@@ -6,6 +6,8 @@ import {
   componentKey, shrinePolygon, valleyPoint, worldTerrain,
   type ShrineComponent, type WorldHooks, type WorldRelic,
 } from './rpg-overworld.js'
+import { STORY_GUIDE } from './story.js'
+import type { StoryWhen } from './story-when.js'
 
 /** Built cells the wand can open: a cracked brick, a rune spring, a seal whose plates are reachable. */
 const WAND_OPENS = new Set(['crack', 'spring', 'seal'])
@@ -26,6 +28,41 @@ function journey(initial: ShrineComponent[] = []) {
   const hooks: WorldHooks = { has: piece => inventory.has(componentKey(piece)), grantRelic, seat, onEntrance, gain, found }
   return { model: new RpgOverworld(hooks), hooks, inventory, grantRelic, seat, onEntrance, gain, found }
 }
+
+describe('people say more as the story moves, and the guide points at real places', () => {
+  it('a resident says a newly true line first, once, then keeps it among what they know', () => {
+    const run = journey()
+    const holds = (when: StoryWhen): boolean => 'has' in when && when.has.kind === 'star'
+    const model = new RpgOverworld({ ...run.hooks, holds })
+    const tamsin = WORLD_RESIDENTS.find(resident => resident.id === 'tamsin')!
+    Object.assign(model.player, at('tamsin'))
+    const starLine = tamsin.later!.find(line => holds(line.when))!.text
+    expect(model.talk('tamsin').message).toBe(starLine)
+    const after = [model.talk('tamsin').message, model.talk('tamsin').message, model.talk('tamsin').message]
+    expect(after).toEqual([tamsin.lines[0], tamsin.lines[1], starLine])
+  })
+
+  it('a resident with nothing newly true keeps to their own lines', () => {
+    const run = journey()
+    const model = new RpgOverworld({ ...run.hooks, holds: () => false })
+    const tamsin = WORLD_RESIDENTS.find(resident => resident.id === 'tamsin')!
+    Object.assign(model.player, at('tamsin'))
+    expect([model.talk('tamsin').message, model.talk('tamsin').message]).toEqual([tamsin.lines[0], tamsin.lines[1]])
+  })
+
+  it('an answered person speaks from the furthest point of the story that holds', () => {
+    const run = journey()
+    const mira = WORLD_PEOPLE.find(person => person.id === 'mira')!
+    const heart = (when: StoryWhen): boolean => ('has' in when && when.has.kind === 'hexagon') || ('done' in when && when.done === 'island/socket:dawn-shrine:0')
+    expect(new RpgOverworld({ ...run.hooks, holds: heart }).personLine(mira)).toBe(mira.later!.find(line => 'has' in line.when && line.when.has.kind === 'hexagon')!.text)
+    expect(new RpgOverworld(run.hooks).personLine(mira)).toBe(mira.insight)
+  })
+
+  it('every guide step with a target names an island encounter or area', () => {
+    const ids = new Set([...WORLD_ENCOUNTERS.map(place => place.id), ...WORLD_AREAS.map(area => area.id)])
+    for (const step of STORY_GUIDE) if (step.target) expect(ids.has(step.target), step.id).toBe(true)
+  })
+})
 
 describe('the RPG world and permanent shrine abilities', () => {
   it('begins beside a conversation that supplies the first piece through a retryable knowledge question', () => {

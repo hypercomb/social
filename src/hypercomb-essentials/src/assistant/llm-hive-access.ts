@@ -27,6 +27,11 @@ export type LlmHiveAccessLike = {
   setMayRead(providerId: string, allowed: boolean): void
   /** Every provider id the participant has granted, for the shell's routing. */
   granted(): readonly string[]
+  /** How many characters of hive content may leave the machine per
+   *  conversation through this provider — undefined means the shell's
+   *  default. The only privacy control that is a number, not a promise. */
+  budget(providerId: string): number | undefined
+  setBudget(providerId: string, chars: number | undefined): void
   addEventListener(type: 'change', listener: () => void): void
   removeEventListener(type: 'change', listener: () => void): void
 }
@@ -67,7 +72,37 @@ export class LlmHiveAccessStore extends EventTarget implements LlmHiveAccessLike
   granted(): readonly string[] {
     return [...this.#granted].filter(id => this.mayRead(id))
   }
+
+  budget(providerId: string): number | undefined {
+    const id = String(providerId ?? '').trim().toLowerCase()
+    if (!id) return undefined
+    try {
+      const raw = globalThis.localStorage?.getItem(budgetKey(id))
+      const chars = raw ? Number(raw) : NaN
+      return Number.isFinite(chars) && chars >= MIN_BUDGET ? Math.min(chars, MAX_BUDGET) : undefined
+    } catch { return undefined }
+  }
+
+  setBudget(providerId: string, chars: number | undefined): void {
+    const id = String(providerId ?? '').trim().toLowerCase()
+    if (!id) return
+    const next = chars !== undefined && Number.isFinite(chars) && chars >= MIN_BUDGET
+      ? Math.min(Math.floor(chars), MAX_BUDGET)
+      : undefined
+    if (this.budget(id) === next) return
+    try {
+      if (next === undefined) globalThis.localStorage?.removeItem(budgetKey(id))
+      else globalThis.localStorage?.setItem(budgetKey(id), String(next))
+    } catch { /* session-only */ }
+    this.dispatchEvent(new CustomEvent('change'))
+  }
 }
+
+const BUDGET_SUFFIX = ':budget'
+const budgetKey = (providerId: string): string => `${KEY_PREFIX}${providerId}${BUDGET_SUFFIX}`
+/** Below this a single `/read` cannot fit; above it the point of a budget is lost. */
+export const MIN_BUDGET = 2_000
+export const MAX_BUDGET = 200_000
 
 export const llmHiveAccess = new LlmHiveAccessStore()
 

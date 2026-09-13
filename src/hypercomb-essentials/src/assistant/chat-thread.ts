@@ -74,6 +74,39 @@ type TurnManifest = {
   readonly role: TurnRole
   readonly at: number
   readonly contentSig: string
+  /** WHAT THIS TURN WAS SENT WITH (anatomy-context-need §6) — present on a
+   *  reply a model produced, absent on the participant's own turns. The
+   *  anatomy sig makes the turn replayable against the exact protocol it
+   *  saw; the context sig names the page/selection manifest; `observed`
+   *  is the hive questions it asked, in order; provider and model say who. */
+  readonly anatomy?: string
+  readonly context?: string
+  readonly observed?: readonly string[]
+  readonly providerId?: string
+  readonly model?: string
+}
+
+/** The optional provenance a caller attaches to a model-produced turn. */
+export type TurnMeta = {
+  readonly anatomy?: string
+  readonly context?: string
+  readonly observed?: readonly string[]
+  readonly providerId?: string
+  readonly model?: string
+}
+
+const SIG64 = /^[0-9a-f]{64}$/
+const cleanMeta = (meta: TurnMeta | undefined): Partial<TurnMeta> => {
+  if (!meta) return {}
+  const out: Record<string, unknown> = {}
+  if (typeof meta.anatomy === 'string' && SIG64.test(meta.anatomy)) out['anatomy'] = meta.anatomy
+  if (typeof meta.context === 'string' && SIG64.test(meta.context)) out['context'] = meta.context
+  if (Array.isArray(meta.observed) && meta.observed.length) {
+    out['observed'] = meta.observed.filter(g => typeof g === 'string' && g.length <= 1_000).slice(0, 8)
+  }
+  if (typeof meta.providerId === 'string' && meta.providerId) out['providerId'] = meta.providerId.slice(0, 64)
+  if (typeof meta.model === 'string' && meta.model) out['model'] = meta.model.slice(0, 128)
+  return out as Partial<TurnMeta>
 }
 
 // ── ARCHIVING: a conversation put away, not thrown away ──
@@ -354,6 +387,7 @@ export const appendTurnSig = async (
   convoId: string,
   role: TurnRole,
   text: string,
+  meta?: TurnMeta,
 ): Promise<StoredTurn | null> => {
   const id = String(convoId ?? '').trim()
   const body = String(text ?? '')
@@ -380,7 +414,7 @@ export const appendTurnSig = async (
     let contentSig: string | undefined
     if (store?.putResource) {
       contentSig = await store.putResource(new Blob([body], { type: 'text/plain' }))
-      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), contentSig, ...(asks ? { asks: true as const } : {}) }
+      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), contentSig, ...(asks ? { asks: true as const } : {}), ...cleanMeta(meta) }
     } else {
       record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), text: body, ...(asks ? { asks: true as const } : {}) }
     }
@@ -411,7 +445,8 @@ export const appendTurn = async (
   convoId: string,
   role: TurnRole,
   text: string,
-): Promise<boolean> => !!(await appendTurnSig(convoId, role, text))
+  meta?: TurnMeta,
+): Promise<boolean> => !!(await appendTurnSig(convoId, role, text, meta))
 
 /** Every turn record in one bucket, oldest first, texts NOT yet materialized —
  *  shared by the single-thread read and the conversation list, so both agree

@@ -22,6 +22,9 @@ export type AnatomyLike = {
    *  a turn record (step 2) waits on this so it never names a sig that
    *  cannot be read back. */
   readonly written: Promise<string>
+  /** The marker name in the `system:anatomy` bag that names this anatomy
+   *  (written if absent), or undefined when the store could not be asked. */
+  readonly marker: Promise<string | undefined>
   /** Which documents and sections the doctrine part was lifted from. */
   readonly sources: readonly { readonly doc: string; readonly heading: string }[]
 }
@@ -63,12 +66,53 @@ const written: Promise<string> = new Promise(resolve => {
   tick()
 })
 
+// THE ANATOMY'S OWN LINEAGE BAG — `sign('system:anatomy')`, markers 00000000,
+// 00000001, … each a `{ layerSig, at }` record naming one anatomy version,
+// the highest marker being the live one (anatomy-context-need §2, §6). The
+// same 8-digit marker shape the history service reads, so `listLayers` on
+// this bag answers "which anatomies has this hive run" with no new reader.
+// Advanced only when the head names a different sig: a rebuild that changed
+// nothing writes nothing; a rollback is a NEW marker naming an older sig.
+// `getPool` is the sanctioned way to derive a sig-named system dir — it also
+// registers the meaning so prune-safety never mistakes the bag for a layer.
+const ANATOMY_BAG_MEANING = 'system:anatomy'
+const MARKER = /^\d{8}$/
+type BagStoreLike = { getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null> }
+
+const recorded: Promise<string | undefined> = written.then(async sig => {
+  try {
+    const store = window.ioc?.get?.(STORE_KEY) as BagStoreLike | undefined
+    const bag = await store?.getPool?.(ANATOMY_BAG_MEANING)
+    if (!bag) return undefined
+    let max = -1
+    for await (const [name, handle] of (bag as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
+      if (handle.kind === 'file' && MARKER.test(name)) max = Math.max(max, Number(name))
+    }
+    if (max >= 0) {
+      const head = await (await bag.getFileHandle(String(max).padStart(8, '0'))).getFile()
+      try {
+        const record = JSON.parse(await head.text()) as { layerSig?: string }
+        if (record.layerSig === sig) return String(max).padStart(8, '0')
+      } catch { /* an unreadable head is not this sig; advance past it */ }
+    }
+    const next = String(max + 1).padStart(8, '0')
+    const handle = await bag.getFileHandle(next, { create: true })
+    const writable = await handle.createWritable()
+    try { await writable.write(new Blob([JSON.stringify({ layerSig: sig, at: Date.now() })])) }
+    finally { await writable.close() }
+    return next
+  } catch {
+    return undefined
+  }
+})
+
 let signed: Promise<string> | undefined
 
 export const anatomy: AnatomyLike = {
   text: ANATOMY_TEXT,
   signature: () => signed ??= SignatureService.sign(new TextEncoder().encode(ANATOMY_TEXT).buffer as ArrayBuffer),
   written,
+  marker: recorded,
   sources: ANATOMY_SOURCES,
 }
 

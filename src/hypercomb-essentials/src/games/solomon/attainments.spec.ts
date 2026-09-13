@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ATTAINMENTS, attainmentById, attainmentsOf, heldAttainments, itemsBoards, itemsProgress,
+  ATTAINMENTS, attainmentById, attainmentsOf, guideStep, heldAttainments, itemsBoards, itemsProgress,
   useAttainment, useVerb, type AttainmentDef, type UseContext,
 } from './attainments.js'
 import { STORY_BOARDS } from './story.js'
@@ -23,6 +23,32 @@ function makeFacts(opts: { has?: readonly SigilRequirement[]; knows?: readonly s
 
 const NO_FACTS = makeFacts()
 const context = (over: Partial<UseContext> = {}): UseContext => ({ place: 'island', group: null, shrine: null, needle: null, ...over })
+
+describe('the guide: one next step at a time', () => {
+  const triangle = (point: number): SigilRequirement => ({ kind: 'triangle', point })
+  const sockets = (shrine: string, count: number): string[] => Array.from({ length: count }, (_, index) => `island/socket:${shrine}:${index}`)
+  const STAR_HELD: SigilRequirement[] = [triangle(0), triangle(1), triangle(2), { kind: 'hexagon' }, { kind: 'star' }]
+
+  it('starts with Mira and follows the main line as each step comes true', () => {
+    expect(guideStep(NO_FACTS)?.id).toBe('meet-mira')
+    expect(guideStep(makeFacts({ done: ['island/person:mira'], has: [triangle(0)] }))?.id).toBe('dawn-socket')
+    expect(guideStep(makeFacts({ done: ['island/person:mira', 'island/socket:dawn-shrine:0'], has: [triangle(0)] }))?.id).toBe('sunseed')
+    const star = makeFacts({ done: ['island/person:mira', 'island/socket:dawn-shrine:0', ...sockets('tide-shrine', 3)], has: STAR_HELD })
+    expect(guideStep(star)?.id).toBe('pyramid-sockets')
+    expect(guideStep(star)?.target).toBe('pyramid-shrine')
+  })
+
+  it('turns to the caverns and places after the pyramid heart, and ends at the plots', () => {
+    const mainLine = ['island/person:mira', 'island/socket:dawn-shrine:0', ...sockets('tide-shrine', 3), ...sockets('pyramid-shrine', 7), 'labyrinth/arrival:starbloom']
+    expect(guideStep(makeFacts({ done: mainLine, has: STAR_HELD }))?.id).toBe('wayfarer')
+    const everything = makeFacts({
+      done: [...mainLine, 'chandler-cellar', 'hollow-grove', 'island/cache:court-cache', 'island/cache:pond-cache', 'island/cache:nook-cache'],
+      has: STAR_HELD, knows: ['wayfarer-spring', 'highland-accord'],
+    })
+    expect(guideStep(everything)?.id).toBe('plots')
+    expect(guideStep(everything)?.target).toBeUndefined()
+  })
+})
 
 describe('ATTAINMENTS registry shape', () => {
   it('every id is unique', () => {

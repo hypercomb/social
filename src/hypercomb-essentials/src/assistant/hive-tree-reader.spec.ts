@@ -92,6 +92,24 @@ describe('the bounded live hive tree reader', () => {
     expect(fx.settled).toHaveBeenCalledTimes(1)
   })
 
+  it('reads one tile with its content, signature and children, and lists without content', async () => {
+    const fx = fixture()
+    const read = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.name).toBe('projects')
+    expect(read.layerSig).toBe(sig(5))
+    expect(read.children).toEqual([{ name: 'roadmap', sig: sig(6) }])
+    expect(read.content).toEqual({ name: 'projects' })
+    expect(read.snapshot).toBeTruthy()
+
+    const listed = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: false })
+    expect(listed.ok && listed.content).toBeUndefined()
+    expect(await fx.reader.readNode(['missing'], { maxBytes: 8_000 })).toMatchObject({ ok: false, code: 'not-found' })
+    // no bag listing on this history → history is honestly unavailable
+    expect(await fx.reader.readHistory(['projects'])).toMatchObject({ ok: false, code: 'unavailable' })
+  })
+
   it('marks a node-budget cut as truncated', async () => {
     const fx = fixture()
     const result = await fx.reader.readTree([], { maxDepth: 3, maxNodes: 2, maxBytes: 8_000 })

@@ -134,3 +134,49 @@ export const STORY_BOARDS: readonly StoryBoard[] = [
   { id: 'tasks', title: 'Tasks', kind: 'tasks', slots: TASK_SLOTS },
   { id: 'contributions', title: 'People', kind: 'contributions', slots: CONTRIBUTION_SLOTS },
 ]
+
+/** One step of the way through the story. The guide shows the first step
+ *  whose `when` holds and whose `done` does not, so steps finished early are
+ *  skipped and the order below is the only thing that says what comes next. */
+export interface GuideStep {
+  readonly id: string
+  /** What to do, in one line. */
+  readonly text: string
+  /** Where it happens on the island: an encounter or area id the pointer leads to. */
+  readonly target?: string
+  /** Offered once this holds; absent = from the start. */
+  readonly when?: StoryWhen
+  readonly done: StoryWhen
+}
+
+const PYRAMID_SOCKETS: StoryWhen = { all: Array.from({ length: 7 }, (_, index) => ({ done: `island/socket:pyramid-shrine:${index}` })) }
+const TIDE_SOCKETS: StoryWhen = { all: Array.from({ length: 3 }, (_, index) => ({ done: `island/socket:tide-shrine:${index}` })) }
+const PYRAMID_HEART: StoryWhen = { done: 'labyrinth/arrival:starbloom' }
+
+export const STORY_GUIDE: readonly GuideStep[] = [
+  { id: 'meet-mira', text: 'Talk to Mira on the valley’s west path. She has the first clue.', target: 'mira', done: { done: 'island/person:mira' } },
+  { id: 'dawn-socket', text: 'Set the Dawn triangle into the Dawn Shrine, north of the valley.', target: 'dawn-shrine',
+    when: { has: { kind: 'triangle', point: 0 } }, done: { done: 'island/socket:dawn-shrine:0' } },
+  { id: 'sunseed', text: 'Walk into the Dawn Shrine. Sunseed’s rooms hide two more points and the heart hexagon.', target: 'dawn-shrine',
+    when: { done: 'island/socket:dawn-shrine:0' },
+    done: { all: [{ has: { kind: 'triangle', point: 1 } }, { has: { kind: 'triangle', point: 2 } }, { has: { kind: 'hexagon' } }] } },
+  { id: 'tide-sockets', text: 'Bring the Tide and Root triangles and the heart hexagon to the Tide Observatory.', target: 'tide-shrine',
+    when: { has: { kind: 'hexagon' } }, done: TIDE_SOCKETS },
+  { id: 'tideglass', text: 'Walk into the Tide Observatory. Tideglass keeps the last three points.', target: 'tide-shrine',
+    when: TIDE_SOCKETS, done: { has: { kind: 'star' } } },
+  { id: 'pyramid-sockets', text: 'Your star is whole. Fill all seven sockets at the Pyramid of Accord.', target: 'pyramid-shrine',
+    when: { has: { kind: 'star' } }, done: PYRAMID_SOCKETS },
+  { id: 'starbloom', text: 'Walk into the Pyramid of Accord and reach its heart.', target: 'pyramid-shrine',
+    when: PYRAMID_SOCKETS, done: PYRAMID_HEART },
+  { id: 'wayfarer', text: 'Explore Wayfarer Cavern, three chambers deep, and bring back its spring crystal.', target: 'wayfarer-cavern',
+    when: PYRAMID_HEART, done: { knows: 'wayfarer-spring' } },
+  { id: 'highland', text: 'Climb down through Highland Cavern to the Accord Sanctum.', target: 'highland-cavern',
+    when: PYRAMID_HEART, done: { knows: 'highland-accord' } },
+  { id: 'wenna', text: 'Knock at Wenna’s door in Saltmere, south of the valley, and find her cellar.', target: 'chandler-door',
+    when: PYRAMID_HEART, done: { done: 'chandler-cellar' } },
+  { id: 'grove', text: 'Push your way into the dense grove in the heart of the valley.', target: 'valley-grove',
+    when: PYRAMID_HEART, done: { done: 'hollow-grove' } },
+  { id: 'garden', text: 'Open the three coffers hidden in the Brick Garden with your wand.', target: 'hollis',
+    when: PYRAMID_HEART, done: { all: [{ done: 'island/cache:court-cache' }, { done: 'island/cache:pond-cache' }, { done: 'island/cache:nook-cache' }] } },
+  { id: 'plots', text: 'Every place is found. The empty plots are waiting for shrines other travellers will build.', done: { any: [] } },
+]

@@ -11,7 +11,7 @@
  *  Pure: no DOM, no storage. */
 
 import { storyHolds, type StoryFacts, type StoryWhen } from './story-when.js'
-import { STORY_BOARDS, type StoryBoard } from './story.js'
+import { STORY_BOARDS, STORY_GUIDE, type GuideStep, type StoryBoard } from './story.js'
 import type { TreasureKind } from './island-treasure.js'
 import type { PlaceSprite } from './island-places.js'
 import type { CombatSkillId, SpellKind, WeaponKind } from './engine.js'
@@ -35,6 +35,11 @@ export interface AttainmentDef {
   readonly slot?: AttainmentSlot
   readonly use?: AttainmentUse
   readonly group?: string
+}
+
+/** The one step the guide shows now: the first offered and not yet done. */
+export function guideStep(facts: StoryFacts, steps: readonly GuideStep[] = STORY_GUIDE): GuideStep | null {
+  return steps.find(step => storyHolds(step.when, facts) && !storyHolds(step.done, facts)) ?? null
 }
 
 // ---------------------------------------------------------------------------

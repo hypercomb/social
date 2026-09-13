@@ -22,6 +22,7 @@
 import { registerLlmProvider } from '../llm-provider-registry.js'
 import type { LlmProviderDescriptor } from './llm-provider.types.js'
 import { openAiRequest, openAiResponse, openAiStreamEvent } from './openai-shape.js'
+import { openRouterRouting, providerBlock } from './openrouter-routing.js'
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 
@@ -49,7 +50,15 @@ export const OPENROUTER_PROVIDER: LlmProviderDescriptor = {
   // OpenRouter passes `cache_control` through to Anthropic and Gemini
   // upstreams (OpenAI upstreams cache prefixes on their own), so the anatomy
   // system turn is sent as a cacheable part. Design: anatomy-context-need §7.
-  toRequest: request => openAiRequest(ENDPOINT, request, undefined, { cacheableSystem: true }),
+  // The participant's host choices for this model (openrouter-routing.ts)
+  // ride as the `provider` block; untouched settings send nothing extra.
+  toRequest: request => {
+    const provider = providerBlock(openRouterRouting.get(), request.model)
+    return openAiRequest(ENDPOINT, request, undefined, {
+      cacheableSystem: true,
+      ...(provider ? { extraBody: { provider } } : {}),
+    })
+  },
   fromResponse: openAiResponse,
   fromStreamEvent: openAiStreamEvent,
 }

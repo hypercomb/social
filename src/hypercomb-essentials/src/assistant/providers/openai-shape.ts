@@ -52,6 +52,9 @@ export type OpenAiShapeOptions = {
    *  with an ephemeral cache marker — the anatomy is billed once per window
    *  instead of once per call. */
   readonly cacheableSystem?: boolean
+  /** Vendor fields added to the body as-is (OpenRouter's `provider` routing
+   *  block). Never overrides `model`, `messages`, `tools` or `stream`. */
+  readonly extraBody?: Readonly<Record<string, unknown>>
 }
 
 const systemTurn = (system: string, request: LlmRequest, options: OpenAiShapeOptions): OpenAiMessage =>
@@ -99,6 +102,7 @@ export const openAiRequest = (
       ...authHeader(request.apiKey),
     },
     body: JSON.stringify({
+      ...(options.extraBody ?? {}),
       model: request.model,
       messages: openAiMessages(request, options),
       max_tokens: request.maxTokens ?? 4096,

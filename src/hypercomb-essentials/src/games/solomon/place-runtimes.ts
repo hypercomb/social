@@ -29,7 +29,7 @@ import type { GainRequest } from './gain-screen.js'
 // the row whose `when: { done: ref }` names it (the same grammar `ADVENTURE.md`
 // and this file's own `done()` refs, below, both use).
 import { ATTAINMENTS, attainmentById, type AttainmentDef } from './attainments.js'
-import { storyRefs } from './story-when.js'
+import { storyHolds, storyRefs, type StoryFacts } from './story-when.js'
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -64,6 +64,8 @@ export interface PlaceRuntime {
   seed(): PlaceSeed
   /** (2) A2.6 — where a portal sits on this runtime's host, as fractions 0..1 of the host box; null when unknown. */
   anchor(feature: string): { readonly x: number; readonly y: number } | null
+  /** Where the story's next step happens, for a place that can point at it. */
+  guide?(target: string | null): void
   dispose(): void
 }
 
@@ -94,6 +96,9 @@ export interface RuntimeShell {
   /** (2) A6.4 — replaces openJournal. */
   openItems(): void
   recordRelic(): void
+  /** What the traveller has held, known and done — the one fact source every
+   *  story condition is checked against. */
+  facts(): StoryFacts
 }
 
 // ── the ONE reveal/progress bridge every runtime shares ────────────────────
@@ -182,6 +187,7 @@ export class IslandRuntime implements PlaceRuntime {
       gain: request => shell.gain(worldGainRequest(request)),
       found: id => shell.found(this.place, id),
       seatSeed: id => shell.seatSeed(this.place, id),
+      holds: when => storyHolds(when, shell.facts()),
     })
     this.view.mount(host)
   }
@@ -205,6 +211,7 @@ export class IslandRuntime implements PlaceRuntime {
     return this.view.arriveLeg(this.view.model.player, direction)
   }
   seed(): PlaceSeed { return this.view.model.seed() }
+  guide(target: string | null): void { this.view.setGuide(target) }
   anchor(_feature: string): { readonly x: number; readonly y: number } | null {
     // The island scrolls continuously beneath a fixed viewport, and
     // `RpgOverworldView` keeps its camera and marker geometry private (unlike

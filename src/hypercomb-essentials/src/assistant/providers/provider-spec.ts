@@ -251,6 +251,21 @@ const modelsOf = (spec: LlmProviderSpec): LlmModelDescriptor[] =>
  * concerned — that indistinguishability is the whole plug-in architecture.
  */
 export const compileProviderSpec = (spec: LlmProviderSpec): LlmProviderDescriptor => {
+  const descriptor = compileSpec(spec)
+  addedProviderIds.add(descriptor.id.toLowerCase())
+  return descriptor
+}
+
+/** Provider ids that came from a SPEC — pasted through Add provider, swept
+ *  from the `llm:providers` pool, or announced by a bridge. Only these are
+ *  removable in the console: OpenRouter is a configurator, and the local
+ *  model and the vendor adapters are part of the shell. Marked only after a
+ *  spec compiles, so a malformed spec never marks an id. */
+const addedProviderIds = new Set<string>()
+export const isAddedProvider = (providerId: string): boolean =>
+  addedProviderIds.has(String(providerId ?? '').trim().toLowerCase())
+
+const compileSpec = (spec: LlmProviderSpec): LlmProviderDescriptor => {
   const bridge = spec.shape === 'agent-bridge'
   const peer = spec.shape === 'peer-swarm'
   const base: Omit<LlmProviderDescriptor, 'toRequest' | 'fromResponse' | 'fromStreamEvent'> = {

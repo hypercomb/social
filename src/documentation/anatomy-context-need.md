@@ -159,9 +159,9 @@ texts. The optimize-phase contract requires purity and no network, so
 summaries must not be minted there. They are still derived-cache records in
 every other sense — recomputable, wipe-safe, never load-bearing:
 
-- Pool: `sign('compaction')` (colon-free system word, added to the registry
-  the sanctioned way via `Store.poolSignature`; the reserved-name list does
-  not grow — this is a pool, not a tile name).
+- Pool: `sign('system:compaction')` — a COLON meaning (patch: the bare-word
+  list is frozen and a bare word can collide with a tile name), listed in the
+  seed census in `pool-registry.ts` so a root walk never mistakes it for a bag.
 - Key: `sign(inputSig + anatomySig + modelId)`. A summary depends on what was
   summarised, the anatomy that framed it, and who wrote it. Change any one and
   it is a miss, never a stale hit.
@@ -230,14 +230,50 @@ local model, bridge — is taught the same way to look back.
    `hypercombGrammarInstruction()` sends it as the system prompt with
    `cacheSystem: true`, live roster after it.
 2. **Turn fields** — `anatomy`, `manifest`, `toolCalls`, `answer` on the
-   thread turn; the chat writes them as it goes. The `system:anatomy`
-   lineage bag lands here too: `commitLayer` is for layers, so the bag needs
-   the same marker primitive the thread bag uses, built once for both.
+   thread turn; the chat writes them as it goes. **BUILT 2026-09-12:**
+   `chat-thread.ts` `TurnMeta` (`anatomy`, `context`, `observed[]`,
+   `providerId`, `model`; sigs validated, junk dropped) on `appendTurn`;
+   the chat holds the provenance per conversation from the stream's end
+   until the run writes the assistant turn (`#turnMeta`); the context
+   manifest `{page, selected}` is a root resource written with `emit:false`.
+   The `system:anatomy` bag is `getPool('system:anatomy')` with 8-digit
+   `{layerSig, at}` markers — the history service's own marker shape, so
+   `listLayers` reads it with no new reader; advanced only when the head
+   names a different sig.
 3. **The gate** — console switch, hold semantics, `hypercombActionProviderId`
    accepts a granted keyed provider; `history()` and `list()` join the
-   observation tool.
-4. **Cache flag** in `openai-shape.ts`.
-5. **Compaction pool** and `summary()`.
+   observation tool. **3a BUILT 2026-09-12:** `assistant/llm-hive-access.ts`
+   (`@hypercomb.social/LlmHiveAccess`, `hc:llm:<id>:hive`, peers refused),
+   "May read the hive" checkbox on keyed rows, router `designatedProviderId`,
+   `hypercombActionProviderId(…, { granted, designated })` — named model never
+   grants; unnamed follows the mediator's pick only if granted. **3b BUILT 2026-09-12:** the observation tool
+   now takes `/tree | /read | /list | /history`, alone or `+ /absolute/path`;
+   `hive-tree-reader.ts` gained `readNode` (layer slots minus `children`,
+   children as `{name, sig}`, same epoch/snapshot discipline) and
+   `readHistory` (last 12 markers of the tile's bag, oldest first, via
+   `listLayers`). `/tree` stays structure-only (its spec forbids sigs); the
+   other three return sigs and content and only ever reach local or granted
+   providers. **Closed 2026-09-12:** the tool is named `hive`; `/read <sig>`
+   and `/list <sig>` read a layer by signature (an earlier version from
+   `/history`, a child sig from `/list`) with no snapshot, since immutable
+   content has no head to go stale; `/find <word>` matches names under the
+   current page; and the console shows a per-provider **read budget** (chars
+   per conversation, `hc:llm:<id>:budget`, 2 000–200 000) below the gate
+   once it is open — the chat's observation budget reads it, else 24 000.
+4. **Cache flag** in `openai-shape.ts`. **BUILT 2026-09-12:** `OpenAiShapeOptions.cacheableSystem`;
+   only the OpenRouter descriptor opts in, so vendors that reject array-form
+   system content are untouched.
+5. **Compaction pool** and `summary()`. **BUILT 2026-09-12:**
+   `assistant/compaction.ts` — `summarize(inputSig, content, deps)`, key =
+   `sign(layerSig
+anatomySig
+modelId)`, one file per key in
+   `system:compaction`; minted only on an explicit `/summary` miss; the
+   summariser is the first mediator-ranked (`fast`) provider THE GATE ADMITS
+   (local always, keyed only if granted) — none admitted ⇒ `no-summariser`,
+   never a vendor fallback. Reader `readSummary` resolves the tile like
+   `/read` and hands its bounded content to compaction; the observation tool
+   answers `/summary` with `{ summary, summarisedBy, minted }`.
 6. Owed from the mediation doc, unchanged: derive `ModelNeed.tier`; an
    orchestration level.
 

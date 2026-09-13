@@ -37,6 +37,8 @@
 
 import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
+import { llmModelChoice } from './llm-model-choice.js'
+import { foldedIntoOpenRouter } from './providers/openrouter-supersedes.js'
 import { localModelServerUp } from './providers/local-liveness.js'
 import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
 import type { LlmProviderDescriptor, LlmTier } from './providers/llm-provider.types.js'
@@ -291,7 +293,9 @@ const canDo = (provider: LlmProviderDescriptor, need: ModelNeed): boolean => {
 
 /** Everything that could answer this need, before preference is applied. */
 export const candidatesFor = (need: ModelNeed = {}): LlmProviderDescriptor[] =>
-  llmProviderRegistry().all().filter(p => isReady(p) && canDo(p, need))
+  // Direct single-vendor rows are folded into OpenRouter for now: never an
+  // automatic pick, whatever key is left on them (openrouter-supersedes.ts).
+  llmProviderRegistry().all().filter(p => isReady(p) && canDo(p, need) && !foldedIntoOpenRouter(p.id))
 
 /**
  * WHO SHOULD ANSWER. Returns undefined when nothing can — the caller decides
@@ -376,7 +380,10 @@ export const chooseProvider = (need: ModelNeed = {}): LlmProviderDescriptor | un
  *  other half of a choice: picking Claude for `fast` work should mean Haiku,
  *  not whatever its default happens to be. */
 export const modelForTier = (provider: LlmProviderDescriptor, tier: LlmTier = 'balanced'): string =>
-  provider.models.find(m => m.tier === tier)?.id ?? provider.defaultModel
+  // A model the participant CHOSE for this provider (llm-model-choice.ts)
+  // answers every tier; otherwise the roster ladder, as before.
+  llmModelChoice.chosen(provider.id)
+    ?? provider.models.find(m => m.tier === tier)?.id ?? provider.defaultModel
 
 /** One line explaining a choice, for a surface that wants to show its work. */
 export const explainChoice = (need: ModelNeed = {}): string => {

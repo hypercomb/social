@@ -20,13 +20,14 @@ import { SolomonOverlay } from './overlay.js'
 import { GameAudio } from '../audio.js'
 import { SaveSlotStore } from './save-slots.js'
 import { PlacePath, entranceKey, seatAt, seatsOf, splitEntranceKey, MAX_PATH_DEPTH } from './place.js'
-import { ROOT_PLACE, STORY, STORY_BOARDS } from './story.js'
+import { ROOT_PLACE, STORY, STORY_BOARDS, type GuideStep } from './story.js'
 import { PLACES, LABYRINTH_PLACE, placeName, seatLabel, crumbLabel, floorLabel, groupOfPlace } from './places.js'
 import { CHAMBERS } from './chamber-places.js'
 import { chamberInstruments, type ChamberInstruments, type ChamberSound } from './chamber-view.js'
 import { IslandRuntime, ChamberRuntime, LabyrinthRuntime, type PlaceRuntime, type RuntimeShell } from './place-runtimes.js'
 import { readAdventureSave, writeAdventureSave, type CarriedEntry } from './adventure-save.js'
-import { attainmentById, heldAttainments, itemsBoards, useAttainment, type UseContext } from './attainments.js'
+import { attainmentById, guideStep, heldAttainments, itemsBoards, useAttainment, type UseContext } from './attainments.js'
+import { DEFAULT_MENU, GAME_MENU_CSS, GameMenu, type MenuOption } from './game-menu.js'
 import type { StoryFacts } from './story-when.js'
 import { GainScreen, GAIN_CSS, type GainRequest } from './gain-screen.js'
 import { ItemsTable, ITEMS_CSS, type ItemsTab } from './items-table.js'
@@ -37,7 +38,7 @@ const arrayHas = (value: unknown, id: string): boolean => Array.isArray(value) &
 
 const KEYS = new Set([
   'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'w', 'a', 's', 'd', ' ',
-  'z', 'j', 'x', 'k', 'r', 'c', 'v', 'n', 'b', 'e', 'enter', 'm', 'i', 'escape',
+  'z', 'j', 'x', 'k', 'r', 'c', 'v', 'n', 'b', 'e', 'enter', 'm', 'i', 'f', 'escape',
 ])
 const element = (tag: string, className = '', text = ''): HTMLElement => {
   const result = document.createElement(tag)
@@ -105,7 +106,6 @@ export class SolomonLabyrinthOverlay {
   #designer: SolomonOverlay | null = null
   #slots: SaveSlotStore<unknown> | null = null
   #slotPanel: HTMLElement | null = null
-  #slotButton: HTMLButtonElement | null = null
   #saveStatus: HTMLElement | null = null
   #lastSaved = ''
   #lastRelic = ''
@@ -116,6 +116,13 @@ export class SolomonLabyrinthOverlay {
   #time = 0
   #saveAt = 0
   #oldFocus: HTMLElement | null = null
+  #menu: GameMenu | null = null
+  #menuAsked = false
+  #guide: GuideStep | null = null
+  #guideAt = 0
+  /** The open panel was entered from the menu, so backing out returns there. */
+  #fromMenu = false
+  #backOff: (() => void) | null = null
 
   readonly #onClose: () => void
   constructor(onClose: () => void) { this.#onClose = onClose }
@@ -138,26 +145,10 @@ export class SolomonLabyrinthOverlay {
     root.setAttribute('aria-modal', 'true')
     root.tabIndex = -1
     const style = element('style')
-    style.textContent = ADVENTURE_CSS + LABYRINTH_ROOM_CSS + PLACE_VEIL_CSS + GAIN_CSS + ITEMS_CSS
+    style.textContent = ADVENTURE_CSS + LABYRINTH_ROOM_CSS + PLACE_VEIL_CSS + GAIN_CSS + ITEMS_CSS + GAME_MENU_CSS
     root.append(style)
-    const bar = element('header', 'sol-adventure-bar')
-    bar.append(element('strong', '', '✡ Solomon’s Key'))
-    this.#inventory = element('span', 'sol-adventure-inventory')
-    bar.append(this.#inventory)
-    bar.append(this.#button('World', () => this.#request({ kind: 'home' })))
-    bar.append(this.#button('Items', () => this.#openItems()))
-    this.#slotButton = this.#button('Saves', () => this.#openSlots())
-    this.#saveStatus = element('span', 'sol-save-status')
-    this.#saveStatus.setAttribute('role', 'status')
-    bar.append(this.#slotButton, this.#saveStatus)
-    bar.append(this.#button('Designer', () => this.showDesigner()))
-    const sound = this.#button(this.#audio.muted ? 'Sound off' : 'Sound on', () => {
-      this.#audio.unlock()
-      sound.textContent = this.#audio.toggleMuted() ? 'Sound off' : 'Sound on'
-    })
-    bar.append(sound, this.#button('Close', () => this.#onClose()))
-    this.#crumbs = element('nav', 'sol-crumbs')
-    this.#crumbs.setAttribute('aria-label', 'Path travelled')
+    // NOTHING OUTSIDE THE LAND (Jaime, 2026-09-13): the place fills the window;
+    // everything else lives in the game's own menu, opened from the corner.
     this.#content = element('main', 'sol-adventure-content')
     this.#veil = new PlaceVeil(this.#content)
     this.#card = element('div', 'sol-card')
@@ -165,9 +156,24 @@ export class SolomonLabyrinthOverlay {
     this.#messageEl = element('div', 'sol-adventure-message', 'Explore the world, and see who you can help.')
     this.#messageEl.setAttribute('role', 'status')
     this.#messageEl.setAttribute('aria-live', 'polite')
-    root.append(bar, this.#crumbs, this.#content, this.#messageEl, this.#touchControls())
+    const menuOpen = this.#button('', () => this.#openMenu())
+    menuOpen.className = 'sol-menu-open'
+    menuOpen.title = 'Menu (Esc)'
+    menuOpen.setAttribute('aria-label', 'Menu')
+    this.#inventory = element('span', 'sol-adventure-inventory')
+    this.#saveStatus = element('span', 'sol-save-status')
+    this.#saveStatus.setAttribute('role', 'status')
+    this.#crumbs = element('nav', 'sol-crumbs')
+    this.#crumbs.setAttribute('aria-label', 'Path travelled')
+    root.append(this.#content, this.#messageEl, this.#touchControls(), menuOpen)
+    this.#menu = new GameMenu(root, {
+      choose: option => this.#chooseMenu(option),
+      detail: option => this.#menuDetail(option),
+      back: () => this.#back(),
+    }, [this.#inventory, this.#saveStatus, this.#crumbs])
     document.body.append(root)
     this.#root = root
+    this.#backOff = this.#answerRightClick(root)
     this.#path = PlacePath.root(ROOT_PLACE)
     this.#here.show({ from: 'save' })
     this.#updatePathUI()
@@ -206,6 +212,7 @@ export class SolomonLabyrinthOverlay {
       runtime = new ChamberRuntime(host, definition, this.#shell)
     }
     this.#runtimes.set(place, runtime)
+    runtime.guide?.(this.#guide?.target ?? null)
     const facts = this.#dormant.get(place)
     if (facts !== undefined) { runtime.restoreFacts(facts); this.#dormant.delete(place) }
     return runtime
@@ -359,6 +366,23 @@ export class SolomonLabyrinthOverlay {
     if (floor) this.#card.append(element('span', 'sol-card-floor', floor))
     if (this.#path.depth > 1) this.#card.append(element('span', 'sol-card-up', `↑ ${this.#shell.upName(here)}`))
     if (this.#path.depth > 2) this.#card.append(element('span', 'sol-card-surface', `⤒ Surface to ${this.#shell.surfaceName(here)}`))
+    this.#paintGuide()
+  }
+
+  /** The story's next step, re-read twice a second: one line on the place
+   *  card, and the island's pointer aimed at where it happens. */
+  #updateGuide(): void {
+    const step = guideStep(this.#storyFacts())
+    if (step === this.#guide) return
+    this.#guide = step
+    this.#paintGuide()
+    for (const runtime of this.#runtimes.values()) runtime.guide?.(step?.target ?? null)
+  }
+
+  #paintGuide(): void {
+    if (!this.#card) return
+    this.#card.querySelector('.sol-card-next')?.remove()
+    if (this.#guide) this.#card.append(element('span', 'sol-card-next', `Next · ${this.#guide.text}`))
   }
 
   // -- the ONE reveal / progress / use mechanism -----------------------------
@@ -485,6 +509,7 @@ export class SolomonLabyrinthOverlay {
   #openItems(section?: ItemsTab): void {
     if (!this.#root || this.#busy) return
     this.#release()
+    this.#fromMenu = false
     this.#items ??= new ItemsTable(this.#root, {
       facts: () => this.#storyFacts(),
       context: () => this.#useContext(),
@@ -524,6 +549,7 @@ export class SolomonLabyrinthOverlay {
       found: (from, entrance) => { this.#found.add(entranceKey(from, entrance)); this.#dirty = true },
       openItems: () => this.#openItems(),
       recordRelic: () => this.#recordRelic(),
+      facts: () => this.#storyFacts(),
     }
   }
 
@@ -605,6 +631,7 @@ export class SolomonLabyrinthOverlay {
       const button = this.#button(label, () => {})
       button.setAttribute('aria-label', label === 'Use' ? 'Interact or use passage' : label)
       button.onpointerdown = event => {
+        if (event.button !== 0) return
         event.preventDefault()
         button.setPointerCapture(event.pointerId)
         this.#keyDown(new KeyboardEvent('keydown', { key }))
@@ -616,6 +643,96 @@ export class SolomonLabyrinthOverlay {
       bar.append(button)
     }
     return bar
+  }
+
+  /** The browser's own full screen, on or off. The land already fills the window. */
+  #toggleFullScreen(): void {
+    if (document.fullscreenElement) void document.exitFullscreen?.()?.catch(() => {})
+    else void document.documentElement.requestFullscreen?.()?.catch(() => {})
+  }
+
+  #openMenu(): void {
+    if (!this.#menu || this.#designer) return
+    this.#release()
+    this.#here.closeDialog()
+    this.#gain?.close(); this.#items?.close(); this.#closeSlots()
+    this.#askMenu()
+    this.#menu.open()
+  }
+
+  #closeMenu(): void {
+    if (!this.#menu?.isOpen) return
+    this.#menu.close()
+    this.#root?.focus({ preventScroll: true })
+  }
+
+  /** Come back out one step. Escape and the right button both ask it, and a
+   *  panel entered from the menu comes back out to the menu, as in a hive. */
+  #back(): void {
+    if (!this.#root || this.#designer) return
+    if (this.#slotPanel) { this.#closeSlots(); this.#backToMenu(); return }
+    if (this.#items?.isOpen) { this.#items.close(); this.#backToMenu(); return }
+    if (this.#gain?.isOpen) { this.#gain.close(); return }
+    if (this.#here.isDialogOpen) { this.#here.closeDialog(); return }
+    if (this.#menu?.isOpen) { this.#closeMenu(); return }
+    if (this.#busy || this.#path.depth > 1) { this.#request({ kind: 'leave' }); return }
+    this.#openMenu()
+  }
+
+  #backToMenu(): void {
+    if (!this.#fromMenu) return
+    this.#fromMenu = false
+    this.#openMenu()
+  }
+
+  /** RIGHT-CLICK COMES BACK OUT, as everywhere in the hive. Inside the hive
+   *  the gesture is the shell's: one entry scoped to the game, so it never
+   *  falls through to the lineage and walks the hive out from under the land.
+   *  A page with no shell (the stand-alone harness) answers from the root. */
+  #answerRightClick(root: HTMLElement): () => void {
+    const gesture = (window as unknown as { ioc?: { get<T>(key: string): T | undefined } }).ioc
+      ?.get<{ register(entry: { owner: string; back: () => void; within?: () => Element | null }): () => void }>('@diamondcoreprocessor.com/BackGesture')
+    if (gesture) return gesture.register({ owner: 'solomon-key', within: () => this.#root, back: () => this.#back() })
+    const answer = (event: MouseEvent): void => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey) return
+      if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable]')) return
+      event.preventDefault()
+      this.#back()
+    }
+    root.addEventListener('contextmenu', answer)
+    return () => root.removeEventListener('contextmenu', answer)
+  }
+
+  /** The options are a standard layer — one tile per option, beside the
+   *  rooms — seeded once and read back after. Asked on the first open; until
+   *  it answers, or with no hive at all, the defaults stand in. */
+  #askMenu(): void {
+    if (this.#menuAsked) return
+    this.#menuAsked = true
+    void Promise.resolve()
+      .then(() => this.#tileSurface().ensureMenu(DEFAULT_MENU))
+      .then(options => { if (options.length) this.#menu?.setOptions(options) })
+      .catch(() => { /* no hive yet: the defaults stand in */ })
+  }
+
+  #chooseMenu(option: MenuOption): void {
+    switch (option.action) {
+      case 'continue': this.#closeMenu(); break
+      case 'items': this.#closeMenu(); this.#openItems(); this.#fromMenu = true; break
+      case 'island': this.#closeMenu(); this.#request({ kind: 'home' }); break
+      case 'saves': this.#closeMenu(); this.#openSlots(); this.#fromMenu = true; break
+      case 'sound': this.#audio.unlock(); this.#audio.toggleMuted(); this.#menu?.refresh(); break
+      case 'fullscreen': this.#toggleFullScreen(); break
+      case 'designer': this.#closeMenu(); this.showDesigner(); break
+      case 'close': this.#onClose(); break
+      default: break
+    }
+  }
+
+  #menuDetail(option: MenuOption): string {
+    if (option.action === 'sound') return this.#audio.muted ? 'off' : 'on'
+    if (option.action === 'saves') return `slot ${this.#slots?.activeSlot ?? 1}`
+    return ''
   }
 
   #release = (): void => {
@@ -632,13 +749,12 @@ export class SolomonLabyrinthOverlay {
     const key = event.key.toLowerCase()
     if (key === 'escape') {
       event.preventDefault(); event.stopPropagation()
-      if (this.#slotPanel) { this.#closeSlots(); return }
-      if (this.#items?.isOpen) { this.#items.close(); return }
-      if (this.#gain?.isOpen) { this.#gain.close(); return }
-      if (this.#here.isDialogOpen) { this.#here.closeDialog(); return }
-      if (this.#busy) { this.#request({ kind: 'leave' }); return }
-      if (this.#path.depth > 1) { this.#request({ kind: 'leave' }); return }
-      this.#onClose()
+      this.#back()
+      return
+    }
+    if (this.#menu?.isOpen) {
+      if (this.#menu.key(key)) event.preventDefault()
+      event.stopPropagation()
       return
     }
     const dialogOpen = !!this.#slotPanel || !!this.#items?.isOpen || !!this.#gain?.isOpen || this.#here.isDialogOpen
@@ -670,6 +786,7 @@ export class SolomonLabyrinthOverlay {
     if ((key === 'enter' || key === ' ') && event.target instanceof HTMLButtonElement) return
     event.preventDefault(); event.stopPropagation()
     this.#audio.unlock()
+    if (key === 'f' && !event.repeat) { this.#toggleFullScreen(); return }
     if (this.#busy) { if (key === 'm') this.#request({ kind: 'home' }); return }
     if (key === 'm') { this.#request({ kind: 'home' }); return }
     if (key === 'i' && !event.repeat) { this.#openItems(); return }
@@ -700,10 +817,11 @@ export class SolomonLabyrinthOverlay {
     const dt = this.#lastTs ? Math.min((ts - this.#lastTs) / 1000, 0.05) : 0
     this.#lastTs = ts
     this.#time += dt
-    if (!document.hidden && !this.#slotPanel && !this.#items?.isOpen && !this.#gain?.isOpen && !this.#busy && !this.#designer && !this.#veil?.playing) {
+    if (!document.hidden && !this.#slotPanel && !this.#items?.isOpen && !this.#gain?.isOpen && !this.#menu?.isOpen && !this.#busy && !this.#designer && !this.#veil?.playing) {
       this.#here.update(dt, this.#input)
     }
     this.#updateInventory()
+    if (this.#time >= this.#guideAt) { this.#guideAt = this.#time + 0.5; this.#updateGuide() }
     if (this.#time >= this.#saveAt) { this.#saveAt = this.#time + 1; this.#save() }
     this.#raf = requestAnimationFrame(this.#loop)
   }
@@ -839,7 +957,7 @@ export class SolomonLabyrinthOverlay {
   }
 
   #updateSaveStatus(): void {
-    if (this.#slotButton) this.#slotButton.textContent = `Saves · ${this.#slots?.activeSlot ?? 1}`
+    this.#menu?.refresh()
     if (this.#saveStatus) {
       this.#saveStatus.textContent = this.#restoreFailed ? 'Continue unavailable' : this.#slots?.error ? 'Autosave unavailable' : 'Autosaved'
       this.#saveStatus.title = this.#slots?.error ?? 'Progress saves automatically in this browser.'
@@ -951,6 +1069,10 @@ export class SolomonLabyrinthOverlay {
     window.removeEventListener('blur', this.#release)
     document.removeEventListener('visibilitychange', this.#visibility)
     window.removeEventListener('pagehide', this.#save)
+    this.#backOff?.()
+    this.#backOff = null
+    this.#menu?.dispose()
+    this.#menu = null
     this.#designer?.unmount()
     this.#designer = null
     this.#veil?.dispose()
@@ -971,16 +1093,29 @@ export class SolomonLabyrinthOverlay {
 const ADVENTURE_CSS = `
 .sol-adventure{position:fixed;inset:0;z-index:2147483000;background:radial-gradient(ellipse at 65% 15%,#30496a,#15273f 70%);color:#f0f2f7;display:flex;flex-direction:column;font:14px system-ui,sans-serif;overflow:hidden;color-scheme:dark}
 .sol-adventure [hidden],.sol-adventure[hidden]{display:none!important}.sol-adventure *{box-sizing:border-box}.sol-adventure button{font:inherit;color:inherit;cursor:pointer}
-.sol-adventure button:focus-visible{outline:2px solid #ffdc96;outline-offset:3px}.sol-adventure-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 20px;border-bottom:1px solid #a3bedb26;background:#12223677}
-.sol-adventure-bar strong{font-size:16px;white-space:nowrap}.sol-adventure-bar button,.sol-adventure-touch button{border:1px solid #9ab2d24d;background:#4b658b33;padding:7px 11px;border-radius:7px;font-size:12px}.sol-adventure-bar button:hover{background:#6186aa66}
-.sol-adventure-inventory{margin-right:auto;margin-left:15px;white-space:nowrap;font-size:12px;color:#edce95;font-variant-numeric:tabular-nums}
+.sol-adventure button:focus-visible{outline:2px solid #ffdc96;outline-offset:3px}
+.sol-adventure-touch button{border:1px solid #9ab2d24d;background:#0f1e30b3;padding:7px 11px;border-radius:7px;font-size:12px}
+.sol-adventure-inventory{white-space:nowrap;font-size:13px;color:#edce95;font-variant-numeric:tabular-nums}
 .sol-save-status{font-size:10px;color:#afc6b9}.sol-save-backdrop{position:absolute;inset:0;z-index:30;display:grid;place-items:center;background:#071624a8;padding:14px}.sol-save-panel{width:min(100%,520px);max-height:100%;overflow:auto;border:1px solid #a9bdbb66;border-radius:14px;padding:22px;background:#1b303e;box-shadow:0 20px 70px #0006}.sol-save-panel h2{font-size:20px;margin:0 0 6px}.sol-save-panel>p{font-size:12px;color:#b9ccc6;line-height:1.5}.sol-save-panel button{border:1px solid #879d9755;border-radius:7px;padding:7px 11px;background:#36564e;font-size:12px}.sol-save-slot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border:1px solid #819f963d;border-radius:9px;padding:12px;margin:12px 0}.sol-save-info{flex:1;min-width:180px}.sol-save-info strong,.sol-save-info small{display:block}.sol-save-info small{font-size:11px;color:#b5c9c2;margin-top:5px}.sol-save-reset-note{flex-basis:100%;margin:3px 0;font-size:12px;color:#f2cb93}.sol-save-error{color:#f2cb93!important}
-.sol-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:6px 20px;font-size:11px;color:#c3d3e6;background:#0f1e30aa;border-bottom:1px solid #a3bedb14}
+.sol-crumbs{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:5px;font-size:12px;color:#c3d3e6}
 .sol-crumb{background:none;border:0;padding:2px 4px;color:#cfe0f2;text-decoration:underline;font-size:11px}.sol-crumb-sep{opacity:.5}.sol-crumb-here{color:#ffdc96;font-weight:600}
-.sol-adventure-content{position:relative;flex:1;min-height:0;padding:14px 24px;overflow:hidden}.sol-adventure-place{height:100%;min-height:0}
-.sol-card{position:absolute;left:24px;top:14px;z-index:15;display:flex;flex-direction:column;gap:2px;padding:8px 12px;border-radius:10px;background:#0f1e30cc;border:1px solid #a3bedb22;pointer-events:none;max-width:60%}
+.sol-adventure-content{position:relative;flex:1;min-height:0;padding:0;overflow:hidden}.sol-adventure-place{height:100%;min-height:0}
+.sol-card{position:absolute;left:12px;top:10px;z-index:15;display:flex;flex-direction:column;gap:2px;padding:8px 12px;border-radius:10px;background:#0f1e30cc;border:1px solid #a3bedb22;pointer-events:none;max-width:60%}
 .sol-card strong{font-size:13px}.sol-card span{font-size:10.5px;color:#c3d3e6}.sol-card-up,.sol-card-surface{color:#ffdc96}
-.sol-adventure-message{min-height:38px;padding:8px 20px;border-top:1px solid #a3bedb22;text-align:center;font-size:12px;line-height:1.5;color:#dfd9bd;background:#14273d99}
-.sol-adventure[aria-busy=true] .sol-adventure-content{opacity:.65;pointer-events:none}.sol-adventure-touch{display:none;justify-content:center;gap:8px;padding:8px;touch-action:none;background:#162a42;flex-wrap:wrap}
-@media(pointer:coarse){.sol-adventure-touch{display:flex}}@media(max-width:700px){.sol-adventure-bar{gap:6px;padding:9px 12px}.sol-adventure-bar strong{font-size:14px}.sol-adventure-inventory{font-size:10px;margin-left:5px}.sol-adventure-bar button{font-size:10px;padding:6px 8px}.sol-adventure-content{padding:10px}.sol-adventure-message{font-size:11px;padding:7px 12px}.sol-crumbs{padding:5px 12px}.sol-card{left:12px;top:8px;max-width:75%}.sol-adventure-touch{gap:5px}.sol-adventure-touch button{padding:8px}}
+.sol-card .sol-card-next{margin-top:5px;padding-top:5px;border-top:1px solid #a3bedb33;color:#ffe3a3;font-size:11px;line-height:1.4}
+.sol-adventure .sol-rpg-world-heading{display:none}
+.sol-adventure-message{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:20;width:max-content;max-width:min(92vw,760px);padding:6px 14px;border:1px solid #a3bedb33;border-radius:10px;text-align:center;font-size:12px;line-height:1.5;color:#dfd9bd;background:#0f1e30cc;pointer-events:none}
+.sol-adventure-message:empty{display:none}
+.sol-adventure[aria-busy=true] .sol-adventure-content{opacity:.65;pointer-events:none}.sol-adventure-touch{display:none;position:absolute;left:0;right:0;bottom:0;z-index:21;justify-content:center;gap:8px;padding:8px;touch-action:none;flex-wrap:wrap}
+@media(pointer:coarse){.sol-adventure-touch{display:flex}.sol-adventure-message{bottom:72px}}@media(max-width:700px){.sol-adventure-inventory{font-size:11px}.sol-adventure-message{font-size:11px;padding:6px 12px}.sol-card{max-width:75%}.sol-adventure-touch{gap:5px}.sol-adventure-touch button{padding:8px}}
+.sol-menu-open{position:absolute;top:10px;right:12px;z-index:25;width:38px;height:44px;border:0;padding:0;cursor:pointer;background:linear-gradient(160deg,#f0cf7a,#8f6f27);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);opacity:.85;transition:opacity .15s,filter .15s}
+.sol-menu-open::before{content:'';position:absolute;inset:2px;clip-path:inherit;background:radial-gradient(ellipse at 50% 30%,#2e4270,#162241 70%)}
+.sol-menu-open::after{content:'';position:absolute;left:50%;top:50%;width:14px;height:10px;transform:translate(-50%,-50%);border-top:2px solid #f2d38a;border-bottom:2px solid #f2d38a;background:linear-gradient(#f2d38a,#f2d38a) center/100% 2px no-repeat}
+.sol-menu-open:hover,.sol-menu-open:focus-visible{opacity:1;filter:brightness(1.15)}
+.sol-adventure .sol-rpg-world{padding:0}.sol-adventure .sol-rpg-world-controls,.sol-adventure .sol-rpg-world .sol-rpg-status{display:none}.sol-adventure .sol-rpg-map{border:0;border-radius:0;box-shadow:none}
+.sol-adventure .sol-chamber-view{position:relative;gap:0;justify-content:center;container-type:size}.sol-adventure .sol-chamber-heading,.sol-adventure .sol-chamber-controls{display:none}
+.sol-adventure .sol-chamber-map{width:min(100cqw,calc(100cqh * var(--cols) / var(--rows)));margin:auto;border-radius:0}
+.sol-adventure .sol-chamber-status{position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:6;width:max-content;max-width:70%;padding:4px 12px;border-radius:8px;background:#0f1e30b3;pointer-events:none}.sol-adventure .sol-chamber-status:empty{display:none}
+.sol-adventure .sol-native-room{position:relative;gap:0}.sol-adventure .sol-room-heading,.sol-adventure .sol-room-hint{display:none}.sol-adventure .sol-room-viewport{padding:6px}
+.sol-adventure .sol-room-status{position:absolute;left:12px;bottom:10px;z-index:6;max-width:45%;gap:10px;padding:4px 10px;border-radius:8px;background:#0f1e30b3;pointer-events:none}.sol-adventure .sol-room-status progress{width:90px}
 `

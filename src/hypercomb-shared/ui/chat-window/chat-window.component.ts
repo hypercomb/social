@@ -722,7 +722,7 @@ type ConversationStandingLike = {
 type ListGroup = 'waiting' | 'open' | 'done'
 
 type ChatThreadsLike = {
-  appendTurn(convoId: string, role: TurnRole, text: string): Promise<boolean>
+  appendTurn(convoId: string, role: TurnRole, text: string, meta?: TurnMetaLike): Promise<boolean>
   readTurns(convoId: string): Promise<ChatTurn[]>
   listConversations(): Promise<ConversationSummary[]>
   /** Each conversation's organized standing, and who it waits on — the rail's
@@ -1059,6 +1059,16 @@ const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
 const ANATOMY_IOC_KEY = '@hypercomb.social/Anatomy'
 /** assistant/llm-hive-access.ts — which keyed providers may read the hive. */
 const LLM_HIVE_ACCESS_IOC_KEY = '@hypercomb.social/LlmHiveAccess'
+
+/** Provenance attached to a model-produced turn — chat-thread.ts `TurnMeta`,
+ *  restated because the shell may not import a module. */
+type TurnMetaLike = {
+  readonly anatomy?: string
+  readonly context?: string
+  readonly observed?: readonly string[]
+  readonly providerId?: string
+  readonly model?: string
+}
 const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 const MAX_OBSERVATION_ROUNDS = 3
 const MAX_OBSERVATION_CONTEXT_CHARS = 24_000
@@ -5605,6 +5615,17 @@ export class ChatWindowComponent implements OnDestroy {
    * bridge, this path never claims it can walk the hive. It may nevertheless
    * EDIT the hive by returning native, validated beehavior grammar: reading
    * state and applying a named action are deliberately different powers. */
+  /** WHAT THE ANSWER WAS SENT WITH, per conversation, held from the moment
+   *  the provider stream ends until the run writes the assistant turn —
+   *  the run owns the write (it may outlive this window), so the provenance
+   *  waits here and rides onto the turn manifest (anatomy-context-need §6). */
+  readonly #turnMeta = new Map<string, TurnMetaLike>()
+  #takeTurnMeta(convoId: string): TurnMetaLike | undefined {
+    const meta = this.#turnMeta.get(convoId)
+    this.#turnMeta.delete(convoId)
+    return meta
+  }
+
   async #askProvider(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
     const router = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
     const need = { tier: 'fast', streaming: true }
@@ -5625,11 +5646,15 @@ export class ChatWindowComponent implements OnDestroy {
     const localReadyAndTrusted = router?.providerIsMachineLocal?.('local') === true
       && !!localEndpoint
       && router.ready?.({ providerId: 'local', need }) === true
-    const hiveAccess = ioc()?.get(LLM_HIVE_ACCESS_IOC_KEY) as { granted?: () => readonly string[] } | undefined
+    const hiveAccess = ioc()?.get(LLM_HIVE_ACCESS_IOC_KEY) as
+      { granted?: () => readonly string[]; budget?: (providerId: string) => number | undefined } | undefined
     const nativeProviderId = hypercombActionProviderId(
       canAct || canObserve, namedModel, namedProvider, localReadyAndTrusted,
       { granted: hiveAccess?.granted?.() ?? [], designated: router?.designatedProviderId?.(need) },
     )
+    // The per-provider read budget the participant set in the console, else
+    // the shell's default. It is the number the gate's privacy rests on.
+    const observationBudget = (nativeProviderId && hiveAccess?.budget?.(nativeProviderId)) || MAX_OBSERVATION_CONTEXT_CHARS
     const actionProviderId = canAct ? nativeProviderId : undefined
     const observationProviderId = canObserve ? nativeProviderId : undefined
     // An unavailable local model loses only its action capability. Automatic
@@ -5689,6 +5714,20 @@ export class ChatWindowComponent implements OnDestroy {
       ].filter(Boolean).join('\n\n')
       : [anatomyText, askingSystem].filter(Boolean).join('\n\n')
 
+    // PROVENANCE FOR THE TURN (anatomy-context-need §6): the anatomy this
+    // answer will be framed by, and the page/selection it was asked from —
+    // the latter written as a small resource so the turn names it by sig.
+    // `emit: false`: a context manifest is never a publish trigger.
+    const anatomySig = await (ioc()?.get(ANATOMY_IOC_KEY) as { signature?: () => Promise<string> } | undefined)
+      ?.signature?.().catch(() => undefined)
+    const contextStore = ioc()?.get('@hypercomb.social/Store') as
+      { putResource?: (blob: Blob, options?: { emit?: boolean }) => Promise<string> } | undefined
+    const contextSig = await contextStore?.putResource?.(
+      new Blob([JSON.stringify({ page: grammarContext.segments, selected: grammarContext.selected })], { type: 'application/json' }),
+      { emit: false },
+    ).catch(() => undefined)
+    const observed: string[] = []
+
     const component = this
     const ask: HostAsk = async function* (_question, opts) {
       let wrote = false
@@ -5734,7 +5773,7 @@ export class ChatWindowComponent implements OnDestroy {
 
         const roundTools = nativeProviderId ? [
           ...(observationProviderId && observationRounds < MAX_OBSERVATION_ROUNDS
-            && observationChars < MAX_OBSERVATION_CONTEXT_CHARS
+            && observationChars < observationBudget
             ? [hypercombObservationTool()]
             : []),
           ...(actionProviderId ? [hypercombGrammarTool(behaviourEntries)] : []),
@@ -5785,6 +5824,11 @@ export class ChatWindowComponent implements OnDestroy {
           }
           if (chunk.toolCalls?.length) roundCalls.push(...chunk.toolCalls)
         }
+        // Updated every round; the last write is what the run stores.
+        component.#turnMeta.set(convoId, {
+          anatomy: anatomySig, context: contextSig, observed: [...observed],
+          providerId: roundProviderId, model: roundModel,
+        })
 
         if (roundCalls.length === 0) {
           if (snapshotIds.length && treeReader
@@ -5817,9 +5861,10 @@ export class ChatWindowComponent implements OnDestroy {
             if (!observationProviderId || !treeReader || observationRounds >= MAX_OBSERVATION_ROUNDS) {
               throw new Error('no more tree observation rounds are available')
             }
-            const remaining = MAX_OBSERVATION_CONTEXT_CHARS - observationChars
+            const remaining = observationBudget - observationChars
             if (remaining < 1_500) throw new Error('the bounded tree observation context is full')
             const plan = parseHypercombObservationToolCalls(roundCalls, grammarContext.segments)
+            observed.push(...plan.observations.map(observation => observation.grammar))
             const perReadBytes = Math.max(1_024, Math.min(
               8_000,
               Math.floor((remaining - 512) / plan.observations.length),
@@ -5909,7 +5954,9 @@ export class ChatWindowComponent implements OnDestroy {
     if (convoId === this.activeId()) this.hostStreaming.set(true)
     const threads = this.#threads()
     return startHostRun(convoId, message, { ask }, {
-      appendTurn: (id, role, text) => threads?.appendTurn(id, role as 'user' | 'assistant', text) ?? Promise.resolve(false),
+      appendTurn: (id, role, text) => threads?.appendTurn(
+        id, role as 'user' | 'assistant', text, role === 'assistant' ? this.#takeTurnMeta(id) : undefined,
+      ) ?? Promise.resolve(false),
       saveStreamCheckpoint: (id, text) => threads?.saveStreamCheckpoint?.(id, text) ?? Promise.resolve(false),
     })
   }
@@ -5972,7 +6019,9 @@ export class ChatWindowComponent implements OnDestroy {
     // back through a component to find somewhere to put the answer.
     const threads = this.#threads()
     return startHostRun(convoId, question, host as { ask?: HostAsk }, {
-      appendTurn: (id, role, text) => threads?.appendTurn(id, role as 'user' | 'assistant', text) ?? Promise.resolve(false),
+      appendTurn: (id, role, text) => threads?.appendTurn(
+        id, role as 'user' | 'assistant', text, role === 'assistant' ? this.#takeTurnMeta(id) : undefined,
+      ) ?? Promise.resolve(false),
       saveStreamCheckpoint: (id, text) => threads?.saveStreamCheckpoint?.(id, text) ?? Promise.resolve(false),
     }, { contextSigs })
   }

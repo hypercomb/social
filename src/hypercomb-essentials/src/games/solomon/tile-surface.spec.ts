@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import type { RoomDef } from './labyrinth.js'
 import {
-  SOLOMON_MAZE_BRANCH, SolomonTileSurface, syncTerrain,
+  SOLOMON_MAZE_BRANCH, SOLOMON_MENU, SolomonTileSurface, syncTerrain,
   type NativeTileLayer, type TileSurfaceHistory, type TileSurfaceCommitter,
 } from './tile-surface.js'
+import type { MenuOption } from './game-menu.js'
 
 /** A content-addressed store with independent location heads. Keeping parent
  *  sigs stale after edits exercises the same live-head rule as the real hive. */
@@ -66,6 +67,35 @@ function room(): RoomDef {
     gates: [{ col: 12, row: 10, requires: { kind: 'hexagon' } }],
   }
 }
+
+describe('the game menu is a standard layer', () => {
+  const DEFAULTS: readonly MenuOption[] = [
+    { name: 'Continue', action: 'continue' },
+    { name: 'Items', action: 'items' },
+    { name: 'Close', action: 'close' },
+  ]
+
+  it('seeds one tile per option beside the rooms the first time, then reads the layer back in order', async () => {
+    const hive = nativeHive()
+    expect(await hive.surface().ensureMenu(DEFAULTS)).toEqual(DEFAULTS)
+    const menu = hive.read([SOLOMON_MAZE_BRANCH, SOLOMON_MENU])!
+    expect(menu.children).toHaveLength(3)
+    expect(hive.read([SOLOMON_MAZE_BRANCH, SOLOMON_MENU, 'Items'])?.solomonMenuOption).toEqual({ version: 1, action: 'items' })
+    const reopened = await hive.surface().ensureMenu([{ name: 'Other', action: 'close' }])
+    expect(reopened.map(option => option.name)).toEqual(['Continue', 'Items', 'Close'])
+    expect(hive.writes()).toBe(1)
+  })
+
+  it('shows a tile added to the menu layer, locked and inert when it names no action', async () => {
+    const hive = nativeHive()
+    await hive.surface().ensureMenu(DEFAULTS)
+    const menuSegments = [SOLOMON_MAZE_BRANCH, SOLOMON_MENU]
+    const sig = hive.put([...menuSegments, 'Postcard'], { name: 'Postcard' })
+    const menu = hive.read(menuSegments)!
+    hive.put(menuSegments, { ...menu, children: [...(menu.children ?? []), sig] })
+    expect((await hive.surface().readMenu())?.at(-1)).toEqual({ name: 'Postcard', action: null })
+  })
+})
 
 describe('Solomon native tile playing surface', () => {
   it('makes one real child layer per square and hydrates all gameplay from those children', async () => {

@@ -15,6 +15,7 @@ import { VEIL_ZOOM, veilCanvasPicture, type VeilDirection, type VeilLeg, type Ve
 import { drawPlace, type PlaceGlow, type PlaceSprite } from './island-places.js'
 import { PLAYER_LOOK, drawWalker, lookFor } from './island-sprites.js'
 import { playChestReveal, type TreasureKind } from './island-treasure.js'
+import type { StoryWhen } from './story-when.js'
 
 export type ShrineComponent = { kind: 'triangle'; point: number } | { kind: 'hexagon' } | { kind: 'star' }
 export type WorldRelic = ShrineComponent & { id: string }
@@ -49,6 +50,9 @@ export interface WorldHooks {
   /** Renamed from onJournal (2) A6.4 — opens the Items surface. */
   onItems?(): void
   onMessage?(message: string): void
+  /** Whether a story condition holds for this traveller — what lets people
+   *  say something new as the story moves. Absent = nothing later is said. */
+  holds?(when: StoryWhen): boolean
   /** See WorldGainRequest. */
   gain?(request: WorldGainRequest): void
   /** Records that this entrance has been reached, for the future found-ledger
@@ -62,9 +66,13 @@ export interface WorldPlace { id: string; name: string; x: number; y: number }
 export interface WorldShrine extends WorldPlace {
   kind: 'shrine'; labyrinthId: string; subtitle: string; components: readonly ShrineComponent[]
 }
+/** Something a person can say once a point in the story holds. Listed in
+ *  story order: the last one that holds is the furthest along. */
+export interface WorldLater { readonly when: StoryWhen; readonly text: string }
 export interface WorldPerson extends WorldPlace {
   kind: 'person'; role: string; color: string; clue: string; question: string
   answers: readonly string[]; correct: number; insight: string; retry: string; reward?: WorldRelic
+  later?: readonly WorldLater[]
 }
 export interface WorldDungeon extends WorldPlace {
   kind: 'dungeon'; levelIndex: number; subtitle: string; clue: string
@@ -72,6 +80,7 @@ export interface WorldDungeon extends WorldPlace {
 /** Someone who lives on the island. They talk; they ask nothing. */
 export interface WorldResident extends WorldPlace {
   kind: 'resident'; role: string; color: string; lines: readonly string[]
+  later?: readonly WorldLater[]
 }
 /** Ground laid out for a shrine nobody has built yet. A plot names no shrine:
  *  empty is a finished state, and a builder's shrine seats onto it later. */
@@ -275,6 +284,12 @@ export const WORLD_PEOPLE: readonly WorldPerson[] = [
     retry: 'Read the inscription again: DAWN faces the sunrise. The sun rises in the east. Try again whenever you are ready.',
     insight: 'Yes: east, toward the sunrise. Take the Dawn triangle. Walk north to the Dawn Shrine and fill its matching socket. Every piece also records a clue in your journal.',
     reward: { id: 'mira-dawn-triangle', kind: 'triangle', point: 0 },
+    later: [
+      { when: { done: 'island/socket:dawn-shrine:0' }, text: 'The Dawn Shrine is open. Walk into it: Sunseed’s rooms hide two more points and the heart of the star.' },
+      { when: { has: { kind: 'hexagon' } }, text: 'You found the heart. Carry it, with the Tide and Root points, to the Tide Observatory on the high road east.' },
+      { when: { has: { kind: 'star' } }, text: 'Six points and a heart: your star is whole. The Pyramid of Accord on the valley’s east side is waiting for all seven.' },
+      { when: { done: 'labyrinth/arrival:starbloom' }, text: 'You reached the heart of the pyramid. The valley feels awake. The caverns, Wenna’s door and the old grove still keep secrets of their own.' },
+    ],
   },
   {
     kind: 'person', id: 'oren', name: 'Oren', role: 'Cartographer of depths', ...valleyPoint(12, 9), color: '#80bbd9',
@@ -282,6 +297,11 @@ export const WORLD_PEOPLE: readonly WorldPerson[] = [
     question: 'After finding a new piece at another depth, where might a new path appear?', answers: ['In a room I visited earlier', 'Only outside the labyrinth', 'Nowhere; doors work once'], correct: 0,
     retry: 'Oren taps the return arrow. A piece can open a matching object in a room you already know; returning is useful.',
     insight: 'Exactly. Doors connect the depths in both directions. Collect pieces, revisit the matching marks, and build a mental map of the rooms.',
+    later: [
+      { when: { has: { kind: 'hexagon' } }, text: 'Tideglass runs deeper than Sunseed. Look across each room before you move a single block.' },
+      { when: { done: 'labyrinth/arrival:starbloom' }, text: 'Wayfarer Cavern goes three chambers down, and Highland Cavern deeper still. I have drawn their doors for years and never reached the bottom.' },
+      { when: { knows: 'wayfarer-spring' }, text: 'You came back up from the Spring Heart! Tell me everything. I have the Cistern wrong on every map I own.' },
+    ],
   },
   {
     kind: 'person', id: 'sela', name: 'Sela', role: 'Reader of the stars', ...valleyPoint(18, 12), color: '#e2b36f',
@@ -289,6 +309,10 @@ export const WORLD_PEOPLE: readonly WorldPerson[] = [
     question: 'What does the six-pointed outline still need to form the complete shrine?', answers: ['A seventh triangle', 'A central hexagon', 'Another doorway'], correct: 1,
     retry: 'Look at the center of the pattern: the empty space has six sides. The central hexagon completes the star.',
     insight: 'The central hexagon. Gather every point and the heart, then fill all seven sockets at the Pyramid. Your abilities remain yours after every placement.',
+    later: [
+      { when: { has: { kind: 'star' } }, text: 'I can see it on you: the whole star. Seven sockets wait at the Pyramid of Accord. Fill every one, then walk in.' },
+      { when: { done: 'labyrinth/arrival:starbloom' }, text: 'The pyramid’s heart answered you. Some nights now the stars over the valley look rearranged.' },
+    ],
   },
 ]
 
@@ -330,12 +354,19 @@ export const WORLD_RESIDENTS: readonly WorldResident[] = [
       'Four plates, one seal. Lay a brick on every plate and the seal gives way.',
       'The wand you carry is the one the rooms below will ask of you. Practise here, where nothing bites.',
     ],
+    later: [
+      { when: { all: [{ done: 'island/cache:court-cache' }, { done: 'island/cache:pond-cache' }, { done: 'island/cache:nook-cache' }] }, text: 'Every coffer in my garden has opened for you. The old builders would have liked you.' },
+    ],
   },
   {
     kind: 'resident', id: 'tamsin', name: 'Tamsin', role: 'Harbour keeper of Saltmere', x: 80, y: 140, color: '#c98f5a',
     lines: [
       'Welcome to Saltmere. The valley road brought you south; the coast road runs east to the Tidewater shore.',
       'There is an empty plot on the Tidewater shore. The old stones are waiting for someone to raise a shrine on them.',
+    ],
+    later: [
+      { when: { has: { kind: 'star' } }, text: 'Sailors swear something on the valley’s east side hums at night now. The Pyramid, they think.' },
+      { when: { done: 'chandler-house' }, text: 'Wenna opened her door to you? She does not do that for just anyone.' },
     ],
   },
   {
@@ -352,12 +383,19 @@ export const WORLD_RESIDENTS: readonly WorldResident[] = [
       'My grandmother says people from far away will come and build shrines here. I want to play every one.',
       "There's a new door on the chandler's house. Wenna hasn't opened it to visitors yet, but I've seen candlelight through the shutters.",
     ],
+    later: [
+      { when: { done: 'labyrinth/arrival:starbloom' }, text: 'Everyone says you woke the pyramid! When I grow up I am going to build a shrine on the Tidewater plot.' },
+      { when: { done: 'chandler-cellar' }, text: "You went down Wenna's trapdoor! What was in the cellar? Candles? Treasure?" },
+    ],
   },
   {
     kind: 'resident', id: 'brannoch', name: 'Brannoch', role: 'Lamplighter of Lanternwick', x: 71, y: 56, color: '#d8a24a',
     lines: [
       'Whisperwood swallows anyone who leaves the road. Keep to it and you will reach the old grove plot to the southwest.',
       'The road east runs toward the Spine and on to a cliffside plot where the wind never stops.',
+    ],
+    later: [
+      { when: { done: 'hollow-grove' }, text: 'You found a way into the old grove in the valley. Those trees have not let anyone through in years.' },
     ],
   },
   {
@@ -366,12 +404,18 @@ export const WORLD_RESIDENTS: readonly WorldResident[] = [
       'Every shrine was built by someone. A shrine is its own set of rooms, and whoever builds one decides the puzzles inside.',
       'The valley’s shrines lead down into labyrinths. Other shrines may lead somewhere else entirely.',
     ],
+    later: [
+      { when: { done: 'labyrinth/arrival:starbloom' }, text: 'Now you know a shrine from the inside. Someday someone will raise one on those empty plots. Maybe you.' },
+    ],
   },
   {
     kind: 'resident', id: 'harl', name: 'Harl', role: 'Pass warden of Cinderreach', x: 180, y: 94, color: '#8fa0b3',
     lines: [
       'The north road climbs through the Spine. It is steep, but the pass stays open all year.',
       'Beyond the pass there is a cliffside plot. Nobody has built on it yet.',
+    ],
+    later: [
+      { when: { has: { kind: 'star' } }, text: 'Travellers crossing the pass talk about someone carrying a whole star. Word travels fast in the mountains.' },
     ],
   },
   {
@@ -380,12 +424,18 @@ export const WORLD_RESIDENTS: readonly WorldResident[] = [
       'Mountains are not walls. Roads find the low places; follow them and you will always cross.',
       'Rock you cannot walk over is still worth looking at. Every range hides something.',
     ],
+    later: [
+      { when: { knows: 'highland-accord' }, text: 'You climbed all the way down Highland Cavern? Those six roads have turned back better travellers than me.' },
+    ],
   },
   {
     kind: 'resident', id: 'orrin', name: 'Orrin', role: 'Traveller', x: 183, y: 97, color: '#7fb07a',
     lines: [
       'I walked here from Saltmere without once losing sight of the road. The whole island is one long walk, if you let it be.',
       'North of the valley the forest is deep. East of here the rivers run down to the sea.',
+    ],
+    later: [
+      { when: { done: 'labyrinth/arrival:starbloom' }, text: 'The whole island is one long walk, and you have walked most of it now.' },
     ],
   },
 ]
@@ -446,6 +496,7 @@ export class RpgOverworld {
   readonly opened = new Set<string>()
   readonly hooks: WorldHooks
   readonly #talks = new Map<string, number>()
+  readonly #heard = new Set<string>()
   /** Island cells the wand has changed. */
   readonly #changed = new Set<number>()
   readonly #stampCells = new Map<string, number[]>()
@@ -790,13 +841,32 @@ export class RpgOverworld {
     }
     return this.result(true, person.insight)
   }
-  /** A resident's next line; they cycle through what they know. */
+  /** A resident's next line. Something newly true in the story is said
+   *  first, once; then they cycle through everything they know by now. */
   talk(residentId: string): WorldResult {
     const resident = WORLD_RESIDENTS.find(candidate => candidate.id === residentId)
     if (!resident || !this.near(resident)) return this.result(false, 'Walk closer to speak with them.')
+    const later = (resident.later ?? []).map((line, index) => ({ line, key: `${resident.id}:${index}` }))
+      .filter(({ line }) => this.hooks.holds?.(line.when) === true)
+    const fresh = [...later].reverse().find(({ key }) => !this.#heard.has(key))
+    if (fresh) {
+      this.#heard.add(fresh.key)
+      return { ok: true, message: fresh.line.text, encounter: resident }
+    }
+    const known = [...resident.lines, ...later.map(({ line }) => line.text)]
     const turn = this.#talks.get(resident.id) ?? 0
     this.#talks.set(resident.id, turn + 1)
-    return { ok: true, message: resident.lines[turn % resident.lines.length] ?? '', encounter: resident }
+    return { ok: true, message: known[turn % known.length] ?? '', encounter: resident }
+  }
+  /** What an answered person says: the furthest point of the story they have
+   *  something to say about, else their insight. */
+  personLine(person: WorldPerson): string {
+    const later = person.later ?? []
+    for (let index = later.length - 1; index >= 0; index--) {
+      const line = later[index]!
+      if (this.hooks.holds?.(line.when) === true) return line.text
+    }
+    return person.insight
   }
   socketFilled(shrineId: string, index: number): boolean { return this.filledSockets.has(`${shrineId}:${index}`) }
   owns(component: ShrineComponent): boolean { return this.hooks.has(component) || this.hooks.has({ kind: 'star' }) }
@@ -967,6 +1037,11 @@ export class RpgOverworldView {
   #askSerial = 0
   #notice = ''
   readonly #camera: IslandCamera = { x: 0, y: 0, width: 0, height: 0, tile: 32, dpr: 1 }
+  /** Where the story's current step happens: a marker bobs over it when it
+   *  is on screen, and an arrow on the map's edge points to it when not. */
+  #guide: WorldPlace | null = null
+  #guideMark: HTMLDivElement | null = null
+  #guideArrow: HTMLDivElement | null = null
   readonly #look = { x: 0, y: 0, ready: false }
   #time = 0
   #region = ''
@@ -1085,7 +1160,15 @@ export class RpgOverworldView {
     this.#cue = element('div', 'sol-rpg-cue')
     this.#cue.hidden = true
     layer.append(this.#cue)
-    map.append(canvas, layer, above, speech, this.#banner, minimap)
+    this.#guideMark = element('div', 'sol-rpg-guide-mark')
+    this.#guideMark.hidden = true
+    this.#guideMark.setAttribute('aria-hidden', 'true')
+    layer.append(this.#guideMark)
+    this.#guideArrow = element('div', 'sol-rpg-guide-arrow')
+    this.#guideArrow.hidden = true
+    this.#guideArrow.setAttribute('aria-hidden', 'true')
+    this.#guideArrow.append(element('span', 'sol-rpg-guide-pointer'), element('span', 'sol-rpg-guide-label'))
+    map.append(canvas, layer, above, speech, this.#banner, minimap, this.#guideArrow)
     this.#status = element('div', 'sol-rpg-status')
     this.#status.setAttribute('aria-live', 'polite')
     const controls = element('div', 'sol-rpg-world-controls')
@@ -1203,6 +1286,38 @@ export class RpgOverworldView {
     }
     for (const area of WORLD_AREAS) this.#areaMarkers.get(area.id)?.classList.toggle('is-near', cue?.id === area.id)
   }
+  /** Points the way to where the story's current step happens: an island
+   *  encounter or area id, or null for nowhere in particular. */
+  setGuide(id: string | null): void {
+    const target: WorldPlace | null = id ? WORLD_ENCOUNTERS.find(place => place.id === id) ?? WORLD_AREAS.find(area => area.id === id) ?? null : null
+    if (target === this.#guide) return
+    this.#guide = target
+    this.#minimapKey = ''
+    this.#placeGuide()
+  }
+  #placeGuide(): void {
+    const target = this.#guide, mark = this.#guideMark, arrow = this.#guideArrow, camera = this.#camera
+    if (!mark || !arrow) return
+    if (!target || !camera.width || !camera.height) { mark.hidden = true; arrow.hidden = true; return }
+    const tile = camera.tile
+    const x = target.x * tile - camera.x, y = target.y * tile - camera.y
+    const inset = tile * 1.5
+    const onScreen = x > inset && x < camera.width - inset && y > inset && y < camera.height - inset
+    mark.hidden = !onScreen
+    arrow.hidden = onScreen
+    if (onScreen) {
+      mark.style.left = `${target.x * tile}px`
+      mark.style.top = `${(target.y + FOOT) * tile}px`
+      return
+    }
+    const cx = camera.width / 2, cy = camera.height / 2, dx = x - cx, dy = y - cy
+    const reach = Math.max(0, Math.min((cx - 90) / Math.max(Math.abs(dx), 1e-6), (cy - 26) / Math.max(Math.abs(dy), 1e-6)))
+    arrow.style.left = `${cx + dx * reach}px`
+    arrow.style.top = `${cy + dy * reach}px`
+    arrow.style.setProperty('--guide-angle', `${Math.atan2(dy, dx)}rad`)
+    const label = arrow.lastElementChild
+    if (label && label.textContent !== target.name) label.textContent = target.name
+  }
   /** A question is waiting beside someone or something: a person's choices,
    *  or a shrine's sockets. Play goes on around it. */
   get isSpeaking(): boolean { return [...this.#speech.values()].some(speech => !!speech.nodes) }
@@ -1242,6 +1357,7 @@ export class RpgOverworldView {
     this.#dialog = null; this.#lastFocus = null
     this.#root?.remove(); this.#root = null; this.#map = null; this.#layer = null; this.#player = null
     this.#cue = null; this.#status = null; this.#areaMarkers.clear()
+    this.#guideMark = null; this.#guideArrow = null
     this.#places.clear(); this.#placeArt.clear(); this.#placeLooks.clear(); this.#bursts.length = 0
     this.#bubbles.clear(); this.#speech.clear(); this.#speechLayer = null
     this.#ctx = null; this.#above = null; this.#sprite = null; this.#spriteKey = ''; this.#painter = null
@@ -1327,13 +1443,14 @@ export class RpgOverworldView {
       if (marker.hidden !== unseen) marker.hidden = unseen
     }
     this.#paintMinimap()
+    this.#placeGuide()
   }
 
   #paintMinimap(): void {
     const ctx = this.#minimap, base = this.#minimapBase
     if (!ctx || !base) return
     const { player } = this.model, camera = this.#camera
-    const key = `${camera.x},${camera.y},${camera.width},${camera.height},${camera.tile},${Math.round(player.x * 2)},${Math.round(player.y * 2)}`
+    const key = `${camera.x},${camera.y},${camera.width},${camera.height},${camera.tile},${Math.round(player.x * 2)},${Math.round(player.y * 2)},${this.#guide?.id ?? ''}`
     if (key === this.#minimapKey) return
     this.#minimapKey = key
     ctx.drawImage(base, 0, 0)
@@ -1349,6 +1466,13 @@ export class RpgOverworldView {
     for (const area of WORLD_AREAS) {
       ctx.fillStyle = AREA_MINIMAP_DOT
       ctx.fillRect(area.x - 2, area.y - 2, 4, 4)
+    }
+    if (this.#guide) {
+      ctx.strokeStyle = '#ffd76a'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(this.#guide.x, this.#guide.y, 6, 0, Math.PI * 2)
+      ctx.stroke()
     }
     ctx.fillStyle = '#ffffff'
     ctx.strokeStyle = '#1b2a2f'
@@ -1451,7 +1575,7 @@ export class RpgOverworldView {
       const nodes: Node[] = [element('p', 'sol-rpg-clue', person.clue)]
       if (reply) nodes.push(element('p', 'sol-rpg-reply', reply))
       if (solved) {
-        if (!reply) nodes.push(element('p', 'sol-rpg-reply', person.insight))
+        if (!reply) nodes.push(element('p', 'sol-rpg-reply', this.model.personLine(person)))
         return nodes
       }
       nodes.push(element('h4', '', person.question))
@@ -1561,6 +1685,11 @@ const WORLD_STYLE = `
 .sol-rpg-cue{position:absolute;left:0;top:0;transform:translate(-50%,calc(-100% - 40px * var(--sprite-scale)));width:max-content;max-width:220px;padding:5px 10px;border-radius:10px;background:rgba(14,22,26,.86);border:1px solid rgba(255,240,200,.3);color:#fff4d6;font-size:11.5px;font-weight:600;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.35);pointer-events:none}
 .sol-rpg-cue[data-action=tag]{font-weight:500;color:#d9e6df;border-style:dashed}
 .sol-rpg-cue.is-below{transform:translate(-50%,calc(10px * var(--sprite-scale)))}
+.sol-rpg-guide-mark{position:absolute;z-index:5;left:0;top:0;width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:13px solid #ffd76a;transform:translate(-50%,calc(-100% - 58px * var(--sprite-scale)));filter:drop-shadow(0 2px 2px #0009);pointer-events:none;animation:sol-rpg-guide-bob 1.1s ease-in-out infinite}
+@keyframes sol-rpg-guide-bob{0%,100%{translate:0 0}50%{translate:0 -5px}}
+@media(prefers-reduced-motion:reduce){.sol-rpg-guide-mark{animation:none}}
+.sol-rpg-guide-arrow{position:absolute;z-index:5;left:0;top:0;display:flex;align-items:center;gap:6px;transform:translate(-50%,-50%);padding:3px 9px 3px 6px;border-radius:999px;background:rgba(14,22,26,.82);border:1px solid rgba(255,215,106,.5);color:#ffe9b0;font-size:11px;font-weight:600;white-space:nowrap;pointer-events:none;box-shadow:0 3px 10px #0006}
+.sol-rpg-guide-pointer{width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-left:10px solid #ffd76a;transform:rotate(var(--guide-angle,0rad))}
 .sol-rpg-speech{position:absolute;z-index:3;left:0;top:0;width:0;height:0;pointer-events:none;will-change:transform}.sol-rpg-bubble{position:absolute;width:max-content;max-width:230px;padding:7px 11px;border:2px solid #1c1230;border-radius:12px;background:rgba(255,249,234,.97);color:#2a2118;font-size:12px;line-height:1.4;font-weight:500;box-shadow:0 6px 16px rgba(0,0,0,.35);transform:translate(-50%,calc(-100% - 54px * var(--sprite-scale)));opacity:0;transition:opacity .25s}.sol-rpg-bubble.is-shown{opacity:1}.sol-rpg-bubble::after{content:'';position:absolute;left:50%;bottom:-7px;width:11px;height:11px;background:inherit;border-right:2px solid #1c1230;border-bottom:2px solid #1c1230;transform:translateX(-50%) rotate(45deg)}.sol-rpg-bubble-sign{background:rgba(240,224,186,.97);font-family:Georgia,serif;font-size:12.5px}
 .sol-rpg-bubble.is-below{transform:translate(-50%,calc(16px * var(--sprite-scale)))}.sol-rpg-bubble.is-below::after{bottom:auto;top:-7px;border:0;border-left:2px solid #1c1230;border-top:2px solid #1c1230}
 .sol-rpg-bubble.is-live{pointer-events:auto;max-width:290px;text-align:left}.sol-rpg-bubble p{margin:0 0 6px;font-size:12px;line-height:1.45}.sol-rpg-bubble p:last-child{margin-bottom:0}.sol-rpg-bubble .sol-rpg-clue{background:transparent;border-left:0;border-radius:0;padding:0}.sol-rpg-bubble h4{margin:6px 0 5px;font-size:12px;color:#3a2a10}.sol-rpg-bubble .sol-rpg-choices{display:grid;gap:5px;margin-bottom:2px}.sol-rpg-bubble .sol-rpg-choices button{padding:6px 9px;border:1px solid #8a7550;border-radius:7px;background:#fff6e0;color:#2a2118;text-align:left;font-size:11.5px;cursor:pointer}.sol-rpg-bubble .sol-rpg-choices button:hover,.sol-rpg-bubble .sol-rpg-choices button:focus-visible{background:#ffe9b8;outline:none}.sol-rpg-bubble .sol-rpg-reply{color:#7a4b0b!important;font-weight:600}.sol-rpg-bubble .sol-rpg-shrine-pattern{width:160px;margin:4px auto 2px}.sol-rpg-bubble .sol-rpg-shrine-pattern .sol-rpg-socket-glyph{font-size:14px}.sol-rpg-bubble .sol-rpg-pattern-key{font-size:10px!important;color:#5a4a30!important;margin:4px 0 0;text-align:left}

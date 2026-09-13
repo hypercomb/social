@@ -384,6 +384,19 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // read-fallback. Per-participant, replaced whole: DOCUMENT.
   'substrate:registry',
   'substrate:sources',
+  // THE STATIC ANATOMY'S LINEAGE BAG — the protocol + doctrine text every
+  // model outside the machine is sent first (documentation/anatomy-context-
+  // need.md §2). 8-digit `{ layerSig, at }` markers, the history service's
+  // own shape; the highest names the anatomy this hive is running. A system
+  // pool no tile may name, hence the colon. Written by essentials/assistant/
+  // anatomy/anatomy.service.ts, advanced only when the sig changes.
+  'system:anatomy',
+  // TILE SUMMARIES a model wrote, keyed sign(layerSig + anatomySig + modelId)
+  // (documentation/anatomy-context-need.md §5). A derived cache — wipe-safe,
+  // never load-bearing — but NOT optimize-phase: a model's text is not a
+  // pure derivation, so it is minted only on an explicit `/summary` miss by
+  // essentials/assistant/compaction.ts. Colon meaning: no tile may name it.
+  'system:compaction',
   'tutorial:artifacts',
   'usage:dwell',
   // Default tile art, keyed by the tile's NAME and holding a SIGNATURE (not

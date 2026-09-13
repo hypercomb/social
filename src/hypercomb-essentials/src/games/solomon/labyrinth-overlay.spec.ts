@@ -65,6 +65,13 @@ function marker(name: string): HTMLButtonElement {
 function crumbs(): string[] {
   return [...document.querySelectorAll('.sol-crumb, .sol-crumb-here')].map(node => node.textContent ?? '')
 }
+/** Opens the game's menu from its corner icon and hands back one of its tiles. */
+function menuTile(name: string): HTMLButtonElement {
+  document.querySelector<HTMLButtonElement>('.sol-menu-open')!.click()
+  const tile = [...document.querySelectorAll<HTMLButtonElement>('.sol-menu-tile')].find(candidate => candidate.dataset['name'] === name)
+  expect(tile, `menu tile ${name}`).toBeTruthy()
+  return tile!
+}
 function mount(): SolomonLabyrinthOverlay {
   let overlay: SolomonLabyrinthOverlay
   overlay = new SolomonLabyrinthOverlay(() => overlay.unmount())
@@ -174,7 +181,84 @@ describe('the path shell', () => {
     expect(overlay.journey.room?.id).toBe('sunseed-porch')
   })
 
-  it('crosses a door by touching it, and the World button surfaces straight back to the island mid-labyrinth', async () => {
+  it('shows the story’s next step on the place card, and moves it on as the story does', () => {
+    mount()
+    const next = (): string => document.querySelector('.sol-card-next')?.textContent ?? ''
+    for (let i = 0; i < 12; i++) frame()
+    expect(next()).toMatch(/Mira/)
+    solveMira()
+    for (let i = 0; i < 12; i++) frame()
+    expect(next()).toMatch(/Dawn Shrine/)
+  })
+
+  it('keeps nothing outside the land, and opens its menu — a locked hive of tiles — from the corner or Escape', () => {
+    const overlay = mount()
+    const menu = (): HTMLElement => document.querySelector<HTMLElement>('.sol-menu')!
+    expect(document.querySelector('.sol-adventure-bar')).toBeNull()
+    expect(menu().hidden).toBe(true)
+    tap('Escape')
+    expect(menu().hidden).toBe(false)
+    expect([...document.querySelectorAll<HTMLButtonElement>('.sol-menu-tile')].map(tile => tile.dataset['name']))
+      .toEqual(['Continue', 'Items', 'Island', 'Saves', 'Sound', 'Full screen', 'Designer', 'Close'])
+    expect(menu().querySelector('.sol-crumbs')).not.toBeNull()
+    tap('Escape')
+    expect(menu().hidden).toBe(true)
+    menuTile('Continue').click()
+    expect(menu().hidden).toBe(true)
+    menuTile('Close').click()
+    expect(overlay.isMounted()).toBe(false)
+  })
+
+  it('comes back out with the right button, as in a hive, and a panel entered from the menu backs out to the menu', async () => {
+    mount()
+    await settle()
+    const menu = (): HTMLElement => document.querySelector<HTMLElement>('.sol-menu')!
+    const items = (): HTMLElement => document.querySelector<HTMLElement>('.sol-items')!
+    const rightClick = (target: Element): boolean =>
+      !target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
+    expect(rightClick(document.querySelector('.sol-adventure-content')!)).toBe(true)
+    expect(menu().hidden).toBe(false)
+    menu().click()
+    expect(menu().hidden).toBe(true)
+    menuTile('Items').click()
+    expect(items().hidden).toBe(false)
+    expect(menu().hidden).toBe(true)
+    rightClick(items())
+    expect(items().hidden).toBe(true)
+    expect(menu().hidden).toBe(false)
+    rightClick(menu())
+    expect(menu().hidden).toBe(true)
+    tap('i')
+    expect(items().hidden).toBe(false)
+    rightClick(items())
+    expect(items().hidden).toBe(true)
+    expect(menu().hidden).toBe(true)
+  })
+
+  it('answers the right button through the hive’s one BackGesture, scoped to the game, never a second listener', async () => {
+    type Entry = { owner: string; back: () => void; within?: () => Element | null }
+    let entry: Entry | undefined
+    const off = vi.fn()
+    vi.stubGlobal('ioc', {
+      get: (key: string) => key === '@diamondcoreprocessor.com/BackGesture'
+        ? { register: (registered: Entry) => { entry = registered; return off } }
+        : undefined,
+    })
+    const overlay = mount()
+    await settle()
+    const root = document.querySelector('.sol-adventure')!
+    expect(entry?.within?.()).toBe(root)
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    root.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+    expect(document.querySelector<HTMLElement>('.sol-menu')!.hidden).toBe(true)
+    entry!.back()
+    expect(document.querySelector<HTMLElement>('.sol-menu')!.hidden).toBe(false)
+    overlay.unmount()
+    expect(off).toHaveBeenCalledTimes(1)
+  })
+
+  it('crosses a door by touching it, and the menu’s Island tile surfaces straight back to the island mid-labyrinth', async () => {
     const overlay = mount()
     await enterSunseed()
     overlay.engine!.arrive(overlay.journey.room!.relics[0])
@@ -183,7 +267,7 @@ describe('the path shell', () => {
     overlay.engine!.arrive(overlay.journey.room!.doors.find(door => door.id === 'deeper')!)
     frame()
     expect(overlay.journey.room?.id).toBe('sunseed-steps')
-    button('World').click()
+    menuTile('Island').click()
     frame()
     expect(crumbs()).toEqual(['The Sevenfold Valley'])
     expect(document.querySelector('.sol-rpg-map')).not.toBeNull()
@@ -231,14 +315,14 @@ describe('combat skills reach the shell through the one GainScreen and ItemsTabl
     expect(document.querySelector('.sol-adventure-message')?.textContent).toContain('Meet what')
   })
 
-  it('closes an open GainScreen on every navigation path, including the header World button (M25)', async () => {
+  it('closes an open GainScreen on every navigation path, including the menu’s Island tile (M25)', async () => {
     const overlay = mount()
     await enterSunseed()
     overlay.engine!.arrive({ col: 3, row: 10 })
     frame()
     tap('e')
     expect(document.querySelector<HTMLElement>('.sol-gain')?.hidden).toBe(false)
-    button('World').click()
+    menuTile('Island').click()
     frame()
     expect(document.querySelector<HTMLElement>('.sol-gain')?.hidden).toBe(true)
     expect(crumbs()).toEqual(['The Sevenfold Valley'])

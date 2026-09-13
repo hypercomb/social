@@ -27,14 +27,44 @@ place wears — never a parent holding children. Walking into an entrance goes
 where you came in. See `src/documentation/solomon-island.md` for the full
 place-graph doctrine (`place.ts`, `story.ts`).
 
+## The guide, and people who notice
+
+`STORY_GUIDE` (`story.ts`) is the way through the story as data: ordered steps,
+each with the `StoryWhen` that offers it, the `StoryWhen` that finishes it, one
+line of text, and an island `target`. `guideStep(facts)` (`attainments.ts`)
+picks the first offered, unfinished step; the shell writes it on the place card
+as **Next · …** and the island points at its target — a gold marker over it on
+screen, an arrow on the map's edge when it is off screen, a ring on the
+minimap. Reordering steps, or adding one, never touches the view.
+
+People change what they say the same way. A `WorldPerson` or `WorldResident`
+may carry `later: { when, text }[]`, listed in story order. An answered person
+speaks the furthest `later` line that holds; a resident says a newly true line
+first, once, then keeps it in the lines they cycle through.
+
 ## Controls
 
 Arrows or WASD walk; E or Enter interacts with the nearest reachable thing;
-M returns to the world; Escape closes a dialog, a table, or steps up one
-place. In labyrinth rooms only: Space jumps, Z or J casts/dispels the
+M returns to the world; Escape — or the right mouse button, as anywhere in the
+hive — closes a dialog, a table, or steps up one place. In labyrinth rooms only: Space jumps, Z or J casts/dispels the
 labyrinth's own wand-brick, X or K throws a fireball, R retries the room, C
 strikes with a held weapon, V casts a held spell, N cycles held weapons, and
-B cycles held spells. I opens the **Items** table from anywhere. Touch
+B cycles held spells. I opens the **Items** table from anywhere. F puts the
+browser itself full screen, or takes it back.
+
+Nothing sits outside the land: the place fills the window. The **menu** — the
+hexagon at the top right, or Escape on the island — is a settings screen over
+the Solomon's Key star, its options a locked hive of tiles, and it moves like a
+hive: a left click on a tile goes in; a right click, or a left click on the
+space around the tiles, comes back out. Items or Saves entered from the menu
+come back out to the menu. Inside the hive the right button is answered by one
+`BackGesture` entry scoped to the game, so it never walks the hive's lineage
+underneath; the stand-alone harness answers it from the game's root. Those options are a
+standard layer, `solomon-maze-v1/menu`, one tile per option carrying
+`solomonMenuOption.action`; `SolomonTileSurface.ensureMenu` seeds it once from
+`DEFAULT_MENU` (`game-menu.ts`) and reads it back in order after that. A tile
+that names no action is shown locked and inert. Without a hive (the harness),
+the defaults stand in. Touch
 controls mirror all of this — walking, jump, wand, use, **Strike**, and
 **Cast** are real buttons; weapon/spell cycling (N/B) stays keyboard-only for
 now.

@@ -5,8 +5,11 @@
 
 import type { Cell, LevelDef } from './engine.js'
 import type { RoomDef } from './labyrinth.js'
+import { isMenuAction, type MenuOption } from './game-menu.js'
 
 export const SOLOMON_MAZE_BRANCH = 'solomon-maze-v1'
+/** The menu's layer, beside the rooms: one child tile per option. */
+export const SOLOMON_MENU = 'menu'
 const VERSION = 1
 
 export interface NativeTileLayer {
@@ -153,6 +156,48 @@ export class SolomonTileSurface {
     const loaded = await this.readRoom(room.id)
     if (!loaded) throw new Error(`Hypercomb did not save the ${room.id} playing surface`)
     return loaded
+  }
+
+  /** The game menu's options: the children of the `menu` layer, in order.
+   *  Seeded once from `defaults`; after that the layer is the menu, so a tile
+   *  added, removed or reordered there changes it. */
+  ensureMenu(defaults: readonly MenuOption[]): Promise<MenuOption[]> {
+    const run = this.#pending.then(() => this.#ensureMenu(defaults))
+    this.#pending = run.catch(() => {})
+    return run
+  }
+
+  async #ensureMenu(defaults: readonly MenuOption[]): Promise<MenuOption[]> {
+    const existing = await this.readMenu()
+    if (existing) return existing
+    const branch = await this.#resolveAt(this.baseSegments)
+    const menuSegments = [...this.baseSegments, SOLOMON_MENU]
+    const updates: { segments: readonly string[]; layer: NativeTileLayer }[] = []
+    if (!branch) updates.push({ segments: this.baseSegments, layer: { name: SOLOMON_MAZE_BRANCH, solomonMaze: { version: VERSION } } })
+    updates.push({ segments: menuSegments, layer: { name: SOLOMON_MENU, solomonMenu: { version: VERSION } } })
+    for (const option of defaults) {
+      updates.push({ segments: [...menuSegments, option.name], layer: { name: option.name, solomonMenuOption: { version: VERSION, action: option.action } } })
+    }
+    await this.#committer.importTree(updates)
+    return await this.readMenu() ?? [...defaults]
+  }
+
+  async readMenu(): Promise<MenuOption[] | null> {
+    const branch = await this.#resolveAt(this.baseSegments)
+    if (!branch) return null
+    if (!object(branch['solomonMaze']) || branch['solomonMaze']['version'] !== VERSION) {
+      throw new Error(`The ${SOLOMON_MAZE_BRANCH} tile already belongs to other content`)
+    }
+    const menuSegments = [...this.baseSegments, SOLOMON_MENU]
+    const layer = await this.#resolveAt(menuSegments)
+    if (!layer) return null
+    const options: MenuOption[] = []
+    for (const child of await this.#children(layer)) {
+      const live = await this.#direct([...menuSegments, child.name!]) ?? child
+      const data = live['solomonMenuOption']
+      options.push({ name: child.name!, action: object(data) && isMenuAction(data['action']) ? data['action'] : null })
+    }
+    return options
   }
 
   async readRoom(roomId: string): Promise<LoadedTileRoom | null> {

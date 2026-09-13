@@ -30,15 +30,23 @@
 import { EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
 import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
-import { llmHiveAccess } from './llm-hive-access.js'
+import { MAX_BUDGET, MIN_BUDGET, llmHiveAccess } from './llm-hive-access.js'
 import { CHAT_NEED, TIERS, USAGE_PLANS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
 import { importProviderSpec, providerOrigin } from './providers/provider-discovery.js'
+import { isAddedProvider } from './providers/provider-spec.js'
 import type { LlmProviderDescriptor } from './providers/llm-provider.types.js'
 import { LOCAL_HOST_STORAGE_KEY, localLlmHost } from './providers/local.provider.js'
-import { fetchOpenRouterCatalog, type OpenRouterCatalogEntry } from './providers/openrouter-catalog.js'
+import {
+  cachedOpenRouterCatalog, fetchOpenRouterCatalog, fetchOpenRouterHosts, type OpenRouterCatalogEntry,
+} from './providers/openrouter-catalog.js'
+import { openRouterRouting } from './providers/openrouter-routing.js'
+import { llmModelChoice } from './llm-model-choice.js'
+import { keyBelongsElsewhere } from './providers/key-owner.js'
+import { llmProviderRemoval } from './llm-provider-removal.js'
+import { foldedIntoOpenRouter } from './providers/openrouter-supersedes.js'
 import {
   checkLocalServer,
   localServerReport,
@@ -100,21 +108,31 @@ const tabOf = (provider: LlmProviderDescriptor): ProviderTab => {
   return cost === 'bridge' ? 'subscription' : cost === 'keyed' ? 'api' : 'swarm'
 }
 
-/**
- * SINGLE-VENDOR ROWS ONE KEY ALREADY REACHES. OpenRouter fronts OpenAI,
- * xAI, Anthropic, Google, and Mistral models behind the one key a
- * participant pastes into ITS row — a separate ChatGPT/Grok/Claude/Gemini/
- * Mistral row, each wanting its own key, is the same choice offered five
- * more times. Hidden from the console list ONLY: the descriptors stay
- * registered in `builtin-providers.ts` so anything that names them directly
- * (the legacy `llm-api.ts` shim's hardcoded `anthropic` calls, an explicit
- * `providerId` in a call) keeps working exactly as before. A vendor already
- * IN USE is never hidden — pulling its row out from under an active key
- * would strand it with no way to see or clear that key again.
- */
-const OPENROUTER_SUPERSEDES = new Set(['openai', 'xai', 'anthropic', 'google', 'mistral'])
-const foldedIntoOpenRouter = (provider: LlmProviderDescriptor): boolean =>
-  OPENROUTER_SUPERSEDES.has(provider.id) && !llmKeyStore.has(provider.id)
+/** A key, drawn in the text colour so the panel's theme owns it — no icon
+ *  font, so no glyph that can go missing from a subset. Static markup. */
+const KEY_ICON_SVG =
+  '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor"'
+  + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+  + '<circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 21 2"/><path d="m16 7 3 3"/><path d="m18.5 4.5 2 2"/></svg>'
+
+/** OpenRouter catalogue ids are `brand/model`; rolling aliases `~brand/model`. */
+/** A domain with more lines than this gets its own search. */
+const DOMAIN_SEARCH_AT = 5
+const catalogBrand = (id: string): string => id.replace(/^~/, '').split('/')[0].toLowerCase()
+const catalogBrandName = (entry: OpenRouterCatalogEntry): string =>
+  entry.name.includes(': ') ? entry.name.slice(0, entry.name.indexOf(': ')) : catalogBrand(entry.id)
+const catalogModelName = (entry: OpenRouterCatalogEntry): string =>
+  entry.name.includes(': ') ? entry.name.slice(entry.name.indexOf(': ') + 2) : entry.name
+/** The API quotes dollars per TOKEN; people read per MILLION. */
+const catalogPrice = (entry: OpenRouterCatalogEntry): string => {
+  const perMillion = (raw: string | undefined): string | undefined => {
+    const n = Number(raw)
+    return raw !== undefined && Number.isFinite(n) && n >= 0 ? String(Math.round(n * 1_000_000 * 1000) / 1000) : undefined
+  }
+  const inM = perMillion(entry.promptPrice)
+  return inM !== undefined ? `$${inM} in · $${perMillion(entry.completionPrice) ?? '?'} out /M` : ''
+}
+
 
 /** The tab the console last showed — or Subscriptions, the plan already paid. */
 const rememberedTab = (): ProviderTab => {
@@ -163,6 +181,18 @@ export class ProvidersWindowView extends EventTarget {
    *  shape the console keeps. Opening it is one press away, every time. */
   #policyOpen = false
   #openId: string | null = null
+  #catalogWarming = false
+  /** The brand picked in the search's first step; null = still on brands. */
+  #pickBrand: string | null = null
+  #pickBrandName = ''
+  #searchInput: HTMLInputElement | undefined = undefined
+  /** Model lines whose host checklist is open. */
+  #hostsOpen = new Set<string>()
+  /** What was typed into each domain's own search, by provider id. */
+  #domainQuery = new Map<string, string>()
+  /** Rows whose key line the participant opened from the key icon while a
+   *  key is saved. Saving closes it again; with no key it is always open. */
+  #keyOpen = new Set<string>()
   #addOpen = false
   /** providerId → transient test/status line ('…' = running). */
   #status = new Map<string, string>()
@@ -317,6 +347,14 @@ export class ProvidersWindowView extends EventTarget {
     search.placeholder = this.#t('providers.search', 'Search providers and models')
     search.value = this.#search
     search.addEventListener('input', () => { this.#search = search.value; this.#render() })
+    // Escape steps back out of the model search to brands, then clears.
+    search.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || (!this.#pickBrand && !this.#search)) return
+      event.preventDefault()
+      event.stopPropagation()
+      this.#clearPick()
+    })
+    this.#searchInput = search
     panel.appendChild(search)
 
     const body = document.createElement('div')
@@ -392,6 +430,30 @@ export class ProvidersWindowView extends EventTarget {
       || provider.label.toLowerCase().includes(needle)
       || provider.vendor.includes(needle)
       || provider.models.some(m => m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle))
+      || (provider.id === 'openrouter' && this.#catalogHas(needle))
+  }
+
+  /** Does OpenRouter's live catalogue hold a model matching `needle`? The
+   *  top search used to know only the three roster models, so "claude" hid
+   *  the one row that can reach Claude. First search warms the list and
+   *  redraws when it lands. */
+  #catalogHas(needle: string): boolean {
+    const cached = cachedOpenRouterCatalog()
+    if (!cached) {
+      if (!this.#catalogWarming) {
+        this.#catalogWarming = true
+        void fetchOpenRouterCatalog()
+          .then(() => { if (this.#panel) this.#render() })
+          .catch(() => { /* the row's own catalogue shows the failure */ })
+          .finally(() => { this.#catalogWarming = false })
+      }
+      return false
+    }
+    return cached.some(entry => entry.id.toLowerCase().includes(needle) || entry.name.toLowerCase().includes(needle))
+  }
+
+  #isOpen(provider: LlmProviderDescriptor): boolean {
+    return this.#openId === provider.id
   }
 
   /** Everything the console shows, in the order the panel stacks it. */
@@ -431,7 +493,7 @@ export class ProvidersWindowView extends EventTarget {
   /** Providers on one tab, already through the search filter. */
   #providersOn(tab: ProviderTab): LlmProviderDescriptor[] {
     return llmProviderRegistry().all()
-      .filter(p => tabOf(p) === tab && this.#matches(p) && !foldedIntoOpenRouter(p))
+      .filter(p => tabOf(p) === tab && this.#matches(p) && !foldedIntoOpenRouter(p.id) && !this.#removed(p))
   }
 
   /** Remember the tab without redrawing — for callers about to redraw anyway. */
@@ -462,7 +524,26 @@ export class ProvidersWindowView extends EventTarget {
     // already said it. It comes back the moment two rows disagree.
     const providers = this.#providersOn(tab.id)
     const varied = new Set(providers.map(reachLabel)).size > 1
-    for (const provider of providers) body.appendChild(this.#row(provider, varied))
+    // The search's brand → model results sit first, right under the box.
+    const picker = tab.id === 'api' ? this.#picker() : undefined
+    if (picker) body.insertBefore(picker, body.firstChild)
+    for (const provider of providers) {
+      body.appendChild(this.#row(provider, varied))
+      // Models added through OpenRouter: one line each, right under it —
+      // AN ACCORDION. The lines show only while the domain is open (its own
+      // row, or one of its lines). There may be hundreds.
+      if (provider.id !== 'openrouter') continue
+      const lines = llmModelChoice.saved(provider.id)
+      const open = this.#openId === provider.id || !!this.#openId?.startsWith(`${provider.id}::`)
+      if (!open || !lines.length) continue
+      // A line shows the model's exact catalogue name; load the catalogue
+      // once so a fresh window never shows a bare id (redraws on arrival).
+      if (!cachedOpenRouterCatalog()) this.#catalogHas('')
+      body.appendChild(this.#domainLines(provider, lines))
+    }
+    const removed = llmProviderRegistry().all()
+      .filter(p => tabOf(p) === tab.id && this.#removed(p))
+    if (removed.length) body.appendChild(this.#removedLine(removed))
     if (!providers.length) body.appendChild(this.#emptyLine(tab.id))
 
     // The tab's own verb. Lending is the swarm's, and pasting a spec is the
@@ -797,7 +878,7 @@ export class ProvidersWindowView extends EventTarget {
     head.appendChild(state)
     row.appendChild(head)
 
-    if (this.#openId === provider.id) row.appendChild(this.#detail(provider))
+    if (this.#isOpen(provider)) row.appendChild(this.#detail(provider))
     return row
   }
 
@@ -850,7 +931,14 @@ export class ProvidersWindowView extends EventTarget {
     }
     if (provider.subscription) detail.appendChild(this.#subscription(provider))
 
-    // endpoint — always shown BEFORE a key is entered: this is where it goes.
+    // ENDPOINT: ADDRESS, then THE KEY ICON — one line. The address is shown
+    // before any key exists, because it is where a key would travel.
+    const inlineLabel = (key: string, fallback: string): HTMLElement => {
+      const label = document.createElement('span')
+      label.className = 'hc-provider-inline-label'
+      label.textContent = `${this.#t(key, fallback)}:`
+      return label
+    }
     const endpoint = document.createElement('div')
     endpoint.className = 'hc-provider-endpoint'
     if (provider.id === 'local') {
@@ -863,9 +951,34 @@ export class ProvidersWindowView extends EventTarget {
         // the old one is evidence about this one.
         recheckLocalServers()
       })
-      endpoint.append(this.#label(this.#t('providers.endpoint', 'Endpoint')), host)
+      endpoint.append(inlineLabel('providers.endpoint', 'Endpoint'), host)
     } else if (provider.endpoint) {
-      endpoint.append(this.#label(this.#t('providers.endpoint', 'Endpoint')), this.#mono(provider.endpoint))
+      endpoint.append(inlineLabel('providers.endpoint', 'Endpoint'), this.#mono(provider.endpoint))
+    }
+
+    // THE KEY LINE COLLAPSES INTO THE ICON. Open while there is no key — there
+    // is nothing else to do on this row — or when the icon opened it; a saved
+    // key folds it away so the row reads as done.
+    const hasKey = needsKey && llmKeyStore.has(provider.id)
+    const keyOpen = needsKey && (!hasKey || this.#keyOpen.has(provider.id))
+    if (needsKey) {
+      const icon = document.createElement('button')
+      icon.type = 'button'
+      icon.className = `hc-provider-keyicon${hasKey ? ' is-set' : ''}`
+      icon.setAttribute('aria-expanded', String(keyOpen))
+      const tip = hasKey
+        ? this.#t('providers.keyIconSet', 'Key saved. Click to replace or clear it.')
+        : this.#t('providers.keyIconMissing', 'No key yet. Paste one below.')
+      icon.title = tip
+      icon.setAttribute('aria-label', tip)
+      icon.innerHTML = KEY_ICON_SVG
+      icon.addEventListener('click', () => {
+        if (!hasKey) return // already open; there is nothing to fold into
+        if (this.#keyOpen.has(provider.id)) this.#keyOpen.delete(provider.id)
+        else this.#keyOpen.add(provider.id)
+        this.#render()
+      })
+      endpoint.appendChild(icon)
     }
     if (endpoint.childNodes.length) detail.appendChild(endpoint)
 
@@ -875,14 +988,18 @@ export class ProvidersWindowView extends EventTarget {
     const localHost = machineLocalEndpoint(provider)
     if (localHost) detail.appendChild(this.#localServer(provider, localHost))
 
-    // key — the one write into the key store.
+    // key — the one write into the key store. ONE LINE: label, input, Save,
+    // Clear; shown only while `keyOpen` (see the icon above).
     if (needsKey) {
+      if (keyOpen) {
       const keyRow = document.createElement('div')
       keyRow.className = 'hc-provider-keyrow'
       const key = document.createElement('input')
       key.className = 'hc-provider-input'
       key.type = 'password'
-      key.autocomplete = 'off'
+      // `new-password`, not `off`: browsers ignore `off` on password fields
+      // and fill a SAVED password — one way a key lands in the wrong row.
+      key.autocomplete = 'new-password'
       key.placeholder = llmKeyStore.has(provider.id)
         ? this.#t('providers.keySet', 'Key saved — paste to replace')
         : this.#t('providers.keyPlaceholder', 'Paste API key')
@@ -892,16 +1009,33 @@ export class ProvidersWindowView extends EventTarget {
       save.addEventListener('click', () => {
         const value = key.value.trim()
         if (!value) return
+        // A KEY IN THE WRONG ROW. An OpenRouter key saved on the DeepSeek row
+        // just returns 401 on every call, with nothing on screen saying why.
+        // When the key matches another row's format and not this one, refuse
+        // it and name the row it belongs in.
+        const owner = keyBelongsElsewhere(value, provider, llmProviderRegistry().all())
+        if (owner) {
+          this.#note(provider.id, this.#t('providers.keyWrongRow', 'That looks like a {owner} key, so it was not saved here. Paste it in the {owner} row.')
+            .replaceAll('{owner}', owner.label))
+          key.value = ''
+          return
+        }
         if (provider.keyPattern && !provider.keyPattern.test(value)) {
           this.#note(provider.id, this.#t('providers.keyLooksOff', 'That key does not look like this provider’s format — saved anyway.'))
         }
+        // Saved ⇒ the line folds into the icon. Forget the hand-opened state
+        // BEFORE the store's change event redraws the console.
+        this.#keyOpen.delete(provider.id)
         llmKeyStore.set(provider.id, value)
       })
       const clear = document.createElement('button')
       clear.className = 'hc-provider-btn is-quiet'
       clear.textContent = this.#t('providers.clear', 'Clear')
-      clear.addEventListener('click', () => llmKeyStore.clear(provider.id))
-      keyRow.append(key, save, clear)
+      clear.addEventListener('click', () => {
+        this.#keyOpen.delete(provider.id) // no key ⇒ open anyway
+        llmKeyStore.clear(provider.id)
+      })
+      keyRow.append(inlineLabel('providers.key', 'API key'), key, save, clear)
 
       const docs = document.createElement('a')
       docs.className = 'hc-provider-docs'
@@ -909,7 +1043,10 @@ export class ProvidersWindowView extends EventTarget {
       docs.target = '_blank'
       docs.rel = 'noopener noreferrer'
       docs.textContent = this.#t('providers.docs', 'Get a key')
-      detail.append(this.#label(this.#t('providers.key', 'API key')), keyRow, docs)
+      detail.append(keyRow, docs)
+      // Opened from the icon to replace a key: be ready to paste.
+      if (hasKey) requestAnimationFrame(() => key.focus())
+      }
     } else if (provider.transport === 'agent-bridge') {
       const docs = document.createElement('a')
       docs.className = 'hc-provider-docs'
@@ -930,8 +1067,8 @@ export class ProvidersWindowView extends EventTarget {
       chip.title = model.label ? `/${model.name} · ${model.id}` : model.id
       models.appendChild(chip)
     }
-    detail.append(this.#label(this.#t('providers.models', 'Models')), models)
-    if (provider.id === 'openrouter') detail.append(this.#openRouterCatalog(provider))
+    // OpenRouter's models are the lines added under it, not a roster.
+    if (provider.id !== 'openrouter') detail.append(this.#label(this.#t('providers.models', 'Models')), models)
 
     // active switch + test — the two verbs.
     const actions = document.createElement('div')
@@ -957,7 +1094,10 @@ export class ProvidersWindowView extends EventTarget {
       const box = document.createElement('input')
       box.type = 'checkbox'
       box.checked = llmHiveAccess.mayRead(provider.id)
-      box.addEventListener('change', () => llmHiveAccess.setMayRead(provider.id, box.checked))
+      box.addEventListener('change', () => {
+        llmHiveAccess.setMayRead(provider.id, box.checked)
+        this.#render() // the budget row below follows the gate
+      })
       gate.append(box, document.createTextNode(this.#t('providers.hiveAccess', 'May read the hive')))
       gate.title = this.#t(
         'providers.hiveAccessHint',
@@ -966,6 +1106,34 @@ export class ProvidersWindowView extends EventTarget {
         + 'Naming a model in the chat never turns this on.',
       )
       actions.appendChild(gate)
+
+      // THE BUDGET — the one privacy control that is a number. Shown only
+      // while the gate is open, because it bounds what the gate lets out.
+      if (llmHiveAccess.mayRead(provider.id)) {
+        const budgetRow = document.createElement('label')
+        budgetRow.className = 'hc-provider-toggle'
+        const budget = document.createElement('input')
+        budget.type = 'number'
+        budget.className = 'hc-provider-input hc-provider-budget'
+        budget.min = String(MIN_BUDGET)
+        budget.max = String(MAX_BUDGET)
+        budget.step = '1000'
+        budget.placeholder = '24000'
+        budget.value = llmHiveAccess.budget(provider.id)?.toString() ?? ''
+        budget.addEventListener('change', () => {
+          const chars = budget.value.trim() ? Number(budget.value) : undefined
+          llmHiveAccess.setBudget(provider.id, chars)
+        })
+        budgetRow.append(
+          document.createTextNode(this.#t('providers.hiveBudget', 'Read budget per conversation, in characters')),
+          budget,
+        )
+        budgetRow.title = this.#t(
+          'providers.hiveBudgetHint',
+          'How much of the hive may leave this machine through this provider in one conversation. Empty means the default, 24 000.',
+        )
+        actions.appendChild(budgetRow)
+      }
     }
 
     if (provider.transport === 'agent-bridge') {
@@ -975,10 +1143,33 @@ export class ProvidersWindowView extends EventTarget {
       actions.appendChild(bridgeState)
     } else {
       const test = document.createElement('button')
-      test.className = 'hc-provider-btn'
+      test.className = 'hc-provider-link'
       test.textContent = this.#t('providers.test', 'Test')
       test.addEventListener('click', () => { void this.#test(provider) })
       actions.appendChild(test)
+    }
+    // REMOVE — only what the participant ADDED (a pasted or discovered spec,
+    // provider-spec.ts). OpenRouter is a configurator, and the local model and
+    // every other built-in are part of the shell: none of them is removable.
+    // Hide first, delete second: the row leaves the list and stops answering;
+    // its key stays until Clear, and Restore at the foot of the tab brings it
+    // all back (llm-provider-removal.ts).
+    if (isAddedProvider(provider.id)) {
+      const remove = document.createElement('button')
+      remove.type = 'button'
+      remove.className = 'hc-provider-link hc-provider-remove'
+      remove.textContent = this.#t('providers.remove', 'Remove')
+      remove.title = this.#t(
+        'providers.removeHint',
+        'Take this provider off the list. It stops answering; Restore at the bottom of the tab brings it back.',
+      )
+      remove.addEventListener('click', () => {
+        llmActivation.setEnabled(provider.id, false)
+        llmProviderRemoval.remove(provider.id)
+        if (this.#openId === provider.id) this.#openId = null
+        this.#render()
+      })
+      actions.appendChild(remove)
     }
     detail.appendChild(actions)
 
@@ -1056,6 +1247,40 @@ export class ProvidersWindowView extends EventTarget {
     where.textContent = host
     block.appendChild(where)
     return block
+  }
+
+  /** Removed, and allowed to be. A built-in can never be removed; one that
+   *  was (before that rule) comes straight back, switched on again. */
+  #removed(provider: LlmProviderDescriptor): boolean {
+    if (!llmProviderRemoval.isRemoved(provider.id)) return false
+    if (isAddedProvider(provider.id)) return true
+    llmProviderRemoval.restore(provider.id)
+    llmActivation.setEnabled(provider.id, true)
+    return false
+  }
+
+  /** The rows removed on this tab, each with Restore — nothing is gone for
+   *  good, and this is the way back. */
+  #removedLine(removed: readonly LlmProviderDescriptor[]): HTMLElement {
+    const line = document.createElement('div')
+    line.className = 'hc-provider-removed'
+    line.appendChild(document.createTextNode(`${this.#t('providers.removed', 'Removed')}:`))
+    for (const provider of removed) {
+      const name = document.createElement('span')
+      name.className = 'hc-provider-removed-item'
+      name.textContent = provider.label
+      const restore = document.createElement('button')
+      restore.type = 'button'
+      restore.className = 'hc-provider-btn is-quiet'
+      restore.textContent = this.#t('providers.restore', 'Restore')
+      restore.addEventListener('click', () => {
+        llmProviderRemoval.restore(provider.id)
+        llmActivation.setEnabled(provider.id, true)
+        this.#render()
+      })
+      line.append(name, restore)
+    }
+    return line
   }
 
   #label(text: string): HTMLElement {
@@ -1136,101 +1361,282 @@ export class ProvidersWindowView extends EventTarget {
   }
 
   /**
-   * THE CATALOGUE PICKER — OpenRouter only. The built-in roster above is a
-   * fixed, economical ladder for automatic tier routing (never touched here).
-   * This is the explicit escape hatch: fetch OpenRouter's real model list and
-   * render it as an actual browsable list — name, id and price per row, same
-   * shape as openrouter.ai/models — rather than a bare `<datalist>` that
-   * shows nothing until you start typing. Clicking a row fires one real call
-   * with the key already saved. Nothing selected here is persisted as a
-   * pin — picking a model and testing it is the whole action, same footing
-   * as typing a model id into any other explicit call.
+   * ADD A MODEL THROUGH OPENROUTER — the console's own search, in two steps
+   * (Jaime, 2026-09-13). Typing lists BRANDS; picking one empties the search
+   * to find a MODEL of that brand; picking the model adds it as ONE LINE under
+   * OpenRouter and the search is done. The key lives once, on the OpenRouter
+   * row. Minimal on purpose: one search box, one short list, nothing else.
    */
-  #openRouterCatalog(provider: LlmProviderDescriptor): HTMLElement {
-    const section = document.createElement('div')
-    section.className = 'hc-provider-catalog'
+  #picker(): HTMLElement | undefined {
+    const query = this.#search.trim().toLowerCase()
+    if (!query && !this.#pickBrand) return undefined
+    const all = cachedOpenRouterCatalog()
+    if (!all) {
+      this.#catalogHas(query) // warms the list; the console redraws when it lands
+      return undefined
+    }
+    const list = document.createElement('div')
+    list.className = 'hc-provider-pick'
+    const item = (label: string, meta: string, onClick: () => void): HTMLButtonElement => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'hc-provider-pick-item'
+      const name = document.createElement('span')
+      name.className = 'hc-provider-catalog-name'
+      name.textContent = label
+      const detail = document.createElement('span')
+      detail.className = 'hc-provider-catalog-price'
+      detail.textContent = meta
+      button.append(name, detail)
+      button.addEventListener('click', onClick)
+      return button
+    }
 
-    const search = document.createElement('input')
-    search.className = 'hc-provider-input'
-    search.placeholder = this.#t('providers.orCatalogPlaceholder', 'Search models — name, vendor, or id')
+    // STEP 1 — BRANDS. A brand matches its own name or any of its models, so
+    // "claude" still lands on Anthropic.
+    if (!this.#pickBrand) {
+      const groups = new Map<string, { slug: string; name: string; count: number; hits: number }>()
+      for (const entry of all) {
+        const slug = catalogBrand(entry.id)
+        const group = groups.get(slug) ?? { slug, name: catalogBrandName(entry), count: 0, hits: 0 }
+        group.count++
+        if (entry.id.toLowerCase().includes(query) || entry.name.toLowerCase().includes(query)) group.hits++
+        groups.set(slug, group)
+      }
+      const shown = [...groups.values()]
+        .filter(g => g.slug.includes(query) || g.name.toLowerCase().includes(query) || g.hits > 0)
+        .sort((a, b) => a.name.localeCompare(b.name))
+      if (!shown.length) return undefined
+      for (const g of shown.slice(0, 40)) {
+        const meta = g.count === 1
+          ? this.#t('providers.orBrandCountOne', '1 model')
+          : this.#t('providers.orBrandCount', '{count} models').replace('{count}', String(g.count))
+        list.appendChild(item(g.name, meta, () => {
+          this.#pickBrand = g.slug
+          this.#pickBrandName = g.name
+          this.#setSearch('')
+        }))
+      }
+      return list
+    }
 
-    const results = document.createElement('div')
-    results.className = 'hc-provider-catalog-list'
+    // STEP 2 — MODELS OF THE BRAND. The brand sits above as a word with ×.
+    const chip = document.createElement('div')
+    chip.className = 'hc-provider-pick-chip'
+    chip.appendChild(document.createTextNode(this.#pickBrandName || this.#pickBrand))
+    const drop = document.createElement('button')
+    drop.type = 'button'
+    drop.className = 'hc-provider-link'
+    drop.textContent = '×'
+    drop.title = this.#t('providers.orClear', 'Clear')
+    drop.setAttribute('aria-label', drop.title)
+    drop.addEventListener('click', () => this.#clearPick())
+    chip.appendChild(drop)
+    list.appendChild(chip)
+    const brand = this.#pickBrand
+    const models = all.filter(entry => catalogBrand(entry.id) === brand
+      && (!query || entry.id.toLowerCase().includes(query) || entry.name.toLowerCase().includes(query)))
+    for (const entry of models.slice(0, 60)) {
+      list.appendChild(item(catalogModelName(entry), catalogPrice(entry), () => {
+        llmModelChoice.add('openrouter', entry.id)
+        this.#openId = 'openrouter::' // open its domain so the new line is in view
+        this.#clearPick()
+      }))
+    }
+    return list
+  }
 
-    let all: readonly OpenRouterCatalogEntry[] = []
+  /**
+   * A DOMAIN'S LINES — the open accordion section under a provider. Past a
+   * handful it gets a search of its own, because a domain can hold hundreds
+   * or thousands of models. The search filters in place, with no redraw, so
+   * typing keeps focus; what was typed survives a redraw, per domain.
+   */
+  #domainLines(provider: LlmProviderDescriptor, lines: readonly string[]): HTMLElement {
+    const box = document.createElement('div')
+    box.className = 'hc-provider-domain'
+    const catalogue = cachedOpenRouterCatalog()
+    const rows = lines.map(modelId => {
+      const row = this.#modelRow(provider, modelId)
+      const entry = catalogue?.find(e => e.id === modelId)
+      row.dataset['match'] = `${modelId} ${entry?.name ?? ''}`.toLowerCase()
+      return row
+    })
+    if (lines.length > DOMAIN_SEARCH_AT) {
+      const search = document.createElement('input')
+      search.className = 'hc-provider-input hc-provider-domain-search'
+      search.placeholder = this.#t('providers.domainSearch', 'Search {count} models').replace('{count}', String(lines.length))
+      search.value = this.#domainQuery.get(provider.id) ?? ''
+      const apply = (): void => {
+        const q = search.value.trim().toLowerCase()
+        this.#domainQuery.set(provider.id, search.value)
+        for (const row of rows) row.hidden = !!q && !(row.dataset['match'] ?? '').includes(q)
+      }
+      search.addEventListener('input', apply)
+      box.appendChild(search)
+      apply()
+    }
+    box.append(...rows)
+    return box
+  }
 
-    const renderList = (): void => {
-      const query = search.value.trim().toLowerCase()
-      const matches = (query
-        ? all.filter(entry => entry.id.toLowerCase().includes(query) || entry.name.toLowerCase().includes(query))
-        : all
-      ).slice(0, 60)
-      results.replaceChildren(...matches.map(entry => {
-        const item = document.createElement('button')
-        item.type = 'button'
-        item.className = 'hc-provider-catalog-item'
+  #clearPick(): void {
+    this.#pickBrand = null
+    this.#pickBrandName = ''
+    this.#setSearch('')
+  }
+
+  /** Set the console's search text and redraw — the picker's steps move the
+   *  search along, so the box always holds what is being searched for. */
+  #setSearch(value: string): void {
+    this.#search = value
+    const input = this.#searchInput
+    if (input) {
+      input.value = value
+      input.placeholder = this.#pickBrand
+        ? this.#t('providers.orModelPlaceholder', 'Search {brand} models').replace('{brand}', this.#pickBrandName || this.#pickBrand)
+        : this.#t('providers.search', 'Search providers and models')
+      input.focus()
+    }
+    this.#render()
+  }
+
+  /**
+   * ONE MODEL ADDED THROUGH OPENROUTER — one line in the list, like any
+   * provider. It uses the OpenRouter key; the key is managed on that row.
+   * Opened: its id and price, then Use · Test · Hosts · Remove as words.
+   */
+  #modelRow(provider: LlmProviderDescriptor, modelId: string): HTMLElement {
+    const entry = cachedOpenRouterCatalog()?.find(e => e.id === modelId)
+    const active = llmModelChoice.chosen(provider.id) === modelId
+    const rowId = `${provider.id}::${modelId}`
+    const row = document.createElement('div')
+    row.className = 'hc-provider hc-provider-model-row'
+
+    const head = document.createElement('button')
+    head.className = 'hc-provider-head'
+    head.addEventListener('click', () => {
+      // Closing a line leaves its domain open: `<domain>::` is "open, nothing expanded".
+      this.#openId = this.#openId === rowId ? `${provider.id}::` : rowId
+      this.#render()
+    })
+    const dot = document.createElement('span')
+    dot.className = 'hc-provider-dot'
+    dot.style.background = modelPalette(modelId).body
+    if (active) dot.classList.add('is-active')
+    const name = document.createElement('span')
+    name.className = 'hc-provider-name'
+    name.textContent = entry ? catalogModelName(entry) : modelId
+    const state = document.createElement('span')
+    state.className = 'hc-provider-state'
+    state.textContent = active ? this.#t('providers.active', 'active') : ''
+    state.hidden = !active
+    head.append(dot, name, state)
+    row.appendChild(head)
+    if (this.#openId !== rowId) return row
+
+    const detail = document.createElement('div')
+    detail.className = 'hc-provider-detail'
+    const line = document.createElement('div')
+    line.className = 'hc-provider-model-line'
+    line.appendChild(this.#mono(modelId))
+    if (entry) {
+      const price = document.createElement('span')
+      price.className = 'hc-provider-catalog-price'
+      price.textContent = catalogPrice(entry)
+      line.appendChild(price)
+    }
+    const link = (key: string, fallback: string, onClick: () => void): HTMLButtonElement => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'hc-provider-link'
+      button.textContent = this.#t(key, fallback)
+      button.addEventListener('click', onClick)
+      return button
+    }
+    const links = document.createElement('div')
+    links.className = 'hc-provider-links'
+    if (!active) {
+      links.appendChild(link('providers.use', 'Use', () => {
+        llmModelChoice.choose(provider.id, modelId)
+        this.#render()
+      }))
+    }
+    links.append(
+      link('providers.test', 'Test', () => { void this.#test(provider, modelId) }),
+      link('providers.hosts', 'Hosts', () => {
+        if (this.#hostsOpen.has(rowId)) this.#hostsOpen.delete(rowId)
+        else this.#hostsOpen.add(rowId)
+        this.#render()
+      }),
+      link('providers.remove', 'Remove', () => {
+        llmModelChoice.drop(provider.id, modelId)
+        this.#openId = `${provider.id}::`
+        this.#render()
+      }),
+    )
+    detail.append(line, links)
+    if (this.#hostsOpen.has(rowId)) detail.appendChild(this.#openRouterHosts(modelId))
+    const status = this.#status.get(provider.id)
+    if (status) {
+      const note = document.createElement('div')
+      note.className = 'hc-provider-status'
+      note.textContent = status
+      detail.appendChild(note)
+    }
+    row.appendChild(detail)
+    return row
+  }
+
+  /**
+   * WHO RUNS THIS MODEL. Tick hosts to use only those; tick none and
+   * OpenRouter picks the cheapest healthy host (openrouter-routing.ts).
+   */
+  #openRouterHosts(modelId: string): HTMLElement {
+    const list = document.createElement('div')
+    list.className = 'hc-provider-pick'
+    const message = (text: string): HTMLElement => {
+      const line = document.createElement('div')
+      line.className = 'hc-provider-label'
+      line.textContent = text
+      return line
+    }
+    list.appendChild(message(this.#t('providers.orHostsLoading', 'Fetching who serves this model…')))
+    void fetchOpenRouterHosts(modelId).then(hosts => {
+      if (!hosts.length) {
+        list.replaceChildren(message(modelId.startsWith('~')
+          ? this.#t('providers.orHostsAlias', 'This is a rolling alias that always points at the newest version, so it has no fixed hosts. Pick a specific version to choose who runs it.')
+          : this.#t('providers.orHostsNone', 'OpenRouter lists no hosts for this model right now; it will route it itself.')))
+        return
+      }
+      const ticked = new Set(openRouterRouting.hostsFor(modelId))
+      list.replaceChildren(...hosts.map(host => {
+        const row = document.createElement('label')
+        row.className = 'hc-provider-pick-item hc-provider-host'
+        const box = document.createElement('input')
+        box.type = 'checkbox'
+        box.checked = ticked.has(host.slug)
+        box.addEventListener('change', () => {
+          if (box.checked) ticked.add(host.slug)
+          else ticked.delete(host.slug)
+          openRouterRouting.setHostsFor(modelId, hosts.map(h => h.slug).filter(slug => ticked.has(slug)))
+        })
         const name = document.createElement('span')
         name.className = 'hc-provider-catalog-name'
-        name.textContent = entry.name
-        const id = document.createElement('span')
-        id.className = 'hc-provider-catalog-id'
-        id.textContent = entry.id
-        const price = document.createElement('span')
-        price.className = 'hc-provider-catalog-price'
-        price.textContent = entry.promptPrice
-          ? `$${entry.promptPrice} in · $${entry.completionPrice ?? '?'} out /M`
-          : ''
-        item.append(name, id, price)
-        item.addEventListener('click', () => { void this.#test(provider, entry.id) })
-        return item
+        name.textContent = host.name
+        const meta = document.createElement('span')
+        meta.className = 'hc-provider-catalog-price'
+        meta.textContent = [
+          host.uptime !== undefined ? `${host.uptime.toFixed(1)}% up` : '',
+          host.promptPerMillion !== undefined ? `$${host.promptPerMillion} in · $${host.completionPerMillion ?? '?'} out /M` : '',
+        ].filter(Boolean).join(' · ')
+        row.append(box, name, meta)
+        return row
       }))
-      if (all.length && !matches.length) {
-        const empty = document.createElement('div')
-        empty.className = 'hc-provider-label'
-        empty.textContent = this.#t('providers.orNoMatch', 'No model matches that search.')
-        results.appendChild(empty)
-      }
-    }
-
-    search.addEventListener('input', renderList)
-
-    const retry = document.createElement('button')
-    retry.type = 'button'
-    retry.className = 'hc-provider-btn is-quiet'
-    retry.textContent = this.#t('providers.orRetry', 'Retry')
-    retry.addEventListener('click', () => { void loadCatalog() })
-
-    const loadCatalog = async (): Promise<void> => {
-      results.replaceChildren()
-      const loading = document.createElement('div')
-      loading.className = 'hc-provider-label'
-      loading.textContent = this.#t('providers.orLoading', 'Fetching OpenRouter’s model list…')
-      results.appendChild(loading)
-      try {
-        all = await fetchOpenRouterCatalog()
-        renderList()
-      } catch (err) {
-        // NEVER GO SILENTLY EMPTY. An earlier version cleared this panel and
-        // reported the failure on a status line elsewhere in the row — which
-        // reads, from here, as nothing having happened at all. The reason
-        // now lives in the exact spot the list would otherwise be.
-        const failure = document.createElement('div')
-        failure.className = 'hc-provider-label'
-        failure.textContent = `✗ ${err instanceof Error ? err.message : String(err)}`
-        results.replaceChildren(failure, retry)
-      }
-    }
-
-    void loadCatalog()
-
-    const hint = document.createElement('div')
-    hint.className = 'hc-provider-label'
-    hint.textContent = this.#t(
-      'providers.orCatalogHint',
-      'Click a model to call it once with the key above — never used by automatic routing unless you pin it.',
-    )
-    section.append(this.#label(this.#t('providers.orCatalog', 'Full catalogue')), search, results, hint)
-    return section
+    }).catch(err => {
+      list.replaceChildren(message(`✗ ${err instanceof Error ? err.message : String(err)}`))
+    })
+    return list
   }
 
   // ── what each tab lets you DO ────────────────────────────────────────────
@@ -1476,8 +1882,9 @@ export class ProvidersWindowView extends EventTarget {
       .hc-provider-usage.is-limited { border-left-color: rgba(240, 180, 90, 0.8); }
       .hc-provider-usage.is-exhausted { border-left-color: rgba(240, 100, 100, 0.8); }
       .hc-provider-usage-line { font-size: 0.9231em; line-height: 1.45; }
+      .hc-provider-budget { width: 7em; flex: 0 0 auto; margin-left: 0.4615em; }
       .hc-provider-catalog { margin: 0.3846em 0 0.6923em; }
-      .hc-provider-catalog .hc-provider-input { width: 100%; margin: 0.3077em 0; }
+      .hc-provider-catalog .hc-provider-input { width: 100%; box-sizing: border-box; margin: 0.3077em 0; }
       .hc-provider-catalog-list { max-height: 220px; overflow-y: auto; border: 1px solid rgba(${STEEL}, 0.2); border-radius: var(--hc-radius-control, 2px); }
       .hc-provider-catalog-item {
         display: flex; align-items: baseline; gap: 0.6154em; width: 100%; text-align: left; cursor: pointer;
@@ -1488,6 +1895,16 @@ export class ProvidersWindowView extends EventTarget {
       .hc-provider-catalog-name { flex: 0 0 auto; font-weight: 600; }
       .hc-provider-catalog-id { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.65; font-size: 0.9231em; }
       .hc-provider-catalog-price { flex: 0 0 auto; opacity: 0.75; font-size: 0.85em; white-space: nowrap; }
+      .hc-provider-catalog-item.is-chosen { background: rgba(${STEEL}, 0.14); }
+      .hc-provider-catalog-mark { flex: 0 0 auto; font-size: 0.85em; font-weight: 600; }
+      .hc-provider-guide { margin: 0.3077em 0 0.6923em; padding-left: 1.4em; line-height: 1.5; font-size: 0.9231em; }
+      .hc-provider-using { display: flex; align-items: center; gap: 0.6154em; flex-wrap: wrap; margin: 0.3077em 0; font-size: 0.9231em; }
+      .hc-provider-stage-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4615em 0.9231em; margin: 0.3077em 0; }
+      .hc-provider-chip { font-weight: 600; }
+      .hc-provider-hosts { margin: 0.9231em 0 0.6923em; }
+      .hc-provider-hosts-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4615em 0.9231em; margin: 0.3077em 0; }
+      .hc-provider-hosts-sort { flex: 0 0 auto; width: auto; }
+      .hc-provider-host input { flex: 0 0 auto; margin: 0; }
       .hc-provider-usage-line.is-dim { opacity: 0.58; }
       .hc-provider-warn {
         font-size: 0.8462em; line-height: 1.4; margin: 0.3077em 0 0.1538em; padding: 0.4615em 0.6154em;
@@ -1495,7 +1912,40 @@ export class ProvidersWindowView extends EventTarget {
         color: rgba(245, 205, 140, 0.95); background: rgba(240, 180, 90, 0.08);
       }
       .hc-provider-mono { font-size: 0.8462em; opacity: 0.85; word-break: break-all; }
-      .hc-provider-endpoint { display: block; }
+      .hc-provider-endpoint { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4615em; margin: 0.6154em 0 0.3077em; }
+      .hc-provider-endpoint .hc-provider-mono { flex: 1 1 auto; min-width: 0; }
+      .hc-provider-endpoint .hc-provider-input { flex: 1 1 8em; min-width: 0; }
+      .hc-provider-inline-label { flex: 0 0 auto; font-size: 0.8462em; opacity: 0.6; letter-spacing: 0.05em; }
+      .hc-provider-keyicon {
+        flex: 0 0 auto; margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+        width: 1.8462em; height: 1.8462em; padding: 0; background: none; color: inherit; cursor: default; opacity: 0.4;
+        border: none; border-radius: var(--hc-radius-control, 2px);
+      }
+      .hc-provider-keyicon.is-set { opacity: 1; cursor: pointer; }
+      .hc-provider-keyicon.is-set[aria-expanded="true"] { background: rgba(${STEEL}, 0.12); }
+      .hc-provider-keyrow { align-items: center; }
+      .hc-provider-remove { margin-left: auto; }
+      .hc-provider-removed { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4615em; margin: 0.6154em 0; font-size: 0.9231em; opacity: 0.8; }
+      .hc-provider-removed-item { font-weight: 600; }
+      .hc-provider-link {
+        background: none; border: none; padding: 0; font: inherit; color: rgba(${STEEL}, 0.9);
+        cursor: pointer; opacity: 0.8;
+      }
+      .hc-provider-link:hover { opacity: 1; text-decoration: underline; }
+      .hc-provider-links { display: flex; flex-wrap: wrap; gap: 0.9231em; margin: 0.3077em 0; font-size: 0.9231em; }
+      .hc-provider-pick { margin: 0.1538em 0 0.6154em; max-height: 16em; overflow-y: auto; }
+      .hc-provider-pick-item {
+        display: flex; align-items: baseline; gap: 0.6154em; width: 100%; box-sizing: border-box; text-align: left;
+        padding: 0.3077em 0.1538em; background: none; border: none; border-bottom: 1px solid rgba(${STEEL}, 0.1);
+        color: inherit; font: inherit; cursor: pointer;
+      }
+      .hc-provider-pick-item:hover { background: rgba(${STEEL}, 0.08); }
+      .hc-provider-pick-item .hc-provider-catalog-price { margin-left: auto; }
+      .hc-provider-pick-chip { display: flex; align-items: center; gap: 0.4615em; font-weight: 600; padding: 0.1538em; }
+      .hc-provider-model-row > .hc-provider-head { padding-left: 1.2308em; }
+      .hc-provider-model-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6154em; }
+      .hc-provider-domain-search { display: block; width: 100%; box-sizing: border-box; margin: 0.3077em 0; }
+      .hc-provider-domain > [hidden] { display: none !important; }
       /* THE FOOT — a status bar that opens upward into the pickers. */
       .hc-providers-foot {
         flex: none; display: flex; flex-direction: column;
