@@ -992,10 +992,21 @@ describe('doctrine ratchets', () => {
       // they are a cabinet screen laid over it, with their own vector-juice
       // rules (chunky HUD panels, fat score plates). The ladder governs the
       // hive's interface; it does not govern a game's.
+      //
+      // Solomon's Key is one of these rooms (Jaime, 2026-09-13): its boards
+      // (door shapes, the island, the ruins) and its own gain card, Items
+      // panel and menu all render inside the full-screen game shell, never
+      // over the hive.
       'hypercomb-essentials/src/games/arkanoid/overlay.ts',
       'hypercomb-essentials/src/games/bubble/overlay.ts',
       'hypercomb-essentials/src/games/roper/overlay.ts',
+      'hypercomb-essentials/src/games/solomon/chamber-view.ts',
+      'hypercomb-essentials/src/games/solomon/gain-screen.ts',
+      'hypercomb-essentials/src/games/solomon/items-table.ts',
+      'hypercomb-essentials/src/games/solomon/labyrinth-overlay.ts',
+      'hypercomb-essentials/src/games/solomon/labyrinth-view.ts',
       'hypercomb-essentials/src/games/solomon/overlay.ts',
+      'hypercomb-essentials/src/games/solomon/rpg-overworld.ts',
     ], 'border-radius above the shape ladder')
   })
 
