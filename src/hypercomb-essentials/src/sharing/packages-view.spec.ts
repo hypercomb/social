@@ -14,6 +14,7 @@ const root = join(here, '..', '..', '..')
 const VIEW = readFileSync(join(here, 'packages.view.ts'), 'utf8')
 const ACQUIRE = readFileSync(join(root, 'hypercomb-runtime', 'src', 'acquire.ts'), 'utf8')
 const INSTALL_TYPES = readFileSync(join(root, 'hypercomb-core', 'src', 'install.types.ts'), 'utf8')
+const PRELOADER = readFileSync(join(root, 'hypercomb-runtime', 'src', 'script-preloader.ts'), 'utf8')
 const BARREL = readFileSync(join(root, 'hypercomb-shared', 'ui', 'shell-surfaces', 'shell-surfaces.barrel.ts'), 'utf8')
 const INDICATOR = readFileSync(join(root, 'hypercomb-shared', 'ui', 'upgrade-indicator', 'upgrade-indicator.component.ts'), 'utf8')
 const UPGRADE = readFileSync(join(here, '..', 'commands', 'upgrade.queen.ts'), 'utf8')
@@ -31,6 +32,17 @@ describe('the packages window', () => {
     expect(BARREL).not.toMatch(/packages/)
     expect(ACQUIRE).toMatch(/ioc\?\.register\?\.\(INSTALL_IOC_KEY, installProvider\)/)
     expect(INSTALL_TYPES).toMatch(/export const INSTALL_IOC_KEY = '@hypercomb\.social\/Install'/)
+  })
+
+  it('a unit that is off does not load: the preloader keeps the activation record\'s bees, not every bee the layers declare', () => {
+    // Found on the real hive 2026-09-13: `comfy` off wrote 133 bees to the
+    // record, and ComfyDrone still registered — the preloader walked the
+    // layers and unioned THEIR bees, reading the record only when there were
+    // no layers to walk. The layers say what exists; the record says what runs.
+    const run = PRELOADER.slice(PRELOADER.indexOf('const layerRoots = ScriptPreloader.readManifestLayers()'))
+    expect(run).toMatch(/const enabled = ScriptPreloader\.readManifestBees\(\)/)
+    expect(run).toMatch(/const keep = new Set\(\[\.\.\.enabled, \.\.\.walked\.criticalBees\]\)/)
+    expect(run.indexOf('walked.bees.filter(sig => keep.has(sig))')).toBeLessThan(run.indexOf('#loadBeesPrioritized(walked.bees'))
   })
 
   it('the notice and /upgrade open it, and nothing calls the origin "your domain"', () => {
