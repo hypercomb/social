@@ -24,11 +24,21 @@ export interface StoryFacts {
 
 export const STORY_WHEN_DEPTH = 8
 
+/** A node read defensively: any of the six keys may be present, and malformed. */
+type WhenNode = {
+  readonly has?: unknown
+  readonly knows?: unknown
+  readonly done?: unknown
+  readonly all?: unknown
+  readonly any?: unknown
+  readonly not?: unknown
+}
+
 function holds(when: StoryWhen | undefined, facts: StoryFacts, depth: number): boolean {
   if (when === undefined) return true
   if (depth > STORY_WHEN_DEPTH) return false
   if (!when || typeof when !== 'object') return false
-  const w = when as Record<string, unknown>
+  const w = when as WhenNode
   if ('has' in w) return facts.has(w.has as SigilRequirement)
   if ('knows' in w) return typeof w.knows === 'string' && facts.knows(w.knows)
   if ('done' in w) return typeof w.done === 'string' && facts.done(w.done)
@@ -50,7 +60,7 @@ export function storyRefs(when: StoryWhen | undefined): { readonly knows: readon
   const done: string[] = []
   const walk = (node: StoryWhen | undefined): void => {
     if (!node || typeof node !== 'object') return
-    const w = node as Record<string, unknown>
+    const w = node as WhenNode
     if (typeof w.knows === 'string') knows.push(w.knows)
     else if (typeof w.done === 'string') done.push(w.done)
     else if (Array.isArray(w.all)) for (const child of w.all as StoryWhen[]) walk(child)

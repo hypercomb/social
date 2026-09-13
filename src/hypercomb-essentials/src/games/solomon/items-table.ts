@@ -128,7 +128,7 @@ function useButton(def: AttainmentDef, context: UseContext, onUse: (id: string) 
  *  silhouette copy per kind for the ones not yet held; see `weaponsSpellsRow`). */
 function plainRow(def: AttainmentDef, context: UseContext, onUse: (id: string) => void): HTMLElement {
   const row = el('li', 'sol-items-row')
-  row.dataset.id = def.id
+  row.dataset['id'] = def.id
   const icon = document.createElement('canvas')
   icon.className = 'sol-items-art'
   row.append(icon)
@@ -141,7 +141,7 @@ function plainRow(def: AttainmentDef, context: UseContext, onUse: (id: string) =
 
 function weaponsSpellsRow(def: AttainmentDef, held: boolean, context: UseContext, onUse: (id: string) => void): HTMLElement {
   const row = el('li', 'sol-items-row')
-  row.dataset.id = def.id
+  row.dataset['id'] = def.id
   const icon = document.createElement('canvas')
   icon.className = 'sol-items-art'
   row.append(icon)
@@ -165,7 +165,7 @@ function slotRow(slot: ItemsBoardView['slots'][number]): HTMLElement {
   icon.className = 'sol-items-art'
   row.append(icon)
   if (slot.filled && slot.attainment) {
-    row.dataset.id = slot.attainment
+    row.dataset['id'] = slot.attainment
     const def = attainmentById(slot.attainment)
     if (def) {
       drawDefIcon(icon, def.art)
@@ -173,7 +173,7 @@ function slotRow(slot: ItemsBoardView['slots'][number]): HTMLElement {
       return row
     }
   }
-  row.dataset.id = slot.id
+  row.dataset['id'] = slot.id
   row.classList.add('is-silhouette')
   if (slot.shown) {
     drawLookIcon(icon, slot.look, true)
@@ -238,7 +238,7 @@ export class ItemsTable {
       button.type = 'button'
       button.className = 'sol-items-tab'
       button.textContent = spec.label
-      button.dataset.tab = spec.id
+      button.dataset['tab'] = spec.id
       button.addEventListener('click', () => this.show(spec.id))
       tabBar.append(button)
       this.#tabs.set(spec.id, button)
@@ -246,7 +246,7 @@ export class ItemsTable {
     const body = el('div', 'sol-items-body')
     for (const spec of TABS) {
       const section = el('div', 'sol-items-section')
-      section.dataset.tab = spec.id
+      section.dataset['tab'] = spec.id
       section.hidden = true
       body.append(section)
       this.#sections.set(spec.id, section)

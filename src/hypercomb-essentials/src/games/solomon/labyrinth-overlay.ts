@@ -1,16 +1,44 @@
-import { SIM_DT, type Engine } from './engine.js'
-import { LabyrinthJourney, ROOMS, describeRequirement } from './labyrinth.js'
-import { LabyrinthRoomView, LABYRINTH_ROOM_CSS } from './labyrinth-view.js'
+// THE ADVENTURE SHELL. One dispatcher for every navigation, dialog and key —
+// push-to-enter, beside-prompts, E-toggle, and the Hush's own input surface
+// all resolve through it with no special-casing by place kind (§0.3's must-
+// avoid, "no switching on place kind throughout the shell", holds for combat
+// too). The `#mode`/`#door()`/`#worldHost`/`#roomHost`/`#dungeonHost` switch
+// this file used to carry is gone for good: a `PlacePath` (place.ts) is the
+// one stack of where the traveller has descended, and a `PlaceRuntime` per
+// place kind (place-runtimes.ts) is the one contract every place — island,
+// chamber, labyrinth — is driven through. Every combat behaviour (Stand-
+// gating, the Hush, weapons/spells, barriers) already routes through those
+// same runtime contracts (M5); this file only ever calls `PlaceRuntime`'s
+// own methods and never reaches into a labyrinth-specific concept directly.
+
+import { LabyrinthJourney } from './labyrinth.js'
+import type { CombatSkillId, Engine } from './engine.js'
+import { LABYRINTH_ROOM_CSS } from './labyrinth-view.js'
 import { createSolomonTileSurface, type SolomonTileSurface, type LoadedTileRoom } from './tile-surface.js'
-import { RpgOverworldView, RELIC_LORE, WORLD_DUNGEONS, WORLD_PEOPLE, WORLD_SHRINES } from './rpg-overworld.js'
 import { PlaceVeil, PLACE_VEIL_CSS, type VeilLeg } from './place-veil.js'
-import { ScrollDungeonView } from './scroll-dungeon.js'
 import { SolomonOverlay } from './overlay.js'
 import { GameAudio } from '../audio.js'
 import { SaveSlotStore } from './save-slots.js'
+import { PlacePath, entranceKey, seatAt, seatsOf, splitEntranceKey, MAX_PATH_DEPTH } from './place.js'
+import { ROOT_PLACE, STORY, STORY_BOARDS } from './story.js'
+import { PLACES, LABYRINTH_PLACE, placeName, seatLabel, crumbLabel, floorLabel, groupOfPlace } from './places.js'
+import { CHAMBERS } from './chamber-places.js'
+import { chamberInstruments, type ChamberInstruments, type ChamberSound } from './chamber-view.js'
+import { IslandRuntime, ChamberRuntime, LabyrinthRuntime, type PlaceRuntime, type RuntimeShell } from './place-runtimes.js'
+import { readAdventureSave, writeAdventureSave, type CarriedEntry } from './adventure-save.js'
+import { attainmentById, heldAttainments, itemsBoards, useAttainment, type UseContext } from './attainments.js'
+import type { StoryFacts } from './story-when.js'
+import { GainScreen, GAIN_CSS, type GainRequest } from './gain-screen.js'
+import { ItemsTable, ITEMS_CSS, type ItemsTab } from './items-table.js'
 
-const record = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
-const KEYS = new Set(['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'w', 'a', 's', 'd', ' ', 'z', 'x', 'j', 'k', 'e', 'enter', 'm', 'r', 'escape'])
+const record = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+const arrayHas = (value: unknown, id: string): boolean => Array.isArray(value) && value.includes(id)
+
+const KEYS = new Set([
+  'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'w', 'a', 's', 'd', ' ',
+  'z', 'j', 'x', 'k', 'r', 'c', 'v', 'n', 'b', 'e', 'enter', 'm', 'i', 'escape',
+])
 const element = (tag: string, className = '', text = ''): HTMLElement => {
   const result = document.createElement(tag)
   result.className = className
@@ -18,50 +46,80 @@ const element = (tag: string, className = '', text = ''): HTMLElement => {
   return result
 }
 
-/** Adventure shell. The world, room puzzles and scrolling expeditions share
- *  knowledge and permanent abilities, with a separate simulation for each. */
+/** Every place ref a chamber's own facts are checked under (§3.2's `done()`
+ *  grammar), keyed by the ref's own word to the `ChamberSnapshot` array it
+ *  reads. */
+const CHAMBER_FACT_KEY: Readonly<Record<string, string>> = {
+  tablet: 'read', gate: 'attuned', chest: 'opened', door: 'unlocked',
+  shutter: 'latched', lever: 'pulled', lamp: 'lit', alcove: 'memories',
+}
+
+/** One navigation request. `#request` is the ONE gateway every place-path
+ *  move goes through — a header button, a crumb, a keyboard Escape/M, or a
+ *  `RuntimeShell` hook a runtime calls on the traveller's behalf. */
+type Intent =
+  | { readonly kind: 'enter'; readonly from: string; readonly entrance: string; readonly arrive?: string }
+  | { readonly kind: 'leave'; readonly from?: string; readonly exit?: string }
+  | { readonly kind: 'home' }
+  | { readonly kind: 'crumb'; readonly index: number }
+  | { readonly kind: 'surface'; readonly from: string }
+  | { readonly kind: 'design' }
+
+/** A ticket for one in-flight, cancellable piece of work — a restore, or a
+ *  place's own async `prepare()`. While one is open every navigation request
+ *  but `home` is refused outright, except it is remembered on `intent` and
+ *  replayed the instant the ticket closes (mirroring how a pending continue
+ *  used to remember "open World" / "open the designer" once it landed). */
+interface Busy { readonly kind: 'restore' | 'enter'; cancelled: boolean; intent: Intent | null }
+
+/** Adventure shell. The island, every chamber and the labyrinth share one
+ *  knowledge ledger and one save, with a separate `PlaceRuntime` simulating
+ *  each. */
 export class SolomonLabyrinthOverlay {
   journey = new LabyrinthJourney()
+  #path = PlacePath.root(ROOT_PLACE)
+  readonly #runtimes = new Map<string, PlaceRuntime>()
+  #dormant = new Map<string, unknown>()
+  #carried: CarriedEntry[] = []
+  #extra: (readonly [string, unknown])[] = []
+  #busy: Busy | null = null
+  #restoreFailed = false
   readonly #loaded = new Map<string, LoadedTileRoom>()
   readonly #knowledge = new Map<string, string>()
-  readonly #dungeons = new Map<number, ScrollDungeonView>()
+  #revealed = new Set<string>()
+  #found = new Set<string>()
+  #crumbs: HTMLElement | null = null
+  #card: HTMLElement | null = null
+  #veil: PlaceVeil | null = null
+  #gain: GainScreen | null = null
+  #items: ItemsTable | null = null
+
+  readonly #shell: RuntimeShell = this.#buildShell()
   readonly #audio = new GameAudio()
   readonly #input = { up: false, down: false, left: false, right: false }
   #surface: SolomonTileSurface | null = null
   #root: HTMLElement | null = null
   #content: HTMLElement | null = null
-  #worldHost: HTMLElement | null = null
-  #roomHost: HTMLElement | null = null
-  #dungeonHost: HTMLElement | null = null
-  #message: HTMLElement | null = null
+  #messageEl: HTMLElement | null = null
   #inventory: HTMLElement | null = null
-  #world: RpgOverworldView | null = null
-  #roomView: LabyrinthRoomView | null = null
-  #dungeon: ScrollDungeonView | null = null
   #designer: SolomonOverlay | null = null
-  #veil: PlaceVeil | null = null
-  #journal: HTMLElement | null = null
   #slots: SaveSlotStore<unknown> | null = null
   #slotPanel: HTMLElement | null = null
   #slotButton: HTMLButtonElement | null = null
   #saveStatus: HTMLElement | null = null
   #lastSaved = ''
-  #restoreFailed = false
-  #restoring = false
-  #afterRestore: 'world' | 'design' | null = null
-  #mode: 'world' | 'room' | 'dungeon' | 'loading' | 'design' = 'world'
-  #raf = 0
-  #lastTs = 0
-  #time = 0
-  #acc = 0
-  #generation = 0
   #lastRelic = ''
   #inventoryKey = ''
   #dirty = false
+  #raf = 0
+  #lastTs = 0
+  #time = 0
   #saveAt = 0
   #oldFocus: HTMLElement | null = null
 
-  constructor(private readonly onClose: () => void) {}
+  readonly #onClose: () => void
+  constructor(onClose: () => void) { this.#onClose = onClose }
+
   get engine(): Engine | null { return this.journey.engine }
   isMounted(): boolean { return !!this.#root }
 
@@ -80,14 +138,14 @@ export class SolomonLabyrinthOverlay {
     root.setAttribute('aria-modal', 'true')
     root.tabIndex = -1
     const style = element('style')
-    style.textContent = ADVENTURE_CSS + LABYRINTH_ROOM_CSS + PLACE_VEIL_CSS
+    style.textContent = ADVENTURE_CSS + LABYRINTH_ROOM_CSS + PLACE_VEIL_CSS + GAIN_CSS + ITEMS_CSS
     root.append(style)
     const bar = element('header', 'sol-adventure-bar')
     bar.append(element('strong', '', '✡ Solomon’s Key'))
     this.#inventory = element('span', 'sol-adventure-inventory')
     bar.append(this.#inventory)
-    bar.append(this.#button('World', () => this.#showWorld()))
-    bar.append(this.#button('Journal', () => this.#openJournal()))
+    bar.append(this.#button('World', () => this.#request({ kind: 'home' })))
+    bar.append(this.#button('Items', () => this.#openItems()))
     this.#slotButton = this.#button('Saves', () => this.#openSlots())
     this.#saveStatus = element('span', 'sol-save-status')
     this.#saveStatus.setAttribute('role', 'status')
@@ -97,21 +155,23 @@ export class SolomonLabyrinthOverlay {
       this.#audio.unlock()
       sound.textContent = this.#audio.toggleMuted() ? 'Sound off' : 'Sound on'
     })
-    bar.append(sound, this.#button('Close', () => this.onClose()))
+    bar.append(sound, this.#button('Close', () => this.#onClose()))
+    this.#crumbs = element('nav', 'sol-crumbs')
+    this.#crumbs.setAttribute('aria-label', 'Path travelled')
     this.#content = element('main', 'sol-adventure-content')
-    this.#worldHost = element('div', 'sol-adventure-world')
-    this.#roomHost = element('div', 'sol-adventure-rooms')
-    this.#dungeonHost = element('div', 'sol-adventure-dungeon')
-    this.#roomHost.hidden = this.#dungeonHost.hidden = true
-    this.#content.append(this.#worldHost, this.#roomHost, this.#dungeonHost)
     this.#veil = new PlaceVeil(this.#content)
-    this.#message = element('div', 'sol-adventure-message', 'Talk to Mira by the path. She knows where the first triangle belongs.')
-    this.#message.setAttribute('role', 'status')
-    this.#message.setAttribute('aria-live', 'polite')
-    root.append(bar, this.#content, this.#message, this.#touchControls())
+    this.#card = element('div', 'sol-card')
+    this.#content.append(this.#card)
+    this.#messageEl = element('div', 'sol-adventure-message', 'Explore the world, and see who you can help.')
+    this.#messageEl.setAttribute('role', 'status')
+    this.#messageEl.setAttribute('aria-live', 'polite')
+    root.append(bar, this.#crumbs, this.#content, this.#messageEl, this.#touchControls())
     document.body.append(root)
     this.#root = root
-    this.#mountSession()
+    this.#path = PlacePath.root(ROOT_PLACE)
+    this.#here.show({ from: 'save' })
+    this.#updatePathUI()
+    this.#updateInventory()
     void this.#restoreSlot()
     window.addEventListener('keydown', this.#keyDown, true)
     window.addEventListener('keyup', this.#keyUp, true)
@@ -123,39 +183,411 @@ export class SolomonLabyrinthOverlay {
     this.#raf = requestAnimationFrame(this.#loop)
   }
 
-  // (2) A2.2/M9's onEntrance/seat replace onEnter/onDungeon — this bridge maps
-  // each entrance's OWN id to today's #enterLabyrinth/#enterDungeon, so the
-  // island stays playable before Phase 3's real STORY-seated routing exists.
-  // Temporary; deleted with the rest of this bridge in Phase 3.
-  static readonly #WORLD_LABYRINTHS: Readonly<Record<string, string>> = { 'dawn-shrine': 'sunseed', 'tide-shrine': 'tideglass', 'pyramid-shrine': 'starbloom' }
-  static readonly #WORLD_DUNGEON_INDEX: Readonly<Record<string, number>> = { 'wayfarer-cavern': 0, 'highland-cavern': 2 }
-  #mountSession(): void {
-    this.#world = new RpgOverworldView({
-      has: requirement => this.journey.has(requirement),
-      grantRelic: relic => {
-        this.journey.grantRelic(relic)
-        this.#recordRelic()
-      },
-      seat: id => id in SolomonLabyrinthOverlay.#WORLD_LABYRINTHS || id in SolomonLabyrinthOverlay.#WORLD_DUNGEON_INDEX,
-      onEntrance: id => {
-        const labyrinthId = SolomonLabyrinthOverlay.#WORLD_LABYRINTHS[id]
-        if (labyrinthId) { void this.#enterLabyrinth(labyrinthId); return }
-        const index = SolomonLabyrinthOverlay.#WORLD_DUNGEON_INDEX[id]
-        if (index !== undefined) this.#enterDungeon(index)
-      },
-      onItems: () => this.#openJournal(),
-      onMessage: message => { this.#say(message); this.#dirty = true },
-      // (2)'s gain→today's-cache-dialog bridge: no GainScreen exists yet, so
-      // the words just join every other status message; the view's own
-      // dialog still does the actual showing.
-      gain: request => { this.#say(request.words); this.#dirty = true },
-    })
-    this.#world.mount(this.#worldHost!)
-    this.#roomView = new LabyrinthRoomView(this.#roomHost!, this.journey, id => this.#door(id))
-    this.#inventoryKey = ''
-    this.#updateInventory()
-    this.#updateSaveStatus()
+  // -- the path shell -------------------------------------------------------
+
+  get #here(): PlaceRuntime { return this.#runtime(this.#path.here.place) }
+
+  /** Builds (once, lazily; cached forever after) the one `PlaceRuntime` for
+   *  `place`, and folds in whatever facts a restore left waiting for it in
+   *  `#dormant` — a place never has to know whether it is being shown fresh
+   *  or resumed. */
+  #runtime(place: string): PlaceRuntime {
+    const existing = this.#runtimes.get(place)
+    if (existing) return existing
+    const host = element('div', 'sol-adventure-place')
+    host.hidden = true
+    this.#content!.append(host)
+    let runtime: PlaceRuntime
+    if (place === ROOT_PLACE) runtime = new IslandRuntime(host, this.#shell)
+    else if (place === LABYRINTH_PLACE.id) runtime = new LabyrinthRuntime(host, this.#shell, () => this.#tileSurface(), this.#loaded)
+    else {
+      const definition = CHAMBERS.find(chamber => chamber.id === place)
+      if (!definition) throw new Error(`labyrinth-overlay.ts: no chamber definition for "${place}"`)
+      runtime = new ChamberRuntime(host, definition, this.#shell)
+    }
+    this.#runtimes.set(place, runtime)
+    const facts = this.#dormant.get(place)
+    if (facts !== undefined) { runtime.restoreFacts(facts); this.#dormant.delete(place) }
+    return runtime
   }
+
+  #tileSurface(): SolomonTileSurface { return this.#surface ??= createSolomonTileSurface([]) }
+
+  /** The ONE navigation gateway (§4.3). `home` always wins, cancelling
+   *  whatever busy ticket is open; every other intent is refused while one
+   *  is open, remembered on it, and replayed the instant it closes. */
+  #request = (intent: Intent): void => {
+    if (intent.kind === 'home') {
+      if (this.#busy) { this.#busy.cancelled = true; this.#busy = null; this.#root?.removeAttribute('aria-busy') }
+      this.#warpTo(0)
+      return
+    }
+    if (this.#busy) { this.#busy.intent = intent; return }
+    if (intent.kind === 'enter') this.#enter(intent.from, intent.entrance, intent.arrive)
+    else if (intent.kind === 'leave') this.#leaveTo(intent.from, intent.exit)
+    else if (intent.kind === 'crumb') this.#crumbTo(intent.index)
+    else if (intent.kind === 'surface') this.#surfaceTo(intent.from)
+    else this.#openDesigner()
+  }
+
+  /** Every place-path move but a fresh descent ends up here: hop back to
+   *  `targetIndex` on the current path, veiling the swap. */
+  #warpTo(targetIndex: number, exit?: string): void {
+    if (targetIndex < 0 || targetIndex >= this.#path.depth) return
+    if (targetIndex === this.#path.depth - 1) return
+    const leaving = this.#here
+    this.#gain?.close()
+    this.#items?.close()
+    leaving.closeDialog()
+    const viaBack = this.#path.steps[targetIndex + 1]?.via ?? ''
+    const arriving = this.#runtime(this.#path.steps[targetIndex].place)
+    this.#warp(leaving.leaveLeg('out'), arriving.arriveLeg('out'), () => {
+      this.#path.leaveTo(targetIndex)
+      leaving.hide()
+      arriving.show({ from: 'below', via: viaBack, exit })
+      this.#updatePathUI()
+    })
+    this.#save()
+  }
+
+  #leaveTo(from?: string, exit?: string): void {
+    if (from !== undefined && from !== this.#path.here.place) return
+    if (this.#path.depth <= 1) return
+    this.#warpTo(this.#path.depth - 2, exit)
+  }
+
+  #surfaceTo(from: string): void {
+    if (from !== this.#path.here.place) return
+    this.#warpTo(0)
+  }
+
+  #crumbTo(index: number): void { this.#warpTo(index) }
+
+  /** A fresh descent into `entrance`, seated per `STORY` — the labyrinth's
+   *  own async room hydration (or a chamber's trivial synchronous one) rides
+   *  on a busy ticket exactly like a restore does, so a stale reply from a
+   *  since-cancelled attempt can never resurrect a place the traveller has
+   *  already left. */
+  #enter(from: string, entrance: string, arrive?: string): void {
+    if (from !== this.#path.here.place) return
+    const key = entranceKey(from, entrance)
+    this.#found.add(key)
+    this.#dirty = true
+    const seat = seatAt(STORY, key)
+    if (!seat) { this.#message('Nothing has been built here yet.'); return }
+    if (this.#path.includes(seat.place) || this.#path.depth >= MAX_PATH_DEPTH) return
+    const leaving = this.#here
+    this.#gain?.close()
+    this.#items?.close()
+    leaving.closeDialog()
+    const runtime = this.#runtime(seat.place)
+    const busy: Busy = { kind: 'enter', cancelled: false, intent: null }
+    this.#busy = busy
+    this.#root?.setAttribute('aria-busy', 'true')
+    const arriveId = arrive ?? seat.arrive ?? ''
+    const proceed = (ok: true | string): void => {
+      if (busy.cancelled || !this.#root) return
+      this.#busy = null
+      this.#root.removeAttribute('aria-busy')
+      if (ok !== true) { this.#message(ok); this.#save(); return }
+      this.#warp(leaving.leaveLeg('in'), runtime.arriveLeg('in'), () => {
+        this.#path.enter(key, seat.place)
+        leaving.hide()
+        runtime.show({ from: 'above', seat, arrive: arriveId })
+        this.#updatePathUI()
+      })
+      this.#save()
+      const next = busy.intent
+      if (next) this.#request(next)
+    }
+    // A prepare that throws must still release the busy ticket and say why,
+    // or every later intent queues behind a ticket that never closes.
+    const refused = (error: unknown): void => proceed(error instanceof Error ? error.message : 'This place could not open. Try it again.')
+    let result: true | string | Promise<true | string>
+    try { result = runtime.prepare(seat, () => busy.cancelled) } catch (error) { result = Promise.reject(error) }
+    if (result instanceof Promise) result.then(proceed, refused)
+    else proceed(result)
+  }
+
+  /** Every warp goes through the veil: the place on show zooms into (or
+   *  shrinks back into) the entrance, and the next place resolves at the
+   *  swap. Without a picture to leave from, or without a veil, it simply
+   *  happens. */
+  #warp(leave: VeilLeg | null, arrive: VeilLeg | null, swap: () => void): void {
+    if (!this.#veil || !leave || !this.#content) { swap(); return }
+    this.#veil.play({ leave, arrive: arrive ?? { element: this.#content, picture: null, origin: [0.5, 0.5], scale: 1 }, onSwap: swap })
+  }
+
+  showDesigner(): void { this.#request({ kind: 'design' }) }
+
+  #openDesigner(): void {
+    if (!this.#root || this.#designer) return
+    this.#release()
+    this.#veil?.cancel()
+    this.#save()
+    this.#closeSlots()
+    this.#gain?.close()
+    this.#items?.close()
+    this.#root.hidden = true
+    this.#designer = new SolomonOverlay(() => {
+      this.#designer?.unmount()
+      this.#designer = null
+      if (this.#root) { this.#root.hidden = false; this.#save() }
+    })
+    this.#designer.mount()
+    this.#designer.showDesigner()
+  }
+
+  #updatePathUI(): void {
+    if (!this.#crumbs || !this.#card) return
+    this.#crumbs.replaceChildren()
+    const steps = this.#path.steps
+    steps.forEach((step, index) => {
+      if (index > 0) this.#crumbs!.append(element('span', 'sol-crumb-sep', '›'))
+      const label = crumbLabel(steps, index, STORY)
+      if (index === steps.length - 1) { this.#crumbs!.append(element('span', 'sol-crumb-here', label)); return }
+      const crumb = this.#button(label, () => this.#request({ kind: 'crumb', index }))
+      crumb.className = 'sol-crumb'
+      this.#crumbs!.append(crumb)
+    })
+    const here = this.#path.here.place
+    const definition = PLACES.get(here)
+    this.#card.replaceChildren()
+    this.#card.append(element('strong', '', definition?.name ?? here))
+    if (definition?.subtitle) this.#card.append(element('span', '', definition.subtitle))
+    const floor = floorLabel(here, STORY)
+    if (floor) this.#card.append(element('span', 'sol-card-floor', floor))
+    if (this.#path.depth > 1) this.#card.append(element('span', 'sol-card-up', `↑ ${this.#shell.upName(here)}`))
+    if (this.#path.depth > 2) this.#card.append(element('span', 'sol-card-surface', `⤒ Surface to ${this.#shell.surfaceName(here)}`))
+  }
+
+  // -- the ONE reveal / progress / use mechanism -----------------------------
+
+  #storyFacts(): StoryFacts {
+    return {
+      has: requirement => this.journey.has(requirement),
+      knows: id => this.#knowledge.has(id),
+      done: ref => this.#done(ref),
+    }
+  }
+
+  /** A live runtime's own current facts, else whatever a restore is still
+   *  holding for a place that has not been shown yet this session, else
+   *  null — never a third, separate store. */
+  #factsRecord(place: string): Record<string, unknown> | null {
+    const live = this.#runtimes.get(place)
+    return record(live ? live.exportFacts() : this.#dormant.get(place))
+  }
+
+  /** §3.2's `done()` grammar, plus the one new row M2 adds
+   *  (`labyrinth/skill:<id>`, read off `journey.kit`, never a dead
+   *  `exportProgress()` path — M22). */
+  #done(ref: string): boolean {
+    if (ref === ROOT_PLACE) return true
+    if (ref === LABYRINTH_PLACE.id) return this.journey.visited.size > 0
+    if (PLACES.has(ref)) return this.#runtimes.has(ref) || this.#dormant.has(ref)
+
+    const skill = /^labyrinth\/skill:(.+)$/.exec(ref)
+    if (skill) return this.journey.kit.includes(skill[1] as CombatSkillId)
+
+    const labyrinthFact = /^labyrinth\/(relic|arrival|room):(.+)$/.exec(ref)
+    if (labyrinthFact) {
+      const [, kind, id] = labyrinthFact
+      if (kind === 'relic') return this.journey.collected(id)
+      if (kind === 'arrival') return this.journey.completed.has(id)
+      return this.journey.visited.has(id)
+    }
+
+    const found = /^island\/found:(.+)$/.exec(ref)
+    if (found) return this.#found.has(`island/${found[1]}`)
+
+    const socket = /^island\/socket:([a-z0-9-]+):(\d+)$/.exec(ref)
+    if (socket) return arrayHas(this.#factsRecord(ROOT_PLACE)?.['filledSockets'], `${socket[1]}:${socket[2]}`)
+
+    const islandFact = /^island\/(cache|person|met):(.+)$/.exec(ref)
+    if (islandFact) {
+      const [, kind, id] = islandFact
+      const facts = this.#factsRecord(ROOT_PLACE)
+      if (!facts) return false
+      if (kind === 'cache') return arrayHas(facts['opened'], id)
+      if (kind === 'person') return arrayHas(facts['solved'], id)
+      return arrayHas(facts['met'], id)
+    }
+
+    const setRef = /^([a-z0-9-]+)\/set:(.+)$/.exec(ref)
+    if (setRef) {
+      const [, place, setId] = setRef
+      const definition = CHAMBERS.find(chamber => chamber.id === place)
+      const set = definition?.lampSets.find(candidate => candidate.id === setId)
+      const facts = this.#factsRecord(place)
+      if (!set || !facts) return false
+      const lit = Array.isArray(facts['lit']) ? facts['lit'] as string[] : []
+      return set.lamps.every(lampId => lit.includes(lampId))
+    }
+
+    const artifact = /^([a-z0-9-]+)\/artifact:(.+)$/.exec(ref)
+    if (artifact) return this.#factsRecord(artifact[1])?.['claimed'] === true
+
+    const chamberFact = /^([a-z0-9-]+)\/(tablet|gate|chest|door|shutter|lever|lamp|alcove):(.+)$/.exec(ref)
+    if (chamberFact) {
+      const [, place, kind, id] = chamberFact
+      const key = CHAMBER_FACT_KEY[kind]
+      return !!key && arrayHas(this.#factsRecord(place)?.[key], id)
+    }
+
+    return false
+  }
+
+  #useContext(): UseContext {
+    const place = this.#path.here.place
+    return {
+      place, group: groupOfPlace(place)?.id ?? null, shrine: null, needle: null,
+      weapon: this.journey.weapon, spell: this.journey.spell,
+    }
+  }
+
+  #useAttainmentAction(id: string): void {
+    const def = attainmentById(id)
+    const result = useAttainment(id, this.#storyFacts(), this.#useContext())
+    switch (result.kind) {
+      case 'read': this.#message(result.text); break
+      case 'map': this.#message(def ? `The ${def.title} points the way.` : 'A map, unfolded.'); break
+      case 'needle': this.#message(result.text); break
+      case 'shrine': this.#message(def ? `Bring the ${def.title} to a shrine that still needs it.` : 'Bring it to a shrine.'); break
+      case 'words': this.#message(result.text); break
+      case 'equip': {
+        const ok = this.journey.equip(result.id)
+        if (ok) {
+          this.#message(`${def?.title ?? result.id} equipped.`)
+          this.#items?.refresh()
+          this.#dirty = true
+          this.#save()
+        }
+        break
+      }
+      case 'none': break
+    }
+  }
+
+  #showGain(request: GainRequest): void {
+    this.#gain ??= new GainScreen(this.#root!, {
+      seen: id => this.#revealed.has(id),
+      markSeen: ids => { for (const id of ids) this.#revealed.add(id); this.#dirty = true; this.#save() },
+      board: boardId => {
+        const board = itemsBoards(this.#storyFacts(), STORY_BOARDS).find(candidate => candidate.id === boardId)
+        return board ? { title: board.title, slots: board.slots.map(slot => ({ id: slot.id, filled: slot.filled })) } : null
+      },
+      closed: () => { this.#items?.refresh(); this.#save() },
+    })
+    this.#gain.show(request)
+  }
+
+  #openItems(section?: ItemsTab): void {
+    if (!this.#root || this.#busy) return
+    this.#release()
+    this.#items ??= new ItemsTable(this.#root, {
+      facts: () => this.#storyFacts(),
+      context: () => this.#useContext(),
+      use: id => this.#useAttainmentAction(id),
+      closed: () => this.#save(),
+    })
+    this.#items.show(section)
+  }
+
+  // -- shell services for runtimes (§4.10) -----------------------------------
+
+  #buildShell(): RuntimeShell {
+    return {
+      journey: () => this.journey,
+      release: () => this.#release(),
+      save: () => { this.#save() },
+      enter: (from, entrance, arrive) => this.#request({ kind: 'enter', from, entrance, arrive }),
+      leave: (from, exit) => this.#request({ kind: 'leave', from, exit }),
+      surface: from => this.#request({ kind: 'surface', from }),
+      seat: (from, entrance) => seatLabel(entranceKey(from, entrance), STORY),
+      upName: place => {
+        const seat = seatsOf(STORY, place)[0]
+        const split = seat ? splitEntranceKey(seat.entrance) : null
+        return placeName(split?.place ?? ROOT_PLACE)
+      },
+      surfaceName: () => placeName(ROOT_PLACE),
+      instruments: place => this.#instruments(place),
+      learn: (id, text) => { if (!this.#knowledge.has(id)) { this.#knowledge.set(id, text); this.#dirty = true } },
+      knows: id => this.#knowledge.has(id),
+      message: text => this.#message(text),
+      sound: kind => this.#sound(kind),
+      gain: request => this.#showGain(request),
+      seatSeed: (from, entrance) => {
+        const seat = seatAt(STORY, entranceKey(from, entrance))
+        return seat ? this.#runtimes.get(seat.place)?.seed() ?? null : null
+      },
+      found: (from, entrance) => { this.#found.add(entranceKey(from, entrance)); this.#dirty = true },
+      openItems: () => this.#openItems(),
+      recordRelic: () => this.#recordRelic(),
+    }
+  }
+
+  #instruments(place: string): ChamberInstruments {
+    const definition = CHAMBERS.find(chamber => chamber.id === place)
+    return definition ? chamberInstruments(definition) : { look: 'cavern', torch: 1, sconces: false }
+  }
+
+  /** A touch-picked relic (a sigil piece, gathered mid-room rather than
+   *  through `interact()`) is a reveal like any other (2) A5.5's own row for
+   *  "relic pieces" — routed through the same one `GainScreen`, never a
+   *  bespoke dialog. */
+  #recordRelic(): void {
+    const relic = this.journey.lastRelic
+    if (!relic || relic.id === this.#lastRelic) return
+    this.#lastRelic = relic.id
+    if (relic.lore) this.#knowledge.set(relic.id, relic.lore)
+    this.#dirty = true
+    this.#updateInventory()
+    const id = relic.kind === 'triangle' ? `piece:triangle:${relic.point}` : relic.kind === 'hexagon' ? 'piece:hexagon' : 'piece:star'
+    const def = attainmentById(id)
+    if (def) this.#showGain({ id: def.id, eyebrow: 'A SIGIL PIECE', title: def.title, words: relic.lore ?? def.words, art: def.art, fresh: true, ...(def.slot ? { slot: def.slot } : {}) })
+    else this.#message(relic.lore ?? 'A new piece joins your star.')
+    if (this.journey.completed.has('starbloom')) this.#message('The Pyramid of Accord is open. You found its heart! Return to the world to revisit your discoveries.')
+  }
+
+  /** The one sound dispatch point (M5/M8): short blips through the shared
+   *  `GameAudio` helpers. Exact tones are a combat-role implementation
+   *  choice, not pinned by any source beyond "short combat blips" (§1 M5). */
+  #sound(kind: ChamberSound | 'door-in' | 'door-out' | 'door-locked'
+    | 'hush' | 'duel' | 'strike' | 'stagger' | 'parry' | 'ward' | 'ember' | 'bat' | 'clang' | 'catch'): void {
+    const TONE: Readonly<Record<string, { freq: number; endFreq: number; dur: number; vol: number }>> = {
+      'door-in': { freq: 440, endFreq: 880, dur: 0.22, vol: 0.07 },
+      'door-out': { freq: 660, endFreq: 880, dur: 0.22, vol: 0.07 },
+      'door-locked': { freq: 220, endFreq: 180, dur: 0.14, vol: 0.05 },
+      push: { freq: 300, endFreq: 260, dur: 0.08, vol: 0.05 },
+      latch: { freq: 520, endFreq: 640, dur: 0.12, vol: 0.05 },
+      read: { freq: 700, endFreq: 700, dur: 0.08, vol: 0.04 },
+      lit: { freq: 880, endFreq: 1040, dur: 0.14, vol: 0.05 },
+      complete: { freq: 660, endFreq: 990, dur: 0.3, vol: 0.07 },
+      unlock: { freq: 500, endFreq: 760, dur: 0.18, vol: 0.06 },
+      pull: { freq: 340, endFreq: 300, dur: 0.1, vol: 0.05 },
+      wand: { freq: 600, endFreq: 500, dur: 0.1, vol: 0.05 },
+      seal: { freq: 400, endFreq: 400, dur: 0.3, vol: 0.06 },
+      settle: { freq: 460, endFreq: 460, dur: 0.12, vol: 0.05 },
+      open: { freq: 620, endFreq: 780, dur: 0.16, vol: 0.06 },
+      claim: { freq: 660, endFreq: 990, dur: 0.24, vol: 0.06 },
+      finale: { freq: 500, endFreq: 1000, dur: 0.6, vol: 0.08 },
+      hush: { freq: 220, endFreq: 160, dur: 0.3, vol: 0.05 },
+      duel: { freq: 500, endFreq: 700, dur: 0.2, vol: 0.06 },
+      strike: { freq: 700, endFreq: 500, dur: 0.06, vol: 0.05 },
+      stagger: { freq: 300, endFreq: 200, dur: 0.14, vol: 0.05 },
+      parry: { freq: 900, endFreq: 700, dur: 0.06, vol: 0.05 },
+      ward: { freq: 800, endFreq: 1000, dur: 0.1, vol: 0.05 },
+      ember: { freq: 600, endFreq: 300, dur: 0.2, vol: 0.06 },
+      bat: { freq: 500, endFreq: 400, dur: 0.06, vol: 0.04 },
+      clang: { freq: 250, endFreq: 200, dur: 0.08, vol: 0.05 },
+      catch: { freq: 800, endFreq: 800, dur: 0.05, vol: 0.04 },
+    }
+    const tone = TONE[kind]
+    if (tone) this.#audio.tone(tone)
+  }
+
+  // -- key / touch input ------------------------------------------------------
 
   #button(label: string, action: () => void): HTMLButtonElement {
     const button = element('button', '', label) as HTMLButtonElement
@@ -166,7 +598,10 @@ export class SolomonLabyrinthOverlay {
 
   #touchControls(): HTMLElement {
     const bar = element('div', 'sol-adventure-touch')
-    for (const [label, key] of [['←', 'ArrowLeft'], ['↑', 'ArrowUp'], ['↓', 'ArrowDown'], ['→', 'ArrowRight'], ['Jump', ' '], ['Wand', 'z'], ['Use', 'e']]) {
+    for (const [label, key] of [
+      ['←', 'ArrowLeft'], ['↑', 'ArrowUp'], ['↓', 'ArrowDown'], ['→', 'ArrowRight'],
+      ['Jump', ' '], ['Wand', 'z'], ['Use', 'e'], ['Strike', 'c'], ['Cast', 'v'],
+    ]) {
       const button = this.#button(label, () => {})
       button.setAttribute('aria-label', label === 'Use' ? 'Interact or use passage' : label)
       button.onpointerdown = event => {
@@ -174,7 +609,7 @@ export class SolomonLabyrinthOverlay {
         button.setPointerCapture(event.pointerId)
         this.#keyDown(new KeyboardEvent('keydown', { key }))
       }
-      const release = () => this.#keyUp(new KeyboardEvent('keyup', { key }))
+      const release = (): void => this.#keyUp(new KeyboardEvent('keyup', { key }))
       button.onpointerup = release
       button.onpointercancel = release
       button.onlostpointercapture = release
@@ -183,278 +618,39 @@ export class SolomonLabyrinthOverlay {
     return bar
   }
 
-  async #enterLabyrinth(id: string): Promise<void> {
-    if (!this.#root || this.#mode === 'loading' || !this.journey.canEnterLabyrinth(id)) return
-    this.#save()
-    this.#release()
-    this.#closeJournal()
-    this.#world?.closeDialog()
-    const generation = ++this.#generation
-    this.#mode = 'loading'
-    this.#say('Opening the shrine’s chambers…')
-    this.#root.setAttribute('aria-busy', 'true')
-    try {
-      this.#surface ??= createSolomonTileSurface([])
-      // A labyrinth's linked destinations hydrate before play; a warp therefore
-      // has no async simulation gap and always uses native destination cells.
-      for (const definition of ROOMS.filter(room => room.labyrinthId === id)) {
-        if (!this.#loaded.has(definition.id)) {
-          const loaded = await this.#surface.ensureRoom(definition)
-          if (generation !== this.#generation || !this.#root) return
-          this.journey.replaceRoom(loaded.room)
-          this.#loaded.set(definition.id, loaded)
-        }
-      }
-      if (generation !== this.#generation || !this.#root) return
-      if (!this.journey.enterLabyrinth(id) || !this.journey.room) throw new Error('This shrine is still missing a component.')
-      this.#mode = 'room'
-      const loaded = this.#loaded.get(this.journey.room.id)!
-      const shrine = WORLD_SHRINES.find(place => place.labyrinthId === id)
-      this.#warp(this.#world!.leaveLeg(shrine ?? this.#world!.model.player, 'in'), this.#roomView!.arriveLeg(loaded, 'in'), () => {
-        this.#worldHost!.hidden = true
-        this.#roomHost!.hidden = false
-        this.#dungeonHost!.hidden = true
-        this.#roomView!.show(loaded)
-      })
-      this.#say('Walk into a door to pass through it. Every door keeps the colour and shape of where it leads, and every room remembers your visit.')
-      this.#acc = 0
-      this.#dirty = true
-      this.#save()
-    } catch (error) {
-      if (generation !== this.#generation || !this.#root) return
-      this.#showWorld()
-      this.#say(error instanceof Error ? error.message : 'The shrine could not open. Try it again from the world.')
-    } finally {
-      if (generation === this.#generation) this.#root?.removeAttribute('aria-busy')
-    }
-  }
-
-  /** TOUCH TO PASS. Jaime, 2026-09-11: "you just have to touch the door or
-   *  portal to go to the next level." Standing in an open door takes you
-   *  through it — except the door you just arrived by, until you step off it
-   *  and back on (the journey's arrival guard). A door you cannot open yet
-   *  says what it needs, once per approach, and stays a door. E still works
-   *  for anyone who reaches for it. */
-  #lockedSaid = ''
-  #passDoor(): void {
-    const door = this.journey.nearDoor()
-    if (!door) { this.#lockedSaid = ''; return }
-    if (door.id === this.journey.arrivalDoor) return
-    if (!this.journey.has(door.requires)) {
-      if (this.#lockedSaid !== door.id) {
-        this.#lockedSaid = door.id
-        this.#say(`${describeRequirement(door.requires)} opens this door.`)
-        this.#audio.tone({ freq: 220, endFreq: 180, dur: 0.14, vol: 0.05 })
-      }
-      return
-    }
-    this.#door(door.id)
-  }
-
-  #door(id?: string): void {
-    if (this.#mode !== 'room') return
-    const oldDepth = this.journey.room?.depth ?? 0
-    const result = this.journey.useDoor(id)
-    this.#say(result.message)
-    if (result.kind !== 'travelled' || !this.journey.room) return
-    const loaded = this.#loaded.get(this.journey.room.id)
-    if (!loaded) { this.#showWorld(); this.#say('This passage has no loaded destination.'); return }
-    const delta = this.journey.room.depth - oldDepth
-    if (this.#veil) this.#roomView!.warp(this.#veil, loaded, delta < 0 ? 'out' : delta === 0 ? 'across' : 'in')
-    else this.#roomView!.show(loaded)
-    this.#release()
-    this.#acc = 0
-    this.#audio.tone({ freq: delta < 0 ? 660 : 440, endFreq: 880, dur: 0.22, vol: 0.07 })
-    this.#dirty = true
-    this.#save()
-  }
-
-  #enterDungeon(index: number): void {
-    if (!this.#dungeonHost || this.#mode === 'loading') return
-    this.#world?.closeDialog()
-    this.#closeJournal()
-    this.#release()
-    this.journey.leave()
-    const view = this.#getDungeon(index)
-    this.#dungeon = view
-    this.#mode = 'dungeon'
-    const mouth = WORLD_DUNGEONS.find(place => place.levelIndex === index)
-    this.#warp(this.#world?.leaveLeg(mouth ?? this.#world.model.player, 'in') ?? null, view.arriveLeg('in'), () => {
-      for (const host of Array.from(this.#dungeonHost!.children) as HTMLElement[]) host.hidden = host.dataset['dungeon'] !== String(index)
-      this.#worldHost!.hidden = this.#roomHost!.hidden = true
-      this.#dungeonHost!.hidden = false
-      view.refresh()
-    })
-    this.#say('Explore the passages. Read inscriptions and use what they teach you to attune the gates.')
-    this.#save()
-  }
-
-  #getDungeon(index: number): ScrollDungeonView {
-    let view = this.#dungeons.get(index)
-    if (!view) {
-      view = new ScrollDungeonView({
-        index,
-        has: requirement => this.journey.has(requirement),
-        onMessage: message => this.#say(message),
-        onKnowledge: (id, text) => { this.#knowledge.set(id, text); this.#dirty = true },
-        onComplete: lore => {
-          this.#knowledge.set(`dungeon-${index}`, lore)
-          this.#showWorld()
-          this.#say('Expedition complete. The discovery is recorded in your journal.')
-        },
-        onExit: () => this.#showWorld(),
-      })
-      const host = element('div', 'sol-adventure-expedition')
-      host.dataset['dungeon'] = String(index)
-      this.#dungeonHost!.append(host)
-      view.mount(host)
-      this.#dungeons.set(index, view)
-    }
-    return view
-  }
-
-  #showWorld(): void {
-    if (!this.#root) return
-    if (this.#restoring) { this.#afterRestore = 'world'; return }
-    ++this.#generation
-    this.#root.removeAttribute('aria-busy')
-    this.#closeJournal()
-    this.#closeSlots()
-    this.#release()
-    const leave = this.#mode === 'room' ? this.#roomView?.leaveLeg('out') ?? null
-      : this.#mode === 'dungeon' ? this.#dungeon?.leaveLeg('out') ?? null : null
-    this.journey.leave()
-    this.#dungeon?.closeDialog()
-    this.#dungeon = null
-    this.#mode = 'world'
-    this.#warp(leave, this.#world?.arriveLeg(this.#world.model.player, 'out') ?? null, () => {
-      this.#worldHost!.hidden = false
-      this.#roomHost!.hidden = this.#dungeonHost!.hidden = true
-      this.#world?.refresh()
-    })
-    this.#save()
-    this.#say('Explore the world, compare clues, and fill the shrines with the pieces you have found.')
-  }
-
-  /** Every change of place goes through the veil: the place on show zooms
-   *  into (or shrinks back into) the entrance, and the next place resolves.
-   *  Without a picture to leave from, or without a veil, the swap simply
-   *  happens. */
-  #warp(leave: VeilLeg | null, arrive: VeilLeg | null, swap: () => void): void {
-    if (!this.#veil || !leave || !this.#content) { swap(); return }
-    this.#veil.play({ leave, arrive: arrive ?? { element: this.#content, picture: null, origin: [0.5, 0.5], scale: 1 }, onSwap: swap })
-  }
-
-  showDesigner(): void {
-    if (!this.#root || this.#designer) return
-    if (this.#restoring) { this.#afterRestore = 'design'; return }
-    this.#release()
-    this.#veil?.cancel()
-    this.#save()
-    ++this.#generation
-    this.#closeJournal()
-    this.#closeSlots()
-    this.#mode = 'design'
-    this.#root.hidden = true
-    this.#designer = new SolomonOverlay(() => {
-      this.#designer?.unmount()
-      this.#designer = null
-      if (this.#root) { this.#root.hidden = false; this.#showWorld() }
-    })
-    this.#designer.mount()
-    this.#designer.showDesigner()
-  }
-
-  #recordRelic(): void {
-    const relic = this.journey.lastRelic
-    if (!relic || relic.id === this.#lastRelic) return
-    this.#lastRelic = relic.id
-    if (relic.lore) this.#knowledge.set(relic.id, relic.lore)
-    this.#say(relic.lore ?? 'A new piece joins your star. Its clue is in the journal.')
-    this.#audio.tone({ freq: 660, endFreq: 990, dur: 0.24, vol: 0.06 })
-    this.#dirty = true
-    this.#updateInventory()
-    if (this.journey.completed.has('starbloom')) this.#say('The Pyramid of Accord is open. You found its heart! Return to the world to revisit your discoveries.')
-  }
-
-  #updateInventory(): void {
-    const inventory = this.journey.inventory
-    const text = `▲ ${inventory.triangles.size}/6 · ⬡ ${inventory.hexagon ? '1' : '0'}/1 · ✡ ${inventory.star ? 'Complete' : 'Gathering'}`
-    if (text === this.#inventoryKey) return
-    this.#inventoryKey = text
-    if (this.#inventory) { this.#inventory.textContent = text; this.#inventory.setAttribute('aria-label', `${inventory.triangles.size} of six triangles, ${inventory.hexagon ? 'central hexagon found' : 'central hexagon missing'}, star ${inventory.star ? 'complete' : 'incomplete'}`) }
-    this.#world?.refresh()
-  }
-
-  #openJournal(): void {
-    if (!this.#root || this.#mode === 'loading') return
-    this.#release()
-    this.#closeSlots()
-    this.#world?.closeDialog()
-    this.#dungeon?.closeDialog()
-    this.#closeJournal()
-    const backdrop = element('div', 'sol-adventure-journal')
-    const dialog = element('section')
-    dialog.setAttribute('role', 'dialog')
-    dialog.setAttribute('aria-modal', 'true')
-    dialog.setAttribute('aria-label', 'Knowledge and sigils')
-    dialog.tabIndex = -1
-    dialog.append(element('h2', '', 'Knowledge & sigils'), element('p', '', 'Every piece is a permanent ability. Its story is a clue, too.'))
-    const close = this.#button('Back to exploring', () => this.#closeJournal())
-    dialog.append(close)
-    for (const [key, lore] of Object.entries(RELIC_LORE)) {
-      const owned = key === 'hexagon' ? this.journey.inventory.hexagon : key === 'star' ? this.journey.inventory.star : this.journey.inventory.triangles.has(Number(key.split(':').at(-1)))
-      if (owned) dialog.append(element('h3', '', lore.title), element('p', '', lore.text))
-    }
-    for (const person of WORLD_PEOPLE) if (this.#world?.model.met.has(person.id)) dialog.append(element('h3', '', person.name), element('p', '', person.clue))
-    for (const text of this.#knowledge.values()) dialog.append(element('p', 'sol-journal-note', text))
-    if (!this.#knowledge.size && !this.journey.inventory.relicIds.size) dialog.append(element('p', '', 'Start by talking to the people you meet. Their observations help you reason out the way forward.'))
-    backdrop.append(dialog)
-    this.#root.append(backdrop)
-    this.#journal = backdrop
-    close.focus({ preventScroll: true })
-    dialog.addEventListener('keydown', event => {
-      if (event.key === 'Tab') { event.preventDefault(); close.focus() }
-    })
-  }
-
-  #closeJournal(): void { this.#journal?.remove(); this.#journal = null }
-  #say(message: string): void { if (this.#message) this.#message.textContent = message }
-
   #release = (): void => {
     this.#input.up = this.#input.down = this.#input.left = this.#input.right = false
-    const engine = this.journey.engine
-    if (engine) engine.input.left = engine.input.right = engine.input.down = engine.input.jump = false
   }
 
   #visibility = (): void => { this.#release(); if (document.hidden) this.#save() }
 
+  /** §4.6's one input model, with combat's C/V/N/B folded straight in
+   *  (M5) — a runtime's own `key()` decides what any of them do; the shell
+   *  never asks which kind of place is listening. */
   #keyDown = (event: KeyboardEvent): void => {
-    if (!this.#root || this.#mode === 'design' || event.ctrlKey || event.metaKey || event.altKey) return
+    if (!this.#root || this.#designer || event.ctrlKey || event.metaKey || event.altKey) return
     const key = event.key.toLowerCase()
     if (key === 'escape') {
-      event.preventDefault(); event.stopImmediatePropagation()
-      if (this.#slotPanel) this.#closeSlots()
-      else if (this.#journal) this.#closeJournal()
-      else if (this.#world?.isDialogOpen) this.#world.closeDialog()
-      else if (this.#dungeon?.isDialogOpen) this.#dungeon.closeDialog()
-      else if (this.#world?.dismiss() || this.#dungeon?.dismiss()) { /* a question put away; play goes on */ }
-      else if (this.#mode !== 'world') this.#showWorld()
-      else this.onClose()
+      event.preventDefault(); event.stopPropagation()
+      if (this.#slotPanel) { this.#closeSlots(); return }
+      if (this.#items?.isOpen) { this.#items.close(); return }
+      if (this.#gain?.isOpen) { this.#gain.close(); return }
+      if (this.#here.isDialogOpen) { this.#here.closeDialog(); return }
+      if (this.#busy) { this.#request({ kind: 'leave' }); return }
+      if (this.#path.depth > 1) { this.#request({ kind: 'leave' }); return }
+      this.#onClose()
       return
     }
-    if (this.#slotPanel || this.#journal || this.#world?.isDialogOpen || this.#dungeon?.isDialogOpen) {
+    const dialogOpen = !!this.#slotPanel || !!this.#items?.isOpen || !!this.#gain?.isOpen || this.#here.isDialogOpen
+    if (dialogOpen) {
       if (key === 'e' && !event.repeat && !this.#slotPanel) {
-        // E opened the conversation, so E puts it away again.
-        event.preventDefault(); event.stopImmediatePropagation()
-        if (this.#journal) this.#closeJournal()
-        else if (this.#world?.isDialogOpen) this.#world.closeDialog()
-        else this.#dungeon?.closeDialog()
+        event.preventDefault(); event.stopPropagation()
+        if (this.#items?.isOpen) this.#items.close()
+        else if (this.#gain?.isOpen) this.#gain.close()
+        else this.#here.closeDialog()
         return
       }
-      // Keep movement and hive shortcuts out of an encounter, while preserving
-      // keyboard activation and focus navigation for its real DOM controls.
-      const dialog = this.#root.querySelector<HTMLElement>('[role="dialog"]')
+      const dialog = this.#root.querySelector<HTMLElement>('[role="dialog"]:not([hidden])')
       if (dialog) {
         const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'))
         const target = document.activeElement
@@ -467,49 +663,35 @@ export class SolomonLabyrinthOverlay {
           else if (!event.shiftKey && (target === last || !buttons.includes(target as HTMLButtonElement))) { event.preventDefault(); first?.focus() }
         } else if (KEYS.has(key)) event.preventDefault()
       }
-      event.stopImmediatePropagation()
+      event.stopPropagation()
       return
     }
     if (!KEYS.has(key)) return
     if ((key === 'enter' || key === ' ') && event.target instanceof HTMLButtonElement) return
-    event.preventDefault(); event.stopImmediatePropagation()
+    event.preventDefault(); event.stopPropagation()
     this.#audio.unlock()
-    if (this.#mode === 'loading') return
-    if (key === 'm') { this.#showWorld(); return }
-    if (key === 'e' || key === 'enter') {
-      if (event.repeat) return
-      this.#release()
-      if (this.#mode === 'world') this.#world?.interact()
-      else if (this.#mode === 'dungeon') this.#dungeon?.interact()
-      else this.#door()
-      return
-    }
+    if (this.#busy) { if (key === 'm') this.#request({ kind: 'home' }); return }
+    if (key === 'm') { this.#request({ kind: 'home' }); return }
+    if (key === 'i' && !event.repeat) { this.#openItems(); return }
+    if ((key === 'e' || key === 'enter') && !event.repeat) { this.#release(); this.#here.interact(); return }
     const left = key === 'arrowleft' || key === 'a', right = key === 'arrowright' || key === 'd'
     const up = key === 'arrowup' || key === 'w', down = key === 'arrowdown' || key === 's'
     if (left) this.#input.left = true
     if (right) this.#input.right = true
     if (up) this.#input.up = true
     if (down) this.#input.down = true
-    if (this.#mode === 'world' && !event.repeat && (key === 'z' || key === 'j')) { this.#world?.cast(); return }
-    const engine = this.journey.engine
-    if (this.#mode !== 'room' || !engine) return
-    if (left) engine.input.left = true
-    if (right) engine.input.right = true
-    if (down) engine.input.down = true
-    if (up || key === ' ') engine.input.jump = true
-    if (!event.repeat && (key === 'z' || key === 'j')) engine.cast()
-    if (!event.repeat && (key === 'x' || key === 'k')) engine.fireball()
-    if (!event.repeat && key === 'r') this.journey.retryCurrent()
+    if (!event.repeat && (key === 'z' || key === 'j')) { this.#here.cast(); return }
+    this.#here.key(key, true, event.repeat)
   }
 
   #keyUp = (event: KeyboardEvent): void => {
-    if (this.#mode === 'design') return
+    if (!this.#root || this.#designer) return
     const key = event.key.toLowerCase()
-    const engine = this.journey.engine
-    if (key === 'arrowleft' || key === 'a') { this.#input.left = false; if (engine) engine.input.left = false }
-    if (key === 'arrowright' || key === 'd') { this.#input.right = false; if (engine) engine.input.right = false }
-    if (key === 'arrowup' || key === 'w' || key === ' ') { this.#input.up = false; if (engine) engine.input.jump = false }
-    if (key === 'arrowdown' || key === 's') { this.#input.down = false; if (engine) engine.input.down = false }
+    if (key === 'arrowleft' || key === 'a') this.#input.left = false
+    if (key === 'arrowright' || key === 'd') this.#input.right = false
+    if (key === 'arrowup' || key === 'w' || key === ' ') this.#input.up = false
+    if (key === 'arrowdown' || key === 's') this.#input.down = false
+    this.#here.key(key, false, false)
     if (KEYS.has(key)) event.stopPropagation()
   }
 
@@ -518,37 +700,44 @@ export class SolomonLabyrinthOverlay {
     const dt = this.#lastTs ? Math.min((ts - this.#lastTs) / 1000, 0.05) : 0
     this.#lastTs = ts
     this.#time += dt
-    if (!document.hidden && !this.#journal && !this.#slotPanel) {
-      // While the veil plays, the places hold still: nothing moves on a
-      // world that is zooming into an entrance.
-      const warping = !!this.#veil?.playing
-      if (this.#mode === 'world' && !warping) this.#world?.update(dt, this.#input)
-      if (this.#mode === 'dungeon' && !warping) this.#dungeon?.update(dt, this.#input)
-      if (this.#mode === 'room') {
-        if (!warping) {
-          this.#acc += dt
-          while (this.#acc >= SIM_DT) { this.journey.update(SIM_DT); this.#acc -= SIM_DT }
-          this.#recordRelic()
-          this.#passDoor()
-        }
-        this.#roomView?.render(this.#time)
-      }
+    if (!document.hidden && !this.#slotPanel && !this.#items?.isOpen && !this.#gain?.isOpen && !this.#busy && !this.#designer && !this.#veil?.playing) {
+      this.#here.update(dt, this.#input)
     }
     this.#updateInventory()
     if (this.#time >= this.#saveAt) { this.#saveAt = this.#time + 1; this.#save() }
     this.#raf = requestAnimationFrame(this.#loop)
   }
 
+  #message(text: string): void { if (this.#messageEl) this.#messageEl.textContent = text }
+
+  #updateInventory(): void {
+    const inventory = this.journey.inventory
+    const text = `▲ ${inventory.triangles.size}/6 · ⬡ ${inventory.hexagon ? '1' : '0'}/1 · ✡ ${inventory.star ? 'Complete' : 'Gathering'}`
+    if (text === this.#inventoryKey) return
+    this.#inventoryKey = text
+    if (this.#inventory) { this.#inventory.textContent = text; this.#inventory.setAttribute('aria-label', `${inventory.triangles.size} of six triangles, ${inventory.hexagon ? 'central hexagon found' : 'central hexagon missing'}, star ${inventory.star ? 'complete' : 'incomplete'}`) }
+  }
+
+  // -- saves (§4.9) -----------------------------------------------------------
+
   #snapshot(): unknown {
-    return {
-      version: 2, journey: this.journey.exportState(), world: this.#world!.exportState(),
-      knowledge: [...this.#knowledge], dungeons: [...this.#dungeons].map(([index, view]) => [index, view.exportState()]),
-      location: { mode: this.#mode, dungeon: [...this.#dungeons].find(([, view]) => view === this.#dungeon)?.[0] ?? null },
-    }
+    const places = new Map<string, unknown>()
+    for (const [place, facts] of this.#dormant) places.set(place, facts)
+    for (const [place, runtime] of this.#runtimes) if (place !== LABYRINTH_PLACE.id) places.set(place, runtime.exportFacts())
+    return writeAdventureSave({
+      journey: this.journey.exportState(),
+      knowledge: this.#knowledge,
+      path: this.#path.toJSON(),
+      places,
+      carried: this.#carried,
+      extra: this.#extra,
+      revealed: this.#revealed,
+      found: this.#found,
+    })
   }
 
   #save = (): boolean => {
-    if (!this.#world || !this.#slots || this.#restoring || this.#restoreFailed || this.#mode === 'loading' || this.#mode === 'design') return false
+    if (!this.#slots || this.#restoreFailed || this.#busy) return false
     try {
       const snapshot = this.#snapshot(), serialized = JSON.stringify(snapshot)
       if (serialized === this.#lastSaved && !this.#slots.error) return true
@@ -563,100 +752,88 @@ export class SolomonLabyrinthOverlay {
     }
   }
 
-  #readKnowledge(value: unknown): void {
-    if (!Array.isArray(value)) return
-    for (const pair of value.slice(0, 256)) {
-      if (Array.isArray(pair) && pair.length === 2 && pair.every(item => typeof item === 'string' && item.length <= 4000)) this.#knowledge.set(pair[0], pair[1])
-    }
+  #readKnowledge(pairs: Iterable<readonly [string, string]>): void {
+    for (const [id, text] of pairs) this.#knowledge.set(id, text)
   }
 
   async #restoreSlot(): Promise<void> {
-    if (!this.#slots || !this.#world) return
-    const save = record(this.#slots.read())
+    if (!this.#slots || !this.#root) return
+    const raw = this.#slots.read()
     this.#restoreFailed = false
     this.#lastSaved = ''
-    if (!save) { this.#save(); this.#updateSaveStatus(); return }
-    if (save['version'] === 1) {
-      this.journey.restoreProgress(save['progress'])
-      this.#world.restoreState({ version: 1, filledSockets: save['sockets'], met: save['met'], solved: save['solved'] })
-      this.#readKnowledge(save['knowledge'])
-      this.#updateInventory()
+    const plan = readAdventureSave(raw, STORY)
+    if (!plan) {
+      if (raw !== null) { this.#restoreFailed = true; this.#message('This slot could not be read. Its saved adventure has been kept.') }
       this.#save()
-      return
-    }
-    if (save['version'] !== 2 || !record(save['journey']) || !record(save['world'])) {
-      this.#restoreFailed = true
       this.#updateSaveStatus()
-      this.#say('This slot could not be read. Its saved adventure has been kept.')
       return
     }
-    const generation = ++this.#generation
-    this.#restoring = true
-    this.#mode = 'loading'
-    this.#root?.setAttribute('aria-busy', 'true')
-    this.#say(`Continuing Slot ${this.#slots.activeSlot}…`)
+    const busy: Busy = { kind: 'restore', cancelled: false, intent: null }
+    this.#busy = busy
+    this.#root.setAttribute('aria-busy', 'true')
+    this.#message(`Continuing Slot ${this.#slots.activeSlot}…`)
     try {
-      const state = record(save['journey'])!
-      // Permanent discoveries need no native room, so they show at once. The
-      // full restore below re-applies them once the chambers have hydrated.
-      this.journey.restoreProgress(state['progress'])
-      this.#world.restoreState(save['world'])
-      this.#readKnowledge(save['knowledge'])
+      // Rule 1 — synchronous, before any hydration: permanent discoveries only.
+      this.journey.restoreProgress(plan.progress)
+      this.#carried = [...plan.carried]
+      this.#extra = [...plan.extra]
+      this.#readKnowledge(plan.knowledge)
+      for (const [place, facts] of plan.places) this.#dormant.set(place, facts)
       this.#updateInventory()
-      const ids = new Set(Array.isArray(state['roomIds']) ? state['roomIds'].filter((id): id is string => typeof id === 'string') : [])
-      const labyrinths = new Set(ROOMS.filter(room => ids.has(room.id) || room.id === state['activeRoomId']).map(room => room.labyrinthId))
-      for (const definition of ROOMS.filter(room => labyrinths.has(room.labyrinthId))) {
-        let loaded = this.#loaded.get(definition.id)
-        if (!loaded) {
-          this.#surface ??= createSolomonTileSurface([])
-          loaded = await this.#surface.ensureRoom(definition)
-          if (generation !== this.#generation || !this.#root) return
-          this.#loaded.set(definition.id, loaded)
-        }
-        this.journey.replaceRoom(loaded.room)
+
+      // Rule 2, the labyrinth's own share: hydrate whatever rooms its
+      // journey touched, regardless of whether it sits on the restored
+      // path — a visited room's live state survives even when play
+      // currently continues elsewhere (§4.9/M15).
+      const labyrinth = this.#runtime(LABYRINTH_PLACE.id) as LabyrinthRuntime
+      const hydrated = await Promise.resolve(labyrinth.hydrateFor(plan.journey, () => busy.cancelled))
+      if (busy.cancelled || !this.#root) return
+      if (hydrated) labyrinth.restoreFacts(plan.journey)
+
+      // Walk the saved path, hydrating each step in turn; the first place
+      // that cannot resume (or a cancelled attempt) ends the walk there.
+      const resumable = new Set<string>([ROOT_PLACE])
+      this.#runtime(ROOT_PLACE)
+      const steps: unknown = plan.path
+      let host = ROOT_PLACE
+      for (let i = 1; i < (Array.isArray(steps) ? steps.length : 0); i++) {
+        const step = record((steps as unknown[])[i])
+        const via = step?.['via'], place = step?.['place']
+        if (typeof via !== 'string' || typeof place !== 'string') break
+        const split = splitEntranceKey(via)
+        if (!split || split.place !== host || resumable.has(place) || !PLACES.has(place)) break
+        const seat = seatAt(STORY, via)
+        if (!seat || seat.place !== place) break
+        if (place === LABYRINTH_PLACE.id) { if (labyrinth.canResume()) resumable.add(place); break }
+        const runtime = this.#runtime(place)
+        const ok = await Promise.resolve(runtime.prepare(seat, () => busy.cancelled))
+        if (busy.cancelled || !this.#root) return
+        if (ok !== true) break
+        resumable.add(place)
+        host = place
       }
-      this.journey.restoreState(state)
-      this.#world.restoreState(save['world'])
-      this.#readKnowledge(save['knowledge'])
-      if (Array.isArray(save['dungeons'])) for (const pair of save['dungeons'].slice(0, 2)) {
-        if (Array.isArray(pair) && (pair[0] === 0 || pair[0] === 2)) this.#getDungeon(pair[0]).restoreState(pair[1])
-      }
-      const location = record(save['location'])
-      this.#mode = 'world'
-      if (location?.['mode'] === 'room' && this.journey.room) {
-        const loaded = this.#loaded.get(this.journey.room.id)
-        if (loaded) {
-          this.#mode = 'room'
-          this.#worldHost!.hidden = this.#dungeonHost!.hidden = true
-          this.#roomHost!.hidden = false
-          this.#roomView!.show(loaded)
-        }
-      } else if (location?.['mode'] === 'dungeon' && (location['dungeon'] === 0 || location['dungeon'] === 2)) this.#enterDungeon(location['dungeon'])
-      else this.journey.leave()
-      if (this.#mode === 'world') {
-        this.#worldHost!.hidden = false
-        this.#roomHost!.hidden = this.#dungeonHost!.hidden = true
-      }
-      this.#lastRelic = ''
+      this.#path = PlacePath.restore(plan.path, STORY, PLACES, ROOT_PLACE, place => resumable.has(place))
+      this.#revealed = new Set(plan.revealed ?? heldAttainments(this.#storyFacts()).map(def => def.id))
+      this.#found = new Set(plan.found)
+      for (const step of this.#path.steps) if (step.via) this.#found.add(step.via)
+      for (const [place, runtime] of this.#runtimes) if (place !== this.#path.here.place) runtime.hide()
+      this.#here.show({ from: 'save' })
+      this.#updatePathUI()
       this.#updateInventory()
       this.#lastSaved = JSON.stringify(this.#snapshot())
-      this.#say(`Slot ${this.#slots.activeSlot} continued. Your progress saves automatically.`)
+      this.#message(`Slot ${this.#slots.activeSlot} continued. Your progress saves automatically.`)
     } catch (error) {
-      if (generation !== this.#generation || !this.#root) return
+      if (busy.cancelled || !this.#root) return
       this.#restoreFailed = true
-      this.#mode = 'world'
-      this.#say(`Could not continue this slot. ${error instanceof Error ? error.message : 'Try again from Saves.'} Your saved adventure has been kept.`)
+      this.#path = PlacePath.root(ROOT_PLACE)
+      this.#message(`Could not continue this slot. ${error instanceof Error ? error.message : 'Try again from Saves.'} Your saved adventure has been kept.`)
     } finally {
-      if (generation === this.#generation) {
-        this.#restoring = false
+      if (!busy.cancelled) {
+        this.#busy = null
         this.#root?.removeAttribute('aria-busy')
         this.#updateSaveStatus()
-        // World and Designer wait for a pending continue: interrupting it would
-        // strand a half-restored adventure that never saves again.
-        const request = this.#afterRestore
-        this.#afterRestore = null
-        if (request === 'design') this.showDesigner()
-        else if (request === 'world' && !this.#restoreFailed) this.#showWorld()
+        const next = busy.intent
+        if (next) this.#request(next)
       }
     }
   }
@@ -677,9 +854,10 @@ export class SolomonLabyrinthOverlay {
   }
 
   #openSlots(confirmReset?: number): void {
-    if (!this.#root || !this.#slots || this.#mode === 'loading') return
+    if (!this.#root || !this.#slots || this.#busy) return
     this.#release()
-    this.#world?.closeDialog(); this.#dungeon?.closeDialog(); this.#closeJournal()
+    this.#here.closeDialog()
+    this.#gain?.close(); this.#items?.close()
     this.#save()
     this.#closeSlots()
     const backdrop = element('div', 'sol-save-backdrop')
@@ -693,8 +871,9 @@ export class SolomonLabyrinthOverlay {
       const active = slot.id === this.#slots.activeSlot
       const info = element('div', 'sol-save-info')
       info.append(element('strong', '', `Slot ${slot.id}${active ? ' · Playing' : ''}`))
-      const payload = record(this.#slots.read(slot.id)), journey = record(payload?.['journey']), progress = record(journey?.['progress'] ?? payload?.['progress'])
-      const pieces = Array.isArray(progress?.['relicIds']) ? progress['relicIds'].length : 0
+      const plan = readAdventureSave(this.#slots.read(slot.id), STORY)
+      const relicIds = record(plan?.progress)?.['relicIds']
+      const pieces = Array.isArray(relicIds) ? relicIds.length : 0
       info.append(element('small', '', slot.occupied ? `${pieces} discoveries · ${slot.updatedAt ? new Date(slot.updatedAt).toLocaleString() : 'Saved adventure'}` : 'New adventure'))
       row.append(info)
       if (confirmReset === slot.id) {
@@ -719,24 +898,28 @@ export class SolomonLabyrinthOverlay {
   }
 
   #freshSession(): void {
-    ++this.#generation
-    this.#restoring = this.#restoreFailed = false
+    if (this.#busy) this.#busy.cancelled = true
+    this.#busy = null
     this.#release()
     this.#veil?.cancel()
-    this.#world?.dispose(); this.#roomView?.dispose()
-    for (const dungeon of this.#dungeons.values()) dungeon.dispose()
-    this.#dungeons.clear(); this.#knowledge.clear()
-    this.#dungeon = null
-    this.#worldHost!.replaceChildren(); this.#roomHost!.replaceChildren(); this.#dungeonHost!.replaceChildren()
+    this.#gain?.close(); this.#items?.close()
+    for (const runtime of this.#runtimes.values()) { runtime.dispose(); runtime.host.remove() }
+    this.#runtimes.clear()
+    this.#loaded.clear()
+    this.#knowledge.clear()
+    this.#dormant.clear()
+    this.#carried = []
+    this.#extra = []
+    this.#revealed = new Set()
+    this.#found = new Set()
+    this.#lastRelic = ''
     this.journey = new LabyrinthJourney()
-    for (const loaded of this.#loaded.values()) this.journey.replaceRoom(loaded.room)
-    this.#mode = 'world'
-    this.#worldHost!.hidden = false
-    this.#roomHost!.hidden = this.#dungeonHost!.hidden = true
+    this.#path = PlacePath.root(ROOT_PLACE)
+    this.#here.show({ from: 'save' })
+    this.#updatePathUI()
+    this.#updateInventory()
     this.#root?.removeAttribute('aria-busy')
-    this.#lastRelic = this.#lastSaved = ''
-    this.#acc = 0
-    this.#mountSession()
+    this.#lastSaved = ''
   }
 
   async #switchSlot(id: number): Promise<void> {
@@ -754,11 +937,11 @@ export class SolomonLabyrinthOverlay {
     this.#closeSlots()
     this.#freshSession()
     await this.#restoreSlot()
-    this.#say(`Slot ${id} reset. Your new adventure saves automatically.`)
+    this.#message(`Slot ${id} reset. Your new adventure saves automatically.`)
   }
 
   unmount(): void {
-    ++this.#generation
+    if (this.#busy) this.#busy.cancelled = true
     this.#save()
     this.#release()
     if (this.#raf) cancelAnimationFrame(this.#raf)
@@ -772,10 +955,12 @@ export class SolomonLabyrinthOverlay {
     this.#designer = null
     this.#veil?.dispose()
     this.#veil = null
-    this.#world?.dispose()
-    this.#roomView?.dispose()
-    for (const dungeon of this.#dungeons.values()) dungeon.dispose()
-    this.#dungeons.clear()
+    this.#gain?.dispose()
+    this.#gain = null
+    this.#items?.dispose()
+    this.#items = null
+    for (const runtime of this.#runtimes.values()) runtime.dispose()
+    this.#runtimes.clear()
     this.#audio.dispose()
     this.#root?.remove()
     this.#root = null
@@ -790,9 +975,12 @@ const ADVENTURE_CSS = `
 .sol-adventure-bar strong{font-size:16px;white-space:nowrap}.sol-adventure-bar button,.sol-adventure-touch button{border:1px solid #9ab2d24d;background:#4b658b33;padding:7px 11px;border-radius:7px;font-size:12px}.sol-adventure-bar button:hover{background:#6186aa66}
 .sol-adventure-inventory{margin-right:auto;margin-left:15px;white-space:nowrap;font-size:12px;color:#edce95;font-variant-numeric:tabular-nums}
 .sol-save-status{font-size:10px;color:#afc6b9}.sol-save-backdrop{position:absolute;inset:0;z-index:30;display:grid;place-items:center;background:#071624a8;padding:14px}.sol-save-panel{width:min(100%,520px);max-height:100%;overflow:auto;border:1px solid #a9bdbb66;border-radius:14px;padding:22px;background:#1b303e;box-shadow:0 20px 70px #0006}.sol-save-panel h2{font-size:20px;margin:0 0 6px}.sol-save-panel>p{font-size:12px;color:#b9ccc6;line-height:1.5}.sol-save-panel button{border:1px solid #879d9755;border-radius:7px;padding:7px 11px;background:#36564e;font-size:12px}.sol-save-slot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border:1px solid #819f963d;border-radius:9px;padding:12px;margin:12px 0}.sol-save-info{flex:1;min-width:180px}.sol-save-info strong,.sol-save-info small{display:block}.sol-save-info small{font-size:11px;color:#b5c9c2;margin-top:5px}.sol-save-reset-note{flex-basis:100%;margin:3px 0;font-size:12px;color:#f2cb93}.sol-save-error{color:#f2cb93!important}
-.sol-adventure-content{position:relative;flex:1;min-height:0;padding:14px 24px;overflow:hidden}.sol-adventure-world,.sol-adventure-rooms,.sol-adventure-dungeon,.sol-adventure-expedition{height:100%;min-height:0}
+.sol-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:6px 20px;font-size:11px;color:#c3d3e6;background:#0f1e30aa;border-bottom:1px solid #a3bedb14}
+.sol-crumb{background:none;border:0;padding:2px 4px;color:#cfe0f2;text-decoration:underline;font-size:11px}.sol-crumb-sep{opacity:.5}.sol-crumb-here{color:#ffdc96;font-weight:600}
+.sol-adventure-content{position:relative;flex:1;min-height:0;padding:14px 24px;overflow:hidden}.sol-adventure-place{height:100%;min-height:0}
+.sol-card{position:absolute;left:24px;top:14px;z-index:15;display:flex;flex-direction:column;gap:2px;padding:8px 12px;border-radius:10px;background:#0f1e30cc;border:1px solid #a3bedb22;pointer-events:none;max-width:60%}
+.sol-card strong{font-size:13px}.sol-card span{font-size:10.5px;color:#c3d3e6}.sol-card-up,.sol-card-surface{color:#ffdc96}
 .sol-adventure-message{min-height:38px;padding:8px 20px;border-top:1px solid #a3bedb22;text-align:center;font-size:12px;line-height:1.5;color:#dfd9bd;background:#14273d99}
-.sol-adventure[aria-busy=true] .sol-adventure-content{opacity:.65;pointer-events:none}.sol-adventure-touch{display:none;justify-content:center;gap:8px;padding:8px;touch-action:none;background:#162a42}
-.sol-adventure-journal{position:absolute;inset:0;z-index:20;display:grid;place-items:center;background:#071624b8;padding:30px}.sol-adventure-journal section{background:#f6f0df;color:#29394a;border:1px solid #fceac5;border-radius:16px;padding:26px 32px;max-width:660px;max-height:100%;overflow:auto;box-shadow:0 25px 80px #05142588}.sol-adventure-journal h2{margin-top:0}.sol-adventure-journal h3{margin:24px 0 7px;color:#706048;font-size:15px}.sol-adventure-journal p{line-height:1.65}.sol-adventure-journal button{background:#264b60;border:0;border-radius:8px;color:#fff;padding:10px 15px}.sol-journal-note{border-left:3px solid #c7aa63;padding-left:13px}
-@media(pointer:coarse){.sol-adventure-touch{display:flex}}@media(max-width:700px){.sol-adventure-bar{gap:6px;padding:9px 12px}.sol-adventure-bar strong{font-size:14px}.sol-adventure-inventory{font-size:10px;margin-left:5px}.sol-adventure-bar button{font-size:10px;padding:6px 8px}.sol-adventure-content{padding:10px}.sol-adventure-message{font-size:11px;padding:7px 12px}.sol-adventure-journal{padding:12px}.sol-adventure-journal section{padding:20px}.sol-adventure-touch{gap:5px}.sol-adventure-touch button{padding:8px}}
+.sol-adventure[aria-busy=true] .sol-adventure-content{opacity:.65;pointer-events:none}.sol-adventure-touch{display:none;justify-content:center;gap:8px;padding:8px;touch-action:none;background:#162a42;flex-wrap:wrap}
+@media(pointer:coarse){.sol-adventure-touch{display:flex}}@media(max-width:700px){.sol-adventure-bar{gap:6px;padding:9px 12px}.sol-adventure-bar strong{font-size:14px}.sol-adventure-inventory{font-size:10px;margin-left:5px}.sol-adventure-bar button{font-size:10px;padding:6px 8px}.sol-adventure-content{padding:10px}.sol-adventure-message{font-size:11px;padding:7px 12px}.sol-crumbs{padding:5px 12px}.sol-card{left:12px;top:8px;max-width:75%}.sol-adventure-touch{gap:5px}.sol-adventure-touch button{padding:8px}}
 `

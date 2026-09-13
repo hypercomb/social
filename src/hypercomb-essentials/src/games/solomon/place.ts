@@ -220,7 +220,7 @@ export function validateStory(story: readonly StorySeat[], places: PlaceCatalog,
 
 function isPlaceStepLike(value: unknown): value is { place: string; via: string | null } {
   if (!value || typeof value !== 'object') return false
-  const v = value as Record<string, unknown>
+  const v = value as { readonly place?: unknown; readonly via?: unknown }
   return typeof v.place === 'string' && (v.via === null || typeof v.via === 'string')
 }
 

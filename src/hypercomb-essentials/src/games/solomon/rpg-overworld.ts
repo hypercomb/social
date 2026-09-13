@@ -294,8 +294,8 @@ export const WORLD_PEOPLE: readonly WorldPerson[] = [
 
 export const WORLD_DUNGEONS: readonly WorldDungeon[] = [
   // (2) A2.2/D6 — moved off the valley's own walking lines; id/name/levelIndex unchanged.
-  { kind: 'dungeon', id: 'wayfarer-cavern', name: 'Wayfarer Cavern', ...valleyPoint(10, 11), levelIndex: 0, subtitle: 'A scrolling dungeon', clue: 'An expedition through longer ruins. Read its inscriptions, interpret the rune sequence, and open the way onward. Return to the world with what you have learned.' },
-  { kind: 'dungeon', id: 'highland-cavern', name: 'Highland Cavern', ...valleyPoint(20, 4), levelIndex: 2, subtitle: 'A deeper scrolling expedition', clue: 'An optional expedition through a larger cavern. Search for inscriptions and gather the information that explains its rune gate.' },
+  { kind: 'dungeon', id: 'wayfarer-cavern', name: 'Wayfarer Cavern', ...valleyPoint(10, 11), levelIndex: 0, subtitle: 'Three chambers, deeper each time', clue: 'A descent through the Wet Steps, the Cistern and the Spring Heart. Read its inscriptions, interpret the rune sequence, and open the way onward. Return to the world with what you have learned.' },
+  { kind: 'dungeon', id: 'highland-cavern', name: 'Highland Cavern', ...valleyPoint(20, 4), levelIndex: 2, subtitle: 'A longer, three-chamber descent', clue: 'An optional descent through the Hall of Hours, the Six Roads and the Accord Sanctum. Search for inscriptions and gather the information that explains its rune gate.' },
 ]
 
 /** (2) A4.1 — a house door: an island portal like a shrine or cave mouth, but

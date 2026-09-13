@@ -5,7 +5,7 @@
 // fixture file outside this spec — everything lives here.
 import { describe, expect, it } from 'vitest'
 import {
-  buildChamber, ChamberModel, PUSH_DELAY, REARM_DISTANCE, TARGET_REACH, CHAMBER_SPEED,
+  buildChamber, ChamberModel, PUSH_DELAY, REARM_DISTANCE, CHAMBER_SPEED,
   type ChamberDefinition, type ChamberCell, type ChamberEvent, type Facing, type MoveInput,
 } from './chamber.js'
 import {
@@ -380,6 +380,7 @@ describe('doorway/gate thresholds — real content, before and after', () => {
     pilot.castFrom(6, 7, 'up')
     pilot.open('rusted-key-chest')
     pilot.unlock('hall-door')
+    pilot.read('garden')
     pilot.attune('cycle', ['rain', 'sun', 'bloom'])
     expect(model.open(17, 10)).toBe(true)
   })
@@ -502,16 +503,21 @@ describe.each(FRAMES)('walkthroughs at dt=%s', dt => {
     events.push(p.open('lodestone-chest').events as ChamberEvent[])
     events.push(p.read('center').events as ChamberEvent[])
     events.push(p.read('three-plates').events as ChamberEvent[])
-    p.castFrom(4, 14, 'up')   // -> (4,13)
-    p.castFrom(4, 14, 'down') // -> (4,15) — both from the same spot, before
-    p.castFrom(7, 14, 'left') // crossing the gap rune (6,14) laid last, since
-    expect(model.sealOpen()).toBe(true) // laying it first would wall the traveller off from (4,14).
+    // The gap rune (6,14) is this pocket's ONLY door. Cast it FIRST, from
+    // the left side, without crossing — then the other two, still inside —
+    // so all three lay while the traveller never left, and the seal (all
+    // three, this room's only 'r'-glyph cells) opens around them.
+    p.castFrom(5, 14, 'right') // -> (6,14), 1 of 3
+    p.castFrom(4, 14, 'up')    // -> (4,13), 2 of 3
+    const thirdCast = p.castFrom(4, 14, 'down') // -> (4,15), 3 of 3 — seal opens
+    events.push(thirdCast.events as ChamberEvent[])
+    expect(model.sealOpen()).toBe(true)
     events.push(p.open('warden-key-chest').events as ChamberEvent[])
-    // Lift the gap brick clear again from the LEFT side — the traveller is
-    // inside the small rune pocket at this point (its only door in or out
-    // IS the gap rune itself), so re-approach from (5,14), not (7,14).
+    // Lift the gap brick again to cross back out — the seal closes (only
+    // two of three now laid), which is fine: the key is already in hand.
     p.castFrom(5, 14, 'right')
     expect(model.sealOpen()).toBe(false)
+    p.castFrom(21, 2, 'right') // -> (22,2), the crack behind rest-chest
     events.push(p.open('rest-chest').events as ChamberEvent[])
     events.push(p.read('unlit-road').events as ChamberEvent[])
     events.push(p.light('west-lamp').events as ChamberEvent[])
@@ -541,17 +547,22 @@ describe.each(FRAMES)('walkthroughs at dt=%s', dt => {
     events.push(p.read('six-plates').events as ChamberEvent[])
     p.push('west-stone', 'down', 1)
     p.push('west-stone', 'left', 3) // -> memory-plate (7,7)
-    p.push('east-stone', 'down', 1) // clears (14,6) so its own rune can be cast
     expect(model.shutterOpen('memory-shutter')).toBe(true)
+    // The seal itself (sealOpen()) is defined over the four corner rune
+    // cells only — the two under-stone 'q' plates (10,6)/(14,6) are "a
+    // normal rune plate" once their block leaves, castable for the full
+    // hexagram, but chamber.ts's own #sealCells never counts them (only
+    // literal 'r'-glyph cells), so the four corners alone open the seal.
     p.castFrom(10, 1, 'down') // -> (10,2)
     p.castFrom(14, 1, 'down') // -> (14,2)
     p.castFrom(7, 4, 'right') // -> (8,4)
-    p.castFrom(17, 4, 'left') // -> (16,4)
-    p.castFrom(10, 5, 'down') // -> (10,6), now clear
-    const lastCast = p.castFrom(14, 5, 'down') // -> (14,6), now clear
+    const lastCast = p.castFrom(17, 4, 'left') // -> (16,4), completes the seal
     events.push(lastCast.events as ChamberEvent[])
     expect(model.sealOpen()).toBe(true)
     expect(lastCast.events.some(e => e.kind === 'finale')).toBe(true)
+    p.push('east-stone', 'down', 1) // clear (14,6) for the optional flourish cast
+    p.castFrom(10, 5, 'down') // -> (10,6), the hexagram's remaining two plates,
+    p.castFrom(14, 5, 'down') // -> (14,6), purely decorative — not seal-gating
     const claimed = p.claim('accord-crystal')
     events.push(claimed.events as ChamberEvent[])
     events.push(p.read('pale-plate').events as ChamberEvent[])
@@ -891,11 +902,18 @@ describe('arriving never bounces', () => {
       let fired = false
       for (let t = 0; t < 1.0; t += 1 / 60) fired ||= model.update(1 / 60, input).some(e => e.kind === 'navigate')
       expect(fired, `${def.id}/${exit.id} bounced immediately on arrival`).toBe(false)
-      // Step away far enough to re-arm, then return and push: fires exactly once.
-      const away: Facing = pushDir === 'up' ? 'down' : pushDir === 'down' ? 'up' : pushDir === 'left' ? 'right' : 'left'
+      // Step away far enough to re-arm, then return and push: fires exactly
+      // once. The direction opposite the push isn't always open ground (a
+      // settling stone, water, a wall can sit right there) — try every
+      // direction in turn and keep whichever actually gains distance.
       const pilot = new ChamberPilot(model, def, 1 / 60)
-      const awayInput: MoveInput = { ...IDLE, [away]: true }
-      for (let t = 0; t < 1.0 && Math.hypot(model.x - (exit.landing.col + 0.5), model.y - (exit.landing.row + 0.5)) < REARM_DISTANCE; t += 1 / 60) model.update(1 / 60, awayInput)
+      const clear = (): number => Math.hypot(model.x - (exit.landing.col + 0.5), model.y - (exit.landing.row + 0.5))
+      for (const away of Object.keys(DIR_VECTOR) as Facing[]) {
+        if (clear() >= REARM_DISTANCE) break
+        const awayInput: MoveInput = { ...IDLE, [away]: true }
+        for (let t = 0; t < 0.5 && clear() < REARM_DISTANCE; t += 1 / 60) model.update(1 / 60, awayInput)
+      }
+      expect(clear(), `${def.id}/${exit.id}: no direction re-armed it`).toBeGreaterThanOrEqual(REARM_DISTANCE)
       pilot.walkTo(exit.landing.col + 0.5, exit.landing.row + 0.5)
       // A real player leaves the model behind the instant this fires (a new
       // model is built for wherever they arrive) — holding input against

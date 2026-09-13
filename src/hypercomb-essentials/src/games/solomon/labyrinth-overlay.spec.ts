@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { WALL } from './engine.js'
 import { type RoomDef } from './labyrinth.js'
 import { SolomonLabyrinthOverlay } from './labyrinth-overlay.js'
 import { SAVE_SLOTS_KEY } from './save-slots.js'
@@ -28,7 +27,6 @@ vi.mock('../audio.js', () => ({
 function hydrate(definition: RoomDef): LoadedTileRoom {
   const room = structuredClone(definition)
   room.level.name = `Native ${definition.level.name}`
-  room.level.tiles[2 * room.level.cols + 4] = WALL
   const roomSegments = ['solomon-maze-v1', room.id]
   return {
     room, level: room.level, roomSegments,
@@ -53,11 +51,7 @@ function frame(): void {
 function key(type: 'keydown' | 'keyup', value: string): void {
   window.dispatchEvent(new KeyboardEvent(type, { key: value, bubbles: true, cancelable: true }))
 }
-function walk(value: string, frames: number): void {
-  key('keydown', value)
-  for (let i = 0; i < frames; i++) frame()
-  key('keyup', value)
-}
+function tap(value: string): void { key('keydown', value); key('keyup', value) }
 function button(label: string, root: ParentNode = document): HTMLButtonElement {
   const result = [...root.querySelectorAll<HTMLButtonElement>('button')].find(candidate => candidate.textContent?.trim() === label)
   expect(result, `button ${label}`).toBeTruthy()
@@ -65,8 +59,11 @@ function button(label: string, root: ParentNode = document): HTMLButtonElement {
 }
 function marker(name: string): HTMLButtonElement {
   const result = document.querySelector<HTMLButtonElement>(`.sol-rpg-place[aria-label^="${name},"]`)
-  expect(result).toBeTruthy()
+  expect(result, `marker ${name}`).toBeTruthy()
   return result!
+}
+function crumbs(): string[] {
+  return [...document.querySelectorAll('.sol-crumb, .sol-crumb-here')].map(node => node.textContent ?? '')
 }
 function mount(): SolomonLabyrinthOverlay {
   let overlay: SolomonLabyrinthOverlay
@@ -76,54 +73,53 @@ function mount(): SolomonLabyrinthOverlay {
   frame()
   return overlay
 }
+/** A gain screen fires automatically for Mira's own reward (rpg-overworld.ts
+ *  already calls `hooks.gain(...)` for a person's reward, unchanged from
+ *  Phase 1) — closed here so the world's own dialog is the next thing E
+ *  reaches, exactly like a player clicking the card's own × would do. */
+function closeGainIfOpen(): void {
+  const card = document.querySelector<HTMLElement>('.sol-gain')
+  if (card && !card.hidden) card.querySelector<HTMLButtonElement>('.sol-gain-close')!.click()
+}
 function solveMira(): void {
   marker('Mira').click()
   expect(document.querySelector('.sol-rpg-clue')?.textContent).toContain('sunrise')
   button('East, toward sunrise').click()
-  key('keydown', 'e')
-  key('keyup', 'e')
+  closeGainIfOpen()
+  tap('e')
 }
+function walk(value: string, frames: number): void {
+  key('keydown', value)
+  for (let i = 0; i < frames; i++) frame()
+  key('keyup', value)
+}
+/** The lake blocks the direct western route; follow the map's clear path. */
 function walkToDawn(): void {
-  // The lake blocks the direct western route. Follow the map's clear path.
   walk('ArrowRight', 19)
   walk('ArrowUp', 38)
 }
 function fillDawn(): void {
+  walkToDawn()
   marker('Dawn Shrine').click()
   const socket = document.querySelector<HTMLButtonElement>('.sol-rpg-socket')!
   expect(socket.disabled).toBe(false)
   socket.click()
   expect(document.querySelector('.sol-rpg-dialog')).toBeNull()
 }
-function enter(): void {
-  key('keydown', 'Enter')
-  key('keyup', 'Enter')
-}
+/** Once Dawn Shrine is open it is a portal (D1: E/Enter never enter a
+ *  push-entrance — only a completed push or a click on its marker does), so
+ *  entering it from the tests means clicking its marker again. */
+function enterDawnShrine(): void { marker('Dawn Shrine').click() }
 async function settle(): Promise<void> { for (let i = 0; i < 12; i++) await Promise.resolve() }
-function stored(): { location: { mode: string }, world: { player: unknown } } {
-  return JSON.parse(localStorage.getItem(SAVE_SLOTS_KEY)!).slots[1].payload
-}
-/** Saves inside the Dawn Shrine, then reopens with the continue's first native
- *  room still hydrating. `finish` lets that room load. */
-async function pendingContinue(): Promise<{ overlay: SolomonLabyrinthOverlay, finish: () => Promise<void> }> {
-  const first = mount()
+async function enterSunseed(): Promise<void> {
   solveMira()
-  walkToDawn()
   fillDawn()
-  enter()
+  enterDawnShrine()
   await settle()
-  first.engine!.arrive(first.journey.room!.relics[0])
   frame()
-  first.unmount()
-  let resolve!: (value: LoadedTileRoom) => void
-  let requested!: RoomDef
-  native.ensure.mockImplementationOnce((room: RoomDef) => {
-    requested = room
-    return new Promise<LoadedTileRoom>(done => { resolve = done })
-  })
-  const overlay = mount()
-  expect(document.querySelector('.sol-adventure')?.getAttribute('aria-busy')).toBe('true')
-  return { overlay, finish: async () => { resolve(hydrate(requested)); await settle() } }
+}
+function stored(): Record<string, unknown> {
+  return JSON.parse(localStorage.getItem(SAVE_SLOTS_KEY)!).slots[1].payload
 }
 
 beforeEach(() => {
@@ -148,107 +144,191 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('the Solomon adventure shell with real journey and world models', () => {
-  it('solves an NPC clue, fills a shrine, hydrates native rooms and warps between fixed 192-tile surfaces', async () => {
+describe('the path shell', () => {
+  it('mounts on the island, one breadcrumb deep', () => {
     const overlay = mount()
-    solveMira()
-    expect(overlay.journey.collected('mira-dawn-triangle')).toBe(true)
-    walkToDawn()
-    fillDawn()
-    expect(overlay.journey.inventory.triangles.has(0)).toBe(true)
-    enter()
+    expect(crumbs()).toEqual(['The Sevenfold Valley'])
+    expect(document.querySelector('.sol-rpg-map')).not.toBeNull()
+    expect(overlay.journey.room).toBeNull()
+  })
+
+  it('solves Mira, fills the Dawn Shrine, and pushes into its labyrinth — deepening the path and hydrating native rooms', async () => {
+    const overlay = mount()
+    await enterSunseed()
+    expect(overlay.journey.room?.id).toBe('sunseed-porch')
+    expect(native.ensure).toHaveBeenCalledTimes(4)
+    expect(crumbs()).toEqual(['The Sevenfold Valley', 'A labyrinth'])
+    expect(document.querySelector('.sol-room-caption')?.textContent).toContain('Native The Sun Porch')
+  })
+
+  it('says why a shrine cannot open while the hive’s tiles are not ready, and the next push tries again', async () => {
+    native.create.mockImplementationOnce(() => { throw new Error('Hypercomb tiles are not ready yet; reopen Solomon’s Key when the hive has loaded') })
+    const overlay = mount()
+    await enterSunseed()
+    expect(overlay.journey.room).toBeNull()
+    expect(document.querySelector('.sol-adventure')?.hasAttribute('aria-busy')).toBe(false)
+    expect(document.querySelector('.sol-adventure')?.textContent).toContain('Hypercomb tiles are not ready yet')
+    enterDawnShrine()
     await settle()
     frame()
-    expect(native.ensure).toHaveBeenCalledTimes(4)
     expect(overlay.journey.room?.id).toBe('sunseed-porch')
-    expect(overlay.engine?.tileAt(4, 2)).toBe(WALL)
-    expect(document.querySelector('.sol-room-caption')?.textContent).toContain('Native The Sun Porch')
-    let cells = [...document.querySelectorAll<HTMLElement>('.sol-game-tile')]
-    expect(cells).toHaveLength(192)
-    expect(new Set(cells.map(cell => cell.dataset.cell)).size).toBe(192)
-    expect(cells.every(cell => cell.dataset.cell?.startsWith('solomon-maze-v1/sunseed-porch/'))).toBe(true)
-    expect((document.querySelector('.sol-adventure-world') as HTMLElement).hidden).toBe(true)
+  })
+
+  it('crosses a door by touching it, and the World button surfaces straight back to the island mid-labyrinth', async () => {
+    const overlay = mount()
+    await enterSunseed()
     overlay.engine!.arrive(overlay.journey.room!.relics[0])
     frame()
-    expect(overlay.journey.inventory.triangles.has(1)).toBe(true)
+    closeGainIfOpen() // the touch-picked sigil piece is a reveal too (M2/A5.5) — the loop pauses under it
     overlay.engine!.arrive(overlay.journey.room!.doors.find(door => door.id === 'deeper')!)
-    key('keydown', 'e')
-    key('keyup', 'e')
     frame()
     expect(overlay.journey.room?.id).toBe('sunseed-steps')
-    cells = [...document.querySelectorAll<HTMLElement>('.sol-game-tile')]
-    expect(cells).toHaveLength(192)
-    expect(cells.every(cell => cell.dataset.cell?.startsWith('solomon-maze-v1/sunseed-steps/'))).toBe(true)
-    expect(document.querySelector('.sol-room-board')?.getAttribute('data-depth')).toBe('1')
-    expect(native.ensure).toHaveBeenCalledTimes(4)
+    button('World').click()
+    frame()
+    expect(crumbs()).toEqual(['The Sevenfold Valley'])
+    expect(document.querySelector('.sol-rpg-map')).not.toBeNull()
   })
 
-  it('passes through a door by touching it — no key — and never bounces straight back through the arrival door', async () => {
+  it('pushes into a cavern chamber from the island, and a crumb click returns to the island', () => {
+    mount()
+    walk('ArrowRight', 24)
+    marker('Wayfarer Cavern').click()
+    frame()
+    expect(crumbs().length).toBe(2)
+    expect(crumbs()[0]).toBe('The Sevenfold Valley')
+    expect(crumbs()[1]).toContain('Wet Steps')
+    button(crumbs()[0]).click()
+    frame()
+    expect(crumbs()).toEqual(['The Sevenfold Valley'])
+  })
+})
+
+describe('combat skills reach the shell through the one GainScreen and ItemsTable (M2/M3/M4)', () => {
+  it('reveals a fresh stele through the GainScreen, and Escape closes it without leaving the room (M3)', async () => {
     const overlay = mount()
-    solveMira()
-    walkToDawn()
-    fillDawn()
-    enter()
-    await settle()
+    await enterSunseed()
+    overlay.engine!.arrive({ col: 3, row: 10 }) // the Stele of the Stand, one tile from spawn
     frame()
-    expect(overlay.journey.room?.id).toBe('sunseed-porch')
-    // The deeper door needs the porch's triangle first — a locked door says so
-    // once and stays a door.
-    const deeper = overlay.journey.room!.doors.find(door => door.id === 'deeper')!
-    overlay.engine!.arrive(deeper)
+    tap('e')
+    expect(document.querySelector<HTMLElement>('.sol-gain')?.hidden).toBe(false)
+    expect(document.querySelector('.sol-gain-eyebrow')?.textContent).toBe('A COMBAT SKILL')
+    expect(document.querySelector('.sol-gain-title')?.textContent).toBe('The Stand')
+    expect(overlay.journey.kit.includes('stand')).toBe(true)
+    key('keydown', 'Escape')
+    expect(document.querySelector<HTMLElement>('.sol-gain')?.hidden).toBe(true)
+    expect(overlay.journey.room?.id, 'Escape closed the card, not the room (M3)').toBe('sunseed-porch')
+  })
+
+  it('reading an already-learned stele again prints its words to the status line instead of reopening the card', async () => {
+    const overlay = mount()
+    await enterSunseed()
+    overlay.engine!.arrive({ col: 3, row: 10 })
     frame()
-    expect(overlay.journey.room?.id, 'a locked door does not pass').toBe('sunseed-porch')
-    expect(document.querySelector('.sol-adventure-message')?.textContent).toContain('opens this door')
+    tap('e')
+    key('keydown', 'Escape')
+    tap('e')
+    expect(document.querySelector<HTMLElement>('.sol-gain')?.hidden).toBe(true)
+    expect(document.querySelector('.sol-adventure-message')?.textContent).toContain('Meet what')
+  })
+
+  it('closes an open GainScreen on every navigation path, including the header World button (M25)', async () => {
+    const overlay = mount()
+    await enterSunseed()
+    overlay.engine!.arrive({ col: 3, row: 10 })
+    frame()
+    tap('e')
+    expect(document.querySelector<HTMLElement>('.sol-gain')?.hidden).toBe(false)
+    button('World').click()
+    frame()
+    expect(document.querySelector<HTMLElement>('.sol-gain')?.hidden).toBe(true)
+    expect(crumbs()).toEqual(['The Sevenfold Valley'])
+    expect(overlay.journey.kit.includes('stand')).toBe(true)
+  })
+
+  it('closes an open GainScreen on the breadcrumb path too (M25)', async () => {
+    const overlay = mount()
+    await enterSunseed()
+    overlay.engine!.arrive({ col: 3, row: 10 })
+    frame()
+    tap('e')
+    expect(document.querySelector<HTMLElement>('.sol-gain')?.hidden).toBe(false)
+    button(crumbs()[0]).click() // the island crumb, not a keyboard path
+    frame()
+    expect(document.querySelector<HTMLElement>('.sol-gain')?.hidden).toBe(true)
+    expect(crumbs()).toEqual(['The Sevenfold Valley'])
+    expect(overlay.journey.kit.includes('stand')).toBe(true)
+  })
+
+  it('opens the Items table with I and closes it with Escape', async () => {
+    mount()
+    tap('i')
+    expect(document.querySelector<HTMLElement>('.sol-items')?.hidden).toBe(false)
+    key('keydown', 'Escape')
+    expect(document.querySelector<HTMLElement>('.sol-items')?.hidden).toBe(true)
+  })
+
+  it('equips a freshly-learned weapon from the Items table, and the shell confirms it in one line (M4)', async () => {
+    const overlay = mount()
+    await enterSunseed()
     overlay.engine!.arrive(overlay.journey.room!.relics[0])
     frame()
-    const passage = document.querySelector<HTMLElement>('.sol-passage[data-door="deeper"]')!
-    expect(passage.textContent, 'a door wears no glyph').toBe('')
-    expect(passage.dataset.shape).toBeTruthy()
-    expect(passage.style.getPropertyValue('--door-h')).toMatch(/^\d+$/)
-    overlay.engine!.arrive(deeper)
+    closeGainIfOpen()
+    overlay.engine!.arrive(overlay.journey.room!.doors.find(door => door.id === 'deeper')!)
     frame()
-    expect(overlay.journey.room?.id, 'standing in the door is enough').toBe('sunseed-steps')
-    for (let i = 0; i < 5; i++) frame()
-    expect(overlay.journey.room?.id, 'the arrival door does not take her straight back').toBe('sunseed-steps')
-    expect(overlay.journey.arrivalDoor).toBeTruthy()
-    // The door back wears the colour of the porch, and the porch is known.
-    const back = document.querySelector<HTMLElement>('.sol-passage.known')
-    expect(back).not.toBeNull()
-    overlay.unmount()
-    expect(pendingFrames.size, 'the veil leaves no frame behind').toBe(0)
+    expect(overlay.journey.room?.id).toBe('sunseed-steps')
+    overlay.engine!.arrive({ col: 12, row: 8 }) // the chest that gives the Sickle of the Sun
+    frame()
+    tap('e')
+    expect(document.querySelector('.sol-gain-title')?.textContent).toBe('Sickle of the Sun')
+    key('keydown', 'Escape')
+    tap('i')
+    const panel = document.querySelector<HTMLElement>('.sol-items-panel')!
+    panel.querySelector<HTMLButtonElement>('.sol-items-tab[data-tab="items"]')!.click()
+    const row = panel.querySelector<HTMLElement>('li[data-id="skill:sickle"]')!
+    const equip = row.querySelector<HTMLButtonElement>('.sol-items-use')!
+    expect(equip.textContent).toBe('Equip')
+    equip.click()
+    expect(overlay.journey.weapon).toBe('sickle')
+    expect(document.querySelector('.sol-adventure-message')?.textContent).toBe('Sickle of the Sun equipped.')
+    const refreshedRow = panel.querySelector<HTMLElement>('li[data-id="skill:sickle"]')!
+    expect(refreshedRow.querySelector('.sol-items-equipped')?.textContent).toBe('Equipped')
+    expect(refreshedRow.querySelector('.sol-items-use')).toBeNull()
   })
 
-  it('keeps NPC knowledge, filled shrine sockets and permanent relic rewards after close and reopen', async () => {
-    const first = mount()
-    solveMira()
-    walkToDawn()
-    fillDawn()
-    enter()
-    await settle()
-    first.engine!.arrive(first.journey.room!.relics[0])
+  it('lists a learned ability under Knowledge once the labyrinth/skill: ref holds (StoryFacts.done)', async () => {
+    const overlay = mount()
+    await enterSunseed()
+    overlay.engine!.arrive({ col: 3, row: 10 })
     frame()
-    const score = first.engine!.score
+    tap('e')
+    key('keydown', 'Escape')
+    expect(overlay.journey.kit.includes('stand')).toBe(true)
+    tap('i')
+    const panel = document.querySelector<HTMLElement>('.sol-items-panel')!
+    panel.querySelector<HTMLButtonElement>('.sol-items-tab[data-tab="knowledge"]')!.click()
+    const knowledge = panel.querySelector<HTMLElement>('.sol-items-section[data-tab="knowledge"]')!
+    expect(knowledge.textContent).toContain('The Stand')
+  })
+})
+
+describe('saves v3 carry the labyrinth and the path across a reopen', () => {
+  it('keeps the restored path, learned skills and equipped weapon after close and reopen', async () => {
+    const first = mount()
+    await enterSunseed()
+    first.engine!.arrive({ col: 3, row: 10 })
+    frame()
+    tap('e')
+    key('keydown', 'Escape')
     first.unmount()
     expect(pendingFrames.size).toBe(0)
+    expect(stored()['version']).toBe(3)
+
     const second = mount()
-    expect(second.journey.inventory.triangles.has(0)).toBe(true)
-    expect(second.journey.inventory.triangles.has(1)).toBe(true)
-    expect(marker('Dawn Shrine').dataset.state).toBe('open')
-    marker('Mira').click()
-    expect(document.querySelector('.sol-rpg-choices')).toBeNull()
-    key('keydown', 'e')
-    key('keyup', 'e')
-    expect(document.querySelector('.sol-rpg-dialog')).toBeNull()
-    walkToDawn()
-    expect(second.engine).toBeNull()
-    marker('Dawn Shrine').click()
-    expect(document.querySelector('.sol-rpg-dialog')).toBeNull()
     await settle()
-    second.engine!.arrive(second.journey.room!.relics[0])
     frame()
-    expect(second.engine!.score).toBe(score)
-    expect(second.journey.collected('mira-dawn-triangle')).toBe(true)
-    expect(document.querySelector('.sol-adventure-inventory')?.textContent).toContain('2/6')
+    expect(second.journey.room?.id).toBe('sunseed-porch')
+    expect(second.journey.kit.includes('stand')).toBe(true)
+    expect(crumbs()).toEqual(['The Sevenfold Valley', 'A labyrinth'])
   })
 
   it('does not revive a closed overlay when an in-flight native room finishes loading', async () => {
@@ -259,76 +339,21 @@ describe('the Solomon adventure shell with real journey and world models', () =>
       return new Promise<LoadedTileRoom>(done => { resolve = done })
     })
     const overlay = mount()
-    solveMira()
+    marker('Mira').click()
+    button('East, toward sunrise').click()
+    closeGainIfOpen()
+    tap('e')
     walkToDawn()
-    fillDawn()
-    enter()
+    marker('Dawn Shrine').click()
+    const socket = document.querySelector<HTMLButtonElement>('.sol-rpg-socket')!
+    socket.click()
+    marker('Dawn Shrine').click()
     expect(document.querySelector('.sol-adventure')?.getAttribute('aria-busy')).toBe('true')
     overlay.unmount()
     resolve(hydrate(requested))
     await settle()
     expect(document.querySelector('.sol-adventure')).toBeNull()
-    expect(overlay.engine).toBeNull()
-    expect(native.ensure).toHaveBeenCalledTimes(1)
+    expect(overlay.journey.room).toBeNull()
     expect(pendingFrames.size).toBe(0)
-  })
-
-  it.each([
-    ['Escape', () => key('keydown', 'Escape')],
-    ['the World button', () => button('World').click()],
-  ])('lets a pending continue finish before %s shows the world, so the adventure keeps saving', async (_, gesture) => {
-    const { overlay, finish } = await pendingContinue()
-    gesture()
-    await settle()
-    expect(overlay.isMounted()).toBe(true)
-    expect(document.querySelector('.sol-adventure')?.getAttribute('aria-busy')).toBe('true')
-    await finish()
-    expect(document.querySelector('.sol-adventure')?.hasAttribute('aria-busy')).toBe(false)
-    expect((document.querySelector('.sol-adventure-world') as HTMLElement).hidden).toBe(false)
-    expect((document.querySelector('.sol-adventure-rooms') as HTMLElement).hidden).toBe(true)
-    expect(overlay.engine).toBeNull()
-    expect(overlay.journey.engines.has('sunseed-porch')).toBe(true)
-    expect(document.querySelector('.sol-save-status')?.textContent).toBe('Autosaved')
-    expect(stored().location.mode).toBe('world')
-    const player = stored().world.player
-    walk('ArrowDown', 30)
-    for (let i = 0; i < 40; i++) frame()
-    expect(stored().world.player).not.toEqual(player)
-  })
-
-  it('opens the designer once a pending continue finishes, and saves again when it closes', async () => {
-    const { overlay, finish } = await pendingContinue()
-    overlay.showDesigner()
-    expect(document.querySelector('.sol-name')).toBeNull()
-    await finish()
-    expect(document.querySelector('.sol-name')).not.toBeNull()
-    expect((document.querySelector('.sol-adventure') as HTMLElement).hidden).toBe(true)
-    expect(overlay.journey.engines.has('sunseed-porch')).toBe(true)
-    key('keydown', 'Escape')
-    expect(document.querySelector('.sol-name')).toBeNull()
-    expect((document.querySelector('.sol-adventure') as HTMLElement).hidden).toBe(false)
-    expect(stored().location.mode).toBe('world')
-  })
-
-  it('dispatches an overworld cavern to its separate scrolling knowledge dungeon', () => {
-    const overlay = mount()
-    walk('ArrowRight', 24)
-    expect((document.querySelector('.sol-adventure-world') as HTMLElement).hidden).toBe(false)
-    expect(document.querySelector('.sol-rpg-dialog')).toBeNull()
-    expect(document.querySelector('.sol-rpg-world-prompt')?.textContent).toContain('Wayfarer Cavern')
-    marker('Wayfarer Cavern').click()
-    frame()
-    expect((document.querySelector('.sol-adventure-dungeon') as HTMLElement).hidden).toBe(false)
-    expect(document.querySelector('.sol-scroll-dungeon header strong')?.textContent).toBe('Wayfarer Cavern')
-    expect(document.querySelectorAll('.sol-scroll-dungeon .sd-feature')).toHaveLength(7)
-    expect(overlay.engine).toBeNull()
-    expect(native.ensure).not.toHaveBeenCalled()
-    button('World').click()
-    frame()
-    expect((document.querySelector('.sol-adventure-world') as HTMLElement).hidden).toBe(false)
-    expect(document.querySelector('.sol-rpg-dialog')).toBeNull()
-    enter()
-    frame()
-    expect((document.querySelector('.sol-adventure-dungeon') as HTMLElement).hidden).toBe(false)
   })
 })
