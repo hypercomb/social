@@ -236,19 +236,65 @@ $accent: #7eb6d6;
   &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
 }
 
-.hosts-probing,
-.hosts-more {
+.hosts-probing {
   margin: 0.3em 0 0.4em;
   font-size: 0.74em;
   color: var(--hc-window-ink-quiet);
 }
 
-.hosts-inspector {
+// A LOOKED-AT DOMAIN: two tabs over one list. The edge and the wash belong to
+// the look as a whole, so Builds and Creations read as one domain's answer
+// whichever tab is showing.
+.hosts-look {
   margin: 0 0 0.5em;
-  padding: 0.55em 0.6em 0.5em 0.75em;
   border-left: 2px solid rgba(var(--acc), 0.28);
   border-bottom: 1px solid rgba(var(--acc), 0.08);
   background: rgba(var(--acc), 0.025);
+}
+
+// The publish panel's tabs, so the two windows read as one family. The count
+// rides the tab: a list you are not looking at still says how much is in it.
+.hosts-tabs {
+  display: flex;
+  gap: 0.15em;
+  padding: 0 0.6em 0 0.35em;
+  border-bottom: 1px solid rgba(var(--acc), 0.18);
+}
+
+.hosts-tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45em;
+  margin-bottom: -1px;
+  padding: 0.5em 0.7em 0.4em;
+  font: inherit;
+  font-size: 0.74em;
+  letter-spacing: 0.04em;
+  color: var(--hc-window-ink-quiet);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+
+  &:hover { color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
+
+  &.active {
+    color: var(--hc-window-accent);
+    border-bottom-color: rgba(var(--acc), 0.8);
+  }
+}
+
+.hosts-tab-count {
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+  color: var(--hc-window-ink-quiet);
+}
+
+.hosts-inspector,
+.hosts-creations {
+  padding: 0.55em 0.6em 0.5em 0.75em;
 }
 
 .hosts-inspector-head {
@@ -422,8 +468,6 @@ $accent: #7eb6d6;
   &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
 }
 
-.hosts-ledger-toggle { margin-top: 0; }
-
 .hosts-offer.current {
   .hosts-offer-label { color: var(--hc-window-accent); }
 }
@@ -535,58 +579,86 @@ $accent: #7eb6d6;
   }
 }
 
-.hosts-offer-add,
-.hosts-more {
-  font: inherit;
-  border-radius: tw.$radius-control;
-  cursor: pointer;
-}
-
 .hosts-offer-add {
   min-width: 4.5em;
   padding: 0.3em 0.55em;
+  font: inherit;
   font-size: 0.7em;
   color: var(--hc-window-ink-plain);
   background: rgba(var(--acc), 0.1);
   border: 1px solid rgba(var(--acc), 0.28);
+  border-radius: tw.$radius-control;
+  cursor: pointer;
 
   &:hover:not(:disabled) { background: rgba(var(--acc), 0.18); }
   &:disabled { cursor: default; opacity: 0.58; }
   &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
 }
 
-// A FOLD SITS ON THE SAME LEFT EDGE AS WHAT IT FOLDS. These carry padding so
-// they have a hit area, and the padding was pushing their words a few pixels
-// in from every heading and every row around them — enough that the panel
-// read as three different left margins stacked on top of each other. The
-// negative inline start gives the words back their column and keeps the box.
-.hosts-more {
-  display: block;
+// ── every build, under its name ─────────────────────────────────────────────
+// A NAME IS A HEADING YOU CLICK, and its dates are the list under it — one
+// heading open at a time (ui/accordion.ts). The toggle carries padding for a
+// hit area; its negative inline start gives the words back the same left edge
+// every row and note around it sits on.
+.hosts-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-top: 0.3em;
+  border-top: 1px solid rgba(var(--acc), 0.1);
+
+  .hosts-group-hide { font-size: 0.68em; }
+}
+
+.hosts-heading-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
   margin-inline-start: -0.4em;
-  padding: 0.25em 0.4em;
+  padding: 0.5em 0.4em;
+  font: inherit;
+  font-size: 0.76em;
   text-align: left;
-  font-size: 0.72em;
+  color: var(--hc-window-ink-plain);
   background: none;
   border: 1px solid transparent;
+  border-radius: tw.$radius-control;
+  cursor: pointer;
 
   &:hover { color: var(--hc-window-ink-loud); background: rgba(var(--acc), 0.07); }
   &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+  .hosts-heading.open & { color: var(--hc-window-accent); }
+}
+
+.hosts-heading-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Drawn, not a glyph: a chevron pointing right that turns down when open.
+.hosts-chev {
+  flex: 0 0 auto;
+  width: 0.42em;
+  height: 0.42em;
+  margin: 0 0.1em;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.12s ease;
+
+  .hosts-heading.open & { transform: rotate(45deg); }
 }
 
 // ── the creations half ──────────────────────────────────────────────────────
 //
 // A domain serves two lists and they are not the same kind of thing: builds
-// are the app, taken by replication; creations are what people made. The
-// creations block borrows the inspector's left edge so the two read as one
-// domain's answer, and keeps its own accent so the eye can tell which list it
-// is looking at without reading the heading.
-
-.hosts-creations {
-  margin: 0 0 0.35em;
-  padding: 0.5em 0.6em 0.45em 0.75em;
-  border-left: 2px solid rgba(var(--acc), 0.45);
-  background: rgba(var(--acc), 0.04);
-}
+// are the app, taken by replication; creations are what people made. They are
+// the two tabs of one look (above), so they share its edge and its wash.
 
 .hosts-creation {
   display: flex;

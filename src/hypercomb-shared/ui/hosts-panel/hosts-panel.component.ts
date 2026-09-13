@@ -19,14 +19,12 @@
 // `hosts:render` (HostsDrone owns the `community:hosts` pool) and leaves as
 // intents: hosts:add, hosts:remove, hosts:close.
 //
-// LOOKING INTO A HOST answers two questions and offers one act: which build
-// you are on, which build is newest there, and Update. A host's manifest can
-// list hundreds of builds and every one of them is a valid root forever, but
-// a list of 175 identical-looking rows each with its own button is not a
-// choice anyone can make — the question a participant actually has is "am I
-// current, and if not, make me current". The full ledger stays a fold away
-// for pinning and rollback, which is where "every root stays valid" earns
-// its keep.
+// LOOKING INTO A HOST opens two tabs, Builds first. Builds answers two
+// questions and offers one act: which build you are on, which build is newest
+// there, and Update. Under that every build is listed under its name, one name
+// open at a time, for pinning and rollback — which is where "every root stays
+// valid" earns its keep. Creations is the other tab: what people made on that
+// domain, each with the one switch that shows it in your hive.
 //
 // The branch count is a DECORATION, not this panel's truth. It is read off
 // `publish:render` when one has been seen, and simply absent otherwise —
@@ -49,6 +47,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
+import { accordion } from '../accordion'
 
 /** What one host publishes, once asked. `null` while in flight. Packages
  *  arrive newest first — the manifest reader sorts by generation. */
@@ -61,9 +60,12 @@ type IntakeState = {
   detail?: string
 }
 
-/** How many builds the ledger fold shows before its "show all" control. The
- *  count is always stated, so a collapsed list never reads as the whole. */
-const OFFERS_SHOWN = 8
+/** A looked-at domain's two lists. */
+type HostTab = 'builds' | 'creations'
+
+/** The delete area's heading key. Build headings are keyed by a build's
+ *  signature, so this can never collide with one. */
+const HIDDEN_HEADING = 'hidden'
 
 // ── switching, and the way back ─────────────────────────────────────────────
 //
@@ -199,11 +201,12 @@ export class HostsPanelComponent implements OnDestroy {
   readonly zones = signal<string[]>([])
   readonly loaded = signal(false)
   readonly selectedZone = signal('')
-  /** The zone whose full build ledger is unfolded. */
-  readonly expandedZone = signal('')
-  /** Whether the ledger fold is open at all — closed by default, because the
-   *  answer to "am I current" is two lines, not a list. */
-  readonly ledgerOpen = signal(false)
+  /** Which of the looked-at domain's lists shows. Every look opens on Builds. */
+  readonly tab = signal<HostTab>('builds')
+  /** One heading open at a time under Builds — each build name, then the
+   *  delete area last. A look opens the newest name's list. */
+  readonly heading = accordion()
+  readonly hiddenHeading = HIDDEN_HEADING
   readonly addError = signal(false)
 
   /** The domain this app is running on. A build from here is an update; a
@@ -230,8 +233,6 @@ export class HostsPanelComponent implements OnDestroy {
   /** Every signature that must not be offered — hidden AND deleted. Deleted
    *  ones are in here and nowhere else, which is what deleted means. */
   readonly concealed = signal<Set<string>>(new Set())
-  /** Is the delete area open? Closed by default: it is somewhere you go. */
-  readonly hiddenOpen = signal(false)
 
   /** zone → how many branches name it. Empty until a publish sweep has been
    *  seen; a missing entry renders as nothing at all. */
@@ -265,8 +266,7 @@ export class HostsPanelComponent implements OnDestroy {
       // Your own domain stays open whether or not you carry it.
       if (this.selectedZone() && !zones.includes(this.selectedZone()) && !this.isHome(this.selectedZone())) {
         this.selectedZone.set('')
-        this.expandedZone.set('')
-        this.ledgerOpen.set(false)
+        this.heading.closeAll()
       }
       // A build a notice opened the window on resumes as the carried list
       // arrives; closing the window drops the ask.
@@ -283,6 +283,7 @@ export class HostsPanelComponent implements OnDestroy {
         ...items.map(i => i.sig),
         ...(p?.gone ?? []),
       ]))
+      this.#settleHeading()
     }))
 
     // WHAT A DOMAIN SERVES. Asked when you look into one, answered by the
@@ -400,8 +401,7 @@ export class HostsPanelComponent implements OnDestroy {
   remove(zone: string): void {
     if (this.selectedZone() === zone) {
       this.selectedZone.set('')
-      this.expandedZone.set('')
-      this.ledgerOpen.set(false)
+      this.heading.closeAll()
     }
     EffectBus.emit('hosts:remove', { zone })
   }
@@ -499,11 +499,11 @@ export class HostsPanelComponent implements OnDestroy {
    *  (the label its build stamped) and a moment. On a host that has only ever
    *  cut one line, that is one heading with every build dated under it; a
    *  RENAME simply starts a new heading, newest first, with its own dates —
-   *  nothing to migrate, nothing to explain. Groups are cut from the SHOWN
-   *  slice, so the fold still folds. */
+   *  nothing to migrate, nothing to explain. Every build the host offers is
+   *  under one of them: the heading is the fold. */
   groupsOf(zone: string): { name: string; packages: HostPackage[] }[] {
     const groups: { name: string; packages: HostPackage[] }[] = []
-    for (const pkg of this.packagesShown(zone)) {
+    for (const pkg of this.offeredOf(zone)) {
       const last = groups[groups.length - 1]
       if (last && last.name === pkg.label) last.packages.push(pkg)
       else groups.push({ name: pkg.label, packages: [pkg] })
@@ -644,32 +644,51 @@ export class HostsPanelComponent implements OnDestroy {
     if (target) this.apply(target)
   }
 
-  // ── the ledger fold: every build, for pinning and rollback ───────────────
+  // ── two tabs, and every build under its name ─────────────────────────────
+  //
+  // POINT AND CLICK (Jaime, 2026-09-12): "you should have a list of builds,
+  // not this confusing All builds button — you're just clicking a heading and
+  // getting a list, or clicking the tab and going to the creations." A look
+  // opens on Builds with the newest name's builds listed; every other name is
+  // a heading one click away, and the delete area is the last heading.
 
-  packagesShown(zone: string): HostPackage[] {
-    const packages = this.offeredOf(zone)
-    return this.expandedZone() === zone ? packages : packages.slice(0, OFFERS_SHOWN)
+  setTab(tab: HostTab): void {
+    this.tab.set(tab)
   }
 
-  /** How many builds the ledger is offering — the number the fold's own label
-   *  states, so it can never disagree with the rows underneath it. */
+  /** How many builds the host is offering — the number the Builds tab states,
+   *  so it can never disagree with the rows underneath it. */
   offeredCount(zone: string): number {
     return this.offeredOf(zone).length
   }
 
-  /** How many are behind the explicit fold. */
-  moreCount(zone: string): number {
-    return this.offers()[zone] && this.expandedZone() !== zone
-      ? Math.max(0, this.offeredCount(zone) - OFFERS_SHOWN)
-      : 0
+  /** A heading's key: the signature of its newest build. Positions move when a
+   *  run is hidden or two runs of one name merge; a signature does not. */
+  groupKey(group: { packages: HostPackage[] }): string {
+    return group.packages[0]?.packageSig ?? ''
   }
 
-  hasFold(zone: string): boolean {
-    return this.offeredCount(zone) > OFFERS_SHOWN
+  /** Open the heading holding this build, or the newest heading. Never the
+   *  delete area: that is somewhere you go, not somewhere a look lands. */
+  #openBuilds(zone: string, sig = ''): void {
+    const groups = this.groupsOf(zone)
+    const group = groups.find(g => g.packages.some(p => p.packageSig === sig)) ?? groups[0]
+    if (group) this.heading.reveal(this.groupKey(group))
   }
 
-  toggleAll(zone: string): void {
-    this.expandedZone.set(this.expandedZone() === zone ? '' : zone)
+  /** After a hide or an unhide the open heading may have merged into another
+   *  run or emptied: keep the build that was open on screen, else the newest.
+   *  A heading closed by hand stays closed. */
+  #settleHeading(): void {
+    const zone = this.selectedZone()
+    const open = this.heading.open()
+    if (!zone || open === null) return
+    const standing = open === HIDDEN_HEADING
+      ? this.hiddenFor(zone).length > 0
+      : this.groupsOf(zone).some(group => this.groupKey(group) === open)
+    if (standing) return
+    this.heading.closeAll()
+    this.#openBuilds(zone, open === HIDDEN_HEADING ? '' : open)
   }
 
   // ── hide, and the delete area ────────────────────────────────────────────
@@ -687,6 +706,12 @@ export class HostsPanelComponent implements OnDestroy {
    *  Update cannot reach it — and turns up in the delete area. */
   hide(pkg: HostPackage): void {
     if (this.isCurrent(pkg)) return
+    // Hiding the build its heading is keyed by hands the key to the next build
+    // under the same name, so the heading stays open on the run it showed.
+    if (this.heading.isOpen(pkg.packageSig)) {
+      const next = this.groupsOf(pkg.zone).find(group => this.groupKey(group) === pkg.packageSig)?.packages[1]
+      if (next) this.heading.reveal(next.packageSig)
+    }
     EffectBus.emit('hidden:conceal', {
       sig: pkg.packageSig,
       scope: BUILD_SCOPE,
@@ -768,10 +793,6 @@ export class HostsPanelComponent implements OnDestroy {
     for (const row of rows) this.destroy(row.item)
   }
 
-  toggleHiddenArea(): void {
-    this.hiddenOpen.set(!this.hiddenOpen())
-  }
-
   /** Take a build back. Nothing was ever removed from the host's list, so this
    *  is simply the filter letting go. */
   restore(item: HiddenItem): void {
@@ -784,11 +805,6 @@ export class HostsPanelComponent implements OnDestroy {
   destroy(item: HiddenItem): void {
     if (!item.deletable) return
     EffectBus.emit('hidden:delete', { sig: item.sig })
-  }
-
-  toggleLedger(): void {
-    this.ledgerOpen.set(!this.ledgerOpen())
-    if (!this.ledgerOpen()) this.expandedZone.set('')
   }
 
   /**
@@ -805,18 +821,20 @@ export class HostsPanelComponent implements OnDestroy {
     this.installed.set(installedPackageSig())
     if (this.selectedZone() === zone) {
       this.selectedZone.set('')
-      this.expandedZone.set('')
-      this.ledgerOpen.set(false)
+      this.heading.closeAll()
       return
     }
     this.selectedZone.set(zone)
-    this.expandedZone.set('')
-    this.ledgerOpen.set(false)
+    this.tab.set('builds')
+    this.heading.closeAll()
     // What this domain SERVES is asked at the same moment and answered
     // separately: the ledger is one small file and the manifest is megabytes,
-    // so the creations are on screen long before the builds are.
+    // so the creations are ready on their tab long before the builds are.
     EffectBus.emit('hosts:creations', { zone })
     await this.#ask(zone)
+    // The builds are listed the moment they land, before the publisher is
+    // asked about the newest — that answer only changes the one button.
+    if (this.selectedZone() === zone && this.heading.open() === null) this.#openBuilds(zone)
     await this.#checkSigned(zone)
   }
 
@@ -843,8 +861,9 @@ export class HostsPanelComponent implements OnDestroy {
         this.#focus = null
         this.installed.set(installedPackageSig())
         this.selectedZone.set(zone)
-        this.expandedZone.set('')
-        this.ledgerOpen.set(false)
+        this.tab.set('builds')
+        this.heading.closeAll()
+        this.#openBuilds(zone, focus.sig)
         EffectBus.emit('hosts:creations', { zone })
         await this.#checkSigned(zone)
         return

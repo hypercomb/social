@@ -110,11 +110,27 @@ describe('hosts panel — the set, apart from the publishing', () => {
     expect(HOSTS_HTML).toMatch(/\(click\)="look\(zone\)"/)
   })
 
-  it('keeps a large host catalog reachable behind an explicit fold', () => {
-    expect(HOSTS_TS).toMatch(/OFFERS_SHOWN/)
-    expect(HOSTS_TS).toMatch(/packagesShown\(zone: string\)/)
-    expect(HOSTS_HTML).toMatch(/hosts\.offer\.show-all/)
-    expect(HOSTS_HTML).toMatch(/hosts\.offer\.show-less/)
+  // POINT AND CLICK (Jaime, 2026-09-12): "you should have a list of builds, not
+  // this confusing All builds button — you're just clicking a heading and
+  // getting a list." Every build is listed under its name; a name is a heading,
+  // one open at a time, and nothing else has to be pressed to see the list.
+  it('lists every build under its name heading, one open at a time — no fold button', () => {
+    expect(HOSTS_TS).toMatch(/import \{ accordion \} from '\.\.\/accordion'/)
+    expect(HOSTS_TS).toMatch(/readonly heading = accordion\(\)/)
+    expect(HOSTS_TS).toMatch(/groupsOf\(zone: string\)[\s\S]{0,200}?for \(const pkg of this\.offeredOf\(zone\)\)/)
+    expect(HOSTS_HTML).toMatch(/\(click\)="heading\.toggle\(groupKey\(group\)\)"/)
+    // Keyed by a build's signature, never a position: hiding one run must not
+    // hand its open state to another run of the same name.
+    expect(HOSTS_TS).toMatch(/groupKey\(group: \{ packages: HostPackage\[\] \}\): string \{\s*return group\.packages\[0\]\?\.packageSig/)
+    expect(HOSTS_TS).toMatch(/'hidden:render'[\s\S]{0,400}?this\.#settleHeading\(\)/)
+    // A look never lands in the delete area; it is somewhere you go.
+    expect(HOSTS_TS).not.toMatch(/reveal\(HIDDEN_HEADING\)/)
+    expect(HOSTS_HTML).toMatch(/\(click\)="heading\.toggle\(hiddenHeading\)"/)
+    expect(HOSTS_TS).not.toMatch(/OFFERS_SHOWN|packagesShown|ledgerOpen|toggleLedger|expandedZone|hiddenOpen/)
+    for (const key of ['hosts.offer.ledger-open', 'hosts.offer.ledger-close', 'hosts.offer.show-all', 'hosts.offer.show-less', 'hosts.hidden.open', 'hosts.hidden.close']) {
+      expect(EN[key]).toBeUndefined()
+      expect(HOSTS_HTML).not.toContain(key)
+    }
   })
 
   it('applies a build through verified runtime acquisition, then restarts', () => {
@@ -144,7 +160,7 @@ describe('hosts panel — the set, apart from the publishing', () => {
   // them is a valid root forever — but 175 identical rows each with its own
   // button is not a choice. The question is "am I current, and if not make me
   // current": the build you are on, the newest here, and ONE Update button.
-  // The ledger stays behind a fold for pinning and rollback.
+  // Every build stays listed under its name for pinning and rollback.
   it('says which build you are on, from the ONE stamp both install paths leave', () => {
     const root = join(here, '..', '..', '..')
     const runtime = readFileSync(join(root, 'hypercomb-runtime', 'src', 'installed-package.ts'), 'utf8')
@@ -365,10 +381,23 @@ describe('the host directory shows what a domain serves', () => {
     expect(EN['hosts.mine.open']).toMatch(/\{count\}/)
   })
 
-  it('puts the creations above the builds — a build is the app, a creation is what somebody made', () => {
-    expect(HOSTS_HTML.indexOf('hosts-creations')).toBeGreaterThan(0)
-    expect(HOSTS_HTML.indexOf('hosts-creations')).toBeLessThan(HOSTS_HTML.indexOf('hosts-inspector'))
-    expect(EN['hosts.builds']).toBe('Builds')
+  // Jaime, 2026-09-12: "two tabs, and it should always open to builds when you
+  // click" a domain — Creations is the other tab, one click away.
+  it('opens every domain on Builds, with Creations the other tab', () => {
+    expect(HOSTS_HTML).toMatch(/class="hosts-tabs" role="tablist"/)
+    expect(HOSTS_HTML).toMatch(/\(click\)="setTab\('builds'\)"/)
+    expect(HOSTS_HTML).toMatch(/\(click\)="setTab\('creations'\)"/)
+    expect(HOSTS_HTML.indexOf("setTab('builds')")).toBeLessThan(HOSTS_HTML.indexOf("setTab('creations')"))
+    // A count only for a list that answered — a host that is down is not "0".
+    expect(HOSTS_HTML).toMatch(/@if \(offerAnswered\(zone\)\) \{ <span class="hosts-tab-count">/)
+    expect(HOSTS_HTML).toMatch(/@if \(creationsAnswered\(zone\)\) \{ <span class="hosts-tab-count">/)
+    // Every look resets to Builds and lists the newest name's builds once they land.
+    expect(HOSTS_TS).toMatch(/async look\(zone: string\)[\s\S]{0,600}?this\.tab\.set\('builds'\)/)
+    expect(HOSTS_TS).toMatch(/await this\.#ask\(zone\)[\s\S]{0,300}?this\.#openBuilds\(zone\)/)
+    expect(HOSTS_TS).toMatch(/async #focusBuild\([\s\S]{0,1200}?this\.#openBuilds\(zone, focus\.sig\)/)
+    expect(EN['hosts.tab.builds']).toBe('Builds')
+    expect(EN['hosts.tab.creations']).toBe('Creations')
+    expect(EN['hosts.builds']).toBeUndefined()
   })
 })
 
@@ -461,7 +490,7 @@ describe('switching builds — named, confirmed, and reversible', () => {
   // could never succeed.
   it('asks the followed publisher before offering another domain’s newest, and takes the build it signed', () => {
     expect(HOSTS_TS).toMatch(/ATTESTATION_IOC_KEY/)
-    expect(HOSTS_TS).toMatch(/await this\.#ask\(zone\)\s*await this\.#checkSigned\(zone\)/)
+    expect(HOSTS_TS).toMatch(/await this\.#ask\(zone\)[\s\S]{0,300}?await this\.#checkSigned\(zone\)/)
     expect(HOSTS_TS).toMatch(/find\(p => p\.packageSig === refused\.named\)/)
     expect(HOSTS_TS).toMatch(/update\(zone: string\): void \{\s*const target = this\.targetOf\(zone\)/)
     expect(HOSTS_HTML).toMatch(/@if \(unsignedOf\(zone\); as refused\)/)
