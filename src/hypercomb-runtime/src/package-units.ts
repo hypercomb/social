@@ -15,8 +15,10 @@
 
 import { SignatureService } from '@hypercomb/core'
 import { resolveSignatureClosure, type ReplicationIo } from './replication-walker.js'
+import { isPath } from './package-tree.js'
 
-/** localStorage key holding the names of the units this participant has off. */
+/** localStorage key holding the name paths this participant has off —
+ *  `games`, or `games/arkanoid` beneath it. */
 export const UNITS_OFF_KEY = 'hc:install:off-units'
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -83,12 +85,12 @@ export const packageUnits = async (rootSig: string, io: ReplicationIo): Promise<
 export const readOffUnits = (storage: Pick<Storage, 'getItem'> = localStorage): Set<string> => {
   try {
     const raw = JSON.parse(storage.getItem(UNITS_OFF_KEY) ?? '[]')
-    return new Set((Array.isArray(raw) ? raw : []).map(String).filter(name => NAME_RE.test(name)))
+    return new Set((Array.isArray(raw) ? raw : []).map(String).filter(isPath))
   } catch { return new Set() }
 }
 
 export const writeOffUnits = (off: Iterable<string>, storage: Pick<Storage, 'setItem' | 'removeItem'> = localStorage): void => {
-  const names = [...new Set([...off].filter(name => NAME_RE.test(name)))].sort()
+  const names = [...new Set([...off].filter(isPath))].sort()
   try {
     if (names.length) storage.setItem(UNITS_OFF_KEY, JSON.stringify(names))
     else storage.removeItem(UNITS_OFF_KEY)

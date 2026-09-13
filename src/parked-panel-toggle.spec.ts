@@ -31,7 +31,7 @@ const PANELS = [
     what: 'hosts',
     drone: './hypercomb-essentials/src/sharing/hosts.drone.ts',
     effect: 'hosts:view-toggle',
-    template: './hypercomb-shared/ui/hosts-panel/hosts-panel.component.html',
+    template: './hypercomb-essentials/src/sharing/host-directory.view.ts',
   },
   {
     what: 'publish',
@@ -130,7 +130,8 @@ describe('a parked panel opens on ONE press of its glyph', () => {
 
     it(`${what}: asks about the id the panel registers under`, () => {
       const asked = read(drone).match(/isWindowShowing\('([^']+)'\)/)?.[1]
-      const registered = read(template).match(/hcDockedPanel="([^"]+)"/)?.[1]
+      // An Angular window names its id in the template; an element names it in a constant.
+      const registered = read(template).match(/hcDockedPanel="([^"]+)"/)?.[1] ?? read(template).match(/_WINDOW = '([^']+)'/)?.[1]
       expect(registered).toBeTruthy()
       expect(asked).toBe(registered)
     })

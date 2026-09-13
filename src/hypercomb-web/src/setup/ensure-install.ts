@@ -15,7 +15,8 @@ import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { isVisitorSession } from './visitor-session'
 // Cold-boot acquisition. Same implementation the shim uses and the same one
 // behind window.hypercomb.acquire — there is one acquisition, not three.
-import { acquire, applyUnits, deriveInventory, headPackage, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
+import { acquire, applySelection, deriveInventory, headPackage, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
+import { readPicks } from '@hypercomb/runtime/package-tree'
 import { readOffUnits } from '@hypercomb/runtime/package-units'
 import { deriveBeeDeps } from '@hypercomb/runtime/bee-deps'
 import { checkCoreCompatibility, CoreMismatchError, describeCoreMismatch } from '@hypercomb/runtime/core-surface'
@@ -872,9 +873,12 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
 
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(manifest))
   localStorage.setItem(SYNC_SIG_KEY, bundled.packageSig)
-  // The units the participant has off stay off across a bundled install —
-  // the same repoint activation makes, over the tree just admitted.
-  if (readOffUnits().size && !(await applyUnits())) console.warn('[ensure-install] unit selection could not be applied — loading the whole tree')
+  // The paths the participant has off stay off, and what they picked stays
+  // picked, across a bundled install — the same composition activation makes,
+  // over the tree just admitted.
+  if ((readOffUnits().size || Object.keys(readPicks()).length) && !(await applySelection(bundled.packageSig)).ok) {
+    console.warn('[ensure-install] the selection could not be applied — loading the whole tree')
+  }
   // The one stamp every activation path leaves — what the host directory reads
   // to say which build this shell is on.
   stampInstalledPackage(bundled.packageSig)
