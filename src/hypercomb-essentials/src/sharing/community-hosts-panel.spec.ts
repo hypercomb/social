@@ -120,7 +120,7 @@ describe('hosts panel — the set, apart from the publishing', () => {
   it('applies a build through verified runtime acquisition, then restarts', () => {
     expect(HOSTS_HTML).toMatch(/\(click\)="apply\(pkg\)"/)
     expect(HOSTS_TS).toMatch(/import\('@hypercomb\/runtime\/acquire'\)/)
-    expect(HOSTS_TS).toMatch(/await acquire\(sig, sources\)/)
+    expect(HOSTS_TS).toMatch(/await installPackage\(pkg, sources\.filter\(zone => zone !== pkg\.zone\)\)/)
     expect(HOSTS_TS).toMatch(/setTimeout\(\(\) => location\.reload\(\)/)
     expect(EN['hosts.offer.applied']).toMatch(/restarting/i)
   })
@@ -405,11 +405,35 @@ describe('switching builds — named, confirmed, and reversible', () => {
     expect(HOSTS_TS).toMatch(/const SWITCHED_KEY = 'hc:hosts:switched-from'/)
     // Recorded only once the switch has activated, before the restart.
     const sw = HOSTS_TS.slice(HOSTS_TS.indexOf('async #switch(pkg: HostPackage)'))
-    expect(sw.indexOf('this.#remember(left, pkg)')).toBeGreaterThan(sw.indexOf('await acquire(sig, sources)'))
+    expect(sw.indexOf('this.#remember(left, pkg)')).toBeGreaterThan(sw.indexOf('await installPackage(pkg,'))
     expect(sw.indexOf('this.#remember(left, pkg)')).toBeLessThan(sw.indexOf('location.reload()'))
     expect(HOSTS_TS).toMatch(/sessionStorage\.getItem\(REOPEN_KEY\) === '1'[\s\S]{0,120}?EffectBus\.emit\('hosts:open'/)
     expect(HOSTS_HTML).toMatch(/\(click\)="switchBack\(\)"/)
     expect(EN['hosts.return.go']).toBe('Switch back')
+  })
+
+  it('switch back resolves locally when no host lists the build any more', () => {
+    // A host's own catalogue moves on with every deploy it makes — not the
+    // same fact as the bytes being gone (2026-09-12: hypercomb.io's
+    // self-served pool holds only its newest build after each deploy, so a
+    // build switched away from stops being LISTED there without ever having
+    // left this device's own store). Failing at that first "is it listed"
+    // check, instead of also trying a resolve, turned an ordinary re-deploy
+    // into a permanent "not listed" for Switch back.
+    const back = HOSTS_TS.slice(HOSTS_TS.indexOf('async switchBack('), HOSTS_TS.indexOf('async keepSwitch('))
+    const loopEnd = back.indexOf('if (!places.length)')
+    const fallback = back.indexOf('const fallbackZone')
+    expect(loopEnd).toBeGreaterThan(-1)
+    expect(fallback).toBeGreaterThan(loopEnd)
+    expect(back).toMatch(/const fallbackZone = record\.fromZone \|\| this\.home/)
+    expect(back).toMatch(/base: hostBases\(fallbackZone\)\[0\] \?\? ''/)
+    expect(back).toMatch(/layers: \[\],\s*bees: \[\],\s*dependencies: \[\]/)
+    // The fallback package still goes through apply() → #switch(), so it gets
+    // the same activation-authority check, restore-point attempt, and
+    // confirm-sheet rule as a build found in a live listing — never a second,
+    // looser door.
+    expect(back.slice(fallback)).toMatch(/this\.apply\(\{/)
+    expect(HOSTS_TS).toMatch(/import \{ askHostPackages, hostBases, type HostPackage \} from '@hypercomb\/runtime\/host-packages'/)
   })
 
   it('explains the whole thing where you read it, and says tiles are never deleted', () => {
@@ -475,7 +499,7 @@ describe('updating happens in the hosts window', () => {
     const restore = sw.indexOf('createRestorePoint')
     expect(gate).toBeGreaterThan(-1)
     expect(restore).toBeGreaterThan(gate)
-    expect(restore).toBeLessThan(sw.indexOf('await acquire(sig, sources)'))
+    expect(restore).toBeLessThan(sw.indexOf('await installPackage(pkg,'))
     // A hive that cannot seal (one cold cell) or takes minutes to must still
     // switch: the wait is bounded and a missing restore point is said, not fatal.
     expect(HOSTS_TS).toMatch(/RESTORE_POINT_WAIT_MS/)

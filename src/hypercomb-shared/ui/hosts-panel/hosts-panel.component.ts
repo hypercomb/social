@@ -40,7 +40,7 @@ import { ATTESTATION_IOC_KEY, buildRevisionName, EffectBus, type AttestationVerd
 // so there is one answer to "what does this domain publish" — essentials
 // cannot reach runtime (it imports core and nothing else), which is why this
 // call sits in the panel rather than in HostsDrone.
-import { askHostPackages, type HostPackage } from '@hypercomb/runtime/host-packages'
+import { askHostPackages, hostBases, type HostPackage } from '@hypercomb/runtime/host-packages'
 import { hostZone } from '@hypercomb/runtime/host-zones'
 // The build this shell is RUNNING — the one stamp every activation path
 // leaves, read here so "you are on build N" is a fact and not a guess.
@@ -1020,7 +1020,17 @@ export class HostsPanelComponent implements OnDestroy {
 
   /** Find the build you were on — where it was seen listed, then your own
    *  domain — and switch to it. Its bytes are usually still here; the host is
-   *  asked only for the manifest that names them. */
+   *  asked only for the manifest that names them.
+   *
+   *  A host's own catalogue moves on with every deploy it makes (2026-09-12:
+   *  hypercomb.io's self-served listing holds only its newest build), so
+   *  "nobody lists it any more" is not the same fact as "the bytes are gone."
+   *  When no place still lists the signature, try it anyway against wherever
+   *  it was last seen: acquire's install path reads this origin's own store
+   *  before it ever fetches, so a build this device already ran resolves
+   *  without needing a host to still be advertising it. A build that really
+   *  is gone everywhere still fails, honestly, through the same intake state
+   *  every other switch failure reports through. */
   async switchBack(): Promise<void> {
     const record = this.returnable()
     if (!record || this.returnBusy()) return
@@ -1036,7 +1046,23 @@ export class HostsPanelComponent implements OnDestroy {
         this.apply(pkg)
         return
       }
-      this.returnMissing.set(places.length ? places.join(', ') : '-')
+      if (!places.length) {
+        this.returnMissing.set('-')
+        return
+      }
+      this.returnFinding.set(false)
+      const fallbackZone = record.fromZone || this.home
+      this.apply({
+        zone: fallbackZone,
+        base: hostBases(fallbackZone)[0] ?? '',
+        packageSig: record.from,
+        label: record.from.slice(0, 12),
+        at: '',
+        generation: null,
+        layers: [],
+        bees: [],
+        dependencies: [],
+      })
     } finally {
       this.returnFinding.set(false)
     }
@@ -1135,8 +1161,14 @@ export class HostsPanelComponent implements OnDestroy {
       ])
       const restoreNote = saved ? '' : 'no restore point could be saved — Switch back is the way back'
       this.intake.set({ ...this.intake(), [sig]: { phase: 'applying', detail: restoreNote } })
-      const { acquire } = await import('@hypercomb/runtime/acquire')
-      const outcome = await acquire(sig, sources)
+      // installPackage, not acquire: acquire's first move is to re-ASK every
+      // carried zone to relist this signature, which is exactly the network
+      // catalogue check switchBack's fallback deliberately skips (a host that
+      // has moved on need not still be advertising bytes it once served).
+      // installPackage resolves straight from `pkg` — the record already in
+      // hand — reading this origin's own store before it fetches anything.
+      const { installPackage } = await import('@hypercomb/runtime/acquire')
+      const outcome = await installPackage(pkg, sources.filter(zone => zone !== pkg.zone))
       if (!outcome.ok) {
         this.intake.set({
           ...this.intake(),
