@@ -105,3 +105,32 @@ branch — a molecule amalgamates more branches, and a branch is recursive."*
   same gated acquisition as everything else.
 - **The hosts window** lost Builds entirely: it is Domains (add / remove /
   visit) + Creations, with one link per domain to Packages. Nothing switches.
+
+## The origin is the shell (2026-09-13)
+
+*Jaime: "only have imports from our own host servers and never from
+hypercomb.io… the hosts are your proxy, it makes it easy to manage, and you're
+always bringing from your own domains and not taxing other people's."*
+
+The origin acting as a host was the fault line under a week of bugs: an Azure
+deploy minted a throwaway one-build pool, `selfBases()` sat in every fetch
+list, the shell's "bundled" notice competed with the followed channel, and a
+reload could swap a followed build for the bundled one. Now:
+
+- **Bytes come only from the hosts you carry** — plus the one seed host
+  (`DEFAULT_HOST_ZONES`) on a cold boot. `originAmong(zones)` in `acquire.ts`
+  admits this origin as a byte source only when it is itself one of the
+  domains asked: a node serving its own content carries itself; hypercomb.io
+  does not.
+- **Only the followed channel announces updates.** The web shell's check
+  against its own `/content/`, `?upgrade=1` and `window.upgradeHypercomb` are
+  gone; the notice ignores anything but `source: 'channel'`.
+- **First-run Start acquires from hosts** (`installFromHosts`). The bundled
+  install remains only where the origin IS the host: a published visitor door
+  seeds its renderer from its own `/content/`, and the native shell's bundle
+  is the version that was installed.
+- **The web deploy publishes no package pool** — each web workflow strips
+  `content/` before upload. Native client builds keep it.
+
+Trade-off, accepted: a first-ever web visitor with no hosts leans on the seed
+host being up.

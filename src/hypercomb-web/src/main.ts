@@ -72,7 +72,7 @@ import { EffectBus } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
 import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
-import { ensureInstall, opfsWritable, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
+import { ensureInstall, installFromHosts, opfsWritable, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
 import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
@@ -317,9 +317,11 @@ const bootstrap = async (): Promise<void> => {
   window.dispatchEvent(new Event('hypercomb:runtime-ready'))
 
   // First-run "Start" — the welcome card's single button, fully unattended.
-  // One source, one contract: the package bundled with this shell, every
-  // byte sha256-verified against its signature before it is admitted. When
-  // it comes up empty the card re-arms (boot:status install-needed).
+  // The web shell takes its first package from the hosts it carries (the one
+  // seed host when it carries none) — the origin is the shell, never a host.
+  // The native shell adopts the package it shipped with: that bundle IS the
+  // version installed. Every byte is sha256-verified before admission; when
+  // nothing arrives the card re-arms (boot:status install-needed).
   window.addEventListener('hypercomb:start-install', () => {
     if (readonlyVisitor) return
     console.log('[main] start-install received')
@@ -375,6 +377,16 @@ const bootstrap = async (): Promise<void> => {
       }
 
       if (localStorage.getItem('hypercomb.installed') === 'true') return
+      if (!nativeAvailable()) {
+        const acquired = await installFromHosts().catch(err => {
+          console.warn('[main] first-run acquisition threw', err)
+          return false
+        })
+        if (acquired) return
+        console.warn('[main] first-run install found no host answering')
+        EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-source' } as BootStatus)
+        return
+      }
       // Log the failure rather than swallowing it. A bundled install that
       // throws is the difference between "no content available" and "the
       // install crashed", and without this both look identical from outside —

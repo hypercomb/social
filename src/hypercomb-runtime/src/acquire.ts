@@ -102,9 +102,16 @@ export type InstallOutcome = {
   error?: string
 }
 
-/** The shim's OWN origin is always a byte source, so a node that serves its
- *  own content needs no host added at all — it already carries itself. */
+/** This origin's content bases — a byte source only through {@link originAmong}. */
 export const selfBases = (): string[] => [`${location.origin}/content`, location.origin]
+
+/** Is this origin one of the domains asked? Only then is it a byte source: a
+ *  node serving its own content carries itself, and a shell that is not a host
+ *  (hypercomb.io) never serves a byte (documentation/packages-window.md). */
+export const originAmong = (zones: readonly string[]): boolean => {
+  const self = hostZone(location.host)
+  return !!self && zones.some(zone => hostZone(zone) === self)
+}
 
 const fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
   try {
@@ -371,7 +378,8 @@ export const installPackage = async (
   if (!store.opfsAvailable) return fail('OPFS unavailable')
 
   // BYTE SOURCES: the host that offered it, then every other domain that
-  // publishes the same signature, then the shim's own origin.
+  // publishes the same signature, then this origin — only when it is itself
+  // one of the domains asked. A shell is not a host.
   //
   // A signature names one closure, so any host holding it holds the SAME
   // bytes — which is what makes a second domain a COPY rather than another
@@ -385,7 +393,7 @@ export const installPackage = async (
   const origins = [...new Set([
     pkg.base,
     ...alsoFrom.flatMap(zone => hostBases(zone)),
-    ...selfBases(),
+    ...(originAmong([pkg.zone, ...alsoFrom]) ? selfBases() : []),
   ])]
   const fetchFrom = async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
     for (const base of origins) {
@@ -487,7 +495,7 @@ export const installPackage = async (
   // not a typed folder.
   await writeBags(store, inventory)
 
-  await activate(pkg.packageSig, provenanceOf(pkg.zone), inventory, beeDeps, held.held, layersIo)
+  await activate(pkg.packageSig, inventory, beeDeps, held.held, layersIo)
   return {
     ok: true,
     packageSig: pkg.packageSig,
@@ -511,32 +519,15 @@ const SIG_STORE_KEY = 'hypercomb.signature-store'
  * one place where "held" becomes "running", kept separate for exactly that
  * reason.
  */
-type InstallSource = 'bundled' | 'sentinel'
-
-// Provenance. A package taken from ANOTHER domain is not answerable to this
-// shell's bundled `/content/` ('sentinel' — an external authority is current),
-// so the bundled check must not raise a phantom "new features" by diffing it
-// against the bundle. A package taken from THIS origin's own domain IS the
-// bundle's line, and recording it as 'sentinel' would silence every later
-// "your domain has a newer deploy" notice.
-const provenanceOf = (zone: string): InstallSource =>
-  hostZone(zone) === hostZone(location.host) ? 'bundled' : 'sentinel'
-
-const installedSource = (): InstallSource => {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(INSTALL_MANIFEST_KEY) ?? '{}') as { source?: unknown }
-    return parsed.source === 'bundled' ? 'bundled' : 'sentinel'
-  } catch { return 'sentinel' }
-}
-
 /** The io a layer walk uses in this origin: held layers first, then every
- *  domain given plus this origin, each verified before it is written. */
+ *  domain given (this origin only when it is one of them), each verified
+ *  before it is written. */
 export const layersIoFor = async (zones: readonly string[]): Promise<ReplicationIo | null> => {
   const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
   if (!store) return null
   await store.initialize()
   if (!store.opfsAvailable) return null
-  const origins = [...new Set([...zones.flatMap(zone => hostBases(zone)), ...selfBases()])]
+  const origins = [...new Set([...zones.flatMap(zone => hostBases(zone)), ...(originAmong(zones) ? selfBases() : [])])]
   return {
     read: readFrom([store.hypercombRoot], sig => [sig, `${sig}.json`]),
     fetch: async (sig) => {
@@ -568,13 +559,12 @@ export const applyUnits = async (): Promise<boolean> => {
   if (!isComplete(result)) return false
   const readAtom = readFrom([store.bees, store.dependencies], s => [`${s}.js`, s])
   const beeDeps = await deriveBeeDeps(inventory.bees, inventory.dependencies, readAtom)
-  await activate(sig, installedSource(), inventory, beeDeps, result.held, local)
+  await activate(sig, inventory, beeDeps, result.held, local)
   return true
 }
 
 const activate = async (
   packageSig: string,
-  source: InstallSource,
   inventory: PackageInventory,
   beeDeps: Record<string, string[]>,
   held: string[],
@@ -595,7 +585,9 @@ const activate = async (
       bees,
       dependencies: inventory.dependencies,
       beeDeps,
-      source,
+      // Answerable to the channel the participant follows — the web has no
+      // bundled authority, because the origin is the shell, not a host.
+      source: 'sentinel',
     }))
     // Per-bee dependency closure, read by the preloader when it lazy-loads a
     // bee's deps. A global rather than storage because it is re-derived every

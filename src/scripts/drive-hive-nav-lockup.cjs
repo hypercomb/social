@@ -119,8 +119,8 @@ async function main() {
   // button), which reloads on success.
   let hasRenderer = await page.evaluate(() => !!window.ioc?.get?.('@diamondcoreprocessor.com/ShowCellDrone')?.pixiRenderer)
   if (!hasRenderer) {
-    log('no renderer → triggering window.upgradeHypercomb() (bundled install)…')
-    await page.evaluate(() => { try { window.upgradeHypercomb && window.upgradeHypercomb() } catch {} }).catch(() => {})
+    log('no renderer → dispatching hypercomb:start-install (acquire from hosts)…')
+    await page.evaluate(() => { window.dispatchEvent(new CustomEvent('hypercomb:start-install')) }).catch(() => {})
     await page.waitForLoadState('load', { timeout: 90000 }).catch(() => {})
     await sleep(6000)
     await page.waitForFunction(() => !!window.ioc?.get?.('@diamondcoreprocessor.com/ShowCellDrone')?.pixiRenderer, { timeout: 60000 })

@@ -112,4 +112,23 @@ describe('the packages window', () => {
     expect(VIEW).toMatch(/this\.#opened = opened \? '' : row\.name/)
     expect(VIEW).toMatch(/pk-where/)
   })
+
+  it('the origin is the shell, never a host: the web shell takes packages only from the hosts it carries', () => {
+    // Jaime 2026-09-13: "only have imports from our own host servers and never
+    // from hypercomb.io… the hosts are your proxy." The bundled install stays
+    // only where the origin IS the host: the visitor door and the native shell.
+    const APP = readFileSync(join(root, 'hypercomb-web', 'src', 'app', 'app.ts'), 'utf8')
+    const MAIN = readFileSync(join(root, 'hypercomb-web', 'src', 'main.ts'), 'utf8')
+    const INSTALL = readFileSync(join(root, 'hypercomb-web', 'src', 'setup', 'ensure-install.ts'), 'utf8')
+    expect(INSTALL).not.toMatch(/export const checkForUpdate/)
+    expect(INSTALL).toMatch(/export const installFromHosts = async/)
+    expect(APP).not.toMatch(/checkForUpdate|upgradeHypercomb|upgradeFromBundled|searchParams\.has\('upgrade'\)/)
+    const start = MAIN.slice(MAIN.indexOf("window.addEventListener('hypercomb:start-install'"))
+    expect(start.indexOf('await installFromHosts()')).toBeGreaterThan(-1)
+    expect(start.indexOf('if (!nativeAvailable()) {')).toBeLessThan(start.indexOf('await upgradeFromBundled()'))
+    expect(INDICATOR).toMatch(/if \(payload\?\.source !== 'channel'\) return/)
+    expect(INDICATOR).not.toMatch(/'bundled'/)
+    expect(UPGRADE).toMatch(/window\.ioc\.get\(INSTALL_IOC_KEY\)/)
+    expect(UPGRADE).not.toMatch(/upgradeHypercomb/)
+  })
 })

@@ -145,10 +145,10 @@ async function waitForReady(page, timeoutMs = 45000) {
 // never installs by itself). Until that is accepted there is no SwarmDrone
 // at all, so a swarm check would be measuring an empty shell.
 //
-// window.upgradeHypercomb is the install prompt's own handler, exposed by
-// hypercomb-web/src/app/app.ts for exactly this — so this is the button, not
-// a back door. It reloads the shell on success. The dev shell imports its
-// drones directly and never needs any of this.
+// `hypercomb:start-install` is the welcome card's own Start — the same handler
+// the button fires, so this is the button, not a back door. It acquires from
+// the hosts carried and reloads the shell on success. The dev shell imports
+// its drones directly and never needs any of this.
 async function installIfNeeded(page, label) {
   // The prompt's handler is published by the App constructor, which runs
   // AFTER the runtime registers Lineage/Navigation — so a single sample can
@@ -159,7 +159,7 @@ async function installIfNeeded(page, label) {
   while (Date.now() < deadline) {
     need = await page.evaluate(() => ({
       missing: !window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone'),
-      canInstall: typeof window.upgradeHypercomb === 'function',
+      canInstall: true,
     })).catch(() => ({ missing: true, canInstall: false }))
     if (!need.missing || need.canInstall) break
     await sleep(1000)
@@ -167,7 +167,7 @@ async function installIfNeeded(page, label) {
   if (!need.missing) return 'already-installed'
   if (!need.canInstall) return 'no-install-affordance'
   log(label, 'shell has no drones — accepting the install prompt')
-  await page.evaluate(() => window.upgradeHypercomb()).catch(() => null)
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('hypercomb:start-install'))).catch(() => null)
   // It reloads itself when the install lands; wait for drones, not a timer.
   const start = Date.now()
   while (Date.now() - start < 240000) {

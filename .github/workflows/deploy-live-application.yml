@@ -104,6 +104,12 @@ jobs:
             fi
           done
 
+      # The origin is the shell, never a host: the web deploy publishes no
+      # package pool (src/documentation/packages-window.md). Native client
+      # builds keep content/ — their bundle is the version installed.
+      - name: Ship the shell without a package pool
+        run: rm -rf src/hypercomb-web/dist/hypercomb-web/browser/content
+
       - name: Upload to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:

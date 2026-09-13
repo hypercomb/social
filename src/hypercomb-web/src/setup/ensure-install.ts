@@ -91,12 +91,10 @@ type InstallManifest = {
   label?: string
   at?: string
   previous?: string | null
-  // Provenance of THIS install — which source produced it. 'bundled' = the
-  // shell's `/content/` package (so the bundle IS the update authority);
-  // 'sentinel' = a DCP logical union (DCP is the authority, the bundle is not).
-  // checkForUpdate gates on this so a DCP-sourced install never raises a phantom
-  // "New features" by diffing against the shell's (possibly older/divergent)
-  // bundle. Absent on pre-provenance manifests → inferred from the bee sets.
+  // Provenance of THIS install — which source produced it: 'bundled' = this
+  // origin's own `/content/` (a visitor door, or the native shell's shipped
+  // version); 'sentinel' = a host the participant carries. Recorded, not
+  // consulted: only the followed channel announces updates.
   source?: 'bundled' | 'sentinel'
 }
 
@@ -209,9 +207,8 @@ export const ensureInstall = async (): Promise<void> => {
   // install. The boot path's job is:
   //
   //   1) If a usable cached install is on disk → boot from cache.
-  //   2) Otherwise → emit `install-needed` and let the user explicitly
-  //      open DCP (push-driven install) or click "Upgrade Hypercomb"
-  //      (user-initiated bundled refresh — see {@link upgradeFromBundled}).
+  //   2) Otherwise → take the first package from the hosts carried (the
+  //      seed host when none) and, failing that, emit `install-needed`.
   //
   // The previous behaviour fetched `/content/manifest.json` on every
   // single boot just to do a staleness diff against the cached sigs.
@@ -326,7 +323,7 @@ export const ensureInstall = async (): Promise<void> => {
   // card that can only say "you have nothing, and I know where to get it, and
   // I will not." Warm boots are untouched by this and still go through the
   // upgrade affordance.
-  const acquired = await autoloadFromHosts()
+  const acquired = await installFromHosts()
   if (acquired) return
 
   console.log('[ensure-install] no cached content — surfacing install-needed')
@@ -390,7 +387,7 @@ const repairInstalled = async (cached: InstallManifest): Promise<boolean> => {
   }
 }
 
-const autoloadFromHosts = async (): Promise<boolean> => {
+export const installFromHosts = async (): Promise<boolean> => {
   try {
     // A COLD CLIENT CARRIES NOTHING. The pool that holds the domains you have
     // added is empty on a first run, and the drone that seeds it ships inside
@@ -467,99 +464,16 @@ const autoloadFromHosts = async (): Promise<boolean> => {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Update check (post-boot, off the critical path). The push-only boot
-// contract forbids a staleness fetch DURING boot, but once the app is
-// up we may compare the cached install against the shell's bundled
-// `/content/` package to surface an "update available" affordance. This
-// never installs anything — it only emits `update:available`, tagged
-// `source: 'bundled'` so the indicator keeps it apart from a followed
-// channel's offer, and the participant decides.
-//
-// `offer` is the `?upgrade=1` door: the participant asked, so the bundle is
-// offered whatever the install's provenance — but only ever offered. A link
-// anyone can send must never change what a hive runs by itself.
-//
-// Resolves true when an update is offered, false when the live package IS
-// the bundled one, null when there is nothing to compare.
-// ─────────────────────────────────────────────────────────────────────
-
-export const checkForUpdate = async ({ offer = false }: { offer?: boolean } = {}): Promise<boolean | null> => {
-  const cached = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-  // Not installed yet (cold/welcome state) — the install prompt handles that,
-  // there's no "update" to offer over an absent install.
-  if (!cached || cached.bees.length === 0) return null
-  const bundled = await fetchBundledPackage()
-  // No bundled manifest (dev shell has no /content/, or offline) — stay quiet.
-  if (!bundled) return null
-
-  const announce = (available: boolean): void => {
-    EffectBus.emit('update:available', {
-      available,
-      newCount: 0,
-      newBees: [],
-      packageSig: bundled.packageSig,
-      previous: bundled.previous ?? null,
-      label: bundled.label,
-      source: 'bundled',
-      ...(offer ? { offer: true } : {}),
-    })
-  }
-
-  // MERKLE FIRST. A package signature IS the closure it names, so equal sigs
-  // mean equal trees and there is nothing to offer — no set comparison can say
-  // more than that. It also keeps the comparisons below honest now that the
-  // cached arrays are DERIVED from the signed tree while `bundled.*` is still
-  // what /content/manifest.json asserts: the two are only ever put side by side
-  // when the packages genuinely differ. The live signature is the one stamp
-  // every activation path writes, so a package a followed channel installed
-  // is compared as itself, not as the bundle it replaced.
-  if (installedPackageSig() === bundled.packageSig) {
-    announce(false)
-    return false
-  }
-
-  // ── Update-authority gate ────────────────────────────────────────────
-  // The shell's bundled `/content/` is the update reference ONLY for installs
-  // that came FROM the bundle. A host-sourced install has its own authority
-  // and surfaces its own updates; diffing it against the bundled package
-  // raised phantom "New features" the moment the two drifted. Provenance is
-  // stamped on every manifest write, and an install without one is treated as
-  // NOT ours — conservative, and it self-heals on the next upgradeFromBundled,
-  // which stamps `source: 'bundled'`.
-  //
-  // This used to INFER provenance by diffing bee sets. It cannot any more, and
-  // should not: the bundle no longer states an inventory, because nothing a
-  // publisher writes down decides what a client installs. An explicit offer
-  // passes: the participant asked for the bundle by name.
-  if (cached.source !== 'bundled' && !offer) {
-    announce(false)
-    return null
-  }
-
-  // THE SIGNATURE IS THE ANSWER. Equal signatures returned above, so reaching
-  // here means the bundle is a different tree — which is what an update IS.
-  //
-  // What went with the manifest is the DELTA: "and here are the 4 new bees".
-  // That list existed only because a document enumerated an inventory, and
-  // computing it honestly now would mean resolving the new package's whole
-  // closure to render a number. The pill says a newer build is here; what
-  // changed in it is a release note's job, not the installer's.
-  announce(true)
-  return true
-}
-
-
-// ─────────────────────────────────────────────────────────────────────
-// User-initiated bundled upgrade. Fired explicitly by the "Upgrade
-// Hypercomb" button in the install prompt UI. Walks the same path
-// the old auto-fallback used (fetch /content/manifest.json → install
-// every sig listed → reload), but only on click — not at boot.
+// THE BUNDLED PACKAGE — only where this origin IS the host. A published
+// visitor door seeds its renderer from its own /content/, and the native
+// shell's bundle is the version that was installed. The web shell never
+// takes one: hypercomb.io is the shell, not a host
+// (documentation/packages-window.md § The origin is the shell).
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * Force an install from the shell's bundled `/content/` package. Called
- * by the "Upgrade Hypercomb" UI button. Unlike {@link ensureInstall},
- * which is automatic and push-only, this path is ALWAYS user-initiated.
+ * Install this origin's bundled `/content/` package — the visitor door's
+ * renderer, or the native shell's shipped version; never the web shell's.
  * On success the caller is expected to `location.reload()` so the
  * freshly-installed bees take over.
  *
@@ -938,8 +852,8 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     bees: inventory.bees,
     dependencies: inventory.dependencies,
     beeDeps,
-    // Came from the shell's bundled package → the bundle IS this install's
-    // update authority (checkForUpdate compares against it).
+    // Came from this origin's own bundle — the visitor door's renderer or the
+    // native shell's shipped version.
     source: 'bundled' as const,
   }
   if (!complete) {

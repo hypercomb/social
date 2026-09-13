@@ -4,7 +4,7 @@
 //
 // Two paths make a package live: `acquire()` (a host's package, replicated and
 // verified — the shim always, the web shell on a cold boot) and the web
-// shell's bundled install (`upgradeFromBundled`, `/upgrade`, `?upgrade=1`).
+// shell's bundled install (the visitor door and the native shell).
 // They used to leave DIFFERENT stamps, so "which build am I on" had two
 // answers and a surface asking it could only guess. Both now write THIS key
 // at the moment of activation, and everything that wants the answer reads it

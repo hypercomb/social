@@ -375,7 +375,11 @@ describe('updating happens in Packages', () => {
     expect(UPGRADE).toMatch(/EffectBus\.emit\('packages:open', \{\}\)/)
   })
 
-  it('an install from your own domain keeps the bundled update check listening', () => {
-    expect(ACQUIRE).toMatch(/hostZone\(zone\) === hostZone\(location\.host\) \? 'bundled' : 'sentinel'/)
+  it('this origin is a byte source only when it is among the domains asked — a shell is not a host', () => {
+    expect(ACQUIRE).toMatch(/export const originAmong = \(zones: readonly string\[\]\): boolean =>/)
+    expect(ACQUIRE).toMatch(/\.\.\.\(originAmong\(\[pkg\.zone, \.\.\.alsoFrom\]\) \? selfBases\(\) : \[\]\)/)
+    expect(ACQUIRE).toMatch(/\.\.\.\(originAmong\(zones\) \? selfBases\(\) : \[\]\)/)
+    expect(ACQUIRE).not.toMatch(/^\s*\.\.\.selfBases\(\),?\s*$/m)
+    expect(ACQUIRE).not.toMatch(/'bundled'/)
   })
 })
