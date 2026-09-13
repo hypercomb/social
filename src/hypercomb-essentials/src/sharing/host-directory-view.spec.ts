@@ -148,7 +148,20 @@ describe('the host directory', () => {
 
     expect(VIEW).toMatch(/#view: View = 'domains'/)
     expect(VIEW).toMatch(/if \(!this\.#resume\) this\.#toDomains\(\)/)
-    expect(VIEW).not.toMatch(/hd-domains|#renderDomains\(/)
+    expect(VIEW).not.toMatch(/hd-domains|#renderDomains\(|hd-hostbar/)
+  })
+
+  it('is an accordion with one search: one domain section open at a time, a search finishing into lines', () => {
+    // Jaime 2026-09-13: "only vertical lists of domains and of the installable
+    // updatables… it is a drill down… accordion style with a search."
+    const toggle = VIEW.slice(VIEW.indexOf('#toggleSection(zone: string): void {'))
+    expect(toggle).toMatch(/if \(this\.#section === zone\) \{ this\.#section = null; this\.#scope = '' \}\s*else \{ this\.#section = zone; this\.#scope = zone \}/)
+    expect(VIEW).toMatch(/header\.setAttribute\('aria-expanded', String\(open\)\)/)
+    expect(VIEW).toMatch(/if \(this\.#query\.trim\(\)\) \{ this\.#renderMatches\(body, domains\); return \}/)
+    // Escape clears the search first, then a drill, then the open section.
+    const back = VIEW.slice(VIEW.indexOf('#back(): boolean {'))
+    expect(back.indexOf("if (this.#query) { this.#query = ''")).toBeLessThan(back.indexOf('if (this.#section !== null)'))
+    expect(EN['hosts.search']).toBeTruthy()
   })
 
   it('revisions are a drill-down that returns to the list, and a change reopens it where it was chosen', () => {
@@ -156,7 +169,7 @@ describe('the host directory', () => {
     expect(VIEW).toMatch(/#openRevisions\(row\.path\)/)
     expect(VIEW).toMatch(/revisionsOf\(path, this\.#sources\(\), roots\)/)
     const pick = VIEW.slice(VIEW.indexOf('async #pick('))
-    expect(pick).toMatch(/this\.#view = 'list'[\s\S]{0,80}?this\.#at = parentOf\(path\)/)
+    expect(pick).toMatch(/this\.#toList\(this\.#scope, parentOf\(path\)\)\s*this\.#restart\(\)/)
     expect(VIEW).toMatch(/sessionStorage\.setItem\(REOPEN_KEY/)
     expect(VIEW).toMatch(/sessionStorage\.removeItem\(REOPEN_KEY\)/)
   })

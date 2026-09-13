@@ -2,10 +2,11 @@
 //
 // <hc-host-directory> — THE HOST DIRECTORY, AND THE SWITCHBOARD IN IT.
 //
-// One window, opening COLLAPSED on a vertical list of domains: this origin and
-// every host you carry, each saying how many packages it carries and whether an
-// update is waiting there — the rows with one first, the rest still listed. A
-// domain opens into its packages, on or shaded. This origin is every package
+// One window of vertical lists, opening COLLAPSED: an accordion of domains —
+// this origin and every host you carry, each saying how many packages it carries
+// and whether an update is waiting there, the ones with an update first. One
+// section opens at a time, into that domain's packages, on or shaded; one search
+// box finishes into lines, one per matching domain or package. This origin is every package
 // all of your hosts carry; a host is the same list filtered to what it carries,
 // with a count beside each row of how many of your hosts carry that SAME
 // signature. Nothing switches: on and off are by name path, and a package
@@ -304,6 +305,8 @@ export class HostDirectoryElement extends HTMLElement {
   #loaded = false
 
   #scope = ''
+  /** The one domain section open, or null — `''` is this origin. */
+  #section: string | null = null
   #at = ''
   #query = ''
   /** The one row open at a time. */
@@ -431,7 +434,7 @@ export class HostDirectoryElement extends HTMLElement {
     const search = make('div', 'hd-search')
     const input = make('input', 'hd-input')
     input.type = 'search'
-    input.addEventListener('input', () => { this.#query = input.value; if (this.#view === 'list') this.#renderBody() })
+    input.addEventListener('input', () => { this.#query = input.value; if (this.#view === 'domains') this.#renderBody() })
     search.append(input)
     const body = make('div', 'hd-body')
 
@@ -462,7 +465,9 @@ export class HostDirectoryElement extends HTMLElement {
     this.#refs.clear()
   }
 
+  /** Collapse: the domains, every section shut, the search cleared. */
   #toDomains(): void {
+    this.#section = null
     this.#scope = ''
     this.#at = ''
     this.#query = ''
@@ -472,25 +477,47 @@ export class HostDirectoryElement extends HTMLElement {
     this.#error = ''
   }
 
+  /** A domain's section open at a path inside it: the accordion when the path
+   *  is the domain's top, the drill-down when it is a branch. */
   #toList(scope: string, at: string): void {
+    this.#section = scope
     this.#scope = scope
     this.#at = at
-    this.#view = 'list'
+    this.#view = at ? 'list' : 'domains'
     this.#warning = null
     this.#opened = ''
     this.#error = ''
   }
 
-  /** Escape unwinds one level: the warning, the drill, the walk, then back to
-   *  the domains. On the domains there is nothing left to unwind. */
+  /** ONE SECTION AT A TIME: opening a domain shuts the one that was open, and
+   *  pressing an open domain shuts it. */
+  #toggleSection(zone: string): void {
+    if (this.#section === zone) { this.#section = null; this.#scope = '' }
+    else { this.#section = zone; this.#scope = zone }
+    this.#opened = ''
+    this.#error = ''
+    this.#renderBody()
+  }
+
+  /** Escape unwinds one level, innermost first: the search, the warning, a
+   *  drill, the walk, the open section. On the shut accordion it has nothing. */
   #back(): boolean {
+    if (this.#query) { this.#query = ''; this.#render(); return true }
     if (this.#warning) { this.#warning = null; this.#renderBody(); return true }
-    if (this.#view === 'domains') return false
-    if (this.#view !== 'list') { this.#view = 'list'; this.#render(); return true }
-    if (this.#at) { this.#at = parentOf(this.#at); this.#opened = ''; this.#renderBody(); return true }
-    this.#toDomains()
-    this.#render()
-    return true
+    if (this.#view === 'revisions' || this.#view === 'creations' || this.#view === 'mine') {
+      this.#view = this.#at ? 'list' : 'domains'
+      this.#render()
+      return true
+    }
+    if (this.#view === 'list') {
+      this.#at = parentOf(this.#at)
+      this.#opened = ''
+      if (!this.#at) this.#view = 'domains'
+      this.#render()
+      return true
+    }
+    if (this.#section !== null) { this.#section = null; this.#scope = ''; this.#renderBody(); return true }
+    return false
   }
 
   // ── what is on screen ────────────────────────────────────────────────────
@@ -514,18 +541,27 @@ export class HostDirectoryElement extends HTMLElement {
   #render(): void {
     if (!this.#panel) return
     const input = this.#refs.get('input') as HTMLInputElement
-    const placeholder = this.#scope
-      ? t('packages.search-in', 'Search packages on {host}', { host: this.#scope })
-      : t('packages.search', 'Search packages')
+    const placeholder = t('hosts.search', 'Search domains and packages')
     input.placeholder = placeholder
     input.setAttribute('aria-label', placeholder)
     if (input.value !== this.#query) input.value = this.#query
-    this.#refs.get('search')!.hidden = this.#view !== 'list'
+    this.#refs.get('search')!.hidden = this.#view !== 'domains'
     this.#renderBody()
   }
 
-  #renderDomainList(body: HTMLElement): void {
-    const rows = domainRows({
+  #renderBody(): void {
+    const body = this.#refs.get('body')
+    if (!body) return
+    body.replaceChildren()
+    if (this.#view === 'domains') this.#renderAccordion(body)
+    else if (this.#view === 'revisions') this.#renderRevisions(body)
+    else if (this.#view === 'creations') this.#renderCreations(body)
+    else if (this.#view === 'mine') this.#renderMine(body)
+    else this.#renderBranch(body)
+  }
+
+  #domains(): DomainRow[] {
+    return domainRows({
       homeLabel: this.#home || t('packages.mine', 'this hive'),
       zones: this.#zones.filter(zone => zone !== this.#home),
       trunk: this.#selection?.trunk ?? null,
@@ -533,24 +569,38 @@ export class HostDirectoryElement extends HTMLElement {
       served: this.#served,
       count: zone => zone ? (this.#served.get(zone) ? this.#rows(zone, '', '').length : 0) : this.#rows('', '', '').length,
     })
+  }
+
+  /** THE ACCORDION: a vertical list of domain headers, one section open. */
+  #renderAccordion(body: HTMLElement): void {
+    const domains = this.#domains()
+    if (this.#query.trim()) { this.#renderMatches(body, domains); return }
+
     const list = make('ul', 'hd-list')
-    for (const row of rows) {
-      const li = make('li', `hd-domain-row${row.update ? ' has-update' : ''}`)
-      const open = button('hd-domain', '', t('hosts.open-domain', 'Open {host}', { host: row.label }))
-      open.append(make('span', 'hd-domain-name', row.label))
-      if (row.update) open.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
-      const count = make('span', 'hd-count', row.count ? String(row.count) : '')
-      if (row.count) count.title = t('hosts.package-count', '{count} packages', { count: row.count })
-      open.append(count, make('span', 'hd-chevron', '›'))
-      open.addEventListener('click', () => { this.#toList(row.zone, ''); this.#render() })
-      li.append(open)
+    for (const domain of domains) {
+      const open = this.#section === domain.zone
+      const li = make('li', `hd-section${domain.update ? ' has-update' : ''}${open ? ' open' : ''}`)
+      const header = button('hd-domain', '', t('hosts.open-domain', 'Open {host}', { host: domain.label }))
+      header.setAttribute('aria-expanded', String(open))
+      const chevron = make('span', 'hd-chevron', open ? '▾' : '▸')
+      chevron.setAttribute('aria-hidden', 'true')
+      header.append(chevron, make('span', 'hd-domain-name', domain.label))
+      if (domain.update) header.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
+      const count = make('span', 'hd-count', domain.count ? String(domain.count) : '')
+      if (domain.count) count.title = t('hosts.package-count', '{count} packages', { count: domain.count })
+      header.append(count)
+      header.addEventListener('click', () => this.#toggleSection(domain.zone))
+      li.append(header)
+      if (open) li.append(this.#sectionBody(domain.zone))
       list.append(li)
     }
     body.append(list)
-    if (this.#reading && rows.every(row => !row.count)) body.append(make('p', 'hd-note', t('packages.reading', 'Reading what is served…')))
+    if (this.#reading && domains.every(domain => !domain.count)) {
+      body.append(make('p', 'hd-note', t('packages.reading', 'Reading what is served…')))
+    }
 
     // A domain is added at the end of the list it joins — the hosts drone owns
-    // the pool, and the new row arrives on its next render.
+    // the pool, and the new header arrives on its next render.
     const add = make('form', 'hd-add')
     const field = make('input', 'hd-add-input')
     field.type = 'text'
@@ -572,82 +622,80 @@ export class HostDirectoryElement extends HTMLElement {
     body.append(add)
   }
 
-  #renderBody(): void {
-    const body = this.#refs.get('body')
-    if (!body) return
-    body.replaceChildren()
-    if (this.#view === 'domains') this.#renderDomainList(body)
-    else if (this.#view === 'revisions') this.#renderRevisions(body)
-    else if (this.#view === 'creations') this.#renderCreations(body)
-    else if (this.#view === 'mine') this.#renderMine(body)
-    else this.#renderList(body)
+  /** THE SEARCH FINISHES INTO LINES: one per matching domain, one per matching
+   *  package wherever it is carried. Choosing a line opens its place. */
+  #renderMatches(body: HTMLElement, domains: readonly DomainRow[]): void {
+    const q = this.#query.trim().toLowerCase()
+    const list = make('ul', 'hd-list hd-matches')
+    const line = (label: string, where: string, go: () => void, update = false): void => {
+      const li = make('li', 'hd-match-row')
+      const choose = button('hd-match', '')
+      choose.append(make('span', 'hd-match-name', label))
+      if (update) choose.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
+      choose.append(make('span', 'hd-match-where', where))
+      choose.addEventListener('click', go)
+      li.append(choose)
+      list.append(li)
+    }
+    for (const domain of domains) {
+      if (domain.label.toLowerCase().includes(q)) {
+        line(domain.label, t('hosts.domain', 'domain'), () => { this.#query = ''; this.#toList(domain.zone, ''); this.#render() }, domain.update)
+      }
+      for (const match of this.#rows(domain.zone, '', this.#query)) {
+        line(match.path, domain.label, () => {
+          this.#query = ''
+          this.#toList(domain.zone, parentOf(match.path))
+          this.#opened = match.path
+          this.#render()
+        }, match.update)
+      }
+    }
+    if (list.childElementCount) body.append(list)
+    else body.append(make('p', 'hd-note', t('hosts.no-match', 'Nothing matches “{query}”.', { query: this.#query.trim() })))
   }
 
-  #renderList(body: HTMLElement): void {
+  /** An open domain: its own acts as lines, then its packages. */
+  #sectionBody(zone: string): HTMLElement {
+    const section = make('div', 'hd-section-body')
     const reach = port()
     const trunk = this.#selection?.trunk ?? null
 
-    // THE WAY BACK: up one level, or to the domains from a domain's top. The
-    // domain names the path's first step, so where you are always reads whole.
-    const crumbs = make('nav', 'hd-crumbs')
-    crumbs.setAttribute('aria-label', t('hosts.path', 'Where you are'))
-    const up = button('hd-back', '‹', this.#at ? t('hosts.up', 'Up one level') : t('hosts.domains', 'All domains'))
-    up.addEventListener('click', () => {
-      if (this.#at) { this.#at = parentOf(this.#at); this.#opened = ''; this.#renderBody() }
-      else { this.#toDomains(); this.#render() }
-    })
-    const domain = button(`hd-crumb${this.#at ? '' : ' here'}`, this.#scope || this.#home || t('packages.mine', 'this hive'))
-    domain.addEventListener('click', () => { this.#at = ''; this.#opened = ''; this.#renderBody() })
-    crumbs.append(up, domain)
-    if (this.#at) {
-      const segments = this.#at.split('/')
-      segments.forEach((segment, index) => {
-        const path = segments.slice(0, index + 1).join('/')
-        crumbs.append(make('span', 'hd-sep', '/'))
-        const crumb = button(`hd-crumb${path === this.#at ? ' here' : ''}`, segment)
-        crumb.addEventListener('click', () => { this.#at = path; this.#opened = ''; this.#renderBody() })
-        crumbs.append(crumb)
-      })
-    }
-    body.append(crumbs)
-
-    // THE HOST ITSELF: what else it serves, its own door, and letting it go.
-    if (this.#scope) {
-      const bar = make('div', 'hd-hostbar')
+    const lines = make('ul', 'hd-lines')
+    const addLine = (node: HTMLElement): void => { const li = make('li', 'hd-line'); li.append(node); lines.append(li) }
+    if (zone) {
+      // THE HOST ITSELF: what else it serves, its own door, and letting it go.
       const creations = button('hd-link', t('hosts.creations.title', 'Creations on {host}', { host: this.#scope }))
       creations.addEventListener('click', () => {
         this.#view = 'creations'
         this.#render()
         EffectBus.emit('hosts:creations', { zone: this.#scope })
       })
-      bar.append(creations)
+      addLine(creations)
       if (hostZone(this.#scope) !== this.#home) {
         const visit = make('a', 'hd-link', t('hosts.visit', 'Visit'))
         visit.href = `https://${this.#scope}/`
         visit.target = '_blank'
         visit.rel = 'noopener'
         visit.title = t('hosts.visit-tip', 'Open {host} in a new tab', { host: this.#scope })
-        bar.append(visit)
+        addLine(visit)
       }
-      const remove = button('hd-link hd-remove', '✕', t('hosts.remove', 'Remove {host} from your host directory', { host: this.#scope }))
+      const remove = button('hd-link', t('hosts.remove-short', 'Remove'), t('hosts.remove', 'Remove {host} from your host directory', { host: this.#scope }))
       remove.addEventListener('click', () => {
         const zone = this.#scope
         this.#toDomains()
         EffectBus.emit('hosts:remove', { zone })
         this.#render()
       })
-      bar.append(remove)
-      body.append(bar)
+      addLine(remove)
     } else if (this.#mine.length) {
       const mine = button('hd-link', t('hosts.mine.open', 'In your hive ({count})', { count: this.#mine.length }))
       mine.addEventListener('click', () => { this.#view = 'mine'; this.#render() })
-      const bar = make('div', 'hd-hostbar')
-      bar.append(mine)
-      body.append(bar)
+      addLine(mine)
     }
+    if (lines.childElementCount) section.append(lines)
 
-    // EVERYTHING THE FOLLOWED PUBLISHER MOVED, in one act — at the top only.
-    if (!this.#scope && !this.#at && trunk && this.#next && this.#next.root !== trunk) {
+    // EVERYTHING THE FOLLOWED PUBLISHER MOVED, in one act — this origin only.
+    if (!zone && trunk && this.#next && this.#next.root !== trunk) {
       const bar = make('div', 'hd-updates')
       bar.setAttribute('role', 'status')
       bar.append(make('span', '', t('packages.updates.shared', 'An update is ready')))
@@ -655,25 +703,63 @@ export class HostDirectoryElement extends HTMLElement {
       take.disabled = !!this.#busy
       take.addEventListener('click', () => { void this.#updateAll() })
       bar.append(take)
-      body.append(bar)
+      section.append(bar)
     }
     if (reach && !trunk) {
-      body.append(make('p', 'hd-note', t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')))
+      section.append(make('p', 'hd-note', t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')))
     }
+    if (this.#error) {
+      const err = make('p', 'hd-error', this.#error)
+      err.setAttribute('role', 'alert')
+      section.append(err)
+    }
+
+    const rows = this.#rows(zone, '', '')
+    if (!rows.length) {
+      section.append(make('p', 'hd-note', this.#reading || !this.#loaded
+        ? t('packages.reading', 'Reading what is served…')
+        : t('packages.empty', 'Nothing listed here yet.')))
+    } else section.append(this.#packageList(rows))
+    return section
+  }
+
+  /** A branch walked into: the way back, then its parts. */
+  #renderBranch(body: HTMLElement): void {
+    const crumbs = make('nav', 'hd-crumbs')
+    crumbs.setAttribute('aria-label', t('hosts.path', 'Where you are'))
+    const up = button('hd-back', '‹', t('hosts.up', 'Up one level'))
+    up.addEventListener('click', () => {
+      this.#at = parentOf(this.#at)
+      this.#opened = ''
+      if (!this.#at) this.#view = 'domains'
+      this.#render()
+    })
+    const domain = button('hd-crumb', this.#scope || this.#home || t('packages.mine', 'this hive'))
+    domain.addEventListener('click', () => { this.#at = ''; this.#opened = ''; this.#view = 'domains'; this.#render() })
+    crumbs.append(up, domain)
+    const segments = this.#at.split('/')
+    segments.forEach((segment, index) => {
+      const path = segments.slice(0, index + 1).join('/')
+      crumbs.append(make('span', 'hd-sep', '/'))
+      const crumb = button(`hd-crumb${path === this.#at ? ' here' : ''}`, segment)
+      crumb.addEventListener('click', () => { this.#at = path; this.#opened = ''; this.#renderBody() })
+      crumbs.append(crumb)
+    })
+    body.append(crumbs)
     if (this.#error) {
       const err = make('p', 'hd-error', this.#error)
       err.setAttribute('role', 'alert')
       body.append(err)
     }
+    const rows = this.#rows(this.#scope, this.#at, '')
+    if (!rows.length) body.append(make('p', 'hd-note', t('packages.empty', 'Nothing listed here yet.')))
+    else body.append(this.#packageList(rows))
+  }
 
-    const rows = this.#rows()
-    if (!rows.length) {
-      body.append(make('p', 'hd-note', this.#reading || !this.#loaded
-        ? t('packages.reading', 'Reading what is served…')
-        : t('packages.empty', 'Nothing listed here yet.')))
-      return
-    }
-
+  /** The installable, updatable packages: one vertical line each. */
+  #packageList(rows: readonly DirectoryRow[]): HTMLElement {
+    const reach = port()
+    const trunk = this.#selection?.trunk ?? null
     const acts = !!reach && !!trunk
     const recursive = !!reach?.recursive
     const list = make('ul', 'hd-list')
@@ -698,9 +784,9 @@ export class HostDirectoryElement extends HTMLElement {
       bulb.append(glyph)
       bulb.addEventListener('click', () => { void this.#toggle(row) })
 
-      // THE ACCORDION: a row is a heading, and one opens at a time.
+      // A row is a heading, and one opens at a time.
       const opened = this.#opened === row.path
-      const name = button('hd-name', this.#query ? row.path : row.name)
+      const name = button('hd-name', row.name)
       name.setAttribute('aria-expanded', String(opened))
       name.addEventListener('click', () => { this.#opened = opened ? '' : row.path; this.#renderBody() })
 
@@ -725,7 +811,7 @@ export class HostDirectoryElement extends HTMLElement {
       li.append(bulb, name, marks, count, revisions)
       if (row.children) {
         const walk = button('hd-icon', '›', t('hosts.walk-in', 'Open {name}', { name: row.path }))
-        walk.addEventListener('click', () => { this.#at = row.path; this.#opened = ''; this.#query = ''; this.#render() })
+        walk.addEventListener('click', () => { this.#at = row.path; this.#view = 'list'; this.#opened = ''; this.#query = ''; this.#render() })
         li.append(walk)
       } else li.append(make('span', 'hd-icon-slot'))
 
@@ -744,14 +830,14 @@ export class HostDirectoryElement extends HTMLElement {
       }
       list.append(li)
     }
-    body.append(list)
+    return list
   }
 
   #renderRevisions(body: HTMLElement): void {
     const path = this.#revPath
     const head = make('div', 'hd-crumbs')
     const back = button('hd-back', '‹', t('hosts.revisions.back', 'Back to the list'))
-    back.addEventListener('click', () => { this.#view = 'list'; this.#warning = null; this.#render() })
+    back.addEventListener('click', () => { this.#view = this.#at ? 'list' : 'domains'; this.#warning = null; this.#render() })
     head.append(back, make('span', 'hd-drill-title', t('hosts.revisions.title', 'Revisions of {name}', { name: path })))
     body.append(head)
     if (this.#error) {
@@ -816,7 +902,7 @@ export class HostDirectoryElement extends HTMLElement {
     const zone = this.#scope
     const head = make('div', 'hd-crumbs')
     const back = button('hd-back', '‹', t('hosts.revisions.back', 'Back to the list'))
-    back.addEventListener('click', () => { this.#view = 'list'; this.#render() })
+    back.addEventListener('click', () => { this.#view = 'domains'; this.#render() })
     head.append(back, make('span', 'hd-drill-title', t('hosts.creations.title', 'Creations on {host}', { host: zone })))
     body.append(head, make('p', 'hd-note', t('hosts.creations.note', 'What people made on this domain. Showing one puts it in your hive, shaded, until you walk into it.')))
 
@@ -857,7 +943,7 @@ export class HostDirectoryElement extends HTMLElement {
   #renderMine(body: HTMLElement): void {
     const head = make('div', 'hd-crumbs')
     const back = button('hd-back', '‹', t('hosts.revisions.back', 'Back to the list'))
-    back.addEventListener('click', () => { this.#view = 'list'; this.#render() })
+    back.addEventListener('click', () => { this.#view = 'domains'; this.#render() })
     head.append(back, make('span', 'hd-drill-title', t('hosts.mine.open', 'In your hive ({count})', { count: this.#mine.length })))
     body.append(head)
     const list = make('ul', 'hd-list')
@@ -993,9 +1079,7 @@ export class HostDirectoryElement extends HTMLElement {
     try {
       const outcome = await reach.install.pick(path, { layer: revision.layer, root: roots[0] ?? '', roots }, this.#sources(), { hides })
       if (!outcome.ok) { this.#error = outcome.error ?? 'revision could not be taken'; return }
-      this.#view = 'list'
-      this.#at = parentOf(path)
-      this.#warning = null
+      this.#toList(this.#scope, parentOf(path))
       this.#restart()
     } catch (error) {
       this.#error = error instanceof Error ? error.message : 'revision could not be taken'
@@ -1124,8 +1208,16 @@ ${S} .hd-head{display:flex;align-items:center;gap:.4em;padding:.55em .7em;border
 ${S} .hd-title{flex:1;font-size:.9em;letter-spacing:.05em;color:var(--hc-window-accent);}
 ${S} .hd-close{background:none;border:none;padding:0 .2em;font:inherit;font-size:1.1em;line-height:1;color:var(--hd-ink-quiet);cursor:pointer;}
 ${S} .hd-close:hover{color:var(--hd-ink);}
-${S} .hd-domain-row{border-bottom:1px solid rgba(var(--acc),0.08);}
-${S} .hd-domain{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;column-gap:.5em;width:100%;padding:.55em .2em;font:inherit;font-size:.82em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}
+${S} .hd-section{border-bottom:1px solid rgba(var(--acc),0.08);}
+${S} .hd-section.open > .hd-domain{color:var(--hc-window-accent);}
+${S} .hd-section-body{padding:0 0 .55em .95em;}
+${S} .hd-lines{list-style:none;margin:.05em 0 .35em;padding:0;display:grid;gap:.2em;font-size:.74em;}
+${S} .hd-match-row{border-bottom:1px solid rgba(var(--acc),0.08);}
+${S} .hd-match{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;column-gap:.5em;width:100%;padding:.45em .2em;font:inherit;font-size:.8em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}
+${S} .hd-match:hover{background:rgba(var(--acc),0.05);}
+${S} .hd-match-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+${S} .hd-match-where{font-size:.85em;color:var(--hd-ink-quiet);}
+${S} .hd-domain{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;column-gap:.5em;width:100%;padding:.55em .2em;font:inherit;font-size:.82em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}
 ${S} .hd-domain:hover{background:rgba(var(--acc),0.05);}
 ${S} .hd-domain-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .hd-chevron{color:var(--hd-ink-quiet);}
@@ -1138,10 +1230,8 @@ ${S} .hd-quiet:disabled{cursor:default;opacity:.55;}
 ${S} .hd-search{padding:.45em .7em .2em;}
 ${S} .hd-input{width:100%;box-sizing:border-box;padding:.3em .45em;font:inherit;font-size:.8em;color:var(--hd-ink);background:rgba(var(--acc),0.06);border:1px solid rgba(var(--acc),0.22);border-radius:var(--hc-radius-control,2px);}
 ${S} .hd-body{flex:1 1 auto;overflow-y:auto;padding:.3em .7em .8em;}
-${S} .hd-hostbar{display:flex;align-items:center;gap:.7em;margin:.15em 0 .35em;font-size:.72em;}
 ${S} .hd-link{padding:0;font:inherit;color:var(--hd-ink-quiet);background:none;border:none;text-decoration:none;cursor:pointer;}
 ${S} .hd-link:hover{color:var(--hd-ink);text-decoration:underline;}
-${S} .hd-remove{margin-left:auto;}
 ${S} .hd-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.25em;margin:.15em 0 .4em;font-size:.74em;}
 ${S} .hd-back{padding:0 .35em;font:inherit;font-size:1.2em;line-height:1;color:var(--hd-ink-quiet);background:none;border:none;cursor:pointer;}
 ${S} .hd-back:hover,${S} .hd-crumb:hover{color:var(--hd-ink);}
