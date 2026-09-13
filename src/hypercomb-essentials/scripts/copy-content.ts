@@ -38,9 +38,12 @@ const DIST_ROOT = resolve(__dirname, '..', 'dist')
 // produced. Additive only; reclaiming space is a separate, deliberate GC phase
 // (mark-sweep over active roots), never a build-time side effect.
 // The dev OPFS feed (web public) stays mirrored — it's regenerable.
+// The relay's content dir is the machine's — one per machine, however many
+// checkouts build into it — so a worktree publishes to the same host as the
+// main checkout by naming it (the bridge's owed-stamps.cjs reads the same var).
 const TARGETS = [
   { dir: resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content'), additive: false },
-  { dir: resolve(__dirname, '..', '..', 'hypercomb-relay', 'content'), additive: true },
+  { dir: process.env['HYPERCOMB_RELAY_CONTENT_DIR'] || resolve(__dirname, '..', '..', 'hypercomb-relay', 'content'), additive: true },
 ]
 
 // A content entry is anything 64-hex-named at the dist/target root:

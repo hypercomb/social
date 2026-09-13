@@ -153,7 +153,7 @@ describe('hosts panel — the set, apart from the publishing', () => {
     expect(runtime).toMatch(/export const installedPackageSig/)
     expect(runtime).toMatch(/export const stampInstalledPackage/)
     // Both activation paths stamp it; nothing else writes the key.
-    expect(acquire).toMatch(/stampInstalledPackage\(pkg\.packageSig\)/)
+    expect(acquire).toMatch(/stampInstalledPackage\(packageSig\)/)
     expect(acquire).not.toMatch(/localStorage\.setItem\(INSTALLED_KEY/)
     expect(ensureInstall).toMatch(/stampInstalledPackage\(bundled\.packageSig\)/)
     expect(HOSTS_TS).toMatch(/from '@hypercomb\/runtime\/installed-package'/)
@@ -482,10 +482,10 @@ describe('updating happens in the hosts window', () => {
 
   it('the pill is a notice: it opens Hosts on its build and never installs', () => {
     expect(INDICATOR).not.toMatch(/hypercomb:apply-update/)
-    expect(INDICATOR).toMatch(/EffectBus\.emit\('hosts:open', \{ packageSig:/)
+    expect(INDICATOR).toMatch(/EffectBus\.emit\('packages:open', \{ packageSig:/)
     expect(APP).not.toMatch(/addEventListener\('hypercomb:apply-update'/)
     expect(UPGRADE).not.toMatch(/hypercomb:apply-update/)
-    expect(UPGRADE).toMatch(/EffectBus\.emit\('hosts:open', \{ source: 'bundled' \}\)/)
+    expect(UPGRADE).toMatch(/EffectBus\.emit\('packages:open', \{\}\)/)
   })
 
   it('opens on the build the notice named', () => {
@@ -508,6 +508,6 @@ describe('updating happens in the hosts window', () => {
   })
 
   it('an install from your own domain keeps the bundled update check listening', () => {
-    expect(ACQUIRE).toMatch(/source: hostZone\(pkg\.zone\) === hostZone\(location\.host\) \? 'bundled' : 'sentinel'/)
+    expect(ACQUIRE).toMatch(/hostZone\(zone\) === hostZone\(location\.host\) \? 'bundled' : 'sentinel'/)
   })
 })

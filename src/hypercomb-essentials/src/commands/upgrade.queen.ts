@@ -1,6 +1,6 @@
 // commands/upgrade.queen.ts
 //
-// `/upgrade` — open the hosts window on your own domain's builds.
+// `/upgrade` — open the Packages window.
 //
 // ── Why this exists ───────────────────────────────────────────────────
 //
@@ -22,10 +22,10 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 export class UpgradeQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'upgrade'
-  override description = 'Open the hosts window on your own domain to update'
+  override description = 'Open Packages — what loads, and what has an update'
   override descriptionKey = 'slash.upgrade'
   override examples = [
-    { input: '/upgrade', result: 'Opens Hosts on your own domain — Update there saves a restore point, then installs' },
+    { input: '/upgrade', result: 'Opens Packages — an update mark sits on what the publisher you follow moved' },
   ]
 
   protected async execute(): Promise<void> {
@@ -36,7 +36,7 @@ export class UpgradeQueenBee extends QueenBee {
       EffectBus.emit('activity:log', { message: 'This shell loads modules directly — there is nothing to upgrade', icon: '⬡' })
       return
     }
-    EffectBus.emit('hosts:open', { source: 'bundled' })
+    EffectBus.emit('packages:open', {})
   }
 }
 

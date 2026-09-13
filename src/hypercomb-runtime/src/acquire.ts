@@ -41,7 +41,7 @@
 // `@hypercomb/core` is EXTERNAL — the import map resolves it to the runtime
 // the shim already loaded, so this bundle shares its instances rather than
 // minting a second set.
-import { MARKER_NAME, hardDeleteVetoFor, registerPoolMeaning, SignatureStore } from '@hypercomb/core'
+import { INSTALL_IOC_KEY, MARKER_NAME, hardDeleteVetoFor, registerPoolMeaning, SignatureStore, type InstallProvider } from '@hypercomb/core'
 // These two are PURE — stateless functions over bytes, no IoC registration, no
 // module state — which is the entire reason they may be bundled in here. The
 // walker IS the protocol; only the io wiring below is ours.
@@ -65,6 +65,9 @@ import { validateSealedPackage } from './sealed-package.js'
 import { deriveBeeDeps } from './bee-deps.js'
 import { checkCoreCompatibility, describeCoreMismatch } from './core-surface.js'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from './bags.js'
+// WHICH NAMED PARTS OF THE TREE LOAD. Activation writes every bee the root
+// names minus the units the participant has turned off (package-units.ts).
+import { beesWithUnitsOff, packageUnits, readOffUnits, writeOffUnits } from './package-units.js'
 
 // Store is reached STRUCTURALLY, never imported. Importing the module would
 // bundle a second Store class AND run its module-scope
@@ -484,7 +487,7 @@ export const installPackage = async (
   // not a typed folder.
   await writeBags(store, inventory)
 
-  activate(pkg, inventory, beeDeps, held.held)
+  await activate(pkg.packageSig, provenanceOf(pkg.zone), inventory, beeDeps, held.held, layersIo)
   return {
     ok: true,
     packageSig: pkg.packageSig,
@@ -508,28 +511,91 @@ const SIG_STORE_KEY = 'hypercomb.signature-store'
  * one place where "held" becomes "running", kept separate for exactly that
  * reason.
  */
-const activate = (
-  pkg: HostPackage,
+type InstallSource = 'bundled' | 'sentinel'
+
+// Provenance. A package taken from ANOTHER domain is not answerable to this
+// shell's bundled `/content/` ('sentinel' — an external authority is current),
+// so the bundled check must not raise a phantom "new features" by diffing it
+// against the bundle. A package taken from THIS origin's own domain IS the
+// bundle's line, and recording it as 'sentinel' would silence every later
+// "your domain has a newer deploy" notice.
+const provenanceOf = (zone: string): InstallSource =>
+  hostZone(zone) === hostZone(location.host) ? 'bundled' : 'sentinel'
+
+const installedSource = (): InstallSource => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(INSTALL_MANIFEST_KEY) ?? '{}') as { source?: unknown }
+    return parsed.source === 'bundled' ? 'bundled' : 'sentinel'
+  } catch { return 'sentinel' }
+}
+
+/** The io a layer walk uses in this origin: held layers first, then every
+ *  domain given plus this origin, each verified before it is written. */
+export const layersIoFor = async (zones: readonly string[]): Promise<ReplicationIo | null> => {
+  const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
+  if (!store) return null
+  await store.initialize()
+  if (!store.opfsAvailable) return null
+  const origins = [...new Set([...zones.flatMap(zone => hostBases(zone)), ...selfBases()])]
+  return {
+    read: readFrom([store.hypercombRoot], sig => [sig, `${sig}.json`]),
+    fetch: async (sig) => {
+      for (const base of origins) {
+        const bytes = await fetchBytes(`${base}/${sig}`)
+        if (bytes) return bytes
+      }
+      return null
+    },
+    write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/${sig}`, 'application/json; charset=utf-8'),
+  }
+}
+
+/**
+ * REPOINT THE LIVE PACKAGE FROM WHAT IS ALREADY HELD. Turning a unit on or off
+ * changes which bees load, not which bytes exist: the whole tree stays in the
+ * heap, so this re-reads the installed root's inventory locally and writes the
+ * activation record again — no host asked, no byte fetched. False when the
+ * held tree does not resolve, in which case nothing is changed.
+ */
+export const applyUnits = async (): Promise<boolean> => {
+  const sig = installedPackageSig()
+  if (!sig) return false
+  const io = await layersIoFor([])
+  const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
+  if (!io || !store) return false
+  const local: ReplicationIo = { ...io, fetch: async () => null }
+  const { inventory, result } = await deriveInventory(sig, local)
+  if (!isComplete(result)) return false
+  const readAtom = readFrom([store.bees, store.dependencies], s => [`${s}.js`, s])
+  const beeDeps = await deriveBeeDeps(inventory.bees, inventory.dependencies, readAtom)
+  await activate(sig, installedSource(), inventory, beeDeps, result.held, local)
+  return true
+}
+
+const activate = async (
+  packageSig: string,
+  source: InstallSource,
   inventory: PackageInventory,
   beeDeps: Record<string, string[]>,
   held: string[],
-): void => {
+  layers: ReplicationIo,
+): Promise<void> => {
+  // The units that are off are left out of the bee list and nothing else:
+  // their layers, bees and dependencies stay held, so turning one back on is
+  // this same write again. A tree whose units cannot be read loads whole.
+  const off = readOffUnits()
+  const bees = off.size
+    ? beesWithUnitsOff(inventory.bees, await packageUnits(packageSig, { ...layers, fetch: async () => null }), off)
+    : inventory.bees
   try {
-    stampInstalledPackage(pkg.packageSig)
+    stampInstalledPackage(packageSig)
     localStorage.setItem(INSTALL_MANIFEST_KEY, JSON.stringify({
       version: 2,
       layers: inventory.layers,
-      bees: inventory.bees,
+      bees,
       dependencies: inventory.dependencies,
       beeDeps,
-      // Provenance. A package taken from ANOTHER domain is not answerable to
-      // this shell's bundled `/content/` ('sentinel' — an external authority
-      // is current), so the bundled check must not raise a phantom "new
-      // features" by diffing it against the bundle. A package taken from THIS
-      // origin's own domain IS the bundle's line, and since the hosts window
-      // became the only way to update, recording it as 'sentinel' would have
-      // silenced every later "your domain has a newer deploy" notice.
-      source: hostZone(pkg.zone) === hostZone(location.host) ? 'bundled' : 'sentinel',
+      source,
     }))
     // Per-bee dependency closure, read by the preloader when it lazy-loads a
     // bee's deps. A global rather than storage because it is re-derived every
@@ -615,3 +681,28 @@ const writeBags = async (store: StoreLike, inventory: PackageInventory): Promise
   await put(store.dependencies, dependencyEntries(inventory.dependencies, sig => aliases.get(sig) ?? ''))
   await put(store.bees, beeEntries(inventory.bees))
 }
+
+// ── the install port ────────────────────────────────────────────────────────
+// Registered under the key CORE declares (install.types.ts), so a module that
+// imports core and nothing else can ask what loads here, turn a named unit on
+// or off, and take a root — through the same gated acquisition as every shell.
+const installProvider: InstallProvider = {
+  installedSig: () => installedPackageSig(),
+  unitsOf: async (root, zones) => {
+    const io = await layersIoFor(zones)
+    return io ? packageUnits(root, io) : []
+  },
+  headOf: async (zone) => (await headPackage(zone))?.packageSig ?? null,
+  acquire: async (root, zones) => {
+    const outcome = await acquire(root, zones)
+    return { ok: outcome.ok, fetched: outcome.fetched, present: outcome.present, ...(outcome.error ? { error: outcome.error } : {}) }
+  },
+  applyUnits,
+  offUnits: () => readOffUnits(),
+  setOffUnits: (names) => writeOffUnits(names),
+}
+
+try {
+  ;(globalThis as { ioc?: { register?: (k: string, v: unknown) => void } })
+    .ioc?.register?.(INSTALL_IOC_KEY, installProvider)
+} catch { /* no ioc in this environment — direct importers still work */ }

@@ -15,7 +15,8 @@ import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { isVisitorSession } from './visitor-session'
 // Cold-boot acquisition. Same implementation the shim uses and the same one
 // behind window.hypercomb.acquire — there is one acquisition, not three.
-import { acquire, deriveInventory, headPackage, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
+import { acquire, applyUnits, deriveInventory, headPackage, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
+import { readOffUnits } from '@hypercomb/runtime/package-units'
 import { deriveBeeDeps } from '@hypercomb/runtime/bee-deps'
 import { checkCoreCompatibility, CoreMismatchError, describeCoreMismatch } from '@hypercomb/runtime/core-surface'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from '@hypercomb/runtime/bags'
@@ -288,10 +289,25 @@ export const ensureInstall = async (): Promise<void> => {
     const missingDeps = [...new Set([...beeDepSigs, ...(cachedManifest.dependencies ?? [])])]
       .filter(sig => !depNames.has(`${sig}.js`))
     console.warn(
-      `[ensure-install] cached state spot-check failed — wiping install cache and awaiting fresh install ` +
+      `[ensure-install] cached state spot-check failed ` +
       `(missing ${missingBees.length} bees, ${missingDeps.length} deps: ` +
       `${[...missingBees, ...missingDeps].slice(0, 3).map(s => s.slice(0, 8)).join(', ')}…)`,
     )
+    // REPAIR THE BUILD THAT IS INSTALLED — never replace it. A hole in the
+    // heap is a delta to fetch for the SAME signature; acquire reuses every
+    // atom already held and asks the carried domains only for the missing
+    // ones. The old path wiped the cache and took the head of whichever host
+    // answered first, which re-versioned a warm hive nobody had asked to move
+    // (2026-09-12: a reload swapped a followed build for the bundled one).
+    if (await repairInstalled(cachedManifest)) {
+      console.log('[ensure-install] installed build repaired in place — booting from it')
+      restoreSignatureStore(sigStore)
+      restoreCachedBeeDeps()
+      localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
+      EffectBus.emit('boot:status', { kind: 'cached' } as BootStatus)
+      return
+    }
+    console.warn('[ensure-install] repair failed — wiping install cache and awaiting fresh install')
     localStorage.removeItem(MANIFEST_KEY)
     localStorage.removeItem(SYNC_SIG_KEY)
     localStorage.removeItem(INSTALLED_FLAG_KEY)
@@ -351,6 +367,27 @@ const serviceWorkerSettled = async (timeoutMs = 4000): Promise<void> => {
       new Promise(resolve => setTimeout(resolve, timeoutMs)),
     ])
   } catch { /* a worker we cannot wait for is one we do not wait for */ }
+}
+
+/** Fetch what the installed package is missing, from the domains carried
+ *  and this origin, for the signature already live — a delta, not a choice. */
+const repairInstalled = async (cached: InstallManifest): Promise<boolean> => {
+  const sig = installedPackageSig()
+  if (!sig) return false
+  try {
+    const carried = await listHostZones()
+    const zones = [...new Set([...carried, ...DEFAULT_HOST_ZONES])]
+    const outcome = await acquire(sig, zones)
+    if (!outcome.ok) {
+      console.warn(`[ensure-install] repair of ${sig.slice(0, 12)} incomplete —`, outcome.error ?? `${outcome.holes.length} hole(s)`)
+      return false
+    }
+    const now = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+    return !!now && now.bees.length > 0 && cached.bees.length > 0
+  } catch (error) {
+    console.warn('[ensure-install] repair threw', error)
+    return false
+  }
 }
 
 const autoloadFromHosts = async (): Promise<boolean> => {
@@ -921,6 +958,9 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
 
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(manifest))
   localStorage.setItem(SYNC_SIG_KEY, bundled.packageSig)
+  // The units the participant has off stay off across a bundled install —
+  // the same repoint activation makes, over the tree just admitted.
+  if (readOffUnits().size && !(await applyUnits())) console.warn('[ensure-install] unit selection could not be applied — loading the whole tree')
   // The one stamp every activation path leaves — what the host directory reads
   // to say which build this shell is on.
   stampInstalledPackage(bundled.packageSig)

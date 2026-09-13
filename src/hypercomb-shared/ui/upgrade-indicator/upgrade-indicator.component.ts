@@ -44,8 +44,8 @@ const COMPLETE_VISIBLE_MS = 12_000
       <div class="upgrade-indicator" role="status" aria-live="polite" [attr.data-phase]="phase()">
         <button class="status-button" type="button" (click)="openHosts()"
           [disabled]="phase() !== 'available'"
-          [attr.aria-label]="phase() === 'available' ? ('upgrade.open-hosts' | t) : statusText()"
-          [title]="phase() === 'available' ? ('upgrade.open-hosts' | t) : statusText()">
+          [attr.aria-label]="phase() === 'available' ? ('upgrade.open-packages' | t) : statusText()"
+          [title]="phase() === 'available' ? ('upgrade.open-packages' | t) : statusText()">
           <span>{{ statusText() }}</span>
           @if (phase() === 'available' && newCount() > 0) {
             <span class="upgrade-count">{{ newCount() }}</span>
@@ -128,7 +128,10 @@ export class UpgradeIndicatorComponent implements OnDestroy {
    *  the rest of the session. */
   readonly openHosts = (): void => {
     if (this.phase() !== 'available') return
-    EffectBus.emit('hosts:open', { packageSig: this.#packageSig || null, source: this.#source })
+    EffectBus.emit('packages:open', { packageSig: this.#packageSig || null, source: this.#source })
+    // A package from before the Packages window has no element to answer;
+    // its hosts window is where the update that brings one is taken.
+    if (!customElements.get('hc-packages')) EffectBus.emit('hosts:open', { packageSig: this.#packageSig || null, source: this.#source })
     this.dismiss()
   }
 
