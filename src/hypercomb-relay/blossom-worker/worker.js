@@ -67,7 +67,13 @@ const HIVE_MAX_BYTES = 65_536 // a hive index is a small map, never a byte store
 // whole binding blob tens of times to answer one request.
 const bindingCache = new WeakMap()
 
+// A request's bindings once the operators' signed records are in. Set on a
+// per-request VIEW of env (bindingsEnv), never on env itself: an isolate reuses
+// one env across requests, and a revoked publisher must be gone on the next read.
+const POOL_BINDINGS = Symbol('pool-bindings')
+
 function siteBindings(env) {
+  if (env?.[POOL_BINDINGS]) return env[POOL_BINDINGS]
   const cached = bindingCache.get(env)
   if (cached) return cached
   const parsed = parseBindings(env)
@@ -80,40 +86,50 @@ function parseBindings(env) {
   try { rawBindings = JSON.parse(String(env.SITE_BINDINGS || '{}')) } catch { return {} }
   const bindings = {}
   for (const [rawHost, raw] of Object.entries(rawBindings || {})) {
-    if (!raw || typeof raw !== 'object') continue
-    const host = String(rawHost || '').trim().toLowerCase()
-    const lineage = String(raw.lineage || '').split('/').map((s) => s.trim()).filter(Boolean).join('/')
-    if (!host || !lineage) continue
-    const publishers = (Array.isArray(raw.publishers) ? raw.publishers : [])
-      .map((p) => ({
-        pubkey: String(p?.pubkey || '').toLowerCase(),
-        label: String(p?.label || '').trim(),
-        primary: p?.primary === true,
-      }))
-      .filter((p) => SIG_RE.test(p.pubkey))
-    bindings[host] = {
-      title: String(raw.title || lineage.split('/').at(-1) || 'Published Hypercomb').trim(),
-      // A site's OWN tab mark, when it has one. Same-origin absolute path
-      // only — in practice a content-addressed `/<sig>/name.svg`, which this
-      // worker already serves with the type the suffix declares. Saying
-      // nothing means the Hypercomb hexagon, which every door carries by
-      // default; this is the opt-OUT, not the source of the icon.
-      icon: iconPath(raw.icon),
-      lineage,
-      publishers,
-      // WHAT IS DEPLOYED, which the script cannot see: Cloudflare does not hand
-      // a worker its own routes, and a binding whose route is commented out
-      // resolves here and is never reached. Both default true — saying nothing
-      // keeps today's answer.
-      //
-      // These gate what the directory ADVERTISES, never what `resolveSite`
-      // serves. If a request somehow arrives, answer it; routing is the edge's
-      // job. Advertising a door that cannot be dialled is this file's job.
-      routed: raw.routed !== false,      // is THIS host served?
-      wildcard: raw.wildcard !== false,  // is `*.<host>` served?
-    }
+    const entry = normalizeBinding(rawHost, raw)
+    if (entry) bindings[entry[0]] = entry[1]
   }
   return bindings
+}
+
+/** One binding, normalized: `[host, binding]`, or null. The SAME rule for an
+ *  entry of the wrangler var and for a site inside an operator's signed record,
+ *  so the two sources cannot give one zone two shapes. The essentials encoder
+ *  (`normalizeBoundSite`, sharing/community-hosts.ts) mirrors it, and
+ *  site-bindings.vector.json pins the two together. */
+function normalizeBinding(rawHost, raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const host = String(rawHost || '').trim().toLowerCase()
+  const lineage = String(raw.lineage || '').split('/').map((s) => s.trim()).filter(Boolean).join('/')
+  if (!host || !lineage) return null
+  const publishers = (Array.isArray(raw.publishers) ? raw.publishers : [])
+    .map((p) => ({
+      pubkey: String(p?.pubkey || '').toLowerCase(),
+      label: String(p?.label || '').trim(),
+      primary: p?.primary === true,
+    }))
+    .filter((p) => SIG_RE.test(p.pubkey))
+  return [host, {
+    title: String(raw.title || lineage.split('/').at(-1) || 'Published Hypercomb').trim(),
+    // A site's OWN tab mark, when it has one. Same-origin absolute path
+    // only — in practice a content-addressed `/<sig>/name.svg`, which this
+    // worker already serves with the type the suffix declares. Saying
+    // nothing means the Hypercomb hexagon, which every door carries by
+    // default; this is the opt-OUT, not the source of the icon.
+    icon: iconPath(raw.icon),
+    lineage,
+    publishers,
+    // WHAT IS DEPLOYED, which the script cannot see: Cloudflare does not hand
+    // a worker its own routes, and a binding whose route is commented out
+    // resolves here and is never reached. Both default true — saying nothing
+    // keeps today's answer.
+    //
+    // These gate what the directory ADVERTISES, never what `resolveSite`
+    // serves. If a request somehow arrives, answer it; routing is the edge's
+    // job. Advertising a door that cannot be dialled is this file's job.
+    routed: raw.routed !== false,      // is THIS host served?
+    wildcard: raw.wildcard !== false,  // is `*.<host>` served?
+  }]
 }
 
 /** An operator-declared site icon, or null. Off-origin is refused rather than
@@ -246,6 +262,113 @@ function indexReader(env) {
     if (!reads.has(pubkey)) reads.set(pubkey, verifiedIndex(env, pubkey))
     return reads.get(pubkey)
   }
+}
+
+// ── the allowlist as content (documentation/signed-site-bindings.md, Plan A) ──
+//
+// SITE_OPERATORS = {"<zone>": "<operator pubkey>"} names whose signed index
+// speaks for a zone's bindings. That index names the zone's binding artifact
+// under `binding:<zone>`, and the artifact's bytes must hash to that name.
+// When every link holds, the record REPLACES the var's entries for that zone.
+// Anything short of it — no operator, no key in the index, missing or forged
+// bytes, a malformed record — leaves SITE_BINDINGS in charge, which is exactly
+// today's answer. A lost operator key is recovered by redeploying
+// SITE_OPERATORS (decided 2026-09-13), the same act that puts a zone's routes
+// on this worker in the first place.
+
+const COMMUNITY_HOSTS_POOL = 'community:hosts'
+const BINDING_KIND = 'visual:binding:artifact'
+
+/** sign(meaning): SHA-256 of the meaning's UTF-8 bytes, lowercase hex — the
+ *  SAME derivation as core's pool registry. A worker that computed another
+ *  address would read a pool no client writes, silently; the vector pins it
+ *  from both sides. */
+async function poolAddress(meaning) {
+  return sha256Hex(new TextEncoder().encode(meaning))
+}
+
+function siteOperators(env) {
+  let raw
+  try { raw = JSON.parse(String(env.SITE_OPERATORS || '{}')) } catch { return [] }
+  return Object.entries(raw && typeof raw === 'object' ? raw : {})
+    .map(([zone, pubkey]) => [String(zone || '').trim().toLowerCase(), String(pubkey || '').trim().toLowerCase()])
+    .filter(([zone, pubkey]) => zone && SIG_RE.test(pubkey))
+}
+
+const withinZone = (host, zone) => host === zone || host.endsWith('.' + zone)
+
+/** A binding artifact's bytes, believed only when they hash to their name:
+ *  the flat heap first, then the `community:hosts` pool that holds it. */
+async function bindingBytes(env, sig) {
+  for (const key of [sig, `${await poolAddress(COMMUNITY_HOSTS_POOL)}/${sig}`]) {
+    try {
+      const object = await env.CONTENT?.get?.(key)
+      if (!object) continue
+      const bytes = new Uint8Array(await object.arrayBuffer())
+      if (await sha256Hex(bytes) === sig) return bytes
+    } catch { /* try the next place */ }
+  }
+  return null
+}
+
+/** One zone's `[host, binding]` entries from its operator's signed record, or
+ *  null unless every link verifies. */
+async function operatorRecord(env, read, zone, pubkey) {
+  const index = await read(pubkey)
+  const sig = String(index?.roots?.[`binding:${zone}`] || '').toLowerCase()
+  if (!SIG_RE.test(sig)) return null
+  const bytes = await bindingBytes(env, sig)
+  if (!bytes) return null
+  let record
+  try { record = JSON.parse(new TextDecoder().decode(bytes)) } catch { return null }
+  if (record?.kind !== BINDING_KIND || record.meaning !== `binding:${zone}` || record.payload?.zone !== zone) return null
+  if (!Array.isArray(record.payload.sites)) return null
+  const entries = []
+  for (const raw of record.payload.sites) {
+    const entry = normalizeBinding(raw?.host, raw)
+    // A record speaks for its own zone and nothing beyond it.
+    if (entry && withinZone(entry[0], zone)) entries.push(entry)
+  }
+  return entries
+}
+
+/** The var's bindings with each operated zone's record in place of that
+ *  zone's entries, in the var's order: the directory lists sites in binding
+ *  order, and a migrated zone must answer what the var did, byte for byte. A
+ *  host inside a deeper operated zone belongs to that zone's record. */
+function mergeBindings(fromVar, records) {
+  const zones = [...records.keys()].sort((a, b) => b.length - a.length)
+  const zoneOf = (host) => zones.find((zone) => withinZone(host, zone)) ?? null
+  const merged = {}
+  const placed = new Set()
+  const place = (zone) => {
+    if (placed.has(zone)) return
+    placed.add(zone)
+    for (const [host, binding] of records.get(zone)) if (zoneOf(host) === zone) merged[host] = binding
+  }
+  for (const [host, binding] of Object.entries(fromVar)) {
+    const zone = zoneOf(host)
+    if (zone) place(zone)
+    else merged[host] = binding
+  }
+  for (const zone of records.keys()) place(zone)
+  return merged
+}
+
+/** A per-request view of env whose bindings include the operators' signed
+ *  records — or env itself when no zone is operated or none verifies. */
+async function bindingsEnv(env, read = indexReader(env)) {
+  const operators = siteOperators(env)
+  if (!operators.length) return env
+  const records = new Map()
+  for (const [zone, pubkey] of operators) {
+    const entries = await operatorRecord(env, read, zone, pubkey)
+    if (entries) records.set(zone, entries)
+  }
+  if (!records.size) return env
+  const view = Object.create(env)
+  view[POOL_BINDINGS] = mergeBindings(siteBindings(env), records)
+  return view
 }
 
 async function publishedRoot(env, publisher, lineage, read = indexReader(env)) {
@@ -1114,13 +1237,23 @@ export default {
     const requestUrl = new URL(request.url)
     const { pathname } = requestUrl
     const method = request.method
-    const { site, implicit, zone: siteZone } = resolveSite(env, requestUrl.hostname)
+    // Which site this host is — resolved once, and only by a branch that needs
+    // it. The flat sig read and the pool listing never ask, so the hot path
+    // pays no index read for the operators' signed bindings.
+    let routing = null
+    const route = async () => {
+      if (!routing) {
+        const scoped = await bindingsEnv(env)
+        routing = { env: scoped, ...resolveSite(scoped, requestUrl.hostname) }
+      }
+      return routing
+    }
 
     // Application domains run Core with a narrower host capability profile.
     // The relay host may accept signed writes; a published Core host never
     // does. Keep this boundary above every mutation endpoint so adding another
     // relay feature cannot accidentally grant it to websites.
-    if (site && method !== 'GET' && method !== 'HEAD') {
+    if (method !== 'GET' && method !== 'HEAD' && (await route()).site) {
       return text(405, 'published Core hosts are read-only')
     }
 
@@ -1190,6 +1323,10 @@ export default {
         return new Response(mark.body, { status: 200, headers })
       }
     }
+
+    const routed = await route()
+    const { site, implicit, zone: siteZone } = routed
+    env = routed.env
 
     if (!site && pathname === '/upload') {
       if (method === 'PUT') return putUpload(request, env)

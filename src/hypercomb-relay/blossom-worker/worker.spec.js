@@ -446,3 +446,104 @@ test('under /content/ a miss is an honest 404, never the SPA page — the pool w
   assert.equal(deep.status, 404)
   assert.deepEqual(assetRequests.slice(-2), ['/some/route', '/index.html'])
 })
+
+// ── Plan A: the allowlist as content (documentation/signed-site-bindings.md) ──
+//
+// An operator's signed index names a zone's binding artifact; the artifact's
+// bytes must hash to that name; only then does it replace the var's entries for
+// that zone. Everything short of that leaves SITE_BINDINGS in charge.
+
+const { readFileSync } = await import('node:fs')
+const VECTOR = JSON.parse(readFileSync(new URL('./site-bindings.vector.json', import.meta.url), 'utf8'))
+const utf8 = (s) => new TextEncoder().encode(s)
+const sha256 = async (s) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', utf8(s))))
+
+function contentStore(objects) {
+  return {
+    get: async (key) => {
+      const text = objects[key]
+      if (text === undefined) return null
+      const bytes = utf8(text)
+      return { arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) }
+    },
+    list: async () => ({ objects: [], truncated: false }),
+  }
+}
+
+async function operated({ roots, objects, bindings = {}, operators }) {
+  const event = await signedIndex(roots)
+  const hiveReads = []
+  return {
+    hiveReads,
+    env: {
+      SITE_BINDINGS: JSON.stringify(bindings),
+      SITE_OPERATORS: JSON.stringify(operators ?? { [VECTOR.zone]: pubkey }),
+      HIVES: { get: async (key) => { hiveReads.push(key); return key === pubkey ? JSON.stringify(event) : null } },
+      CONTENT: contentStore(objects),
+      ASSETS: { fetch: async () => new Response('visitor engine', { headers: { 'content-type': 'text/html' } }) },
+    },
+  }
+}
+
+const publicationsText = async (env) =>
+  (await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)).text()
+const sitesOf = async (env) => JSON.parse(await publicationsText(env)).sites
+
+const BOUND_ROOTS = { pluginthematrix: head, revolucion: head, ['binding:' + VECTOR.zone]: VECTOR.recordSig }
+
+test('the binding vector names the test operator and hashes to its own name', async () => {
+  assert.equal(VECTOR.operatorPubkey, pubkey)
+  assert.equal(await sha256(VECTOR.record), VECTOR.recordSig)
+  for (const [meaning, address] of Object.entries(VECTOR.poolAddresses)) assert.equal(await sha256(meaning), address)
+})
+
+test("an operator's signed record answers publications.json byte for byte as the var did", async () => {
+  const fromVar = await fixture(await signedIndex(BOUND_ROOTS), VECTOR.siteBindings)
+  const fromPool = await operated({ roots: BOUND_ROOTS, objects: { [VECTOR.recordSig]: VECTOR.record } })
+  assert.equal(await publicationsText(fromPool.env), await publicationsText(fromVar.env))
+})
+
+test('the record is found in the community:hosts pool at the address core derives', async () => {
+  const pooled = VECTOR.poolAddresses['community:hosts'] + '/' + VECTOR.recordSig
+  const { env } = await operated({ roots: BOUND_ROOTS, objects: { [pooled]: VECTOR.record } })
+  const sites = await sitesOf(env)
+  assert.deepEqual(sites.map((s) => s.host + '|' + s.title), ['pluginthematrix.com|Plugin the Matrix', 'revolucion.pluginthematrix.com|Revolución'])
+})
+
+test('forged bytes, an unnamed record, or a stranger as operator leave the var in charge', async () => {
+  // The var binds only the apex, so revolucion can appear only as an IMPLICIT
+  // plate — titled by its label — unless a record was believed.
+  const apexOnly = { [VECTOR.zone]: VECTOR.siteBindings[VECTOR.zone] }
+  const titleOfRevolucion = async (env) => (await sitesOf(env)).find((s) => s.lineage === 'revolucion')?.title
+
+  const forged = await operated({ roots: BOUND_ROOTS, objects: { [VECTOR.recordSig]: VECTOR.record.replace('Curator', 'Mallory') }, bindings: apexOnly })
+  assert.equal(await titleOfRevolucion(forged.env), 'revolucion')
+
+  const unnamed = await operated({ roots: { pluginthematrix: head, revolucion: head }, objects: { [VECTOR.recordSig]: VECTOR.record }, bindings: apexOnly })
+  assert.equal(await titleOfRevolucion(unnamed.env), 'revolucion')
+
+  const stranger = await operated({ roots: BOUND_ROOTS, objects: { [VECTOR.recordSig]: VECTOR.record }, bindings: apexOnly, operators: { [VECTOR.zone]: 'b'.repeat(64) } })
+  assert.equal(await titleOfRevolucion(stranger.env), 'revolucion')
+
+  const believed = await operated({ roots: BOUND_ROOTS, objects: { [VECTOR.recordSig]: VECTOR.record }, bindings: apexOnly })
+  assert.equal(await titleOfRevolucion(believed.env), 'Revolución')
+})
+
+test('a record speaks for its own zone only, and a publisher it drops is gone on the next read', async () => {
+  const record = JSON.parse(VECTOR.record)
+  record.payload.sites.push({ ...record.payload.sites[0], host: 'hypercomb.com', lineage: 'hypercomb', title: 'Hypercomb' })
+  record.payload.sites[1] = { ...record.payload.sites[1], publishers: [] }
+  const text = JSON.stringify(record)
+  const sig = await sha256(text)
+  const { env } = await operated({ roots: { pluginthematrix: head, revolucion: head, ['binding:' + VECTOR.zone]: sig }, objects: { [sig]: text } })
+  const sites = await sitesOf(env)
+  assert.equal(sites.some((s) => s.host === 'hypercomb.com'), false)
+  assert.deepEqual(sites.find((s) => s.lineage === 'revolucion').publishers, [])
+})
+
+test('the pool listing never reads an index for bindings, even on an operated zone', async () => {
+  const { env, hiveReads } = await operated({ roots: BOUND_ROOTS, objects: { [VECTOR.recordSig]: VECTOR.record } })
+  const response = await worker.fetch(new Request('https://pluginthematrix.com/' + 'c'.repeat(64) + '/'), env)
+  assert.equal(response.status, 404)
+  assert.deepEqual(hiveReads, [])
+})

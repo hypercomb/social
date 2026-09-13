@@ -193,6 +193,218 @@ export async function removeCommunityHost(raw: unknown): Promise<boolean> {
   } catch { return false }
 }
 
+// ── the zone side: who may publish at a host ────────────────────────
+//
+// documentation/signed-site-bindings.md, Plan A. The directory worker used to
+// learn which keys may publish at a zone, and under which titles and lineages,
+// from a wrangler variable no client can see, verify or replicate. That fact is
+// content now: a BINDING ARTIFACT in the same `community:hosts` pool as the
+// hosts, one per zone, named by its own bytes. It holds authority only when the
+// zone operator's signed index names it under `binding:<zone>`; a record nobody
+// names is bytes in a pool and nothing more. The worker keeps SITE_BINDINGS as
+// the fallback, and a lost operator key is recovered by redeploying the
+// worker's operator config (decided 2026-09-13).
+
+/** The artifact family — `visual:binding:artifact`, beside `visual:host:artifact`. */
+export const BINDING_FAMILY = 'binding'
+
+export const BINDING_ARTIFACT_KIND = artifactKindFor(BINDING_FAMILY)
+
+const SIG_RE = /^[0-9a-f]{64}$/
+
+export interface SitePublisher {
+  readonly pubkey: string
+  readonly label: string
+  readonly primary: boolean
+}
+
+/** One bound site, in the shape the directory worker serves it. */
+export interface BoundSite {
+  readonly host: string
+  readonly lineage: string
+  readonly title: string
+  readonly publishers: readonly SitePublisher[]
+  /** Is this host's route deployed? Gates what is advertised, never what is served. */
+  readonly routed: boolean
+  /** Is `*.<host>` deployed? */
+  readonly wildcard: boolean
+  /** A same-origin tab mark, when the site declares one. */
+  readonly icon?: string
+}
+
+export interface ZoneBinding {
+  readonly zone: string
+  readonly sig: string
+  readonly sites: readonly BoundSite[]
+}
+
+/** `hypercomb.com` → `binding:hypercomb.com`; '' for anything that is not a zone. */
+export const bindingMeaning = (raw: unknown): string => {
+  const zone = hostZone(raw)
+  return zone ? `${BINDING_FAMILY}:${zone}` : ''
+}
+
+/** `binding:hypercomb.com` → `hypercomb.com`; anything else → ''. */
+export const zoneOfBindingMeaning = (meaning: unknown): string => {
+  const text = String(meaning ?? '')
+  if (familyOfMeaning(text) !== BINDING_FAMILY) return ''
+  return hostZone(text.slice(BINDING_FAMILY.length + 1))
+}
+
+const withinZone = (host: string, zone: string): boolean => host === zone || host.endsWith(`.${zone}`)
+
+/**
+ * One site entry, normalized by the SAME rule the directory worker applies to
+ * a SITE_BINDINGS entry (`normalizeBinding` in blossom-worker/worker.js). Two
+ * rules would be two sources that disagree about one zone, silently — the
+ * vector in site-bindings.vector.json pins them together.
+ */
+export const normalizeBoundSite = (rawHost: unknown, raw: unknown): BoundSite | null => {
+  if (!raw || typeof raw !== 'object') return null
+  const entry = raw as Record<string, unknown>
+  const host = String(rawHost || '').trim().toLowerCase()
+  const lineage = String(entry['lineage'] || '').split('/').map(s => s.trim()).filter(Boolean).join('/')
+  if (!host || !lineage) return null
+  const publishers = (Array.isArray(entry['publishers']) ? entry['publishers'] : [])
+    .map((value): SitePublisher => {
+      const p = (value ?? {}) as Record<string, unknown>
+      return {
+        pubkey: String(p['pubkey'] || '').toLowerCase(),
+        label: String(p['label'] || '').trim(),
+        primary: p['primary'] === true,
+      }
+    })
+    .filter(p => SIG_RE.test(p.pubkey))
+  const icon = String(entry['icon'] || '').trim()
+  return {
+    host,
+    lineage,
+    title: String(entry['title'] || lineage.split('/').at(-1) || 'Published Hypercomb').trim(),
+    publishers,
+    routed: entry['routed'] !== false,
+    wildcard: entry['wildcard'] !== false,
+    ...(icon.startsWith('/') && !icon.startsWith('//') ? { icon } : {}),
+  }
+}
+
+const sortKeys = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(sortKeys)
+  if (!value || typeof value !== 'object') return value
+  const source = value as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(source).sort()) out[key] = sortKeys(source[key])
+  return out
+}
+
+/** Canonical JSON: keys sorted at every depth, arrays kept in authored order.
+ *  Order inside an array is data (the directory lists sites in that order);
+ *  order of keys is formatting, so it is folded out. */
+export const canonicalJson = (value: unknown): string => JSON.stringify(sortKeys(value))
+
+/** The artifact record for one zone. Sites outside the zone are dropped: a
+ *  record speaks for its own zone and nothing beyond it. */
+export const bindingArtifactRecord = (zone: unknown, sites: readonly BoundSite[]): Record<string, unknown> | null => {
+  const clean = hostZone(zone)
+  if (!clean) return null
+  return {
+    kind: BINDING_ARTIFACT_KIND,
+    meaning: bindingMeaning(clean),
+    payload: { sites: sites.filter(site => withinZone(site.host, clean)), zone: clean },
+  }
+}
+
+export const bindingArtifactBytes = (zone: unknown, sites: readonly BoundSite[]): Uint8Array | null => {
+  const record = bindingArtifactRecord(zone, sites)
+  return record ? new TextEncoder().encode(canonicalJson(record)) : null
+}
+
+/** The pool member name for a zone's bindings — the signature of its own bytes. */
+export const bindingArtifactSig = async (zone: unknown, sites: readonly BoundSite[]): Promise<string> => {
+  const bytes = bindingArtifactBytes(zone, sites)
+  return bytes ? SignatureService.sign(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer) : ''
+}
+
+/**
+ * A SITE_BINDINGS value split into one record per zone, keeping the var's
+ * order — the migration's first act. A zone is a bound host that no other
+ * bound host is a parent of: `revolucion.pluginthematrix.com` belongs to
+ * `pluginthematrix.com`, and `hypercomb.com` is its own.
+ */
+export const bindingRecordsFromSiteBindings = (raw: unknown): Map<string, BoundSite[]> => {
+  let parsed = raw
+  if (typeof raw === 'string') {
+    try { parsed = JSON.parse(raw) } catch { return new Map() }
+  }
+  const sites = Object.entries(parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {})
+    .map(([host, value]) => normalizeBoundSite(host, value))
+    .filter((site): site is BoundSite => site !== null)
+  const hosts = sites.map(site => site.host)
+  const out = new Map<string, BoundSite[]>()
+  for (const site of sites) {
+    const outermost = hosts.filter(host => withinZone(site.host, host)).sort((a, b) => a.length - b.length)[0]
+    const zone = hostZone(outermost)
+    if (!zone) continue
+    out.set(zone, [...(out.get(zone) ?? []), site])
+  }
+  return out
+}
+
+/** A record read back: its zone and its sites, or null when it is not a
+ *  binding artifact for the zone it names. */
+export const parseBindingRecord = (record: unknown): { zone: string; sites: BoundSite[] } | null => {
+  const r = (record ?? {}) as { kind?: unknown; meaning?: unknown; payload?: { zone?: unknown; sites?: unknown } }
+  if (r.kind !== BINDING_ARTIFACT_KIND) return null
+  const zone = zoneOfBindingMeaning(r.meaning)
+  if (!zone || hostZone(r.payload?.zone) !== zone) return null
+  const raw = Array.isArray(r.payload?.sites) ? r.payload.sites as unknown[] : []
+  const sites = raw
+    .map(value => normalizeBoundSite((value as { host?: unknown } | null)?.host, value))
+    .filter((site): site is BoundSite => site !== null && withinZone(site.host, zone))
+  return { zone, sites }
+}
+
+/**
+ * Every zone binding this hive holds, by zone. A member is believed only when
+ * its bytes hash to its name — the pool is the set, and a member that is not
+ * named by its own bytes is not a member. Authority is not decided here: which
+ * record a zone actually serves is the operator's signed index.
+ */
+export async function listZoneBindings(): Promise<ZoneBinding[]> {
+  const pool = await communityPool()
+  if (!pool) return []
+  const found: ZoneBinding[] = []
+  try {
+    for await (const [name, handle] of (pool as unknown as {
+      entries(): AsyncIterableIterator<[string, FileSystemHandle]>
+    }).entries()) {
+      if (handle.kind !== 'file' || !SIG_RE.test(name)) continue
+      try {
+        const buffer = await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()
+        if ((await SignatureService.sign(buffer)) !== name) continue
+        const parsed = parseBindingRecord(JSON.parse(new TextDecoder().decode(buffer)))
+        if (parsed) found.push({ zone: parsed.zone, sig: name, sites: parsed.sites })
+      } catch { /* a member that will not parse is not a binding */ }
+    }
+  } catch { return [] }
+  return found.sort((a, b) => a.zone.localeCompare(b.zone) || a.sig.localeCompare(b.sig))
+}
+
+/** Put one zone's bindings in the pool. Idempotent — the same bindings land on
+ *  the same member. Returns the member's signature, or '' when nothing could
+ *  be written. Naming it from the operator's index is a separate act. */
+export async function addZoneBinding(zone: unknown, sites: readonly BoundSite[]): Promise<string> {
+  const bytes = bindingArtifactBytes(zone, sites)
+  const pool = await communityPool()
+  if (!bytes || !pool) return ''
+  try {
+    const name = await bindingArtifactSig(zone, sites)
+    const handle = await pool.getFileHandle(name, { create: true })
+    const writable = await handle.createWritable()
+    try { await writable.write(new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer])) } finally { await writable.close() }
+    return name
+  } catch { return '' }
+}
+
 // ── where a branch publishes: the marks it wears ────────────────────
 
 const cellAt = async (segments: readonly string[]) => {

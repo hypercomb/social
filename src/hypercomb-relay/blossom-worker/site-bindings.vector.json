@@ -1,0 +1,35 @@
+{
+  "$comment": "Site-binding conformance vector — documentation/signed-site-bindings.md, Plan A. `record` is the canonical encoding of `siteBindings` for `zone`: keys sorted at every depth, arrays in authored order, no wall clock, UTF-8. Asserted by the essentials encoder (sharing/community-hosts.spec.ts) and by the directory worker (worker.spec.js). Changing it is a protocol change.",
+  "poolAddresses": {
+    "community:hosts": "567f17ee420673bfc5d0025d0db3e29195142d033d5527f1ba626cce23bfed42",
+    "host:packages": "44150aa24d2f2a1c1b544530e2f7e177cde71130f882f37984d0cdba16bf2363"
+  },
+  "zone": "pluginthematrix.com",
+  "operatorPubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "siteBindings": {
+    "pluginthematrix.com": {
+      "title": "Plugin the Matrix",
+      "lineage": "pluginthematrix",
+      "publishers": [
+        {
+          "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          "label": "Jaime",
+          "primary": true
+        }
+      ]
+    },
+    "revolucion.pluginthematrix.com": {
+      "title": "Revolución",
+      "lineage": "revolucion",
+      "publishers": [
+        {
+          "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          "label": "Curator",
+          "primary": true
+        }
+      ]
+    }
+  },
+  "record": "{\"kind\":\"visual:binding:artifact\",\"meaning\":\"binding:pluginthematrix.com\",\"payload\":{\"sites\":[{\"host\":\"pluginthematrix.com\",\"lineage\":\"pluginthematrix\",\"publishers\":[{\"label\":\"Jaime\",\"primary\":true,\"pubkey\":\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\"}],\"routed\":true,\"title\":\"Plugin the Matrix\",\"wildcard\":true},{\"host\":\"revolucion.pluginthematrix.com\",\"lineage\":\"revolucion\",\"publishers\":[{\"label\":\"Curator\",\"primary\":true,\"pubkey\":\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\"}],\"routed\":true,\"title\":\"Revolución\",\"wildcard\":true}],\"zone\":\"pluginthematrix.com\"}}",
+  "recordSig": "fcd0ae5125347ae34a6c7121d663cf86e031d4cc48410059279ceb43f0acbfc5"
+}

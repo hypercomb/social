@@ -1,16 +1,91 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
+  BINDING_ARTIFACT_KIND,
   HOST_ARTIFACT_KIND,
   HOST_FAMILY,
   COMMUNITY_HOSTS_POOL,
+  bindingArtifactBytes,
+  bindingArtifactRecord,
+  bindingArtifactSig,
+  bindingRecordsFromSiteBindings,
+  canonicalJson,
   hostArtifactRecord,
   hostMeaning,
   hostSignature,
   hostZone,
+  parseBindingRecord,
+  zoneOfBindingMeaning,
   zoneOfHostMeaning,
 } from './community-hosts.js'
 import { familyOfMeaning } from '../pheromones/enrollment.js'
-import { groupPreimage } from '@hypercomb/core'
+import { groupPreimage, registerPoolMeaning } from '@hypercomb/core'
+
+const VECTOR_FILE = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'hypercomb-relay', 'blossom-worker', 'site-bindings.vector.json')
+const VECTOR = JSON.parse(readFileSync(VECTOR_FILE, 'utf8')) as {
+  poolAddresses: Record<string, string>
+  zone: string
+  siteBindings: Record<string, unknown>
+  record: string
+  recordSig: string
+}
+
+// ── the zone side (documentation/signed-site-bindings.md, Plan A) ──────────
+describe('site bindings — the allowlist as content', () => {
+  it('derives pool addresses exactly as the worker does, pinned by the shared vector', async () => {
+    for (const [meaning, address] of Object.entries(VECTOR.poolAddresses)) {
+      expect(await registerPoolMeaning(meaning)).toBe(address)
+    }
+  })
+
+  it("encodes a zone's bindings to the vector's exact bytes and name", async () => {
+    const records = bindingRecordsFromSiteBindings(VECTOR.siteBindings)
+    expect([...records.keys()]).toEqual([VECTOR.zone])
+    const sites = records.get(VECTOR.zone)!
+    expect(new TextDecoder().decode(bindingArtifactBytes(VECTOR.zone, sites)!)).toBe(VECTOR.record)
+    expect(await bindingArtifactSig(VECTOR.zone, sites)).toBe(VECTOR.recordSig)
+  })
+
+  it('is canonical: keys sorted at every depth, authored order kept, no wall clock', () => {
+    expect(canonicalJson({ b: 1, a: { d: [3, { z: 1, y: 2 }], c: 2 } })).toBe('{"a":{"c":2,"d":[3,{"y":2,"z":1}]},"b":1}')
+    const shuffled = Object.fromEntries(Object.entries(VECTOR.siteBindings).map(([h, v]) => [h, Object.fromEntries(Object.entries(v as object).reverse())]))
+    const sites = bindingRecordsFromSiteBindings(shuffled).get(VECTOR.zone)!
+    expect(new TextDecoder().decode(bindingArtifactBytes(VECTOR.zone, sites)!)).toBe(VECTOR.record)
+    expect(VECTOR.record).not.toMatch(/\d{10,}/)
+  })
+
+  it('splits a var by outermost zone and keeps each record to its own zone', () => {
+    const records = bindingRecordsFromSiteBindings({
+      'pluginthematrix.com': { lineage: 'pluginthematrix', publishers: [] },
+      'meetup.pluginthematrix.com': { lineage: 'revolucion/meetup', publishers: [] },
+      'hypercomb.com': { lineage: 'hypercomb', title: 'Hypercomb', routed: false, publishers: [] },
+    })
+    expect([...records.keys()]).toEqual(['pluginthematrix.com', 'hypercomb.com'])
+    expect(records.get('pluginthematrix.com')!.map(s => s.host)).toEqual(['pluginthematrix.com', 'meetup.pluginthematrix.com'])
+    expect(records.get('pluginthematrix.com')![1]!.title).toBe('meetup')
+    expect(records.get('hypercomb.com')![0]).toMatchObject({ routed: false, wildcard: true })
+    const record = bindingArtifactRecord('hypercomb.com', [...records.get('pluginthematrix.com')!, ...records.get('hypercomb.com')!])!
+    expect((record['payload'] as { sites: { host: string }[] }).sites.map(s => s.host)).toEqual(['hypercomb.com'])
+  })
+
+  it('reads a record back, and refuses one that names another zone or another kind', () => {
+    const parsed = parseBindingRecord(JSON.parse(VECTOR.record))!
+    expect(parsed.zone).toBe(VECTOR.zone)
+    expect(parsed.sites.map(s => s.host)).toEqual(['pluginthematrix.com', 'revolucion.pluginthematrix.com'])
+    const record = JSON.parse(VECTOR.record)
+    expect(parseBindingRecord({ ...record, meaning: 'binding:hypercomb.com' })).toBeNull()
+    expect(parseBindingRecord({ ...record, kind: HOST_ARTIFACT_KIND })).toBeNull()
+    expect(record.kind).toBe(BINDING_ARTIFACT_KIND)
+  })
+
+  it('a binding member never reads as a host, and a host member never as a binding', () => {
+    expect(zoneOfHostMeaning('binding:hypercomb.com')).toBe('')
+    expect(zoneOfBindingMeaning('host:hypercomb.com')).toBe('')
+    expect(zoneOfBindingMeaning('binding:hypercomb.com')).toBe('hypercomb.com')
+  })
+})
 
 describe('community hosts — the identity half', () => {
   it('folds scheme, case, path and the content. plumbing out of a zone', () => {
