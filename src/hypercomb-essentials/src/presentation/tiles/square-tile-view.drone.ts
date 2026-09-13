@@ -783,7 +783,7 @@ const SCENE_CSS = `
 .wv-hint{margin:auto auto 0;padding-top:2.6rem;text-align:center;color:rgba(138,118,87,.75);font:400 .74rem/1 Georgia,serif;letter-spacing:.26em;text-transform:uppercase;animation:wv-fade 1s ease .6s backwards}
 .wv-tools{position:fixed;z-index:2147483600;right:calc(var(--wv-right,var(--hc-inset-right,0px)) + .75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(var(--wv-top,0px) + .75rem + env(safe-area-inset-top,0px));display:flex;align-items:center;gap:.5rem}
 .hc-square-tile-view[data-controls="shown"] .wv-tools{margin-top:1rem}
-.wv-shell-toggle{min-height:2.75rem;padding:.5rem 1rem;border:1px solid rgba(184,147,63,.5);border-radius:1.5rem;background:#fffdf7;color:#5c4630;font:600 .8rem/1.2 Georgia,serif;cursor:pointer}
+.wv-shell-toggle{min-height:2.75rem;padding:.5rem 1rem;border:1px solid rgba(184,147,63,.5);border-radius:var(--hc-radius-control,2px);background:#fffdf7;color:#5c4630;font:600 .8rem/1.2 Georgia,serif;cursor:pointer}
 .wv-shell-toggle:hover{background:#efe7d6}
 .wv-tools button:focus-visible{outline:2px solid #8b651b;outline-offset:3px}
 .wv-close{width:2.75rem;height:2.75rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,253,247,.85);border:1px solid rgba(184,147,63,.5);backdrop-filter:blur(6px);color:#5c4630;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.6;transition:opacity .16s ease}
