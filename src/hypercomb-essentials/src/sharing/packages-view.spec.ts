@@ -113,6 +113,18 @@ describe('the packages window', () => {
     expect(VIEW).toMatch(/pk-where/)
   })
 
+  it('a dependency-only change marks its unit, and a moved root with nothing marked still offers Update', () => {
+    const mine = { root: 'r1', units: [unit('commands', 'c1'), unit('games', 'g1')] }
+    const next = { root: 'r2', units: [unit('commands', 'c1'), unit('games', 'g1')] }
+    const rows = packageRows({ scope: '', mine, next, carried: new Map(), off: new Set(), query: '', moved: new Set(['commands']) })
+    expect(rows.filter(r => r.update).map(r => r.name)).toEqual(['commands'])
+    expect(VIEW).toMatch(/const rootMoved = !this\.#scope && !!this\.#next && this\.#next\.root !== this\.#mine\?\.root/)
+    expect(VIEW).toMatch(/if \(updates \|\| rootMoved\)/)
+    expect(VIEW).toMatch(/typeof install\.movedUnits === 'function'/)
+    expect(ACQUIRE).toMatch(/movedUnits: async \(installedRoot, nextRoot, zones\) =>/)
+    expect(EN['packages.updates.shared']).toBeTruthy()
+  })
+
   it('the origin is the shell, never a host: the web shell takes packages only from the hosts it carries', () => {
     // Jaime 2026-09-13: "only have imports from our own host servers and never
     // from hypercomb.io… the hosts are your proxy." The bundled install stays

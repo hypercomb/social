@@ -36,6 +36,9 @@ export interface InstallProvider {
   unitsOf(root: string, zones: readonly string[]): Promise<InstallUnit[]>
   /** The signature a domain publishes as its head, or null. */
   headOf(zone: string): Promise<string | null>
+  /** The units a newer root moves, by name — through their own layers or
+   *  through their namespace dependencies. */
+  movedUnits(installedRoot: string, nextRoot: string, zones: readonly string[]): Promise<string[]>
   /** Make a root yours through the one verified, gated acquisition. */
   acquire(root: string, zones: readonly string[]): Promise<InstallOutcomeInfo>
   /** Re-write the activation record from what is held — the repoint a unit

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { beesWithUnitsOff, changedUnits, packageUnits, readOffUnits, writeOffUnits, UNITS_OFF_KEY } from './package-units'
+import { beesWithUnitsOff, changedUnits, dependencyUnits, packageUnits, readOffUnits, unitOfDependency, writeOffUnits, UNITS_OFF_KEY } from './package-units'
 import type { ReplicationIo } from './replication-walker'
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>
@@ -93,6 +93,30 @@ describe('package units', () => {
     expect(beesWithUnitsOff(all, units, new Set(['games']))).toEqual(['2', '3', 'root-bee'])
     expect(beesWithUnitsOff(all, units, new Set(['games', 'notes']))).toEqual(['root-bee'])
     expect(beesWithUnitsOff(all, units, new Set())).toEqual(all)
+  })
+
+  it('attributes a changed namespace dependency to the unit its alias names — a queen moves its unit, not just the root', async () => {
+    // Found on the real hive 2026-09-13: a change to upgrade.queen.ts moved the
+    // root and no unit layer, so the notice announced an update Packages could
+    // not show. Queens, views and services build into namespace dependencies,
+    // which only the root layer lists.
+    const w = world()
+    const dep = (alias: string, body: string) => encode(`// ${alias}\n${body}`)
+    const oldCommands = dep('@hypercomb/essentials/commands', 'old')
+    const newCommands = dep('@hypercomb/essentials/commands', 'new')
+    const tiles = dep('@hypercomb/essentials/presentation/tiles', 'same')
+    const [sOld, sNew, sTiles] = await Promise.all([sigOf(oldCommands), sigOf(newCommands), sigOf(tiles)])
+    const held = new Map([[sOld, oldCommands], [sTiles, tiles]])
+    w.origin.set(sNew, newCommands)
+    const commands = await w.publish({ name: 'commands', cells: [], bees: [], dependencies: [] })
+    const before = await w.publish({ name: 'root', cells: [commands], bees: [], dependencies: [`${sOld}.js`, `${sTiles}.js`] })
+    const after = await w.publish({ name: 'root', cells: [commands], bees: [], dependencies: [`${sNew}.js`, `${sTiles}.js`] })
+
+    const moved = await dependencyUnits(before, after, w.io, async sig => held.get(sig) ?? null)
+    expect([...moved]).toEqual(['commands'])
+    expect(unitOfDependency(tiles)).toBe('presentation')
+    expect(unitOfDependency(encode('no alias here'))).toBe('')
+    expect((await dependencyUnits(before, before, w.io, async () => null)).size).toBe(0)
   })
 
   it('marks the units a newer root changes, by name, and the ones it adds', () => {

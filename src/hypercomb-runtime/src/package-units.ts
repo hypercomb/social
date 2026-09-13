@@ -37,7 +37,7 @@ const sigsOf = (list: unknown): string[] =>
     .map(entry => bare(typeof entry === 'string' ? entry : (entry as { sig?: unknown })?.sig))
     .filter(sig => SIG_RE.test(sig))
 
-type LayerRecord = { name?: unknown; cells?: unknown; bees?: unknown; docs?: { description?: unknown } }
+type LayerRecord = { name?: unknown; cells?: unknown; bees?: unknown; dependencies?: unknown; docs?: { description?: unknown } }
 
 const parseLayer = (bytes: Uint8Array | null): LayerRecord | null => {
   if (!bytes) return null
@@ -102,6 +102,48 @@ export const beesWithUnitsOff = (bees: readonly string[], units: readonly Packag
   for (const unit of units) if (!off.has(unit.name)) for (const bee of unit.bees) kept.add(bee)
   const declared = new Set(units.flatMap(unit => unit.bees))
   return bees.filter(bee => kept.has(bee) || !declared.has(bee))
+}
+
+/** The unit a namespace dependency belongs to, by the alias on its first line:
+ *  `// @hypercomb/essentials/presentation/tiles` → `presentation`. */
+export const unitOfDependency = (bytes: Uint8Array | null): string => {
+  if (!bytes) return ''
+  const line = new TextDecoder().decode(bytes.subarray(0, 240)).split('\n')[0] ?? ''
+  const alias = line.replace(/^\s*\/\/\s*/, '').trim()
+  const ns = alias.startsWith('@hypercomb/essentials/') ? alias.slice('@hypercomb/essentials/'.length) : alias.replace(/^@/, '')
+  const name = ns.split('/')[0] ?? ''
+  return NAME_RE.test(name) ? name : ''
+}
+
+/**
+ * Which units a newer root moved through its NAMESPACE DEPENDENCIES. A queen,
+ * a view or a service builds into its namespace's dependency bundle, and those
+ * are listed on the root layer only — so a change to one moves the root and no
+ * unit layer. Each dependency the two roots do not share is attributed to the
+ * unit its alias names: bytes from what is held, else fetched and verified. A
+ * dependency that cannot be read marks nothing.
+ */
+export const dependencyUnits = async (
+  installedRoot: string,
+  nextRoot: string,
+  io: ReplicationIo,
+  readHeld: (sig: string) => Promise<Uint8Array<ArrayBuffer> | null>,
+): Promise<Set<string>> => {
+  const [a, b] = await Promise.all([readAtom(installedRoot, io), readAtom(nextRoot, io)])
+  const before = new Set(sigsOf(parseLayer(a)?.dependencies))
+  const after = new Set(sigsOf(parseLayer(b)?.dependencies))
+  const changed = [...after].filter(sig => !before.has(sig)).concat([...before].filter(sig => !after.has(sig)))
+  const units = new Set<string>()
+  for (const sig of changed) {
+    let bytes = await readHeld(sig)
+    if (!bytes) {
+      const fetched = await io.fetch(sig)
+      bytes = fetched && (await SignatureService.sign(fetched.buffer)) === sig ? fetched : null
+    }
+    const name = unitOfDependency(bytes)
+    if (name) units.add(name)
+  }
+  return units
 }
 
 /** Which units a newer root changes, by name: a unit whose layer signature

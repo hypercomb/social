@@ -2783,6 +2783,7 @@
   "packages.updates.one": "{count} package has an update",
   "packages.updates.other": "{count} packages have an update",
   "packages.update": "Update",
+  "packages.updates.shared": "An update is ready",
   "packages.update-mark": "update",
   "packages.new": "not here yet",
   "packages.reading": "Reading what is served…",

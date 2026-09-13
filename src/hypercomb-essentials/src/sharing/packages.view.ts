@@ -103,9 +103,12 @@ export const packageRows = (input: {
   carried: ReadonlyMap<string, Tree | null>
   off: ReadonlySet<string>
   query: string
+  /** Units the followed root moved, when the port has worked it out (layers
+   *  AND namespace dependencies). Absent: the layer comparison alone. */
+  moved?: ReadonlySet<string>
 }): PackageRow[] => {
   const { scope, mine, next, carried, off } = input
-  const moved = next && mine ? changedUnits(mine.units, next.units) : new Set<string>()
+  const moved = input.moved ?? (next && mine ? changedUnits(mine.units, next.units) : new Set<string>())
   const held = new Set(mine?.units.map(u => u.name) ?? [])
   const names = new Map<string, InstallUnit>()
   const take = (tree: Tree | null | undefined): void => {
@@ -157,6 +160,8 @@ export class PackagesElement extends HTMLElement {
   #announced = ''
   /** The one heading open at a time. */
   #opened = ''
+  /** What the followed root moved, by unit, once the port has answered. */
+  #moved: Set<string> | null = null
 
   #mine: Tree | null = null
   #next: Tree | null = null
@@ -268,6 +273,7 @@ export class PackagesElement extends HTMLElement {
       carried: this.#served,
       off: install?.offUnits() ?? new Set(),
       query: this.#query,
+      moved: this.#moved ?? undefined,
     })
   }
 
@@ -325,11 +331,16 @@ export class PackagesElement extends HTMLElement {
     body.replaceChildren()
     const rows = this.#rows()
     const updates = this.#scope ? 0 : rows.filter(row => row.update && row.on).length
+    // A root the followed publisher moved is an update even when no unit can be
+    // named for it — the notice must never open onto a window with nothing to take.
+    const rootMoved = !this.#scope && !!this.#next && this.#next.root !== this.#mine?.root
 
-    if (updates) {
+    if (updates || rootMoved) {
       const bar = make('div', 'pk-updates')
       bar.setAttribute('role', 'status')
-      bar.append(make('span', '', updates === 1
+      bar.append(make('span', '', !updates
+        ? t('packages.updates.shared', 'An update is ready')
+        : updates === 1
         ? t('packages.updates.one', '{count} package has an update', { count: updates })
         : t('packages.updates.other', '{count} packages have an update', { count: updates })))
       const take = make('button', 'pk-primary', t('packages.update', 'Update'))
@@ -487,7 +498,10 @@ export class PackagesElement extends HTMLElement {
       const namedSig = await this.#namedRoot(installedSig)
       if (namedSig && namedSig !== installedSig) {
         if (this.#next?.root !== namedSig) this.#next = await this.#tree(namedSig, this.#zones)
-      } else this.#next = null
+        this.#moved = installedSig && typeof install.movedUnits === 'function'
+          ? new Set(await install.movedUnits(installedSig, namedSig, this.#zones).catch(() => []))
+          : null
+      } else { this.#next = null; this.#moved = null }
       // EVERY domain's head, because the board is the union of them: the
       // scope first so its rows land first, the rest together. Each is read
       // once per open and rendered as it arrives.

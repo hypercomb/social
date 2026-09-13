@@ -67,7 +67,7 @@ import { checkCoreCompatibility, describeCoreMismatch } from './core-surface.js'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from './bags.js'
 // WHICH NAMED PARTS OF THE TREE LOAD. Activation writes every bee the root
 // names minus the units the participant has turned off (package-units.ts).
-import { beesWithUnitsOff, packageUnits, readOffUnits, writeOffUnits } from './package-units.js'
+import { beesWithUnitsOff, changedUnits, dependencyUnits, packageUnits, readOffUnits, writeOffUnits } from './package-units.js'
 
 // Store is reached STRUCTURALLY, never imported. Importing the module would
 // bundle a second Store class AND run its module-scope
@@ -685,6 +685,16 @@ const installProvider: InstallProvider = {
     return io ? packageUnits(root, io) : []
   },
   headOf: async (zone) => (await headPackage(zone))?.packageSig ?? null,
+  movedUnits: async (installedRoot, nextRoot, zones) => {
+    const io = await layersIoFor(zones)
+    const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
+    if (!io || !store) return []
+    const [mine, next] = await Promise.all([packageUnits(installedRoot, io), packageUnits(nextRoot, io)])
+    const moved = changedUnits(mine, next)
+    const readHeld = readFrom([store.dependencies], sig => [`${sig}.js`, sig])
+    for (const name of await dependencyUnits(installedRoot, nextRoot, io, readHeld)) moved.add(name)
+    return [...moved].sort()
+  },
   acquire: async (root, zones) => {
     const outcome = await acquire(root, zones)
     return { ok: outcome.ok, fetched: outcome.fetched, present: outcome.present, ...(outcome.error ? { error: outcome.error } : {}) }
