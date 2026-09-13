@@ -2,11 +2,14 @@
 //
 // <hc-host-directory> — THE HOST DIRECTORY, AND THE SWITCHBOARD IN IT.
 //
-// One window. Under this origin is every package all of your hosts carry, in
-// one list, on or shaded. Choosing a host shows the same list filtered to what
-// that host carries, with a count beside each row of how many of your hosts
-// carry that SAME signature. Nothing switches: on and off are by name path,
-// and a package turned off is shaded everywhere it appears.
+// One window, opening COLLAPSED on a vertical list of domains: this origin and
+// every host you carry, each saying how many packages it carries and whether an
+// update is waiting there — the rows with one first, the rest still listed. A
+// domain opens into its packages, on or shaded. This origin is every package
+// all of your hosts carry; a host is the same list filtered to what it carries,
+// with a count beside each row of how many of your hosts carry that SAME
+// signature. Nothing switches: on and off are by name path, and a package
+// turned off is shaded everywhere it appears.
 //
 // PACKAGES ARE BRANCHES, AND BRANCHES ARE RECURSIVE. A row with parts inside
 // it is walked into — the list becomes its children, with the way back above
@@ -184,6 +187,47 @@ export const directoryRows = (input: {
     .sort((a, b) => Number(b.on) - Number(a.on) || a.path.localeCompare(b.path))
 }
 
+export interface DomainRow {
+  /** `''` for this origin, else the host. */
+  zone: string
+  label: string
+  /** Top-level packages the domain lists. */
+  count: number
+  /** The build the followed publisher names now is waiting there. */
+  update: boolean
+}
+
+/**
+ * THE DOMAINS, as data — the directory's first screen. This origin carries an
+ * update when the followed publisher names a build this hive does not run; a
+ * host carries one when that named build is the head it serves. Every domain is
+ * listed: a host with nothing new is still a host you carry, and hiding it would
+ * read as removed. The ones with an update come first, in their own order.
+ */
+export const domainRows = (input: {
+  homeLabel: string
+  zones: readonly string[]
+  trunk: string | null
+  next: ServedTree | null
+  served: ReadonlyMap<string, ServedTree | null>
+  count: (zone: string) => number
+}): DomainRow[] => {
+  const named = input.trunk && input.next && input.next.root !== input.trunk ? input.next.root : ''
+  const rows: DomainRow[] = [
+    { zone: '', label: input.homeLabel, count: input.count(''), update: !!named },
+    ...input.zones.map(zone => ({
+      zone,
+      label: zone,
+      count: input.count(zone),
+      update: !!named && input.served.get(zone)?.root === named,
+    })),
+  ]
+  return rows
+    .map((row, order) => ({ row, order }))
+    .sort((a, b) => Number(b.row.update) - Number(a.row.update) || a.order - b.order)
+    .map(({ row }) => row)
+}
+
 /** The parts inside a path that one of its revisions would replace: every
  *  descendant running here whose signature that revision does not carry. */
 export const replacedBeneath = (path: string, running: readonly InstallNode[], revision: readonly InstallNode[]): string[] => {
@@ -229,7 +273,7 @@ interface MineRow {
   host: string
 }
 
-type View = 'list' | 'revisions' | 'creations' | 'mine'
+type View = 'domains' | 'list' | 'revisions' | 'creations' | 'mine'
 
 type Warning = { revision: InstallRevision; replaced: string[]; picksBeneath: string[] }
 
@@ -264,7 +308,11 @@ export class HostDirectoryElement extends HTMLElement {
   #query = ''
   /** The one row open at a time. */
   #opened = ''
-  #view: View = 'list'
+  /** Every fresh open starts collapsed, on the domains. */
+  #view: View = 'domains'
+  /** The next open continues where an act left off (a restart, a notice)
+   *  instead of collapsing. */
+  #resume = false
 
   #selection: InstallSelection | null = null
   #next: ServedTree | null = null
@@ -303,11 +351,16 @@ export class HostDirectoryElement extends HTMLElement {
       EffectBus.on<{ open?: boolean; zones?: unknown; loaded?: boolean }>('hosts:render', (p) => {
         this.#zones = Array.isArray(p?.zones) ? p.zones.map(zoneOf).filter(Boolean) : []
         this.#loaded = !!p?.loaded
-        if (this.#scope && !this.#zones.includes(this.#scope)) this.#toList('', '')
+        if (this.#scope && !this.#zones.includes(this.#scope)) this.#toDomains()
         const wanted = !!p?.open
         if (wanted !== this.#wanted) {
           this.#wanted = wanted
-          if (wanted) { this.#mount(); void this.#read() } else this.#unmount()
+          if (wanted) {
+            if (!this.#resume) this.#toDomains()
+            this.#resume = false
+            this.#mount()
+            void this.#read()
+          } else this.#unmount()
         } else if (this.#panel) {
           this.#render()
           void this.#read()
@@ -317,6 +370,8 @@ export class HostDirectoryElement extends HTMLElement {
       EffectBus.on<{ zone?: unknown }>('packages:open', (p) => {
         const zone = zoneOf(p?.zone)
         this.#toList(zone && zone !== this.#home ? zone : '', '')
+        this.#resume = true
+        if (this.#panel) this.#render()
         EffectBus.emit('hosts:open', {})
       }),
       EffectBus.on<{ available?: boolean; packageSig?: unknown; source?: unknown }>('update:available', (p) => {
@@ -343,6 +398,7 @@ export class HostDirectoryElement extends HTMLElement {
         sessionStorage.removeItem(REOPEN_KEY)
         const where = JSON.parse(raw) as { scope?: unknown; at?: unknown }
         this.#toList(zoneOf(where.scope), typeof where.at === 'string' ? where.at : '')
+        this.#resume = true
         queueMicrotask(() => EffectBus.emit('hosts:open', {}))
       }
     } catch { /* storage unavailable — opens fresh */ }
@@ -372,7 +428,6 @@ export class HostDirectoryElement extends HTMLElement {
     close.addEventListener('click', () => EffectBus.emit('hosts:close', {}))
     head.append(close)
 
-    const domains = make('div', 'hd-domains')
     const search = make('div', 'hd-search')
     const input = make('input', 'hd-input')
     input.type = 'search'
@@ -380,8 +435,8 @@ export class HostDirectoryElement extends HTMLElement {
     search.append(input)
     const body = make('div', 'hd-body')
 
-    panel.append(head, domains, search, body)
-    this.#refs.set('domains', domains).set('search', search).set('input', input).set('body', body)
+    panel.append(head, search, body)
+    this.#refs.set('search', search).set('input', input).set('body', body)
     this.appendChild(panel)
     this.#panel = panel
 
@@ -407,6 +462,16 @@ export class HostDirectoryElement extends HTMLElement {
     this.#refs.clear()
   }
 
+  #toDomains(): void {
+    this.#scope = ''
+    this.#at = ''
+    this.#query = ''
+    this.#view = 'domains'
+    this.#warning = null
+    this.#opened = ''
+    this.#error = ''
+  }
+
   #toList(scope: string, at: string): void {
     this.#scope = scope
     this.#at = at
@@ -416,12 +481,16 @@ export class HostDirectoryElement extends HTMLElement {
     this.#error = ''
   }
 
-  /** Escape unwinds one level: the warning, the drill, then the walk. */
+  /** Escape unwinds one level: the warning, the drill, the walk, then back to
+   *  the domains. On the domains there is nothing left to unwind. */
   #back(): boolean {
     if (this.#warning) { this.#warning = null; this.#renderBody(); return true }
-    if (this.#view !== 'list') { this.#view = 'list'; this.#renderBody(); return true }
+    if (this.#view === 'domains') return false
+    if (this.#view !== 'list') { this.#view = 'list'; this.#render(); return true }
     if (this.#at) { this.#at = parentOf(this.#at); this.#opened = ''; this.#renderBody(); return true }
-    return false
+    this.#toDomains()
+    this.#render()
+    return true
   }
 
   // ── what is on screen ────────────────────────────────────────────────────
@@ -444,7 +513,6 @@ export class HostDirectoryElement extends HTMLElement {
 
   #render(): void {
     if (!this.#panel) return
-    this.#renderDomains()
     const input = this.#refs.get('input') as HTMLInputElement
     const placeholder = this.#scope
       ? t('packages.search-in', 'Search packages on {host}', { host: this.#scope })
@@ -456,24 +524,33 @@ export class HostDirectoryElement extends HTMLElement {
     this.#renderBody()
   }
 
-  #renderDomains(): void {
-    const domains = this.#refs.get('domains')
-    if (!domains) return
-    domains.replaceChildren()
-    const chip = (zone: string, label: string): void => {
-      const selected = this.#scope === zone
-      const chosen = button(`hd-domain${selected ? ' selected' : ''}`, label)
-      chosen.setAttribute('aria-pressed', String(selected))
-      const count = zone ? (this.#served.get(zone) ? this.#rows(zone, '', '').length : 0) : this.#rows('', '', '').length
-      if (count) chosen.append(make('span', 'hd-domain-count', String(count)))
-      chosen.addEventListener('click', () => { this.#toList(zone, ''); this.#render() })
-      domains.append(chosen)
+  #renderDomainList(body: HTMLElement): void {
+    const rows = domainRows({
+      homeLabel: this.#home || t('packages.mine', 'this hive'),
+      zones: this.#zones.filter(zone => zone !== this.#home),
+      trunk: this.#selection?.trunk ?? null,
+      next: this.#next,
+      served: this.#served,
+      count: zone => zone ? (this.#served.get(zone) ? this.#rows(zone, '', '').length : 0) : this.#rows('', '', '').length,
+    })
+    const list = make('ul', 'hd-list')
+    for (const row of rows) {
+      const li = make('li', `hd-domain-row${row.update ? ' has-update' : ''}`)
+      const open = button('hd-domain', '', t('hosts.open-domain', 'Open {host}', { host: row.label }))
+      open.append(make('span', 'hd-domain-name', row.label))
+      if (row.update) open.append(make('span', 'hd-mark', t('packages.update-mark', 'update')))
+      const count = make('span', 'hd-count', row.count ? String(row.count) : '')
+      if (row.count) count.title = t('hosts.package-count', '{count} packages', { count: row.count })
+      open.append(count, make('span', 'hd-chevron', '›'))
+      open.addEventListener('click', () => { this.#toList(row.zone, ''); this.#render() })
+      li.append(open)
+      list.append(li)
     }
-    chip('', this.#home || t('packages.mine', 'this hive'))
-    for (const zone of this.#zones) if (zone !== this.#home) chip(zone, zone)
+    body.append(list)
+    if (this.#reading && rows.every(row => !row.count)) body.append(make('p', 'hd-note', t('packages.reading', 'Reading what is served…')))
 
-    // A domain is added at the end of the row it joins — the hosts drone owns
-    // the pool, and the new chip arrives on its next render.
+    // A domain is added at the end of the list it joins — the hosts drone owns
+    // the pool, and the new row arrives on its next render.
     const add = make('form', 'hd-add')
     const field = make('input', 'hd-add-input')
     field.type = 'text'
@@ -492,14 +569,15 @@ export class HostDirectoryElement extends HTMLElement {
       EffectBus.emit('hosts:add', { zone })
       field.value = ''
     })
-    domains.append(add)
+    body.append(add)
   }
 
   #renderBody(): void {
     const body = this.#refs.get('body')
     if (!body) return
     body.replaceChildren()
-    if (this.#view === 'revisions') this.#renderRevisions(body)
+    if (this.#view === 'domains') this.#renderDomainList(body)
+    else if (this.#view === 'revisions') this.#renderRevisions(body)
     else if (this.#view === 'creations') this.#renderCreations(body)
     else if (this.#view === 'mine') this.#renderMine(body)
     else this.#renderList(body)
@@ -508,6 +586,30 @@ export class HostDirectoryElement extends HTMLElement {
   #renderList(body: HTMLElement): void {
     const reach = port()
     const trunk = this.#selection?.trunk ?? null
+
+    // THE WAY BACK: up one level, or to the domains from a domain's top. The
+    // domain names the path's first step, so where you are always reads whole.
+    const crumbs = make('nav', 'hd-crumbs')
+    crumbs.setAttribute('aria-label', t('hosts.path', 'Where you are'))
+    const up = button('hd-back', '‹', this.#at ? t('hosts.up', 'Up one level') : t('hosts.domains', 'All domains'))
+    up.addEventListener('click', () => {
+      if (this.#at) { this.#at = parentOf(this.#at); this.#opened = ''; this.#renderBody() }
+      else { this.#toDomains(); this.#render() }
+    })
+    const domain = button(`hd-crumb${this.#at ? '' : ' here'}`, this.#scope || this.#home || t('packages.mine', 'this hive'))
+    domain.addEventListener('click', () => { this.#at = ''; this.#opened = ''; this.#renderBody() })
+    crumbs.append(up, domain)
+    if (this.#at) {
+      const segments = this.#at.split('/')
+      segments.forEach((segment, index) => {
+        const path = segments.slice(0, index + 1).join('/')
+        crumbs.append(make('span', 'hd-sep', '/'))
+        const crumb = button(`hd-crumb${path === this.#at ? ' here' : ''}`, segment)
+        crumb.addEventListener('click', () => { this.#at = path; this.#opened = ''; this.#renderBody() })
+        crumbs.append(crumb)
+      })
+    }
+    body.append(crumbs)
 
     // THE HOST ITSELF: what else it serves, its own door, and letting it go.
     if (this.#scope) {
@@ -530,7 +632,7 @@ export class HostDirectoryElement extends HTMLElement {
       const remove = button('hd-link hd-remove', '✕', t('hosts.remove', 'Remove {host} from your host directory', { host: this.#scope }))
       remove.addEventListener('click', () => {
         const zone = this.#scope
-        this.#toList('', '')
+        this.#toDomains()
         EffectBus.emit('hosts:remove', { zone })
         this.#render()
       })
@@ -542,27 +644,6 @@ export class HostDirectoryElement extends HTMLElement {
       const bar = make('div', 'hd-hostbar')
       bar.append(mine)
       body.append(bar)
-    }
-
-    // THE WAY BACK UP, when walked into a branch.
-    if (this.#at) {
-      const crumbs = make('nav', 'hd-crumbs')
-      crumbs.setAttribute('aria-label', t('hosts.path', 'Where you are'))
-      const up = button('hd-back', '‹', t('hosts.up', 'Up one level'))
-      up.addEventListener('click', () => { this.#at = parentOf(this.#at); this.#opened = ''; this.#renderBody() })
-      crumbs.append(up)
-      const all = button('hd-crumb', t('hosts.all', 'all packages'))
-      all.addEventListener('click', () => { this.#at = ''; this.#opened = ''; this.#renderBody() })
-      crumbs.append(all)
-      const segments = this.#at.split('/')
-      segments.forEach((segment, index) => {
-        const path = segments.slice(0, index + 1).join('/')
-        crumbs.append(make('span', 'hd-sep', '/'))
-        const crumb = button(`hd-crumb${path === this.#at ? ' here' : ''}`, segment)
-        crumb.addEventListener('click', () => { this.#at = path; this.#opened = ''; this.#renderBody() })
-        crumbs.append(crumb)
-      })
-      body.append(crumbs)
     }
 
     // EVERYTHING THE FOLLOWED PUBLISHER MOVED, in one act — at the top only.
@@ -1043,13 +1124,13 @@ ${S} .hd-head{display:flex;align-items:center;gap:.4em;padding:.55em .7em;border
 ${S} .hd-title{flex:1;font-size:.9em;letter-spacing:.05em;color:var(--hc-window-accent);}
 ${S} .hd-close{background:none;border:none;padding:0 .2em;font:inherit;font-size:1.1em;line-height:1;color:var(--hd-ink-quiet);cursor:pointer;}
 ${S} .hd-close:hover{color:var(--hd-ink);}
-${S} .hd-domains{display:flex;flex-wrap:wrap;gap:.25em;padding:.5em .7em 0;}
-${S} .hd-domain{display:inline-flex;align-items:center;gap:.35em;padding:.25em .5em;font:inherit;font-size:.7em;letter-spacing:.04em;color:var(--hd-ink-quiet);background:none;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);cursor:pointer;}
-${S} .hd-domain:hover{color:var(--hd-ink);background:rgba(var(--acc),0.07);}
-${S} .hd-domain.selected{color:var(--hd-ink);border-color:rgba(var(--acc),0.45);background:rgba(var(--acc),0.09);}
-${S} .hd-domain-count{font-size:.9em;opacity:.7;}
-${S} .hd-add{display:inline-flex;align-items:center;gap:.25em;margin-left:auto;}
-${S} .hd-add-input{width:9em;padding:.2em .4em;font:inherit;font-size:.7em;color:var(--hd-ink);background:rgba(var(--acc),0.06);border:1px solid rgba(var(--acc),0.22);border-radius:var(--hc-radius-control,2px);}
+${S} .hd-domain-row{border-bottom:1px solid rgba(var(--acc),0.08);}
+${S} .hd-domain{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;column-gap:.5em;width:100%;padding:.55em .2em;font:inherit;font-size:.82em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}
+${S} .hd-domain:hover{background:rgba(var(--acc),0.05);}
+${S} .hd-domain-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+${S} .hd-chevron{color:var(--hd-ink-quiet);}
+${S} .hd-add{display:flex;align-items:center;gap:.25em;margin:.7em 0 0;}
+${S} .hd-add-input{flex:1 1 auto;min-width:0;padding:.2em .4em;font:inherit;font-size:.7em;color:var(--hd-ink);background:rgba(var(--acc),0.06);border:1px solid rgba(var(--acc),0.22);border-radius:var(--hc-radius-control,2px);}
 ${S} .hd-add-input[aria-invalid="true"]{border-color:rgba(217,160,135,0.72);}
 ${S} .hd-quiet{padding:.2em .45em;font:inherit;font-size:.7em;color:var(--hd-ink-quiet);background:none;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);cursor:pointer;}
 ${S} .hd-quiet:hover{color:var(--hd-ink);background:rgba(var(--acc),0.07);}

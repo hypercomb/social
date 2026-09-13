@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { directoryRows, isOlder, offAbove, replacedBeneath, rootsFor, type ServedTree } from './host-directory.view'
+import { directoryRows, domainRows, isOlder, offAbove, replacedBeneath, rootsFor, type ServedTree } from './host-directory.view'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..', '..', '..')
@@ -127,8 +127,32 @@ describe('the host directory', () => {
     expect(VIEW).not.toMatch(/\byour domain\b(?!s)|isHome|hosts\.home/)
   })
 
+  it('opens collapsed on a vertical list of domains, each saying whether an update waits there', () => {
+    // Jaime 2026-09-13: "a vertical list of domains, not the list of items, and it
+    // should always start collapsed. The domain would show if there's new updates
+    // in the row, and then you click that domain and go to the features."
+    const next: ServedTree = { root: 'r2', nodes: [node('games', 'g2')] }
+    const served = new Map<string, ServedTree | null>([
+      ['plugin.com', { root: 'r1', nodes: [node('games', 'g1')] }],
+      ['jwize.com', next],
+    ])
+    const counts: Record<string, number> = { '': 36, 'plugin.com': 36, 'jwize.com': 36 }
+    const input = { homeLabel: 'hypercomb.io', zones: ['plugin.com', 'jwize.com'], served, count: (zone: string) => counts[zone] ?? 0 }
+
+    const waiting = domainRows({ ...input, trunk: 'r1', next })
+    expect(waiting.map(r => `${r.label}:${r.update}`)).toEqual(['hypercomb.io:true', 'jwize.com:true', 'plugin.com:false'])
+
+    // Nothing waiting: every domain is still listed, in its own order.
+    const quiet = domainRows({ ...input, trunk: 'r2', next })
+    expect(quiet.map(r => `${r.label}:${r.update}`)).toEqual(['hypercomb.io:false', 'plugin.com:false', 'jwize.com:false'])
+
+    expect(VIEW).toMatch(/#view: View = 'domains'/)
+    expect(VIEW).toMatch(/if \(!this\.#resume\) this\.#toDomains\(\)/)
+    expect(VIEW).not.toMatch(/hd-domains|#renderDomains\(/)
+  })
+
   it('revisions are a drill-down that returns to the list, and a change reopens it where it was chosen', () => {
-    expect(VIEW).toMatch(/type View = 'list' \| 'revisions' \| 'creations' \| 'mine'/)
+    expect(VIEW).toMatch(/type View = 'domains' \| 'list' \| 'revisions' \| 'creations' \| 'mine'/)
     expect(VIEW).toMatch(/#openRevisions\(row\.path\)/)
     expect(VIEW).toMatch(/revisionsOf\(path, this\.#sources\(\), roots\)/)
     const pick = VIEW.slice(VIEW.indexOf('async #pick('))
