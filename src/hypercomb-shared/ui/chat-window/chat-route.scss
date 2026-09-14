@@ -912,6 +912,130 @@ $jx: calc(#{$pad} + #{$square} / 2);
   &.on { color: var(--hc-window-accent); }
 }
 
+// ── the Execution column (documentation/hive-read-fence.md §3) ────────────
+//
+// The workflow's twin on the same side: the policy as words at its head, then
+// one row per request, waiting rows first. Words, never bordered buttons; the
+// accent marks only what is on. On a phone the side has no room beside the
+// thread, so the column covers it until the icon puts it away.
+
+.chat-exec-toggle { position: relative; }
+.chat-exec-badge {
+  position: absolute;
+  inset-block-start: 0.1rem;
+  inset-inline-end: 0.05rem;
+  min-width: 0.9rem;
+  padding: 0 0.2rem;
+  font-size: 0.58rem;
+  line-height: 0.9rem;
+  border-radius: var(--hc-window-radius-control, 2px);
+  color: var(--hc-window-on-accent);
+  background: var(--hc-window-accent);
+}
+
+.chat-exec-col {
+  flex: 0 1 var(--chat-route-side-w);
+  min-width: 14rem;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  border-inline-start: 1px solid var(--hc-window-edge);
+}
+@include bp.phone {
+  .chat-route-split { position: relative; }
+  .chat-exec-col {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    min-width: 0;
+    border-inline-start: 0;
+    background: rgb(var(--hc-panel-pane));
+  }
+}
+
+.chat-exec-words,
+.chat-exec-auto,
+.chat-exec-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.6rem;
+}
+.chat-exec-auto { padding: 0 0.75rem 0.5rem; font-size: 0.72rem; }
+
+.chat-exec-word {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+  &:hover { color: var(--hc-window-ink-loud); text-decoration: underline; }
+  &:focus-visible { outline: 1px solid var(--hc-window-edge-firm); outline-offset: 2px; }
+  &.on { color: var(--hc-window-accent); }
+}
+.chat-exec-go { color: var(--hc-window-accent); }
+
+.chat-exec-quiet { margin: 0; color: var(--hc-window-ink-quiet); }
+
+.chat-exec-list {
+  margin: 0;
+  padding: 0 0 0.75rem;
+  list-style: none;
+}
+.chat-exec-empty { padding: 0.4rem 0.75rem; font-size: 0.78rem; }
+
+.chat-exec-row {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.55rem 0.75rem;
+  border-block-start: 1px solid var(--hc-window-line);
+  font-size: 0.78rem;
+  color: var(--hc-window-ink-plain);
+
+  &[data-state='waiting'] { background: var(--hc-window-wash); }
+  &[data-state='ran'],
+  &[data-state='skipped'] { opacity: 0.7; }
+}
+
+.chat-exec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.chat-exec-kind { color: var(--hc-window-ink-loud); }
+.chat-exec-row[data-kind='destructive'] .chat-exec-kind { color: var(--hc-window-accent); }
+.chat-exec-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  color: var(--hc-window-ink-quiet);
+}
+
+.chat-exec-lines { display: grid; gap: 0.1rem; min-width: 0; }
+.chat-exec-line {
+  font-family: var(--hc-code, monospace);
+  font-size: 0.74rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--hc-window-ink-loud);
+}
+
+.chat-exec-outcome {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--hc-window-ink-quiet);
+  overflow-wrap: anywhere;
+}
+.chat-exec-row[data-state='failed'] .chat-exec-outcome { color: var(--hc-window-accent); }
+
 // ── the masthead, the step rules, the composer ─────────────────────────────
 //
 // The centre reads as one story: the masthead names the conversation and says

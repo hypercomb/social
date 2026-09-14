@@ -125,8 +125,8 @@ const composeContext = async (
  * WHAT THIS HIVE CAN DO, IN WORDS — the instruction a bridged responder needs
  * and, until now, never received.
  *
- * The chat window has always handed its local model a census-derived
- * vocabulary (`hypercombGrammarInstruction`). The bridge tier got the
+ * The chat window has always handed its models a census-derived vocabulary
+ * (today `hypercombVocabulary`, taught through the work fence). The bridge tier got the
  * MATERIAL of a question — prompt, transcript, context signatures — and none
  * of the vocabulary, because the renderer lived in the shell where no module
  * can reach it. Claude Code coped only because a skill file happens to sit in

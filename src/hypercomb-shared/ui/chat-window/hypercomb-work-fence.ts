@@ -190,6 +190,21 @@ export class WorkStreamGuard {
   }
 }
 
+/** A block the hive would not run, said so the model can correct it. It goes
+ *  back to the model as the next message; any other error ends the work. */
+export class WorkRefused extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'WorkRefused'
+  }
+}
+
+const REFUSALS = new Set(['WorkRefused', 'HypercombGrammarError', 'HypercombObservationError'])
+
+/** The parsers' own refusals count too: their words are the ones to send back. */
+export const isWorkRefusal = (error: unknown): error is Error =>
+  error instanceof Error && REFUSALS.has(error.name)
+
 // ── what the model is told ────────────────────────────────────────────────
 
 /** Who is answering — so "is this DeepSeek?" gets the truth. */
@@ -226,6 +241,8 @@ export const workInstruction = (powers: WorkPowers): string => {
       'read here — the participant\'s current page: its content, its signature, its children',
       'read /path · list /path · tree /path · history /path · summary /path — another tile by its route',
       'read <signature> · list <signature> — that exact version',
+      'read <signature> also opens whatever else a signature names: a note, an attachment, a module\'s code. Long text comes a page at a time; read <signature> <next> continues from the "next" the last page gave',
+      'code · code <word> — the code running in this hive: every module and dependency by name, with the signature that opens it',
       'find <word> — tiles under the current page whose name contains the word',
       powers.readsRunFreely
         ? 'Reads run straight away, inside a size budget for this conversation.'

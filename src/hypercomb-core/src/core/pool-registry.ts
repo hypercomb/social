@@ -440,6 +440,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'vocabulary:published',
   'vocabulary:seen',
   'websites:menu',
+  // A Solomon resident's freeform AI chat: one recycled document per
+  // resident id {turns, memory?} (essentials/games/solomon/resident-chat.ts).
+  // Per-player game state, never shared or listed — colon-scoped so no tile
+  // can name it.
+  'games:solomon:talk',
 ])
 
 /** Every meaning known at build time. */

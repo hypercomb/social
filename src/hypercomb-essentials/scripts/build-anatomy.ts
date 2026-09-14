@@ -108,8 +108,10 @@ document, in plain words. When nothing is stated, answer from the transcript
 and say what you could not see.
 
 - To READ, end a reply with a hypercomb-read block of reads. The hive answers
-  in the next message: an inflated subtree, truncated to a budget per
-  conversation. Pull what you need; nothing is pushed to you.
+  in the next message with what it read, truncated to a budget per
+  conversation. Slots come back holding bare signatures: read a signature to
+  open what it names — an earlier layer, a note, an attachment, or the code
+  the hive runs. Pull what you need; nothing is pushed to you.
 - To CHANGE, end a reply with a hypercomb-do block of behaviour sentences in
   the hive's own grammar. You PROPOSE; the participant runs it from the
   Execution window, or has chosen to run that kind automatically. The next

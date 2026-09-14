@@ -130,3 +130,23 @@ describe('removing a provider', () => {
     expect(llmActivation.isEnabled('openrouter')).toBe(true)
   })
 })
+
+describe('the price-stage track on OpenRouter', () => {
+  it('shows three stops, and an arrow key moves one without crossing its neighbour', async () => {
+    const { openRouterStages } = await import('./providers/openrouter-stages.js')
+    openRouterStages.set({ fast: 0.1, balanced: 0.2, deep: 0.3 })
+    ;[...document.querySelectorAll<HTMLElement>('.hc-providers-tab')].find(t => t.textContent?.startsWith('API'))?.click()
+    openRouterOpen()
+    const stops = [...document.querySelectorAll<HTMLButtonElement>('.hc-provider-stage-stop')]
+    expect(stops.map(stop => stop.getAttribute('aria-valuetext'))).toEqual(['$0.10', '$0.20', '$0.30'])
+    expect($('.hc-provider-stage-legend')?.textContent).toContain('≤ $0.20')
+
+    stops[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    expect(openRouterStages.get().balanced).toBe(0.22)
+    for (let i = 0; i < 10; i++) {
+      document.querySelectorAll<HTMLButtonElement>('.hc-provider-stage-stop')[1]!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    }
+    expect(openRouterStages.get().balanced).toBe(0.3) // stopped at the deep stop
+  })
+})

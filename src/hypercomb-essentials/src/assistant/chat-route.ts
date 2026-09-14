@@ -2376,15 +2376,15 @@ export const localOrganizerState = async (): Promise<
  * (`llmPolicy.orchestratorProvider`, model-policy.ts) decides between the
  * machine-local probe above and a named paid provider, gated the same way
  * every other tier is: switched on, and keyed if it needs a key. Default is
- * `'anthropic'` — Jaime, 2026-09-11, moved off the local-only default because
- * the local model is "just not there yet" — `'local'` asks for exactly the
- * probe `localOrganizerState` always ran.
+ * AUTOMATIC (2026-09-13; it was `'anthropic'` from 2026-09-11, when Jaime
+ * moved off the local-only default because the local model is "just not there
+ * yet") — `'local'` asks for exactly the probe `localOrganizerState` always ran.
  */
 export const organizerGate = async (): Promise<
   | { readonly state: 'awake'; readonly provider: LlmProviderDescriptor }
   | { readonly state: Exclude<RouteOrganizerState, 'awake' | 'no-model'> }
 > => {
-  const { llmPolicy } = await import('./model-policy.js')
+  const { llmPolicy, rankProviders } = await import('./model-policy.js')
   const chosen = llmPolicy.orchestratorProvider
   if (chosen === 'local') return localOrganizerState()
   const [{ llmProviderRegistry }, { llmActivation }, core] = await Promise.all([
@@ -2392,10 +2392,22 @@ export const organizerGate = async (): Promise<
     import('./llm-activation.js'),
     import('@hypercomb/core'),
   ])
-  const provider = llmProviderRegistry().all().find(p => p.id === chosen)
-  if (!provider) return { state: 'off' }
+  const provider = chosen ? llmProviderRegistry().all().find(p => p.id === chosen) : undefined
+  // AUTOMATIC — the default, and where a named provider that is gone falls
+  // back to (Jaime, 2026-09-13: "change any provider to be available to the
+  // orchestrator … I don't really like Qwen, the local one"). The mediator's
+  // pick at the helper's weight among the providers switched on as available
+  // to the orchestrator, keyed, and callable directly; the machine-local
+  // model only ever runs this when it is chosen by name.
+  if (!provider) {
+    const pick = rankProviders({ tier: llmPolicy.orchestratorTier })
+      .find(p => p.id !== 'local' && (p.transport === 'browser-http' || p.transport === 'host-relay'))
+    return pick ? { state: 'awake', provider: pick } : { state: 'off' }
+  }
   if (!llmActivation.isEnabled(provider.id)) return { state: 'off' }
-  if (provider.requiresKey !== false && !core.llmKeyStore.has(provider.id)) return { state: 'off' }
+  // A model added through OpenRouter pays with OpenRouter's key.
+  const keyOwner = (provider as { credentialsFrom?: string }).credentialsFrom ?? provider.id
+  if (provider.requiresKey !== false && !core.llmKeyStore.has(keyOwner)) return { state: 'off' }
   return { state: 'awake', provider }
 }
 

@@ -416,10 +416,14 @@ describe('world conversations and shrine controls', () => {
     } finally { view.dispose(); host.remove() }
   })
 
-  it('lets residents talk in turn and plots describe the shrine that could stand there, without entering anything', () => {
+  it('lets residents talk in turn and plots describe the shrine that could stand there, without entering anything', async () => {
     const run = journey()
     const host = document.createElement('div'); document.body.append(host)
     const view = new RpgOverworldView(run.hooks)
+    // A resident's chat opens with their scripted beat, added asynchronously
+    // (it is read from, and written back to, the resident-chat pool) —
+    // resident-chat.spec.ts covers that read/write/AI-reply path directly.
+    const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
     try {
       view.mount(host)
       const tamsin = WORLD_RESIDENTS[0]
@@ -427,10 +431,12 @@ describe('world conversations and shrine controls', () => {
       Object.assign(view.model.player, at(tamsin.id))
       const said = (): string | null | undefined => host.querySelector(`.sol-rpg-bubble.is-shown[data-for="${tamsin.id}"]`)?.textContent
       view.interact(tamsin.id)
+      await flush()
       expect(view.isDialogOpen).toBe(false)
-      expect(said()).toBe(tamsin.lines[0])
+      expect(said()).toContain(tamsin.lines[0])
       view.interact(tamsin.id)
-      expect(said()).toBe(tamsin.lines[1])
+      await flush()
+      expect(said()).toContain(tamsin.lines[1])
       const plot = WORLD_PLOTS[0]
       Object.assign(view.model.player, at(plot.id)); view.refresh()
       expect(host.querySelector('.sol-rpg-cue')?.textContent).toBe(`${plot.name} · E to look`)

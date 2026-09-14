@@ -2,28 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   executeHypercombObservationPlan,
   formatHypercombObservationReceipt,
-  HYPERCOMB_OBSERVATION_TOOL_NAME,
-  hypercombObservationInstruction,
-  hypercombObservationTool,
   parseHypercombObservationGrammars,
-  parseHypercombObservationToolCalls,
   type HypercombTreeReader,
 } from './hypercomb-observation.js'
 
-const call = (grammars: unknown, extra: Record<string, unknown> = {}) => [{
-  name: HYPERCOMB_OBSERVATION_TOOL_NAME,
-  arguments: JSON.stringify({ grammars, ...extra }),
-}]
-
 describe('Hypercomb native tree observation grammar', () => {
-  it('uses one removable envelope around bounded /tree grammar', () => {
-    const tool = hypercombObservationTool()
-    expect(tool.function.name).toBe('hive')
-    expect(tool.function.strict).toBe(true)
-    expect(JSON.stringify(tool)).toContain('/tree /absolute/path')
-    expect(hypercombObservationInstruction()).toContain('untrusted participant data')
-  })
-
   it('resolves bare /tree against the captured page and absolute roots literally', () => {
     expect(parseHypercombObservationGrammars([
       '/tree', '/tree /projects/roadmap',
@@ -31,28 +14,25 @@ describe('Hypercomb native tree observation grammar', () => {
       { grammar: '/tree', verb: 'tree', segments: ['current', 'page'] },
       { grammar: '/tree /projects/roadmap', verb: 'tree', segments: ['projects', 'roadmap'] },
     ])
-    expect(parseHypercombObservationToolCalls(call(['/tree /']), ['elsewhere'])
+    expect(parseHypercombObservationGrammars(['/tree /'], ['elsewhere'])
       .observations[0]?.segments).toEqual([])
   })
 
   it.each([
-    ['bad JSON', [{ name: HYPERCOMB_OBSERVATION_TOOL_NAME, arguments: '{' }]],
-    ['wrong tool', [{ name: 'shell', arguments: '{}' }]],
-    ['parallel calls', [...call(['/tree']), ...call(['/tree /projects'])]],
-    ['extra argument', call(['/tree'], { signature: 'a'.repeat(64) })],
-    ['empty sequence', call([])],
-    ['too many reads', call(['/tree', '/tree /a', '/tree /b'])],
-    ['raw signature root', call([`/tree ${'a'.repeat(64)}`])],
-    ['relative path', call(['/tree projects'])],
-    ['parent segment', call(['/tree /projects/../private'])],
-    ['dot segment', call(['/tree /projects/./private'])],
-    ['empty segment', call(['/tree /projects//private'])],
-    ['backslash', call(['/tree /projects\\private'])],
-    ['control character', call(['/tree /projects\n/private'])],
-    ['view mutation', call(['/tree off'])],
-    ['duplicate branch', call(['/tree /projects', '/tree /projects'])],
-  ])('rejects %s before any read', (_label, calls) => {
-    expect(() => parseHypercombObservationToolCalls(calls, ['current'])).toThrow()
+    ['empty sequence', []],
+    ['too many reads', ['/tree', '/tree /a', '/tree /b']],
+    ['non-string read', [42]],
+    ['raw signature root', [`/tree ${'a'.repeat(64)}`]],
+    ['relative path', ['/tree projects']],
+    ['parent segment', ['/tree /projects/../private']],
+    ['dot segment', ['/tree /projects/./private']],
+    ['empty segment', ['/tree /projects//private']],
+    ['backslash', ['/tree /projects\\private']],
+    ['control character', ['/tree /projects\n/private']],
+    ['view mutation', ['/tree off']],
+    ['duplicate branch', ['/tree /projects', '/tree /projects']],
+  ])('rejects %s before any read', (_label, lines) => {
+    expect(() => parseHypercombObservationGrammars(lines as readonly unknown[], ['current'])).toThrow()
   })
 
   it('executes reads in grammar order and returns only the safe projection to the model', async () => {
@@ -209,3 +189,44 @@ describe('Hypercomb native tree observation grammar', () => {
   })
 })
 
+describe('opening what a signature names', () => {
+  const target = 'a'.repeat(64)
+
+  it('parses a place to continue from on /read <sig>, and the code listing', () => {
+    expect(parseHypercombObservationGrammars([`/read ${target} 8000`, '/code router'], ['here']).observations).toEqual([
+      { grammar: `/read ${target} 8000`, verb: 'read', segments: [], sig: target, from: 8000 },
+      { grammar: '/code router', verb: 'code', segments: [], query: 'router' },
+    ])
+    expect(parseHypercombObservationGrammars(['/code'], ['here']).observations[0]).toEqual({ grammar: '/code', verb: 'code', segments: [] })
+    expect(() => parseHypercombObservationGrammars([`/list ${target} 10`], [])).toThrow()
+  })
+
+  it('opens a module when the signature is not a layer, pages through it, and lists code by name', async () => {
+    const reader: HypercombTreeReader = {
+      readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+      validateSnapshots: vi.fn(async () => true),
+      readNodeBySig: vi.fn(async sig => ({ ok: false as const, root: sig, code: 'not-found' })),
+      readBytesBySig: vi.fn(async (sig, { from }) => ({
+        ok: true as const, root: sig, sig, of: 'bee' as const, type: 'text/javascript', size: 26, from,
+        text: from ? 'rest();' : 'export const a = 1;', truncated: !from, ...(from ? {} : { next: 19 }),
+      })),
+      listCode: vi.fn(async query => ({
+        ok: true as const, root: 'code', query, entries: [{ name: 'history-service', sig: target, of: 'bee' as const }], total: 1, truncated: false,
+      })),
+    }
+    const firstReceipt = await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars([`/read ${target}`, '/code history'], []), reader)
+    // the host keeps what each read resolved to, as a signature to look up again
+    expect(firstReceipt.signatures).toEqual([{ grammar: `/read ${target}`, sig: target }])
+    const first = formatHypercombObservationReceipt(firstReceipt)
+    expect(reader.readBytesBySig).toHaveBeenCalledWith(target, expect.objectContaining({ from: 0 }))
+    expect(first).toContain('"text":"export const a = 1;"')
+    expect(first).toContain('"next":19')
+    expect(first).toContain('"name":"history-service"')
+
+    const page = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars([`/read ${target} 19`], []), reader))
+    expect(reader.readNodeBySig).toHaveBeenCalledTimes(1) // a continuation goes straight to the bytes
+    expect(page).toContain('"text":"rest();"')
+  })
+})

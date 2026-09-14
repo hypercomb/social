@@ -927,8 +927,9 @@ export class SolomonOverlay {
     this.#audio.unlock()
     this.#audio.startAmbience({ level: this.#mode === 'play' ? 1 : 0.5 })
     if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.#onClose(); return }
-    // While typing in the designer's name field, let the field have its keys.
-    if (document.activeElement === this.#nameInput) return
+    // While typing in a text field — the designer's name field, a resident
+    // chat box — let the field have its keys instead of walking the player.
+    if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return
     // Let OS/browser shortcuts (Ctrl/Cmd/Alt combos) pass.
     if (e.ctrlKey || e.metaKey || e.altKey) return
     // Otherwise FULLY isolate — stop + preventDefault every plain key so none
@@ -991,7 +992,7 @@ export class SolomonOverlay {
   }
 
   #onKeyUp = (e: KeyboardEvent): void => {
-    if (document.activeElement === this.#nameInput) return
+    if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return
     if (e.ctrlKey || e.metaKey || e.altKey) return
     e.stopImmediatePropagation()
     if (this.#mode === 'overworld') {

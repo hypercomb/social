@@ -36,6 +36,7 @@ import {
   noteLocalServerUnreachable,
 } from './providers/local-liveness.js'
 import { chooseProvider, modelForTier, rankProviders, type ModelNeed } from './model-policy.js'
+import { credentialOwner } from './providers/credential-owner.js'
 import { llmProviderRegistry, publishService, type LlmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
 import type {
@@ -91,6 +92,12 @@ export type LlmCall = {
   /** Sampling temperature. Honoured by the local provider only. */
   readonly temperature?: number
   readonly signal?: AbortSignal
+  /** Automatic fallback, but only among providers paying with this owner's
+   *  credentials (credential-owner.ts). The chat's first round sets it, so a
+   *  job designated to one model added through OpenRouter can fall to
+   *  another of them before any output — never to a provider the participant
+   *  has not let read the hive. */
+  readonly fallbackWithin?: string
 }
 
 // ── the participant's own local model ─────────────────────────────────
@@ -203,7 +210,7 @@ export const configuredProviders = (): LlmProviderDescriptor[] =>
     isCallable(p) && llmActivation.isEnabled(p.id)
     && (p.transport !== 'peer-swarm' || !!peerCaller)
     && localModelServerUp(p)
-    && (p.requiresKey === false || llmKeyStore.has(p.id)))
+    && (p.requiresKey === false || llmKeyStore.has(credentialOwner(p))))
 
 /** Every ACTIVE provider whatever its transport — what the orchestrator picks
  *  from when it is choosing WHO answers rather than building a fetch. Bridges
@@ -211,7 +218,7 @@ export const configuredProviders = (): LlmProviderDescriptor[] =>
 export const activeProviders = (): LlmProviderDescriptor[] =>
   registry().all().filter(p =>
     llmActivation.isEnabled(p.id) && localModelServerUp(p)
-    && (!isCallable(p) || p.requiresKey === false || llmKeyStore.has(p.id)))
+    && (!isCallable(p) || p.requiresKey === false || llmKeyStore.has(credentialOwner(p))))
 
 /**
  * Which provider answers this call.
@@ -266,7 +273,7 @@ export const buildRequest = (
   options: { stream?: boolean } = {},
 ): LlmRequest => {
   const needsKey = provider.requiresKey !== false
-  const apiKey = needsKey ? llmKeyStore.get(provider.id) : ''
+  const apiKey = needsKey ? llmKeyStore.get(credentialOwner(provider)) : ''
   if (needsKey && !apiKey) {
     throw new LlmDispatchError(
       `no key configured for "${provider.id}" — set one up at ${provider.docsUrl}`,
@@ -531,16 +538,27 @@ const isTransient = (error: unknown): boolean => {
  * silently change vendor; automatic choices may fall through their policy-
  * ranked alternatives. */
 export const routeCandidates = (
-  call: Pick<LlmCall, 'providerId' | 'model' | 'preferModel' | 'need'>,
+  call: Pick<LlmCall, 'providerId' | 'model' | 'preferModel' | 'need' | 'fallbackWithin'>,
 ): LlmProviderDescriptor[] => {
   const explicit = !!call.providerId || !!call.model
   let candidates = explicit ? [resolveProvider(call)] : rankProviders(call.need ?? {})
+  if (!explicit && call.fallbackWithin) {
+    const owner = call.fallbackWithin.toLowerCase()
+    candidates = candidates.filter(provider => credentialOwner(provider).toLowerCase() === owner)
+  }
   // Session stickiness is a preference, not authority. Reuse the previous
   // model only while its provider is still eligible for this request.
   if (!explicit && call.preferModel) {
     const sticky = registry().providerForModel(call.preferModel)
     const index = sticky ? candidates.findIndex(provider => provider.id === sticky.id) : -1
-    if (index > 0) candidates = [candidates[index], ...candidates.slice(0, index), ...candidates.slice(index + 1)]
+    // A HARDER OR SIMPLER QUESTION MAY CHANGE MODELS: the previous one keeps
+    // its place only while it offers the weight of work now asked for, or the
+    // provider the policy ranked first does not offer it either.
+    const tier = call.need?.tier
+    const offers = (provider: LlmProviderDescriptor): boolean => !tier || provider.models.some(model => model.tier === tier)
+    if (index > 0 && (offers(candidates[index]) || !offers(candidates[0]))) {
+      candidates = [candidates[index], ...candidates.slice(0, index), ...candidates.slice(index + 1)]
+    }
   }
   const callable = candidates.filter(provider =>
     provider.transport !== 'agent-bridge'
@@ -574,7 +592,12 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
 
   const automatic = !call.providerId && !call.model
   const failures: string[] = []
+  // A KEY THE VENDOR REFUSED (401/403) is refused for every model that pays
+  // with it: models added through OpenRouter all borrow one key, so falling
+  // to the next of them only repeats the same refusal.
+  const refusedOwners = new Set<string>()
   for (const provider of candidates) {
+    if (refusedOwners.has(credentialOwner(provider))) continue
     let emitted = false
     try {
       for await (const chunk of streamProvider(provider, call)) {
@@ -601,6 +624,8 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
       const message = error instanceof Error ? error.message : String(error)
       failures.push(`${provider.label}: ${message}`)
       if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
+      const status = error instanceof LlmDispatchError ? error.status : undefined
+      if (status === 401 || status === 403) refusedOwners.add(credentialOwner(provider))
       EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
     }
   }
@@ -664,6 +689,12 @@ export const llmRouter = {
    *  attaches any tool (llm-hive-access.ts). */
   designatedProviderId: (need: ModelNeed = {}): string | undefined => {
     try { return chooseProvider(need)?.id } catch { return undefined }
+  },
+  /** Whose key, grant and budget a provider uses — its own id, or the
+   *  configurator it came from (a model added through OpenRouter). */
+  credentialOwnerOf: (providerId: string): string | undefined => {
+    const provider = registry().get(providerId)
+    return provider ? credentialOwner(provider) : undefined
   },
   stream: (call: LlmCall): AsyncGenerator<LlmRoutedChunk> => streamRoutedModel(call),
 }

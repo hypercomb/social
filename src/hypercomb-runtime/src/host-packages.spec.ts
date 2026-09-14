@@ -102,6 +102,18 @@ describe('headPackage — discovery', () => {
     expect((await headPackage('host.example'))?.packageSig).toBe(SIG_A)
   })
 
+  it('asks the base that answered first on the next probe, sparing the dead bases', async () => {
+    const fetchMock = serving(await poolAt('https://root.example', [SIG_A]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect((await headPackage('root.example'))?.base).toBe('https://root.example')
+    fetchMock.mockClear()
+    expect((await headPackage('root.example'))?.packageSig).toBe(SIG_A)
+
+    const asked = fetchMock.mock.calls.map(call => String(call[0]))
+    expect(asked.some(url => url.startsWith('https://root.example/content/'))).toBe(false)
+  })
+
   it('answers null for a domain that publishes nothing at all', async () => {
     vi.stubGlobal('fetch', serving({}))
     expect(await headPackage('host.example')).toBeNull()

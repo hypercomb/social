@@ -82,6 +82,8 @@ type TurnManifest = {
   readonly anatomy?: string
   readonly context?: string
   readonly observed?: readonly string[]
+  /** The signatures those questions resolved to — lookup keys, never content. */
+  readonly read?: readonly string[]
   readonly providerId?: string
   readonly model?: string
 }
@@ -91,6 +93,8 @@ export type TurnMeta = {
   readonly anatomy?: string
   readonly context?: string
   readonly observed?: readonly string[]
+  /** The signatures those questions resolved to — lookup keys, never content. */
+  readonly read?: readonly string[]
   readonly providerId?: string
   readonly model?: string
 }
@@ -103,6 +107,10 @@ const cleanMeta = (meta: TurnMeta | undefined): Partial<TurnMeta> => {
   if (typeof meta.context === 'string' && SIG64.test(meta.context)) out['context'] = meta.context
   if (Array.isArray(meta.observed) && meta.observed.length) {
     out['observed'] = meta.observed.filter(g => typeof g === 'string' && g.length <= 1_000).slice(0, 8)
+  }
+  if (Array.isArray(meta.read) && meta.read.length) {
+    const read = [...new Set(meta.read.filter(sig => typeof sig === 'string' && SIG64.test(sig)))].slice(0, 64)
+    if (read.length) out['read'] = read
   }
   if (typeof meta.providerId === 'string' && meta.providerId) out['providerId'] = meta.providerId.slice(0, 64)
   if (typeof meta.model === 'string' && meta.model) out['model'] = meta.model.slice(0, 128)

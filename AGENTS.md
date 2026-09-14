@@ -13,3 +13,15 @@ Disposable output must not be created in normal source paths.
 - `test-results/` is not a generic scratch directory. This repository intentionally tracks some test evidence there, so use it only when the output is meant to be reviewed and committed.
 
 Commit the ignore rule, not the generated files.
+
+## Protected `development` branch (mandatory)
+
+`development` is maintained directly by the repository owner only. Agents must
+work on a dedicated task branch and may commit and push only that branch; they
+must never commit, merge, rebase, or push directly to `development`.
+
+The shared pre-push hook rejects any direct update of `development`. Do not
+disable, edit around, or bypass that hook, including by setting
+`HYPERCOMB_ALLOW_DIRECT_DEVELOPMENT_PUSH`. Only the repository owner may use
+that explicit, one-command override when intentionally publishing
+`development`.

@@ -30,6 +30,8 @@ const MAX_BYTES = 12_000
 const MAX_READ_MS = 5_000
 const SNAPSHOT_TTL_MS = 2 * 60_000
 const SNAPSHOT_LIMIT = 32
+/** Read results kept for reuse; the oldest falls out first. */
+const CACHE_LIMIT = 64
 
 type HiveHistory = {
   sign(lineage: { explorerSegments: () => readonly string[] }): Promise<string>
@@ -39,7 +41,13 @@ type HiveHistory = {
   treeEpoch(): number
 }
 
-type HiveStore = { getResource(sig: string): Promise<Blob | null> }
+type HiveStore = {
+  getResource(sig: string): Promise<Blob | null>
+  /** Verified module bytes from the `sign('bees')` pool — never imported here. */
+  getBeeBytes?(sig: string): Promise<Uint8Array | null>
+  /** Verified dependency bytes from the `sign('dependencies')` pool. */
+  getDependencyBytes?(sig: string): Promise<Uint8Array | null>
+}
 type LayerCommitter = { settled(): Promise<void> }
 type Lookup = <T>(key: string) => T | undefined
 
@@ -78,6 +86,10 @@ type CarriedChild = { readonly name: string; readonly sig: string }
 
 const MAX_HISTORY_MARKERS = 32
 const COMPACTION_KEY = '@hypercomb.social/Compaction'
+const PRELOADER_KEY = '@hypercomb.social/ScriptPreloader'
+const DEPENDENCY_LOADER_KEY = '@hypercomb.social/DependencyLoader'
+const MAX_CODE_ENTRIES = 200
+const CONTROL = /[\u0000-\u001f\u007f]/g
 
 export type HypercombNodeRead =
   | {
@@ -125,6 +137,53 @@ export type HypercombSummaryRead =
     readonly minted: boolean
   }
   | { readonly ok: false; readonly root: string; readonly code: 'not-found' | 'incomplete-read' | 'stale-read' | 'unavailable' | 'no-summariser' | 'failed' }
+
+export type HypercombBytesRead =
+  | {
+    readonly ok: true
+    readonly root: string
+    readonly sig: string
+    readonly of: 'resource' | 'bee' | 'dependency'
+    readonly type: string
+    readonly size: number
+    readonly from: number
+    /** Absent when the bytes are not text. */
+    readonly text?: string
+    readonly truncated: boolean
+    readonly next?: number
+  }
+  | { readonly ok: false; readonly root: string; readonly code: 'not-found' | 'incomplete-read' | 'unavailable' }
+
+export type HypercombCodeRead =
+  | {
+    readonly ok: true
+    readonly root: string
+    readonly query: string
+    readonly entries: readonly { readonly name: string; readonly sig: string; readonly of: 'bee' | 'dependency' }[]
+    readonly total: number
+    readonly truncated: boolean
+  }
+  | { readonly ok: false; readonly root: string; readonly code: 'unavailable' }
+
+/** The whole of a Blob as bytes — `arrayBuffer` where the Blob has it, a
+ *  FileReader where it does not. */
+const blobBytes = async (blob: Blob): Promise<Uint8Array> => {
+  if (typeof blob.arrayBuffer === 'function') return new Uint8Array(await blob.arrayBuffer())
+  return new Uint8Array(await new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as ArrayBuffer)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsArrayBuffer(blob)
+  }))
+}
+
+/** UTF-8 text, or undefined for bytes that are not text. */
+const textOf = (bytes: Uint8Array): string | undefined => {
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return text.includes('\u0000') ? undefined : text
+  } catch { return undefined }
+}
 
 class StaleReadError extends Error {}
 class ReadBudgetError extends Error {}
@@ -238,9 +297,11 @@ export class HypercombHiveTreeReader {
   }
 
   /** Bounded breadth-first structural read rooted only at a participant path. */
-  async readTree(
+  async #readTreeLive(
     segments: readonly string[],
     options: HypercombTreeReadOptions = {},
+    /** The cache already waited for pending commits: wait exactly once. */
+    settled = false,
   ): Promise<HypercombTreeRead> {
     const root = rootLabel(segments)
     const history = this.#history()
@@ -258,7 +319,7 @@ export class HypercombHiveTreeReader {
 
     try {
       if (signal?.aborted) throw stopped()
-      await committer.settled()
+      if (!settled) await committer.settled()
       if (signal?.aborted) throw stopped()
       const epoch = history.treeEpoch()
 
@@ -352,9 +413,11 @@ export class HypercombHiveTreeReader {
    * granted (llm-hive-access.ts); `/tree` stays structure-only for the
    * ungranted case. Same epoch/snapshot discipline as `readTree`.
    */
-  async readNode(
+  async #readNodeLive(
     segments: readonly string[],
     options: { readonly maxBytes?: number; readonly withContent?: boolean; readonly signal?: AbortSignal } = {},
+    /** The cache already waited for pending commits: wait exactly once. */
+    settled = false,
   ): Promise<HypercombNodeRead> {
     const root = rootLabel(segments)
     const history = this.#history()
@@ -367,7 +430,7 @@ export class HypercombHiveTreeReader {
     const signal = options.signal
     try {
       if (signal?.aborted) throw stopped()
-      await committer.settled()
+      if (!settled) await committer.settled()
       const epoch = history.treeEpoch()
       const locationSig = await history.sign({ explorerSegments: () => [...segments] })
       const stats: { cold?: boolean } = {}
@@ -415,7 +478,7 @@ export class HypercombHiveTreeReader {
    * the present, and an earlier sig is a later verb — but it can see how
    * many there are, when, and what each was called.
    */
-  async readHistory(
+  async #readHistoryLive(
     segments: readonly string[],
     options: { readonly limit?: number; readonly signal?: AbortSignal } = {},
   ): Promise<HypercombHistoryRead> {
@@ -455,7 +518,7 @@ export class HypercombHiveTreeReader {
    * `/list` returned. No location head, so no snapshot — there is nothing
    * to go stale. Reads the verified bytes through the history service.
    */
-  async readNodeBySig(
+  async #readNodeBySigLive(
     sig: string,
     options: { readonly maxBytes?: number; readonly withContent?: boolean; readonly signal?: AbortSignal } = {},
   ): Promise<HypercombNodeRead> {
@@ -547,6 +610,233 @@ export class HypercombHiveTreeReader {
       return { ok: false, root, code }
     }
     return { ok: true, root, name: node.name, layerSig: node.layerSig, model: result.record.model, text: result.record.text, minted: result.minted }
+  }
+
+  /**
+   * WHAT A SIGNATURE NAMES, OPENED — `/read <sig>` when the signature is not
+   * a layer, and `/read <sig> <from>` (Jaime, 2026-09-13: "open and review
+   * every resource and including the code"). A module from the bees pool, a
+   * dependency from its pool, else a resource from the store; text a page at
+   * a time from `from` characters in. Bytes that are not text report their
+   * type and size only. Modules are read as bytes and never imported, so
+   * reading code can never run it. Immutable, so cached by signature.
+   */
+  async readBytesBySig(
+    sig: string,
+    options: { readonly from?: number; readonly maxBytes?: number; readonly signal?: AbortSignal } = {},
+  ): Promise<HypercombBytesRead> {
+    if (options.signal?.aborted) throw stopped()
+    const from = Math.max(0, Math.floor(Number(options.from) || 0))
+    const key = `bytes|${JSON.stringify([sig, from, options.maxBytes])}`
+    const hit = this.#cacheGet<HypercombBytesRead>(key)
+    if (hit) return hit
+    const read = await this.#readBytesBySigLive(sig, from, options)
+    this.#cacheSet(key, null, read)
+    return read
+  }
+
+  async #readBytesBySigLive(
+    sig: string,
+    from: number,
+    options: { readonly maxBytes?: number; readonly signal?: AbortSignal },
+  ): Promise<HypercombBytesRead> {
+    const root = sig
+    const store = this.#store()
+    if (!store?.getResource) return { ok: false, root, code: 'unavailable' }
+    if (!SIG.test(sig)) return { ok: false, root, code: 'not-found' }
+    const maxBytes = Math.max(512, boundedInteger(options.maxBytes, 8_000, MAX_BYTES))
+    try {
+      let of: 'bee' | 'dependency' | 'resource' = 'bee'
+      let type = 'text/javascript'
+      let bytes = (await store.getBeeBytes?.(sig).catch(() => null)) ?? null
+      if (!bytes) {
+        of = 'dependency'
+        bytes = (await store.getDependencyBytes?.(sig).catch(() => null)) ?? null
+      }
+      if (!bytes) {
+        of = 'resource'
+        const blob = await store.getResource(sig).catch(() => null)
+        if (!blob) return { ok: false, root, code: 'not-found' }
+        type = blob.type
+        bytes = await blobBytes(blob)
+      }
+      if (options.signal?.aborted) throw stopped()
+      const text = textOf(bytes)
+      if (text === undefined) {
+        return { ok: true, root, sig, of, type: type || 'application/octet-stream', size: bytes.byteLength, from: 0, truncated: false }
+      }
+      const page = text.slice(from, from + maxBytes)
+      const end = from + page.length
+      const more = end < text.length
+      return {
+        ok: true, root, sig, of, type: type || 'text/plain', size: bytes.byteLength, from, text: page,
+        truncated: more, ...(more ? { next: end } : {}),
+      }
+    } catch (error) {
+      if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
+      return { ok: false, root, code: 'incomplete-read' }
+    }
+  }
+
+  /**
+   * THE RUNNING CODE BY NAME — `/code` and `/code <word>`. Every module the
+   * script preloader loaded and every dependency the import map carries,
+   * each with the signature `/read` opens. The names come from the runtime,
+   * never from a list kept here.
+   */
+  async listCode(
+    query: string,
+    options: { readonly maxEntries?: number; readonly signal?: AbortSignal } = {},
+  ): Promise<HypercombCodeRead> {
+    const root = 'code'
+    if (options.signal?.aborted) throw stopped()
+    const preloader = this.#lookup<{ actions?: readonly { signature?: string; name?: string }[] }>(PRELOADER_KEY)
+    const loader = this.#lookup<{ loadedSignatures?: readonly string[] }>(DEPENDENCY_LOADER_KEY)
+    const aliases = (globalThis as { __hypercombAliasMap?: unknown }).__hypercombAliasMap
+    if (!preloader?.actions && !loader?.loadedSignatures && !(aliases instanceof Map)) return { ok: false, root, code: 'unavailable' }
+
+    const entries = new Map<string, { name: string; sig: string; of: 'bee' | 'dependency' }>()
+    const add = (rawSig: unknown, rawName: unknown, of: 'bee' | 'dependency'): void => {
+      const sig = String(rawSig ?? '').replace(/\.js$/i, '').toLowerCase()
+      if (!SIG.test(sig) || entries.has(sig)) return
+      const name = String(rawName ?? '').replace(CONTROL, '').trim().slice(0, 256) || sig.slice(0, 12)
+      entries.set(sig, { name, sig, of })
+    }
+    for (const action of preloader?.actions ?? []) add(action?.signature, action?.name, 'bee')
+    if (aliases instanceof Map) for (const [alias, sig] of aliases) add(sig, alias, 'dependency')
+    for (const sig of loader?.loadedSignatures ?? []) add(sig, '', 'dependency')
+
+    const needle = String(query ?? '').trim().toLowerCase()
+    const matched = [...entries.values()]
+      .filter(entry => !needle || entry.name.toLowerCase().includes(needle))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    const limit = Math.max(1, boundedInteger(options.maxEntries, 60, MAX_CODE_ENTRIES))
+    return { ok: true, root, query: needle, entries: matched.slice(0, limit), total: matched.length, truncated: matched.length > limit }
+  }
+
+  // ── THE READ CACHE ──────────────────────────────────────────────────────
+  //
+  // LOOKED UP ONCE, REUSED (Jaime, 2026-09-13: "keep our own cache in memory
+  // locally within the hive so it can be reused quickly upon new questions
+  // that require the same context"). Every read a model makes is kept here
+  // for the session, so the next question needing the same context is
+  // answered without walking the store again.
+  //
+  // It can never serve a stale answer. A route read is keyed by the tree
+  // epoch — any change anywhere moves the epoch, and the next read is fresh.
+  // A read by signature is keyed by the signature, because that content can
+  // never change. Only successful reads are kept, and a hit mints a FRESH
+  // snapshot from the heads it was read at, so the change check that guards
+  // a later write still validates. In memory only: a derived cache that is
+  // wipe-safe by construction and never load-bearing.
+
+  readonly #cache = new Map<string, { readonly epoch: number | null; readonly heads?: readonly SnapshotHead[]; readonly value: unknown }>()
+
+  #cacheGet<T extends { ok: boolean; snapshot?: string }>(key: string): T | undefined {
+    const hit = this.#cache.get(key)
+    if (!hit) return undefined
+    const value = hit.value as T
+    if (!hit.heads || hit.epoch === null) return value
+    return { ...value, snapshot: this.#remember(hit.epoch, hit.heads) }
+  }
+
+  #cacheSet(key: string, epoch: number | null, value: { ok: boolean; snapshot?: string }): void {
+    if (!value.ok) return
+    const heads = value.snapshot ? this.#snapshots.get(value.snapshot)?.heads : undefined
+    this.#cache.delete(key)
+    this.#cache.set(key, { epoch, ...(heads ? { heads: [...heads] } : {}), value })
+    if (epoch !== null) {
+      for (const [other, entry] of this.#cache) if (entry.epoch !== null && entry.epoch !== epoch) this.#cache.delete(other)
+    }
+    while (this.#cache.size > CACHE_LIMIT) {
+      const oldest = this.#cache.keys().next().value as string | undefined
+      if (!oldest) break
+      this.#cache.delete(oldest)
+    }
+  }
+
+  /** The epoch a route read would be taken at, once pending commits land. */
+  async #settledEpoch(signal?: AbortSignal): Promise<number | undefined> {
+    const history = this.#history()
+    const committer = this.#committer()
+    if (!history?.treeEpoch || !committer?.settled) return undefined
+    if (signal?.aborted) throw stopped()
+    await committer.settled()
+    if (signal?.aborted) throw stopped()
+    return history.treeEpoch()
+  }
+
+  async readTree(segments: readonly string[], options: HypercombTreeReadOptions = {}): Promise<HypercombTreeRead> {
+    const epoch = await this.#settledEpoch(options.signal)
+    if (epoch === undefined) return this.#readTreeLive(segments, options)
+    const key = `tree|${JSON.stringify([segments, options.maxDepth, options.maxNodes, options.maxBytes])}|${epoch}`
+    const hit = this.#cacheGet<HypercombTreeRead>(key)
+    if (hit) return hit
+    const read = await this.#readTreeLive(segments, options, true)
+    this.#cacheSet(key, epoch, read)
+    return read
+  }
+
+  async readNode(
+    segments: readonly string[],
+    options: { readonly maxBytes?: number; readonly withContent?: boolean; readonly signal?: AbortSignal } = {},
+  ): Promise<HypercombNodeRead> {
+    const epoch = await this.#settledEpoch(options.signal)
+    if (epoch === undefined) return this.#readNodeLive(segments, options)
+    // SIGNATURES ARE THE LOOKUP KEYS (Jaime, 2026-09-13: "just need to store
+    // the signatures as lookup keys"). A route is kept only as what it
+    // resolved to at this epoch — its signature and head, never its content —
+    // and the content is looked up by that signature, the same entry a read
+    // by signature uses. Any change moves the epoch and the route resolves
+    // afresh; the content behind a signature never changes.
+    const routeKey = `${JSON.stringify(segments)}|${epoch}`
+    const route = this.#routes.get(routeKey)
+    if (route) {
+      const read = await this.readNodeBySig(route.layerSig, options)
+      if (read.ok) return { ...read, root: rootLabel(segments), name: route.name, snapshot: this.#remember(epoch, [route.head]) }
+    }
+    const read = await this.#readNodeLive(segments, options, true)
+    const head = read.ok && read.snapshot ? this.#snapshots.get(read.snapshot)?.heads[0] : undefined
+    if (read.ok && head) {
+      for (const [key, entry] of this.#routes) if (entry.epoch !== epoch) this.#routes.delete(key)
+      this.#routes.set(routeKey, { epoch, head, layerSig: read.layerSig, name: read.name })
+      while (this.#routes.size > CACHE_LIMIT) this.#routes.delete(this.#routes.keys().next().value as string)
+      const { snapshot: _snapshot, ...content } = read
+      const bySignature: HypercombNodeRead = { ...content, root: read.layerSig }
+      this.#cacheSet(`sig|${JSON.stringify([read.layerSig, options.maxBytes, options.withContent !== false])}`, null, bySignature)
+    }
+    return read
+  }
+
+  /** Route → the signature it resolved to at one epoch. Signatures only. */
+  readonly #routes = new Map<string, { readonly epoch: number; readonly head: SnapshotHead; readonly layerSig: string; readonly name: string }>()
+
+  async readHistory(
+    segments: readonly string[],
+    options: { readonly limit?: number; readonly signal?: AbortSignal } = {},
+  ): Promise<HypercombHistoryRead> {
+    const epoch = await this.#settledEpoch(options.signal)
+    if (epoch === undefined) return this.#readHistoryLive(segments, options)
+    const key = `history|${JSON.stringify([segments, options.limit])}|${epoch}`
+    const hit = this.#cacheGet<HypercombHistoryRead>(key)
+    if (hit) return hit
+    const read = await this.#readHistoryLive(segments, options)
+    this.#cacheSet(key, epoch, read)
+    return read
+  }
+
+  async readNodeBySig(
+    sig: string,
+    options: { readonly maxBytes?: number; readonly withContent?: boolean; readonly signal?: AbortSignal } = {},
+  ): Promise<HypercombNodeRead> {
+    if (options.signal?.aborted) throw stopped()
+    // Immutable content: keyed by the signature alone, valid across epochs.
+    const key = `sig|${JSON.stringify([sig, options.maxBytes, options.withContent !== false])}`
+    const hit = this.#cacheGet<HypercombNodeRead>(key)
+    if (hit) return hit
+    const read = await this.#readNodeBySigLive(sig, options)
+    this.#cacheSet(key, null, read)
+    return read
   }
 
   /** Revalidate the union of every bounded head vector the current model turn

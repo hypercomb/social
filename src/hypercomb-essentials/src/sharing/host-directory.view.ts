@@ -323,6 +323,7 @@ export class HostDirectoryElement extends HTMLElement {
   #moved: Set<string> | null = null
   #served = new Map<string, ServedTree | null>()
   #trees = new Map<string, Promise<ServedTree | null>>()
+  #heads = new Map<string, Promise<void>>()
   #reading = false
 
   #revPath = ''
@@ -1130,11 +1131,20 @@ export class HostDirectoryElement extends HTMLElement {
       this.#render()
       // EVERY host's head, because the list is the union of them — each read
       // once per open and shown as it arrives.
-      await Promise.all(this.#zones.map(async zone => {
+      // An open and its zones landing are two reads a tick apart; they share
+      // one in-flight head per zone instead of asking every host twice.
+      await Promise.all(this.#zones.map(zone => {
         if (this.#served.has(zone)) return
-        const head = await install.headOf(zone).catch(() => null)
-        this.#served.set(zone, head ? await this.#tree(head, [zone]) : null)
-        this.#render()
+        let pending = this.#heads.get(zone)
+        if (!pending) {
+          pending = (async () => {
+            const head = await install.headOf(zone).catch(() => null)
+            this.#served.set(zone, head ? await this.#tree(head, [zone]) : null)
+            this.#render()
+          })().finally(() => this.#heads.delete(zone))
+          this.#heads.set(zone, pending)
+        }
+        return pending
       }))
     } finally {
       this.#reading = false

@@ -31,6 +31,9 @@ export const OPENROUTER_PROVIDER: LlmProviderDescriptor = {
   label: 'OpenRouter',
   vendor: 'openrouter',
   transport: 'browser-http',
+  // THE CONFIGURATOR: its key and search live here; the models added through
+  // it are the providers that answer (openrouter-instances.ts).
+  configurator: true,
   endpoint: ENDPOINT,
   models: [
     // Pinned to a dated snapshot rather than a rolling `deepseek-chat` alias

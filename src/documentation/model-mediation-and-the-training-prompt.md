@@ -124,6 +124,19 @@ verified to fail against the old rule by returning `my-machine` — the exact
 
 ### 3.1 Nothing derives the tier — this is the missing half of the mediator
 
+**BUILT for the chat, 2026-09-13.** `hypercomb-shared/ui/chat-window/message-effort.ts`
+names a tier per message (`effortFor`: long, multi-line or planning words →
+deep; short with no change words → fast; otherwise balanced) and estimates the
+tokens the request must hold (`contextNeedFor` → `ModelNeed.minContext`). The
+mediator rules out a provider whose model for the tier publishes a smaller
+window, and splits otherwise-tied candidates by fit — cheapest input for fast,
+highest published output price for deep, nearest the median for balanced,
+largest window for jobs of 64k tokens and up — using the price and window each
+model added through OpenRouter carries from the catalogue. A mediator-picked
+OpenRouter model may fall back before output only to another model paying with
+the same key (`LlmCall.fallbackWithin`). Pins and a model named in the chat
+still override. Other callers still state their own tier.
+
 `ModelNeed.tier` is **always stated by the caller**, and every caller hardcodes
 a constant. The policy is a very good router with no one deciding what to route.
 That is precisely Jaime's "the mediator should decide what level of work needs

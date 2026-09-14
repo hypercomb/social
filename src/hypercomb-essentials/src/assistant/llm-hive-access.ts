@@ -12,7 +12,11 @@
 // Peer-lent models are refused at this door regardless of the flag: a peer
 // is someone else's machine.
 
-import { publishService } from './llm-provider-registry.js'
+import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
+
+/** The provider whose grant and budget this one uses (credential-owner.ts). */
+const ownerOf = (providerId: string): string | undefined =>
+  llmProviderRegistry().get(providerId)?.credentialsFrom?.toLowerCase()
 
 export const LLM_HIVE_ACCESS_IOC_KEY = '@hypercomb.social/LlmHiveAccess'
 
@@ -54,7 +58,10 @@ export class LlmHiveAccessStore extends EventTarget implements LlmHiveAccessLike
 
   mayRead(providerId: string): boolean {
     const id = String(providerId ?? '').trim().toLowerCase()
-    return !!id && !id.startsWith('peer:') && this.#granted.has(id)
+    if (!id || id.startsWith('peer:')) return false
+    // A model added through OpenRouter reads under OpenRouter's grant.
+    const owner = ownerOf(id)
+    return this.#granted.has(id) || (!!owner && this.#granted.has(owner))
   }
 
   setMayRead(providerId: string, allowed: boolean): void {
@@ -66,11 +73,16 @@ export class LlmHiveAccessStore extends EventTarget implements LlmHiveAccessLike
       if (allowed) globalThis.localStorage?.setItem(storageKey(id), '1')
       else globalThis.localStorage?.removeItem(storageKey(id))
     } catch { /* session-only */ }
-    this.dispatchEvent(new CustomEvent('change'))
+    // Say WHO moved and WHICH WAY: the Execution queue forgets a provider's
+    // remembered reads the moment its grant is taken away.
+    this.dispatchEvent(new CustomEvent('change', { detail: { providerId: id, allowed } }))
   }
 
   granted(): readonly string[] {
-    return [...this.#granted].filter(id => this.mayRead(id))
+    const borrowed = llmProviderRegistry().all()
+      .filter(provider => provider.credentialsFrom && this.#granted.has(provider.credentialsFrom.toLowerCase()))
+      .map(provider => provider.id)
+    return [...new Set([...this.#granted, ...borrowed])].filter(id => this.mayRead(id))
   }
 
   budget(providerId: string): number | undefined {
@@ -79,7 +91,10 @@ export class LlmHiveAccessStore extends EventTarget implements LlmHiveAccessLike
     try {
       const raw = globalThis.localStorage?.getItem(budgetKey(id))
       const chars = raw ? Number(raw) : NaN
-      return Number.isFinite(chars) && chars >= MIN_BUDGET ? Math.min(chars, MAX_BUDGET) : undefined
+      if (Number.isFinite(chars) && chars >= MIN_BUDGET) return Math.min(chars, MAX_BUDGET)
+      // No budget of its own: a model added through OpenRouter uses OpenRouter's.
+      const owner = ownerOf(id)
+      return owner && owner !== id ? this.budget(owner) : undefined
     } catch { return undefined }
   }
 

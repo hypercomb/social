@@ -3,15 +3,12 @@ import { DEFAULT_MACHINE_GRANT } from '@hypercomb/core'
 import {
   callableBehaviours,
   executeHypercombPlan,
-  formatHypercombReceipt,
-  HYPERCOMB_GRAMMAR_TOOL_NAME,
   HypercombPlanQueue,
   hypercombActionProviderId,
   hypercombContextKey,
-  hypercombGrammarInstruction,
-  hypercombGrammarTool,
+  hypercombPlanReach,
+  hypercombVocabulary,
   parseHypercombGrammars,
-  parseHypercombToolCalls,
   type HypercombBehaviour,
 } from './hypercomb-grammar.js'
 
@@ -56,11 +53,6 @@ const entries: HypercombBehaviour[] = [
   { name: 'workbench', description: 'Prototype', prototype: true, machine: { forms: '<x>', example: '/workbench x' } },
 ]
 
-const call = (grammars: unknown, extra: Record<string, unknown> = {}) => [{
-  name: HYPERCOMB_GRAMMAR_TOOL_NAME,
-  arguments: JSON.stringify({ grammars, ...extra }),
-}]
-
 describe('Hypercomb model grammar contract', () => {
   it('grants action transport only to an automatic or explicitly local route', () => {
     expect(hypercombActionProviderId(true, undefined, undefined, true)).toBe('local')
@@ -89,7 +81,7 @@ describe('Hypercomb model grammar contract', () => {
       .not.toBe(hypercombContextKey(['archive'], ['a']))
   })
 
-  it('publishes one grammar-sequence tool from the live, default-deny census', () => {
+  it('teaches the live, default-deny census as its vocabulary', () => {
     // TWO GATES, AND THEY ARE DIFFERENT QUESTIONS. Membership starts with the
     // declaration — `files` declares none and is out — and then the
     // participant's ceiling decides how much of what declared itself may
@@ -104,30 +96,25 @@ describe('Hypercomb model grammar contract', () => {
       'create', 'keyword', 'accent', 'postit', 'title', 'remove', 'undo',
     ])
     // A ceiling of 'none' is the off switch, and it empties the vocabulary —
-    // which is what makes `canAct` false and takes the tool away entirely.
+    // which is what makes `canChange` false and takes changing away entirely.
     expect(callableBehaviours(entries, { reach: 'none', scope: 'network' })).toEqual([])
 
-    const tool = hypercombGrammarTool(entries, { reach: 'destructive', scope: 'network' })
-    expect(tool.function.name).toBe('hypercomb_act')
-    expect(tool.function.strict).toBe(true)
-    const body = JSON.stringify(tool)
-    expect(body).toContain('/create')
-    expect(body).toContain('/remove')
-    expect(body).not.toContain('/files')
+    const vocabulary = hypercombVocabulary(entries, { reach: 'destructive', scope: 'network' })
+    expect(vocabulary).toContain('/create')
+    expect(vocabulary).toContain('/remove')
+    expect(vocabulary).not.toContain('/files')
     // WHAT IS REFUSED IS NEVER TAUGHT. Under the default the catalogue does not
     // name the verb it would go on to refuse — the difference between a
     // boundary and a trap.
-    expect(JSON.stringify(hypercombGrammarTool(entries, DEFAULT_MACHINE_GRANT)))
-      .not.toContain('/remove')
-    expect(body).not.toContain('/debug')
-    expect(hypercombGrammarInstruction(entries)).toContain('cannot use a shell')
+    expect(hypercombVocabulary(entries, DEFAULT_MACHINE_GRANT)).not.toContain('/remove')
+    expect(vocabulary).not.toContain('/debug')
   })
 
   it("quotes the behaviour's own consequence, and invents none of its own", () => {
     // Granted destructive on purpose: this asserts the catalogue's WORDING, and
     // the only entry carrying a consequence is the one the default ceiling
     // would otherwise hide.
-    const catalogue = hypercombGrammarInstruction(entries, { reach: 'destructive', scope: 'network' })
+    const catalogue = hypercombVocabulary(entries, { reach: 'destructive', scope: 'network' })
     // The consequence rides through VERBATIM. This module knows how far a verb
     // reaches but not what reaching there does — it printed a fixed sentence
     // per reach value once, and that sentence promised a confirmation /remove
@@ -139,7 +126,7 @@ describe('Hypercomb model grammar contract', () => {
   })
 
   it('never composes a consequence from the reach value alone', () => {
-    const silent = hypercombGrammarInstruction([
+    const silent = hypercombVocabulary([
       { name: 'remove', description: 'Remove a tile',
         machine: { forms: '<tile>', example: '/remove drafts', reach: 'destructive' } },
     ], { reach: 'destructive', scope: 'network' })
@@ -157,49 +144,31 @@ describe('Hypercomb model grammar contract', () => {
     expect(() => parseHypercombGrammars(['/accent ultraviolet'], entries)).toThrow('unknown preset')
   })
 
-  it('parses a fully valid ordered sequence from JSON or object arguments', () => {
-    const fromJson = parseHypercombToolCalls(call(['/create roadmap', '/title roadmap = Road map']), entries)
-    expect(fromJson.actions).toEqual([
+  it('parses a fully valid ordered sequence', () => {
+    expect(parseHypercombGrammars(['/create roadmap', '/title roadmap = Road map'], entries).actions).toEqual([
       { grammar: '/create roadmap', command: 'create', args: 'roadmap' },
       { grammar: '/title roadmap = Road map', command: 'title', args: 'roadmap = Road map' },
     ])
-
-    const fromObject = parseHypercombToolCalls([{
-      name: HYPERCOMB_GRAMMAR_TOOL_NAME,
-      arguments: { grammars: ['/postit here First draft'] },
-    }], entries)
-    expect(fromObject.actions[0]?.args).toBe('here First draft')
-
-    const fromProvider = parseHypercombToolCalls([{
-      type: 'function',
-      function: {
-        name: HYPERCOMB_GRAMMAR_TOOL_NAME,
-        arguments: '{"grammars":["/accent ember"]}',
-      },
-    }], entries)
-    expect(fromProvider.actions[0]?.command).toBe('accent')
+    expect(parseHypercombGrammars(['/postit here First draft'], entries).actions[0]?.args).toBe('here First draft')
+    expect(parseHypercombGrammars(['/accent ember'], entries).actions[0]?.command).toBe('accent')
   })
 
   it.each([
-    ['bad JSON', [{ name: HYPERCOMB_GRAMMAR_TOOL_NAME, arguments: '{' }]],
-    ['wrong tool', [{ name: 'shell', arguments: '{}' }]],
-    ['multiple calls', [...call(['/create a']), ...call(['/create b'])]],
-    ['extra property', call(['/create a'], { cwd: '/' })],
-    ['empty sequence', call([])],
-    ['too many lines', call(Array.from({ length: 13 }, (_, i) => `/create ${i}`))],
-    ['non-string grammar', call([42])],
-    ['control character', call(['/create a\u0000'])],
-    ['overlong grammar', call([`/create ${'a'.repeat(1_001)}`])],
-    ['non-slash prose', call(['create a'])],
-    ['multiline grammar', call(['/create a\n/create b'])],
-    ['alias', call(['/make a'])],
-    ['unknown command', call(['/invent a'])],
-    ['an undeclared behaviour', call(['/files here'])],
-    ['missing explicit args', call(['/create'])],
-    ['a refusal from the behaviour itself', call(['/create \\'])],
-    ['an unknown accent preset', call(['/accent ultraviolet'])],
-  ])('rejects %s before execution', (_label, calls) => {
-    expect(() => parseHypercombToolCalls(calls, entries)).toThrow()
+    ['empty sequence', []],
+    ['too many lines', Array.from({ length: 13 }, (_, i) => `/create ${i}`)],
+    ['non-string grammar', [42]],
+    ['control character', ['/create a ']],
+    ['overlong grammar', [`/create ${'a'.repeat(1_001)}`]],
+    ['non-slash prose', ['create a']],
+    ['multiline grammar', ['/create a\n/create b']],
+    ['alias', ['/make a']],
+    ['unknown command', ['/invent a']],
+    ['an undeclared behaviour', ['/files here']],
+    ['missing explicit args', ['/create']],
+    ['a refusal from the behaviour itself', ['/create \\']],
+    ['an unknown accent preset', ['/accent ultraviolet']],
+  ])('rejects %s before execution', (_label, lines) => {
+    expect(() => parseHypercombGrammars(lines as readonly unknown[], entries)).toThrow()
   })
 
   it('also rejects a declared command when its live entry becomes hidden or prototype', () => {
@@ -209,34 +178,36 @@ describe('Hypercomb model grammar contract', () => {
     // AND IT SAYS WHICH RULE APPLIED. A flat "not available" sends a model
     // looking for a synonym; naming concealment tells it there is nothing to
     // look for. Same for a ceiling, below.
-    expect(() => parseHypercombToolCalls(call(['/create a']), [
+    expect(() => parseHypercombGrammars(['/create a'], [
       { name: 'create', hidden: true, machine: declared },
     ])).toThrow('/create is not offered to a caller that is not typing it')
-    expect(() => parseHypercombToolCalls(call(['/title a']), [
+    expect(() => parseHypercombGrammars(['/title a'], [
       { name: 'title', prototype: true, machine: declared },
     ])).toThrow('/title is not offered to a caller that is not typing it')
   })
 
   it('refuses a verb above the ceiling in words a model can act on', () => {
     // The audit's blunt question was whether a model could delete a tile
-    // unattended. It could: one hypercomb_act call carrying /remove <leaf> ran
-    // to a committed layer with no dialog, because this door had no reach gate
-    // at all. Under the standing default it is refused, and told what it may
+    // unattended. It could: one model call carrying /remove <leaf> ran to a
+    // committed layer with no dialog, because this door had no reach gate at
+    // all. Under the standing default it is refused, and told what it may
     // have instead.
-    expect(() => parseHypercombToolCalls(call(['/remove drafts']), entries, DEFAULT_MACHINE_GRANT))
+    expect(() => parseHypercombGrammars(['/remove drafts'], entries, DEFAULT_MACHINE_GRANT))
       .toThrow('/remove is destructive, and this hive grants a machine no further than editing')
     // A tightened scope refuses on the other axis, independently.
-    expect(() => parseHypercombToolCalls(call(['/create a']), entries, { reach: 'editing', scope: 'local' }))
+    expect(() => parseHypercombGrammars(['/create a'], entries, { reach: 'editing', scope: 'local' }))
       .toThrow('/create has not declared how far it travels')
   })
 
   it('validates the whole batch before any executor is involved', () => {
-    expect(() => parseHypercombToolCalls(call(['/create good', '/files bad']), entries)).toThrow('/files')
+    expect(() => parseHypercombGrammars(['/create good', '/files bad'], entries)).toThrow('/files')
   })
 
-  it('exposes raw grammar sequences as the contract beneath the tool envelope', () => {
-    expect(parseHypercombGrammars(['/create roadmap'], entries).actions[0])
-      .toEqual({ grammar: '/create roadmap', command: 'create', args: 'roadmap' })
+  it('reads how far a plan reaches from its farthest line', () => {
+    const grant = { reach: 'destructive', scope: 'network' } as const
+    expect(hypercombPlanReach(parseHypercombGrammars(['/create a', '/postit here b'], entries, grant), entries, grant)).toBe('additive')
+    expect(hypercombPlanReach(parseHypercombGrammars(['/create a', '/title a = A'], entries, grant), entries, grant)).toBe('editing')
+    expect(hypercombPlanReach(parseHypercombGrammars(['/remove a', '/create b'], entries, grant), entries, grant)).toBe('destructive')
   })
 
   it('awaits actions in order and returns a visible receipt', async () => {
@@ -248,11 +219,11 @@ describe('Hypercomb model grammar contract', () => {
         states.push(`end:${command}`)
       }),
     }
-    const plan = parseHypercombToolCalls(call(['/create roadmap', '/title roadmap = Road map']), entries)
+    const plan = parseHypercombGrammars(['/create roadmap', '/title roadmap = Road map'], entries)
     const receipt = await executeHypercombPlan(plan, executor)
 
     expect(states).toEqual(['start:create', 'end:create', 'start:title', 'end:title'])
-    expect(formatHypercombReceipt(receipt)).toContain('Ran 2 Hypercomb grammars')
+    expect(receipt).toEqual({ grammars: ['/create roadmap', '/title roadmap = Road map'], executed: 2 })
   })
 
   it('does not begin another grammar after the participant stops the run', async () => {
@@ -260,7 +231,7 @@ describe('Hypercomb model grammar contract', () => {
     const executor = {
       execute: vi.fn(async () => { controller.abort() }),
     }
-    const plan = parseHypercombToolCalls(call(['/create roadmap', '/title roadmap = Road map']), entries)
+    const plan = parseHypercombGrammars(['/create roadmap', '/title roadmap = Road map'], entries)
 
     await expect(executeHypercombPlan(plan, executor, controller.signal))
       .rejects.toMatchObject({ name: 'AbortError' })
@@ -369,9 +340,9 @@ describe('Hypercomb model grammar contract', () => {
         if (command === 'keyword') throw new Error('failed')
       }),
     }
-    const plan = parseHypercombToolCalls(call([
+    const plan = parseHypercombGrammars([
       '/create roadmap', '/keyword urgent', '/title roadmap = Road map',
-    ]), entries)
+    ], entries)
 
     await expect(executeHypercombPlan(plan, executor)).rejects.toMatchObject({
       completed: ['/create roadmap'],

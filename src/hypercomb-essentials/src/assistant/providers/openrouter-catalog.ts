@@ -23,9 +23,15 @@ export type OpenRouterCatalogEntry = {
    *  do here, only display. */
   readonly promptPrice?: string
   readonly completionPrice?: string
+  /** Context window in tokens, as published. */
+  readonly contextLength?: number
 }
 
 const CATALOG_URL = 'https://openrouter.ai/api/v1/models'
+
+/** `loaded` fires when a fresh catalogue lands — model providers take their
+ *  exact names from it (openrouter-instances.ts). */
+export const openRouterCatalogEvents = new EventTarget()
 const CACHE_TTL_MS = 10 * 60 * 1000
 
 let cached: readonly OpenRouterCatalogEntry[] | undefined
@@ -37,6 +43,7 @@ type CatalogBody = {
     id?: unknown
     name?: unknown
     pricing?: { prompt?: unknown; completion?: unknown }
+    context_length?: unknown
   }[]
 }
 
@@ -53,17 +60,19 @@ export const fetchOpenRouterCatalog = async (): Promise<readonly OpenRouterCatal
     if (!response.ok) throw new Error(`OpenRouter catalogue request failed (${response.status})`)
     const body = await response.json() as CatalogBody
     const entries = (body.data ?? [])
-      .filter((row): row is { id: string; name?: unknown; pricing?: { prompt?: unknown; completion?: unknown } } =>
+      .filter((row): row is { id: string; name?: unknown; pricing?: { prompt?: unknown; completion?: unknown }; context_length?: unknown } =>
         typeof row?.id === 'string' && row.id.length > 0)
       .map(row => ({
         id: row.id,
         name: typeof row.name === 'string' && row.name ? row.name : row.id,
         promptPrice: typeof row.pricing?.prompt === 'string' ? row.pricing.prompt : undefined,
         completionPrice: typeof row.pricing?.completion === 'string' ? row.pricing.completion : undefined,
+        contextLength: typeof row.context_length === 'number' && row.context_length > 0 ? row.context_length : undefined,
       }))
       .sort((a, b) => a.id.localeCompare(b.id))
     cached = entries
     cachedAt = Date.now()
+    openRouterCatalogEvents.dispatchEvent(new CustomEvent('loaded'))
     return entries
   })()
 

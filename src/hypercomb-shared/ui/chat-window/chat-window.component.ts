@@ -118,13 +118,11 @@ import { hivePathSegments, renderChatMarkdown } from './chat-markdown'
 import { liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
 import {
   callableBehaviours,
-  formatHypercombReceipt,
   hypercombActionProviderId,
   hypercombContextKey,
-  hypercombGrammarInstruction,
-  hypercombGrammarTool,
-  HYPERCOMB_GRAMMAR_TOOL_NAME,
-  parseHypercombToolCalls,
+  hypercombPlanReach,
+  hypercombVocabulary,
+  parseHypercombGrammars,
   HypercombActionExecutionError,
   HypercombPlanQueue,
   type HypercombBehaviour,
@@ -135,12 +133,29 @@ import {
 import {
   executeHypercombObservationPlan,
   formatHypercombObservationReceipt,
-  HYPERCOMB_OBSERVATION_TOOL_NAME,
-  hypercombObservationInstruction,
-  hypercombObservationTool,
-  parseHypercombObservationToolCalls,
+  MAX_OBSERVATIONS,
+  parseHypercombObservationGrammars,
   type HypercombTreeReader,
 } from './hypercomb-observation'
+import { contextNeedFor, effortInThread, type MessageEffort } from './message-effort'
+import {
+  blockRefusedMessage,
+  doFailedMessage,
+  doRanMessage,
+  doSkippedMessage,
+  HELD_DO_NOTE,
+  identityInstruction,
+  isWorkRefusal,
+  lastRoundMessage,
+  MAX_WORK_ROUNDS,
+  readResultMessage,
+  readSkippedMessage,
+  splitWork,
+  transcriptForModel,
+  workInstruction,
+  WorkRefused,
+  WorkStreamGuard,
+} from './hypercomb-work-fence'
 
 type TurnRole = 'user' | 'assistant'
 
@@ -150,6 +165,9 @@ type ChatTurn = {
   readonly role: TurnRole
   readonly text: string
   readonly at: number
+  /** The model that wrote an assistant turn, when the thread recorded it —
+   *  so a later model is told the reply was not its own. */
+  readonly model?: string
   /** The turn's manifest signature — its file name in the bucket. Present
    *  on a turn read back from disk, absent on one this window appended in
    *  memory and has not re-read yet. It is the ONLY join between a drawn
@@ -970,11 +988,14 @@ type LlmMessageLike =
   | { readonly role: 'tool'; readonly content: string; readonly toolCallId: string }
 
 type LlmRouterLike = {
-  ready?(call?: { providerId?: string; model?: string; preferModel?: string; need?: { tier?: string; streaming?: boolean } }): boolean
+  ready?(call?: { providerId?: string; model?: string; preferModel?: string; need?: { tier?: string; streaming?: boolean; minContext?: number } }): boolean
   providerIdForModel?(model: string): string | undefined
   /** The provider the mediator would pick for this need right now — so the
    *  shell can tell whether that pick has been granted hive access. */
-  designatedProviderId?(need?: { tier?: string; streaming?: boolean }): string | undefined
+  designatedProviderId?(need?: { tier?: string; streaming?: boolean; minContext?: number }): string | undefined
+  /** Whose key, grant and budget a provider uses: its own id, or the
+   *  configurator it came from (a model added through OpenRouter). */
+  credentialOwnerOf?(providerId: string): string | undefined
   providerIsMachineLocal?(providerId: string): boolean
   providerMachineEndpoint?(providerId: string): string | undefined
   /** Why nothing can answer, as a token this shell turns into words of its
@@ -984,7 +1005,7 @@ type LlmRouterLike = {
     providerId?: string
     model?: string
     preferModel?: string
-    need?: { tier?: string; streaming?: boolean }
+    need?: { tier?: string; streaming?: boolean; minContext?: number }
     messages: readonly LlmMessageLike[]
     system?: string
     tools?: readonly HypercombFunctionTool[]
@@ -992,6 +1013,8 @@ type LlmRouterLike = {
     signal?: AbortSignal
     /** The system prompt is stable enough to be prefix-cached by the vendor. */
     cacheSystem?: boolean
+    /** Fall back automatically, but only among providers using this owner's key. */
+    fallbackWithin?: string
   }): AsyncGenerator<RoutedChunkLike>
 }
 
@@ -1037,6 +1060,10 @@ const readRouteSideWanted = (): boolean => {
   try { return localStorage.getItem(ROUTE_SIDE_WANTED_KEY) !== 'false' } catch { return true }
 }
 
+const readExecSideWanted = (): boolean => {
+  try { return localStorage.getItem(EXEC_SIDE_WANTED_KEY) === 'true' } catch { return false }
+}
+
 const readRouteSideWidth = (): number => {
   try {
     const raw = Number(localStorage.getItem(ROUTE_SIDE_WIDTH_KEY) ?? '')
@@ -1059,6 +1086,49 @@ const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
 const ANATOMY_IOC_KEY = '@hypercomb.social/Anatomy'
 /** assistant/llm-hive-access.ts — which keyed providers may read the hive. */
 const LLM_HIVE_ACCESS_IOC_KEY = '@hypercomb.social/LlmHiveAccess'
+/** assistant/execution-queue.ts — what models ask to read and change. */
+const EXECUTION_QUEUE_IOC_KEY = '@hypercomb.social/ExecutionQueue'
+const EXEC_SIDE_WANTED_KEY = 'hc:chat-exec-side'
+
+type ExecutionKindLike = 'read' | 'additive' | 'editing' | 'destructive'
+type ExecutionModeLike = 'manual' | 'auto' | 'everything'
+type ExecutionRequestLike = {
+  readonly id: string
+  readonly convoId: string
+  readonly providerId: string
+  readonly model: string
+  readonly kind: ExecutionKindLike
+  readonly lines: readonly string[]
+  readonly needsGrant: boolean
+  readonly at: number
+  readonly state: 'waiting' | 'running' | 'ran' | 'skipped' | 'failed'
+  readonly auto: boolean
+  /** Ran on arrival because these exact reads were allowed before. */
+  readonly remembered?: boolean
+  readonly outcome?: string
+}
+type ExecutionQueueLike = {
+  mode(): ExecutionModeLike
+  setMode(mode: ExecutionModeLike): void
+  autoKinds(): readonly ExecutionKindLike[]
+  setAuto(kind: ExecutionKindLike, on: boolean): void
+  requests(): readonly ExecutionRequestLike[]
+  request(ask: {
+    readonly convoId: string
+    readonly providerId: string
+    readonly model: string
+    readonly kind: ExecutionKindLike
+    readonly lines: readonly string[]
+    /** What each read resolved to; an allowed read is remembered by these. */
+    readonly keys?: readonly string[]
+    readonly needsGrant: boolean
+    readonly signal?: AbortSignal
+  }): { readonly id: string; readonly decision: Promise<'run' | 'skip'> }
+  decide(id: string, decision: 'run' | 'skip' | 'always'): void
+  settle(id: string, state: 'ran' | 'skipped' | 'failed', outcome?: string): void
+  addEventListener(type: 'change', listener: () => void): void
+  removeEventListener(type: 'change', listener: () => void): void
+}
 
 /** Provenance attached to a model-produced turn — chat-thread.ts `TurnMeta`,
  *  restated because the shell may not import a module. */
@@ -1066,11 +1136,13 @@ type TurnMetaLike = {
   readonly anatomy?: string
   readonly context?: string
   readonly observed?: readonly string[]
+  readonly read?: readonly string[]
   readonly providerId?: string
   readonly model?: string
 }
 const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
-const MAX_OBSERVATION_ROUNDS = 3
+/** Reads one message may make: enough for a model to find its way in. */
+const MAX_OBSERVATION_ROUNDS = 6
 const MAX_OBSERVATION_CONTEXT_CHARS = 24_000
 const hypercombPlanQueue = new HypercombPlanQueue()
 
@@ -2765,16 +2837,75 @@ export class ChatWindowComponent implements OnDestroy {
   // gates on this, so false hides the column and stops the attended call.
   // Flip to true to bring it back.
   readonly routeSideShown = computed(() =>
-    this.routeSideWanted() && this.railVisible() && !!this.activeId() && this.turns().length > 0)
+    this.routeSideWanted() && !this.execSideWanted() && this.railVisible() && !!this.activeId() && this.turns().length > 0)
 
   /** The participant's choice to show the workflow column at all — a header
    *  icon toggles it (Jaime, 2026-09-11: "hide and show it when we want more
    *  chat screen real estate"). Shown by default; sticky per device. */
   readonly routeSideWanted = signal(readRouteSideWanted())
   toggleRouteSide(): void {
+    // ONE SIDE, TWO OCCUPANTS. Asking for the workflow while Execution holds
+    // the side brings the workflow back rather than hiding it.
+    if (this.execSideWanted()) {
+      this.#setExecSide(false)
+      if (this.routeSideWanted()) return
+    }
     const next = !this.routeSideWanted()
     this.routeSideWanted.set(next)
     try { localStorage.setItem(ROUTE_SIDE_WANTED_KEY, next ? 'true' : 'false') } catch { /* private mode */ }
+  }
+
+  // ── THE EXECUTION COLUMN (documentation/hive-read-fence.md §3) ──────────
+  //
+  // What models ask to read and change, waiting for Run or Skip unless the
+  // policy runs that kind by itself — the workflow's twin on the same side,
+  // one at a time. The queue is essentials' (assistant/execution-queue.ts);
+  // this is its painting.
+  readonly execSideWanted = signal(readExecSideWanted())
+  readonly execMode = signal<ExecutionModeLike>('auto')
+  readonly execAuto = signal<readonly ExecutionKindLike[]>(['read'])
+  readonly execRows = signal<readonly ExecutionRequestLike[]>([])
+  readonly execWaiting = computed(() => this.execRows().filter(row => row.state === 'waiting').length)
+  readonly execModes: readonly ExecutionModeLike[] = ['manual', 'auto', 'everything']
+  readonly execKinds: readonly ExecutionKindLike[] = ['read', 'additive', 'editing', 'destructive']
+
+  toggleExecSide(): void { this.#setExecSide(!this.execSideWanted()) }
+
+  setExecMode(mode: ExecutionModeLike): void { this.#execQueue()?.setMode(mode) }
+
+  toggleExecAuto(kind: ExecutionKindLike): void {
+    const queue = this.#execQueue()
+    queue?.setAuto(kind, !queue.autoKinds().includes(kind))
+  }
+
+  decideExec(id: string, decision: 'run' | 'skip' | 'always'): void { this.#execQueue()?.decide(id, decision) }
+
+  #setExecSide(on: boolean): void {
+    this.execSideWanted.set(on)
+    try { localStorage.setItem(EXEC_SIDE_WANTED_KEY, on ? 'true' : 'false') } catch { /* private mode */ }
+  }
+
+  #execQueue(): ExecutionQueueLike | undefined {
+    return ioc()?.get(EXECUTION_QUEUE_IOC_KEY) as ExecutionQueueLike | undefined
+  }
+
+  #bindExecution(queue: ExecutionQueueLike | undefined): void {
+    if (!queue?.requests) return
+    let seen = new Set<string>()
+    const pull = (): void => {
+      const rows = queue.requests()
+      const waiting = rows.filter(row => row.state === 'waiting')
+      // SOMETHING NEW WAITS ON THE PARTICIPANT: bring the column forward for
+      // now. Not a preference, so nothing is written.
+      if (waiting.some(row => !seen.has(row.id))) this.execSideWanted.set(true)
+      seen = new Set(waiting.map(row => row.id))
+      this.execRows.set([...waiting, ...rows.filter(row => row.state !== 'waiting')])
+      this.execMode.set(queue.mode())
+      this.execAuto.set(queue.autoKinds())
+    }
+    pull()
+    queue.addEventListener('change', pull)
+    this.#cleanups.push(() => queue.removeEventListener('change', pull))
   }
 
   /** Branches folded away (←, or the fold mark), by conversation, for as long
@@ -4414,6 +4545,8 @@ export class ChatWindowComponent implements OnDestroy {
       })
     ;(globalThis as { ioc?: { whenReady?: (k: string, cb: () => void) => void } }).ioc
       ?.whenReady?.(LLM_ROUTER_IOC_KEY, () => this.#refreshDesignation())
+    ;(globalThis as { ioc?: { whenReady?: (k: string, cb: (value: unknown) => void) => void } }).ioc
+      ?.whenReady?.(EXECUTION_QUEUE_IOC_KEY, value => this.#bindExecution(value as ExecutionQueueLike))
   }
 
   ngOnDestroy(): void {
@@ -5610,16 +5743,25 @@ export class ChatWindowComponent implements OnDestroy {
     if (!this.#bumpList(convoId)) void this.#refreshList()
   }
 
-  /** Direct provider route (local Ollama or a configured API key). The
-   * transcript is the context these providers can honestly see; unlike a
-   * bridge, this path never claims it can walk the hive. It may nevertheless
-   * EDIT the hive by returning native, validated beehavior grammar: reading
-   * state and applying a named action are deliberately different powers. */
+  /** Direct provider route (local Ollama or a configured API key). A model
+   * here WORKS IN ROUNDS (documentation/hive-read-fence.md): it ends a reply
+   * with a hypercomb-read or hypercomb-do block, the block waits in the
+   * Execution column for the participant's policy or hand, and the result
+   * goes back to the model as the next message until it answers. */
   /** WHAT THE ANSWER WAS SENT WITH, per conversation, held from the moment
    *  the provider stream ends until the run writes the assistant turn —
    *  the run owns the write (it may outlive this window), so the provenance
    *  waits here and rides onto the turn manifest (anatomy-context-need §6). */
   readonly #turnMeta = new Map<string, TurnMetaLike>()
+  /** The weight of work each conversation was last answered at. In memory: a
+   *  reopened conversation simply lets its next message be weighed afresh. */
+  readonly #answeredTier = new Map<string, MessageEffort>()
+
+  /** What each conversation has read, as signatures (lookup keys) with the
+   *  read that found each. Told to the model on the next message, so content
+   *  already found opens again by signature instead of by walking to it. */
+  readonly #readSignatures = new Map<string, Map<string, string>>()
+
   #takeTurnMeta(convoId: string): TurnMetaLike | undefined {
     const meta = this.#turnMeta.get(convoId)
     this.#turnMeta.delete(convoId)
@@ -5628,19 +5770,27 @@ export class ChatWindowComponent implements OnDestroy {
 
   async #askProvider(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
     const router = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
-    const need = { tier: 'fast', streaming: true }
+    // HOW MUCH WORK THIS MESSAGE IS (message-effort.ts), and how much the
+    // request must hold — so deep work reaches the most capable model added,
+    // and a long conversation never lands on a model too small for it.
+    const transcriptChars = this.turns().slice(-TRANSCRIPT_TURNS).reduce((total, turn) => total + turn.text.length, 0)
+    // A HARDER OR SIMPLER QUESTION CHANGES MODELS (Jaime, 2026-09-13): each
+    // message is weighed in its thread, and the model that answered last is
+    // preferred only while the weight is the same — so the mediator chooses
+    // again the moment the work gets heavier or lighter.
+    const previousTier = this.#answeredTier.get(convoId)
+    const need = { tier: effortInThread(message, previousTier), streaming: true, minContext: contextNeedFor(transcriptChars, message) }
     const namedModel = this.modelExplicit() ? this.model() || undefined : undefined
-    const preferModel = !this.modelExplicit() ? this.model() || undefined : undefined
+    const preferModel = !this.modelExplicit() && previousTier === need.tier ? this.model() || undefined : undefined
     const slash = ioc()?.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as SlashBehaviourDroneLike | undefined
     const treeReader = ioc()?.get(HIVE_TREE_READER_IOC_KEY) as HypercombTreeReader | undefined
+    const queue = ioc()?.get(EXECUTION_QUEUE_IOC_KEY) as ExecutionQueueLike | undefined
     const behaviourEntries = slash?.entries?.() ?? []
-    const canAct = !!slash?.executePublicCanonical && callableBehaviours(behaviourEntries).length > 0
-    const canObserve = !!treeReader?.readTree && !!treeReader?.validateSnapshots
-    // Native grammar is LOCAL AUTHORITY, or GRANTED authority. Automatic
-    // conversations prefer the participant's own model. A keyed provider
-    // receives tree data and action tools only if the participant turned
-    // "may read the hive" on for it in the providers console; naming a
-    // remote model in the chat never grants that (anatomy-context-need §4).
+    // WORK NEEDS SOMEWHERE TO WAIT. Every read and change a model asks for
+    // passes through the Execution column (documentation/hive-read-fence.md);
+    // an essentials build without the queue leaves the model answer-only.
+    const canChange = !!queue && !!slash?.executePublicCanonical && callableBehaviours(behaviourEntries).length > 0
+    const canRead = !!queue && !!treeReader?.readTree && !!treeReader?.validateSnapshots
     const namedProvider = namedModel ? router?.providerIdForModel?.(namedModel) : undefined
     const localEndpoint = router?.providerMachineEndpoint?.('local')
     const localReadyAndTrusted = router?.providerIsMachineLocal?.('local') === true
@@ -5648,28 +5798,27 @@ export class ChatWindowComponent implements OnDestroy {
       && router.ready?.({ providerId: 'local', need }) === true
     const hiveAccess = ioc()?.get(LLM_HIVE_ACCESS_IOC_KEY) as
       { granted?: () => readonly string[]; budget?: (providerId: string) => number | undefined } | undefined
-    const nativeProviderId = hypercombActionProviderId(
-      canAct || canObserve, namedModel, namedProvider, localReadyAndTrusted,
+    // WHO READS WITHOUT ASKING: the participant's own local model, or a keyed
+    // provider they granted in the providers console — naming a model never
+    // grants (anatomy-context-need §4). Anyone else may still ASK to read;
+    // each such read waits in the Execution column for Allow once or Always.
+    // Read live, so an "Always" pressed mid-conversation counts next round.
+    const trustedProviderId = hypercombActionProviderId(
+      canRead || canChange, namedModel, namedProvider, localReadyAndTrusted,
       { granted: hiveAccess?.granted?.() ?? [], designated: router?.designatedProviderId?.(need) },
     )
-    // The per-provider read budget the participant set in the console, else
-    // the shell's default. It is the number the gate's privacy rests on.
-    const observationBudget = (nativeProviderId && hiveAccess?.budget?.(nativeProviderId)) || MAX_OBSERVATION_CONTEXT_CHARS
-    const actionProviderId = canAct ? nativeProviderId : undefined
-    const observationProviderId = canObserve ? nativeProviderId : undefined
-    // An unavailable local model loses only its action capability. Automatic
-    // chat may still be answered by the ordinary provider policy, with no
-    // grammar tool attached; an explicitly named local model still declines
-    // honestly instead of changing vendor.
-    const route = nativeProviderId
-      ? { providerId: nativeProviderId, model: namedModel, preferModel, need }
+    const readsFreely = (providerId: string | undefined): boolean => !!providerId
+      && ((providerId === 'local' && localReadyAndTrusted) || (hiveAccess?.granted?.() ?? []).includes(providerId))
+    const route = trustedProviderId
+      ? { providerId: trustedProviderId, model: namedModel, preferModel, need }
       : { model: namedModel, preferModel, need }
     if (!router?.stream || !router.ready?.(route)) return 'declined'
+    // A model added through OpenRouter that the mediator picked (not one the
+    // participant named) may fall to another of them before any output —
+    // never to a provider without the same key and read grant.
+    const owner = trustedProviderId ? router.credentialOwnerOf?.(trustedProviderId) : undefined
+    const fallbackWithin = !namedModel && owner && owner !== trustedProviderId ? owner : undefined
 
-    const messages: LlmMessageLike[] = this.turns().slice(-TRANSCRIPT_TURNS).map(turn => ({
-      role: turn.role,
-      content: turn.text,
-    }))
     const about = this.#chosenTargets()
     const baseSystem = about.length
       ? `You are helping inside Hypercomb. The participant says this conversation is about: ${about.join(', ')}. Do not claim to have read tile contents unless they are present in the messages.`
@@ -5700,19 +5849,40 @@ export class ChatWindowComponent implements OnDestroy {
     const grammarContext = readGrammarContext()
     // THE ANATOMY GOES FIRST, TO EVERY PROVIDER. It is the stable protocol +
     // doctrine (documentation/anatomy-context-need.md): identical bytes on
-    // every call, so it is the part a vendor's prefix cache pays back. It
-    // carries no tree data — what the participant is looking at only ever
-    // reaches a provider through the observation tool, behind the gate.
+    // every call, so it is the part a vendor's prefix cache pays back. Who is
+    // answering and what they may do follow it — small, and only they vary.
+    // Where the participant is travels only to a provider that reads freely.
     const anatomyText = (ioc()?.get(ANATOMY_IOC_KEY) as { text?: string } | undefined)?.text ?? ''
-    const system = nativeProviderId
-      ? [
-        anatomyText,
-        askingSystem,
-        observationProviderId ? hypercombObservationInstruction() : '',
-        actionProviderId ? hypercombGrammarInstruction(behaviourEntries) : '',
-        `The native grammar context is page ${grammarContext.page || '/'} with selected tiles: ${grammarContext.selected.join(', ') || '(none)'}. Bare /tree and the word "here" mean that page, which may differ from the conversation subject. You may make at most ${MAX_OBSERVATION_ROUNDS} observation rounds before answering or acting.`,
-      ].filter(Boolean).join('\n\n')
-      : [anatomyText, askingSystem].filter(Boolean).join('\n\n')
+    const vocabulary = canChange ? hypercombVocabulary(behaviourEntries) : ''
+    // Taken once per message, so the system text stays byte-stable across
+    // the rounds of one answer (a vendor's prompt cache keys on the prefix).
+    const knownReads = [...(this.#readSignatures.get(convoId) ?? new Map<string, string>())].slice(-24)
+    const priorReadsText = canRead && knownReads.length
+      ? `ALREADY READ in this conversation. Each opens again with read <signature>; what a signature names never changes, so there is no need to walk to it again:\n${knownReads.map(([sig, grammar]) => `${grammar.replace(/^\//, '')} → ${sig}`).join('\n')}`
+      : ''
+    const systemFor = (model: string | undefined, providerLabel: string | undefined, providerId: string | undefined): string => [
+      anatomyText,
+      identityInstruction(model, providerLabel),
+      askingSystem,
+      workInstruction({
+        canRead,
+        readsRunFreely: readsFreely(providerId),
+        readsPerBlock: MAX_OBSERVATIONS,
+        canChange,
+        vocabulary,
+      }),
+      !(canRead || canChange)
+        ? ''
+        : readsFreely(providerId)
+          ? `The participant is on page ${grammarContext.page || '/'} with selected tiles: ${grammarContext.selected.join(', ') || '(none)'}. "here" means that page, which may differ from the conversation subject.`
+          : 'The participant\'s page is not shared with you until they let you read; "here" still means the page they are on.',
+      priorReadsText,
+    ].filter(Boolean).join('\n\n')
+
+    // Who the mediator will choose for THIS weight, not whoever answered last.
+    const policyForNeed = ioc()?.get('@diamondcoreprocessor.com/LlmPolicyStore') as PolicyLike | undefined
+    const firstModel = namedModel ?? preferModel ?? policyForNeed?.designate?.(need)?.model ?? this.designated()?.model
+    const messages: LlmMessageLike[] = transcriptForModel(this.turns().slice(-TRANSCRIPT_TURNS), firstModel)
 
     // PROVENANCE FOR THE TURN (anatomy-context-need §6): the anatomy this
     // answer will be framed by, and the page/selection it was asked from —
@@ -5727,223 +5897,270 @@ export class ChatWindowComponent implements OnDestroy {
       { emit: false },
     ).catch(() => undefined)
     const observed: string[] = []
+    const readSigs: string[] = []
 
     const component = this
     const ask: HostAsk = async function* (_question, opts) {
+      const signal = opts?.signal
+      const stopped = (): DOMException => new DOMException('The model request was aborted', 'AbortError')
       let wrote = false
-      let observationRounds = 0
-      let observationChars = 0
+      let rounds = 0
+      let readRounds = 0
+      let readChars = 0
+      let lastRound = false
+      // THE WORK STAYS WITH WHOEVER STARTED IT. The first round may be routed
+      // by policy; every later round names that provider, so a fallback can
+      // never hand a half-done job — or its read results — to another vendor.
+      // With a fallback allowed, round one is routed; whoever answers is pinned.
+      let pinned = fallbackWithin ? undefined : trustedProviderId
+      let pinnedEndpoint = pinned ? router.providerMachineEndpoint?.(pinned) : undefined
       let continuationModel = namedModel
+      let system = systemFor(firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(need))
       const snapshotIds: string[] = []
+      const ran: string[] = []
 
-      const assertNativeAuthority = (providerId: string): void => {
-        if (!nativeProviderId || providerId !== nativeProviderId
-          || router.providerIsMachineLocal?.(providerId) !== true
-          || router.providerMachineEndpoint?.(providerId) !== localEndpoint) {
-          throw new Error('the native grammar exchange is no longer attached to the same local model endpoint')
+      const stillHere = (): void => {
+        if (pinned && router.providerIsMachineLocal?.(pinned) && router.providerMachineEndpoint?.(pinned) !== pinnedEndpoint) {
+          throw new Error('the local model endpoint changed during the work')
+        }
+        if (readGrammarContext().key !== grammarContext.key) {
+          throw new WorkRefused('the participant moved to another page or selection, so nothing ran; tell them, and stop')
         }
       }
-      const callName = (call: HypercombToolCall | undefined): string =>
-        call?.function?.name ?? call?.name ?? ''
-      const normalizeToolCall = (
-        call: HypercombToolCall,
-        round: number,
-      ): Required<Pick<HypercombToolCall, 'id' | 'name'>> & { readonly arguments: string } => {
-        const name = callName(call)
-        const rawArguments = call.function?.arguments ?? call.arguments
-        const args = typeof rawArguments === 'string'
-          ? rawArguments
-          : JSON.stringify(rawArguments)
-        if (!name || typeof args !== 'string') throw new Error('the local model returned a malformed tool call')
-        return {
-          id: call.id || `hypercomb-${round}-${Date.now().toString(36)}`,
-          name,
-          arguments: args,
+      const waitingOn = (id: string): void => {
+        if (queue?.requests().find(row => row.id === id)?.state !== 'waiting') return
+        EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for you in Execution' })
+      }
+
+      const runRead = async (lines: readonly string[], providerId: string, model: string): Promise<string> => {
+        if (!canRead || !treeReader || !queue) throw new WorkRefused('reading the hive is not available here')
+        if (readRounds >= MAX_OBSERVATION_ROUNDS) throw new WorkRefused('no more reads are available for this message')
+        const budget = hiveAccess?.budget?.(providerId) || MAX_OBSERVATION_CONTEXT_CHARS
+        const remaining = budget - readChars
+        if (remaining < 1_500) throw new WorkRefused('the read budget for this conversation is spent')
+        const plan = parseHypercombObservationGrammars(lines, grammarContext.segments)
+        const grammars = plan.observations.map(observation => observation.grammar)
+        // What each read RESOLVED to — the key an allowed read is remembered
+        // by, so "read here" allowed on one page never covers another.
+        const keys = plan.observations.map(observation => observation.verb === 'code'
+          ? `code ${observation.query ?? ''}`.trim()
+          : observation.sig
+            ? `${observation.verb} ${observation.sig}${observation.from ? ` ${observation.from}` : ''}`
+            : observation.query !== undefined
+              ? `find ${observation.query} /${observation.segments.join('/')}`
+              : `${observation.verb} /${observation.segments.join('/')}`)
+        const entry = queue.request({ convoId, providerId, model, kind: 'read', lines: grammars, keys, needsGrant: !readsFreely(providerId), signal })
+        waitingOn(entry.id)
+        if (await entry.decision === 'skip') {
+          if (signal?.aborted) throw stopped()
+          return readSkippedMessage(grammars, message)
+        }
+        try {
+          stillHere()
+          const perReadBytes = Math.max(1_024, Math.min(8_000, Math.floor((remaining - 512) / plan.observations.length)))
+          const receipt = await executeHypercombObservationPlan(plan, treeReader, {
+            maxDepth: 2,
+            maxNodes: 48,
+            maxBytes: perReadBytes,
+            signal,
+          })
+          const content = formatHypercombObservationReceipt(receipt)
+          if (content.length > remaining) throw new WorkRefused('those reads are larger than what is left of the read budget; ask for less')
+          const allSnapshots = [...snapshotIds, ...receipt.snapshots]
+          if (allSnapshots.length && !await treeReader.validateSnapshots(allSnapshots, signal)) {
+            throw new WorkRefused('the tree changed while it was being read; read it again')
+          }
+          readRounds++
+          readChars += content.length
+          snapshotIds.push(...receipt.snapshots)
+          observed.push(...grammars)
+          const known = component.#readSignatures.get(convoId) ?? new Map<string, string>()
+          for (const { grammar, sig } of receipt.signatures ?? []) {
+            known.delete(sig) // newest last
+            known.set(sig, grammar)
+            if (!readSigs.includes(sig)) readSigs.push(sig)
+          }
+          while (known.size > 64) known.delete(known.keys().next().value as string)
+          component.#readSignatures.set(convoId, known)
+          queue.settle(entry.id, 'ran', `${content.length} characters`)
+          return readResultMessage(content, message)
+        } catch (error) {
+          queue.settle(entry.id, signal?.aborted ? 'skipped' : 'failed', error instanceof Error ? error.message : undefined)
+          throw error
+        }
+      }
+
+      const runDo = async (lines: readonly string[], providerId: string, model: string): Promise<string> => {
+        if (!canChange || !slash?.executePublicCanonical || !queue) throw new WorkRefused('changing the hive is not available here')
+        // Parse EVERY line before anything is queued, let alone run: one bad
+        // tail can never leave a half-run prefix.
+        const plan = parseHypercombGrammars(lines, behaviourEntries)
+        const grammars = plan.actions.map(action => action.grammar)
+        const entry = queue.request({
+          convoId, providerId, model, kind: hypercombPlanReach(plan, behaviourEntries), lines: grammars, needsGrant: false, signal,
+        })
+        waitingOn(entry.id)
+        if (await entry.decision === 'skip') {
+          if (signal?.aborted) throw stopped()
+          return doSkippedMessage(grammars, message)
+        }
+        // The snapshot check happens in the serialized lane, immediately
+        // before the first action, so waiting behind another plan — or behind
+        // the participant's hand — cannot stale a read unnoticed.
+        let snapshotAdmitted = snapshotIds.length === 0
+        const executor: HypercombBehaviourExecutor = {
+          execute: async (command, args) => {
+            stillHere()
+            if (!snapshotAdmitted) {
+              if (!treeReader || !await treeReader.validateSnapshots(snapshotIds, signal)) {
+                throw new WorkRefused('the tree changed since you read it; read it again before changing it')
+              }
+              snapshotAdmitted = true
+            }
+            const live = new Set(callableBehaviours(slash.entries?.() ?? []).map(entry => entry.name))
+            if (!live.has(command)) throw new WorkRefused(`/${command} is no longer available`)
+            return slash.executePublicCanonical!(command, args)
+          },
+        }
+        try {
+          const receipt = await hypercombPlanQueue.run(plan, executor, signal)
+          ran.push(...receipt.grammars)
+          // What the model read is now older than what it changed.
+          snapshotIds.length = 0
+          queue.settle(entry.id, 'ran')
+          return doRanMessage(receipt.grammars, message)
+        } catch (error) {
+          if (signal?.aborted) {
+            queue.settle(entry.id, 'skipped')
+            throw error
+          }
+          if (error instanceof HypercombActionExecutionError) {
+            ran.push(...error.completed)
+            if (error.completed.length) snapshotIds.length = 0
+            const reason = error.cause instanceof Error ? error.cause.message : 'it could not run'
+            queue.settle(entry.id, 'failed', `${error.grammar}: ${reason}`)
+            return doFailedMessage(error.completed, error.grammar, reason, message)
+          }
+          queue.settle(entry.id, 'failed', error instanceof Error ? error.message : undefined)
+          throw error
         }
       }
 
       while (true) {
-        if (opts?.signal?.aborted) throw new DOMException('The model request was aborted', 'AbortError')
-        if (nativeProviderId) {
-          assertNativeAuthority(nativeProviderId)
-          if (readGrammarContext().key !== grammarContext.key) {
-            throw new Error('the page or tile selection changed during the native grammar exchange')
-          }
-        }
-
-        const roundTools = nativeProviderId ? [
-          ...(observationProviderId && observationRounds < MAX_OBSERVATION_ROUNDS
-            && observationChars < observationBudget
-            ? [hypercombObservationTool()]
-            : []),
-          ...(actionProviderId ? [hypercombGrammarTool(behaviourEntries)] : []),
-        ] : []
+        if (signal?.aborted) throw stopped()
+        // Prose streams live; a work block is held back from the first line
+        // that opens it — the participant sees it in Execution instead.
+        const guard = new WorkStreamGuard()
+        let lead = wrote ? '\n\n' : ''
         let roundText = ''
-        const roundCalls: HypercombToolCall[] = []
         let roundProviderId = ''
         let roundModel = continuationModel ?? ''
+        let roundLabel = ''
 
         for await (const chunk of router.stream!({
-          providerId: nativeProviderId,
+          providerId: pinned,
           model: continuationModel,
-          preferModel: observationRounds === 0 ? preferModel : undefined,
+          preferModel: rounds === 0 ? preferModel : undefined,
           need,
+          ...(rounds === 0 && !pinned && fallbackWithin ? { fallbackWithin } : {}),
           cacheSystem: true,
           messages,
           system,
-          tools: roundTools.length ? roundTools : undefined,
-          signal: opts?.signal,
+          signal,
         })) {
           if (roundProviderId && roundProviderId !== chunk.providerId) {
             throw new Error('a provider changed during one model round')
           }
+          if (pinned && chunk.providerId !== pinned) {
+            throw new Error('a different provider answered in the middle of the work')
+          }
           roundProviderId = chunk.providerId
           roundModel = chunk.model
-          if (nativeProviderId) assertNativeAuthority(chunk.providerId)
+          roundLabel = chunk.providerLabel ?? ''
 
-          // The route that emitted output is the truth. Observation rounds
-          // are buffered so internal pre-tool prose never becomes a durable
-          // assistant turn; ordinary answer-only providers still stream live.
+          // The route that emitted output is the truth.
           component.designated.set({
             providerId: chunk.providerId,
             label: chunk.providerLabel,
             vendor: chunk.vendor,
-            tier: 'fast',
+            tier: need.tier,
             model: chunk.model,
             name: chunk.model,
           })
           component.model.set(chunk.model)
           component.modelExplicit.set(false)
           component.#remember(chunk.model)
+          component.#answeredTier.set(convoId, need.tier)
           if (chunk.text) {
-            if (nativeProviderId) roundText += chunk.text
-            else {
+            roundText += chunk.text
+            const visible = guard.push(chunk.text)
+            if (visible) {
               wrote = true
-              yield chunk.text
+              yield `${lead}${visible}`
+              lead = ''
             }
           }
-          if (chunk.toolCalls?.length) roundCalls.push(...chunk.toolCalls)
         }
+        const tail = guard.end()
+        if (tail) {
+          wrote = true
+          yield `${lead}${tail}`
+        }
+        rounds++
         // Updated every round; the last write is what the run stores.
         component.#turnMeta.set(convoId, {
-          anatomy: anatomySig, context: contextSig, observed: [...observed],
+          anatomy: anatomySig, context: contextSig, observed: [...observed], read: [...readSigs],
           providerId: roundProviderId, model: roundModel,
         })
 
-        if (roundCalls.length === 0) {
-          if (snapshotIds.length && treeReader
-            && !await treeReader.validateSnapshots(snapshotIds, opts?.signal)) {
-            const lead = wrote ? '\n\n' : ''
+        const work = splitWork(roundText)
+        if (!work.request || lastRound) {
+          if (work.request) {
             wrote = true
-            yield `${lead}Hypercomb's tree changed while the local model was exploring it. Ask again to read the new tree.`
+            yield `\n\nStopped after ${MAX_WORK_ROUNDS} rounds.`
+          }
+          if (snapshotIds.length && treeReader && !await treeReader.validateSnapshots(snapshotIds, signal)) {
+            wrote = true
+            yield `\n\nHypercomb's tree changed while the model was reading it. Ask again to read the new tree.`
+          }
+          // THE HIVE'S OWN RECEIPT, never the model's account of it.
+          if (ran.length) yield `\n\nRan in the hive: ${ran.map(line => `\`${line.replace(/`/g, '\'')}\``).join(' · ')}`
+          return ''
+        }
+
+        if (!pinned) {
+          pinned = roundProviderId
+          pinnedEndpoint = router.providerMachineEndpoint?.(pinned)
+        }
+        continuationModel = roundModel
+        system = systemFor(roundModel, roundLabel, pinned)
+        messages.push({ role: 'assistant', content: roundText })
+
+        let reply: string
+        try {
+          stillHere()
+          reply = work.request.kind === 'read'
+            ? await runRead(work.request.lines, pinned, roundModel)
+            : await runDo(work.request.lines, pinned, roundModel)
+        } catch (error) {
+          // Stop belongs to the participant: never turn it into a message.
+          if (signal?.aborted) throw error
+          if (!isWorkRefusal(error)) {
+            const detail = error instanceof Error ? error.message : 'the work could not continue'
+            wrote = true
+            yield `\n\nHypercomb stopped the work: ${detail}.`
             return ''
           }
-          if (roundText) {
-            wrote = true
-            yield roundText
-          }
-          return ''
+          // A refusal goes back to the model in the gate's own words, so it
+          // can correct the block rather than guess.
+          reply = blockRefusedMessage(work.request.kind, (error as Error).message, message)
         }
-
-        const lead = wrote ? '\n\n' : ''
-        try {
-          if (!nativeProviderId || roundCalls.length !== 1) {
-            throw new Error('one native grammar request is allowed per model round')
-          }
-          assertNativeAuthority(roundProviderId)
-          if (readGrammarContext().key !== grammarContext.key) {
-            throw new Error('the page or tile selection changed while the local model was answering; ask again in the new context')
-          }
-
-          const name = callName(roundCalls[0])
-          const normalized = normalizeToolCall(roundCalls[0], observationRounds + 1)
-          if (name === HYPERCOMB_OBSERVATION_TOOL_NAME) {
-            if (!observationProviderId || !treeReader || observationRounds >= MAX_OBSERVATION_ROUNDS) {
-              throw new Error('no more tree observation rounds are available')
-            }
-            const remaining = observationBudget - observationChars
-            if (remaining < 1_500) throw new Error('the bounded tree observation context is full')
-            const plan = parseHypercombObservationToolCalls(roundCalls, grammarContext.segments)
-            observed.push(...plan.observations.map(observation => observation.grammar))
-            const perReadBytes = Math.max(1_024, Math.min(
-              8_000,
-              Math.floor((remaining - 512) / plan.observations.length),
-            ))
-            const receipt = await executeHypercombObservationPlan(plan, treeReader, {
-              maxDepth: 2,
-              maxNodes: 48,
-              maxBytes: perReadBytes,
-              signal: opts?.signal,
-            })
-            const content = formatHypercombObservationReceipt(receipt)
-            if (content.length > remaining) throw new Error('the bounded tree observation context is full')
-            const allSnapshots = [...snapshotIds, ...receipt.snapshots]
-            if (allSnapshots.length
-              && !await treeReader.validateSnapshots(allSnapshots, opts?.signal)) {
-              throw new Error('the tree changed during exploration; ask again to read the new tree')
-            }
-            observationRounds++
-            observationChars += content.length
-            snapshotIds.push(...receipt.snapshots)
-            messages.push(
-              { role: 'assistant', content: roundText, toolCalls: [normalized] },
-              { role: 'tool', content, toolCallId: normalized.id },
-            )
-            continuationModel = roundModel
-            continue
-          }
-
-          // Parse EVERY action line before the first Queen is invoked, then
-          // await native execution in order. The snapshot check happens in the
-          // serialized lane, immediately before the first action, so waiting
-          // behind another plan cannot stale the observation unnoticed.
-          if (!actionProviderId || name !== HYPERCOMB_GRAMMAR_TOOL_NAME || !slash?.executePublicCanonical) {
-            throw new Error('the local model returned a native grammar it was not offered')
-          }
-          const plan = parseHypercombToolCalls(roundCalls, behaviourEntries)
-          let snapshotAdmitted = snapshotIds.length === 0
-          const guardedExecutor: HypercombBehaviourExecutor = {
-            execute: async (command, args) => {
-              assertNativeAuthority(actionProviderId)
-              if (readGrammarContext().key !== grammarContext.key) {
-                throw new Error('the Hypercomb grammar context changed before execution')
-              }
-              if (!snapshotAdmitted) {
-                if (!treeReader || !await treeReader.validateSnapshots(snapshotIds, opts?.signal)) {
-                  throw new Error('the observed Hypercomb tree changed before execution')
-                }
-                snapshotAdmitted = true
-              }
-              const live = new Set(callableBehaviours(slash.entries?.() ?? []).map(entry => entry.name))
-              if (!live.has(command)) throw new Error(`/${command} is no longer machine-callable`)
-              return slash.executePublicCanonical!(command, args)
-            },
-          }
-          if (roundText) {
-            wrote = true
-            yield `${lead}${roundText}`
-          }
-          const receipt = await hypercombPlanQueue.run(plan, guardedExecutor, opts?.signal)
-          const receiptLead = wrote ? '\n\n' : ''
-          wrote = true
-          yield `${receiptLead}${formatHypercombReceipt(receipt)}`
-          return ''
-        } catch (error) {
-          // Stop belongs to the participant. Do not turn it into a model
-          // receipt or continue the sequence.
-          if (opts?.signal?.aborted) throw error
-          wrote = true
-          if (error instanceof HypercombActionExecutionError) {
-            const prefix = error.completed.length
-              ? `Ran ${error.completed.length} before stopping. `
-              : ''
-            yield `${lead}${prefix}Hypercomb stopped at ${error.grammar}.`
-          } else {
-            const detail = error instanceof Error ? error.message : 'invalid native grammar request'
-            yield `${lead}Hypercomb could not use that local-model request: ${detail}.`
-          }
-          return ''
+        if (work.heldDo) reply = `${HELD_DO_NOTE}\n\n${reply}`
+        if (rounds >= MAX_WORK_ROUNDS - 1) {
+          reply = `${reply}\n\n${lastRoundMessage(message)}`
+          lastRound = true
         }
+        messages.push({ role: 'user', content: reply })
       }
     }
 

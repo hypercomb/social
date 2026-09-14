@@ -144,11 +144,19 @@ type FoundPool = {
  *  different facts, and only the second is about reachability. */
 type PoolProbe = { pool: FoundPool | null; answered: boolean }
 
+/** The base each zone's pool last answered on. A host's layout does not move
+ *  between opens, so the next probe asks there first instead of walking the
+ *  wrong bases into a row of 404s. A hint only: every base is still tried. */
+const answeredBase = new Map<string, string>()
+
 const probePool = async (zone: string): Promise<PoolProbe> => {
   const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
   let answered = false
+  const remembered = answeredBase.get(zone)
+  const bases = hostBases(zone)
+  const ordered = remembered && bases.includes(remembered) ? [remembered, ...bases.filter(base => base !== remembered)] : bases
 
-  for (const base of hostBases(zone)) {
+  for (const base of ordered) {
     const read = poolReader(base, pool)
 
     let listing: string[] | null = null
@@ -160,12 +168,18 @@ const probePool = async (zone: string): Promise<PoolProbe> => {
 
     if (listing) {
       const indices = markerIndices(listing)
-      if (indices.length) return { pool: { base, read, head: indices[indices.length - 1]!, indices }, answered }
+      if (indices.length) {
+        answeredBase.set(zone, base)
+        return { pool: { base, read, head: indices[indices.length - 1]!, indices }, answered }
+      }
       continue   // the host holds this pool and it is empty — not a miss to retry elsewhere
     }
 
     const head = await headIndex(async i => (await read(i)) !== null)
-    if (head >= 0) return { pool: { base, read, head, indices: null }, answered: true }
+    if (head >= 0) {
+      answeredBase.set(zone, base)
+      return { pool: { base, read, head, indices: null }, answered: true }
+    }
   }
   return { pool: null, answered }
 }

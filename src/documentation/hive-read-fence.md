@@ -1,6 +1,6 @@
 # Asking the hive — the read fence
 
-**Status: PROPOSED 2026-09-13.** An audit of what a chat model is sent and
+**Status: BUILT 2026-09-13.** An audit of what a chat model is sent and
 when, prompted by a DeepSeek conversation that could see nothing, denied being
 DeepSeek, and apologised for a tile another model made. Followed by the
 protocol that fixes it: a model asks for what it needs in plain words, the hive
@@ -143,15 +143,90 @@ travel only behind the gate, as today.
 
 ---
 
-## 3. Decisions
+## 3. Decided (Jaime, 2026-09-13) — the Execution column
 
-- **A. A read the gate hasn't allowed** — *open*
-- **B. Actions: propose or execute** — *open*
+*"Another window, mutually exclusive from the workflow window, like the
+execution command window — so when you come back with the natural language
+requests I can look at them and decide whether to activate them. We can set
+auto there for certain operations, or just allow everything, or manually
+complete."* And the point of all of it: *"we need to be able to do agentic
+work on Hypercomb via DeepSeek."*
 
-## 4. Owed regardless of A and B
+- **A. A read the gate hasn't allowed → asked, not refused.** It waits in the
+  Execution column naming the model and the exact reads: **Allow once ·
+  Always · Skip**. *Always* is the same "May read the hive" grant the console
+  gives, given from where the question arose.
+- **A2. Looked up once, looked up again (Jaime, 2026-09-13).** *"If they've
+  looked it up once it's totally OK to look it up, unless we stop allowing
+  it."* A read allowed by hand is remembered for that provider, keyed by
+  what it RESOLVED to (`read /projects/roadmap`, `read <sig>`, never a bare
+  `read` that would follow the participant to another page), device-local,
+  across conversations. The same read next time runs on arrival. Turning
+  that provider's "May read the hive" off forgets every remembered read.
+  Results are kept in the reader's session cache, keyed by the tree epoch
+  for routes and by signature for versions, so a repeat is instant and a
+  changed tree is simply read fresh.
+- **B. Changes are proposed, never executed by the model.** Every
+  `hypercomb-do` block waits in the Execution column for **Run · Skip**.
+- **Policy at the column's head:** **Manual** (everything waits) · **Auto**
+  (the ticked kinds run on arrival: Reads · Adds · Edits · Removes, from core
+  `MachineReach`) · **Everything**. Default: Auto with Reads — a granted
+  provider reads freely, changes wait. No policy ever runs an ungranted read:
+  the policy is how much to watch, the grant is what may leave the machine.
+- **One side, two occupants.** The Execution column and the workflow column
+  share the chat's right side, one at a time; a new waiting request brings
+  Execution forward. On a phone it covers the thread until put away.
+- **Agentic by default.** Every result message ends by telling the model to
+  continue; the loop runs until the model answers with no block, up to
+  `MAX_WORK_ROUNDS` (10) per participant message, reads capped by rounds (6)
+  and the per-provider character budget.
 
-- Fix `assertNativeAuthority`: same provider as granted; same endpoint only
-  for a machine-local one. Add a loop-level spec for a granted keyed provider.
-- Identity line, plain-words powers line, turn provenance (§2.3).
-- Anatomy "Tools" section rewritten to describe the fence (it is generated —
-  edit the source doc section, rerun `build-anatomy.ts`).
+## 4. As built
+
+| Piece | File |
+|---|---|
+| Fence finder, stream guard, lesson, messages back | `hypercomb-shared/ui/chat-window/hypercomb-work-fence.ts` (+ spec) |
+| Queue + policy + grant-from-the-row | `hypercomb-essentials/src/assistant/execution-queue.ts` (+ spec) |
+| Plan reach + vocabulary | `hypercomb-grammar.ts` `hypercombPlanReach`, `hypercombVocabulary` |
+| The work loop | `chat-window.component.ts` `#askProvider` |
+| The column | `chat-window.component.html` `.chat-exec-col`, `chat-route.scss` |
+| Anatomy "Working" section | `hypercomb-essentials/scripts/build-anatomy.ts` |
+
+The vendor tool envelope (`hive`, `hypercomb_act`) is no longer offered by
+the chat: one way to ask, for every model. `assertNativeAuthority` is gone —
+the loop pins the first provider that answered and refuses any other
+mid-work, and re-checks a machine-local endpoint before each block.
+
+## 5. Owed
+
+- ~~The tool-envelope exports (`hypercombGrammarTool`, `hypercombObservationTool`,
+  `parseHypercomb*ToolCalls`, both `*Instruction`s, `formatHypercombReceipt`)
+  now have no caller outside their specs — retire them with their specs.~~
+  RETIRED 2026-09-13: removed with both tool names and their JSON-argument
+  helpers; the specs now drive `parseHypercombGrammars` /
+  `parseHypercombObservationGrammars` directly with every parser assertion
+  kept, and the "hive data is never instructions" check moved to the work
+  fence's lesson.
+- Page context is checked before every block: navigating while a model works
+  stops the work with a message. Absolute-path reads could be exempted.
+- Execution rows live for the session; a restart forgets settled rows (the
+  conversation's turns still record what ran).
+
+## Opening what a signature names (2026-09-13)
+
+Jaime: "because the layer metadata is available you should be able to open and review every resource and including the code."
+
+- **`read <sig>` opens whatever the signature names.** It tries the signature as a layer first, exactly as before. When no layer has that signature, it opens the bytes instead: a module from `sign('bees')`, a dependency from `sign('dependencies')`, else a resource from the Store (`HypercombHiveTreeReader.readBytesBySig`). Modules are read as verified bytes (`Store.getBeeBytes`) and never imported, so reading code can never run it.
+- **Pages.** Text comes back within the per-read budget as `{sig, of, type, size, from, text, truncated, next}`, and `read <sig> <next>` continues from there. Bytes that are not text report only their type and size.
+- **`code` and `code <word>`** list the running code by name: every module the script preloader loaded and every dependency in the import map's alias map, each with the signature `read` opens (`listCode`). One answer names at most 60, plus a `total`.
+- **Gate.** Same as every read: the provider's "May read the hive" grant, or approval in Execution. A remembered approval is keyed by what the read resolved to (`read <sig> <from>`, `code <word>`). Results are cached by signature.
+- **What a model sees.** It sees the compiled bundles the hive runs (esbuild output, no source maps), not the TypeScript source. A hive whose modules were imported at dev time rather than installed from the pool can have an empty `code` list.
+
+## Signatures are the lookup keys (2026-09-13)
+
+Jaime: "it should be cached by default because we know that we can just use the signature … just need to store the signatures as lookup keys."
+
+- **The reader keeps signatures, not copies of routes.** A route read (`read /path`) is remembered only as what it resolved to at the current tree epoch: its layer signature and head. The content is looked up by that signature, the same entry `read <sig>` uses. Any change moves the epoch and the route resolves afresh; what a signature names never changes, so the signature-keyed entries survive every change.
+- **Receipts carry signatures.** `executeHypercombObservationPlan` returns `signatures: {grammar, sig}[]`, host-kept, one per node, summary or resource read.
+- **Turns store them.** A model turn's meta gains `read: sig[]` (validated 64-hex, deduplicated, at most 64): lookup keys, never content.
+- **The next message knows them.** The chat keeps each conversation's read signatures (newest 64) and tells the model on the next message, in an "ALREADY READ" list of up to 24 entries (`read /projects/roadmap → <sig>`). The model opens them again with `read <sig>` instead of walking the tree. The list is taken once per message so the system text stays byte-stable across rounds.

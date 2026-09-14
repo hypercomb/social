@@ -1,9 +1,11 @@
 // hypercomb-grammar.ts
 //
-// THE MODEL SPEAKS HYPERCOMB. Function calling is only the transport envelope:
-// its one payload is an ordered sequence of native slash-beehavior grammars.
-// The envelope is deliberately tiny so it can be shed later without changing
-// the language or the executor underneath it.
+// THE MODEL SPEAKS HYPERCOMB. What a model asks to change is an ordered
+// sequence of native slash-beehavior grammars. The transport is the work
+// fence (hypercomb-work-fence.ts, documentation/hive-read-fence.md) — plain
+// text any model can write. The vendor function-calling envelope that carried
+// the same lines once was shed exactly as it was built to be: the language
+// and the executor underneath it did not change.
 //
 // THE VOCABULARY IS THE CENSUS, NOT A TABLE HERE. This file used to hold
 // `CALLABLE_FORMS` — five behaviour names and their argument shapes, written
@@ -24,8 +26,8 @@
 // them had it, so a grant bolted on here would have tightened the tightest door
 // and left the rest open. The rule moved to core's `machine-admission`, which
 // every machine door now consults — this one saying `'model'`, the bridge
-// saying `'operator'`. What this file kept is what only it knows: the transport
-// envelope, the canonical-line parser, and the catalogue's wording.
+// saying `'operator'`. What this file kept is what only it knows: the
+// canonical-line parser, the plan's reach, and the executor's lane.
 //
 // ONE CONSEQUENCE WORTH STATING. The catalogue and the admission gate read the
 // same function, so a verb the grant refuses is never TAUGHT. A model is not
@@ -44,14 +46,12 @@ import {
 // this module is still the door the chat window knocks on.
 export { callableBehaviours }
 
-export const HYPERCOMB_GRAMMAR_TOOL_NAME = 'hypercomb_act'
-
-/** Who may receive the hive's tools this turn. The participant's own local
- *  model always may. A keyed provider may only if the participant GRANTED it
+/** Who may read the hive without asking this turn. The participant's own
+ *  local model always may. A keyed provider may only if the participant GRANTED it
  *  in the console (documentation/anatomy-context-need.md §4) — and naming a
  *  model in the chat never grants: naming picks who answers, the grant
- *  decides what they may see. With no model named, the tools follow the
- *  provider the mediator would designate anyway, if that one is granted. */
+ *  decides what they may see. With no model named, it follows the provider
+ *  the mediator would designate anyway, if that one is granted. */
 export const hypercombActionProviderId = (
   canAct: boolean,
   namedModel: string | undefined,
@@ -260,54 +260,26 @@ const refusalFor = (
 
 const catalogue = machineCatalogue
 
-/** One transport tool; Hypercomb grammar remains the actual action language. */
-export const hypercombGrammarTool = (
+/** The live vocabulary a model may change the hive with — the census
+ *  catalogue, grant-filtered, for the work fence's lesson. */
+export const hypercombVocabulary = (
   entries: readonly HypercombBehaviour[],
   grant: MachineGrant = currentMachineGrant(),
-): HypercombFunctionTool => ({
-  type: 'function',
-  function: {
-    name: HYPERCOMB_GRAMMAR_TOOL_NAME,
-    description: 'Apply an ordered sequence of validated, native Hypercomb slash-beehavior grammars to the current hive. This cannot run shell commands or edit computer files.',
-    strict: true,
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        grammars: {
-          type: 'array',
-          minItems: 1,
-          maxItems: MAX_GRAMMARS,
-          description: `Complete grammar lines, run in order. Available forms:\n${catalogue(entries, grant)}`,
-          items: { type: 'string', maxLength: MAX_GRAMMAR_LENGTH },
-        },
-      },
-      required: ['grammars'],
-    },
-  },
-})
+): string => catalogue(entries, grant)
 
-/** Stable instructions plus a live census, so prompt and validation cannot drift. */
-export const hypercombGrammarInstruction = (
+/** How far a validated plan reaches: its farthest line. A behaviour that
+ *  never said is read as editing — never quieter than it might be. */
+export const hypercombPlanReach = (
+  plan: HypercombActionPlan,
   entries: readonly HypercombBehaviour[],
   grant: MachineGrant = currentMachineGrant(),
-): string => `
-Hypercomb's native action language is its slash-behavior grammar. If the participant asks only for information, answer normally in prose. If they ask you to change the current Hypercomb hive, call ${HYPERCOMB_GRAMMAR_TOOL_NAME} exactly once with one or more complete grammar lines in execution order. Do not print the tool payload as prose. Never invent behavior names. This capability changes only the current Hypercomb hive; it cannot use a shell, edit repository files, control the computer, or use a bridge.
-
-Available machine-callable grammar:
-${catalogue(entries, grant) || '(none currently available)'}
-`.trim()
-
-const parseArguments = (raw: unknown): Record<string, unknown> => {
-  let value = raw
-  if (typeof raw === 'string') {
-    try { value = JSON.parse(raw) }
-    catch { throw new HypercombGrammarError('the action arguments are not valid JSON') }
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new HypercombGrammarError('the action arguments must be an object')
-  }
-  return value as Record<string, unknown>
+): MachineReach => {
+  const order: readonly MachineReach[] = ['additive', 'editing', 'destructive']
+  const reachOf = new Map(callableBehaviours(entries, grant).map(entry => [entry.name, entry.machine?.reach ?? 'editing'] as const))
+  return plan.actions.reduce<MachineReach>((far, action) => {
+    const reach = reachOf.get(action.command) ?? 'editing'
+    return order.indexOf(reach) > order.indexOf(far) ? reach : far
+  }, 'additive')
 }
 
 const parseLine = (
@@ -354,39 +326,10 @@ const parseLine = (
 }
 
 /**
- * Validate the entire sequence before returning any executable action. No
- * mutation occurs here, so one invalid tail cannot leave a half-run prefix.
- */
-export const parseHypercombToolCalls = (
-  calls: readonly HypercombToolCall[],
-  entries: readonly HypercombBehaviour[],
-  grant: MachineGrant = currentMachineGrant(),
-): HypercombActionPlan => {
-  const call = calls[0]
-  const name = call?.function?.name ?? call?.name
-  if (calls.length !== 1 || name !== HYPERCOMB_GRAMMAR_TOOL_NAME) {
-    throw new HypercombGrammarError(`expected exactly one ${HYPERCOMB_GRAMMAR_TOOL_NAME} call`)
-  }
-  const input = parseArguments(call.function?.arguments ?? call.arguments)
-  const keys = Object.keys(input)
-  if (keys.length !== 1 || keys[0] !== 'grammars') {
-    throw new HypercombGrammarError('the action accepts only the grammars property')
-  }
-  const grammars = input['grammars']
-  if (!Array.isArray(grammars)) {
-    throw new HypercombGrammarError('grammars must be an array')
-  }
-  if (grammars.length < 1 || grammars.length > MAX_GRAMMARS) {
-    throw new HypercombGrammarError(`grammars must contain between 1 and ${MAX_GRAMMARS} lines`)
-  }
-
-  return parseHypercombGrammars(grammars, entries, grant)
-}
-
-/**
- * The durable contract beneath today's function-call scaffold: an ordered
- * sequence of raw Hypercomb grammars. Another transport can call this directly
- * without carrying forward any OpenAI-specific envelope.
+ * The durable contract every transport speaks: an ordered sequence of raw
+ * Hypercomb grammars. The entire sequence is validated before any executable
+ * action is returned — no mutation occurs here, so one invalid tail cannot
+ * leave a half-run prefix.
  */
 export const parseHypercombGrammars = (
   grammars: readonly unknown[],
@@ -429,9 +372,4 @@ export const executeHypercombPlan = async (
     if (signal?.aborted) throw stopped()
   }
   return { grammars: completed, executed: completed.length }
-}
-
-export const formatHypercombReceipt = (receipt: HypercombActionReceipt): string => {
-  const noun = receipt.executed === 1 ? 'grammar' : 'grammars'
-  return `Ran ${receipt.executed} Hypercomb ${noun}:\n${receipt.grammars.map(line => `- ${line}`).join('\n')}`
 }

@@ -61,12 +61,24 @@
       <span class="chat-header-space"></span>
       <!-- Show or hide the workflow column: one icon, sticky, lit while shown. -->
       <button class="chat-close chat-route-toggle" type="button"
-        [class.on]="routeSideWanted()"
+        [class.on]="routeSideWanted() && !execSideWanted()"
         (click)="toggleRouteSide()"
         [title]="'chat.route.toggle' | t"
-        [attr.aria-pressed]="routeSideWanted()"
+        [attr.aria-pressed]="routeSideWanted() && !execSideWanted()"
         [attr.aria-label]="'chat.route.toggle' | t">
         <span class="mat-sym" aria-hidden="true">account_tree</span>
+      </button>
+      <!-- The Execution column: what models ask to read and change. It shares
+           the workflow's side, so the two icons light one at a time; a count
+           rides it while something waits on you. -->
+      <button class="chat-close chat-route-toggle chat-exec-toggle" type="button"
+        [class.on]="execSideWanted()"
+        (click)="toggleExecSide()"
+        [title]="'chat.exec.toggle' | t"
+        [attr.aria-pressed]="execSideWanted()"
+        [attr.aria-label]="'chat.exec.toggle' | t">
+        <span class="mat-sym" aria-hidden="true">terminal</span>
+        @if (execWaiting()) { <span class="chat-exec-badge">{{ execWaiting() }}</span> }
       </button>
       <button class="chat-close" type="button" (click)="close()"
         [attr.aria-label]="'chat.close' | t">×</button>
@@ -1034,6 +1046,65 @@
           }
         </section>
       </div>
+    }
+    <!-- THE EXECUTION COLUMN (documentation/hive-read-fence.md §3): every read
+         and change a model asks for, waiting for Run or Skip unless the policy
+         at its head runs that kind by itself. It shares the workflow's side,
+         one at a time; on a phone it covers the thread until put away. -->
+    @if (execSideWanted()) {
+      <aside class="chat-exec-col" [attr.aria-label]="'chat.exec.side' | t">
+        <div class="chat-route-sec">
+          <span>{{ 'chat.exec.sec' | t }}</span>
+          <span class="chat-exec-words" role="radiogroup" [attr.aria-label]="'chat.exec.sec' | t">
+            @for (mode of execModes; track mode) {
+              <button type="button" class="chat-exec-word" role="radio"
+                [class.on]="execMode() === mode"
+                [attr.aria-checked]="execMode() === mode"
+                (click)="setExecMode(mode)">{{ ('chat.exec.mode.' + mode) | t }}</button>
+            }
+          </span>
+        </div>
+        @if (execMode() === 'auto') {
+          <div class="chat-exec-auto">
+            <span class="chat-exec-quiet">{{ 'chat.exec.auto-runs' | t }}</span>
+            @for (kind of execKinds; track kind) {
+              <button type="button" class="chat-exec-word" role="checkbox"
+                [class.on]="execAuto().includes(kind)"
+                [attr.aria-checked]="execAuto().includes(kind)"
+                (click)="toggleExecAuto(kind)">{{ ('chat.exec.kind.' + kind) | t }}</button>
+            }
+          </div>
+        }
+        <ol class="chat-exec-list">
+          @for (row of execRows(); track row.id) {
+            <li class="chat-exec-row" [attr.data-state]="row.state" [attr.data-kind]="row.kind">
+              <div class="chat-exec-head">
+                <span class="chat-exec-kind">{{ ('chat.exec.kind.' + row.kind) | t }}</span>
+                <span class="chat-exec-model" [title]="row.model">{{ row.model }}</span>
+              </div>
+              @if (row.needsGrant && row.state === 'waiting') {
+                <p class="chat-exec-quiet">{{ 'chat.exec.needs-grant' | t }}</p>
+              }
+              <div class="chat-exec-lines">
+                @for (line of row.lines; track $index) { <code class="chat-exec-line">{{ line }}</code> }
+              </div>
+              @if (row.state === 'waiting') {
+                <div class="chat-exec-acts">
+                  <button type="button" class="chat-exec-word chat-exec-go" (click)="decideExec(row.id, 'run')">{{ (row.needsGrant ? 'chat.exec.allow-once' : 'chat.exec.run') | t }}</button>
+                  @if (row.needsGrant) {
+                    <button type="button" class="chat-exec-word" (click)="decideExec(row.id, 'always')">{{ 'chat.exec.always' | t }}</button>
+                  }
+                  <button type="button" class="chat-exec-word" (click)="decideExec(row.id, 'skip')">{{ 'chat.exec.skip' | t }}</button>
+                </div>
+              } @else {
+                <p class="chat-exec-outcome">{{ ('chat.exec.state.' + row.state) | t }}@if (row.auto) { · {{ 'chat.exec.auto' | t }} }@if (row.outcome) { — {{ row.outcome }} }</p>
+              }
+            </li>
+          } @empty {
+            <li class="chat-exec-quiet chat-exec-empty">{{ 'chat.exec.empty' | t }}</li>
+          }
+        </ol>
+      </aside>
     }
     </div>
 

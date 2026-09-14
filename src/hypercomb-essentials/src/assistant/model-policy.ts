@@ -39,6 +39,7 @@ import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
 import { llmModelChoice } from './llm-model-choice.js'
 import { foldedIntoOpenRouter } from './providers/openrouter-supersedes.js'
+import { credentialOwner } from './providers/credential-owner.js'
 import { localModelServerUp } from './providers/local-liveness.js'
 import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
 import type { LlmProviderDescriptor, LlmTier } from './providers/llm-provider.types.js'
@@ -73,6 +74,9 @@ const isUsagePlan = (value: string): value is UsagePlanId =>
 export type ModelNeed = {
   /** How heavy the job is. Omitted = balanced. */
   readonly tier?: LlmTier
+  /** Tokens the request needs to fit. A provider whose model for the tier
+   *  declares a smaller context window cannot do this work. */
+  readonly minContext?: number
   /** Only a tier that can walk the participant's tree will do. */
   readonly readsHive?: boolean
   /** The caller will consume deltas; a provider that cannot stream is worse. */
@@ -220,15 +224,18 @@ export class LlmPolicyStore extends EventTarget {
    *  [the local model], just not there yet" — so the default moved to a paid
    *  provider, and this became a setting rather than staying a constant.
    *  `'local'` asks for the machine-local model, exactly as before this
-   *  setting existed; anything else names a provider id in the registry. */
+   *  setting existed; anything else names a provider id in the registry.
+   *  `''` — the default since Jaime, 2026-09-13 ("I don't really like Qwen,
+   *  the local one") — is AUTOMATIC: the mediator's pick among providers
+   *  available to the orchestrator, never the local model. */
   get orchestratorProvider(): string {
-    try { return (globalThis.localStorage?.getItem(ORCHESTRATOR_PROVIDER_KEY) ?? '').trim().toLowerCase() || 'anthropic' }
-    catch { return 'anthropic' }
+    try { return (globalThis.localStorage?.getItem(ORCHESTRATOR_PROVIDER_KEY) ?? '').trim().toLowerCase() }
+    catch { return '' }
   }
   set orchestratorProvider(id: string) {
     const v = String(id ?? '').trim().toLowerCase()
     try {
-      if (v && v !== 'anthropic') globalThis.localStorage?.setItem(ORCHESTRATOR_PROVIDER_KEY, v)
+      if (v) globalThis.localStorage?.setItem(ORCHESTRATOR_PROVIDER_KEY, v)
       else globalThis.localStorage?.removeItem(ORCHESTRATOR_PROVIDER_KEY)
     } catch { /* session-only */ }
     this.dispatchEvent(new Event('change'))
@@ -269,7 +276,7 @@ export const availabilityOf = (provider: LlmProviderDescriptor): 'available' | '
  *  fact, probed (local-liveness.ts) rather than assumed. */
 const isReady = (provider: LlmProviderDescriptor): boolean =>
   llmActivation.isEnabled(provider.id)
-  && (provider.requiresKey === false || llmKeyStore.has(provider.id))
+  && (provider.requiresKey === false || llmKeyStore.has(credentialOwner(provider)))
   && localModelServerUp(provider)
   && availabilityOf(provider) !== 'exhausted'
 
@@ -281,6 +288,11 @@ const hasTier = (provider: LlmProviderDescriptor, tier: LlmTier): boolean =>
 
 /** Hard requirements. Failing one of these means "cannot do this work". */
 const canDo = (provider: LlmProviderDescriptor, need: ModelNeed): boolean => {
+  if (need.minContext) {
+    // Only a PUBLISHED window can rule a provider out; an unknown one might fit.
+    const model = provider.models.find(m => m.id === modelForTier(provider, need.tier ?? 'balanced'))
+    if (model?.contextLength && model.contextLength < need.minContext) return false
+  }
   if (need.readsHive && !provider.readsHive) return false
   // A bridge answers asks, not calls, so it is only a candidate for a caller
   // that can wait for one — work that wants the hive-reading tier, or any
@@ -295,7 +307,9 @@ const canDo = (provider: LlmProviderDescriptor, need: ModelNeed): boolean => {
 export const candidatesFor = (need: ModelNeed = {}): LlmProviderDescriptor[] =>
   // Direct single-vendor rows are folded into OpenRouter for now: never an
   // automatic pick, whatever key is left on them (openrouter-supersedes.ts).
-  llmProviderRegistry().all().filter(p => isReady(p) && canDo(p, need) && !foldedIntoOpenRouter(p.id))
+  // A configurator (OpenRouter) is where models are chosen, never an answer
+  // itself: the models added through it are the candidates.
+  llmProviderRegistry().all().filter(p => isReady(p) && canDo(p, need) && !foldedIntoOpenRouter(p.id) && !p.configurator)
 
 /**
  * WHO SHOULD ANSWER. Returns undefined when nothing can — the caller decides
@@ -332,6 +346,24 @@ export const rankProviders = (need: ModelNeed = {}): LlmProviderDescriptor[] => 
     const index = order.indexOf(value)
     return index < 0 ? order.length : index
   }
+  // FIT — the last tiebreak, among candidates otherwise equal (every model
+  // added through OpenRouter ties on tier, availability and cost class). Fast
+  // work goes to the cheapest; deep work to the most capable, with published
+  // price as the proxy; balanced work to the one nearest the middle price;
+  // and a job needing a very large window to the largest window. A model with
+  // no published figures sorts after those that have them, and never above
+  // anything the earlier rules already ordered.
+  const UNKNOWN = Number.MAX_SAFE_INTEGER
+  const modelOf = (p: LlmProviderDescriptor) => p.models.find(m => m.id === modelForTier(p, tier))
+  const prices = pool.map(p => modelOf(p)?.outputPerMillion).filter((n): n is number => typeof n === 'number').sort((a, b) => a - b)
+  const median = prices.length ? prices[Math.floor(prices.length / 2)] : undefined
+  const fit = (p: LlmProviderDescriptor): number => {
+    const model = modelOf(p)
+    if ((need.minContext ?? 0) >= 64_000) return model?.contextLength ? -model.contextLength : UNKNOWN
+    if (tier === 'fast') return model?.inputPerMillion ?? UNKNOWN
+    if (tier === 'deep') return model?.outputPerMillion !== undefined ? -model.outputPerMillion : UNKNOWN
+    return model?.outputPerMillion !== undefined && median !== undefined ? Math.abs(model.outputPerMillion - median) : UNKNOWN
+  }
   const rank = (p: LlmProviderDescriptor): readonly number[] => {
     const exactTier = hasTier(p, tier) ? 0 : 1
     const availability = availabilityOf(p) === 'available' ? 0
@@ -342,11 +374,11 @@ export const rankProviders = (need: ModelNeed = {}): LlmProviderDescriptor[] => 
     const localFirst = position<CostClass>(['local', 'keyed', 'bridge', 'peer'], costOf(p))
     const privateFirst = position<CostClass>(['local', 'bridge', 'keyed', 'peer'], costOf(p))
 
-    if (plan === 'economy') return [freeCost, exactTier, availability]
-    if (plan === 'fast') return [exactTier, localFirst, availability, capableCost]
-    if (plan === 'private') return [exactTier, privateFirst, availability, capableCost]
-    if (plan === 'balanced') return [exactTier, availability, localFirst, capableCost]
-    return [exactTier, availability, capableCost]
+    if (plan === 'economy') return [freeCost, exactTier, availability, fit(p)]
+    if (plan === 'fast') return [exactTier, localFirst, availability, capableCost, fit(p)]
+    if (plan === 'private') return [exactTier, privateFirst, availability, capableCost, fit(p)]
+    if (plan === 'balanced') return [exactTier, availability, localFirst, capableCost, fit(p)]
+    return [exactTier, availability, capableCost, fit(p)]
   }
 
   const compareRank = (left: readonly number[], right: readonly number[]): number => {

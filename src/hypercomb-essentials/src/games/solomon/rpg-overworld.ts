@@ -16,6 +16,7 @@ import { drawPlace, type PlaceGlow, type PlaceSprite } from './island-places.js'
 import { PLAYER_LOOK, drawWalker, lookFor } from './island-sprites.js'
 import { playChestReveal, type TreasureKind } from './island-treasure.js'
 import type { StoryWhen } from './story-when.js'
+import { appendResidentTurn, askResident, readResidentTalk, type ResidentTalk } from './resident-chat.js'
 
 export type ShrineComponent = { kind: 'triangle'; point: number } | { kind: 'hexagon' } | { kind: 'star' }
 export type WorldRelic = ShrineComponent & { id: string }
@@ -77,10 +78,16 @@ export interface WorldPerson extends WorldPlace {
 export interface WorldDungeon extends WorldPlace {
   kind: 'dungeon'; levelIndex: number; subtitle: string; clue: string
 }
-/** Someone who lives on the island. They talk; they ask nothing. */
+/** Someone who lives on the island. They talk; they ask nothing.
+ *  `lines`/`later` remain the deterministic script — quest-gated reveals must
+ *  never depend on a model remembering to say the right thing (see
+ *  resident-chat.ts). `persona` is optional: a hand-written voice for the
+ *  freeform chat layered on top; one left unset gets a persona derived from
+ *  `role`/`lines`/`later` instead, so every resident talks in character. */
 export interface WorldResident extends WorldPlace {
   kind: 'resident'; role: string; color: string; lines: readonly string[]
   later?: readonly WorldLater[]
+  persona?: string
 }
 /** Ground laid out for a shrine nobody has built yet. A plot names no shrine:
  *  empty is a finished state, and a builder's shrine seats onto it later. */
@@ -1337,7 +1344,7 @@ export class RpgOverworldView {
     if (!targetId && this.#speech.get(place.id)?.nodes) { this.#speech.delete(place.id); this.#notice = ''; this.refresh(); return }
     if (place.kind === 'person') { this.#notice = ''; this.openPerson(place) }
     else if (place.kind === 'shrine' && this.model.shrineStatus(place.id) !== 'open') { this.#notice = ''; this.openShrine(place) }
-    else if (place.kind === 'resident') { this.#notice = ''; this.#speak(place, this.model.talk(place.id).message) }
+    else if (place.kind === 'resident') { this.#notice = ''; this.openResidentChat(place) }
     else if (place.kind === 'plot') { this.#notice = ''; this.#openPlot(place) }
     else if (place.kind === 'cache') { this.#notice = ''; this.#openCache(place, result.fresh === true) }
     else if (place.kind === 'sign') { this.#notice = ''; this.#speak(place, place.text) }
@@ -1588,6 +1595,60 @@ export class RpgOverworldView {
       return nodes
     }, solved ? 9 : Infinity)
   }
+  /** A resident's chat: their next scripted beat (still deterministic — it is
+   *  what fires quest-gated `later` reveals, see resident-chat.ts) seeds the
+   *  conversation, then the player can type freely and the reply comes back
+   *  in the resident's voice. Persisted per resident, so leaving and coming
+   *  back resumes exactly where it left off. */
+  private openResidentChat(resident: WorldResident): void {
+    let talk: ResidentTalk = { kind: 'resident-talk', residentId: resident.id, turns: [] }
+    let pending = false
+    const submit = (raw: string): void => {
+      const message = raw.trim()
+      if (!message || pending) return
+      pending = true
+      talk = { ...talk, turns: [...talk.turns, { role: 'user', text: message, at: Date.now() }] }
+      render()
+      void (async () => {
+        talk = await appendResidentTurn(resident.id, 'user', message)
+        const reply = await askResident(resident, talk, message)
+        talk = await appendResidentTurn(resident.id, 'assistant', reply ?? this.model.talk(resident.id).message)
+        pending = false
+        render()
+      })()
+    }
+    const render = (): void => this.#ask(resident, () => this.#residentChatNodes(resident, talk, pending, submit), Infinity)
+    render()
+    void (async () => {
+      talk = await readResidentTalk(resident.id)
+      const seed = this.model.talk(resident.id).message
+      if (seed) talk = await appendResidentTurn(resident.id, 'assistant', seed)
+      render()
+    })()
+  }
+  /** The chat bubble's contents: the turn log, a "…thinking" line while a
+   *  reply is in flight, and an input + send that stay out of the movement
+   *  keys' way (overlay.ts's key handler skips a focused text field). */
+  #residentChatNodes(resident: WorldResident, talk: ResidentTalk, pending: boolean, submit: (text: string) => void): Node[] {
+    const log = element('div', 'sol-rpg-chat-log')
+    for (const turn of talk.turns) log.append(element('p', `sol-rpg-chat-turn is-${turn.role}`, turn.text))
+    if (pending) log.append(element('p', 'sol-rpg-chat-turn is-pending', '…'))
+    const input = element('input', 'sol-rpg-chat-input')
+    input.type = 'text'
+    input.placeholder = `Say something to ${resident.name}…`
+    input.disabled = pending
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.repeat) { event.preventDefault(); submit(input.value); input.value = '' }
+    })
+    const send = button('Send', () => { submit(input.value); input.value = '' }, 'sol-rpg-chat-send')
+    send.disabled = pending
+    const form = element('div', 'sol-rpg-chat-form')
+    form.append(input, send)
+    const close = button('×', () => this.dismiss(), 'sol-rpg-chat-close')
+    close.setAttribute('aria-label', 'Close')
+    queueMicrotask(() => { log.scrollTop = log.scrollHeight; if (!pending) input.focus({ preventScroll: true }) })
+    return [close, log, form]
+  }
   /** The shrine's sockets sit in a bubble beside it. Placing a piece keeps
    *  the bubble; the last piece opens the way and the bubble says so. */
   private openShrine(shrine: WorldShrine, reply = ''): void {
@@ -1693,5 +1754,6 @@ const WORLD_STYLE = `
 .sol-rpg-speech{position:absolute;z-index:3;left:0;top:0;width:0;height:0;pointer-events:none;will-change:transform}.sol-rpg-bubble{position:absolute;width:max-content;max-width:230px;padding:7px 11px;border:2px solid #1c1230;border-radius:12px;background:rgba(255,249,234,.97);color:#2a2118;font-size:12px;line-height:1.4;font-weight:500;box-shadow:0 6px 16px rgba(0,0,0,.35);transform:translate(-50%,calc(-100% - 54px * var(--sprite-scale)));opacity:0;transition:opacity .25s}.sol-rpg-bubble.is-shown{opacity:1}.sol-rpg-bubble::after{content:'';position:absolute;left:50%;bottom:-7px;width:11px;height:11px;background:inherit;border-right:2px solid #1c1230;border-bottom:2px solid #1c1230;transform:translateX(-50%) rotate(45deg)}.sol-rpg-bubble-sign{background:rgba(240,224,186,.97);font-family:Georgia,serif;font-size:12.5px}
 .sol-rpg-bubble.is-below{transform:translate(-50%,calc(16px * var(--sprite-scale)))}.sol-rpg-bubble.is-below::after{bottom:auto;top:-7px;border:0;border-left:2px solid #1c1230;border-top:2px solid #1c1230}
 .sol-rpg-bubble.is-live{pointer-events:auto;max-width:290px;text-align:left}.sol-rpg-bubble p{margin:0 0 6px;font-size:12px;line-height:1.45}.sol-rpg-bubble p:last-child{margin-bottom:0}.sol-rpg-bubble .sol-rpg-clue{background:transparent;border-left:0;border-radius:0;padding:0}.sol-rpg-bubble h4{margin:6px 0 5px;font-size:12px;color:#3a2a10}.sol-rpg-bubble .sol-rpg-choices{display:grid;gap:5px;margin-bottom:2px}.sol-rpg-bubble .sol-rpg-choices button{padding:6px 9px;border:1px solid #8a7550;border-radius:7px;background:#fff6e0;color:#2a2118;text-align:left;font-size:11.5px;cursor:pointer}.sol-rpg-bubble .sol-rpg-choices button:hover,.sol-rpg-bubble .sol-rpg-choices button:focus-visible{background:#ffe9b8;outline:none}.sol-rpg-bubble .sol-rpg-reply{color:#7a4b0b!important;font-weight:600}.sol-rpg-bubble .sol-rpg-shrine-pattern{width:160px;margin:4px auto 2px}.sol-rpg-bubble .sol-rpg-shrine-pattern .sol-rpg-socket-glyph{font-size:14px}.sol-rpg-bubble .sol-rpg-pattern-key{font-size:10px!important;color:#5a4a30!important;margin:4px 0 0;text-align:left}
+.sol-rpg-chat-close{position:absolute;right:6px;top:4px;width:20px;height:20px;line-height:18px;text-align:center;padding:0;border:1px solid #8a7550;border-radius:50%;background:#fff6e0;color:#2a2118;font-size:14px}.sol-rpg-chat-log{max-height:170px;overflow-y:auto;margin:2px 0 6px;padding-right:18px}.sol-rpg-chat-turn{max-width:88%;padding:5px 9px;border-radius:9px;font-size:11.5px!important;line-height:1.4}.sol-rpg-chat-turn.is-assistant{margin-right:auto;background:#fff6e0;color:#2a2118!important}.sol-rpg-chat-turn.is-user{margin-left:auto;background:#3b5745;color:#eef6ee!important}.sol-rpg-chat-turn.is-pending{margin-right:auto;background:transparent;color:#7a6a50!important;font-style:italic}.sol-rpg-chat-form{display:flex;gap:6px}.sol-rpg-chat-input{flex:1;min-width:0;padding:6px 9px;border:1px solid #8a7550;border-radius:7px;background:#fff6e0;color:#2a2118;font-size:11.5px}.sol-rpg-chat-input::placeholder{color:#8a7c5c}.sol-rpg-chat-send{padding:6px 12px;border:1px solid #8a7550;border-radius:7px;background:#826f38;color:#fff4d8!important;font-size:11.5px!important;font-weight:650!important}
 .sol-rpg-treasure{display:block;width:100%;max-width:440px;aspect-ratio:240/130;margin:6px auto 2px;border-radius:12px;background:radial-gradient(ellipse at 50% 78%,#3d311d,#16130f 72%)}.sol-rpg-items{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:10px 0 4px;padding:0}.sol-rpg-item{padding:4px 11px;border-radius:999px;background:rgba(255,220,140,.12);border:1px solid rgba(255,220,140,.4);color:#ffe8b0;font-size:12px;font-weight:600}.sol-rpg-items.is-fresh .sol-rpg-item{animation:sol-rpg-item .45s ease both}@keyframes sol-rpg-item{from{opacity:0;transform:translateY(8px) scale(.9)}to{opacity:1;transform:none}}
 `

@@ -47,6 +47,8 @@ import { llmModelChoice } from './llm-model-choice.js'
 import { keyBelongsElsewhere } from './providers/key-owner.js'
 import { llmProviderRemoval } from './llm-provider-removal.js'
 import { foldedIntoOpenRouter } from './providers/openrouter-supersedes.js'
+import { instanceId } from './providers/openrouter-instances.js'
+import { openRouterStages, stageFor, stagePosition, stagePrice, type PriceStages } from './providers/openrouter-stages.js'
 import {
   checkLocalServer,
   localServerReport,
@@ -123,6 +125,12 @@ const catalogBrandName = (entry: OpenRouterCatalogEntry): string =>
   entry.name.includes(': ') ? entry.name.slice(0, entry.name.indexOf(': ')) : catalogBrand(entry.id)
 const catalogModelName = (entry: OpenRouterCatalogEntry): string =>
   entry.name.includes(': ') ? entry.name.slice(entry.name.indexOf(': ') + 2) : entry.name
+/** Output price in dollars per million tokens, or undefined when unpublished. */
+const catalogOutput = (entry: OpenRouterCatalogEntry): number | undefined => {
+  const n = Number(entry.completionPrice)
+  return entry.completionPrice !== undefined && Number.isFinite(n) && n >= 0 ? n * 1_000_000 : undefined
+}
+
 /** The API quotes dollars per TOKEN; people read per MILLION. */
 const catalogPrice = (entry: OpenRouterCatalogEntry): string => {
   const perMillion = (raw: string | undefined): string | undefined => {
@@ -190,6 +198,8 @@ export class ProvidersWindowView extends EventTarget {
   #hostsOpen = new Set<string>()
   /** What was typed into each domain's own search, by provider id. */
   #domainQuery = new Map<string, string>()
+  /** The price-stage stop to focus again after a redraw (arrow-key moves). */
+  #stageFocus: keyof PriceStages | null = null
   /** Rows whose key line the participant opened from the key icon while a
    *  key is saved. Saving closes it again; with no key it is always open. */
   #keyOpen = new Set<string>()
@@ -493,7 +503,9 @@ export class ProvidersWindowView extends EventTarget {
   /** Providers on one tab, already through the search filter. */
   #providersOn(tab: ProviderTab): LlmProviderDescriptor[] {
     return llmProviderRegistry().all()
-      .filter(p => tabOf(p) === tab && this.#matches(p) && !foldedIntoOpenRouter(p.id) && !this.#removed(p))
+      // A model added through OpenRouter shows as a line under OpenRouter,
+      // never a second time as a row of its own.
+      .filter(p => tabOf(p) === tab && this.#matches(p) && !foldedIntoOpenRouter(p.id) && !this.#removed(p) && !p.credentialsFrom)
   }
 
   /** Remember the tab without redrawing — for callers about to redraw anyway. */
@@ -527,20 +539,23 @@ export class ProvidersWindowView extends EventTarget {
     // The search's brand → model results sit first, right under the box.
     const picker = tab.id === 'api' ? this.#picker() : undefined
     if (picker) body.insertBefore(picker, body.firstChild)
-    for (const provider of providers) {
-      body.appendChild(this.#row(provider, varied))
-      // Models added through OpenRouter: one line each, right under it —
-      // AN ACCORDION. The lines show only while the domain is open (its own
-      // row, or one of its lines). There may be hundreds.
-      if (provider.id !== 'openrouter') continue
-      const lines = llmModelChoice.saved(provider.id)
-      const open = this.#openId === provider.id || !!this.#openId?.startsWith(`${provider.id}::`)
-      if (!open || !lines.length) continue
+    // THE MODELS ADDED, AS ONE FLAT LIST (Jaime, 2026-09-13: "you're not using
+    // OpenRouter as a configurator, you're using it as a category … it wipes
+    // out me being able to see the ones that are live"). OpenRouter is where
+    // an item is added, never a parent that hides them: every added model is
+    // always in view, grouped under a small company header, and OpenRouter
+    // stays an ordinary row for its endpoint and key.
+    const configurator = llmProviderRegistry().get('openrouter')
+    const lines = configurator && tabOf(configurator) === tab.id && !this.#removed(configurator)
+      ? llmModelChoice.saved(configurator.id)
+      : []
+    if (configurator && lines.length) {
       // A line shows the model's exact catalogue name; load the catalogue
       // once so a fresh window never shows a bare id (redraws on arrival).
       if (!cachedOpenRouterCatalog()) this.#catalogHas('')
-      body.appendChild(this.#domainLines(provider, lines))
+      body.appendChild(this.#domainLines(configurator, lines))
     }
+    for (const provider of providers) body.appendChild(this.#row(provider, varied))
     const removed = llmProviderRegistry().all()
       .filter(p => tabOf(p) === tab.id && this.#removed(p))
     if (removed.length) body.appendChild(this.#removedLine(removed))
@@ -736,8 +751,14 @@ export class ProvidersWindowView extends EventTarget {
       helperName.className = 'hc-policy-tier'
       helperName.textContent = this.#t('providers.orchestrator', 'Background helper')
 
+      // Automatic first (the mediator's pick among providers available to the
+      // orchestrator, never Local), then Local, then every provider that can
+      // run it — the models added through OpenRouter included; never a vendor
+      // folded into OpenRouter, nor OpenRouter itself, which only configures.
       const directTransports = new Set(['browser-http', 'host-relay'])
-      const helperCandidates = llmProviderRegistry().all().filter(p => directTransports.has(p.transport))
+      const helperCandidates = llmProviderRegistry().all()
+        .filter(p => directTransports.has(p.transport) && !foldedIntoOpenRouter(p.id) && !p.configurator)
+        .sort((a, b) => Number(b.id === 'local') - Number(a.id === 'local'))
 
       const helperWrap = document.createElement('span')
       helperWrap.className = 'hc-policy-pickwrap'
@@ -747,13 +768,19 @@ export class ProvidersWindowView extends EventTarget {
         'providers.orchestratorHint',
         'Who tags and summarizes a conversation for its sidebar workflow.',
       )
+      const automatic = document.createElement('option')
+      automatic.value = ''
+      automatic.textContent = this.#t('providers.orchestratorAuto', 'Automatic')
+      helperPicker.appendChild(automatic)
       for (const provider of helperCandidates) {
         const option = document.createElement('option')
         option.value = provider.id
         option.textContent = provider.id === 'local' ? this.#t('providers.orchestratorLocal', 'Local') : provider.label
         helperPicker.appendChild(option)
       }
-      helperPicker.value = llmPolicy.orchestratorProvider
+      // A named provider that is no longer offered runs as Automatic.
+      const helperChoice = llmPolicy.orchestratorProvider
+      helperPicker.value = helperCandidates.some(p => p.id === helperChoice) ? helperChoice : ''
       helperPicker.addEventListener('change', () => {
         llmPolicy.orchestratorProvider = helperPicker.value
         this.#render()
@@ -1067,8 +1094,10 @@ export class ProvidersWindowView extends EventTarget {
       chip.title = model.label ? `/${model.name} · ${model.id}` : model.id
       models.appendChild(chip)
     }
-    // OpenRouter's models are the lines added under it, not a roster.
+    // OpenRouter's models are the lines added under it, not a roster; its
+    // price stages decide which of them take which level of work.
     if (provider.id !== 'openrouter') detail.append(this.#label(this.#t('providers.models', 'Models')), models)
+    else detail.appendChild(this.#stageControl())
 
     // active switch + test — the two verbs.
     const actions = document.createElement('div')
@@ -1370,11 +1399,15 @@ export class ProvidersWindowView extends EventTarget {
   #picker(): HTMLElement | undefined {
     const query = this.#search.trim().toLowerCase()
     if (!query && !this.#pickBrand) return undefined
-    const all = cachedOpenRouterCatalog()
-    if (!all) {
+    const catalogue = cachedOpenRouterCatalog()
+    if (!catalogue) {
       this.#catalogHas(query) // warms the list; the console redraws when it lands
       return undefined
     }
+    // CAPPED BY THE PRICE STAGES: a model above the last stop is not offered.
+    const stages = openRouterStages.get()
+    const all = catalogue.filter(entry => stageFor(catalogOutput(entry), stages) !== 'over')
+    const hiddenByCap = catalogue.length - all.length
     const list = document.createElement('div')
     list.className = 'hc-provider-pick'
     const item = (label: string, meta: string, onClick: () => void): HTMLButtonElement => {
@@ -1417,10 +1450,21 @@ export class ProvidersWindowView extends EventTarget {
           this.#setSearch('')
         }))
       }
+      if (hiddenByCap) {
+        const capped = document.createElement('div')
+        capped.className = 'hc-provider-label'
+        capped.textContent = this.#t('providers.capHidden', '{count} more above your price stages')
+          .replace('{count}', String(hiddenByCap))
+        list.appendChild(capped)
+      }
       return list
     }
 
     // STEP 2 — MODELS OF THE BRAND. The brand sits above as a word with ×.
+    // The list STAYS OPEN after a pick (Jaime, 2026-09-13: "you should be able
+    // to have multiple models of the same provider"), so several of a brand's
+    // models are added in one go, each landing as its own line at once and
+    // marked "added" here. Esc or × closes it.
     const chip = document.createElement('div')
     chip.className = 'hc-provider-pick-chip'
     chip.appendChild(document.createTextNode(this.#pickBrandName || this.#pickBrand))
@@ -1436,32 +1480,63 @@ export class ProvidersWindowView extends EventTarget {
     const brand = this.#pickBrand
     const models = all.filter(entry => catalogBrand(entry.id) === brand
       && (!query || entry.id.toLowerCase().includes(query) || entry.name.toLowerCase().includes(query)))
+    const added = new Set(llmModelChoice.saved('openrouter'))
     for (const entry of models.slice(0, 60)) {
-      list.appendChild(item(catalogModelName(entry), catalogPrice(entry), () => {
+      const button = item(catalogModelName(entry), catalogPrice(entry), () => {
+        if (llmModelChoice.saved('openrouter').includes(entry.id)) return
         llmModelChoice.add('openrouter', entry.id)
         this.#openId = 'openrouter::' // open its domain so the new line is in view
-        this.#clearPick()
-      }))
+        this.#setSearch(this.#search)
+      })
+      if (added.has(entry.id)) {
+        const mark = document.createElement('span')
+        mark.className = 'hc-provider-catalog-price hc-provider-added'
+        mark.textContent = this.#t('providers.added', 'added')
+        button.appendChild(mark)
+      }
+      list.appendChild(button)
     }
     return list
   }
 
   /**
-   * A DOMAIN'S LINES — the open accordion section under a provider. Past a
-   * handful it gets a search of its own, because a domain can hold hundreds
-   * or thousands of models. The search filters in place, with no redraw, so
+   * THE ADDED MODELS — one flat list, always in view, never nested under
+   * the configurator that added them. Past a handful it gets a search of its
+   * own, because there can be hundreds or thousands of models. The search filters in place, with no redraw, so
    * typing keeps focus; what was typed survives a redraw, per domain.
+   *
+   * A DIVIDER PER COMPANY (Jaime, 2026-09-13): the lines are grouped by the
+   * company that makes the model, companies in name order and models in the
+   * order they were added, under a thin labelled rule about a third the
+   * height of a line. A filter that hides every line of a company hides its
+   * divider too.
    */
   #domainLines(provider: LlmProviderDescriptor, lines: readonly string[]): HTMLElement {
     const box = document.createElement('div')
     box.className = 'hc-provider-domain'
     const catalogue = cachedOpenRouterCatalog()
-    const rows = lines.map(modelId => {
-      const row = this.#modelRow(provider, modelId)
+    const companies = new Map<string, { name: string; divider: HTMLElement; rows: HTMLElement[] }>()
+    for (const modelId of lines) {
       const entry = catalogue?.find(e => e.id === modelId)
-      row.dataset['match'] = `${modelId} ${entry?.name ?? ''}`.toLowerCase()
-      return row
-    })
+      const slug = catalogBrand(modelId)
+      let company = companies.get(slug)
+      if (!company) {
+        const name = entry ? catalogBrandName(entry) : slug
+        const divider = document.createElement('div')
+        divider.className = 'hc-provider-company'
+        const label = document.createElement('span')
+        label.className = 'hc-provider-company-name'
+        label.textContent = name
+        divider.appendChild(label)
+        company = { name, divider, rows: [] }
+        companies.set(slug, company)
+      }
+      const row = this.#modelRow(provider, modelId)
+      row.dataset['match'] = `${modelId} ${entry?.name ?? ''} ${company.name}`.toLowerCase()
+      company.rows.push(row)
+    }
+    const groups = [...companies.values()].sort((a, b) => a.name.localeCompare(b.name))
+    const rows = groups.flatMap(group => group.rows)
     if (lines.length > DOMAIN_SEARCH_AT) {
       const search = document.createElement('input')
       search.className = 'hc-provider-input hc-provider-domain-search'
@@ -1471,12 +1546,118 @@ export class ProvidersWindowView extends EventTarget {
         const q = search.value.trim().toLowerCase()
         this.#domainQuery.set(provider.id, search.value)
         for (const row of rows) row.hidden = !!q && !(row.dataset['match'] ?? '').includes(q)
+        for (const group of groups) group.divider.hidden = group.rows.every(row => row.hidden)
       }
       search.addEventListener('input', apply)
       box.appendChild(search)
       apply()
     }
-    box.append(...rows)
+    for (const group of groups) box.append(group.divider, ...group.rows)
+    return box
+  }
+
+  /**
+   * PRICE STAGES — the stops of a gradient (Jaime, 2026-09-13). One track of
+   * output price per million tokens, three stops: up to the first is fast
+   * work, up to the second balanced, up to the third deep; above the last a
+   * model is left out of the list and never picked. Each model added sits on
+   * the track as a dot, so the stage it falls in shows at a glance. Drag a
+   * stop, or focus it and use the arrow keys. Stops never cross.
+   */
+  #stageControl(): HTMLElement {
+    const box = document.createElement('div')
+    box.className = 'hc-provider-stages'
+    const stages = openRouterStages.get()
+    const tiers = ['fast', 'balanced', 'deep'] as const
+    const money = (n: number): string => `$${n < 0.1 ? n.toFixed(3) : n.toFixed(2)}`
+
+    const track = document.createElement('div')
+    track.className = 'hc-provider-stage-track'
+    let from = 0
+    for (const tier of tiers) {
+      const to = stagePosition(stages[tier])
+      const band = document.createElement('div')
+      band.className = `hc-provider-stage-band is-${tier}`
+      band.style.left = `${from * 100}%`
+      band.style.width = `${Math.max(0, to - from) * 100}%`
+      track.appendChild(band)
+      from = to
+    }
+
+    const catalogue = cachedOpenRouterCatalog()
+    for (const modelId of llmModelChoice.saved('openrouter')) {
+      const entry = catalogue?.find(e => e.id === modelId)
+      const price = entry ? catalogOutput(entry) : undefined
+      if (price === undefined) continue
+      const dot = document.createElement('span')
+      dot.className = 'hc-provider-stage-dot'
+      dot.style.left = `${stagePosition(price) * 100}%`
+      dot.title = `${entry ? catalogModelName(entry) : modelId} · ${money(price)}`
+      track.appendChild(dot)
+    }
+
+    const legend = document.createElement('div')
+    legend.className = 'hc-provider-stage-legend'
+    const legendText = (values: PriceStages): string =>
+      tiers.map(tier => `${this.#t(`providers.tier.${tier}`, tier)} ≤ ${money(values[tier])}`).join(' · ')
+    legend.textContent = legendText(stages)
+
+    tiers.forEach((tier, index) => {
+      const lower = index > 0 ? stages[tiers[index - 1]] : 0
+      const upper = index < tiers.length - 1 ? stages[tiers[index + 1]] : Number.POSITIVE_INFINITY
+      const within = (value: number): number => Math.min(upper, Math.max(lower, value))
+      const commit = (value: number): void => {
+        this.#stageFocus = tier
+        openRouterStages.set({ ...openRouterStages.get(), [tier]: within(value) })
+        this.#render()
+      }
+
+      const stop = document.createElement('button')
+      stop.type = 'button'
+      stop.className = `hc-provider-stage-stop is-${tier}`
+      stop.style.left = `${stagePosition(stages[tier]) * 100}%`
+      stop.setAttribute('role', 'slider')
+      stop.setAttribute('aria-label', this.#t(`providers.tier.${tier}`, tier))
+      stop.setAttribute('aria-valuetext', money(stages[tier]))
+      stop.addEventListener('keydown', event => {
+        const up = event.key === 'ArrowRight' || event.key === 'ArrowUp'
+        const down = event.key === 'ArrowLeft' || event.key === 'ArrowDown'
+        if (!up && !down) return
+        event.preventDefault()
+        commit(stages[tier] * (up ? 1.1 : 1 / 1.1))
+      })
+      stop.addEventListener('pointerdown', event => {
+        event.preventDefault()
+        stop.setPointerCapture?.(event.pointerId)
+        const rect = track.getBoundingClientRect()
+        let value = stages[tier]
+        const move = (moved: PointerEvent): void => {
+          if (!rect.width) return
+          value = within(stagePrice((moved.clientX - rect.left) / rect.width))
+          stop.style.left = `${stagePosition(value) * 100}%`
+          legend.textContent = legendText({ ...stages, [tier]: value })
+        }
+        const release = (): void => {
+          stop.removeEventListener('pointermove', move)
+          commit(value)
+        }
+        stop.addEventListener('pointermove', move)
+        stop.addEventListener('pointerup', release, { once: true })
+      })
+      if (this.#stageFocus === tier) {
+        this.#stageFocus = null
+        requestAnimationFrame(() => stop.focus())
+      }
+      track.appendChild(stop)
+    })
+
+    const hint = document.createElement('div')
+    hint.className = 'hc-provider-label'
+    hint.textContent = this.#t(
+      'providers.stagesHint',
+      'Drag a stop, or use the arrow keys. Output price per million tokens; models above the last stop are left out.',
+    )
+    box.append(this.#label(this.#t('providers.stages', 'Price stages')), track, legend, hint)
     return box
   }
 
@@ -1508,7 +1689,10 @@ export class ProvidersWindowView extends EventTarget {
    */
   #modelRow(provider: LlmProviderDescriptor, modelId: string): HTMLElement {
     const entry = cachedOpenRouterCatalog()?.find(e => e.id === modelId)
-    const active = llmModelChoice.chosen(provider.id) === modelId
+    // Its own provider (openrouter-instances.ts). "active" means what it means
+    // on any row: the one chat would pick right now.
+    const instance = llmProviderRegistry().get(instanceId(modelId))
+    const active = !!instance && llmPolicy.designate(CHAT_NEED)?.providerId === instance.id
     const rowId = `${provider.id}::${modelId}`
     const row = document.createElement('div')
     row.className = 'hc-provider hc-provider-model-row'
@@ -1545,6 +1729,16 @@ export class ProvidersWindowView extends EventTarget {
       price.className = 'hc-provider-catalog-price'
       price.textContent = catalogPrice(entry)
       line.appendChild(price)
+      // Which level of work its price puts it in.
+      const stage = stageFor(catalogOutput(entry))
+      if (stage) {
+        const word = document.createElement('span')
+        word.className = 'hc-provider-catalog-price hc-provider-stage-word'
+        word.textContent = stage === 'over'
+          ? this.#t('providers.overCap', 'above your price stages')
+          : this.#t(`providers.tier.${stage}`, stage)
+        line.appendChild(word)
+      }
     }
     const link = (key: string, fallback: string, onClick: () => void): HTMLButtonElement => {
       const button = document.createElement('button')
@@ -1556,14 +1750,8 @@ export class ProvidersWindowView extends EventTarget {
     }
     const links = document.createElement('div')
     links.className = 'hc-provider-links'
-    if (!active) {
-      links.appendChild(link('providers.use', 'Use', () => {
-        llmModelChoice.choose(provider.id, modelId)
-        this.#render()
-      }))
-    }
     links.append(
-      link('providers.test', 'Test', () => { void this.#test(provider, modelId) }),
+      link('providers.test', 'Test', () => { void (instance ? this.#test(instance) : this.#test(provider, modelId)) }),
       link('providers.hosts', 'Hosts', () => {
         if (this.#hostsOpen.has(rowId)) this.#hostsOpen.delete(rowId)
         else this.#hostsOpen.add(rowId)
@@ -1576,8 +1764,23 @@ export class ProvidersWindowView extends EventTarget {
       }),
     )
     detail.append(line, links)
+    // Every model line is a provider of its own, so it has the same switch
+    // every provider row has: whether the orchestrator may pick it.
+    if (instance) {
+      const toggle = document.createElement('label')
+      toggle.className = 'hc-provider-toggle'
+      const checkbox = document.createElement('input')
+      checkbox.type = 'checkbox'
+      checkbox.checked = llmActivation.isEnabled(instance.id)
+      checkbox.addEventListener('change', () => {
+        llmActivation.setEnabled(instance.id, checkbox.checked)
+        this.#render()
+      })
+      toggle.append(checkbox, document.createTextNode(this.#t('providers.enabled', 'Available to the orchestrator')))
+      detail.appendChild(toggle)
+    }
     if (this.#hostsOpen.has(rowId)) detail.appendChild(this.#openRouterHosts(modelId))
-    const status = this.#status.get(provider.id)
+    const status = this.#status.get(instance?.id ?? provider.id)
     if (status) {
       const note = document.createElement('div')
       note.className = 'hc-provider-status'
@@ -1942,10 +2145,37 @@ export class ProvidersWindowView extends EventTarget {
       .hc-provider-pick-item:hover { background: rgba(${STEEL}, 0.08); }
       .hc-provider-pick-item .hc-provider-catalog-price { margin-left: auto; }
       .hc-provider-pick-chip { display: flex; align-items: center; gap: 0.4615em; font-weight: 600; padding: 0.1538em; }
-      .hc-provider-model-row > .hc-provider-head { padding-left: 1.2308em; }
       .hc-provider-model-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6154em; }
       .hc-provider-domain-search { display: block; width: 100%; box-sizing: border-box; margin: 0.3077em 0; }
       .hc-provider-domain > [hidden] { display: none !important; }
+      /* one company's divider: a third of a line's height (a line is ~2.55em) */
+      .hc-provider-company {
+        display: flex; align-items: center; gap: 0.6154em;
+        height: 0.8462em; margin-top: 0.3077em; padding-left: 0.1538em;
+      }
+      .hc-provider-company-name {
+        font-size: 0.6923em; line-height: 1; letter-spacing: 0.06em;
+        text-transform: uppercase; opacity: 0.7; white-space: nowrap;
+      }
+      .hc-provider-company::after { content: ''; flex: 1; height: 1px; background: rgba(${STEEL}, 0.18); }
+      .hc-provider-stages { margin: 0.6154em 0; }
+      .hc-provider-stage-track {
+        position: relative; height: 0.4615em; margin: 1.0769em 0.4615em 0.7692em;
+        border-radius: var(--hc-radius-control, 2px); background: rgba(${STEEL}, 0.12);
+      }
+      .hc-provider-stage-band { position: absolute; top: 0; bottom: 0; border-radius: var(--hc-radius-control, 2px); }
+      .hc-provider-stage-band.is-fast { background: rgba(${STEEL}, 0.28); }
+      .hc-provider-stage-band.is-balanced { background: rgba(${STEEL}, 0.48); }
+      .hc-provider-stage-band.is-deep { background: rgba(${STEEL}, 0.68); }
+      .hc-provider-stage-stop {
+        position: absolute; top: 50%; width: 0.9231em; height: 0.9231em; margin: -0.4615em 0 0 -0.4615em;
+        padding: 0; border: none; border-radius: 50%; background: currentColor; cursor: ew-resize; touch-action: none;
+      }
+      .hc-provider-stage-dot {
+        position: absolute; top: 50%; width: 0.3846em; height: 0.3846em; margin: -0.1923em 0 0 -0.1923em;
+        border-radius: 50%; background: rgba(${STEEL}, 1);
+      }
+      .hc-provider-stage-legend { font-size: 0.9231em; opacity: 0.85; }
       /* THE FOOT — a status bar that opens upward into the pickers. */
       .hc-providers-foot {
         flex: none; display: flex; flex-direction: column;

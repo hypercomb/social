@@ -101,6 +101,13 @@ export type LlmModelDescriptor = {
   readonly tier: LlmTier
   /** Optional participant-facing label; `name` remains the command alias. */
   readonly label?: string
+  /** Published price in dollars per million tokens (OpenRouter's catalogue).
+   *  The mediator's fit tiebreak reads it: cheapest for fast work, most
+   *  capable for deep work. */
+  readonly inputPerMillion?: number
+  readonly outputPerMillion?: number
+  /** The model's context window in tokens, when published. */
+  readonly contextLength?: number
 }
 
 export type LlmSubscriptionUsage = {
@@ -200,6 +207,14 @@ export type LlmProviderDescriptor = {
    * (Ollama) and the host-relay tier do not.
    */
   readonly requiresKey?: boolean
+
+  /** The provider whose key, hive grant and read budget this one uses —
+   *  set on every model added through OpenRouter (credential-owner.ts). */
+  readonly credentialsFrom?: string
+
+  /** A configurator, not an answerer: where models are chosen, never an
+   *  automatic pick itself (OpenRouter). Still callable when named. */
+  readonly configurator?: boolean
 
   /**
    * HONESTY FLAG. Only `agent-bridge` responders can walk the participant's

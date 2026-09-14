@@ -173,3 +173,108 @@ describe('the bounded live hive tree reader', () => {
   })
 })
 
+
+describe('the read cache', () => {
+  it('reuses a repeated read without walking the store again, and its snapshot still validates', async () => {
+    const fx = fixture()
+    const first = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+    const walked = fx.getLayerBySig.mock.calls.length
+    const again = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+    expect(fx.getLayerBySig.mock.calls.length).toBe(walked)
+    expect(again.ok && first.ok && again.layerSig).toBe(first.ok ? first.layerSig : undefined)
+    expect(again.ok && again.snapshot).toBeTruthy()
+    expect(again.ok && first.ok && again.snapshot !== first.snapshot).toBe(true)
+    if (again.ok && again.snapshot) expect(await fx.reader.validateSnapshots([again.snapshot])).toBe(true)
+  })
+
+  it('reads fresh the moment the tree changes', async () => {
+    const fx = fixture()
+    await fx.reader.readTree([], { maxDepth: 2, maxNodes: 48, maxBytes: 8_000 })
+    const walked = fx.getLayerBySig.mock.calls.length
+    await fx.reader.readTree([], { maxDepth: 2, maxNodes: 48, maxBytes: 8_000 })
+    expect(fx.getLayerBySig.mock.calls.length).toBe(walked)
+    fx.epoch.value++
+    await fx.reader.readTree([], { maxDepth: 2, maxNodes: 48, maxBytes: 8_000 })
+    expect(fx.getLayerBySig.mock.calls.length).toBeGreaterThan(walked)
+  })
+
+  it('keeps a read by signature across tree changes — that content never changes', async () => {
+    const fx = fixture()
+    const first = await fx.reader.readNodeBySig(sig(5), { maxBytes: 8_000 })
+    expect(first.ok).toBe(true)
+    const walked = fx.getLayerBySig.mock.calls.length
+    fx.epoch.value++
+    await fx.reader.readNodeBySig(sig(5), { maxBytes: 8_000 })
+    expect(fx.getLayerBySig.mock.calls.length).toBe(walked)
+  })
+
+  it('never keeps a failed read', async () => {
+    const fx = fixture()
+    expect(await fx.reader.readNode(['missing'], { maxBytes: 8_000 })).toMatchObject({ ok: false })
+    const walked = fx.settled.mock.calls.length
+    await fx.reader.readNode(['missing'], { maxBytes: 8_000 })
+    expect(fx.settled.mock.calls.length).toBeGreaterThan(walked)
+  })
+})
+
+describe('opening what a signature names', () => {
+  const readerWith = (store: unknown, extra: readonly [string, unknown][] = []): HypercombHiveTreeReader => {
+    const services = new Map<string, unknown>([[STORE, store], ...extra])
+    return new HypercombHiveTreeReader(<T>(key: string): T | undefined => services.get(key) as T | undefined)
+  }
+
+  it('opens a module from the bees pool a page at a time, without reading a page twice', async () => {
+    const source = 'x'.repeat(1_500)
+    const getBeeBytes = vi.fn(async () => new TextEncoder().encode(source))
+    const reader = readerWith({ getResource: vi.fn(async () => null), getBeeBytes, getDependencyBytes: vi.fn(async () => null) })
+    expect(await reader.readBytesBySig(sig(5), { maxBytes: 1_000 }))
+      .toMatchObject({ ok: true, of: 'bee', type: 'text/javascript', from: 0, size: 1_500, truncated: true, next: 1_000 })
+    const rest = await reader.readBytesBySig(sig(5), { from: 1_000, maxBytes: 1_000 })
+    expect(rest).toMatchObject({ ok: true, from: 1_000, truncated: false })
+    expect(rest.ok && rest.text?.length).toBe(500)
+    await reader.readBytesBySig(sig(5), { maxBytes: 1_000 })
+    expect(getBeeBytes).toHaveBeenCalledTimes(2)
+  })
+
+  it('opens a resource as text, reports bytes that are not text by type and size, and says when nothing is there', async () => {
+    const blobs = new Map<string, Blob>([
+      [sig(6), new Blob(['{"note":"hello"}'], { type: 'application/json' })],
+      [sig(7), new Blob([new Uint8Array([0xff, 0x00, 0xfe])], { type: 'image/png' })],
+    ])
+    const reader = readerWith({ getResource: vi.fn(async (s: string) => blobs.get(s) ?? null) })
+    expect(await reader.readBytesBySig(sig(6))).toMatchObject({ ok: true, of: 'resource', type: 'application/json', text: '{"note":"hello"}' })
+    const image = await reader.readBytesBySig(sig(7))
+    expect(image).toMatchObject({ ok: true, of: 'resource', type: 'image/png', size: 3 })
+    expect(image.ok && image.text).toBeUndefined()
+    expect(await reader.readBytesBySig(sig(8))).toMatchObject({ ok: false, code: 'not-found' })
+  })
+
+  it('lists the running code by name, filtered by a word', async () => {
+    const reader = readerWith({ getResource: vi.fn(async () => null) }, [
+      ['@hypercomb.social/ScriptPreloader', { actions: [{ signature: sig(9), name: 'history-service' }, { signature: sig(10), name: 'layer-committer' }] }],
+      ['@hypercomb.social/DependencyLoader', { loadedSignatures: [sig(11)] }],
+    ])
+    expect(await reader.listCode('')).toMatchObject({ ok: true, total: 3, truncated: false })
+    const some = await reader.listCode('history')
+    expect(some.ok && some.entries).toEqual([{ name: 'history-service', sig: sig(9), of: 'bee' }])
+  })
+})
+
+describe('signatures are the lookup keys', () => {
+  it('keeps a route only as the signature it resolved to, so reading that signature afterwards walks nothing', async () => {
+    const fx = fixture()
+    const byRoute = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+    if (!byRoute.ok) throw new Error('route read failed')
+    const walked = fx.getLayerBySig.mock.calls.length
+
+    const bySig = await fx.reader.readNodeBySig(byRoute.layerSig, { maxBytes: 8_000, withContent: true })
+    expect(fx.getLayerBySig.mock.calls.length).toBe(walked)
+    expect(bySig).toMatchObject({ ok: true, root: byRoute.layerSig, layerSig: byRoute.layerSig, children: byRoute.children })
+
+    // and the route again: looked up through the same signature, with a fresh snapshot that validates
+    const again = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+    expect(fx.getLayerBySig.mock.calls.length).toBe(walked)
+    expect(again).toMatchObject({ ok: true, root: byRoute.root, name: byRoute.name, layerSig: byRoute.layerSig })
+    if (again.ok && again.snapshot) expect(await fx.reader.validateSnapshots([again.snapshot])).toBe(true)
+  })
+})

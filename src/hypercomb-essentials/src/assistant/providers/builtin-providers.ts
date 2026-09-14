@@ -17,6 +17,8 @@ import './xai.provider.js'
 import './deepseek.provider.js'
 import './mistral.provider.js'
 import './openrouter.provider.js'
+// Not a vendor: one provider per model added through OpenRouter.
+import './openrouter-instances.js'
 import './local.provider.js'
 
 // Not a vendor either: the heartbeat that asks the machine's own model server
