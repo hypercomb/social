@@ -10,8 +10,15 @@
 //
 // ── THE ADDRESS OF AN OFFERING IS ITS SIGNATURE, NEVER ITS PATH ───────────
 //
-// This gate reads exactly ONE mark carrier: `sigMarksOf` — the marks the
-// participant put on exact BYTES, in the `pheromones:content` pool.
+// This gate reads two mark carriers, both keyed by the SAME signature and
+// merged before judging: `sigMarksOf` — the marks THIS participant put on
+// exact BYTES, in `pheromones:content` — and `depositKindsOf` — the marks
+// somebody else (a person, or an agent that read the content) authored on
+// those same bytes, in `pheromones:deposits` (pheromone-deposits.ts). This is
+// the 2026-09-13 reframe in documentation/pheromones.md: "we get the author
+// of the pheromones or read them from other people and if they match our
+// interests then we get to see the content." Neither carrier is ever the
+// location carrier.
 //
 // It used to read the location carrier too (`tagsForSegments`), and that was
 // a false-evidence bug rather than a missing feature. A location is where a
@@ -30,18 +37,20 @@
 //
 // A signature cannot collide that way: it names the bytes themselves, so a
 // mark keyed by one is about the thing being offered no matter whose hive it
-// came from or where it would sit. That is the only carrier admissible at
-// intake, and dropping the other one is why `IntakeTarget` is now a signature
-// and nothing else.
+// came from or where it would sit. That is the only KIND of carrier
+// admissible at intake — location is out, signature (own marks or authored
+// deposits, both keyed the same way) is in — and it is why `IntakeTarget` is
+// a signature and nothing else.
 //
-// ── two gates over one carrier ────────────────────────────────────────────
+// ── two gates over two carriers ───────────────────────────────────────────
 //
-//   `allowsHere`  — sync. Reads `sigMarksKnown`, the in-memory record cache,
-//                   and never awaits. For a render or a mid-gesture decision,
-//                   where an OPFS read on every peer tile of every frame is
-//                   not affordable. An unread signature answers "allow" and
-//                   the read is kicked, so the next pass has an answer.
-//   `allows`      — async. Awaits the record read. For a COMMIT, where the
+//   `allowsHere`  — sync. Reads `sigMarksKnown` and `depositKindsKnown`, the
+//                   in-memory record caches, and never awaits. For a render
+//                   or a mid-gesture decision, where an OPFS read on every
+//                   peer tile of every frame is not affordable. Either
+//                   carrier unread answers "allow" and kicks its own read,
+//                   so the next pass has an answer.
+//   `allows`      — async. Awaits both record reads. For a COMMIT, where the
 //                   round trip is affordable and the answer is authoritative.
 //
 // That is `hide first, delete second`: the cheap gate suppresses what it
@@ -65,6 +74,7 @@
 // Full doctrine: documentation/intake-filter.md.
 
 import { sigMarksKnown, sigMarksOf } from './pheromone-marks.js'
+import { depositKindsKnown, depositKindsOf } from './pheromone-deposits.js'
 
 const get = <T,>(key: string): T | undefined => (window as any).ioc?.get?.(key) as T | undefined
 
@@ -175,6 +185,19 @@ const kick = (sig: string): void => {
   )
 }
 
+/** The same kick, for the authored-deposits carrier. Two independent sets on
+ *  purpose: the two reads land at different times (different pools), and one
+ *  landing must not stop the other's retry. */
+const kickedDeposits = new Set<string>()
+const kickDeposits = (sig: string): void => {
+  if (kickedDeposits.has(sig)) return
+  kickedDeposits.add(sig)
+  void depositKindsOf(sig).then(
+    () => { if (!depositKindsKnown(sig)) kickedDeposits.delete(sig) },
+    () => { kickedDeposits.delete(sig) },
+  )
+}
+
 /**
  * SYNCHRONOUS verdict from the marks already in hand.
  *
@@ -194,15 +217,15 @@ export const allowsHere = (target: IntakeTarget): boolean => {
   if (!filtering(reg)) return true
   const sig = String(target.sig ?? '').toLowerCase()
   if (!SIG_RE.test(sig)) return reg.allows([])
-  const known = sigMarksKnown(sig)
-  if (known) return reg.allows(known)
-  // NEVER READ. Allow, and kick the read so the NEXT pass can refuse. Peer
-  // content re-renders on every relay arrival and every `synchronize`, so a
-  // marked signature is suppressed within a frame or two of first sight —
-  // which is what `hide first` can honestly promise when the evidence lives
-  // on disk. The authoritative refusal is `allows`, at the commit.
-  kick(sig)
-  return true
+  const own = sigMarksKnown(sig)
+  const authored = depositKindsKnown(sig)
+  // EITHER SIDE UNREAD is the same "no idea yet" as before: allow, and kick
+  // whichever carrier has not landed so the next pass has more evidence. A
+  // carrier that HAS landed is not re-kicked just because its sibling hasn't.
+  if (own === undefined) kick(sig)
+  if (authored === undefined) kickDeposits(sig)
+  if (own === undefined || authored === undefined) return true
+  return reg.allows(own.length || authored.length ? [...own, ...authored] : own)
 }
 
 /**
@@ -221,7 +244,9 @@ export const allows = async (target: IntakeTarget): Promise<boolean> => {
   await warm(reg)
   if (!filtering(reg)) return true
   const sig = String(target.sig ?? '').toLowerCase()
-  return reg.allows(SIG_RE.test(sig) ? await sigMarksOf(sig) : [])
+  if (!SIG_RE.test(sig)) return reg.allows([])
+  const [own, authored] = await Promise.all([sigMarksOf(sig), depositKindsOf(sig)])
+  return reg.allows(own.length || authored.length ? [...own, ...authored] : own)
 }
 
 // The gate, reachable from OUTSIDE essentials — the same loose-IoC seam

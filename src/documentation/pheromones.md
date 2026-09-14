@@ -1,6 +1,14 @@
 # Pheromones — living signals over dead labels
 
-**Status: DESIGN — pinned 2026-07-09 (Jaime). Not built.**
+**Status: PARTLY BUILT (2026-09-13).** Signing, verifying, minting and local
+reading of authored deposits: `hypercomb-essentials/src/pheromones/pheromone-
+deposits.ts`, consulted by the intake gate alongside this participant's own
+marks (`intake-filter.md`'s "Authored deposits" section has the detail). NOT
+yet built: carrying a deposit across a hive boundary alongside the content it
+marks (the publish/probe half — see *Not now* below), decay/evaporation as a
+read-time computation, the reserved negative vocabulary, and the pheromone
+window as an authoring surface. The rest of this document is still the
+original 2026-07-09 design pin; sections describing what is unbuilt say so.
 Companions: `public-content-endpoint.md` (the shelf this curates),
 `optimize-phase.md` (where fields are minted),
 `intake-filter.md` (the other half — marks filtering what you TAKE IN, where
@@ -98,6 +106,15 @@ same append-only sigbag lineages as everything else — living in the
 ```
 <opfs root>/<sign('pheromones:deposits')>/<lineage-per-target>/0000, 0001, …
 ```
+
+**As built (2026-09-13):** many independent authors can deposit on one
+target, so "one lineage per target" is bucketed per depositor underneath it —
+`<pool>/<targetSig>/<depositorPubkey>/0000, 0001, …` — the same reconciliation
+`molecule/facet-succession.ts` already makes between "one lineage per facet"
+(doctrine) and "bucketed per author" (implementation). Reading unions every
+bucket under a target; only THIS participant's own next marker number is
+ever computed, so two depositors can never collide on a marker name. Full
+rationale: `pheromone-deposits.ts`'s own header comment.
 
 - One lineage per target; each **deposit appends one marker** referencing
   a sig-addressed deposit record (signed event bytes at the content root
@@ -544,9 +561,25 @@ counter-markable (an author's "disputed" reply riding the same trail).
 
 ## Not now
 
-Build after the public write path + share UX land. First slice when it
-comes: deposit event shape + per-sig field in a derived-cache pool + one
-filter consumer (discovery surface), negative-kind included from day one
-— with the reserved set defined in that same slice, since retrofitting a
-mandatory vocabulary after noses ship is a breaking change for every
-consumer.
+**First slice LANDED 2026-09-13**, ahead of the public write path this
+section originally said to wait for: deposit event shape + signing +
+verifying + local mint/read (`pheromone-deposits.ts`) + one filter consumer,
+the intake gate (`intake-filter.md`). It shipped without the negative-kind
+vocabulary or a derived-cache field — those are still owed, and retrofitting
+the reserved set later remains a breaking change for every consumer, so it
+should land before this is exposed as a general-purpose discovery surface.
+
+Still not now:
+
+- **Carrying a deposit across a hive boundary** alongside the content it
+  marks — a `pheromones:deposits`-scoped `published-pools.ts` handler so a
+  probe can fetch a specific author's marks for a specific signature, rather
+  than only reading whatever markers already happen to be in this
+  participant's own pool (`intake-filter.md`'s "Owed" has the detail).
+- **Decay/evaporation** as an actual read-time computation over multiple
+  deposits — today every verified deposit counts equally and forever; nothing
+  ages one out.
+- **The reserved negative vocabulary** and the sybil-weighted aggregation.
+- **The pheromone window as a deliberate authoring surface** — `mintDeposit`
+  exists and is callable, by a person's gesture or an agent's routine alike,
+  but nothing in the shell calls it yet.

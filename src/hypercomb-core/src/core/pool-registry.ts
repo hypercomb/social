@@ -157,6 +157,14 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // localStorage still holds a mirror of it, but only as a boot cache: the
   // completions are read synchronously and cannot wait on an OPFS round trip.
   'habits:spoken',
+  // Authored, signed marks on exact bytes from ANYONE — a person, another
+  // participant, or an agent that read the content — never the participant's
+  // own tag taxonomy (documentation/pheromones.md's 2026-09-13 reframe: a
+  // pheromone is an interest-signal, not a classifier). One bucket per
+  // (target signature, depositor pubkey) underneath the target, so
+  // independent depositors never collide; unioned at read time. Written and
+  // read by PheromoneDeposits (essentials/pheromones/pheromone-deposits.ts),
+  // truth pool, never minted from the optimize phase.
   'pheromones:deposits',
   // Sig-keyed author marks — one record per TARGET signature, member named
   // by that sig (the substrate:references pattern: the pool listing IS the

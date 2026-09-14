@@ -331,14 +331,47 @@ default set that opens the cycle and that the participant can replace entirely.
   one word, in the same subsystem. The same shape as the two lists both called
   "community" above, and worth settling before the word spreads further.
 
+## Authored deposits — the ceiling partly lifted (BUILT 2026-09-13)
+
+`pheromones/pheromone-deposits.ts` adds a SECOND signature-keyed carrier
+alongside `sigMarksOf`: `depositKindsOf` / `depositKindsKnown`, verified marks
+somebody else — a person, or an agent that read the content — authored on
+exact bytes via a signed nostr event (`PHEROMONE_DEPOSIT_KIND`). Storage is
+`sign('pheromones:deposits')/<targetSig>/<depositorPubkey>/<marker>`, one
+bucket per (target, author) so independent depositors never collide, unioned
+at read time (documentation/pheromones.md has the full storage rationale).
+Both gates (`allowsHere`, `allows`) now merge `sigMarksOf ∪ depositKindsOf`
+before asking the registry anything — an authored deposit judges exactly like
+an own mark, and neither carrier can veto the other's evidence. Proven end to
+end in `intake-filter-seam.spec.ts`'s "deposits authored by somebody else"
+suite, including a stranger's independently-keyed signature and a tamper
+check.
+
+What this does NOT yet do: carry a deposit ALONGSIDE the content it marks
+when that content crosses a hive boundary (the mesh/publish half — see
+documentation/pheromones.md "Not now"). `mintDeposit` mints locally and
+`depositKindsOf` reads whatever is already in this participant's own pool —
+which today means their own deposits, or a peer's deposits that arrived by
+some other path already union-merged into the same pool by the general
+lineage-bag replication this participant's OPFS already does for any pool.
+Nothing yet REACHES OUT to fetch a specific domain's deposits for a specific
+signature the way `published-pools.ts` fetches other content.
+
 ## Owed
 
-- **Marks that travel with content.** The ceiling stated above: the carrier is
-  participant-local, so a KEEP set can only narrow what you already hold and a
-  DROP cannot fire on a mark nobody local recorded. Community deposits arriving
-  alongside the bytes are what would lift it — and it is now the ONLY thing
-  standing between the gate and being useful against a stranger, the location
-  carrier having been correctly taken out of it.
+- **Deposits published and probed like any other pool.** A domain that wants
+  its deposits discoverable needs a `pheromones:deposits`-scoped
+  `published-pools.ts` handler (the `set` pool kind already `replicates`, so
+  `registerPublishedPool` will accept the meaning) so a probe can fetch a
+  specific author's marks for a specific signature rather than waiting for
+  them to already be present locally.
+- **A surface for authoring a deposit deliberately**, as opposed to
+  `mintDeposit` being called programmatically. The pheromone window remains
+  the place a person would do this; nothing wires it there yet.
+- **An agent that actually calls `mintDeposit` on its own.** The doctrine
+  point (no special case between a person and an agent) is satisfied
+  structurally — `mintDeposit` does not know or care who calls it — but no
+  routine in the tree calls it autonomously yet.
 - **A surface for editing an interest.** The registry, the gate and its three
   sites are built and proven end to end
   ([`intake-filter-seam.spec.ts`](../intake-filter-seam.spec.ts) drives the real

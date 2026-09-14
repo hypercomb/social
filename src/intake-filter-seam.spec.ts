@@ -25,6 +25,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
+import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools'
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>
@@ -63,15 +64,31 @@ vi.hoisted(() => {
 const sign = async (text: string): Promise<string> =>
   await SignatureService.sign(new TextEncoder().encode(text).buffer as ArrayBuffer)
 
+/** A directory entry as `entries()` yields it — a file readable through
+ *  `getFile()`, or a nested directory that is itself a full `FakeDir`. Real
+ *  `FileSystemDirectoryHandle.entries()` yields handles usable exactly like
+ *  ones from `getFileHandle`/`getDirectoryHandle`, which is what lets
+ *  pheromone-deposits.ts recurse into an author bucket without a second
+ *  lookup — this fake matches that shape rather than a flattened one. */
 type FakeDir = {
-  meaning: string
+  meaning?: string
+  kind: 'directory'
   files: Map<string, string>
+  dirs: Map<string, FakeDir>
   getFileHandle(name: string, opts?: { create?: boolean }): Promise<{
+    kind: 'file'
     getFile(): Promise<{ text(): Promise<string> }>
     createWritable(): Promise<{ write(data: unknown): Promise<void>; close(): Promise<void> }>
   }>
+  getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<FakeDir>
   removeEntry(name: string): Promise<void>
+  entries(): AsyncGenerator<[string, { kind: 'file' | 'directory' }]>
 }
+
+const notFound = (name: string): Error =>
+  typeof DOMException !== 'undefined'
+    ? new DOMException(`${name} not found`, 'NotFoundError')
+    : Object.assign(new Error(`${name} not found`), { name: 'NotFoundError' })
 
 const makeStore = () => {
   const resources = new Map<string, string>()
@@ -86,23 +103,24 @@ const makeStore = () => {
    *  every assertion here would still pass. */
   const opened: string[] = []
 
-  const dir = (meaning: string): FakeDir => {
+  const dir = (meaning?: string): FakeDir => {
     const files = new Map<string, string>()
-    return {
+    const dirs = new Map<string, FakeDir>()
+    const handle: FakeDir = {
       meaning,
+      kind: 'directory',
       files,
+      dirs,
       getFileHandle: async (name: string, opts?: { create?: boolean }) => {
         // ABSENCE IS REPORTED BY `name`, exactly as OPFS and the native shim
         // report it (`new DOMException(..., 'NotFoundError')`). `readRecord`
         // now reads that name to tell "no record here" — an answer — from "the
         // pool would not read" — not an answer. A fake that threw a plain
         // Error made every absent member look like a failed read.
-        if (!files.has(name) && !opts?.create) {
-          throw typeof DOMException !== 'undefined'
-            ? new DOMException(`${name} not found`, 'NotFoundError')
-            : Object.assign(new Error(`${name} not found`), { name: 'NotFoundError' })
-        }
+        if (!files.has(name) && !opts?.create) throw notFound(name)
+        if (!files.has(name)) files.set(name, '')
         return {
+          kind: 'file' as const,
           getFile: async () => ({ text: async () => files.get(name) ?? '' }),
           createWritable: async () => ({
             write: async (data: unknown) => { files.set(name, String(data)) },
@@ -110,8 +128,28 @@ const makeStore = () => {
           }),
         }
       },
-      removeEntry: async (name: string) => { files.delete(name) },
+      getDirectoryHandle: async (name: string, opts?: { create?: boolean }) => {
+        let held = dirs.get(name)
+        if (!held) {
+          if (!opts?.create) throw notFound(name)
+          held = dir()
+          dirs.set(name, held)
+        }
+        return held
+      },
+      removeEntry: async (name: string) => { files.delete(name); dirs.delete(name) },
+      async *entries() {
+        for (const [name, sub] of dirs) yield [name, sub] as [string, FakeDir]
+        for (const name of files.keys()) {
+          yield [name, {
+            kind: 'file' as const,
+            getFile: async () => ({ text: async () => files.get(name) ?? '' }),
+            createWritable: async () => ({ write: async () => { /* unused in reads */ }, close: async () => { /* unused in reads */ } }),
+          }] as [string, { kind: 'file' }]
+        }
+      },
     }
+    return handle
   }
 
   return {
@@ -160,6 +198,9 @@ let store: ReturnType<typeof makeStore>
 const { InterestRegistry } = await import('./hypercomb-shared/core/interest-registry.js')
 const { addSigMark } = await import('./hypercomb-essentials/src/pheromones/pheromone-marks.js')
 const { allows, allowsHere } = await import('./hypercomb-essentials/src/pheromones/intake-filter.js')
+const { NostrSigner } = await import('./hypercomb-essentials/src/sharing/nostr-signer.js')
+const { mintDeposit, depositPreimage, PHEROMONE_DEPOSIT_KIND } =
+  await import('./hypercomb-essentials/src/pheromones/pheromone-deposits.js')
 
 /** Both modules under test hold PROCESS-LIFETIME caches — the mark record
  *  cache and the gate's kick-once set — so a signature reused across tests
@@ -186,10 +227,43 @@ const withoutStore = (reg: unknown): void => {
   ;(window as any).__ioc = { '@hypercomb.social/InterestRegistry': reg }
 }
 
+/** A signed deposit from a participant this store has never otherwise heard
+ *  from — an independent keypair, exactly what "read them from other people"
+ *  means. Written straight into the pool, bypassing `mintDeposit`, the same
+ *  way `markOnDisk` bypasses `addSigMark`: this is what a peer's deposit
+ *  looks like to a cold cache, not what minting it locally looks like. */
+const depositFromStranger = async (target: string, kind: string): Promise<string> => {
+  const sk = generateSecretKey()
+  const pubkey = getPublicKey(sk)
+  const at = Math.floor(Date.now() / 1000)
+  const content = depositPreimage(target, kind, pubkey, at)
+  const evt = finalizeEvent({ kind: PHEROMONE_DEPOSIT_KIND, created_at: at, tags: [['d', target], ['k', kind]], content }, sk)
+  const recordSig = await store.putResource(new Blob([JSON.stringify(evt)]))
+  const pool = await store.getPool('pheromones:deposits')
+  const targetBucket = await pool.getDirectoryHandle(target, { create: true })
+  const authorBucket = await targetBucket.getDirectoryHandle(pubkey, { create: true })
+  const marker = await authorBucket.getFileHandle('00000000', { create: true })
+  const writable = await marker.createWritable()
+  try { await writable.write(recordSig) } finally { await writable.close() }
+  return pubkey
+}
+
 const put = (reg: unknown): void => {
   ;(window as any).__ioc = {
     '@hypercomb.social/Store': store,
     '@hypercomb.social/InterestRegistry': reg,
+  }
+}
+
+/** `put`, plus the REAL `NostrSigner` — for `mintDeposit`, which needs an
+ *  identity to sign with. localStorage persists its minted key across every
+ *  test in this file (one jsdom document per file), so this participant's
+ *  depositor pubkey is stable; that is fine here, nothing asserts otherwise. */
+const putWithSigner = (reg: unknown): void => {
+  ;(window as any).__ioc = {
+    '@hypercomb.social/Store': store,
+    '@hypercomb.social/InterestRegistry': reg,
+    '@diamondcoreprocessor.com/NostrSigner': new NostrSigner(),
   }
 }
 
@@ -457,5 +531,96 @@ describe('the real registry, through the real gate', () => {
     const bad = await freshSig()
     await addSigMark(bad, 'malicious')
     expect(await allows({ sig: bad })).toBe(false)
+  })
+
+  // ── authored deposits — the 2026-09-13 reframe, end to end ──────────────
+  //
+  // "We get the author of the pheromones or read them from other people and
+  // if they match our interests then we get to see the content." Everything
+  // above proves the gate against THIS participant's own marks; these prove
+  // it against marks somebody ELSE authored — a different key, verified
+  // independently, never trusted by directory position alone.
+  describe('deposits authored by somebody else', () => {
+    it('a DROP interest refuses content only a stranger marked', async () => {
+      const reg = new InterestRegistry()
+      put(reg)
+      await reg.save('junk', ['malicious'])
+      await reg.setRole('drop', 'junk')
+
+      const bad = await freshSig()
+      await depositFromStranger(bad, 'malicious')
+
+      expect(await allows({ sig: bad })).toBe(false)
+    })
+
+    it('a KEEP interest is satisfied by a stranger\'s deposit alone', async () => {
+      const reg = new InterestRegistry()
+      put(reg)
+      await reg.save('mine', ['cigars'])
+      await reg.setRole('keep', 'mine')
+
+      const wanted = await freshSig()
+      const other = await freshSig()
+      await depositFromStranger(wanted, 'cigars')
+      await depositFromStranger(other, 'knitting')
+
+      expect(await allows({ sig: wanted })).toBe(true)
+      expect(await allows({ sig: other })).toBe(false)
+    })
+
+    // TAMPER EVIDENCE — proves the crypto gate is not a no-op. A record whose
+    // signature no longer matches its (edited) content must read as though it
+    // were never deposited at all, not as a refusal in the wrong direction.
+    it('a deposit record edited after signing is not honoured', async () => {
+      const reg = new InterestRegistry()
+      put(reg)
+      await reg.save('junk', ['malicious'])
+      await reg.setRole('drop', 'junk')
+
+      const target = await freshSig()
+      const sk = generateSecretKey()
+      const pubkey = getPublicKey(sk)
+      const at = Math.floor(Date.now() / 1000)
+      const evt = finalizeEvent(
+        { kind: PHEROMONE_DEPOSIT_KIND, created_at: at, tags: [['d', target], ['k', 'malicious']], content: depositPreimage(target, 'malicious', pubkey, at) },
+        sk,
+      )
+      ;(evt as unknown as { content: string }).content = depositPreimage(target, 'friendly', pubkey, at) // tampered post-signature
+      const recordSig = await store.putResource(new Blob([JSON.stringify(evt)]))
+      const pool = await store.getPool('pheromones:deposits')
+      const targetBucket = await pool.getDirectoryHandle(target, { create: true })
+      const authorBucket = await targetBucket.getDirectoryHandle(pubkey, { create: true })
+      const marker = await authorBucket.getFileHandle('00000000', { create: true })
+      const w = await marker.createWritable()
+      try { await w.write(recordSig) } finally { await w.close() }
+
+      expect(await allows({ sig: target })).toBe(true) // the tampered mark is not read at all
+    })
+
+    it('mintDeposit signs, stores, and reads back its own deposit', async () => {
+      const reg = new InterestRegistry()
+      putWithSigner(reg)
+      await reg.save('mine', ['cigars'])
+      await reg.setRole('keep', 'mine')
+
+      const target = await freshSig()
+      const result = await mintDeposit(target, 'cigars')
+      expect(result.ok).toBe(true)
+
+      expect(await allows({ sig: target })).toBe(true)
+    })
+
+    it('an own mark and a stranger\'s deposit combine under one KEEP set', async () => {
+      const reg = new InterestRegistry()
+      put(reg)
+      await reg.save('mine', ['cigars'])
+      await reg.setRole('keep', 'mine')
+
+      const target = await freshSig()
+      await depositFromStranger(target, 'unrelated')
+      await addSigMark(target, 'cigars')
+
+      expect(await allows({ sig: target })).toBe(true)
+    })
   })
 })

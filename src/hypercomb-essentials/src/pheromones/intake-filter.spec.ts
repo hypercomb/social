@@ -48,6 +48,24 @@ vi.mock('./pheromone-marks.js', () => ({
   },
 }))
 
+// The authored-deposits carrier, stubbed the same way and for the same
+// reason: what is under test is the GATE's merge of the two carriers, not
+// pheromone-deposits.ts's own signing/pool machinery (that has its own spec).
+const depositKinds = new Map<string, string[]>()
+const seenDeposits = new Set<string>()
+let depositReads = 0
+
+vi.mock('./pheromone-deposits.js', () => ({
+  depositKindsKnown: (sig: string) =>
+    seenDeposits.has(sig.toLowerCase()) ? (depositKinds.get(sig.toLowerCase()) ?? []) : undefined,
+  depositKindsOf: async (sig: string) => {
+    depositReads++
+    await Promise.resolve()
+    seenDeposits.add(sig.toLowerCase())
+    return depositKinds.get(sig.toLowerCase()) ?? []
+  },
+}))
+
 const { allows, allowsHere } = await import('./intake-filter.js')
 
 /** A FRESH SIGNATURE PER TEST, because the gate's kick-once set is
@@ -91,6 +109,9 @@ describe('intake filter', () => {
     sigMarks.clear()
     seen.clear()
     reads = 0
+    depositKinds.clear()
+    seenDeposits.clear()
+    depositReads = 0
     SIG_A = freshSig()
     SIG_B = freshSig()
     ;(window as any).__reg = {}
@@ -119,6 +140,7 @@ describe('intake filter', () => {
     allowsHere({ sig: SIG_A })
     expect(await allows({ sig: SIG_A })).toBe(true)
     expect(reads).toBe(0)
+    expect(depositReads).toBe(0)
   })
 
   // ...and a registry too old to say gets asked anyway. Paying for a read
@@ -338,6 +360,63 @@ describe('intake filter', () => {
       sigMarks.set(SIG_A, ['whatever'])
       expect(await allows({ sig: SIG_A })).toBe(true)
       expect(allowsHere({ sig: SIG_A })).toBe(true)
+    })
+  })
+
+  // ── authored deposits — the 2026-09-13 reframe ───────────────────────────
+  //
+  // "We get the author of the pheromones or read them from other people and
+  // if they match our interests then we get to see the content." A deposit
+  // somebody else authored on exact bytes must judge exactly like this
+  // participant's own mark on those bytes — the gate merges the two carriers
+  // before asking the registry anything, and neither carrier alone gets to
+  // veto the other's evidence.
+  describe('authored deposits — marks somebody else put on the bytes', () => {
+    it('a DROP-marked deposit refuses content this participant never marked themselves', async () => {
+      useInterests([], ['malicious'])
+      depositKinds.set(SIG_A, ['malicious'])   // nobody local marked it — a peer did
+      expect(await allows({ sig: SIG_A })).toBe(false)
+    })
+
+    it('a KEEP interest is satisfied by an authored deposit alone', async () => {
+      useInterests(['cigars'], [])
+      depositKinds.set(SIG_A, ['cigars'])
+      depositKinds.set(SIG_B, ['knitting'])
+      expect(await allows({ sig: SIG_A })).toBe(true)
+      expect(await allows({ sig: SIG_B })).toBe(false)
+    })
+
+    it('an own mark and an authored deposit combine — either can satisfy a KEEP', async () => {
+      useInterests(['cigars'], [])
+      sigMarks.set(SIG_A, ['cigars'])
+      depositKinds.set(SIG_A, ['unrelated'])
+      expect(await allows({ sig: SIG_A })).toBe(true)
+    })
+
+    it('an own KEEP mark does not save content a deposit flagged DROP', async () => {
+      useInterests(['cigars'], ['malicious'])
+      sigMarks.set(SIG_A, ['cigars'])
+      depositKinds.set(SIG_A, ['malicious'])
+      expect(await allows({ sig: SIG_A })).toBe(false)
+    })
+
+    it('content with neither an own mark nor a deposit still survives a KEEP set', async () => {
+      useInterests(['cigars'], [])
+      expect(await allows({ sig: SIG_A })).toBe(true)
+      expect(allowsHere({ sig: SIG_A })).toBe(true)
+    })
+
+    // Hide first, delete second — for the SECOND carrier too. Neither carrier
+    // landing may unblock the sync gate on the other's behalf.
+    it('the sync gate waits for BOTH carriers before it can refuse', async () => {
+      useInterests([], ['malicious'])
+      depositKinds.set(SIG_A, ['malicious'])
+      // Own marks are known (empty), deposits are not — still allowed.
+      seen.add(SIG_A.toLowerCase())
+      expect(allowsHere({ sig: SIG_A })).toBe(true)
+      expect(depositReads).toBe(1)   // the miss kicked its own read
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(allowsHere({ sig: SIG_A })).toBe(false)
     })
   })
 })
