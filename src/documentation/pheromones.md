@@ -4,7 +4,48 @@
 Companions: `public-content-endpoint.md` (the shelf this curates),
 `optimize-phase.md` (where fields are minted),
 `intake-filter.md` (the other half — marks filtering what you TAKE IN, where
-this doc covers marks making what you deposit FOUND).
+this doc covers marks making what you deposit FOUND),
+`hypergraph-molecule-lineage.md` (where classification actually lives — see
+the reframe immediately below).
+
+## Pheromones are not categorization (Jaime, 2026-09-13 — reframe)
+
+Earlier readings of this doc, and years of call sites built off them, treated
+a pheromone as a decaying tag — something you put ON a tile to say what it
+IS, so the hive could classify, group, or render by it. **That is wrong, and
+it is retired.** Classifying, grouping, and rendering are the hypergraph's
+job: a molecule NAME (`sign(name)`) is the category, and membership is a mark
+a member wears — `hypergraph-molecule-lineage.md`, `life-primitive.md`. If a
+change needs a new grouping, it needs a name, never a pheromone kind.
+
+**A pheromone answers a different question: not "what is this," but "is this
+worth your attention."** Concretely:
+
+- A pheromone is an authored, signed interest-signal deposited on a
+  signature. The author (the depositor) can be you, another participant, or
+  **an agent that read the content and decided it was worth marking** — an
+  agent is a depositor exactly like a person, no special case.
+- The deposit travels WITH the content it marks, so a peer who receives the
+  bytes receives the mark alongside them. (This is the build `intake-filter.md`
+  calls out as *Owed: marks that travel with content* — this doc's deposit
+  model is that build.)
+- Every participant separately holds their own **interests** — the marks
+  they are watching for and the marks they never want (`InterestRegistry`,
+  built: `intake-filter.md`). Interests are private and never travel; they
+  are the receptor, not the signal.
+- **A match is what makes content visible.** A pheromone a reader has no
+  interest in is not hidden or blocked — it simply carries no signal for
+  that reader (receptor-relative meaning, below). Reading other people's
+  authored marks is the entire point: your own filter is only useful once it
+  has other bees' scent to compare against.
+
+So: **your interests are private and yours to keep; a pheromone is a public
+claim someone else (or their agent) made about content.** The intake filter
+is where the two meet. Do not read the "kind" vocabulary below, or any tag
+family, as license to reuse this primitive for classification — a `tag`
+decoration a person puts on their OWN tile to group or render it is authored
+structure, lives in the layer, is truth, and belongs to the hypergraph naming
+model, never to this one.
 
 ## Pheromones ARE the sharing layer (Jaime, 2026-07-09)
 
@@ -24,6 +65,12 @@ Tags are what an author says once. Pheromones are what the swarm keeps
 saying: signed deposits on a sig, with **depositor, intensity, and decay**.
 The community's refinements accumulate into each participant's filters —
 curation without moderators, exactly how a colony does it (stigmergy).
+
+*(The sentence above is the historical framing that got over-read as "a
+pheromone is a decaying tag" — see the reframe above it. A tag stays what an
+author says about their OWN tile to classify it; a pheromone is a claim
+somebody else's nose can compare against your interests. They rhyme in
+mechanism, not in purpose.)*
 
 ## Why this answers pollution
 
@@ -115,7 +162,7 @@ this line is built.
 | Pheromone piece | Existing primitive |
 |---|---|
 | Deposit | signed event/decoration referencing the target sig — publisher sig authoritative, every deposit attributable |
-| Kind | the tag taxonomy (tags = decoration kind 'tag') gains intensity + decay; a classic tag ≡ author's pheromone with no decay |
+| Kind | a namespaced interest vocabulary the depositor chooses from (`domain:word`) — a SEPARATE vocabulary from the tag/classification taxonomy, not an extension of it (see the 2026-09-13 reframe above) |
 | Evaporation | the grant/expiry lease pattern applied to signals |
 | Field (aggregated intensities per sig) | **derived cache** — pure derivation of deposits, keyed by input sigs, minted in the optimize phase, wipe-safe, NEVER truth (litmus: cold client rebuilds from deposits alone → optimization-class) |
 | Filter | participant-local blend: which kinds count, whose deposits count, thresholds — never global, never in history |

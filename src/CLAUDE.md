@@ -10,7 +10,9 @@ Minimalism. Small surface area. No unnecessary abstractions. Signatures (SHA-256
 
 **Retired: the mirror paradigm.** There is no longer a second structure to build alongside the code — no per-creation mirror pass, no mirror queue, no `scripts/mirror-*`. Do not reintroduce one, and do not treat "and now mirror it into the hive" as owed work. The hive holds artifacts that were made by breaking things apart, not a parallel copy of the source tree.
 
-Features remain **data-driven from pools of meaning and pheromones**. If a change would require editing code to change how something is classified, grouped, or rendered, that classification belongs on a tile as a pheromone instead.
+Features remain **data-driven from pools of meaning**. If a change would require editing code to change how something is classified, grouped, or rendered, that classification belongs on a molecule name in the hypergraph instead — a `sign(name)` pool and the marks its members wear, never a pheromone kind (`src/documentation/hypergraph-molecule-lineage.md`).
+
+**Pheromones are not a categorization tool.** A pheromone is an authored, signed interest-signal deposited on a signature — the author can be you, another participant, or an agent that read the content — and it travels WITH the content. It never labels what something IS; it is a claim a reader's own private interest set either matches or doesn't, and only a match surfaces the content to them. Full doctrine: `src/documentation/pheromones.md` (deposits) and `src/documentation/intake-filter.md` (interests — the built half).
 
 ## Project Roles
 

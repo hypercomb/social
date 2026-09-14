@@ -84,11 +84,13 @@ I'd hand over?") answers yes for a community-forkable branch.
 
 ### 2. Pheromone tags — intent, discoverable
 
-**Today's pheromone = the tag decoration with a namespaced name.** The
-pheromone spec already defines a classic tag as "the author's pheromone
-with no decay", and the tags panel is already titled *Pheromones*. So
-until the deposit-history pool (`sign('pheromones')`) is built, AI-work
-intent is deposited as tags:
+**Interim vehicle, not the primitive itself: a namespaced tag standing in for
+a deposit.** `pheromones.md`'s 2026-09-13 reframe retired "a tag ≡ a
+pheromone" — a pheromone is an authored interest-signal an agent can pick up
+on its own, never a classification label, and these namespaced names are
+exactly that: a marker an agent watches for, not a description of what the
+branch IS. Until the deposit-history pool (`sign('pheromones:deposits')`) is
+built, that signal rides on the existing tag decoration as its carrier:
 
 ```
 jwize.com:website      this branch is meant to be a website
