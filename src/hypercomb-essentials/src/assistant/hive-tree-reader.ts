@@ -13,7 +13,7 @@
 // allowing an action based on what the model saw. No bridge, navigation, view
 // state, content slot, or filesystem surface participates.
 
-import { CHILD_SLOTS } from '@hypercomb/core'
+import { CHILD_SLOTS, childSigsOfLayer } from '@hypercomb/core'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
@@ -98,6 +98,9 @@ export type HypercombNodeRead =
     readonly name: string
     readonly layerSig: string
     readonly children: readonly CarriedChild[]
+    /** Children declared but whose layers are not on this device — listed by
+     *  signature instead of failing the read (the canvas skips them too). */
+    readonly unresolved?: readonly string[]
     /** The layer's own slots, everything but `children`. Absent for `/list`. */
     readonly content?: Record<string, unknown>
     readonly truncated?: boolean
@@ -262,6 +265,47 @@ const carriedChildren = async (
     children.push({ name, sig })
   }
   return children
+}
+
+/**
+ * ONE TILE'S CHILDREN, READ THE WAY THE CANVAS READS THEM (core level-roster
+ * `childLayersOf`, "the single definition of the tiles inside this one"). A
+ * malformed entry is skipped, a nameless child — a meta atom — is named by
+ * its signature, and a child whose layer is not on this device is listed as
+ * unresolved instead of failing the whole read. The strict walk above stays
+ * for `/tree`; a single tile read must not go blank on a live hive over one
+ * child it cannot see (Jaime, 2026-09-13: every read came back
+ * incomplete-read).
+ */
+const scannedChildren = async (
+  layer: LayerContent,
+  history: HiveHistory,
+  store: HiveStore,
+): Promise<{ readonly children: readonly CarriedChild[]; readonly unresolved: readonly string[] }> => {
+  const sigs = await childSigsOfLayer(layer as never, store).catch(() => [] as string[])
+  if (sigs.length === 0) return { children: [], unresolved: [] }
+
+  const inlined = new Map<string, LayerContent>()
+  if (typeof history.childrenManifestFor === 'function') {
+    const manifest = await history.childrenManifestFor(layer).catch(() => null)
+    if (manifest?.length === sigs.length) {
+      for (const entry of manifest) if (SIG.test(String(entry.sig)) && entry.layer) inlined.set(String(entry.sig), entry.layer)
+    }
+  }
+
+  const seen = new Set<string>()
+  const children: CarriedChild[] = []
+  const unresolved: string[] = []
+  for (const sig of sigs) {
+    const child = inlined.get(sig) ?? await history.getLayerBySig(sig).catch(() => null)
+    if (!child) { unresolved.push(sig); continue }
+    const raw = typeof child.name === 'string' ? child.name.replace(CONTROL, '').trim().slice(0, 256) : ''
+    const name = raw || sig.slice(0, 8)
+    if (seen.has(name)) continue
+    seen.add(name)
+    children.push({ name, sig })
+  }
+  return { children, unresolved }
 }
 
 export class HypercombHiveTreeReader {
@@ -438,7 +482,7 @@ export class HypercombHiveTreeReader {
       if (!ref && stats.cold) throw new IncompleteReadError()
       if (!ref) return { ok: false, root, code: 'not-found' }
       if (history.treeEpoch() !== epoch) throw new StaleReadError()
-      const children = await carriedChildren(ref.layer, history, store)
+      const { children, unresolved } = await scannedChildren(ref.layer, history, store)
       if (history.treeEpoch() !== epoch) throw new StaleReadError()
 
       let content: Record<string, unknown> | undefined
@@ -460,6 +504,7 @@ export class HypercombHiveTreeReader {
         name: ref.layer.name || (segments[segments.length - 1] ?? 'hive'),
         layerSig: ref.layerSig,
         children,
+        ...(unresolved.length ? { unresolved } : {}),
         ...(content ? { content, truncated } : {}),
         snapshot: this.#remember(epoch, [{ locationSig: ref.locationSig, layerSig: ref.layerSig }]),
       }
@@ -532,7 +577,7 @@ export class HypercombHiveTreeReader {
       if (options.signal?.aborted) throw stopped()
       const layer = await history.getLayerBySig(sig).catch(() => null)
       if (!layer) return { ok: false, root, code: 'not-found' }
-      const children = await carriedChildren(layer, history, store)
+      const { children, unresolved } = await scannedChildren(layer, history, store)
       let content: Record<string, unknown> | undefined
       let truncated = false
       if (options.withContent !== false) {
@@ -548,6 +593,7 @@ export class HypercombHiveTreeReader {
       }
       return {
         ok: true, root, name: layer.name || sig.slice(0, 8), layerSig: sig, children,
+        ...(unresolved.length ? { unresolved } : {}),
         ...(content ? { content, truncated } : {}),
       }
     } catch (error) {

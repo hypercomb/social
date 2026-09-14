@@ -874,16 +874,16 @@ export class ZoomDrone extends Drone {
     // A position-hold pins the captured local point back at the safe-area
     // centre instead of the content centre, so the view stays where the user
     // put it while the zoom changes around it.
+    // A lane strip only fits across its short axis, but it still starts
+    // centered in the available stage on both axes. The user can then scroll
+    // its long axis when there is more to read; we never pin a fresh lane
+    // view to an edge merely because it is scrollable.
     const targetPosX = heldLocal
       ? (safeMidX - screenCx) / stageScale - heldLocal.x * fitScale
-      : fitAxis === 'y'
-        ? (safeLeft - screenCx) / stageScale - bounds.x * fitScale
-        : (safeMidX - screenCx) / stageScale - centerX * fitScale
+      : (safeMidX - screenCx) / stageScale - centerX * fitScale
     const targetPosY = heldLocal
       ? (safeMidY - screenCy) / stageScale - heldLocal.y * fitScale
-      : fitAxis === 'x'
-        ? (safeTop - screenCy) / stageScale - bounds.y * fitScale
-        : (safeMidY - screenCy) / stageScale - centerY * fitScale
+      : (safeMidY - screenCy) / stageScale - centerY * fitScale
 
     if (snap) {
       target.scale.set(fitScale)

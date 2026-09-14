@@ -2,8 +2,8 @@
 //
 // THE PHONE READS THE HIVE AS A STRIP, AND NEVER WRITES IT.
 //
-// On a phone the tiles sit in three rails that run along the long side of
-// the screen: portrait = three columns you scroll up and down, landscape =
+// When enabled, tiles sit in three rails that run along the long side of the
+// viewport: portrait = three columns you scroll up and down, landscape =
 // three rows you scroll side to side, turning with the device. This drone
 // owns that posture. It is a PROJECTION of the layer's order, never an
 // arrangement: while it is active the renderer's slot grid
@@ -27,25 +27,21 @@
 //   • publishes `lanes:changed {active, lanes}` for the chrome and
 //     `render:grid-changed` for the renderer.
 //
-// The rung persists in `hc:lane-count`; `/lanes off` is the participant's
-// opt-out (`hc:rails` = off, a free map on this phone) and `/lanes on|1|2|3`
-// brings the rails back. Mobile mode off releases everything.
+// `hc:lanes` is a participant-local on/off switch. No lane count is exposed:
+// turning it on always produces three centered lanes.
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import { buildRailMatrix } from '../presentation/grid/rail-grid.js'
 import type { SlotMatrix } from '../presentation/grid/axial-service.js'
-import { MOBILE_MODE_EFFECT, MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
+import { MOBILE_MODE_EFFECT } from '../preferences/mobile-pheromones.js'
 import {
-  getLaneCount,
-  laneCountAtEdge,
   laneStripHorizontal,
-  setLaneCount,
   setLaneViewport,
-  stepLaneCount,
 } from './lane-viewport-mode.js'
 
-/** Participant opt-out. Absent = rails whenever the phone is a phone. */
-export const RAILS_KEY = 'hc:rails'
+/** Participant-local lane-view toggle. It is off until the participant asks. */
+export const RAILS_KEY = 'hc:lanes'
+const LANES = 3
 const ORIENTATION_KEY = 'hc:hex-orientation'
 /** Settle time for a rotation burst before re-projecting. */
 const REFLOW_MS = 160
@@ -60,7 +56,7 @@ type AxialLike = {
 type ZoomLike = { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto' | 'auto-persist') => void }
 
 export const railsPreferenceOff = (): boolean => {
-  try { return window.localStorage?.getItem(RAILS_KEY) === 'off' } catch { return false }
+  try { return window.localStorage?.getItem(RAILS_KEY) !== 'on' } catch { return true }
 }
 
 export class RailProjectionDrone extends Drone {
@@ -74,7 +70,7 @@ export class RailProjectionDrone extends Drone {
   }
   protected override listens = [
     'render:host-ready', 'render:cell-count', MOBILE_MODE_EFFECT, 'render:set-orientation',
-    'lanes:set', 'lanes:step', 'lanes:off', 'lanes:on',
+    'lanes:toggle', 'lanes:set', 'lanes:step', 'lanes:off', 'lanes:on',
   ]
   protected override emits = [
     'lanes:changed', 'render:grid-changed', 'render:set-orientation', 'toast:show',
@@ -140,19 +136,11 @@ export class RailProjectionDrone extends Drone {
       if (next !== this.#horizontal) this.#orient(this.#horizontal === true)
     })
 
-    // ── the rung ──────────────────────────────────────────────────────
-    this.onEffect<{ lanes?: number }>('lanes:set', ({ lanes }) => {
-      const n = Number(lanes)
-      if (Number.isFinite(n) && n > 0) setLaneCount(n)
-      this.#setPreference(true)
-      this.#apply(true)
-    })
-    this.onEffect<{ dir?: number }>('lanes:step', ({ dir }) => {
-      const step = Number(dir) < 0 ? -1 : +1
-      if (laneCountAtEdge(step)) { this.#publish(); return }
-      stepLaneCount(step)
-      this.#apply(true)
-    })
+    // One switch, one layout. Older count/step emitters remain harmless
+    // aliases during the transition, but can no longer change the layout.
+    this.onEffect('lanes:toggle', () => { this.#setPreference(!this.#active); this.#apply(true) })
+    this.onEffect('lanes:set', () => { this.#setPreference(true); this.#apply(true) })
+    this.onEffect('lanes:step', () => { this.#setPreference(true); this.#apply(true) })
     this.onEffect('lanes:on', () => { this.#setPreference(true); this.#apply(true) })
     this.onEffect('lanes:off', () => { this.#setPreference(false); this.#apply() })
 
@@ -173,23 +161,18 @@ export class RailProjectionDrone extends Drone {
   /** Is the strip up right now? (For the harness and any surface that asks.) */
   public get active(): boolean { return this.#active }
 
-  #mobile(): boolean {
-    return window.ioc.get<{ active?: boolean }>(MOBILE_MODE_IOC_KEY)?.active === true
-  }
-
   #locationKey(): string {
     const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
     return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean).join('/')
   }
 
   #wanted(): boolean {
-    return this.#mobile() && !railsPreferenceOff()
+    return !railsPreferenceOff()
   }
 
   #setPreference(on: boolean): void {
     try {
-      if (on) window.localStorage?.removeItem(RAILS_KEY)
-      else window.localStorage?.setItem(RAILS_KEY, 'off')
+      window.localStorage?.setItem(RAILS_KEY, on ? 'on' : 'off')
     } catch { /* storage disabled — the choice holds for this session */ }
   }
 
@@ -207,7 +190,7 @@ export class RailProjectionDrone extends Drone {
    *  rotation does not. */
   #apply(say = false): void {
     if (!this.#wanted()) { this.#release(); return }
-    const lanes = getLaneCount()
+    const lanes = LANES
     const horizontal = laneStripHorizontal()
     if (this.#active && this.#lanes === lanes && this.#horizontal === horizontal) {
       if (say) this.#toast(lanes)
@@ -243,7 +226,7 @@ export class RailProjectionDrone extends Drone {
       this.#orientationEcho = true
       this.emitEffect('render:set-orientation', { flat: before })
     }
-    this.emitEffect('render:grid-changed', { active: false, lanes: getLaneCount(), horizontal: null })
+    this.emitEffect('render:grid-changed', { active: false, lanes: LANES, horizontal: null })
     this.#publish()
     this.#fitPending = true
   }
@@ -266,10 +249,10 @@ export class RailProjectionDrone extends Drone {
   /** The rung, for anything that shows it (the phone bar). Replayed by
    *  EffectBus, so chrome mounted later still reads it. */
   #publish(): void {
-    this.emitEffect('lanes:changed', { active: this.#active, lanes: getLaneCount() })
+    this.emitEffect('lanes:changed', { active: this.#active, lanes: LANES })
   }
 
-  /** Fit ACROSS the strip and align its start edge — zoomToFit derives the
+  /** Fit ACROSS the strip and center it in the viewport — zoomToFit derives
    *  axis from the lane lock itself, so a plain fit is the right call. An
    *  automatic fit, so it persists as one ('auto-persist'): nobody gestured. */
   #fit(): void {
@@ -293,4 +276,4 @@ export class RailProjectionDrone extends Drone {
 const _railProjection = new RailProjectionDrone()
 window.ioc.register('@diamondcoreprocessor.com/RailProjectionDrone', _railProjection)
 // Seed the replayed channel so chrome reads a value before the first apply.
-try { EffectBus.emit('lanes:changed', { active: false, lanes: getLaneCount() }) } catch { /* no bus */ }
+try { EffectBus.emit('lanes:changed', { active: false, lanes: LANES }) } catch { /* no bus */ }

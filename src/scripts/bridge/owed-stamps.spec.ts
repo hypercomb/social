@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
+import { get } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -94,7 +95,21 @@ const attachRenderer = (port: number, signer: string) => new Promise<Record<stri
   })
 })
 
+const health = (port: number) => new Promise<{ status: number | undefined; cors: string | string[] | undefined }>((resolve, reject) => {
+  const request = get(`http://127.0.0.1:${port}/healthz`, response => {
+    response.resume()
+    response.on('end', () => resolve({ status: response.statusCode, cors: response.headers['access-control-allow-origin'] }))
+  })
+  request.on('error', reject)
+})
+
 describe('owed install stamps', () => {
+  it('answers the renderer health probe over HTTP', async () => {
+    const ws = workspace([])
+    const broker = await startBroker(ws)
+    await expect(health(broker.port)).resolves.toEqual({ status: 200, cors: '*' })
+  })
+
   it('keeps one debt per channel, the newest build replacing an older one', () => {
     const ws = workspace([])
     expect(owedStamps.recordOwed('essentials', BUILT, undefined, ws.owed)).toBe(true)

@@ -5699,6 +5699,20 @@ export class ChatWindowComponent implements OnDestroy {
       if (outcome === 'aborted') return
     }
 
+    // THE BROKER IS FOR COMPLEX WORK, NOT A WAITING ROOM (Jaime, 2026-09-13:
+    // "we are using natural language … only use [the broker] for complex
+    // ops"). A question no model took goes to the bridge queue only when a
+    // session is listening, or the participant named a model only a bridge
+    // serves. Otherwise they are told why, now.
+    if (!this.bridgeUp() && !this.modelExplicit()) {
+      this.#endWait()
+      const reason = this.#declineReason.get(convoId)
+        ?? 'No model is ready to answer. Check the providers console.'
+      console.warn('[chat] no model took the question:', reason)
+      EffectBus.emit('toast:show', { type: 'warning', message: reason })
+      return
+    }
+
     // A participant-host failure is retryable, but without a configured local
     // bridge there is nobody who could ever drain the durable bridge queue.
     if (!this.bridgeConfigured() || !queen?.submitChat) {
@@ -5756,11 +5770,18 @@ export class ChatWindowComponent implements OnDestroy {
   /** The weight of work each conversation was last answered at. In memory: a
    *  reopened conversation simply lets its next message be weighed afresh. */
   readonly #answeredTier = new Map<string, MessageEffort>()
+  /** Which provider gave each conversation's last answer — so the model it
+   *  reported is only ever preferred again on that same provider. */
+  readonly #answeredProvider = new Map<string, string>()
 
   /** What each conversation has read, as signatures (lookup keys) with the
    *  read that found each. Told to the model on the next message, so content
    *  already found opens again by signature instead of by walking to it. */
   readonly #readSignatures = new Map<string, Map<string, string>>()
+
+  /** Why no model took a conversation's last question, in the words the
+   *  participant is shown instead of a queue nobody drains. */
+  readonly #declineReason = new Map<string, string>()
 
   #takeTurnMeta(convoId: string): TurnMetaLike | undefined {
     const meta = this.#turnMeta.get(convoId)
@@ -5781,7 +5802,14 @@ export class ChatWindowComponent implements OnDestroy {
     const previousTier = this.#answeredTier.get(convoId)
     const need = { tier: effortInThread(message, previousTier), streaming: true, minContext: contextNeedFor(transcriptChars, message) }
     const namedModel = this.modelExplicit() ? this.model() || undefined : undefined
-    const preferModel = !this.modelExplicit() && previousTier === need.tier ? this.model() || undefined : undefined
+    // …and only on the provider that gave it. The name a vendor reports back
+    // is not always a name another provider knows: a remembered OpenRouter
+    // model handed to the local server came back "invalid model name".
+    const lastModel = this.model()
+    const preferModel = !this.modelExplicit() && previousTier === need.tier && !!lastModel
+      && router?.providerIdForModel?.(lastModel) === this.#answeredProvider.get(convoId)
+      ? lastModel
+      : undefined
     const slash = ioc()?.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as SlashBehaviourDroneLike | undefined
     const treeReader = ioc()?.get(HIVE_TREE_READER_IOC_KEY) as HypercombTreeReader | undefined
     const queue = ioc()?.get(EXECUTION_QUEUE_IOC_KEY) as ExecutionQueueLike | undefined
@@ -5812,7 +5840,16 @@ export class ChatWindowComponent implements OnDestroy {
     const route = trustedProviderId
       ? { providerId: trustedProviderId, model: namedModel, preferModel, need }
       : { model: namedModel, preferModel, need }
-    if (!router?.stream || !router.ready?.(route)) return 'declined'
+    if (!router?.stream || !router.ready?.(route)) {
+      // Say WHICH wall it hit: a conversation grown past every window, or no
+      // model ready at all (a key, or nothing switched on).
+      const fitsIfShorter = !!router?.ready?.({ model: namedModel, preferModel, need: { tier: need.tier, streaming: need.streaming } })
+      this.#declineReason.set(convoId, fitsIfShorter
+        ? 'This conversation is now longer than the models switched on can hold. Start a new conversation, or switch on a model with a larger window.'
+        : 'No model is ready to answer. In the providers console, check the OpenRouter key and that at least one model is switched on as available to the orchestrator.')
+      return 'declined'
+    }
+    this.#declineReason.delete(convoId)
     // A model added through OpenRouter that the mediator picked (not one the
     // participant named) may fall to another of them before any output —
     // never to a provider without the same key and read grant.
@@ -6091,6 +6128,7 @@ export class ChatWindowComponent implements OnDestroy {
           component.modelExplicit.set(false)
           component.#remember(chunk.model)
           component.#answeredTier.set(convoId, need.tier)
+          component.#answeredProvider.set(convoId, chunk.providerId)
           if (chunk.text) {
             roundText += chunk.text
             const visible = guard.push(chunk.text)
@@ -6170,7 +6208,22 @@ export class ChatWindowComponent implements OnDestroy {
     })
     if (convoId === this.activeId()) this.hostStreaming.set(true)
     const threads = this.#threads()
-    return startHostRun(convoId, message, { ask }, {
+    // A MODEL THAT FAILS SAYS SO. An error before any words used to leave the
+    // run empty, which reads as "declined" and sent the question on to the
+    // broker queue — so a refused key or a failing model looked like "nothing
+    // is listening yet". The failure is now the answer: shown, stored, and
+    // never handed to a broker nobody is running.
+    const guarded: HostAsk = async function* (question, opts) {
+      try {
+        for await (const chunk of ask(question, opts)) yield chunk
+      } catch (error) {
+        if (opts?.signal?.aborted) throw error
+        console.warn('[chat] the model could not answer:', error)
+        yield `\n\nThe model could not answer: ${error instanceof Error ? error.message : String(error)}`
+      }
+      return ''
+    }
+    return startHostRun(convoId, message, { ask: guarded }, {
       appendTurn: (id, role, text) => threads?.appendTurn(
         id, role as 'user' | 'assistant', text, role === 'assistant' ? this.#takeTurnMeta(id) : undefined,
       ) ?? Promise.resolve(false),

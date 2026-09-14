@@ -54,8 +54,11 @@ const entries: HypercombBehaviour[] = [
 ]
 
 describe('Hypercomb model grammar contract', () => {
-  it('grants action transport only to an automatic or explicitly local route', () => {
-    expect(hypercombActionProviderId(true, undefined, undefined, true)).toBe('local')
+  it('grants action transport to the local model only when it is named or designated', () => {
+    // a running local model no longer takes every message ahead of the mediator
+    expect(hypercombActionProviderId(true, undefined, undefined, true)).toBeUndefined()
+    expect(hypercombActionProviderId(true, undefined, undefined, true, { designated: 'local' })).toBe('local')
+    expect(hypercombActionProviderId(true, undefined, undefined, false, { designated: 'local' })).toBeUndefined()
     expect(hypercombActionProviderId(true, 'qwen3:8b', 'local', true)).toBe('local')
     expect(hypercombActionProviderId(true, 'gpt-5', 'openai', true)).toBeUndefined()
     expect(hypercombActionProviderId(false, undefined, undefined, true)).toBeUndefined()
@@ -67,8 +70,8 @@ describe('Hypercomb model grammar contract', () => {
     // named + granted → that provider; named + not granted → nobody, even with local ready
     expect(hypercombActionProviderId(true, 'deepseek', 'openrouter', true, granted)).toBe('openrouter')
     expect(hypercombActionProviderId(true, 'gpt-5', 'openai', true, granted)).toBeUndefined()
-    // unnamed: local first; without local, the designated provider only if granted
-    expect(hypercombActionProviderId(true, undefined, undefined, true, { ...granted, designated: 'openrouter' })).toBe('local')
+    // unnamed: the designated provider, only if granted — even with a local model running
+    expect(hypercombActionProviderId(true, undefined, undefined, true, { ...granted, designated: 'openrouter' })).toBe('openrouter')
     expect(hypercombActionProviderId(true, undefined, undefined, false, { ...granted, designated: 'openrouter' })).toBe('openrouter')
     expect(hypercombActionProviderId(true, undefined, undefined, false, { granted: [], designated: 'openrouter' })).toBeUndefined()
     expect(hypercombActionProviderId(true, undefined, undefined, false, { ...granted, designated: 'deepseek' })).toBeUndefined()

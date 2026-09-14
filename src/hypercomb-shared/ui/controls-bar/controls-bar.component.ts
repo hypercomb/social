@@ -132,6 +132,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // entry here would put a second opener on a bar that no longer owns the
   // act, in a place that says nothing about what it does.
   { id: 'fit',          label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always' },
+  { id: 'lanes',        label: 'controls.lanes',        action: 'toggleLanes',        visibleWhen: 'always' },
   { id: 'zoom-out',     label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always' },
   { id: 'zoom-in',      label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always' },
   { id: 'pin',          label: 'controls.pin',          action: 'togglePin',          visibleWhen: 'always' },
@@ -197,7 +198,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   // The magnifiers default OFF: the wheel owns zoom, and their verbs live in
   // the fit flyout now. Edit mode re-enables them for trackpad-less setups.
-  'back': true, 'fit': true, 'zoom-out': false, 'zoom-in': false, 'pin': true, 'fullscreen': true,
+  'back': true, 'fit': true, 'lanes': true, 'zoom-out': false, 'zoom-in': false, 'pin': true, 'fullscreen': true,
   'text-only': false,
   'pools': true,
   'chat': false,
@@ -368,10 +369,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Whether this browser can go fullscreen at all (iPhone Safari cannot).
    *  Where it cannot, the phone tools row leaves the fullscreen slot empty. */
   readonly fullscreenEnabled = !!document.fullscreenEnabled
-  /** The legibility ladder: how many lanes of hexagons the phone is reading
-   *  at (3 scan · 2 browse · 1 read), and whether lane mode owns the
-   *  viewport at all. Published by SequenceCycleDrone on `lanes:changed`. */
-  readonly laneCount = signal(2)
+  /** The single lane-view state, shared by desktop and mobile. */
+  readonly laneCount = signal(3)
   readonly lanesActive = signal(false)
   /** Rotate the grid: point-top ⇄ flat-top. In lane mode the lanes own the
    *  orientation (they turn with the device), so this is the manual override
@@ -383,6 +382,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  same `a` cycle the desktop has, which touch could not reach. */
   readonly cycleArrangement = (): void => {
     EffectBus.emit('keymap:invoke', { cmd: 'sequence.cycle' })
+  }
+  readonly toggleLanes = (): void => {
+    EffectBus.emit('lanes:toggle', {})
   }
   #fullscreenHandler = (): void => { this.isFullscreen.set(!!document.fullscreenElement) }
   #landscapeQuery: MediaQueryList | null = null
@@ -816,6 +818,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly #actions: Record<string, (e?: MouseEvent) => void> = {
     goBack: () => this.goBack(),
     fitOrCenter: (e) => this.fitOrCenter(e!),
+    toggleLanes: () => this.toggleLanes(),
     zoomOut: () => this.zoomOut(),
     zoomIn: () => this.zoomIn(),
     togglePin: () => this.togglePin(),
@@ -853,6 +856,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'hosts': return this.#hostsPanelOpen()
       case 'pin': return this.pinnedHere()
       case 'fit': return this.fitLocked()
+      case 'lanes': return this.lanesActive()
       case 'text-only': return this.#textOnly()
       case 'bees': return this.#beesVisible()
       case 'voice': return this.voiceActive()
@@ -879,6 +883,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     switch (ctrl.id) {
       case 'back':         return 'arrow_back'
       case 'fit':          return 'center_focus_strong'
+      case 'lanes':        return 'view_column'
       // zoom_in/zoom_out is the lens-style magnifying glass (circle +
       // handle). Visually off-centre by default because the handle
       // extends bottom-right of the lens — the .zoom-btn class in
@@ -1344,16 +1349,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  reaches every rung without a second control. Off ⇒ the first tap
    *  engages lanes at the remembered rung rather than stepping past it. */
   readonly stepLanes = (): void => {
-    if (!this.lanesActive()) {
-      EffectBus.emit('lanes:set', { lanes: this.laneCount() })
-      return
-    }
-    EffectBus.emit('lanes:set', { lanes: this.laneCount() <= 1 ? 3 : this.laneCount() - 1 })
+    EffectBus.emit('lanes:toggle', {})
   }
 
   /** Long-press releases the lane viewport — free pan and zoom back. */
   readonly releaseLanes = (): void => {
-    EffectBus.emit('lanes:off', {})
+    EffectBus.emit('lanes:toggle', {})
   }
 
   /** Pools of Meaning — just SHOW the collections window. Deliberately does NOT
@@ -1549,7 +1550,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       'lanes:changed',
       ({ active, lanes }) => {
         this.lanesActive.set(!!active)
-        if (Number.isFinite(lanes)) this.laneCount.set(Math.min(3, Math.max(1, Number(lanes))))
+        if (Number.isFinite(lanes)) this.laneCount.set(3)
       },
     )
 

@@ -58,11 +58,6 @@ const SHEET_Z = 100003
 const SHEET_BG = 'rgba(8,10,16,0.97)'
 const SHEET_EDGE = 'rgba(126,182,214,0.34)'
 const BACKDROP = 'rgba(0,0,0,0.42)'
-/** The lane rung's ceiling — `lanes:step -1` from 1 wraps back up here. */
-const LANES_FULL = 3
-/** Synchronous UI fallback before the replayed lane state arrives. */
-const LANES_DEFAULT = 2
-
 type ViewToggle = { view: string; icon?: string; label?: string; active?: boolean; isDefault?: boolean }
 type Lanes = { active?: boolean; lanes?: number }
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -94,7 +89,7 @@ export class LayerDeckDrone extends Drone {
   #face: 'list' | 'hexagons' = 'list'
   protected override emits = [
     'view:toggle', 'feature:apply', 'tags:view-open',
-    'keymap:invoke', 'lanes:step', 'lanes:set', 'viewport:pin-toggle',
+    'keymap:invoke', 'lanes:on', 'lanes:toggle', 'viewport:pin-toggle',
     'publish:view-toggle', 'mesh:open-modal', 'mesh:leave', 'phone:face-set',
   ]
   /** The swarm switch's reading — the shell's `mesh:public-changed` replay. */
@@ -376,7 +371,6 @@ export class LayerDeckDrone extends Drone {
   /** SEE — how you see the layer. Lenses, never commits. */
   #seeChips(): AppChip[] {
     const chips: AppChip[] = []
-    const lanes = Number(this.#lanes.lanes) || LANES_DEFAULT
     // LIST · LANES — one face at a time. From the list, the lanes plate IS
     // the selector: it takes the phone to the hexagons and puts the list
     // away. On the hexagons it walks the rung, and a LIST plate stands
@@ -396,21 +390,17 @@ export class LayerDeckDrone extends Drone {
     chips.push({
       action: 'lanes',
       glyph: 'view_column',
-      badge: String(lanes),
       labelKey: 'layer-deck.lanes',
       fallback: 'lanes',
-      accent: this.#face === 'hexagons',
+      accent: this.#lanes.active === true,
       run: () => {
         if (this.#face !== 'hexagons') {
           this.close()
           EffectBus.emit('phone:face-set', { face: 'hexagons' })
+          EffectBus.emit('lanes:on', {})
           return
         }
-        // 3 → 2 → 1 → 3. The projection publishes `lanes:changed` and the
-        // sheet re-renders with the new digit; it stays up so the rung can
-        // be walked without reopening.
-        if (lanes <= 1) EffectBus.emit('lanes:set', { lanes: LANES_FULL })
-        else EffectBus.emit('lanes:step', { dir: -1 })
+        EffectBus.emit('lanes:toggle', {})
       },
     })
     if (document.fullscreenEnabled) {

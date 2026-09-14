@@ -92,6 +92,9 @@ export type HypercombNodeRead =
     readonly children: readonly { readonly name: string; readonly sig: string }[]
     readonly content?: Record<string, unknown>
     readonly truncated?: boolean
+    /** Children the layer declares whose layers are not on this device —
+     *  listed by signature rather than failing the whole read. */
+    readonly unresolved?: readonly string[]
     /** Absent on a sig-addressed read: a layer by sig has no live head to
      *  revalidate — it is immutable content, which is the whole point. */
     readonly snapshot?: string
@@ -497,12 +500,17 @@ const safeNode = (read: HypercombNodeRead, expectedRoot: string, maxChildren: nu
     }
     return { name: child.name, sig: child.sig }
   })
+  const unresolved = read.unresolved === undefined ? [] : read.unresolved
+  if (!Array.isArray(unresolved) || unresolved.length > 1_000 || unresolved.some(sig => !SIG.test(sig))) {
+    throw new HypercombObservationError('the hive reader returned malformed unresolved children')
+  }
   return {
     ok: true,
     root: expectedRoot,
     name: read.name,
     layerSig: read.layerSig,
     children,
+    ...(unresolved.length ? { unresolved: [...unresolved] } : {}),
     ...(read.content && typeof read.content === 'object' ? { content: read.content, truncated: read.truncated === true } : {}),
     ...(read.snapshot ? { snapshot: read.snapshot } : {}),
   }
@@ -588,6 +596,9 @@ export const formatHypercombObservationReceipt = (
     if (!node.ok) return { grammar, root: read.root, error: node.code }
     return {
       grammar, root: node.root, name: node.name, sig: node.layerSig, children: node.children,
+      ...(node.unresolved?.length
+        ? { unresolved: node.unresolved, unresolvedNote: 'children whose layers are not on this device yet; read <signature> may still open one' }
+        : {}),
       ...(node.content ? { content: node.content, truncated: node.truncated === true } : {}),
     }
   }),

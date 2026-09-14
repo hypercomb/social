@@ -47,11 +47,18 @@ import {
 export { callableBehaviours }
 
 /** Who may read the hive without asking this turn. The participant's own
- *  local model always may. A keyed provider may only if the participant GRANTED it
+ *  local model may, when it is the one answering. A keyed provider may only if the participant GRANTED it
  *  in the console (documentation/anatomy-context-need.md §4) — and naming a
  *  model in the chat never grants: naming picks who answers, the grant
  *  decides what they may see. With no model named, it follows the provider
- *  the mediator would designate anyway, if that one is granted. */
+ *  the mediator would designate anyway, if that one is granted.
+ *
+ *  LOCAL ONLY WHEN IT IS THE CHOICE (Jaime, 2026-09-13: "I don't really like
+ *  Qwen, the local one"). A running local model used to take EVERY message
+ *  that could read or act, ahead of the mediator — so the OpenRouter models
+ *  the participant added were never asked. Now it answers only when named,
+ *  or when the mediator itself designates it (a pin, the economy plan, or
+ *  nothing else ready). */
 export const hypercombActionProviderId = (
   canAct: boolean,
   namedModel: string | undefined,
@@ -65,9 +72,9 @@ export const hypercombActionProviderId = (
     if (namedProvider === 'local') return localReadyAndTrusted ? 'local' : undefined
     return namedProvider && granted.has(namedProvider.toLowerCase()) ? namedProvider : undefined
   }
-  if (localReadyAndTrusted) return 'local'
   const designated = hiveAccess.designated?.toLowerCase()
-  return designated && designated !== 'local' && granted.has(designated) ? designated : undefined
+  if (designated === 'local') return localReadyAndTrusted ? 'local' : undefined
+  return designated && granted.has(designated) ? designated : undefined
 }
 
 /** Relative grammar is safe only while its page/selection context is stable. */

@@ -9,7 +9,11 @@
 // view reorganises without scrambling the order the participant built.
 //
 // The cycle is:
-//   [ Rectangle, Flowers, …every set saved via /sequence ]
+//   [ Rectangle, Flowers, …every set saved via /sequence, Initial ]
+// `Initial` is an in-memory, per-location snapshot taken when the participant
+// first enters the cycle. It lets the cycle return to the exact layout that
+// was on screen before arranging; an outside reorder or a membership change
+// drops that snapshot, so it never becomes a stale second source of truth.
 // The phone's rails are deliberately NOT an arrangement at all any more: they
 // are a PROJECTION of the layer's order owned by RailProjectionDrone
 // (documentation/mobile-rails-projection.md), never a commit, so nothing
@@ -70,6 +74,7 @@ type StoreLike = { putResource(blob: Blob): Promise<string> }
 type I18nLike = { t: (k: string, p?: Record<string, string | number>) => string }
 
 const ACTIVE_KEY = 'hc:arrange-active'
+const INITIAL_CYCLE_ID = '__initial__'
 
 /** How long the arrange gate will wait for a targeted pass to settle. */
 const PAINT_SETTLE_TIMEOUT = 3000
@@ -78,6 +83,10 @@ const PAINT_SETTLE_TIMEOUT = 3000
 type CycleEntry =
   | { kind: 'builtin'; id: string; label: string; labelKey: string }
   | { kind: 'saved'; id: string; label: string; labelKey: string }
+  | { kind: 'initial'; id: string; label: string; labelKey: string; placement: Map<string, number> }
+
+/** The arrangement that existed immediately before this location's cycle. */
+type InitialArrangement = Map<string, number>
 
 export class SequenceCycleDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -92,6 +101,7 @@ export class SequenceCycleDrone extends Drone {
   }
   protected override listens = [
     'render:tiles-target', 'render:cell-count', 'keymap:invoke', 'sequence:select', 'sequence:edit',
+    'cell:reorder', 'cell:added', 'cell:removed',
   ]
   protected override emits = [
     'arrange:preview', 'cell:reorder', 'toast:show',
@@ -117,6 +127,9 @@ export class SequenceCycleDrone extends Drone {
   #fitTimer: ReturnType<typeof setTimeout> | null = null
   #commitTail: Promise<void> = Promise.resolve()
   readonly #commitRevision = new Map<string, number>()
+  // Deliberately session-only. The original is a way out of an active cycle,
+  // not a durable arrangement to replay after a refresh.
+  readonly #initialArrangements = new Map<string, InitialArrangement>()
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -150,6 +163,16 @@ export class SequenceCycleDrone extends Drone {
       )
       void editor?.openEditor?.((name || 'default').trim() || 'default', segments)
     })
+
+    // A direct move, a layout application, or a changed tile set means the
+    // remembered starting point is no longer the current participant's
+    // layout. Our own cache-invalidation notification is explicitly marked
+    // so cycling itself does not erase the way back to Initial.
+    this.onEffect<{ source?: string }>('cell:reorder', ({ source }) => {
+      if (source !== 'sequence-cycle') this.#forgetInitialArrangements()
+    })
+    this.onEffect('cell:added', () => this.#forgetInitialArrangements())
+    this.onEffect('cell:removed', () => this.#forgetInitialArrangements())
   }
 
   // ── cycle ───────────────────────────────────────────────────────────
@@ -227,9 +250,6 @@ export class SequenceCycleDrone extends Drone {
       (a, b) => current.get(a)! - current.get(b)!,
     )
 
-    const cycle = this.#buildCycle()
-    if (cycle.length === 0) return
-
     this.#busy = true
     try {
       const lineage = this.resolve<LineageLike>('lineage')
@@ -238,6 +258,9 @@ export class SequenceCycleDrone extends Drone {
         .filter(Boolean)
 
       const locationKey = segments.join('/')
+      const initial = this.#initialFor(locationKey, current)
+      const cycle = this.#buildCycle(initial)
+      if (cycle.length === 0) return
       const active = this.#readActive(locationKey)
       const requestedIdx = requestedId
         ? cycle.findIndex((candidate) => candidate.id === requestedId)
@@ -251,7 +274,12 @@ export class SequenceCycleDrone extends Drone {
       const indexes = this.#indexesFor(entry, orderedNames.length, coordToIndex)
       if (!indexes || indexes.length === 0) return
 
-      const placement = applyToExisting(orderedNames, indexes)
+      // Built-ins and saved sets intentionally preserve the *current* tile
+      // order. Initial instead restores each label to its captured slot,
+      // which is what makes it a genuine return rather than another pack.
+      const placement = entry.kind === 'initial'
+        ? new Map(entry.placement)
+        : applyToExisting(orderedNames, indexes)
       const revision = (this.#commitRevision.get(locationKey) ?? 0) + 1
       this.#commitRevision.set(locationKey, revision)
 
@@ -304,8 +332,8 @@ export class SequenceCycleDrone extends Drone {
     }, 80)
   }
 
-  /** Built-ins first, then every saved set in the palette. */
-  #buildCycle = (): CycleEntry[] => {
+  /** Built-ins first, then saved sets, then the captured starting layout. */
+  #buildCycle = (initial: InitialArrangement): CycleEntry[] => {
     const entries: CycleEntry[] = BUILTIN_ARRANGEMENTS.map((b) => ({
       kind: 'builtin' as const,
       id: b.id,
@@ -316,6 +344,13 @@ export class SequenceCycleDrone extends Drone {
     for (const name of svc?.list() ?? []) {
       entries.push({ kind: 'saved', id: name, label: name, labelKey: '' })
     }
+    entries.push({
+      kind: 'initial',
+      id: INITIAL_CYCLE_ID,
+      label: 'Initial',
+      labelKey: 'arrange.initial',
+      placement: new Map(initial),
+    })
     return entries
   }
 
@@ -326,6 +361,7 @@ export class SequenceCycleDrone extends Drone {
     count: number,
     coordToIndex: Map<string, number>,
   ): number[] | null => {
+    if (entry.kind === 'initial') return [...entry.placement.values()]
     if (entry.kind === 'builtin') {
       const builtin = BUILTIN_ARRANGEMENTS.find((b) => b.id === entry.id)
       return builtin ? builtin.generate(count, coordToIndex) : null
@@ -393,7 +429,7 @@ export class SequenceCycleDrone extends Drone {
         const dense = [...commit.placement.entries()]
           .sort((a, b) => a[1] - b[1])
           .map(([label]) => label)
-        this.emitEffect('cell:reorder', { labels: dense })
+        this.emitEffect('cell:reorder', { labels: dense, source: 'sequence-cycle' })
         this.emitEffect('arrange:preview', { location: commit.locationKey, names: null })
       })
       .catch((err) => {
@@ -420,6 +456,10 @@ export class SequenceCycleDrone extends Drone {
     try {
       const existing = await listSequenceTargetHere(segments)
       for (const e of existing) removeSequenceTarget(e.sig, segments)
+
+      // The original arrangement is not a reusable pattern. Returning to it
+      // must also stop new tiles from inheriting the last generated/saved one.
+      if (entry.kind === 'initial') return
 
       if (entry.kind === 'saved') {
         const svc = this.resolve<SequenceServiceLike>('sequences')
@@ -458,6 +498,19 @@ export class SequenceCycleDrone extends Drone {
     } catch {
       /* ignore quota / disabled storage */
     }
+  }
+
+  /** Capture once. A map preserves the exact label → sparse-slot pairing. */
+  #initialFor = (locationKey: string, current: ReadonlyMap<string, number>): InitialArrangement => {
+    const existing = this.#initialArrangements.get(locationKey)
+    if (existing) return existing
+    const initial = new Map(current)
+    this.#initialArrangements.set(locationKey, initial)
+    return initial
+  }
+
+  #forgetInitialArrangements = (): void => {
+    this.#initialArrangements.clear()
   }
 
   // ── feedback ────────────────────────────────────────────────────────

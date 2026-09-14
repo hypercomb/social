@@ -365,13 +365,21 @@ signature the way `published-pools.ts` fetches other content.
   `registerPublishedPool` will accept the meaning) so a probe can fetch a
   specific author's marks for a specific signature rather than waiting for
   them to already be present locally.
-- **A surface for authoring a deposit deliberately**, as opposed to
-  `mintDeposit` being called programmatically. The pheromone window remains
-  the place a person would do this; nothing wires it there yet.
-- **An agent that actually calls `mintDeposit` on its own.** The doctrine
-  point (no special case between a person and an agent) is satisfied
-  structurally — `mintDeposit` does not know or care who calls it — but no
-  routine in the tree calls it autonomously yet.
+- **A surface for authoring a deposit deliberately.** `/deposit <mark>` /
+  `/deposit <cell> = <mark>` (`commands/deposit.queen.ts`, BUILT 2026-09-13)
+  is the command-line door — usable by a person typing it, or by an agent
+  speaking the command line the same way (documentation/hive-read-fence.md).
+  Deliberately NOT wired into the mouse-click scent gesture in
+  tile-overlay.drone.ts, which resolves tiles by LABEL only and has no
+  content signature in hand at click time; that gesture stays a location
+  mark (`/keyword`'s territory) until the categorization migration below
+  gives it a real home.
+- **An agent that actually calls `/deposit` autonomously.** The door is open
+  and tested (`deposit.queen.spec.ts`) — a person or an assistant driving
+  the command line can use it today — but no routine in the tree calls it
+  on its own yet. That is a decision about WHEN an agent should judge
+  content worth marking, which still needs a trigger design, not just a
+  door.
 - **A surface for editing an interest.** The registry, the gate and its three
   sites are built and proven end to end
   ([`intake-filter-seam.spec.ts`](../intake-filter-seam.spec.ts) drives the real

@@ -84,19 +84,19 @@ describe('lane viewport axis', () => {
     expect(getLaneScrollAxis()).toBeNull()
   })
 
-  it('never locks the desktop viewport, however lanes was reached', () => {
+  it('locks the desktop viewport when lanes are active', () => {
     setMobile(false)
     setLaneViewport(true)
-    expect(getLaneScrollAxis()).toBeNull()
+    expect(getLaneScrollAxis()).toBe('y')
     landscape()
-    expect(getLaneScrollAxis()).toBeNull()
+    expect(getLaneScrollAxis()).toBe('x')
   })
 
-  it('drops the lock the moment mobile mode goes away', () => {
+  it('does not drop lanes when mobile mode changes', () => {
     setLaneViewport(true)
     expect(getLaneScrollAxis()).toBe('y')
     setMobile(false)
-    expect(getLaneScrollAxis()).toBeNull()
+    expect(getLaneScrollAxis()).toBe('y')
   })
 
   it('reads the strip direction from the viewport, squares counting as portrait', () => {

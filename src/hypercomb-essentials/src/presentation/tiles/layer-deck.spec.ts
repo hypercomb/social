@@ -54,7 +54,7 @@ services['@diamondcoreprocessor.com/ImagePasteWorker'] = { createTileFromImage: 
 
 // OUT contracts, spied before anything is emitted so a replay cannot confuse.
 const out = {
-  toggle: vi.fn(), apply: vi.fn(), camera: vi.fn(), tags: vi.fn(), pin: vi.fn(), keymap: vi.fn(), step: vi.fn(), set: vi.fn(),
+  toggle: vi.fn(), apply: vi.fn(), camera: vi.fn(), tags: vi.fn(), pin: vi.fn(), keymap: vi.fn(), lanesOn: vi.fn(), lanesToggle: vi.fn(),
   publish: vi.fn(), meshModal: vi.fn(), meshLeave: vi.fn(), face: vi.fn(),
 }
 EffectBus.on('phone:face-set', out.face)
@@ -67,8 +67,8 @@ EffectBus.on('camera:capture-open', out.camera)
 EffectBus.on('tags:view-open', out.tags)
 EffectBus.on('viewport:pin-toggle', out.pin)
 EffectBus.on('keymap:invoke', out.keymap)
-EffectBus.on('lanes:step', out.step)
-EffectBus.on('lanes:set', out.set)
+EffectBus.on('lanes:on', out.lanesOn)
+EffectBus.on('lanes:toggle', out.lanesToggle)
 
 const { LAYER_DECK_KEY, LAYER_DECK_SURFACE } = await import('./layer-deck.drone.js')
 
@@ -201,7 +201,7 @@ describe('the three groups', () => {
     expect(plate('list')).toBeUndefined()
     plate('lanes')!.click()
     expect(out.face).toHaveBeenCalledWith({ face: 'hexagons' })
-    expect(out.step).not.toHaveBeenCalled()
+    expect(out.lanesOn).toHaveBeenCalledTimes(1)
     expect(isOpen()).toBe(false)
     EffectBus.emit('phone:face', { face: 'hexagons' })
     open()
@@ -211,19 +211,19 @@ describe('the three groups', () => {
     expect(isOpen()).toBe(false)
   })
 
-  it('see: on the hexagons the rung carries its digit and steps down, wrapping to three at one; no fullscreen plate here', () => {
+  it('see: on the hexagons lanes is one centered three-lane toggle; no fullscreen plate here', () => {
     EffectBus.emit('phone:face', { face: 'hexagons' })
     open()
     const lanes = plate('lanes')!
-    expect(lanes.querySelector('[data-role="app-badge"]')?.textContent).toBe('3')
+    expect(lanes.querySelector('[data-role="app-badge"]')).toBeNull()
     expect(plate('fullscreen')).toBeUndefined()
     lanes.click()
-    expect(out.step).toHaveBeenCalledWith({ dir: -1 })
+    expect(out.lanesToggle).toHaveBeenCalledTimes(1)
     expect(isOpen()).toBe(true)
-    EffectBus.emit('lanes:changed', { active: true, lanes: 1 })
-    expect(plate('lanes')!.querySelector('[data-role="app-badge"]')?.textContent).toBe('1')
+    EffectBus.emit('lanes:changed', { active: false, lanes: 3 })
+    expect(plate('lanes')!.firstElementChild?.getAttribute('data-tone')).toBe('plain')
     plate('lanes')!.click()
-    expect(out.set).toHaveBeenCalledWith({ lanes: 3 })
+    expect(out.lanesToggle).toHaveBeenCalledTimes(2)
   })
 
   it('see: pheromones hands over; undo and redo keep the sheet up', () => {

@@ -278,3 +278,21 @@ describe('signatures are the lookup keys', () => {
     if (again.ok && again.snapshot) expect(await fx.reader.validateSnapshots([again.snapshot])).toBe(true)
   })
 })
+
+describe('a tile read on a live hive', () => {
+  it('names a nameless child by its signature and lists a child it cannot see, instead of failing the read', async () => {
+    const fx = fixture()
+    const original = fx.getLayerBySig.getMockImplementation()! as (signature: string) => Promise<unknown>
+    fx.getLayerBySig.mockImplementation(async (signature: string) =>
+      signature === sig(6) ? ({ children: [] } as unknown as LayerContent) : original(signature))
+    const nameless = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+    expect(nameless).toMatchObject({ ok: true, children: [{ name: sig(6).slice(0, 8), sig: sig(6) }] })
+    expect(nameless.ok && nameless.unresolved).toBeUndefined()
+
+    const cold = fixture()
+    const coldOriginal = cold.getLayerBySig.getMockImplementation()! as (signature: string) => Promise<unknown>
+    cold.getLayerBySig.mockImplementation(async (signature: string) => signature === sig(6) ? null : coldOriginal(signature))
+    expect(await cold.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true }))
+      .toMatchObject({ ok: true, children: [], unresolved: [sig(6)] })
+  })
+})

@@ -16,7 +16,6 @@
 // already scrolling the right direction.
 
 import { EffectBus } from '@hypercomb/core'
-import { MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 import { LANE_DEFAULT, LANE_MAX, LANE_MIN, clampLanes } from './arrangements.js'
 
 const LANE_COUNT_KEY = 'hc:lane-count'
@@ -87,13 +86,6 @@ const restoreLaneCount = (): void => {
   }
 }
 
-const mobileModeActive = (): boolean => {
-  const ioc = (globalThis as {
-    ioc?: { get?: (key: string) => unknown }
-  }).ioc
-  return (ioc?.get?.(MOBILE_MODE_IOC_KEY) as { active?: boolean } | undefined)?.active === true
-}
-
 /** Which way the strip runs: left↔right exactly when the viewport is wider
  *  than it is tall. ONE definition, shared by the axis lock and the packer, so
  *  the direction the phone scrolls and the direction the lanes were packed can
@@ -103,7 +95,7 @@ export const laneStripHorizontal = (): boolean =>
   typeof window !== 'undefined' && window.innerWidth > window.innerHeight
 
 export const getLaneScrollAxis = (): LaneScrollAxis | null =>
-  laneViewport && mobileModeActive()
+  laneViewport
     ? (laneStripHorizontal() ? 'x' : 'y')
     : null
 
@@ -172,7 +164,7 @@ restoreLaneCount()
 export const setLaneViewport = (active: boolean): boolean => {
   // Enforce the platform boundary here, at the source read by pan + zoom.
   // Command/UI guards are useful feedback, but must not be the safety boundary.
-  const next = active && mobileModeActive()
+  const next = active
   if (laneViewport === next) return false
   laneViewport = next
   // Publish so every OTHER copy of this module — pan, zoom, anything bundled

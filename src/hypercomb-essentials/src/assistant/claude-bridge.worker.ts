@@ -113,6 +113,13 @@ const RECONNECT_MS = 3_000
 // a ceiling is what keeps "keep dialling" from becoming a red console line
 // every three seconds for the rest of the session.
 const RECONNECT_CEILING_MS = 30_000
+// A refused browser WebSocket is reported by Chromium before its `onerror`
+// handler can run. The local dev server proxies these paths to the broker's
+// HTTP health endpoint, so an opted-in tab can wait for a broker that is not
+// running without issuing a refused localhost request from Chromium itself.
+const BRIDGE_HEALTH_PATH = '/claude-bridge-health'
+const TEST_BRIDGE_HEALTH_PATH = '/claude-bridge-health-2411'
+const HEALTH_PROBE_DEADLINE_MS = 1_000
 
 /** How long `submit` waits for the command line's receipt before answering
  *  `unknown`. The listener settles on every path, so this is a backstop
@@ -151,6 +158,7 @@ export class ClaudeBridgeWorker extends Worker {
 
   #ws: WebSocket | null = null
   #timer: ReturnType<typeof setTimeout> | null = null
+  #checkingHealth = false
   /** Consecutive attempts that did not reach an open socket. Reset by a
    *  successful handshake; the only input to the backoff. */
   #attempts = 0
@@ -173,9 +181,9 @@ export class ClaudeBridgeWorker extends Worker {
   /** Open the bridge WebSocket. Gated by the shared host + opt-in decision
    *  and idempotent — safe to call multiple times. */
   public connect(): void {
-    if (this.#ws) return
+    if (this.#ws || this.#checkingHealth) return
     if (!isLocalClaudeBridgeConfigured()) return
-    this.#connect()
+    void this.#checkHealthThenConnect()
   }
 
   // ------- WebSocket lifecycle -------
@@ -206,6 +214,46 @@ export class ClaudeBridgeWorker extends Worker {
       if (Number.isInteger(port) && port > 0 && port < 65_536) return port
     } catch { /* fall through to default */ }
     return BRIDGE_PORT
+  }
+
+  #healthPath(): string | null {
+    const port = this.#port()
+    if (port === BRIDGE_PORT) return BRIDGE_HEALTH_PATH
+    // The isolated ask-loop test stack has a dedicated development proxy.
+    if (port === 2411) return TEST_BRIDGE_HEALTH_PATH
+    return null
+  }
+
+  /** Check that the local broker is listening before creating a browser
+   *  WebSocket. This fetch is same-origin: Angular's development proxy probes
+   *  localhost, so a refused broker is an ordinary response rather than
+   *  Chromium's noisy refused-WebSocket diagnostic. */
+  async #checkHealthThenConnect(): Promise<void> {
+    this.#checkingHealth = true
+    const controller = new AbortController()
+    const deadline = setTimeout(() => controller.abort(), HEALTH_PROBE_DEADLINE_MS)
+    try {
+      const healthPath = this.#healthPath()
+      if (healthPath) {
+        const response = await fetch(healthPath, {
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+        const body = await response.json() as { ok?: unknown }
+        if (response.ok && body.ok === true) {
+          this.#connect()
+          return
+        }
+      }
+    } catch {
+      // The normal "broker is not running" path is deliberately quiet.
+    } finally {
+      clearTimeout(deadline)
+      this.#checkingHealth = false
+    }
+    // Status is still useful to chat surfaces even though no socket was made.
+    this.#announce()
+    this.#scheduleReconnect()
   }
 
   #connect(): void {
@@ -273,7 +321,7 @@ export class ClaudeBridgeWorker extends Worker {
     this.#attempts++
     this.#timer = setTimeout(() => {
       this.#timer = null
-      this.#connect()
+      this.connect()
     }, wait)
   }
 
@@ -2187,4 +2235,3 @@ window.ioc.register('@diamondcoreprocessor.com/ClaudeBridgeWorker', _claudeBridg
     slotRegistry.register({ slot: CONTEXT_SLOT, triggers: [] })
   },
 )
-

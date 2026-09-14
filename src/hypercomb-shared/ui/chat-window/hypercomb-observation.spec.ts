@@ -230,3 +230,22 @@ describe('opening what a signature names', () => {
     expect(page).toContain('"text":"rest();"')
   })
 })
+
+describe('a tile read with children not on this device', () => {
+  it('passes the unresolved children through by signature, with a note, instead of failing', async () => {
+    const layerSig = 'b'.repeat(64)
+    const missing = 'c'.repeat(64)
+    const reader: HypercombTreeReader = {
+      readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+      validateSnapshots: vi.fn(async () => true),
+      readNode: vi.fn(async () => ({
+        ok: true as const, root: '/', name: 'hive', layerSig, children: [], content: {}, truncated: false,
+        unresolved: [missing], snapshot: 'private',
+      })),
+    }
+    const receipt = await executeHypercombObservationPlan(parseHypercombObservationGrammars(['/read /'], ['here']), reader)
+    const out = formatHypercombObservationReceipt(receipt)
+    expect(out).toContain(`"unresolved":["${missing}"]`)
+    expect(out).toContain('unresolvedNote')
+  })
+})

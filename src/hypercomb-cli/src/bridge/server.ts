@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws'
-import type { IncomingMessage } from 'node:http'
+import { createServer, type IncomingMessage } from 'node:http'
 import { BRIDGE_PORT } from '@hypercomb/sdk'
 
 // ── TRUST MODEL ─────────────────────────────────────────────────────────
@@ -43,7 +43,24 @@ export function runBridge(): void {
   const BRIDGE_HOST = process.env.BRIDGE_HOST || '127.0.0.1'
   const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
 
-  const wss = new WebSocketServer({ port: BRIDGE_PORT, host: BRIDGE_HOST })
+  // A browser logs a refused WebSocket before application code can handle it.
+  // Expose a tiny CORS-enabled probe so the renderer only opens its socket
+  // after this broker is actually listening.
+  const server = createServer((req, res) => {
+    if (req.url === '/healthz') {
+      res.writeHead(200, {
+        'access-control-allow-origin': '*',
+        'cache-control': 'no-store',
+        'content-type': 'application/json',
+      })
+      res.end('{"ok":true}')
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const wss = new WebSocketServer({ server })
+  server.listen(BRIDGE_PORT, BRIDGE_HOST)
 
   let renderer: WebSocket | null = null
   const pending = new Map<string, WebSocket>()

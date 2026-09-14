@@ -57,6 +57,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   EffectBus.clear()
   localStorage.clear()
+  localStorage.setItem('hc:lanes', 'on')
   setLaneCount(3)
   portrait()
   mobile = { active: true }
@@ -111,11 +112,11 @@ describe('rail projection — the phone posture', () => {
     expect(last('render:set-orientation')).toBeUndefined()
   })
 
-  it('never projects on a desktop', async () => {
+  it('projects on a desktop when lanes are enabled', async () => {
     mobile.active = false
     await beat()
-    expect(project).not.toHaveBeenCalled()
-    expect(drone.active).toBe(false)
+    expect(project).toHaveBeenCalledTimes(1)
+    expect(drone.active).toBe(true)
   })
 
   it('re-projects flat-top when the phone turns, once the rotation settles — and back', async () => {
@@ -153,36 +154,28 @@ describe('rail projection — the phone posture', () => {
     expect(last('lanes:changed')).toEqual({ active: false, lanes: 3 })
     expect(last(LANE_VIEWPORT_EFFECT)).toEqual({ active: false })
     expect(last('render:grid-changed')).toEqual({ active: false, lanes: 3, horizontal: null })
-    expect(localStorage.getItem('hc:rails')).toBe('off')
+    expect(localStorage.getItem('hc:lanes')).toBe('off')
 
     EffectBus.emit('lanes:on', {})
     expect(project).toHaveBeenCalledTimes(3)
     expect(matrixAt(2).get(0)).toEqual(railCoord(0, 3, false))
     expect(drone.active).toBe(true)
-    expect(localStorage.getItem('hc:rails')).toBeNull()
+    expect(localStorage.getItem('hc:lanes')).toBe('on')
     expect(last('lanes:changed')).toEqual({ active: true, lanes: 3 })
   })
 
-  it('the rung is a lens: lanes:set 2 re-projects two-lane rows and persists the rung', async () => {
+  it('always keeps three lanes when a legacy rung event arrives', async () => {
     await beat()
     EffectBus.emit('lanes:set', { lanes: 2 })
-    expect(project).toHaveBeenCalledTimes(2)
-    const two = matrixAt(1)
-    for (let slot = 0; slot < CAPACITY; slot++) expect(two.get(slot)).toEqual(railCoord(slot, 2, false))
-    expect(two.get(0)).toEqual({ q: 0, r: 0 })
-    expect(two.get(1)).toEqual({ q: 1, r: 0 })
-    expect(two.get(2)!.r).toBe(1)
-    expect(last('lanes:changed')).toEqual({ active: true, lanes: 2 })
-    expect(last('render:grid-changed')).toEqual({ active: true, lanes: 2, horizontal: false })
-    expect(localStorage.getItem('hc:lane-count')).toBe('2')
+    expect(project).toHaveBeenCalledTimes(1)
+    for (let slot = 0; slot < CAPACITY; slot++) expect(matrixAt(0).get(slot)).toEqual(railCoord(slot, 3, false))
+    expect(last('lanes:changed')).toEqual({ active: true, lanes: 3 })
+    expect(last('render:grid-changed')).toEqual({ active: true, lanes: 3, horizontal: false })
 
-    // lanes:step walks the ladder and holds at its ends.
+    // Legacy stepping is equally unable to change the fixed layout.
     EffectBus.emit('lanes:step', { dir: -1 })
-    expect(last('lanes:changed')).toEqual({ active: true, lanes: 1 })
-    expect(project).toHaveBeenCalledTimes(3)
-    EffectBus.emit('lanes:step', { dir: -1 })
-    expect(last('lanes:changed')).toEqual({ active: true, lanes: 1 })
-    expect(project).toHaveBeenCalledTimes(3)
+    expect(last('lanes:changed')).toEqual({ active: true, lanes: 3 })
+    expect(project).toHaveBeenCalledTimes(1)
   })
 
   it('fits the strip on the settled render after a projection, and again on arrival at a new page', async () => {
@@ -208,14 +201,13 @@ describe('rail projection — the phone posture', () => {
     expect(zoomToFit).toHaveBeenCalledTimes(2)
   })
 
-  it('releases everything when mobile mode goes away', async () => {
+  it('keeps lanes active when mobile mode changes', async () => {
     await beat()
     mobile.active = false
     EffectBus.emit(MOBILE_MODE_EFFECT, { active: false })
-    expect(project).toHaveBeenLastCalledWith(null)
-    expect(drone.active).toBe(false)
-    expect(last('lanes:changed')).toEqual({ active: false, lanes: 3 })
-    expect(last(LANE_VIEWPORT_EFFECT)).toEqual({ active: false })
+    expect(project).toHaveBeenCalledTimes(1)
+    expect(drone.active).toBe(true)
+    expect(last('lanes:changed')).toEqual({ active: true, lanes: 3 })
   })
 
   it('owns the orientation only while active — the standing preference comes back on release', async () => {

@@ -58,4 +58,14 @@ describe('claude bridge renderer reconnection', () => {
     const body = source.slice(source.indexOf('#connect(): void {'))
     expect(body.slice(0, 400)).toMatch(/if\s*\(\s*this\.#ws\s*\)\s*return/)
   })
+
+  it('checks broker health before opening the browser WebSocket', () => {
+    const publicConnect = source.slice(source.indexOf('public connect(): void {'), source.indexOf('// ------- WebSocket lifecycle'))
+    expect(publicConnect).toMatch(/#checkHealthThenConnect/)
+    expect(publicConnect).not.toMatch(/new\s+WebSocket/)
+
+    const probe = source.slice(source.indexOf('#checkHealthThenConnect'), source.indexOf('#connect(): void {'))
+    expect(probe).toMatch(/fetch\(healthPath/)
+    expect(probe).toMatch(/response\.ok\s*&&\s*body\.ok\s*===\s*true/)
+  })
 })

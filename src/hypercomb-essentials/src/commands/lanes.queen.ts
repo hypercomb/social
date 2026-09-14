@@ -18,33 +18,15 @@ import { EffectBus, QueenBee } from '@hypercomb/core'
 export class LanesQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'lanes'
-  override description =
-    'On a phone, read the hive in rails: 3 to scan, 2 to browse, 1 to read; off for the free map'
+  override description = 'Toggle three centered lanes for this viewport'
   override descriptionKey = 'slash.lanes'
-  override options = ['1', '2', '3', 'off', 'on']
-  override examples = [
-    { input: '/lanes', result: 'Rails on, at the rung you last read at' },
-    { input: '/lanes 1', result: 'One rail — the widest hexagons, for reading' },
-    { input: '/lanes off', result: 'The free map on this phone; pan and zoom go back to free' },
-  ]
+  override options: string[] = []
+  override examples = [{ input: '/lanes', result: 'Toggle three centered lanes' }]
 
-  override slashComplete(args: string): readonly string[] {
-    const q = args.toLowerCase().trim()
-    return q ? this.options.filter(o => o.startsWith(q)) : this.options
-  }
+  override slashComplete(): readonly string[] { return [] }
 
-  protected execute(args: string): void {
-    const arg = (args ?? '').trim().toLowerCase()
-    if (arg === 'off' || arg === 'free') {
-      EffectBus.emit('lanes:off', {})
-      return
-    }
-    const n = Number(arg)
-    if (Number.isFinite(n) && n > 0) {
-      EffectBus.emit('lanes:set', { lanes: n })
-      return
-    }
-    EffectBus.emit('lanes:on', {})
+  protected execute(): void {
+    EffectBus.emit('lanes:toggle', {})
   }
 }
 

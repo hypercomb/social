@@ -28,6 +28,7 @@
 // behaves exactly as before.
 
 const { WebSocketServer, WebSocket } = require('ws')
+const { createServer } = require('node:http')
 const { watchFile } = require('node:fs')
 const { OWED_FILE, readOwed, settleOwed, followedPubkey, servedByRelay } = require('./owed-stamps.cjs')
 
@@ -35,7 +36,25 @@ const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 2401)
 const BRIDGE_HOST = process.env.BRIDGE_HOST || '127.0.0.1'
 const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
 
-const wss = new WebSocketServer({ port: BRIDGE_PORT, host: BRIDGE_HOST })
+// Browsers cannot test whether a TCP/WebSocket port is open without creating
+// a WebSocket, and Chromium logs every refused WebSocket in the console. This
+// small CORS-enabled probe lets an opted-in renderer wait quietly until the
+// broker actually exists.
+const server = createServer((req, res) => {
+  if (req.url === '/healthz') {
+    res.writeHead(200, {
+      'access-control-allow-origin': '*',
+      'cache-control': 'no-store',
+      'content-type': 'application/json',
+    })
+    res.end('{"ok":true}')
+    return
+  }
+  res.writeHead(404)
+  res.end()
+})
+const wss = new WebSocketServer({ server })
+server.listen(BRIDGE_PORT, BRIDGE_HOST)
 
 let renderer = null
 const pending = new Map()
@@ -182,7 +201,7 @@ wss.on('connection', (ws, req) => {
 })
 
 // Said once the socket is bound — a client that trusts this line must be able to connect.
-wss.on('listening', () => {
+server.on('listening', () => {
   console.log(`[bridge] listening on ws://${BRIDGE_HOST}:${BRIDGE_PORT}`)
   console.log(
     BRIDGE_HOST === '127.0.0.1'
