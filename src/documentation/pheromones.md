@@ -569,17 +569,34 @@ vocabulary or a derived-cache field — those are still owed, and retrofitting
 the reserved set later remains a breaking change for every consumer, so it
 should land before this is exposed as a general-purpose discovery surface.
 
+**Second slice LANDED 2026-09-13, same day** — a command-line authoring
+surface (`/deposit`, `commands/deposit.queen.ts`) and the declared vocabulary
+(`sign('pheromones:names')`, a `family:names` pool per
+documentation/pools-across-hosts.md, deliberately reused rather than a
+bespoke index — Jaime: *"Or maybe rather a pool of meaning"*) plus its
+editing surface, `/interest` (`commands/interest.queen.ts`). Full detail in
+`intake-filter.md`'s "The declared vocabulary, and /interest" section — this
+is what closes "you should be able to select from" offerings you don't yet
+watch for, entirely as a LOCAL projection over what this participant already
+holds.
+
 Still not now:
 
-- **Carrying a deposit across a hive boundary** alongside the content it
-  marks — a `pheromones:deposits`-scoped `published-pools.ts` handler so a
-  probe can fetch a specific author's marks for a specific signature, rather
-  than only reading whatever markers already happen to be in this
-  participant's own pool (`intake-filter.md`'s "Owed" has the detail).
+- **Carrying a deposit — or the vocabulary — across a hive boundary**
+  alongside the content it marks, i.e. a `pheromones:deposits`- and
+  `pheromones:names`-scoped `published-pools.ts` handler so a probe can
+  fetch a SPECIFIC host's offerings on demand, rather than only reading
+  whatever already happens to be in this participant's own pool
+  (`intake-filter.md`'s "Owed" has the detail). Until this lands,
+  `knownPheromoneKinds()` can only ever show kinds that already reached this
+  participant some other way.
 - **Decay/evaporation** as an actual read-time computation over multiple
   deposits — today every verified deposit counts equally and forever; nothing
   ages one out.
 - **The reserved negative vocabulary** and the sybil-weighted aggregation.
 - **The pheromone window as a deliberate authoring surface** — `mintDeposit`
-  exists and is callable, by a person's gesture or an agent's routine alike,
-  but nothing in the shell calls it yet.
+  is callable (by a person's gesture, an agent's routine, or `/deposit`
+  alike) but the mouse-click Pheromones window itself still only writes
+  location tags; nothing routes it to `mintDeposit` yet.
+- **An agent that calls `/deposit` (or `mintDeposit`) on its own judgment.**
+  The door is open and tested; nothing walks through it autonomously.

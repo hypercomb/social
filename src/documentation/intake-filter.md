@@ -357,6 +357,45 @@ lineage-bag replication this participant's OPFS already does for any pool.
 Nothing yet REACHES OUT to fetch a specific domain's deposits for a specific
 signature the way `published-pools.ts` fetches other content.
 
+## The declared vocabulary, and `/interest` (BUILT 2026-09-13)
+
+Jaime, 2026-09-13, refining the direction after the deposit build landed:
+*"we'll just get the part where we read pheromones and if they match
+whatever we have in our pheromone collection then they show up... we need to
+see the pheromone offerings from the sites... so if we want to turn on
+pheromones that might be available but that we don't have them on we should
+be able to select from"* — then, on how that offering list should be
+modeled: *"Or maybe rather a pool of meaning."*
+
+That is exactly `documentation/pools-across-hosts.md`'s `family:names`
+pattern, reused rather than reinvented: `pheromones/pheromone-deposits.ts`
+gained a second pool, `sign('pheromones:names')`, holding one tiny
+content-addressed record per distinct kind this participant has minted or
+received a deposit for (`knownPheromoneKinds()`). It answers a browsing
+question — *what kinds exist to pick from* — kept structurally separate from
+`pheromones:deposits`, which answers an intake question — *what does this
+target carry*. `mintDeposit` registers its kind into the vocabulary
+idempotently, awaited (not fire-and-forget: a caller listing
+`knownPheromoneKinds()` right after minting must see it).
+
+`commands/interest.queen.ts` is the editing surface this document's own
+"Owed" list named as missing:
+
+```
+/interest                — list what you watch for, never want, and what's
+                            available to add (known kinds not yet in either)
+/interest cigars          — watch for "cigars" (KEEP)
+/interest cigars, travel  — several at once
+/interest ~cigars         — stop filtering on "cigars", wherever it sits
+/interest !malicious      — never want "malicious" (DROP)
+```
+
+"Available to add" is `knownPheromoneKinds()` minus whatever is already in
+KEEP or DROP — still anchor-first, still a LOCAL projection over what this
+participant already holds, never a network enumeration (pheromones.md's
+receptor-relative-meaning rule is unchanged: there is still no "list every
+kind that exists" endpoint — this lists only what already reached you).
+
 ## Owed
 
 - **Deposits published and probed like any other pool.** A domain that wants
@@ -380,12 +419,18 @@ signature the way `published-pools.ts` fetches other content.
   on its own yet. That is a decision about WHEN an agent should judge
   content worth marking, which still needs a trigger design, not just a
   door.
-- **A surface for editing an interest.** The registry, the gate and its three
-  sites are built and proven end to end
-  ([`intake-filter-seam.spec.ts`](../intake-filter-seam.spec.ts) drives the real
-  registry through the real gate over the real carrier); nothing yet lets a
-  participant SAY which marks they want. Until something does, every verdict is the empty-set default (allow),
-  which is why shipping it changes nothing on its own.
+- ~~A surface for editing an interest.~~ **BUILT 2026-09-13:**
+  `/interest` (`commands/interest.queen.ts`, above) — a participant can now
+  say which marks they watch for or never want, and every verdict stops
+  being the empty-set default the moment they do.
+- **The vocabulary reaching further than "what I already hold."** Today
+  `knownPheromoneKinds()` is a purely local projection — it lists kinds
+  already in this participant's own `pheromones:names` pool, never a
+  specific host's offerings fetched on demand. Turning `pheromones:names`
+  into a `family:names` pool a specific host can be ASKED for
+  (`documentation/pools-across-hosts.md`'s `GET /<sign(meaning)>/`) is the
+  same missing piece as the "deposits published and probed" item above,
+  applied to the vocabulary instead of the deposits themselves.
 - **A decision on polarity.** An interest is a set you are watching FOR, which
   reads positive: keep what carries an enrolled mark. The one filter shipping
   today is the opposite (empty selection = everyone shows), and a positive

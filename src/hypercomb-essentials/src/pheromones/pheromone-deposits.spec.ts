@@ -128,6 +128,7 @@ let store: ReturnType<typeof makeStore>
 const { NostrSigner } = await import('../sharing/nostr-signer.js')
 const {
   mintDeposit, depositKindsOf, depositKindsKnown, depositPreimage, PHEROMONE_DEPOSIT_KIND, forgetDeposits,
+  knownPheromoneKinds,
 } = await import('./pheromone-deposits.js')
 
 const setIoc = (withSigner: boolean): void => {
@@ -262,5 +263,50 @@ describe('pheromone deposits', () => {
     try { await w.write(recordSig) } finally { await w.close() }
 
     expect(await depositKindsOf(target)).toEqual([])
+  })
+
+  describe('the declared vocabulary — what kinds could I turn on', () => {
+    it('a minted deposit registers its kind in the vocabulary', async () => {
+      const target = await freshTarget()
+      await mintDeposit(target, 'cigars')
+      expect(await knownPheromoneKinds()).toEqual(['cigars'])
+    })
+
+    it('the same kind minted on different targets registers once', async () => {
+      const a = await freshTarget()
+      const b = await freshTarget()
+      await mintDeposit(a, 'cigars')
+      await mintDeposit(b, 'cigars')
+      expect(await knownPheromoneKinds()).toEqual(['cigars'])
+    })
+
+    it('several distinct kinds all surface, sorted', async () => {
+      const target = await freshTarget()
+      await mintDeposit(target, 'travel')
+      await mintDeposit(target, 'cigars')
+      expect(await knownPheromoneKinds()).toEqual(['cigars', 'travel'])
+    })
+
+    it('an untouched hive has no vocabulary yet', async () => {
+      expect(await knownPheromoneKinds()).toEqual([])
+    })
+
+    it('a vocabulary write failure never fails the deposit itself', async () => {
+      // Only the vocabulary pool refuses; the deposit's own pool is untouched.
+      let namesPoolRequested = false
+      const realGetPool = store.getPool.bind(store)
+      store.getPool = (async (meaning: string) => {
+        if (meaning === 'pheromones:names') { namesPoolRequested = true; throw new Error('quota exceeded') }
+        return realGetPool(meaning)
+      }) as typeof store.getPool
+
+      const target = await freshTarget()
+      const result = await mintDeposit(target, 'cigars')
+      expect(result.ok).toBe(true)
+      expect(namesPoolRequested).toBe(true)
+      // The vocabulary write failed, so the kind never registered — this is
+      // the tradeoff `knownPheromoneKinds` accepts for never blocking a mint.
+      expect(await depositKindsOf(target)).toEqual(['cigars'])
+    })
   })
 })

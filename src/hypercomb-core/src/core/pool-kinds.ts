@@ -146,6 +146,13 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['host:packages', 'set'],
   ['pheromones:content', 'set'],
   ['pheromones:deposits', 'set'],
+  // The DECLARED VOCABULARY of pheromone kinds this participant has minted or
+  // received deposits for — one tiny record per distinct kind, named by its
+  // own hash (documentation/pools-across-hosts.md's family:names pattern, a
+  // pool of meaning rather than a bespoke index). Never resolve a target's
+  // marks from this — it answers "what kinds exist to pick from", never "what
+  // does this content carry" (that stays `pheromones:deposits`).
+  ['pheromones:names', 'set'],
   ['substrate:references', 'set'],
   ['substrate:sources', 'set'],
   ['websites:menu', 'set'],

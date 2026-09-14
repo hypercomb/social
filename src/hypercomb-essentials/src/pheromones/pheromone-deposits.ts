@@ -58,13 +58,34 @@
 // and local read — including deposits a peer's replicated content already
 // brought into this participant's own `pheromones:deposits` pool by any
 // other path, which `readDeposits` reads exactly like a local mint.
+//
+// ── the declared vocabulary ────────────────────────────────────────────────
+//
+// A second, separate pool answers a different question: not "what does this
+// content carry" (`pheromones:deposits`, above) but "what kinds exist to pick
+// from" — `pheromones:names`, one tiny record per distinct kind, following
+// documentation/pools-across-hosts.md's `family:names` pattern (a pool of
+// meaning, not a bespoke index). `mintDeposit` registers its kind there
+// idempotently; `knownPheromoneKinds()` lists them for a discovery/interest-
+// editing surface (`commands/interest.queen.ts`). Anchor-first still holds:
+// this is a local projection over what THIS participant already has, never a
+// network enumeration.
 
-import { EffectBus, MARKER_NAME, SIGNATURE_NAME, get, markerName } from '@hypercomb/core'
+import { EffectBus, MARKER_NAME, SIGNATURE_NAME, SignatureService, get, markerName } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools'
 import { normalizeTags } from '../notes/note-tree.js'
 import { readerPubkey } from '../sharing/head-claim-signer.js'
 
 const DEPOSITS_MEANING = 'pheromones:deposits'
+/** The DECLARED VOCABULARY — documentation/pools-across-hosts.md's
+ *  `family:names` pattern, a pool of meaning rather than a bespoke index.
+ *  One tiny record per distinct kind this participant has minted or
+ *  received a deposit for, named by its own hash. Answers "what kinds
+ *  could I turn on", never "what does this content carry" (that stays
+ *  `pheromones:deposits`) — the two are separate indexes over the same
+ *  underlying marks, kept apart so browsing never needs to walk every
+ *  target this participant holds. */
+const NAMES_MEANING = 'pheromones:names'
 
 /** 30209-30217 are the swarm/peer-model kinds (sharing/swarm.drone.ts,
  *  peer-models.drone.ts); 30564-30566 are the hive-index/head-claim/vocabulary
@@ -251,6 +272,12 @@ export async function mintDeposit(target: string, kind: string): Promise<Deposit
   } catch { return { ok: false, reason: 'no store' } }
 
   remember(t, parsed.kind)
+  // AWAITED, NOT FIRE-AND-FORGET — a caller that lists `knownPheromoneKinds()`
+  // right after this resolves must see the kind that was just minted. Still
+  // best-effort in the failure sense: `rememberKindGlobally` swallows its own
+  // errors internally, so a vocabulary write that fails only means this kind
+  // is not yet browsable, never that the deposit itself is incomplete.
+  await rememberKindGlobally(st, parsed.kind)
   EffectBus.emit('pheromones:deposit-minted', { target: t, kind: cleanKind, depositor, at })
   return { ok: true, deposit: parsed }
 }
@@ -362,6 +389,60 @@ export async function depositKindsOf(target: string): Promise<readonly string[]>
   return await readKinds(target.toLowerCase())
 }
 
+// ── the declared vocabulary — "what kinds could I turn on" ─────────────────
+//
+// Separate from everything above: this pool answers a browsing question, not
+// an intake question. It is deliberately NOT gated by verification the way
+// `readFromPool` gates deposits — a vocabulary entry is a bare word, not a
+// claim about specific bytes, so there is nothing to forge by adding one.
+// Anchor-first still holds: this reads only what THIS participant already
+// holds (documentation/pheromones.md, "How a mark is found") — it is a local
+// projection, never a network crawl for every kind that exists anywhere.
+
+/** Idempotently register a kind in the discoverable vocabulary. Additive
+ *  only — a kind once used stays pickable forever, the same as a tag once
+ *  minted stays in the tag registry. Never removed by this module: removing
+ *  a kind nobody deposits any more is a GC concern, not an intake one. */
+async function rememberKindGlobally(st: StoreLike, kind: string): Promise<void> {
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify({ mark: kind }))
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    const pool = await st.getPool(NAMES_MEANING)
+    if (!pool) return
+    try { await pool.getFileHandle(sig, { create: false }); return } catch { /* not present yet — write it below */ }
+    const handle = await pool.getFileHandle(sig, { create: true })
+    const writable = await handle.createWritable()
+    try { await writable.write(new TextDecoder().decode(bytes)) } finally { await writable.close() }
+  } catch { /* best-effort only — see the call site's comment */ }
+}
+
+/** Every kind THIS participant has ever minted or received a deposit for —
+ *  the pickable list for a discovery/interest-editing surface. Sorted,
+ *  deduped, never gated by verification (see the section header above). */
+export async function knownPheromoneKinds(): Promise<readonly string[]> {
+  const st = store()
+  if (!st) return []
+  let pool: DirLike | null
+  try { pool = await (st.openPool?.(NAMES_MEANING) ?? st.getPool(NAMES_MEANING)) }
+  catch { return [] }
+  if (!pool?.entries) return []
+
+  const kinds = new Set<string>()
+  try {
+    for await (const [name, handle] of pool.entries()) {
+      if (handle?.kind && handle.kind !== 'file') continue
+      if (!SIGNATURE_NAME.test(name)) continue
+      try {
+        const file = await (handle as unknown as FileLike).getFile()
+        const parsed = JSON.parse(await file.text()) as { mark?: unknown }
+        const mark = typeof parsed?.mark === 'string' ? normalizeTags([parsed.mark])[0] : undefined
+        if (mark) kinds.add(mark)
+      } catch { /* one unreadable record must not sink the whole read */ }
+    }
+  } catch { return [] }
+  return [...kinds].sort()
+}
+
 // Reachable from OUTSIDE essentials — the same loose-IoC seam PheromoneMarks
 // and IntakeFilter use.
 window.ioc.register('@diamondcoreprocessor.com/PheromoneDeposits', {
@@ -370,4 +451,5 @@ window.ioc.register('@diamondcoreprocessor.com/PheromoneDeposits', {
   depositKindsOf,
   depositKindsKnown,
   forgetDeposits,
+  knownPheromoneKinds,
 })

@@ -175,6 +175,15 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // (essentials/pheromones/pheromone-marks.ts), truth pool, never minted
   // from the optimize phase.
   'pheromones:content',
+  // The DECLARED VOCABULARY of pheromone kinds — a `family:names` pool
+  // (documentation/pools-across-hosts.md) so "what kinds could I turn on"
+  // is a directory listing, not an enumeration endpoint: it answers only
+  // for the kinds THIS participant already holds, anchored on the closed
+  // `pheromones` family word, never a network-wide crawl. One tiny record
+  // per distinct kind, named by its own hash — idempotent, additive-only.
+  // Written and read by PheromoneDeposits, truth pool (a cold client could
+  // not rebuild "which kinds exist" from layers alone).
+  'pheromones:names',
   // 'places:references' / 'places:sources' — SHORT-LIVED, never shipped. The
   // substrate surface was briefly renamed Places before that name went to the
   // collections index instead. Both are drain sources in substrate.service.ts
