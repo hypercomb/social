@@ -29,10 +29,13 @@ Your hive lives on your device. There is no account. Published content is
 named by its own bytes, so whoever receives it can verify it. Features are
 signed modules a community can adopt or fork for itself.
 
-Hypercomb is free, open source, and not for sale. I have funded its development
-myself. I am opening a voluntary support channel for people who want to help me
-continue the work and recover part of what I put into getting it here. Support
-does not buy equity, control, exclusive access or a financial return.
+The Hypercomb platform is free, open source, and not for sale. I have funded
+its development myself. I am opening a voluntary support channel for people
+who want to help me continue the public product and recover part of what I put
+into getting it here. Support does not buy equity, control, exclusive access,
+professional services, or a financial return. My company also offers paid
+implementation, customization, hosting, training, and support as a separate
+commercial relationship; hiring us is never required to use Hypercomb.
 
 Try it: https://hypercomb.io
 
@@ -45,7 +48,9 @@ Source: https://github.com/hypercomb/social
 Your work should not require somebody else's account or continued permission.
 
 Hypercomb keeps your hive with you and shares published content by verifiable
-signature. Free, open source, community owned, and not for sale.
+signature. The platform is free, open source, community owned, and not for
+sale. Voluntary support funds continued public development; professional
+services are available separately.
 
 https://hypercomb.io
 

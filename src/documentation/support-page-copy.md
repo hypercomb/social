@@ -11,7 +11,8 @@ Keep Hypercomb free, open and in the hands of its users
 
 Hypercomb is free, open-source, community-owned software where your work lives
 with you. Voluntary support helps me continue building it and recover part of
-the founder-funded cost of getting it this far.
+the founder-funded cost of getting it this far. My company also offers paid
+professional services, separately from donations and the software license.
 
 ## Full description
 
@@ -30,6 +31,11 @@ This is support, not a purchase or financial investment. A contribution does
 not buy equity, repayment, profit, governance power, guaranteed features,
 exclusive access or a private edition. Hypercomb stays free and open whether
 or not you contribute.
+
+My company may separately charge for implementation, customization, managed
+hosting, integration, training, or support. Those are paid services with their
+own scope and terms. A donation does not purchase or reserve services, and no
+service purchase is required to use or self-host Hypercomb.
 
 The best place to start is the working software at https://hypercomb.io and
 the guided tour at https://hypercomb.com/tour/.
@@ -58,6 +64,6 @@ financial details will not be published.
 
 ## Checkout note
 
-This contribution is voluntary. It is not a purchase, loan, security,
-charitable gift, or promise of a financial return. No charitable tax receipt
-is provided.
+This contribution is voluntary. It is not payment for professional services,
+a purchase, loan, security, charitable gift, or promise of a financial return.
+No charitable tax receipt is provided.

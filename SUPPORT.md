@@ -1,8 +1,8 @@
 # Support Hypercomb
 
-Hypercomb is free, open-source software and is not for sale. The complete
-platform remains available under its existing open licenses whether or not
-anyone contributes.
+Hypercomb is a free, open-source platform and the platform itself is not for
+sale. The complete software remains available under its existing open licenses
+whether or not anyone contributes or hires the company behind it.
 
 The project has been founder funded. Voluntary donations and sponsorship help
 pay for continued development, testing, documentation, domains and hosting,
@@ -20,6 +20,18 @@ Support does **not** purchase:
 Supporters may choose to be acknowledged publicly, but acknowledgement is
 optional and is not a reward with monetary value. Anonymous support is equally
 welcome.
+
+## Donations and paid services are separate
+
+The company behind Hypercomb may charge for professional services such as
+implementation, customization, managed hosting, integration, training, and
+support. Those services pay for a defined commercial engagement; donations
+support continued development of the public product.
+
+A donation does not purchase consulting time, service credits, priority
+support, or a future feature. Hiring the company is not required to use,
+study, modify, or self-host Hypercomb. A separate written scope and price will
+apply whenever someone chooses to purchase professional services.
 
 ## Ways to help now
 

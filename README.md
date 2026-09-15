@@ -10,11 +10,14 @@ asking a platform owner for permission.
 
 [Try Hypercomb](https://hypercomb.io) · [Take the guided tour](https://hypercomb.com/tour/) · [Read the architecture](src/documentation/architecture-overview.md)
 
-Hypercomb is not for sale. The software is licensed under AGPL-3.0-only and
-the documentation and media under CC BY-SA 4.0. Donations and sponsorship
-sustain the work and may help recover its founder-funded development cost;
-they do not buy equity, repayment, governance, preferential features, or
-exclusive access.
+The Hypercomb platform is not for sale. The software is licensed under
+AGPL-3.0-only and the documentation and media under CC BY-SA 4.0. Donations
+and sponsorship sustain public product development and may help recover its
+founder-funded development cost; they do not buy equity, repayment,
+governance, preferential features, or exclusive access. The company behind
+Hypercomb may separately charge for professional services such as
+implementation, customization, hosting, training, and support. Those services
+do not change the platform's free and open-source status.
 
 ## Why it is different
 
@@ -26,7 +29,8 @@ exclusive access.
   identifiable byte for byte.
 - **Community owned.** The shell is a harness; capabilities live in modules a
   community can carry and compose for itself.
-- **Free and open.** There is no paid edition and no plan to sell the project.
+- **Free and open.** There is no paid edition and no plan to sell the platform.
+  Optional professional services are separate from the software license.
 
 ## See it before reading about it
 
@@ -74,7 +78,7 @@ from the browser's origin-private file system, resolves their dependencies,
 and composes capabilities by reference rather than inheritance. Everything
 that can be externalized is externalized.
 
-## Support without purchasing the project
+## Support the product; hire services separately
 
 The most useful support today is to try Hypercomb, share a demonstration,
 study or fork the source, and introduce it to a community that values local
@@ -82,6 +86,10 @@ ownership. A channel for one-time donations and recurring sponsorship is being
 prepared. [Read the support principles](SUPPORT.md). Support keeps the
 complete platform free and open; it does not create gated features, financial
 returns, or ownership rights.
+
+Professional services from the company behind Hypercomb are a separate paid
+commercial relationship. A donation does not purchase services, and buying a
+service is not required to use, study, modify, or self-host the platform.
 
 ## License
 
