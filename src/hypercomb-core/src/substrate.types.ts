@@ -75,12 +75,30 @@ export interface SubstrateReferencesSource {
   readonly builtin?: boolean
 }
 
+/**
+ * CUSTOM SET — a participant-created named collection, held as signature
+ * references copied into the `sign('substrate:custom-sets')` pool under this
+ * set's own id (registry doc `registry`, members doc `<id>`).
+ *
+ * Same "the pool is the list" shape as {@link SubstrateReferencesSource}, but
+ * where exactly one reference source exists (built-in, ungrowable in count),
+ * any number of custom sets can exist — created and deleted, never renamed
+ * (a set's id is its identity; give it the name you want at creation).
+ */
+export interface SubstrateCustomSource {
+  readonly type: 'custom'
+  readonly id: string           // the set's id — also its storage key in the pool
+  readonly label: string
+  readonly builtin?: false
+}
+
 export type SubstrateSource =
   | SubstrateLayerSource
   | SubstrateHiveSource
   | SubstrateFolderSource
   | SubstrateUrlSource
   | SubstrateReferencesSource
+  | SubstrateCustomSource
 
 /** Registry persisted in the sign('substrate:sources') pool as the `registry`
  *  record. Read-fallbacks, each drained on first migrate: the short-lived

@@ -429,7 +429,7 @@ export class SubstrateOrganizerDrone {
     `
     // Type glyph placeholder (shown until a thumbnail loads)
     const glyphs: Record<SubstrateSource['type'], string> = {
-      folder: '📁', url: '◈', hive: '⬡', layer: '▧', references: '⌖',
+      folder: '📁', url: '◈', hive: '⬡', layer: '▧', references: '⌖', custom: '⬢',
     }
     thumb.textContent = glyphs[source.type] ?? '◈'
 

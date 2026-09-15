@@ -28,7 +28,7 @@
 //     root OPFS `0000` → `substrate-registry` key
 //     per-hive dir `0000` → `substrate` / `substrate-inherit` keys
 
-import { EffectBus, SignatureService, type SubstrateSource, type SubstrateRegistry, EMPTY_SUBSTRATE_REGISTRY } from '@hypercomb/core'
+import { EffectBus, SignatureService, type SubstrateSource, type SubstrateCustomSource, type SubstrateRegistry, EMPTY_SUBSTRATE_REGISTRY } from '@hypercomb/core'
 // Folder helpers live in this namespace — see folder-handles.ts header for why
 // essentials must NOT import from @hypercomb/shared. Pulling shared into a
 // module bundle drags in Angular component code, which fails JIT in the
@@ -80,6 +80,18 @@ const LEGACY_LS_GLOBAL = 'hc:substrate-global'
 // sweep the overrides in with the images.
 const SOURCES_MEANING = 'substrate:sources'
 const REFERENCES_MEANING = 'substrate:references'
+// Participant-created named collections — any number of them, unlike the
+// single built-in References set. One pool, doc-per-set: the `registry`
+// subkey is unused here (the sets themselves live as ordinary `custom`
+// entries in the substrate:sources registry, addSource/removeSource cover
+// creation/deletion) — this pool holds only each set's MEMBER LIST, one doc
+// per set keyed by the set's own id ({ sigs: string[] }), same doc-pool
+// shape as backgrounds:saved.
+const CUSTOM_SETS_MEANING = 'substrate:custom-sets'
+// Generated-but-undecided candidates, one doc per set (subKey=setId),
+// { sigs: string[] } — separate pool from custom-sets so a candidate can
+// never be mistaken for a member by a caller reading the wrong list.
+const PENDING_MEANING = 'substrate:custom-gen'
 
 // ── drain sources, newest first. Read-only, every one of them. ───────────
 //
@@ -759,6 +771,169 @@ export class SubstrateService extends EventTarget {
     this.#propsPool = []
   }
 
+  // ─────────────────────── custom sets ───────────────────────
+  //
+  // Any number of participant-created named collections, unlike References
+  // (exactly one, built-in). A set's identity is its id — created once via
+  // createSet, never renamed by id, though its LABEL can be (renameSource,
+  // already generic over every source type). Deleting a set detaches it from
+  // the registry only; the member-list doc and the image bytes it named are
+  // untouched, same as removeReference leaving bytes alone — nothing here
+  // ever deletes content, only membership.
+
+  /** Every custom set that exists, in registry order. */
+  listSets(): readonly SubstrateCustomSource[] {
+    return this.#registry.sources.filter((s): s is SubstrateCustomSource => s.type === 'custom')
+  }
+
+  /** Create a new empty custom set and make it active. */
+  async createSet(name: string): Promise<SubstrateCustomSource> {
+    await this.ensureLoaded()
+    const label = name.trim() || 'Untitled set'
+    return await this.addSource({ type: 'custom', label }, true) as SubstrateCustomSource
+  }
+
+  /** Detach a custom set from the registry. Its member-list doc and every
+   *  image it named are left alone — deleting a SET is not deleting PICTURES. */
+  async deleteSet(id: string): Promise<void> {
+    await this.ensureLoaded()
+    const target = this.#registry.sources.find(s => s.id === id)
+    if (!target || target.type !== 'custom') return
+    await this.removeSource(id)
+  }
+
+  /** Every image signature currently in custom set `setId`. */
+  async listSetMembers(setId: string): Promise<string[]> {
+    const store = this.#store()
+    if (!store?.getPoolDoc) return []
+    try {
+      const pool = await this.#customSetsPool(store)
+      const buf = await store.getPoolDoc(pool ?? undefined, setId)
+      if (!buf) return []
+      const parsed = JSON.parse(new TextDecoder().decode(buf)) as { sigs?: unknown }
+      return Array.isArray(parsed.sigs)
+        ? parsed.sigs.filter((s): s is string => typeof s === 'string' && SIG_NAME_RE.test(s))
+        : []
+    } catch { return [] }
+  }
+
+  async #writeSetMembers(setId: string, sigs: readonly string[]): Promise<void> {
+    const store = this.#store()
+    if (!store?.putPoolDoc) return
+    try {
+      const pool = await this.#customSetsPool(store)
+      if (!pool) return
+      const bytes = new TextEncoder().encode(JSON.stringify({ sigs })).buffer as ArrayBuffer
+      await store.putPoolDoc(pool, bytes, setId)
+    } catch { /* store not ready */ }
+  }
+
+  /** Add an image into a custom set. Idempotent — already-a-member is a no-op. */
+  async addToSet(setId: string, signature: string): Promise<boolean> {
+    if (!SIG_NAME_RE.test(signature)) return false
+    const members = await this.listSetMembers(setId)
+    if (!members.includes(signature)) await this.#writeSetMembers(setId, [...members, signature])
+    this.#invalidateResolvedSet(setId)
+    EffectBus.emit('substrate:changed', { scope: 'custom', setId, signature })
+    return true
+  }
+
+  /** Remove an image from a custom set. Bytes at the root are untouched —
+   *  the same image may still be a member of another set, or on a tile. */
+  async removeFromSet(setId: string, signature: string): Promise<boolean> {
+    const members = await this.listSetMembers(setId)
+    if (!members.includes(signature)) return false
+    await this.#writeSetMembers(setId, members.filter(s => s !== signature))
+    this.#invalidateResolvedSet(setId)
+    EffectBus.emit('substrate:changed', { scope: 'custom', setId, signature })
+    return true
+  }
+
+  /** Force a re-list only when THIS set is the one currently resolved —
+   *  editing set B must not invalidate a render mid-way through set A. */
+  #invalidateResolvedSet(setId: string): void {
+    const resolved = this.#resolved?.source
+    if (!resolved || resolved.type !== 'custom' || resolved.id !== setId) return
+    this.#resolved = null
+    this.#propsPool = []
+  }
+
+  // ─────────────────── pending (Gen tab) candidates ───────────────────
+  //
+  // A freshly generated picture is not yet IN a set — it is offered, and the
+  // participant decides. A SEPARATE pool from custom-sets on purpose, same
+  // reason sources and references are separate pools: candidates and members
+  // are different questions ("what could go in?" vs "what is in?"), and one
+  // pool cannot answer both without a caller mixing them up by name.
+
+  /** Every candidate signature waiting on a decision for `setId`. */
+  async listCandidates(setId: string): Promise<string[]> {
+    const store = this.#store()
+    if (!store?.getPoolDoc) return []
+    try {
+      const pool = await this.#poolFor(store, PENDING_MEANING)
+      const buf = await store.getPoolDoc(pool ?? undefined, setId)
+      if (!buf) return []
+      const parsed = JSON.parse(new TextDecoder().decode(buf)) as { sigs?: unknown }
+      return Array.isArray(parsed.sigs)
+        ? parsed.sigs.filter((s): s is string => typeof s === 'string' && SIG_NAME_RE.test(s))
+        : []
+    } catch { return [] }
+  }
+
+  async #writeCandidates(setId: string, sigs: readonly string[]): Promise<void> {
+    const store = this.#store()
+    if (!store?.putPoolDoc) return
+    try {
+      const pool = await this.#poolFor(store, PENDING_MEANING)
+      if (!pool) return
+      const bytes = new TextEncoder().encode(JSON.stringify({ sigs })).buffer as ArrayBuffer
+      await store.putPoolDoc(pool, bytes, setId)
+    } catch { /* store not ready */ }
+  }
+
+  /** A freshly generated picture, offered but not yet decided. Called by the
+   *  generation orchestrator as each image lands — never by a surface. */
+  async addCandidate(setId: string, signature: string): Promise<void> {
+    if (!SIG_NAME_RE.test(signature)) return
+    const pending = await this.listCandidates(setId)
+    if (pending.includes(signature)) return
+    await this.#writeCandidates(setId, [...pending, signature])
+    EffectBus.emit('substrate:candidates-changed', { setId, count: pending.length + 1 })
+  }
+
+  /** The gesture the Gen tab offers: keep this one. Moves it from candidate
+   *  to member in one step — a click promotes, it does not duplicate. */
+  async promoteCandidate(setId: string, signature: string): Promise<boolean> {
+    const ok = await this.addToSet(setId, signature)
+    if (!ok) return false
+    const pending = await this.listCandidates(setId)
+    await this.#writeCandidates(setId, pending.filter(s => s !== signature))
+    EffectBus.emit('substrate:candidates-changed', { setId, count: pending.length - 1 })
+    return true
+  }
+
+  /** The gesture a candidate the participant does NOT want takes: gone from
+   *  the Gen tab, bytes untouched (they may still be a member elsewhere). */
+  async dismissCandidate(setId: string, signature: string): Promise<void> {
+    const pending = await this.listCandidates(setId)
+    if (!pending.includes(signature)) return
+    await this.#writeCandidates(setId, pending.filter(s => s !== signature))
+    EffectBus.emit('substrate:candidates-changed', { setId, count: pending.length - 1 })
+  }
+
+  /** Queue a ComfyUI batch for `setId`'s Gen tab. Dynamic import: comfy
+   *  generation is a whole GPU pipeline nothing here needs at rest, so it
+   *  loads only the moment a surface actually asks to generate. */
+  async generateCandidates(
+    setId: string,
+    request: { positive: string; negative?: string; width?: number; height?: number },
+    count: number,
+  ): Promise<number> {
+    const { generateSetCandidates } = await import('./substrate-generate.js')
+    return generateSetCandidates(setId, request, count)
+  }
+
   // ─────────────────── source resolvers (per type) ───────────────────
 
   async #loadSourceImages(source: SubstrateSource): Promise<string[]> {
@@ -768,7 +943,18 @@ export class SubstrateService extends EventTarget {
       case 'folder': return this.#loadFolderImages(source.handleId)
       case 'layer':  return this.#loadLayerImages(source.signature)
       case 'references': return this.#loadReferenceImages()
+      case 'custom': return this.#loadCustomSetImages(source.id)
     }
+  }
+
+  /** Custom sets resolve with no walk, same as References — the member-list
+   *  doc IS the image set. */
+  async #loadCustomSetImages(setId: string): Promise<string[]> {
+    const sigs = await this.listSetMembers(setId)
+    for (const sig of sigs) {
+      if (!this.#imageNames.has(sig)) this.#imageNames.set(sig, sig.slice(0, 8))
+    }
+    return sigs
   }
 
   /** References resolve with no walk at all — the pool listing IS the image
@@ -2282,6 +2468,11 @@ export class SubstrateService extends EventTarget {
   /** The sign('substrate:references') pool — one file per copied reference. */
   async #referencesPool(store: StoreHandle): Promise<FileSystemDirectoryHandle | null> {
     return await this.#poolFor(store, REFERENCES_MEANING)
+  }
+
+  /** The sign('substrate:custom-sets') pool — one doc per custom set. */
+  async #customSetsPool(store: StoreHandle): Promise<FileSystemDirectoryHandle | null> {
+    return await this.#poolFor(store, CUSTOM_SETS_MEANING)
   }
 
   /** Open a RETIRED pool. `create: false` throughout — a drained pool must

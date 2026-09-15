@@ -93,12 +93,32 @@ type CanvasLike = EventTarget & {
   unsavePicture?(sig: string): void
   worldOf?(sig: string): 'light' | 'dark' | null
 }
+/** A participant-created named collection — mirrors SubstrateCustomSource. */
+type SetLike = { type: 'custom'; id: string; label: string }
 type SubstrateLike = {
   ensureLoaded(): Promise<void>
   listImages(): { name: string; imageSig: string; enabled: boolean }[]
   setImageHidden(signature: string, hidden: boolean): void
   showAllImages(): void
   hiddenImages(): readonly string[]
+  /** Which source is filling blank tiles right now, whatever its type. */
+  activeSource: { type: string; id: string; label: string } | null
+  setActive(id: string | null): Promise<void>
+  // custom sets — optional: a build from before they existed simply has a
+  // window with no "Your sets" area, same amnesty as the saved shelves.
+  listSets?(): readonly SetLike[]
+  createSet?(name: string): Promise<SetLike>
+  deleteSet?(id: string): Promise<void>
+  listSetMembers?(setId: string): Promise<string[]>
+  removeFromSet?(setId: string, signature: string): Promise<boolean>
+  listCandidates?(setId: string): Promise<string[]>
+  promoteCandidate?(setId: string, signature: string): Promise<boolean>
+  dismissCandidate?(setId: string, signature: string): Promise<void>
+  generateCandidates?(
+    setId: string,
+    request: { positive: string; negative?: string; width?: number; height?: number },
+    count: number,
+  ): Promise<number>
 }
 type StoreLike = { getResource(sig: string): Promise<Blob | null> }
 
@@ -138,6 +158,13 @@ export type PictureRow = {
 export type SavedRow = {
   signature: string
   /** Object URL, once the bytes have resolved. Empty until then. */
+  thumb: string
+}
+
+/** One picture in a custom set — a member or a Gen-tab candidate, same
+ *  shape either way; which list it is in is the only difference. */
+export type SetPictureRow = {
+  signature: string
   thumb: string
 }
 
@@ -183,6 +210,26 @@ export class BackgroundsWindowComponent implements OnDestroy {
   readonly spacePan = signal(false)
   #panStart: { pointerX: number; pointerY: number; imageX: number; imageY: number } | null = null
 
+  // ── your sets ────────────────────────────────────────────────────────
+  /** Every custom set that exists. */
+  readonly sets = signal<readonly SetLike[]>([])
+  /** Which set is filling blank tiles right now — null when a built-in
+   *  theme group (or nothing) is active instead. */
+  readonly activeSetId = signal<string | null>(null)
+  /** Which set's Active/Gen tabs are open for browsing — independent of
+   *  which one is active, so looking through a set does not switch tiles. */
+  readonly viewingSetId = signal<string | null>(null)
+  readonly setTab = signal<'active' | 'gen'>('active')
+  readonly setMembers = signal<readonly SetPictureRow[]>([])
+  readonly setCandidates = signal<readonly SetPictureRow[]>([])
+  readonly loadingSetContents = signal(false)
+  readonly newSetName = signal('')
+  readonly creatingSet = signal(false)
+  readonly genPrompt = signal('')
+  readonly genCount = signal<10 | 19>(19)
+  readonly generating = signal(false)
+  readonly genProgress = signal<{ done: number; total: number } | null>(null)
+
   readonly session = signalSession(
     this.visible,
     open => { EffectBus.emit('backgrounds:state', { open }) },
@@ -206,12 +253,21 @@ export class BackgroundsWindowComponent implements OnDestroy {
       const key = payload?.section === 'tiles' ? 'tiles' : 'screen'
       this.open()
       this.sections.reveal(key)
-      if (key === 'tiles') void this.#loadPictures()
+      if (key === 'tiles') { void this.#loadPictures(); void this.#loadSets() }
     }))
     this.#cleanups.push(EffectBus.on('substrate:changed', () => {
       this.revision.update(n => n + 1)
-      if (this.visible() && this.sections.isOpen('tiles')) void this.#loadPictures()
+      if (this.visible() && this.sections.isOpen('tiles')) { void this.#loadPictures(); void this.#loadSets() }
     }))
+    this.#cleanups.push(EffectBus.on<{ setId: string }>('substrate:candidates-changed', payload => {
+      if (payload?.setId && payload.setId === this.viewingSetId()) void this.#loadSetContents()
+    }))
+    this.#cleanups.push(EffectBus.on<{ setId: string; done: number; total: number; state: string }>(
+      'substrate:generate-progress', payload => {
+        if (!payload || payload.setId !== this.viewingSetId()) return
+        this.genProgress.set(payload.state === 'done' ? null : { done: payload.done, total: payload.total })
+        if (payload.state === 'done') void this.#loadSetContents()
+      }))
     this.#cleanups.push(EffectBus.on('locale:changed', () => this.revision.update(n => n + 1)))
 
     this.#follow(THEMES_KEY)
@@ -402,7 +458,7 @@ export class BackgroundsWindowComponent implements OnDestroy {
 
   section(key: string): void {
     this.sections.toggle(key)
-    if (this.sections.isOpen('tiles')) void this.#loadPictures()
+    if (this.sections.isOpen('tiles')) { void this.#loadPictures(); void this.#loadSets() }
   }
 
   /** Wear nothing on this half. Nothing is removed: a picture already on a
@@ -656,6 +712,151 @@ export class BackgroundsWindowComponent implements OnDestroy {
       try { URL.revokeObjectURL(url) } catch { /* already gone */ }
     }
     this.#thumbs.clear()
+  }
+
+  // ── your sets ────────────────────────────────────────────────────────
+
+  async #loadSets(): Promise<void> {
+    const substrate = this.#substrate()
+    if (!substrate?.listSets) { this.sets.set([]); return }
+    await substrate.ensureLoaded()
+    this.sets.set(substrate.listSets())
+    const active = substrate.activeSource
+    this.activeSetId.set(active?.type === 'custom' ? active.id : null)
+    if (!this.viewingSetId() && this.sets().length) this.viewingSetId.set(this.sets()[0]!.id)
+    if (this.viewingSetId()) void this.#loadSetContents()
+  }
+
+  /** Browse a set's contents without changing what fills blank tiles. */
+  viewSet(id: string): void {
+    this.viewingSetId.set(id)
+    this.setTab.set('active')
+    void this.#loadSetContents()
+  }
+
+  setTabTo(tab: 'active' | 'gen'): void { this.setTab.set(tab) }
+
+  /** Make a set the one that fills blank tiles — and browse it, since
+   *  picking one and then wondering what's in it is one gesture, not two. */
+  async activateSet(id: string): Promise<void> {
+    await this.#substrate()?.setActive(id)
+    this.activeSetId.set(id)
+    this.viewSet(id)
+    this.revision.update(n => n + 1)
+  }
+
+  async createNewSet(): Promise<void> {
+    const name = this.newSetName().trim()
+    const substrate = this.#substrate()
+    if (!name || !substrate?.createSet || this.creatingSet()) return
+    this.creatingSet.set(true)
+    try {
+      const created = await substrate.createSet(name)
+      this.newSetName.set('')
+      await this.#loadSets()
+      if (created) await this.activateSet(created.id)
+    } finally {
+      this.creatingSet.set(false)
+    }
+  }
+
+  /** Detach a set. Its pictures stay exactly where they already were —
+   *  on tiles, in the store — only the collection grouping them is gone. */
+  async deleteSetConfirm(id: string): Promise<void> {
+    await this.#substrate()?.deleteSet?.(id)
+    if (this.viewingSetId() === id) this.viewingSetId.set(null)
+    if (this.activeSetId() === id) this.activeSetId.set(null)
+    await this.#loadSets()
+  }
+
+  async #loadSetContents(): Promise<void> {
+    const id = this.viewingSetId()
+    const substrate = this.#substrate()
+    if (!id || !substrate?.listSetMembers || !substrate.listCandidates) {
+      this.setMembers.set([])
+      this.setCandidates.set([])
+      return
+    }
+    this.loadingSetContents.set(true)
+    try {
+      const [members, candidates] = await Promise.all([
+        substrate.listSetMembers(id),
+        substrate.listCandidates(id),
+      ])
+      // A newer view can resolve before this one — switching sets twice
+      // quickly, or #loadSets' own refresh racing a just-created set's
+      // activation. Whichever load lands second must not overwrite what
+      // the viewer is looking at NOW with what they were looking at THEN.
+      if (this.viewingSetId() !== id) return
+      this.setMembers.set(members.map(sig => ({ signature: sig, thumb: this.#thumbs.get(sig) ?? '' })))
+      this.setCandidates.set(candidates.map(sig => ({ signature: sig, thumb: this.#thumbs.get(sig) ?? '' })))
+      void this.#resolveSetThumbs([...members, ...candidates])
+    } finally {
+      if (this.viewingSetId() === id) this.loadingSetContents.set(false)
+    }
+  }
+
+  async #resolveSetThumbs(sigs: readonly string[]): Promise<void> {
+    const store = ioc()?.get<StoreLike>(STORE_KEY)
+    if (!store?.getResource) return
+    for (const sig of sigs) {
+      if (this.#thumbs.has(sig)) continue
+      const blob = await store.getResource(sig).catch(() => null)
+      if (!blob) continue
+      const url = URL.createObjectURL(blob)
+      this.#thumbs.set(sig, url)
+      const patch = (rows: readonly SetPictureRow[]): SetPictureRow[] =>
+        rows.map(r => (r.signature === sig ? { ...r, thumb: url } : r))
+      this.setMembers.update(patch)
+      this.setCandidates.update(patch)
+    }
+  }
+
+  /** Real removal — the picture leaves the set. Bytes are untouched; the
+   *  same picture may still be a member elsewhere or sitting on a tile. */
+  async removeMember(signature: string): Promise<void> {
+    const id = this.viewingSetId()
+    if (!id) return
+    await this.#substrate()?.removeFromSet?.(id, signature)
+    this.setMembers.update(rows => rows.filter(r => r.signature !== signature))
+  }
+
+  /** The Gen-tab gesture: keep this one. */
+  async promoteCandidate(signature: string): Promise<void> {
+    const id = this.viewingSetId()
+    if (!id) return
+    const ok = await this.#substrate()?.promoteCandidate?.(id, signature)
+    if (!ok) return
+    this.setCandidates.update(rows => rows.filter(r => r.signature !== signature))
+    this.setMembers.update(rows => [...rows, { signature, thumb: this.#thumbs.get(signature) ?? '' }])
+  }
+
+  async dismissCandidate(signature: string): Promise<void> {
+    const id = this.viewingSetId()
+    if (!id) return
+    await this.#substrate()?.dismissCandidate?.(id, signature)
+    this.setCandidates.update(rows => rows.filter(r => r.signature !== signature))
+  }
+
+  setGenCount(count: 10 | 19): void { this.genCount.set(count) }
+
+  /** Queue a batch. Progress arrives over `substrate:generate-progress` —
+   *  see the constructor — so this just fires it and gets out of the way. */
+  async generate(): Promise<void> {
+    const id = this.viewingSetId()
+    const prompt = this.genPrompt().trim()
+    const substrate = this.#substrate()
+    if (!id || !prompt || !substrate?.generateCandidates || this.generating()) return
+    this.generating.set(true)
+    this.genProgress.set({ done: 0, total: this.genCount() })
+    try {
+      await substrate.generateCandidates(id, { positive: prompt }, this.genCount())
+    } finally {
+      this.generating.set(false)
+      this.genProgress.set(null)
+      this.setTab.set('gen')
+      void this.#loadSetContents()
+    }
   }
 }
 

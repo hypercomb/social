@@ -285,6 +285,158 @@
                 }
               </ul>
             }
+
+            <!-- YOUR SETS — participant-created named collections, any number
+                 of them, each generatable into and each really deletable
+                 (unlike the built-in groups above, which are fixed). -->
+            <div class="bg-pool-head bg-sets-head">
+              <span class="bg-note">{{ 'backgrounds.sets' | t }}</span>
+            </div>
+
+            <div class="bg-grid bg-sets-grid">
+              @for (set of sets(); track set.id) {
+                <button
+                  class="bg-card bg-set-card"
+                  type="button"
+                  [class.on]="set.id === activeSetId()"
+                  [class.viewing]="set.id === viewingSetId()"
+                  (click)="viewSet(set.id)"
+                >
+                  <span class="bg-card-name">{{ set.label }}</span>
+                  @if (set.id === activeSetId()) {
+                    <span class="bg-card-note">{{ 'backgrounds.sets.active' | t }}</span>
+                  } @else {
+                    <span
+                      class="bg-set-wear"
+                      role="button"
+                      tabindex="0"
+                      (click)="$event.stopPropagation(); activateSet(set.id)"
+                      (keydown.enter)="$event.stopPropagation(); activateSet(set.id)"
+                    >{{ 'backgrounds.sets.wear' | t }}</span>
+                  }
+                </button>
+              }
+              <div class="bg-card bg-set-new">
+                <input
+                  class="bg-set-new-input"
+                  type="text"
+                  [value]="newSetName()"
+                  (input)="newSetName.set($any($event.target).value)"
+                  (keydown.enter)="createNewSet()"
+                  [attr.placeholder]="'backgrounds.sets.new-placeholder' | t"
+                  [attr.aria-label]="'backgrounds.sets.new' | t"
+                />
+                <button
+                  class="bg-link"
+                  type="button"
+                  [disabled]="!newSetName().trim() || creatingSet()"
+                  (click)="createNewSet()"
+                >{{ 'backgrounds.sets.create' | t }}</button>
+              </div>
+            </div>
+
+            @if (viewingSetId()) {
+              <div class="bg-set-detail">
+                <div class="bg-set-tabs">
+                  <button class="bg-tab" type="button" [class.on]="setTab() === 'active'" (click)="setTabTo('active')">
+                    {{ 'backgrounds.sets.tab-active' | t: { count: setMembers().length } }}
+                  </button>
+                  <button class="bg-tab" type="button" [class.on]="setTab() === 'gen'" (click)="setTabTo('gen')">
+                    {{ 'backgrounds.sets.tab-gen' | t: { count: setCandidates().length } }}
+                  </button>
+                  <span class="bg-set-spacer"></span>
+                  <button class="bg-link bg-set-delete" type="button" (click)="deleteSetConfirm(viewingSetId()!)">
+                    {{ 'backgrounds.sets.delete' | t }}
+                  </button>
+                </div>
+
+                @if (setTab() === 'active') {
+                  @if (loadingSetContents() && setMembers().length === 0) {
+                    <p class="bg-empty">{{ 'backgrounds.pool.loading' | t }}</p>
+                  } @else if (setMembers().length === 0) {
+                    <p class="bg-empty">{{ 'backgrounds.sets.empty-active' | t }}</p>
+                  } @else {
+                    <ul class="bg-pool bg-set-grid">
+                      @for (picture of setMembers(); track picture.signature) {
+                        <li class="bg-pic bg-set-pic">
+                          <span
+                            class="bg-pic-chip"
+                            [style.background-image]="picture.thumb ? 'url(' + picture.thumb + ')' : null"
+                            aria-hidden="true"
+                          ></span>
+                          <button
+                            class="bg-pic-act bg-set-remove"
+                            type="button"
+                            (click)="removeMember(picture.signature)"
+                            [attr.aria-label]="'backgrounds.sets.remove' | t"
+                            [attr.title]="'backgrounds.sets.remove' | t"
+                          >
+                            <span class="mat-sym" aria-hidden="true">delete</span>
+                          </button>
+                        </li>
+                      }
+                    </ul>
+                  }
+                } @else {
+                  <div class="bg-gen-form">
+                    <textarea
+                      class="bg-gen-prompt"
+                      rows="2"
+                      [value]="genPrompt()"
+                      (input)="genPrompt.set($any($event.target).value)"
+                      [attr.placeholder]="'backgrounds.sets.gen-placeholder' | t"
+                      [attr.aria-label]="'backgrounds.sets.gen-placeholder' | t"
+                    ></textarea>
+                    <div class="bg-gen-row">
+                      <div class="bg-gen-count" role="group" [attr.aria-label]="'backgrounds.sets.gen-count' | t">
+                        <button class="bg-chip" type="button" [class.on]="genCount() === 10" (click)="setGenCount(10)">10</button>
+                        <button class="bg-chip" type="button" [class.on]="genCount() === 19" (click)="setGenCount(19)">19</button>
+                      </div>
+                      <button
+                        class="bg-gen-run"
+                        type="button"
+                        [disabled]="!genPrompt().trim() || generating()"
+                        (click)="generate()"
+                      >
+                        @if (genProgress(); as progress) {
+                          {{ 'backgrounds.sets.generating' | t: { done: progress.done, total: progress.total } }}
+                        } @else {
+                          {{ 'backgrounds.sets.generate' | t }}
+                        }
+                      </button>
+                    </div>
+                  </div>
+
+                  @if (setCandidates().length === 0) {
+                    <p class="bg-empty">{{ 'backgrounds.sets.empty-gen' | t }}</p>
+                  } @else {
+                    <ul class="bg-pool bg-set-grid">
+                      @for (picture of setCandidates(); track picture.signature) {
+                        <li class="bg-pic bg-set-pic bg-candidate">
+                          <button
+                            class="bg-pic-chip bg-candidate-chip"
+                            type="button"
+                            [style.background-image]="picture.thumb ? 'url(' + picture.thumb + ')' : null"
+                            (click)="promoteCandidate(picture.signature)"
+                            [attr.aria-label]="'backgrounds.sets.keep' | t"
+                            [attr.title]="'backgrounds.sets.keep' | t"
+                          ></button>
+                          <button
+                            class="bg-pic-act bg-set-remove"
+                            type="button"
+                            (click)="dismissCandidate(picture.signature)"
+                            [attr.aria-label]="'backgrounds.sets.discard' | t"
+                            [attr.title]="'backgrounds.sets.discard' | t"
+                          >
+                            <span class="mat-sym" aria-hidden="true">close</span>
+                          </button>
+                        </li>
+                      }
+                    </ul>
+                  }
+                }
+              </div>
+            }
           </div>
         }
       </section>

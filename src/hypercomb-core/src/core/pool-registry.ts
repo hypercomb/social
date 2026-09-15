@@ -419,6 +419,18 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // to prevent — so the colon-scoped spelling is claimed now, not later.
   'hives:names',
   'substrate:references',
+  // PARTICIPANT-CREATED NAMED TILE-BACKGROUND SETS — any number of them,
+  // unlike substrate:references (exactly one). One doc per set, keyed by the
+  // set's own id ({ sigs: [...] }), same doc-pool shape as backgrounds:saved.
+  // The sets themselves are ordinary `custom`-type entries in the
+  // substrate:sources registry; this pool holds only each set's member list.
+  'substrate:custom-sets',
+  // GENERATED-BUT-UNDECIDED CANDIDATES for a custom set — one doc per set
+  // (subKey=setId), { sigs: [...] }. Separate pool from substrate:custom-sets
+  // on purpose: a candidate and a member answer different questions ("could
+  // go in?" vs "is in"), same reason substrate:sources and
+  // substrate:references are two pools rather than one.
+  'substrate:custom-gen',
   // THE SUBSTRATE REGISTRY — which background sources this participant has and
   // which is active: one current document (essentials/substrate). It replaces a
   // member literally named `registry` inside substrate:sources, kept as a

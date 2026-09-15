@@ -396,6 +396,156 @@ $accent: #7eb6d6;
   .mat-sym { font-size: 1.05em; }
 }
 
+// ── your sets ───────────────────────────────────────────
+.bg-sets-head { margin-top: 0.6em; }
+.bg-sets-grid { grid-template-columns: repeat(auto-fill, minmax(7.2em, 1fr)); }
+
+.bg-set-card { position: relative; }
+.bg-set-card.viewing { border-color: var(--hc-window-edge); }
+.bg-set-wear {
+  font-size: 0.64em;
+  text-decoration: underline;
+  color: var(--hc-window-accent);
+  cursor: pointer;
+  align-self: flex-start;
+  &:hover { color: var(--hc-window-ink-loud); }
+}
+
+.bg-set-new {
+  gap: 0.3em;
+  cursor: default;
+  &:hover { border-color: var(--hc-window-line); background: none; }
+}
+.bg-set-new-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.25em 0.35em;
+  font: inherit;
+  font-size: 0.72em;
+  color: var(--hc-panel-text, var(--hc-window-ink-loud));
+  background: color-mix(in srgb, var(--hc-window-ink-loud) 6%, transparent);
+  border: 1px solid var(--hc-window-line);
+  border-radius: 2px;
+  &:focus-visible { outline: 1px solid rgb(var(--acc)); outline-offset: 1px; }
+}
+
+.bg-set-detail {
+  margin-top: 0.5em;
+  padding-top: 0.5em;
+  border-top: 1px solid var(--hc-window-line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+.bg-set-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+.bg-tab {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.7em;
+  padding: 0.2em 0;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  &:hover { color: var(--hc-window-ink-plain); }
+  &.on { color: var(--hc-window-ink-loud); border-bottom-color: rgb(var(--acc)); }
+}
+.bg-set-spacer { flex: 1; }
+.bg-set-delete { color: var(--hc-window-ink-quiet); &:hover { color: var(--hc-window-ink-loud); } }
+
+.bg-set-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.6em, 1fr));
+  gap: 0.4em;
+}
+.bg-set-pic {
+  position: relative;
+  padding: 0;
+  border-radius: 2px;
+  overflow: hidden;
+  .bg-pic-chip { width: 100%; height: 4em; border-radius: 2px; }
+}
+.bg-set-remove {
+  position: absolute;
+  top: 0.15em;
+  right: 0.15em;
+  background: color-mix(in srgb, var(--md-surface) 70%, transparent);
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  .bg-set-pic:hover & { opacity: 1; }
+}
+
+// A CANDIDATE, LIT ON HOVER — the gesture the Gen tab is built around: this
+// picture is only a suggestion until you say otherwise, and hovering it
+// should feel like picking something up, not like clicking a button.
+.bg-candidate-chip {
+  border: 1px solid var(--hc-window-line);
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  &:hover, &:focus-visible {
+    border-color: rgb(var(--acc));
+    box-shadow: 0 0 0 2px color-mix(in srgb, rgb(var(--acc)) 45%, transparent);
+    transform: translateY(-1px);
+  }
+}
+
+.bg-gen-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+.bg-gen-prompt {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 0.4em 0.5em;
+  font: inherit;
+  font-size: 0.74em;
+  line-height: 1.4;
+  color: var(--hc-window-ink-loud);
+  background: color-mix(in srgb, var(--hc-window-ink-loud) 6%, transparent);
+  border: 1px solid var(--hc-window-line);
+  border-radius: 2px;
+  &:focus-visible { outline: 1px solid rgb(var(--acc)); outline-offset: 1px; }
+}
+.bg-gen-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+.bg-gen-count { display: flex; gap: 0.3em; }
+.bg-chip {
+  padding: 0.2em 0.55em;
+  font: inherit;
+  font-size: 0.7em;
+  color: var(--hc-window-ink-plain);
+  background: none;
+  border: 1px solid var(--hc-window-line);
+  border-radius: 999px;
+  cursor: pointer;
+  &:hover { border-color: var(--hc-window-edge); }
+  &.on { border-color: rgb(var(--acc)); color: var(--hc-window-ink-loud); background: var(--hc-window-wash); }
+}
+.bg-gen-run {
+  flex: 1;
+  padding: 0.35em 0.6em;
+  font: inherit;
+  font-size: 0.72em;
+  letter-spacing: 0.03em;
+  color: var(--hc-window-ink-loud);
+  background: var(--hc-window-wash);
+  border: 1px solid rgb(var(--acc));
+  border-radius: 2px;
+  cursor: pointer;
+  &:hover:not(:disabled) { background: color-mix(in srgb, rgb(var(--acc)) 18%, var(--hc-window-wash)); }
+  &:disabled { opacity: 0.5; cursor: default; }
+}
+
 // ── the world filter ────────────────────────────────────
 .bg-world {
   flex: 0 0 auto;
