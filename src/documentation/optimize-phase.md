@@ -68,3 +68,16 @@ child sig to its layer and writes the complete-or-absent children manifest into
 inline in `HistoryService.commitLayer` on a microtask — the commit path now
 mints truth only. `resolveChildNames` backfills missing manifests, so the
 record is never required.
+
+## Second implementation
+
+`assistant/llm-context.ts` + `assistant/llm-context.drone.ts` (essentials):
+a token-compact text projection of one tile, keyed by its layer sig, in
+`sign('llm:context')`. `projectLayer` is the pure rule (the layer's own
+bytes plus the resources its `notes`/`properties` slots name, local reads
+only); the drone queues sigs off `content:wrote` (kind `layer`) plus an
+`enqueue` door anything cold may call. `LlmContextService.project()` proves
+"never load-bearing" as a single rule applied to both a pool hit and an
+in-memory derive, rather than two implementations kept in sync by hand.
+`history/inflate.ts`'s optional `lens` is the first consumer: a pool hit
+substitutes the projection in place of a fully-expanded subtree.

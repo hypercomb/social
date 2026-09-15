@@ -19,6 +19,24 @@ export interface ActionDescriptor {
   name: string // kebab-case, ux-facing
 }
 
+export type ReadableArtifactDescriptor = {
+  readonly name: string
+  readonly sig: string
+  readonly of?: 'bee' | 'dependency'
+  readonly type?: string
+}
+
+export type ReadableArtifact = Required<Pick<ReadableArtifactDescriptor, 'name' | 'sig'>> & {
+  readonly of: 'bee' | 'dependency'
+  readonly type: string
+  readonly bytes: Uint8Array
+}
+
+export type ReadableArtifactProvider = {
+  entries(): Promise<readonly ReadableArtifactDescriptor[]>
+  readArtifact(sig: string): Promise<ReadableArtifact | null>
+}
+
 type DeferredBeeLoads = {
   pending: readonly string[]
   loads: readonly Promise<Bee | null>[]
@@ -45,6 +63,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // list, exactly like the legacy dev shell, or every action re-pulses the
   // entire application and makes navigation pay startup cost again.
   #registeredBees: readonly Bee[] | null = null
+  readonly #readableArtifactProviders: ReadableArtifactProvider[] = []
+  readonly #readableArtifactReads = new Map<string, Promise<ReadableArtifact | null>>()
 
   // Bees pulsed at least once (either by the processor's encounter loop
   // for the first wave, or individually here once they land off the
@@ -65,6 +85,44 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   public useRegisteredBees(bees: readonly Bee[]): void {
     this.#registeredBees = [...new Set(bees)]
     this.setResourceCount(this.#registeredBees.length)
+  }
+
+  /** Register inert, content-addressed artifacts that the preloader did not
+   * evaluate itself, such as TypeScript sources embedded in the dev source map. */
+  public registerReadableArtifacts(provider: ReadableArtifactProvider): void {
+    if (this.#readableArtifactProviders.includes(provider)) return
+    this.#readableArtifactProviders.push(provider)
+    this.#readableArtifactReads.clear()
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  public readableArtifacts = async (): Promise<readonly ReadableArtifactDescriptor[]> => {
+    const own = this.#actions.map(action => ({
+      name: action.name,
+      sig: action.signature,
+      of: 'bee' as const,
+      type: 'text/javascript',
+    }))
+    const provided = (await Promise.all(
+      this.#readableArtifactProviders.map(provider => provider.entries().catch(() => []))
+    )).flat()
+    return [...own, ...provided]
+  }
+
+  public readArtifact = async (sig: string): Promise<ReadableArtifact | null> => {
+    const clean = this.#stripExt(sig).toLowerCase()
+    if (!this.#isSignature(clean)) return null
+    const hit = this.#readableArtifactReads.get(clean)
+    if (hit) return hit
+    const read = (async (): Promise<ReadableArtifact | null> => {
+      for (const provider of this.#readableArtifactProviders) {
+        const artifact = await provider.readArtifact(clean).catch(() => null)
+        if (artifact) return artifact
+      }
+      return null
+    })()
+    this.#readableArtifactReads.set(clean, read)
+    return read
   }
 
   readonly #bySignature = new Map<string, ActionDescriptor>()

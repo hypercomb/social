@@ -130,6 +130,7 @@ describe('publishing is an act', () => {
       .map(rel)
       .sort()
     expect(touching).toEqual([
+      'assistant/llm-context.drone.ts',        // derived cache, local only
       'history/active-genome.service.ts',      // derived cache, local only
       'history/history.service.ts',            // THE EMITTER (layer commits)
       'history/manifest-optimizer.drone.ts',   // derived cache, local only

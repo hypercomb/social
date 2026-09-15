@@ -264,6 +264,25 @@ export interface RouteFlowView {
   readonly counts: Readonly<Record<RouteFlowState, number>>
 }
 
+/** A participant-curated comment beside the generated workflow. `nodeId` is
+ *  optional: a selection may concern the whole conversation rather than the
+ *  step that happened to be current when it was captured. */
+export interface RouteWorkflowComment {
+  readonly text: string
+  readonly nodeId?: string
+}
+
+/** User-directed state, kept apart from the wipe-safe generated flow. The
+ *  selected range is already durable in the thread; this is the participant's
+ *  durable decision that the range belongs in the workflow. */
+export interface RouteWorkflowCommentsRecord {
+  readonly kind: 'chat:workflow-comments'
+  readonly v: 1
+  readonly convoId: string
+  readonly comments: readonly RouteWorkflowComment[]
+  readonly at: number
+}
+
 /** What the participant's local model can do right now, read from probe STATE only. */
 export type RouteOrganizerState =
   'awake' | 'off' | 'unknown' | 'asleep' | 'blocked' | 'needs-permission' | 'empty' | 'no-model'
@@ -273,6 +292,8 @@ export type RouteOrganizing =
   | { readonly stage: 'structure' }
   | { readonly stage: 'card'; readonly nodeId: string }
   | { readonly stage: 'session' }
+  | { readonly stage: 'selection-summary' }
+  | { readonly stage: 'selection-assimilate' }
 
 export interface Route {
   /** Only rows that hold work, in thread order. */
@@ -286,6 +307,9 @@ export interface Route {
    *  record at this version exists AND is about this thread's history. The
    *  pure derivation leaves it out. */
   readonly flow?: RouteFlowView
+  /** Participant-curated observations assimilated from selected transcript
+   *  text. Unlike `flow`, these are state and survive flow regeneration. */
+  readonly comments?: readonly RouteWorkflowComment[]
   /** Probe STATE only: `organizerGate`, then `organizerModel`. No fetch on
    *  any path. */
   readonly organizerState?: RouteOrganizerState
@@ -506,6 +530,7 @@ export const readRoute = async (convoId: string, liveRunId?: string): Promise<Ro
   if (!records) return EMPTY_ROUTE
   const id = String(convoId ?? '').trim()
   const record = await readRouteFlow(id)
+  const comments = await readRouteWorkflowComments(id)
   const flow = record ? flowView(record, records.turns, !!record.session && await sessionDue(record)) : undefined
   const organizer = await organizerFields(id)
   const state = flowState()
@@ -514,6 +539,7 @@ export const readRoute = async (convoId: string, liveRunId?: string): Promise<Ro
   return {
     ...records.route,
     ...(flow ? { flow } : {}),
+    ...(comments.comments.length ? { comments: comments.comments } : {}),
     ...organizer,
     ...(organizing ? { organizing } : {}),
     ...(cardBackoff.length ? { cardBackoff } : {}),
@@ -599,6 +625,16 @@ export const routeExchanges = (
  *  (`lineageKey` folds every non-letter/number to `-`), addressed only
  *  through the store, which registers the meaning when it derives it. */
 export const ROUTE_FLOWS_POOL = 'chat:route-flows'
+
+/** Participant-requested workflow comments. This is intentionally NOT the
+ *  generated-flow pool: a flow is disposable derivation, while choosing a
+ *  passage for the workflow is an act that cannot be reconstructed from the
+ *  thread alone. One recycled document per conversation. */
+export const ROUTE_WORKFLOW_COMMENTS_POOL = 'chat:workflow-comments'
+export const ROUTE_WORKFLOW_COMMENTS_VERSION = 1
+export const ROUTE_WORKFLOW_COMMENT_LIMIT = 24
+export const ROUTE_WORKFLOW_COMMENT_CHARS = 220
+export const ROUTE_SELECTION_CHARS = 12_000
 
 /** THE SECOND HALF OF THE KEY. Bump on any change to the structure prompt,
  *  the parse, the window, the repair rules, the behind rule or the record's
@@ -687,6 +723,9 @@ interface FlowCoordination {
   subscribedAt: number
   /** The per-conversation mint guard. */
   readonly organizing: Set<string>
+  /** Explicit selected-text assimilation owns the conversation while its two
+   *  calls run, so refresh hints cannot interleave an automatic flow call. */
+  readonly assimilating: Set<string>
   readonly organizingNow: Map<string, RouteOrganizing>
   /** convoId → the node the participant is looking at. */
   readonly prefer: Map<string, string>
@@ -715,14 +754,15 @@ const readVisited = (): Map<string, number> => {
   } catch { return new Map() }
 }
 
-const flowState = (): FlowCoordination =>
-  ((globalThis as Record<symbol, unknown>)[FLOW_STATE] ??= {
+const flowState = (): FlowCoordination => {
+  const state = ((globalThis as Record<symbol, unknown>)[FLOW_STATE] ??= {
     tail: Promise.resolve(),
     inFlight: null,
     attendedWaiting: 0,
     pausedUntil: 0,
     subscribedAt: 0,
     organizing: new Set<string>(),
+    assimilating: new Set<string>(),
     organizingNow: new Map<string, RouteOrganizing>(),
     prefer: new Map<string, string>(),
     backoff: new Map<string, number>(),
@@ -730,6 +770,10 @@ const flowState = (): FlowCoordination =>
     lastPassModel: '',
     visited: readVisited(),
   } satisfies FlowCoordination) as FlowCoordination
+  // A live hot-reloaded tab may hold the preceding state shape.
+  ;(state as FlowCoordination & { assimilating?: Set<string> }).assimilating ??= new Set<string>()
+  return state
+}
 
 /**
  * THE VISITED QUEUE. Jaime: "if we don't touch the conversation let's not
@@ -2218,6 +2262,104 @@ const flowsPool = async (store: StoreLike | undefined, create: boolean): Promise
   } catch { return null }
 }
 
+const workflowCommentsPool = async (
+  store: StoreLike | undefined,
+  create: boolean,
+): Promise<FileSystemDirectoryHandle | null> => {
+  try {
+    return (create
+      ? await store?.getPool?.(ROUTE_WORKFLOW_COMMENTS_POOL)
+      : await store?.openPool?.(ROUTE_WORKFLOW_COMMENTS_POOL)) ?? null
+  } catch { return null }
+}
+
+const workflowCommentText = (value: unknown): string => {
+  const text = flat(value)
+  return text.length > ROUTE_WORKFLOW_COMMENT_CHARS
+    ? `${text.slice(0, ROUTE_WORKFLOW_COMMENT_CHARS - 1).trimEnd()}…`
+    : text
+}
+
+const workflowCommentKey = (value: string): string =>
+  flat(value).toLocaleLowerCase().replace(/[.!?;,:–—]+$/g, '')
+
+/** Strict at the record boundary and forgiving per entry: an invalid or
+ *  repeated comment is dropped without making every unrelated comment
+ *  disappear. This exact-key guard backs up the semantic de-duplication in
+ *  the second model operation. */
+export const parseRouteWorkflowComments = (
+  value: unknown,
+  convoId: string,
+): RouteWorkflowCommentsRecord | null => {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Record<string, unknown>
+  if (raw['kind'] !== 'chat:workflow-comments'
+    || raw['v'] !== ROUTE_WORKFLOW_COMMENTS_VERSION
+    || raw['convoId'] !== convoId
+    || !Array.isArray(raw['comments'])) return null
+
+  const comments: RouteWorkflowComment[] = []
+  const seen = new Set<string>()
+  for (const entry of raw['comments'].slice(0, ROUTE_WORKFLOW_COMMENT_LIMIT)) {
+    if (!entry || typeof entry !== 'object') continue
+    const item = entry as Record<string, unknown>
+    const text = workflowCommentText(item['text'])
+    if (!text) continue
+    const key = workflowCommentKey(text)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const nodeId = typeof item['nodeId'] === 'string' && /^t\d{1,3}$/.test(item['nodeId'])
+      ? item['nodeId'] : undefined
+    comments.push({ text, ...(nodeId ? { nodeId } : {}) })
+  }
+  return {
+    kind: 'chat:workflow-comments', v: ROUTE_WORKFLOW_COMMENTS_VERSION, convoId,
+    comments,
+    at: typeof raw['at'] === 'number' && Number.isFinite(raw['at']) ? raw['at'] : 0,
+  }
+}
+
+/** The participant-curated comments for one conversation. Reads never create
+ *  their pool; absent, old, or unreadable all mean an empty record. */
+export const readRouteWorkflowComments = async (
+  convoId: string,
+): Promise<RouteWorkflowCommentsRecord> => {
+  const id = String(convoId ?? '').trim()
+  const empty = (): RouteWorkflowCommentsRecord => ({
+    kind: 'chat:workflow-comments', v: ROUTE_WORKFLOW_COMMENTS_VERSION,
+    convoId: id, comments: [], at: 0,
+  })
+  if (!id) return empty()
+  try {
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    const pool = await workflowCommentsPool(store, false)
+    if (!pool || !store?.getPoolDoc) return empty()
+    const bytes = await store.getPoolDoc(pool, id)
+    if (!bytes?.byteLength) return empty()
+    return parseRouteWorkflowComments(JSON.parse(new TextDecoder().decode(bytes)), id) ?? empty()
+  } catch { return empty() }
+}
+
+/** Recycle the conversation's one comments document. User-directed state is
+ *  written only here, never by the passive flow organizer. */
+export const writeRouteWorkflowComments = async (
+  record: RouteWorkflowCommentsRecord,
+): Promise<boolean> => {
+  const checked = parseRouteWorkflowComments(record, String(record?.convoId ?? ''))
+  if (!checked) return false
+  try {
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    const pool = await workflowCommentsPool(store, true)
+    if (!pool || !store?.putPoolDoc) return false
+    const bytes = new TextEncoder().encode(JSON.stringify(checked))
+    return !!(await store.putPoolDoc(
+      pool,
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+      checked.convoId,
+    ))
+  } catch { return false }
+}
+
 /** The flow held for one conversation, or null: absent, empty, unparseable,
  *  another version, another conversation — all the same answer. Never throws,
  *  never creates the pool. */
@@ -2531,6 +2673,10 @@ type CallOutcome = { readonly ok: true; readonly text: string } | { readonly ok:
 
 interface OrganizeOptions {
   readonly attended: boolean
+  /** A participant pressed a control for this operation. It still uses the
+   *  shared lane, but is not refused by the background organizer's courtesy
+   *  pause after local chat. */
+  readonly explicit?: boolean
   /** The wire model every call names — resolved once by the caller. */
   readonly model: string
   readonly liveRunId?: string
@@ -2570,6 +2716,7 @@ const withLane = async (
   attended: boolean,
   convoId: string,
   timeoutMs: number,
+  ignorePause: boolean,
   run: (signal: AbortSignal, timedOut: () => boolean) => Promise<CallOutcome>,
 ): Promise<CallOutcome> => {
   if (attended && state.inFlight && !state.inFlight.attended) state.inFlight.abort.abort()
@@ -2579,7 +2726,7 @@ const withLane = async (
   state.tail = before.then(() => mine)
   try {
     await before
-    if (Date.now() < state.pausedUntil) return { ok: false, why: 'yielded' }
+    if (!ignorePause && Date.now() < state.pausedUntil) return { ok: false, why: 'yielded' }
     if (!attended && state.attendedWaiting > 0) return { ok: false, why: 'yielded' }
     const abort = new AbortController()
     let timedOut = false
@@ -2607,14 +2754,14 @@ const flowCall = async (
   const state = flowState()
   const stop = options.beforeCall?.()
   if (stop) return { ok: false, why: stop === 'budget' ? 'budget' : 'yielded' }
-  if (Date.now() < state.pausedUntil) return { ok: false, why: 'yielded' }
+  if (!options.explicit && Date.now() < state.pausedUntil) return { ok: false, why: 'yielded' }
   const labeller = await awakeOrganizerLabeller(options.model)
   if (!labeller) return { ok: false, why: 'gate' }
   if (options.attended && options.claim && !options.claim.counted) {
     options.claim.counted = true
     state.attendedWaiting++
   }
-  return withLane(state, options.attended, convoId, timeoutMs, async (signal, timedOut) => {
+  return withLane(state, options.attended, convoId, timeoutMs, !!options.explicit, async (signal, timedOut) => {
     state.organizingNow.set(convoId, stage)
     EffectBus.emit('chat:route-flow-organizing', { convoId, ...stage, active: true })
     try {
@@ -2705,7 +2852,7 @@ const nextCard = (
  */
 const organizeOne = async (convoId: string, options: OrganizeOptions): Promise<OrganizeResult> => {
   const state = flowState()
-  if (state.organizing.has(convoId)) return { outcome: 'busy', wrote: false }
+  if (state.organizing.has(convoId) || state.assimilating.has(convoId)) return { outcome: 'busy', wrote: false }
   state.organizing.add(convoId)
   let wrote = false
   const stop = (outcome: OrganizeOutcome): OrganizeResult => ({ outcome, wrote })
@@ -3015,6 +3162,192 @@ export const organizeRoute = async (
     return 0
   } finally {
     if (claim.counted) state.attendedWaiting--
+  }
+}
+
+export const ROUTE_SELECTION_SUMMARY_SYSTEM = [
+  'Distill the selected conversation excerpt into ONE concise workflow observation.',
+  'Preserve concrete decisions, requirements, changes, blockers, and outcomes. Omit conversational filler.',
+  'Write about the work, not the speakers or the selection. Do not invent anything.',
+  `The summary must be at most ${ROUTE_WORKFLOW_COMMENT_CHARS} characters. Reply with JSON only.`,
+].join('\n')
+
+export const ROUTE_SELECTION_SUMMARY_SCHEMA = {
+  type: 'object',
+  properties: { summary: { type: 'string' } },
+  required: ['summary'],
+} as const
+
+export const ROUTE_SELECTION_ASSIMILATE_SYSTEM = [
+  'Assimilate ONE new observation into the comments beside an existing conversation workflow.',
+  'The generated workflow summaries are authoritative context, and the numbered comments are participant-curated.',
+  '',
+  'Return exactly one operation:',
+  '- "none" when the observation is already covered well enough by the workflow or an existing comment.',
+  '- "add" when it adds a distinct useful fact.',
+  '- "replace" when it corrects, sharpens, or overlaps an existing comment; index names that comment.',
+  'remove lists any OTHER comment indexes made redundant by the result. Never remove unrelated comments.',
+  'text is the final concise comment for add/replace, or "" for none.',
+  'nodeId is an existing workflow node id when the comment belongs to that step, otherwise "".',
+  `Keep text at most ${ROUTE_WORKFLOW_COMMENT_CHARS} characters. Preserve specifics. Reply with JSON only.`,
+].join('\n')
+
+export const ROUTE_SELECTION_ASSIMILATE_SCHEMA = {
+  type: 'object',
+  properties: {
+    action: { type: 'string', enum: ['none', 'add', 'replace'] },
+    index: { type: 'integer' },
+    remove: { type: 'array', items: { type: 'integer' } },
+    text: { type: 'string' },
+    nodeId: { type: 'string' },
+  },
+  required: ['action', 'index', 'remove', 'text', 'nodeId'],
+} as const
+
+/** Apply the second model operation without giving it ownership of unrelated
+ *  comments. It can add one, replace one, and name redundant siblings; code
+ *  validates every index/node and performs a final exact de-duplication. */
+export const applyRouteWorkflowAssimilation = (
+  existing: readonly RouteWorkflowComment[],
+  raw: unknown,
+  nodeIds: ReadonlySet<string>,
+): readonly RouteWorkflowComment[] | null => {
+  if (!raw || typeof raw !== 'object') return null
+  const value = raw as Record<string, unknown>
+  const action = value['action']
+  if (action !== 'none' && action !== 'add' && action !== 'replace') return null
+  if (!Array.isArray(value['remove'])) return null
+  const index = Number(value['index'])
+  const remove = new Set<number>()
+  for (const candidate of value['remove']) {
+    if (!Number.isInteger(candidate) || candidate < 0 || candidate >= existing.length) return null
+    remove.add(candidate)
+  }
+  if (action === 'none') return [...existing]
+  if (action === 'replace' && (!Number.isInteger(index) || index < 0 || index >= existing.length)) return null
+
+  const text = workflowCommentText(value['text'])
+  if (!text) return null
+  const askedNode = typeof value['nodeId'] === 'string' ? value['nodeId'].trim() : ''
+  const nodeId = nodeIds.has(askedNode) ? askedNode : undefined
+  const next: RouteWorkflowComment[] = []
+  for (const [at, comment] of existing.entries()) {
+    if (remove.has(at) && !(action === 'replace' && at === index)) continue
+    if (action === 'replace' && at === index) next.push({ text, ...(nodeId ? { nodeId } : {}) })
+    else next.push(comment)
+  }
+  if (action === 'add') next.push({ text, ...(nodeId ? { nodeId } : {}) })
+
+  const unique: RouteWorkflowComment[] = []
+  const seen = new Set<string>()
+  for (const comment of next.slice(0, ROUTE_WORKFLOW_COMMENT_LIMIT)) {
+    const key = workflowCommentKey(comment.text)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    unique.push(comment)
+  }
+  return unique
+}
+
+export interface RouteSelectionAssimilationResult {
+  readonly status: 'added' | 'updated' | 'unchanged' | 'unavailable' | 'failed'
+  readonly summary?: string
+  readonly comments: readonly RouteWorkflowComment[]
+}
+
+const sameWorkflowComments = (
+  left: readonly RouteWorkflowComment[],
+  right: readonly RouteWorkflowComment[],
+): boolean => left.length === right.length && left.every((comment, at) =>
+  comment.text === right[at]?.text && comment.nodeId === right[at]?.nodeId)
+
+/** Two attended model operations: first distill the selected blurb, then
+ *  assimilate it against both the generated workflow and existing comments.
+ *  The second answer is an operation rather than a rewritten list, so a model
+ *  cannot accidentally drop unrelated participant-curated comments. */
+export const assimilateRouteSelection = async (
+  convoId: string,
+  selectedText: string,
+  focusNodeId?: string,
+): Promise<RouteSelectionAssimilationResult> => {
+  const id = String(convoId ?? '').trim()
+  const selected = String(selectedText ?? '').trim().slice(0, ROUTE_SELECTION_CHARS)
+  const held = await readRouteWorkflowComments(id)
+  if (!id || !selected) return { status: 'failed', comments: held.comments }
+
+  const state = flowState()
+  ensureSubscribed(state)
+  if (state.assimilating.has(id)) return { status: 'failed', comments: held.comments }
+  state.assimilating.add(id)
+  const claim = { counted: false }
+  try {
+    const gate = await organizerGate()
+    if (gate.state !== 'awake') return { status: 'unavailable', comments: held.comments }
+    const model = await organizerModel(gate, { fallback: state.lastPassModel, convoIds: [id] })
+    if (!model) return { status: 'unavailable', comments: held.comments }
+    const options: OrganizeOptions = {
+      attended: true, explicit: true, model, now: Date.now,
+      pending: async () => null, claim,
+    }
+
+    const summarized = await flowCall(id, options, { stage: 'selection-summary' }, {
+      system: ROUTE_SELECTION_SUMMARY_SYSTEM,
+      messages: [{ role: 'user', content: selected }],
+      jsonSchema: ROUTE_SELECTION_SUMMARY_SCHEMA as unknown as Readonly<Record<string, unknown>>,
+      temperature: 0,
+      maxTokens: 160,
+    }, ROUTE_FLOW_CARD_TIMEOUT_MS)
+    if (!summarized.ok) {
+      return { status: summarized.why === 'gate' ? 'unavailable' : 'failed', comments: held.comments }
+    }
+    const summaryValue = extractRouteFlow(summarized.text) as { summary?: unknown } | null
+    const summary = workflowCommentText(summaryValue?.summary)
+    if (!summary) return { status: 'failed', comments: held.comments }
+
+    const flow = await readRouteFlow(id)
+    const nodes = flow?.nodes ?? []
+    const nodeIds = new Set(nodes.map(node => node.id))
+    const focus = nodeIds.has(String(focusNodeId ?? '')) ? String(focusNodeId) : ''
+    const workflow = nodes.map(node => ({
+      id: node.id, title: node.title, state: node.state, ...(node.parent ? { parent: node.parent } : {}),
+      ...(node.card ? { goal: node.card.goal, done: node.card.done, outcome: node.card.outcome } : {}),
+    }))
+    const prompt = JSON.stringify({
+      focusNodeId: focus,
+      workflow,
+      comments: held.comments.map((comment, at) => ({ index: at, ...comment })),
+      observation: summary,
+    })
+    const assimilated = await flowCall(id, options, { stage: 'selection-assimilate' }, {
+      system: ROUTE_SELECTION_ASSIMILATE_SYSTEM,
+      messages: [{ role: 'user', content: prompt }],
+      jsonSchema: ROUTE_SELECTION_ASSIMILATE_SCHEMA as unknown as Readonly<Record<string, unknown>>,
+      temperature: 0,
+      maxTokens: 320,
+    }, ROUTE_FLOW_CARD_TIMEOUT_MS)
+    if (!assimilated.ok) {
+      return { status: assimilated.why === 'gate' ? 'unavailable' : 'failed', summary, comments: held.comments }
+    }
+    const next = applyRouteWorkflowAssimilation(held.comments, extractRouteFlow(assimilated.text), nodeIds)
+    if (!next) return { status: 'failed', summary, comments: held.comments }
+    if (sameWorkflowComments(held.comments, next)) return { status: 'unchanged', summary, comments: held.comments }
+
+    const written = await writeRouteWorkflowComments({
+      kind: 'chat:workflow-comments', v: ROUTE_WORKFLOW_COMMENTS_VERSION,
+      convoId: id, comments: next, at: Date.now(),
+    })
+    if (!written) return { status: 'failed', summary, comments: held.comments }
+    EffectBus.emit('chat:route-flow-changed', { convoId: id })
+    return {
+      status: next.length > held.comments.length ? 'added' : 'updated',
+      summary,
+      comments: next,
+    }
+  } catch {
+    return { status: 'failed', comments: held.comments }
+  } finally {
+    if (claim.counted) state.attendedWaiting--
+    state.assimilating.delete(id)
   }
 }
 

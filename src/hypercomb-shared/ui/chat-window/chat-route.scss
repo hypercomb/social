@@ -684,6 +684,34 @@ $jx: calc(#{$pad} + #{$square} / 2);
   > p + p { margin-top: 0.35rem; }
 }
 
+// Participant-curated observations. The model assigns a step when it can;
+// that name is a quiet lead-in, while the observation keeps the reading face.
+.chat-route-summary-comments {
+  margin-top: 0.6rem;
+
+  ul {
+    margin-top: 0.2rem;
+    padding-inline-start: 1.05rem;
+  }
+
+  li {
+    font-family: var(--hc-read, inherit);
+    color: var(--hc-window-ink-plain);
+    overflow-wrap: anywhere;
+  }
+
+  li + li { margin-top: 0.25rem; }
+}
+
+.chat-route-summary-comment-step {
+  margin-inline-end: 0.35rem;
+  color: var(--hc-window-accent-quiet);
+  font-family: var(--hc-code, inherit);
+  font-size: 0.9em;
+
+  &::after { content: ':'; }
+}
+
 .chat-route-summary-folded,
 .chat-route-summary-replied,
 .chat-route-summary-decided,
@@ -1021,11 +1049,20 @@ $jx: calc(#{$pad} + #{$square} / 2);
 
 .chat-exec-lines { display: grid; gap: 0.1rem; min-width: 0; }
 .chat-exec-line {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--hc-code, monospace);
   font-size: 0.74rem;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
   color: var(--hc-window-ink-loud);
+}
+
+.chat-exec-sig {
+  cursor: help;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 0.16em;
 }
 
 .chat-exec-outcome {

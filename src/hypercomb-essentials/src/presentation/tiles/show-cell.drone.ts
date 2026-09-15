@@ -9066,6 +9066,7 @@ export class ShowCellDrone extends Drone {
         try {
           const blob = await store.getResource(sig)
           if (!blob) {
+            this.#armMissWindowRetry([sig])
             // Not yet delivered — egg; retried after the miss TTL. Record
             // the CONCLUDED miss so the readiness shade releases: the tile
             // reverts to bright label-only (clickable) instead of staying

@@ -350,10 +350,16 @@ export class ComfyService extends EventTarget {
    * face — it emits the same effect a dropped file does, and the ordinary
    * attach path (editor/resource-attach.drone) does the rest: canonical props,
    * the right slot through a portal, `tile:saved`, the history entry.
+   *
+   * NO TARGET IS NOT NOTHING TO DO. A picture with nowhere to land takes the
+   * same door every other ownerless picture takes — it arms the command-line
+   * chevron slot (`command:arm-resource`), so naming it and pressing Enter
+   * creates the tile. Silently no-op'ing here read as "clicking does
+   * nothing", because most of the time nothing is selected yet.
    */
   attach(result: ComfyResult, cell?: string): boolean {
     const target = cell ?? this.targetCell()
-    if (!target) return false
+    if (!target) { this.#arm(result); return false }
     EffectBus.emit('cell:attach-resource', {
       cell: target,
       largeSig: result.largeSig,
@@ -364,6 +370,24 @@ export class ComfyService extends EventTarget {
     })
     EffectBus.emit('activity:log', { message: `picture on "${target}"`, icon: '◈' })
     return true
+  }
+
+  /** Arm the command-line chevron slot with a result already in the store —
+   *  the sigs are already known, so this skips `storeImageResources` entirely
+   *  rather than re-hashing bytes `run()` or `keep()` just hashed. */
+  #arm(result: ComfyResult): void {
+    EffectBus.emit('command:arm-resource', {
+      armId: null,
+      atTop: false,
+      previewUrl: result.previewUrl,
+      largeSig: result.largeSig,
+      smallPointSig: result.smallPointSig,
+      smallFlatSig: result.smallFlatSig,
+      url: null,
+      type: 'image',
+      attachment: null,
+      name: null,
+    })
   }
 
   /**

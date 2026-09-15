@@ -76,7 +76,6 @@ export class CavernPainter {
     const { tile, dpr, width, height } = camera
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.globalCompositeOperation = 'source-over'
-    ctx.clearRect(0, 0, width, height)
     if (this.#wood) { this.#daylight(ctx, camera, time); return }
     ctx.fillStyle = 'rgba(4, 5, 9, 0.8)'
     ctx.fillRect(0, 0, width, height)
@@ -147,11 +146,14 @@ export class CavernPainter {
     for (let row = 0; row < this.#map.rows; row++) for (let col = 0; col < this.#map.cols; col++) {
       const cell = this.#at(col, row)
       if (cell === '~') pool(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) !== '~', wood)
-      else floor(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) === '#', wood)
+      else if (cell === 'B' && wood) boulderWood(ctx, col * tile, row * tile, tile, col, row)
+      else if (cell === 'r' && wood) rubbleWood(ctx, col * tile, row * tile, tile, col, row)
+      else floor(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) === '#' || this.#at(col, row - 1) === 'T', wood)
     }
     for (let row = 0; row < this.#map.rows; row++) for (let col = 0; col < this.#map.cols; col++) {
-      if (this.#at(col, row) !== '#') continue
-      wall(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row + 1), this.#at(col, row - 1), this.#at(col - 1, row), this.#at(col + 1, row), wood)
+      const cell = this.#at(col, row)
+      if (cell !== '#' && cell !== 'T') continue
+      wall(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row + 1), this.#at(col, row - 1), this.#at(col - 1, row), this.#at(col + 1, row), wood, cell === 'T')
     }
     if (!wood) for (const torch of this.torches) {
       ctx.fillStyle = '#1a1512'
@@ -307,8 +309,8 @@ function poolWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number
   }
 }
 
-function wall(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, below: string, above: string, left: string, right: string, wood: boolean): void {
-  if (wood) { wallWood(ctx, x, y, s, col, row, below, above, left, right); return }
+function wall(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, below: string, above: string, left: string, right: string, wood: boolean, oldTree = false): void {
+  if (wood) { wallWood(ctx, x, y, s, col, row, below, above, left, right, oldTree); return }
   const g = islandHash(col, row, 211), h = islandHash(col, row, 215)
   const face = below !== '#'
   ctx.fillStyle = '#1b1814'
@@ -317,7 +319,7 @@ function wall(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, co
     ctx.fillStyle = 'rgba(96, 84, 70, 0.22)'
     ctx.fillRect(x + islandHash(col + k, row, 217) * s, y + islandHash(col, row + k, 219) * s * (face ? 0.4 : 1), Math.max(1, s * 0.05), Math.max(1, s * 0.03))
   }
-  if (above !== '#') {
+  if (above !== '#' && above !== 'T') {
     ctx.fillStyle = 'rgba(150, 128, 104, 0.35)'
     ctx.fillRect(x, y, s, Math.max(1, s * 0.04))
   }
@@ -337,11 +339,11 @@ function wall(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, co
     ctx.fillStyle = 'rgba(214, 184, 140, 0.24)'
     ctx.fillRect(x, top, s, Math.max(1, s * 0.035))
   }
-  if (left !== '#') {
+  if (left !== '#' && left !== 'T') {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.32)'
     ctx.fillRect(x, y, Math.max(2, s * 0.06), s)
   }
-  if (right !== '#') {
+  if (right !== '#' && right !== 'T') {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
     ctx.fillRect(x + s - Math.max(2, s * 0.06), y, Math.max(2, s * 0.06), s)
   }
@@ -350,18 +352,19 @@ function wall(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, co
 /** A trunk seen from the front where the ground opens below it; a leafy
  *  canopy top, seen from above, everywhere else — boulders and dense brush
  *  read the same way the Hollow Grove's own boulder ring does. */
-function wallWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, below: string, above: string, left: string, right: string): void {
+function wallWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, below: string, above: string, left: string, right: string, oldTree: boolean): void {
   const g = islandHash(col, row, 211), h = islandHash(col, row, 215)
-  const face = below !== '#'
-  ctx.fillStyle = '#173a1c'
+  const face = below !== '#' && below !== 'T'
+  ctx.fillStyle = oldTree ? '#204b23' : '#173a1c'
   ctx.fillRect(x, y, s, face ? s * 0.44 : s)
-  for (let k = 0; k < 5; k++) {
-    ctx.fillStyle = k % 2 ? 'rgba(60, 110, 50, 0.3)' : 'rgba(10, 24, 10, 0.35)'
+  for (let k = 0; k < (oldTree ? 9 : 5); k++) {
+    ctx.fillStyle = k % 3 === 0 ? 'rgba(113, 154, 68, 0.36)' : k % 2 ? 'rgba(60, 110, 50, 0.38)' : 'rgba(10, 24, 10, 0.35)'
     ctx.beginPath()
-    ctx.ellipse(x + islandHash(col + k, row, 217) * s, y + islandHash(col, row + k, 219) * s * (face ? 0.4 : 1), s * 0.09, s * 0.05, 0, 0, TAU)
+    const radius = oldTree ? 0.15 : 0.09
+    ctx.ellipse(x + islandHash(col + k, row, 217) * s, y + islandHash(col, row + k, 219) * s * (face ? 0.4 : 1), s * radius, s * radius * 0.64, 0, 0, TAU)
     ctx.fill()
   }
-  if (above !== '#') {
+  if (above !== '#' && above !== 'T') {
     ctx.fillStyle = 'rgba(90, 130, 70, 0.3)'
     ctx.fillRect(x, y, s, Math.max(1, s * 0.04))
   }
@@ -382,13 +385,46 @@ function wallWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number
     ctx.fillStyle = 'rgba(210, 190, 140, 0.16)'
     ctx.fillRect(x, top, s, Math.max(1, s * 0.03))
   }
-  if (left !== '#') {
+  if (left !== '#' && left !== 'T') {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.26)'
     ctx.fillRect(x, y, Math.max(2, s * 0.06), s)
   }
-  if (right !== '#') {
+  if (right !== '#' && right !== 'T') {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.34)'
     ctx.fillRect(x + s - Math.max(2, s * 0.06), y, Math.max(2, s * 0.06), s)
+  }
+}
+
+/** A landmark boulder, not a generic blocked square. The crack stays visible
+ *  from the walking side so the grove's first chest has a readable location. */
+function boulderWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number): void {
+  floorWood(ctx, x, y, s, col, row, false)
+  const g = islandHash(col, row, 301)
+  ctx.fillStyle = 'rgba(14, 30, 12, 0.35)'
+  ctx.beginPath(); ctx.ellipse(x + s * 0.53, y + s * 0.78, s * 0.34, s * 0.11, 0, 0, TAU); ctx.fill()
+  const rock = ctx.createLinearGradient(x, y + s * 0.2, x, y + s * 0.8)
+  rock.addColorStop(0, '#9a9378'); rock.addColorStop(0.55, '#625f50'); rock.addColorStop(1, '#34382e')
+  ctx.fillStyle = rock
+  ctx.beginPath()
+  ctx.moveTo(x + s * 0.18, y + s * 0.72)
+  ctx.quadraticCurveTo(x + s * 0.16, y + s * 0.32, x + s * (0.42 + g * 0.12), y + s * 0.16)
+  ctx.quadraticCurveTo(x + s * 0.82, y + s * 0.2, x + s * 0.88, y + s * 0.66)
+  ctx.quadraticCurveTo(x + s * 0.74, y + s * 0.82, x + s * 0.18, y + s * 0.72)
+  ctx.fill()
+  ctx.strokeStyle = '#29291f'; ctx.lineWidth = Math.max(1, s * 0.05)
+  ctx.beginPath(); ctx.moveTo(x + s * 0.53, y + s * 0.25); ctx.lineTo(x + s * 0.47, y + s * 0.51); ctx.lineTo(x + s * 0.62, y + s * 0.7); ctx.stroke()
+  ctx.strokeStyle = 'rgba(226, 210, 164, 0.36)'; ctx.lineWidth = Math.max(1, s * 0.025)
+  ctx.beginPath(); ctx.moveTo(x + s * 0.3, y + s * 0.34); ctx.quadraticCurveTo(x + s * 0.48, y + s * 0.2, x + s * 0.66, y + s * 0.28); ctx.stroke()
+}
+
+function rubbleWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number): void {
+  floorWood(ctx, x, y, s, col, row, false)
+  for (let k = 0; k < 5; k++) {
+    const px = x + s * (0.14 + islandHash(col, row + k, 307) * 0.7)
+    const py = y + s * (0.45 + islandHash(col + k, row, 311) * 0.3)
+    const r = s * (0.06 + islandHash(col + k, row + k, 313) * 0.07)
+    ctx.fillStyle = k % 2 ? '#676553' : '#8a866f'
+    ctx.beginPath(); ctx.ellipse(px, py, r, r * 0.72, 0.25, 0, TAU); ctx.fill()
   }
 }
 

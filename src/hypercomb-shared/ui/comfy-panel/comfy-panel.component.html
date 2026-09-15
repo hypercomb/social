@@ -76,7 +76,9 @@
                   <button
                     class="comfy-thumb"
                     type="button"
+                    draggable="true"
                     (click)="keep(i)"
+                    (dragstart)="dragFolderPicture($event, i)"
                     [title]="picture.filename + ' — ' + megabytes(picture.size)"
                   >
                     <img [src]="picture.url" [alt]="picture.filename" />
@@ -193,7 +195,9 @@
               <button
                 class="comfy-thumb"
                 type="button"
+                draggable="true"
                 (click)="attach(i)"
+                (dragstart)="dragResult($event, i)"
                 [title]="('comfy.seed' | t) + ' ' + result.seed"
               >
                 <img [src]="result.url" [alt]="result.filename" />

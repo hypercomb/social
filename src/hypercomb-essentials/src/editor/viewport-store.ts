@@ -290,10 +290,23 @@ export const writeViewportAt = async (
     const existing: ViewportSnapshot = _warmCache.get(sig) ?? {}
     const next: ViewportSnapshot = { ...existing, ...snapshot }
     _warmCache.set(sig, next)
-    const fh = await dir.getFileHandle(sig, { create: true })
-    const writable = await fh.createWritable()
-    try { await writable.write(JSON.stringify(next)) }
-    finally { await writable.close() }
+    const body = JSON.stringify(next)
+    // Multiple tabs/sessions share this OPFS pool without a cross-process
+    // lock, so a concurrent clear (writeViewportAt(segs, null) in another
+    // tab) can remove this same sig between our getFileHandle and close,
+    // throwing NotFoundError. One retry re-derives a fresh handle — a
+    // second collision is left to the next debounced commit.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const fh = await dir.getFileHandle(sig, { create: true })
+        const writable = await fh.createWritable()
+        try { await writable.write(body) }
+        finally { await writable.close() }
+        return next
+      } catch (err) {
+        if (attempt === 1 || !(err instanceof DOMException) || err.name !== 'NotFoundError') throw err
+      }
+    }
     return next
   })
 

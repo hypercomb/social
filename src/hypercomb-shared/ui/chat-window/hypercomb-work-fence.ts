@@ -49,6 +49,29 @@ type Block = {
   readonly body: readonly string[]
 }
 
+/**
+ * Some smaller models put the requested info string on the first line of a
+ * generic text fence instead of on the opening fence itself:
+ *
+ * ```text
+ * hypercomb-read
+ * read /somewhere
+ * ```
+ *
+ * The literal marker is still an unambiguous opt-in to the work protocol.
+ * Accept only that exact first non-empty line; never infer work from an
+ * unlabeled block containing ordinary slash-looking examples.
+ */
+const markedBody = (info: string, body: readonly string[]):
+  { readonly kind: WorkKind; readonly body: readonly string[] } | null => {
+  if (kindOf(info)) return null
+  const first = body.findIndex(line => line.trim().length > 0)
+  if (first < 0) return null
+  const kind = kindOf(body[first])
+  if (!kind) return null
+  return { kind, body: body.slice(first + 1) }
+}
+
 const kindOf = (info: string): WorkKind | null => {
   const word = info.trim().split(/\s+/)[0] ?? ''
   if (word === READ_FENCE_LANG) return 'read'
@@ -70,10 +93,12 @@ const scan = (lines: readonly string[]): Block[] => {
     if (!open) { index++; continue }
     let end = index + 1
     while (end < lines.length && !closes(lines[end], open[1])) end++
-    const kind = kindOf(open[2])
+    const body = lines.slice(index + 1, end)
+    const marked = markedBody(open[2], body)
+    const kind = kindOf(open[2]) ?? marked?.kind ?? null
     // An unclosed work block still counts: a model that stopped generating
     // before the closer meant the request all the same.
-    if (kind) blocks.push({ kind, open: index, end, body: lines.slice(index + 1, end) })
+    if (kind) blocks.push({ kind, open: index, end, body: marked?.body ?? body })
     index = end + 1
   }
   return blocks
@@ -93,7 +118,16 @@ export const workLineGrammar = (raw: string, kind: WorkKind): string => {
     .replace(/^\//, '')
     .replace(/^[A-Za-z][\w-]*/, verb => verb.toLowerCase())
   if (!line) return ''
-  if (kind === 'read') line = line.replace(/^([a-z][a-z0-9-]*)\s+here$/, '$1')
+  if (kind === 'read') {
+    if (/^[0-9a-f]{64}$/i.test(line)) return `/read ${line.toLowerCase()}`
+    line = line.replace(/^([a-z][a-z0-9-]*)\s+here$/, '$1')
+    // Small models sometimes treat the code-discovery grammar as prose and
+    // say `read code core`. That spelling cannot name a tile (routes require
+    // a leading slash), so correcting it to `code core` is unambiguous. Keep
+    // `read /code` literal: that really does mean the tile at /code.
+    line = line.replace(/^read\s+code(?:\s+(.+))?$/i, (_whole, query: string | undefined) =>
+      query?.trim() ? `code ${query.trim()}` : 'code')
+  }
   return `/${line}`
 }
 
@@ -243,6 +277,7 @@ export const workInstruction = (powers: WorkPowers): string => {
       'read <signature> · list <signature> — that exact version',
       'read <signature> also opens whatever else a signature names: a note, an attachment, a module\'s code. Long text comes a page at a time; read <signature> <next> continues from the "next" the last page gave',
       'code · code <word> — the code running in this hive: every module and dependency by name, with the signature that opens it',
+      'CODE TAKES TWO ROUNDS. First send the one line `code` to list signed modules (or `code <name>` only when you already know a name fragment). After its result gives a module signature, send one line exactly like `read <the complete 64-character signature>`. Do not try `read code core`, `read /code`, or `read /core`; do not send alternative spellings. Reading code never runs it and never grants permission to change it.',
       'find <word> — tiles under the current page whose name contains the word',
       powers.readsRunFreely
         ? 'Reads run straight away, inside a size budget for this conversation.'

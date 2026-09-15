@@ -24,7 +24,10 @@
 // replies are two turns, never an overwrite.
 
 import { EffectBus, splitQuestion } from '@hypercomb/core'
-import { flowOpenSteps, organizeRoute, readRoute, readRouteFlow, type Route } from './chat-route.js'
+import {
+  assimilateRouteSelection, flowOpenSteps, organizeRoute, readRoute, readRouteFlow,
+  type Route, type RouteSelectionAssimilationResult,
+} from './chat-route.js'
 import { runIdForAsk } from './chat-steps.js'
 
 /** Pool of meaning holding conversations. Bare word, already in the frozen
@@ -1418,6 +1421,16 @@ export class ChatThreads {
 
   organizeRoute(convoId: string, liveRunId?: string, waiting?: boolean, prefer?: string): Promise<number> {
     return organizeRoute(convoId, liveRunId, waiting, prefer)
+  }
+
+  /** Summarize a selected transcript range, then merge it into the workflow's
+   *  participant-curated comments without duplicating what is already there. */
+  assimilateRouteSelection(
+    convoId: string,
+    selectedText: string,
+    focusNodeId?: string,
+  ): Promise<RouteSelectionAssimilationResult> {
+    return assimilateRouteSelection(convoId, selectedText, focusNodeId)
   }
 }
 

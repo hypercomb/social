@@ -308,6 +308,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // conversation (putPoolDoc sub-keyed by the convoId), version-stamped,
   // never load-bearing — wipe-safe.
   'chat:route-flows',
+  // User-requested observations assimilated from selected chat text into the
+  // workflow sidebar (assistant/chat-route.ts). Unlike route-flows these are
+  // durable source state: the selected range cannot be reconstructed later.
+  'chat:workflow-comments',
   // The context basket — signatures gathered while browsing, handed to an ask
   // as its closure root list (see assistant/context-basket.ts). Colon-scoped
   // so neither can collide with a tile slugged 'context' or 'changes'.
@@ -340,6 +344,16 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // hiding is a hand, not a derivation. Losing it does not lose the tiles,
   // it UNHIDES them all at once, which is the loudest possible failure.
   'hidden:items',
+  // TOKEN-COMPACT TILE PROJECTIONS for the hive's `hive` tool
+  // (assistant/llm-context.ts) — one record per SOURCE LAYER SIGNATURE,
+  // a compact line-oriented rendering of what a tile SAYS in place of the
+  // raw sig arrays `/read` returns. DERIVED CACHE, minted in the optimize
+  // phase (optimize-phase.md): a pure derivation of the layer's own bytes
+  // plus the resources its non-child slots reference, never load-bearing,
+  // wipe-safe — `inflate()` substitutes it under a lens and re-derives on
+  // a miss. Colon-scoped because the bare-word list is frozen and no tile
+  // may name it.
+  'llm:context',
   // The provider specs this hive knows how to talk to
   // (assistant/providers/provider-discovery.ts), probed for on every domain
   // the participant learns (sharing/published-pools.ts). Specs only — a

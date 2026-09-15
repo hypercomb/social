@@ -38,17 +38,29 @@ type HiveHistory = {
   currentLayerRefAt(locationSig: string, stats?: { cold?: boolean }): Promise<CurrentLayerRef | null>
   getLayerBySig(sig: string): Promise<LayerContent | null>
   childrenManifestFor?(layer: LayerContent): Promise<Array<{ sig: string; layer: LayerContent }> | null>
+  /** A bag's markers — the page's own history, used when its head cannot be pinned. */
+  listLayers?(locationSig: string): Promise<readonly { index: number; layerSig: string; at: number }[]>
   treeEpoch(): number
 }
 
 type HiveStore = {
   getResource(sig: string): Promise<Blob | null>
+  /** Signed package layers carry the module-name → signature documentation
+   *  used by `/code` even when a development shell imported bees directly. */
+  getLayerBytes?(sig: string): Promise<Uint8Array | null>
   /** Verified module bytes from the `sign('bees')` pool — never imported here. */
   getBeeBytes?(sig: string): Promise<Uint8Array | null>
   /** Verified dependency bytes from the `sign('dependencies')` pool. */
   getDependencyBytes?(sig: string): Promise<Uint8Array | null>
 }
 type LayerCommitter = { settled(): Promise<void> }
+type CodeArtifactEntry = { readonly name: string; readonly sig: string; readonly of?: 'bee' | 'dependency'; readonly type?: string }
+type CodeArtifactRead = { readonly name: string; readonly sig: string; readonly of: 'bee' | 'dependency'; readonly type: string; readonly bytes: Uint8Array }
+type CodePreloader = {
+  readonly actions?: readonly { readonly signature?: string; readonly name?: string }[]
+  readableArtifacts?(): Promise<readonly CodeArtifactEntry[]>
+  readArtifact?(sig: string): Promise<CodeArtifactRead | null>
+}
 type Lookup = <T>(key: string) => T | undefined
 
 export type HypercombTreeNode = {
@@ -311,6 +323,8 @@ const scannedChildren = async (
 export class HypercombHiveTreeReader {
   readonly #lookup: Lookup
   readonly #snapshots = new Map<string, Snapshot>()
+  /** One immutable module inventory per installed-manifest value. */
+  readonly #signedCodeInventories = new Map<string, Promise<readonly { name: string; sig: string; of: 'bee' | 'dependency' }[]>>()
   #sequence = 0
 
   constructor(lookup: Lookup = ((key: string) => window.ioc?.get<unknown>(key)) as Lookup) {
@@ -457,6 +471,66 @@ export class HypercombHiveTreeReader {
    * granted (llm-hive-access.ts); `/tree` stays structure-only for the
    * ungranted case. Same epoch/snapshot discipline as `readTree`.
    */
+  /**
+   * WHERE A PAGE'S CONTENT IS, found the way the canvas finds it. History's
+   * pinned head first — live, so it carries a snapshot the change guard can
+   * revalidate. That pin gives up on much of a real hive (a head seeded from
+   * its parent, a husk-only bag) while the canvas still shows the tile
+   * (Jaime, 2026-09-13: every read, even `read /`, came back incomplete-read).
+   * So next: the bag's latest marker, then the copy the parent carries under
+   * this name. Those come back without a snapshot — nothing to revalidate, so
+   * nothing is ever gated on them.
+   */
+  async #resolvePage(
+    segments: readonly string[],
+    locationSig: string,
+    history: HiveHistory,
+    stats: { cold?: boolean },
+  ): Promise<(CurrentLayerRef & { readonly live: boolean }) | null> {
+    // A cold/corrupt head lookup is not the end of a route read. The canvas
+    // can still be showing the parent-carried copy, so keep walking the same
+    // fallbacks it uses instead of collapsing an exception to
+    // `incomplete-read` before those sources are consulted.
+    const ref = await history.currentLayerRefAt(locationSig, stats).catch(() => null)
+    if (ref) return { ...ref, live: true }
+
+    const markers = await history.listLayers?.(locationSig).catch(() => []) ?? []
+    const latest = [...markers].sort((a, b) => b.index - a.index)[0]
+    const marked = latest && SIG.test(latest.layerSig) ? await history.getLayerBySig(latest.layerSig).catch(() => null) : null
+    const bare = !marked || Object.keys(marked).every(key => key === 'name')
+    if (marked && latest && !bare) return { locationSig, layerSig: latest.layerSig, layer: marked, live: false }
+
+    if (segments.length) {
+      const parentSegments = segments.slice(0, -1)
+      const parentSig = await history.sign({ explorerSegments: () => [...parentSegments] })
+      const parent = await this.#resolvePage(parentSegments, parentSig, history, {})
+      const name = segments[segments.length - 1]
+      const store = this.#store()
+      if (parent && store) {
+        const sigs = await childSigsOfLayer(parent.layer as never, store).catch(() => [] as string[])
+        // `childrenManifestFor` is the canvas's complete carried copy. A
+        // freshly adopted tile may exist there before its standalone layer
+        // bytes have reached the local pool; asking only `getLayerBySig`
+        // made a visible tile unreadable to the model.
+        const carried = new Map<string, LayerContent>()
+        if (typeof history.childrenManifestFor === 'function') {
+          const manifest = await history.childrenManifestFor(parent.layer).catch(() => null)
+          if (manifest) {
+            for (const entry of manifest) {
+              const sig = String(entry?.sig ?? '')
+              if (SIG.test(sig) && entry.layer) carried.set(sig, entry.layer)
+            }
+          }
+        }
+        for (const sig of sigs) {
+          const child = carried.get(sig) ?? await history.getLayerBySig(sig).catch(() => null)
+          if (child?.name === name) return { locationSig, layerSig: sig, layer: child, live: false }
+        }
+      }
+    }
+    return marked && latest ? { locationSig, layerSig: latest.layerSig, layer: marked, live: false } : null
+  }
+
   async #readNodeLive(
     segments: readonly string[],
     options: { readonly maxBytes?: number; readonly withContent?: boolean; readonly signal?: AbortSignal } = {},
@@ -478,7 +552,7 @@ export class HypercombHiveTreeReader {
       const epoch = history.treeEpoch()
       const locationSig = await history.sign({ explorerSegments: () => [...segments] })
       const stats: { cold?: boolean } = {}
-      const ref = await history.currentLayerRefAt(locationSig, stats)
+      const ref = await this.#resolvePage(segments, locationSig, history, stats)
       if (!ref && stats.cold) throw new IncompleteReadError()
       if (!ref) return { ok: false, root, code: 'not-found' }
       if (history.treeEpoch() !== epoch) throw new StaleReadError()
@@ -506,7 +580,7 @@ export class HypercombHiveTreeReader {
         children,
         ...(unresolved.length ? { unresolved } : {}),
         ...(content ? { content, truncated } : {}),
-        snapshot: this.#remember(epoch, [{ locationSig: ref.locationSig, layerSig: ref.layerSig }]),
+        ...(ref.live ? { snapshot: this.#remember(epoch, [{ locationSig: ref.locationSig, layerSig: ref.layerSig }]) } : {}),
       }
     } catch (error) {
       if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
@@ -694,7 +768,15 @@ export class HypercombHiveTreeReader {
     try {
       let of: 'bee' | 'dependency' | 'resource' = 'bee'
       let type = 'text/javascript'
-      let bytes = (await store.getBeeBytes?.(sig).catch(() => null)) ?? null
+      const artifact = await this.#lookup<CodePreloader>(PRELOADER_KEY)?.readArtifact?.(sig).catch(() => null)
+      let bytes: Uint8Array | null = artifact?.bytes ?? null
+      if (artifact) {
+        of = artifact.of
+        type = artifact.type
+      }
+      if (!bytes) {
+        bytes = (await store.getBeeBytes?.(sig).catch(() => null)) ?? null
+      }
       if (!bytes) {
         of = 'dependency'
         bytes = (await store.getDependencyBytes?.(sig).catch(() => null)) ?? null
@@ -736,10 +818,17 @@ export class HypercombHiveTreeReader {
   ): Promise<HypercombCodeRead> {
     const root = 'code'
     if (options.signal?.aborted) throw stopped()
-    const preloader = this.#lookup<{ actions?: readonly { signature?: string; name?: string }[] }>(PRELOADER_KEY)
+    const preloader = this.#lookup<CodePreloader>(PRELOADER_KEY)
     const loader = this.#lookup<{ loadedSignatures?: readonly string[] }>(DEPENDENCY_LOADER_KEY)
     const aliases = (globalThis as { __hypercombAliasMap?: unknown }).__hypercombAliasMap
-    if (!preloader?.actions && !loader?.loadedSignatures && !(aliases instanceof Map)) return { ok: false, root, code: 'unavailable' }
+    const actions = preloader?.actions ?? []
+    const readableArtifacts = await preloader?.readableArtifacts?.().catch(() => []) ?? []
+    const loadedDependencies = loader?.loadedSignatures ?? []
+    const aliasMap = aliases instanceof Map ? aliases : null
+    const signed = await this.#signedCodeInventory()
+    if (!actions.length && !readableArtifacts.length && !loadedDependencies.length && !aliasMap?.size && !signed.length) {
+      return { ok: false, root, code: 'unavailable' }
+    }
 
     const entries = new Map<string, { name: string; sig: string; of: 'bee' | 'dependency' }>()
     const add = (rawSig: unknown, rawName: unknown, of: 'bee' | 'dependency'): void => {
@@ -748,9 +837,11 @@ export class HypercombHiveTreeReader {
       const name = String(rawName ?? '').replace(CONTROL, '').trim().slice(0, 256) || sig.slice(0, 12)
       entries.set(sig, { name, sig, of })
     }
-    for (const action of preloader?.actions ?? []) add(action?.signature, action?.name, 'bee')
-    if (aliases instanceof Map) for (const [alias, sig] of aliases) add(sig, alias, 'dependency')
-    for (const sig of loader?.loadedSignatures ?? []) add(sig, '', 'dependency')
+    for (const action of actions) add(action?.signature, action?.name, 'bee')
+    if (aliasMap) for (const [alias, sig] of aliasMap) add(sig, alias, 'dependency')
+    for (const sig of loadedDependencies) add(sig, '', 'dependency')
+    for (const entry of signed) add(entry.sig, entry.name, entry.of)
+    for (const entry of readableArtifacts) add(entry.sig, entry.name, entry.of ?? 'bee')
 
     const needle = String(query ?? '').trim().toLowerCase()
     const matched = [...entries.values()]
@@ -758,6 +849,60 @@ export class HypercombHiveTreeReader {
       .sort((a, b) => a.name.localeCompare(b.name))
     const limit = Math.max(1, boundedInteger(options.maxEntries, 60, MAX_CODE_ENTRIES))
     return { ok: true, root, query: needle, entries: matched.slice(0, limit), total: matched.length, truncated: matched.length > limit }
+  }
+
+  /**
+   * The dev shell imports its bees through Angular and intentionally skips the
+   * OPFS evaluator, so ScriptPreloader.actions is empty there. The installed
+   * package still names every module by signature, and its signed layers carry
+   * extracted class documentation keyed by those same signatures. Read that
+   * immutable projection once per manifest; never execute a module to name it.
+   */
+  async #signedCodeInventory(): Promise<readonly { name: string; sig: string; of: 'bee' | 'dependency' }[]> {
+    let raw = ''
+    try { raw = globalThis.localStorage?.getItem('core-adapter.installed-manifest') ?? '' } catch { /* unavailable */ }
+    if (!raw) return []
+    const cached = this.#signedCodeInventories.get(raw)
+    if (cached) return cached
+
+    const build = (async (): Promise<readonly { name: string; sig: string; of: 'bee' | 'dependency' }[]> => {
+      let manifest: { layers?: unknown; bees?: unknown; dependencies?: unknown }
+      try { manifest = JSON.parse(raw) as typeof manifest } catch { return [] }
+      const sigs = (value: unknown): string[] => Array.isArray(value)
+        ? [...new Set(value.map(item => String(item).replace(/\.(?:js|json)$/i, '').toLowerCase()).filter(item => SIG.test(item)))]
+        : []
+      const layers = sigs(manifest.layers)
+      const bees = sigs(manifest.bees)
+      const dependencies = sigs(manifest.dependencies)
+      const names = new Map<string, string>()
+      const store = this.#store()
+
+      if (store?.getLayerBytes) {
+        await Promise.all(layers.map(async layerSig => {
+          const bytes = await store.getLayerBytes!(layerSig).catch(() => null)
+          if (!bytes) return
+          try {
+            const layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+            const docs = layer['docs'] as { bees?: unknown } | undefined
+            if (!docs?.bees || typeof docs.bees !== 'object') return
+            for (const [rawSig, rawDoc] of Object.entries(docs.bees as Record<string, unknown>)) {
+              const sig = rawSig.replace(/\.js$/i, '').toLowerCase()
+              const className = String((rawDoc as { className?: unknown } | null)?.className ?? '')
+                .replace(CONTROL, '').trim().slice(0, 256)
+              if (SIG.test(sig) && className && !names.has(sig)) names.set(sig, className)
+            }
+          } catch { /* malformed signed layer contributes no names */ }
+        }))
+      }
+
+      return [
+        ...bees.map(sig => ({ name: names.get(sig) ?? sig.slice(0, 12), sig, of: 'bee' as const })),
+        ...dependencies.map(sig => ({ name: sig.slice(0, 12), sig, of: 'dependency' as const })),
+      ]
+    })()
+    this.#signedCodeInventories.clear()
+    this.#signedCodeInventories.set(raw, build)
+    return build
   }
 
   // ── THE READ CACHE ──────────────────────────────────────────────────────
@@ -839,13 +984,23 @@ export class HypercombHiveTreeReader {
     const route = this.#routes.get(routeKey)
     if (route) {
       const read = await this.readNodeBySig(route.layerSig, options)
-      if (read.ok) return { ...read, root: rootLabel(segments), name: route.name, snapshot: this.#remember(epoch, [route.head]) }
+      if (read.ok) return {
+        ...read,
+        root: rootLabel(segments),
+        name: route.name,
+        ...(route.head ? { snapshot: this.#remember(epoch, [route.head]) } : {}),
+      }
     }
     const read = await this.#readNodeLive(segments, options, true)
     const head = read.ok && read.snapshot ? this.#snapshots.get(read.snapshot)?.heads[0] : undefined
-    if (read.ok && head) {
+    if (read.ok) {
       for (const [key, entry] of this.#routes) if (entry.epoch !== epoch) this.#routes.delete(key)
-      this.#routes.set(routeKey, { epoch, head, layerSig: read.layerSig, name: read.name })
+      this.#routes.set(routeKey, {
+        epoch,
+        ...(head ? { head } : {}),
+        layerSig: read.layerSig,
+        name: read.name,
+      })
       while (this.#routes.size > CACHE_LIMIT) this.#routes.delete(this.#routes.keys().next().value as string)
       const { snapshot: _snapshot, ...content } = read
       const bySignature: HypercombNodeRead = { ...content, root: read.layerSig }
@@ -855,7 +1010,7 @@ export class HypercombHiveTreeReader {
   }
 
   /** Route → the signature it resolved to at one epoch. Signatures only. */
-  readonly #routes = new Map<string, { readonly epoch: number; readonly head: SnapshotHead; readonly layerSig: string; readonly name: string }>()
+  readonly #routes = new Map<string, { readonly epoch: number; readonly head?: SnapshotHead; readonly layerSig: string; readonly name: string }>()
 
   async readHistory(
     segments: readonly string[],

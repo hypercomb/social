@@ -57,6 +57,7 @@ vi.hoisted(() => {
 })
 
 import {
+  applyRouteWorkflowAssimilation,
   buildFlowTree,
   cardKey,
   checkFlowSession,
@@ -70,6 +71,7 @@ import {
   flowMatches,
   IN_PROGRESS_MS,
   parseFlowRecord,
+  parseRouteWorkflowComments,
   planFlowWindow,
   ROUTE_FLOW_CARD_VERSION,
   ROUTE_FLOW_IDLE_MS,
@@ -724,6 +726,7 @@ describe('ChatThreads names the live run', () => {
       const threads = registered.get(thread.CHAT_THREADS_IOC_KEY) as {
         runIdForAsk?: (sig: string) => Promise<string>
         organizeRoute?: (convoId: string, liveRunId?: string, waiting?: boolean) => Promise<number>
+        assimilateRouteSelection?: (convoId: string, selectedText: string, focusNodeId?: string) => Promise<unknown>
         labelRoute?: unknown
       }
       expect(typeof threads?.runIdForAsk).toBe('function')
@@ -734,6 +737,8 @@ describe('ChatThreads names the live run', () => {
       // per-exchange labeller it replaced is gone.
       expect(typeof threads?.organizeRoute).toBe('function')
       expect(Object.prototype.hasOwnProperty.call(threads, 'organizeRoute')).toBe(false)
+      expect(typeof threads?.assimilateRouteSelection).toBe('function')
+      expect(Object.prototype.hasOwnProperty.call(threads, 'assimilateRouteSelection')).toBe(false)
       expect(threads.labelRoute).toBeUndefined()
     } finally {
       ioc.register = held
@@ -770,6 +775,55 @@ describe('ChatThreads names the live run', () => {
 //      version (or about another history) reads as absent
 //  12. the passive drain: live newest-first then archived, a budget, the gate
 //      re-read mid-pass, and never a second mint beside the attended one
+
+describe('selected text assimilation', () => {
+  it('adds, replaces, removes redundant siblings, and rejects invented node ids', () => {
+    const existing = [
+      { text: 'Use the compact header', nodeId: 't1' },
+      { text: 'Keep the header small' },
+      { text: 'Ship keyboard support', nodeId: 't2' },
+    ]
+    const updated = applyRouteWorkflowAssimilation(existing, {
+      action: 'replace', index: 0, remove: [1],
+      text: 'Use the compact header at every width', nodeId: 't1',
+    }, new Set(['t1', 't2']))
+    expect(updated).toEqual([
+      { text: 'Use the compact header at every width', nodeId: 't1' },
+      { text: 'Ship keyboard support', nodeId: 't2' },
+    ])
+
+    const added = applyRouteWorkflowAssimilation(updated!, {
+      action: 'add', index: -1, remove: [], text: 'Preserve the original order', nodeId: 't99',
+    }, new Set(['t1', 't2']))
+    expect(added?.at(-1)).toEqual({ text: 'Preserve the original order' })
+  })
+
+  it('keeps an explicit no-op byte-for-byte and de-duplicates exact comments in storage', () => {
+    const existing = [{ text: 'Keep one comment', nodeId: 't1' }]
+    expect(applyRouteWorkflowAssimilation(existing, {
+      action: 'none', index: -1, remove: [], text: '', nodeId: '',
+    }, new Set(['t1']))).toEqual(existing)
+
+    const parsed = parseRouteWorkflowComments({
+      kind: 'chat:workflow-comments', v: 1, convoId: CONVO, at: 20,
+      comments: [
+        { text: 'Keep one comment.' },
+        { text: 'keep one comment' },
+        { text: 'A distinct comment', nodeId: 'not-a-node' },
+      ],
+    }, CONVO)
+    expect(parsed?.comments).toEqual([
+      { text: 'Keep one comment.' },
+      { text: 'A distinct comment' },
+    ])
+  })
+
+  it('refuses an out-of-range replacement instead of changing unrelated comments', () => {
+    expect(applyRouteWorkflowAssimilation([{ text: 'Keep me' }], {
+      action: 'replace', index: 4, remove: [], text: 'Wrong target', nodeId: '',
+    }, new Set())).toBeNull()
+  })
+})
 
 describe('extracting a flow answer', () => {
   it('extracts the JSON value, not the prose — a think block, a fence, prose around it, a trailing comma', () => {
@@ -1208,6 +1262,7 @@ const LOCAL_HOST = 'http://127.0.0.1:11434'
 const MODELS_URL = `${LOCAL_HOST}/v1/models`
 const CHAT_URL = `${LOCAL_HOST}/v1/chat/completions`
 const FLOWS_MEANING = 'chat:route-flows'
+const COMMENTS_MEANING = 'chat:workflow-comments'
 /** The model of the participant's last own local chat — the one that organizes. */
 const MODEL = 'qwen2.5-coder:7b'
 /** An hour ago: every exchange here is long quiet unless a test says not. */
@@ -1420,6 +1475,42 @@ describe('organizing a conversation — only the machine-local model, never a kn
     expect(await m.route.organizeRoute(CONVO)).toBe(0)
     await tick()
     expect(empty).not.toHaveBeenCalled()
+  })
+
+  it('selected prose takes exactly two model calls and recycles one durable comments slot', async () => {
+    const pool = new MockDir('threads')
+    const store = makeStore(pool)
+    await seedTurn(store, pool, 'assistant', 'The header must stay compact at every width.', OLD_AT)
+    const m = await loadFlows(store)
+    const server = localServer(body => {
+      const prompt = asked(body)
+      if (prompt.includes('Distill the selected conversation excerpt')) {
+        return completion(JSON.stringify({ summary: 'Keep the header compact at every width' }))
+      }
+      if (prompt.includes('Assimilate ONE new observation')) {
+        const alreadyHeld = prompt.includes('Keep the header compact at every width')
+          && prompt.includes('\\"index\\":0')
+        return completion(JSON.stringify(alreadyHeld
+          ? { action: 'none', index: -1, remove: [], text: '', nodeId: '' }
+          : { action: 'add', index: -1, remove: [], text: 'Keep the header compact at every width', nodeId: '' }))
+      }
+      throw new TypeError('unexpected model call')
+    })
+    await wake(m, server)
+
+    const first = await m.route.assimilateRouteSelection(CONVO, 'The header must stay compact at every width.')
+    expect(first.status).toBe('added')
+    expect(chatCalls(server)).toBe(2)
+    expect((await m.route.readRouteWorkflowComments(CONVO)).comments).toEqual([
+      { text: 'Keep the header compact at every width' },
+    ])
+    expect((await m.route.readRoute(CONVO)).comments).toEqual(first.comments)
+
+    const second = await m.route.assimilateRouteSelection(CONVO, 'The header must stay compact at every width.')
+    expect(second.status).toBe('unchanged')
+    expect(chatCalls(server)).toBe(4)
+    const slot = store.pools.get(COMMENTS_MEANING)?.dirs.get(await signText(CONVO))
+    expect(slot?.files.size, 'one recycled document, not one artifact per selection').toBe(1)
   })
 
   it('an awake local model organizes the conversation — one structure call, a card per node, silently, into its one slot — and the route reads it back', async () => {

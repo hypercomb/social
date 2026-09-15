@@ -110,8 +110,17 @@ const SOUND_FOR: Readonly<Partial<Record<ChamberEvent['kind'], ChamberSound>>> =
  *  this). Anything not plainly walkable or water paints as rock, furniture
  *  and un-wanded cracks/runes/seals included: they read as solid until the
  *  wand (or a lamp set) says otherwise, matching what they actually are. */
-function paintSymbol(terrain: ChamberTerrain): string {
+function paintSymbol(terrain: ChamberTerrain, authored: string, look: ChamberLook): string {
   if (terrain === 'water' || terrain === 'spring') return '~'
+  if (look === 'wood') {
+    // Preserve the authored forest landmarks: a grove is a place, not a
+    // cavern palette painted green. This remains visual-only; `ChamberModel`
+    // is still the authority for movement and state.
+    if (terrain === 'rubble') return 'r'
+    if (authored === 'W') return 'T'
+    if (authored === 'B') return 'B'
+    if (authored === '#') return '#'
+  }
   if (terrain === 'floor' || terrain === 'threshold' || terrain === 'seal-open' || terrain === 'rubble' || terrain === 'laid' || terrain === 'stone') return '.'
   return '#'
 }
@@ -519,7 +528,7 @@ export class ChamberView {
     const tiles: string[] = []
     for (let row = 0; row < rows; row++) {
       let line = ''
-      for (let col = 0; col < cols; col++) line += paintSymbol(this.model.terrainAt(col, row))
+      for (let col = 0; col < cols; col++) line += paintSymbol(this.model.terrainAt(col, row), this.#definition.map[row]?.[col] ?? '#', this.#definition.look)
       tiles.push(line)
     }
     const key = tiles.join('|')

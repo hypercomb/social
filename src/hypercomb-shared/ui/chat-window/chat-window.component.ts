@@ -138,6 +138,7 @@ import {
   type HypercombTreeReader,
 } from './hypercomb-observation'
 import { contextNeedFor, effortInThread, type MessageEffort } from './message-effort'
+import { executionLineParts } from './execution-line'
 import {
   blockRefusedMessage,
   doFailedMessage,
@@ -219,6 +220,9 @@ type Route = {
    *  Absent when nothing has organized it yet, and on an older essentials
    *  build: then every exchange is a dormant stage. */
   readonly flow?: RouteFlowView
+  /** Participant-curated observations distilled from selected transcript
+   *  passages and semantically merged by the workflow model. */
+  readonly comments?: readonly RouteWorkflowComment[]
   /** What the participant's own local model can do right now, read from probe
    *  STATE only (§3.5). Absent on an older essentials build: then the pane
    *  says nothing about why no model is running and the section carries no
@@ -227,12 +231,28 @@ type Route = {
   /** Present only while `organizerState` is `awake`. */
   readonly organizer?: { readonly providerId: string; readonly model: string }
   /** A flow model call for THIS conversation is in flight. */
-  readonly organizing?: { readonly stage: 'structure' } | { readonly stage: 'card'; readonly nodeId: string }
+  readonly organizing?:
+    | { readonly stage: 'structure' }
+    | { readonly stage: 'card'; readonly nodeId: string }
+    | { readonly stage: 'session' | 'selection-summary' | 'selection-assimilate' }
   /** Node ids whose card is in back-off: its last answer was unusable, recently. */
   readonly cardBackoff?: readonly string[]
 }
 
 type RouteOrganizerState = 'awake' | 'off' | 'unknown' | 'asleep' | 'blocked' | 'needs-permission' | 'empty' | 'no-model'
+
+type RouteWorkflowComment = { readonly text: string; readonly nodeId?: string }
+type RouteSelectionAssimilationResult = {
+  readonly status: 'added' | 'updated' | 'unchanged' | 'unavailable' | 'failed'
+  readonly summary?: string
+  readonly comments: readonly RouteWorkflowComment[]
+}
+
+type WorkflowTextSelection = {
+  readonly text: string
+  readonly left: number
+  readonly top: number
+}
 
 type RouteFlowState = 'done' | 'open' | 'decided' | 'dropped'
 
@@ -809,6 +829,13 @@ type ChatThreadsLike = {
    *  { convoId }`. Absent on an older essentials build: then every exchange
    *  stays dormant. */
   organizeRoute?(convoId: string, liveRunId?: string, waiting?: boolean, prefer?: string): Promise<number>
+  /** Two AI operations over a participant-selected range: summarize it, then
+   *  assimilate it into the workflow comments without redundancy. */
+  assimilateRouteSelection?(
+    convoId: string,
+    selectedText: string,
+    focusNodeId?: string,
+  ): Promise<RouteSelectionAssimilationResult>
 }
 
 type QueenLike = {
@@ -1055,6 +1082,7 @@ const readRailWidth = (): number => {
 const ROUTE_SIDE_WIDTH_KEY = 'hc:chat-route-side-width'
 const ROUTE_SIDE_MIN_REM = 12
 const ROUTE_SIDE_WANTED_KEY = 'hc:chat-route-side'
+const WORKFLOW_SELECTION_MAX = 12_000
 
 const readRouteSideWanted = (): boolean => {
   try { return localStorage.getItem(ROUTE_SIDE_WANTED_KEY) !== 'false' } catch { return true }
@@ -2353,6 +2381,11 @@ export class ChatWindowComponent implements OnDestroy {
   /** Which message's Copy just fired — a transient tick on that one row. */
   readonly copiedTurn = signal('')
 
+  /** A live browser selection wholly inside transcript prose. The text is
+   *  captured before focus can move to its action button. */
+  readonly workflowSelection = signal<WorkflowTextSelection | null>(null)
+  readonly workflowSelectionBusy = signal(false)
+
   // ── guided setup state ──────────────────────────────────────────────────
 
   /** Checklist flags. `toolsDone` is the one manual step; the rest derive
@@ -2865,6 +2898,7 @@ export class ChatWindowComponent implements OnDestroy {
   readonly execMode = signal<ExecutionModeLike>('auto')
   readonly execAuto = signal<readonly ExecutionKindLike[]>(['read'])
   readonly execRows = signal<readonly ExecutionRequestLike[]>([])
+  readonly executionLineParts = executionLineParts
   readonly execWaiting = computed(() => this.execRows().filter(row => row.state === 'waiting').length)
   readonly execModes: readonly ExecutionModeLike[] = ['manual', 'auto', 'everything']
   readonly execKinds: readonly ExecutionKindLike[] = ['read', 'additive', 'editing', 'destructive']
@@ -3308,6 +3342,15 @@ export class ChatWindowComponent implements OnDestroy {
   routeCardBy(item: RouteItem): string {
     const model = item.node?.card?.model ?? ''
     return model && model !== (this.route()?.flow?.model ?? '') ? model : ''
+  }
+
+  /** Participant-curated workflow comments, with an optional step name for
+   *  observations the assimilation pass could place more precisely. */
+  readonly routeComments = computed(() => this.route()?.comments ?? [])
+
+  routeCommentStep(comment: RouteWorkflowComment): string {
+    if (!comment.nodeId) return ''
+    return this.routeTree().nodes.get(comment.nodeId)?.title ?? ''
   }
 
   /** Goal and what was done: opened once, it stays open while walking the
@@ -4068,6 +4111,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (this.#keySettle !== null) { clearTimeout(this.#keySettle); this.#keySettle = null }
     if (this.#preferTimer !== null) { clearTimeout(this.#preferTimer); this.#preferTimer = null }
     this.route.set(null)
+    this.workflowSelection.set(null)
     this.routeError.set(false)
     this.#cancelSteer(false)
     this.routeCurrent.set(null)
@@ -4256,6 +4300,9 @@ export class ChatWindowComponent implements OnDestroy {
   }
 
   constructor() {
+    const selectionChanged = (): void => { queueMicrotask(() => this.captureWorkflowSelection()) }
+    document.addEventListener('selectionchange', selectionChanged)
+    this.#cleanups.push(() => document.removeEventListener('selectionchange', selectionChanged))
     window.addEventListener('online', this.#onNetworkChange)
     window.addEventListener('offline', this.#onNetworkChange)
     // Code blocks are highlighted AFTER the turn is in the DOM — highlight.js
@@ -6499,6 +6546,76 @@ export class ChatWindowComponent implements OnDestroy {
   // Nothing here rewrites history: a thread is append-only (the same rule the
   // rest of the hive keeps), so editing a question sends a NEW turn rather than
   // silently replacing the one above it and orphaning the answer it produced.
+
+  /** Read the browser selection only when both ends live in rendered message
+   *  prose. Selecting panel chrome, the workflow itself, or half of each never
+   *  offers an operation with ambiguous input. */
+  captureWorkflowSelection(): void {
+    if (this.workflowSelectionBusy()) return
+    const root = this.scroller()?.nativeElement
+    const selection = window.getSelection()
+    if (!root || !selection || selection.isCollapsed || selection.rangeCount < 1) {
+      this.workflowSelection.set(null)
+      return
+    }
+    const elementOf = (node: Node | null): Element | null =>
+      node instanceof Element ? node : node?.parentElement ?? null
+    const anchor = elementOf(selection.anchorNode)?.closest('.chat-msg-text')
+    const focus = elementOf(selection.focusNode)?.closest('.chat-msg-text')
+    if (!anchor || !focus || !root.contains(anchor) || !root.contains(focus)) {
+      this.workflowSelection.set(null)
+      return
+    }
+    const text = selection.toString().trim().slice(0, WORKFLOW_SELECTION_MAX)
+    if (!text) { this.workflowSelection.set(null); return }
+    const range = selection.getRangeAt(0)
+    const rects = range.getClientRects()
+    const rect = rects.length ? rects[rects.length - 1]! : range.getBoundingClientRect()
+    const left = Math.max(92, Math.min(window.innerWidth - 92, rect.left + rect.width / 2))
+    const top = Math.max(48, Math.min(window.innerHeight - 8, rect.top - 8))
+    this.workflowSelection.set({ text, left, top })
+  }
+
+  /** Keep the range intact while its action takes pointer focus. */
+  holdWorkflowSelection(event: PointerEvent): void { event.preventDefault() }
+
+  /** Run the two explicit AI operations exposed by ChatThreads. */
+  async assimilateWorkflowSelection(): Promise<void> {
+    const selection = this.workflowSelection()
+    const convoId = this.activeId()
+    const threads = this.#threads()
+    if (!selection || !convoId || this.workflowSelectionBusy()) return
+    if (!threads?.assimilateRouteSelection) {
+      EffectBus.emit('toast:show', { type: 'warning', message: 'Workflow assimilation is not available yet.' })
+      return
+    }
+
+    this.workflowSelectionBusy.set(true)
+    try {
+      const focusNodeId = this.routePaneItem()?.node?.id
+      const result = await threads.assimilateRouteSelection(convoId, selection.text, focusNodeId)
+      if (convoId !== this.activeId()) return
+      if (result.status === 'added' || result.status === 'updated') {
+        this.routeSideWanted.set(true)
+        try { localStorage.setItem(ROUTE_SIDE_WANTED_KEY, 'true') } catch { /* private mode */ }
+        EffectBus.emit('toast:show', {
+          type: 'tip',
+          message: result.status === 'added' ? 'Added to the workflow.' : 'Workflow comment updated.',
+        })
+        this.#scheduleRouteRefresh(convoId)
+      } else if (result.status === 'unchanged') {
+        EffectBus.emit('toast:show', { type: 'tip', message: 'That is already covered by the workflow.' })
+      } else if (result.status === 'unavailable') {
+        EffectBus.emit('toast:show', { type: 'warning', message: 'The workflow AI is not available right now.' })
+      } else {
+        EffectBus.emit('toast:show', { type: 'warning', message: 'Could not assimilate that selection.' })
+      }
+    } finally {
+      this.workflowSelectionBusy.set(false)
+      this.workflowSelection.set(null)
+      window.getSelection()?.removeAllRanges()
+    }
+  }
 
   /** The question that produced this turn: itself, if it is the question. */
   #questionFor(turn: ChatTurn): string {

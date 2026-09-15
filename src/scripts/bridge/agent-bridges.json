@@ -85,10 +85,10 @@
         "--skip-git-repo-check"
       ],
       "models": [
-        { "name": "codex", "id": "gpt-5-codex", "tier": "deep" },
-        { "name": "codex-mini", "id": "gpt-5-codex-mini", "tier": "fast" }
+        { "name": "codex", "id": "gpt-5.6-sol", "tier": "deep" },
+        { "name": "codex-mini", "id": "gpt-5.6-luna", "tier": "fast" }
       ],
-      "defaultModel": "gpt-5-codex",
+      "defaultModel": "gpt-5.6-sol",
       "docsUrl": "https://developers.openai.com/codex/cli"
     },
     {

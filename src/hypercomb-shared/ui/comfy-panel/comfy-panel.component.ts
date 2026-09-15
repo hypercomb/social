@@ -280,6 +280,18 @@ export class ComfyPanelComponent implements OnDestroy {
   /** Put a result on the tile. */
   attach(index: number): void { EffectBus.emit('comfy:attach', { index }) }
 
+  /** Same gesture as `attach`, carried by a drag instead of a click — the
+   *  custom MIME never collides with a real OS file drag over the canvas. */
+  dragResult(event: DragEvent, index: number): void {
+    event.dataTransfer?.setData('application/x-hc-comfy-result', String(index))
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+  }
+
+  dragFolderPicture(event: DragEvent, index: number): void {
+    event.dataTransfer?.setData('application/x-hc-comfy-folder-picture', String(index))
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+  }
+
   /** The percentage the bar is filled to, as a whole number. */
   percent(): number {
     return Math.round(Math.min(1, Math.max(0, this.jobFraction() ?? 0)) * 100)

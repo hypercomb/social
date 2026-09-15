@@ -29,6 +29,7 @@
 import { Drone, EffectBus, poolAddresses, SignatureService, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
+import { noteVisualHosts } from './visual-hosts.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
 import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
 import { referenceTargetForLabel, titlesForSegments } from '../commands/decoration-kind-index.js'
@@ -2063,7 +2064,7 @@ export class SwarmDrone extends Drone {
 
       // Domain attribution — recovered entries are the ORIGINAL layer
       // events (pubkey/content/tags preserved by the responder), so the
-      // publisher's ['domain', …] tag is attributed per layerSig exactly
+      // publisher's ['domain', …] tag is attributed to layers and images exactly
       // like the live #onEvent path. A late joiner receives peer tiles
       // through THIS path, not a live broadcast — without this, their
       // adopt had no capture-source host and the tile fell to a root
@@ -2072,10 +2073,7 @@ export class SwarmDrone extends Drone {
         .filter((t): t is string[] => Array.isArray(t) && String(t[0]) === 'domain' && !!String(t[1] ?? '').trim())
         .map(t => String(t[1]).trim())
       if (domainTags.length && broker?.noteDomainsForSig) {
-        for (const v of cleanVisuals) {
-          const ls = String(v['layerSig'] ?? '').trim().toLowerCase()
-          if (/^[a-f0-9]{64}$/.test(ls)) broker.noteDomainsForSig(ls, domainTags)
-        }
+        noteVisualHosts(cleanVisuals, domainTags, broker.noteDomainsForSig)
       }
       if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
       bag.set(pubkey, { visuals: cleanVisuals })
@@ -2331,11 +2329,12 @@ export class SwarmDrone extends Drone {
 
     // Domain attribution — the publisher advertised their host as a
     // ['domain', …] tag (mirroring the broker's 30401 responses). Record it
-    // against each visual's layerSig in the broker's address graph, so an
+    // against each visual's layer and image refs in the address graph, so an
     // adopt-click's getKnownDomains(layerSig) answers "which host serves
     // this tile" — that's what files the adopt under its capture-source
     // folder (jwize.com/dolphin) and gives the installer an HTTP-direct
-    // byte path. Must run BEFORE the auto-adopt emit below, which reads the
+    // byte path. Image attribution also clears prior preview miss windows.
+    // Must run BEFORE the auto-adopt emit below, which reads the
     // attribution synchronously. Untrusted input: it only ever adds a
     // Tier-2 fetch candidate; sha256 still gates every byte.
     const domainTags = (evt?.event?.tags ?? [])
@@ -2344,10 +2343,7 @@ export class SwarmDrone extends Drone {
     if (domainTags.length) {
       const broker = this.#getBroker()
       if (broker?.noteDomainsForSig) {
-        for (const v of cleanVisuals) {
-          const ls = String(v['layerSig'] ?? '').trim().toLowerCase()
-          if (/^[a-f0-9]{64}$/.test(ls)) broker.noteDomainsForSig(ls, domainTags)
-        }
+        noteVisualHosts(cleanVisuals, domainTags, broker.noteDomainsForSig)
       }
     }
 

@@ -81,6 +81,18 @@ export interface ComfyRenderPayload {
   importError: string
 }
 
+/** Where a drag now sits, per TileOverlayDrone's broadcast — the same signal
+ *  every file/image drag reads to know which hex it is over. */
+interface DropTargetInfo {
+  occupied: boolean
+  label: string | null
+}
+
+/** The custom drag payload a comfy thumbnail carries — never real `Files`,
+ *  so it never collides with an OS file drag over the same canvas. */
+const RESULT_MIME = 'application/x-hc-comfy-result'
+const FOLDER_MIME = 'application/x-hc-comfy-folder-picture'
+
 export class ComfyDrone extends Drone {
 
   readonly namespace = 'diamondcoreprocessor.com'
@@ -90,18 +102,32 @@ export class ComfyDrone extends Drone {
     'comfy:link-folder', 'comfy:browse', 'comfy:set-workflow',
     'comfy:import-workflow', 'comfy:generate', 'comfy:cancel',
     'comfy:keep', 'comfy:attach', 'comfy:job', 'comfy:host-changed',
-    'comfy:folder-changed', 'comfy:workflows-changed', 'selection:changed',
+    'comfy:folder-changed', 'comfy:workflows-changed', 'selection:changed', 'drop:target',
   ]
-  protected override emits: string[] = ['comfy:render', 'activity:log']
+  protected override emits: string[] = ['comfy:render', 'activity:log', 'drop:dragging']
 
   #open = false
   #reveal = ''
   #browsing = false
   #importError = ''
   #folderPictures: ComfyPicture[] = []
+  /** Where TileOverlayDrone says the pointer currently is, while OUR drag
+   *  (never TheirsFiles) is what put it into drag mode. */
+  #dropTarget: DropTargetInfo | null = null
+  #dragging = false
 
   constructor() {
     super()
+
+    // A comfy thumbnail dragged onto the canvas — same landing logic as a
+    // click, just with a where attached. Never claims a real file drag
+    // (`dataTransfer.types` never carries our custom MIME for one), so this
+    // sits beside ImageDropDrone/FileDropDrone without contending.
+    document.addEventListener('dragover', this.#onDragOver)
+    document.addEventListener('drop', this.#onDrop)
+    document.addEventListener('dragend', this.#onDragEnd)
+
+    this.onEffect<DropTargetInfo>('drop:target', (t) => { this.#dropTarget = t })
 
     this.onEffect<{ section?: string }>('comfy:open', (p) => {
       const section = String(p?.section ?? '')
@@ -215,6 +241,44 @@ export class ComfyDrone extends Drone {
     }
     // "onto <tile>" has to be true while you look at it.
     this.onEffect('selection:changed', () => { if (this.#open) this.#emit() })
+  }
+
+  // ── dragging a thumbnail onto the canvas ────────────────────────────────
+
+  #onDragOver = (e: DragEvent): void => {
+    const types = e.dataTransfer?.types ?? []
+    if (!types.includes(RESULT_MIME) && !types.includes(FOLDER_MIME)) return
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    // Arms TileOverlayDrone's own hex-tracking — the same broadcast an image
+    // or file drag sends, so `drop:target` starts following the pointer.
+    if (!this.#dragging) { this.#dragging = true; this.emitEffect('drop:dragging', { active: true }) }
+  }
+
+  #onDragEnd = (): void => {
+    if (!this.#dragging) return
+    this.#dragging = false
+    this.emitEffect('drop:dragging', { active: false })
+  }
+
+  #onDrop = (e: DragEvent): void => {
+    const resultIndex = e.dataTransfer?.getData(RESULT_MIME)
+    const folderIndex = e.dataTransfer?.getData(FOLDER_MIME)
+    if (!resultIndex && !folderIndex) return
+    e.preventDefault()
+    this.#onDragEnd()
+    // Dropped on an occupied hex → that tile. Anywhere else (empty hex, off
+    // the hive entirely) → whatever is already selected, same as a click —
+    // `attach`/`keep` arm the command line themselves when that is nothing.
+    const cell = this.#dropTarget?.occupied ? (this.#dropTarget.label ?? undefined) : undefined
+    if (resultIndex) {
+      const result = comfyService.results[Number(resultIndex)]
+      if (result) comfyService.attach(result, cell)
+    } else if (folderIndex) {
+      const picture = this.#folderPictures[Number(folderIndex)]
+      if (picture) void comfyService.keep(this.#refOf(picture), cell).then(() => this.#emit())
+    }
+    this.#emit()
   }
 
   /** Ask the machine and re-open the folder on the way in — a status dot that

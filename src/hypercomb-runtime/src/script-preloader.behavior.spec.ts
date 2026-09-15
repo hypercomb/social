@@ -150,6 +150,40 @@ beforeEach(() => {
 })
 
 describe('ScriptPreloader priority scheduling', () => {
+  it('exposes registered readable artifacts through the preloader and caches reads by signature', async () => {
+    const sourceSig = 'f'.repeat(64)
+    const readArtifact = vi.fn(async (requested: string) => requested === sourceSig
+      ? {
+          name: 'hypercomb-essentials/src/assistant/hive-tree-reader.ts',
+          sig: sourceSig,
+          of: 'bee' as const,
+          type: 'text/typescript',
+          bytes: new TextEncoder().encode('export class HypercombHiveTreeReader {}'),
+        }
+      : null)
+
+    const preloader = new ScriptPreloader()
+    preloader.registerReadableArtifacts({
+      entries: async () => [{
+        name: 'hypercomb-essentials/src/assistant/hive-tree-reader.ts',
+        sig: sourceSig,
+        of: 'bee',
+        type: 'text/typescript',
+      }],
+      readArtifact,
+    })
+
+    await expect(preloader.readableArtifacts()).resolves.toMatchObject([{
+      name: 'hypercomb-essentials/src/assistant/hive-tree-reader.ts',
+      sig: sourceSig,
+      of: 'bee',
+      type: 'text/typescript',
+    }])
+    expect(await preloader.readArtifact(sourceSig)).toMatchObject({ sig: sourceSig, type: 'text/typescript' })
+    expect(await preloader.readArtifact(sourceSig)).toMatchObject({ sig: sourceSig, type: 'text/typescript' })
+    expect(readArtifact).toHaveBeenCalledTimes(1)
+  })
+
   it('starts only the signed critical wave first and pulses every bee once', async () => {
     let releaseCritical: () => void = () => {}
     const criticalGate = new Promise<void>(resolve => { releaseCritical = resolve })

@@ -278,6 +278,34 @@ $accent: #7eb6d6;
 .chat-msg:hover .chat-acts,
 .chat-acts:focus-within { opacity: 1; }
 
+// A text-selection action, placed over the end of the live range. It is one
+// explicit verb rather than another permanently-lit control on every message.
+.chat-workflow-selection {
+  position: fixed;
+  z-index: 8;
+  transform: translate(-50%, -100%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  max-width: calc(100vw - 1rem);
+  padding: 0.38em 0.65em;
+  color: var(--hc-window-on-accent);
+  background: rgba(var(--acc), 0.96);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.16);
+  border-radius: var(--md-shape-xs, 4px);
+  box-shadow: 0 4px 14px rgba(var(--hc-panel-shadow), 0.42);
+  font: inherit;
+  font-size: 0.72em;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.05em; }
+  &:hover { filter: brightness(1.08); }
+  &:focus-visible { outline: 2px solid var(--hc-window-ink-loud); outline-offset: 2px; }
+  &:disabled { opacity: 0.72; cursor: progress; }
+}
+
 // Touch has no hover. Rather than hide the actions behind a gesture nobody
 // discovers, they simply stay visible where pointing is coarse.
 @media (hover: none) {

@@ -339,9 +339,14 @@ const send = async (
     const body = await response.text().catch(() => '')
     // A model the participant never pulled is the one local failure that
     // arrives as a clean HTTP status, and "404" alone hides the one-line fix.
+    // A 400 from a local server is usually the same shape of problem in a
+    // different vendor's spelling (LM Studio and other OpenAI-compatible
+    // servers reject an unrecognized model name with 400, not 404).
     const hint = local && response.status === 404
       ? ` — pull it first (ollama pull ${request.model})`
-      : ''
+      : local && response.status === 400
+        ? ` — your local server doesn't recognize "${request.model}"; check its model name/list`
+        : ''
     throw new LlmDispatchError(
       `${provider.label} API ${response.status}: ${body.slice(0, MAX_ERROR_BODY)}${hint}`,
       provider.id,

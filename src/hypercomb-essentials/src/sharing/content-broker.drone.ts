@@ -73,6 +73,7 @@
 import { Drone, EffectBus, registerPoolMeaning } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
+import { firstAvailableHost } from './first-available-host.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -929,7 +930,10 @@ export class ContentBrokerDrone extends Drone {
 
     if (ordered.length === 0) return null
 
-    for (const host of ordered) {
+    // Start at most three hosts in preference order; the first verified
+    // response wins and cancels outstanding probes. A dead host must not
+    // block a healthy publisher behind repeated multi-second timeouts.
+    return firstAvailableHost(ordered, async (host, cancelled) => {
       // Loopback hosts are served over plain http — the content-side analog
       // of the mesh's allow-loopback. Real domains always use https.
       const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
@@ -956,11 +960,14 @@ export class ContentBrokerDrone extends Drone {
         : [flatPath, path]
       let flatMissed = false
       for (const tryPath of tryPaths) {
+        if (cancelled.aborted) return null
         const url = `${scheme}://${host}${tryPath}`
         // Bounded probe: a dead/hung host must cost at most
         // HTTP_PROBE_TIMEOUT_MS, never the browser's connect timeout —
         // callers on the render path await this cascade.
         const probeCtrl = new AbortController()
+        const cancelProbe = (): void => probeCtrl.abort()
+        cancelled.addEventListener('abort', cancelProbe, { once: true })
         const probeTimer = setTimeout(() => probeCtrl.abort(), HTTP_PROBE_TIMEOUT_MS)
         try {
           // `/<sig>` is IMMUTABLE by construction — the URL is the content
@@ -1001,6 +1008,7 @@ export class ContentBrokerDrone extends Drone {
             this.#mintOutcome(host, 'mismatch')
             continue
           }
+          if (cancelled.aborted) return null
           // Branch-closure attribution (§21.14): a host serving a LAYER is
           // presumed to serve the layer's entire closure — the standard is
           // "a branch merkle signature hosts all its contents". Every ref
@@ -1018,17 +1026,23 @@ export class ContentBrokerDrone extends Drone {
           this.#mintOutcome(host, 'ok')
           return bytes
         } catch (err) {
+          if (cancelled.aborted) return null
           // network error / CORS / cert issue / probe timeout — try next
           // path / host. Our own probe abort is the one distinguishable
           // timeout; everything else is opaque to fetch() → unreachable.
           this.#mintOutcome(host, (err as { name?: string } | null)?.name === 'AbortError' ? 'timeout' : 'unreachable')
+          // Do not spend a second timeout on this host's legacy layout.
+          // Other errors may be path-specific (for example CORS), so they
+          // still get the compatibility fallback.
+          if (probeCtrl.signal.aborted) break
           continue
         } finally {
           clearTimeout(probeTimer)
+          cancelled.removeEventListener('abort', cancelProbe)
         }
       }
-    }
-    return null
+      return null
+    })
   }
 
   // ─────────────────────────────────────────────────────────────────

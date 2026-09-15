@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   executeHypercombObservationPlan,
   formatHypercombObservationReceipt,
@@ -228,6 +228,67 @@ describe('opening what a signature names', () => {
       parseHypercombObservationGrammars([`/read ${target} 19`], []), reader))
     expect(reader.readNodeBySig).toHaveBeenCalledTimes(1) // a continuation goes straight to the bytes
     expect(page).toContain('"text":"rest();"')
+  })
+})
+
+describe('LLM context projection substitutes for content on /read only', () => {
+  const layerSig = 'e'.repeat(64)
+
+  const readerFor = (): HypercombTreeReader => ({
+    readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+    validateSnapshots: vi.fn(async () => true),
+    readNode: vi.fn(async (segments, options) => ({
+      ok: true as const,
+      root: `/${segments.join('/')}`,
+      name: segments[segments.length - 1] ?? 'hive',
+      layerSig,
+      children: [],
+      ...(options.withContent ? { content: { notes: ['a'] }, truncated: false } : {}),
+      snapshot: `private-${segments.join('-')}`,
+    })),
+  })
+
+  afterEach(() => {
+    delete (window as unknown as { ioc?: unknown }).ioc
+  })
+
+  it('carries `projection` and omits `content` when the LLM context service yields text for this layer', async () => {
+    (window as unknown as { ioc: unknown }).ioc = {
+      get: (key: string) => key === '@diamondcoreprocessor.com/LlmContext'
+        ? { project: async (sig: string) => (sig === layerSig ? { text: 'Humidor\nnotes:\n  Buy cedar', minted: true } : null) }
+        : undefined,
+    }
+    const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/read /humidor'], []), readerFor()))
+    expect(out).toContain('"projection":"Humidor\\nnotes:\\n  Buy cedar"')
+    expect(out).not.toContain('"content"')
+  })
+
+  it('answers exactly as before when no LLM context service is registered', async () => {
+    const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/read /humidor'], []), readerFor()))
+    expect(out).toContain('"content":{"notes":["a"]}')
+    expect(out).not.toContain('projection')
+  })
+
+  it('answers exactly as before when the service yields nothing for this layer', async () => {
+    (window as unknown as { ioc: unknown }).ioc = {
+      get: () => ({ project: async () => null }),
+    }
+    const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/read /humidor'], []), readerFor()))
+    expect(out).toContain('"content":{"notes":["a"]}')
+    expect(out).not.toContain('projection')
+  })
+
+  it('never projects /list, even with a service that would happily project', async () => {
+    (window as unknown as { ioc: unknown }).ioc = {
+      get: () => ({ project: vi.fn(async () => ({ text: 'should never appear', minted: true })) }),
+    }
+    const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/list /humidor'], []), readerFor()))
+    expect(out).not.toContain('projection')
+    expect(out).not.toContain('should never appear')
   })
 })
 

@@ -632,6 +632,19 @@
       }
     </div>
 
+    @if (workflowSelection(); as selection) {
+      <button class="chat-workflow-selection" type="button"
+        [style.left.px]="selection.left"
+        [style.top.px]="selection.top"
+        [disabled]="workflowSelectionBusy()"
+        (pointerdown)="holdWorkflowSelection($event)"
+        (click)="assimilateWorkflowSelection()"
+        [attr.aria-label]="'chat.workflow-selection.add' | t">
+        <span class="mat-sym" aria-hidden="true">auto_awesome</span>
+        <span>{{ (workflowSelectionBusy() ? 'chat.workflow-selection.working' : 'chat.workflow-selection.add') | t }}</span>
+      </button>
+    }
+
     <!-- Scrolled up to read something: arrivals stop moving the view, and this
          is the way back to the newest turn. -->
     @if (!atBottom()) {
@@ -974,6 +987,21 @@
                 }
               }
             </div>
+            @if (routeComments().length) {
+              <section class="chat-route-summary-comments">
+                <span class="chat-route-summary-label">{{ 'chat.workflow-comments' | t }}</span>
+                <ul>
+                  @for (comment of routeComments(); track comment.nodeId + ':' + comment.text) {
+                    <li>
+                      @if (routeCommentStep(comment); as step) {
+                        <span class="chat-route-summary-comment-step">{{ step }}</span>
+                      }
+                      <span>{{ comment.text }}</span>
+                    </li>
+                  }
+                </ul>
+              </section>
+            }
             @if (item.collapsed) {
               <p class="chat-route-summary-folded">{{ 'chat.route.flow.hidden' | t: { count: item.descendants } }}</p>
             }
@@ -1086,7 +1114,13 @@
                 <p class="chat-exec-quiet">{{ 'chat.exec.needs-grant' | t }}</p>
               }
               <div class="chat-exec-lines">
-                @for (line of row.lines; track $index) { <code class="chat-exec-line">{{ line }}</code> }
+                @for (line of row.lines; track $index) {
+                  <code class="chat-exec-line">@for (part of executionLineParts(line); track $index) {<span
+                    [class.chat-exec-sig]="part.signature"
+                    [attr.title]="part.signature || null"
+                    [attr.aria-label]="part.signature || null"
+                  >{{ part.text }}</span>}</code>
+                }
               </div>
               @if (row.state === 'waiting') {
                 <div class="chat-exec-acts">

@@ -35,6 +35,15 @@
 //
 // Cycles (a child sig that loops back to an ancestor) get an
 // { $cycle: sig } marker instead of infinite recursion.
+//
+// An optional LENS (`options.lens`) sits in front of the normal resolution
+// order: for each sig, past the cycle check, `lens.shadow(sig)` is asked
+// first. A non-null/undefined answer is substituted AS-IS and is terminal —
+// it is not recursed into, so a lens may hand back an already-compact
+// string in place of a whole resolved subtree (llm-context.ts's projection
+// cache is the first one). A miss (`null`/`undefined`) calls `lens.miss?.`
+// and falls through to resolution exactly as if there were no lens. With no
+// lens passed, behaviour is byte-for-byte what it always was.
 
 import { isSignature } from '@hypercomb/core'
 
@@ -68,6 +77,17 @@ type BinaryDescriptor = {
 }
 
 const PREVIEW_LIMIT = 280
+
+/** A lens sits in front of normal sig resolution during `inflate`. `shadow`
+ *  answers from an accelerator (a derived cache, say) WITHOUT deriving —
+ *  null/undefined means "no shadow, resolve normally." `miss` is a fire-
+ *  and-forget signal that a sig had no shadow, for a caller that wants to
+ *  queue it for next time (never awaited, never allowed to throw into the
+ *  walk). */
+export type InflateLens = {
+  shadow(sig: string): Promise<unknown | null | undefined>
+  miss?(sig: string): void
+}
 
 /** One sig → its raw parsed value, or a binary descriptor when the
  *  resource exists but isn't JSON, or null when nothing addressable
@@ -136,21 +156,28 @@ const isMarker = (value: unknown): boolean =>
 export const inflate = async (
   value: unknown,
   visited: Set<string> = new Set(),
+  options?: { readonly lens?: InflateLens },
 ): Promise<unknown> => {
   if (isSignature(value)) {
     const sig = value as string
     if (visited.has(sig)) return { $cycle: sig }
     visited.add(sig)
+    const lens = options?.lens
+    if (lens) {
+      const shadow = await lens.shadow(sig)
+      if (shadow !== null && shadow !== undefined) return shadow
+      lens.miss?.(sig)
+    }
     const raw = await resolveOne(sig)
     if (raw === null) return { $sig: sig, $missing: true }
     if (isMarker(raw)) return raw
-    return await inflate(raw, visited)
+    return await inflate(raw, visited, options)
   }
 
   if (Array.isArray(value)) {
     const out = new Array(value.length)
     for (let i = 0; i < value.length; i++) {
-      out[i] = await inflate(value[i], visited)
+      out[i] = await inflate(value[i], visited, options)
     }
     return out
   }
@@ -159,7 +186,7 @@ export const inflate = async (
     if (isMarker(value)) return value
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = await inflate(v, visited)
+      out[k] = await inflate(v, visited, options)
     }
     return out
   }

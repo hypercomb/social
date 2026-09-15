@@ -84,11 +84,13 @@ import {
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/runtime/sw-domains'
 import { appConfig } from './app/app.config'
 import { App } from './app/app'
+import { registerDevSourceCatalog } from './dev-source-catalog'
 
 // keep this as a value-use so the module can't be elided
 void Store
 void DroneRegistry
 void IconProviderRegistry
+registerDevSourceCatalog()
 
 /**
  * Boot runs before Angular owns the page. If storage cannot be reopened (for

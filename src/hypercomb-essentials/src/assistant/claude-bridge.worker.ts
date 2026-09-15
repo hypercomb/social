@@ -12,6 +12,7 @@ import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-prop
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { inflate } from '../history/inflate.js'
+import { LlmContextService, llmContextLens } from './llm-context.js'
 import { extractPageRefSigs, collectSigsDeep } from '../sharing/decoration-closure.js'
 import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sigs.js'
 import { mintBuildRecord } from '../history/builds-slot.js'
@@ -104,6 +105,10 @@ type BridgeRequest = {
   steps?: boolean
   /** `thread-read`: narrow the returned steps to one run. */
   runId?: string
+  /** `inflate`: `'llm'` substitutes the token-compact projection cache
+   *  (assistant/llm-context.ts) for any layer sig `inflate` would otherwise
+   *  expand in full — a pool hit only; a miss falls through unchanged. */
+  lens?: string
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -1538,6 +1543,9 @@ export class ClaudeBridgeWorker extends Worker {
 
   async #inflate(req: BridgeRequest): Promise<BridgeResponse> {
     let sig = typeof req.cell === 'string' ? req.cell.trim() : ''
+    // Optional, and cheap: a pool-hit-only accelerator, never a change to
+    // what `inflate` resolves when it misses.
+    const options = req.lens === 'llm' ? { lens: llmContextLens(new LlmContextService()) } : undefined
 
     // No sig → resolve segments to the current layer at that location.
     if (!sig && req.segments) {
@@ -1547,7 +1555,7 @@ export class ClaudeBridgeWorker extends Worker {
       const locationSig = await history.sign({ explorerSegments: () => segments })
       const layer = await history.currentLayerAt(locationSig)
       if (!layer) return { id: req.id, ok: false, error: `no layer at /${segments.join('/')}` }
-      const inflated = await inflate(layer)
+      const inflated = await inflate(layer, new Set(), options)
       return { id: req.id, ok: true, data: inflated }
     }
 
@@ -1555,7 +1563,7 @@ export class ClaudeBridgeWorker extends Worker {
       return { id: req.id, ok: false, error: 'inflate requires a 64-hex sig (in `cell`) or `segments`' }
     }
 
-    const inflated = await inflate(sig)
+    const inflated = await inflate(sig, new Set(), options)
     return { id: req.id, ok: true, data: inflated }
   }
 

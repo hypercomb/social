@@ -7,6 +7,7 @@ const sig = (n: number): string => n.toString(16).padStart(64, '0')
 const HISTORY = '@diamondcoreprocessor.com/HistoryService'
 const STORE = '@hypercomb.social/Store'
 const COMMITTER = '@diamondcoreprocessor.com/LayerCommitter'
+const PRELOADER = '@hypercomb.social/ScriptPreloader'
 
 type Fixture = {
   readonly reader: HypercombHiveTreeReader
@@ -15,6 +16,7 @@ type Fixture = {
   readonly paths: Map<string, string>
   readonly getLayerBySig: ReturnType<typeof vi.fn>
   readonly settled: ReturnType<typeof vi.fn>
+  readonly history: Record<string, unknown>
 }
 
 const fixture = (): Fixture => {
@@ -73,7 +75,7 @@ const fixture = (): Fixture => {
     [COMMITTER, { settled }],
   ])
   const lookup = (<T>(key: string): T | undefined => services.get(key) as T | undefined)
-  return { reader: new HypercombHiveTreeReader(lookup), epoch, refs, paths, getLayerBySig, settled }
+  return { reader: new HypercombHiveTreeReader(lookup), epoch, refs, paths, getLayerBySig, settled, history }
 }
 
 describe('the bounded live hive tree reader', () => {
@@ -251,12 +253,70 @@ describe('opening what a signature names', () => {
 
   it('lists the running code by name, filtered by a word', async () => {
     const reader = readerWith({ getResource: vi.fn(async () => null) }, [
-      ['@hypercomb.social/ScriptPreloader', { actions: [{ signature: sig(9), name: 'history-service' }, { signature: sig(10), name: 'layer-committer' }] }],
+      [PRELOADER, { actions: [{ signature: sig(9), name: 'history-service' }, { signature: sig(10), name: 'layer-committer' }] }],
       ['@hypercomb.social/DependencyLoader', { loadedSignatures: [sig(11)] }],
     ])
     expect(await reader.listCode('')).toMatchObject({ ok: true, total: 3, truncated: false })
     const some = await reader.listCode('history')
     expect(some.ok && some.entries).toEqual([{ name: 'history-service', sig: sig(9), of: 'bee' }])
+  })
+
+  it('lists directly imported dev modules from signed package layers and caches that inventory', async () => {
+    const layerSig = sig(12)
+    const beeSig = sig(13)
+    const getLayerBytes = vi.fn(async (requested: string) => requested === layerSig
+      ? new TextEncoder().encode(JSON.stringify({
+          name: 'assistant',
+          bees: [`${beeSig}.js`],
+          docs: { bees: { [beeSig]: { className: 'CoreReaderDrone' } } },
+        }))
+      : null)
+    const previous = localStorage.getItem('core-adapter.installed-manifest')
+    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({
+      layers: [layerSig], bees: [beeSig], dependencies: [],
+    }))
+    try {
+      const reader = readerWith({ getResource: vi.fn(async () => null), getLayerBytes })
+      const first = await reader.listCode('core')
+      expect(first.ok && first.entries).toEqual([{ name: 'CoreReaderDrone', sig: beeSig, of: 'bee' }])
+      await reader.listCode('core')
+      expect(getLayerBytes).toHaveBeenCalledTimes(1)
+    } finally {
+      if (previous === null) localStorage.removeItem('core-adapter.installed-manifest')
+      else localStorage.setItem('core-adapter.installed-manifest', previous)
+    }
+  })
+
+  it('lists and opens the development shell TypeScript by its content signature', async () => {
+    const sourceSig = sig(14)
+    const source = 'export class HypercombHiveTreeReader {}'
+    const readArtifact = vi.fn(async (requested: string) => requested === sourceSig
+      ? {
+          name: 'hypercomb-essentials/src/assistant/hive-tree-reader.ts',
+          sig: sourceSig,
+          of: 'bee' as const,
+          type: 'text/typescript',
+          bytes: new TextEncoder().encode(source),
+        }
+      : null)
+    const reader = readerWith({
+      getResource: vi.fn(async () => null),
+      getBeeBytes: vi.fn(async () => null),
+      getDependencyBytes: vi.fn(async () => null),
+    }, [[PRELOADER, {
+      readableArtifacts: async () => [{ name: 'hypercomb-essentials/src/assistant/hive-tree-reader.ts', sig: sourceSig }],
+      readArtifact,
+    }]])
+
+    const listed = await reader.listCode('hive-tree-reader')
+    expect(listed.ok && listed.entries).toEqual([{
+      name: 'hypercomb-essentials/src/assistant/hive-tree-reader.ts', sig: sourceSig, of: 'bee',
+    }])
+    expect(await reader.readBytesBySig(sourceSig)).toMatchObject({
+      ok: true, sig: sourceSig, of: 'bee', type: 'text/typescript', text: source,
+    })
+    await reader.readBytesBySig(sourceSig)
+    expect(readArtifact).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -294,5 +354,65 @@ describe('a tile read on a live hive', () => {
     cold.getLayerBySig.mockImplementation(async (signature: string) => signature === sig(6) ? null : coldOriginal(signature))
     expect(await cold.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true }))
       .toMatchObject({ ok: true, children: [], unresolved: [sig(6)] })
+  })
+})
+
+describe('a page history cannot pin to one signature', () => {
+  it('reads it from the bag\u2019s latest marker, without a snapshot', async () => {
+    const fx = fixture()
+    fx.refs.delete(sig(102)) // /projects: the head cannot be pinned, so history says cold
+    fx.history['listLayers'] = vi.fn(async () => [{ index: 0, layerSig: sig(5) }])
+    const read = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+    expect(read).toMatchObject({ ok: true, name: 'projects', layerSig: sig(5), children: [{ name: 'roadmap', sig: sig(6) }] })
+    expect(read.ok && read.snapshot).toBeUndefined()
+  })
+
+  it('reads it from the copy its parent carries when the bag has nothing, and still says not-found for a name nobody carries', async () => {
+    const fx = fixture()
+    fx.refs.delete(sig(102))
+    expect(await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true }))
+      .toMatchObject({ ok: true, name: 'projects', layerSig: sig(2), children: [{ name: 'legacy', sig: sig(4) }] })
+    expect(await fx.reader.readNode(['missing'], { maxBytes: 8_000 })).toMatchObject({ ok: false, code: 'not-found' })
+  })
+
+  it('reads a manifest-carried tile whose standalone layer is not in the pool', async () => {
+    const fx = fixture()
+    fx.refs.delete(sig(102))
+    const original = fx.getLayerBySig.getMockImplementation()! as (signature: string) => Promise<LayerContent | null>
+    fx.getLayerBySig.mockImplementation(async signature => signature === sig(2) ? null : original(signature))
+    fx.history['childrenManifestFor'] = vi.fn(async (layer: LayerContent) => layer.name === 'hive'
+      ? [{ sig: sig(2), layer: { name: 'projects', children: [sig(4)] } }]
+      : null)
+
+    expect(await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true }))
+      .toMatchObject({ ok: true, name: 'projects', layerSig: sig(2), children: [{ name: 'legacy', sig: sig(4) }] })
+  })
+
+  it('falls back when the live head lookup itself throws', async () => {
+    const fx = fixture()
+    const current = fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>
+    current.mockImplementation(async (location: string) => {
+      if (location === sig(102)) throw new Error('cold head')
+      return fx.refs.get(location) ?? null
+    })
+
+    expect(await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true }))
+      .toMatchObject({ ok: true, name: 'projects', layerSig: sig(2) })
+  })
+
+  it('keeps a fallback route and its signature content in memory for the next read', async () => {
+    const fx = fixture()
+    fx.refs.delete(sig(102))
+
+    const first = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+    expect(first).toMatchObject({ ok: true, name: 'projects', layerSig: sig(2) })
+    const headReads = (fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>).mock.calls.length
+    const layerReads = fx.getLayerBySig.mock.calls.length
+
+    const again = await fx.reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+    expect(again).toMatchObject({ ok: true, name: 'projects', layerSig: sig(2) })
+    expect(again.ok && again.snapshot).toBeUndefined()
+    expect((fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>).mock.calls.length).toBe(headReads)
+    expect(fx.getLayerBySig.mock.calls.length).toBe(layerReads)
   })
 })

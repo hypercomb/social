@@ -1102,20 +1102,19 @@ export class Store extends EventTarget {
    * Concurrent callers coalesce on #hostFetchPending; the broker also
    * coalesces its own fetches, so a double-miss never double-fetches.
    */
-  /** Effective negative-cache expiry for a sig: the LATER of Store's own
-   *  fixed window and the broker's exponential-backoff window (missUntil).
-   *  Store's fixed HOST_MISS_TTL_MS re-dialed every 60s even after the
-   *  broker had backed a dead sig off to minutes — the two caches never
-   *  talked. Resolved via IoC, optional-chained: with no broker registered
-   *  Store's own window is the sole authority, exactly as before. */
+  /** The broker owns retry timing, including early recovery when a publisher
+   *  host is learned. Store's fixed window is a compatibility fallback for
+   *  transports that do not expose missUntil. */
   #effectiveMissUntil(signature: string, own: number | undefined): number {
-    let until = own ?? 0
+    const until = own ?? 0
     try {
       const broker = (window.ioc?.get?.('@ContentBrokerDrone')) as
         | { missUntil?: (sig: string) => number }
         | undefined
-      const brokerUntil = broker?.missUntil?.(signature) ?? 0
-      if (brokerUntil > until) until = brokerUntil
+      // The broker owns the retry window when it exposes one. In
+      // particular, zero means new host knowledge has cleared a miss;
+      // retaining Store's old minute-long window would hide that recovery.
+      if (typeof broker?.missUntil === 'function') return broker.missUntil(signature)
     } catch { /* no ioc — own window only */ }
     return until
   }
@@ -1125,7 +1124,7 @@ export class Store extends EventTarget {
     if (existing) return existing
     // Within a miss window → answer null instantly, no network. The egg
     // re-tries when the window lapses (or the bytes arrive locally first).
-    // The window is the LATER of Store's own and the broker's backoff.
+    // The broker's window also reflects newly discovered fetch sources.
     const missUntil = this.#effectiveMissUntil(signature, this.#hostFetchMissUntil.get(signature))
     if (missUntil) {
       if (Date.now() < missUntil) return Promise.resolve(null)
@@ -1207,8 +1206,7 @@ export class Store extends EventTarget {
         broker?.allowFetchRetry?.(signature)
       } catch { /* broker is optional; the local re-check below still applies */ }
     }
-    // LATER of Store's own window and the broker's backoff — see
-    // #effectiveMissUntil.
+    // Use the broker's retry window, with Store's legacy fallback.
     const missUntil = this.#effectiveMissUntil(signature, this.#layerHostMissUntil.get(signature))
     if (missUntil) {
       if (Date.now() < missUntil) return Promise.resolve(null)

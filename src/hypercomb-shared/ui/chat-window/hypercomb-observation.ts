@@ -25,6 +25,17 @@ const SIG = /^[0-9a-f]{64}$/
 const MAX_QUERY_LENGTH = 64
 /** Modules and dependencies named per `/code` answer; `total` says how many matched. */
 const CODE_ENTRIES = 60
+/** A structural ceiling on `projection`, independent of the caller's byte
+ *  budget — matches the cap the writer enforces (assistant/llm-context.ts),
+ *  with slack for a record minted by an older build. */
+const MAX_PROJECTION_LENGTH = 8_000
+
+/** Shared consumes modules through IoC at runtime and never imports an
+ *  essentials path (CLAUDE.md's dependency direction) — this is the one
+ *  lookup, kept local rather than exported so nothing outside this file can
+ *  mistake it for a stable import. */
+const ioc = <T>(key: string): T | undefined =>
+  (window as unknown as { ioc?: { get?: <V>(k: string) => V | undefined } }).ioc?.get?.<T>(key)
 
 export type HypercombObservation = {
   readonly grammar: string
@@ -91,6 +102,11 @@ export type HypercombNodeRead =
     readonly layerSig: string
     readonly children: readonly { readonly name: string; readonly sig: string }[]
     readonly content?: Record<string, unknown>
+    /** A token-compact rendering of the tile in place of `content`, from the
+     *  hive's LLM context cache (assistant/llm-context.ts). Present only on
+     *  a `/read` (never `/list`) whose layer sig had — or could derive — a
+     *  projection; when present, `content` is omitted, which is the saving. */
+    readonly projection?: string
     readonly truncated?: boolean
     /** Children the layer declares whose layers are not on this device —
      *  listed by signature rather than failing the whole read. */
@@ -337,6 +353,23 @@ const safeRead = (
   return { ok: true, root: expectedRoot, nodes, truncated: read.truncated === true, snapshot: read.snapshot }
 }
 
+/** `/read` node results only — never `/list`, which never sets `withContent`.
+ *  Optional: a hive with no LLM context service (or one that yields nothing
+ *  for this layer) answers exactly as it always did. When it yields text,
+ *  `content` is dropped in favour of `projection` — that omission is the
+ *  saving the whole cache exists for — while `truncated` is kept. */
+const withProjection = async (read: HypercombNodeRead): Promise<HypercombNodeRead> => {
+  if (!read.ok) return read
+  const service = ioc<{ project?: (layerSig: string) => Promise<{ readonly text: string } | null> }>(
+    '@diamondcoreprocessor.com/LlmContext',
+  )
+  if (!service?.project) return read
+  const projected = await service.project(read.layerSig).catch(() => null)
+  if (!projected?.text) return read
+  const { content: _content, ...rest } = read
+  return { ...rest, projection: projected.text }
+}
+
 export const executeHypercombObservationPlan = async (
   plan: HypercombObservationPlan,
   reader: HypercombTreeReader,
@@ -381,7 +414,7 @@ export const executeHypercombObservationPlan = async (
       if (verb === 'read' && notALayer && reader.readBytesBySig) {
         results.push({ grammar, kind: 'bytes', read: await openBytes(0) })
       } else {
-        results.push({ grammar, kind: 'node', read })
+        results.push({ grammar, kind: 'node', read: verb === 'read' ? await withProjection(read) : read })
       }
     } else if (verb === 'find') {
       if (!reader.find) throw new HypercombObservationError('this hive cannot answer /find')
@@ -407,7 +440,7 @@ export const executeHypercombObservationPlan = async (
       const read = safeNode(await reader.readNode(segments, {
         maxBytes, withContent: verb === 'read', signal: options.signal,
       }), root, maxNodes)
-      results.push({ grammar, kind: 'node', read })
+      results.push({ grammar, kind: 'node', read: verb === 'read' ? await withProjection(read) : read })
       if (read.ok && read.snapshot) snapshots.push(read.snapshot)
     }
   }
@@ -489,7 +522,10 @@ const safeNode = (read: HypercombNodeRead, expectedRoot: string, maxChildren: nu
   if (!read.ok) return { ok: false, root: expectedRoot, code: String(read.code || 'unavailable') }
   const snapshotOk = read.snapshot === undefined
     || (typeof read.snapshot === 'string' && !!read.snapshot && read.snapshot.length <= 128)
-  if (!snapshotOk
+  const projectionOk = read.projection === undefined
+    || (typeof read.projection === 'string' && read.projection.length > 0
+      && read.projection.length <= MAX_PROJECTION_LENGTH && !CONTROL_CHARACTER.test(read.projection.replace(/\n/g, '')))
+  if (!snapshotOk || !projectionOk
     || !safeName(read.name) || !read.name || !SIG.test(read.layerSig)
     || !Array.isArray(read.children) || read.children.length > Math.max(maxChildren, 1_000)) {
     throw new HypercombObservationError('the hive reader returned malformed node data')
@@ -511,7 +547,9 @@ const safeNode = (read: HypercombNodeRead, expectedRoot: string, maxChildren: nu
     layerSig: read.layerSig,
     children,
     ...(unresolved.length ? { unresolved: [...unresolved] } : {}),
-    ...(read.content && typeof read.content === 'object' ? { content: read.content, truncated: read.truncated === true } : {}),
+    ...(read.projection !== undefined
+      ? { projection: read.projection, truncated: read.truncated === true }
+      : read.content && typeof read.content === 'object' ? { content: read.content, truncated: read.truncated === true } : {}),
     ...(read.snapshot ? { snapshot: read.snapshot } : {}),
   }
 }
@@ -599,7 +637,9 @@ export const formatHypercombObservationReceipt = (
       ...(node.unresolved?.length
         ? { unresolved: node.unresolved, unresolvedNote: 'children whose layers are not on this device yet; read <signature> may still open one' }
         : {}),
-      ...(node.content ? { content: node.content, truncated: node.truncated === true } : {}),
+      ...(node.projection !== undefined
+        ? { projection: node.projection, truncated: node.truncated === true }
+        : node.content ? { content: node.content, truncated: node.truncated === true } : {}),
     }
   }),
 })
