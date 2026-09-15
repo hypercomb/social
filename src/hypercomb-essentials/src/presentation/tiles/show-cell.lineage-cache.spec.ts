@@ -129,4 +129,10 @@ describe('show-cell same name across lineages', () => {
     expect(load).toMatch(/if \(!prepareOnly && cacheOwner === this\.#derivedLocationKey\)/)
     expect(load).toMatch(/this\.renderedCells\.values\(\)/)
   })
+
+  it('atlas-loads a cached peer image after its detached resource pull lands', () => {
+    const load = memberBody('private loadCellImages = async (')
+    expect(load).toMatch(/cached && this\.peerImageSourceByLabel\.get\(cell\.label\) === peerSig\)[\s\S]{0,500}?await loadImageOnce\(cached\)/)
+    expect(load).toMatch(/No CURRENT peer sig[\s\S]{0,700}?if \(cached\) \{[\s\S]{0,160}?await loadImageOnce\(cached\)/)
+  })
 })

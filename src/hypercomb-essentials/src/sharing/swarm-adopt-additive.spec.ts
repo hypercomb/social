@@ -1,11 +1,10 @@
 // swarm-adopt-additive.spec.ts — adopt on a HELD tile is ADDITIVE.
 //
 // The rule this file guards: adopting a tile you already hold, that a peer
-// has diverged on, must ADD the children they publish that you lack and
-// touch NOTHING else. It must never re-home (overwrite) the tile — that
-// path SETs the tile's children to the peer's list and so drops any child
-// you have that they lack. The structural proof: the held tile is never a
-// fold target; only the missing child's location is imported.
+// has diverged on, must ADD the complete shared subtree while preserving
+// every participant-owned layer it meets. It must never replace a held
+// layer with the publisher's version, because that would drop local-only
+// children and visuals.
 //
 // Real machinery runs (resolveCurrentLayer, childLayerOf, childNamesOfStrict,
 // flattenLayerTree, the drone's own routing); only IoC leaves — history,
@@ -20,10 +19,13 @@ const RECIPES = 'a'.repeat(64)        // MY recipes — children [bread, soup]
 const BREAD = 'b'.repeat(64)
 const SOUP = 'c'.repeat(64)
 const PASTA = 'd'.repeat(64)
+const SAUCE = '7'.repeat(64)
+const LOCAL_PROPS = '6'.repeat(64)
+const PEER_PROPS = '5'.repeat(64)
 const PEER_RECIPES_LOC = 'e'.repeat(64)
 const PEER_RECIPES = '9'.repeat(64)   // the PEER's recipes — children [bread, pasta], NO soup
 
-type Layer = { name?: string; children?: string[] }
+type Layer = { name?: string; children?: string[]; properties?: string[] }
 
 let layers: Map<string, Layer>
 let headByLoc: Map<string, Layer>
@@ -31,6 +33,7 @@ let broker: { adopt: ReturnType<typeof vi.fn>; noteDomainsForSig: ReturnType<typ
 let committer: { update: ReturnType<typeof vi.fn>; importTree: ReturnType<typeof vi.fn> }
 let peerTiles: Record<string, unknown>[]
 let peerByLoc: Map<string, Record<string, unknown>[]>
+let registeredDrone: unknown
 
 const history = {
   sign: vi.fn(async (l: { explorerSegments: () => readonly string[] }) => 'loc:' + l.explorerSegments().join('/')),
@@ -56,25 +59,27 @@ const iocRegistry = (): Record<string, unknown> => ({
 })
 
 ;(window as unknown as { ioc: unknown }).ioc = {
-  register: () => void 0,
+  register: (_key: string, value: unknown) => { registeredDrone = value },
   get: (key: string) => iocRegistry()[key],
 }
 
-await import('./swarm-adopt.drone.js')
+const { SwarmAdoptDrone } = await import('./swarm-adopt.drone.js')
+const drone = registeredDrone as InstanceType<typeof SwarmAdoptDrone>
 
 /** I hold `recipes` with children [bread, soup]; a peer publishes recipes
  *  with children [bread, pasta] — so `pasta` is the one thing I lack. */
 const heldWithPeerSuperset = () => {
   layers = new Map<string, Layer>([
-    [RECIPES, { name: 'recipes', children: [BREAD, SOUP] }],       // mine
-    [PEER_RECIPES, { name: 'recipes', children: [BREAD, PASTA] }], // peer's — distinct, no soup
+    [RECIPES, { name: 'recipes', children: [BREAD, SOUP], properties: [LOCAL_PROPS] }],       // mine
+    [PEER_RECIPES, { name: 'recipes', children: [BREAD, PASTA], properties: [PEER_PROPS] }], // peer's — distinct, no soup
     [BREAD, { name: 'bread', children: [] }],
     [SOUP, { name: 'soup', children: [] }],
-    [PASTA, { name: 'pasta', children: [] }],
+    [PASTA, { name: 'pasta', children: [SAUCE] }],
+    [SAUCE, { name: 'sauce', children: [] }],
   ])
   headByLoc = new Map<string, Layer>([['loc:', { name: 'root', children: [RECIPES] }]])
   broker = {
-    adopt: vi.fn(async () => ({ layers: 1, leaves: 0, failed: 0 })),
+    adopt: vi.fn(async () => ({ layers: 4, leaves: 0, failed: 0 })),
     noteDomainsForSig: vi.fn(),
     getKnownDomains: () => [],
   }
@@ -85,17 +90,7 @@ const heldWithPeerSuperset = () => {
   committer = {
     update: vi.fn(async () => 'f'.repeat(64)),
     importTree: vi.fn(async (updates: { segments: string[]; layer: Layer }[]) => {
-      for (const u of updates) {
-        const loc = 'loc:' + u.segments.join('/')
-        if (u.segments.join('/') === 'recipes/pasta') {
-          headByLoc.set(loc, { name: 'pasta', children: [] })
-          const rec = layers.get(RECIPES)!
-          rec.children = [...(rec.children ?? []), PASTA]
-          headByLoc.set('loc:recipes', { name: 'recipes', children: [...rec.children] })
-        } else {
-          headByLoc.set(loc, { name: u.layer.name ?? u.segments[u.segments.length - 1] ?? 'root', children: [] })
-        }
-      }
+      for (const u of updates) headByLoc.set('loc:' + u.segments.join('/'), { ...u.layer })
     }),
   }
   peerTiles = [{ name: 'recipes', peerPubkey: P1, layerSig: PEER_RECIPES }]
@@ -114,54 +109,62 @@ const importedUpdates = (): { segments: string[]; layer: Layer }[] =>
 /** Segments passed to importTree across every call this run. */
 const importedSegments = (): string[][] => importedUpdates().map(u => u.segments)
 
-const settle = async () => { await Promise.resolve(); await new Promise(r => setTimeout(r, 0)); await Promise.resolve() }
-
 beforeEach(() => { localStorage.clear() })
 
 describe('adopt on a held tile is additive', () => {
 
-  it('folds the missing child and keeps my-only child — the parent link is additive', async () => {
+  it('folds every missing descendant and preserves my-only content', async () => {
     heldWithPeerSuperset()
 
+    const landed = new Promise<void>(resolve => {
+      const off = EffectBus.on('fs:changed', () => { off(); resolve() })
+    })
     EffectBus.emit('tile:action', { action: 'adopt', label: 'recipes' })
-    await settle()
+    await landed
 
     const segs = importedSegments()
-    // The missing child was folded at its own location…
+    // The missing child and everything beneath it land in one import.
     expect(segs.some(s => s.join('/') === 'recipes/pasta')).toBe(true)
-    // `bread` (held on both sides) is never re-folded — additive means new-only.
-    expect(segs.some(s => s.join('/') === 'recipes/bread')).toBe(false)
+    expect(segs.some(s => s.join('/') === 'recipes/pasta/sauce')).toBe(true)
 
-    // THE additive guarantee. The held tile's children list is rebuilt from MY
-    // existing children + the new name — NOT SET to the peer's [bread, pasta].
-    // So `soup` (mine-only) survives; the destructive re-home would drop it.
+    // The held layer keeps both its local-only child and its local visual while
+    // gaining the publisher's missing branch.
     const recipesLink = importedUpdates().find(u => u.segments.join('/') === 'recipes')
     expect(recipesLink).toBeTruthy()
     expect(recipesLink!.layer.children).toContain('soup')   // mine-only, PRESERVED
     expect(recipesLink!.layer.children).toContain('pasta')  // peer's, ADDED
     expect(recipesLink!.layer.children).toContain('bread')  // shared, kept
+    expect(recipesLink!.layer.properties).toEqual([LOCAL_PROPS])
   })
 
   it('records the held tile\'s receipt on success so the adopt affordance clears', async () => {
     heldWithPeerSuperset()
 
-    EffectBus.emit('tile:action', { action: 'adopt', label: 'recipes' })
-    await settle()
+    const res = await drone.adoptResolvedBranch(
+      { layerSig: PEER_RECIPES, at: [], label: 'recipes' },
+      { mode: 'additive' },
+    )
+    expect(res).toBe('committed')
 
     const receipts = JSON.parse(localStorage.getItem('hc:synced-publisher-roots') ?? '{}')
     // Keyed by the held tile's path, valued at the peer's announced generation.
     expect(receipts['recipes']).toBe(PEER_RECIPES)
   })
 
-  it('a held tile with nothing new imports nothing', async () => {
+  it('a held tile with no missing children keeps its local layer intact', async () => {
     heldWithPeerSuperset()
-    // Peer offers only what I already hold → no missing child.
-    peerByLoc.set(PEER_RECIPES_LOC, [{ name: 'bread', peerPubkey: P1, layerSig: BREAD }])
+    // The signed peer branch contains only a child I already hold.
+    layers.set(PEER_RECIPES, { name: 'recipes', children: [BREAD], properties: [PEER_PROPS] })
 
-    EffectBus.emit('tile:action', { action: 'adopt', label: 'recipes' })
-    await settle()
+    const res = await drone.adoptResolvedBranch(
+      { layerSig: PEER_RECIPES, at: [], label: 'recipes' },
+      { mode: 'additive' },
+    )
+    expect(res).toBe('committed')
 
-    expect(committer.importTree).not.toHaveBeenCalled()
+    const recipesLink = importedUpdates().find(u => u.segments.join('/') === 'recipes')
+    expect(recipesLink?.layer.children).toEqual(expect.arrayContaining(['bread', 'soup']))
+    expect(recipesLink?.layer.properties).toEqual([LOCAL_PROPS])
   })
 
 })

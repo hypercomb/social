@@ -9274,6 +9274,12 @@ export class ShowCellDrone extends Drone {
           const cached = imageCache.get(cell.label)
           if (cached && this.peerImageSourceByLabel.get(cell.label) === peerSig) {
             cell.imageSig = cached
+            // The properties pointer and the image it names arrive in two
+            // separate pulls. A previous pass can therefore know (and cache)
+            // the final image sig before those image bytes are resident in the
+            // atlas. Re-check residency here: trusting the derivation cache
+            // alone strands the tile blank after the detached pull succeeds.
+            await loadImageOnce(cached)
             return
           }
           try {
@@ -9331,7 +9337,11 @@ export class ShowCellDrone extends Drone {
         // strand the tile — otherwise mark null and wait for the next
         // visuals/resource arrival to re-attempt.
         const cached = imageCache.get(cell.label)
-        if (cached) { cell.imageSig = cached; return }
+        if (cached) {
+          cell.imageSig = cached
+          await loadImageOnce(cached)
+          return
+        }
         imageCache.set(cell.label, null)
         return
       }
