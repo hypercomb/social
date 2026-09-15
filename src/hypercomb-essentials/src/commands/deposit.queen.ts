@@ -117,3 +117,4 @@ const readNamedTarget = (
 }
 
 const _deposit = new DepositQueenBee()
+window.ioc.register('@diamondcoreprocessor.com/DepositQueenBee', _deposit)

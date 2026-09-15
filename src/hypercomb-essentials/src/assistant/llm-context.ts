@@ -73,7 +73,7 @@ export const LLM_CONTEXT_MEANING = 'llm:context'
  * members' own projections (context-slices.ts) — a rule change, so every
  * v1 record is a miss and re-derives under the new rule.
  */
-export const LLM_CONTEXT_DERIVATION = 2
+export const LLM_CONTEXT_DERIVATION = 3
 
 /** A record holds at most this many characters of projected text. Complete-
  *  or-absent: a projection that would exceed this is null, never truncated
@@ -235,7 +235,9 @@ export const projectLayer = async (
     const parts: string[] = []
     for (const sig of members) {
       const projected = readProjection ? await readProjection(sig) : null
-      if (projected === null) return null
+      // An empty member is an absent one: a real projection always starts
+      // with the tile's name.
+      if (!projected) return null
       parts.push(projected)
     }
     const text = `slice ${name} (${members.length} members)\n${parts.join('\n---\n')}`
@@ -283,6 +285,12 @@ export const projectLayer = async (
 // ── the reader / minter split (molecule-index.service.ts's pattern) ─────
 
 type StoreLike = {
+  /** Local layer bytes with META ENVELOPES FOLLOWED — a typed incidence
+   *  `{ kind:'layer', sig }` resolves to the layer it names; never a host
+   *  fetch. Preferred over the raw reader below when the store has it. */
+  getLayerBytes?(signature: string): Promise<Uint8Array | null>
+  /** Local resource bytes with envelopes followed; never a host fetch. */
+  getResourceResolvedLocal?(signature: string): Promise<Blob | null>
   /** THE READ-ONLY OPEN — never creates the pool directory. */
   openPool(meaning: string): Promise<FileSystemDirectoryHandle | null>
   /** Creates the pool directory if absent. Write-path only. */
@@ -354,17 +362,24 @@ export class LlmContextService {
     visited.add(layerSig)
 
     const store = this.store
-    const bytes = await store?.getLayerLocalBytes(layerSig).catch(() => null)
+    // Envelopes followed: the raw local reader can hand back a meta
+    // incidence instead of the layer, which parses to a nameless object and
+    // projected as an empty string on the live hive.
+    const readLayer = store?.getLayerBytes ?? store?.getLayerLocalBytes
+    const bytes = await readLayer?.(layerSig).catch(() => null)
     if (!bytes?.byteLength) return null
     let layer: LayerLike | null
     try {
       const parsed = JSON.parse(new TextDecoder().decode(bytes))
-      layer = parsed && typeof parsed === 'object' ? parsed as LayerLike : null
+      layer = parsed && typeof parsed === 'object' && typeof (parsed as LayerLike).name === 'string'
+        ? parsed as LayerLike
+        : null
     } catch { layer = null }
     if (!layer) return null
 
     const readResource: ReadLocalResource = async (sig) => {
-      const blob = await store?.getResourceLocal(sig).catch(() => null)
+      const readResourceLocal = store?.getResourceResolvedLocal ?? store?.getResourceLocal
+      const blob = await readResourceLocal?.(sig).catch(() => null)
       if (!blob) return null
       // `.text()` rather than `.arrayBuffer()` — every resource this reads
       // (notes, properties) is JSON, and `.text()` is the method the rest of

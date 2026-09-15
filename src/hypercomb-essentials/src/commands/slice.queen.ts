@@ -94,3 +94,4 @@ const readSliceLine = (
 }
 
 const _slice = new SliceQueenBee()
+window.ioc.register('@diamondcoreprocessor.com/SliceQueenBee', _slice)

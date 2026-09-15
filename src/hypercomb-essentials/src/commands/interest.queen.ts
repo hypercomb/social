@@ -136,3 +136,4 @@ export class InterestQueenBee extends QueenBee {
 }
 
 const _interest = new InterestQueenBee()
+window.ioc.register('@diamondcoreprocessor.com/InterestQueenBee', _interest)
