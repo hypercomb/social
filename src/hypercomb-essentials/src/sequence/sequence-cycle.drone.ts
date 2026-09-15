@@ -74,7 +74,7 @@ type StoreLike = { putResource(blob: Blob): Promise<string> }
 type I18nLike = { t: (k: string, p?: Record<string, string | number>) => string }
 
 const ACTIVE_KEY = 'hc:arrange-active'
-const INITIAL_CYCLE_ID = '__initial__'
+const INITIAL_CYCLE_ID = 'initial'
 
 /** How long the arrange gate will wait for a targeted pass to settle. */
 const PAINT_SETTLE_TIMEOUT = 3000

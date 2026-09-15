@@ -879,7 +879,23 @@ describe('doctrine ratchets', () => {
     // `port:` in a server options literal with no `host:` beside it, or a
     // `.listen(port, …)` whose second argument is not a bind-address string.
     const PORT_NO_HOST = /new\s+WebSocketServer\s*\(\s*\{(?![^}]*\bhost\s*:)[^}]*\bport\s*:/
-    const LISTEN_NO_HOST = /\.listen\s*\(\s*[^,)]+\s*(?:\)|,(?!\s*['"]))/
+    // Every `.listen(port, second)`: `second` is undefined when absent.
+    const LISTEN_CALL = /\.listen\s*\(\s*[^,)]+\s*(?:\)|,\s*([^,)]+))/g
+    const STRING_LITERAL = /^['"]/
+    // The sanctioned env opt-in: `const X = process.env.Y || '127.0.0.1'`
+    // declared in the same file — loopback unless someone sets it on purpose.
+    const loopbackDefault = (code: string, name: string): boolean =>
+      new RegExp(`\\b${name}\\s*=\\s*process\\.env\\.\\w+\\s*\\|\\|\\s*['"](?:127\\.0\\.0\\.1|localhost|::1)['"]`).test(code)
+    const listensWide = (code: string): boolean => {
+      for (const m of code.matchAll(LISTEN_CALL)) {
+        const second = (m[1] ?? '').trim()
+        if (!second) return true
+        if (STRING_LITERAL.test(second)) continue
+        if (/^[A-Za-z_$][\w$]*$/.test(second) && loopbackDefault(code, second)) continue
+        return true
+      }
+      return false
+    }
 
     const offenders: string[] = []
     for (const dir of SERVER_DIRS) {
@@ -887,7 +903,7 @@ describe('doctrine ratchets', () => {
       try { files = walkAll(join(ROOT, dir)) } catch { continue }
       for (const file of files) {
         const code = stripComments(readFileSync(file, 'utf8'))
-        if (PORT_NO_HOST.test(code) || LISTEN_NO_HOST.test(code)) {
+        if (PORT_NO_HOST.test(code) || listensWide(code)) {
           offenders.push(relative(ROOT, file).replace(/\\/g, '/'))
         }
       }

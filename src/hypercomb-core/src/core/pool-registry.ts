@@ -322,6 +322,16 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // same tiles and stay two groups — and it is participant-local working
   // state, so it is a pool and never a layer.
   'context:groups',
+  // AN AGENT-OR-PARTICIPANT-CHOSEN SET OF TILES, kept as a slice layer
+  // (assistant/context-slices.ts) so its members compose into one
+  // projection. TRUTH POOL — a chosen set is an act, never derived, so
+  // this is never minted from the optimize phase (optimize-phase.md
+  // litmus: no cold client could rebuild "these are the members" from
+  // layers alone). One member per slice, NAMED BY THE SLICE'S LAYER SIG,
+  // holding `{ kind: 'context-slice', name, layerSig }` — the member is
+  // what keeps the slice's root layer file reachable: a root sig file no
+  // marker and no pool member names is litter to the collector.
+  'context:slices',
   // The feedback inbox's summary log — one append-only record per bridge
   // start, saying who was waiting on whom at that moment (see
   // assistant/feedback-summaries.ts). TRUTH POOL, never minted from the

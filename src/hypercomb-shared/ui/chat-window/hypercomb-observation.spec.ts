@@ -292,6 +292,36 @@ describe('LLM context projection substitutes for content on /read only', () => {
   })
 })
 
+describe('read <sliceSig> — cycle 2, no new verb', () => {
+  it('carries the composed slice projection and omits `content`, through the same `/read <sig>` path', async () => {
+    const sliceSig = '7'.repeat(64)
+    const reader: HypercombTreeReader = {
+      readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+      validateSnapshots: vi.fn(async () => true),
+      readNodeBySig: vi.fn(async sig => ({
+        ok: true as const, root: sig, name: 'cigars', layerSig: sig, children: [],
+        content: { children: [] }, truncated: false,
+      })),
+    }
+    ;(window as unknown as { ioc: unknown }).ioc = {
+      get: (key: string) => key === '@diamondcoreprocessor.com/LlmContext'
+        ? {
+          project: async (sig: string) => (sig === sliceSig
+            ? { text: 'slice cigars (2 members)\nCohiba\n---\nPadron', minted: true }
+            : null),
+        }
+        : undefined,
+    }
+
+    const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars([`/read ${sliceSig}`], []), reader))
+    expect(reader.readNodeBySig).toHaveBeenCalledWith(sliceSig, expect.objectContaining({ withContent: true }))
+    expect(out).toContain('"projection":"slice cigars (2 members)\\nCohiba\\n---\\nPadron"')
+    expect(out).not.toContain('"content"')
+    delete (window as unknown as { ioc?: unknown }).ioc
+  })
+})
+
 describe('a tile read with children not on this device', () => {
   it('passes the unresolved children through by signature, with a note, instead of failing', async () => {
     const layerSig = 'b'.repeat(64)

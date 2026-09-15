@@ -13,6 +13,7 @@ import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { inflate } from '../history/inflate.js'
 import { LlmContextService, llmContextLens } from './llm-context.js'
+import { mintSlice } from './context-slices.js'
 import { extractPageRefSigs, collectSigsDeep } from '../sharing/decoration-closure.js'
 import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sigs.js'
 import { mintBuildRecord } from '../history/builds-slot.js'
@@ -109,6 +110,10 @@ type BridgeRequest = {
    *  (assistant/llm-context.ts) for any layer sig `inflate` would otherwise
    *  expand in full — a pool hit only; a miss falls through unchanged. */
   lens?: string
+  /** `slice-create`: the slice's name and its chosen member signatures
+   *  (assistant/context-slices.ts). */
+  name?: string
+  sigs?: string[]
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -544,6 +549,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'inflate':      return this.#inflate(req)
       case 'layer-at':     return this.#layerAt(req)
       case 'layer-by-sig': return this.#layerBySig(req)
+      case 'slice-create': return this.#sliceCreate(req)
       case 'put-resource': return this.#putResource(req)
       case 'get-resource': return this.#getResource(req)
       case 'optimization-add':    return this.#optimizationAdd(req)
@@ -1539,6 +1545,19 @@ export class ClaudeBridgeWorker extends Worker {
     const layer = await history.getLayerBySig(sig)
     if (!layer) return { id: req.id, ok: false, error: `no layer for sig ${sig}` }
     return { id: req.id, ok: true, data: layer }
+  }
+
+  /** `slice-create`: mint a merkle slice from `{ name, sigs }` — the bridge
+   *  door onto `context-slices.ts`'s `mintSlice`, mirroring `#layerBySig`'s
+   *  style. Same act `commands/slice.queen.ts` performs from the command
+   *  line; a responder reaches it here instead of typing `/slice`. */
+  async #sliceCreate(req: BridgeRequest): Promise<BridgeResponse> {
+    const name = typeof req.name === 'string' ? req.name : ''
+    const sigs = Array.isArray(req.sigs) ? req.sigs.filter((s): s is string => typeof s === 'string') : []
+    const result = await mintSlice(name, sigs)
+    return result.ok
+      ? { id: req.id, ok: true, data: { sig: result.sig } }
+      : { id: req.id, ok: false, error: result.reason }
   }
 
   async #inflate(req: BridgeRequest): Promise<BridgeResponse> {

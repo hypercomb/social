@@ -57,6 +57,7 @@
 
 import { CHILD_SLOTS, isSignature } from '@hypercomb/core'
 import type { InflateLens } from '../history/inflate.js'
+import { isSliceLayer } from './context-slices.js'
 
 /** The pool. Colon-scoped: the bare-word list is frozen, and no tile may
  *  name this meaning (see pool-registry.ts). */
@@ -67,13 +68,29 @@ export const LLM_CONTEXT_MEANING = 'llm:context'
  * different slot handling, a different note format, a different cap — and
  * every prior record becomes a miss on read and is re-minted by the phase.
  * Reject-on-mismatch IS the invalidation: no migration, no sweep.
+ *
+ * v2 (cycle 2): `projectLayer` learned to compose a SLICE layer from its
+ * members' own projections (context-slices.ts) — a rule change, so every
+ * v1 record is a miss and re-derives under the new rule.
  */
-export const LLM_CONTEXT_DERIVATION = 1
+export const LLM_CONTEXT_DERIVATION = 2
 
 /** A record holds at most this many characters of projected text. Complete-
  *  or-absent: a projection that would exceed this is null, never truncated
  *  prose a model might mistake for the whole tile. */
 export const MAX_PROJECTION_CHARS = 6_000
+
+/** A SLICE's composed projection may run larger than a single tile's —
+ *  it is, after all, several tiles' worth of text — up to the chat's
+ *  default per-provider read budget. Still complete-or-absent: over this,
+ *  null, never a truncated composition. */
+export const MAX_SLICE_PROJECTION_CHARS = 24_000
+
+/** How many slice-of-slice hops `derive` will follow before giving up (past
+ *  the `visited` cycle guard, which stops an actual cycle at any depth) —
+ *  a ceiling on legitimate but unbounded nesting, not the cycle detector
+ *  itself. */
+const MAX_SLICE_RECURSION_DEPTH = 8
 
 /** The record. `text` and NOTHING ELSE — no layer sig, no child sigs, no
  *  resource sigs (see the file header). */
@@ -96,7 +113,7 @@ export const readableRecord = (parsed: unknown): LlmContextRecord | null => {
   const record = parsed as LlmContextRecord | null
   if (!record || typeof record !== 'object' || Array.isArray(record)) return null
   if (record.v !== LLM_CONTEXT_DERIVATION) return null
-  if (typeof record.text !== 'string' || record.text.length > MAX_PROJECTION_CHARS) return null
+  if (typeof record.text !== 'string' || record.text.length > MAX_SLICE_PROJECTION_CHARS) return null
   return { v: LLM_CONTEXT_DERIVATION, text: record.text }
 }
 
@@ -109,6 +126,13 @@ type LayerLike = { name?: unknown; [slot: string]: unknown }
  *  `projectLayer` stays a pure function of its two arguments and is testable
  *  with no Store, no OPFS, no IoC. */
 type ReadLocalResource = (sig: string) => Promise<Uint8Array | null>
+
+/** Resolves a MEMBER's own projection during slice composition — a record
+ *  when one exists, else derived in memory (`LlmContextService.derive`
+ *  supplies this, with a depth guard and a shared `visited` set for the
+ *  cycle case). Returns null on any miss — complete-or-absent propagates:
+ *  one absent member makes the WHOLE slice projection null. */
+type ReadProjection = (sig: string) => Promise<string | null>
 
 /** Property-bag keys that are never human-meaningful text: layout/position,
  *  picture plumbing, and ownership marks. Everything else that survives
@@ -197,8 +221,27 @@ const renderNotes = async (
 export const projectLayer = async (
   layer: LayerLike | null | undefined,
   readResource: ReadLocalResource,
+  readProjection?: ReadProjection,
 ): Promise<string | null> => {
   if (!layer || typeof layer !== 'object') return null
+
+  // A SLICE composes from its members' own projections instead of running
+  // the tile rule below — `children` here is the chosen set, not a tree to
+  // count. `readProjection` absent (a caller that never expects a slice)
+  // degrades to "no members resolve," which is still complete-or-absent.
+  if (isSliceLayer(layer)) {
+    const name = typeof layer.name === 'string' ? layer.name : ''
+    const members = layer.children
+    const parts: string[] = []
+    for (const sig of members) {
+      const projected = readProjection ? await readProjection(sig) : null
+      if (projected === null) return null
+      parts.push(projected)
+    }
+    const text = `slice ${name} (${members.length} members)\n${parts.join('\n---\n')}`
+    return text.length > MAX_SLICE_PROJECTION_CHARS ? null : text
+  }
+
   const name = typeof layer.name === 'string' ? layer.name : ''
   const lines: string[] = [name]
 
@@ -294,6 +337,22 @@ export class LlmContextService {
   /** Derive the record for a layer sig, in memory. No write — the caller
    *  (the phase, via the drone) decides whether to persist it. */
   derive = async (layerSig: string): Promise<LlmContextRecord | null> => {
+    const text = await this.#deriveText(layerSig, 0, new Set())
+    return text === null ? null : { v: LLM_CONTEXT_DERIVATION, text }
+  }
+
+  /**
+   * The recursive half of `derive`, shared by the top-level call (depth 0,
+   * a fresh `visited`) and slice member resolution (deeper, the SAME
+   * `visited` — a cycle anywhere in the walk stops it there). NEVER
+   * WRITES: only the drone, asked to mint a specific sig, persists
+   * anything (see the file header's "the phase never mints truth").
+   */
+  #deriveText = async (layerSig: string, depth: number, visited: Set<string>): Promise<string | null> => {
+    if (depth > MAX_SLICE_RECURSION_DEPTH) return null
+    if (visited.has(layerSig)) return null
+    visited.add(layerSig)
+
     const store = this.store
     const bytes = await store?.getLayerLocalBytes(layerSig).catch(() => null)
     if (!bytes?.byteLength) return null
@@ -312,8 +371,16 @@ export class LlmContextService {
       // this codebase already relies on for blob reads of text content.
       return new TextEncoder().encode(await blob.text())
     }
-    const text = await projectLayer(layer, readResource)
-    return text === null ? null : { v: LLM_CONTEXT_DERIVATION, text }
+    // A SLICE MEMBER'S projection is read like `project()` reads any sig —
+    // the pool record when one exists, else derived here in memory — so a
+    // slice of slices composes through the same door regardless of which
+    // members happen to be warm. This never writes; only the drone persists.
+    const readProjection: ReadProjection = async (memberSig) => {
+      const held = await this.readRecord(memberSig)
+      if (held) return held.text
+      return this.#deriveText(memberSig, depth + 1, visited)
+    }
+    return projectLayer(layer, readResource, readProjection)
   }
 
   /** Write a derived record, keyed by the sig it was derived from. Best-

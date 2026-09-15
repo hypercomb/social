@@ -15,8 +15,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 import {
   LLM_CONTEXT_DERIVATION, LLM_CONTEXT_MEANING,
-  LlmContextService, llmContextReader, MAX_PROJECTION_CHARS, projectLayer, readableRecord,
+  LlmContextService, llmContextReader, MAX_PROJECTION_CHARS, MAX_SLICE_PROJECTION_CHARS, projectLayer, readableRecord,
 } from './llm-context.js'
+import { SLICE_KIND } from './context-slices.js'
 
 const sig = (n: number): string => n.toString(16).padStart(64, '0')
 
@@ -252,7 +253,11 @@ describe('(d) version mismatch and malformed files read as null; the cold path s
   })
 
   it('readableRecord rejects a text over the cap even if a file claims otherwise', () => {
-    expect(readableRecord({ v: LLM_CONTEXT_DERIVATION, text: 'x'.repeat(MAX_PROJECTION_CHARS + 1) })).toBeNull()
+    // readableRecord accepts up to the LARGER cap (a slice's own projection
+    // may run past a single tile's MAX_PROJECTION_CHARS) — only past the
+    // slice cap is a record refused outright.
+    expect(readableRecord({ v: LLM_CONTEXT_DERIVATION, text: 'x'.repeat(MAX_PROJECTION_CHARS + 1) })).not.toBeNull()
+    expect(readableRecord({ v: LLM_CONTEXT_DERIVATION, text: 'x'.repeat(MAX_SLICE_PROJECTION_CHARS + 1) })).toBeNull()
     expect(readableRecord({ v: LLM_CONTEXT_DERIVATION, text: 'ok' })).toEqual({ v: LLM_CONTEXT_DERIVATION, text: 'ok' })
   })
 })
@@ -349,5 +354,139 @@ describe('(g) the minting drone', () => {
     EffectBus.emit('content:wrote', { sig: TILE, kind: 'resource' })
     EffectBus.emit('content:wrote', { sig: '', kind: 'layer' })
     expect(drone.pendingCount).toBe(0)
+  })
+})
+
+// ── cycle 2: slices compose from their members' own projections ─────────
+
+describe('(f) a slice composes from its members\' projections', () => {
+  it('projects to the composed text, byte-identical after a wipe', async () => {
+    const TILE_A = sig(60)
+    const TILE_B = sig(61)
+    const SLICE = sig(62)
+    setLayer(TILE_A, { name: 'Cohiba' })
+    setLayer(TILE_B, { name: 'Padron' })
+    setLayer(SLICE, { name: 'Two Cigars', kind: SLICE_KIND, children: [TILE_A, TILE_B] })
+
+    const service = new LlmContextService()
+    const first = await service.derive(SLICE)
+    expect(first?.text).toBe('slice Two Cigars (2 members)\nCohiba\n---\nPadron')
+    await service.writeRecord(SLICE, first!)
+
+    const pool = await contextPool()
+    const before = pool.files.get(SLICE)!.data
+    await pool.removeEntry(SLICE)
+    const fresh = new LlmContextService()
+    const second = await fresh.derive(SLICE)
+    await fresh.writeRecord(SLICE, second!)
+    expect(pool.files.get(SLICE)!.data).toBe(before)
+  })
+})
+
+describe('(g) a slice of slices composes, and a cycle yields null and writes nothing', () => {
+  it('recurses through a nested slice (depth 2)', async () => {
+    const LEAF = sig(63)
+    const INNER = sig(64)
+    const OUTER = sig(65)
+    setLayer(LEAF, { name: 'Leaf' })
+    setLayer(INNER, { name: 'Inner', kind: SLICE_KIND, children: [LEAF] })
+    setLayer(OUTER, { name: 'Outer', kind: SLICE_KIND, children: [INNER] })
+
+    const service = new LlmContextService()
+    const record = await service.derive(OUTER)
+    expect(record?.text).toBe('slice Outer (1 members)\nslice Inner (1 members)\nLeaf')
+  })
+
+  it('a cycle (A contains B contains A) yields null and writes nothing', async () => {
+    const A = sig(66)
+    const B = sig(67)
+    setLayer(A, { name: 'A', kind: SLICE_KIND, children: [B] })
+    setLayer(B, { name: 'B', kind: SLICE_KIND, children: [A] })
+
+    const service = new LlmContextService()
+    expect(await service.derive(A)).toBeNull()
+    expect(await service.project(A)).toBeNull()
+    const pool = await contextPool()
+    expect(pool.files.has(A)).toBe(false)
+    expect(pool.files.has(B)).toBe(false)
+  })
+})
+
+describe('(h) a member with no local layer yields null (complete-or-absent)', () => {
+  it('refuses the whole slice when one member has no layer bytes', async () => {
+    const PRESENT = sig(70)
+    const MISSING = sig(71)
+    const SLICE = sig(72)
+    setLayer(PRESENT, { name: 'Here' })
+    setLayer(SLICE, { name: 'Partial', kind: SLICE_KIND, children: [PRESENT, MISSING] })
+    const service = new LlmContextService()
+    expect(await service.derive(SLICE)).toBeNull()
+    const pool = await contextPool()
+    expect(pool.files.has(SLICE)).toBe(false)
+  })
+})
+
+describe('(i) a member projection is read from the pool when present, derived when absent', () => {
+  it('produces the same slice text either way', async () => {
+    const TILE_A = sig(80)
+    const TILE_B = sig(81)
+    const SLICE = sig(82)
+    setLayer(TILE_A, { name: 'Warm' })
+    setLayer(TILE_B, { name: 'Cold' })
+    setLayer(SLICE, { name: 'Mixed', kind: SLICE_KIND, children: [TILE_A, TILE_B] })
+
+    // TILE_A is warmed ahead of time; TILE_B is never minted, so the walk
+    // must derive it in memory — same output either way.
+    const warmer = new LlmContextService()
+    await warmer.writeRecord(TILE_A, (await warmer.derive(TILE_A))!)
+
+    const service = new LlmContextService()
+    const record = await service.derive(SLICE)
+    expect(record?.text).toBe('slice Mixed (2 members)\nWarm\n---\nCold')
+  })
+})
+
+describe('(j) the drone mints a slice\'s record after enqueue', () => {
+  it('derives and writes the composed projection on the next pass', async () => {
+    const TILE = sig(90)
+    const SLICE = sig(91)
+    setLayer(TILE, { name: 'Solo' })
+    setLayer(SLICE, { name: 'One', kind: SLICE_KIND, children: [TILE] })
+
+    const { LlmContextDrone } = await import('./llm-context.drone.js')
+    const drone = new LlmContextDrone()
+    drone.enqueue(SLICE)
+    await drone.optimize()
+
+    const pool = await contextPool()
+    expect(pool.files.has(SLICE)).toBe(true)
+    expect(JSON.parse(pool.files.get(SLICE)!.data).text).toBe('slice One (1 members)\nSolo')
+  })
+})
+
+describe('(k) no signature survives in a slice record\'s bytes', () => {
+  it('the assembled and written text carries no 64-hex run', async () => {
+    const TILE = sig(95)
+    const SLICE = sig(96)
+    setLayer(TILE, { name: 'Plain' })
+    setLayer(SLICE, { name: 'Wrapper', kind: SLICE_KIND, children: [TILE] })
+    const service = new LlmContextService()
+    const record = await service.derive(SLICE)
+    await service.writeRecord(SLICE, record!)
+    const pool = await contextPool()
+    expect(pool.files.get(SLICE)!.data).not.toMatch(/[0-9a-f]{64}/i)
+  })
+})
+
+describe('(l) a v1 record misses under the v2 rule and re-derives', () => {
+  it('treats an old-version record as absent and answers cold', async () => {
+    setupBasicTile()
+    const pool = await contextPool()
+    pool.files.set(TILE, new MemFile(JSON.stringify({ v: 1, text: EXPECTED_TEXT })))
+    const service = new LlmContextService()
+    expect(await service.readRecord(TILE)).toBeNull()
+    const projected = await service.project(TILE)
+    expect(projected?.minted).toBe(false)
+    expect(projected?.text).toBe(EXPECTED_TEXT)
   })
 })
