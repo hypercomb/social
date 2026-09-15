@@ -24,9 +24,9 @@ const hosts = require('./hosts.cjs')
 
 const OUT = path.join(__dirname, 'dist', 'welcome.json')
 
-// The tour is the presentation, kept whole and moved to /tour/ when the shim
-// took the apex. It is the first link because it is the one thing this domain
-// most wants read: nineteen minutes that explain the rest.
+// The app is first because the cold front door should let a curious visitor do
+// the thing immediately. The complete tour follows for people who want the
+// ideas, proof and roadmap before or after trying it.
 //
 // /downloads/ is documentation/hypercomb.com — the welcome page that carries
 // the desktop release status and the two browser utilities, with their sizes,
@@ -38,8 +38,8 @@ const compose = (doors) => ({
   tagline: 'An open software platform. Your work is named by its own content, '
     + 'kept in your hands, and carried by the people who use it.',
   links: [
-    { label: 'Watch the tour', href: '/tour/', note: '≈ 19 minutes · narrated, with captions' },
-    { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the main app — start a hive of your own' },
+    { label: 'Start a hive', href: 'https://hypercomb.io', note: 'free and open source · no account' },
+    { label: 'Watch the tour', href: '/tour/', note: 'guided and narrated · leave or skip ahead at any time' },
     { label: 'Downloads', href: '/downloads/', note: 'desktop app · Windows, macOS, Linux' },
     { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker · No YouTube Shorts' },
   ],

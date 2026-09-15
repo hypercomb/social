@@ -55,11 +55,11 @@ export const DEFAULT_TAGLINE =
  *  chose to serve; these say what the files are for, and they are the same
  *  on every host because they are about the platform, not the host. */
 export const PLATFORM_LINKS: readonly WelcomeLink[] = [
-  { label: 'the tour', href: 'https://hypercomb.com/tour/', note: 'what this is, in nineteen minutes' },
-  { label: 'hypercomb.io', href: 'https://hypercomb.io/', note: 'the app — start a hive of your own' },
-  { label: 'documentation', href: 'https://github.com/hypercomb/social/tree/main/documentation', note: '' },
+  { label: 'hypercomb.io', href: 'https://hypercomb.io/', note: 'start a hive — free, open source, no account' },
+  { label: 'the tour', href: 'https://hypercomb.com/tour/', note: 'see the ideas and the working software' },
+  { label: 'documentation', href: 'https://github.com/hypercomb/social/tree/main/src/documentation', note: '' },
   { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0' },
-  { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/documentation/licensing.md', note: '' },
+  { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/src/documentation/license-docs.md', note: '' },
 ]
 
 const HOSTNAME_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/

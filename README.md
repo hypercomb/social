@@ -1,55 +1,97 @@
 # Hypercomb
 
-**This repository is the canonical origin of Hypercomb — a permanent, read-only reference implementation.**
+**Your work lives with you. No account. No central platform.**
 
-Hypercomb is a signature-addressed, drone-based runtime for building community-owned software. Features live as signed, interchangeable modules; the shell is just a harness that loads them. Over time, the shell shrinks and the module ecosystem grows.
+Hypercomb is a free, open-source platform for community-owned software. It
+runs in the browser, keeps a participant's work on their own device, and moves
+published content by verifiable signature. Features are signed,
+interchangeable modules; a community can adopt, replace, or fork them without
+asking a platform owner for permission.
 
-This repo is the snapshot of Hypercomb at the moment it became self-sustaining. It is preserved unchanged as a reference — a starting point anyone can clone, fork, and run on their own domain. Nothing flows back here. There is no roadmap, no release cycle, no issue triage. Your fork is your own.
+[Try Hypercomb](https://hypercomb.io) · [Take the guided tour](https://hypercomb.com/tour/) · [Read the architecture](src/documentation/architecture-overview.md)
 
----
+Hypercomb is not for sale. The software is licensed under AGPL-3.0-only and
+the documentation and media under CC BY-SA 4.0. Donations and sponsorship
+sustain the work and may help recover its founder-funded development cost;
+they do not buy equity, repayment, governance, preferential features, or
+exclusive access.
 
-## What this repository is
+## Why it is different
 
-- **A canonical origin artifact.** The source of truth for what Hypercomb looked like at the moment of open release.
-- **A reference implementation.** Read it, learn from it, study the architecture, use it as a starting template.
-- **A seed.** Fork it, run your own instance on your own domain, build whatever you want on top of it.
+- **Local first.** A hive begins on the participant's device, not behind a
+  service account.
+- **Verifiable.** Content is named by the SHA-256 signature of its canonical
+  bytes. The receiver checks what arrived instead of trusting an intermediary.
+- **Forkable in practice.** Signed modules make implementations and forks
+  identifiable byte for byte.
+- **Community owned.** The shell is a harness; capabilities live in modules a
+  community can carry and compose for itself.
+- **Free and open.** There is no paid edition and no plan to sell the project.
 
-## What this repository is not
+## See it before reading about it
 
-- **Not actively maintained here.** No PRs will be merged. No issues will be triaged. The canonical repo is intentionally frozen.
-- **Not a collaboration hub.** Collaboration happens in your own forks, in your own modules, and across the signature-addressed module network — not in this repo.
-- **Not a product.** It is source. What you do with it is up to you.
+The narrated [Hypercomb tour](https://hypercomb.com/tour/) uses live captures
+from a working hive. To explore directly, open [hypercomb.io](https://hypercomb.io),
+type a name, and press Enter. The in-app `/help` curriculum and `/tutorial`
+take over from there.
 
----
+## Repository status
+
+The project has two deliberately different branch roles:
+
+- **`development`** is the active integration branch. Task branches merge
+  here through the owner-maintained workflow.
+- **`main`** is the public release line. It advances only through an
+  intentional publication from the integration work, and each published
+  revision remains a reference anyone can clone, fork, and run independently.
+
+Published releases remain usable without turning the origin repository into a
+centralized gatekeeper. Development can continue while named revisions remain
+durable reference points.
 
 ## Running your own instance
 
-1. Clone or fork this repository.
-2. Install dependencies and build — see [src/CLAUDE.md](src/CLAUDE.md) for the build chain and project layout.
-3. Point the web shell at your own storage and deploy wherever you like.
-4. Sign and share your own modules. The merkle-tree sharing pattern means your work is content-addressed — others can import it by signature without asking anyone's permission.
+1. Clone or fork the repository.
+2. Install dependencies and build; see [src/CLAUDE.md](src/CLAUDE.md) for the
+   project layout and build chain.
+3. Point the web shell at storage you control and deploy it on your own domain.
+4. Sign and share modules. Merkle-tree composition makes the work
+   content-addressed, so others can import it by signature without permission.
 
 ## Documentation
 
-All documentation lives in [src/documentation/](src/documentation/). Start with:
-
-- [src/documentation/architecture-overview.md](src/documentation/architecture-overview.md) — high-level architecture
-- [src/documentation/protocol-spec.md](src/documentation/protocol-spec.md) — the Hypercomb protocol
-- [src/documentation/signature-algebra.md](src/documentation/signature-algebra.md) — the signature composition model
-- [src/documentation/glossary.md](src/documentation/glossary.md) — terminology
-- [src/CLAUDE.md](src/CLAUDE.md) — codebase orientation, project tiers, build commands
+- [Architecture overview](src/documentation/architecture-overview.md)
+- [Protocol specification](src/documentation/protocol-spec.md)
+- [Signature algebra](src/documentation/signature-algebra.md)
+- [Glossary](src/documentation/glossary.md)
+- [Codebase orientation](src/CLAUDE.md)
 
 ## Architecture in one paragraph
 
-Signatures (SHA-256 hashes of canonical content) are the universal identity primitive. Drones are self-contained modules that self-register in an IoC container. The web shell loads signed drone bundles from OPFS at runtime, resolves dependencies via a dynamic import map, and composes features by reference, not inheritance. Everything that can be externalized, is.
+Signatures are the universal identity primitive. Drones are self-contained
+modules that register in an IoC container. The web shell loads signed bundles
+from the browser's origin-private file system, resolves their dependencies,
+and composes capabilities by reference rather than inheritance. Everything
+that can be externalized is externalized.
+
+## Support without purchasing the project
+
+The most useful support today is to try Hypercomb, share a demonstration,
+study or fork the source, and introduce it to a community that values local
+ownership. A channel for one-time donations and recurring sponsorship is being
+prepared. [Read the support principles](SUPPORT.md). Support keeps the
+complete platform free and open; it does not create gated features, financial
+returns, or ownership rights.
 
 ## License
 
 - **Code:** [GNU AGPL v3.0 only](LICENSE) (`SPDX-License-Identifier: AGPL-3.0-only`)
 - **Documentation and media:** [CC BY-SA 4.0](src/documentation/license-docs.md)
 
-Public instances running modified versions must link to their corresponding source, per the AGPL network clause.
+Public instances running modified versions must link to their corresponding
+source, as required by the AGPL network clause.
 
 ---
 
-*Hypercomb is a beehive. Each tile is a cell. Each drone is a specialized worker. The hive is the sum of what we bring to it.*
+*Hypercomb is a beehive. Each tile is a cell. Each drone is a specialized
+worker. The hive is the sum of what we bring to it.*
