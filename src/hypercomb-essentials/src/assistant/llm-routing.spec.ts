@@ -43,9 +43,14 @@ beforeEach(() => {
 
 describe('streamRoutedModel', () => {
   it('resolves model ownership for shells without exposing the registry', () => {
-    registry.register(descriptor('local-model-owner', 'unused'))
+    registry.register({
+      ...descriptor('local-model-owner', 'unused'),
+      models: [{ name: 'local-model-owner', id: 'local-model-owner-model', tier: 'fast', contextLength: 65_536 }],
+    })
     expect(llmRouter.providerIdForModel('local-model-owner-model')).toBe('local-model-owner')
+    expect(llmRouter.contextLengthForModel('local-model-owner-model')).toBe(65_536)
     expect(llmRouter.providerIdForModel('unknown-model')).toBeUndefined()
+    expect(llmRouter.contextLengthForModel('unknown-model')).toBeUndefined()
   })
 
   it('reports machine locality from the resolved endpoint rather than the provider id', () => {
@@ -105,6 +110,73 @@ describe('streamRoutedModel', () => {
     expect(chunks.map(chunk => chunk.text).join('')).toBe('hello')
     expect(chunks[0]?.providerId).toBe('second')
     expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('observes safe per-attempt lifecycle data without exposing request contents', async () => {
+    registry.register({
+      ...descriptor('telemetry-first', 'unused'),
+      models: [{ name: 'telemetry-first', id: 'telemetry-first-model', tier: 'fast', inputPerMillion: 2, outputPerMillion: 4 }],
+      fromResponse: () => ({ text: '', stopReason: 'stop', inputTokens: 10, outputTokens: 5, model: 'telemetry-first-model' }),
+    })
+    registry.register({
+      ...descriptor('telemetry-second', 'ok'),
+      models: [{ name: 'telemetry-second', id: 'telemetry-second-model', tier: 'fast', inputPerMillion: 2, outputPerMillion: 4 }],
+      fromResponse: () => ({ text: 'ok', stopReason: 'stop', inputTokens: 10, outputTokens: 5, model: 'telemetry-second-model' }),
+    })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('telemetry-first')) throw new TypeError('private provider body')
+      return new Response('{}', { status: 200 })
+    }))
+    const events: Array<Record<string, unknown>> = []
+    for await (const _chunk of streamRoutedModel({
+      need: { tier: 'fast' },
+      messages: [{ role: 'user', content: 'secret prompt' }],
+      observeAttempt: event => events.push(event as unknown as Record<string, unknown>),
+    })) { /* consume */ }
+    expect(events.map(event => event['phase'])).toEqual(['start', 'failure', 'start', 'success'])
+    expect(events[0]).toMatchObject({ providerId: 'telemetry-first', model: 'telemetry-first-model', category: 'start', outputEmitted: false })
+    expect(events[1]).toMatchObject({ providerId: 'telemetry-first', category: 'network', outputEmitted: false })
+    expect(events[2]).toMatchObject({ providerId: 'telemetry-second', model: 'telemetry-second-model' })
+    expect(events[3]).toMatchObject({ providerId: 'telemetry-second', category: 'success', outputEmitted: true, usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15, estimatedCost: true, estimatedCostUsd: 0.00004 } })
+    expect(JSON.stringify(events)).not.toContain('secret prompt')
+    expect(JSON.stringify(events)).not.toContain('private provider body')
+  })
+
+  it('accounts for terminal stream usage without emitting an empty chat chunk', async () => {
+    registry.register({
+      ...descriptor('stream-telemetry', ''),
+      models: [{ name: 'stream-telemetry', id: 'stream-telemetry-model', tier: 'fast', inputPerMillion: 1, outputPerMillion: 2 }],
+      fromStreamEvent: openAiStreamEvent,
+    })
+    const sse = [
+      'data: {"choices":[{"delta":{"content":"hello"}}]}',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+      'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14,"prompt_tokens_details":{"cached_tokens":6},"completion_tokens_details":{"reasoning_tokens":2}}}',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(sse, { status: 200 })))
+    const events: import('./llm-dispatch.js').LlmAttemptEvent[] = []
+    const chunks: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({
+      providerId: 'stream-telemetry',
+      messages: [{ role: 'user', content: 'hello' }],
+      observeAttempt: event => events.push(event),
+    })) chunks.push(chunk)
+
+    expect(chunks.map(chunk => chunk.text)).toEqual(['hello'])
+    expect(events.at(-1)).toMatchObject({
+      phase: 'success',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        totalTokens: 14,
+        cacheReadTokens: 6,
+        reasoningTokens: 2,
+        estimatedCost: true,
+        estimatedCostUsd: 0.000018,
+      },
+    })
   })
 
   it('does not override an explicit provider choice', async () => {
@@ -383,9 +455,19 @@ describe('the flow knobs reach the local body only', () => {
   })
 
   it('leaves every other vendor\'s request unchanged when a call sets them', async () => {
-    const vendors = ['anthropic', 'openai', 'google', 'xai', 'deepseek', 'mistral', 'openrouter']
-    for (const vendor of vendors) {
-      const module = await import(`./providers/${vendor}.provider.js`) as Record<string, unknown>
+    // Literal imports are intentional: Vite cannot statically expand a
+    // template import whose source files are TypeScript but specifiers end in
+    // `.js`, even though its normal resolver handles each literal correctly.
+    const vendors: readonly [string, Record<string, unknown>][] = [
+      ['anthropic', await import('./providers/anthropic.provider.js')],
+      ['openai', await import('./providers/openai.provider.js')],
+      ['google', await import('./providers/google.provider.js')],
+      ['xai', await import('./providers/xai.provider.js')],
+      ['deepseek', await import('./providers/deepseek.provider.js')],
+      ['mistral', await import('./providers/mistral.provider.js')],
+      ['openrouter', await import('./providers/openrouter.provider.js')],
+    ]
+    for (const [vendor, module] of vendors) {
       const descriptor = Object.values(module).find(value =>
         !!value && typeof value === 'object' && typeof (value as Descriptor).toRequest === 'function') as Descriptor
       expect(descriptor, vendor).toBeDefined()

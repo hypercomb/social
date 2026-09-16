@@ -56,6 +56,33 @@ export interface ChatTurn {
    *  route is drawn on: `contentSig` dedups across identical replies, this
    *  never does. */
   readonly sig?: string
+  /** Signature of the deterministic prompt-view manifest used for this turn. */
+  readonly prompt?: string
+  /** Settled model attempts, safe for evaluation and routing diagnostics. */
+  readonly attempts?: readonly TurnAttempt[]
+}
+
+export type TurnAttemptUsage = {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly totalTokens?: number
+  readonly cacheReadTokens?: number
+  readonly cacheWriteTokens?: number
+  readonly reasoningTokens?: number
+  readonly estimatedCostUsd?: number
+}
+
+export type TurnAttempt = {
+  readonly round: number
+  readonly attempt: number
+  readonly providerId: string
+  readonly model: string
+  readonly outcome: 'success' | 'failure'
+  readonly category: string
+  readonly durationMs: number
+  readonly outputEmitted: boolean
+  readonly status?: number
+  readonly usage?: TurnAttemptUsage
 }
 
 /** A turn as it sits ON DISK since the doctrine pass: the TEXT is a root
@@ -89,6 +116,8 @@ type TurnManifest = {
   readonly read?: readonly string[]
   readonly providerId?: string
   readonly model?: string
+  readonly prompt?: string
+  readonly attempts?: readonly TurnAttempt[]
 }
 
 /** The optional provenance a caller attaches to a model-produced turn. */
@@ -100,9 +129,60 @@ export type TurnMeta = {
   readonly read?: readonly string[]
   readonly providerId?: string
   readonly model?: string
+  readonly prompt?: string
+  readonly attempts?: readonly TurnAttempt[]
 }
 
 const SIG64 = /^[0-9a-f]{64}$/
+const finiteNonNegative = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+
+const cleanAttemptUsage = (value: unknown): TurnAttemptUsage | undefined => {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as Record<string, unknown>
+  const usage: TurnAttemptUsage = {
+    ...(finiteNonNegative(source['inputTokens']) !== undefined ? { inputTokens: finiteNonNegative(source['inputTokens']) } : {}),
+    ...(finiteNonNegative(source['outputTokens']) !== undefined ? { outputTokens: finiteNonNegative(source['outputTokens']) } : {}),
+    ...(finiteNonNegative(source['totalTokens']) !== undefined ? { totalTokens: finiteNonNegative(source['totalTokens']) } : {}),
+    ...(finiteNonNegative(source['cacheReadTokens']) !== undefined ? { cacheReadTokens: finiteNonNegative(source['cacheReadTokens']) } : {}),
+    ...(finiteNonNegative(source['cacheWriteTokens']) !== undefined ? { cacheWriteTokens: finiteNonNegative(source['cacheWriteTokens']) } : {}),
+    ...(finiteNonNegative(source['reasoningTokens']) !== undefined ? { reasoningTokens: finiteNonNegative(source['reasoningTokens']) } : {}),
+    ...(finiteNonNegative(source['estimatedCostUsd']) !== undefined ? { estimatedCostUsd: finiteNonNegative(source['estimatedCostUsd']) } : {}),
+  }
+  return Object.keys(usage).length ? usage : undefined
+}
+
+const cleanAttempt = (value: unknown): TurnAttempt | undefined => {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as Record<string, unknown>
+  const outcome = source['outcome'] === 'success' || source['outcome'] === 'failure' ? source['outcome'] : undefined
+  const providerId = typeof source['providerId'] === 'string' ? source['providerId'].trim().slice(0, 64) : ''
+  const model = typeof source['model'] === 'string' ? source['model'].trim().slice(0, 128) : ''
+  const round = finiteNonNegative(source['round'])
+  const attempt = finiteNonNegative(source['attempt'])
+  const durationMs = finiteNonNegative(source['durationMs'])
+  if (!outcome || !providerId || !model || round === undefined || attempt === undefined || durationMs === undefined) return undefined
+  const status = finiteNonNegative(source['status'])
+  const usage = cleanAttemptUsage(source['usage'])
+  return {
+    round: Math.floor(round),
+    attempt: Math.floor(attempt),
+    providerId,
+    model,
+    outcome,
+    category: (typeof source['category'] === 'string' ? source['category'] : 'unknown').slice(0, 32),
+    durationMs: Math.floor(durationMs),
+    outputEmitted: source['outputEmitted'] === true,
+    ...(status !== undefined ? { status: Math.floor(status) } : {}),
+    ...(usage ? { usage } : {}),
+  }
+}
+
+const cleanAttempts = (value: unknown): TurnAttempt[] =>
+  Array.isArray(value)
+    ? value.slice(0, 32).map(cleanAttempt).filter((attempt): attempt is TurnAttempt => !!attempt)
+    : []
+
 const cleanMeta = (meta: TurnMeta | undefined): Partial<TurnMeta> => {
   if (!meta) return {}
   const out: Record<string, unknown> = {}
@@ -117,6 +197,11 @@ const cleanMeta = (meta: TurnMeta | undefined): Partial<TurnMeta> => {
   }
   if (typeof meta.providerId === 'string' && meta.providerId) out['providerId'] = meta.providerId.slice(0, 64)
   if (typeof meta.model === 'string' && meta.model) out['model'] = meta.model.slice(0, 128)
+  if (typeof meta.prompt === 'string' && SIG64.test(meta.prompt)) out['prompt'] = meta.prompt
+  if (Array.isArray(meta.attempts) && meta.attempts.length) {
+    const attempts = cleanAttempts(meta.attempts)
+    if (attempts.length) out['attempts'] = attempts
+  }
   return out as Partial<TurnMeta>
 }
 
@@ -184,6 +269,8 @@ type RawTurn = {
   readonly at: number
   readonly text?: string
   readonly contentSig?: string
+  readonly prompt?: string
+  readonly attempts?: readonly TurnAttempt[]
   /** The entry's file name — set by the walk, never read from the bytes. */
   readonly sig?: string
 }
@@ -551,6 +638,7 @@ export const readTurnsStrict = async (
       const blob = await store.getResource(raw.contentSig)   // a rejection propagates
       body = blob ? await blob.text() : ''
     }
+    const attempts = cleanAttempts(raw.attempts)
     return {
       kind: 'chat-turn' as const,
       convoId: raw.convoId,
@@ -559,6 +647,8 @@ export const readTurnsStrict = async (
       text: body,
       ...(raw.contentSig ? { contentSig: raw.contentSig } : {}),
       ...(raw.sig ? { sig: raw.sig } : {}),
+      ...(typeof raw.prompt === 'string' && SIG64.test(raw.prompt) ? { prompt: raw.prompt } : {}),
+      ...(attempts.length ? { attempts } : {}),
     }
   }))
 }
@@ -593,15 +683,20 @@ const materializeTurns = async (
   raw: readonly RawTurn[],
   store: StoreLike,
 ): Promise<ChatTurn[]> =>
-  Promise.all(raw.map(async r => ({
-    kind: 'chat-turn' as const,
-    convoId: r.convoId,
-    role: r.role,
-    at: r.at,
-    text: await resolveText(r, store),
-    ...(r.contentSig ? { contentSig: r.contentSig } : {}),
-    ...(r.sig ? { sig: r.sig } : {}),
-  })))
+  Promise.all(raw.map(async r => {
+    const attempts = cleanAttempts(r.attempts)
+    return {
+      kind: 'chat-turn' as const,
+      convoId: r.convoId,
+      role: r.role,
+      at: r.at,
+      text: await resolveText(r, store),
+      ...(r.contentSig ? { contentSig: r.contentSig } : {}),
+      ...(r.sig ? { sig: r.sig } : {}),
+      ...(typeof r.prompt === 'string' && SIG64.test(r.prompt) ? { prompt: r.prompt } : {}),
+      ...(attempts.length ? { attempts } : {}),
+    }
+  }))
 
 /** Every stored turn for a conversation, oldest first. What a window reads
  *  when it opens — which is why a closed window costs nothing. */

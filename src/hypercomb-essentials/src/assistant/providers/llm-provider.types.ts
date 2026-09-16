@@ -86,10 +86,22 @@ export type LlmToolCallDelta = {
   readonly arguments?: string
 }
 
+/** Token accounting reported by a provider, when the wire response includes it. */
+export type LlmTokenUsage = {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly cacheReadTokens?: number
+  readonly cacheWriteTokens?: number
+  readonly reasoningTokens?: number
+  readonly totalTokens?: number
+}
+
 /** Normalized output of one provider streaming frame. */
 export type LlmStreamEvent = {
   readonly text?: string
   readonly toolCallDeltas?: readonly LlmToolCallDelta[]
+  /** Usage is normally present only on the terminal usage frame. */
+  readonly usage?: LlmTokenUsage
   /** Present only on the provider's terminal choice frame. */
   readonly finishReason?: string
 }
@@ -158,6 +170,8 @@ export type LlmCallResult = {
   readonly stopReason: string
   readonly inputTokens: number
   readonly outputTokens: number
+  /** Additional accounting dimensions reported by the provider. */
+  readonly usage?: LlmTokenUsage
   readonly model: string
 }
 

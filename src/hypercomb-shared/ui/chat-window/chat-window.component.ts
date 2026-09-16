@@ -138,6 +138,7 @@ import {
   type HypercombTreeReader,
 } from './hypercomb-observation'
 import { contextNeedFor, effortInThread, type MessageEffort } from './message-effort'
+import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-compiler'
 import { executionLineParts } from './execution-line'
 import {
   blockRefusedMessage,
@@ -998,6 +999,33 @@ type RoutedChunkLike = {
   readonly model: string
 }
 
+type LlmAttemptUsageLike = {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly totalTokens?: number
+  readonly cacheReadTokens?: number
+  readonly cacheWriteTokens?: number
+  readonly reasoningTokens?: number
+  readonly estimatedCostUsd?: number
+}
+
+type LlmAttemptEventLike = {
+  readonly phase: 'start' | 'success' | 'failure'
+  readonly attempt: number
+  readonly providerId: string
+  readonly model: string
+  readonly durationMs: number
+  readonly outputEmitted: boolean
+  readonly category: string
+  readonly status?: number
+  readonly usage?: LlmAttemptUsageLike
+}
+
+type TurnAttemptLike = Omit<LlmAttemptEventLike, 'phase'> & {
+  readonly round: number
+  readonly outcome: 'success' | 'failure'
+}
+
 /** The native beehavior census/executor, reached through IoC so the shared
  * shell does not import essentials. Model output is validated against
  * `entries()` before this direct execution seam is ever called. */
@@ -1017,6 +1045,8 @@ type LlmMessageLike =
 type LlmRouterLike = {
   ready?(call?: { providerId?: string; model?: string; preferModel?: string; need?: { tier?: string; streaming?: boolean; minContext?: number } }): boolean
   providerIdForModel?(model: string): string | undefined
+  /** Published model capacity, when the provider catalog knows it. */
+  contextLengthForModel?(model: string): number | undefined
   /** The provider the mediator would pick for this need right now — so the
    *  shell can tell whether that pick has been granted hive access. */
   designatedProviderId?(need?: { tier?: string; streaming?: boolean; minContext?: number }): string | undefined
@@ -1042,6 +1072,8 @@ type LlmRouterLike = {
     cacheSystem?: boolean
     /** Fall back automatically, but only among providers using this owner's key. */
     fallbackWithin?: string
+    /** Settled provider attempts, without prompts or credentials. */
+    observeAttempt?: (event: LlmAttemptEventLike) => void
   }): AsyncGenerator<RoutedChunkLike>
 }
 
@@ -1099,10 +1131,6 @@ const readRouteSideWidth = (): number => {
   } catch { return 0 }
 }
 const DEFAULT_MODEL = 'auto'
-
-/** Turns carried to a stateless responder. The stored thread can be any
- *  length; this is the window into it the ask record can afford. */
-const TRANSCRIPT_TURNS = 12
 
 /** How long the composer waits after the last keystroke before the thinking
  *  is written down. Long enough that a sentence is one write, short enough
@@ -1167,6 +1195,8 @@ type TurnMetaLike = {
   readonly read?: readonly string[]
   readonly providerId?: string
   readonly model?: string
+  readonly prompt?: string
+  readonly attempts?: readonly TurnAttemptLike[]
 }
 const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 /** Reads one message may make: enough for a model to find its way in. */
@@ -5771,9 +5801,18 @@ export class ChatWindowComponent implements OnDestroy {
       return
     }
 
-    const transcript = this.turns()
-      .slice(-TRANSCRIPT_TURNS)
-      .map(t => ({ role: t.role, text: t.text }))
+    const bridgeModel = this.answering()
+    const bridgeRouter = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
+    const transcript = compileChatContext(this.turns().map((turn, index) => ({
+      role: turn.role,
+      text: turn.text,
+      model: turn.model,
+      sourceId: turn.sig ?? `turn:${index}`,
+    })), {
+      model: bridgeModel,
+      contextWindowTokens: bridgeRouter?.contextLengthForModel?.(bridgeModel),
+    }).turns
+      .map(turn => ({ role: turn.role, text: turn.text }))
 
     // THE TIER CHANGED UNDER THE QUESTION. Getting here with the bridge down
     // means the shallow host declined it and the durable queue will answer
@@ -5841,7 +5880,22 @@ export class ChatWindowComponent implements OnDestroy {
     // HOW MUCH WORK THIS MESSAGE IS (message-effort.ts), and how much the
     // request must hold — so deep work reaches the most capable model added,
     // and a long conversation never lands on a model too small for it.
-    const transcriptChars = this.turns().slice(-TRANSCRIPT_TURNS).reduce((total, turn) => total + turn.text.length, 0)
+    const contextHint = this.modelExplicit() ? this.model() || undefined : this.designated()?.model
+    const compiledForNeed = compileChatContext(this.turns().map((turn, index) => ({
+      role: turn.role,
+      text: turn.text,
+      model: turn.model,
+      sourceId: turn.sig ?? `turn:${index}`,
+    })), {
+      model: contextHint,
+      contextWindowTokens: contextHint ? router?.contextLengthForModel?.(contextHint) : undefined,
+    })
+    const compiledChars = compiledForNeed.turns.reduce((total, turn) => total + turn.text.length, 0)
+    const compiledLatest = compiledForNeed.turns.at(-1)
+    // contextNeedFor adds the new message itself; the in-memory thread already
+    // contains that turn, so remove it from the transcript side of the sum.
+    const transcriptChars = Math.max(0, compiledChars
+      - (compiledLatest?.role === 'user' && compiledLatest.text === message ? message.length : 0))
     // A HARDER OR SIMPLER QUESTION CHANGES MODELS (Jaime, 2026-09-13): each
     // message is weighed in its thread, and the model that answered last is
     // preferred only while the weight is the same — so the mediator chooses
@@ -5966,7 +6020,16 @@ export class ChatWindowComponent implements OnDestroy {
     // Who the mediator will choose for THIS weight, not whoever answered last.
     const policyForNeed = ioc()?.get('@diamondcoreprocessor.com/LlmPolicyStore') as PolicyLike | undefined
     const firstModel = namedModel ?? preferModel ?? policyForNeed?.designate?.(need)?.model ?? this.designated()?.model
-    const messages: LlmMessageLike[] = transcriptForModel(this.turns().slice(-TRANSCRIPT_TURNS), firstModel)
+    const compiledContext = compileChatContext(this.turns().map((turn, index) => ({
+      role: turn.role,
+      text: turn.text,
+      model: turn.model,
+      sourceId: turn.sig ?? `turn:${index}`,
+    })), {
+      model: firstModel,
+      contextWindowTokens: firstModel ? router.contextLengthForModel?.(firstModel) : undefined,
+    })
+    const messages: LlmMessageLike[] = transcriptForModel(compiledContext.turns, firstModel)
 
     // PROVENANCE FOR THE TURN (anatomy-context-need §6): the anatomy this
     // answer will be framed by, and the page/selection it was asked from —
@@ -5980,8 +6043,17 @@ export class ChatWindowComponent implements OnDestroy {
       new Blob([JSON.stringify({ page: grammarContext.segments, selected: grammarContext.selected })], { type: 'application/json' }),
       { emit: false },
     ).catch(() => undefined)
+    const promptSig = await contextStore?.putResource?.(
+      new Blob([JSON.stringify({
+        kind: 'chat-context-view',
+        compiler: CHAT_CONTEXT_COMPILER,
+        ...compiledContext.manifest,
+      })], { type: 'application/json' }),
+      { emit: false },
+    ).catch(() => undefined)
     const observed: string[] = []
     const readSigs: string[] = []
+    const settledAttempts: TurnAttemptLike[] = []
 
     const component = this
     const ask: HostAsk = async function* (_question, opts) {
@@ -6002,6 +6074,36 @@ export class ChatWindowComponent implements OnDestroy {
       let system = systemFor(firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(need))
       const snapshotIds: string[] = []
       const ran: string[] = []
+
+      const writeTurnMeta = (providerId?: string, model?: string): void => {
+        component.#turnMeta.set(convoId, {
+          anatomy: anatomySig,
+          context: contextSig,
+          prompt: promptSig,
+          observed: [...observed],
+          read: [...readSigs],
+          attempts: [...settledAttempts],
+          providerId,
+          model,
+        })
+      }
+
+      const observeAttempt = (event: LlmAttemptEventLike): void => {
+        if (event.phase === 'start') return
+        settledAttempts.push({
+          round: rounds + 1,
+          attempt: event.attempt,
+          providerId: event.providerId,
+          model: event.model,
+          outcome: event.phase,
+          category: event.category,
+          durationMs: event.durationMs,
+          outputEmitted: event.outputEmitted,
+          ...(event.status !== undefined ? { status: event.status } : {}),
+          ...(event.usage ? { usage: event.usage } : {}),
+        })
+        writeTurnMeta(event.providerId, event.model)
+      }
 
       const stillHere = (): void => {
         if (pinned && router.providerIsMachineLocal?.(pinned) && router.providerMachineEndpoint?.(pinned) !== pinnedEndpoint) {
@@ -6148,6 +6250,7 @@ export class ChatWindowComponent implements OnDestroy {
           need,
           ...(rounds === 0 && !pinned && fallbackWithin ? { fallbackWithin } : {}),
           cacheSystem: true,
+          observeAttempt,
           messages,
           system,
           signal,
@@ -6193,10 +6296,7 @@ export class ChatWindowComponent implements OnDestroy {
         }
         rounds++
         // Updated every round; the last write is what the run stores.
-        component.#turnMeta.set(convoId, {
-          anatomy: anatomySig, context: contextSig, observed: [...observed], read: [...readSigs],
-          providerId: roundProviderId, model: roundModel,
-        })
+        writeTurnMeta(roundProviderId, roundModel)
 
         const work = splitWork(roundText)
         if (!work.request || lastRound) {

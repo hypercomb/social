@@ -98,6 +98,32 @@ export type LlmCall = {
    *  another of them before any output — never to a provider the participant
    *  has not let read the hive. */
   readonly fallbackWithin?: string
+  /** Optional, non-persistent lifecycle hook for one routed provider attempt. */
+  readonly observeAttempt?: (event: LlmAttemptEvent) => void
+}
+
+export type LlmAttemptUsage = {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly totalTokens?: number
+  readonly cacheReadTokens?: number
+  readonly cacheWriteTokens?: number
+  readonly reasoningTokens?: number
+  /** Derived from the descriptor's published per-million-token rates. */
+  readonly estimatedCostUsd?: number
+  readonly estimatedCost?: true
+}
+
+export type LlmAttemptEvent = {
+  readonly phase: 'start' | 'success' | 'failure'
+  readonly attempt: number
+  readonly providerId: string
+  readonly model: string
+  readonly durationMs: number
+  readonly outputEmitted: boolean
+  readonly category: string
+  readonly status?: number
+  readonly usage?: LlmAttemptUsage
 }
 
 // ── the participant's own local model ─────────────────────────────────
@@ -439,9 +465,10 @@ const emitLocalUse = (provider: LlmProviderDescriptor): void => {
 async function* streamProvider(
   provider: LlmProviderDescriptor,
   call: LlmCall,
-): AsyncGenerator<{ text: string; toolCalls?: readonly LlmToolCall[]; model: string }> {
+  suppliedRequest?: LlmRequest,
+): AsyncGenerator<{ text: string; toolCalls?: readonly LlmToolCall[]; model: string; usage?: LlmAttemptUsage }> {
   if (provider.transport === 'peer-swarm' || !provider.fromStreamEvent) {
-    const request = buildRequest(provider, call)
+    const request = suppliedRequest ?? buildRequest(provider, call)
     let result: LlmCallResult
     if (provider.transport === 'peer-swarm') {
       if (!peerCaller) {
@@ -464,12 +491,13 @@ async function* streamProvider(
         text: result.text,
         ...(result.toolCalls?.length ? { toolCalls: result.toolCalls } : {}),
         model: result.model || request.model,
+        usage: attemptUsage(provider, result, request.model),
       }
     }
     return
   }
 
-  const request = buildRequest(provider, call, { stream: true })
+  const request = suppliedRequest ?? buildRequest(provider, call, { stream: true })
   emitLocalUse(provider)
   const response = await send(provider, request, call.signal)
   rememberLocalChoice(provider, request.model)
@@ -485,7 +513,8 @@ async function* streamProvider(
       if (decoded) yield { text: decoded, model: request.model }
       continue
     }
-    if (decoded.text) yield { text: decoded.text, model: request.model }
+    const frameUsage = attemptUsage(provider, decoded, request.model)
+    if (decoded.text || frameUsage) yield { text: decoded.text ?? '', model: request.model, ...(frameUsage ? { usage: frameUsage } : {}) }
     if (decoded.finishReason === 'tool_calls') toolStreamFinished = true
     for (const delta of decoded.toolCallDeltas ?? []) {
       const pending = pendingToolCalls.get(delta.index) ?? { name: '', arguments: '' }
@@ -520,6 +549,51 @@ async function* streamProvider(
   if (toolCalls.length) {
     yield { text: '', toolCalls, model: request.model }
   }
+}
+
+const finite = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+
+/** Keep only normalized token counts; provider payloads and error bodies never cross this seam. */
+const attemptUsage = (provider: LlmProviderDescriptor, value: unknown, modelId: string): LlmAttemptUsage | undefined => {
+  const source = value as { inputTokens?: unknown; outputTokens?: unknown; totalTokens?: unknown; usage?: unknown }
+  const usage = (source.usage && typeof source.usage === 'object' ? source.usage : source) as {
+    inputTokens?: unknown; outputTokens?: unknown; totalTokens?: unknown
+    cacheReadTokens?: unknown; cacheWriteTokens?: unknown; reasoningTokens?: unknown
+  }
+  const inputTokens = finite(usage.inputTokens)
+  const outputTokens = finite(usage.outputTokens)
+  const totalTokens = finite(usage.totalTokens) ?? (inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined)
+  const cacheReadTokens = finite(usage.cacheReadTokens)
+  const cacheWriteTokens = finite(usage.cacheWriteTokens)
+  const reasoningTokens = finite(usage.reasoningTokens)
+  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined && cacheReadTokens === undefined && cacheWriteTokens === undefined && reasoningTokens === undefined) return undefined
+  const out: LlmAttemptUsage = {
+    ...(inputTokens !== undefined ? { inputTokens } : {}), ...(outputTokens !== undefined ? { outputTokens } : {}), ...(totalTokens !== undefined ? { totalTokens } : {}),
+    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}), ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}), ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+  }
+  if (inputTokens !== undefined && outputTokens !== undefined && provider.models.length) {
+    const model = provider.models.find(item => item.id === modelId)
+    const inputRate = model?.inputPerMillion
+    const outputRate = model?.outputPerMillion
+    if (inputRate !== undefined && outputRate !== undefined) {
+      return { ...out, estimatedCostUsd: (inputTokens * inputRate + outputTokens * outputRate) / 1_000_000, estimatedCost: true }
+    }
+  }
+  return out
+}
+
+const attemptCategory = (error: unknown, status?: number): string => {
+  if (status === 401 || status === 403) return 'unauthorized'
+  if (status === 408 || status === 409 || status === 425 || status === 429 || (status !== undefined && status >= 500)) return 'transient'
+  if (status !== undefined) return 'http'
+  if (error instanceof DOMException && error.name === 'AbortError') return 'aborted'
+  if (error instanceof LlmDispatchError) return 'provider'
+  return 'network'
+}
+
+const safeObserve = (call: LlmCall, event: LlmAttemptEvent): void => {
+  try { call.observeAttempt?.(event) } catch { /* telemetry must never change routing */ }
 }
 
 // A provider that just failed should not win every fresh automatic route and
@@ -601,12 +675,40 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
   // with it: models added through OpenRouter all borrow one key, so falling
   // to the next of them only repeats the same refusal.
   const refusedOwners = new Set<string>()
-  for (const provider of candidates) {
+  for (const [candidateIndex, provider] of candidates.entries()) {
     if (refusedOwners.has(credentialOwner(provider))) continue
     let emitted = false
+    let usage: LlmAttemptUsage | undefined
+    const startedAt = Date.now()
+    let request: LlmRequest
     try {
-      for await (const chunk of streamProvider(provider, call)) {
-        emitted = true
+      request = buildRequest(provider, call, { stream: !!provider.fromStreamEvent })
+    } catch (error) {
+      const model = call.model ?? provider.defaultModel
+      safeObserve(call, { phase: 'start', attempt: candidateIndex + 1, providerId: provider.id, model, durationMs: 0, outputEmitted: false, category: 'start' })
+      const dispatch = error instanceof LlmDispatchError ? error : undefined
+      safeObserve(call, { phase: 'failure', attempt: candidateIndex + 1, providerId: provider.id, model, durationMs: Date.now() - startedAt, outputEmitted: false, category: attemptCategory(error, dispatch?.status), ...(dispatch?.status !== undefined ? { status: dispatch.status } : {}) })
+      if (isAbort(error, call.signal) || !automatic) throw error
+      const message = error instanceof Error ? error.message : String(error)
+      failures.push(`${provider.label}: ${message}`)
+      if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
+      if (dispatch?.status === 401 || dispatch?.status === 403) refusedOwners.add(credentialOwner(provider))
+      EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
+      continue
+    }
+    safeObserve(call, { phase: 'start', attempt: candidateIndex + 1, providerId: provider.id, model: request.model, durationMs: 0, outputEmitted: false, category: 'start' })
+    let answeredModel = request.model
+    try {
+      for await (const chunk of streamProvider(provider, call, request)) {
+        // Usage-only terminal frames are informative, not visible output and
+        // must not disable automatic fallback or turn an empty answer into a
+        // success.
+        emitted = emitted || !!chunk.text || !!chunk.toolCalls?.length
+        usage = chunk.usage
+          ? attemptUsage(provider, { ...(usage ?? {}), ...chunk.usage }, request.model)
+          : usage
+        if (!chunk.text && !chunk.toolCalls?.length) continue
+        answeredModel = chunk.model || answeredModel
         coolingUntil.delete(provider.id)
         yield {
           text: chunk.text,
@@ -623,13 +725,15 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
           call.model ?? modelForTier(provider, call.need?.tier ?? 'balanced'),
         )
       }
+      safeObserve(call, { phase: 'success', attempt: candidateIndex + 1, providerId: provider.id, model: answeredModel, durationMs: Date.now() - startedAt, outputEmitted: emitted, category: 'success', ...(usage ? { usage } : {}) })
       return
     } catch (error) {
+      const status = error instanceof LlmDispatchError ? error.status : undefined
+      safeObserve(call, { phase: 'failure', attempt: candidateIndex + 1, providerId: provider.id, model: answeredModel, durationMs: Date.now() - startedAt, outputEmitted: emitted, category: attemptCategory(error, status), ...(status !== undefined ? { status } : {}), ...(usage ? { usage } : {}) })
       if (isAbort(error, call.signal) || emitted || !automatic) throw error
       const message = error instanceof Error ? error.message : String(error)
       failures.push(`${provider.label}: ${message}`)
       if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
-      const status = error instanceof LlmDispatchError ? error.status : undefined
       if (status === 401 || status === 403) refusedOwners.add(credentialOwner(provider))
       EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
     }
@@ -663,6 +767,11 @@ export const llmRouter = {
    * model answer-only while granting grammar tools only to `local`. */
   providerIdForModel: (model: string): string | undefined =>
     registry().providerForModel(model)?.id,
+  /** Published capacity for the exact model, when its provider declared it. */
+  contextLengthForModel: (model: string): number | undefined => {
+    const provider = registry().providerForModel(model)
+    return provider?.models.find(candidate => candidate.id === model || candidate.name === model)?.contextLength
+  },
   /** Execution authority depends on where the endpoint really is, never on a
    * provider's friendly id. In particular, changing the built-in `local`
    * host to a LAN or Internet URL must make it answer-only immediately. */
