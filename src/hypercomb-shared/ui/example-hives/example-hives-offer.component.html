@@ -2,8 +2,10 @@
 @if (visible()) {
   <!-- The hive the card opens onto: the behaviors deck's nine collections,
        silhouetted. Painted BEHIND the wash on purpose — the backdrop's own
-       darkening and blur are what shade it out. -->
-  <div class="offer-hive" aria-hidden="true">
+       darkening and blur are what shade it out.
+       `is-entering` is set only for the one opening (see ExampleHivesOfferComponent.entrance);
+       without it every rule below is exactly the static composition. -->
+  <div class="offer-hive" aria-hidden="true" [class.is-entering]="entrance()">
     <svg [attr.viewBox]="deckViewBox" preserveAspectRatio="xMidYMid slice" focusable="false">
       <defs>
         <!-- The comb itself, as a stencil: light lands on tiles, never on the
@@ -25,8 +27,14 @@
         }
       </defs>
 
+      <!-- Each tile lands on its own ring's beat and grows out of its own
+           centre. The delay and the origin come from the art (viewBox units,
+           hence `transform-box: view-box` in the stylesheet) so the schedule
+           can never drift from the geometry. -->
       @for (tile of deckTiles; track tile.name) {
-        <g [attr.stroke]="tile.color" [attr.fill]="tile.color">
+        <g [attr.stroke]="tile.color" [attr.fill]="tile.color"
+           [style.animation-delay.ms]="tile.delayMs"
+           [style.transform-origin]="tile.cx + 'px ' + tile.cy + 'px'">
           <polygon class="halo" [attr.points]="tile.halo" stroke="none" />
           <polygon class="body" [attr.points]="tile.body" />
           <polygon class="ring" [attr.points]="tile.ring" fill="none" />
@@ -36,13 +44,16 @@
       <g class="lights" mask="url(#hc-deck-comb)">
         @for (light of deckTriads; track light.id) {
           <circle [attr.cx]="light.cx" [attr.cy]="light.cy" [attr.r]="light.r"
-                  [attr.fill]="'url(#' + light.id + ')'" />
+                  [attr.fill]="'url(#' + light.id + ')'"
+                  [style.animation-delay.ms]="light.delayMs"
+                  [style.transform-origin]="light.cx + 'px ' + light.cy + 'px'" />
         }
       </g>
     </svg>
   </div>
-  <div class="offer-backdrop" aria-hidden="true"></div>
-  <div class="offer-card" role="dialog" aria-modal="true" aria-labelledby="example-hives-title">
+  <div class="offer-backdrop" aria-hidden="true" [class.is-entering]="entrance()"></div>
+  <div class="offer-card" role="dialog" aria-modal="true" aria-labelledby="example-hives-title"
+       [class.is-entering]="entrance()">
     <header class="welcome">
       <span class="eyebrow">{{ 'examples.offer.eyebrow' | t }}</span>
       <h2 id="example-hives-title">{{ 'examples.offer.title' | t }}</h2>

@@ -12,7 +12,9 @@
 // The hive behind the welcome — the behaviors deck as a silhouette. It sits
 // UNDER .offer-backdrop, so the wash darkens it and the backdrop blur softens
 // it: "shaded out" is the existing backdrop doing its job, not a second set of
-// numbers to keep in sync. Everything here is still — no drift, no pulse.
+// numbers to keep in sync. Everything here rests still — no drift, no pulse.
+// The one exception is the opening (see `is-entering` below): the comb grows
+// out of the splash's dot once, and then this is what it comes to rest on.
 .offer-hive {
   position: absolute;
   inset: 0;
@@ -41,6 +43,34 @@
   .light-core { stop-color: rgb(var(--hc-chrome-accent)); stop-opacity: 0.11; }
   .light-mid  { stop-color: rgb(var(--hc-chrome-accent)); stop-opacity: 0.04; }
   .light-edge { stop-color: rgb(var(--hc-chrome-accent)); stop-opacity: 0; }
+
+  // ── the entrance ────────────────────────────────────
+  // The comb grows out of the splash's dot: tiles land in rings by distance
+  // from DECK_ORIGIN, each triad's light blooms once all three of its tiles
+  // are in, and the wash and the card follow — one shot, then the styles
+  // above are the whole story. The schedule lives in
+  // behaviors-deck-silhouette.ts; this file owns the durations it mirrors.
+  //
+  // The groups carry their delays inline, so the fill mode is `both`, not the
+  // house `forwards`: with `forwards` alone a delayed element renders its
+  // RESTING style while it waits, so every tile would show, blink out, and
+  // land. `both` parks it on `from` until its beat arrives.
+  &.is-entering {
+    svg > g:not(.lights) {
+      animation: hc-offer-tile-enter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .lights circle {
+      animation: hc-offer-light-enter 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+  }
+
+  // Delays and origins are inline and written in viewBox units, so resolve
+  // them against the SVG's own coordinate system, not the element's box.
+  svg > g,
+  .lights circle {
+    transform-box: view-box;
+  }
 }
 
 .offer-backdrop {
@@ -51,6 +81,11 @@
     rgba(var(--hc-chrome-shadow), 0.48);
   backdrop-filter: blur(3px) saturate(0.75);
   pointer-events: auto;
+
+  // The wash is there from the start — it is what shades the comb out.
+  &.is-entering {
+    animation: hc-offer-backdrop-enter 300ms ease both;
+  }
 }
 
 .offer-card {
@@ -83,6 +118,13 @@
   color: var(--hc-window-ink-loud);
   font-family: inherit;
   pointer-events: auto;
+
+  // The card lands last, over the comb's centre while the outer rings are
+  // still arriving — the margins are where the comb is actually visible.
+  // Ends on this rule's own resting transform, so nothing is left to sync.
+  &.is-entering {
+    animation: hc-offer-card-enter 460ms cubic-bezier(0.16, 1, 0.3, 1) 1250ms both;
+  }
 
   h2 {
     margin: 0;
@@ -325,6 +367,12 @@ button {
     grid-template-columns: 1fr;
     border-radius: var(--hc-radius-floating) var(--hc-radius-floating) 0 0;
     padding-bottom: env(safe-area-inset-bottom, 0px);
+
+    // The sheet's resting transform is `none`, so it rises in rather than
+    // scaling — the desktop keyframe's translate would fight this rule.
+    &.is-entering {
+      animation: hc-offer-card-enter-phone 460ms cubic-bezier(0.16, 1, 0.3, 1) 1250ms both;
+    }
   }
 
   .welcome { border-right: 0; border-bottom: 1px solid var(--hc-window-line); }
@@ -396,6 +444,49 @@ button {
   .examples { padding: 2.5rem; }
 }
 
+// ── entrance keyframes ────────────────────────────────
+// Every `to` frame is the resting style declared above, so an entrance that
+// never runs (or is suppressed below) leaves the composition exactly as it
+// was. The durations are what the constants in behaviors-deck-silhouette.ts
+// mirror — change them as a pair.
+@keyframes hc-offer-tile-enter {
+  from { opacity: 0; transform: scale(0.55); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes hc-offer-light-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes hc-offer-backdrop-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes hc-offer-card-enter {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.72); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(0.8); }
+}
+
+@keyframes hc-offer-card-enter-phone {
+  from { opacity: 0; transform: translateY(1.5rem); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+// ── reduced motion: the resting composition is the truth ──
+// `both` parks every animated element on its `from` frame for the length of
+// its delay, so suppressing the animations is not cosmetic — without this the
+// comb and the card would sit invisible until their beats arrived. With them
+// off, the rules above already describe today's exact static look. Declared
+// after the `.is-entering` rules and at matching specificity, so it wins.
 @media (prefers-reduced-motion: reduce) {
   button { transition: none; }
+
+  .offer-hive.is-entering svg > g:not(.lights),
+  .offer-hive.is-entering .lights circle,
+  .offer-backdrop.is-entering,
+  .offer-card.is-entering {
+    animation: none;
+  }
 }

@@ -129,6 +129,42 @@ SwarmAdoptDrone.adoptResolvedBranch(
   the fold lands.
 - Every string through i18n (`en.json` + `ja.json`).
 
+### The entrance
+
+The card opens onto a hive that **grows**, rather than one that is simply
+there. `splash.js` converges on a honey dot and holds it while it fades; the
+welcome continues that motion — tiles land in rings, each triad's light blooms
+once all three of its tiles have arrived, the wash comes in under them, and the
+card lands last. It plays **once**, and then rests on exactly the static
+composition it had before the entrance existed: same numbers, same look, no
+loop, no idle drift.
+
+- The art and the schedule both live in `behaviors-deck-silhouette.ts` (raw
+  shared source — no build step). A tile's ring is its **distance band** from
+  `DECK_ORIGIN`, derived from the geometry rather than hand-listed, so tiles
+  that are equidistant land together and the schedule cannot drift from the
+  art. A light's delay is the latest of its three members, so a light can never
+  bloom over a tile that has not landed.
+- **`DECK_ORIGIN` is the tunable.** It is the comb's own centre, which is also
+  the composition's optical centre. It is deliberately *not* the splash dot's
+  exact pixel — the dot sits ~20 viewBox units above it and the offset moves
+  with the slice scale — but the dot is still fading and glowing through the
+  handoff, so the small offset reads as the dot expanding. What the eye reads
+  as "growing out of the dot" is the **order** (inner bands first), and only a
+  centre on the comb's axis of symmetry keeps mirrored tiles equidistant. Move
+  it off `cy: 150` and the `b`/`h`, `c`/`i`, `a`/`g` pairs fall out of step.
+- `ExampleHivesOfferComponent.entrance()` latches the entrance **off** once it
+  has played. The DOM lives inside `@if (visible())`, so CSS animations run on
+  every insertion — and `render:cell-count` can oscillate (a fresh dev origin
+  installs bundled content and the count climbs back above zero). Without the
+  latch the comb would replay its opening under a participant already looking
+  at it.
+- The stylesheet owns the durations; the constants in the silhouette module
+  mirror them so the ring math and the moment the entrance ends are computed in
+  one place. The keyframes' `to` frames are the resting styles, so
+  `prefers-reduced-motion` lands on today's composition with nothing to keep in
+  sync.
+
 ## 6. Doctrine compliance
 
 - **OPFS**: nothing wipes, nothing writes outside the adopt fold. Verification

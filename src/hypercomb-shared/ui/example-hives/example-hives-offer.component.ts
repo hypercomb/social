@@ -14,10 +14,10 @@
 // counts while a fold pulls its closure — loaders always show counts).
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
-import { Component, signal, computed, type OnDestroy, type OnInit } from '@angular/core'
+import { Component, signal, computed, effect, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { DECK_SILHOUETTE, DECK_TRIADS, DECK_VIEW_BOX } from './behaviors-deck-silhouette'
+import { DECK_SILHOUETTE, DECK_TRIADS, DECK_VIEW_BOX, ENTRANCE_TOTAL_MS } from './behaviors-deck-silhouette'
 
 interface ExampleEntry {
   name: string
@@ -51,6 +51,10 @@ export class ExampleHivesOfferComponent implements OnInit, OnDestroy {
   readonly deckViewBoxParts = DECK_VIEW_BOX.split(' ')
 
   #unsubs: (() => void)[] = []
+  #entranceTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Latched off once the entrance has played — never re-armed. */
+  readonly #entranceDone = signal(false)
 
   readonly #offer = signal<OfferPayload | null>(null)
   readonly #status = signal<Record<string, RowStatus>>({})
@@ -66,6 +70,25 @@ export class ExampleHivesOfferComponent implements OnInit, OnDestroy {
   readonly examples = computed(() => this.#offer()?.examples ?? [])
   readonly anyAdded = computed(() => Object.values(this.#status()).includes('added'))
   readonly progressCount = computed(() => this.#progress())
+
+  /** Whether the comb should grow in rather than simply be there. The entrance
+   *  plays ONCE per session: the DOM lives inside `@if (visible())`, so CSS
+   *  animations run on every insertion — and `render:cell-count` can oscillate
+   *  (a fresh dev origin installs bundled content, and the count climbs back
+   *  above zero), which would tear the comb down and replay its entrance under
+   *  a participant who is already looking at it. The latch is what makes the
+   *  entrance an opening, not a loop. */
+  readonly entrance = computed(() => this.visible() && !this.#entranceDone())
+
+  constructor() {
+    effect(() => {
+      if (!this.visible() || this.#entranceDone()) return
+      // Not cleared when the effect re-runs, and that is the point: the
+      // entrance is a one-shot, so a surface flickering back into view inside
+      // the animation window must not re-arm it.
+      this.#entranceTimer ??= setTimeout(() => this.#entranceDone.set(true), ENTRANCE_TOTAL_MS)
+    })
+  }
 
   ngOnInit(): void {
     this.#unsubs.push(
@@ -153,6 +176,7 @@ export class ExampleHivesOfferComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     for (const u of this.#unsubs) u()
     this.#unsubs.length = 0
+    if (this.#entranceTimer !== null) clearTimeout(this.#entranceTimer)
   }
 }
 
