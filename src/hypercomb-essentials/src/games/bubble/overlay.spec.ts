@@ -5,8 +5,11 @@ type ArcadeInput = { left: boolean; right: boolean; jump: boolean; blow: boolean
 type Effects = Record<'jump' | 'blow' | 'trap' | 'pop' | 'fruit' | 'hurt' | 'clear', number>
 type FakeEngine = {
   score: number; time: number; state: string; levelIndex: number; lives: number; fx: Effects
+  levels: unknown[]
   update: ReturnType<typeof vi.fn<(dt: number, input: ArcadeInput) => void>>
   restart: ReturnType<typeof vi.fn<() => void>>
+  useLivingLevels: ReturnType<typeof vi.fn<() => void>>
+  installLevel: ReturnType<typeof vi.fn<(index: number, level: unknown) => void>>
 }
 type FakeRenderer = { draw: ReturnType<typeof vi.fn> }
 type FakeAudio = {
@@ -21,18 +24,33 @@ const doubles = vi.hoisted(() => ({
   engines: [] as FakeEngine[], renderers: [] as FakeRenderer[], audio: [] as FakeAudio[],
   effects: (): Effects => ({ jump: 0, blow: 0, trap: 0, pop: 0, fruit: 0, hurt: 0, clear: 0 }),
 }))
+const living = vi.hoisted(() => ({ ensure: vi.fn(), create: vi.fn() }))
+
+vi.mock('./tile-surface.js', () => ({
+  createBubbleTileSurface: living.create,
+}))
 
 vi.mock('./engine.js', () => ({
-  WIDTH: 256, HEIGHT: 224,
+  WIDTH: 320, HEIGHT: 200,
   Engine: class implements FakeEngine {
     score = 0
     time = 0
     state = 'playing'
     levelIndex = 0
     lives = 3
+    levels = Array.from({ length: 100 })
     fx = doubles.effects()
+    // Mirror the real engine's living-round gate: a campaign whose ROUND 01 is
+    // not installed has no static seed to restart into, so restart() refuses.
+    #living = false
+    #installed = new Set<number>()
+    useLivingLevels = vi.fn(() => { this.#living = true; this.#installed.clear() })
+    installLevel = vi.fn((index: number, _level: unknown) => { this.#installed.add(index) })
     update = vi.fn((dt: number, _input: ArcadeInput) => { this.time += dt })
     restart = vi.fn(() => {
+      if (this.#living && !this.#installed.has(0)) {
+        throw new Error('Bubble Bobble ROUND 01 has not loaded from the hive')
+      }
       this.score = 0
       this.time = 0
       this.state = 'playing'
@@ -74,6 +92,10 @@ let observers: Array<{ observe: ReturnType<typeof vi.fn>; disconnect: ReturnType
 
 beforeEach(() => {
   doubles.engines.length = doubles.renderers.length = doubles.audio.length = 0
+  living.ensure.mockReset().mockImplementation((index: number) => ({
+    index, level: { name: `ROUND ${index + 1}` }, roundSegments: [], tiles: [],
+  }))
+  living.create.mockReset().mockImplementation(() => ({ ensureRound: living.ensure }))
   overlays = []
   observers = []
   frames = new Map()
@@ -154,6 +176,9 @@ function frame(delta = 20): void {
   frames.clear()
   for (const callback of callbacks) callback(now)
 }
+async function settle(): Promise<void> {
+  for (let index = 0; index < 6; index++) await Promise.resolve()
+}
 
 function key(game: ReturnType<typeof mount>, code: string, type = 'keydown', keyValue?: string): KeyboardEvent {
   const event = new game.inner.KeyboardEvent(type, {
@@ -186,8 +211,8 @@ describe('BubbleOverlay responsive playfield', () => {
     const { canvas } = mount()
     expect(Number.parseFloat(canvas.style.width)).toBeCloseTo(650, 6)
     expect(Number.parseFloat(canvas.style.height)).toBeCloseTo(487.5, 6)
-    expect(canvas.width).toBe(256)
-    expect(canvas.height).toBe(224)
+    expect(canvas.width).toBe(320)
+    expect(canvas.height).toBe(200)
   })
 
   it('shrinks the display to fit a narrow stage without cropping the logical game surface', () => {
@@ -195,8 +220,8 @@ describe('BubbleOverlay responsive playfield', () => {
     const { canvas } = mount()
     expect(Number.parseFloat(canvas.style.width)).toBeCloseTo(210, 6)
     expect(Number.parseFloat(canvas.style.height)).toBeCloseTo(157.5, 6)
-    expect(canvas.width).toBe(256)
-    expect(canvas.height).toBe(224)
+    expect(canvas.width).toBe(320)
+    expect(canvas.height).toBe(200)
   })
 
   it('uses all available stage height in a wide window without overflowing its width', () => {
@@ -220,12 +245,42 @@ describe('BubbleOverlay responsive playfield', () => {
     expect(Number.parseFloat(canvas.style.height)).toBeCloseTo(300, 6)
     expect(Number.parseFloat(canvas.style.width)).toBeCloseTo(400, 6)
     expect(doc.querySelector('canvas')).toBe(canvas)
-    expect(canvas.width).toBe(256)
-    expect(canvas.height).toBe(224)
+    expect(canvas.width).toBe(320)
+    expect(canvas.height).toBe(200)
   })
 })
 
 describe('BubbleOverlay keyboard isolation', () => {
+  it('keeps play disabled until ROUND 01 has hydrated from living hive tiles', async () => {
+    let hydrate!: (value: { index: number; level: object; roundSegments: never[]; tiles: never[] }) => void
+    living.ensure.mockReturnValueOnce(new Promise(resolve => { hydrate = resolve }))
+    const game = mount()
+    const startButton = game.doc.querySelector<HTMLButtonElement>('.bub-start')!
+    expect(startButton.disabled).toBe(true)
+    expect(startButton.textContent).toBe('Loading\u2026')
+    expect(game.engine.installLevel).not.toHaveBeenCalled()
+    hydrate({ index: 0, level: { name: 'Living ROUND 01' }, roundSegments: [], tiles: [] })
+    await settle()
+    expect(game.engine.installLevel).toHaveBeenCalledWith(0, { name: 'Living ROUND 01' })
+    expect(startButton.disabled).toBe(false)
+    expect(startButton.textContent).toBe('Start game')
+  })
+
+  it('reports a cold hive without using static fallback and retries the living source', () => {
+    living.create.mockImplementationOnce(() => {
+      throw new Error('Hypercomb Bubble Bobble data is still loading; please open the game again')
+    }).mockImplementationOnce(() => ({ ensureRound: living.ensure }))
+    const game = mount()
+    const startButton = game.doc.querySelector<HTMLButtonElement>('.bub-start')!
+    expect(game.doc.querySelector('.bub-cover-title')?.textContent).toBe('Living round unavailable')
+    expect(game.doc.querySelector('.bub-cover-copy')?.textContent).toContain('still loading')
+    expect(startButton.textContent).toBe('Try again')
+    click(game.doc, '.bub-start')
+    expect(living.create).toHaveBeenCalledTimes(2)
+    expect(game.engine.installLevel).toHaveBeenCalledWith(0, expect.anything())
+    expect(startButton.textContent).toBe('Start game')
+  })
+
   it('mounts the local arcade synchronously and keeps game input out of earlier shell capture listeners', () => {
     const shellKey = vi.fn()
     window.addEventListener('keydown', shellKey, true)
@@ -357,9 +412,52 @@ describe('BubbleOverlay pause and restart', () => {
     expect(game.engine.update).toHaveBeenLastCalledWith(expect.any(Number), noInput)
     expect(doubles.renderers[0].draw).toHaveBeenLastCalledWith(game.engine, game.engine.time, 750)
   })
+
+  it('keeps Restart dark and inert until ROUND 01 is installed, then arms it', async () => {
+    let hydrate!: (value: unknown) => void
+    living.ensure.mockReturnValueOnce(new Promise(resolve => { hydrate = resolve }))
+    const game = mount()
+    const restartButton = game.doc.querySelector<HTMLButtonElement>('.bub-restart')!
+    expect(restartButton.disabled).toBe(true)
+    // R is not gated by the disabled attribute, so the handler itself must refuse.
+    expect(() => key(game, 'KeyR')).not.toThrow()
+    expect(game.engine.restart).not.toHaveBeenCalled()
+    hydrate({ index: 0, level: { name: 'Living ROUND 01' }, roundSegments: [], tiles: [] })
+    await settle()
+    expect(restartButton.disabled).toBe(false)
+    expect(() => key(game, 'KeyR')).not.toThrow()
+    expect(game.engine.restart).toHaveBeenCalledOnce()
+  })
+
+  it('re-issues the living load when Restart is used in place of a failed round', () => {
+    living.create
+      .mockImplementationOnce(() => {
+        throw new Error('Hypercomb Bubble Bobble data is still loading; please open the game again')
+      })
+      .mockImplementationOnce(() => ({ ensureRound: living.ensure }))
+    const game = mount()
+    const restartButton = game.doc.querySelector<HTMLButtonElement>('.bub-restart')!
+    expect(restartButton.disabled).toBe(true)
+    expect(() => key(game, 'KeyR')).not.toThrow()
+    expect(game.engine.restart).not.toHaveBeenCalled()
+    // Refused restart retries through the same door as the cover's "Try again".
+    expect(living.create).toHaveBeenCalledTimes(2)
+    expect(game.engine.installLevel).toHaveBeenCalledWith(0, expect.anything())
+    expect(restartButton.disabled).toBe(false)
+  })
 })
 
 describe('BubbleOverlay score and lifecycle', () => {
+  it('hydrates the next living round only when the current round clears', () => {
+    const game = mount()
+    expect(living.ensure).toHaveBeenCalledTimes(1)
+    expect(living.ensure).toHaveBeenLastCalledWith(0)
+    game.engine.state = 'clear'
+    frame()
+    expect(living.ensure).toHaveBeenLastCalledWith(1)
+    expect(game.engine.installLevel).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'ROUND 2' }))
+  })
+
   it('retains a stored best score, persists an improved completed run and offers another game', () => {
     localStorage.setItem(SCORE_KEY, '1000')
     const game = mount()
