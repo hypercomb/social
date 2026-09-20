@@ -213,6 +213,44 @@ describe('chat-thread — turns are contentSig manifests; legacy stays readable'
     expect(new TextDecoder().decode(store.resources.get(record.contentSig)!)).toBe('hello doctrine')
   })
 
+  it('persists the prompt receipt and settled model attempts without request contents', async () => {
+    const prompt = 'a'.repeat(64)
+    const ok = await mod.appendTurn('chat:telemetry', 'assistant', 'measured answer', {
+      prompt,
+      providerId: 'openrouter',
+      model: 'vendor/model',
+      attempts: [{
+        round: 1,
+        attempt: 2,
+        providerId: 'openrouter',
+        model: 'vendor/model',
+        outcome: 'success',
+        category: 'success',
+        durationMs: 125,
+        outputEmitted: true,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadTokens: 80,
+          reasoningTokens: 5,
+          estimatedCostUsd: 0.00012,
+        },
+      }],
+    })
+    expect(ok).toBe(true)
+
+    const turns = await mod.readTurns('chat:telemetry')
+    expect(turns[0]).toMatchObject({
+      prompt,
+      attempts: [{
+        outcome: 'success',
+        providerId: 'openrouter',
+        usage: { inputTokens: 100, cacheReadTokens: 80, reasoningTokens: 5 },
+      }],
+    })
+    expect(JSON.stringify(turns[0])).not.toContain('secret prompt')
+  })
+
   it('identical text across turns and threads dedups to one resource', async () => {
     await mod.appendTurn('chat:shape-a', 'user', 'same words')
     await mod.appendTurn('chat:shape-b', 'assistant', 'same words')

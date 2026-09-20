@@ -86,10 +86,22 @@ export type LlmToolCallDelta = {
   readonly arguments?: string
 }
 
+/** Token accounting reported by a provider, when the wire response includes it. */
+export type LlmTokenUsage = {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly cacheReadTokens?: number
+  readonly cacheWriteTokens?: number
+  readonly reasoningTokens?: number
+  readonly totalTokens?: number
+}
+
 /** Normalized output of one provider streaming frame. */
 export type LlmStreamEvent = {
   readonly text?: string
   readonly toolCallDeltas?: readonly LlmToolCallDelta[]
+  /** Usage is normally present only on the terminal usage frame. */
+  readonly usage?: LlmTokenUsage
   /** Present only on the provider's terminal choice frame. */
   readonly finishReason?: string
 }
@@ -158,6 +170,8 @@ export type LlmCallResult = {
   readonly stopReason: string
   readonly inputTokens: number
   readonly outputTokens: number
+  /** Additional accounting dimensions reported by the provider. */
+  readonly usage?: LlmTokenUsage
   readonly model: string
 }
 
@@ -215,6 +229,9 @@ export type LlmProviderDescriptor = {
   /** A configurator, not an answerer: where models are chosen, never an
    *  automatic pick itself (OpenRouter). Still callable when named. */
   readonly configurator?: boolean
+
+  /** Structured decision service, never a text worker or a chat-completions call. */
+  readonly decisionOnly?: boolean
 
   /**
    * HONESTY FLAG. Only `agent-bridge` responders can walk the participant's

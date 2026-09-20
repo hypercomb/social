@@ -17,6 +17,7 @@ import type {
   LlmHttpRequest,
   LlmRequest,
   LlmStreamEvent,
+  LlmTokenUsage,
   LlmToolCall,
   LlmToolCallDelta,
 } from './llm-provider.types.js'
@@ -117,8 +118,39 @@ type OpenAiBody = {
     message?: { content?: string | null; tool_calls?: unknown }
     finish_reason?: string
   }[]
-  usage?: { prompt_tokens?: number; completion_tokens?: number }
+  usage?: OpenAiUsage
   model?: string
+}
+
+type OpenAiUsage = {
+  prompt_tokens?: unknown
+  completion_tokens?: unknown
+  total_tokens?: unknown
+  prompt_tokens_details?: { cached_tokens?: unknown }
+  completion_tokens_details?: { reasoning_tokens?: unknown }
+  cache_read_input_tokens?: unknown
+  cache_write_input_tokens?: unknown
+}
+
+const tokenCount = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+
+const openAiUsage = (value: OpenAiUsage | undefined): LlmTokenUsage | undefined => {
+  if (!value || typeof value !== 'object') return undefined
+  const usage: LlmTokenUsage = {
+    ...(tokenCount(value.prompt_tokens) !== undefined ? { inputTokens: tokenCount(value.prompt_tokens) } : {}),
+    ...(tokenCount(value.completion_tokens) !== undefined ? { outputTokens: tokenCount(value.completion_tokens) } : {}),
+    ...(tokenCount(value.prompt_tokens_details?.cached_tokens) !== undefined
+      ? { cacheReadTokens: tokenCount(value.prompt_tokens_details?.cached_tokens) } : {}),
+    ...(tokenCount(value.cache_read_input_tokens) !== undefined
+      ? { cacheReadTokens: tokenCount(value.cache_read_input_tokens) } : {}),
+    ...(tokenCount(value.cache_write_input_tokens) !== undefined
+      ? { cacheWriteTokens: tokenCount(value.cache_write_input_tokens) } : {}),
+    ...(tokenCount(value.completion_tokens_details?.reasoning_tokens) !== undefined
+      ? { reasoningTokens: tokenCount(value.completion_tokens_details?.reasoning_tokens) } : {}),
+    ...(tokenCount(value.total_tokens) !== undefined ? { totalTokens: tokenCount(value.total_tokens) } : {}),
+  }
+  return Object.keys(usage).length ? usage : undefined
 }
 
 type OpenAiToolCall = {
@@ -162,8 +194,9 @@ export const openAiResponse = (json: unknown, request: LlmRequest): LlmCallResul
     text: typeof choice?.message?.content === 'string' ? choice.message.content : '',
     ...(toolCalls.length ? { toolCalls } : {}),
     stopReason: choice?.finish_reason ?? 'stop',
-    inputTokens: body.usage?.prompt_tokens ?? 0,
-    outputTokens: body.usage?.completion_tokens ?? 0,
+    inputTokens: tokenCount(body.usage?.prompt_tokens) ?? 0,
+    outputTokens: tokenCount(body.usage?.completion_tokens) ?? 0,
+    ...(openAiUsage(body.usage) ? { usage: openAiUsage(body.usage) } : {}),
     model: body.model ?? request.model,
   }
 }
@@ -173,6 +206,7 @@ type OpenAiStreamFrame = {
     delta?: { content?: unknown; tool_calls?: unknown }
     finish_reason?: unknown
   }[]
+  usage?: OpenAiUsage
 }
 
 type OpenAiToolCallDelta = OpenAiToolCall & { index?: unknown }
@@ -220,17 +254,20 @@ const openAiToolCallDeltas = (value: unknown): LlmToolCallDelta[] => {
 }
 
 export const openAiStreamEvent = (event: unknown): string | LlmStreamEvent => {
-  const choice = ((event ?? {}) as OpenAiStreamFrame).choices?.[0]
+  const frame = (event ?? {}) as OpenAiStreamFrame
+  const choice = frame.choices?.[0]
   const delta = choice?.delta
   const text = typeof delta?.content === 'string' ? delta.content : ''
   const toolCallDeltas = openAiToolCallDeltas(delta?.tool_calls)
   const finishReason = typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined
+  const usage = openAiUsage(frame.usage)
   // Preserve the long-standing text-only adapter contract for every frame
   // that carries no calls. Dispatch also accepts the richer union below.
-  if (!toolCallDeltas.length && finishReason === undefined) return text
+  if (!toolCallDeltas.length && finishReason === undefined && usage === undefined) return text
   return {
     ...(text ? { text } : {}),
     ...(toolCallDeltas.length ? { toolCallDeltas } : {}),
     ...(finishReason !== undefined ? { finishReason } : {}),
+    ...(usage ? { usage } : {}),
   }
 }

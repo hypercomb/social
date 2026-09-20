@@ -11,17 +11,53 @@ import type {
   LlmHttpRequest,
   LlmProviderDescriptor,
   LlmRequest,
+  LlmStreamEvent,
+  LlmTokenUsage,
 } from './llm-provider.types.js'
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 type GoogleBody = {
   candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[]
-  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number }
+  usageMetadata?: GoogleUsage
   modelVersion?: string
 }
 
-export const googleStreamEvent = (event: unknown): string => textOf(event)
+type GoogleUsage = {
+  promptTokenCount?: unknown
+  candidatesTokenCount?: unknown
+  totalTokenCount?: unknown
+  cachedContentTokenCount?: unknown
+  thoughtsTokenCount?: unknown
+}
+
+const tokenCount = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+
+const googleUsage = (value: GoogleUsage | undefined): LlmTokenUsage | undefined => {
+  if (!value) return undefined
+  const usage: LlmTokenUsage = {
+    ...(tokenCount(value.promptTokenCount) !== undefined ? { inputTokens: tokenCount(value.promptTokenCount) } : {}),
+    ...(tokenCount(value.candidatesTokenCount) !== undefined ? { outputTokens: tokenCount(value.candidatesTokenCount) } : {}),
+    ...(tokenCount(value.totalTokenCount) !== undefined ? { totalTokens: tokenCount(value.totalTokenCount) } : {}),
+    ...(tokenCount(value.cachedContentTokenCount) !== undefined ? { cacheReadTokens: tokenCount(value.cachedContentTokenCount) } : {}),
+    ...(tokenCount(value.thoughtsTokenCount) !== undefined ? { reasoningTokens: tokenCount(value.thoughtsTokenCount) } : {}),
+  }
+  return Object.keys(usage).length ? usage : undefined
+}
+
+export const googleStreamEvent = (event: unknown): string | LlmStreamEvent => {
+  const body = (event ?? {}) as GoogleBody
+  const text = textOf(body)
+  const usage = googleUsage(body.usageMetadata)
+  const finishReason = body.candidates?.[0]?.finishReason
+  if (!usage && finishReason === undefined) return text
+  return {
+    ...(text ? { text } : {}),
+    ...(usage ? { usage } : {}),
+    ...(finishReason !== undefined ? { finishReason } : {}),
+  }
+}
 
 const textOf = (json: unknown): string =>
   ((json ?? {}) as GoogleBody).candidates?.[0]?.content?.parts
@@ -53,11 +89,13 @@ export const googleRequest = (base: string, request: LlmRequest): LlmHttpRequest
 
 export const googleResponse = (json: unknown, request: LlmRequest): LlmCallResult => {
   const body = (json ?? {}) as GoogleBody
+  const usage = googleUsage(body.usageMetadata)
   return {
     text: textOf(json),
     stopReason: body.candidates?.[0]?.finishReason ?? 'STOP',
-    inputTokens: body.usageMetadata?.promptTokenCount ?? 0,
-    outputTokens: body.usageMetadata?.candidatesTokenCount ?? 0,
+    inputTokens: tokenCount(body.usageMetadata?.promptTokenCount) ?? 0,
+    outputTokens: tokenCount(body.usageMetadata?.candidatesTokenCount) ?? 0,
+    ...(usage ? { usage } : {}),
     model: body.modelVersion ?? request.model,
   }
 }

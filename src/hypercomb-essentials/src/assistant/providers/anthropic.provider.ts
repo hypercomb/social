@@ -16,6 +16,8 @@ import type {
   LlmHttpRequest,
   LlmProviderDescriptor,
   LlmRequest,
+  LlmStreamEvent,
+  LlmTokenUsage,
 } from './llm-provider.types.js'
 
 export const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages'
@@ -24,15 +26,53 @@ export const ANTHROPIC_VERSION = '2023-06-01'
 type AnthropicBody = {
   content?: { text?: string }[]
   stop_reason?: string
-  usage?: { input_tokens?: number; output_tokens?: number }
+  usage?: AnthropicUsage
   model?: string
 }
 
-type AnthropicStreamFrame = { type?: string; delta?: { text?: string } }
+type AnthropicUsage = {
+  input_tokens?: unknown
+  output_tokens?: unknown
+  cache_read_input_tokens?: unknown
+  cache_creation_input_tokens?: unknown
+}
 
-export const anthropicStreamEvent = (event: unknown): string => {
+type AnthropicStreamFrame = {
+  type?: string
+  message?: { usage?: AnthropicUsage }
+  usage?: AnthropicUsage
+  delta?: { text?: string; stop_reason?: string }
+}
+
+const tokenCount = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+
+const anthropicUsage = (value: AnthropicUsage | undefined): LlmTokenUsage | undefined => {
+  if (!value) return undefined
+  const inputTokens = tokenCount(value.input_tokens)
+  const outputTokens = tokenCount(value.output_tokens)
+  const cacheReadTokens = tokenCount(value.cache_read_input_tokens)
+  const cacheWriteTokens = tokenCount(value.cache_creation_input_tokens)
+  const usage: LlmTokenUsage = {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+  }
+  return Object.keys(usage).length ? usage : undefined
+}
+
+export const anthropicStreamEvent = (event: unknown): string | LlmStreamEvent => {
   const frame = (event ?? {}) as AnthropicStreamFrame
-  return frame.type === 'content_block_delta' ? frame.delta?.text ?? '' : ''
+  const text = frame.type === 'content_block_delta' ? frame.delta?.text ?? '' : ''
+  const usage = anthropicUsage(frame.message?.usage ?? frame.usage)
+  const finishReason = typeof frame.delta?.stop_reason === 'string' ? frame.delta.stop_reason : undefined
+  if (!usage && finishReason === undefined) return text
+  return {
+    ...(text ? { text } : {}),
+    ...(usage ? { usage } : {}),
+    ...(finishReason !== undefined ? { finishReason } : {}),
+  }
 }
 
 /** Build an Anthropic `/v1/messages` POST against any endpoint that speaks
@@ -69,11 +109,13 @@ export const anthropicRequest = (url: string, request: LlmRequest): LlmHttpReque
 
 export const anthropicResponse = (json: unknown, request: LlmRequest): LlmCallResult => {
   const body = (json ?? {}) as AnthropicBody
+  const usage = anthropicUsage(body.usage)
   return {
     text: body.content?.[0]?.text ?? '',
     stopReason: body.stop_reason ?? 'end_turn',
-    inputTokens: body.usage?.input_tokens ?? 0,
-    outputTokens: body.usage?.output_tokens ?? 0,
+    inputTokens: tokenCount(body.usage?.input_tokens) ?? 0,
+    outputTokens: tokenCount(body.usage?.output_tokens) ?? 0,
+    ...(usage ? { usage } : {}),
     model: body.model ?? request.model,
   }
 }

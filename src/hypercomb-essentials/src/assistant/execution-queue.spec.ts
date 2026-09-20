@@ -14,6 +14,17 @@ const ask = (over: Partial<Parameters<InstanceType<typeof ExecutionQueueStore>['
 })
 
 describe('the execution queue', () => {
+  it('keeps an uncertain decision under participant review through policy changes', async () => {
+    const queue = new ExecutionQueueStore()
+    queue.setMode('everything')
+    const entry = queue.request(ask({ forceReview: true }))
+    expect(queue.requests().find(row => row.id === entry.id)?.state).toBe('waiting')
+    queue.setMode('manual')
+    queue.setMode('everything')
+    expect(queue.requests().find(row => row.id === entry.id)?.state).toBe('waiting')
+    queue.decide(entry.id, 'run')
+    expect(await entry.decision).toBe('run')
+  })
   beforeEach(() => {
     localStorage.clear()
     llmHiveAccess.setMayRead('openrouter', false)

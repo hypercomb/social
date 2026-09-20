@@ -288,6 +288,7 @@ const hasTier = (provider: LlmProviderDescriptor, tier: LlmTier): boolean =>
 
 /** Hard requirements. Failing one of these means "cannot do this work". */
 const canDo = (provider: LlmProviderDescriptor, need: ModelNeed): boolean => {
+  if (provider.decisionOnly) return false
   if (need.minContext) {
     // Only a PUBLISHED window can rule a provider out; an unknown one might fit.
     const model = provider.models.find(m => m.id === modelForTier(provider, need.tier ?? 'balanced'))
@@ -411,11 +412,13 @@ export const chooseProvider = (need: ModelNeed = {}): LlmProviderDescriptor | un
 /** The wire model id this provider should use for the tier asked for — the
  *  other half of a choice: picking Claude for `fast` work should mean Haiku,
  *  not whatever its default happens to be. */
-export const modelForTier = (provider: LlmProviderDescriptor, tier: LlmTier = 'balanced'): string =>
+export const modelForTier = (provider: LlmProviderDescriptor, tier: LlmTier = 'balanced'): string => {
   // A model the participant CHOSE for this provider (llm-model-choice.ts)
   // answers every tier; otherwise the roster ladder, as before.
-  llmModelChoice.chosen(provider.id)
+  const chosen = llmModelChoice.chosen(provider.id)
+  return (chosen && !llmProviderRegistry().providerForModel(chosen)?.decisionOnly ? chosen : undefined)
     ?? provider.models.find(m => m.tier === tier)?.id ?? provider.defaultModel
+}
 
 /** One line explaining a choice, for a surface that wants to show its work. */
 export const explainChoice = (need: ModelNeed = {}): string => {

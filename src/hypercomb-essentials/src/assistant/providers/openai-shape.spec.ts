@@ -124,6 +124,7 @@ describe('the OpenAI-compatible response shape', () => {
       stopReason: 'tool_calls',
       inputTokens: 17,
       outputTokens: 9,
+      usage: { inputTokens: 17, outputTokens: 9 },
       model: 'qwen3:8b-q4',
     })
   })
@@ -218,10 +219,34 @@ describe('the OpenAI-compatible stream shape', () => {
     })).toThrow('malformed tool-call index')
   })
 
-  it('marks a terminal tool frame and ignores usage frames that carry no output', () => {
+  it('marks terminal frames and normalizes the usage-only frame', () => {
     expect(openAiStreamEvent({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }))
       .toEqual({ finishReason: 'tool_calls' })
-    expect(openAiStreamEvent({ usage: { prompt_tokens: 4 } })).toBe('')
+    expect(openAiStreamEvent({ usage: {
+      prompt_tokens: 4,
+      completion_tokens: 6,
+      total_tokens: 10,
+      prompt_tokens_details: { cached_tokens: 2 },
+      completion_tokens_details: { reasoning_tokens: 3 },
+    } })).toEqual({
+      usage: {
+        inputTokens: 4,
+        outputTokens: 6,
+        cacheReadTokens: 2,
+        reasoningTokens: 3,
+        totalTokens: 10,
+      },
+    })
+  })
+
+  it('keeps usage and finish reason together when a server combines them', () => {
+    expect(openAiStreamEvent({
+      choices: [{ delta: {}, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+    })).toEqual({
+      finishReason: 'stop',
+      usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3 },
+    })
   })
 
   it('preserves the original string result for text-only frames', () => {
