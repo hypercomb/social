@@ -15,7 +15,7 @@
 import { llmModelChoice } from '../llm-model-choice.js'
 import { llmProviderRegistry } from '../llm-provider-registry.js'
 import type { LlmProviderDescriptor, LlmTier } from './llm-provider.types.js'
-import { cachedOpenRouterCatalog, openRouterCatalogEvents } from './openrouter-catalog.js'
+import { cachedOpenRouterCatalog, isOpenRouterBatchModel, openRouterCatalogEvents } from './openrouter-catalog.js'
 import { openRouterStages, stageFor } from './openrouter-stages.js'
 import { OPENROUTER_PROVIDER } from './openrouter.provider.js'
 import { JEV_ENDPOINT, JEV_MODEL } from '../jev-decision.js'
@@ -85,7 +85,7 @@ export const openRouterInstance = (modelId: string): LlmProviderDescriptor => {
 export const syncOpenRouterInstances = (): void => {
   const registry = llmProviderRegistry()
   const wanted = new Map(llmModelChoice.saved(OPENROUTER_PROVIDER.id)
-    .filter(model => !aboveStages(model))
+    .filter(model => !aboveStages(model) && !isOpenRouterBatchModel(model))
     .map(model => [instanceId(model), model] as const))
   for (const provider of registry.all()) {
     if (isOpenRouterInstance(provider.id) && !wanted.has(provider.id)) registry.unregister(provider.id)

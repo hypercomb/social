@@ -42,7 +42,7 @@ import { isAddedProvider } from './providers/provider-spec.js'
 import type { LlmProviderDescriptor } from './providers/llm-provider.types.js'
 import { LOCAL_HOST_STORAGE_KEY, localLlmHost } from './providers/local.provider.js'
 import {
-  cachedOpenRouterCatalog, fetchOpenRouterCatalog, fetchOpenRouterHosts, type OpenRouterCatalogEntry,
+  cachedOpenRouterCatalog, fetchOpenRouterCatalog, fetchOpenRouterHosts, isOpenRouterBatchModel, type OpenRouterCatalogEntry,
 } from './providers/openrouter-catalog.js'
 import { openRouterRouting } from './providers/openrouter-routing.js'
 import { llmModelChoice } from './llm-model-choice.js'
@@ -1734,6 +1734,9 @@ export class ProvidersWindowView extends EventTarget {
     const line = document.createElement('div')
     line.className = 'hc-provider-model-line'
     line.appendChild(this.#mono(modelId))
+    if (isOpenRouterBatchModel(modelId)) {
+      line.appendChild(document.createTextNode(this.#t('providers.batchOnly', 'Batch API only · unavailable for live chat')))
+    }
     if (instance?.decisionOnly) {
       line.appendChild(document.createTextNode(this.#t('providers.decisionOnly', 'Decisions · evaluates directions and actions')))
     }

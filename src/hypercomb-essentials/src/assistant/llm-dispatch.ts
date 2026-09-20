@@ -36,6 +36,7 @@ import {
   noteLocalServerUnreachable,
 } from './providers/local-liveness.js'
 import { chooseProvider, modelForTier, rankProviders, type ModelNeed } from './model-policy.js'
+import { isOpenRouterBatchModel } from './providers/openrouter-catalog.js'
 import { credentialOwner } from './providers/credential-owner.js'
 import { llmProviderRegistry, publishService, type LlmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
@@ -262,6 +263,9 @@ export const activeProviders = (): LlmProviderDescriptor[] =>
  */
 export const resolveProvider = (call: Pick<LlmCall, 'providerId' | 'model' | 'need'>): LlmProviderDescriptor => {
   const reg = registry()
+  if (call.model && isOpenRouterBatchModel(call.model)) {
+    throw new LlmDispatchError('This OpenRouter model requires the asynchronous Batch API and cannot answer live chat. Choose a non-batch model.', 'openrouter', call.model)
+  }
   if (call.providerId) {
     const named = reg.get(call.providerId)
     if (!named) {
