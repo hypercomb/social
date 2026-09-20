@@ -49,8 +49,12 @@ service, not a chat model. Its endpoint is
 `https://openrouter.ai/api/alpha/decisions`, using the existing OpenRouter key
 and provider-routing preferences. There is no extra SDK dependency.
 
-Jev mode requires an OpenRouter worker, an enabled OpenRouter account and worker,
-and the OpenRouter hive read grant. It does not forward a local, bridge, peer,
+Jev mode requires Jev Latest to be added and enabled in the provider picker,
+an enabled OpenRouter account and worker, and the OpenRouter hive read grant.
+The picker resolves Jev's per-model metadata when the general catalogue omits
+it. Jev is decision-only and cannot be selected as a chat worker. Its Test
+action sends a small synthetic fixture and displays returned tokens and cost.
+It does not forward a local, bridge, peer,
 or other vendor's conversation. Every request/evidence/plan field must already
 occur in the current OpenRouter exchange; doctrine must be a verbatim part of
 its system instructions. The service neither walks the hive nor resolves sigs.
@@ -81,6 +85,8 @@ Snapshots are checked before and after decisions and immediately before action.
   reusable cache across turns: the latest alias can move.
 - Hive projections keep their existing signature/version invalidation rules.
   Nothing here mints an optimization-phase cache or changes hive truth.
+- Each completed Jev turn reports worker and Jev input/output tokens separately.
+  Missing provider measurements are unavailable or partial, never guessed.
 
 Initial automatic gates: fit >= .90, rules >= .95, evidence >= .90. For multiple
 options, Choice confidence >= .85, winning probability >= .85, and margin over
