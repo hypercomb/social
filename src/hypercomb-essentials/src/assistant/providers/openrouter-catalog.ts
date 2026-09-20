@@ -32,6 +32,12 @@ export type OpenRouterCatalogEntry = {
 
 const CATALOG_URL = 'https://openrouter.ai/api/v1/models'
 
+/** Asynchronous Batch API variants cannot answer the live chat-completions
+ * route. Keep the exact saved id for display/removal, never substitute its
+ * base model silently (its price and execution semantics differ). */
+export const isOpenRouterBatchModel = (modelId: string): boolean =>
+  /^~?[a-z0-9._-]+\/[a-z0-9._:~-]+:batch$/i.test(modelId)
+
 /** `loaded` fires when a fresh catalogue lands — model providers take their
  *  exact names from it (openrouter-instances.ts). */
 export const openRouterCatalogEvents = new EventTarget()
@@ -81,7 +87,7 @@ export const fetchOpenRouterCatalog = async (): Promise<readonly OpenRouterCatal
     }
     const entries: OpenRouterCatalogEntry[] = (body.data ?? [])
       .filter((row): row is { id: string; name?: unknown; pricing?: { prompt?: unknown; completion?: unknown }; context_length?: unknown } =>
-        typeof row?.id === 'string' && row.id.length > 0)
+        typeof row?.id === 'string' && row.id.length > 0 && !isOpenRouterBatchModel(row.id))
       .map(row => ({
         id: row.id,
         name: typeof row.name === 'string' && row.name ? row.name : row.id,

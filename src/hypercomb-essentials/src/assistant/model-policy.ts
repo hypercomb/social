@@ -38,6 +38,7 @@
 import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
 import { llmModelChoice } from './llm-model-choice.js'
+import { isOpenRouterBatchModel } from './providers/openrouter-catalog.js'
 import { foldedIntoOpenRouter } from './providers/openrouter-supersedes.js'
 import { credentialOwner } from './providers/credential-owner.js'
 import { localModelServerUp } from './providers/local-liveness.js'
@@ -289,6 +290,7 @@ const hasTier = (provider: LlmProviderDescriptor, tier: LlmTier): boolean =>
 /** Hard requirements. Failing one of these means "cannot do this work". */
 const canDo = (provider: LlmProviderDescriptor, need: ModelNeed): boolean => {
   if (provider.decisionOnly) return false
+  if (provider.vendor === 'openrouter' && isOpenRouterBatchModel(provider.defaultModel)) return false
   if (need.minContext) {
     // Only a PUBLISHED window can rule a provider out; an unknown one might fit.
     const model = provider.models.find(m => m.id === modelForTier(provider, need.tier ?? 'balanced'))
@@ -416,7 +418,8 @@ export const modelForTier = (provider: LlmProviderDescriptor, tier: LlmTier = 'b
   // A model the participant CHOSE for this provider (llm-model-choice.ts)
   // answers every tier; otherwise the roster ladder, as before.
   const chosen = llmModelChoice.chosen(provider.id)
-  return (chosen && !llmProviderRegistry().providerForModel(chosen)?.decisionOnly ? chosen : undefined)
+  return (chosen && !(provider.vendor === 'openrouter' && isOpenRouterBatchModel(chosen))
+    && !llmProviderRegistry().providerForModel(chosen)?.decisionOnly ? chosen : undefined)
     ?? provider.models.find(m => m.tier === tier)?.id ?? provider.defaultModel
 }
 

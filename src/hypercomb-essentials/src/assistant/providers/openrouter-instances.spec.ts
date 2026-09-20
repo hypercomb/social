@@ -82,7 +82,7 @@ describe('every model added through OpenRouter is its own provider', () => {
   })
 
   it.each([
-    'google/gemini-2.5-flash-lite:batch',
+    'google/gemini-2.5-flash-lite',
     DEEPSEEK,
   ])('sends %s to authenticated OpenRouter chat completions', model => {
     llmModelChoice.add('openrouter', model)
@@ -94,6 +94,22 @@ describe('every model added through OpenRouter is its own provider', () => {
     expect(wire.init.method).toBe('POST')
     expect(wire.init.headers).toMatchObject({ Authorization: `Bearer ${KEY}` })
     expect(JSON.parse(String(wire.init.body))).toMatchObject({ model, messages: [{ role: 'user', content: 'hi' }] })
+  })
+
+  it('keeps a saved batch model removable but never routes live work to it', async () => {
+    const batch = 'google/gemini-2.5-flash-lite:batch'
+    llmModelChoice.add('openrouter', batch)
+    llmKeyStore.set('openrouter', KEY)
+    expect(llmModelChoice.saved('openrouter')).toContain(batch)
+    expect(llmProviderRegistry().get(instanceId(batch))).toBeUndefined()
+    const { routeCandidates, callModel } = await import('../llm-dispatch.js')
+    expect(routeCandidates({ fallbackWithin: 'openrouter' }).map(provider => provider.id)).not.toContain(instanceId(batch))
+    await expect(callModel({ model: batch, messages: [{ role: 'user', content: 'hi' }] })).rejects.toThrow('Batch API')
+    llmModelChoice.choose('openrouter', batch)
+    const { OPENROUTER_PROVIDER } = await import('./openrouter.provider.js')
+    const { modelForTier } = await import('../model-policy.js')
+    expect(modelForTier(OPENROUTER_PROVIDER, 'fast')).toBe('google/gemini-2.5-flash-lite')
+    expect(() => OPENROUTER_PROVIDER.toRequest({ model: batch, apiKey: KEY, messages: [] })).toThrow('Batch API')
   })
 
   it('reads under the OpenRouter grant and budget', () => {
