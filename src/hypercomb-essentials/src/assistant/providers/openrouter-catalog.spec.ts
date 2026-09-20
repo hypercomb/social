@@ -23,6 +23,12 @@ describe('decision model discovery', () => {
     }))
     expect((await fetchOpenRouterCatalog()).map(e => e.id)).toEqual(['example/chat'])
   })
+  it('keeps Jev discoverable when the general chat catalogue fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/endpoints')
+      ? { ok: true, json: async () => ({ data: { id: JEV_MODEL, name: 'TypeSafe: Jev Latest', architecture: { output_modalities: ['decisions'] } } }) }
+      : { ok: false, status: 503 }))
+    expect(await fetchOpenRouterCatalog()).toContainEqual({ id: JEV_MODEL, name: 'TypeSafe: Jev Latest', decisionOnly: true })
+  })
   it('never duplicates Jev if OpenRouter begins including it in the general list', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ ok: true, json: async () => url.endsWith('/endpoints')
       ? { data: { id: JEV_MODEL, architecture: { output_modalities: ['decisions'] } } }

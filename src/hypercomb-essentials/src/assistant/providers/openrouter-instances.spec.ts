@@ -81,6 +81,21 @@ describe('every model added through OpenRouter is its own provider', () => {
     expect(request.model).toBe(SONNET)
   })
 
+  it.each([
+    'google/gemini-2.5-flash-lite:batch',
+    DEEPSEEK,
+  ])('sends %s to authenticated OpenRouter chat completions', model => {
+    llmModelChoice.add('openrouter', model)
+    llmKeyStore.set('openrouter', KEY)
+    const provider = llmProviderRegistry().get(instanceId(model))!
+    const request = buildRequest(provider, { messages: [{ role: 'user', content: 'hi' }] })
+    const wire = provider.toRequest(request)
+    expect(wire.url).toBe('https://openrouter.ai/api/v1/chat/completions')
+    expect(wire.init.method).toBe('POST')
+    expect(wire.init.headers).toMatchObject({ Authorization: `Bearer ${KEY}` })
+    expect(JSON.parse(String(wire.init.body))).toMatchObject({ model, messages: [{ role: 'user', content: 'hi' }] })
+  })
+
   it('reads under the OpenRouter grant and budget', () => {
     llmModelChoice.add('openrouter', SONNET)
     expect(llmHiveAccess.mayRead(instanceId(SONNET))).toBe(false)

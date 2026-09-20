@@ -34,12 +34,32 @@ describe('Jev decision gates', () => {
     raw.answers.direction = { type: 'choice', choice: 'none', confidence: 1, probabilities: { a: 0, b: 0, none: 1 } }
     expect(jevResult(raw, input).outcome).toBe('participant')
   })
-  it('fails closed on missing answers, foreign choices and invalid distributions', () => {
+  it('keeps a valid choice and billed usage when optional confidence data is absent', () => {
+    const raw = response()
+    const direction: { type: string; choice: string; confidence?: number; probabilities?: Record<string, number> } = raw.answers.direction
+    delete direction.confidence
+    delete direction.probabilities
+    expect(jevResult(raw, input)).toMatchObject({
+      outcome: 'participant', model: 'typesafe/jev-resolved',
+      answers: { direction: { type: 'choice', choice: 'a' } },
+      usage: { inputTokens: 123, outputTokens: 0, cost: 0.00001 },
+    })
+    direction.confidence = 0.96
+    expect(jevResult(raw, input).outcome).toBe('participant')
+    direction.probabilities = { a: 0.97, b: 0.02, none: 0.01 }
+    expect(jevResult(raw, input).outcome).toBe('selected')
+  })
+  it('fails closed on missing answers and foreign choices, and defers weak distributions', () => {
     expect(() => jevResult({ answers: {} }, input)).toThrow()
     const raw = response(); raw.answers.direction.choice = 'execute'
     expect(() => jevResult(raw, input)).toThrow()
     raw.answers.direction.choice = 'a'; raw.answers.direction.probabilities.a = Number.NaN
     expect(() => jevResult(raw, input)).toThrow()
+    const direction: { probabilities: Record<string, number> } = raw.answers.direction
+    direction.probabilities = { a: 0.9 }
+    expect(jevResult(raw, input).outcome).toBe('participant')
+    direction.probabilities = { a: 0.9, b: 0.05, none: 0.01 }
+    expect(jevResult(raw, input).outcome).toBe('participant')
   })
   it('evaluates one action without inventing a competing alternative', () => {
     const one = { ...input, proposals: [input.proposals[0]] }

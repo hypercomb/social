@@ -66,9 +66,19 @@ export const fetchOpenRouterCatalog = async (): Promise<readonly OpenRouterCatal
       .then(body => body?.data?.id === JEV_MODEL && body.data.architecture?.output_modalities?.includes('decisions')
         ? { id: JEV_MODEL, name: String(body.data.name || 'TypeSafe: Jev Latest'), decisionOnly: true } : undefined)
       .catch(() => undefined)
-    const response = await fetch(CATALOG_URL)
-    if (!response.ok) throw new Error(`OpenRouter catalogue request failed (${response.status})`)
-    const body = await response.json() as CatalogBody
+    let body: CatalogBody
+    let catalogueFailure: unknown
+    try {
+      const response = await fetch(CATALOG_URL)
+      if (!response.ok) throw new Error(`OpenRouter catalogue request failed (${response.status})`)
+      body = await response.json() as CatalogBody
+    } catch (error) {
+      // Jev's alias metadata is independent of the general chat catalogue.
+      // Keep it discoverable when that list fails, while preserving the real
+      // catalogue error if neither endpoint is available.
+      catalogueFailure = error
+      body = { data: [] }
+    }
     const entries: OpenRouterCatalogEntry[] = (body.data ?? [])
       .filter((row): row is { id: string; name?: unknown; pricing?: { prompt?: unknown; completion?: unknown }; context_length?: unknown } =>
         typeof row?.id === 'string' && row.id.length > 0)
@@ -82,6 +92,7 @@ export const fetchOpenRouterCatalog = async (): Promise<readonly OpenRouterCatal
       }))
       .sort((a, b) => a.id.localeCompare(b.id))
     const jev = await decision
+    if (catalogueFailure && !jev) throw catalogueFailure
     if (jev && !entries.some(entry => entry.id === jev.id)) entries.push(jev)
     cached = entries
     cachedAt = Date.now()

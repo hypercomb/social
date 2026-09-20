@@ -52,8 +52,11 @@ export class JevDecisionService {
   async test(signal?: AbortSignal): Promise<JevResult> {
     return this.#request(jevInput({
       request: 'Choose the blue circle.', doctrine: 'Follow the request.',
-      evidence: 'A blue circle is available.',
-      proposals: [{ id: 'blue', label: 'Blue circle', plan: 'Choose the blue circle.' }],
+      evidence: 'A blue circle and a red circle are available.',
+      proposals: [
+        { id: 'blue', label: 'Blue circle', plan: 'Choose the blue circle.' },
+        { id: 'red', label: 'Red circle', plan: 'Choose the red circle.' },
+      ],
     }), signal)
   }
 
