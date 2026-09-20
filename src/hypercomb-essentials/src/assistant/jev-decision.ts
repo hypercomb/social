@@ -94,18 +94,27 @@ export const jevResult = (raw: unknown, input: JevInput): JevResult => {
     if (values[1] <= 0.05) rejected.add(proposal.id)
   }
   let selected = input.proposals.length === 1 ? input.proposals[0].id : undefined
+  let uncertainMetadata = false
   if (input.proposals.length > 1) {
     const answer = object(answers['direction'])
-    const distribution = object(answer['probabilities'])
     const keys = [...input.proposals.map(p => p.id), 'none']
-    if (answer['type'] !== 'choice' || typeof answer['choice'] !== 'string' || !keys.includes(answer['choice'])
-      || Object.keys(distribution).length !== keys.length) throw new Error('Jev returned an unknown choice')
-    const probabilities = keys.map(key => probability(distribution[key]))
-    if (Math.abs(probabilities.reduce((a, b) => a + b, 0) - 1) > 0.025) throw new Error('Jev returned an invalid distribution')
-    const confidence = probability(answer['confidence'])
-    const winner = probability(distribution[answer['choice']])
-    const runnerUp = Math.max(...keys.filter(key => key !== answer['choice']).map(key => probability(distribution[key])))
-    selected = confidence >= 0.85 && winner >= 0.85 && winner - runnerUp >= 0.2 ? answer['choice'] : undefined
+    if (answer['type'] !== 'choice' || typeof answer['choice'] !== 'string' || !keys.includes(answer['choice']))
+      throw new Error('Jev returned an unknown choice')
+    // OpenRouter permits both fields to be absent. The choice is still a
+    // valid billed answer, but without calibrated evidence for our automatic
+    // gate the participant must decide. Validate either field when supplied.
+    const distribution = answer['probabilities'] === undefined ? undefined : object(answer['probabilities'])
+    const complete = !!distribution && Object.keys(distribution).length === keys.length
+      && keys.every(key => Object.hasOwn(distribution, key))
+    const probabilities = complete ? keys.map(key => probability(distribution[key])) : undefined
+    const normalized = !!probabilities && Math.abs(probabilities.reduce((a, b) => a + b, 0) - 1) <= 0.025
+    const confidence = answer['confidence'] === undefined ? undefined : probability(answer['confidence'])
+    uncertainMetadata = !normalized || confidence === undefined
+    if (normalized && distribution && confidence !== undefined) {
+      const winner = probability(distribution[answer['choice']])
+      const runnerUp = Math.max(...keys.filter(key => key !== answer['choice']).map(key => probability(distribution[key])))
+      selected = confidence >= 0.85 && winner >= 0.85 && winner - runnerUp >= 0.2 ? answer['choice'] : undefined
+    }
   }
   const accepted = !!selected && eligible.has(selected)
   const revise = rejected.size === input.proposals.length || (!!selected && rejected.has(selected))
@@ -117,6 +126,7 @@ export const jevResult = (raw: unknown, input: JevInput): JevResult => {
     rejected: [...rejected],
     reason: accepted ? 'The proposal passed the requirement, doctrine and evidence gates.'
       : revise ? 'Jev found a conflict with Hypercomb doctrine. Revise the approach using the existing hive mechanisms before proposing it again.'
+      : uncertainMetadata ? 'Jev returned a choice without enough confidence data for an automatic decision.'
       : 'The evidence or preference was not clear enough for an automatic decision.',
     model: typeof body['model'] === 'string' ? body['model'] : JEV_MODEL,
     answers,

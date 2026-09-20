@@ -32,6 +32,12 @@ export type OpenRouterCatalogEntry = {
 
 const CATALOG_URL = 'https://openrouter.ai/api/v1/models'
 
+/** Asynchronous Batch API variants cannot answer the live chat-completions
+ * route. Keep the exact saved id for display/removal, never substitute its
+ * base model silently (its price and execution semantics differ). */
+export const isOpenRouterBatchModel = (modelId: string): boolean =>
+  /^~?[a-z0-9._-]+\/[a-z0-9._:~-]+:batch$/i.test(modelId)
+
 /** `loaded` fires when a fresh catalogue lands — model providers take their
  *  exact names from it (openrouter-instances.ts). */
 export const openRouterCatalogEvents = new EventTarget()
@@ -66,12 +72,22 @@ export const fetchOpenRouterCatalog = async (): Promise<readonly OpenRouterCatal
       .then(body => body?.data?.id === JEV_MODEL && body.data.architecture?.output_modalities?.includes('decisions')
         ? { id: JEV_MODEL, name: String(body.data.name || 'TypeSafe: Jev Latest'), decisionOnly: true } : undefined)
       .catch(() => undefined)
-    const response = await fetch(CATALOG_URL)
-    if (!response.ok) throw new Error(`OpenRouter catalogue request failed (${response.status})`)
-    const body = await response.json() as CatalogBody
+    let body: CatalogBody
+    let catalogueFailure: unknown
+    try {
+      const response = await fetch(CATALOG_URL)
+      if (!response.ok) throw new Error(`OpenRouter catalogue request failed (${response.status})`)
+      body = await response.json() as CatalogBody
+    } catch (error) {
+      // Jev's alias metadata is independent of the general chat catalogue.
+      // Keep it discoverable when that list fails, while preserving the real
+      // catalogue error if neither endpoint is available.
+      catalogueFailure = error
+      body = { data: [] }
+    }
     const entries: OpenRouterCatalogEntry[] = (body.data ?? [])
       .filter((row): row is { id: string; name?: unknown; pricing?: { prompt?: unknown; completion?: unknown }; context_length?: unknown } =>
-        typeof row?.id === 'string' && row.id.length > 0)
+        typeof row?.id === 'string' && row.id.length > 0 && !isOpenRouterBatchModel(row.id))
       .map(row => ({
         id: row.id,
         name: typeof row.name === 'string' && row.name ? row.name : row.id,
@@ -82,6 +98,7 @@ export const fetchOpenRouterCatalog = async (): Promise<readonly OpenRouterCatal
       }))
       .sort((a, b) => a.id.localeCompare(b.id))
     const jev = await decision
+    if (catalogueFailure && !jev) throw catalogueFailure
     if (jev && !entries.some(entry => entry.id === jev.id)) entries.push(jev)
     cached = entries
     cachedAt = Date.now()
