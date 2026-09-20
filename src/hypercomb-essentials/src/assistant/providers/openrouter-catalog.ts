@@ -15,6 +15,8 @@
 // console's "Use this model" action), which is the same explicit-naming path
 // as typing a model id directly.
 
+import { JEV_MODEL } from '../jev-decision.js'
+
 export type OpenRouterCatalogEntry = {
   readonly id: string
   readonly name: string
@@ -25,6 +27,7 @@ export type OpenRouterCatalogEntry = {
   readonly completionPrice?: string
   /** Context window in tokens, as published. */
   readonly contextLength?: number
+  readonly decisionOnly?: boolean
 }
 
 const CATALOG_URL = 'https://openrouter.ai/api/v1/models'
@@ -56,20 +59,30 @@ export const fetchOpenRouterCatalog = async (): Promise<readonly OpenRouterCatal
   if (inflight) return inflight
 
   inflight = (async () => {
+    // Decision aliases need their own metadata lookup: OpenRouter's general
+    // list currently omits them. A failed optional lookup leaves chat intact.
+    const decision = fetch(`${CATALOG_URL}/${JEV_MODEL}/endpoints`, { signal: AbortSignal.timeout(10_000) })
+      .then(async response => response.ok ? await response.json() : undefined)
+      .then(body => body?.data?.id === JEV_MODEL && body.data.architecture?.output_modalities?.includes('decisions')
+        ? { id: JEV_MODEL, name: String(body.data.name || 'TypeSafe: Jev Latest'), decisionOnly: true } : undefined)
+      .catch(() => undefined)
     const response = await fetch(CATALOG_URL)
     if (!response.ok) throw new Error(`OpenRouter catalogue request failed (${response.status})`)
     const body = await response.json() as CatalogBody
-    const entries = (body.data ?? [])
+    const entries: OpenRouterCatalogEntry[] = (body.data ?? [])
       .filter((row): row is { id: string; name?: unknown; pricing?: { prompt?: unknown; completion?: unknown }; context_length?: unknown } =>
         typeof row?.id === 'string' && row.id.length > 0)
       .map(row => ({
         id: row.id,
         name: typeof row.name === 'string' && row.name ? row.name : row.id,
+        ...(row.id === JEV_MODEL ? { decisionOnly: true } : {}),
         promptPrice: typeof row.pricing?.prompt === 'string' ? row.pricing.prompt : undefined,
         completionPrice: typeof row.pricing?.completion === 'string' ? row.pricing.completion : undefined,
         contextLength: typeof row.context_length === 'number' && row.context_length > 0 ? row.context_length : undefined,
       }))
       .sort((a, b) => a.id.localeCompare(b.id))
+    const jev = await decision
+    if (jev && !entries.some(entry => entry.id === jev.id)) entries.push(jev)
     cached = entries
     cachedAt = Date.now()
     openRouterCatalogEvents.dispatchEvent(new CustomEvent('loaded'))

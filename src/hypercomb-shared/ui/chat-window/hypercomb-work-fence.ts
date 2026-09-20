@@ -20,11 +20,12 @@ import { FENCE_RE } from '@hypercomb/core'
 
 export const READ_FENCE_LANG = 'hypercomb-read'
 export const DO_FENCE_LANG = 'hypercomb-do'
+export const PROPOSE_FENCE_LANG = 'hypercomb-propose'
 
 /** Rounds one participant message may take before the model must answer. */
 export const MAX_WORK_ROUNDS = 10
 
-export type WorkKind = 'read' | 'do'
+export type WorkKind = 'read' | 'do' | 'propose'
 
 export type WorkRequest = {
   readonly kind: WorkKind
@@ -76,6 +77,7 @@ const kindOf = (info: string): WorkKind | null => {
   const word = info.trim().split(/\s+/)[0] ?? ''
   if (word === READ_FENCE_LANG) return 'read'
   if (word === DO_FENCE_LANG) return 'do'
+  if (word === PROPOSE_FENCE_LANG) return 'propose'
   return null
 }
 
@@ -111,6 +113,7 @@ const scan = (lines: readonly string[]): Block[] => {
  * observation parser spells as a bare verb.
  */
 export const workLineGrammar = (raw: string, kind: WorkKind): string => {
+  if (kind === 'propose') return raw
   let line = String(raw ?? '').trim()
     .replace(/^(?:[-*•]|\d+[.)])\s+/, '')
     .replace(/^`(.*)`$/, '$1')
@@ -148,7 +151,12 @@ export const splitWork = (text: string): SplitWork => {
     .filter(Boolean)
   const reads = linesOf('read')
   const changes = linesOf('do')
-  if (reads.length) return { prose, request: { kind: 'read', lines: reads }, ...(changes.length ? { heldDo: true as const } : {}) }
+  const proposals = blocks.filter(block => block.kind === 'propose')
+  if (reads.length) return { prose, request: { kind: 'read', lines: reads }, ...(changes.length || proposals.length ? { heldDo: true as const } : {}) }
+  if (proposals.length) {
+    const valid = proposals.length === 1 && proposals[0].end < lines.length
+    return { prose, request: { kind: 'propose', lines: valid ? proposals[0].body : [] }, ...(changes.length ? { heldDo: true as const } : {}) }
+  }
   if (changes.length) return { prose, request: { kind: 'do', lines: changes } }
   return { prose }
 }
@@ -328,7 +336,7 @@ export const doFailedMessage = (ran: readonly string[], stoppedAt: string, reaso
   `Your ${DO_FENCE_LANG} block stopped at ${stoppedAt}: ${reason}.${ran.length ? `\nIt ran before stopping:\n${bullets(ran)}` : ' Nothing ran.'}\n\nContinue: correct it, or tell the participant what went wrong.${carry(request)}`
 
 export const blockRefusedMessage = (kind: WorkKind, reason: string, request: string): string =>
-  `Your ${kind === 'read' ? READ_FENCE_LANG : DO_FENCE_LANG} block was not used: ${reason}. Send a corrected block, or answer.${carry(request)}`
+  `Your ${kind === 'read' ? READ_FENCE_LANG : kind === 'propose' ? PROPOSE_FENCE_LANG : DO_FENCE_LANG} block was not used: ${reason}. Send a corrected block, or answer.${carry(request)}`
 
 export const HELD_DO_NOTE = `Your ${DO_FENCE_LANG} block was not run: the same reply also asked to read. Read first; propose changes in a later reply.`
 

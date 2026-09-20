@@ -30,6 +30,8 @@
 import { EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
 import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
+import { JEV_MODEL } from './jev-decision.js'
+import { jevDecision } from './jev-decision.service.js'
 import { MAX_BUDGET, MIN_BUDGET, llmHiveAccess } from './llm-hive-access.js'
 import { CHAT_NEED, TIERS, USAGE_PLANS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
@@ -757,7 +759,7 @@ export class ProvidersWindowView extends EventTarget {
       // folded into OpenRouter, nor OpenRouter itself, which only configures.
       const directTransports = new Set(['browser-http', 'host-relay'])
       const helperCandidates = llmProviderRegistry().all()
-        .filter(p => directTransports.has(p.transport) && !foldedIntoOpenRouter(p.id) && !p.configurator)
+        .filter(p => directTransports.has(p.transport) && !foldedIntoOpenRouter(p.id) && !p.configurator && !p.decisionOnly)
         .sort((a, b) => Number(b.id === 'local') - Number(a.id === 'local'))
 
       const helperWrap = document.createElement('span')
@@ -1377,6 +1379,14 @@ export class ProvidersWindowView extends EventTarget {
   async #test(provider: LlmProviderDescriptor, model?: string): Promise<void> {
     this.#note(provider.id, this.#t('providers.testing', 'Testing…'))
     try {
+      if (provider.decisionOnly || (model ?? provider.defaultModel) === JEV_MODEL) {
+        const result = await jevDecision.test()
+        const usage = result.usage
+        const tokens = usage ? ` · ${usage.inputTokens ?? '?'} input / ${usage.outputTokens ?? '?'} output tokens` : ' · token usage unavailable'
+        const cost = usage?.cost === undefined ? '' : ` · $${usage.cost}`
+        this.#note(provider.id, `✓ ${result.model}${tokens}${cost}`)
+        return
+      }
       const result = await callModel({
         providerId: provider.id,
         ...(model ? { model } : {}),
@@ -1482,9 +1492,9 @@ export class ProvidersWindowView extends EventTarget {
       && (!query || entry.id.toLowerCase().includes(query) || entry.name.toLowerCase().includes(query)))
     const added = new Set(llmModelChoice.saved('openrouter'))
     for (const entry of models.slice(0, 60)) {
-      const button = item(catalogModelName(entry), catalogPrice(entry), () => {
+      const button = item(catalogModelName(entry), entry.decisionOnly ? this.#t('providers.decisions', 'Decisions') : catalogPrice(entry), () => {
         if (llmModelChoice.saved('openrouter').includes(entry.id)) return
-        llmModelChoice.add('openrouter', entry.id)
+        llmModelChoice.add('openrouter', entry.id, !entry.decisionOnly)
         this.#openId = 'openrouter::' // open its domain so the new line is in view
         this.#setSearch(this.#search)
       })
@@ -1724,6 +1734,9 @@ export class ProvidersWindowView extends EventTarget {
     const line = document.createElement('div')
     line.className = 'hc-provider-model-line'
     line.appendChild(this.#mono(modelId))
+    if (instance?.decisionOnly) {
+      line.appendChild(document.createTextNode(this.#t('providers.decisionOnly', 'Decisions · evaluates directions and actions')))
+    }
     if (entry) {
       const price = document.createElement('span')
       price.className = 'hc-provider-catalog-price'
@@ -1731,7 +1744,7 @@ export class ProvidersWindowView extends EventTarget {
       line.appendChild(price)
       // Which level of work its price puts it in.
       const stage = stageFor(catalogOutput(entry))
-      if (stage) {
+      if (stage && !instance?.decisionOnly) {
         const word = document.createElement('span')
         word.className = 'hc-provider-catalog-price hc-provider-stage-word'
         word.textContent = stage === 'over'

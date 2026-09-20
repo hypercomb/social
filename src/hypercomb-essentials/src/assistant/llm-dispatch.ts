@@ -39,6 +39,7 @@ import { chooseProvider, modelForTier, rankProviders, type ModelNeed } from './m
 import { credentialOwner } from './providers/credential-owner.js'
 import { llmProviderRegistry, publishService, type LlmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
+import './jev-decision.service.js'
 import type {
   LlmCallResult,
   LlmChatMessage,
@@ -206,7 +207,7 @@ const registry = (): LlmProviderRegistry => llmProviderRegistry()
  *  is routed below. Keeping the test here means one definition of "callable"
  *  for the roster and the resolver both. */
 const isCallable = (provider: LlmProviderDescriptor): boolean =>
-  provider.transport !== 'agent-bridge'
+  provider.transport !== 'agent-bridge' && !provider.decisionOnly
 
 /**
  * THE PEER SEAM. `peer-models.drone` installs this when the swarm tier is
@@ -243,7 +244,7 @@ export const configuredProviders = (): LlmProviderDescriptor[] =>
  *  belong here: they are the only tier that can read the hive. */
 export const activeProviders = (): LlmProviderDescriptor[] =>
   registry().all().filter(p =>
-    llmActivation.isEnabled(p.id) && localModelServerUp(p)
+    !p.decisionOnly && llmActivation.isEnabled(p.id) && localModelServerUp(p)
     && (!isCallable(p) || p.requiresKey === false || llmKeyStore.has(credentialOwner(p))))
 
 /**
@@ -640,7 +641,7 @@ export const routeCandidates = (
     }
   }
   const callable = candidates.filter(provider =>
-    provider.transport !== 'agent-bridge'
+    isCallable(provider)
     && (provider.transport !== 'peer-swarm' || !!peerCaller))
   if (explicit || callable.length < 2) return callable.slice(0, MAX_ROUTE_ATTEMPTS)
 

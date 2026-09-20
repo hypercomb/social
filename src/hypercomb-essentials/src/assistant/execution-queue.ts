@@ -33,6 +33,8 @@ export type ExecutionState = 'waiting' | 'running' | 'ran' | 'skipped' | 'failed
 export type ExecutionDecision = 'run' | 'skip'
 
 export type ExecutionRequest = {
+  /** A semantic decision needs the participant, even in automatic mode. */
+  readonly forceReview?: boolean
   readonly id: string
   readonly convoId: string
   readonly providerId: string
@@ -52,6 +54,7 @@ export type ExecutionRequest = {
 }
 
 export type ExecutionAsk = {
+  readonly forceReview?: boolean
   readonly convoId: string
   readonly providerId: string
   readonly model: string
@@ -156,7 +159,7 @@ export class ExecutionQueueStore extends EventTarget {
     const allowed = this.#allowedFor(providerId)
     const remembered = ask.kind === 'read' && ask.needsGrant && keys.length > 0
       && keys.every(key => allowed.has(key))
-    const auto = remembered || this.runsByPolicy(ask.kind, ask.needsGrant)
+    const auto = !ask.forceReview && (remembered || this.runsByPolicy(ask.kind, ask.needsGrant))
     const entry: ExecutionRequest = {
       id,
       convoId: String(ask.convoId ?? ''),
@@ -168,6 +171,7 @@ export class ExecutionQueueStore extends EventTarget {
       at: Date.now(),
       state: auto ? 'running' : 'waiting',
       auto,
+      ...(ask.forceReview ? { forceReview: true } : {}),
       ...(remembered ? { remembered: true } : {}),
     }
     if (keys.length) this.#keysById.set(id, keys)
@@ -248,7 +252,7 @@ export class ExecutionQueueStore extends EventTarget {
   /** A looser policy releases what it now covers. */
   #releaseCovered(): void {
     for (const entry of this.#requests) {
-      if (entry.state === 'waiting' && this.runsByPolicy(entry.kind, entry.needsGrant)) this.decide(entry.id, 'run')
+      if (entry.state === 'waiting' && !entry.forceReview && this.runsByPolicy(entry.kind, entry.needsGrant)) this.decide(entry.id, 'run')
     }
   }
 

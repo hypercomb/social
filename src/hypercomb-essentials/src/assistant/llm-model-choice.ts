@@ -59,13 +59,13 @@ export class LlmModelChoiceStore extends EventTarget {
   }
 
   /** Add a model line and put it in use. */
-  add(providerId: string, modelId: string): void {
+  add(providerId: string, modelId: string, select = true): void {
     const id = clean(providerId).toLowerCase()
     const model = clean(modelId)
     if (!id || !okModel(model)) return
     const list = this.saved(id)
     if (!list.includes(model)) this.#writeList(id, [...list, model])
-    this.choose(id, model)
+    if (select) this.choose(id, model)
     this.dispatchEvent(new CustomEvent('change', { detail: { providerId: id, modelId: model } }))
   }
 

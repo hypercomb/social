@@ -158,6 +158,7 @@ import {
   WorkRefused,
   WorkStreamGuard,
 } from './hypercomb-work-fence'
+import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, parseProposals, proposalQuestion, persistJevInput, persistJevReceipt, formatJevUsage, type JevLike, type Proposal, type Decision } from './hypercomb-jev'
 
 type TurnRole = 'user' | 'assistant'
 
@@ -1178,6 +1179,7 @@ type ExecutionQueueLike = {
     /** What each read resolved to; an allowed read is remembered by these. */
     readonly keys?: readonly string[]
     readonly needsGrant: boolean
+    readonly forceReview?: boolean
     readonly signal?: AbortSignal
   }): { readonly id: string; readonly decision: Promise<'run' | 'skip'> }
   decide(id: string, decision: 'run' | 'skip' | 'always'): void
@@ -5985,6 +5987,8 @@ export class ChatWindowComponent implements OnDestroy {
       }
     }
     const grammarContext = readGrammarContext()
+    const jev = ioc()?.get(JEV_IOC_KEY) as JevLike | undefined
+    const jevMode = !!jev?.ready(trustedProviderId ?? router.designatedProviderId?.(need) ?? '')
     // THE ANATOMY GOES FIRST, TO EVERY PROVIDER. It is the stable protocol +
     // doctrine (documentation/anatomy-context-need.md): identical bytes on
     // every call, so it is the part a vendor's prefix cache pays back. Who is
@@ -6015,6 +6019,7 @@ export class ChatWindowComponent implements OnDestroy {
           ? `The participant is on page ${grammarContext.page || '/'} with selected tiles: ${grammarContext.selected.join(', ') || '(none)'}. "here" means that page, which may differ from the conversation subject.`
           : 'The participant\'s page is not shared with you until they let you read; "here" still means the page they are on.',
       priorReadsText,
+      jevMode ? JEV_WORK_INSTRUCTION : '',
     ].filter(Boolean).join('\n\n')
 
     // Who the mediator will choose for THIS weight, not whoever answered last.
@@ -6074,6 +6079,65 @@ export class ChatWindowComponent implements OnDestroy {
       let system = systemFor(firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(need))
       const snapshotIds: string[] = []
       const ran: string[] = []
+      let decisionCalls = 0
+      let decisionChars = 0
+      const evidence = [message]
+      const decisionCache = new Map<string, Decision>()
+      let needsVerification = false
+      const discardStaleEvidence = (): void => {
+        snapshotIds.length = 0
+        evidence.splice(1)
+        decisionCache.clear()
+      }
+
+      const judge = async (proposals: readonly Proposal[], providerId: string): Promise<Decision> => {
+        const participant = (reason: string): Decision => ({ outcome: 'participant', reason, model: JEV_MODEL, answers: {}, rejected: [] })
+        if (!jevMode || !jev?.ready(providerId)) return participant('Jev is unavailable; the participant must choose.')
+        // Mechanics are already implemented by the harness; only the verbatim
+        // doctrine section is needed for this semantic judgment.
+        const doctrineStart = anatomyText.indexOf('# Doctrine')
+        const doctrine = doctrineStart >= 0 ? anatomyText.slice(doctrineStart) : anatomyText
+        const input = { request: message, doctrine, evidence: [...evidence], proposals }
+        const chars = JSON.stringify(input).length
+        const budget = hiveAccess?.budget?.('openrouter') ?? MAX_OBSERVATION_CONTEXT_CHARS
+        stillHere()
+        if (snapshotIds.length && treeReader && !await treeReader.validateSnapshots(snapshotIds, signal)) {
+          discardStaleEvidence()
+          throw new WorkRefused('the tree changed before the decision; read it again')
+        }
+        const sourceSig = await persistJevInput(contextStore, input)
+        const cached = sourceSig ? decisionCache.get(sourceSig) : undefined
+        if (cached) return cached
+        if (decisionCalls >= 3) return participant('The decision budget is spent; the participant must choose.')
+        if (decisionChars + chars > budget) return participant('The decision context exceeds the remaining budget; the participant must choose.')
+        decisionCalls++
+        decisionChars += chars
+        EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'evaluating the direction with Jev' })
+        const startedAt = Date.now()
+        let result: Decision
+        try {
+          result = await jev.evaluate(input, { providerId, system, messages }, signal)
+        } catch (error) {
+          if (signal?.aborted) throw error
+          result = participant(error instanceof Error ? error.message : 'Jev could not evaluate this direction.')
+        }
+        stillHere()
+        if (snapshotIds.length && treeReader && !await treeReader.validateSnapshots(snapshotIds, signal)) {
+          discardStaleEvidence()
+          throw new WorkRefused('the tree changed during the decision; read it again')
+        }
+        // The source packet and the decision are independent immutable
+        // resources. Their signatures ride on the existing turn provenance.
+        const receiptSig = sourceSig && await persistJevReceipt(contextStore, sourceSig, result)
+        if (receiptSig) readSigs.push(receiptSig)
+        if (sourceSig && Object.keys(result.answers).length) decisionCache.set(sourceSig, result)
+        settledAttempts.push({ round: rounds, attempt: decisionCalls, providerId: 'openrouter', model: result.model,
+          outcome: Object.keys(result.answers).length ? 'success' : 'failure', category: 'jev-decision', durationMs: Date.now() - startedAt, outputEmitted: false,
+          ...(result.usage ? { usage: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, estimatedCostUsd: result.usage.cost } } : {}),
+        })
+        writeTurnMeta(providerId, continuationModel)
+        return result
+      }
 
       const writeTurnMeta = (providerId?: string, model?: string): void => {
         component.#turnMeta.set(convoId, {
@@ -6154,10 +6218,13 @@ export class ChatWindowComponent implements OnDestroy {
           if (content.length > remaining) throw new WorkRefused('those reads are larger than what is left of the read budget; ask for less')
           const allSnapshots = [...snapshotIds, ...receipt.snapshots]
           if (allSnapshots.length && !await treeReader.validateSnapshots(allSnapshots, signal)) {
+            discardStaleEvidence()
             throw new WorkRefused('the tree changed while it was being read; read it again')
           }
           readRounds++
           readChars += content.length
+          if (!evidence.includes(content)) evidence.push(content)
+          needsVerification = false
           snapshotIds.push(...receipt.snapshots)
           observed.push(...grammars)
           const known = component.#readSignatures.get(convoId) ?? new Map<string, string>()
@@ -6176,16 +6243,23 @@ export class ChatWindowComponent implements OnDestroy {
         }
       }
 
-      const runDo = async (lines: readonly string[], providerId: string, model: string): Promise<string> => {
+      const runDo = async (lines: readonly string[], providerId: string, model: string, rawPlan: string): Promise<string> => {
         if (!canChange || !slash?.executePublicCanonical || !queue) throw new WorkRefused('changing the hive is not available here')
         // Parse EVERY line before anything is queued, let alone run: one bad
         // tail can never leave a half-run prefix.
         const plan = parseHypercombGrammars(lines, behaviourEntries)
         const grammars = plan.actions.map(action => action.grammar)
+        if (jevMode && rawPlan.length > 2_000) throw new WorkRefused('keep the complete action round under 2000 characters so Jev can evaluate it; split the work into smaller rounds')
+        const decision = jevMode ? await judge([{ id: 'action', label: 'Run this plan', plan: rawPlan }], providerId) : undefined
+        if (decision?.outcome === 'revise') throw new WorkRefused(decision.reason)
+        if (decision?.outcome === 'participant') EffectBus.emit('agent:progress', {
+          id: component.#beeId(convoId), activity: `waiting for your review: ${decision.reason}`,
+        })
         const entry = queue.request({
           convoId, providerId, model, kind: hypercombPlanReach(plan, behaviourEntries), lines: grammars, needsGrant: false, signal,
+          forceReview: decision?.outcome === 'participant',
         })
-        waitingOn(entry.id)
+        if (decision?.outcome !== 'participant') waitingOn(entry.id)
         if (await entry.decision === 'skip') {
           if (signal?.aborted) throw stopped()
           return doSkippedMessage(grammars, message)
@@ -6199,6 +6273,7 @@ export class ChatWindowComponent implements OnDestroy {
             stillHere()
             if (!snapshotAdmitted) {
               if (!treeReader || !await treeReader.validateSnapshots(snapshotIds, signal)) {
+                discardStaleEvidence()
                 throw new WorkRefused('the tree changed since you read it; read it again before changing it')
               }
               snapshotAdmitted = true
@@ -6211,6 +6286,8 @@ export class ChatWindowComponent implements OnDestroy {
         try {
           const receipt = await hypercombPlanQueue.run(plan, executor, signal)
           ran.push(...receipt.grammars)
+          needsVerification = true
+          evidence.splice(1)
           // What the model read is now older than what it changed.
           snapshotIds.length = 0
           queue.settle(entry.id, 'ran')
@@ -6222,6 +6299,8 @@ export class ChatWindowComponent implements OnDestroy {
           }
           if (error instanceof HypercombActionExecutionError) {
             ran.push(...error.completed)
+            if (error.completed.length) needsVerification = true
+            if (error.completed.length) evidence.splice(1)
             if (error.completed.length) snapshotIds.length = 0
             const reason = error.cause instanceof Error ? error.cause.message : 'it could not run'
             queue.settle(entry.id, 'failed', `${error.grammar}: ${reason}`)
@@ -6282,7 +6361,7 @@ export class ChatWindowComponent implements OnDestroy {
           if (chunk.text) {
             roundText += chunk.text
             const visible = guard.push(chunk.text)
-            if (visible) {
+            if (visible && !jevMode) {
               wrote = true
               yield `${lead}${visible}`
               lead = ''
@@ -6290,7 +6369,7 @@ export class ChatWindowComponent implements OnDestroy {
           }
         }
         const tail = guard.end()
-        if (tail) {
+        if (tail && !jevMode) {
           wrote = true
           yield `${lead}${tail}`
         }
@@ -6300,6 +6379,14 @@ export class ChatWindowComponent implements OnDestroy {
 
         const work = splitWork(roundText)
         if (!work.request || lastRound) {
+          if (jevMode && work.prose) {
+            wrote = true
+            yield `${lead}${work.prose}`
+          }
+          if (jevMode && ran.length) yield needsVerification
+            ? '\n\nThe commands ran, but no subsequent readback was completed.'
+            : '\n\nReadback was collected after execution; correctness of every affected item has not been independently verified.'
+          if (jevMode) yield `\n\n${formatJevUsage(settledAttempts)}`
           if (work.request) {
             wrote = true
             yield `\n\nStopped after ${MAX_WORK_ROUNDS} rounds.`
@@ -6324,9 +6411,24 @@ export class ChatWindowComponent implements OnDestroy {
         let reply: string
         try {
           stillHere()
-          reply = work.request.kind === 'read'
-            ? await runRead(work.request.lines, pinned, roundModel)
-            : await runDo(work.request.lines, pinned, roundModel)
+          if (work.request.kind === 'propose') {
+            let proposals: readonly Proposal[]
+            try { proposals = parseProposals(work.request.lines) }
+            catch { throw new WorkRefused('send one closed hypercomb-propose JSON block with two or three distinct, concise proposals') }
+            const decision = await judge(proposals, pinned)
+            if (decision.outcome === 'revise') throw new WorkRefused(decision.reason)
+            if (decision.outcome === 'participant') {
+              if (ran.length) yield `\n\nEarlier commands ran: ${ran.join(' · ')}`
+              yield `\n\n${formatJevUsage(settledAttempts)}`
+              yield `\n\n${proposalQuestion(proposals.filter(proposal => !decision.rejected.includes(proposal.id)), decision.reason)}`
+              return ''
+            }
+            reply = `Jev selected proposal ${decision.selected}. Continue implementing that direction, then read the affected content to verify it. This decision does not grant execution permission.`
+          } else {
+            reply = work.request.kind === 'read'
+              ? await runRead(work.request.lines, pinned, roundModel)
+              : await runDo(work.request.lines, pinned, roundModel, roundText)
+          }
         } catch (error) {
           // Stop belongs to the participant: never turn it into a message.
           if (signal?.aborted) throw error

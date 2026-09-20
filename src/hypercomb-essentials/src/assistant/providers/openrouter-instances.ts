@@ -18,6 +18,7 @@ import type { LlmProviderDescriptor, LlmTier } from './llm-provider.types.js'
 import { cachedOpenRouterCatalog, openRouterCatalogEvents } from './openrouter-catalog.js'
 import { openRouterStages, stageFor } from './openrouter-stages.js'
 import { OPENROUTER_PROVIDER } from './openrouter.provider.js'
+import { JEV_ENDPOINT, JEV_MODEL } from '../jev-decision.js'
 
 const PREFIX = `${OPENROUTER_PROVIDER.id}:`
 
@@ -63,6 +64,11 @@ export const openRouterInstance = (modelId: string): LlmProviderDescriptor => {
   const { configurator: _configurator, ...base } = OPENROUTER_PROVIDER
   return {
     ...base,
+    ...(modelId === JEV_MODEL ? {
+      decisionOnly: true,
+      endpoint: JEV_ENDPOINT,
+      description: 'Evaluates proposed directions against your request, Hypercomb values, and evidence.',
+    } : {}),
     id: instanceId(modelId),
     label: labelFor(modelId),
     credentialsFrom: OPENROUTER_PROVIDER.id,
@@ -87,7 +93,7 @@ export const syncOpenRouterInstances = (): void => {
   for (const [id, model] of wanted) {
     const next = openRouterInstance(model)
     const existing = registry.get(id)
-    if (existing && existing.label === next.label && JSON.stringify(existing.models) === JSON.stringify(next.models)) continue
+    if (existing && existing.label === next.label && existing.decisionOnly === next.decisionOnly && JSON.stringify(existing.models) === JSON.stringify(next.models)) continue
     if (existing) registry.unregister(id)
     registry.register(next)
   }

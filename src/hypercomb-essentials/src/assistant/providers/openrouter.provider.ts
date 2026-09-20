@@ -23,6 +23,7 @@ import { registerLlmProvider } from '../llm-provider-registry.js'
 import type { LlmProviderDescriptor } from './llm-provider.types.js'
 import { openAiRequest, openAiResponse, openAiStreamEvent } from './openai-shape.js'
 import { openRouterRouting, providerBlock } from './openrouter-routing.js'
+import { JEV_MODEL } from '../jev-decision.js'
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 
@@ -56,6 +57,9 @@ export const OPENROUTER_PROVIDER: LlmProviderDescriptor = {
   // The participant's host choices for this model (openrouter-routing.ts)
   // ride as the `provider` block; untouched settings send nothing extra.
   toRequest: request => {
+    if (request.model === JEV_MODEL || /^~?typesafe\/jev(?:-|$)/i.test(request.model)) {
+      throw new Error('Jev is a decision service; use the Decisions API, not chat completions')
+    }
     const provider = providerBlock(openRouterRouting.get(), request.model)
     return openAiRequest(ENDPOINT, request, undefined, {
       cacheableSystem: true,

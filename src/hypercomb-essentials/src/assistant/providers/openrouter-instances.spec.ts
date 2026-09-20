@@ -27,6 +27,28 @@ beforeEach(() => {
 })
 
 describe('every model added through OpenRouter is its own provider', () => {
+  it('registers Jev only after opt-in and never offers it as a chat worker', async () => {
+    const jev = '~typesafe/jev-latest'
+    const { OPENROUTER_PROVIDER } = await import('./openrouter.provider.js')
+    const { modelForTier } = await import('../model-policy.js')
+    const { callModel, routeCandidates } = await import('../llm-dispatch.js')
+    expect(llmProviderRegistry().get(instanceId(jev))).toBeUndefined()
+    llmModelChoice.add('openrouter', SONNET)
+    llmModelChoice.add('openrouter', jev, false)
+    llmKeyStore.set('openrouter', KEY)
+    const provider = llmProviderRegistry().get(instanceId(jev))!
+    expect(provider.decisionOnly).toBe(true)
+    expect(llmModelChoice.chosen('openrouter')).toBe(SONNET)
+    expect(candidatesFor().map(p => p.id)).not.toContain(provider.id)
+    expect(routeCandidates({ fallbackWithin: 'openrouter' }).map(p => p.id)).not.toContain(provider.id)
+    await expect(callModel({ providerId: provider.id, messages: [{ role: 'user', content: 'hello' }] })).rejects.toThrow()
+    expect(() => OPENROUTER_PROVIDER.toRequest({ model: jev, apiKey: KEY, messages: [] })).toThrow('Decisions API')
+    // Legacy persisted choices must not turn the OpenRouter key Test into chat with Jev.
+    llmModelChoice.choose('openrouter', jev)
+    expect(modelForTier(OPENROUTER_PROVIDER)).not.toBe(jev)
+    llmModelChoice.drop('openrouter', jev)
+    expect(llmProviderRegistry().get(provider.id)).toBeUndefined()
+  })
   it('registers on add and goes away on remove, offering every tier with that one model', () => {
     llmModelChoice.add('openrouter', SONNET)
     const provider = llmProviderRegistry().get(instanceId(SONNET))

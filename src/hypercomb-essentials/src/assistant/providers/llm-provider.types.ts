@@ -230,6 +230,9 @@ export type LlmProviderDescriptor = {
    *  automatic pick itself (OpenRouter). Still callable when named. */
   readonly configurator?: boolean
 
+  /** Structured decision service, never a text worker or a chat-completions call. */
+  readonly decisionOnly?: boolean
+
   /**
    * HONESTY FLAG. Only `agent-bridge` responders can walk the participant's
    * tree; a browser-http key answers from the prompt plus whatever context
