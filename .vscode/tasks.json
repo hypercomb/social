@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Publish revision",
+      "detail": "Ship the build as a new revision. Press Enter to publish under the default name, or type a name (a new name starts a new named head).",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "publish:revision", "--", "${input:revisionName}"],
+      "options": { "cwd": "${workspaceFolder}/src" },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "revisionName",
+      "type": "promptString",
+      "description": "Revision name — leave empty for the default name (essentials)",
+      "default": ""
+    }
+  ]
+}

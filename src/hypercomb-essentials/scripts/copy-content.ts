@@ -42,7 +42,7 @@ const DIST_ROOT = resolve(__dirname, '..', 'dist')
 // checkouts build into it — so a worktree publishes to the same host as the
 // main checkout by naming it (the bridge's owed-stamps.cjs reads the same var).
 const TARGETS = [
-  { dir: resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content'), additive: false },
+  { dir: process.env['HYPERCOMB_WEB_CONTENT_DIR'] || resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content'), additive: false },
   { dir: process.env['HYPERCOMB_RELAY_CONTENT_DIR'] || resolve(__dirname, '..', '..', 'hypercomb-relay', 'content'), additive: true },
 ]
 
@@ -77,6 +77,19 @@ const MANIFEST_FILE = 'manifest.json'
 const HOST_PACKAGES_MEANING = 'host:packages'
 const HOST_PACKAGES_POOL = createHash('sha256').update(HOST_PACKAGES_MEANING, 'utf8').digest('hex')
 const poolEntryName = (index: number): string => String(index).padStart(8, '0')
+
+// A REVISION IS A DELIBERATE ACT. A build copies bytes; it does not enter the
+// additive host's pool — that is what `--publish` does, and only that. The
+// member's second line (the label) is the NAME the revision was published
+// under; its file date is the revision's date. A plain build's own package
+// still reaches the mirrored dev feed as its head, so local iteration is
+// unchanged, but it is never a revision a follower could be offered.
+const argv = process.argv.slice(2)
+const publishing = argv.includes('--publish')
+const publishName = ((): string => {
+  const at = argv.indexOf('--name')
+  return at >= 0 ? String(argv[at + 1] ?? '').trim() : ''
+})()
 
 const copyDirRecursive = (srcDir: string, tgtDir: string): void => {
   mkdirSync(tgtDir, { recursive: true })
@@ -197,6 +210,9 @@ const syncTarget = (
   // Either way, if the name exists in target, content-addressing guarantees
   // it's the same content — skip.
   for (const name of srcEntries) {
+    // The package pool is written below, from what is PUBLISHED — never copied
+    // wholesale from dist, whose one member is the build just made.
+    if (name === HOST_PACKAGES_POOL) continue
     if (tgtEntries.has(name)) {
       skipped++
       continue
@@ -271,6 +287,13 @@ const syncTarget = (
     if (existsSync(entry)) {
       const held = readFileSync(entry, 'utf8')
       const heldSig = (held.split('\n')[0] ?? '').trim()
+      // The mirrored dev feed is regenerable: its head is the working build
+      // and moves with every build, so it is rewritten rather than reported.
+      if (heldSig !== member.sig && !additive) {
+        writeFileSync(entry, bytes, 'utf8')
+        copied++
+        return
+      }
       if (heldSig !== member.sig) {
         // A different package at an index already shipped. Append-only says
         // this cannot happen, so it is a fault to report — never to paper over
@@ -303,6 +326,13 @@ const syncTarget = (
   // MIME type, so mirrored browser ships also carry the same bytes as
   // `listing.txt`. Neither file is a member and every live reader filters the
   // static renderings out.
+  if (!additive) {
+    // Members past the working head are earlier builds' heads; the dev feed
+    // keeps none of them (append-only is a promise the additive host makes).
+    for (const name of readdirSync(poolDir)) {
+      if (/^[0-9]{8}$/.test(name) && Number(name) >= poolOrder.length) rmSync(join(poolDir, name), { force: true })
+    }
+  }
   const listing = poolOrder.map((_, index) => poolEntryName(index)).sort().join('\n')
   const indexPath = join(poolDir, 'index.html')
   if (!existsSync(indexPath) || readFileSync(indexPath, 'utf8') !== listing) {
@@ -331,7 +361,7 @@ const syncTarget = (
   // to advertise 23 revisions it could only serve one of.
   if (!additive) {
     for (const name of tgtEntries) {
-      if (!srcEntries.has(name) && !keep.has(name)) {
+      if (name !== HOST_PACKAGES_POOL && !srcEntries.has(name) && !keep.has(name)) {
         rmSync(join(targetDir, name), { recursive: true, force: true })
         removed++
       }
@@ -365,14 +395,26 @@ const main = () => {
   // a member — publishing the same package twice is a no-op, which is what a
   // content-addressed member buys.
   const distMember = poolEntries(DIST_ROOT, HOST_PACKAGES_POOL)[0]
-  const existingPool = [...TARGETS]
-    .sort((a, b) => Number(b.additive) - Number(a.additive))
+  // PUBLISHED = the additive host's pool alone. The mirrored feed holds a
+  // working head on top of it and must never be mistaken for history.
+  const published = TARGETS
+    .filter(target => target.additive)
     .map(target => poolEntries(target.dir, HOST_PACKAGES_POOL))
     .reduce((deepest, candidate) => (candidate.length > deepest.length ? candidate : deepest), [] as { sig: string; label: string }[])
-  const poolOrder = distMember && !existingPool.some(entry => entry.sig === distMember.sig)
-    ? [...existingPool, distMember]
-    : existingPool
-  console.log(`[copy-content] host:packages — ${poolOrder.length} member(s), head ${poolOrder[poolOrder.length - 1]?.sig.slice(0, 12) ?? '(none)'}`)
+
+  let publishedOrder = published
+  if (publishing) {
+    if (!distMember) { console.error('[copy-content] --publish with no built package'); process.exit(1) }
+    const label = publishName || 'essentials'
+    // Publishing the head of a name again is a no-op; a package taken back to
+    // (a rollback) or moved to another name is a NEW member — the pool is a
+    // history, and history only grows.
+    const lastUnderName = [...published].reverse().find(entry => entry.label === label)
+    if (lastUnderName?.sig !== distMember.sig) publishedOrder = [...published, { sig: distMember.sig, label }]
+  }
+  const workingHead = distMember && publishedOrder[publishedOrder.length - 1]?.sig !== distMember.sig ? distMember : null
+  const poolOrder = workingHead ? [...publishedOrder, workingHead] : publishedOrder
+  console.log(`[copy-content] host:packages — ${publishedOrder.length} published, ${workingHead ? `working head ${workingHead.sig.slice(0, 12)} (unpublished)` : `head ${publishedOrder[publishedOrder.length - 1]?.sig.slice(0, 12) ?? '(none)'}`}`)
 
   // RETENTION IS DERIVED, NOT ADVERTISED (retention.ts). Every signature any
   // published package still needs, walked from its sealed root — the same walk
@@ -394,7 +436,7 @@ const main = () => {
 
   for (const { dir, additive } of TARGETS) {
     const peers = sourceOrder.filter(d => d !== dir && existsSync(d))
-    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, poolOrder, keep, peers)
+    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, additive ? publishedOrder : poolOrder, keep, peers)
     console.log(`[copy-content] ${dir}${additive ? ' (additive/persistent)' : ''}`)
     console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${healed ? `, ${healed} backfilled for older versions` : ''}${drained ? `, ${drained} drained from legacy dirs` : ''}`)
   }

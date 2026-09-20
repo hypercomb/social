@@ -247,6 +247,56 @@ export const isOlder = (revisions: readonly InstallRevision[], chosen: string, r
   return at >= 0 && pick > at
 }
 
+/** One line of a revision list: a revision as it was published under one name,
+ *  on one date. A revision published under two names is two lines. */
+export type RevisionEntry = { revision: InstallRevision; name: string; at: string }
+
+/** Everything published under one name. */
+export type RevisionGroup = { name: string; entries: RevisionEntry[] }
+
+/**
+ * REVISIONS BY NAME, THEN DATE. One heading per name, and every revision
+ * published under it is appended there, newest first — a name that comes back
+ * after another name still lands under its one heading. Headings are ordered
+ * by their newest revision. Lines that name nothing (held here, or a member
+ * with no label) form the last group, undated ones after every dated one.
+ */
+export const revisionGroups = (revisions: readonly InstallRevision[]): RevisionGroup[] => {
+  const entries: (RevisionEntry & { order: number })[] = []
+  revisions.forEach((revision, order) => {
+    const named = new Map<string, string>()
+    for (const source of revision.sources) {
+      const name = (source.name ?? '').trim()
+      if (!name) continue
+      const held = named.get(name) ?? ''
+      named.set(name, source.at > held ? source.at : held)
+    }
+    if (!named.size) named.set('', revision.at)
+    for (const [name, at] of named) entries.push({ revision, name, at, order })
+  })
+  const newestFirst = (a: { at: string; order: number }, b: { at: string; order: number }): number => {
+    if (a.at && b.at) return a.at === b.at ? a.order - b.order : b.at.localeCompare(a.at)
+    if (!!a.at !== !!b.at) return a.at ? -1 : 1
+    return a.order - b.order
+  }
+  entries.sort(newestFirst)
+  // Entries are now newest first, so a group's first entry is its newest and
+  // groups form in the order their newest revisions appear.
+  const groups = new Map<string, RevisionGroup>()
+  for (const { revision, name, at } of entries) {
+    const group = groups.get(name) ?? { name, entries: [] }
+    group.entries.push({ revision, name, at })
+    groups.set(name, group)
+  }
+  const named = [...groups.values()].filter(group => group.name)
+  const unnamed = groups.get('')
+  return unnamed ? [...named, unnamed] : named
+}
+
+/** `2026-09-20 11:08` from an ISO stamp; the date alone when it has no time. */
+export const revisionDate = (at: string): string =>
+  at.length >= 16 && at[10] === 'T' ? `${at.slice(0, 10)} ${at.slice(11, 16)}` : at.slice(0, 10)
+
 /** The roots to take a revision from, the trunk first when it carries it —
  *  the trunk needs no gate, and taking its own layer is no pick at all. */
 export const rootsFor = (revision: InstallRevision, trunk: string | null): string[] => {
@@ -876,25 +926,37 @@ export class HostDirectoryElement extends HTMLElement {
     const trunk = this.#selection?.trunk ?? null
     const running = this.#selection?.nodes.find(node => node.path === path)?.layerSig ?? ''
     const list = make('ul', 'hd-list')
-    revisions.forEach((revision, index) => {
-      const li = make('li', 'hd-rev')
-      const choose = button('hd-rev-choose', '')
-      const isRunning = revision.layer === running
-      choose.disabled = !trunk || isRunning || !!this.#busy
-      if (this.#busy === revision.layer) li.classList.add('busy')
-      choose.append(make('span', 'hd-rev-sig', revision.layer.slice(0, 8)))
-      if (revision.at) choose.append(make('span', 'hd-rev-at', revision.at.slice(0, 10)))
-      const zones = new Set(revision.sources.map(source => source.zone).filter(Boolean))
-      choose.append(make('span', 'hd-rev-hosts', zones.size
-        ? t('hosts.revisions.hosts', 'on {count} of your hosts', { count: zones.size })
-        : t('hosts.revisions.held', 'held here')))
-      if (index === 0) choose.append(make('span', 'hd-mark quiet', t('hosts.revisions.latest', 'latest')))
-      if (isRunning) choose.append(make('span', 'hd-mark', t('hosts.revisions.running', 'running')))
-      choose.setAttribute('aria-label', t('hosts.revisions.take', 'Take revision {sig} of {name}', { sig: revision.layer.slice(0, 8), name: path }))
-      choose.addEventListener('click', () => { void this.#chooseRevision(revision) })
-      li.append(choose)
-      list.append(li)
-      if (!trunk) choose.title = t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')
+    // Names are headings only when there is something to tell apart: a list
+    // nobody named (an older host, or revisions held here) stays one plain run.
+    const groups = revisionGroups(revisions)
+    const headed = groups.some(group => group.name)
+    groups.forEach((group, groupIndex) => {
+      if (headed) {
+        const heading = make('li', 'hd-rev-name', group.name || t('hosts.revisions.unnamed', 'Held here'))
+        heading.setAttribute('role', 'presentation')
+        list.append(heading)
+      }
+      group.entries.forEach(({ revision, at }, index) => {
+        const li = make('li', 'hd-rev')
+        const choose = button('hd-rev-choose', '')
+        const isRunning = revision.layer === running
+        choose.disabled = !trunk || isRunning || !!this.#busy
+        if (this.#busy === revision.layer) li.classList.add('busy')
+        choose.append(make('span', 'hd-rev-sig', revision.layer.slice(0, 8)))
+        if (at) choose.append(make('span', 'hd-rev-at', revisionDate(at)))
+        const zones = new Set(revision.sources.map(source => source.zone).filter(Boolean))
+        choose.append(make('span', 'hd-rev-hosts', zones.size
+          ? t('hosts.revisions.hosts', 'on {count} of your hosts', { count: zones.size })
+          : t('hosts.revisions.held', 'held here')))
+        // "latest" is the newest line of the whole list — the first line of the first group.
+        if (groupIndex === 0 && index === 0) choose.append(make('span', 'hd-mark quiet', t('hosts.revisions.latest', 'latest')))
+        if (isRunning) choose.append(make('span', 'hd-mark', t('hosts.revisions.running', 'running')))
+        choose.setAttribute('aria-label', t('hosts.revisions.take', 'Take revision {sig} of {name}', { sig: revision.layer.slice(0, 8), name: path }))
+        choose.addEventListener('click', () => { void this.#chooseRevision(revision) })
+        li.append(choose)
+        list.append(li)
+        if (!trunk) choose.title = t('hosts.from-source', 'This shell loads its packages from source, so turning them on or off and picking revisions happens on a hive.')
+      })
     })
     body.append(list)
   }
@@ -1277,6 +1339,8 @@ ${S} .hd-icon-slot{width:.9em;}
 ${S} .hd-detail{grid-column:2 / -1;padding:.15em 0 .3em;}
 ${S} .hd-desc{margin:0 0 .2em;font-size:.68em;line-height:1.35;color:var(--hd-ink-quiet);}
 ${S} .hd-where{margin:.1em 0;font-size:.66em;line-height:1.35;color:var(--hd-ink-quiet);}
+${S} .hd-rev-name{padding:.7em .2em .2em;font-size:.72em;letter-spacing:.05em;color:var(--hc-window-accent);list-style:none;}
+${S} .hd-rev-name ~ .hd-rev{margin-left:.9em;}
 ${S} .hd-rev{border-bottom:1px solid rgba(var(--acc),0.08);}
 ${S} .hd-rev.busy{cursor:progress;}
 ${S} .hd-rev-choose{display:flex;align-items:center;gap:.6em;width:100%;padding:.4em .2em;font:inherit;font-size:.74em;color:var(--hd-ink);background:none;border:none;text-align:left;cursor:pointer;}

@@ -333,6 +333,9 @@ export type RevisionSource = {
   at: string
   /** Its place in that domain's newest-first list. */
   rank: number
+  /** The name it was published under — the member's label; absent when held
+   *  here or when the member names nothing. */
+  name?: string
 }
 
 export type Revision = {

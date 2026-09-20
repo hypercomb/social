@@ -971,13 +971,16 @@ const installProvider: InstallProvider = {
       const rows = await listHostPackages(zone, { limit: REVISION_ROOTS }).catch(() => [])
       await Promise.all(rows.map(async (row, rank) => {
         const layer = await layerAt(row.packageSig, path, io)
-        if (layer) found.push({ layer, source: { root: row.packageSig, zone, at: row.at, rank } })
+        // A member that names nothing is labelled by its own signature prefix;
+        // that is a placeholder for display, not a name to group under.
+        const name = row.label && row.label !== row.packageSig.slice(0, 12) ? row.label : ''
+        if (layer) found.push({ layer, source: { root: row.packageSig, zone, at: row.at, rank, name } })
       }))
     }))
     return orderRevisions(found).map(revision => ({
       layer: revision.layer,
       at: revision.at,
-      sources: revision.sources.map(({ root, zone, at }) => ({ root, zone, at })),
+      sources: revision.sources.map(({ root, zone, at, name }) => ({ root, zone, at, ...(name ? { name } : {}) })),
     }))
   },
   revisionNodes: async (path, root, zones) => {
