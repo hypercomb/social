@@ -354,6 +354,13 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // hiding is a hand, not a derivation. Losing it does not lose the tiles,
   // it UNHIDES them all at once, which is the loudest possible failure.
   'hidden:items',
+  // SIGNATURES THAT HAVE NOT ARRIVED YET (core/eggs.ts) — one file per
+  // missing signature, named by it, listing the hosts that already said no, so
+  // they are never asked again until a new host joins. Truth about the
+  // network, not a derivation of layers; wipe-safe (losing it costs one round
+  // of 404s). Colon-scoped: the bare-word list is frozen, and it is NOT the
+  // brood, which holds untrusted behaviours.
+  'eggs:dormant',
   // TOKEN-COMPACT TILE PROJECTIONS for the hive's `hive` tool
   // (assistant/llm-context.ts) — one record per SOURCE LAYER SIGNATURE,
   // a compact line-oriented rendering of what a tile SAYS in place of the

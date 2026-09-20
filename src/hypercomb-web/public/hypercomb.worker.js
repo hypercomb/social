@@ -654,32 +654,95 @@ async function sha256Hex(buffer) {
   return hex
 }
 
-// Try each known host in order; the first response whose bytes sha256 to the
-// requested sig wins. Loopback hosts use http (content-side analog of the
-// mesh allow-loopback); real domains use https. Returns { buf, contentType }
-// or null. Verification is the backstop — a wrong/hostile domain can only
-// cost a 404, never serve incorrect bytes.
+// EGGS — a signature no host has yet, at rest (hypercomb-core/src/core/eggs.ts
+// holds the doctrine; a service worker cannot import core, so the SAME record
+// is kept here BY HAND at the SAME address — change both together). One file
+// per missing sig in the `eggs:dormant` pool, named by the sig, listing the
+// host origins that answered a definite "not here". Those are never asked
+// again; only a host not yet asked is. The bytes arriving removes the egg.
+// A network error / 5xx is "unreachable" and records nothing.
+const EGGS_MEANING = 'eggs:dormant'
+const eggsKnown = new Map()
+let eggsAddress = null
+
+async function eggsDir(create) {
+  try {
+    eggsAddress ??= await sha256Hex(new TextEncoder().encode(EGGS_MEANING))
+    const root = await self.navigator.storage.getDirectory()
+    return await root.getDirectoryHandle(eggsAddress, { create })
+  } catch { return null }
+}
+
+async function eggTried(sig) {
+  const held = eggsKnown.get(sig)
+  if (held) return held
+  const tried = new Set()
+  try {
+    const dir = await eggsDir(false)
+    const file = dir && await (await dir.getFileHandle(sig)).getFile()
+    const record = file ? JSON.parse(await file.text()) : null
+    for (const base of (record && Array.isArray(record.tried) ? record.tried : [])) if (typeof base === 'string' && base) tried.add(base)
+  } catch { /* no egg */ }
+  eggsKnown.set(sig, tried)
+  return tried
+}
+
+async function layEgg(sig, refused) {
+  if (!refused.length) return
+  const tried = await eggTried(sig)
+  const before = tried.size
+  for (const base of refused) tried.add(base)
+  if (tried.size === before) return
+  try {
+    const dir = await eggsDir(true)
+    if (!dir) return
+    const writable = await (await dir.getFileHandle(sig, { create: true })).createWritable()
+    try { await writable.write(JSON.stringify({ tried: [...tried].sort() })) } finally { await writable.close() }
+  } catch { /* the session copy still holds it */ }
+}
+
+async function hatchEgg(sig) {
+  const tried = eggsKnown.get(sig)
+  eggsKnown.set(sig, new Set())
+  if (tried && !tried.size) return
+  try { const dir = await eggsDir(false); if (dir) await dir.removeEntry(sig) } catch { /* no egg */ }
+}
+
+// Try each known host not already refused, in order; the first response whose
+// bytes sha256 to the requested sig wins. Loopback hosts use http
+// (content-side analog of the mesh allow-loopback); real domains use https.
+// Returns { buf, contentType } or null. Verification is the backstop — a
+// wrong/hostile domain can only cost a 404, never serve incorrect bytes — and
+// the egg makes that 404 cost ONCE per host, not once per repaint.
 async function fetchResourceFromHosts(sig) {
   let domains = KNOWN_DOMAINS
   if (!domains || domains.length === 0) domains = await loadDomains()
+  const tried = /^[0-9a-f]{64}$/.test(sig) ? await eggTried(sig) : new Set()
+  const refused = []
   for (const raw of (domains || [])) {
     const host = String(raw || '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
     if (!host) continue
     const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+    const origin = `${scheme}://${host}`
+    if (tried.has(origin)) continue
+    let unreachable = false
     // Flat heap first (`/<sig>` — the canonical address; host-sync pushes
     // land there), legacy typed pool fallback for unmigrated hosts.
     for (const path of [`/${sig}`, `/__resources__/${sig}`]) {
       try {
-        const res = await fetch(`${scheme}://${host}${path}`, { cache: 'no-store' })
-        if (!res || !res.ok) continue
+        const res = await fetch(`${origin}${path}`, { cache: 'no-store' })
+        if (!res || !res.ok) { if (!res || (res.status !== 404 && res.status !== 410)) unreachable = true; continue }
         // SPA fallback guard: sig-addressed bytes are never text/html.
         if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) continue
         const buf = await res.arrayBuffer()
         if (await sha256Hex(buf) !== sig) continue
+        await hatchEgg(sig)
         return { buf, contentType: res.headers.get('content-type') || '' }
-      } catch { /* network / CORS / cert — try next path / host */ }
+      } catch { unreachable = true /* network / CORS / cert — not a "not here" */ }
     }
+    if (!unreachable) refused.push(origin)
   }
+  if (/^[0-9a-f]{64}$/.test(sig)) await layEgg(sig, refused)
   return null
 }
 
