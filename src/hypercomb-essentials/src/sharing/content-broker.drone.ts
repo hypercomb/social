@@ -70,7 +70,7 @@
 // self-cleaning drain removes it. Layer/resource paths use the
 // canonical Store APIs.
 
-import { Drone, EffectBus, registerPoolMeaning } from '@hypercomb/core'
+import { Drone, EffectBus, isMetaEnvelope, registerPoolMeaning } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
@@ -129,7 +129,22 @@ const BROADCAST_TAG = 'broker:fetch'
 // ~340KB on the wire, which most relays accept without complaint. A
 // requester that needs a larger blob should use the resource pipeline
 // (out-of-band URL referencing the sig).
-const MAX_RESPONSE_BYTES = 256 * 1024
+// ONE EVENT, ONE CHUNK. A relay event must fit max_message_length (our relay
+// defaults to 512 KB) and base64 inflates by 4/3, so a single response event
+// carries at most this many raw bytes. A tile picture minted before the
+// 346x400 WebP chokepoint is routinely 500-700 KB (a measured `small.image`
+// was 679,566 bytes), and the old single-event cap of 256 KB meant such a
+// picture never crossed the mesh at all — the holder silently declined and
+// the asker backed off for minutes. Larger bytes now travel as an ordered run
+// of chunk events (['c', 'i/n']), each in its own parameterized-replaceable
+// slot (d = '<sig>#i'), reassembled and sha256-gated as one by the asker.
+const CHUNK_BYTES = 192 * 1024
+// Largest resource a participant will serve or assemble over the mesh. Beyond
+// this the durable tier (an HTTP host) is the path.
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+// A chunked run keeps the asker's clock alive while chunks keep arriving; this
+// bounds the whole assembly regardless.
+const MESH_ASSEMBLY_MAX_MS = 60_000
 
 // How long fetchBySig waits for the first valid response. The relay
 // fans the request to every subscriber within one round-trip; valid
@@ -380,6 +395,8 @@ interface StoreApi {
   getResource?: (sig: string) => Promise<Blob | null>
   getResourceLocal?: (sig: string) => Promise<Blob | null>
   putResource?: (blob: Blob) => Promise<string>
+  /** Exact bytes for a layer sig — a meta envelope stays an envelope. */
+  getLayerLocalBytes?: (sig: string) => Promise<Uint8Array | null>
   getLayerBytes?: (sig: string) => Promise<Uint8Array | null>
   getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
   writeLayerBytes?: (sig: string, bytes: ArrayBuffer) => Promise<void>
@@ -1505,7 +1522,12 @@ export class ContentBrokerDrone extends Drone {
         console.warn(`[adopt] unresolved layer ${sig.slice(0, 12)} (${Date.now() - started}ms)`)
         return
       }
-      stats.layers++
+      // An ENVELOPE is an edge, not a tile: it is walked through, never
+      // counted — the count is what a participant is told they are about to
+      // take, and a branch of three read as six.
+      let envelope = false
+      try { envelope = isMetaEnvelope(JSON.parse(new TextDecoder().decode(bytes))) } catch { /* not JSON — not an envelope */ }
+      if (!envelope) stats.layers++
       // Layers are never skipped on the destination's behalf: the walk has to
       // READ one to learn its children, and they are a handful of tiny JSONs
       // (the slim-mesh note below). Only the leaves are worth skipping, and
@@ -1821,6 +1843,48 @@ export class ContentBrokerDrone extends Drone {
       // the request — if the responder is fast (local fanout from a
       // co-resident broker, or sub-100ms relay round-trip) we don't
       // want to race past the EVENT and miss it.
+      // Chunk runs in flight, per responder. A run completes when every index
+      // 0..n-1 is present; the concatenation is then verified exactly like a
+      // single-event response. Runs from different responders never mix.
+      const runs = new Map<string, { n: number; parts: Map<number, Uint8Array>; bytes: number }>()
+      const startedAt = Date.now()
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const armTimer = (ms: number): void => {
+        if (timer !== null) clearTimeout(timer)
+        timer = setTimeout(() => {
+          if (settled) return
+          this.#mintOutcome('mesh', 'timeout')
+          cleanup()
+          resolve(null)
+        }, Math.max(100, ms))
+      }
+      const accept = (bytes: Uint8Array, attributed: string[]): void => {
+        void this.#acceptVerifiedBytes(sig, type, bytes).then((ok) => {
+          // Bytes that failed verification do NOT resolve — keep waiting; some
+          // other (honest) responder may still answer before the timeout. We
+          // also don't cancel — other peers may still legitimately need to send.
+          if (!ok) return
+          // Branch-closure attribution (§21.14) for MESH-fetched layers too —
+          // the HTTP path already does this (#fetchOverHttp), and skipping it
+          // here left every ref inside a mesh-delivered layer without a host,
+          // so the branch's resources could never HTTP-resolve.
+          if (type === 'layer') {
+            for (const d of attributed) {
+              const host = this.#domainToHost(d)
+              if (host) this.#attributeClosure(ok, host)
+            }
+          }
+          // Cooperative-cancellable broadcast: signal that the sig
+          // is satisfied so other in-flight preparers abort before
+          // committing duplicate bandwidth. Fire-and-forget — we
+          // don't await; the fetch itself resolves immediately.
+          void this.#publishCancel(sig)
+          if (timer !== null) clearTimeout(timer)
+          cleanup()
+          resolve(ok)
+        })
+      }
+
       const sub: MeshSubLike = mesh.subscribe(sig, (evt) => {
         if (settled) return
         if (Number(evt.event?.kind) !== KIND_FETCH_RESPONSE) return
@@ -1839,31 +1903,32 @@ export class ContentBrokerDrone extends Drone {
 
         const b64 = String(evt.event?.content ?? '')
         if (!b64) return
-        void this.#acceptResponseBytes(sig, type, b64).then((bytes) => {
-          if (bytes) {
-            // Branch-closure attribution (§21.14) for MESH-fetched layers too —
-            // the HTTP path already does this (#fetchOverHttp), and skipping it
-            // here left every ref inside a mesh-delivered layer without a host,
-            // so the branch's resources could never HTTP-resolve.
-            if (type === 'layer') {
-              for (const d of attributed) {
-                const host = this.#domainToHost(d)
-                if (host) this.#attributeClosure(bytes, host)
-              }
-            }
-            // Cooperative-cancellable broadcast: signal that the sig
-            // is satisfied so other in-flight preparers abort before
-            // committing duplicate bandwidth. Fire-and-forget — we
-            // don't await; the fetch itself resolves immediately.
-            void this.#publishCancel(sig)
-            cleanup()
-            resolve(bytes)
-          }
-          // If the bytes failed verification we DON'T resolve — keep
-          // waiting; some other (honest) responder may still answer
-          // before the timeout. We also don't cancel — other peers may
-          // still legitimately need to send.
-        })
+        let part: Uint8Array
+        try { part = base64ToBytes(b64) } catch { return }
+        if (part.byteLength === 0 || part.byteLength > CHUNK_BYTES) return
+
+        const chunkTag = evt.event?.tags?.find(t => t[0] === 'c')?.[1]
+        if (!chunkTag) { accept(part, attributed); return }   // a single-event response
+
+        const m = /^(\d+)\/(\d+)$/.exec(chunkTag)
+        if (!m) return
+        const i = Number(m[1]), n = Number(m[2])
+        if (!(n >= 2 && i >= 0 && i < n) || (n - 1) * CHUNK_BYTES > MAX_RESPONSE_BYTES) return
+        let run = runs.get(pubkey)
+        if (!run || run.n !== n) { run = { n, parts: new Map(), bytes: 0 }; runs.set(pubkey, run) }
+        if (run.parts.has(i)) return
+        run.parts.set(i, part)
+        run.bytes += part.byteLength
+        if (run.bytes > MAX_RESPONSE_BYTES) { runs.delete(pubkey); return }
+        // Progress keeps the clock alive — a large run must not lose to a
+        // deadline sized for a single event — inside the hard assembly bound.
+        armTimer(Math.min(Math.max(timeoutMs, 5_000), Math.max(100, MESH_ASSEMBLY_MAX_MS - (Date.now() - startedAt))))
+        if (run.parts.size < n) return
+        const whole = new Uint8Array(run.bytes)
+        let at = 0
+        for (let k = 0; k < n; k++) { const c = run.parts.get(k)!; whole.set(c, at); at += c.byteLength }
+        runs.delete(pubkey)
+        accept(whole, attributed)
       })
 
       // Broadcast the request.
@@ -1873,12 +1938,7 @@ export class ContentBrokerDrone extends Drone {
       ])
 
       // Timeout safety net.
-      setTimeout(() => {
-        if (settled) return
-        this.#mintOutcome('mesh', 'timeout')
-        cleanup()
-        resolve(null)
-      }, Math.max(100, timeoutMs))
+      armTimer(timeoutMs)
     })
   }
 
@@ -1962,6 +2022,12 @@ export class ContentBrokerDrone extends Drone {
   #acceptResponseBytes = async (sig: string, type: ContentType, b64: string): Promise<Uint8Array | null> => {
     let bytes: Uint8Array
     try { bytes = base64ToBytes(b64) } catch { return null }
+    return this.#acceptVerifiedBytes(sig, type, bytes)
+  }
+
+  /** Verify assembled bytes against `sig` and persist them. Returns the bytes
+   *  on a hash match, null on mismatch or an out-of-bounds size. */
+  #acceptVerifiedBytes = async (sig: string, type: ContentType, bytes: Uint8Array): Promise<Uint8Array | null> => {
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_RESPONSE_BYTES) return null
 
     const computed = await sha256Hex(bytes)
@@ -1983,6 +2049,7 @@ export class ContentBrokerDrone extends Drone {
     this.#mintOutcome('mesh', 'ok')
     return bytes
   }
+
 
   /** Persist verified bytes to the local Store at the canonical location for
    *  their type, so subsequent reads (getLayerBySig, the render path, and
@@ -2026,6 +2093,14 @@ export class ContentBrokerDrone extends Drone {
     if (!store) return null
     try {
       if (type === 'layer') {
+        // THE BYTES A SIG NAMES, NEVER WHAT THEY POINT AT. A child slot holds
+        // a META ENVELOPE; getLayerBytes follows it to the inner layer, so a
+        // responder answering an envelope sig sent bytes that hash to the
+        // inner layer instead — every asker discarded them as a mismatch,
+        // and a branch adopt over the mesh resolved its root and not one
+        // child (drive-swarm-adopt-branch: failed 3/3). The asker steps
+        // through the envelope itself (adopt-descendants.ts).
+        if (store.getLayerLocalBytes) return (await store.getLayerLocalBytes(sig)) ?? null
         if (store.getLayerBytes) return (await store.getLayerBytes(sig)) ?? null
         if (store.getLayerPoolBytes) return (await store.getLayerPoolBytes(sig)) ?? null
         return null
@@ -2294,9 +2369,8 @@ export class ContentBrokerDrone extends Drone {
     if (!bytes) return  // we don't have it — silent no-op
     if (bytes.byteLength === 0) return
     if (bytes.byteLength > MAX_RESPONSE_BYTES) {
-      // Unservable over the relay: base64 inflates by 4/3 and the event must
-      // still fit the relay's max_message_length. Say so once per sig instead
-      // of going silent — a silent drop leaves the asker waiting out its whole
+      // Beyond what a participant will push through a relay, even chunked.
+      // Say so once per sig instead of going silent — a silent drop leaves the asker waiting out its whole
       // window and then backing off, with nothing anywhere naming the reason.
       // The durable tier (an HTTP host) is the path for bytes this large.
       // Not a broker:outcome: that ledger is per-host TRANSPORT health, and
@@ -2304,7 +2378,7 @@ export class ContentBrokerDrone extends Drone {
       if (!this.#oversizeReported.has(sigTag)) {
         this.#oversizeReported.add(sigTag)
         console.warn(
-          `[content-broker] ${sigTag.slice(0, 12)}… is ${bytes.byteLength} bytes — over the ${MAX_RESPONSE_BYTES}-byte mesh response cap; it can only be served by a host.`,
+          `[content-broker] ${sigTag.slice(0, 12)}… is ${bytes.byteLength} bytes — over the ${MAX_RESPONSE_BYTES}-byte mesh limit; it can only be served by a host.`,
         )
       }
       return
@@ -2327,7 +2401,6 @@ export class ContentBrokerDrone extends Drone {
 
     const mesh = this.#getMesh()
     if (!mesh?.publish) return
-    const content = arrayBufferToBase64(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
     // Parameterized-replaceable: ['d', sig] makes the relay store
     // exactly one of these per (pubkey, kind, sig). Future requesters
     // for the same sig hit the cached event via REQ replay — they
@@ -2335,6 +2408,11 @@ export class ContentBrokerDrone extends Drone {
     // what's already there. ['expiration', ...] lets the relay garbage-
     // collect after RESPONSE_TTL_SECS so the cache doesn't grow
     // unbounded.
+    //
+    // Bytes over CHUNK_BYTES go as an ordered run: chunk i of n carries
+    // ['c', 'i/n'] and its own d-tag '<sig>#i', so every chunk keeps its own
+    // relay slot (one d per event is how replaceability works) while the x
+    // tag — the channel the asker subscribes on — stays the bare sig.
     const expirationSecs = Math.floor(Date.now() / 1000) + RESPONSE_TTL_SECS
     // Doctrine: response carries { bytes, domains }. Include our own
     // domain when set so requesters accumulate it into their address
@@ -2342,16 +2420,26 @@ export class ContentBrokerDrone extends Drone {
     // localStorage['hc:nostrmesh:self-domain'] (e.g. 'wss://jwize.com');
     // regular peers leave it empty and emit domain-less responses.
     const selfDomain = this.#getSelfDomain()
-    const responseTags: string[][] = [
-      ['d', sigTag],
-      ['t', typeTag],
-      ['expiration', String(expirationSecs)],
-    ]
-    if (selfDomain) responseTags.push(['domain', selfDomain])
-    try {
-      await mesh.publish(KIND_FETCH_RESPONSE, sigTag, content, responseTags)
-    } catch (err) {
-      console.warn('[content-broker] response publish failed', { sig: sigTag.slice(0, 12), err })
+    const n = Math.ceil(bytes.byteLength / CHUNK_BYTES)
+    for (let i = 0; i < n; i++) {
+      // A cancel that lands mid-run stops the rest of it — the asker has
+      // already assembled a full run from someone else.
+      if (i > 0 && this.#isCancelled(sigTag)) return
+      const slice = bytes.subarray(i * CHUNK_BYTES, Math.min(bytes.byteLength, (i + 1) * CHUNK_BYTES))
+      const content = arrayBufferToBase64(slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength) as ArrayBuffer)
+      const responseTags: string[][] = [
+        ['d', n > 1 ? `${sigTag}#${i}` : sigTag],
+        ['t', typeTag],
+        ['expiration', String(expirationSecs)],
+      ]
+      if (n > 1) responseTags.push(['c', `${i}/${n}`])
+      if (selfDomain) responseTags.push(['domain', selfDomain])
+      try {
+        await mesh.publish(KIND_FETCH_RESPONSE, sigTag, content, responseTags)
+      } catch (err) {
+        console.warn('[content-broker] response publish failed', { sig: sigTag.slice(0, 12), chunk: `${i}/${n}`, err })
+        return
+      }
     }
   }
 
@@ -2402,7 +2490,7 @@ export class ContentBrokerDrone extends Drone {
 
     const packed = JSON.stringify(entries)
     const bytes = new TextEncoder().encode(packed)
-    if (bytes.byteLength === 0 || bytes.byteLength > MAX_RESPONSE_BYTES) return
+    if (bytes.byteLength === 0 || bytes.byteLength > CHUNK_BYTES) return   // visuals are one event
 
     const content = arrayBufferToBase64(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
     const expirationSecs = Math.floor(Date.now() / 1000) + RESPONSE_TTL_SECS

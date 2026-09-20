@@ -32,6 +32,8 @@ export type CaptureOptions = {
   orientation: HexOrientation
   /** The participant's framing. Absent = the default (centred, covering). */
   framing?: Framing
+  /** The hex side the framing is expressed in (the editor's display side).
+   *  Never the output size — that is always TILE_PICTURE_SIDE. */
   /** `#rrggbb` painted behind the picture. Only ever the participant's own
    *  choice for a picture set to Fit; anything else is ignored. */
   fill?: string | null
@@ -40,7 +42,17 @@ export type CaptureOptions = {
 }
 
 export const CAPTURE_TYPE = 'image/webp'
-export const CAPTURE_QUALITY = 0.92
+export const CAPTURE_QUALITY = 0.85
+
+/** THE STORED PICTURE IS ONE SIZE. A tile's small picture is the 346x400
+ *  point-top box (side 200) — whatever hexagon size this participant happens
+ *  to DISPLAY. The display side is a preference and can be anything; the
+ *  stored bytes travel to every other participant over the mesh, and a
+ *  picture captured at a large display side was the reason peers' tiles
+ *  arrived without pictures (a 693x800 WebP at q0.92 is ~700 KB; one relay
+ *  event carries 192 KB). At this box a WebP is tens of KB and crosses in a
+ *  single event. The renderer scales it to whatever size is on screen. */
+export const TILE_PICTURE_SIDE = 200
 
 type AnyCanvas = OffscreenCanvas | HTMLCanvasElement
 type Ctx2d = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D
@@ -62,9 +74,15 @@ export const captureGeometry = (
   source: Size,
   options: Pick<CaptureOptions, 'orientation' | 'framing' | 'side'>,
 ): { box: Size; framing: Framing; rect: { x: number; y: number; width: number; height: number } } => {
-  const side = options.side ?? DEFAULT_HEX_SIDE
-  const box = captureBox(options.orientation, side)
-  const framing = options.framing ?? defaultFraming(source, side)
+  // `side` is the side the FRAMING is expressed in (the editor frames against
+  // the display side); the BOX is always the canonical one. A framing made at
+  // side S maps onto the canonical box by the ratio of the two — offsets and
+  // scale alike — so the picture lands exactly where the participant put it.
+  const framedAt = options.side ?? TILE_PICTURE_SIDE
+  const box = captureBox(options.orientation, TILE_PICTURE_SIDE)
+  const at = options.framing ?? defaultFraming(source, framedAt)
+  const k = TILE_PICTURE_SIDE / framedAt
+  const framing = k === 1 ? at : { x: at.x * k, y: at.y * k, scale: at.scale * k }
   return { box, framing, rect: drawRect(source, framing, box) }
 }
 

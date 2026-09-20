@@ -56,6 +56,7 @@
 // See documentation/website-artifact-paradigm.md (rules 10 and 11).
 
 import { EffectBus } from '@hypercomb/core'
+import { captureBothOrientations } from '../editor/hex-capture.js'
 import {
   listDecorations,
   removeDecoration,
@@ -99,6 +100,19 @@ type HistoryLike = {
 /** Long edge of a part's picture, in pixels. Big enough to read as a picture
  *  in the tile editor and the lightbox, small enough that seven of them are
  *  not a burden to store or to push. */
+/** The tile's SMALL pictures are the canonical 346x400 box in both
+ *  orientations (hex-capture), never the crop itself: the crop is the
+ *  participant's `large`, and up to 1024 px wide it does not cross the mesh in
+ *  one event. Same two-pictures write the editor and every drop door make. */
+const storeSmallPictures = async (
+  store: { putResource?: (blob: Blob) => Promise<string> },
+  large: Blob,
+): Promise<{ point: string; flat: string }> => {
+  if (!store.putResource) throw new Error('no store to keep the picture in')
+  const both = await captureBothOrientations(large)
+  return { point: await store.putResource(both.point), flat: await store.putResource(both.flat) }
+}
+
 const MIN_PART_WIDTH = 256
 const MAX_PART_WIDTH = 1024
 
@@ -204,8 +218,10 @@ export async function distributeVisual(opts: {
     if (!bytes) continue
 
     let sig: string
+    let small: { point: string; flat: string }
     try {
       sig = await store.putResource(bytes)
+      small = await storeSmallPictures(store, bytes)
     } catch (err) {
       console.warn('[visual-distribution] could not store the picture for', part, err)
       continue
@@ -213,7 +229,8 @@ export async function distributeVisual(opts: {
 
     const updates: Record<string, unknown> = {
       large: { image: sig, x: 0, y: 0, scale: 1 },
-      small: { image: sig },
+      small: { image: small.point },
+      flat: { small: { image: small.flat } },
       // A distributed picture is the part's OWN. Clearing the substrate mark
       // keeps a theme re-dress from treating it as filler and replacing it.
       substrate: undefined,
@@ -274,9 +291,11 @@ export async function dressParts(opts: {
       const bytes = await drawDerived(derivedVisualSpec(part))
       if (!bytes) continue
       const sig = await store.putResource(bytes)
+      const small = await storeSmallPictures(store, bytes)
       await writeTilePropertiesAt(segments, part, {
         large: { image: sig, x: 0, y: 0, scale: 1 },
-        small: { image: sig },
+        small: { image: small.point },
+        flat: { small: { image: small.flat } },
         substrate: undefined,
       })
       EffectBus.emit('tile:saved', { cell: part, segments })

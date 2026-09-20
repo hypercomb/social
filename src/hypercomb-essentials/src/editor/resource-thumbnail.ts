@@ -10,7 +10,7 @@
 // touch changes nothing.
 
 import { captureBothOrientations, decodePicture } from './hex-capture.js'
-import type { Settings, HexOrientation } from '../preferences/settings.js'
+import type { HexOrientation } from '../preferences/settings.js'
 
 type GeneratedThumbnails = {
   pointBlob: Blob | null
@@ -20,10 +20,12 @@ type GeneratedThumbnails = {
 /** Both orientations' small pictures at the default framing. Null blobs when
  *  the picture cannot be decoded. */
 export const generateHexThumbnails = async (source: Blob): Promise<GeneratedThumbnails> => {
-  const settings = (window as any).ioc?.get?.('@diamondcoreprocessor.com/Settings') as Settings | undefined
-  const side = settings?.hexagonSide
+  // The STORED picture is always the canonical 346x400 box (hex-capture's
+  // TILE_PICTURE_SIDE), never this participant's display side: a picture is
+  // shared bytes, and one captured at a large display side arrived at peers
+  // too big to cross the mesh in one event.
   try {
-    const both = await captureBothOrientations(source, typeof side === 'number' && side > 0 ? { side } : {})
+    const both = await captureBothOrientations(source)
     return { pointBlob: both.point, flatBlob: both.flat }
   } catch {
     return { pointBlob: null, flatBlob: null }

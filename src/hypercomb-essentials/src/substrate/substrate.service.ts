@@ -28,6 +28,7 @@
 //     root OPFS `0000` → `substrate-registry` key
 //     per-hive dir `0000` → `substrate` / `substrate-inherit` keys
 
+import { captureBox } from '../editor/crop-math.js'
 import { EffectBus, SignatureService, type SubstrateSource, type SubstrateCustomSource, type SubstrateRegistry, EMPTY_SUBSTRATE_REGISTRY } from '@hypercomb/core'
 // Folder helpers live in this namespace — see folder-handles.ts header for why
 // essentials must NOT import from @hypercomb/shared. Pulling shared into a
@@ -1231,10 +1232,14 @@ export class SubstrateService extends EventTarget {
     // toggling between point-top and flat-top shows a correctly-shaped tile.
     // Same two-images process the tile editor uses on save — just propagated
     // via the substrate pool instead of the editor canvas.
-    const pointW = Math.round(settings.hexWidth('point-top'))
-    const pointH = Math.round(settings.hexHeight('point-top'))
-    const flatW = Math.round(settings.hexWidth('flat-top'))
-    const flatH = Math.round(settings.hexHeight('flat-top'))
+    // The canonical stored box (346x400 point-top), never the display size —
+    // see hex-capture's TILE_PICTURE_SIDE. The renderer scales to the screen.
+    const pointBox = captureBox('point-top')
+    const flatBox = captureBox('flat-top')
+    const pointW = pointBox.width
+    const pointH = pointBox.height
+    const flatW = flatBox.width
+    const flatH = flatBox.height
 
     const byImage = new Map<string, string>()
     const pool: { imageSig: string; propsSig: string }[] = []
@@ -1789,14 +1794,12 @@ export class SubstrateService extends EventTarget {
 
         try {
           const point = await renderTileSmall(blob, {
-            width: Math.round(settings.hexWidth('point-top')),
-            height: Math.round(settings.hexHeight('point-top')),
+            ...captureBox('point-top'),
             orientation: 'point-top',
             framing: framingOf(props?.large),
           })
           const flat = await renderTileSmall(blob, {
-            width: Math.round(settings.hexWidth('flat-top')),
-            height: Math.round(settings.hexHeight('flat-top')),
+            ...captureBox('flat-top'),
             orientation: 'flat-top',
             framing: framingOf(props?.flat?.large),
           })

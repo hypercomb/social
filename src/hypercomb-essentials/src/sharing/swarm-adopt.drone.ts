@@ -441,6 +441,15 @@ export class SwarmAdoptDrone extends Drone {
   // content lands where the participant is, regardless of where the
   // publisher had it), and the publisher domain (if the broker learned it
   // from the mesh) so the resolution protocol can HTTP-direct fetch bytes.
+  /** The witnessed peer branch under `label` at the current location — what
+   *  an explicit branch adopt (adopt-branch.drone) resolves before it asks the
+   *  participant. Read-only: nothing is fetched or folded here. */
+  public peerBranchFor = (
+    label: string,
+    pubkey?: string,
+  ): { layerSig: string; at: string[]; domain?: string; label: string; pubkey?: string } | null =>
+    this.#resolvePeerBranch(label, pubkey)
+
   #resolvePeerBranch = (
     label: string,
     pubkey?: string,
