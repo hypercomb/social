@@ -568,6 +568,7 @@
   "slash.meeting": "Iniciar o unirse a una videollamada en el mosaico seleccionado",
   "slash.debug": "Alternar inspector del árbol de Pixi",
   "slash.remove": "Eliminar mosaicos del directorio actual",
+  "slash.adopt": "Toma el mosaico de otro participante en tu colmena — `adopt <mosaico>` toma solo ese mosaico, `adopt <mosaico> branch` pregunta y luego toma todo lo que hay debajo",
   "slash.format": "Copiar formato visual del mosaico activo",
   "slash.layout": "Guardar, aplicar, listar o eliminar plantillas de diseño",
   "slash.into": "Mover los mosaicos seleccionados dentro de otro mosaico — salen de esta página; /into <cell>",

@@ -568,6 +568,7 @@
   "slash.meeting": "在所选磁贴上启动或加入视频会议",
   "slash.debug": "切换 Pixi 显示树检查器",
   "slash.remove": "从当前目录删除磁贴",
+  "slash.adopt": "把其他参与者的贴片收进你的蜂巢 — `adopt <贴片>` 只收这一块，`adopt <贴片> branch` 先询问，再收下面的一切",
   "slash.format": "复制活动磁贴的可视格式",
   "slash.layout": "保存、应用、列出或删除布局模板",
   "slash.into": "将所选磁贴移入另一个磁贴 — 它们会离开此页面；/into <cell>",

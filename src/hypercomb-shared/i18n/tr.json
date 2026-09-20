@@ -568,6 +568,7 @@
   "slash.meeting": "Seçili döşemede görüntülü toplantı başlat veya katıl",
   "slash.debug": "Pixi görüntü ağacı denetleyicisini değiştir",
   "slash.remove": "Geçerli dizinden döşemeleri kaldır",
+  "slash.adopt": "Bir katılımcının karosunu kovanına al — `adopt <karo>` yalnızca o karoyu alır, `adopt <karo> branch` sorar ve altındaki her şeyi alır",
   "slash.format": "Etkin döşemenin görsel biçimini kopyala",
   "slash.layout": "Düzen şablonlarını kaydet, uygula, listele veya kaldır",
   "slash.into": "Seçili döşemeleri başka bir döşemenin içine taşı — bu sayfadan ayrılırlar; /into <cell>",

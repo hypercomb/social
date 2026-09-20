@@ -568,6 +568,7 @@
   "slash.meeting": "Démarrer ou rejoindre un appel vidéo sur la tuile sélectionnée",
   "slash.debug": "Basculer l'inspecteur de l'arbre d'affichage Pixi",
   "slash.remove": "Supprimer les tuiles du répertoire actuel",
+  "slash.adopt": "Prendre la tuile d’un participant dans ta ruche — `adopt <tuile>` prend la seule tuile, `adopt <tuile> branch` demande puis prend tout ce qu’il y a dessous",
   "slash.format": "Copier le format visuel de la tuile active",
   "slash.layout": "Enregistrer, appliquer, lister ou supprimer des modèles de disposition",
   "slash.into": "Déplacer les tuiles sélectionnées dans une autre tuile — elles quittent cette page ; /into <cell>",

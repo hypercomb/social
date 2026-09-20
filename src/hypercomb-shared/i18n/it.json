@@ -568,6 +568,7 @@
   "slash.meeting": "Avvia o unisciti a una videochiamata sulla tessera selezionata",
   "slash.debug": "Alterna ispettore albero di visualizzazione Pixi",
   "slash.remove": "Rimuovi tessere dalla directory corrente",
+  "slash.adopt": "Prendi la tessera di un altro nel tuo alveare — `adopt <tessera>` prende solo quella, `adopt <tessera> branch` chiede e poi prende tutto ciò che c’è sotto",
   "slash.format": "Copia la formattazione visiva dalla tessera attiva",
   "slash.layout": "Salva, applica, elenca o rimuovi modelli di layout",
   "slash.into": "Sposta le tessere selezionate dentro un'altra tessera — lasciano questa pagina; /into <cell>",

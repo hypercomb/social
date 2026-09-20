@@ -568,6 +568,7 @@
   "slash.meeting": "선택한 타일에서 화상 회의 시작 또는 참여",
   "slash.debug": "Pixi 디스플레이 트리 검사기 전환",
   "slash.remove": "현재 디렉토리에서 타일 제거",
+  "slash.adopt": "다른 참여자의 타일을 내 벌집으로 가져오기 — `adopt <타일>`은 그 타일 하나만, `adopt <타일> branch`는 묻고 나서 그 아래 전부를 가져옵니다",
   "slash.format": "활성 타일의 시각적 서식 복사",
   "slash.layout": "레이아웃 템플릿 저장, 적용, 목록 또는 제거",
   "slash.into": "선택한 타일을 다른 타일 안으로 이동 — 이 페이지에서는 사라집니다; /into <cell>",

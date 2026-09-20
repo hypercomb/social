@@ -126,9 +126,24 @@ const doorArmed = (c) => H.evalSafe(() => c.page.evaluate(() => !!window.ioc.get
   })), n => ['apple', 'pear', 'plum'].every(x => n.includes(x)), 30000, 500)
   H.check('accepted — the children are at B\'s path too', kids.ok, JSON.stringify(kids.value))
 
+  // ── the spoken word: a third participant takes the branch from the command line ──
+  const third = await boot('C')
+  const seenC = await H.waitFor(() => H.peerTilesNow(third.page), t => t.includes('orchard'), 30000)
+  H.check("C sees A's branch root", seenC.ok, seenC.waitedMs + 'ms')
+  await armConfirm(third, true)
+  // `/adopt …` from the line's naming stance. A BARE `adopt orchard branch`
+  // on a fresh line names a tile — the Common Tongue reads plain words only
+  // in COMMAND stance (command-line.component #commitUtterance), the same for
+  // every word in the census; the slash form is the word from either stance.
+  await H.addTile(third.page, '/adopt orchard branch')
+  const askedC = await H.waitFor(() => confirmSeen(third), v => !!v, 20000, 250)
+  H.check('"/adopt orchard branch" asks the same question', askedC.ok && Number(askedC.value && askedC.value.params && askedC.value.params.count) === 3, JSON.stringify(askedC.value && askedC.value.params))
+  const heldC = await H.waitFor(() => H.ownChildren(third.page), o => (o.names || []).includes('orchard'), 30000, 500)
+  H.check('"/adopt orchard branch" lands the branch', heldC.ok, heldC.waitedMs + 'ms')
+
   console.log('\n========== adopt-branch ==========')
   for (const r of H.results) console.log(`  ${r.ok ? '✓' : '✗'} ${r.name}${r.detail ? '  — ' + r.detail : ''}`)
   console.log(`========== ${H.results.filter(r => r.ok).length}/${H.results.length} passed ==========`)
-  if (!H.KEEP) for (const c of [a, b]) { try { await c.browser.close() } catch { /* gone */ } }
+  if (!H.KEEP) for (const c of [a, b, third]) { try { await c.browser.close() } catch { /* gone */ } }
   process.exit(H.results.every(r => r.ok) ? 0 : 1)
 })().catch(e => { console.error(e); process.exit(1) })

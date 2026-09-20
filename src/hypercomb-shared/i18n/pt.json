@@ -568,6 +568,7 @@
   "slash.meeting": "Iniciar ou entrar em videochamada no bloco selecionado",
   "slash.debug": "Alternar inspetor da árvore de exibição Pixi",
   "slash.remove": "Remover blocos do diretório atual",
+  "slash.adopt": "Leva o mosaico de outro participante para a tua colmeia — `adopt <mosaico>` leva só esse, `adopt <mosaico> branch` pergunta e depois leva tudo o que está abaixo",
   "slash.format": "Copiar formatação visual do bloco ativo",
   "slash.layout": "Salvar, aplicar, listar ou remover modelos de layout",
   "slash.into": "Mover os blocos selecionados para dentro de outro bloco — eles saem desta página; /into <cell>",
