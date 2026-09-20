@@ -27,7 +27,6 @@ import { Store } from './store'
 
 export type RuntimeInitializerOptions = {
   logOpfs?: boolean
-  onMeshStateChange?: (enabled: boolean) => void
   /**
    * Where host locale catalogs come from. Return null for a locale you cannot
    * supply and the loader treats it as absent, exactly like a failed import.
@@ -83,7 +82,6 @@ const _runInitializeRuntime = async (
 ): Promise<void> => {
   const {
     logOpfs = false,
-    onMeshStateChange,
   } = options
 
   try {
@@ -495,18 +493,19 @@ const _runInitializeRuntime = async (
     }
 
     localStorage.setItem('hc:mesh-public', String(next))
-    const mesh = get('@NostrMeshDrone') as any
-    mesh?.setNetworkEnabled?.(next, true)
+    // ANNOUNCE, DON'T REACH IN. Going public is driven by
+    // `mesh:public-changed` — the mesh owns its own network flag and the swarm
+    // owns its subscriptions, and both react to this. A direct
+    // `setNetworkEnabled(next, true)` used to sit here as well, which also
+    // ran `reconnectAll()`: it tore the relay sockets down and resubscribed
+    // them in the same instant the swarm was opening its own subscription for
+    // the new zone, and the events the relay had already replayed were lost
+    // with them. Measured, not theorised — with that call live, the
+    // two-client harness dropped from 27/27 to 12/26, a joining participant
+    // seeing one of its peer's two tiles. It had been dormant since the
+    // hypercomb-runtime carve-out (the '@NostrMeshDrone' lookup resolved
+    // nothing), so "does nothing here" is the behaviour the swarm has been
+    // built and verified against. Nothing in this package needs the mesh.
     EffectBus.emit('mesh:public-changed', { public: next })
   })
-
-  // Probe mesh state for UI toggle
-  const mesh = get('@NostrMeshDrone') as any
-  if (mesh) {
-    try {
-      onMeshStateChange?.(!!mesh.isNetworkEnabled?.())
-    } catch {
-      // ignore mesh state probe failures
-    }
-  }
 }

@@ -79,6 +79,10 @@ const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const STORE_KEY = '@hypercomb.social/Store'
 
+// The namespace-free key @hypercomb/runtime knows this capability by. See the
+// alias registration at the bottom of the file.
+const RUNTIME_BROKER_KEY = '@ContentBrokerDrone'
+
 const KIND_FETCH_REQUEST = 20400
 // Responses are PARAMETERIZED-REPLACEABLE (30000-39999 range). The
 // relay enforces one stored event per (pubkey, kind, d-tag=sig), so
@@ -134,6 +138,41 @@ const MAX_RESPONSE_BYTES = 256 * 1024
 // public relays alike; raise via the optional `timeoutMs` arg when
 // a caller knows their content is rare in the swarm.
 const DEFAULT_TIMEOUT_MS = 2000
+
+// Mesh wait for a sig a LIVE participant claims to hold. The 2s render default
+// is a "probably nobody has this" budget; here somebody demonstrably does, and
+// they may be serving a page's worth of sigs off disk at once. Waiting is
+// strictly cheaper than the alternative the short deadline produced — a miss
+// that parks the sig on the 60s-doubling ladder. Nothing blocks on this: the
+// render path never awaits a fetch (show-cell's detached fillFromHost owns it).
+const PEER_CLAIMED_MESH_TIMEOUT_MS = 10_000
+
+// Response spreading (see #standDownDelayMs). One slot per rank; a slot must
+// cover a full cancel round trip (asker receives → verifies → publishes the
+// cancel → relay fans it out), or the next rank commits before it can hear
+// the first one won. Rank 0 always waits 0. Capped at two slots so the worst
+// wait (700ms) always fits inside the asker's 2s mesh window — see the tier
+// note in #standDownDelayMs.
+const STAND_DOWN_SLOT_MS = 350
+const MAX_STAND_DOWN_SLOTS = 2
+
+// How long a participant seen on the broadcast channel counts toward the crowd
+// estimate. Long enough to span a page's fetch burst, short enough that a
+// departed peer stops widening the window.
+const ZONE_PEER_TTL_MS = 60_000
+
+/** A cheap, deterministic, per-(sig, participant) ordering key. Not a hash
+ *  anyone verifies — only an order every holder computes identically from
+ *  facts they all have. FNV-1a over the two hex strings. */
+const standDownScore = (sig: string, pubkey: string): number => {
+  let h = 0x811c9dc5
+  const s = sig + pubkey
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h
+}
 
 // Bounds on deep resource descent. The walk follows signatures found inside
 // fetched content, which may be peer-authored, so none of these limits may be
@@ -461,6 +500,26 @@ export class ContentBrokerDrone extends Drone {
   // lapses so repeated misses escalate; reset on a local hit or new knowledge.
   // This is the whole "stop re-dialing a dead sig" mechanism.
   #missBackoff = new Map<string, number>()
+
+  // Sigs some LIVE participant claims to hold (notePeerLiveness). A claimed
+  // sig is reachable over the mesh right now, so its resolution races the
+  // mesh against HTTP instead of paying the cascade first.
+  #peerClaimedSigs = new Set<string>()
+
+  // Distinct participants seen on the broadcast channel → pubkey → last-seen
+  // ms. The observed crowd size, used only to spread responses.
+  #zonePeersSeenMs = new Map<string, number>()
+
+  // Sigs already reported as too large for a mesh response — warn once, not
+  // once per request.
+  #oversizeReported = new Set<string>()
+
+  // `${pubkey} ${sig}` claims already granted a miss-window clear. The
+  // idempotence guard that keeps a heartbeat re-announce from becoming a
+  // retry storm — see notePeerLiveness.
+  #grantedPeerClaims = new Set<string>()
+
+  static readonly #PEER_CLAIM_MAX = 8192
 
   // Same coalescing for visuals fetches — distinct map because the
   // return shape is different (CachedVisualsEntry[] vs Uint8Array).
@@ -1097,6 +1156,73 @@ export class ContentBrokerDrone extends Drone {
   }
 
   /**
+   * A LIVE PARTICIPANT HOLDING BYTES IS NEW KNOWLEDGE. The address graph only
+   * ever learned from HTTP attribution, so a peer who joined the zone WITH the
+   * bytes — the commonest case, and one with no domain to advertise — cleared
+   * nothing. Every sig that had already missed stayed on the exponential
+   * ladder (60s doubling to 30 min) while the participant who could answer it
+   * in one round trip sat right there. That is the whole "tiles trickle in for
+   * minutes after someone connects" complaint.
+   *
+   * Granted ONCE per (pubkey, sig). This is the anti-storm discipline
+   * #noteDomains learned the hard way: a re-announce is not new knowledge, and
+   * clearing on every heartbeat re-armed consumers that missed again and went
+   * round. One claimant buys one prompt retry; a SECOND participant claiming
+   * the same sig buys another. Retries therefore scale with distinct claims,
+   * never with heartbeats or participant count.
+   *
+   * Claims also mark the sig as live-peer-backed, which is what lets
+   * #resolveRemote race the mesh instead of waiting out the HTTP cascade.
+   */
+  public notePeerLiveness = (pubkey: string, sigs: readonly string[]): void => {
+    const peer = String(pubkey ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(peer)) return
+    if (!Array.isArray(sigs) || sigs.length === 0) return
+
+    const woken: string[] = []
+    for (const raw of sigs) {
+      const sig = String(raw ?? '').trim().toLowerCase()
+      if (!SIG_RE.test(sig)) continue
+
+      this.#rememberPeerClaim(this.#peerClaimedSigs, sig)
+
+      const claim = `${peer} ${sig}`
+      if (this.#grantedPeerClaims.has(claim)) continue
+      this.#rememberPeerClaim(this.#grantedPeerClaims, claim)
+
+      // Only a sig that actually sat in a window is worth waking. delete()
+      // returning false means it was never missing, so nothing changed.
+      const wasMissing = this.#fetchMissUntil.delete(sig)
+      this.#missBackoff.delete(sig)
+      if (wasMissing) woken.push(sig)
+    }
+
+    // ONE coalesced wake for the batch. content:arrived forces a full render
+    // pass (show-cell #rearmResolveGates), and a joining peer announces a
+    // whole page of tiles at once — emitting per sig would force a pass per
+    // tile. The gates are re-armed once and the next pass re-asks for
+    // everything through the now-informed cascade.
+    if (woken.length > 0) {
+      this.emitEffect('content:arrived', { sig: woken[0], kind: 'layer' as const })
+    }
+  }
+
+  /** Bounded FIFO insert — these sets are keyed by peer claims, so a long
+   *  session in a busy zone must not grow them without limit. Oldest claims
+   *  age out; re-hearing an aged-out claim simply grants one more retry. */
+  #rememberPeerClaim = (set: Set<string>, key: string): void => {
+    if (set.has(key)) return
+    set.add(key)
+    if (set.size <= ContentBrokerDrone.#PEER_CLAIM_MAX) return
+    const oldest = set.values().next().value
+    if (oldest !== undefined) set.delete(oldest)
+  }
+
+  /** Is some live participant claiming to hold this sig? Drives the parallel
+   *  mesh race in #resolveRemote. */
+  #isPeerClaimed = (sig: string): boolean => this.#peerClaimedSigs.has(sig)
+
+  /**
    * Ask the swarm for content addressed by sig. Returns the verified
    * bytes when the first valid response arrives, or null on timeout /
    * no responder. Idempotent across concurrent callers for the same
@@ -1171,6 +1297,21 @@ export class ContentBrokerDrone extends Drone {
    *  fallback for layers. Runs coalesced under #pendingFetches; records
    *  a full-cascade miss (with backoff) when everything comes up empty. */
   #resolveRemote = async (s: string, type: ContentType, timeoutMs: number): Promise<Uint8Array | null> => {
+    // LIVE PEER PRESENT → ASK BOTH AT ONCE. The serial cascade (HTTP fully,
+    // then mesh) is right when the durable tier is the likely holder, and
+    // exactly wrong in a swarm: the bytes are on a participant's disk one
+    // round trip away, and the asker spent the HTTP tier walk — up to
+    // HTTP_PROBE_TIMEOUT_MS per host against hosts that cannot have a live
+    // peer's unpublished bytes — before it ever asked them. Race the two
+    // legs and take whichever verifies first; both write through to the same
+    // content-addressed slot, so a double win is idempotent.
+    if ((type === 'layer' || type === 'resource') && this.#isPeerClaimed(s)) {
+      const raced = await this.#raceHostAndMesh(s, type, timeoutMs)
+      if (raced) return raced
+      this.#noteFetchMiss(s)
+      return null
+    }
+
     // HTTP-direct path — try known domains' content endpoints first.
     // Per the layer-only-mesh doctrine, heavy bytes (resources, deps)
     // travel via HTTP exclusively; layers can fall back to mesh.
@@ -1198,6 +1339,40 @@ export class ContentBrokerDrone extends Drone {
     const bytes = await this.#fetchOverMesh(s, type, timeoutMs)
     if (!bytes) this.#noteFetchMiss(s)
     return bytes
+  }
+
+  /** Both legs at once, first verified bytes win. A leg that comes up empty
+   *  never settles the race — only both failing does, so a 404-ing host
+   *  cannot cancel a live peer who is still reading off disk. The mesh leg
+   *  gets PEER_CLAIMED_MESH_TIMEOUT_MS rather than the render default: a
+   *  participant answering a whole page of tiles at once is doing an OPFS read
+   *  plus a base64 encode per sig, and the tail of that burst does not make a
+   *  2s deadline — the sigs that missed it were the ones that then sat on the
+   *  60s ladder, which is precisely the observed sparseness. */
+  #raceHostAndMesh = async (
+    s: string,
+    type: ContentType,
+    timeoutMs: number,
+  ): Promise<Uint8Array | null> => {
+    const meshTimeout = Math.max(timeoutMs, PEER_CLAIMED_MESH_TIMEOUT_MS)
+    const legs = [
+      this.#fetchOverHttp(s, type),
+      this.#fetchOverMesh(s, type, meshTimeout),
+    ]
+    return new Promise<Uint8Array | null>((resolve) => {
+      let settled = false
+      let pending = legs.length
+      for (const leg of legs) {
+        void leg.then((bytes) => {
+          if (settled) return
+          if (bytes) { settled = true; resolve(bytes); return }
+          if (--pending === 0) { settled = true; resolve(null) }
+        }).catch(() => {
+          if (settled) return
+          if (--pending === 0) { settled = true; resolve(null) }
+        })
+      }
+    })
   }
 
   /**
@@ -1952,8 +2127,72 @@ export class ContentBrokerDrone extends Drone {
   // any preparation-in-flight aborts before publishing duplicate bytes.
   #handleBroadcast = async (evt: MeshEvtLike): Promise<void> => {
     const kind = Number(evt.event?.kind)
+    this.#noteZonePeer(evt)
     if (kind === KIND_FETCH_REQUEST) return void this.#handleFetchRequest(evt)
     if (kind === KIND_FETCH_CANCEL)  return void this.#handleFetchCancel(evt)
+  }
+
+  /** Crowd estimate, observed rather than configured. Every request and cancel
+   *  on the broadcast channel is signed, so the distinct pubkeys seen there
+   *  recently ARE the set of participants currently exchanging bytes. Used
+   *  only to spread responses (#standDownDelayMs); never to gate anything. */
+  #noteZonePeer = (evt: MeshEvtLike): void => {
+    const pubkey = String(evt.event?.pubkey ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(pubkey)) return
+    if (this.#myPubkey && pubkey === this.#myPubkey) return
+    this.#zonePeersSeenMs.set(pubkey, Date.now())
+  }
+
+  /**
+   * How long THIS participant stands down before committing bytes for `sig`,
+   * so P holders of the same bytes do not all publish a copy.
+   *
+   * The cooperative cancel already exists, but it is published only once the
+   * ASKER has verified bytes — so any holder that reaches its publish inside
+   * that round trip sends a full copy anyway. At two participants that is
+   * harmless; at nine it was nine redundant multi-hundred-KB events per sig
+   * (measured by drive-swarm-scale: every holder published, 9/9), which is
+   * the bandwidth wall a large swarm hits.
+   *
+   * DETERMINISTIC, NOT RANDOM. A random wait inside a crowd-sized window was
+   * tried first and converged nothing: the window (tens of ms) was shorter
+   * than the cancel's own round trip (~250ms locally, more over the
+   * internet), so everyone had already committed. Instead each holder ranks
+   * itself among the participants it has seen on the broadcast channel by
+   * mixing (sig, pubkey) into an ordering key, and waits rank × STAND_DOWN_SLOT_MS:
+   *
+   *   - rank 0 waits NOTHING, so the first copy is as fast as it ever was —
+   *     responsiveness is untouched, whatever the crowd size;
+   *   - every later rank waits at least one full cancel round trip, sees the
+   *     cancel, and stands down. Two holders whose views of the crowd differ
+   *     may both take rank 0 — that costs one extra copy, never a missing one.
+   *
+   * Alone (nobody else seen): rank 0, zero wait — a quiet swarm pays nothing.
+   */
+  #standDownDelayMs = (sig: string): number => {
+    const peers = this.#zonePeers()
+    if (peers.length === 0 || !this.#myPubkey) return 0
+    const mine = standDownScore(sig, this.#myPubkey)
+    let rank = 0
+    for (const p of peers) if (standDownScore(sig, p) < mine) rank++
+    // TIERS, NOT A LADDER. rank × slot stacked past the asker's own mesh
+    // window in a crowd of nine (the sole holder ranked fifth waited 2s and
+    // the asker had already given up — measured: cold fetches went from
+    // ~200ms to null). Three tiers keep the worst wait at two slots: the
+    // lowest-ranked holder answers at once, the next after one cancel round
+    // trip, everyone else after two. Only if BOTH of the two lowest-ranked
+    // participants are non-holders does the crowd publish together — a
+    // bounded number of extra copies, never a missing answer.
+    return Math.min(rank, MAX_STAND_DOWN_SLOTS) * STAND_DOWN_SLOT_MS
+  }
+
+  /** The other participants seen on the broadcast channel recently. */
+  #zonePeers = (): string[] => {
+    const cutoff = Date.now() - ZONE_PEER_TTL_MS
+    for (const [pubkey, seen] of this.#zonePeersSeenMs) {
+      if (seen < cutoff) this.#zonePeersSeenMs.delete(pubkey)
+    }
+    return [...this.#zonePeersSeenMs.keys()]
   }
 
   // Record a cancel signal. The sig tag identifies which fetch has
@@ -2053,7 +2292,23 @@ export class ContentBrokerDrone extends Drone {
 
     const bytes = await this.#readLocal(sigTag, typeTag as ContentType)
     if (!bytes) return  // we don't have it — silent no-op
-    if (bytes.byteLength === 0 || bytes.byteLength > MAX_RESPONSE_BYTES) return
+    if (bytes.byteLength === 0) return
+    if (bytes.byteLength > MAX_RESPONSE_BYTES) {
+      // Unservable over the relay: base64 inflates by 4/3 and the event must
+      // still fit the relay's max_message_length. Say so once per sig instead
+      // of going silent — a silent drop leaves the asker waiting out its whole
+      // window and then backing off, with nothing anywhere naming the reason.
+      // The durable tier (an HTTP host) is the path for bytes this large.
+      // Not a broker:outcome: that ledger is per-host TRANSPORT health, and
+      // our own file being large says nothing about whether the mesh works.
+      if (!this.#oversizeReported.has(sigTag)) {
+        this.#oversizeReported.add(sigTag)
+        console.warn(
+          `[content-broker] ${sigTag.slice(0, 12)}… is ${bytes.byteLength} bytes — over the ${MAX_RESPONSE_BYTES}-byte mesh response cap; it can only be served by a host.`,
+        )
+      }
+      return
+    }
 
     // Re-check cancellation AFTER the readLocal await — a cancel may
     // have arrived during the async disk read. This is the window the
@@ -2061,6 +2316,14 @@ export class ContentBrokerDrone extends Drone {
     // this check, every peer that races the readLocal commits bytes
     // even after the first responder has already resolved the sig.
     if (this.#isCancelled(sigTag)) return
+
+    // Spread responses across the crowd, then look once more. This is where
+    // the redundant copies are actually eliminated — see #standDownDelayMs.
+    const standDown = this.#standDownDelayMs(sigTag)
+    if (standDown > 0) {
+      await new Promise<void>(resolve => setTimeout(resolve, standDown))
+      if (this.#isCancelled(sigTag)) return
+    }
 
     const mesh = this.#getMesh()
     if (!mesh?.publish) return
@@ -2192,3 +2455,11 @@ export class ContentBrokerDrone extends Drone {
 
 const _broker = new ContentBrokerDrone()
 window.ioc.register('@diamondcoreprocessor.com/ContentBrokerDrone', _broker)
+// RUNTIME CONTRACT KEY. @hypercomb/runtime is a standalone package that must
+// not name an essentials namespace, so it resolves this capability as
+// '@ContentBrokerDrone' — the same never-import, key-only contract the
+// 'hc:known-domains' handoff uses. Store's host fetch (resources, layers,
+// artifact meta, miss-window coordination) goes through that key, so without
+// this alias every non-local byte read answers null and no image ever arrives.
+// Aliasing one instance under a second key is an ioc.web no-op by design.
+window.ioc.register(RUNTIME_BROKER_KEY, _broker)

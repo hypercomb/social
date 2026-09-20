@@ -29,7 +29,7 @@
 import { Drone, EffectBus, poolAddresses, SignatureService, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
-import { noteVisualHosts } from './visual-hosts.js'
+import { noteVisualHosts, visualArtifactSigs } from './visual-hosts.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
 import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
 import { referenceTargetForLabel, titlesForSegments } from '../commands/decoration-kind-index.js'
@@ -1371,13 +1371,19 @@ export class SwarmDrone extends Drone {
     // to whatever's in this list. Omitting them is a silent miss: the
     // broker subscription registers but never receives events, so
     // swarm.requestSubtree() always times out with "no responder."
+    // 20400/20402/30401 = the content broker's fetch REQUEST, fetch CANCEL and
+    // fetch RESPONSE. The cancel was missing from this list until 2026-09-19:
+    // the relay dropped every one, so no holder ever heard that another had
+    // already answered, and with N participants holding the same bytes all N
+    // published a copy (drive-swarm-scale measured 9/9). The broker's
+    // stand-down ranking only works because the cancel now arrives.
     // 30213 = the durable feedback-loop channel item (FeedbackChannelDrone).
     // Same rule as above: omit it and the relay filter drops the events as a
     // silent miss. (30210/30211/30212 were the feedback consent handshake and
     // 30214 the per-recipient reply; both drones retired with the feedback
     // window on 2026-09-04 - documentation/annotate-the-screen.md. A kind
     // nobody publishes and nobody handles has no business in the filter.)
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 30401, 30207, 30213, 30215, 30216, 30217], true)
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 20402, 30401, 30207, 30213, 30215, 30216, 30217], true)
   }
 
   /**
@@ -2075,6 +2081,14 @@ export class SwarmDrone extends Drone {
       if (domainTags.length && broker?.noteDomainsForSig) {
         noteVisualHosts(cleanVisuals, domainTags, broker.noteDomainsForSig)
       }
+      // A recovered entry is a LIVE answer from a participant who is in the
+      // zone right now — the late-joiner path, which is the exact moment the
+      // user means by "it should be immediate when participants connect".
+      // Same unconditional claim as #onEvent, same per-claim idempotence.
+      if (broker?.notePeerLiveness) {
+        const refs = visualArtifactSigs(cleanVisuals)
+        if (refs.length) broker.notePeerLiveness(pubkey, refs)
+      }
       if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
       bag.set(pubkey, { visuals: cleanVisuals })
       let lastSeenBag = this.#peerLastSeenMsBySig.get(sig)
@@ -2340,11 +2354,23 @@ export class SwarmDrone extends Drone {
     const domainTags = (evt?.event?.tags ?? [])
       .filter((t): t is string[] => Array.isArray(t) && String(t[0]) === 'domain' && !!String(t[1] ?? '').trim())
       .map(t => String(t[1]).trim())
-    if (domainTags.length) {
-      const broker = this.#getBroker()
-      if (broker?.noteDomainsForSig) {
-        noteVisualHosts(cleanVisuals, domainTags, broker.noteDomainsForSig)
-      }
+    const broker = this.#getBroker()
+    if (domainTags.length && broker?.noteDomainsForSig) {
+      noteVisualHosts(cleanVisuals, domainTags, broker.noteDomainsForSig)
+    }
+
+    // THE PUBLISHER IS HERE, AND THEY HAVE THE BYTES. Unconditional — the
+    // attribution above only fires for a peer who advertises a host, which
+    // most participants never do, so a plain peer's arrival used to clear
+    // nothing. Every sig of theirs that had already missed stayed on the
+    // broker's exponential ladder (60s doubling toward 30 min) even though the
+    // one participant who could answer it had just announced themselves. That
+    // is why tiles trickled in for minutes instead of resolving on connect.
+    // Idempotent per (pubkey, sig) inside the broker, so the 30s heartbeat
+    // re-announce costs nothing and the crowd cannot turn this into a storm.
+    if (broker?.notePeerLiveness) {
+      const refs = visualArtifactSigs(cleanVisuals)
+      if (refs.length) broker.notePeerLiveness(pubkey, refs)
     }
 
     // Auto-resource-pull DISABLED for the exploration-first model.
@@ -4524,6 +4550,7 @@ const payload: SwarmLayerPayload = myLabel
       fetchVisualsAt?: (sig: string, timeoutMs?: number) =>
         Promise<readonly { pubkey: string; content: string; created_at: number; tags: string[][] }[] | null>
       noteDomainsForSig?: (sig: string, domains: string[]) => void
+      notePeerLiveness?: (pubkey: string, sigs: readonly string[]) => void
     } | undefined
 
   #getSigner = (): SignerApi | undefined =>

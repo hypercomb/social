@@ -1388,4 +1388,89 @@ describe('doctrine ratchets', () => {
       /\bmachine\s*[?!]?\.\s*(?:reach|scope)\s*[!=]==\s*['"`]/)
     assertRatchet(actual, [], 'a door re-deriving machine admission instead of asking the gate')
   })
+
+  it('every IoC key somebody resolves is a key somebody registers', () => {
+    // A LOOKUP THAT NAMES NOTHING IS SILENT. `ioc.get` is exact-match and
+    // returns `undefined` for an unknown key, and nearly every consumer treats
+    // undefined as "that capability isn't here yet" — a legitimate state during
+    // boot. So a key that NO ONE registers does not throw, does not warn, and
+    // does not fail a test: it degrades to the absent-service branch forever.
+    //
+    // This is not hypothetical. The hypercomb-runtime carve-out (ce9eb3720)
+    // rewrote store.ts's four broker/mesh/history/host-sync lookups from
+    // '@diamondcoreprocessor.com/X' to '@X' so the new package would not name
+    // an essentials namespace — a correct instinct — but nothing registered the
+    // short names. For two and a half weeks Store.getResource could not fetch a
+    // single remote byte: `if (!broker?.fetchBySig) return null` on every call.
+    // Swarm tiles arrived without their images and nothing anywhere said why.
+    // The spec that covered it registered the short key itself, so it passed.
+    //
+    // The runtime-contract keys are the fix and the reason this ratchet exists:
+    // a package that must not name a namespace resolves a bare capability name,
+    // and the provider registers BOTH. This check simply proves the two halves
+    // still meet. Empty allowlist — an unregistered key is never correct.
+    const gets = new Map<string, Set<string>>()   // key → files resolving it
+    const registered = new Set<string>()
+    const constKeys = new Map<string, string>()   // CONST_NAME → '@literal'
+    const sources: { rel: string; code: string }[] = []
+
+    // `.spec` files are excluded from `walk`, which matters here: a test that
+    // registers its own stub must not be able to satisfy production's lookup.
+    for (const dir of SCAN_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        sources.push({
+          rel: relative(ROOT, file).replace(/\\/g, '/'),
+          code: stripComments(readFileSync(file, 'utf8')),
+        })
+      }
+    }
+
+    // A key is very often declared once and shared, so resolve the indirection
+    // before judging anything: `const FOO_KEY = '@x/Y'` then `register(FOO_KEY)`.
+    for (const { code } of sources) {
+      for (const m of code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*['"`](@[^'"`]+)['"`]/g)) {
+        constKeys.set(m[1], m[2])
+      }
+    }
+
+    for (const { rel, code } of sources) {
+      // `[\s\S]*?` spans the newline in a wrapped `register(\n  '@x/Y',\n …)`.
+      for (const m of code.matchAll(/\bregister\s*\??\.?\s*\(\s*[\s\S]{0,40}?(['"`](@[^'"`]+)['"`]|([A-Za-z_$][\w$]*))/g)) {
+        const literal = m[2]
+        if (literal) { registered.add(literal); continue }
+        const viaConst = m[3] ? constKeys.get(m[3]) : undefined
+        if (viaConst) registered.add(viaConst)
+      }
+      for (const m of code.matchAll(/\bget\s*(?:<[^>]*>)?\s*\(\s*['"`](@[^'"`]+)['"`]/g)) {
+        const key = m[1]
+        if (!gets.has(key)) gets.set(key, new Set())
+        gets.get(key)!.add(rel)
+      }
+    }
+
+    // Scoped to NAMESPACE-FREE keys — '@ContentBrokerDrone', not
+    // '@domain.com/Thing'. A bare capability name is precisely the
+    // runtime-contract form: the shape a package reaches for when it must not
+    // name a provider's namespace, and therefore the shape whose two halves
+    // are written in different packages by different hands and can drift apart
+    // without one file looking wrong. Namespaced keys are left to their own
+    // owners; several are registered through provider-specific helpers
+    // (publishService, and a couple of genuine orphans worth their own pass)
+    // and folding them in here would make this ratchet about something else.
+    const isRuntimeContractKey = (key: string): boolean => !key.includes('/')
+
+    const orphans: string[] = []
+    for (const [key, files] of gets) {
+      if (!isRuntimeContractKey(key)) continue
+      if (registered.has(key)) continue
+      for (const file of files) orphans.push(`${key}  ←  ${file}`)
+    }
+    assertRatchet(
+      orphans.sort(),
+      [],
+      'a namespace-free IoC key resolved but never registered — the lookup silently answers undefined forever',
+    )
+  })
 })

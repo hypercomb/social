@@ -4659,3 +4659,6 @@ export class HistoryService {
 
 const _historyService = new HistoryService()
 ;(window as any).ioc.register('@diamondcoreprocessor.com/HistoryService', _historyService)
+// RUNTIME CONTRACT KEY — @hypercomb/runtime names no essentials namespace and
+// resolves this as '@HistoryService'.
+;(window as any).ioc.register('@HistoryService', _historyService)

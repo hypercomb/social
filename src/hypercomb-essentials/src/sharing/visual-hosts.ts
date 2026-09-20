@@ -1,10 +1,9 @@
-/** Attribute only artifact references from an already-sanitized visual.
- * This is discovery, not a fetch: image bytes still resolve on demand. */
-export const noteVisualHosts = (
+/** The artifact signatures an already-sanitized visual refers to: its layer
+ * and every image variant the sanitizer admits. Discovery, not a fetch —
+ * bytes still resolve on demand, and sha256 still gates every one. */
+export const visualArtifactSigs = (
   visuals: readonly Record<string, unknown>[],
-  domains: string[],
-  note: (sig: string, domains: string[]) => void,
-): void => {
+): string[] => {
   const refs = new Set<string>()
   const add = (value: unknown): void => {
     if (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)) refs.add(value)
@@ -22,5 +21,16 @@ export const noteVisualHosts = (
     image(flat?.['small'])
     image(flat?.['large'])
   }
-  if (domains.length) for (const sig of refs) note(sig, domains)
+  return [...refs]
+}
+
+/** Attribute only artifact references from an already-sanitized visual.
+ * This is discovery, not a fetch: image bytes still resolve on demand. */
+export const noteVisualHosts = (
+  visuals: readonly Record<string, unknown>[],
+  domains: string[],
+  note: (sig: string, domains: string[]) => void,
+): void => {
+  if (!domains.length) return
+  for (const sig of visualArtifactSigs(visuals)) note(sig, domains)
 }

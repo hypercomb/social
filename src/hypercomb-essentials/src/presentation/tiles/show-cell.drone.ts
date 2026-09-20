@@ -7506,6 +7506,26 @@ export class ShowCellDrone extends Drone {
     }
   }
 
+  /** A just-landed props resource names the picture it stands for. Follow that
+   *  pointer now rather than waiting for the next render pass to discover it —
+   *  see the call site in loadCellImages' fillFromHost. Silent on anything
+   *  that isn't a small JSON blob carrying a recoverable image signature;
+   *  a raw image blob simply has no pointer to follow. */
+  #prefetchNestedImageSig = async (
+    blob: Blob,
+    fill: (sig: string, label?: string) => void,
+  ): Promise<void> => {
+    try {
+      if (blob.size > 64 * 1024) return   // an image, not a pointer
+      const props = JSON.parse(await blob.text())
+      const nested = recoverableTileImageSig(props, this.#flat)
+      if (!nested || !isSignature(nested)) return
+      if (this.imageAtlas?.hasImage(nested)) return
+      if (await this.#localDecodeBlob(nested)) return   // already here
+      fill(nested)
+    } catch { /* not a pointer — nothing to chain */ }
+  }
+
   // Re-open the completeness gates and force a repaint — shared by the
   // content:arrived effect and the miss-window timer. Drops the back-nav
   // cell caches of placeholder locations so the fast path can't restore a
@@ -9082,6 +9102,16 @@ export class ShowCellDrone extends Drone {
           // Fresh bytes for this sig — un-pin any decode-failure record so
           // the atlas retries with the healed blob instead of skipping it.
           imageAtlas.clearFailure(sig)
+          // CHAIN THE POINTER IN ONE PASS. A peer's visual names a PROPS
+          // resource whose small.image is the actual picture, so resolving a
+          // tile took two detached fetches with a full render pass between
+          // them — the second sig wasn't even known until the first landed and
+          // a pass re-derived it. On a fresh join that doubled the wait for
+          // every image. Follow the pointer here instead: the nested fetch
+          // starts immediately and the pass that follows finds both bytes
+          // local. Guarded by #hostFillInFlight, so this can't recurse or
+          // double-fetch, and a props blob is small by construction.
+          void this.#prefetchNestedImageSig(blob, fillFromHost)
           // Bytes landed (memory + OPFS write-through). Drop the label's
           // cached derivation so the next pass re-derives from fresh
           // bytes, then schedule that pass. The force is required — a
