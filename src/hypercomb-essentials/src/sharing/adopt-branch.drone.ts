@@ -13,12 +13,24 @@
 // several participants can publish the same tile at the same place, and the
 // dialog names every one of them and says whose version is being taken.
 //
+// WHICH PARTICIPANT is part of the question: several people can publish the
+// same tile at the same place, and they do not hold the same thing under it.
+// The dialog counts each offer and lets the participant pick whose version
+// arrives; the freshest publisher (the one the canvas painted) leads.
+//
+// The question is drawn by this module (adopt-branch-picker.ts), not by the
+// shell. Asking it through a new core export made every package carrying it
+// require a newer shell — the admission gate refuses such a package by name —
+// and a door that cannot replicate is not finished. Everything here rides the
+// signed package.
+//
 // Nothing here is a new adopt path. The count is the broker's layer-only
 // walk (membership, a handful of tiny JSONs, never the branch's pictures);
 // the fold is SwarmAdoptDrone.adoptResolvedBranch — inspection, code consent,
 // receipts and the Beehaviors landing are the same as every explicit adopt.
 
-import { Drone, EffectBus, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { askWhichBranch, type BranchOffer } from './adopt-branch-picker.js'
 import type { OverlayActionDescriptor, OverlayTileContext } from '../presentation/tiles/tile-overlay.drone.js'
 
 const OWNER = '@diamondcoreprocessor.com/AdoptBranchDrone'
@@ -31,6 +43,9 @@ const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 const LARGE_BRANCH = 12
 /** How long the count may take before the dialog asks without a number. */
 const COUNT_BUDGET_MS = 8_000
+/** How many participants offering the same tile are counted and offered. A
+ *  dialog that walks ten closures before it can ask is not a dialog. */
+const MAX_OFFERS = 4
 
 // A tree: trunk with two branches. Same 24-box, white-fill convention as the
 // rest of the overlay glyphs.
@@ -145,44 +160,77 @@ export class AdoptBranchDrone extends Drone {
     this.#asking.add(label)
     try {
       const adopt = ioc<SwarmAdoptLike>(SWARM_ADOPT_KEY)
-      // RESOLVE BEFORE THE FIRST AWAIT — the same rule the wand keeps: the
-      // location and the offer are gesture-time facts, and a navigation can
-      // land behind this handler.
-      const branch = adopt?.peerBranchFor?.(label) ?? null
+      // RESOLVE WHERE AND WHAT SYNCHRONOUSLY, before the first await — the same
+      // rule the wand keeps: the location and the offers are gesture-time
+      // facts, and a navigation can land behind this handler.
       const publishers = this.#publishersOf(label)
+      const branch = adopt?.peerBranchFor?.(label) ?? null
       if (!branch || !adopt?.adoptResolvedBranch) {
         this.#say(this.#t('swarm.adopt-branch.unresolved', { label }, `nobody here is offering “${label}” right now`))
         return
       }
-      const taking = publishers.find(p => p.pubkey === branch.pubkey) ?? publishers[0]
-      const publisher = taking?.name ?? (branch.pubkey?.slice(0, 8) ?? '')
-      const others = publishers.filter(p => p !== taking).map(p => p.name)
 
-      const count = await this.#countUnder(branch.layerSig)
-      const large = count === null || count >= LARGE_BRANCH
-      const params = { label, count: count ?? '?', publisher, others: others.join(', ') }
-      const message = count === 0
-        ? 'swarm.adopt-branch.message-leaf'
-        : others.length > 0 ? 'swarm.adopt-branch.message-many' : 'swarm.adopt-branch.message'
-      const warning = count === null
+      // EACH PARTICIPANT IS A DIFFERENT BRANCH. The same tile name at the same
+      // place is several people's work, and they do not hold the same thing
+      // under it — so the count belongs to the OFFER, not to the tile, and
+      // choosing a participant chooses what arrives. The freshest publisher is
+      // the one the canvas painted, so it leads and is selected.
+      const offers: { pubkey: string; name: string; branch: NonNullable<ReturnType<NonNullable<SwarmAdoptLike['peerBranchFor']>>>; count: number | null }[] = []
+      for (const p of publishers.slice(0, MAX_OFFERS)) {
+        const theirs = p.pubkey === branch.pubkey ? branch : adopt.peerBranchFor?.(label, p.pubkey) ?? null
+        if (!theirs) continue
+        offers.push({ ...p, branch: theirs, count: await this.#countUnder(theirs.layerSig) })
+      }
+      if (offers.length === 0) offers.push({ pubkey: branch.pubkey ?? '', name: branch.pubkey?.slice(0, 8) ?? '', branch, count: await this.#countUnder(branch.layerSig) })
+
+      const lead = offers.find(o => o.pubkey === branch.pubkey) ?? offers[0]
+      const many = offers.length > 1
+      const choices: BranchOffer[] = many
+        ? offers.map(o => ({
+            id: o.pubkey,
+            label: o.name,
+            detail: o.count === null
+              ? this.#t('swarm.adopt-branch.count-unknown', undefined, 'size unknown')
+              : this.#t('swarm.adopt-branch.count', { count: o.count }, `${o.count} tiles`),
+          }))
+        : []
+
+      // The warning is about what the PARTICIPANT is standing on: the biggest
+      // thing they could take with one press.
+      const counts = offers.map(o => o.count).filter((c): c is number => c !== null)
+      const uncounted = offers.some(o => o.count === null)
+      const biggest = counts.length ? Math.max(...counts) : null
+      const large = uncounted || (biggest !== null && biggest >= LARGE_BRANCH)
+
+      const params = {
+        label,
+        count: lead.count ?? '?',
+        publisher: lead.name,
+        others: offers.filter(o => o !== lead).map(o => o.name).join(', '),
+      }
+      const message = many
+        ? 'swarm.adopt-branch.message-choose'
+        : lead.count === 0 ? 'swarm.adopt-branch.message-leaf' : 'swarm.adopt-branch.message'
+      const warning = uncounted
         ? 'swarm.adopt-branch.uncounted'
-        : count >= LARGE_BRANCH ? 'swarm.adopt-branch.warning' : undefined
+        : (biggest !== null && biggest >= LARGE_BRANCH) ? 'swarm.adopt-branch.warning' : undefined
 
-      const yes = await requestConfirm({
-        title: 'swarm.adopt-branch.title',
-        message,
-        messageParams: params,
-        warning,
-        warningParams: params,
-        confirmLabel: 'swarm.adopt-branch.confirm',
-        cancelLabel: 'confirm.cancel',
+      const answer = await askWhichBranch({
+        title: this.#t('swarm.adopt-branch.title', undefined, 'Add the whole branch?'),
+        message: this.#t(message, { ...params, count: biggest ?? params.count }, `“${label}” and everything under it`),
+        warning: warning ? this.#t(warning, { ...params, count: biggest ?? params.count }, '') : undefined,
+        confirmLabel: this.#t('swarm.adopt-branch.confirm', undefined, 'Add the branch'),
+        cancelLabel: this.#t('confirm.cancel', undefined, 'Cancel'),
         danger: large,
+        ...(many ? { offers: choices, chosen: lead.pubkey } : {}),
       })
-      if (!yes) return
+      if (!answer.confirmed) return
 
-      const result = await adopt.adoptResolvedBranch(branch)
+      const taken = offers.find(o => o.pubkey === answer.choice) ?? lead
+      const result = await adopt.adoptResolvedBranch(taken.branch)
+      const done = { label, count: taken.count ?? '?', publisher: taken.name, others: params.others }
       if (result === 'committed' || result === 'exists') {
-        this.#say(this.#t('swarm.adopt-branch.done', params, `added “${label}” and ${params.count} tiles from ${publisher}`))
+        this.#say(this.#t('swarm.adopt-branch.done', done, `added “${label}” and ${done.count} tiles from ${taken.name}`))
         return
       }
       // The fold already explained itself for 'unavailable' / 'uninspectable'
