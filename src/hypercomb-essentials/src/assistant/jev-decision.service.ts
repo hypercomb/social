@@ -73,7 +73,14 @@ export class JevDecisionService {
         body: JSON.stringify({ model: JEV_MODEL, state: input, questions: jevQuestions(input), ...(provider ? { provider } : {}) }),
         signal: controller.signal,
       })
-      if (!response.ok) throw new Error(`Jev decision failed (HTTP ${response.status})`)
+      if (!response.ok) {
+        let detail = ''
+        try {
+          const error = await response.json() as { error?: { message?: unknown } }
+          if (typeof error?.error?.message === 'string') detail = error.error.message.slice(0, 500)
+        } catch { /* HTTP status remains actionable without a JSON body. */ }
+        throw new Error(`Jev decision failed (HTTP ${response.status})${detail ? `: ${detail}` : ''}`)
+      }
       const result = jevResult(await response.json(), input)
       controller.signal.throwIfAborted()
       if (!this.enabled() || llmKeyStore.get('openrouter') !== key) throw new Error('OpenRouter access changed during the decision')

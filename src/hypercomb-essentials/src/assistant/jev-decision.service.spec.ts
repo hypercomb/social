@@ -62,8 +62,8 @@ describe('Jev OpenRouter boundary', () => {
     await expect(new JevDecisionService().evaluate(input, source)).rejects.toThrow('access changed')
   })
   it('does not retry a failed or malformed reply', async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 429 })
-    await expect(new JevDecisionService().evaluate(input, source)).rejects.toThrow('429')
+    fetchMock.mockResolvedValue({ ok: false, status: 429, json: async () => ({ error: { message: 'OpenRouter account limit' } }) })
+    await expect(new JevDecisionService().evaluate(input, source)).rejects.toThrow('HTTP 429): OpenRouter account limit')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ answers: {} }) })
     await expect(new JevDecisionService().evaluate(input, source)).rejects.toThrow()
