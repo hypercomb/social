@@ -654,6 +654,88 @@ function resolveFlatSig(sig) {
 
 const receiptIndex = new ReceiptIndex(cfg.contentDir, resolveFlatSig)
 
+// ── GET/PUT /hive/<pubkey> — the signed index a publisher owns here ──────────
+//
+// A HOST THAT CARRIES BYTES BUT CANNOT SAY WHO SIGNED THEM IS NOT A HOST.
+// Every atom on this machine is content-addressed and verifiable, but the one
+// question replication cannot answer from bytes alone is "whose build is
+// this" — and that answer lives in a publisher's signed index (kind 30564).
+// Until now only the Cloudflare worker served it, so a participant carrying
+// this relay alone could fetch every byte of a package and still be refused
+// at the activation gate with nowhere to look (observed 2026-09-20:
+// `jwize.com/hive/<pubkey>` 404 while `jwize.com/<sig>` answered 200).
+//
+// The index is an ordinary parameterized-replaceable event, so the relay
+// already knows how to keep exactly one per publisher — `insertEvent` does the
+// eviction and the staleness compare. This route is only the HTTP face of it.
+//
+// Auth mirrors the worker's: NIP-98 proves the CALLER, the body event proves
+// the OWNER, and a PUT is admitted only when both are the SAME key. A relay
+// operator's `--writers` list does not enter into it — a publisher's own index
+// is theirs, and nobody else may move it.
+const HIVE_INDEX_KIND = 30564
+
+function tryServeHiveIndex(req, res) {
+  const match = (req.url || '').split('?')[0].match(/^\/hive\/([0-9a-f]{64})$/)
+  if (!match) return false
+  const pubkey = match[1]
+
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    const row = db.prepare(
+      'SELECT id, pubkey, created_at, kind, tags, content, sig FROM events WHERE pubkey = ? AND kind = ? ORDER BY created_at DESC LIMIT 1'
+    ).get(pubkey, HIVE_INDEX_KIND)
+    if (!row) { respondText(res, 404, 'no index for this publisher'); return true }
+    const body = JSON.stringify({
+      kind: row.kind,
+      created_at: row.created_at,
+      tags: JSON.parse(row.tags),
+      content: row.content,
+      pubkey: row.pubkey,
+      id: row.id,
+      sig: row.sig,
+    })
+    // NEVER CACHED. The whole point of an index is that it moves; a reader
+    // holding a stale one is told about a build that is no longer offered.
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-store',
+    })
+    res.end(req.method === 'HEAD' ? undefined : body)
+    return true
+  }
+
+  if (req.method !== 'PUT') return false
+
+  readRequestBody(req, res, 64 * 1024, body => {
+    // THE ONLY AUTHORIZED WRITER OF AN INDEX IS ITS OWNER. Passing the
+    // address's own key as the writer set says precisely that, and reuses
+    // every other NIP-98 check (freshness window, method, url and payload
+    // hash) rather than re-implementing them here. The operator's --writers
+    // list governs the content heap; it has no say over whose index this is.
+    const auth = verifyNip98(req, new Set([pubkey]), { devOpen: false, payload: body })
+    if (!auth.ok) { respondText(res, 401, auth.reason); return }
+    let evt
+    try { evt = JSON.parse(body.toString('utf8')) } catch { respondText(res, 400, 'not an event'); return }
+    if (Number(evt?.kind) !== HIVE_INDEX_KIND) { respondText(res, 400, 'not a hive index'); return }
+    const owner = String(evt?.pubkey ?? '').toLowerCase()
+    // The caller, the body and the address must be one key. Any disagreement
+    // is somebody moving an index that is not theirs.
+    if (owner !== pubkey || auth.pubkey !== pubkey) { respondText(res, 403, 'an index is moved only by its own publisher'); return }
+    if (!verifyEvent(evt)) { respondText(res, 400, 'signature does not verify'); return }
+    try { insertEvent(evt) } catch (error) { respondText(res, 500, String(error?.message || error)); return }
+    // insertEvent keeps the NEWER of the two, so read back what is actually
+    // served rather than claiming the write landed.
+    const now = db.prepare(
+      'SELECT created_at FROM events WHERE pubkey = ? AND kind = ? ORDER BY created_at DESC LIMIT 1'
+    ).get(pubkey, HIVE_INDEX_KIND)
+    console.log(`[hive] index for ${pubkey.slice(0, 8)}… now at ${now?.created_at ?? 0}`)
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' })
+    res.end(JSON.stringify({ ok: true, pubkey, created_at: now?.created_at ?? 0 }))
+  })
+  return true
+}
+
 function tryServeContent(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') return false
 
@@ -1131,6 +1213,10 @@ const server = createServer((req, res) => {
 
   // Authenticated job status must precede the generic typed-path fallback.
   if (tryServeReplicationStatus(req, res)) return
+
+  // The publisher's signed index — must precede the generic content branch,
+  // which would otherwise treat /hive/<pubkey> as a path in the heap.
+  if (tryServeHiveIndex(req, res)) return
 
   // Read side: GET/HEAD/OPTIONS content serving (returns true if handled)
   if (tryServeContent(req, res)) return

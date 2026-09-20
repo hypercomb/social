@@ -52,10 +52,18 @@ const beeCount = (page) => H.evalSafe(() => page.evaluate(() => window.ioc?.list
     catch (e) { return { ok: false, error: String(e && e.message || e) } }
   }, { sig: SIG, host: HOST }))
   H.log('acquire', JSON.stringify(res).slice(0, 300))
-  H.check('acquire(sig, [host]) answers', !!res.ok, res.ok ? '' : res.error)
+
+  // A COLD BOOT ALREADY INSTALLS THE PUBLISHED HEAD, so "the instance runs the
+  // named build" passes without the acquire doing anything at all — that is
+  // how this harness reported 5/5 while every acquire was being refused
+  // (2026-09-20). Judge the CALL, and only then the outcome.
+  const verdict = res.ok && res.result && res.result.ok === true
+  H.check('acquire(sig, [host]) is accepted', !!verdict,
+    verdict ? `fetched ${res.result.fetched}, present ${res.result.present}` : `REFUSED: ${(res.result && res.result.error) || res.error}`)
+  if (before === SIG) H.log('note', 'the cold boot had already installed this build — the move below proves nothing on its own')
 
   const moved = await H.waitFor(() => installedSig(page), s => s === SIG, 120000, 1000)
-  H.check('the instance now runs the named build', moved.ok, `${String(moved.value).slice(0, 12)} after ${moved.waitedMs}ms`)
+  H.check('the instance now runs the named build', moved.ok && !!verdict, `${String(moved.value).slice(0, 12)} after ${moved.waitedMs}ms`)
 
   // It must still be a working hive afterwards, not just a moved pointer.
   await page.reload({ waitUntil: 'domcontentloaded' })

@@ -44,8 +44,14 @@ const isLoopback = (zone: string): boolean =>
  */
 export const hostBases = (zone: string): string[] => {
   const scheme = isLoopback(zone) ? 'http' : 'https'
-  return [`${scheme}://${zone}`, `${scheme}://content.${zone}`]
-    .flatMap(base => [`${base}/content`, base])
+  // A zone that IS the content face already needs no second one: prefixing it
+  // again asks for `content.content.<zone>`, which resolves nowhere and costs
+  // every caller a DNS failure per atom. Seen in the wild against
+  // content.pluginthematrix.com (2026-09-20).
+  const faces = /^content\./i.test(zone)
+    ? [`${scheme}://${zone}`]
+    : [`${scheme}://${zone}`, `${scheme}://content.${zone}`]
+  return faces.flatMap(base => [`${base}/content`, base])
 }
 
 export type HostPackage = {
