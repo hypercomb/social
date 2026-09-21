@@ -200,6 +200,19 @@ unsure answer hands the turn to the worker loop unchanged (`passed` in
 the request, the catalogue the worker would be sent, and the page listing,
 read under the OpenRouter grant with its snapshot guarding the run.
 
+## 5b. Jev checks the answer
+
+Built 2026-09-21 (`jev-creative-plan.md` §2.1). When a Jev-mode turn ends in
+prose and the hive read something this turn, one Jev call
+(`assistant/jev-verify.ts`) asks `supported` (everything the answer says
+about the hive is in what was read) and `complete` (every part of the
+request is answered), each ≥ .80. The answer is never rewritten. When either
+falls short, the hive adds one line under it: "Jev could not confirm this
+answer against what the hive read", with the two numbers. An answer after a
+change with nothing read since is not checked, because there is nothing to
+check it against. Each check records `verify:verified` or
+`verify:unverified` in `jev:outcomes`.
+
 ## 6. The whole provider suite
 
 Jev serves EVERY worker — a local model, a direct vendor key, an OpenRouter

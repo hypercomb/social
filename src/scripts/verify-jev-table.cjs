@@ -52,7 +52,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   const page = await context.newPage()
   page.on('pageerror', e => console.log('[pageerror]', String(e).slice(0, 200)))
 
-  const workerCalls = [], jevCalls = [], directCalls = []
+  const workerCalls = [], jevCalls = [], directCalls = [], verifyCalls = []
   let doLine = ''
   let scenario = 'main'
   const sse = text => {
@@ -66,6 +66,13 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   await page.route('https://openrouter.ai/**', route => {
     const url = route.request().url()
     const headers = { 'access-control-allow-origin': '*', 'content-type': 'application/json' }
+    if (url.includes('/api/alpha/decisions') && JSON.parse(route.request().postData() || '{}').questions?.supported) {
+      const body = JSON.parse(route.request().postData() || '{}')
+      verifyCalls.push({ scenario, answer: body.state?.answer, evidence: body.state?.evidence?.length })
+      const doubt = scenario === 'unverified'
+      const answers = { supported: { type: 'noul', noul: doubt ? 0.22 : 0.94 }, complete: { type: 'noul', noul: 0.9 } }
+      return route.fulfill({ status: 200, headers, body: JSON.stringify({ id: 'gen-dec-verify', model: 'typesafe/jev-1.13-fake', answers, usage: { input_tokens: 200, output_tokens: 0, cost: 0.00001 } }) })
+    }
     if (url.includes('/api/alpha/decisions') && JSON.parse(route.request().postData() || '{}').questions?.behaviour) {
       const body = JSON.parse(route.request().postData() || '{}')
       directCalls.push({ scenario, request: body.state?.request, behaviours: (body.state?.behaviours ?? []).map(b => b.name), spans: Object.values(body.questions.span?.criteria ?? {}), tiles: body.state?.tiles ?? [] })
@@ -84,7 +91,9 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
       const rows = body.state?.rows ?? []
       jevCalls.push({ questions: Object.keys(body.questions ?? {}), rows: rows.map(r => `${r.kind}:${r.id}`), model: body.model })
       const read = rows.find(r => r.kind === 'read'), doRow = rows.find(r => r.kind === 'do'), answer = rows.find(r => r.kind === 'answer')
-      const pick = read && doRow ? read : doRow ? doRow : answer ?? rows[0]
+      const checking = scenario === 'unverified' || scenario === 'verified'
+      const pick = checking ? ((body.state?.evidence?.length ?? 0) > 1 ? answer : read) ?? rows[0]
+        : read && doRow ? read : doRow ? doRow : answer ?? rows[0]
       // Every question gets an answer: the picked row's positive questions
       // high, everyone's negative ones (known, beyond, a broken rule) low.
       const answers = {}
@@ -107,7 +116,11 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
       if (!/JEV RUNS THE SHOW/.test(system)) return route.fulfill({ status: 200, headers, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: '{"nodes":[]}' } }] }) })
       workerCalls.push({ system, last, model: body.model, stream: !!body.stream, scenario })
       let text
-      if (scenario === 'bare') {
+      if (scenario === 'unverified' || scenario === 'verified') {
+        text = /HIVE RESULTS/.test(last) ? table([{ id: 'c', kind: 'answer', label: 'Answer now' }, { id: 'a', kind: 'read', label: 'Look again', line: 'list here' }])
+          : /Answer the participant now in prose/.test(last) ? `CHECKED ANSWER (${scenario}): the page holds the tiles listed.`
+          : table([{ id: 'a', kind: 'read', label: 'See what is here', line: 'list here' }, { id: 'c', kind: 'answer', label: 'Answer now' }])
+      } else if (scenario === 'bare') {
         text = /The participant ran your|The hive ran/.test(last)
           ? 'BARE DONE: the block ran after Jev judged it.'
           : '```hypercomb-do\n' + doLine + '\n```'
@@ -298,14 +311,33 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
     directCalls.filter(c => c.scenario === 'main').length === 1 && directCalls.filter(c => c.scenario === 'bare').length === 1 && directCalls.filter(c => c.scenario === 'pick').length === 0,
     JSON.stringify(directCalls.map(c => c.scenario)))
 
+  // ── JEV CHECKS THE ANSWER against what the hive read ────────────────────
+  for (const which of ['unverified', 'verified']) {
+    scenario = which
+    const before = verifyCalls.length
+    const convo = await newConvo([['assistant', 'Ready.']])
+    await openAndSend(convo, 'What tiles are on this page?')
+    const said = await storedAnswer(convo, 'CHECKED ANSWER')
+    const checkedBy = verifyCalls.slice(before)
+    if (which === 'unverified') {
+      check('Jev checks a final answer against what was read, and the hive says when it cannot confirm it',
+        checkedBy.length === 1 && checkedBy[0].evidence >= 1 && /CHECKED ANSWER/.test(checkedBy[0].answer ?? '') && /could not confirm this answer .*supported \.22/.test(said ?? ''),
+        (said ?? '').slice(-220))
+    } else {
+      check('a supported answer stands with no note under it', checkedBy.length === 1 && !!said && !/could not confirm/.test(said), (said ?? '').slice(-160))
+    }
+  }
+  check('an answer after a change, with nothing read since, is not sent to be checked', verifyCalls.every(c => c.scenario === 'unverified' || c.scenario === 'verified'), JSON.stringify(verifyCalls.map(c => c.scenario)))
+
   // WHAT HAPPENED AFTER JEV DECIDED is recorded, one outcome per decided round.
   const outcomes = await waitFor(() => page.evaluate(() => {
     const records = window.ioc.get('@diamondcoreprocessor.com/JevOutcomes')?.records?.() ?? []
-    return records.some(r => r.plan === 'direct' && r.outcome === 'ran') ? records.map(r => `${r.plan}:${r.outcome}${r.reach ? ':' + r.reach : ''}${r.decision ? ':signed' : ''}`) : null
+    return records.some(r => r.plan === 'direct' && r.outcome === 'ran') && records.filter(r => r.plan === 'verify').length >= 2 ? records.map(r => `${r.plan}:${r.outcome}${r.reach ? ':' + r.reach : ''}${r.decision ? ':signed' : ''}`) : null
   }), 10_000, 400)
   check('every decided round records its outcome, tied to its signed receipt',
     !!outcomes && outcomes.some(o => o.startsWith('read:ran')) && outcomes.some(o => o.startsWith('do:ran')) && outcomes.some(o => o.startsWith('answer:answered'))
       && outcomes.some(o => o.startsWith('direct:ran:additive')) && outcomes.some(o => o.startsWith('direct:passed'))
+      && outcomes.some(o => o.startsWith('verify:unverified')) && outcomes.some(o => o.startsWith('verify:verified'))
       && outcomes.every(o => o.endsWith(':signed')),
     JSON.stringify(outcomes))
 

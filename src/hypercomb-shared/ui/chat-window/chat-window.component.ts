@@ -161,7 +161,7 @@ import {
   workLineGrammar,
   WorkStreamGuard,
 } from './hypercomb-work-fence'
-import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, doctrineSections, persistJevDirect, persistJevInput, persistJevReceipt, formatJevUsage, type JevLike, type Row, type Decision } from './hypercomb-jev'
+import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, doctrineSections, persistJevDirect, persistJevInput, persistJevVerify, persistJevReceipt, formatJevUsage, type JevLike, type Row, type Decision } from './hypercomb-jev'
 import { offeredSentence, prepareTable, stepFor, tableFor, type RoundCensus } from './jev-round'
 
 type TurnRole = 'user' | 'assistant'
@@ -6308,6 +6308,33 @@ export class ChatWindowComponent implements OnDestroy {
         },
       }
 
+      /** Jev's check of the final answer, or undefined when it holds, when
+       *  nothing was read to check it against, or when Jev is unavailable. */
+      const verifyAnswer = async (answer: string, spoken: string, providerId: string): Promise<string | undefined> => {
+        const read = evidence.slice(1)
+        if (!jev?.verify || !read.length || !jev.ready(providerId)) return undefined
+        const startedAt = Date.now()
+        let decision: Awaited<ReturnType<NonNullable<JevLike['verify']>>>
+        try {
+          decision = await jev.verify({ request: message, evidence: read, answer },
+            { providerId, system, messages: [...messages, { content: spoken }] }, signal)
+        } catch (error) {
+          if (signal?.aborted) throw error
+          console.warn('[chat] Jev could not check the answer:', error)
+          return undefined
+        }
+        decisionCalls++
+        settledAttempts.push({ round: rounds, attempt: decisionCalls, providerId: 'openrouter', model: decision.model || JEV_MODEL,
+          outcome: 'success', category: 'jev-decision', durationMs: Date.now() - startedAt, outputEmitted: false,
+          ...(decision.usage ? { usage: { inputTokens: decision.usage.inputTokens, outputTokens: decision.usage.outputTokens, estimatedCostUsd: decision.usage.cost } } : {}),
+        })
+        const receipt = await persistJevVerify(contextStore, answer, decision).catch(() => undefined)
+        if (receipt) readSigs.push(receipt)
+        writeTurnMeta(providerId, continuationModel)
+        EffectBus.emit('jev:outcome', { decision: receipt, plan: 'verify', outcome: decision.verified ? 'verified' : 'unverified', at: Date.now() })
+        return decision.verified ? undefined : `\n\nJev could not confirm this answer against what the hive read (${decision.reason}).`
+      }
+
       /** The direct path: the hive's answer to show, or undefined to let the worker loop run. */
       const tryDirect = async (): Promise<string | undefined> => {
         const providerId = pinned ?? router.designatedProviderId?.(need) ?? ''
@@ -6563,6 +6590,10 @@ export class ChatWindowComponent implements OnDestroy {
           if (jevMode && work.prose) {
             wrote = true
             yield `${lead}${work.prose}`
+            // JEV CHECKS THE ANSWER (jev-creative-plan.md §2.1) against what
+            // the hive read this turn. Never rewrites it; says so when unsure.
+            const note = await verifyAnswer(work.prose, roundText, roundProviderId)
+            if (note) yield note
           }
           if (jevMode && ran.length) yield needsVerification
             ? '\n\nThe commands ran, but no subsequent readback was completed.'

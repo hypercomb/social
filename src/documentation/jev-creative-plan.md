@@ -109,6 +109,10 @@ only when Jev is unsure.
 
 **What to build.**
 
+**§2.1 LANDED 2026-09-21** in `assistant/jev-verify.ts`, the service's
+`verify()`, and the chat loop's `verifyAnswer`; harness 30/30. See
+`jev-decisions.md` §5b. §2.2 (step-down) and §2.3 (wall time) remain.
+
 1. **Verified answers.** When the plan is `answer`, after the worker's final
    prose arrives, ask Jev one call over `{answer, evidence, request}`:
    `supported` noul (every claim in the answer is in the evidence),

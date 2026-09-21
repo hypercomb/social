@@ -6,6 +6,7 @@ import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
 import { openRouterRouting, providerBlock } from './providers/openrouter-routing.js'
 import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevResult, jevState, type JevInput, type JevResult } from './jev-decision.js'
 import { jevDirectInput, jevDirectQuestions, jevDirectResult, jevDirectState, type JevDirectInput, type JevDirectResult } from './jev-direct.js'
+import { jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyResult } from './jev-verify.js'
 
 /** A subset of material ALREADY sent to / received from the worker whose
  * table is being judged. Never fetches hive content, accepts signatures to
@@ -97,6 +98,23 @@ export class JevDecisionService {
     const missing = jevDirectUnseen(input, source)
     if (missing) throw new Error(`Jev may only judge what the participant said and the hive listed, and it could not find ${missing} as written`)
     const result = await this.#post({ state: jevDirectState(input), questions: jevDirectQuestions(input) }, body => jevDirectResult(body, input), signal)
+    if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
+    return result
+  }
+
+  /** JEV CHECKS THE ANSWER (jev-verify.ts): is the worker's final answer
+   *  supported by what the hive read, and complete? The answer, the request
+   *  and every piece of evidence must already be in the worker's exchange. */
+  async verify(raw: unknown, source: JevSource, signal?: AbortSignal): Promise<JevVerifyResult> {
+    signal?.throwIfAborted()
+    if (!this.ready(source.providerId)) throw new Error('Jev requires an enabled worker and the OpenRouter hive read grant')
+    const input = jevVerifyInput(raw)
+    const seen = (part: string): boolean => source.messages.some(message => message.content.includes(part))
+    const missing = !seen(input.request) ? 'the request' : !seen(input.answer) ? 'the answer'
+      : input.evidence.findIndex(part => !seen(part)) >= 0 ? `evidence ${input.evidence.findIndex(part => !seen(part)) + 1}` : null
+    if (missing) throw new Error(`Jev may only judge what this worker already saw, and it could not find ${missing} as written`)
+    if (JSON.stringify(input).length > (llmHiveAccess.budget('openrouter') ?? 24_000) + 8_000) throw new Error('Jev verification exceeds the OpenRouter read budget')
+    const result = await this.#post({ state: input, questions: jevVerifyQuestions() }, jevVerifyResult, signal)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
     return result
   }

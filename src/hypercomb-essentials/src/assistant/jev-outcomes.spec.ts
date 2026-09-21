@@ -25,6 +25,6 @@ describe('what happened after Jev decided', () => {
       outcomeRecord({ plan: 'read', outcome: 'ran', at: 3 })!,
       outcomeRecord({ plan: 'participant', outcome: 'deferred', at: 4 })!,
     ]
-    expect(tallyOutcomes(records)).toEqual({ decisions: 4, ran: 2, skipped: 1, failed: 0, answered: 0, deferred: 1, refused: 0, passed: 0 })
+    expect(tallyOutcomes(records)).toEqual({ decisions: 4, ran: 2, skipped: 1, failed: 0, answered: 0, deferred: 1, refused: 0, passed: 0, verified: 0, unverified: 0 })
   })
 })

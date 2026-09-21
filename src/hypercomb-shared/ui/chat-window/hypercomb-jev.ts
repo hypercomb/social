@@ -40,8 +40,17 @@ export interface DirectDecision {
   readonly answers: Record<string, unknown>
   readonly usage?: { inputTokens?: number; outputTokens?: number; cost?: number }
 }
+/** Jev's check of a final answer (essentials jev-verify.ts). */
+export interface VerifyDecision {
+  readonly verified: boolean
+  readonly reason: string
+  readonly model: string
+  readonly answers: Record<string, unknown>
+  readonly usage?: { inputTokens?: number; outputTokens?: number; cost?: number }
+}
 export interface JevLike {
   ready(providerId: string): boolean
+  verify?(input: unknown, source: { providerId: string; system: string; messages: readonly { content: string }[] }, signal?: AbortSignal): Promise<VerifyDecision>
   direct?(input: unknown, source: { providerId: string; system: string; messages: readonly { content: string }[] }, signal?: AbortSignal): Promise<DirectDecision>
   evaluate(input: unknown, source: { providerId: string; system: string; messages: readonly { content: string }[] }, signal?: AbortSignal): Promise<Decision>
 }
@@ -103,6 +112,15 @@ export const persistJevDirect = async (store: ResourceWriter | undefined, reques
     kind: 'jev-direct', requestedModel: JEV_MODEL, model: result.model, rubric: 1,
     request: await resource(store, request), reason: await resource(store, result.reason), answers: await resource(store, result.answers),
     ...(result.sentence ? { sentence: await resource(store, result.sentence) } : {}),
+  })
+}
+
+/** A verification's provenance: what was checked and what Jev answered. */
+export const persistJevVerify = async (store: ResourceWriter | undefined, answer: string, result: VerifyDecision): Promise<string | undefined> => {
+  if (!store?.putResource) return undefined
+  return resource(store, {
+    kind: 'jev-verify', requestedModel: JEV_MODEL, model: result.model, rubric: 1, verified: result.verified,
+    answer: await resource(store, answer), reason: await resource(store, result.reason), answers: await resource(store, result.answers),
   })
 }
 
