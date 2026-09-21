@@ -453,9 +453,11 @@ export class LabyrinthJourney {
     this.#bank()
     if (this.engine) this.#releaseInput(this.engine)
     // The room she is leaving is forgotten and the one she enters is built
-    // fresh — even when it is the same room again (see `#forget`). A room
-    // restored from a save keeps its engine until she first steps out of it.
-    if (this.room?.id !== roomId) this.#forget()
+    // fresh — even when it is the same room again (see `#forget`): the shell
+    // never calls `leave()` on the way up to the island, it re-enters the
+    // labyrinth at her last room, and that return is a fresh start too. A
+    // room restored from a save keeps its engine until she first steps out.
+    this.#forget()
     let engine = this.engines.get(roomId)
     if (!engine) {
       engine = new Engine({ ...copyLevel(room.level), interconnected: true })

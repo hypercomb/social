@@ -176,6 +176,14 @@ describe('the interconnected Solomon labyrinth', () => {
     expect(again.score).toBe(5000)
     expect(again.lives).toBe(2)
     expect([...journey.engines.keys()]).toEqual(['sunseed-steps'])
+    // Going up to the island and back in lands in the same room, fresh: the
+    // shell re-enters the labyrinth without ever calling leave().
+    again.setTile(4, 2, BRICK)
+    expect(journey.enterLabyrinth('sunseed')).toBe(true)
+    expect(journey.room!.id).toBe('sunseed-steps')
+    expect(journey.engine).not.toBe(again)
+    expect(journey.engine!.tileAt(4, 2)).toBe(EMPTY)
+    expect(journey.engine!.lives).toBe(2)
   })
 
   it('opens ability gates permanently and awards each relic only once, including after retry', () => {
