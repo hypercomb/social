@@ -77,7 +77,7 @@ export const persistJevReceipt = async (store: ResourceWriter | undefined, sourc
 
 export const JEV_WORK_INSTRUCTION =
   'JEV RUNS THE SHOW. You do not choose the next step; you list the possible ones and Jev, a decision service, picks in one fast call. '
-  + 'Every round, end your reply with ONE closed `hypercomb-table` fence holding JSON: {"rows":[{"id":"a","kind":"read","label":"See who is under people","line":"list /business/people"},'
+  + 'Every round, end your reply with ONE closed fence whose opening line is exactly three backticks followed by hypercomb-table (never json, never a bare fence), holding JSON: {"rows":[{"id":"a","kind":"read","label":"See who is under people","line":"list /business/people"},'
   + '{"id":"b","kind":"do","label":"Create the people tile","lines":["create people"]},{"id":"c","kind":"answer","label":"Answer now"},{"id":"d","kind":"ask","label":"Ask how to group","line":"Group by city or by role?"}]}. '
   + `Two to ${JEV_MAX_ROWS} rows. Kinds: read (one read line: tree, read, list, history, summary, find or code), do (one to six behaviour sentences from the vocabulary, in lines), answer (you could answer the request now from what the messages hold), ask (a question only the participant can answer, in line). `
   + 'Ids are lowercase letters, digits, underscores; labels under 70 characters and distinct; an optional why under 200 characters. '
@@ -112,11 +112,15 @@ export const parseTable = (lines: readonly string[]): readonly Row[] => {
 }
 
 /** The question itself is normal persisted conversation text, so the next
- * worker sees the alternatives and the participant's answer after reload. */
+ * worker sees the alternatives and the participant's answer after reload.
+ * THE OPTIONS ARE THE SENTENCES — behaviour lines in the hive's own grammar,
+ * the vocabulary the census teaches — never labels. What the participant
+ * picks is a sentence the hive can run as it stands. */
 export const tableQuestion = (rows: readonly Row[], reason: string, prompt = 'Which step should the hive take?'): string => {
   const details = rows.map(row => `**${row.label}**${row.kind === 'answer' ? '' : `\n${row.lines.join('\n').replace(/[`~]/g, '')}`}`).join('\n\n')
+  const sentences = [...new Set(rows.flatMap(row => row.kind === 'read' || row.kind === 'do' ? row.lines.map(line => line.replace(/[\r\n`]/g, ' ').trim()) : []))]
   return `${reason}\n\n${details}\n\n\`\`\`hypercomb-question\n${JSON.stringify({
-    prompt: prompt.replace(/[\r\n`]/g, ' '), options: [...rows.map(row => row.label), 'Something else'],
+    prompt: prompt.replace(/[\r\n`]/g, ' '), options: [...sentences, 'Something else'],
   })}\n\`\`\``
 }
 

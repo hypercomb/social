@@ -74,14 +74,24 @@ describe('the possibility table protocol', () => {
     expect(() => parseTable([JSON.stringify({ rows: [{ id: 'a', kind: 'read', label: 'Something else', line: 'y' }] })])).toThrow()
     expect(() => parseTable([JSON.stringify({ rows: [{ id: 'a', kind: 'read', label: 'x', lines: ['y', 'z'] }] })])).toThrow()
   })
+  it('recognises a table by shape in a json fence, a bare fence, or no fence at all', () => {
+    const body = JSON.stringify({ rows: [{ id: 'a', kind: 'read', label: 'See the notes', line: 'list /notes' }] })
+    for (const text of ['```json\n' + body + '\n```', '```\n' + body + '\n```', body, 'Here is the table:\n```json\n' + body + '\n```']) {
+      const work = splitWork(text)
+      expect(work.request?.kind).toBe('table')
+      expect(parseTable(work.request!.lines)[0].label).toBe('See the notes')
+    }
+    expect(splitWork('```json\n{"nodes":[]}\n```').request).toBeUndefined()
+    expect(splitWork('plain prose about rows').request).toBeUndefined()
+  })
   it('hides the table during streaming', () => {
     const guard = new WorkStreamGuard()
     expect([...fence].map(c => guard.push(c)).join('') + guard.end()).toBe('')
   })
-  it('persists the surviving rows as an answerable participant question, with an ask row as the prompt', () => {
+  it('offers the behaviour sentences as the options, never the labels, with an ask row as the prompt', () => {
     const text = tableQuestion(rows.slice(0, 2), 'Evidence is insufficient.')
     expect(text).toContain('create topics')
-    expect(splitQuestion(text).question?.options).toEqual(['See the notes', 'Group by topic', 'Something else'])
+    expect(splitQuestion(text).question?.options).toEqual(['list /notes', 'create topics', 'move notes topics', 'Something else'])
     const asked = tableQuestion(rows.slice(0, 2), 'Jev chose to ask.', 'By city or by role?')
     expect(splitQuestion(asked).question?.prompt).toBe('By city or by role?')
   })

@@ -168,6 +168,14 @@ export const jevResult = (raw: unknown, input: JevInput): JevResult => {
     const runnerUp = Math.max(...keys.filter(key => key !== choice).map(key => probability(distribution[key])))
     confident = confidence >= G.confidence && winner >= G.winner && winner - runnerUp >= G.margin
   }
+  // THE NUMBERS, SHOWN. Gates are starting values; a participant who sees
+  // ".72 fit" next to a row they would have run can tell us where to move them.
+  const two = (value: number): string => value.toFixed(2).replace(/^0/, '')
+  const scoreboard = input.rows.map(row => {
+    const parts = [`fit ${two(fit.get(row.id)!)}`]
+    if (row.kind === 'do') parts.push(`rules ${two(noul(answers, `${row.id}_rules`))}`, `grounded ${two(noul(answers, `${row.id}_grounded`))}`)
+    return `${row.label}: ${parts.join(' ')}`
+  }).join(' · ') + ` · next ${choice}${confidence === undefined ? '' : ` ${two(confidence)}`}`
   const reads = input.rows.filter(row => row.kind === 'read' && passes.has(row.id))
     .sort((a, b) => fit.get(b.id)! - fit.get(a.id)!).map(row => row.id)
   const survivors = input.rows.filter(row => row.kind !== 'answer' && !rejected.has(row.id)).map(row => row.id)
@@ -182,20 +190,20 @@ export const jevResult = (raw: unknown, input: JevInput): JevResult => {
     reason = `Jev chose ${chosen.label}.`
   } else if (chosen && chosen.kind === 'do' && !rejected.has(chosen.id)) {
     plan = { kind: 'do', row: chosen.id, review: true }
-    reason = `Jev chose ${chosen.label}, but not every gate passed; the participant reviews it before it runs.`
+    reason = `Jev chose ${chosen.label}, but not every gate passed; the participant reviews it before it runs. (${scoreboard})`
   } else if (reads.length) {
     plan = { kind: 'read', rows: reads.slice(0, JEV_MAX_READS) }
-    reason = chosen && rejected.has(chosen.id)
+    reason = (chosen && rejected.has(chosen.id)
       ? `Jev's choice conflicts with Hypercomb doctrine; reading first instead.`
-      : 'No step was clear enough to take; Jev is reading first.'
+      : 'No step was clear enough to take; Jev is reading first.') + ` (${scoreboard})`
   } else if (!survivors.length) {
     plan = { kind: 'revise' }
     reason = 'Every change in the table conflicts with Hypercomb doctrine. Revise the approach using the existing hive mechanisms before proposing it again.'
   } else {
     plan = { kind: 'participant', rows: survivors }
-    reason = !normalized || confidence === undefined
+    reason = (!normalized || confidence === undefined
       ? 'Jev returned a choice without enough confidence data for an automatic decision.'
-      : 'The evidence or preference was not clear enough for an automatic decision.'
+      : 'The evidence or preference was not clear enough for an automatic decision.') + ` (${scoreboard})`
   }
   const usage = body['usage'] && typeof body['usage'] === 'object' ? object(body['usage']) : {}
   const count = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined

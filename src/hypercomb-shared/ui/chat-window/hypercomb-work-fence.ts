@@ -73,6 +73,12 @@ const markedBody = (info: string, body: readonly string[]):
   return { kind, body: body.slice(first + 1) }
 }
 
+/** A table is unmistakable by shape: a JSON object whose first key is rows.
+ *  Models that were told to write a hypercomb-table fence still reach for a
+ *  json fence, or no fence; the shape is the opt-in either way. */
+const looksLikeTable = (body: readonly string[]): boolean =>
+  /^\{\s*"rows"\s*:/.test(body.map(line => line.trim()).filter(Boolean).join(''))
+
 const kindOf = (info: string): WorkKind | null => {
   const word = info.trim().split(/\s+/)[0] ?? ''
   if (word === READ_FENCE_LANG) return 'read'
@@ -97,7 +103,7 @@ const scan = (lines: readonly string[]): Block[] => {
     while (end < lines.length && !closes(lines[end], open[1])) end++
     const body = lines.slice(index + 1, end)
     const marked = markedBody(open[2], body)
-    const kind = kindOf(open[2]) ?? marked?.kind ?? null
+    const kind = kindOf(open[2]) ?? marked?.kind ?? (looksLikeTable(body) ? 'table' : null)
     // An unclosed work block still counts: a model that stopped generating
     // before the closer meant the request all the same.
     if (kind) blocks.push({ kind, open: index, end, body: marked?.body ?? body })
@@ -138,7 +144,11 @@ export const workLineGrammar = (raw: string, kind: WorkKind): string => {
 export const splitWork = (text: string): SplitWork => {
   const lines = String(text ?? '').split('\n')
   const blocks = scan(lines)
-  if (!blocks.length) return { prose: String(text ?? '') }
+  if (!blocks.length) {
+    // The whole reply is the table, with no fence at all.
+    if (looksLikeTable(lines)) return { prose: '', request: { kind: 'table', lines } }
+    return { prose: String(text ?? '') }
+  }
   const removed = new Set<number>()
   for (const block of blocks) {
     for (let at = block.open; at <= Math.min(block.end, lines.length - 1); at++) removed.add(at)

@@ -81,6 +81,8 @@ describe('composition', () => {
     const absent = jevResult(response('c', { a_fit: noul(0.2), next: { type: 'choice', choice: 'c' } }), input)
     expect(absent.plan.kind).toBe('participant')
     expect(absent.reason).toContain('confidence')
+    expect(weak.reason).toContain('Create people: fit .97 rules .99 grounded .96')
+    expect(weak.reason).toContain('next c .60')
   })
   it('fails closed on missing answers, foreign choices and invalid probabilities', () => {
     expect(() => jevResult({ answers: {} }, input)).toThrow()

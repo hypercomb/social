@@ -49,6 +49,12 @@ Fence `hypercomb-table` (`hypercomb-work-fence.ts`, kind `table`; replaces
 optional `why` ≤ 200. A bare `hypercomb-do` block in Jev mode is treated as a
 one-row table. A bare `hypercomb-read` runs as written: reads are safe.
 
+**A table is recognised by its shape.** Models told to write a
+`hypercomb-table` fence still reach for a `json` fence, a bare fence, or no
+fence (the first live run did exactly that, and Jev was never called). A JSON
+object whose first key is `rows` counts as a table in any of those spellings;
+an organizer's `{"nodes":[]}` or ordinary prose does not.
+
 **The hive's parsers go first.** Before Jev sees a row, every read line goes
 through `parseHypercombObservationGrammars` and every do row through
 `parseHypercombGrammars` against the census. A row the hive cannot run is
@@ -84,7 +90,7 @@ choice confidence ≥ .85, winner ≥ .85, margin over runner-up ≥ .20.
    - `answer` → `{kind:'answer'}`: the worker is told to answer in prose; that
      is the last round.
    - `ask` → participant question with the ask line as the prompt and the
-     surviving rows as options.
+     surviving rows' sentences as options.
    - `read` → `{kind:'read', rows}`: the chosen read plus any other passing
      read, best fit first, up to `JEV_MAX_READS` (2) — reads are cheap and
      independent, so a round settles several assumptions at once.
@@ -100,12 +106,42 @@ choice confidence ≥ .85, winner ≥ .85, margin over runner-up ≥ .20.
    refusal). Else → `participant`, with rejected rows excluded from the
    choices.
 
+Whenever the decision falls to review or to the participant, the reason
+carries Jev's scoreboard — each row's fit, and for changes its rules and
+grounded scores, plus the `next` choice and its confidence — so a
+participant can see which gate held it back. The gates are tuned against
+those numbers, not guessed.
+
 No averaging can compensate for a failed rule. Rejected rows are named to
 the worker as "never to be proposed again". A positive decision grants no
 permission: execution policy, live vocabulary validation, the serialized
 lane and snapshot checks all still apply.
 
-## 5. The whole provider suite
+## 5. The participant speaks the hive's language
+
+Direction from jwize: *"everything is run through behaviors, nothing should
+be hard coded."* A table question therefore offers the rows' **behaviour
+sentences** as its options — `create jev-proof`, `list /` — never their
+labels. When the participant's message is one of the sentences the previous
+turn offered, the hive runs it as that behaviour through Execution, parsed by
+the same census parser every table row goes through, and the worker continues
+from the receipt. No decision is bought: the participant outranks Jev. Only
+an OFFERED sentence runs this way; ordinary prose never becomes a command.
+
+**The imprint.** Picking a sentence option also puts that sentence on the
+command line, unfocused (`search:prefill`). The participant sees the dialect
+they just used, in the place where they can say it themselves next time.
+What counts as a sentence is whatever the live census parsers accept; a
+label, a question or "Something else" leaves the line alone.
+
+**What a failure means.** The census is the audit: a behaviour declares on
+itself what a machine may say to it, and default-deny covers the rest. So a
+request the hive cannot do has only two causes — the behaviour does not
+exist, or it exists without a machine declaration. On 2026-09-20 about 25
+behaviours were machine-callable out of roughly 114 behaviour files; that
+gap, not the loop, is the limit on what chat can do.
+
+## 6. The whole provider suite
 
 Jev serves EVERY worker — a local model, a direct vendor key, an OpenRouter
 model. `JevDecisionService.ready(providerId)` requires: Jev added and enabled
@@ -117,7 +153,7 @@ OpenRouter-credentialed workers) is gone; it protected nothing the grant does
 not, and it kept Jev away from the local model, which is where deliberation
 is slowest.
 
-## 6. Budgets, provenance, verification
+## 7. Budgets, provenance, verification
 
 - One Jev call per round, at most `MAX_WORK_ROUNDS` (10) per turn; 20 s
   timeout; cancellation follows the worker turn. No retries, no fallback
@@ -133,7 +169,7 @@ is slowest.
   After a change ran the worker is told to include a verifying read row;
   when none followed, the final message says verification is missing.
 
-## 7. Files
+## 8. Files
 
 - `hypercomb-essentials/src/assistant/jev-decision.ts` — rows, questions,
   gates, composition (pure; `jev-decision.spec.ts`).
@@ -152,7 +188,7 @@ TypeSafe *Primitives* — "ask for one snap judgment per question", "ask
 multiple questions together", "speculative fan-out"; OpenRouter cookbook
 *Jev-verified cascade*.
 
-## 8. Owed
+## 9. Owed
 
 - **Tier step-down in Jev mode.** With deliberation removed, the mediator
   could route the worker one tier lighter (`tierUnderLoad` already exists).

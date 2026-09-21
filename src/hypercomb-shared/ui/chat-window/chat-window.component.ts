@@ -2748,6 +2748,22 @@ export class ChatWindowComponent implements OnDestroy {
     if (!label) return
     this.#releaseQuestionKeys()
     void this.send(label)
+    this.#imprint(label)
+  }
+
+  /** THE IMPRINT (jwize, 2026-09-20). A picked option that is a sentence in
+   *  the hive's own grammar is put on the command line as well, unfocused:
+   *  the participant sees the words they just used where they can say them
+   *  directly next time. Only what the census admits is a sentence; a label,
+   *  a question or 'Something else' leaves the line alone. */
+  #imprint(sentence: string): void {
+    const slash = ioc()?.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as SlashBehaviourDroneLike | undefined
+    const entries = slash?.entries?.() ?? []
+    let spoken = false
+    try { parseHypercombGrammars([workLineGrammar(sentence, 'do')], entries); spoken = true } catch {
+      try { parseHypercombObservationGrammars([workLineGrammar(sentence, 'read')], []); spoken = true } catch { /* not a sentence */ }
+    }
+    if (spoken) EffectBus.emit('search:prefill', { value: sentence.trim(), focus: false, subject: null })
   }
 
   /** The settled line's answer — the option's label, or that the participant
@@ -6304,6 +6320,39 @@ export class ChatWindowComponent implements OnDestroy {
           }
           queue.settle(entry.id, 'failed', error instanceof Error ? error.message : undefined)
           throw error
+        }
+      }
+
+      // THE PARTICIPANT SPEAKS THE HIVE'S LANGUAGE. A table question offers
+      // behaviour sentences; when the message IS one of the sentences the
+      // previous turn offered, it runs as that behaviour through Execution,
+      // and the worker continues from the receipt. Nothing is matched by
+      // label and no decision is bought: the participant outranks Jev, and
+      // the census — not this shell — says what the sentence does. Only an
+      // OFFERED sentence runs this way: ordinary prose never becomes a command.
+      const lastAssistant = [...component.turns()].reverse().find(turn => turn.role === 'assistant')
+      const offered = (lastAssistant ? splitQuestion(lastAssistant.text).question?.options ?? [] : [])
+        .map(option => option.trim().toLowerCase())
+      if (offered.includes(message.trim().toLowerCase())) {
+        const providerId = pinned ?? router.designatedProviderId?.(need) ?? ''
+        const asDo = workLineGrammar(message, 'do')
+        const asRead = workLineGrammar(message, 'read')
+        let spoken: 'do' | 'read' | undefined
+        try { parseHypercombGrammars([asDo], behaviourEntries); spoken = 'do' } catch {
+          try { parseHypercombObservationGrammars([asRead], grammarContext.segments); spoken = 'read' } catch { /* not a sentence the hive runs */ }
+        }
+        if (spoken) {
+          let receipt: string
+          try {
+            receipt = spoken === 'do'
+              ? await runDo([asDo], providerId, continuationModel ?? '')
+              : await runRead([asRead], providerId, continuationModel ?? '')
+          } catch (error) {
+            if (signal?.aborted) throw error
+            if (!isWorkRefusal(error)) throw error
+            receipt = `The hive would not run it: ${(error as Error).message}.`
+          }
+          messages.push({ role: 'user', content: `The participant chose a sentence from your table and the hive ran it as their own words.\n\n${receipt}` })
         }
       }
 
