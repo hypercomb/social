@@ -30,6 +30,7 @@
 // A brood record is bytes that arrived and are not trusted yet.
 
 import { registerPoolMeaning } from './pool-registry.js'
+import { admitArrival, broodRules, type ArrivalKind, type BroodVouch } from './brood-rules.js'
 
 export const BROOD_MEANING = 'brood:unverified'
 
@@ -44,6 +45,9 @@ export type BroodSource = {
   readonly key?: string
   /** What the participant was doing when it arrived. */
   readonly how?: string
+  /** Which rule governs it (brood-rules.ts). Unset is treated as a stranger:
+   *  an arrival that forgot to say where it came from is not a trusted one. */
+  readonly kind?: ArrivalKind
 }
 
 /** What an audit made of it. Advisory, always — see the header. */
@@ -75,6 +79,9 @@ export type BroodRecord = {
   readonly name?: string
   readonly source: BroodSource
   readonly audits: readonly BroodAudit[]
+  /** Rulings made by OTHER participants, already verified by whoever recorded
+   *  them. Counted only when their key is one this participant follows. */
+  readonly vouches: readonly BroodVouch[]
   readonly ruling?: BroodRuling
 }
 
@@ -115,7 +122,7 @@ export const broodRecord = async (sig: string): Promise<BroodRecord | null> => {
     const dir = await broodDir(false)
     const file = dir && await (await dir.getFileHandle(sig)).getFile()
     const parsed = file ? JSON.parse(await file.text()) as unknown : null
-    if (isRecord(parsed)) record = parsed
+    if (isRecord(parsed)) record = { ...parsed, vouches: parsed.vouches ?? [] }
   } catch { /* never held */ }
   cache.set(sig, record)
   return record
@@ -135,7 +142,7 @@ export const holdInBrood = async (
   const held = await broodRecord(sig)
   if (held) return held
   const record: BroodRecord = {
-    sig, kind: 'bee', arrived: Date.now(), source, audits: [],
+    sig, kind: 'bee', arrived: Date.now(), source, audits: [], vouches: [],
     ...(name ? { name } : {}),
   }
   try { await write(record) } catch { /* the session copy still holds it */ }
@@ -143,12 +150,19 @@ export const holdInBrood = async (
 }
 
 /**
- * MAY THIS SIGNATURE RUN? Anything never held runs as before — the brood adds
- * a gate, it is not the only one. Held and unruled, or refused, never runs.
+ * MAY THIS SIGNATURE RUN?
+ *
+ * Anything never held runs as before — the brood adds a gate, it is not the
+ * only one. For something held, YOUR OWN RULING ALWAYS WINS, either way. Only
+ * when you have not ruled do the rules speak (brood-rules.ts): they may admit
+ * it outright, or on the strength of enough vouches from communities you
+ * follow. A stranger with no vouches stays held, which is the whole point.
  */
 export const mayRunBee = async (sig: string): Promise<boolean> => {
   const record = await broodRecord(sig)
-  return !record || record.ruling?.verdict === 'accepted'
+  if (!record) return true
+  if (record.ruling) return record.ruling.verdict === 'accepted'
+  return admitArrival(record.source.kind ?? 'stranger', await broodRules(), record.vouches) === 'run'
 }
 
 /** Everything the brood is holding, newest arrival first. The pool and what
@@ -196,6 +210,23 @@ export const acceptIntoHive = async (sig: string, warnings: readonly string[]): 
   if (!record) return null
   const next: BroodRecord = { ...record, ruling: { at: Date.now(), verdict: 'accepted', warnings: shown } }
   await write(next)
+  return next
+}
+
+/**
+ * Record another participant's ruling. The caller has ALREADY verified the
+ * signature — core counts keys, it never checks them. One vouch per key: a
+ * community that changes its mind replaces its own earlier word and can
+ * never stuff the count.
+ */
+export const recordVouch = async (sig: string, vouch: BroodVouch): Promise<BroodRecord | null> => {
+  const record = await broodRecord(sig)
+  if (!record || !vouch?.by) return null
+  const next: BroodRecord = {
+    ...record,
+    vouches: [...record.vouches.filter(held => held.by !== vouch.by), vouch],
+  }
+  try { await write(next) } catch { /* session copy holds it */ }
   return next
 }
 

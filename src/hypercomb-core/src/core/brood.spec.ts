@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   acceptIntoHive, attachAudit, broodRecord, broodRoster, forgetInBrood,
-  holdInBrood, mayRunBee, refuseInBrood,
+  holdInBrood, mayRunBee, recordVouch, refuseInBrood,
 } from './brood.js'
+import { BROOD_TRUST_IOC_KEY, setBroodRules } from './brood-rules.js'
+
+/** The participant follows these keys — the only ones whose word counts. */
+const follows = (keys: readonly string[]): void => {
+  ;(globalThis as { ioc?: unknown }).ioc = {
+    get: (key: string) => key === BROOD_TRUST_IOC_KEY ? { follows: () => keys } : undefined,
+  }
+}
 
 const sig = (c: string): string => c.repeat(64)
 
@@ -73,6 +81,34 @@ describe('the brood — unverified automatons, held and inert', () => {
     expect(held.map(r => r.sig)).toEqual([late, early])
     await forgetInBrood(early)
     await forgetInBrood(late)
+  })
+
+  it("a followed community's code runs on the rules alone — today's behaviour, kept", async () => {
+    const s = sig('a')
+    await holdInBrood(s, { zone: 'friends.example', kind: 'followed' })
+    expect(await mayRunBee(s)).toBe(true)
+  })
+
+  it('a stranger stays held until enough followed keys stand behind it', async () => {
+    const s = sig('b')
+    follows(['alice', 'bob'])
+    await setBroodRules({ vouchesAdmitStrangers: true, vouchesNeeded: 2 })
+    await holdInBrood(s, { zone: 'nobody.example', kind: 'stranger' })
+    expect(await mayRunBee(s)).toBe(false)
+    await recordVouch(s, { by: 'alice', verdict: 'accepted', at: 1 })
+    expect(await mayRunBee(s)).toBe(false)
+    await recordVouch(s, { by: 'bob', verdict: 'accepted', at: 1 })
+    expect(await mayRunBee(s)).toBe(true)
+    // And your own hand still overrules the communities, either way.
+    await refuseInBrood(s)
+    expect(await mayRunBee(s)).toBe(false)
+    await setBroodRules({ vouchesAdmitStrangers: false, vouchesNeeded: 2 })
+  })
+
+  it('an arrival that did not say where it came from is treated as a stranger', async () => {
+    const s = sig('c')
+    await holdInBrood(s, {})
+    expect(await mayRunBee(s)).toBe(false)
   })
 
   it('ignores anything that is not a signature', async () => {

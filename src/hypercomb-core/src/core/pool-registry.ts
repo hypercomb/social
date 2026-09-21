@@ -368,6 +368,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // the optimize phase: losing it would silently un-hold code. Colon-scoped
   // because the bare-word list is frozen and no tile may name it.
   'brood:unverified',
+  // The participant's admission policy (core/brood-rules.ts): what happens to
+  // their own code, a followed community's, and a stranger's, and how many
+  // followed keys must have accepted before their agreement stands in for a
+  // hand. One record, named by the pool's own address.
+  'brood:rules',
   // TOKEN-COMPACT TILE PROJECTIONS for the hive's `hive` tool
   // (assistant/llm-context.ts) — one record per SOURCE LAYER SIGNATURE,
   // a compact line-oriented rendering of what a tile SAYS in place of the
