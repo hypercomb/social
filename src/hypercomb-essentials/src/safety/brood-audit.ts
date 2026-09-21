@@ -113,8 +113,8 @@ export const auditHeldBee = async (sig: string, options: BroodAuditOptions = {})
   // handed anything the worker was not already given.
   const content = [
     REQUEST,
-    `Proposal accept: ${PLANS.accept}`,
-    `Proposal refuse: ${PLANS.refuse}`,
+    `Row accept (Let it run): ${PLANS.accept}`,
+    `Row refuse (Keep it held): ${PLANS.refuse}`,
     `<held-code signature="${sig}">`,
     code,
     '</held-code>',
@@ -140,16 +140,16 @@ export const auditHeldBee = async (sig: string, options: BroodAuditOptions = {})
         request: REQUEST,
         doctrine: DOCTRINE,
         evidence: [code],
-        proposals: [
-          { id: 'accept', label: 'Let it run', plan: PLANS.accept },
-          { id: 'refuse', label: 'Keep it held', plan: PLANS.refuse },
+        rows: [
+          { id: 'accept', kind: 'do', label: 'Let it run', lines: [PLANS.accept] },
+          { id: 'refuse', kind: 'do', label: 'Keep it held', lines: [PLANS.refuse] },
         ],
       }, { providerId, system: AUDIT_SYSTEM, messages: [{ content }] }, options.signal)
       scores = scoresOf(scored)
       // JEV choosing `accept` is a SCORE, not an acceptance: it can only move
       // the recommendation a person still has to act on.
-      if (scored.outcome === 'selected') recommends = scored.selected === 'accept' ? 'accept' : 'refuse'
-      else recommends = 'unclear'
+      const plan = scored.plan
+      recommends = plan.kind === 'do' && !plan.review ? (plan.row === 'accept' ? 'accept' : 'refuse') : 'unclear'
     } catch { /* the agent's reading stands on its own */ }
   }
 

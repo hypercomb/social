@@ -1,11 +1,24 @@
 // Shell contract for the replaceable essentials decision service. No module
 // import: the web shell resolves services from the signed installation.
+//
+// JEV RUNS THE SHOW (documentation/jev-decisions.md). The worker model never
+// picks the next step. It ends a round with a POSSIBILITY TABLE — every step
+// that could reasonably come next, as rows the hive can already run — and Jev
+// answers one batch of snap questions about the rows. Code composes the plan.
 export const JEV_IOC_KEY = '@hypercomb.social/JevDecision'
 export const JEV_MODEL = '~typesafe/jev-latest'
-export interface Proposal { readonly id: string; readonly label: string; readonly plan: string }
+export const JEV_MAX_ROWS = 8
+export type RowKind = 'read' | 'do' | 'answer' | 'ask'
+export interface Row { readonly id: string; readonly kind: RowKind; readonly label: string; readonly lines: readonly string[]; readonly why?: string }
+export type Plan =
+  | { readonly kind: 'answer' }
+  | { readonly kind: 'ask'; readonly row: string }
+  | { readonly kind: 'read'; readonly rows: readonly string[] }
+  | { readonly kind: 'do'; readonly row: string; readonly review: boolean }
+  | { readonly kind: 'participant'; readonly rows: readonly string[] }
+  | { readonly kind: 'revise' }
 export interface Decision {
-  readonly outcome: 'selected' | 'participant' | 'revise'
-  readonly selected?: string
+  readonly plan: Plan
   readonly rejected: readonly string[]
   readonly reason: string
   readonly model: string
@@ -42,16 +55,17 @@ const resource = (store: ResourceWriter, value: unknown): Promise<string | undef
 
 /** Durable provenance references immutable content; only the wire packet is inline. */
 export const persistJevInput = async (store: ResourceWriter | undefined, input: {
-  request: string; doctrine: string; evidence: readonly string[]; proposals: readonly Proposal[]
+  request: string; doctrine: string; evidence: readonly string[]; rows: readonly Row[]
 }): Promise<string | undefined> => {
   if (!store?.putResource) return undefined
   const request = await resource(store, input.request)
   const doctrine = await resource(store, input.doctrine)
   const evidence = await Promise.all(input.evidence.map(value => resource(store, value)))
-  const proposals = await Promise.all(input.proposals.map(async proposal => resource(store, {
-    id: proposal.id, label: await resource(store, proposal.label), plan: await resource(store, proposal.plan),
+  const rows = await Promise.all(input.rows.map(async row => resource(store, {
+    id: row.id, kind: row.kind, label: await resource(store, row.label), lines: await resource(store, row.lines),
+    ...(row.why ? { why: await resource(store, row.why) } : {}),
   })))
-  return resource(store, { kind: 'jev-input', model: JEV_MODEL, rubric: 2, request, doctrine, evidence, proposals })
+  return resource(store, { kind: 'jev-input', model: JEV_MODEL, rubric: 3, request, doctrine, evidence, rows })
 }
 
 export const persistJevReceipt = async (store: ResourceWriter | undefined, source: string, result: Decision): Promise<string | undefined> => {
@@ -60,37 +74,64 @@ export const persistJevReceipt = async (store: ResourceWriter | undefined, sourc
     reason: await resource(store, result.reason), answers: await resource(store, result.answers),
   })
 }
-export const JEV_WORK_INSTRUCTION =
-  'DIRECTIONS. For a consequential choice, after reading the relevant facts, end a round with one closed `hypercomb-propose` fence containing JSON: '
-  + '{"proposals":[{"id":"a","label":"Short choice label","plan":"Concrete approach and tradeoffs"},{"id":"b","label":"Another label","plan":"Alternative approach and tradeoffs"}]}. '
-  + 'Use two or three distinct proposals, ids of lowercase letters/digits/underscores, labels under 70 characters, each plan under 2000 characters. '
-  + 'Jev evaluates these against the participant request, doctrine and observed evidence. Wait for the decision before implementing. Do not manufacture alternatives for straightforward work. '
-  + 'Start with the existing Hypercomb primitives and participant values. Outside techniques are useful only when they fit that architecture; novelty is not a reason to replace it. If a proposal conflicts with doctrine, revise it instead of asking the participant to approve the conflict. '
-  + 'While working, emit only work blocks, without progress essays. Prose is shown after the work is finished or a participant choice is required. '
-  + 'After changing the hive, read the affected content to verify the result before your final response. A command receipt proves execution, not correctness.'
 
-export const parseProposals = (lines: readonly string[]): readonly Proposal[] => {
-  if (lines.join('\n').length > 7_000) throw new Error('Proposals exceed the decision budget')
-  const value = JSON.parse(lines.join('\n')) as { proposals?: unknown }
-  if (!value || !Array.isArray(value.proposals) || value.proposals.length < 2 || value.proposals.length > 3) throw new Error('Provide two or three proposals')
-  const proposals = value.proposals.map((p: unknown): Proposal => {
-    if (!p || typeof p !== 'object') throw new Error('Invalid proposal')
-    const row = p as Record<string, unknown>
+export const JEV_WORK_INSTRUCTION =
+  'JEV RUNS THE SHOW. You do not choose the next step; you list the possible ones and Jev, a decision service, picks in one fast call. '
+  + 'Every round, end your reply with ONE closed `hypercomb-table` fence holding JSON: {"rows":[{"id":"a","kind":"read","label":"See who is under people","line":"list /business/people"},'
+  + '{"id":"b","kind":"do","label":"Create the people tile","lines":["create people"]},{"id":"c","kind":"answer","label":"Answer now"},{"id":"d","kind":"ask","label":"Ask how to group","line":"Group by city or by role?"}]}. '
+  + `Two to ${JEV_MAX_ROWS} rows. Kinds: read (one read line: tree, read, list, history, summary, find or code), do (one to six behaviour sentences from the vocabulary, in lines), answer (you could answer the request now from what the messages hold), ask (a question only the participant can answer, in line). `
+  + 'Ids are lowercase letters, digits, underscores; labels under 70 characters and distinct; an optional why under 200 characters. '
+  + 'List every step that could reasonably be next: the reads that would settle an assumption, the change the request asks for, the answer row whenever you might be done, the ask row when a preference is missing. '
+  + 'Do not argue for a row, rank the rows, or reason about which is best — that is Jev\'s job and it is faster at it. Write no prose while working. '
+  + 'The next message says what Jev chose and what ran; continue from it. After a change ran, include a read row that would verify it. When told to answer, answer in prose with no block.'
+
+/** The table the model wrote, before the hive's parsers and Jev see it. */
+export const parseTable = (lines: readonly string[]): readonly Row[] => {
+  if (lines.join('\n').length > 9_000) throw new Error('The table exceeds the decision budget')
+  const value = JSON.parse(lines.join('\n')) as { rows?: unknown }
+  if (!value || !Array.isArray(value.rows) || value.rows.length < 1 || value.rows.length > JEV_MAX_ROWS) throw new Error(`Provide one to ${JEV_MAX_ROWS} rows`)
+  const rows = value.rows.map((raw: unknown): Row => {
+    if (!raw || typeof raw !== 'object') throw new Error('Invalid row')
+    const row = raw as Record<string, unknown>
+    const kind = row['kind']
     if (typeof row['id'] !== 'string' || !/^[a-z][a-z0-9_-]{0,23}$/.test(row['id']) || row['id'] === 'none'
-      || typeof row['label'] !== 'string' || !row['label'].trim() || row['label'].length > 70
-      || /[\u0000-\u001f\u007f`~]/.test(row['label']) || row['label'].trim() === 'Choose a different direction'
-      || typeof row['plan'] !== 'string' || !row['plan'].trim() || row['plan'].length > 2_000) throw new Error('Invalid proposal')
-    return { id: row['id'], label: row['label'].trim(), plan: row['plan'].trim() }
+      || (kind !== 'read' && kind !== 'do' && kind !== 'answer' && kind !== 'ask')
+      || typeof row['label'] !== 'string' || !row['label'].trim() || row['label'].length > 70 || /[\x00-\x1f\x7f`~*]/.test(row['label'])
+      || row['label'].trim() === 'Something else') throw new Error('Invalid row')
+    const raw_lines = row['lines'] ?? (row['line'] === undefined ? [] : [row['line']])
+    if (!Array.isArray(raw_lines) || raw_lines.some(line => typeof line !== 'string' || !line.trim() || line.length > 1_000)) throw new Error('Invalid row line')
+    const lines = (raw_lines as string[]).map(line => line.trim())
+    if (kind === 'answer' ? lines.length : !lines.length) throw new Error('Invalid row line')
+    if ((kind !== 'do' && lines.length > 1) || lines.length > 6 || lines.join('\n').length > 2_000) throw new Error('A row exceeds its budget')
+    const why = typeof row['why'] === 'string' && row['why'].trim() && row['why'].length <= 200 ? row['why'].trim() : undefined
+    return { id: row['id'], kind, label: row['label'].trim(), lines, ...(why ? { why } : {}) }
   })
-  if (new Set(proposals.map(p => p.id)).size !== proposals.length || new Set(proposals.map(p => p.label)).size !== proposals.length) throw new Error('Proposals must have distinct ids and labels')
-  return proposals
+  if (new Set(rows.map(r => r.id)).size !== rows.length || new Set(rows.map(r => r.label)).size !== rows.length) throw new Error('Rows must have distinct ids and labels')
+  if (rows.filter(r => r.kind === 'answer').length > 1) throw new Error('One answer row at most')
+  return rows
 }
 
 /** The question itself is normal persisted conversation text, so the next
- * worker sees both alternatives and the participant's answer after reload. */
-export const proposalQuestion = (proposals: readonly Proposal[], reason: string): string => {
-  const details = proposals.map(p => `**${p.label.replace(/[\r\n`*]/g, ' ')}**\n${p.plan.replace(/[`~]/g, '')}`).join('\n\n')
+ * worker sees the alternatives and the participant's answer after reload. */
+export const tableQuestion = (rows: readonly Row[], reason: string, prompt = 'Which step should the hive take?'): string => {
+  const details = rows.map(row => `**${row.label}**${row.kind === 'answer' ? '' : `\n${row.lines.join('\n').replace(/[`~]/g, '')}`}`).join('\n\n')
   return `${reason}\n\n${details}\n\n\`\`\`hypercomb-question\n${JSON.stringify({
-    prompt: 'Which direction should the hive take?', options: [...proposals.map(p => p.label), 'Choose a different direction'],
+    prompt: prompt.replace(/[\r\n`]/g, ' '), options: [...rows.map(row => row.label), 'Something else'],
   })}\n\`\`\``
 }
+
+/** What the worker is told after Jev decided: the choice, then what ran. */
+export const tableChoiceNote = (decision: Decision, rows: readonly Row[], dropped: readonly { id: string; reason: string }[]): string => {
+  const label = (id: string): string => rows.find(row => row.id === id)?.label ?? id
+  const plan = decision.plan
+  const chose = plan.kind === 'read' ? `Jev chose to read: ${plan.rows.map(label).join(' · ')}.`
+    : plan.kind === 'do' ? `Jev chose ${label(plan.row)}${plan.review ? ' and asked the participant to review it first' : ''}.`
+    : plan.kind === 'answer' ? 'Jev decided the evidence answers the request.'
+    : plan.kind === 'ask' ? `Jev chose to ask the participant: ${label(plan.row)}.`
+    : decision.reason
+  const skipped = dropped.length ? ` Rows the hive could not run: ${dropped.map(row => `${row.id} (${row.reason})`).join('; ')}.` : ''
+  const conflicts = decision.rejected.length ? ` Rows conflicting with doctrine, never to be proposed again: ${decision.rejected.map(label).join(' · ')}.` : ''
+  return `${chose}${skipped}${conflicts} This decision grants no permission of its own.`
+}
+
+export const JEV_ANSWER_NOW = 'Jev decided the evidence already answers the request. Answer the participant now in prose, with no block.'

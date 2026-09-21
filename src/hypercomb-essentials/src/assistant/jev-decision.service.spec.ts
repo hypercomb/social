@@ -4,12 +4,12 @@ vi.mock('@hypercomb/core', () => ({ llmKeyStore: { get: () => state.key } }))
 vi.mock('./llm-activation.js', () => ({ llmActivation: { isEnabled: (id: string) => state.enabled && (!id.includes('jev') || state.jevEnabled) } }))
 vi.mock('./llm-model-choice.js', () => ({ llmModelChoice: { saved: () => state.saved ? ['~typesafe/jev-latest'] : [] } }))
 vi.mock('./llm-hive-access.js', () => ({ llmHiveAccess: { mayRead: () => state.granted, budget: () => 24_000 } }))
-vi.mock('./llm-provider-registry.js', () => ({ publishService: () => {}, llmProviderRegistry: () => ({ get: (id: string) => ({ id, credentialsFrom: id === 'worker' ? 'openrouter' : id }) }) }))
+vi.mock('./llm-provider-registry.js', () => ({ publishService: () => {}, llmProviderRegistry: () => ({ get: (id: string) => ({ id, decisionOnly: id === 'jev' }) }) }))
 vi.mock('./providers/openrouter-routing.js', () => ({ openRouterRouting: { get: () => ({}) }, providerBlock: () => ({ data_collection: 'deny' }) }))
 const { JevDecisionService } = await import('./jev-decision.service.js')
-const input = { request: 'Organize notes', doctrine: 'Preserve history.', evidence: 'These notes exist.', proposals: [{ id: 'a', label: 'Group', plan: 'Group notes.' }] }
-const source = { providerId: 'worker', system: input.doctrine, messages: [{ content: input.request }, { content: input.evidence }, { content: input.proposals[0].plan }] }
-const body = { model: 'resolved-jev', answers: { a_fit: { type: 'noul', noul: 1 }, a_rules: { type: 'noul', noul: 1 }, a_evidence: { type: 'noul', noul: 1 } } }
+const input = { request: 'Organize notes', doctrine: 'Preserve history.', evidence: 'These notes exist.', rows: [{ id: 'a', kind: 'do', label: 'Group', lines: ['/group notes'] }] }
+const source = { providerId: 'worker', system: input.doctrine, messages: [{ content: input.request }, { content: input.evidence }, { content: JSON.stringify({ rows: input.rows }) }] }
+const body = { model: 'resolved-jev', answers: { a_fit: { type: 'noul', noul: 1 }, a_rules: { type: 'noul', noul: 1 }, a_grounded: { type: 'noul', noul: 1 }, next: { type: 'choice', choice: 'a', confidence: 0.99, probabilities: { a: 0.99, none: 0.01 } } } }
 let fetchMock: ReturnType<typeof vi.fn>
 beforeEach(() => {
   state.key = 'test-key'; state.enabled = true; state.granted = true; state.saved = true; state.jevEnabled = true
@@ -31,30 +31,35 @@ describe('Jev OpenRouter boundary', () => {
   it('tests the decision endpoint with public synthetic data and reports usage without a hive grant', async () => {
     state.granted = false
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ model: 'resolved-jev',
-      answers: { blue_fit: { type: 'noul', noul: 1 }, blue_rules: { type: 'noul', noul: 1 }, blue_evidence: { type: 'noul', noul: 1 },
-        red_fit: { type: 'noul', noul: 0 }, red_rules: { type: 'noul', noul: 1 }, red_evidence: { type: 'noul', noul: 1 },
-        direction: { type: 'choice', choice: 'blue', confidence: 0.99, probabilities: { blue: 0.99, red: 0.01, none: 0 } } },
+      answers: { blue_fit: { type: 'noul', noul: 1 }, blue_rules: { type: 'noul', noul: 1 }, blue_grounded: { type: 'noul', noul: 1 },
+        red_fit: { type: 'noul', noul: 0 }, red_rules: { type: 'noul', noul: 1 }, red_grounded: { type: 'noul', noul: 1 },
+        next: { type: 'choice', choice: 'blue', confidence: 0.99, probabilities: { blue: 0.99, red: 0.01, none: 0 } } },
       usage: { input_tokens: 42, output_tokens: 0, cost: 0.000001764 },
     }) })
     const result = await new JevDecisionService().test()
-    expect(result).toMatchObject({ outcome: 'selected', selected: 'blue' })
+    expect(result.plan).toEqual({ kind: 'do', row: 'blue', review: false })
     expect(result.usage).toEqual({ inputTokens: 42, outputTokens: 0, cost: 0.000001764 })
     expect(fetchMock.mock.calls[0][0]).toBe('https://openrouter.ai/api/alpha/decisions')
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-key')
     const request = JSON.parse(fetchMock.mock.calls[0][1].body)
     expect(request.state.request).toBe('Choose the blue circle.')
-    expect(request.questions.direction.type).toBe('choice')
+    expect(request.questions.next.type).toBe('choice')
   })
   it('uses the latest alias, decisions endpoint and existing routing controls', async () => {
-    expect((await new JevDecisionService().evaluate(input, source)).outcome).toBe('selected')
+    expect((await new JevDecisionService().evaluate(input, source)).plan).toEqual({ kind: 'do', row: 'a', review: false })
     expect(fetchMock.mock.calls[0][0]).toBe('https://openrouter.ai/api/alpha/decisions')
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model: '~typesafe/jev-latest', provider: { data_collection: 'deny' }, state: input })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model: '~typesafe/jev-latest', provider: { data_collection: 'deny' }, state: { ...input, evidence: [input.evidence] } })
   })
-  it('never sends another provider context or newly fetched private material', async () => {
+  it('serves every worker in the suite, never Jev itself, and never unshared material', async () => {
     const service = new JevDecisionService()
-    await expect(service.evaluate(input, { ...source, providerId: 'local' })).rejects.toThrow()
+    expect(service.ready('local')).toBe(true)
+    expect(service.ready('anthropic')).toBe(true)
+    expect(service.ready('jev')).toBe(false)
+    await expect(service.evaluate(input, { ...source, providerId: 'jev' })).rejects.toThrow()
     await expect(service.evaluate({ ...input, evidence: 'Unshared secret' }, source)).rejects.toThrow()
+    await expect(service.evaluate({ ...input, rows: [{ ...input.rows[0], lines: ['/remove notes'] }] }, source)).rejects.toThrow()
     expect(fetchMock).not.toHaveBeenCalled()
+    expect((await service.evaluate(input, { ...source, providerId: 'local' })).plan.kind).toBe('do')
   })
   it('requires both the read grant and activation, even with a key', async () => {
     state.granted = false

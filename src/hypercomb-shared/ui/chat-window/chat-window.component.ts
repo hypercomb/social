@@ -156,9 +156,10 @@ import {
   transcriptForModel,
   workInstruction,
   WorkRefused,
+  workLineGrammar,
   WorkStreamGuard,
 } from './hypercomb-work-fence'
-import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, parseProposals, proposalQuestion, persistJevInput, persistJevReceipt, formatJevUsage, type JevLike, type Proposal, type Decision } from './hypercomb-jev'
+import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, JEV_ANSWER_NOW, parseTable, tableQuestion, tableChoiceNote, persistJevInput, persistJevReceipt, formatJevUsage, type JevLike, type Row, type Decision } from './hypercomb-jev'
 
 type TurnRole = 'user' | 'assistant'
 
@@ -6090,14 +6091,14 @@ export class ChatWindowComponent implements OnDestroy {
         decisionCache.clear()
       }
 
-      const judge = async (proposals: readonly Proposal[], providerId: string): Promise<Decision> => {
-        const participant = (reason: string): Decision => ({ outcome: 'participant', reason, model: JEV_MODEL, answers: {}, rejected: [] })
+      const judge = async (rows: readonly Row[], providerId: string): Promise<Decision> => {
+        const participant = (reason: string): Decision => ({ plan: { kind: 'participant', rows: rows.filter(row => row.kind !== 'answer').map(row => row.id) }, reason, model: JEV_MODEL, answers: {}, rejected: [] })
         if (!jevMode || !jev?.ready(providerId)) return participant('Jev is unavailable; the participant must choose.')
         // Mechanics are already implemented by the harness; only the verbatim
         // doctrine section is needed for this semantic judgment.
         const doctrineStart = anatomyText.indexOf('# Doctrine')
         const doctrine = doctrineStart >= 0 ? anatomyText.slice(doctrineStart) : anatomyText
-        const input = { request: message, doctrine, evidence: [...evidence], proposals }
+        const input = { request: message, doctrine, evidence: [...evidence], rows }
         const chars = JSON.stringify(input).length
         const budget = hiveAccess?.budget?.('openrouter') ?? MAX_OBSERVATION_CONTEXT_CHARS
         stillHere()
@@ -6108,7 +6109,7 @@ export class ChatWindowComponent implements OnDestroy {
         const sourceSig = await persistJevInput(contextStore, input)
         const cached = sourceSig ? decisionCache.get(sourceSig) : undefined
         if (cached) return cached
-        if (decisionCalls >= 3) return participant('The decision budget is spent; the participant must choose.')
+        if (decisionCalls >= MAX_WORK_ROUNDS) return participant('The decision budget is spent; the participant must choose.')
         if (decisionChars + chars > budget) return participant('The decision context exceeds the remaining budget; the participant must choose.')
         decisionCalls++
         decisionChars += chars
@@ -6243,23 +6244,18 @@ export class ChatWindowComponent implements OnDestroy {
         }
       }
 
-      const runDo = async (lines: readonly string[], providerId: string, model: string, rawPlan: string): Promise<string> => {
+      const runDo = async (lines: readonly string[], providerId: string, model: string, review = false): Promise<string> => {
         if (!canChange || !slash?.executePublicCanonical || !queue) throw new WorkRefused('changing the hive is not available here')
         // Parse EVERY line before anything is queued, let alone run: one bad
         // tail can never leave a half-run prefix.
         const plan = parseHypercombGrammars(lines, behaviourEntries)
         const grammars = plan.actions.map(action => action.grammar)
-        if (jevMode && rawPlan.length > 2_000) throw new WorkRefused('keep the complete action round under 2000 characters so Jev can evaluate it; split the work into smaller rounds')
-        const decision = jevMode ? await judge([{ id: 'action', label: 'Run this plan', plan: rawPlan }], providerId) : undefined
-        if (decision?.outcome === 'revise') throw new WorkRefused(decision.reason)
-        if (decision?.outcome === 'participant') EffectBus.emit('agent:progress', {
-          id: component.#beeId(convoId), activity: `waiting for your review: ${decision.reason}`,
-        })
+        if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: hypercombPlanReach(plan, behaviourEntries), lines: grammars, needsGrant: false, signal,
-          forceReview: decision?.outcome === 'participant',
+          forceReview: review,
         })
-        if (decision?.outcome !== 'participant') waitingOn(entry.id)
+        if (!review) waitingOn(entry.id)
         if (await entry.decision === 'skip') {
           if (signal?.aborted) throw stopped()
           return doSkippedMessage(grammars, message)
@@ -6411,23 +6407,66 @@ export class ChatWindowComponent implements OnDestroy {
         let reply: string
         try {
           stillHere()
-          if (work.request.kind === 'propose') {
-            let proposals: readonly Proposal[]
-            try { proposals = parseProposals(work.request.lines) }
-            catch { throw new WorkRefused('send one closed hypercomb-propose JSON block with two or three distinct, concise proposals') }
-            const decision = await judge(proposals, pinned)
-            if (decision.outcome === 'revise') throw new WorkRefused(decision.reason)
-            if (decision.outcome === 'participant') {
+          // JEV RUNS THE SHOW: a table is judged; a bare do block in Jev mode is
+          // a one-row table. Reads are safe and run as written.
+          const table = work.request.kind === 'table' ? work.request.lines
+            : jevMode && work.request.kind === 'do' ? [JSON.stringify({ rows: [{ id: 'action', kind: 'do', label: 'Run this block', lines: work.request.lines }] })]
+            : undefined
+          if (table) {
+            let rows: readonly Row[]
+            try { rows = parseTable(table) }
+            catch { throw new WorkRefused('send one closed hypercomb-table JSON block with two to eight distinct rows of kind read, do, answer or ask') }
+            // THE HIVE'S PARSERS GO FIRST. Jev only ever chooses among rows
+            // the hive can already run; a row it cannot is dropped, and said.
+            // Jev judges the rows AS THE WORKER WROTE THEM (the source boundary
+            // holds the worker to its own words); the hive runs the canonical
+            // grammar those words parse to.
+            const dropped: { id: string; reason: string }[] = []
+            const grammarOf = new Map<string, readonly string[]>()
+            const runnable = rows.flatMap((row): Row[] => {
+              try {
+                if (row.kind === 'read') {
+                  const grammar = workLineGrammar(row.lines[0], 'read')
+                  parseHypercombObservationGrammars([grammar], grammarContext.segments)
+                  grammarOf.set(row.id, [grammar])
+                }
+                if (row.kind === 'do') {
+                  const grammars = row.lines.map(line => workLineGrammar(line, 'do')).filter(Boolean)
+                  parseHypercombGrammars(grammars, behaviourEntries)
+                  grammarOf.set(row.id, grammars)
+                }
+                return [row]
+              } catch (error) {
+                dropped.push({ id: row.id, reason: error instanceof Error ? error.message : 'the hive cannot run it' })
+                return []
+              }
+            })
+            if (!runnable.length) throw new WorkRefused(`no row can run: ${dropped.map(row => `${row.id}: ${row.reason}`).join('; ')}`)
+            const decision = await judge(runnable, pinned)
+            const plan = decision.plan
+            const note = tableChoiceNote(decision, runnable, dropped)
+            const rowById = (id: string): Row => runnable.find(row => row.id === id)!
+            if (plan.kind === 'revise') throw new WorkRefused(decision.reason)
+            if (plan.kind === 'participant' || plan.kind === 'ask') {
               if (ran.length) yield `\n\nEarlier commands ran: ${ran.join(' · ')}`
               yield `\n\n${formatJevUsage(settledAttempts)}`
-              yield `\n\n${proposalQuestion(proposals.filter(proposal => !decision.rejected.includes(proposal.id)), decision.reason)}`
+              const asked = plan.kind === 'ask' ? rowById(plan.row) : undefined
+              const choices = runnable.filter(row => row.kind !== 'answer' && row.id !== asked?.id && !decision.rejected.includes(row.id))
+              yield `\n\n${tableQuestion(choices, decision.reason, asked?.lines[0])}`
               return ''
             }
-            reply = `Jev selected proposal ${decision.selected}. Continue implementing that direction, then read the affected content to verify it. This decision does not grant execution permission.`
+            if (plan.kind === 'answer') {
+              reply = `${note} ${JEV_ANSWER_NOW}`
+              lastRound = true
+            } else if (plan.kind === 'read') {
+              reply = `${note}\n\n${await runRead(plan.rows.flatMap(id => grammarOf.get(id) ?? []), pinned, roundModel)}`
+            } else {
+              reply = `${note}\n\n${await runDo(grammarOf.get(plan.row) ?? [], pinned, roundModel, plan.review)}`
+            }
           } else {
             reply = work.request.kind === 'read'
               ? await runRead(work.request.lines, pinned, roundModel)
-              : await runDo(work.request.lines, pinned, roundModel, roundText)
+              : await runDo(work.request.lines, pinned, roundModel)
           }
         } catch (error) {
           // Stop belongs to the participant: never turn it into a message.

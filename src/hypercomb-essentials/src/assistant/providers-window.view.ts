@@ -392,6 +392,7 @@ export class ProvidersWindowView extends EventTarget {
     registry.addEventListener('change', rerender)
     llmKeyStore.addEventListener('change', rerender)
     llmActivation.addEventListener('change', rerender)
+    llmHiveAccess.addEventListener('change', rerender)
     llmPolicy.addEventListener('change', rerender)
     // A local server waking or dying moves no descriptor and flips no switch,
     // so it arrives as the one effect that means "who answers may have
@@ -890,13 +891,16 @@ export class ProvidersWindowView extends EventTarget {
         ? this.#t('providers.localPermissionShort', 'needs permission')
       : localDown
         ? this.#t('providers.localAsleepShort', 'not running')
+      : !usable
+        ? this.#t('providers.noKey', 'no key')
+      // EVERYTHING THAT IS ACTIVE SHOWS ACTIVE (jwize, 2026-09-20): every
+      // provider that is on and usable says so, and stays saying so; the one
+      // the mediator would pick next is marked on top of that, never instead.
       : active
-        ? this.#t('providers.active', 'active')
-        : !usable
-          ? this.#t('providers.noKey', 'no key')
-          : ''
+        ? this.#t('providers.activeChosen', 'active · answers next')
+        : this.#t('providers.active', 'active')
     state.hidden = !state.textContent
-    state.classList.toggle('is-dim', !active)
+    state.classList.toggle('is-dim', !usable)
 
     head.append(dot, name)
     if (showReach) head.appendChild(this.#badge(reachLabel(provider)))
@@ -1740,6 +1744,31 @@ export class ProvidersWindowView extends EventTarget {
     if (instance?.decisionOnly) {
       line.appendChild(document.createTextNode(this.#t('providers.decisionOnly', 'Decisions · evaluates directions and actions')))
     }
+    // The same word on every model row: on and usable, or not.
+    if (instance) {
+      const state = document.createElement('span')
+      state.className = 'hc-provider-state'
+      const on = llmActivation.isEnabled(instance.id) && (instance.decisionOnly
+        ? jevDecision.enabled()
+        : !!llmKeyStore.get('openrouter') && !isOpenRouterBatchModel(modelId))
+      state.textContent = on ? this.#t('providers.active', 'active') : this.#t('providers.off', 'off')
+      state.classList.toggle('is-dim', !on)
+      line.appendChild(state)
+    }
+    let jevStatus: HTMLElement | undefined
+    if (instance?.decisionOnly) {
+      // WHETHER CHAT IS IN JEV MODE, said in one line — and when it is not,
+      // which switch is missing. The same gates the chat loop asks per turn.
+      const status = document.createElement('div')
+      status.className = 'hc-provider-model-line hc-provider-jev-status'
+      const missing = !jevDecision.enabled() ? this.#t('providers.jevNeedsSwitch', 'switch it on above')
+        : !llmHiveAccess.mayRead('openrouter') ? this.#t('providers.jevNeedsGrant', 'let OpenRouter read the hive, on its key row')
+        : ''
+      status.textContent = missing
+        ? `${this.#t('providers.jevOff', 'Jev mode for chat: off — ')}${missing}`
+        : this.#t('providers.jevOn', 'Jev mode for chat: on — any worker lists the possibilities, Jev decides')
+      jevStatus = status
+    }
     if (entry) {
       const price = document.createElement('span')
       price.className = 'hc-provider-catalog-price'
@@ -1780,6 +1809,7 @@ export class ProvidersWindowView extends EventTarget {
       }),
     )
     detail.append(line, links)
+    if (jevStatus) detail.appendChild(jevStatus)
     // Every model line is a provider of its own, so it has the same switch
     // every provider row has: whether the orchestrator may pick it.
     if (instance) {
