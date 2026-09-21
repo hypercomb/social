@@ -1,15 +1,23 @@
 // Hypercomb shell for the source-based Bubble Bobble adaptation.
 // Gameplay provenance and GPL notices: ./UPSTREAM.md and ./COPYING.
 import { Engine, WIDTH, HEIGHT, type Input } from './engine.js'
+import { DOS_TICK_SECONDS } from './dos-mechanics.js'
 import { Renderer } from './renderer.js'
+import {
+  createBubbleTileSurface, type LoadedBubbleRound,
+} from './tile-surface.js'
 import { GameAudio } from '../audio.js'
 
 const HISCORE_KEY = 'hc:bubble-arcade-hiscore'
-const STEP = 1 / 120
-// The 256 × 224 raster was displayed on a horizontal 4:3 arcade monitor.
+const STEP = DOS_TICK_SECONDS
+// The DOS game renders a 320 x 200 logical framebuffer, displayed at 4:3.
 const DISPLAY_ASPECT = 4 / 3
 const SOURCE = 'https://github.com/JulianRijken/BubbleBobble/tree/6a59ee99e621f4061cab50802155b9c28c51c4f9'
 type Control = 'left' | 'right' | 'jump' | 'blow'
+type LivingRoundSource = {
+  ensureRound(index: number): LoadedBubbleRound | Promise<LoadedBubbleRound>
+}
+type LivingRoundSourceFactory = () => LivingRoundSource
 
 /** A local iframe gives the arcade its own keyboard document. Game keys never
  * reach the hive's earlier capture listeners; no remote page or runtime loads. */
@@ -19,6 +27,12 @@ export class BubbleOverlay {
   #canvas: HTMLCanvasElement | null = null
   #renderer: Renderer | null = null
   #engine = new Engine()
+  #roundSource: LivingRoundSource | null = null
+  #roundLoads = new Map<number, Promise<void>>()
+  #loadedRounds = new Set<number>()
+  #livingReady = false
+  #livingError = ''
+  #wantedRound = 0
   #audio = new GameAudio()
   #abort: AbortController | null = null
   #resize: ResizeObserver | null = null
@@ -37,12 +51,18 @@ export class BubbleOverlay {
   #coverCopy: HTMLElement | null = null
   #coverButton: HTMLButtonElement | null = null
   #pauseButton: HTMLButtonElement | null = null
+  #restartButton: HTMLButtonElement | null = null
   #soundButton: HTMLButtonElement | null = null
   #status: HTMLElement | null = null
   #lastState = ''
   #fx = { jump: 0, blow: 0, trap: 0, pop: 0, fruit: 0, hurt: 0, clear: 0 }
 
-  constructor(private readonly onClose: () => void) {}
+  constructor(
+    private readonly onClose: () => void,
+    private readonly roundSourceFactory: LivingRoundSourceFactory = () => createBubbleTileSurface([]),
+  ) {
+    this.#engine.useLivingLevels()
+  }
   isMounted(): boolean { return this.#root !== null }
 
   mount(): void {
@@ -89,7 +109,8 @@ export class BubbleOverlay {
     this.#status = doc.querySelector('.bub-status')
     doc.querySelector<HTMLAnchorElement>('.bub-source')!.href = SOURCE
     doc.querySelector<HTMLButtonElement>('.bub-close')!.onclick = this.onClose
-    doc.querySelector<HTMLButtonElement>('.bub-restart')!.onclick = () => this.#restart()
+    this.#restartButton = doc.querySelector('.bub-restart')
+    this.#restartButton!.onclick = () => this.#restart()
     this.#coverButton!.onclick = () => {
       if (this.#ended()) this.#restart()
       else this.#resume()
@@ -137,6 +158,7 @@ export class BubbleOverlay {
     this.#fit()
     this.#syncCover()
     this.#coverButton?.focus()
+    this.#loadLivingRound(0)
     this.#last = 0
     this.#raf = requestAnimationFrame(this.#loop)
   }
@@ -155,6 +177,13 @@ export class BubbleOverlay {
     this.#frame = null
     this.#canvas = null
     this.#renderer = null
+    this.#roundLoads.clear()
+    this.#loadedRounds.clear()
+    this.#roundSource = null
+    this.#livingReady = false
+    this.#livingError = ''
+    this.#wantedRound = 0
+    this.#engine.useLivingLevels()
     this.#keys.clear()
     this.#touch.clear()
     this.#restoreFocus?.focus?.({ preventScroll: true })
@@ -170,6 +199,10 @@ export class BubbleOverlay {
     this.#last = 0
   }
   #resume(): void {
+    if (!this.#livingReady || this.#livingError) {
+      this.#loadLivingRound(this.#wantedRound, this.#started)
+      return
+    }
     this.#started = true
     this.#paused = false
     this.#clearInput()
@@ -184,11 +217,60 @@ export class BubbleOverlay {
     this.#syncCover()
   }
   #restart(): void {
+    // A living campaign has no static seed to fall back to, so the engine
+    // refuses to restart one whose ROUND 01 is not installed yet. Re-issue the
+    // load instead of letting that refusal escape a click or keydown handler.
+    if (!this.#livingReady) { this.#resume(); return }
     this.#saveScore()
     this.#engine.restart()
     this.#fx = { ...this.#engine.fx }
     this.#lastState = ''
     this.#resume()
+  }
+
+  #loadLivingRound(index: number, resumeAfter = false): void {
+    if (!this.#root || this.#loadedRounds.has(index) || this.#roundLoads.has(index)) return
+    this.#wantedRound = index
+    this.#livingError = ''
+    this.#syncCover()
+    let result: LoadedBubbleRound | Promise<LoadedBubbleRound>
+    try {
+      this.#roundSource ??= this.roundSourceFactory()
+      result = this.#roundSource.ensureRound(index)
+    } catch (error) {
+      this.#roundSource = null
+      this.#livingFailure(error)
+      return
+    }
+    const accept = (loaded: LoadedBubbleRound): void => {
+      if (!this.#root) return
+      this.#engine.installLevel(index, loaded.level)
+      this.#loadedRounds.add(index)
+      this.#livingError = ''
+      if (index === 0 && !this.#livingReady) {
+        this.#livingReady = true
+      }
+      this.#syncCover()
+      if (resumeAfter) this.#resume()
+      else if (!this.#started) this.#coverButton?.focus()
+    }
+    if (!result || typeof (result as Promise<LoadedBubbleRound>).then !== 'function') {
+      try { accept(result as LoadedBubbleRound) } catch (error) { this.#livingFailure(error) }
+      return
+    }
+    const pending = Promise.resolve(result).then(accept).catch(error => this.#livingFailure(error)).finally(() => {
+      if (this.#roundLoads.get(index) === pending) this.#roundLoads.delete(index)
+    })
+    this.#roundLoads.set(index, pending)
+  }
+
+  #livingFailure(error: unknown): void {
+    if (!this.#root) return
+    this.#livingError = error instanceof Error ? error.message : 'The living round could not be read.'
+    this.#paused = true
+    this.#clearInput()
+    this.#syncCover()
+    this.#coverButton?.focus()
   }
 
   #keyDown(event: KeyboardEvent): void {
@@ -235,11 +317,19 @@ export class BubbleOverlay {
     this.#last = now
     if (!this.#paused && !this.#ended()) {
       this.#accumulator += dt
-      while (this.#accumulator >= STEP) {
-        this.#engine.update(STEP, this.#input())
-        this.#accumulator -= STEP
+      if (this.#accumulator >= STEP) {
+        // Input is fixed for the whole frame — keys and touches only change in
+        // event handlers — so sample it once rather than per native tick.
+        const input = this.#input()
+        while (this.#accumulator >= STEP) {
+          this.#engine.update(STEP, input)
+          this.#accumulator -= STEP
+        }
       }
       this.#sounds()
+    }
+    if (this.#engine.state === 'clear' && this.#engine.levelIndex + 1 < this.#engine.levels.length) {
+      this.#loadLivingRound(this.#engine.levelIndex + 1)
     }
     this.#hiscore = Math.max(this.#hiscore, this.#engine.score)
     this.#renderer?.draw(this.#engine, this.#engine.time, this.#hiscore)
@@ -276,11 +366,26 @@ export class BubbleOverlay {
   }
   #syncCover(): void {
     if (!this.#cover || !this.#coverTitle || !this.#coverCopy || !this.#coverButton) return
+    // Restart is legal exactly when the engine will accept it: once ROUND 01 is
+    // installed. Before that it goes dark beside the pause button.
+    if (this.#restartButton) this.#restartButton.disabled = !this.#livingReady
+    if (!this.#livingReady || this.#livingError) {
+      this.#cover.hidden = false
+      this.#coverTitle.textContent = this.#livingError ? 'Living round unavailable' : 'Bubble Bobble'
+      this.#coverCopy.textContent = this.#livingError
+        ? this.#livingError
+        : `Opening ROUND ${String(this.#wantedRound + 1).padStart(2, '0')} from its hive tiles\u2026`
+      this.#coverButton.textContent = this.#livingError ? 'Try again' : 'Loading\u2026'
+      this.#coverButton.disabled = !this.#livingError
+      if (this.#pauseButton) this.#pauseButton.disabled = true
+      return
+    }
     const end = this.#ended()
     this.#cover.hidden = !this.#paused && !end
-    this.#coverTitle.textContent = end ? (this.#engine.state === 'won' ? 'All three rounds cleared!' : 'Game over') : this.#started ? 'Paused' : 'Bubble Bobble'
+    this.#coverTitle.textContent = end ? (this.#engine.state === 'won' ? 'All 100 rounds cleared!' : 'Game over') : this.#started ? 'Paused' : 'Bubble Bobble'
     this.#coverCopy.textContent = end ? `Score ${this.#engine.score.toLocaleString()} · Best ${this.#hiscore.toLocaleString()}` : this.#started ? 'Ready when you are.' : 'Trap a foe in a bubble. Jump into it to pop it. Collect the fruit.'
     this.#coverButton.textContent = end ? 'Play again' : this.#started ? 'Resume' : 'Start game'
+    this.#coverButton.disabled = false
     if (this.#pauseButton) { this.#pauseButton.textContent = this.#paused ? 'Resume' : 'Pause'; this.#pauseButton.disabled = !this.#started || end }
   }
   #fit(): void {

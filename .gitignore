@@ -6,7 +6,8 @@
 /e2e/test-output/
 /.angular/
 .angular/
-.vscode/
+**/.vscode/*
+!/.vscode/tasks.json
 dist/
 
 # Node modules and dependency files

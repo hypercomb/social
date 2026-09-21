@@ -74,7 +74,8 @@ hypercomb-core → hypercomb-essentials → hypercomb-web / hypercomb-dev
 npm run build:packages          # Build core + essentials in order
 npm run build:core              # Build core only
 npm run build:essentials        # Build essentials (tsup + esbuild modules + copy to web)
-npm run deploy:essentials       # Build essentials + advance the signed install sentinel (moves no bytes)
+npm run publish:revision -- [name]   # THE one act that makes a revision: build + ship + advance install:<name> (default name: essentials). Also VS Code task "Publish revision". A plain build stamps nothing.
+npm run deploy:essentials       # Alias of publish:revision
 ```
 
 From `hypercomb-web/`:
@@ -89,7 +90,7 @@ npm run runtime:core            # Copy core dist to public/core/
 Essentials are built as **signature-addressed modules** and auto-installed into OPFS at runtime:
 
 1. **Build** (`npm run build:essentials`): esbuild bundles drones into flat `dist/` as **sig-named files** (layers, bees, dependencies — no typed dirs) plus `manifest.json`. Then `copy-to-web.ts` copies output to `hypercomb-web/public/content/`. *(Legacy note: already-deployed content may still use the retired `__layers__/`/`__bees__/`/`__dependencies__/` URL layout; fetchers try the flat `/<sig>` URL first and fall back to the legacy typed URL — new builds never emit those dirs.)*
-2. **Deploy** (`npm run deploy:essentials`): Same build and the same local copies, plus `stamp-install-channel.ts` — which asks the authoring browser over the bridge to advance the signed `install:essentials` pointer to the new package signature. It uploads NOTHING; Azure blob storage was dropped. Bytes reach a reader by REPLICATION from a host (a web deploy, a Pages deployment, or a machine running `hypercomb-serve` — see `documentation/hosting-from-a-machine.md`).
+2. **Publish a revision** (`npm run publish:revision -- [name]`, alias `deploy:essentials`; see `documentation/publishing-a-revision.md`): a build is NOT a revision — it copies bytes and the mirrored dev feed's working head, and stamps nothing. Publishing builds, appends the package to the host's `host:packages` pool with the name as the member label (its file date is the revision date), and runs `stamp-install-channel.ts` — which asks the authoring browser over the bridge to advance the signed `install:essentials` pointer to the new package signature. It uploads NOTHING; Azure blob storage was dropped. Bytes reach a reader by REPLICATION from a host (a web deploy, a Pages deployment, or a machine running `hypercomb-serve` — see `documentation/hosting-from-a-machine.md`).
 3. **Runtime auto-install**: On app load, `ensureInstall()` uses sentinel sync or `LayerInstaller` fetches `manifest.json` → looks up package by signature → downloads all listed layers/bees/deps → writes sig-named files to the OPFS root and the `sign('bees')`/`sign('dependencies')` pools. Skips if already installed (checked via `localStorage` + OPFS presence).
 4. **Import map**: `resolveImportMap()` reads the `sign('dependencies')` pool from OPFS (union-reading the legacy `__dependencies__/` dir as a read-only fallback while it drains), extracts aliases from first-line comments (`// @scope/name`), and injects a dynamic `<script type="importmap">`.
 5. **Module loading**: `DependencyLoader` imports dependencies via the import map. `ScriptPreloader` loads bees from OPFS, instantiates them, and registers in IoC.

@@ -58,6 +58,9 @@ export interface InstallRevisionSource {
   root: string
   zone: string
   at: string
+  /** The name the domain published this root under (the pool member's label),
+   *  `''` for a root held here or a member that carries none. */
+  name?: string
 }
 
 /** One version of one path — a signature, whichever domain carries it. */

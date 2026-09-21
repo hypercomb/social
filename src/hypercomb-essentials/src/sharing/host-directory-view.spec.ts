@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { directoryRows, domainRows, isOlder, offAbove, replacedBeneath, rootsFor, type ServedTree } from './host-directory.view'
+import { directoryRows, domainRows, isOlder, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..', '..', '..')
@@ -102,6 +102,49 @@ describe('the host directory', () => {
 
     const older = [node('games', 'g0', ['games/arkanoid', 'games/bubble']), node('games/arkanoid', 'a0'), node('games/bubble', 'b1')]
     expect(replacedBeneath('games', running, older)).toEqual(['games/arkanoid', 'games/arkanoid/themes'])
+  })
+
+  it('lists revisions by name, dates as sub-items, a returning name appending to its own heading', () => {
+    // Jaime 2026-09-20: "dates show as subitems if the name hasn't changed —
+    // name / dates… renamed / dates… another revision name / dates", then, of a
+    // returning name: "clearly to be appended on the other same named revision".
+    const at = (layer: string, when: string, name?: string): InstallRevision =>
+      ({ layer, at: when, sources: [{ root: `r-${layer}`, zone: 'jwize.com', at: when, ...(name ? { name } : {}) }] })
+    const list = [
+      at('f', '2026-09-20T12:00:00.000Z', 'stable'),
+      at('e', '2026-09-19T09:30:00.000Z', 'stable'),
+      at('d', '2026-09-18T08:00:00.000Z', 'renamed'),
+      at('c', '2026-09-17T08:00:00.000Z', 'stable'),   // returns after "renamed" — still under "stable"
+      at('b', '2026-09-16T08:00:00.000Z', 'another'),
+      at('a', '2026-09-15T08:00:00.000Z'),
+    ]
+    // One heading per name: a name that comes back APPENDS to its own heading.
+    const groups = revisionGroups(list)
+    expect(groups.map(group => `${group.name || '(none)'}:${group.entries.map(e => e.revision.layer).join('')}`))
+      .toEqual(['stable:fec', 'renamed:d', 'another:b', '(none):a'])
+
+    // Nothing named anywhere: one plain group, newest first.
+    const plain = revisionGroups([at('x', '2026-09-01T00:00:00.000Z'), at('y', '2026-09-02T00:00:00.000Z')])
+    expect(plain[0]!.entries.map(e => e.revision.layer).join('')).toBe('yx')
+    expect(plain).toHaveLength(1)
+    expect(plain[0]!.name).toBe('')
+
+    // One revision published under two names is a line under each, at its own date.
+    const both: InstallRevision = { layer: 'z', at: '2026-09-20T12:00:00.000Z', sources: [
+      { root: 'r1', zone: 'jwize.com', at: '2026-09-20T12:00:00.000Z', name: 'beta' },
+      { root: 'r2', zone: 'jwize.com', at: '2026-09-10T12:00:00.000Z', name: 'stable' },
+    ] }
+    expect(revisionGroups([both]).map(run => `${run.name}:${run.entries[0]!.at.slice(0, 10)}`)).toEqual(['beta:2026-09-20', 'stable:2026-09-10'])
+
+    expect(revisionDate('2026-09-20T11:08:33.000Z')).toBe('2026-09-20 11:08')
+    expect(revisionDate('2026-09-13')).toBe('2026-09-13')
+
+    // The name travels from the pool member to the row.
+    expect(ACQUIRE).toMatch(/row\.label !== row\.packageSig\.slice\(0, 12\)/)
+    expect(ACQUIRE).toMatch(/sources: revision\.sources\.map\(\(\{ root, zone, at, name \}\)/)
+    expect(INSTALL_TYPES).toMatch(/interface InstallRevisionSource \{[\s\S]*?name\?: string/)
+    expect(VIEW).toMatch(/revisionGroups\(revisions\)/)
+    expect(EN['hosts.revisions.unnamed']).toBeTruthy()
   })
 
   it('is one element from essentials, docked as the hosts window the drone asks about — the Angular window is gone', () => {

@@ -1,68 +1,104 @@
-# Bubble Bobble adaptation
+# Bubble Bobble reconstruction
 
-The previous Hypercomb simulation, vector renderer, authored campaign and level
-designer have been replaced with a browser adaptation of
-[Julian Rijken's BubbleBobble](https://github.com/JulianRijken/BubbleBobble), pinned
-to commit `6a59ee99e621f4061cab50802155b9c28c51c4f9`.
+The authoritative campaign data now comes from a static reconstruction of the
+supplied 1989 NovaLogic/Taito MS-DOS release. See
+[DOS-REFERENCE.md](DOS-REFERENCE.md) for hashes, the safety boundary, decoded
+formats, and the exact-versus-transitional status.
 
-The adapted game code and level data are distributed under **GPL-3.0-or-later**,
-as declared by the upstream README. The complete license is in [COPYING](COPYING).
-Credit remains visible in the game's footer. This is a fan-made adaptation, not
-Taito's original arcade source.
+The repository contains clean TypeScript data only:
 
-## Source correspondence
+- all 100 native 100-byte terrain records in `dos-level-data.ts`;
+- all 100 native enemy lists (575 descriptors) in `dos-enemy-data.ts`;
+- all 100 airflow records, 100 collision-patch records, and three round-setting
+  arrays in `dos-air-data.ts`;
+- their typed decoders and native cell model in `levels.ts`.
 
-- `engine.ts`: the movement, bubble capture/escape, enemy pursuit, Maita shots,
-  defeated-enemy fruit and respawn behavior are adapted from upstream
-  `src/Components/CaptureBubble.*`, `src/Components/Character/Player/PlayerState.*`,
-  character/enemy components, `src/Game.cpp` and `src/Scenes.cpp`.
-- `levels.ts`: the three playable maps are decoded from upstream
-  `Assets/Levels.png`, following `Game::ParseMaps`. Enemy placement follows
-  `src/Scenes.cpp`, except round one's ledges and floor are one tile lower and
-  it opens with three Zen-Chan on the upper platform, matching the Taito arcade
-  reference. Blue, green and red in the
-  source map identify collision types; they are not visible tile colors.
-  The top 16 pixels are reserved for the HUD.
-- `renderer.ts` and `sprite-assets.ts`: the arcade presentation uses sprite
-  sheets supplied in the pinned upstream repository, embedded locally so no
-  asset server or runtime download is required. Their source names and revision
-  are recorded alongside the embedded data. The characters and original game
-  designs are Taito's; these are not newly authored Hypercomb sprites. The
-  upstream project declares GPL-3.0-or-later and provides no separate asset
-  license or Taito permission statement. No music or sound files are copied.
-- `overlay.ts`: Hypercomb's launch/close shell, local keyboard document, touch
-  controls, fixed simulation timestep, focus/visibility pause, score storage and
-  synthesized sounds. The 256×224 canvas fills the available space using a 4:3
-  cabinet display aspect, without discarding space by rounding the scale down.
-  This follows MAME's [visible raster configuration](https://github.com/mamedev/mame/blob/master/src/mame/taito/bublbobl.cpp)
-  and [default CRT aspect](https://github.com/mamedev/mame/blob/master/src/emu/screen.cpp).
-  This runs locally without a remote game embed or a WASM download.
+No DOS executable, machine code, compressed resource, or runtime emulator ships
+with Hypercomb.
 
-This is a TypeScript/Canvas2D adaptation, not a binary-identical port of the
-C++/Box2D game. The implementation uses pixel coordinates, deterministic collision
-handling, one player and the upstream three-round campaign. The old designer's
-localStorage data is left intact but is not read by this version. New scores use
-`hc:bubble-arcade-hiscore`; the shared arcade mute preference is retained.
+## Reproducible static inspection
 
-Visual comparison: [1986 arcade round-one screenshot, MobyGames](https://www.mobygames.com/game/787/bubble-bobble/screenshots/)
-([image](https://cdn.mobygames.com/6074b612-c33c-11ed-9a87-02420a0001b4.webp)).
-The opening now uses the pink diagonal tile pattern, black background and
-recognizable upstream character sprites rather than the earlier generic art.
+`scripts/bubble-static-inspect.py` is a read-only aid for an analyst who
+already has the unpacked image in a separately controlled location. It requires
+the exact 131,856-byte SHA-256 recorded in `DOS-REFERENCE.md` before printing a
+bounded byte range; it never unpacks, downloads, executes, modifies, or bundles
+the supplied file. From `src/hypercomb-essentials`, for example:
+
+```powershell
+py scripts/bubble-static-inspect.py --image C:\controlled\image.bin --start 0xA917 --length 0x60
+```
+
+`--disassemble` is optional and uses an already-installed Capstone Python
+module in the analyst's external environment. Its direct near-call/jump targets
+are display-only `CS:IP` values with a 16-bit masked IP; it is not an emulator.
+
+## Living primitive architecture
+
+`tile-surface.ts` projects the reconstructed campaign into the same native
+Hypercomb shape used by Solomon's Key. The `bubble-bobble-dos-v1` branch is a
+campaign layer; each loaded round is a child layer; and every one of its 32x25
+visible cells is an individually addressed child layer. A cell owns its native
+DOS byte, player marker, and ordered enemy descriptors. The eight native work
+columns and three airflow settings live on the round layer.
+
+The TypeScript tables are a seed, not permanent authority. A round is imported
+once on first entry. Later openings resolve the round's current child heads,
+so authored hive edits win even while the parent's historical child signatures
+remain immutable. Incomplete, cold, or conflicting content is reported and is
+never silently overwritten. Simulation state remains session-local; movement,
+bubbles, scores, and 60 Hz native ticks do not generate history writes.
+
+`overlay.ts` now waits for ROUND 01 to hydrate before play. At a clear boundary
+it loads the next round, and `engine.ts` will not advance until that living
+round has been installed. Only rounds actually reached are materialized, so
+opening the game does not create all 80,000 cell layers at once.
+
+## Reconstructed mechanics and transitional presentation
+
+The initial actor simulation and current sprite presentation adapt Julian Rijken's
+[BubbleBobble](https://github.com/JulianRijken/BubbleBobble) at commit
+`6a59ee99e621f4061cab50802155b9c28c51c4f9`, distributed here under
+GPL-3.0-or-later. The complete license is in [COPYING](COPYING). Credit remains
+visible in the game footer.
+
+Source correspondence:
+
+- `engine.ts` retains portions of the upstream collision, collection, defeat,
+  and stage-lifecycle structure. Its scheduler, deterministic RNG, native
+  entrance, 8.8 movement, directional collision masks, principal player
+  states, all eight enemy dispatches, projectiles, bubble
+  phases/airflow/lifetimes/list cap/support and bounce states, direct trapped
+  contact, timed defeated-enemy flight, and pop-score chain have been replaced
+  with statically reconstructed DOS behavior. Horizontal enemy shots and fired
+  bubbles also use the reconstructed native collision masks, and Invader's
+  falling-shot cutoff uses its native coordinate.
+- `renderer.ts` and `sprite-assets.ts` still use the pinned upstream sprite
+  sheets. The character designs are Taito's; upstream states GPL-3.0-or-later
+  but supplies no separate Taito asset permission. No original DOS graphic,
+  music, or sound resource is copied.
+- `overlay.ts` is Hypercomb's iframe shell, input/focus handling, touch UI,
+  score preference, synthesized audio, and living-round hydration. Its canvas
+  uses the DOS 320x200 logical framebuffer and a 4:3 displayed aspect.
+
+The remaining inherited pieces are deliberately labelled transitional. Each
+decoded archetype now has distinct behavior and the important native constants,
+but deeper AI/projectile state branches and some dynamic bubble/contact edge
+cases are not yet a cycle-exact translation. Collectible motion/collection
+after the native defeat transition, two-player rules, special items and bonus
+scoring, audio, and sprites also remain outside exact parity.
 
 ## Building and checking
 
-The game ships through the existing essentials source/module build. There are no
-new native toolchains, downloaded dependencies or external asset fetches. Source
-for the adaptation is in this directory; the pinned upstream link above contains
-the original C++ source and build instructions.
+The game uses the existing essentials and application toolchains. It adds no
+native dependency and performs no runtime fetch.
 
-From `src/hypercomb-essentials`, run:
+From `src/hypercomb-essentials`:
 
 ```powershell
 node ../node_modules/vitest/vitest.mjs run src/games/bubble --config ../vitest.config.ts --root . --no-cache
 ```
 
-From `src/hypercomb-dev`, run the application's TypeScript check:
+From `src/hypercomb-dev`:
 
 ```powershell
 node ../node_modules/typescript/bin/tsc -p tsconfig.app.json --noEmit --incremental false

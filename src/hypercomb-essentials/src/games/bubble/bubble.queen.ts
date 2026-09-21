@@ -41,7 +41,7 @@ export class BubbleQueenBee extends QueenBee {
     if (a === 'on' || a === 'open') { drone.open(); this.#log('Bubble Bobble — opened', '🫧'); return }
     if (a === 'off' || a === 'close') { drone.close(); this.#log('Bubble Bobble — closed', '○'); return }
     if (a === 'design' || a === 'designer' || a === 'edit') {
-      this.#log('This Bubble Bobble version has three arcade rounds and no level designer.', '🫧'); return
+      this.#log('This Bubble Bobble version has the 100-round DOS campaign and no level designer.', '🫧'); return
     }
     const on = drone.toggle()
     this.#log(on ? 'Bubble Bobble — opened' : 'Bubble Bobble — closed', on ? '🫧' : '○')

@@ -41,7 +41,7 @@
 // `@hypercomb/core` is EXTERNAL — the import map resolves it to the runtime
 // the shim already loaded, so this bundle shares its instances rather than
 // minting a second set.
-import { INSTALL_IOC_KEY, MARKER_NAME, hardDeleteVetoFor, registerPoolMeaning, SignatureService, SignatureStore, type InstallProvider } from '@hypercomb/core'
+import { INSTALL_IOC_KEY, MARKER_NAME, askUntried, hardDeleteVetoFor, registerPoolMeaning, SignatureService, SignatureStore, type EggProbe, type InstallProvider } from '@hypercomb/core'
 // These two are PURE — stateless functions over bytes, no IoC registration, no
 // module state — which is the entire reason they may be bundled in here. The
 // walker IS the protocol; only the io wiring below is ours.
@@ -117,20 +117,30 @@ export const originAmong = (zones: readonly string[]): boolean => {
   return !!self && zones.some(zone => hostZone(zone) === self)
 }
 
-const fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+// What one host said about one signature. A 404/410, or an HTML page where
+// sig-addressed bytes belong (the SPA fallback), is a definite "not here" and
+// lays an egg (core/eggs.ts); a network error or any other status is the host
+// being unreachable and records nothing.
+const probeBytes = async (url: string): Promise<EggProbe<Uint8Array<ArrayBuffer>>> => {
   try {
     // Default cache mode, NOT 'no-store': every URL through here is
     // sig-addressed immutable content, so the HTTP cache is free bandwidth.
     const res = await fetch(url)
-    if (!res.ok) return null
+    if (res.status === 404 || res.status === 410) return 'absent'
+    if (!res.ok) return 'unreachable'
     // SPA fallback guard: an extension-less flat `/<sig>` on a dev-server
     // origin answers index.html with 200. Sig-addressed bytes are never
     // text/html. The sha256 check is the real gate; this only saves the
     // pointless hash of a 404 page.
-    if ((res.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return null
+    if ((res.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return 'absent'
     return new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>
-  } catch { return null }
+  } catch { return 'unreachable' }
 }
+
+/** Fetch a signature from the first of `origins` that holds it, never asking
+ *  again a host that already said it does not (core/eggs.ts). */
+const fetchAcross = (origins: readonly string[]) => (sig: string): Promise<Uint8Array<ArrayBuffer> | null> =>
+  askUntried(sig, origins, base => probeBytes(`${base}/${sig}`))
 
 const writeBytes = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
   const handle = await dir.getFileHandle(name, { create: true })
@@ -399,13 +409,7 @@ export const installPackage = async (
     ...alsoFrom.flatMap(zone => hostBases(zone)),
     ...(originAmong([pkg.zone, ...alsoFrom]) ? selfBases() : []),
   ])]
-  const fetchFrom = async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
-    for (const base of origins) {
-      const bytes = await fetchBytes(`${base}/${sig}`)
-      if (bytes) return bytes
-    }
-    return null
-  }
+  const fetchFrom = fetchAcross(origins)
 
   const beesUrlBase = `/opfs/${await registerPoolMeaning(BEES_MEANING)}`
   const depsUrlBase = `/opfs/${await registerPoolMeaning(DEPENDENCIES_MEANING)}`
@@ -543,13 +547,7 @@ export const layersIoFor = async (zones: readonly string[]): Promise<Replication
   const origins = [...new Set([...zones.flatMap(zone => hostBases(zone)), ...(originAmong(zones) ? selfBases() : [])])]
   return {
     read: readFrom([store.hypercombRoot], sig => [sig, `${sig}.json`]),
-    fetch: async (sig) => {
-      for (const base of origins) {
-        const bytes = await fetchBytes(`${base}/${sig}`)
-        if (bytes) return bytes
-      }
-      return null
-    },
+    fetch: fetchAcross(origins),
     write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/${sig}`, 'application/json; charset=utf-8'),
   }
 }
@@ -720,13 +718,7 @@ export const pickRevision = async (
   if (!root) return fail(refusal || 'no root carries that revision')
 
   const origins = [...new Set([...carried.flatMap(zone => hostBases(zone)), ...(originAmong(carried) ? selfBases() : [])])]
-  const fetchFrom = async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
-    for (const base of origins) {
-      const bytes = await fetchBytes(`${base}/${sig}`)
-      if (bytes) return bytes
-    }
-    return null
-  }
+  const fetchFrom = fetchAcross(origins)
 
   // THE BRANCH: its layer closure, and the bees it declares.
   const branch = await deriveInventory(revision.layer, io)
@@ -971,13 +963,16 @@ const installProvider: InstallProvider = {
       const rows = await listHostPackages(zone, { limit: REVISION_ROOTS }).catch(() => [])
       await Promise.all(rows.map(async (row, rank) => {
         const layer = await layerAt(row.packageSig, path, io)
-        if (layer) found.push({ layer, source: { root: row.packageSig, zone, at: row.at, rank } })
+        // A member that names nothing is labelled by its own signature prefix;
+        // that is a placeholder for display, not a name to group under.
+        const name = row.label && row.label !== row.packageSig.slice(0, 12) ? row.label : ''
+        if (layer) found.push({ layer, source: { root: row.packageSig, zone, at: row.at, rank, name } })
       }))
     }))
     return orderRevisions(found).map(revision => ({
       layer: revision.layer,
       at: revision.at,
-      sources: revision.sources.map(({ root, zone, at }) => ({ root, zone, at })),
+      sources: revision.sources.map(({ root, zone, at, name }) => ({ root, zone, at, ...(name ? { name } : {}) })),
     }))
   },
   revisionNodes: async (path, root, zones) => {
