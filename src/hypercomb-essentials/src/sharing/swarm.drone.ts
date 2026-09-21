@@ -211,6 +211,11 @@ const LAYER_REFRESH_MS = (EVENT_TTL_SECS * 1000) / 2
 // minutes.
 const PEER_STALE_MS = EVENT_TTL_SECS * 1500  // 90s * 1.5 = 135s
 
+// Upper bound on resource subscriptions waiting for bytes at once (see
+// #openResourceSub). The relay caps subscriptions per connection; ~14 are
+// long-lived shell channels, so this keeps the shell well under it.
+const RESOURCE_SUBS_MAX = 24
+
 // How often to sweep stale peers from the cache. Tied to the same
 // rhythm as the layer heartbeat so each pass either republishes our
 // own slot or evicts a peer who hasn't kept theirs alive.
@@ -3232,9 +3237,27 @@ const payload: SwarmLayerPayload = myLabel
       let existing: Blob | null = null
       try { existing = await store.getResource(sig) } catch { /* fall through */ }
       if (existing) continue
-      const sub = mesh.subscribe(sig, (evt) => void this.#onResourceEvent(evt))
-      this.#resourceSubs.set(sig, sub)
+      this.#openResourceSub(sig, mesh)
     }
+  }
+
+  // The only door onto #resourceSubs. A sub closes itself when the bytes
+  // land — but bytes for a peer who has since left NEVER land, and those
+  // subs used to pile up for the life of the session until the relay's
+  // per-connection cap refused every new REQ (the next location walked
+  // into went deaf). Bounded here: past the cap the OLDEST waiting sub is
+  // closed; the sig is still wanted, so the next layer pass re-opens it
+  // and the relay replays any response that arrived meanwhile.
+  #openResourceSub = (sig: string, mesh: { subscribe: (sig: string, cb: (evt: MeshEvtLike) => void) => MeshSubLike }): void => {
+    while (this.#resourceSubs.size >= RESOURCE_SUBS_MAX) {
+      const oldest = this.#resourceSubs.keys().next().value
+      if (oldest === undefined) break
+      const stale = this.#resourceSubs.get(oldest)
+      this.#resourceSubs.delete(oldest)
+      try { stale?.close() } catch { /* ignore */ }
+    }
+    const sub = mesh.subscribe(sig, (evt) => void this.#onResourceEvent(evt))
+    this.#resourceSubs.set(sig, sub)
   }
 
   // Resource arrival path. HASH FIRST, WRITE ON MATCH. The bytes used to be
@@ -3300,8 +3323,7 @@ const payload: SwarmLayerPayload = myLabel
           let existing: Blob | null = null
           try { existing = await getResource(sub) } catch { /* fall through */ }
           if (existing) continue
-          const sh = mesh.subscribe(sub, (ev) => void this.#onResourceEvent(ev))
-          this.#resourceSubs.set(sub, sh)
+          this.#openResourceSub(sub, mesh)
         }
       }
     } catch { /* leaf resource */ }

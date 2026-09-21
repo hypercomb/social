@@ -806,6 +806,58 @@ export class NostrMeshDrone extends Drone {
       if (/rate-limited|too large/i.test(noticeText)) {
         console.warn(`[nostr-mesh] relay ${relay} is DROPPING our messages: "${noticeText}" — published events are not reaching peers`)
       }
+      // A refused REQ is a subscription that never existed: no replay, no
+      // live events, and the caller believes it is listening. This was the
+      // "swarm goes deaf after a while" — the relay capped subscriptions at
+      // 20 and a session crossed it in ordinary use. Loud, with the count,
+      // so the next report names the cause.
+      if (/too many subscriptions/i.test(noticeText)) {
+        console.warn(`[nostr-mesh] relay ${relay} REFUSED a subscription: "${noticeText}" — ${this.bucketsBySig.size} open here; events for the newest subscription will never arrive`)
+      }
+      return
+    }
+
+    // NIP-01: a refused or ended subscription arrives as CLOSED with a
+    // prefixed reason. It is not a NOTICE — it names the subscription, so
+    // we know exactly which bucket is deaf. auth-required: is answered by
+    // the AUTH branch below; anything else is retried once after a pause
+    // (a rate limit or a cap that has since freed up).
+    if (type === 'CLOSED') {
+      const subId = String(msg[1] ?? '')
+      const reason = String(msg[2] ?? '')
+      const bucket = this.bucketsBySubId.get(subId)
+      this.stats.msgOtherIn++
+      this.note('in:closed', relay, bucket?.sig, subId, undefined, reason)
+      if (!bucket) return
+      console.warn(`[nostr-mesh] relay ${relay} CLOSED subscription ${subId}: "${reason}" — ${this.bucketsBySig.size} open here`)
+      if (reason.startsWith('auth-required:')) return
+      window.setTimeout(() => {
+        if (this.stopped || !this.bucketsBySubId.has(subId)) return
+        this.sendReq(relay, bucket)
+      }, 5000)
+      return
+    }
+
+    // NIP-01: every published event gets an OK. A false one means the
+    // relay threw it away, and the reason's prefix says why.
+    if (type === 'OK') {
+      const accepted = msg[2] === true
+      const reason = String(msg[3] ?? '')
+      this.stats.msgOtherIn++
+      if (this.debug || !accepted) this.note('in:ok', relay, undefined, undefined, undefined, { id: msg[1], accepted, reason })
+      if (!accepted) console.warn(`[nostr-mesh] relay ${relay} REJECTED event ${String(msg[1] ?? '').slice(0, 12)}: "${reason}"`)
+      return
+    }
+
+    // NIP-42: the relay wants proof of our key. Sign the challenge with the
+    // same signer publishes use, then re-ask for every bucket — the REQs
+    // sent before the handshake were CLOSED auth-required.
+    if (type === 'AUTH') {
+      const challenge = String(msg[1] ?? '')
+      this.stats.msgOtherIn++
+      this.note('in:auth', relay, undefined, undefined, undefined, challenge)
+      if (!challenge) return
+      void this.answerAuth(relay, challenge)
       return
     }
 
@@ -940,6 +992,26 @@ export class NostrMeshDrone extends Drone {
     this.note('out:req', url, b.sig, b.subId, undefined, filter)
 
     try { ws.send(JSON.stringify(['REQ', b.subId, filter])) } catch { /* ignore */ }
+  }
+
+  // NIP-42 handshake: kind 22242, tags relay + challenge, fresh created_at.
+  private answerAuth = async (relay: string, challenge: string): Promise<void> => {
+    const evt: NostrEvent = {
+      created_at: Math.floor(Date.now() / 1000),
+      kind: 22242,
+      tags: [['relay', relay], ['challenge', challenge]],
+      content: ''
+    }
+    const signed = await this.trySign(evt)
+    const ws = this.sockets.get(relay)
+    if (!signed || !ws || ws.readyState !== WebSocket.OPEN) {
+      this.note('auth:skipped', relay, undefined, undefined, undefined, signed ? 'socket not open' : 'no signer')
+      return
+    }
+    try { ws.send(JSON.stringify(['AUTH', signed])) } catch { return }
+    this.note('auth:sent', relay)
+    for (const bucket of this.bucketsBySig.values()) this.sendReq(relay, bucket)
+    this.flushPendingOutbound()
   }
 
   private sendCloseToAll = (subId: string): void => {

@@ -1,12 +1,9 @@
 #!/usr/bin/env node
 // hypercomb-relay — minimal Nostr relay AND HTTP content host for private swarm meetings
-// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--memory] [--db ./relay.db] [--max-event-size 65536] [--content-dir ./content] [--writers hex1,hex2] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources]
+// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--max-event-size 65536] [--content-dir ./content] [--writers hex1,hex2] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources]
 //
 // env fallbacks (used when the matching --flag is absent):
 //   PORT             → port to listen on (Azure App Service injects this)
-//   WEBSITE_HOSTNAME → presence implies App Service: default db moves to
-//                      /home/relay.db (persistent across restarts on the
-//                      App Service Linux /home mount).
 //   CONTENT_DIR      → directory to serve HTTP content from (sig-addressed
 //                      content store). Defaults to ./content next to the
 //                      script. Operators populate it however they want
@@ -24,7 +21,6 @@ import { randomBytes, createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import Database from 'better-sqlite3'
 import { WebSocketServer } from 'ws'
 import { verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
@@ -39,13 +35,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 function parseArgs(argv) {
   const envPort = Number(process.env.PORT)
-  const onAppService = !!process.env.WEBSITE_HOSTNAME
   const envContentDir = String(process.env.CONTENT_DIR ?? '').trim()
   const args = {
     port: Number.isFinite(envPort) && envPort > 0 ? envPort : 7777,
     pubkeys: null,
-    memory: false,
-    db: onAppService ? '/home/relay.db' : './relay.db',
     // Must clear the swarm's resource pipeline: kind-30201 events inline
     // up to MAX_RESOURCE_BYTES (256 KB) of image bytes as base64 — ≈342 KB
     // of JSON before the envelope. At the old 64 KB cap every tile-image
@@ -111,13 +104,12 @@ function parseArgs(argv) {
   }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
-    if (a === '--memory') { args.memory = true; continue }
+    if (a === '--memory') continue  // accepted for old launch lines; memory is the only mode now
     if (a === '--dev-open-writes') { args.devOpenWrites = true; continue }
     if (a === '--allow-private-sources') { args.allowPrivateSources = true; continue }
     const next = argv[i + 1]
     if (a === '--port' && next) { args.port = Number(next); i++ }
     else if (a === '--pubkeys' && next) { args.pubkeys = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
-    else if (a === '--db' && next) { args.db = next; i++ }
     else if (a === '--max-event-size' && next) { args.maxEventSize = Number(next); i++ }
     else if (a === '--content-dir' && next) { args.contentDir = resolve(next); i++ }
     else if (a === '--writers' && next) { args.writers = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
@@ -239,84 +231,100 @@ const PERMISSIONS_POLICY = [
   'picture-in-picture=(self)',
 ].join(', ')
 
-// ── database ─────────────────────────────────────────────────────────────────
+// ── event store (memory only) ────────────────────────────────────────────────
+//
+// The relay is a MEETING POINT, not a store. Participants meet at a
+// signature address; the bytes behind a signature travel between a HOST
+// and a participant by replication, never through here. So the relay
+// remembers only what rendezvous needs: replaceable slots (one per
+// publisher + kind + d-tag, the newest wins) and expiring beacons — in
+// process memory, gone on restart, nothing on disk. Every event the swarm
+// publishes is one or the other. Ephemeral kinds (20000–29999) are
+// broadcast to live subscribers and never kept at all.
 
-const db = new Database(cfg.memory ? ':memory:' : cfg.db)
-db.pragma('journal_mode = WAL')
+const events = new Map()  // id → event
+const slots = new Map()   // pubkey\0kind\0d → id of the replaceable event held
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS events (
-    id TEXT PRIMARY KEY, pubkey TEXT NOT NULL, created_at INTEGER NOT NULL,
-    kind INTEGER NOT NULL, tags TEXT NOT NULL, content TEXT NOT NULL, sig TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_kind ON events(kind);
-  CREATE INDEX IF NOT EXISTS idx_pubkey ON events(pubkey);
-  CREATE INDEX IF NOT EXISTS idx_created_at ON events(created_at);
-`)
+const isEphemeralKind = (kind) => kind >= 20000 && kind < 30000
+const isAddressableKind = (kind) => kind >= 30000 && kind < 40000                       // one per pubkey+kind+d
+const isReplaceableKind = (kind) => kind === 0 || kind === 3 || (kind >= 10000 && kind < 20000)  // one per pubkey+kind
+const tagValue = (evt, name) => (evt.tags || []).find((t) => Array.isArray(t) && t[0] === name)?.[1]
+const dTagOf = (evt) => String(tagValue(evt, 'd') ?? '')
+const expirationOf = (evt) => { const n = Number(tagValue(evt, 'expiration')); return Number.isFinite(n) && n > 0 ? n : 0 }
+const slotKey = (evt, kind) => `${evt.pubkey}\0${kind}\0${isAddressableKind(kind) ? dTagOf(evt) : ''}`
 
-const stmtInsert = db.prepare(
-  'INSERT OR IGNORE INTO events (id, pubkey, created_at, kind, tags, content, sig) VALUES (?, ?, ?, ?, ?, ?, ?)'
-)
-
+// Returns the NIP-01 verdict: 'stored' | 'duplicate' | 'stale' | 'ephemeral'.
 function insertEvent(evt) {
-  // NIP-33 parameterized replaceable events (kind 30000–39999): the relay
-  // holds exactly ONE event per (pubkey, kind, d-tag) — the newest. The
-  // whole swarm wire model assumes this (kinds 30200–30205 all publish to
-  // a replaceable slot). Without the eviction, every publish accumulated
-  // and REQ replay returned the full history newest-first — receivers
-  // applying events in arrival order ended on the publisher's OLDEST
-  // event, so a late joiner saw a peer's initial empty publish instead of
-  // their current tiles.
   const kind = Number(evt.kind)
-  if (kind >= 30000 && kind < 40000) {
-    const d = String((evt.tags || []).find((t) => Array.isArray(t) && t[0] === 'd')?.[1] ?? '')
-    const dMatch = `EXISTS (SELECT 1 FROM json_each(tags) AS t WHERE json_extract(t.value, '$[0]') = 'd' AND json_extract(t.value, '$[1]') = ?)`
-    const newest = db.prepare(
-      `SELECT created_at FROM events WHERE pubkey = ? AND kind = ? AND ${dMatch} ORDER BY created_at DESC LIMIT 1`
-    ).get(evt.pubkey, kind, d)
-    if (newest && newest.created_at > evt.created_at) return  // stale republish — keep the newer slot
-    db.prepare(`DELETE FROM events WHERE pubkey = ? AND kind = ? AND ${dMatch}`).run(evt.pubkey, kind, d)
+  if (isEphemeralKind(kind)) return 'ephemeral'
+  if (events.has(evt.id)) return 'duplicate'
+  if (isAddressableKind(kind) || isReplaceableKind(kind)) {
+    // NIP-01: exactly ONE event per slot — the newest; on equal created_at
+    // the lowest id wins. The whole swarm wire model assumes this. A stale
+    // republish never displaces the held slot.
+    const key = slotKey(evt, kind)
+    const heldId = slots.get(key)
+    const held = heldId ? events.get(heldId) : undefined
+    if (held && (held.created_at > evt.created_at || (held.created_at === evt.created_at && held.id < evt.id))) return 'stale'
+    if (heldId) events.delete(heldId)
+    slots.set(key, evt.id)
   }
-  stmtInsert.run(evt.id, evt.pubkey, evt.created_at, evt.kind, JSON.stringify(evt.tags), evt.content, evt.sig)
+  events.set(evt.id, { id: evt.id, pubkey: evt.pubkey, created_at: Number(evt.created_at), kind, tags: evt.tags, content: evt.content, sig: evt.sig })
+  return 'stored'
+}
+
+// NIP-01 event shape, checked before the (expensive) signature. Every
+// refusal is an OK false with a machine-readable prefix.
+const HEX64 = /^[0-9a-f]{64}$/
+const HEX128 = /^[0-9a-f]{128}$/
+const FUTURE_SKEW_SECS = 15 * 60
+function eventShapeError(evt) {
+  if (!evt || typeof evt !== 'object') return 'invalid: event is not an object'
+  if (!HEX64.test(String(evt.id))) return 'invalid: id must be 64 lowercase hex'
+  if (!HEX64.test(String(evt.pubkey))) return 'invalid: pubkey must be 64 lowercase hex'
+  if (!HEX128.test(String(evt.sig))) return 'invalid: sig must be 128 lowercase hex'
+  if (!Number.isInteger(evt.kind) || evt.kind < 0 || evt.kind > 65535) return 'invalid: kind must be an integer 0–65535'
+  if (!Number.isInteger(evt.created_at)) return 'invalid: created_at must be an integer'
+  if (evt.created_at > Math.floor(Date.now() / 1000) + FUTURE_SKEW_SECS) return 'invalid: created_at is too far in the future'
+  if (!Array.isArray(evt.tags) || !evt.tags.every((tag) => Array.isArray(tag) && tag.every((v) => typeof v === 'string'))) return 'invalid: tags must be an array of string arrays'
+  if (typeof evt.content !== 'string') return 'invalid: content must be a string'
+  return null
+}
+
+function newestEvent(pubkey, kind) {
+  let best
+  for (const evt of events.values()) {
+    if (evt.pubkey !== pubkey || evt.kind !== kind) continue
+    if (!best || evt.created_at > best.created_at) best = evt
+  }
+  return best
 }
 
 function queryEvents(filters) {
   const results = []
+  const now = Math.floor(Date.now() / 1000)
   for (const f of filters) {
-    const clauses = []; const params = []
-
-    if (f.ids?.length) { clauses.push(`id IN (${f.ids.map(() => '?').join(',')})`); params.push(...f.ids) }
-    if (f.authors?.length) { clauses.push(`pubkey IN (${f.authors.map(() => '?').join(',')})`); params.push(...f.authors) }
-    if (f.kinds?.length) { clauses.push(`kind IN (${f.kinds.map(() => '?').join(',')})`); params.push(...f.kinds) }
-    if (f.since != null) { clauses.push('created_at >= ?'); params.push(f.since) }
-    if (f.until != null) { clauses.push('created_at <= ?'); params.push(f.until) }
-
-    // generic tag filters (#x, #e, #p, etc.)
-    for (const [key, values] of Object.entries(f)) {
-      if (!key.startsWith('#') || key.length !== 2 || !Array.isArray(values)) continue
-      const tagName = key[1]
-      clauses.push(
-        `EXISTS (SELECT 1 FROM json_each(tags) AS t WHERE json_extract(t.value, '$[0]') = ? AND json_extract(t.value, '$[1]') IN (${values.map(() => '?').join(',')}))`
-      )
-      params.push(tagName, ...values)
+    const hits = []
+    for (const evt of events.values()) {
+      const exp = expirationOf(evt)
+      if (exp && exp < now) continue  // NIP-40: never replay an expired beacon, even before the sweep
+      if (matchFilter(f, evt)) hits.push(evt)
     }
-
-    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
-    const limit = Math.min(f.limit ?? 500, 5000)
-    const rows = db.prepare(`SELECT id, pubkey, created_at, kind, tags, content, sig FROM events ${where} ORDER BY created_at DESC LIMIT ?`).all(...params, limit)
-
-    for (const r of rows) {
-      results.push({ id: r.id, pubkey: r.pubkey, created_at: r.created_at, kind: r.kind, tags: JSON.parse(r.tags), content: r.content, sig: r.sig })
-    }
+    hits.sort((a, b) => b.created_at - a.created_at)
+    results.push(...hits.slice(0, Math.min(f.limit ?? 500, 5000)))
   }
   return results
 }
 
 function deleteExpired() {
   const now = Math.floor(Date.now() / 1000)
-  db.prepare(
-    `DELETE FROM events WHERE EXISTS (SELECT 1 FROM json_each(tags) AS t WHERE json_extract(t.value, '$[0]') = 'expiration' AND CAST(json_extract(t.value, '$[1]') AS INTEGER) > 0 AND CAST(json_extract(t.value, '$[1]') AS INTEGER) < ?)`
-  ).run(now)
+  for (const [id, evt] of events) {
+    const exp = expirationOf(evt)
+    if (exp && exp < now) {
+      events.delete(id)
+      if ((isAddressableKind(evt.kind) || isReplaceableKind(evt.kind)) && slots.get(slotKey(evt, evt.kind)) === id) slots.delete(slotKey(evt, evt.kind))
+    }
+  }
 }
 
 // ── rate limiting ────────────────────────────────────────────────────────────
@@ -356,8 +364,8 @@ function matchFilter(filter, evt) {
   if (filter.ids && !filter.ids.includes(evt.id)) return false
   if (filter.authors && !filter.authors.includes(evt.pubkey)) return false
   if (filter.kinds && !filter.kinds.includes(evt.kind)) return false
-  if (filter.since && evt.created_at < filter.since) return false
-  if (filter.until && evt.created_at > filter.until) return false
+  if (filter.since != null && evt.created_at < filter.since) return false
+  if (filter.until != null && evt.created_at > filter.until) return false
 
   for (const [key, values] of Object.entries(filter)) {
     if (!key.startsWith('#') || key.length !== 2 || !Array.isArray(values)) continue
@@ -384,6 +392,9 @@ function verifyAuth(evt, challenge) {
 
   const challengeTag = evt.tags.find(t => t[0] === 'challenge')
   if (!challengeTag || challengeTag[1] !== challenge) return false
+  // NIP-42: the auth event must be fresh (±10 minutes). The relay tag is
+  // not checked — behind a tunnel this process cannot know its public URL.
+  if (Math.abs(Math.floor(Date.now() / 1000) - Number(evt.created_at)) > 600) return false
 
   if (!cfg.pubkeys.includes(evt.pubkey)) return false
   return true
@@ -392,18 +403,80 @@ function verifyAuth(evt, challenge) {
 // ── connections ──────────────────────────────────────────────────────────────
 
 const clients = new Set()
-const MAX_SUBS_PER_CLIENT = 20
+// A joined shell holds ~14 long-lived subscriptions (lifecycle, location,
+// presence, follow, channels, broker broadcast, peer models, avatars,
+// meeting, feedback) before a single image is requested — and every image
+// a peer's layer references that isn't local yet opens one more. At 20 the
+// cap was reached in ordinary use; the refusal was a NOTICE the client
+// ignored, so the NEXT location a participant walked into was silently
+// deaf until reload. 200 leaves an order of magnitude of headroom while
+// still bounding one connection's share of the broadcast loop.
+const MAX_SUBS_PER_CLIENT = 200
+const MAX_SUBID_LENGTH = 64  // NIP-01
+
+// ── subscription routing ─────────────────────────────────────────────────────
+//
+// Every swarm subscription is addressed by a signature in its `#x` filter —
+// that IS the meeting point. So live fan-out is routed by that tag: an
+// event is offered only to the subscriptions that asked for one of its
+// `x` values, never to every subscription of every connection. A filter
+// without `#x` (a generic Nostr client) lands in the catch-all and is
+// checked against everything. Cost per event is the number of listeners
+// at that address, not the number of listeners on the relay.
+
+const subsByX = new Map()     // x value → Set<{ client, subId }>
+const subsCatchAll = new Set() // { client, subId } for filters without #x
+
+function xValuesOf(filters) {
+  const xs = new Set()
+  for (const f of filters) {
+    const values = f['#x']
+    if (!Array.isArray(values) || values.length === 0) return null  // one unaddressed filter → catch-all
+    for (const v of values) xs.add(String(v))
+  }
+  return xs
+}
+
+function routeSubscription(client, subId, filters) {
+  unrouteSubscription(client, subId)
+  const entry = { client, subId }
+  const xs = xValuesOf(filters)
+  if (!xs) { subsCatchAll.add(entry); client.routes.set(subId, { entry, xs: null }); return }
+  for (const x of xs) {
+    let set = subsByX.get(x)
+    if (!set) { set = new Set(); subsByX.set(x, set) }
+    set.add(entry)
+  }
+  client.routes.set(subId, { entry, xs })
+}
+
+function unrouteSubscription(client, subId) {
+  const route = client.routes.get(subId)
+  if (!route) return
+  client.routes.delete(subId)
+  if (!route.xs) { subsCatchAll.delete(route.entry); return }
+  for (const x of route.xs) {
+    const set = subsByX.get(x)
+    if (!set) continue
+    set.delete(route.entry)
+    if (set.size === 0) subsByX.delete(x)
+  }
+}
 
 function broadcast(evt, sourceWs) {
-  const frame = JSON.stringify(['EVENT', '__broadcast__', evt])
-  for (const c of clients) {
+  const candidates = new Set(subsCatchAll)
+  for (const tag of evt.tags || []) {
+    if (!Array.isArray(tag) || tag[0] !== 'x') continue
+    const set = subsByX.get(String(tag[1]))
+    if (set) for (const entry of set) candidates.add(entry)
+  }
+  for (const { client: c, subId } of candidates) {
     if (c.ws === sourceWs) continue
     if (c.ws.readyState !== 1) continue
     if (authRequired && !c.authed) continue
-    for (const [subId, filters] of c.subs) {
-      if (matchesAny(filters, evt)) {
-        try { c.ws.send(JSON.stringify(['EVENT', subId, evt])) } catch {}
-      }
+    const filters = c.subs.get(subId)
+    if (filters && matchesAny(filters, evt)) {
+      try { c.ws.send(JSON.stringify(['EVENT', subId, evt])) } catch {}
     }
   }
 }
@@ -496,24 +569,38 @@ function fireWills(client) {
 function handleDisconnect(client) {
   if (client.closed) return
   client.closed = true
+  for (const subId of [...client.routes.keys()]) unrouteSubscription(client, subId)
   try { fireWills(client) } catch {}
   clients.delete(client)
 }
 
+// NIP-01: every EVENT gets an OK, every refused REQ gets a CLOSED, and a
+// NOTICE is only for what cannot be tied to either. Reasons carry the
+// standard machine-readable prefix (duplicate:, rate-limited:, invalid:,
+// error:, auth-required:) so clients act on them instead of reading prose.
 function handleMessage(client, raw) {
   if (typeof raw !== 'string') return
   if (Buffer.byteLength(raw, 'utf8') > cfg.maxEventSize) {
-    send(client.ws, ['NOTICE', 'message too large']); return
-  }
-  if (!checkRate(client.ip)) {
-    send(client.ws, ['NOTICE', 'rate-limited']); return
+    // Too big to parse in good conscience — but an EVENT still deserves its
+    // OK, so pull the id out of the raw text when it is one.
+    const id = raw.startsWith('["EVENT"') ? raw.match(/"id"\s*:\s*"([0-9a-f]{64})"/)?.[1] : undefined
+    if (id) send(client.ws, ['OK', id, false, `invalid: message exceeds ${cfg.maxEventSize} bytes`])
+    else send(client.ws, ['NOTICE', `error: message exceeds ${cfg.maxEventSize} bytes`])
+    return
   }
 
   let msg
-  try { msg = JSON.parse(raw) } catch { send(client.ws, ['NOTICE', 'invalid JSON']); return }
-  if (!Array.isArray(msg) || msg.length < 1) { send(client.ws, ['NOTICE', 'invalid message']); return }
+  try { msg = JSON.parse(raw) } catch { send(client.ws, ['NOTICE', 'error: invalid JSON']); return }
+  if (!Array.isArray(msg) || msg.length < 1) { send(client.ws, ['NOTICE', 'error: invalid message']); return }
 
   const type = msg[0]
+
+  if (!checkRate(client.ip)) {
+    if (type === 'EVENT') send(client.ws, ['OK', msg[1]?.id ?? '', false, 'rate-limited: slow down'])
+    else if (type === 'REQ') send(client.ws, ['CLOSED', String(msg[1] ?? ''), 'rate-limited: slow down'])
+    else send(client.ws, ['NOTICE', 'rate-limited: slow down'])
+    return
+  }
 
   if (type === 'AUTH') {
     if (!authRequired) return
@@ -530,20 +617,22 @@ function handleMessage(client, raw) {
 
   if (authRequired && !client.authed) {
     if (type === 'EVENT') { send(client.ws, ['OK', msg[1]?.id ?? '', false, 'auth-required: please authenticate']); return }
-    if (type === 'REQ') { send(client.ws, ['NOTICE', 'auth-required: please authenticate']); return }
+    if (type === 'REQ') { send(client.ws, ['CLOSED', String(msg[1] ?? ''), 'auth-required: please authenticate']); return }
   }
 
   if (type === 'EVENT') {
     const evt = msg[1]
-    if (!evt || !evt.id || !evt.pubkey || !evt.sig) {
-      send(client.ws, ['OK', evt?.id ?? '', false, 'invalid: missing fields']); return
-    }
+    const shape = eventShapeError(evt)
+    if (shape) { send(client.ws, ['OK', HEX64.test(String(evt?.id)) ? evt.id : '', false, shape]); return }
     try { if (!verifyEvent(evt)) { send(client.ws, ['OK', evt.id, false, 'invalid: bad signature']); return } }
     catch { send(client.ws, ['OK', evt.id, false, 'invalid: verification error']); return }
 
-    insertEvent(evt)
+    const verdict = insertEvent(evt)
+    if (verdict === 'duplicate') { send(client.ws, ['OK', evt.id, true, 'duplicate: already have this event']); return }
     send(client.ws, ['OK', evt.id, true, ''])
-    broadcast(evt, client.ws)
+    // A stale replaceable is accepted (the publisher did nothing wrong) but
+    // not fanned out: subscribers already hold the newer slot.
+    if (verdict !== 'stale') broadcast(evt, client.ws)
     // Arm/disarm this connection's last-will from lifecycle beacons so we
     // can tombstone it server-side if the socket dies without a graceful
     // {left} (tab crash / kill — see fireWills).
@@ -553,11 +642,18 @@ function handleMessage(client, raw) {
 
   if (type === 'REQ') {
     const subId = msg[1]
-    if (typeof subId !== 'string' || !subId) { send(client.ws, ['NOTICE', 'invalid subscription id']); return }
-    if (client.subs.size >= MAX_SUBS_PER_CLIENT) { send(client.ws, ['NOTICE', 'too many subscriptions']); return }
+    if (typeof subId !== 'string' || !subId || subId.length > MAX_SUBID_LENGTH) { send(client.ws, ['CLOSED', String(subId ?? ''), `invalid: subscription id must be 1–${MAX_SUBID_LENGTH} characters`]); return }
+    if (client.subs.size >= MAX_SUBS_PER_CLIENT && !client.subs.has(subId)) {
+      // Loud on the relay side too — a silent refusal here is a deaf
+      // participant who cannot tell why.
+      console.warn(`[subs] refused REQ from ${client.ip} (${client.pubkey?.slice(0, 8) ?? 'anon'}): ${client.subs.size} open subscriptions`)
+      send(client.ws, ['CLOSED', subId, `error: too many subscriptions (max ${MAX_SUBS_PER_CLIENT})`]); return
+    }
 
     const filters = msg.slice(2)
+    if (filters.length === 0 || !filters.every((f) => f && typeof f === 'object' && !Array.isArray(f))) { send(client.ws, ['CLOSED', subId, 'invalid: a REQ needs at least one filter object']); return }
     client.subs.set(subId, filters)
+    routeSubscription(client, subId, filters)
 
     const events = queryEvents(filters)
     for (const evt of events) send(client.ws, ['EVENT', subId, evt])
@@ -567,6 +663,7 @@ function handleMessage(client, raw) {
 
   if (type === 'CLOSE') {
     client.subs.delete(msg[1])
+    unrouteSubscription(client, String(msg[1] ?? ''))
     return
   }
 }
@@ -576,12 +673,14 @@ function handleMessage(client, raw) {
 const relayInfo = {
   name: 'hypercomb-relay',
   description: 'Minimal Nostr relay for Hypercomb swarms',
-  supported_nips: [1, 11, ...(authRequired ? [42] : [])],
+  supported_nips: [1, 11, 33, 40, ...(authRequired ? [42] : [])],
   software: 'https://github.com/nicepkg/hypercomb',
   version: '0.1.0',
   limitation: {
     max_message_length: cfg.maxEventSize,
     max_subscriptions: MAX_SUBS_PER_CLIENT,
+    max_subid_length: MAX_SUBID_LENGTH,
+    max_limit: 5000,
     auth_required: authRequired
   }
 }
@@ -681,14 +780,12 @@ function tryServeHiveIndex(req, res) {
   const pubkey = match[1]
 
   if (req.method === 'GET' || req.method === 'HEAD') {
-    const row = db.prepare(
-      'SELECT id, pubkey, created_at, kind, tags, content, sig FROM events WHERE pubkey = ? AND kind = ? ORDER BY created_at DESC LIMIT 1'
-    ).get(pubkey, HIVE_INDEX_KIND)
+    const row = newestEvent(pubkey, HIVE_INDEX_KIND)
     if (!row) { respondText(res, 404, 'no index for this publisher'); return true }
     const body = JSON.stringify({
       kind: row.kind,
       created_at: row.created_at,
-      tags: JSON.parse(row.tags),
+      tags: row.tags,
       content: row.content,
       pubkey: row.pubkey,
       id: row.id,
@@ -726,9 +823,7 @@ function tryServeHiveIndex(req, res) {
     try { insertEvent(evt) } catch (error) { respondText(res, 500, String(error?.message || error)); return }
     // insertEvent keeps the NEWER of the two, so read back what is actually
     // served rather than claiming the write landed.
-    const now = db.prepare(
-      'SELECT created_at FROM events WHERE pubkey = ? AND kind = ? ORDER BY created_at DESC LIMIT 1'
-    ).get(pubkey, HIVE_INDEX_KIND)
+    const now = newestEvent(pubkey, HIVE_INDEX_KIND)
     console.log(`[hive] index for ${pubkey.slice(0, 8)}… now at ${now?.created_at ?? 0}`)
     res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' })
     res.end(JSON.stringify({ ok: true, pubkey, created_at: now?.created_at ?? 0 }))
@@ -1247,7 +1342,7 @@ const wss = new WebSocketServer({ server })
 
 wss.on('connection', (ws, req) => {
   const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown'
-  const client = { ws, ip, authed: !authRequired, pubkey: null, challenge: null, subs: new Map(), lifecycle: new Map(), closed: false }
+  const client = { ws, ip, authed: !authRequired, pubkey: null, challenge: null, subs: new Map(), routes: new Map(), lifecycle: new Map(), closed: false }
 
   if (authRequired) {
     client.challenge = makeChallenge()
@@ -1256,10 +1351,28 @@ wss.on('connection', (ws, req) => {
 
   clients.add(client)
 
-  ws.on('message', (data) => handleMessage(client, String(data)))
+  client.alive = true
+  ws.on('pong', () => { client.alive = true })
+  ws.on('message', (data) => { client.alive = true; handleMessage(client, String(data)) })
   ws.on('close', () => handleDisconnect(client))
   ws.on('error', () => handleDisconnect(client))
 })
+
+// Keepalive. A connection whose TCP path died without a FIN (NAT expiry,
+// a laptop lid, a tunnel that went away) stays readyState OPEN here
+// forever: its subscriptions keep costing the broadcast loop and its
+// lifecycle will never fires, so peers keep seeing a ghost. Ping every
+// 30 s; a socket that answered nothing in a full interval is terminated,
+// which runs the ordinary disconnect path.
+const KEEPALIVE_MS = 30_000
+setInterval(() => {
+  for (const c of clients) {
+    if (c.ws.readyState !== 1) continue
+    if (!c.alive) { try { c.ws.terminate() } catch {} ; handleDisconnect(c); continue }
+    c.alive = false
+    try { c.ws.ping() } catch {}
+  }
+}, KEEPALIVE_MS)
 
 // periodic cleanup
 setInterval(deleteExpired, 60_000)
@@ -1270,7 +1383,6 @@ function shutdown() {
   for (const c of clients) try { c.ws.close() } catch {}
   wss.close()
   server.close()
-  db.close()
   process.exit(0)
 }
 process.on('SIGINT', shutdown)
@@ -1280,8 +1392,7 @@ process.on('SIGTERM', shutdown)
 server.listen(cfg.port, () => {
   console.log(`hypercomb-relay listening on ws://0.0.0.0:${cfg.port} (WebSocket relay + HTTP content host)`)
   if (authRequired) console.log(`auth required — ${cfg.pubkeys.length} pubkey(s) whitelisted`)
-  if (cfg.memory) console.log('in-memory mode — events will not persist')
-  else console.log(`database: ${cfg.db}`)
+  console.log('events: memory only — a meeting point, not a store')
   const contentReady = existsSync(cfg.contentDir)
   console.log(`content-dir: ${cfg.contentDir} ${contentReady ? '(ready)' : '(empty — host will 404 until populated)'}`)
   if (cfg.devOpenWrites) console.log('writes: OPEN (--dev-open-writes — sha256 verify only, NEVER use on a public host)')
