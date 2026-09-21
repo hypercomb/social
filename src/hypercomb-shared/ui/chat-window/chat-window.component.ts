@@ -161,7 +161,8 @@ import {
   workLineGrammar,
   WorkStreamGuard,
 } from './hypercomb-work-fence'
-import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, JEV_ANSWER_NOW, parseTable, tableQuestion, tableChoiceNote, persistJevInput, persistJevReceipt, formatJevUsage, type JevLike, type Row, type Decision } from './hypercomb-jev'
+import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, persistJevInput, persistJevReceipt, formatJevUsage, type JevLike, type Row, type Decision } from './hypercomb-jev'
+import { offeredSentence, prepareTable, stepFor, tableFor, type RoundCensus } from './jev-round'
 
 type TurnRole = 'user' | 'assistant'
 
@@ -6286,6 +6287,20 @@ export class ChatWindowComponent implements OnDestroy {
         }
       }
 
+      // THE LIVE CENSUS as jev-round reads it: both throw on a line the hive
+      // would not run, so the decisions there never name a behaviour.
+      const census: RoundCensus = {
+        readRead: line => {
+          const grammar = workLineGrammar(line, 'read')
+          parseHypercombObservationGrammars([grammar], grammarContext.segments)
+          return grammar
+        },
+        readDo: lines => {
+          const grammars = lines.map(line => workLineGrammar(line, 'do')).filter(Boolean)
+          return { grammars, reach: hypercombPlanReach(parseHypercombGrammars(grammars, behaviourEntries), behaviourEntries) }
+        },
+      }
+
       const runDo = async (lines: readonly string[], providerId: string, model: string, review = false): Promise<string> => {
         if (!canChange || !slash?.executePublicCanonical || !queue) throw new WorkRefused('changing the hive is not available here')
         // Parse EVERY line before anything is queued, let alone run: one bad
@@ -6363,29 +6378,20 @@ export class ChatWindowComponent implements OnDestroy {
       // the census — not this shell — says what the sentence does. Only an
       // OFFERED sentence runs this way: ordinary prose never becomes a command.
       const lastAssistant = [...component.turns()].reverse().find(turn => turn.role === 'assistant')
-      const offered = (lastAssistant ? splitQuestion(lastAssistant.text).question?.options ?? [] : [])
-        .map(option => option.trim().toLowerCase())
-      if (offered.includes(message.trim().toLowerCase())) {
+      const spoken = offeredSentence(message, lastAssistant?.text, census)
+      if (spoken) {
         const providerId = pinned ?? router.designatedProviderId?.(need) ?? ''
-        const asDo = workLineGrammar(message, 'do')
-        const asRead = workLineGrammar(message, 'read')
-        let spoken: 'do' | 'read' | undefined
-        try { parseHypercombGrammars([asDo], behaviourEntries); spoken = 'do' } catch {
-          try { parseHypercombObservationGrammars([asRead], grammarContext.segments); spoken = 'read' } catch { /* not a sentence the hive runs */ }
+        let receipt: string
+        try {
+          receipt = spoken.kind === 'do'
+            ? await runDo([spoken.grammar], providerId, continuationModel ?? '')
+            : await runRead([spoken.grammar], providerId, continuationModel ?? '')
+        } catch (error) {
+          if (signal?.aborted) throw error
+          if (!isWorkRefusal(error)) throw error
+          receipt = `The hive would not run it: ${(error as Error).message}.`
         }
-        if (spoken) {
-          let receipt: string
-          try {
-            receipt = spoken === 'do'
-              ? await runDo([asDo], providerId, continuationModel ?? '')
-              : await runRead([asRead], providerId, continuationModel ?? '')
-          } catch (error) {
-            if (signal?.aborted) throw error
-            if (!isWorkRefusal(error)) throw error
-            receipt = `The hive would not run it: ${(error as Error).message}.`
-          }
-          messages.push({ role: 'user', content: `The participant chose a sentence from your table and the hive ran it as their own words.\n\n${receipt}` })
-        }
+        messages.push({ role: 'user', content: `The participant chose a sentence from your table and the hive ran it as their own words.\n\n${receipt}` })
       }
 
       while (true) {
@@ -6488,73 +6494,30 @@ export class ChatWindowComponent implements OnDestroy {
         let reply: string
         try {
           stillHere()
-          // JEV RUNS THE SHOW: a table is judged; a bare do block in Jev mode is
-          // a one-row table. Reads are safe and run as written.
-          const table = work.request.kind === 'table' ? work.request.lines
-            // The label is the worker's own first line, bare: the source
-            // boundary only lets Jev see what the worker itself wrote.
-            : jevMode && work.request.kind === 'do' ? [JSON.stringify({ rows: [{
-                id: 'action', kind: 'do',
-                label: work.request.lines[0].replace(/^\//, '').replace(/[\u0000-\u001f\u007f`~*]/g, ' ').trim().slice(0, 70) || 'change',
-                lines: work.request.lines,
-              }] })]
-            : undefined
+          // JEV RUNS THE SHOW (jev-round.ts decides, this loop does).
+          const table = tableFor(work.request, jevMode)
           if (table) {
-            let rows: readonly Row[]
-            try { rows = parseTable(table) }
-            catch { throw new WorkRefused('send one closed hypercomb-table JSON block with two to eight distinct rows of kind read, do, answer or ask') }
-            // THE HIVE'S PARSERS GO FIRST. Jev only ever chooses among rows
-            // the hive can already run; a row it cannot is dropped, and said.
-            // Jev judges the rows AS THE WORKER WROTE THEM (the source boundary
-            // holds the worker to its own words); the hive runs the canonical
-            // grammar those words parse to.
-            const dropped: { id: string; reason: string }[] = []
-            const grammarOf = new Map<string, readonly string[]>()
-            const runnable = rows.flatMap((row): Row[] => {
-              try {
-                if (row.kind === 'read') {
-                  const grammar = workLineGrammar(row.lines[0], 'read')
-                  parseHypercombObservationGrammars([grammar], grammarContext.segments)
-                  grammarOf.set(row.id, [grammar])
-                }
-                if (row.kind === 'do') {
-                  const grammars = row.lines.map(line => workLineGrammar(line, 'do')).filter(Boolean)
-                  // The behaviours say how far they reach; the gates follow.
-                  const reach = hypercombPlanReach(parseHypercombGrammars(grammars, behaviourEntries), behaviourEntries)
-                  grammarOf.set(row.id, grammars)
-                  return [{ ...row, reach }]
-                }
-                return [row]
-              } catch (error) {
-                const reason = error instanceof Error ? error.message : 'the hive cannot run it'
-                dropped.push({ id: row.id, reason })
-                // WHAT THE HIVE COULD NOT DO is recorded, not thrown away
-                // (essentials assistant/machine-misses.ts; read with `misses`).
-                EffectBus.emit('machine:miss', { sentence: row.lines.join(' · '), reason, model: roundModel, at: Date.now() })
-                return []
-              }
-            })
-            if (!runnable.length) throw new WorkRefused(`no row can run: ${dropped.map(row => `${row.id}: ${row.reason}`).join('; ')}`)
-            const decision = await judge(runnable, pinned)
-            const plan = decision.plan
-            const note = tableChoiceNote(decision, runnable, dropped)
-            const rowById = (id: string): Row => runnable.find(row => row.id === id)!
-            if (plan.kind === 'revise') throw new WorkRefused(decision.reason)
-            if (plan.kind === 'participant' || plan.kind === 'ask') {
+            const prepared = prepareTable(table, census)
+            // WHAT THE HIVE COULD NOT DO is recorded, not thrown away
+            // (essentials assistant/machine-misses.ts; read with `misses`).
+            for (const miss of prepared.dropped) {
+              EffectBus.emit('machine:miss', { sentence: miss.sentence, reason: miss.reason, model: roundModel, at: Date.now() })
+            }
+            const step = stepFor(await judge(prepared.rows, pinned), prepared)
+            if (step.kind === 'refuse') throw new WorkRefused(step.reason)
+            if (step.kind === 'question') {
               if (ran.length) yield `\n\nEarlier commands ran: ${ran.join(' · ')}`
               yield `\n\n${formatJevUsage(settledAttempts)}`
-              const asked = plan.kind === 'ask' ? rowById(plan.row) : undefined
-              const choices = runnable.filter(row => row.kind !== 'answer' && row.id !== asked?.id && !decision.rejected.includes(row.id))
-              yield `\n\n${tableQuestion(choices, decision.reason, asked?.lines[0])}`
+              yield `\n\n${step.text}`
               return ''
             }
-            if (plan.kind === 'answer') {
-              reply = `${note} ${JEV_ANSWER_NOW}`
+            if (step.kind === 'answer') {
+              reply = step.reply
               lastRound = true
-            } else if (plan.kind === 'read') {
-              reply = `${note}\n\n${await runRead(plan.rows.flatMap(id => grammarOf.get(id) ?? []), pinned, roundModel)}`
+            } else if (step.kind === 'read') {
+              reply = `${step.note}\n\n${await runRead(step.grammars, pinned, roundModel)}`
             } else {
-              reply = `${note}\n\n${await runDo(grammarOf.get(plan.row) ?? [], pinned, roundModel, plan.review)}`
+              reply = `${step.note}\n\n${await runDo(step.grammars, pinned, roundModel, step.review)}`
             }
           } else {
             reply = work.request.kind === 'read'
