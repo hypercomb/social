@@ -721,6 +721,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
   // to the next of them only repeats the same refusal.
   const refusedOwners = new Set<string>()
   let attempt = 0
+  let lastError: unknown
   for (let pass = 0; pass <= ROUTE_RETRY_PASSES; pass++) {
     // Whether THIS pass failed only in ways worth a second pass, and the
     // longest wait any vendor asked for before it.
@@ -786,7 +787,13 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
       } catch (error) {
         const status = error instanceof LlmDispatchError ? error.status : undefined
         safeObserve(call, { phase: 'failure', attempt, providerId: provider.id, model: answeredModel, durationMs: Date.now() - startedAt, outputEmitted: emitted, category: attemptCategory(error, status), ...(status !== undefined ? { status } : {}), ...(usage ? { usage } : {}) })
-        if (isAbort(error, call.signal) || emitted || !automatic) throw error
+        if (isAbort(error, call.signal) || emitted) throw error
+        // A NAMED provider never changes vendor — but a busy one is asked
+        // again like any other, since that is the same vendor a moment
+        // later. The chat names its granted provider on every turn, so
+        // without this the retry only ever covered the route nobody takes.
+        if (!automatic && !(isRetryWorthy(error) && pass < ROUTE_RETRY_PASSES)) throw error
+        lastError = error
         const message = error instanceof Error ? error.message : String(error)
         failures.push(`${provider.label}: ${message}`)
         retryWorthy &&= isRetryWorthy(error)
@@ -797,11 +804,13 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
         EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
       }
     }
-    if (!automatic || !tried || !retryWorthy || pass === ROUTE_RETRY_PASSES) break
+    if (!tried || !retryWorthy || pass === ROUTE_RETRY_PASSES) break
     await waitFor(Math.min(retryAfter ?? ROUTE_RETRY_DELAY_MS, ROUTE_RETRY_MAX_WAIT_MS), call.signal)
     if (call.signal?.aborted) throw new DOMException('The model request was aborted', 'AbortError')
   }
 
+  // A named provider's own last failure is the answer — it was the only one asked.
+  if (!automatic && lastError) throw lastError
   throw new LlmDispatchError(
     `every eligible AI provider failed: ${failures.join(' | ')}`,
     candidates[candidates.length - 1]?.id ?? '', call.model ?? '',

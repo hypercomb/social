@@ -136,6 +136,40 @@ describe('streamRoutedModel', () => {
     expect(fetch).toHaveBeenCalledTimes(3)
   })
 
+  it('asks a NAMED provider again when it was busy, and never another vendor', async () => {
+    registry.register(descriptor('named-busy', 'here now'))
+    registry.register(descriptor('other-vendor', 'unused'))
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1
+      return calls === 1
+        ? new Response('{"error":"engine_overloaded"}', { status: 429 })
+        : new Response('{}', { status: 200 })
+    }))
+
+    const chunks: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({
+      providerId: 'named-busy',
+      messages: [{ role: 'user', content: 'hello' }],
+    })) chunks.push(chunk)
+
+    expect(chunks.map(chunk => chunk.text).join('')).toBe('here now')
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.every(([url]) => String(url).includes('named-busy'))).toBe(true)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('a named provider still busy after the retry fails with its own error', async () => {
+    registry.register(descriptor('named-stuck', 'unused'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"engine_overloaded"}', { status: 429 })))
+    await expect((async () => {
+      for await (const _chunk of streamRoutedModel({
+        providerId: 'named-stuck',
+        messages: [{ role: 'user', content: 'hello' }],
+      })) { /* consume */ }
+    })()).rejects.toThrow(/named-stuck API 429/)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
   it('does not ask again when the failure was not a busy vendor', async () => {
     registry.register(descriptor('bad-first', 'unused'))
     registry.register(descriptor('bad-second', 'unused'))
