@@ -2381,6 +2381,8 @@
   "chat.reference.next": "下一张图片",
   "chat.reference.done": "关闭",
   "chat.question.hint": "或在下方输入你自己的回答",
+  "chat.jev.which": "蜂巢下一步该做什么？",
+  "chat.jev.other": "其他",
   "chat.question.own": "用自己的话回答了",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — 未得到回答就继续了",

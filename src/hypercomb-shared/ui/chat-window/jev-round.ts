@@ -16,7 +16,7 @@
 // run a line, so this module names no behaviour and keeps no vocabulary.
 
 import { splitQuestion } from '@hypercomb/core'
-import { JEV_ANSWER_NOW, parseTable, tableChoiceNote, tableQuestion, type Decision, type Reach, type Row } from './hypercomb-jev'
+import { JEV_ANSWER_NOW, parseTable, tableChoiceNote, tableQuestion, QUESTION_WORDS, type Decision, type QuestionWords, type Reach, type Row } from './hypercomb-jev'
 import { WorkRefused, type WorkRequest } from './hypercomb-work-fence'
 
 /** The live census, as the loop reads it. Both throw on a line the hive refuses. */
@@ -86,7 +86,7 @@ export const prepareTable = (lines: readonly string[], census: RoundCensus): Pre
 }
 
 /** Jev's plan, made into the one thing the loop does next. */
-export const stepFor = (decision: Decision, table: PreparedTable): RoundStep => {
+export const stepFor = (decision: Decision, table: PreparedTable, words: QuestionWords = QUESTION_WORDS): RoundStep => {
   const plan = decision.plan
   const note = tableChoiceNote(decision, table.rows, table.dropped)
   const row = (id: string): Row | undefined => table.rows.find(candidate => candidate.id === id)
@@ -97,7 +97,7 @@ export const stepFor = (decision: Decision, table: PreparedTable): RoundStep => 
     case 'ask': {
       const asked = plan.kind === 'ask' ? row(plan.row) : undefined
       const choices = table.rows.filter(candidate => candidate.kind !== 'answer' && candidate.id !== asked?.id && !decision.rejected.includes(candidate.id))
-      return { kind: 'question', text: tableQuestion(choices, decision.reason, asked?.lines[0]) }
+      return { kind: 'question', text: tableQuestion(choices, decision.reason, asked?.lines[0], words) }
     }
     case 'answer':
       return { kind: 'answer', reply: `${note} ${JEV_ANSWER_NOW}` }

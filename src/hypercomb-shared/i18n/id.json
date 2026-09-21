@@ -2381,6 +2381,8 @@
   "chat.reference.next": "Gambar berikutnya",
   "chat.reference.done": "Tutup",
   "chat.question.hint": "atau ketik jawabanmu sendiri di bawah",
+  "chat.jev.which": "Langkah apa yang harus diambil hive?",
+  "chat.jev.other": "Hal lain",
   "chat.question.own": "dijawab dengan kata-katamu sendiri",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — berlanjut tanpa jawaban",

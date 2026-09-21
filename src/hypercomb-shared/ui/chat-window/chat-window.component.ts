@@ -6503,7 +6503,12 @@ export class ChatWindowComponent implements OnDestroy {
             for (const miss of prepared.dropped) {
               EffectBus.emit('machine:miss', { sentence: miss.sentence, reason: miss.reason, model: roundModel, at: Date.now() })
             }
-            const step = stepFor(await judge(prepared.rows, pinned), prepared)
+            const i18n = ioc()?.get('@hypercomb.social/I18n') as { t?: (key: string) => string } | undefined
+            const word = (key: string, fallback: string): string => { const said = i18n?.t?.(key); return said && said !== key ? said : fallback }
+            const step = stepFor(await judge(prepared.rows, pinned), prepared, {
+              which: word('chat.jev.which', 'Which step should the hive take?'),
+              other: word('chat.jev.other', 'Something else'),
+            })
             if (step.kind === 'refuse') throw new WorkRefused(step.reason)
             if (step.kind === 'question') {
               if (ran.length) yield `\n\nEarlier commands ran: ${ran.join(' · ')}`

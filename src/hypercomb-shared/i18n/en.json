@@ -1990,6 +1990,8 @@
   "chat.reference.next": "Next picture",
   "chat.reference.done": "Done looking",
   "chat.question.hint": "or type your own answer below",
+  "chat.jev.which": "Which step should the hive take?",
+  "chat.jev.other": "Something else",
   "chat.question.own": "answered in your own words",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — went on without an answer",

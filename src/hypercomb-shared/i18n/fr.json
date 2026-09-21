@@ -2381,6 +2381,8 @@
   "chat.reference.next": "Image suivante",
   "chat.reference.done": "Fermer",
   "chat.question.hint": "ou saisissez votre propre réponse ci-dessous",
+  "chat.jev.which": "Quelle étape la ruche doit-elle suivre ?",
+  "chat.jev.other": "Autre chose",
   "chat.question.own": "répondu avec vos propres mots",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — a continué sans réponse",

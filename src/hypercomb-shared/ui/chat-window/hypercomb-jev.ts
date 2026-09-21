@@ -119,11 +119,16 @@ export const parseTable = (lines: readonly string[]): readonly Row[] => {
  * THE OPTIONS ARE THE SENTENCES — behaviour lines in the hive's own grammar,
  * the vocabulary the census teaches — never labels. What the participant
  * picks is a sentence the hive can run as it stands. */
-export const tableQuestion = (rows: readonly Row[], reason: string, prompt = 'Which step should the hive take?'): string => {
+/** The two words a table question needs in the participant's language. The
+ *  shell passes them from its catalog; English is only the fallback. */
+export interface QuestionWords { readonly which: string; readonly other: string }
+export const QUESTION_WORDS: QuestionWords = { which: 'Which step should the hive take?', other: 'Something else' }
+
+export const tableQuestion = (rows: readonly Row[], reason: string, prompt?: string, words: QuestionWords = QUESTION_WORDS): string => {
   const details = rows.map(row => `**${row.label}**${row.kind === 'answer' ? '' : `\n${row.lines.map(line => `\`${line.replace(/^\//, '').replace(/[`~]/g, '')}\``).join('\n')}`}`).join('\n\n')
   const sentences = [...new Set(rows.flatMap(row => row.kind === 'read' || row.kind === 'do' ? row.lines.map(line => line.replace(/^\//, '').replace(/[\r\n`]/g, ' ').trim()) : []))]
   return `${reason}\n\n${details}\n\n\`\`\`hypercomb-question\n${JSON.stringify({
-    prompt: prompt.replace(/[\r\n`]/g, ' '), options: [...sentences, 'Something else'],
+    prompt: (prompt ?? words.which).replace(/[\r\n`]/g, ' '), options: [...sentences, words.other.replace(/[\r\n`]/g, ' ')],
   })}\n\`\`\``
 }
 

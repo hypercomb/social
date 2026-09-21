@@ -2381,6 +2381,8 @@
   "chat.reference.next": "अगली तस्वीर",
   "chat.reference.done": "बंद करें",
   "chat.question.hint": "या नीचे अपना जवाब लिखें",
+  "chat.jev.which": "हाइव को कौन-सा कदम उठाना चाहिए?",
+  "chat.jev.other": "कुछ और",
   "chat.question.own": "अपने शब्दों में जवाब दिया",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — बिना जवाब के आगे बढ़ गया",

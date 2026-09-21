@@ -2381,6 +2381,8 @@
   "chat.reference.next": "الصورة التالية",
   "chat.reference.done": "إغلاق",
   "chat.question.hint": "أو اكتب إجابتك الخاصة أدناه",
+  "chat.jev.which": "ما الخطوة التي يجب أن تتخذها الخلية؟",
+  "chat.jev.other": "شيء آخر",
   "chat.question.own": "أُجيب بكلماتك الخاصة",
   "chat.question.answered": "{prompt} ← {answer}",
   "chat.question.superseded": "{prompt} — تابع دون إجابة",

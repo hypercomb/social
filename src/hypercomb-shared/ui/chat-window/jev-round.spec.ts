@@ -99,6 +99,16 @@ describe('the plan becomes one step', () => {
   })
 })
 
+describe('the question speaks the participant language', () => {
+  it('uses the words the shell passes for the prompt and the other option', () => {
+    const prepared = prepareTable(table(rows), census)
+    const step = stepFor(decision({ kind: 'participant', rows: ['a'] }), prepared, { which: 'Welchen Schritt?', other: 'Etwas anderes' })
+    const question = splitQuestion(step.kind === 'question' ? step.text : '').question
+    expect(question?.prompt).toBe('Welchen Schritt?')
+    expect(question?.options.at(-1)).toBe('Etwas anderes')
+  })
+})
+
 describe('the participant speaks the hive’s language', () => {
   const asked = tableQuestion([{ id: 'b', kind: 'do', label: 'Make people', lines: ['/create people'] }, { id: 'a', kind: 'read', label: 'See', lines: ['list /people'] }] as Row[], 'Because.')
   it('runs an offered sentence as the behaviour it is', () => {

@@ -1803,6 +1803,8 @@
   "chat.reference.next": "次の画像",
   "chat.reference.done": "閉じる",
   "chat.question.hint": "または下に自分の答えを入力",
+  "chat.jev.which": "ハイブはどのステップを取るべきですか？",
+  "chat.jev.other": "ほかのこと",
   "chat.question.own": "自分の言葉で答えた",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — 答えのないまま先へ進んだ",

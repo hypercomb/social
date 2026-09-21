@@ -2381,6 +2381,8 @@
   "chat.reference.next": "다음 이미지",
   "chat.reference.done": "닫기",
   "chat.question.hint": "또는 아래에 직접 답을 입력하세요",
+  "chat.jev.which": "하이브가 어떤 단계를 밟아야 할까요?",
+  "chat.jev.other": "다른 것",
   "chat.question.own": "직접 쓴 말로 답함",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — 답 없이 계속 진행함",

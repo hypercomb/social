@@ -2381,6 +2381,8 @@
   "chat.reference.next": "Próxima imagem",
   "chat.reference.done": "Fechar",
   "chat.question.hint": "ou escreva a sua própria resposta abaixo",
+  "chat.jev.which": "Que passo a colmeia deve dar?",
+  "chat.jev.other": "Outra coisa",
   "chat.question.own": "respondido com as suas próprias palavras",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — seguiu sem resposta",

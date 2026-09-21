@@ -2381,6 +2381,8 @@
   "chat.reference.next": "Nächstes Bild",
   "chat.reference.done": "Schließen",
   "chat.question.hint": "oder unten eine eigene Antwort eingeben",
+  "chat.jev.which": "Welchen Schritt soll der Hive gehen?",
+  "chat.jev.other": "Etwas anderes",
   "chat.question.own": "in eigenen Worten beantwortet",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — ging ohne Antwort weiter",

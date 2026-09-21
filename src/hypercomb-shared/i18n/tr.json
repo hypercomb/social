@@ -2381,6 +2381,8 @@
   "chat.reference.next": "Sonraki görsel",
   "chat.reference.done": "Kapat",
   "chat.question.hint": "ya da kendi yanıtınızı aşağıya yazın",
+  "chat.jev.which": "Kovan hangi adımı atmalı?",
+  "chat.jev.other": "Başka bir şey",
   "chat.question.own": "kendi sözlerinizle yanıtlandı",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — yanıt olmadan devam etti",

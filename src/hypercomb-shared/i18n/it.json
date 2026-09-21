@@ -2381,6 +2381,8 @@
   "chat.reference.next": "Immagine successiva",
   "chat.reference.done": "Chiudi",
   "chat.question.hint": "oppure scrivi la tua risposta qui sotto",
+  "chat.jev.which": "Quale passo deve fare l’alveare?",
+  "chat.jev.other": "Qualcos’altro",
   "chat.question.own": "risposto con parole tue",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — è andato avanti senza risposta",

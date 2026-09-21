@@ -2381,6 +2381,8 @@
   "chat.reference.next": "Следующее изображение",
   "chat.reference.done": "Закрыть",
   "chat.question.hint": "или введите свой ответ ниже",
+  "chat.jev.which": "Какой шаг должен сделать улей?",
+  "chat.jev.other": "Что-то другое",
   "chat.question.own": "ответ своими словами",
   "chat.question.answered": "{prompt} → {answer}",
   "chat.question.superseded": "{prompt} — продолжил без ответа",
