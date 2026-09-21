@@ -51,6 +51,12 @@ class EffectBusImpl {
     return () => { set!.delete(handler) }
   }
 
+  /** Does anything listen for this effect right now? The shell asks whether
+   *  the installed package answers a door the shell emits (package-floor.ts). */
+  listens(effect: string): boolean {
+    return (this.handlers.get(effect)?.size ?? 0) > 0
+  }
+
   once<T = unknown>(effect: string, handler: EffectHandler<T>): () => void {
     const unsub = this.on<T>(effect, (payload) => {
       unsub()

@@ -24,6 +24,12 @@
 //   ATTESTED  a publisher the participant FOLLOWS has signed a sentinel
 //             naming it (core ATTESTATION_IOC_KEY, implemented where nostr
 //             lives — essentials/sharing/package-attestation.ts).
+//   FLOOR     the shell found the live package below its floor: it cannot
+//             answer the update door, so it can never move itself
+//             (hypercomb-web package-floor.ts). No attester is loaded, since
+//             the old package has none, and the offer comes from the ONE named
+//             seed. It is genesis again: the bootstrap trust spent a second
+//             time, for a package that can vouch for nothing.
 //
 // Everything else is REFUSED, by name, before a single byte is fetched. Fail
 // closed: no attester loaded means no foreign package, never a free pass. The
@@ -36,7 +42,7 @@ import { ATTESTATION_IOC_KEY, type AttestationRefusal, type PackageAttestation }
 import { DEFAULT_HOST_ZONES, hostZone } from './host-zones.js'
 
 export type ActivationVerdict =
-  | { ok: true; by: 'self' | 'genesis' | 'attested' }
+  | { ok: true; by: 'self' | 'genesis' | 'attested' | 'floor' }
   | { ok: false; error: string }
 
 export type ActivationQuestion = {
@@ -52,6 +58,9 @@ export type ActivationQuestion = {
   zones?: readonly string[]
   /** Whoever registered under ATTESTATION_IOC_KEY, or nothing. */
   attester?: PackageAttestation | null
+  /** The shell found the live package below its floor (package-floor.ts).
+   *  Only the shell sets it, and only the seed may answer it. */
+  floor?: boolean
 }
 
 /** The attester runtime finds through IoC — null when no module has
@@ -71,6 +80,7 @@ export const activationAuthority = async (q: ActivationQuestion): Promise<Activa
   const attester = q.attester ?? null
   if (!attester) {
     if (q.installed === null && DEFAULT_HOST_ZONES.includes(zone)) return { ok: true, by: 'genesis' }
+    if (q.floor === true && DEFAULT_HOST_ZONES.includes(zone)) return { ok: true, by: 'floor' }
     return {
       ok: false,
       error: `${zone || 'this host'} offers a package nothing here can vouch for — no publisher attester is loaded`,

@@ -117,6 +117,7 @@ ONE of
 | **self** | the offering domain IS this origin | its code already runs here — nothing new can run |
 | **genesis** | no package ever activated here, no module is loaded, and the offer is from the ONE seed in `DEFAULT_HOST_ZONES` | the bootstrap trust the chain already rests on, spent once, before there is data to protect |
 | **attested** | a publisher the participant FOLLOWS has signed a sentinel naming it | authority (rule 3 above), enforced at the act |
+| **floor** | the shell found the live package below its floor (see below), no attester is loaded, and the offer is from the ONE seed | genesis again: the installed package can vouch for nothing and can never move itself |
 
 Everything else is refused by name, and the refusal says what to do instead.
 **Fail closed**: no attester loaded means no foreign package, never a free
@@ -134,6 +135,40 @@ Every root a followed key has been seen to name is WITNESSED
 answer `held` without a fetch; a witness under a key you no longer follow is
 no witness. A host that publishes a package and does not serve the
 publisher's signed index publishes something nobody can apply.
+
+### The floor — a package too old to update itself
+
+Updating lives in the package: its scout announces, the shell's pill emits
+`packages:open`, and its Packages window takes the build. So a package that
+predates the current door can never move. Observed 2026-09-21 on a Mac
+running an Aug 31 package: its window answered nothing the pill emitted, its
+scout followed no publisher (the key landed 2026-09-11), and its own update
+button fired `hypercomb:apply-update`, which the shell had stopped hearing.
+
+The shell owns the one exception to "the human decides"
+(`hypercomb-web/src/setup/package-floor.ts`). Fifteen seconds after
+`hypercomb:runtime-ready`, on participant web shells only, it asks one derived
+question: does anything answer `packages:open` (`EffectBus.listens`)? A
+package that answers is never touched, so updating it stays a choice. A
+package that answers nothing is **below the floor**, and the shell takes the
+seed's head for it through the **floor** door:
+
+- integrity and the core-surface gate apply exactly as for any install;
+- complete-or-absent: a failed move activates nothing, and the old package
+  keeps running until the next boot asks again;
+- nothing is deleted: the old package's bytes stay, and the move is recorded
+  in `hc:install:floor` (`{ from, to, zone, at }`);
+- the reload waits for three quiet seconds, and happens at most once per
+  session (`hc:install:floor-reloaded`), so a move that did not stick never
+  loops.
+
+Two guards keep an old package BOOTABLE long enough for the floor to act:
+core's export surface is a protocol (`hypercomb-core/src/export-surface.spec.ts`
+fails when any runtime export name disappears; retired names live in
+`retired-exports.ts`), and the shell-surfaces host mounts each surface on its
+own, so one surface that throws on an old service cannot take the rest down.
+`scripts/drive-package-floor.cjs` proves the whole path on a throwaway profile:
+Aug 31 package in, seed head out, every module running, nothing lost.
 
 ### Where someone else's code runs
 

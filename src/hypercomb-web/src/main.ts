@@ -83,6 +83,7 @@ import {
 } from '@hypercomb/shared/core'
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/runtime/sw-domains'
 import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
+import { watchPackageFloor } from './setup/package-floor'
 
 // Ensure side-effect registration
 const _deps = [DependencyLoader]
@@ -315,6 +316,10 @@ const bootstrap = async (): Promise<void> => {
   // descriptor to HiveVisitDrone. By here dependencies and bees are loaded,
   // Angular is painted, and the existing preview path can receive the root.
   window.dispatchEvent(new Event('hypercomb:runtime-ready'))
+
+  // THE FLOOR (package-floor.ts): a package too old to answer the update door
+  // cannot move itself, so the shell moves it to the seed's head.
+  if (!readonlyVisitor && !nativeAvailable()) watchPackageFloor()
 
   // First-run "Start" — the welcome card's single button, fully unattended.
   // The web shell takes its first package from the hosts it carries (the one

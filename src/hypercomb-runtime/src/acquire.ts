@@ -327,7 +327,13 @@ export const reportDivergence = (
  * or refusals mean nothing is marked installed and the next call repairs the
  * delta.
  */
-export const acquire = async (packageSig: string, zones: readonly string[]): Promise<InstallOutcome> => {
+export const acquire = async (
+  packageSig: string,
+  zones: readonly string[],
+  /** `floor`: the shell found the live package below its floor
+   *  (activation-authority.ts, FLOOR). Only the shell passes it. */
+  opts: { floor?: boolean } = {},
+): Promise<InstallOutcome> => {
   const fail = (error: string): InstallOutcome =>
     ({ ok: false, packageSig, fetched: 0, present: 0, holes: [], refused: [], error })
 
@@ -349,7 +355,7 @@ export const acquire = async (packageSig: string, zones: readonly string[]): Pro
   // signature — installPackage re-validates it, so taking the first is safe.
   // The rest are byte sources.
   const [first, ...rest] = holders
-  return installPackage(first!, rest.map(p => p.zone))
+  return installPackage(first!, rest.map(p => p.zone), opts)
 }
 
 /**
@@ -368,6 +374,7 @@ export const installPackage = async (
   /** Extra domains to pull the SAME signature from. Every carried host that
    *  publishes it is a byte source for it — see {@link acquire}. */
   alsoFrom: readonly string[] = [],
+  opts: { floor?: boolean } = {},
 ): Promise<InstallOutcome> => {
   const fail = (error: string): InstallOutcome =>
     ({ ok: false, packageSig: pkg.packageSig, fetched: 0, present: 0, holes: [], refused: [], error })
@@ -383,6 +390,7 @@ export const installPackage = async (
     installed: installedPackageSig(),
     zones: alsoFrom,
     attester: registeredAttester(),
+    floor: opts.floor === true,
   })
   if (!authority.ok) return fail(authority.error)
 
@@ -674,11 +682,11 @@ export const applySelection = async (
  * so the participant's own rules can hold it anyway — "I wrote it, hold it
  * until I have tested it" is the ordinary case.
  *
- * The seed bootstrap counts as followed, not as your own: it is somebody
+ * The seed bootstrap (genesis, and the floor) counts as followed, not as your own: it is somebody
  * else's code, trusted once, and a participant who holds followed code should
  * see it too.
  */
-const arrivalKindOf = (by: 'self' | 'genesis' | 'attested'): ArrivalKind =>
+const arrivalKindOf = (by: 'self' | 'genesis' | 'attested' | 'floor'): ArrivalKind =>
   by === 'self' ? 'own' : 'followed'
 
 const trustedHere = (sig: string): boolean => {

@@ -37,6 +37,15 @@ describe('activationAuthority', () => {
     expect(later.ok).toBe(false)
   })
 
+  it('spends the seed again for a package below the floor, and only the seed', async () => {
+    const installed = 'c'.repeat(64)
+    expect(await activationAuthority({ packageSig: SIG, zone: SEED, self: 'hypercomb.io', installed, attester: null, floor: true }))
+      .toEqual({ ok: true, by: 'floor' })
+    // The floor is the seed's door, not a stranger's.
+    const stranger = await activationAuthority({ packageSig: SIG, zone: 'evil.example', self: 'hypercomb.io', installed, attester: null, floor: true })
+    expect(stranger.ok).toBe(false)
+  })
+
   it('fails closed when no attester is loaded', async () => {
     const verdict = await activationAuthority({ packageSig: SIG, zone: 'friend.example', self: 'hypercomb.io', installed: 'c'.repeat(64) })
     expect(verdict).toMatchObject({ ok: false })
