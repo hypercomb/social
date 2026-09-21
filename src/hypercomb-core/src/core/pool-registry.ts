@@ -361,6 +361,13 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // of 404s). Colon-scoped: the bare-word list is frozen, and it is NOT the
   // brood, which holds untrusted behaviours.
   'eggs:dormant',
+  // THE BROOD (core/brood.ts) — automatons that arrived from somebody else
+  // and are NOT trusted yet: held, inspectable, never imported. One record
+  // per bee signature carrying where it came from, what readers made of it,
+  // and the participant's ruling. TRUTH, never derived and never minted from
+  // the optimize phase: losing it would silently un-hold code. Colon-scoped
+  // because the bare-word list is frozen and no tile may name it.
+  'brood:unverified',
   // TOKEN-COMPACT TILE PROJECTIONS for the hive's `hive` tool
   // (assistant/llm-context.ts) — one record per SOURCE LAYER SIGNATURE,
   // a compact line-oriented rendering of what a tile SAYS in place of the

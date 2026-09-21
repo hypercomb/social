@@ -4,6 +4,9 @@ import { INSTALLED_KEY } from './installed-package'
 vi.mock('@hypercomb/core', () => ({
   Bee: class {},
   EffectBus: { emit: vi.fn() },
+  // Nothing is held in the brood in these tests; the gate's own behaviour
+  // lives in script-preloader.brood.spec.ts.
+  mayRunBee: async () => true,
 }))
 
 vi.mock('./store', () => ({ Store: class {} }))

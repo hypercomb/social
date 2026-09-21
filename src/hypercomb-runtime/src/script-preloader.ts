@@ -3,7 +3,7 @@
 // and loads bee modules on demand. The processor (hypercomb.act()) is the
 // sole caller of find() → pulse → synchronize.
 
-import { Bee, type BeeResolver, EffectBus } from '@hypercomb/core'
+import { Bee, type BeeResolver, EffectBus, mayRunBee } from '@hypercomb/core'
 import { Store } from './store'
 import { installedPackageSig } from './installed-package.js'
 import {
@@ -128,6 +128,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   readonly #bySignature = new Map<string, ActionDescriptor>()
   readonly #beeCache = new Map<string, Bee>()
   readonly #loadedDeps = new Set<string>()
+  /** Signatures the brood held back, so the refusal is said once per session. */
+  readonly #heldBack = new Set<string>()
   // In-flight dedup: prevents two callers from loading the same bee concurrently
   readonly #inFlight = new Map<string, Promise<Bee | null>>()
 
@@ -675,6 +677,18 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   }
 
   #tryLoadBee = async (signature: string): Promise<Bee | null> => {
+    // THE BROOD GATE (core/brood.ts). This is the one point where a signature
+    // becomes running code, so it is the one place worth asking. Held and
+    // unruled — or refused — never evaluates; nothing else in this method has
+    // run yet, so the bytes are not even read. Anything never held passes
+    // straight through: the brood adds a gate, it does not replace admission.
+    if (!(await mayRunBee(signature))) {
+      if (!this.#heldBack.has(signature)) {
+        this.#heldBack.add(signature)
+        console.warn(`[script-preloader] bee ${signature.slice(0, 12)}… is held in the brood — accept it by hand before it can run`)
+      }
+      return null
+    }
     const tStart = performance.now()
     let tOpfs = 0, tDeps = 0, tEval = 0
 
