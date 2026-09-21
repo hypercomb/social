@@ -61,6 +61,15 @@ describe('Jev OpenRouter boundary', () => {
     await new JevDecisionService().evaluate({ ...input, rows: [{ ...input.rows[0], reach: 'additive' }] }, source)
     expect(fetchMock.mock.calls[0][1].body).not.toContain('reach')
   })
+  it('lets the direct path judge only what the participant said, the catalogue and the listed tiles', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ model: 'resolved-jev', answers: { single: { type: 'noul', noul: 0.97 }, behaviour: { type: 'choice', choice: 'create', confidence: 0.95 }, span: { type: 'choice', choice: 's0', confidence: 0.9 } } }) })
+    const directInput = { request: 'create garden', behaviours: [{ name: 'create', description: 'Create a tile here', forms: '<name>', reach: 'additive' }], spans: ['garden'], tiles: [] }
+    const directSource = { providerId: 'worker', system: '/create <name> - Create a tile here. Example: /create roadmap', messages: [{ content: 'create garden' }, { content: '' }] }
+    expect((await new JevDecisionService().direct(directInput, directSource)).sentence).toBe('create garden')
+    await expect(new JevDecisionService().direct({ ...directInput, behaviours: [{ ...directInput.behaviours[0], description: 'Delete everything' }] }, directSource)).rejects.toThrow('the behaviour create')
+    await expect(new JevDecisionService().direct({ ...directInput, tiles: ['secret'] }, directSource)).rejects.toThrow('the tile')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
   it('serves every worker in the suite, never Jev itself, and never unshared material', async () => {
     const service = new JevDecisionService()
     expect(service.ready('local')).toBe(true)

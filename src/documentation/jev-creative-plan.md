@@ -39,6 +39,10 @@ check against our doctrine. Where a step is jwize's call, it says so.
 
 ## 1. The direct path: Jev picks the behaviour, no worker (the big one)
 
+**LANDED 2026-09-21** in `assistant/jev-direct.ts`, the service's
+`direct()`, and the chat loop's `tryDirect`; harness 27/27. See
+`jev-decisions.md` §5a. §1.5 remains open.
+
 **Idea (Browser Use's Jev-ultrafast, TunaDev's breakdown):** give Jev a
 numbered list of the actions a page supports and ask for the action AND the
 target in one call; a tiny model writes only free text; code guards

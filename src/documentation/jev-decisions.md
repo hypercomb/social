@@ -180,6 +180,26 @@ sent to Jev. Additive changes need fit and doctrine but not prior evidence;
 editing needs fit, doctrine and grounding; anything that takes something
 away always waits for the participant (`JEV_REACH_GATES`).
 
+## 5a. The direct path: Jev picks the behaviour
+
+Built 2026-09-21 (`jev-creative-plan.md` §1, after Browser Use's Jev agent).
+Before any worker is asked, one Jev call (`assistant/jev-direct.ts`) asks
+whether the request is ONE census step and which: `single` (one listed
+behaviour, used once, does it all), `behaviour` over the census's callable
+behaviours minus every removal, `span` over exact spans of the request found
+in code, and `target` over the current page's tile names. The argument kind
+comes from each behaviour's declared forms: `<name>` takes a span, `<tile>`
+a listed tile, a bare word nothing. Nothing is generated.
+
+When `single` ≥ .90, the behaviour clears its reach's choice gate, and the
+span or tile clears .70, the sentence goes through the census parser and
+runs through Execution under the participant's policy. The worker is never
+called, and the answer is the hive's receipt plus "workers: no calls". Any
+unsure answer hands the turn to the worker loop unchanged (`passed` in
+`jev:outcomes`). A picked table sentence skips this path. The boundary is
+the request, the catalogue the worker would be sent, and the page listing,
+read under the OpenRouter grant with its snapshot guarding the run.
+
 ## 6. The whole provider suite
 
 Jev serves EVERY worker — a local model, a direct vendor key, an OpenRouter

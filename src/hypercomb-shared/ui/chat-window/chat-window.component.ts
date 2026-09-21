@@ -161,7 +161,7 @@ import {
   workLineGrammar,
   WorkStreamGuard,
 } from './hypercomb-work-fence'
-import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, doctrineSections, persistJevInput, persistJevReceipt, formatJevUsage, type JevLike, type Row, type Decision } from './hypercomb-jev'
+import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, doctrineSections, persistJevDirect, persistJevInput, persistJevReceipt, formatJevUsage, type JevLike, type Row, type Decision } from './hypercomb-jev'
 import { offeredSentence, prepareTable, stepFor, tableFor, type RoundCensus } from './jev-round'
 
 type TurnRole = 'user' | 'assistant'
@@ -6308,6 +6308,79 @@ export class ChatWindowComponent implements OnDestroy {
         },
       }
 
+      /** The direct path: the hive's answer to show, or undefined to let the worker loop run. */
+      const tryDirect = async (): Promise<string | undefined> => {
+        const providerId = pinned ?? router.designatedProviderId?.(need) ?? ''
+        if (!jev?.direct || !jev.ready(providerId)) return undefined
+        const offered = callableBehaviours(behaviourEntries).filter(entry => entry.machine && (entry.machine.reach ?? 'editing') !== 'destructive')
+        if (!offered.length) return undefined
+        // The page's tiles, names only, under the OpenRouter read grant (Jev
+        // mode already requires it). Its snapshot guards the run below.
+        let tiles: string[] = []
+        if (treeReader?.readTree) {
+          try {
+            const listed = await treeReader.readTree(grammarContext.segments, { maxDepth: 1, maxNodes: 48, maxBytes: 8_000, signal })
+            if (listed.ok) {
+              tiles = listed.nodes.filter(node => node.depth === 1).map(node => node.name).filter(Boolean).slice(0, 48)
+              snapshotIds.push(listed.snapshot)
+            }
+          } catch (error) { if (signal?.aborted) throw error }
+        }
+        const startedAt = Date.now()
+        let decision: Awaited<ReturnType<NonNullable<JevLike['direct']>>>
+        try {
+          decision = await jev.direct({
+            request: message,
+            behaviours: offered.map(entry => ({
+              name: entry.name, description: entry.description ?? entry.name,
+              forms: entry.machine!.forms, bare: entry.machine!.bare === true, reach: entry.machine!.reach ?? 'editing',
+            })),
+            tiles,
+          }, { providerId, system: vocabulary, messages: [{ content: message }, { content: tiles.join('\n') }] }, signal)
+        } catch (error) {
+          if (signal?.aborted) throw error
+          console.warn('[chat] the direct path could not decide:', error)
+          return undefined
+        }
+        decisionCalls++
+        settledAttempts.push({ round: 0, attempt: decisionCalls, providerId: 'openrouter', model: decision.model || JEV_MODEL,
+          outcome: 'success', category: 'jev-decision', durationMs: Date.now() - startedAt, outputEmitted: false,
+          ...(decision.usage ? { usage: { inputTokens: decision.usage.inputTokens, outputTokens: decision.usage.outputTokens, estimatedCostUsd: decision.usage.cost } } : {}),
+        })
+        const receipt = await persistJevDirect(contextStore, message, decision).catch(() => undefined)
+        if (receipt) readSigs.push(receipt)
+        writeTurnMeta(providerId, decision.model || JEV_MODEL)
+        const report = (outcome: string): void => {
+          EffectBus.emit('jev:outcome', { decision: receipt, plan: 'direct', outcome, at: Date.now(), ...(decision.reach ? { reach: decision.reach } : {}) })
+        }
+        if (!decision.sentence) { report('passed'); return undefined }
+        // The hive's parser has the last word; a sentence it refuses is a miss.
+        let grammars: readonly string[]
+        try { grammars = census.readDo([decision.sentence]).grammars } catch (error) {
+          EffectBus.emit('machine:miss', { sentence: decision.sentence, reason: error instanceof Error ? error.message : 'the hive cannot run it', model: decision.model, at: Date.now() })
+          report('passed')
+          return undefined
+        }
+        lastRun = 'failed'
+        try {
+          await runDo(grammars, providerId, decision.model || JEV_MODEL, false)
+        } catch (error) {
+          if (signal?.aborted) throw error
+          if (!isWorkRefusal(error)) throw error
+          report('failed')
+          return `\n\nThe hive did not run \`${decision.sentence.replace(/`/g, '\'')}\`: ${(error as Error).message}.\n\n${formatJevUsage(settledAttempts)}`
+        }
+        // runDo settles lastRun inside its own closure; read it back fresh.
+        const how = ((): 'ran' | 'skipped' | 'failed' => lastRun)()
+        report(how)
+        const line = `\`${grammars.join('\` · \`').replace(/\n/g, ' ')}\``
+        return how === 'ran'
+          ? `\n\nRan in the hive: ${line}\n\n${formatJevUsage(settledAttempts)}`
+          : how === 'skipped'
+            ? `\n\nSkipped in Execution; nothing changed: ${line}\n\n${formatJevUsage(settledAttempts)}`
+            : `\n\nThe hive stopped while running ${line}.\n\n${formatJevUsage(settledAttempts)}`
+      }
+
       const runDo = async (lines: readonly string[], providerId: string, model: string, review = false): Promise<string> => {
         if (!canChange || !slash?.executePublicCanonical || !queue) throw new WorkRefused('changing the hive is not available here')
         // Parse EVERY line before anything is queued, let alone run: one bad
@@ -6401,6 +6474,22 @@ export class ChatWindowComponent implements OnDestroy {
           receipt = `The hive would not run it: ${(error as Error).message}.`
         }
         messages.push({ role: 'user', content: `The participant chose a sentence from your table and the hive ran it as their own words.\n\n${receipt}` })
+      }
+
+      // JEV PICKS THE BEHAVIOUR (documentation/jev-creative-plan.md §1). Before
+      // any worker is asked, one Jev call asks whether this is ONE census step
+      // and which: the behaviour from the census, the name from the
+      // participant's own words, the target from this page's tiles. Sure on
+      // every count, it runs through Execution like any change and the worker
+      // is never called; unsure on any, the ordinary loop runs as before.
+      // Removals are never offered here.
+      if (jevMode && canChange && !spoken && jev?.direct) {
+        const direct = await tryDirect()
+        if (direct !== undefined) {
+          wrote = true
+          yield direct
+          return ''
+        }
       }
 
       while (true) {

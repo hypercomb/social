@@ -5,6 +5,7 @@ import { llmHiveAccess } from './llm-hive-access.js'
 import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
 import { openRouterRouting, providerBlock } from './providers/openrouter-routing.js'
 import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevResult, jevState, type JevInput, type JevResult } from './jev-decision.js'
+import { jevDirectInput, jevDirectQuestions, jevDirectResult, jevDirectState, type JevDirectInput, type JevDirectResult } from './jev-direct.js'
 
 /** A subset of material ALREADY sent to / received from the worker whose
  * table is being judged. Never fetches hive content, accepts signatures to
@@ -41,6 +42,21 @@ export const jevUnseen = (input: JevInput, source: JevSource): string | null => 
   return null
 }
 
+/** THE BOUNDARY FOR THE DIRECT PATH. No worker has spoken yet, so the source
+ *  is what the participant said, the census catalogue the worker WOULD be sent,
+ *  and the page's tile names under the OpenRouter read grant. Every behaviour
+ *  must be verbatim in that catalogue, every tile in the listing, every span a
+ *  part of the request (checked in jevDirectInput). */
+export const jevDirectUnseen = (input: JevDirectInput, source: JevSource): string | null => {
+  const seen = (part: string): boolean => source.messages.some(message => message.content.includes(part))
+  if (!seen(input.request)) return 'the request'
+  const behaviour = input.behaviours.find(b => !source.system.includes(`/${b.name}`) || !source.system.includes(b.description))
+  if (behaviour) return `the behaviour ${behaviour.name}`
+  const tile = input.tiles.find(t => !seen(t))
+  if (tile !== undefined) return `the tile "${tile.slice(0, 60)}"`
+  return null
+}
+
 /** JEV SERVES THE WHOLE PROVIDER SUITE. Any worker — local, direct vendor,
  * OpenRouter — lists the possibilities; Jev, reached through OpenRouter,
  * decides. The one disclosure gate is therefore OpenRouter's own "may read
@@ -72,6 +88,19 @@ export class JevDecisionService {
     return result
   }
 
+  /** THE DIRECT PATH (jev-direct.ts): is this request one step the census can
+   *  take, and which? One call, before any worker is asked. */
+  async direct(raw: unknown, source: JevSource, signal?: AbortSignal): Promise<JevDirectResult> {
+    signal?.throwIfAborted()
+    if (!this.ready(source.providerId)) throw new Error('Jev requires an enabled worker and the OpenRouter hive read grant')
+    const input = jevDirectInput(raw)
+    const missing = jevDirectUnseen(input, source)
+    if (missing) throw new Error(`Jev may only judge what the participant said and the hive listed, and it could not find ${missing} as written`)
+    const result = await this.#post({ state: jevDirectState(input), questions: jevDirectQuestions(input) }, body => jevDirectResult(body, input), signal)
+    if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
+    return result
+  }
+
   /** Participant-triggered connection test, containing no hive material. */
   async test(signal?: AbortSignal): Promise<JevResult> {
     return this.#request(jevInput({
@@ -85,6 +114,10 @@ export class JevDecisionService {
   }
 
   async #request(input: JevInput, signal?: AbortSignal): Promise<JevResult> {
+    return this.#post({ state: jevState(input), questions: jevQuestions(input) }, body => jevResult(body, input), signal)
+  }
+
+  async #post<T>(packet: { state: unknown; questions: unknown }, parse: (body: unknown) => T, signal?: AbortSignal): Promise<T> {
     signal?.throwIfAborted()
     if (!this.enabled()) throw new Error('Add and enable Jev Latest with an OpenRouter key first')
     const key = llmKeyStore.get('openrouter')
@@ -97,7 +130,7 @@ export class JevDecisionService {
       const response = await fetch(JEV_ENDPOINT, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: JEV_MODEL, state: jevState(input), questions: jevQuestions(input), ...(provider ? { provider } : {}) }),
+        body: JSON.stringify({ model: JEV_MODEL, state: packet.state, questions: packet.questions, ...(provider ? { provider } : {}) }),
         signal: controller.signal,
       })
       if (!response.ok) {
@@ -108,7 +141,7 @@ export class JevDecisionService {
         } catch { /* HTTP status remains actionable without a JSON body. */ }
         throw new Error(`Jev decision failed (HTTP ${response.status})${detail ? `: ${detail}` : ''}`)
       }
-      const result = jevResult(await response.json(), input)
+      const result = parse(await response.json())
       controller.signal.throwIfAborted()
       if (!this.enabled() || llmKeyStore.get('openrouter') !== key) throw new Error('OpenRouter access changed during the decision')
       return result

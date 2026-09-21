@@ -29,8 +29,20 @@ export interface Decision {
   /** The decision receipt's signature, once the store has kept it. */
   readonly receipt?: string
 }
+/** The direct path's answer (essentials jev-direct.ts): a sentence to run
+ *  when Jev is sure the request is one census step, or why it is not. */
+export interface DirectDecision {
+  readonly sentence?: string
+  readonly behaviour?: string
+  readonly reach?: Reach
+  readonly reason: string
+  readonly model: string
+  readonly answers: Record<string, unknown>
+  readonly usage?: { inputTokens?: number; outputTokens?: number; cost?: number }
+}
 export interface JevLike {
   ready(providerId: string): boolean
+  direct?(input: unknown, source: { providerId: string; system: string; messages: readonly { content: string }[] }, signal?: AbortSignal): Promise<DirectDecision>
   evaluate(input: unknown, source: { providerId: string; system: string; messages: readonly { content: string }[] }, signal?: AbortSignal): Promise<Decision>
 }
 interface UsageAttempt {
@@ -82,6 +94,16 @@ export const persistJevInput = async (store: ResourceWriter | undefined, input: 
     ...(row.reach ? { reach: row.reach } : {}),
   })))
   return resource(store, { kind: 'jev-input', model: JEV_MODEL, rubric: 5, request, doctrine, evidence, rows })
+}
+
+/** The direct path's provenance: what was asked, what Jev answered, what ran. */
+export const persistJevDirect = async (store: ResourceWriter | undefined, request: string, result: DirectDecision): Promise<string | undefined> => {
+  if (!store?.putResource) return undefined
+  return resource(store, {
+    kind: 'jev-direct', requestedModel: JEV_MODEL, model: result.model, rubric: 1,
+    request: await resource(store, request), reason: await resource(store, result.reason), answers: await resource(store, result.answers),
+    ...(result.sentence ? { sentence: await resource(store, result.sentence) } : {}),
+  })
 }
 
 export const persistJevReceipt = async (store: ResourceWriter | undefined, source: string, result: Decision): Promise<string | undefined> => {

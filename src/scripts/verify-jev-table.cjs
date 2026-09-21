@@ -52,7 +52,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   const page = await context.newPage()
   page.on('pageerror', e => console.log('[pageerror]', String(e).slice(0, 200)))
 
-  const workerCalls = [], jevCalls = []
+  const workerCalls = [], jevCalls = [], directCalls = []
   let doLine = ''
   let scenario = 'main'
   const sse = text => {
@@ -66,6 +66,19 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   await page.route('https://openrouter.ai/**', route => {
     const url = route.request().url()
     const headers = { 'access-control-allow-origin': '*', 'content-type': 'application/json' }
+    if (url.includes('/api/alpha/decisions') && JSON.parse(route.request().postData() || '{}').questions?.behaviour) {
+      const body = JSON.parse(route.request().postData() || '{}')
+      directCalls.push({ scenario, request: body.state?.request, behaviours: (body.state?.behaviours ?? []).map(b => b.name), spans: Object.values(body.questions.span?.criteria ?? {}), tiles: body.state?.tiles ?? [] })
+      const spanKey = Object.entries(body.questions.span?.criteria ?? {}).find(([, text]) => text === '"jev-proof-direct"')?.[0] ?? 'none'
+      const take = scenario === 'direct'
+      const answers = {
+        single: { type: 'noul', noul: take ? 0.97 : 0.2 },
+        behaviour: { type: 'choice', choice: take ? 'create' : 'none', confidence: 0.95 },
+        ...(body.questions.span ? { span: { type: 'choice', choice: take ? spanKey : 'none', confidence: 0.93 } } : {}),
+        ...(body.questions.target ? { target: { type: 'choice', choice: 'none', confidence: 0.9 } } : {}),
+      }
+      return route.fulfill({ status: 200, headers, body: JSON.stringify({ id: 'gen-dec-direct', model: 'typesafe/jev-1.13-fake', answers, usage: { input_tokens: 350, output_tokens: 0, cost: 0.00001 } }) })
+    }
     if (url.includes('/api/alpha/decisions')) {
       const body = JSON.parse(route.request().postData() || '{}')
       const rows = body.state?.rows ?? []
@@ -191,7 +204,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   check('the turn ends with the worker\'s prose after Jev chose answer', !!final, final ? '' : decline)
   const text = final?.text ?? ''
   check('the hive\'s own receipt names the change that ran', /Ran in the hive:/.test(text) && text.includes(doLine.split(' ')[0]), text.slice(-200))
-  check('the turn reports worker and Jev tokens separately', /Tokens — workers: 480 input, 120 output; Jev: 1200 input, 0 output/.test(text), text.match(/Tokens[^.]*./)?.[0] ?? text.slice(-200))
+  check('the turn reports worker and Jev tokens separately', /Tokens — workers: 480 input, 120 output; Jev: 1550 input, 0 output/.test(text), text.match(/Tokens[^.]*./)?.[0] ?? text.slice(-200))
   check('no table fence leaked into the transcript', !/hypercomb-table/.test(text))
 
   check('every worker round carried JEV RUNS THE SHOW', workerCalls.length > 0 && workerCalls.every(c => /JEV RUNS THE SHOW/.test(c.system)), `${workerCalls.length} worker rounds`)
@@ -255,13 +268,44 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   check('the worker answers from the receipt', !!pickText, (pickText ?? '').slice(0, 120))
   clearInterval(runner)
 
+  // ── JEV PICKS THE BEHAVIOUR: one census step, no worker at all ──────────
+  const runnerDirect = setInterval(() => page.evaluate(() => {
+    const queue = window.ioc.get('@hypercomb.social/ExecutionQueue')
+    const waiting = queue.requests().filter(r => r.state === 'waiting')
+    for (const r of waiting) queue.decide(r.id, 'run')
+    return waiting.map(r => ({ kind: r.kind, lines: r.lines, forceReview: !!r.forceReview }))
+  }).then(rows => rows.length && decided.push(...rows)).catch(() => {}), 400)
+  scenario = 'direct'
+  const directWorkerBefore = workerCalls.length
+  const directJevBefore = jevCalls.length
+  const directCallsBefore = directCalls.length
+  const directDecidedBefore = decided.length
+  const directConvo = await newConvo([['assistant', 'Ready.']])
+  await openAndSend(directConvo, 'Make a tile called jev-proof-direct here')
+  const directText = await storedAnswer(directConvo, 'Ran in the hive:')
+  clearInterval(runnerDirect)
+  const offeredToJev = directCalls.slice(directCallsBefore)[0]
+  check('the direct path asks Jev once, offering census behaviours, the request own words, and no removals',
+    directCalls.length - directCallsBefore === 1 && offeredToJev?.behaviours.includes('create') && offeredToJev?.spans.includes('"jev-proof-direct"')
+      && !offeredToJev?.behaviours.some(name => /^(cut|remove|delete)$/.test(name)),
+    JSON.stringify({ behaviours: offeredToJev?.behaviours, spans: offeredToJev?.spans?.length }))
+  check('one census step runs with no worker call and no table decision',
+    workerCalls.length === directWorkerBefore && jevCalls.length === directJevBefore
+      && decided.slice(directDecidedBefore).some(d => d.lines.join() === '/create jev-proof-direct' && d.kind === 'additive'),
+    JSON.stringify({ workerCalls: workerCalls.length - directWorkerBefore, rows: decided.slice(directDecidedBefore) }))
+  check('the answer is the hive receipt, with no worker tokens', !!directText && /Ran in the hive: .*create jev-proof-direct/.test(directText) && /workers: no calls; Jev: 350 input/.test(directText), (directText ?? '').slice(-200))
+  check('the table scenarios offered the direct path first and were handed on; a picked sentence skipped it',
+    directCalls.filter(c => c.scenario === 'main').length === 1 && directCalls.filter(c => c.scenario === 'bare').length === 1 && directCalls.filter(c => c.scenario === 'pick').length === 0,
+    JSON.stringify(directCalls.map(c => c.scenario)))
+
   // WHAT HAPPENED AFTER JEV DECIDED is recorded, one outcome per decided round.
   const outcomes = await waitFor(() => page.evaluate(() => {
     const records = window.ioc.get('@diamondcoreprocessor.com/JevOutcomes')?.records?.() ?? []
-    return records.length >= 4 ? records.map(r => `${r.plan}:${r.outcome}${r.reach ? ':' + r.reach : ''}${r.decision ? ':signed' : ''}`) : null
+    return records.some(r => r.plan === 'direct' && r.outcome === 'ran') ? records.map(r => `${r.plan}:${r.outcome}${r.reach ? ':' + r.reach : ''}${r.decision ? ':signed' : ''}`) : null
   }), 10_000, 400)
   check('every decided round records its outcome, tied to its signed receipt',
     !!outcomes && outcomes.some(o => o.startsWith('read:ran')) && outcomes.some(o => o.startsWith('do:ran')) && outcomes.some(o => o.startsWith('answer:answered'))
+      && outcomes.some(o => o.startsWith('direct:ran:additive')) && outcomes.some(o => o.startsWith('direct:passed'))
       && outcomes.every(o => o.endsWith(':signed')),
     JSON.stringify(outcomes))
 

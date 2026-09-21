@@ -18,9 +18,10 @@ import { EffectBus } from '@hypercomb/core'
 export const JEV_OUTCOMES_POOL = 'jev:outcomes'
 export const JEV_OUTCOMES_IOC_KEY = '@diamondcoreprocessor.com/JevOutcomes'
 
-export const JEV_OUTCOMES = ['ran', 'skipped', 'failed', 'answered', 'deferred', 'refused'] as const
+/** `passed`: the direct path was not sure and handed the turn to the worker. */
+export const JEV_OUTCOMES = ['ran', 'skipped', 'failed', 'answered', 'deferred', 'refused', 'passed'] as const
 export type JevOutcomeKind = typeof JEV_OUTCOMES[number]
-const PLANS = ['do', 'read', 'answer', 'ask', 'participant', 'revise'] as const
+const PLANS = ['do', 'read', 'answer', 'ask', 'participant', 'revise', 'direct'] as const
 const REACHES = ['additive', 'editing', 'destructive'] as const
 
 export interface JevOutcome {
