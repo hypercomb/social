@@ -111,7 +111,7 @@ only when Jev is unsure.
 
 **§2.1 LANDED 2026-09-21** in `assistant/jev-verify.ts`, the service's
 `verify()`, and the chat loop's `verifyAnswer`; harness 30/30. See
-`jev-decisions.md` §5b. §2.2 (step-down) and §2.3 (wall time) remain.
+`jev-decisions.md` §5b. §2.2 was superseded by the front door; §2.3 (wall time) landed.
 
 1. **Verified answers.** When the plan is `answer`, after the worker's final
    prose arrives, ask Jev one call over `{answer, evidence, request}`:
@@ -128,7 +128,9 @@ only when Jev is unsure.
    verification in (1) fails, re-ask the same round on the designated (not
    stepped-down) tier once — that is one escalation, not a retry of a failed
    call, so it does not cross the no-retry rule; say so in the doc.
-3. Measure it: the outcomes pool plus the token line already separate worker
+3. **LANDED 2026-09-21** (`jev-decisions.md` §9, "How long turns take"):
+   every turn is timed by the way it went, and the Jev row shows the medians.
+   Measure it: the outcomes pool plus the token line already separate worker
    and Jev usage; add per-turn wall time to `jev:outcome` so §3 can compare.
 
 **Acceptance:** harness scenario where the fake worker's answer contradicts

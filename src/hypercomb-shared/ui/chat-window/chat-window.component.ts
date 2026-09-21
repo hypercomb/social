@@ -6041,6 +6041,11 @@ export class ChatWindowComponent implements OnDestroy {
     const jevMode = !!jev?.ready(trustedProviderId ?? router.designatedProviderId?.(need) ?? '')
     // Whether Jev takes part in THIS turn: the front door may step it aside.
     let jevTurn = jevMode
+    // HOW THE TURN WENT, for its timing record (essentials jev-outcomes.ts):
+    // the way it took, the worker calls it made, the weight it was routed at.
+    let turnPath: 'direct' | 'judged' | 'aside' | 'down' | 'gone' | 'off' = jevMode ? 'judged' : 'off'
+    let turnRounds = 0
+    let turnWeight: MessageEffort = need.tier
     // THE ANATOMY GOES FIRST, TO EVERY PROVIDER. It is the stable protocol +
     // doctrine (documentation/anatomy-context-need.md): identical bytes on
     // every call, so it is the part a vendor's prefix cache pays back. Who is
@@ -6179,6 +6184,7 @@ export class ChatWindowComponent implements OnDestroy {
           // rest of the turn itself, exactly as with Jev off.
           if (!(error instanceof Error && error.name === 'JevBoundaryError')) {
             jevTurn = false
+            turnPath = 'gone'
             system = systemFor(continuationModel, component.designated()?.label, pinned)
             throw new JevGone(error instanceof Error ? error.message : 'no answer')
           }
@@ -6352,13 +6358,13 @@ export class ChatWindowComponent implements OnDestroy {
       /** THE FRONT DOOR (essentials jev-front.ts): Jev reads the request once,
        *  before any worker. `answer` is the hive's receipt when one census step
        *  ran; otherwise the door says what the rest of the turn should know. */
-      type Door = { readonly answer?: string; readonly aside: boolean; readonly weight?: MessageEffort; readonly carry: boolean }
+      type Door = { readonly answer?: string; readonly aside: boolean; readonly down?: true; readonly weight?: MessageEffort; readonly carry: boolean }
       const frontDoor = async (): Promise<Door> => {
         const stay: Door = { aside: false, carry: false }
         // JEV IS NOT THERE — not ready for this worker, or no answer in time:
         // the turn runs on the regular model exactly as with Jev off, rather
         // than leaving the participant to pick what Jev would have picked.
-        const without: Door = { aside: true, carry: false }
+        const without: Door = { aside: true, down: true, carry: false }
         const providerId = pinned ?? router.designatedProviderId?.(need) ?? ''
         if (!jev?.front) return stay
         if (!jev.ready(providerId)) return without
@@ -6551,16 +6557,21 @@ export class ChatWindowComponent implements OnDestroy {
       if (jevMode && !spoken && jev?.front) {
         const door = await frontDoor()
         if (door.answer !== undefined) {
+          turnPath = 'direct'
           wrote = true
           yield door.answer
           return ''
         }
-        if (door.aside) jevTurn = false
+        if (door.aside) {
+          jevTurn = false
+          turnPath = door.down ? 'down' : 'aside'
+        }
         if (!namedModel) {
           const tier = effortFromJev(need.tier, door, previousTier)
           const moved = { ...need, tier }
           if (tier !== need.tier && router.ready?.({ ...(pinned ? { providerId: pinned } : {}), need: moved }) !== false) routeNeed = moved
         }
+        turnWeight = routeNeed.tier
         if (door.aside || routeNeed !== need) {
           system = systemFor(policyForNeed?.designate?.(routeNeed)?.model ?? firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(routeNeed))
         }
@@ -6629,6 +6640,7 @@ export class ChatWindowComponent implements OnDestroy {
           yield `${lead}${tail}`
         }
         rounds++
+        turnRounds = rounds
         // Updated every round; the last write is what the run stores.
         writeTurnMeta(roundProviderId, roundModel)
 
@@ -6759,12 +6771,30 @@ export class ChatWindowComponent implements OnDestroy {
     // is listening yet". The failure is now the answer: shown, stored, and
     // never handed to a broker nobody is running.
     const guarded: HostAsk = async function* (question, opts) {
+      // HOW LONG THE TURN TOOK (essentials jev-outcomes.ts): to the last
+      // word, and to the first visible one. A stopped or failed turn says
+      // nothing about speed, so it is not recorded.
+      const startedAt = Date.now()
+      let firstAt = 0
+      let answered = true
       try {
-        for await (const chunk of ask(question, opts)) yield chunk
+        for await (const chunk of ask(question, opts)) {
+          if (!firstAt && chunk) firstAt = Date.now()
+          yield chunk
+        }
       } catch (error) {
+        answered = false
         if (opts?.signal?.aborted) throw error
         console.warn('[chat] the model could not answer:', error)
         yield `\n\nThe model could not answer: ${error instanceof Error ? error.message : String(error)}`
+      } finally {
+        if (answered && !opts?.signal?.aborted) {
+          const at = Date.now()
+          EffectBus.emit('jev:turn', {
+            path: turnPath, ms: at - startedAt, rounds: turnRounds, weight: turnWeight, at,
+            ...(firstAt ? { firstMs: firstAt - startedAt } : {}),
+          })
+        }
       }
       return ''
     }

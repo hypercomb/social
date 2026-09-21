@@ -67,6 +67,81 @@ export const outcomeRecord = (payload: unknown): JevOutcome | null => {
   }
 }
 
+// ── how long a turn took, by the way it went ──────────────────────────────
+//
+// "Does Jev make turns faster" is a number, not a feeling
+// (jev-creative-plan.md §2.3). The chat emits `jev:turn` once per finished
+// turn, Jev on or off, and each lands in the same pool as its own record.
+// Times include any wait in Execution; medians keep one long wait from
+// deciding the answer.
+
+/** direct: Jev ran one step, no worker · judged: Jev stayed and judged the
+ *  worker's tables · aside: Jev was sure the hive was not needed · down: Jev
+ *  was on but did not answer at the front door · gone: Jev failed mid-turn ·
+ *  off: Jev was not on for this worker. */
+export const JEV_TURN_PATHS = ['direct', 'judged', 'aside', 'down', 'gone', 'off'] as const
+export type JevTurnPath = typeof JEV_TURN_PATHS[number]
+
+export interface JevTurn {
+  readonly kind: 'jev-turn'
+  readonly path: JevTurnPath
+  /** From the message leaving to the turn's last word. */
+  readonly ms: number
+  /** Until the first visible text: what streaming changes. */
+  readonly firstMs?: number
+  /** Worker calls in the turn (0 on the direct path). */
+  readonly rounds: number
+  /** The weight the worker was routed at. */
+  readonly weight?: typeof WEIGHTS[number]
+  readonly at: number
+}
+
+const count = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined
+
+export const turnRecord = (payload: unknown): JevTurn | null => {
+  if (!payload || typeof payload !== 'object') return null
+  const value = payload as Record<string, unknown>
+  const path = one(JEV_TURN_PATHS, value['path'])
+  const ms = count(value['ms'])
+  const rounds = count(value['rounds'])
+  const at = typeof value['at'] === 'number' && Number.isFinite(value['at']) ? value['at'] : 0
+  if (!path || ms === undefined || rounds === undefined || !at) return null
+  const firstMs = count(value['firstMs'])
+  const weight = one(WEIGHTS, value['weight'])
+  return {
+    kind: 'jev-turn', path, ms, rounds, at,
+    ...(firstMs !== undefined && firstMs <= ms ? { firstMs } : {}),
+    ...(weight ? { weight } : {}),
+  }
+}
+
+/** The four ways a turn can go, as the Jev row compares them. */
+export const TURN_GROUPS = {
+  direct: ['direct'], judged: ['judged'], aside: ['aside'], without: ['off', 'down', 'gone'],
+} as const satisfies Record<string, readonly JevTurnPath[]>
+export type JevTurnGroup = keyof typeof TURN_GROUPS
+export type JevSpeeds = Partial<Record<JevTurnGroup, { readonly turns: number; readonly ms: number; readonly firstMs?: number }>>
+
+const median = (values: readonly number[]): number | undefined => {
+  if (!values.length) return undefined
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+}
+
+/** Median time per group, only for groups that have turns. */
+export const turnSpeeds = (turns: readonly JevTurn[]): JevSpeeds => {
+  const speeds: JevSpeeds = {}
+  for (const [group, paths] of Object.entries(TURN_GROUPS) as [JevTurnGroup, readonly JevTurnPath[]][]) {
+    const inGroup = turns.filter(turn => paths.includes(turn.path))
+    if (!inGroup.length) continue
+    const firstMs = median(inGroup.flatMap(turn => turn.firstMs === undefined ? [] : [turn.firstMs]))
+    speeds[group] = { turns: inGroup.length, ms: median(inGroup.map(turn => turn.ms))!, ...(firstMs === undefined ? {} : { firstMs }) }
+  }
+  return speeds
+}
+
 export const tallyOutcomes = (records: readonly JevOutcome[]): JevTally => {
   const tally = Object.fromEntries(JEV_OUTCOMES.map(kind => [kind, 0])) as Record<JevOutcomeKind, number>
   for (const record of records) tally[record.outcome]++
@@ -85,6 +160,7 @@ const sha256Hex = async (text: string): Promise<string> =>
 
 class JevOutcomes {
   #records: JevOutcome[] = []
+  #turns: JevTurn[] = []
   #seen = new Set<string>()
   #loaded: Promise<void> | null = null
 
@@ -96,8 +172,11 @@ class JevOutcomes {
       for await (const [name, handle] of (dir as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
         if (handle.kind !== 'file' || !SIG.test(name) || this.#seen.has(name)) continue
         try {
-          const record = outcomeRecord(JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()))
-          if (record) { this.#seen.add(name); this.#records.push(record) }
+          const parsed: unknown = JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text())
+          const kind = (parsed as { kind?: unknown } | null)?.kind
+          const record = kind === 'jev-turn' ? turnRecord(parsed) : outcomeRecord(parsed)
+          if (record?.kind === 'jev-turn') { this.#seen.add(name); this.#turns.push(record) }
+          else if (record) { this.#seen.add(name); this.#records.push(record) }
         } catch { /* an unreadable record is skipped, never fatal */ }
       }
     })()
@@ -107,16 +186,38 @@ class JevOutcomes {
   async record(payload: unknown): Promise<boolean> {
     const record = outcomeRecord(payload)
     if (!record) return false
+    const name = await this.#write(record)
+    if (name && !this.#seen.has(name)) { this.#seen.add(name); this.#records.push(record) }
+    return !!name
+  }
+
+  async recordTurn(payload: unknown): Promise<boolean> {
+    const record = turnRecord(payload)
+    if (!record) return false
+    const name = await this.#write(record)
+    if (name && !this.#seen.has(name)) { this.#seen.add(name); this.#turns.push(record) }
+    return !!name
+  }
+
+  /** One immutable record, named by the hash of its bytes. */
+  async #write(record: JevOutcome | JevTurn): Promise<string | null> {
     const dir = await pool()
-    if (!dir) return false
+    if (!dir) return null
     const body = JSON.stringify(record)
     const name = await sha256Hex(body)
     const handle = await dir.getFileHandle(name, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(body) } finally { await writable.close() }
-    if (!this.#seen.has(name)) { this.#seen.add(name); this.#records.push(record) }
-    return true
+    return name
   }
+
+  /** Median turn time per group, as far as it is known now. */
+  speeds(): JevSpeeds {
+    void this.load().catch(() => { this.#loaded = null })
+    return turnSpeeds(this.#turns)
+  }
+
+  turns(): readonly JevTurn[] { return this.#turns }
 
   /** The tally as far as it is known now: synchronous, for a view to paint. */
   tally(): JevTally {
@@ -129,4 +230,5 @@ class JevOutcomes {
 
 export const jevOutcomes = new JevOutcomes()
 EffectBus.on('jev:outcome', payload => { void jevOutcomes.record(payload).catch(() => { /* the chat never waits on this */ }) })
+EffectBus.on('jev:turn', payload => { void jevOutcomes.recordTurn(payload).catch(() => { /* the chat never waits on this */ }) })
 window.ioc?.register(JEV_OUTCOMES_IOC_KEY, jevOutcomes)

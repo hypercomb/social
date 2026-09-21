@@ -440,6 +440,36 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
       && outcomes.filter(o => !o.startsWith('file:')).every(o => o.endsWith(':signed')),
     JSON.stringify(outcomes))
 
+  // ── TURN TIMING: every finished turn is timed, by the way it went ───────
+  const turns = await waitFor(() => page.evaluate(() => {
+    const all = window.ioc.get('@diamondcoreprocessor.com/JevOutcomes')?.turns?.() ?? []
+    const paths = new Set(all.map(t => t.path))
+    return ['direct', 'judged', 'aside', 'down', 'off', 'gone'].every(p => paths.has(p)) ? all : null
+  }), 10_000, 400)
+  const of = path => (turns ?? []).filter(t => t.path === path)
+  check('every finished turn records how long it took and which way it went',
+    !!turns && turns.every(t => t.ms > 0) && of('direct').every(t => t.rounds === 0)
+      && of('aside').every(t => t.rounds === 1 && t.firstMs > 0 && t.weight === 'deep') && of('gone').every(t => t.rounds === 2),
+    JSON.stringify((turns ?? []).map(t => `${t.path}:${t.ms}ms:${t.rounds}r${t.firstMs !== undefined ? ':first' + t.firstMs : ''}${t.weight ? ':' + t.weight : ''}`)))
+  // The Jev row lives on the API tab, and its status shows when the row is open.
+  const row = await page.evaluate(async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms))
+    const click = (selector, pattern) => [...document.querySelectorAll(selector)].find(el => pattern.test(el.textContent || ''))?.click()
+    window.__hypercombEffectBus.emit('providers:open', {})
+    await wait(1200)
+    click('.hc-providers-tab', /^API/)
+    await wait(600)
+    click('.hc-provider-head', /OpenRouter/)
+    await wait(600)
+    click('.hc-provider-model-row .hc-provider-head', /jev/i)
+    await wait(600)
+    const text = [...document.querySelectorAll('.hc-provider-jev-status')].map(el => el.textContent).join(' | ')
+    window.__hypercombEffectBus.emit('providers:open', {})
+    return text
+  })
+  check('the Jev row compares the median turn by the way it went',
+    /median turn: one step [\d.]+ s \(\d+\) · with Jev [\d.]+ s \(\d+\) · Jev aside [\d.]+ s \(1\) · without Jev [\d.]+ s \(\d+\)/.test(row), row)
+
   // ── THE FILE WORD: a note lands on the tile Jev picks, or waits ─────────
   const fileRun = async (note, answer) => {
     fileAnswer = answer

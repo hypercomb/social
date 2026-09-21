@@ -339,6 +339,17 @@ the change's reach and whether it waited for review. The Jev row of the
 providers window shows the tally. These are the numbers the gates are tuned
 against — a skipped automatic change is a gate set too low.
 
+**How long turns take** (`jev-creative-plan.md` §2.3, built 2026-09-21).
+Every finished turn, Jev on or off, emits `jev:turn` and lands in the same
+pool as a `jev-turn` record: the way it went (`direct` one step with no
+worker, `judged` Jev stayed, `aside` Jev was sure the hive was not needed,
+`down` Jev did not answer at the door, `gone` Jev failed mid-turn, `off` Jev
+not on), the time to the last word and to the first visible one, the worker
+calls it made, and the weight it was routed at. A stopped or failed turn is
+not recorded. Times include any wait in Execution. The Jev row shows the
+median per way (one step, with Jev, Jev aside, without Jev) and how many
+turns each median stands on, so whether Jev makes chat faster is a number.
+
 **Tuning from the outcomes: the golden set** (`jev-creative-plan.md` §3).
 Every decision's receipt names, by signature, everything Jev was shown and
 everything it answered, so any past decision can be decided again offline

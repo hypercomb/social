@@ -32,7 +32,7 @@ import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
 import { JEV_MODEL } from './jev-decision.js'
 import { jevDecision } from './jev-decision.service.js'
-import { jevOutcomes } from './jev-outcomes.js'
+import { jevOutcomes, type JevTurnGroup } from './jev-outcomes.js'
 import { MAX_BUDGET, MIN_BUDGET, llmHiveAccess } from './llm-hive-access.js'
 import { CHAT_NEED, TIERS, USAGE_PLANS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
@@ -1781,6 +1781,25 @@ export class ProvidersWindowView extends EventTarget {
           `${tally.deferred} ${this.#t('providers.jevDeferred', 'left to you')}`,
         ].join(' · ')
         status.append(document.createElement('br'), count)
+      }
+      // HOW LONG TURNS TAKE, by the way they went (jev-outcomes.ts): whether
+      // Jev makes chat faster, as a median per way.
+      const speeds = jevOutcomes.speeds()
+      const ways: [JevTurnGroup, string, string][] = [
+        ['direct', 'providers.jevTurnDirect', 'one step'],
+        ['judged', 'providers.jevTurnJudged', 'with Jev'],
+        ['aside', 'providers.jevTurnAside', 'Jev aside'],
+        ['without', 'providers.jevTurnWithout', 'without Jev'],
+      ]
+      const timed = ways.filter(([group]) => speeds[group])
+      if (timed.length) {
+        const seconds = (ms: number): string => `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`
+        const line = document.createElement('span')
+        line.className = 'hc-provider-catalog-price'
+        line.textContent = `${this.#t('providers.jevTurnsMedian', 'median turn')}: ${timed
+          .map(([group, key, fallback]) => `${this.#t(key, fallback)} ${seconds(speeds[group]!.ms)} (${speeds[group]!.turns})`)
+          .join(' · ')}`
+        status.append(document.createElement('br'), line)
       }
       jevStatus = status
     }
