@@ -230,6 +230,42 @@ Both the direct path and `file` list the page with the single-tile read
 made the walk refuse the whole root, which left the direct path with no
 tiles to choose from until this was found.
 
+## 5d. The front door: Jev is used where it helps, and picks the weight
+
+Built 2026-09-21 (jwize: "automatically do what it does best and ignore
+other queries … choose the best regular model and let the delegation
+work"). The direct path's call became the front door
+(`assistant/jev-front.ts`): with Jev on, every message is read by Jev once,
+before any worker, and that one call also asks two more questions. Jev
+answers all of a call's questions together, so each one added costs a few
+input tokens and no time (typically 0.1–0.5 s for the whole call):
+
+- `hive` (yes/no): does the request need this hive (its tiles, notes or
+  behaviours)? When Jev is sure it does not (no ≥ .90), **Jev steps aside
+  for the turn**: the turn runs exactly as with Jev off. The reply streams,
+  the worker is not told to list a table, and nothing is judged or checked.
+  A greeting, a haiku or a general question costs one small Jev call and
+  nothing else.
+- `weight` (fast / balanced / deep, ≥ .60): how much thinking the request
+  needs. When Jev is sure, its weight replaces the English-only word list in
+  `message-effort.ts`, in any language, and the mediator (`model-policy.ts`)
+  turns it into the participant's own model for that weight: fast work to
+  the cheapest, deep work to the most capable, a pin for that weight first.
+  Unsure, the word list stands. A model the participant named in the chat
+  always wins, and a weight no model can serve is not used.
+- `carry` (yes/no, ≥ .80, only when the thread has an answer): does the
+  request only continue that answer ("why?", "go on")? Then the weight never
+  drops below the thread's, so a follow-up is not handed to a lighter model
+  in the middle of a harder answer.
+
+The worker's model, the fallbacks among the participant's OpenRouter models,
+and the read grant are all still the mediator's; Jev only supplies the
+weight. When the hive is needed, everything after the door is as before:
+tables judged by Jev, answers checked. The door records `front:ran`,
+`front:passed` or `front:aside` in `jev:outcomes`, with the weight it read
+(§9), and its receipt is a `jev-front` resource. Where nothing can change,
+the door still asks `hive` and `weight`, with the request alone.
+
 ## 6. The whole provider suite
 
 Jev serves EVERY worker — a local model, a direct vendor key, an OpenRouter
@@ -262,6 +298,10 @@ is slowest.
 
 - `hypercomb-essentials/src/assistant/jev-decision.ts` — rows, questions,
   gates, composition (pure; `jev-decision.spec.ts`).
+- `hypercomb-essentials/src/assistant/jev-front.ts` — the front door: the
+  direct path's questions plus `hive`, `weight` and `carry`
+  (`jev-front.spec.ts`); the weight rule is `effortFromJev` in the shell's
+  `message-effort.ts`.
 - `hypercomb-essentials/src/assistant/jev-decision.service.ts` — readiness,
   source boundary, the Decisions call (`jev-decision.service.spec.ts`).
 - `hypercomb-shared/ui/chat-window/hypercomb-jev.ts` — shell contract, table
@@ -280,7 +320,9 @@ multiple questions together", "speculative fan-out"; OpenRouter cookbook
 ## 9. Outcomes
 
 Every decided round emits `jev:outcome`: ran, skipped, failed, answered,
-deferred to the participant, or refused. Essentials
+deferred to the participant, or refused; the front door adds passed (handed
+to the worker) and aside (Jev stepped out of the turn), with the weight it
+read. Essentials
 (`assistant/jev-outcomes.ts`) keeps one content-addressed record per outcome
 in the `jev:outcomes` pool, tied to the decision receipt's signature, with
 the change's reach and whether it waited for review. The Jev row of the
@@ -328,9 +370,9 @@ against what it would break here.
 
 ## 11. Owed
 
-- **Tier step-down in Jev mode.** With deliberation removed, the mediator
-  could route the worker one tier lighter (`tierUnderLoad` already exists).
-  Not done: it changes which model answers, which is the participant's call.
+- ~~Tier step-down in Jev mode.~~ Superseded 2026-09-21 by the front door's
+  weight (§5d): jwize asked Jev to choose the model, so Jev weighs each
+  request instead of every Jev turn stepping down one tier.
 - Live account run: the loop is proven by tests and a mocked router; no
   claim is made that a real OpenRouter account was exercised in this pass.
 - Gate calibration from participant corrections once real decisions exist.

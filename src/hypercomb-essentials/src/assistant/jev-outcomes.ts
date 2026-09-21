@@ -18,11 +18,14 @@ import { EffectBus } from '@hypercomb/core'
 export const JEV_OUTCOMES_POOL = 'jev:outcomes'
 export const JEV_OUTCOMES_IOC_KEY = '@diamondcoreprocessor.com/JevOutcomes'
 
-/** `passed`: the direct path was not sure and handed the turn to the worker. */
-export const JEV_OUTCOMES = ['ran', 'skipped', 'failed', 'answered', 'deferred', 'refused', 'passed', 'verified', 'unverified'] as const
+/** `passed`: the front door was not sure of one step and handed the turn to
+ *  the worker. `aside`: the front door was sure the hive was not needed and
+ *  Jev stepped out of the turn. */
+export const JEV_OUTCOMES = ['ran', 'skipped', 'failed', 'answered', 'deferred', 'refused', 'passed', 'verified', 'unverified', 'aside'] as const
 export type JevOutcomeKind = typeof JEV_OUTCOMES[number]
-const PLANS = ['do', 'read', 'answer', 'ask', 'participant', 'revise', 'direct', 'verify', 'file'] as const
+const PLANS = ['do', 'read', 'answer', 'ask', 'participant', 'revise', 'direct', 'verify', 'file', 'front'] as const
 const REACHES = ['additive', 'editing', 'destructive'] as const
+const WEIGHTS = ['fast', 'balanced', 'deep'] as const
 
 export interface JevOutcome {
   readonly kind: 'jev-outcome'
@@ -33,6 +36,8 @@ export interface JevOutcome {
   /** The change waited for the participant's review rather than Jev's gates. */
   readonly review?: true
   readonly reach?: typeof REACHES[number]
+  /** The weight the front door read the request at, when it was sure. */
+  readonly weight?: typeof WEIGHTS[number]
   readonly at: number
 }
 
@@ -52,11 +57,13 @@ export const outcomeRecord = (payload: unknown): JevOutcome | null => {
   if (!plan || !outcome || !at) return null
   const decision = typeof value['decision'] === 'string' && SIG.test(value['decision']) ? value['decision'] : undefined
   const reach = one(REACHES, value['reach'])
+  const weight = one(WEIGHTS, value['weight'])
   return {
     kind: 'jev-outcome', plan, outcome, at,
     ...(decision ? { decision } : {}),
     ...(value['review'] === true ? { review: true as const } : {}),
     ...(reach ? { reach } : {}),
+    ...(weight ? { weight } : {}),
   }
 }
 

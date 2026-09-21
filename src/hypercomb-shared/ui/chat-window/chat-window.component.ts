@@ -139,7 +139,7 @@ import {
   parseHypercombObservationGrammars,
   type HypercombTreeReader,
 } from './hypercomb-observation'
-import { contextNeedFor, effortInThread, type MessageEffort } from './message-effort'
+import { contextNeedFor, effortFromJev, effortInThread, type MessageEffort } from './message-effort'
 import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-compiler'
 import { executionLineParts } from './execution-line'
 import {
@@ -161,7 +161,7 @@ import {
   workLineGrammar,
   WorkStreamGuard,
 } from './hypercomb-work-fence'
-import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, doctrineSections, persistJevDirect, persistJevInput, persistJevVerify, persistJevReceipt, formatJevUsage, type JevLike, type Row, type Decision } from './hypercomb-jev'
+import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, doctrineSections, persistJevFront, persistJevInput, persistJevVerify, persistJevReceipt, formatJevUsage, type JevLike, type FrontDecision, type Row, type Decision } from './hypercomb-jev'
 import { offeredSentence, prepareTable, stepFor, tableFor, type RoundCensus } from './jev-round'
 
 type TurnRole = 'user' | 'assistant'
@@ -5957,10 +5957,11 @@ export class ChatWindowComponent implements OnDestroy {
     // is not always a name another provider knows: a remembered OpenRouter
     // model handed to the local server came back "invalid model name".
     const lastModel = this.model()
-    const preferModel = !this.modelExplicit() && previousTier === need.tier && !!lastModel
+    const preferFor = (tier: MessageEffort): string | undefined => !this.modelExplicit() && previousTier === tier && !!lastModel
       && router?.providerIdForModel?.(lastModel) === this.#answeredProvider.get(convoId)
       ? lastModel
       : undefined
+    const preferModel = preferFor(need.tier)
     const slash = ioc()?.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as SlashBehaviourDroneLike | undefined
     const treeReader = ioc()?.get(HIVE_TREE_READER_IOC_KEY) as HypercombTreeReader | undefined
     const queue = ioc()?.get(EXECUTION_QUEUE_IOC_KEY) as ExecutionQueueLike | undefined
@@ -6037,6 +6038,8 @@ export class ChatWindowComponent implements OnDestroy {
     const grammarContext = readGrammarContext()
     const jev = ioc()?.get(JEV_IOC_KEY) as JevLike | undefined
     const jevMode = !!jev?.ready(trustedProviderId ?? router.designatedProviderId?.(need) ?? '')
+    // Whether Jev takes part in THIS turn: the front door may step it aside.
+    let jevTurn = jevMode
     // THE ANATOMY GOES FIRST, TO EVERY PROVIDER. It is the stable protocol +
     // doctrine (documentation/anatomy-context-need.md): identical bytes on
     // every call, so it is the part a vendor's prefix cache pays back. Who is
@@ -6067,7 +6070,7 @@ export class ChatWindowComponent implements OnDestroy {
           ? `The participant is on page ${grammarContext.page || '/'} with selected tiles: ${grammarContext.selected.join(', ') || '(none)'}. "here" means that page, which may differ from the conversation subject.`
           : 'The participant\'s page is not shared with you until they let you read; "here" still means the page they are on.',
       priorReadsText,
-      jevMode ? JEV_WORK_INSTRUCTION : '',
+      jevTurn ? JEV_WORK_INSTRUCTION : '',
     ].filter(Boolean).join('\n\n')
 
     // Who the mediator will choose for THIS weight, not whoever answered last.
@@ -6125,6 +6128,8 @@ export class ChatWindowComponent implements OnDestroy {
       let pinnedEndpoint = pinned ? router.providerMachineEndpoint?.(pinned) : undefined
       let continuationModel = namedModel
       let system = systemFor(firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(need))
+      // The weight the worker is routed at; the front door may change it.
+      let routeNeed = need
       const snapshotIds: string[] = []
       const ran: string[] = []
       // How the last read or change settled — what jev:outcome reports.
@@ -6142,7 +6147,7 @@ export class ChatWindowComponent implements OnDestroy {
 
       const judge = async (rows: readonly Row[], providerId: string): Promise<Decision> => {
         const participant = (reason: string): Decision => ({ plan: { kind: 'participant', rows: rows.filter(row => row.kind !== 'answer').map(row => row.id) }, reason, model: JEV_MODEL, answers: {}, rejected: [] })
-        if (!jevMode || !jev?.ready(providerId)) return participant('Jev is unavailable; the participant must choose.')
+        if (!jevTurn || !jev?.ready(providerId)) return participant('Jev is unavailable; the participant must choose.')
         // Mechanics are already implemented by the harness; only the verbatim
         // doctrine is needed, section by section, each judged on its own.
         const doctrine = doctrineSections(anatomyText)
@@ -6335,19 +6340,25 @@ export class ChatWindowComponent implements OnDestroy {
         return decision.verified ? undefined : `\n\nJev could not confirm this answer against what the hive read (${decision.reason}).`
       }
 
-      /** The direct path: the hive's answer to show, or undefined to let the worker loop run. */
-      const tryDirect = async (): Promise<string | undefined> => {
+      /** THE FRONT DOOR (essentials jev-front.ts): Jev reads the request once,
+       *  before any worker. `answer` is the hive's receipt when one census step
+       *  ran; otherwise the door says what the rest of the turn should know. */
+      type Door = { readonly answer?: string; readonly aside: boolean; readonly weight?: MessageEffort; readonly carry: boolean }
+      const frontDoor = async (): Promise<Door> => {
+        const stay: Door = { aside: false, carry: false }
         const providerId = pinned ?? router.designatedProviderId?.(need) ?? ''
-        if (!jev?.direct || !jev.ready(providerId)) return undefined
-        const offered = callableBehaviours(behaviourEntries).filter(entry => entry.machine && (entry.machine.reach ?? 'editing') !== 'destructive')
-        if (!offered.length) return undefined
+        if (!jev?.front || !jev.ready(providerId)) return stay
+        // The direct path is offered only where the hive can change.
+        const offered = canChange
+          ? callableBehaviours(behaviourEntries).filter(entry => entry.machine && (entry.machine.reach ?? 'editing') !== 'destructive')
+          : []
         // The page's tiles, names only, under the OpenRouter read grant (Jev
         // mode already requires it). The single-tile read, not the strict
         // tree walk: one child this device cannot see must not blank the
         // listing (the tree walk refused the root outright in the harness).
         // Its snapshot guards the run below.
         let tiles: string[] = []
-        if (treeReader?.readNode) {
+        if (offered.length && treeReader?.readNode) {
           try {
             const listed = await treeReader.readNode(grammarContext.segments, { maxBytes: 8_000, withContent: false, signal })
             if (listed.ok) {
@@ -6357,40 +6368,46 @@ export class ChatWindowComponent implements OnDestroy {
           } catch (error) { if (signal?.aborted) throw error }
         }
         const startedAt = Date.now()
-        let decision: Awaited<ReturnType<NonNullable<JevLike['direct']>>>
+        let decision: FrontDecision
         try {
-          decision = await jev.direct({
+          decision = await jev.front({
             request: message,
             behaviours: offered.map(entry => ({
               name: entry.name, description: entry.description ?? entry.name,
               forms: entry.machine!.forms, bare: entry.machine!.bare === true, reach: entry.machine!.reach ?? 'editing',
             })),
             tiles,
+            carrying: !!previousTier,
           }, { providerId, system: vocabulary, messages: [{ content: message }, { content: tiles.join('\n') }] }, signal)
         } catch (error) {
           if (signal?.aborted) throw error
-          console.warn('[chat] the direct path could not decide:', error)
-          return undefined
+          console.warn('[chat] the front door could not decide:', error)
+          return stay
         }
         decisionCalls++
         settledAttempts.push({ round: 0, attempt: decisionCalls, providerId: 'openrouter', model: decision.model || JEV_MODEL,
           outcome: 'success', category: 'jev-decision', durationMs: Date.now() - startedAt, outputEmitted: false,
           ...(decision.usage ? { usage: { inputTokens: decision.usage.inputTokens, outputTokens: decision.usage.outputTokens, estimatedCostUsd: decision.usage.cost } } : {}),
         })
-        const receipt = await persistJevDirect(contextStore, message, decision).catch(() => undefined)
+        const receipt = await persistJevFront(contextStore, message, decision).catch(() => undefined)
         if (receipt) readSigs.push(receipt)
-        writeTurnMeta(providerId, decision.model || JEV_MODEL)
         const report = (outcome: string): void => {
-          EffectBus.emit('jev:outcome', { decision: receipt, plan: 'direct', outcome, at: Date.now(), ...(decision.reach ? { reach: decision.reach } : {}) })
+          EffectBus.emit('jev:outcome', {
+            decision: receipt, plan: 'front', outcome, at: Date.now(),
+            ...(decision.weight ? { weight: decision.weight } : {}), ...(decision.direct?.reach ? { reach: decision.direct.reach } : {}),
+          })
         }
-        if (!decision.sentence) { report('passed'); return undefined }
+        const next: Door = { aside: decision.aside, carry: decision.carry, ...(decision.weight ? { weight: decision.weight } : {}) }
+        const sentence = decision.direct?.sentence
+        if (!sentence) { report(decision.aside ? 'aside' : 'passed'); return next }
         // The hive's parser has the last word; a sentence it refuses is a miss.
         let grammars: readonly string[]
-        try { grammars = census.readDo([decision.sentence]).grammars } catch (error) {
-          EffectBus.emit('machine:miss', { sentence: decision.sentence, reason: error instanceof Error ? error.message : 'the hive cannot run it', model: decision.model, at: Date.now() })
+        try { grammars = census.readDo([sentence]).grammars } catch (error) {
+          EffectBus.emit('machine:miss', { sentence, reason: error instanceof Error ? error.message : 'the hive cannot run it', model: decision.model, at: Date.now() })
           report('passed')
-          return undefined
+          return next
         }
+        writeTurnMeta(providerId, decision.model || JEV_MODEL)
         lastRun = 'failed'
         try {
           await runDo(grammars, providerId, decision.model || JEV_MODEL, false)
@@ -6398,17 +6415,17 @@ export class ChatWindowComponent implements OnDestroy {
           if (signal?.aborted) throw error
           if (!isWorkRefusal(error)) throw error
           report('failed')
-          return `\n\nThe hive did not run \`${decision.sentence.replace(/`/g, '\'')}\`: ${(error as Error).message}.\n\n${formatJevUsage(settledAttempts)}`
+          return { ...next, answer: `\n\nThe hive did not run \`${sentence.replace(/`/g, '\'')}\`: ${(error as Error).message}.\n\n${formatJevUsage(settledAttempts)}` }
         }
         // runDo settles lastRun inside its own closure; read it back fresh.
         const how = ((): 'ran' | 'skipped' | 'failed' => lastRun)()
         report(how)
         const line = `\`${grammars.join('\` · \`').replace(/\n/g, ' ')}\``
-        return how === 'ran'
+        return { ...next, answer: how === 'ran'
           ? `\n\nRan in the hive: ${line}\n\n${formatJevUsage(settledAttempts)}`
           : how === 'skipped'
             ? `\n\nSkipped in Execution; nothing changed: ${line}\n\n${formatJevUsage(settledAttempts)}`
-            : `\n\nThe hive stopped while running ${line}.\n\n${formatJevUsage(settledAttempts)}`
+            : `\n\nThe hive stopped while running ${line}.\n\n${formatJevUsage(settledAttempts)}` }
       }
 
       const runDo = async (lines: readonly string[], providerId: string, model: string, review = false): Promise<string> => {
@@ -6506,19 +6523,32 @@ export class ChatWindowComponent implements OnDestroy {
         messages.push({ role: 'user', content: `The participant chose a sentence from your table and the hive ran it as their own words.\n\n${receipt}` })
       }
 
-      // JEV PICKS THE BEHAVIOUR (documentation/jev-creative-plan.md §1). Before
-      // any worker is asked, one Jev call asks whether this is ONE census step
-      // and which: the behaviour from the census, the name from the
-      // participant's own words, the target from this page's tiles. Sure on
-      // every count, it runs through Execution like any change and the worker
-      // is never called; unsure on any, the ordinary loop runs as before.
-      // Removals are never offered here.
-      if (jevMode && canChange && !spoken && jev?.direct) {
-        const direct = await tryDirect()
-        if (direct !== undefined) {
+      // THE FRONT DOOR (documentation/jev-decisions.md §5d). Before any worker
+      // is asked, ONE Jev call reads the request and settles three things:
+      //  - one census step? (jev-creative-plan.md §1) Sure on every count, it
+      //    runs through Execution and the worker is never called. Removals
+      //    are never offered here.
+      //  - does it need the hive at all? Sure it does not, Jev steps aside:
+      //    this turn runs exactly as with Jev off — the reply streams, no
+      //    table, no judging, no check.
+      //  - how heavy is it? Sure, its weight replaces the word list's, and
+      //    the mediator picks the participant's own model for that weight.
+      // Unsure on any, that part stays as it was.
+      if (jevMode && !spoken && jev?.front) {
+        const door = await frontDoor()
+        if (door.answer !== undefined) {
           wrote = true
-          yield direct
+          yield door.answer
           return ''
+        }
+        if (door.aside) jevTurn = false
+        if (!namedModel) {
+          const tier = effortFromJev(need.tier, door, previousTier)
+          const moved = { ...need, tier }
+          if (tier !== need.tier && router.ready?.({ ...(pinned ? { providerId: pinned } : {}), need: moved }) !== false) routeNeed = moved
+        }
+        if (door.aside || routeNeed !== need) {
+          system = systemFor(policyForNeed?.designate?.(routeNeed)?.model ?? firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(routeNeed))
         }
       }
 
@@ -6536,8 +6566,8 @@ export class ChatWindowComponent implements OnDestroy {
         for await (const chunk of router.stream!({
           providerId: pinned,
           model: continuationModel,
-          preferModel: rounds === 0 ? preferModel : undefined,
-          need,
+          preferModel: rounds === 0 ? preferFor(routeNeed.tier) : undefined,
+          need: routeNeed,
           ...(rounds === 0 && !pinned && fallbackWithin ? { fallbackWithin } : {}),
           cacheSystem: true,
           observeAttempt,
@@ -6560,19 +6590,19 @@ export class ChatWindowComponent implements OnDestroy {
             providerId: chunk.providerId,
             label: chunk.providerLabel,
             vendor: chunk.vendor,
-            tier: need.tier,
+            tier: routeNeed.tier,
             model: chunk.model,
             name: chunk.model,
           })
           component.model.set(chunk.model)
           component.modelExplicit.set(false)
           component.#remember(chunk.model)
-          component.#answeredTier.set(convoId, need.tier)
+          component.#answeredTier.set(convoId, routeNeed.tier)
           component.#answeredProvider.set(convoId, chunk.providerId)
           if (chunk.text) {
             roundText += chunk.text
             const visible = guard.push(chunk.text)
-            if (visible && !jevMode) {
+            if (visible && !jevTurn) {
               wrote = true
               yield `${lead}${visible}`
               lead = ''
@@ -6580,7 +6610,7 @@ export class ChatWindowComponent implements OnDestroy {
           }
         }
         const tail = guard.end()
-        if (tail && !jevMode) {
+        if (tail && !jevTurn) {
           wrote = true
           yield `${lead}${tail}`
         }
@@ -6590,7 +6620,7 @@ export class ChatWindowComponent implements OnDestroy {
 
         const work = splitWork(roundText)
         if (!work.request || lastRound) {
-          if (jevMode && work.prose) {
+          if (jevTurn && work.prose) {
             wrote = true
             yield `${lead}${work.prose}`
             // JEV CHECKS THE ANSWER (jev-creative-plan.md §2.1) against what
@@ -6598,10 +6628,10 @@ export class ChatWindowComponent implements OnDestroy {
             const note = await verifyAnswer(work.prose, roundText, roundProviderId)
             if (note) yield note
           }
-          if (jevMode && ran.length) yield needsVerification
+          if (jevTurn && ran.length) yield needsVerification
             ? '\n\nThe commands ran, but no subsequent readback was completed.'
             : '\n\nReadback was collected after execution; correctness of every affected item has not been independently verified.'
-          if (jevMode) yield `\n\n${formatJevUsage(settledAttempts)}`
+          if (jevTurn) yield `\n\n${formatJevUsage(settledAttempts)}`
           if (work.request) {
             wrote = true
             yield `\n\nStopped after ${MAX_WORK_ROUNDS} rounds.`
@@ -6627,7 +6657,7 @@ export class ChatWindowComponent implements OnDestroy {
         try {
           stillHere()
           // JEV RUNS THE SHOW (jev-round.ts decides, this loop does).
-          const table = tableFor(work.request, jevMode)
+          const table = tableFor(work.request, jevTurn)
           if (table) {
             const prepared = prepareTable(table, census)
             // WHAT THE HIVE COULD NOT DO is recorded, not thrown away

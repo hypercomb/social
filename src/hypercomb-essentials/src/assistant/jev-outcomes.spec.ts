@@ -9,6 +9,8 @@ describe('what happened after Jev decided', () => {
     expect(outcomeRecord({ decision: sig, plan: 'do', outcome: 'skipped', review: true, reach: 'additive', at: 5 }))
       .toEqual({ kind: 'jev-outcome', decision: sig, plan: 'do', outcome: 'skipped', review: true, reach: 'additive', at: 5 })
     expect(outcomeRecord({ plan: 'participant', outcome: 'deferred', at: 1 })).toEqual({ kind: 'jev-outcome', plan: 'participant', outcome: 'deferred', at: 1 })
+    expect(outcomeRecord({ plan: 'front', outcome: 'aside', weight: 'deep', at: 2 })).toEqual({ kind: 'jev-outcome', plan: 'front', outcome: 'aside', weight: 'deep', at: 2 })
+    expect(outcomeRecord({ plan: 'front', outcome: 'passed', weight: 'heavy', at: 3 })).toEqual({ kind: 'jev-outcome', plan: 'front', outcome: 'passed', at: 3 })
   })
   it('refuses anything that is not an outcome', () => {
     expect(outcomeRecord({ plan: 'launch', outcome: 'ran', at: 1 })).toBeNull()
@@ -25,6 +27,6 @@ describe('what happened after Jev decided', () => {
       outcomeRecord({ plan: 'read', outcome: 'ran', at: 3 })!,
       outcomeRecord({ plan: 'participant', outcome: 'deferred', at: 4 })!,
     ]
-    expect(tallyOutcomes(records)).toEqual({ decisions: 4, ran: 2, skipped: 1, failed: 0, answered: 0, deferred: 1, refused: 0, passed: 0, verified: 0, unverified: 0 })
+    expect(tallyOutcomes(records)).toEqual({ decisions: 4, ran: 2, skipped: 1, failed: 0, answered: 0, deferred: 1, refused: 0, passed: 0, verified: 0, unverified: 0, aside: 0 })
   })
 })

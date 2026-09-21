@@ -119,7 +119,10 @@ only when Jev is unsure.
    `complete` noul (the answer covers the request). Below the gate, append
    the hive's own line: "This answer was not verified against what was read"
    — never rewrite the answer. Report `answer:verified|unverified`.
-2. **Worker step-down** — a switch on the Jev row, default OFF, jwize's call:
+2. **SUPERSEDED 2026-09-21 by the front door** (`jev-decisions.md` §5d):
+   jwize asked Jev to choose the regular model, so Jev now weighs every
+   request and the mediator routes by that weight. The switch below is not
+   built. **Worker step-down** — a switch on the Jev row, default OFF, jwize's call:
    in Jev mode route the worker one tier lighter (`tierUnderLoad` /
    `designate` in `model-policy.ts` already know tiers). When ON and the
    verification in (1) fails, re-ask the same round on the designated (not

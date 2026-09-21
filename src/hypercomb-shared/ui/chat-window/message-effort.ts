@@ -41,6 +41,21 @@ export const effortInThread = (message: string, previous: MessageEffort | undefi
   return RANK[previous] > RANK[own] ? previous : own
 }
 
+/**
+ * THE WEIGHT JEV READ (essentials jev-front.ts). When Jev is on, it weighs the
+ * request in any language, and when it is sure its weight replaces the word
+ * list above; unsure, the word list stands. A request Jev reads as only
+ * continuing the thread never drops below the thread's weight.
+ */
+export const effortFromJev = (
+  own: MessageEffort,
+  jev: { readonly weight?: MessageEffort; readonly carry: boolean },
+  previous: MessageEffort | undefined,
+): MessageEffort => {
+  const weight = jev.weight ?? own
+  return jev.carry && previous && RANK[previous] > RANK[weight] ? previous : weight
+}
+
 /** Tokens the request is likely to need: the anatomy and instructions, the
  *  transcript that travels, the message, and room for the reply. Four
  *  characters to a token is the usual estimate; it only has to rule out a

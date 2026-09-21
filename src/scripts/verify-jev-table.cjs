@@ -84,14 +84,19 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
     }
     if (url.includes('/api/alpha/decisions') && JSON.parse(route.request().postData() || '{}').questions?.behaviour) {
       const body = JSON.parse(route.request().postData() || '{}')
-      directCalls.push({ scenario, request: body.state?.request, behaviours: (body.state?.behaviours ?? []).map(b => b.name), spans: Object.values(body.questions.span?.criteria ?? {}), tiles: body.state?.tiles ?? [] })
+      directCalls.push({ scenario, request: body.state?.request, questions: Object.keys(body.questions), behaviours: (body.state?.behaviours ?? []).map(b => b.name), spans: Object.values(body.questions.span?.criteria ?? {}), tiles: body.state?.tiles ?? [] })
       const spanKey = Object.entries(body.questions.span?.criteria ?? {}).find(([, text]) => text === '"jev-proof-direct"')?.[0] ?? 'none'
       const take = scenario === 'direct'
+      // THE FRONT DOOR: the aside scenario needs nothing from the hive and is
+      // heavy; every other scenario needs the hive, and its weight is unsure.
+      const aside = scenario === 'aside'
       const answers = {
         single: { type: 'noul', noul: take ? 0.97 : 0.2 },
         behaviour: { type: 'choice', choice: take ? 'create' : 'none', confidence: 0.95 },
         ...(body.questions.span ? { span: { type: 'choice', choice: take ? spanKey : 'none', confidence: 0.93 } } : {}),
         ...(body.questions.target ? { target: { type: 'choice', choice: 'none', confidence: 0.9 } } : {}),
+        hive: { type: 'noul', noul: aside ? 0.03 : 0.96 },
+        weight: { type: 'choice', choice: aside ? 'deep' : 'balanced', confidence: aside ? 0.88 : 0.4 },
       }
       return route.fulfill({ status: 200, headers, body: JSON.stringify({ id: 'gen-dec-direct', model: 'typesafe/jev-1.13-fake', answers, usage: { input_tokens: 350, output_tokens: 0, cost: 0.00001 } }) })
     }
@@ -121,6 +126,11 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
       const messages = body.messages ?? []
       const last = String(messages[messages.length - 1]?.content ?? '')
       const system = JSON.stringify(body)
+      // With Jev stepped aside the worker is asked as ordinary chat.
+      if (scenario === 'aside' && body.stream && /haiku/.test(last)) {
+        workerCalls.push({ system, last, model: body.model, stream: true, scenario })
+        return route.fulfill({ status: 200, headers: { ...headers, 'content-type': 'text/event-stream' }, body: sse('ASIDE ANSWER: rain taps the tiles; the hive hums on.') })
+      }
       // Other callers (the route-flow organizer) share the model; they get an empty organizer answer, not a table.
       if (!/JEV RUNS THE SHOW/.test(system)) return route.fulfill({ status: 200, headers, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: '{"nodes":[]}' } }] }) })
       workerCalls.push({ system, last, model: body.model, stream: !!body.stream, scenario })
@@ -338,14 +348,42 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   }
   check('an answer after a change, with nothing read since, is not sent to be checked', verifyCalls.every(c => c.scenario === 'unverified' || c.scenario === 'verified'), JSON.stringify(verifyCalls.map(c => c.scenario)))
 
+  // ── THE FRONT DOOR: Jev steps aside when the hive is not needed, and the
+  //    weight it read chooses the model ─────────────────────────────────────
+  await page.evaluate(() => {
+    const router = window.ioc.get('@diamondcoreprocessor.com/LlmRouter')
+    const stream = router.stream
+    window.__routeTiers = []
+    router.stream = call => { window.__routeTiers.push(call?.need?.tier); return stream(call) }
+  })
+  scenario = 'aside'
+  const asideJevBefore = jevCalls.length, asideVerifyBefore = verifyCalls.length
+  const asideConvo = await newConvo([['assistant', 'Ready.']])
+  // The word list reads this as fast: short, and no word of change or planning.
+  await openAndSend(asideConvo, 'Tell me a haiku about rain.')
+  const asideText = await storedAnswer(asideConvo, 'ASIDE ANSWER')
+  const asideDoor = directCalls.filter(c => c.scenario === 'aside')
+  const asideWorker = workerCalls.filter(c => c.scenario === 'aside')
+  check('the front door asks once, with the hive and weight questions in the same call',
+    asideDoor.length === 1 && ['single', 'behaviour', 'hive', 'weight'].every(key => asideDoor[0].questions.includes(key)),
+    JSON.stringify(asideDoor.map(c => c.questions)))
+  check('with the hive not needed, Jev steps aside: the worker is asked as ordinary chat, streaming',
+    asideWorker.length === 1 && asideWorker[0].stream && !/JEV RUNS THE SHOW/.test(asideWorker[0].system),
+    JSON.stringify(asideWorker.map(c => ({ stream: c.stream, jev: /JEV RUNS THE SHOW/.test(c.system) }))))
+  check('a turn Jev stepped out of buys no table decision, no check, and carries no Jev line',
+    !!asideText && jevCalls.length === asideJevBefore && verifyCalls.length === asideVerifyBefore && !/Tokens —|could not confirm/.test(asideText),
+    (asideText ?? '').slice(-160))
+  const tiers = await page.evaluate(() => window.__routeTiers)
+  check('the weight Jev read routes the worker, over the word list', tiers.length === 1 && tiers[0] === 'deep', JSON.stringify(tiers))
+
   // WHAT HAPPENED AFTER JEV DECIDED is recorded, one outcome per decided round.
   const outcomes = await waitFor(() => page.evaluate(() => {
     const records = window.ioc.get('@diamondcoreprocessor.com/JevOutcomes')?.records?.() ?? []
-    return records.some(r => r.plan === 'direct' && r.outcome === 'ran') && records.filter(r => r.plan === 'verify').length >= 2 ? records.map(r => `${r.plan}:${r.outcome}${r.reach ? ':' + r.reach : ''}${r.decision ? ':signed' : ''}`) : null
+    return records.some(r => r.plan === 'front' && r.outcome === 'aside') && records.filter(r => r.plan === 'verify').length >= 2 ? records.map(r => `${r.plan}:${r.outcome}${r.reach ? ':' + r.reach : ''}${r.weight ? ':' + r.weight : ''}${r.decision ? ':signed' : ''}`) : null
   }), 10_000, 400)
   check('every decided round records its outcome, tied to its signed receipt',
     !!outcomes && outcomes.some(o => o.startsWith('read:ran')) && outcomes.some(o => o.startsWith('do:ran')) && outcomes.some(o => o.startsWith('answer:answered'))
-      && outcomes.some(o => o.startsWith('direct:ran:additive')) && outcomes.some(o => o.startsWith('direct:passed'))
+      && outcomes.some(o => o.startsWith('front:ran:additive')) && outcomes.some(o => o.startsWith('front:passed')) && outcomes.some(o => o.startsWith('front:aside:deep'))
       && outcomes.some(o => o.startsWith('verify:unverified')) && outcomes.some(o => o.startsWith('verify:verified'))
       && outcomes.filter(o => !o.startsWith('file:')).every(o => o.endsWith(':signed')),
     JSON.stringify(outcomes))

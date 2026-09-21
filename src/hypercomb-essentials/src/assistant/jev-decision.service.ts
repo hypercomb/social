@@ -5,7 +5,8 @@ import { llmHiveAccess } from './llm-hive-access.js'
 import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
 import { openRouterRouting, providerBlock } from './providers/openrouter-routing.js'
 import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevResult, jevState, type JevInput, type JevResult } from './jev-decision.js'
-import { jevDirectInput, jevDirectQuestions, jevDirectResult, jevDirectState, type JevDirectInput, type JevDirectResult } from './jev-direct.js'
+import type { JevDirectInput } from './jev-direct.js'
+import { jevFrontInput, jevFrontQuestions, jevFrontResult, jevFrontState, type JevFrontResult } from './jev-front.js'
 import { jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyResult } from './jev-verify.js'
 import { jevFileInput, jevFileQuestions, jevFileResult, type JevFileResult } from './jev-file.js'
 
@@ -90,15 +91,17 @@ export class JevDecisionService {
     return result
   }
 
-  /** THE DIRECT PATH (jev-direct.ts): is this request one step the census can
-   *  take, and which? One call, before any worker is asked. */
-  async direct(raw: unknown, source: JevSource, signal?: AbortSignal): Promise<JevDirectResult> {
+  /** THE FRONT DOOR (jev-front.ts): one call per message, before any worker
+   *  is asked — is it one census step (the direct path), does it need the
+   *  hive at all, and how much thinking does it need? */
+  async front(raw: unknown, source: JevSource, signal?: AbortSignal): Promise<JevFrontResult> {
     signal?.throwIfAborted()
     if (!this.ready(source.providerId)) throw new Error('Jev requires an enabled worker and the OpenRouter hive read grant')
-    const input = jevDirectInput(raw)
-    const missing = jevDirectUnseen(input, source)
+    const input = jevFrontInput(raw)
+    const missing = input.direct ? jevDirectUnseen(input.direct, source)
+      : source.messages.some(message => message.content.includes(input.request)) ? null : 'the request'
     if (missing) throw new Error(`Jev may only judge what the participant said and the hive listed, and it could not find ${missing} as written`)
-    const result = await this.#post({ state: jevDirectState(input), questions: jevDirectQuestions(input) }, body => jevDirectResult(body, input), signal)
+    const result = await this.#post({ state: jevFrontState(input), questions: jevFrontQuestions(input) }, body => jevFrontResult(body, input), signal)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
     return result
   }

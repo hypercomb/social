@@ -40,6 +40,19 @@ export interface DirectDecision {
   readonly answers: Record<string, unknown>
   readonly usage?: { inputTokens?: number; outputTokens?: number; cost?: number }
 }
+/** THE FRONT DOOR's answer (essentials jev-front.ts): the direct path's
+ *  answer when behaviours were offered, whether Jev steps aside for the turn,
+ *  and the weight of the request when Jev is sure of it. */
+export interface FrontDecision {
+  readonly direct?: DirectDecision
+  readonly aside: boolean
+  readonly weight?: 'fast' | 'balanced' | 'deep'
+  readonly carry: boolean
+  readonly reason: string
+  readonly model: string
+  readonly answers: Record<string, unknown>
+  readonly usage?: { inputTokens?: number; outputTokens?: number; cost?: number }
+}
 /** Jev's check of a final answer (essentials jev-verify.ts). */
 export interface VerifyDecision {
   readonly verified: boolean
@@ -51,7 +64,7 @@ export interface VerifyDecision {
 export interface JevLike {
   ready(providerId: string): boolean
   verify?(input: unknown, source: { providerId: string; system: string; messages: readonly { content: string }[] }, signal?: AbortSignal): Promise<VerifyDecision>
-  direct?(input: unknown, source: { providerId: string; system: string; messages: readonly { content: string }[] }, signal?: AbortSignal): Promise<DirectDecision>
+  front?(input: unknown, source: { providerId: string; system: string; messages: readonly { content: string }[] }, signal?: AbortSignal): Promise<FrontDecision>
   evaluate(input: unknown, source: { providerId: string; system: string; messages: readonly { content: string }[] }, signal?: AbortSignal): Promise<Decision>
 }
 interface UsageAttempt {
@@ -105,13 +118,15 @@ export const persistJevInput = async (store: ResourceWriter | undefined, input: 
   return resource(store, { kind: 'jev-input', model: JEV_MODEL, rubric: 5, request, doctrine, evidence, rows })
 }
 
-/** The direct path's provenance: what was asked, what Jev answered, what ran. */
-export const persistJevDirect = async (store: ResourceWriter | undefined, request: string, result: DirectDecision): Promise<string | undefined> => {
+/** The front door's provenance: what was asked, what Jev answered, what ran. */
+export const persistJevFront = async (store: ResourceWriter | undefined, request: string, result: FrontDecision): Promise<string | undefined> => {
   if (!store?.putResource) return undefined
+  const reason = result.direct ? `${result.reason}; ${result.direct.reason}` : result.reason
   return resource(store, {
-    kind: 'jev-direct', requestedModel: JEV_MODEL, model: result.model, rubric: 1,
-    request: await resource(store, request), reason: await resource(store, result.reason), answers: await resource(store, result.answers),
-    ...(result.sentence ? { sentence: await resource(store, result.sentence) } : {}),
+    kind: 'jev-front', requestedModel: JEV_MODEL, model: result.model, rubric: 1, aside: result.aside,
+    ...(result.weight ? { weight: result.weight } : {}),
+    request: await resource(store, request), reason: await resource(store, reason), answers: await resource(store, result.answers),
+    ...(result.direct?.sentence ? { sentence: await resource(store, result.direct.sentence) } : {}),
   })
 }
 
