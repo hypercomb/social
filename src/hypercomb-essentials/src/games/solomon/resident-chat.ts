@@ -50,7 +50,12 @@ type LlmDispatch = typeof import('../../assistant/llm-dispatch.js')
 let dispatchPromise: Promise<LlmDispatch> | null = null
 const dispatch = (): Promise<LlmDispatch> => (dispatchPromise ??= import('../../assistant/llm-dispatch.js'))
 
-export const RESIDENT_TALK_POOL = 'games:solomon:talk'
+export const RESIDENT_TALK_POOL = 'games:solomon-talk'
+
+/** Where these conversations lived until 2026-09-20, when the meaning was
+ *  respelled to one colon (pool-registry.ts, RETIRED_POOL_MEANINGS). Read so
+ *  a player's existing conversations still open; NEVER written. */
+export const RETIRED_RESIDENT_TALK_POOL = 'games:solomon:talk'
 
 export type ResidentTurnRole = 'user' | 'assistant'
 export interface ResidentTurn {
@@ -80,9 +85,9 @@ type StoreLike = {
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
 }
 
-const talkPool = async (): Promise<{ store: StoreLike; pool: FileSystemDirectoryHandle } | null> => {
+const talkPool = async (meaning: string = RESIDENT_TALK_POOL): Promise<{ store: StoreLike; pool: FileSystemDirectoryHandle } | null> => {
   const store = get<StoreLike>('@hypercomb.social/Store')
-  const pool = await store?.getPool?.(RESIDENT_TALK_POOL)
+  const pool = await store?.getPool?.(meaning)
   return pool && store ? { store, pool } : null
 }
 
@@ -95,7 +100,13 @@ export const readResidentTalk = async (residentId: string): Promise<ResidentTalk
   if (!id) return emptyTalk(id)
   try {
     const held = await talkPool()
-    const bytes = await held?.store.getPoolDoc?.(held.pool, id)
+    // New spelling first, then where it used to live. A conversation written
+    // before the respelling still opens; the next write lands in the new pool.
+    let bytes = await held?.store.getPoolDoc?.(held.pool, id)
+    if (!bytes) {
+      const retired = await talkPool(RETIRED_RESIDENT_TALK_POOL)
+      bytes = await retired?.store.getPoolDoc?.(retired.pool, id)
+    }
     if (!bytes) return emptyTalk(id)
     const record = JSON.parse(new TextDecoder().decode(bytes)) as Partial<ResidentTalk>
     if (record?.kind !== 'resident-talk' || !Array.isArray(record.turns)) return emptyTalk(id)

@@ -17,7 +17,7 @@ import { readdirSync, readFileSync, existsSync } from 'fs'
 import { join, relative } from 'path'
 import { spawnSync } from 'child_process'
 import { createRequire } from 'module'
-import { BARE_WORD_POOL_MEANINGS, SCOPED_POOL_MEANINGS } from '@hypercomb/core'
+import { BARE_WORD_POOL_MEANINGS, RETIRED_POOL_MEANINGS, SCOPED_POOL_MEANINGS } from '@hypercomb/core'
 
 const ROOT = __dirname
 const REPO_ROOT = join(ROOT, '..')
@@ -728,7 +728,11 @@ describe('doctrine ratchets', () => {
       Array.isArray(SCOPED_POOL_MEANINGS) && SCOPED_POOL_MEANINGS.length > 0,
       'SCOPED_POOL_MEANINGS did not load from @hypercomb/core — run vitest from `src/`.',
     ).toBe(true)
-    const seeded = new Set([...BARE_WORD_POOL_MEANINGS, ...SCOPED_POOL_MEANINGS])
+    // Exactly what SEED_MEANINGS is made of. A RETIRED spelling counts as
+    // seeded for the very reason this ratchet exists: its directory is still
+    // on disk, and a root walk must be told it is a pool rather than prune it
+    // as a lineage sigbag. It is not an exemption — nothing may write it.
+    const seeded = new Set([...BARE_WORD_POOL_MEANINGS, ...SCOPED_POOL_MEANINGS, ...RETIRED_POOL_MEANINGS])
 
     // Two spellings, both line-oriented. A meaning and its quotes are always
     // on one line here, and matching per line keeps a type annotation
@@ -770,7 +774,8 @@ describe('doctrine ratchets', () => {
       '\nPOOL MEANING MISSING FROM THE SEED CENSUS — until some code path\n' +
       'derives it, `isPoolAddress()` does not know this directory is a pool,\n' +
       'and a root walk that runs first can prune it as a lineage sigbag.\n' +
-      'Add it to SCOPED_POOL_MEANINGS in hypercomb-core/src/core/pool-registry.ts.\n',
+      'Add it to SCOPED_POOL_MEANINGS in hypercomb-core/src/core/pool-registry.ts\n' +
+      '(or RETIRED_POOL_MEANINGS, if it is a spelling nothing writes any more).\n',
     ).toEqual([])
     // The reverse is NOT an error: the seed may hold RESERVED spellings
     // (`pheromones:deposits`, `hives:names`) that nothing derives yet. A

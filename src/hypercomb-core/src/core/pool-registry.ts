@@ -516,13 +516,46 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // resident id {turns, memory?} (essentials/games/solomon/resident-chat.ts).
   // Per-player game state, never shared or listed — colon-scoped so no tile
   // can name it.
-  'games:solomon:talk',
+  //
+  // ONE COLON, NOT TWO. Spelled 'games:solomon:talk' until 2026-09-20, which
+  // validatePoolSpelling rejects on its own stated rule: a pool never contains
+  // another pool, and everything below the first level is a bucket rather than
+  // a new meaning. The rule predates the spelling, and the spelling arrived in
+  // a commit about something else, so the spelling was the accident. The old
+  // address is retired below and still read.
+  'games:solomon-talk',
 ])
 
 /** Every meaning known at build time. */
+/**
+ * SPELLINGS THAT WERE ONCE WRITTEN AND ARE NO LONGER WRITTEN.
+ *
+ * A pool's address is the hash of its meaning, so RESPELLING A MEANING MOVES
+ * IT. The bytes already written under the old spelling do not move with it,
+ * and data never heals: the old address stays a read-fallback in whatever
+ * module owns the feature, and nothing ever writes it again.
+ *
+ * They stay SEEDED for one reason that matters more than tidiness: anything
+ * that walks, prunes or enumerates the root asks this registry whether a
+ * sig-named directory is a pool. Forget a retired address and its directory
+ * looks like a lineage bag to the next prune. Seeding it here keeps that
+ * answer right from boot rather than from whenever the owning module happens
+ * to load.
+ *
+ * NOT part of SCOPED_POOL_MEANINGS: these are history, so the spelling rules
+ * that govern live meanings do not apply to them, and they reserve no scope.
+ * This list may grow when a meaning is retired; an entry may never be removed.
+ */
+export const RETIRED_POOL_MEANINGS: readonly string[] = Object.freeze([
+  // → 'games:solomon-talk' (2026-09-20). Read-fallback in
+  // essentials/games/solomon/resident-chat.ts; nothing writes it.
+  'games:solomon:talk',
+])
+
 const SEED_MEANINGS: readonly string[] = Object.freeze([
   ...BARE_WORD_POOL_MEANINGS,
   ...SCOPED_POOL_MEANINGS,
+  ...RETIRED_POOL_MEANINGS,
 ])
 
 /** meaning → sign(meaning), populated lazily and never evicted. */
