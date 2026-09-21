@@ -191,6 +191,8 @@ export class LlmDispatchError extends Error {
     readonly providerId: string,
     readonly model: string,
     readonly status?: number,
+    /** How long the vendor asked us to wait before asking again (`Retry-After`). */
+    readonly retryAfterMs?: number,
   ) {
     super(message)
     this.name = 'LlmDispatchError'
@@ -198,6 +200,16 @@ export class LlmDispatchError extends Error {
 }
 
 const MAX_ERROR_BODY = 600
+
+/** `Retry-After` as milliseconds — delay-seconds or an HTTP-date; undefined
+ *  when the vendor sent nothing readable. */
+const retryAfterMs = (response: Response): number | undefined => {
+  const value = response.headers?.get?.('retry-after')?.trim()
+  if (!value) return undefined
+  if (/^\d+$/.test(value)) return Number(value) * 1000
+  const at = Date.parse(value)
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : undefined
+}
 
 const registry = (): LlmProviderRegistry => llmProviderRegistry()
 
@@ -383,6 +395,7 @@ const send = async (
       provider.id,
       request.model,
       response.status,
+      retryAfterMs(response),
     )
   }
   return response
@@ -608,6 +621,33 @@ const ROUTE_COOLDOWN_MS = 30_000
 const MAX_ROUTE_ATTEMPTS = 3
 const coolingUntil = new Map<string, number>()
 
+// A VENDOR THAT SAYS "RETRY SHORTLY" IS TAKEN AT ITS WORD. When every choice
+// fails busy — rate-limited or overloaded — before a word is out, the whole
+// plan is tried once more after a short wait: the longest Retry-After any of
+// them sent, else ROUTE_RETRY_DELAY_MS, never past ROUTE_RETRY_MAX_WAIT_MS.
+// Two free models sharing one upstream pool both answered 429 in the same
+// second and the question was lost to it.
+const ROUTE_RETRY_PASSES = 1
+const ROUTE_RETRY_DELAY_MS = 1_500
+const ROUTE_RETRY_MAX_WAIT_MS = 8_000
+
+/** Busy, not broken: the same request may well succeed in a moment. Narrower
+ *  than `isTransient` (which only decides cooling) — a refused key, a bad
+ *  request, an unreachable local server or an empty answer are not worth
+ *  asking again for. */
+const isRetryWorthy = (error: unknown): boolean => {
+  if (!(error instanceof LlmDispatchError)) return false
+  const status = error.status
+  return status === 429 || status === 408 || (status !== undefined && status >= 500)
+}
+
+const waitFor = (ms: number, signal?: AbortSignal): Promise<void> => new Promise(resolve => {
+  if (ms <= 0 || signal?.aborted) { resolve(); return }
+  const done = (): void => { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve() }
+  const timer = setTimeout(done, ms)
+  signal?.addEventListener('abort', done, { once: true })
+})
+
 const isAbort = (error: unknown, signal?: AbortSignal): boolean =>
   !!signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')
 
@@ -680,68 +720,86 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
   // with it: models added through OpenRouter all borrow one key, so falling
   // to the next of them only repeats the same refusal.
   const refusedOwners = new Set<string>()
-  for (const [candidateIndex, provider] of candidates.entries()) {
-    if (refusedOwners.has(credentialOwner(provider))) continue
-    let emitted = false
-    let usage: LlmAttemptUsage | undefined
-    const startedAt = Date.now()
-    let request: LlmRequest
-    try {
-      request = buildRequest(provider, call, { stream: !!provider.fromStreamEvent })
-    } catch (error) {
-      const model = call.model ?? provider.defaultModel
-      safeObserve(call, { phase: 'start', attempt: candidateIndex + 1, providerId: provider.id, model, durationMs: 0, outputEmitted: false, category: 'start' })
-      const dispatch = error instanceof LlmDispatchError ? error : undefined
-      safeObserve(call, { phase: 'failure', attempt: candidateIndex + 1, providerId: provider.id, model, durationMs: Date.now() - startedAt, outputEmitted: false, category: attemptCategory(error, dispatch?.status), ...(dispatch?.status !== undefined ? { status: dispatch.status } : {}) })
-      if (isAbort(error, call.signal) || !automatic) throw error
-      const message = error instanceof Error ? error.message : String(error)
-      failures.push(`${provider.label}: ${message}`)
-      if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
-      if (dispatch?.status === 401 || dispatch?.status === 403) refusedOwners.add(credentialOwner(provider))
-      EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
-      continue
-    }
-    safeObserve(call, { phase: 'start', attempt: candidateIndex + 1, providerId: provider.id, model: request.model, durationMs: 0, outputEmitted: false, category: 'start' })
-    let answeredModel = request.model
-    try {
-      for await (const chunk of streamProvider(provider, call, request)) {
-        // Usage-only terminal frames are informative, not visible output and
-        // must not disable automatic fallback or turn an empty answer into a
-        // success.
-        emitted = emitted || !!chunk.text || !!chunk.toolCalls?.length
-        usage = chunk.usage
-          ? attemptUsage(provider, { ...(usage ?? {}), ...chunk.usage }, request.model)
-          : usage
-        if (!chunk.text && !chunk.toolCalls?.length) continue
-        answeredModel = chunk.model || answeredModel
-        coolingUntil.delete(provider.id)
-        yield {
-          text: chunk.text,
-          ...(chunk.toolCalls?.length ? { toolCalls: chunk.toolCalls } : {}),
-          providerId: provider.id,
-          providerLabel: provider.label,
-          vendor: provider.vendor,
-          model: chunk.model,
+  let attempt = 0
+  for (let pass = 0; pass <= ROUTE_RETRY_PASSES; pass++) {
+    // Whether THIS pass failed only in ways worth a second pass, and the
+    // longest wait any vendor asked for before it.
+    let tried = 0
+    let retryWorthy = true
+    let retryAfter: number | undefined
+    for (const provider of candidates) {
+      if (refusedOwners.has(credentialOwner(provider))) continue
+      tried += 1
+      attempt += 1
+      let emitted = false
+      let usage: LlmAttemptUsage | undefined
+      const startedAt = Date.now()
+      let request: LlmRequest
+      try {
+        request = buildRequest(provider, call, { stream: !!provider.fromStreamEvent })
+      } catch (error) {
+        const model = call.model ?? provider.defaultModel
+        safeObserve(call, { phase: 'start', attempt, providerId: provider.id, model, durationMs: 0, outputEmitted: false, category: 'start' })
+        const dispatch = error instanceof LlmDispatchError ? error : undefined
+        safeObserve(call, { phase: 'failure', attempt, providerId: provider.id, model, durationMs: Date.now() - startedAt, outputEmitted: false, category: attemptCategory(error, dispatch?.status), ...(dispatch?.status !== undefined ? { status: dispatch.status } : {}) })
+        if (isAbort(error, call.signal) || !automatic) throw error
+        const message = error instanceof Error ? error.message : String(error)
+        failures.push(`${provider.label}: ${message}`)
+        // A request that could not be built will not build next time either.
+        retryWorthy = false
+        if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
+        if (dispatch?.status === 401 || dispatch?.status === 403) refusedOwners.add(credentialOwner(provider))
+        EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
+        continue
+      }
+      safeObserve(call, { phase: 'start', attempt, providerId: provider.id, model: request.model, durationMs: 0, outputEmitted: false, category: 'start' })
+      let answeredModel = request.model
+      try {
+        for await (const chunk of streamProvider(provider, call, request)) {
+          // Usage-only terminal frames are informative, not visible output and
+          // must not disable automatic fallback or turn an empty answer into a
+          // success.
+          emitted = emitted || !!chunk.text || !!chunk.toolCalls?.length
+          usage = chunk.usage
+            ? attemptUsage(provider, { ...(usage ?? {}), ...chunk.usage }, request.model)
+            : usage
+          if (!chunk.text && !chunk.toolCalls?.length) continue
+          answeredModel = chunk.model || answeredModel
+          coolingUntil.delete(provider.id)
+          yield {
+            text: chunk.text,
+            ...(chunk.toolCalls?.length ? { toolCalls: chunk.toolCalls } : {}),
+            providerId: provider.id,
+            providerLabel: provider.label,
+            vendor: provider.vendor,
+            model: chunk.model,
+          }
         }
+        if (!emitted) {
+          throw new LlmDispatchError(
+            `${provider.label} returned no visible text`, provider.id,
+            call.model ?? modelForTier(provider, call.need?.tier ?? 'balanced'),
+          )
+        }
+        safeObserve(call, { phase: 'success', attempt, providerId: provider.id, model: answeredModel, durationMs: Date.now() - startedAt, outputEmitted: emitted, category: 'success', ...(usage ? { usage } : {}) })
+        return
+      } catch (error) {
+        const status = error instanceof LlmDispatchError ? error.status : undefined
+        safeObserve(call, { phase: 'failure', attempt, providerId: provider.id, model: answeredModel, durationMs: Date.now() - startedAt, outputEmitted: emitted, category: attemptCategory(error, status), ...(status !== undefined ? { status } : {}), ...(usage ? { usage } : {}) })
+        if (isAbort(error, call.signal) || emitted || !automatic) throw error
+        const message = error instanceof Error ? error.message : String(error)
+        failures.push(`${provider.label}: ${message}`)
+        retryWorthy &&= isRetryWorthy(error)
+        const asked = error instanceof LlmDispatchError ? error.retryAfterMs : undefined
+        if (asked !== undefined) retryAfter = Math.max(retryAfter ?? 0, asked)
+        if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
+        if (status === 401 || status === 403) refusedOwners.add(credentialOwner(provider))
+        EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
       }
-      if (!emitted) {
-        throw new LlmDispatchError(
-          `${provider.label} returned no visible text`, provider.id,
-          call.model ?? modelForTier(provider, call.need?.tier ?? 'balanced'),
-        )
-      }
-      safeObserve(call, { phase: 'success', attempt: candidateIndex + 1, providerId: provider.id, model: answeredModel, durationMs: Date.now() - startedAt, outputEmitted: emitted, category: 'success', ...(usage ? { usage } : {}) })
-      return
-    } catch (error) {
-      const status = error instanceof LlmDispatchError ? error.status : undefined
-      safeObserve(call, { phase: 'failure', attempt: candidateIndex + 1, providerId: provider.id, model: answeredModel, durationMs: Date.now() - startedAt, outputEmitted: emitted, category: attemptCategory(error, status), ...(status !== undefined ? { status } : {}), ...(usage ? { usage } : {}) })
-      if (isAbort(error, call.signal) || emitted || !automatic) throw error
-      const message = error instanceof Error ? error.message : String(error)
-      failures.push(`${provider.label}: ${message}`)
-      if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
-      if (status === 401 || status === 403) refusedOwners.add(credentialOwner(provider))
-      EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
     }
+    if (!automatic || !tried || !retryWorthy || pass === ROUTE_RETRY_PASSES) break
+    await waitFor(Math.min(retryAfter ?? ROUTE_RETRY_DELAY_MS, ROUTE_RETRY_MAX_WAIT_MS), call.signal)
+    if (call.signal?.aborted) throw new DOMException('The model request was aborted', 'AbortError')
   }
 
   throw new LlmDispatchError(

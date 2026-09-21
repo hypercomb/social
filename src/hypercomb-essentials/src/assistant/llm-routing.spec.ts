@@ -112,6 +112,44 @@ describe('streamRoutedModel', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
+  it('asks the plan again when every choice was busy, after the Retry-After it was given', async () => {
+    registry.register(descriptor('busy-first', 'made it'))
+    registry.register(descriptor('busy-second', 'unused'))
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1
+      // Both share one upstream pool and are busy on the first pass; the first
+      // is free again on the second.
+      return calls <= 2
+        ? new Response('{"error":"temporarily rate-limited upstream"}', { status: 429, headers: { 'retry-after': '0' } })
+        : new Response('{}', { status: 200 })
+    }))
+
+    const chunks: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({
+      need: { tier: 'fast', streaming: true },
+      messages: [{ role: 'user', content: 'hello' }],
+    })) chunks.push(chunk)
+
+    expect(chunks.map(chunk => chunk.text).join('')).toBe('made it')
+    expect(chunks[0]?.providerId).toBe('busy-first')
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not ask again when the failure was not a busy vendor', async () => {
+    registry.register(descriptor('bad-first', 'unused'))
+    registry.register(descriptor('bad-second', 'unused'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"bad request"}', { status: 400 })))
+
+    await expect((async () => {
+      for await (const _chunk of streamRoutedModel({
+        need: { tier: 'fast', streaming: true },
+        messages: [{ role: 'user', content: 'hello' }],
+      })) { /* consume */ }
+    })()).rejects.toThrow(/every eligible AI provider failed/)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
   it('observes safe per-attempt lifecycle data without exposing request contents', async () => {
     registry.register({
       ...descriptor('telemetry-first', 'unused'),

@@ -6765,11 +6765,19 @@ export class ChatWindowComponent implements OnDestroy {
     })
     if (convoId === this.activeId()) this.hostStreaming.set(true)
     const threads = this.#threads()
-    // A MODEL THAT FAILS SAYS SO. An error before any words used to leave the
-    // run empty, which reads as "declined" and sent the question on to the
-    // broker queue — so a refused key or a failing model looked like "nothing
-    // is listening yet". The failure is now the answer: shown, stored, and
-    // never handed to a broker nobody is running.
+    // A MODEL THAT FAILS SAYS SO — unless a session is on the bridge, in
+    // which case the session TAKES THE QUESTION. An error before any words
+    // used to leave the run empty, which reads as "declined" and sent the
+    // question on to the broker queue — so a refused key or a failing model
+    // looked like "nothing is listening yet" and waited on a broker nobody
+    // was running. With nobody listening the failure is the answer: shown,
+    // stored, never queued. With a session listening, a question no model
+    // could take (every provider rate-limited, say) is exactly the deep
+    // tier's work, so the run ends empty ON PURPOSE and `send()` hands it to
+    // the bridge queue (jwize, 2026-09-21: "the agent should have done the
+    // task instead of this message"). Words already on screen are never
+    // taken back: a failure after them is appended, whoever is listening.
+    const listening = (): boolean => this.bridgeUp()
     const guarded: HostAsk = async function* (question, opts) {
       // HOW LONG THE TURN TOOK (essentials jev-outcomes.ts): to the last
       // word, and to the first visible one. A stopped or failed turn says
@@ -6785,8 +6793,13 @@ export class ChatWindowComponent implements OnDestroy {
       } catch (error) {
         answered = false
         if (opts?.signal?.aborted) throw error
+        const detail = error instanceof Error ? error.message : String(error)
+        if (!firstAt && listening()) {
+          console.warn('[chat] no model took the question — the bridge session takes it:', detail)
+          return ''
+        }
         console.warn('[chat] the model could not answer:', error)
-        yield `\n\nThe model could not answer: ${error instanceof Error ? error.message : String(error)}`
+        yield `\n\nThe model could not answer: ${detail}`
       } finally {
         if (answered && !opts?.signal?.aborted) {
           const at = Date.now()
