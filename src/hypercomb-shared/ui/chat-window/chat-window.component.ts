@@ -6481,8 +6481,10 @@ export class ChatWindowComponent implements OnDestroy {
                 }
                 if (row.kind === 'do') {
                   const grammars = row.lines.map(line => workLineGrammar(line, 'do')).filter(Boolean)
-                  parseHypercombGrammars(grammars, behaviourEntries)
+                  // The behaviours say how far they reach; the gates follow.
+                  const reach = hypercombPlanReach(parseHypercombGrammars(grammars, behaviourEntries), behaviourEntries)
                   grammarOf.set(row.id, grammars)
+                  return [{ ...row, reach }]
                 }
                 return [row]
               } catch (error) {

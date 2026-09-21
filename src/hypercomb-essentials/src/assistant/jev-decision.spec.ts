@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { JEV_MAX_READS, jevInput, jevQuestions, jevResult } from './jev-decision.js'
+import { JEV_MAX_READS, jevInput, jevQuestions, jevResult, jevState } from './jev-decision.js'
 
 const rows = [
   { id: 'a', kind: 'read', label: 'See the people', lines: ['/list /business/people'] },
@@ -38,6 +38,11 @@ describe('the possibility table', () => {
     expect((questions['c_rules'] as { instructions: string }).instructions).toContain('`rows[2].lines`')
     expect((questions['a_fit'] as { instructions: string }).instructions).toContain('not yet contain')
   })
+  it('never sends the hive reach to Jev', () => {
+    const reached = jevInput({ request: 'r', doctrine: 'd', evidence: 'e', rows: [{ id: 'a', kind: 'do', label: 'x', line: 'create y', reach: 'additive' }] })
+    expect(reached.rows[0].reach).toBe('additive')
+    expect(JSON.stringify(jevState(reached))).not.toContain('reach')
+  })
 })
 
 describe('composition', () => {
@@ -60,6 +65,19 @@ describe('composition', () => {
   it('sends a chosen change to review when a gate fails, and never averages past a rule', () => {
     expect(jevResult(response('c', { c_grounded: noul(0.5) }), input).plan).toEqual({ kind: 'do', row: 'c', review: true })
     expect(jevResult(response('c', { c_rules: noul(0.5), c_fit: noul(1), c_grounded: noul(1) }), input).plan).toEqual({ kind: 'do', row: 'c', review: true })
+  })
+  it('gates a change by the reach its behaviours declare', () => {
+    const withReach = (reach: string) => jevInput({ request: 'Organize the people', doctrine: 'Preserve history.', evidence: ['Nothing read yet.'], rows: rows.map(row => row.id === 'c' ? { ...row, reach } : row) })
+    const thin = { c_grounded: noul(0.4) }
+    expect(jevResult(response('c', thin), withReach('additive')).plan).toEqual({ kind: 'do', row: 'c', review: false })
+    expect(jevResult(response('c', thin), withReach('editing')).plan).toEqual({ kind: 'do', row: 'c', review: true })
+    expect(jevResult(response('c', thin), input).plan).toEqual({ kind: 'do', row: 'c', review: true })
+    const destructive = jevResult(response('c'), withReach('destructive'))
+    expect(destructive.plan).toEqual({ kind: 'do', row: 'c', review: true })
+    expect(destructive.reason).toContain('always reviews')
+    expect(jevResult(response('c', { c_rules: noul(0.5) }), withReach('additive')).plan).toEqual({ kind: 'do', row: 'c', review: true })
+    expect(() => withReach('sideways')).toThrow()
+    expect(() => jevInput({ request: 'r', doctrine: 'd', evidence: 'e', rows: [{ id: 'a', kind: 'read', label: 'x', line: 'y', reach: 'additive' }] })).toThrow()
   })
   it('reads first when the choice is unclear or conflicts with doctrine', () => {
     const unclear = jevResult(response('none'), input)

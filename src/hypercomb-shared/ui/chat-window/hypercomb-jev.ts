@@ -9,7 +9,9 @@ export const JEV_IOC_KEY = '@hypercomb.social/JevDecision'
 export const JEV_MODEL = '~typesafe/jev-latest'
 export const JEV_MAX_ROWS = 8
 export type RowKind = 'read' | 'do' | 'answer' | 'ask'
-export interface Row { readonly id: string; readonly kind: RowKind; readonly label: string; readonly lines: readonly string[]; readonly why?: string }
+/** Set by the hive from the census for do rows; decides gates, never sent to Jev. */
+export type Reach = 'additive' | 'editing' | 'destructive'
+export interface Row { readonly id: string; readonly kind: RowKind; readonly label: string; readonly lines: readonly string[]; readonly why?: string; readonly reach?: Reach }
 export type Plan =
   | { readonly kind: 'answer' }
   | { readonly kind: 'ask'; readonly row: string }
@@ -64,8 +66,9 @@ export const persistJevInput = async (store: ResourceWriter | undefined, input: 
   const rows = await Promise.all(input.rows.map(async row => resource(store, {
     id: row.id, kind: row.kind, label: await resource(store, row.label), lines: await resource(store, row.lines),
     ...(row.why ? { why: await resource(store, row.why) } : {}),
+    ...(row.reach ? { reach: row.reach } : {}),
   })))
-  return resource(store, { kind: 'jev-input', model: JEV_MODEL, rubric: 3, request, doctrine, evidence, rows })
+  return resource(store, { kind: 'jev-input', model: JEV_MODEL, rubric: 4, request, doctrine, evidence, rows })
 }
 
 export const persistJevReceipt = async (store: ResourceWriter | undefined, source: string, result: Decision): Promise<string | undefined> => {

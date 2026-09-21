@@ -4,7 +4,7 @@ import { llmModelChoice } from './llm-model-choice.js'
 import { llmHiveAccess } from './llm-hive-access.js'
 import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
 import { openRouterRouting, providerBlock } from './providers/openrouter-routing.js'
-import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevResult, type JevInput, type JevResult } from './jev-decision.js'
+import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevResult, jevState, type JevInput, type JevResult } from './jev-decision.js'
 
 /** A subset of material ALREADY sent to / received from the worker whose
  * table is being judged. Never fetches hive content, accepts signatures to
@@ -45,7 +45,7 @@ export class JevDecisionService {
     if (!source.system.includes(input.doctrine) || !contains(input.request) || input.evidence.some(part => !contains(part))
       || input.rows.some(row => !contains(row.label) || row.lines.some(line => !contains(line)) || (row.why && !contains(row.why))))
       throw new Error('Jev may only judge context already shared with this worker')
-    if (JSON.stringify(input).length > (llmHiveAccess.budget('openrouter') ?? 24_000)) throw new Error('Jev context exceeds the OpenRouter read budget')
+    if (JSON.stringify(jevState(input)).length > (llmHiveAccess.budget('openrouter') ?? 24_000)) throw new Error('Jev context exceeds the OpenRouter read budget')
     const result = await this.#request(input, signal)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
     return result
@@ -76,7 +76,7 @@ export class JevDecisionService {
       const response = await fetch(JEV_ENDPOINT, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: JEV_MODEL, state: input, questions: jevQuestions(input), ...(provider ? { provider } : {}) }),
+        body: JSON.stringify({ model: JEV_MODEL, state: jevState(input), questions: jevQuestions(input), ...(provider ? { provider } : {}) }),
         signal: controller.signal,
       })
       if (!response.ok) {

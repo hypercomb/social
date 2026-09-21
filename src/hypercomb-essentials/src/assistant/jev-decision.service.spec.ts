@@ -50,6 +50,10 @@ describe('Jev OpenRouter boundary', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://openrouter.ai/api/alpha/decisions')
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model: '~typesafe/jev-latest', provider: { data_collection: 'deny' }, state: { ...input, evidence: [input.evidence] } })
   })
+  it('keeps the hive reach out of the request body', async () => {
+    await new JevDecisionService().evaluate({ ...input, rows: [{ ...input.rows[0], reach: 'additive' }] }, source)
+    expect(fetchMock.mock.calls[0][1].body).not.toContain('reach')
+  })
   it('serves every worker in the suite, never Jev itself, and never unshared material', async () => {
     const service = new JevDecisionService()
     expect(service.ready('local')).toBe(true)
