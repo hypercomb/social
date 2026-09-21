@@ -115,7 +115,7 @@ import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
 import { resolveEntryImageUrl } from '../clipboard-thumbs'
 import { hivePathSegments, renderChatMarkdown, type ChatMarkdownOptions } from './chat-markdown'
-import { hiveSentenceHtml, hiveSentenceParts, type SentencePart, type SentenceReader } from '../hive-sentence/hive-sentence'
+import { hiveSentenceHtml, hiveSentenceParts, sentenceAccent, type SentencePart, type SentenceReader } from '../hive-sentence/hive-sentence'
 import { liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
 import {
   callableBehaviours,
@@ -2964,6 +2964,10 @@ export class ChatWindowComponent implements OnDestroy {
   /** An Execution line is parsed grammar already: always a sentence. */
   sentenceParts(line: string): readonly SentencePart[] {
     return hiveSentenceParts(line, this.#sentenceReader(), { force: true }) ?? []
+  }
+  /** The tint a sentence wears: its first behaviour's colour. */
+  sentenceAccent(parts: readonly SentencePart[] | null): string | null {
+    return (parts && sentenceAccent(parts)) || null
   }
   /** A question option is a sentence only when it reads as one. */
   optionParts(option: string): readonly SentencePart[] | null {
@@ -6384,8 +6388,8 @@ export class ChatWindowComponent implements OnDestroy {
         let receipt: string
         try {
           receipt = spoken.kind === 'do'
-            ? await runDo([spoken.grammar], providerId, continuationModel ?? '')
-            : await runRead([spoken.grammar], providerId, continuationModel ?? '')
+            ? await runDo(spoken.grammars, providerId, continuationModel ?? '')
+            : await runRead(spoken.grammars, providerId, continuationModel ?? '')
         } catch (error) {
           if (signal?.aborted) throw error
           if (!isWorkRefusal(error)) throw error

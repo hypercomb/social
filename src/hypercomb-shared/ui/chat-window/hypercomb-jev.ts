@@ -124,11 +124,41 @@ export const parseTable = (lines: readonly string[]): readonly Row[] => {
 export interface QuestionWords { readonly which: string; readonly other: string }
 export const QUESTION_WORDS: QuestionWords = { which: 'Which step should the hive take?', other: 'Something else' }
 
+/** The sentence a row offers as ONE option: all its lines, bare, joined by
+ *  a quiet dot — so picking it runs the whole step, never a third of it. */
+export const SENTENCE_JOIN = ' · '
+export const rowSentence = (row: Row): string =>
+  row.lines.map(line => line.replace(/^\//, '').replace(/[\r\n`~]/g, ' ').trim()).join(SENTENCE_JOIN)
+
+/** The question format's own limits (core QUESTION_LIMITS): four options of at
+ *  most eighty characters, a prompt of at most 280. A question that breaks
+ *  them is silently refused and falls through as raw code, so this never
+ *  builds one. */
+const OPTIONS_MAX = 4
+const OPTION_CHARS = 80
+const PROMPT_CHARS = 280
+
 export const tableQuestion = (rows: readonly Row[], reason: string, prompt?: string, words: QuestionWords = QUESTION_WORDS): string => {
-  const details = rows.map(row => `**${row.label}**${row.kind === 'answer' ? '' : `\n${row.lines.map(line => `\`${line.replace(/^\//, '').replace(/[`~]/g, '')}\``).join('\n')}`}`).join('\n\n')
-  const sentences = [...new Set(rows.flatMap(row => row.kind === 'read' || row.kind === 'do' ? row.lines.map(line => line.replace(/^\//, '').replace(/[\r\n`]/g, ' ').trim()) : []))]
+  const details = rows.map(row => {
+    const head = `**${row.label.replace(/[\r\n`*]/g, ' ')}**`
+    if (row.kind === 'answer') return head
+    // A question is prose for the participant; a sentence is the hive's language.
+    if (row.kind === 'ask') return `${head}\n${row.lines[0].replace(/[\r\n`*_~]/g, ' ')}`
+    return `${head}\n${row.lines.map(line => `\`${line.replace(/^\//, '').replace(/[`~]/g, '')}\``).join(' ')}`
+  }).join('\n\n')
+  const other = words.other.replace(/[\r\n`]/g, ' ').trim()
+  const options = [...new Set(rows
+    .filter(row => row.kind === 'read' || row.kind === 'do')
+    .map(rowSentence)
+    .filter(sentence => sentence && sentence.length <= OPTION_CHARS && sentence !== other))]
+    .slice(0, OPTIONS_MAX - 1)
+  const said = (prompt ?? words.which).replace(/[\r\n`]/g, ' ').trim()
+  const asking = said.length > PROMPT_CHARS ? `${said.slice(0, PROMPT_CHARS - 1)}…` : said
+  // Nothing clickable: the reason and the steps stand as prose, and the
+  // participant answers in their own words.
+  if (!options.length) return `${reason}\n\n${details}\n\n${asking}`
   return `${reason}\n\n${details}\n\n\`\`\`hypercomb-question\n${JSON.stringify({
-    prompt: (prompt ?? words.which).replace(/[\r\n`]/g, ' '), options: [...sentences, words.other.replace(/[\r\n`]/g, ' ')],
+    prompt: asking, options: [...options, other],
   })}\n\`\`\``
 }
 

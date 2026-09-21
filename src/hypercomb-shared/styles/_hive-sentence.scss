@@ -1,32 +1,51 @@
-// THE HIVE'S LANGUAGE HAS ONE LOOK (jwize, 2026-09-20).
+// THE HIVE'S LANGUAGE HAS ONE LOOK (jwize, 2026-09-20; restyled 2026-09-21:
+// "the underlines make it look unnatural … a distinct sentence style and
+// theme, stylistically perfect for reading").
 //
 // Every behaviour sentence, on every surface, is drawn from these rules and
-// nothing else: the chat, table questions, the Execution column, receipts.
-// Markup comes from `ui/hive-sentence/hive-sentence.ts`.
+// nothing else: the chat, table questions and their options, the Execution
+// column, receipts. Markup comes from `ui/hive-sentence/hive-sentence.ts`.
 //
-// It is the command line's own reading, carried out of the box: the verb in
-// the command register's colour — or, inline, its behaviour's own colour —
-// underlined so colour is never the only signal; arguments in ordinary ink;
-// filler receding; an ambiguous word dashed. No slash anywhere on the page.
+// A sentence is its own typographic object: a soft chip in the command
+// line's own face, tinted by its behaviour's colour. The behaviour word is set
+// heavier in that colour; arguments stay in ordinary ink; the separators
+// inside a path, and between the sentences of one step, recede so the words
+// carry the reading. No slash in front, no underline. The tint is mixed from
+// transparency, so the same rules read on paper and on dark.
 
 .hc-sentence {
-  border-radius: 0.3em;
-  padding: 0 0.28em;
-  background: color-mix(in srgb, currentColor 8%, transparent);
+  // The behaviour's own colour when the reader knows one (set inline by the
+  // markup); the command register's colour otherwise.
+  --hc-sentence-accent: var(--hc-status-warn);
+
+  font-family: var(--hc-font);
+  font-size: 0.94em;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.55;
+  padding: 0.06em 0.5em 0.1em;
+  border-radius: 0.55em;
+  background: color-mix(in srgb, var(--hc-sentence-accent) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hc-sentence-accent) 22%, transparent);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  // A sentence that wraps keeps its chip on every line, not one torn box.
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .hc-sentence-verb {
-  color: var(--hc-status-warn);
-  font-weight: 600;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.22em;
+  color: var(--hc-sentence-accent);
+  font-weight: 650;
 }
 
 .hc-sentence-arg {
   color: inherit;
+}
+
+.hc-sentence-sep {
+  color: inherit;
+  opacity: 0.42;
 }
 
 .hc-sentence-residue {
@@ -34,6 +53,8 @@
   opacity: 0.6;
 }
 
+// The one mark that keeps a line: a word the reader could not settle is a
+// question the participant must answer, and colour alone would hide it.
 .hc-sentence-ambiguity {
   color: #b48ad8;
   text-decoration: underline dashed;

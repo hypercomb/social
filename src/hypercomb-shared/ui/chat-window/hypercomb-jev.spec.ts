@@ -91,7 +91,7 @@ describe('the possibility table protocol', () => {
   it('offers the behaviour sentences as the options, never the labels, with an ask row as the prompt', () => {
     const text = tableQuestion(rows.slice(0, 2), 'Evidence is insufficient.')
     expect(text).toContain('create topics')
-    expect(splitQuestion(text).question?.options).toEqual(['list /notes', 'create topics', 'move notes topics', 'Something else'])
+    expect(splitQuestion(text).question?.options).toEqual(['list /notes', 'create topics · move notes topics', 'Something else'])
     const asked = tableQuestion(rows.slice(0, 2), 'Jev chose to ask.', 'By city or by role?')
     expect(splitQuestion(asked).question?.prompt).toBe('By city or by role?')
   })

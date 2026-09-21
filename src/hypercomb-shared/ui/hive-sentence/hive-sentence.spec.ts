@@ -63,6 +63,14 @@ describe('the hive sentence', () => {
 
   it('renders escaped markup with one class per role', () => {
     const html = hiveSentenceHtml(hiveSentenceParts('copy <b>', reader)!)
-    expect(html).toBe('<span class="hc-sentence"><span class="hc-sentence-verb" style="color:#4fb3e8">copy</span><span class="hc-sentence-arg"> </span><span class="hc-sentence-arg">&lt;b&gt;</span></span>')
+    expect(html).toBe('<span class="hc-sentence" style="--hc-sentence-accent:#4fb3e8"><span class="hc-sentence-verb" style="color:#4fb3e8">copy</span><span class="hc-sentence-arg"> </span><span class="hc-sentence-arg">&lt;b&gt;</span></span>')
+  })
+
+  it('lets path separators and the step dot recede, but never the root', () => {
+    const roles = (line: string) => hiveSentenceParts(line, undefined, { force: true })!.map(part => `${part.role}:${part.text}`)
+    expect(roles('create jev-proof/beta/gamma')).toEqual(['verb:create', 'arg: jev-proof', 'sep:/', 'arg:beta', 'sep:/', 'arg:gamma'])
+    expect(roles('list /people')).toEqual(['verb:list', 'arg: ', 'sep:/', 'arg:people'])
+    expect(roles('list /')).toEqual(['verb:list', 'arg: /'])
+    expect(roles('create a · create b')).toEqual(['verb:create', 'arg: a', 'sep: · ', 'arg:create b'])
   })
 })

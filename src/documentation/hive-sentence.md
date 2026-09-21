@@ -11,16 +11,21 @@ light). This carries that reading onto every other surface.
 
 ## The look
 
+**Restyled 2026-09-21** (jwize: *"the underlines make it look unnatural … a
+distinct sentence style and theme, stylistically perfect for reading"*).
+
 | Part | Look |
 |---|---|
-| behaviour word | its behaviour's own colour, bold, underlined |
+| the whole sentence | a soft chip in the command line's own face, tinted by its behaviour's colour |
+| behaviour word | heavier, in that colour |
 | argument | ordinary ink |
+| separator | a slash inside a path, or the dot between one step's sentences, recedes |
 | filler | recedes |
-| ambiguous word | violet, dashed underline |
-| the whole sentence | a faint pill, so it reads as one unit inside prose |
+| ambiguous word | violet with a dashed line: the one mark that keeps a line |
 
-No slash is ever shown. Colour is never the only signal: the underline and
-weight carry it for anyone who cannot tell the hues apart.
+No slash in front, no underline. Colour is never the only signal: the weight
+carries the behaviour word for anyone who cannot tell the hues apart. A lone
+`/` means the root and stays in ink.
 
 **Colour per behaviour.** A behaviour's colour is its behaviour tile's
 category keyword, through the tag registry — exactly what the command line
@@ -30,7 +35,11 @@ register's colour (`--hc-status-warn`).
 ## Where it shows
 
 - chat messages: any code span whose first word is a behaviour or a read verb
-- table questions: each row's sentences, and the answer options
+- table questions: each row's sentences, and the answer options — one option
+  per row, its sentences joined by the quiet dot, so a pick runs the whole
+  step. At most three rows are offered, best first by Jev's fit, because the
+  question format allows four options of eighty characters; a question that
+  broke that was silently refused and fell through as raw code.
 - the Execution column: every line waiting or run
 - receipts: "Ran in the hive: …"
 

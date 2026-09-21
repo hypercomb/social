@@ -5,10 +5,12 @@
 //
 // A behaviour sentence — `copy drafts`, `list /`, `create jev-proof` — is
 // drawn the same way wherever it appears: the chat, a table question, the
-// Execution column, a receipt. No slash. The behaviour word wears its OWN
-// colour, the one the command line already paints it (its behaviour tile's
-// category keyword through TagRegistry), with an underline so colour is
-// never the only signal. Arguments stay in ordinary ink.
+// Execution column, a receipt. No slash, no underline. The sentence is a soft
+// chip in the command line's face, tinted by its behaviour's OWN colour (the
+// one the command line already paints it: its behaviour tile's category
+// keyword through TagRegistry). The behaviour word is set heavier in that
+// colour, so colour is never the only signal. Arguments stay in ordinary ink,
+// and separators inside a path recede.
 //
 // The reading is not done here. The command line's reader
 // (`@diamondcoreprocessor.com/UtteranceReader`, essentials) is handed in, so
@@ -21,7 +23,7 @@
 
 import { executionLineParts } from '../chat-window/execution-line'
 
-export type SentenceRole = 'verb' | 'arg' | 'residue' | 'ambiguity'
+export type SentenceRole = 'verb' | 'arg' | 'sep' | 'residue' | 'ambiguity'
 
 export interface SentencePart {
   readonly text: string
@@ -72,6 +74,28 @@ const compact = (part: SentencePart): SentencePart[] =>
     ? [part]
     : executionLineParts(part.text).map(piece => ({ ...part, text: piece.text, ...(piece.signature ? { signature: piece.signature } : {}) }))
 
+/** THE SEPARATORS RECEDE: a slash inside a path (`jev-proof/beta`, `/people`)
+ *  and the dot between the sentences of one step. A lone `/` is the root —
+ *  a word in its own right — and stays in ink. */
+const SEPARATOR = /\s·\s|\/(?=\S)|(?<=\S)\//g
+const separate = (part: SentencePart): SentencePart[] => {
+  if (part.role !== 'arg' || part.signature) return [part]
+  const out: SentencePart[] = []
+  let cursor = 0
+  for (const match of part.text.matchAll(SEPARATOR)) {
+    const at = match.index ?? 0
+    if (at > cursor) out.push({ ...part, text: part.text.slice(cursor, at) })
+    out.push({ text: match[0], role: 'sep' })
+    cursor = at + match[0].length
+  }
+  if (cursor < part.text.length) out.push({ ...part, text: part.text.slice(cursor) })
+  return out.length ? out : [part]
+}
+
+/** The colour the whole sentence is tinted with: its first behaviour's. */
+export const sentenceAccent = (parts: readonly SentencePart[]): string | undefined =>
+  parts.find(part => part.role === 'verb' && part.color)?.color
+
 /**
  * Read one line as a hive sentence. Returns null when it is not one — the
  * first word is neither a behaviour the reader knows nor one of `verbs` —
@@ -108,17 +132,19 @@ export const hiveSentenceParts = (
     parts.push({ text: bare.slice(0, firstEnd), role: 'verb' })
     if (firstEnd < bare.length) parts.push({ text: bare.slice(firstEnd), role: 'arg' })
   }
-  return parts.flatMap(compact)
+  return parts.flatMap(compact).flatMap(separate)
 }
 
 const esc = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 /** The same parts as HTML, for surfaces that render markup (chat markdown). */
-export const hiveSentenceHtml = (parts: readonly SentencePart[]): string =>
-  `<span class="hc-sentence">${parts.map(part => {
+export const hiveSentenceHtml = (parts: readonly SentencePart[]): string => {
+  const accent = sentenceAccent(parts)
+  return `<span class="hc-sentence"${accent ? ` style="--hc-sentence-accent:${esc(accent)}"` : ''}>${parts.map(part => {
     const classes = `hc-sentence-${part.role}${part.signature ? ' hc-sentence-sig' : ''}`
     const style = part.color ? ` style="color:${esc(part.color)}"` : ''
     const title = part.signature ? ` title="${esc(part.signature)}"` : ''
     return `<span class="${classes}"${style}${title}>${esc(part.text)}</span>`
   }).join('')}</span>`
+}

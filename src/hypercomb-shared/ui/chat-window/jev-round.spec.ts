@@ -91,6 +91,18 @@ describe('the plan becomes one step', () => {
     expect(options).toEqual(['list /people', 'Something else'])
     expect(step.kind === 'question' && step.text).toContain('By city or by role?')
   })
+  it('never builds a question the format would refuse: best three rows, then the other option', () => {
+    const many = prepareTable(table([
+      { id: 'r1', kind: 'read', label: 'One', line: 'list /one' },
+      { id: 'r2', kind: 'read', label: 'Two', line: 'list /two' },
+      { id: 'r3', kind: 'read', label: 'Three', line: 'list /three' },
+      { id: 'd1', kind: 'do', label: 'Build', lines: ['create x', 'create x/y', 'create x/y/z'] },
+    ]), census)
+    const ranked = { ...decision({ kind: 'participant', rows: [] }), answers: { r1_fit: { type: 'noul', noul: 0.1 }, r2_fit: { type: 'noul', noul: 0.9 }, r3_fit: { type: 'noul', noul: 0.5 }, d1_fit: { type: 'noul', noul: 0.7 } } }
+    const step = stepFor(ranked, many)
+    const options = splitQuestion(step.kind === 'question' ? step.text : '').question?.options
+    expect(options).toEqual(['list /two', 'create x · create x/y · create x/y/z', 'list /three', 'Something else'])
+  })
   it('asks the worker’s own question when Jev chose to ask', () => {
     const step = stepFor(decision({ kind: 'ask', row: 'd' }), prepared)
     const question = splitQuestion(step.kind === 'question' ? step.text : '').question
@@ -112,8 +124,13 @@ describe('the question speaks the participant language', () => {
 describe('the participant speaks the hive’s language', () => {
   const asked = tableQuestion([{ id: 'b', kind: 'do', label: 'Make people', lines: ['/create people'] }, { id: 'a', kind: 'read', label: 'See', lines: ['list /people'] }] as Row[], 'Because.')
   it('runs an offered sentence as the behaviour it is', () => {
-    expect(offeredSentence('create people', asked, census)).toEqual({ kind: 'do', grammar: '/create people' })
-    expect(offeredSentence('list /people', asked, census)).toEqual({ kind: 'read', grammar: '/list /people' })
+    expect(offeredSentence('create people', asked, census)).toEqual({ kind: 'do', grammars: ['/create people'] })
+    expect(offeredSentence('list /people', asked, census)).toEqual({ kind: 'read', grammars: ['/list /people'] })
+  })
+  it('runs a picked multi-sentence row as the whole step', () => {
+    const multi = tableQuestion([{ id: 'b', kind: 'do', label: 'Build', lines: ['create a', 'create a/b'] }] as Row[], 'Because.')
+    expect(splitQuestion(multi).question?.options).toEqual(['create a · create a/b', 'Something else'])
+    expect(offeredSentence('create a · create a/b', multi, census)).toEqual({ kind: 'do', grammars: ['/create a', '/create a/b'] })
   })
   it('never turns prose, an unoffered sentence, or a non-sentence option into a command', () => {
     expect(offeredSentence('Something else', asked, census)).toBeNull()

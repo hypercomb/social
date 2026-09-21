@@ -16,7 +16,7 @@
 // run a line, so this module names no behaviour and keeps no vocabulary.
 
 import { splitQuestion } from '@hypercomb/core'
-import { JEV_ANSWER_NOW, parseTable, tableChoiceNote, tableQuestion, QUESTION_WORDS, type Decision, type QuestionWords, type Reach, type Row } from './hypercomb-jev'
+import { JEV_ANSWER_NOW, parseTable, SENTENCE_JOIN, tableChoiceNote, tableQuestion, QUESTION_WORDS, type Decision, type QuestionWords, type Reach, type Row } from './hypercomb-jev'
 import { WorkRefused, type WorkRequest } from './hypercomb-work-fence'
 
 /** The live census, as the loop reads it. Both throw on a line the hive refuses. */
@@ -96,7 +96,16 @@ export const stepFor = (decision: Decision, table: PreparedTable, words: Questio
     case 'participant':
     case 'ask': {
       const asked = plan.kind === 'ask' ? row(plan.row) : undefined
-      const choices = table.rows.filter(candidate => candidate.kind !== 'answer' && candidate.id !== asked?.id && !decision.rejected.includes(candidate.id))
+      // Best first, by Jev's own fit for each row; the worker's order breaks ties.
+      const fit = (id: string): number => {
+        const answer = decision.answers[`${id}_fit`] as { noul?: unknown } | undefined
+        return typeof answer?.noul === 'number' ? answer.noul : 0
+      }
+      const choices = table.rows
+        .filter(candidate => candidate.kind !== 'answer' && candidate.id !== asked?.id && !decision.rejected.includes(candidate.id))
+        .map((candidate, order) => ({ candidate, order }))
+        .sort((a, b) => fit(b.candidate.id) - fit(a.candidate.id) || a.order - b.order)
+        .map(({ candidate }) => candidate)
       return { kind: 'question', text: tableQuestion(choices, decision.reason, asked?.lines[0], words) }
     }
     case 'answer':
@@ -116,12 +125,15 @@ export const offeredSentence = (
   message: string,
   lastAssistantText: string | undefined,
   census: RoundCensus,
-): { readonly kind: 'do' | 'read'; readonly grammar: string } | null => {
+): { readonly kind: 'do' | 'read'; readonly grammars: readonly string[] } | null => {
   const said = String(message ?? '').trim()
   if (!said || !lastAssistantText) return null
   const offered = (splitQuestion(lastAssistantText).question?.options ?? []).map(option => option.trim().toLowerCase())
   if (!offered.includes(said.toLowerCase())) return null
-  try { return { kind: 'do', grammar: census.readDo([said]).grammars[0] } } catch { /* not a change */ }
-  try { return { kind: 'read', grammar: census.readRead(said) } } catch { /* not a read either */ }
+  // One option is one row: its sentences, joined by the quiet dot.
+  const sentences = said.split(SENTENCE_JOIN).map(sentence => sentence.trim()).filter(Boolean)
+  try { return { kind: 'do', grammars: census.readDo(sentences).grammars } } catch { /* not a change */ }
+  if (sentences.length !== 1) return null
+  try { return { kind: 'read', grammars: [census.readRead(sentences[0])] } } catch { /* not a read either */ }
   return null
 }
