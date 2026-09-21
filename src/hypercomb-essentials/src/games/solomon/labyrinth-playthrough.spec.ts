@@ -138,7 +138,8 @@ describe('an uninterrupted physical labyrinth playthrough', () => {
       player.nextRoom()
 
       // Walk away from the arrival lock, back through the reciprocal door,
-      // and into the same retained room again, using its actual floor route.
+      // and into the same room again — rebuilt fresh, never the engine she
+      // left — using its actual floor route.
       const stepsRoom = journey.engine!
       player.walkTo(3)
       player.walkTo(1)
@@ -146,7 +147,8 @@ describe('an uninterrupted physical labyrinth playthrough', () => {
       player.walkTo(11)
       player.walkTo(14)
       player.useDoor('deeper')
-      expect(journey.engine).toBe(stepsRoom)
+      expect(journey.engine).not.toBe(stepsRoom)
+      expect(journey.room!.id).toBe(`${id}-steps`)
 
       player.climbMiddle()
       player.climbUpper()
@@ -156,8 +158,9 @@ describe('an uninterrupted physical labyrinth playthrough', () => {
       player.walkTo(9)
       player.walkTo(7)
       player.useDoor('fold')
-      expect(journey.engine).toBe(stepsRoom)
-      expect(journey.engine!.tileAt(5, 7)).toBe(BRICK)
+      // Back in a fresh steps room: the block she conjured is gone again.
+      expect(journey.room!.id).toBe(`${id}-steps`)
+      expect(journey.engine!.tileAt(5, 7)).toBe(EMPTY)
 
       player.nextRoom()
       expect(journey.room!.id).toBe(`${id}-loft`)

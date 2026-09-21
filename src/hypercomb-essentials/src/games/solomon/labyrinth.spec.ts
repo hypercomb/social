@@ -143,9 +143,10 @@ describe('the interconnected Solomon labyrinth', () => {
     expect(journey.room!.id).toBe('sunseed-steps')
   })
 
-  it('keeps changed blocks, defeated enemies and collected items while stats follow the player', () => {
+  it('starts every room fresh on return — blocks, enemies and items reset — while stats and relics follow the player', () => {
     const journey = start()
-    collect(journey, journey.room!.relics[0])
+    const porchRelic = journey.room!.relics[0]
+    collect(journey, porchRelic)
     travel(journey, 'deeper')
     const steps = journey.engine!
     steps.setTile(4, 2, BRICK)
@@ -155,16 +156,26 @@ describe('the interconnected Solomon labyrinth', () => {
     steps.ammo = [true, false]
     steps.score = 4500
     travel(journey, 'return')
+    // The room she left is forgotten the moment she leaves it.
+    expect(journey.engines.has('sunseed-steps')).toBe(false)
     expect(journey.engine!.lives).toBe(2)
     expect(journey.engine!.ammo).toEqual([true, false])
     expect(journey.engine!.score).toBe(4500)
+    // The relic she took there is hers for good and does not lie there again.
+    expect(journey.collected(porchRelic.id)).toBe(true)
+    journey.engine!.arrive(porchRelic)
+    journey.update(0)
+    expect(journey.engine!.score).toBe(4500)
     journey.engine!.score += 500
     travel(journey, 'deeper')
-    expect(journey.engine).toBe(steps)
-    expect(steps.tileAt(4, 2)).toBe(BRICK)
-    expect(steps.enemies.every(enemy => !enemy.alive)).toBe(true)
-    expect(steps.items[0].taken).toBe(true)
-    expect(steps.score).toBe(5000)
+    const again = journey.engine!
+    expect(again).not.toBe(steps)
+    expect(again.tileAt(4, 2)).toBe(EMPTY)
+    expect(again.enemies.some(enemy => enemy.alive)).toBe(true)
+    expect(again.items[0].taken).toBe(false)
+    expect(again.score).toBe(5000)
+    expect(again.lives).toBe(2)
+    expect([...journey.engines.keys()]).toEqual(['sunseed-steps'])
   })
 
   it('opens ability gates permanently and awards each relic only once, including after retry', () => {
@@ -186,7 +197,7 @@ describe('the interconnected Solomon labyrinth', () => {
     expect(journey.engine!.score).toBe(score)
   })
 
-  it('uses native hydrated cells and metadata as the room source, retaining live engines on subsequent hydration', () => {
+  it('uses native hydrated cells and metadata as the room source, keeping the live room while she stands in it and rebuilding it fresh after she leaves', () => {
     const authored = ROOMS[0]
     const native: RoomDef = { ...authored, level: { ...authored.level, name: 'Native Sun Porch', tiles: [...authored.level.tiles] } }
     native.level.tiles[2 * ROOM_COLS + 4] = WALL
@@ -197,10 +208,14 @@ describe('the interconnected Solomon labyrinth', () => {
     expect(journey.room).toBe(native)
     expect(journey.engine!.tileAt(4, 2)).toBe(WALL)
     journey.engine!.setTile(4, 2, BRICK)
+    // Hydration never replaces the room she is standing in.
     journey.replaceRoom(authored)
+    expect(journey.room).toBe(native)
     journey.leave()
+    expect(journey.engines.size).toBe(0)
     journey.enterLabyrinth('sunseed')
-    expect(journey.engine!.tileAt(4, 2)).toBe(BRICK)
+    // Fresh from its definition: the conjured block is gone.
+    expect(journey.engine!.tileAt(4, 2)).toBe(WALL)
     expect(journey.room).toBe(native)
   })
 

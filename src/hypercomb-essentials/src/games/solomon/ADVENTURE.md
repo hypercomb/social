@@ -131,6 +131,13 @@ screen** (below) — never a chamber-owned dialog of its own.
 
 ## Labyrinths: rooms, relics, and the Hush
 
+**Rooms always start fresh.** Leaving a room forgets it: enemies, taken
+items, found secrets and conjured blocks all reset, and the next visit plays
+it from its authored definition. What follows Dana out is only journey-wide
+state — her score, lives, sand and kit, and the relics she holds, each
+awarded once and never lying in a room again. A save made inside a room
+still restores that room as it stood.
+
 Doors are portals (push-to-enter, already hued and shaped per destination);
 relics (triangle/hexagon/star) are walk-over pickups that raise a gain
 screen as a piece flies into the star. `SigilRequirement`-gated walls open

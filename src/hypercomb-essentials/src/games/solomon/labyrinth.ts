@@ -328,7 +328,10 @@ export class LabyrinthJourney {
     for (const entry of raw['lastRooms']) {
       if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string' || typeof entry[1] !== 'string') continue
       const room = this.rooms.get(entry[1])
-      if (room?.labyrinthId === entry[0] && stage.engines.has(room.id)) stage.#lastRoom.set(entry[0], room.id)
+      // Where she was in each labyrinth is remembered on its own: the room's
+      // engine is gone the moment she left it, and that must not send her
+      // back to the entry room after a reload.
+      if (room?.labyrinthId === entry[0]) stage.#lastRoom.set(entry[0], room.id)
     }
     const active = typeof raw['activeRoomId'] === 'string' ? this.rooms.get(raw['activeRoomId']) : undefined
     if (active && stage.engines.has(active.id) && stage.canEnterLabyrinth(active.labyrinthId)) {
@@ -411,9 +414,21 @@ export class LabyrinthJourney {
   leave(): void {
     this.#bank()
     if (this.engine) this.#releaseInput(this.engine)
+    this.#forget()
     this.room = null
     this.engine = null
     this.#arrivalDoor = null
+  }
+
+  // ROOMS ALWAYS START FRESH (jwize, 2026-09-21): leaving a room forgets it —
+  // enemies, taken items, found secrets, conjured blocks — so the next visit
+  // plays it from its authored definition. What follows Dana out is exactly
+  // the journey-wide state: her stats (`#bank`), the relics she has collected
+  // (`inventory`, each awarded once), and the kit that opens barriers. A room
+  // is remembered only while she is standing in it, which is what a save made
+  // inside a room still restores.
+  #forget(): void {
+    if (this.room) this.engines.delete(this.room.id)
   }
 
   #bank(): void {
@@ -437,6 +452,10 @@ export class LabyrinthJourney {
     if (doorId !== undefined && !arrival) return false
     this.#bank()
     if (this.engine) this.#releaseInput(this.engine)
+    // The room she is leaving is forgotten and the one she enters is built
+    // fresh — even when it is the same room again (see `#forget`). A room
+    // restored from a save keeps its engine until she first steps out of it.
+    if (this.room?.id !== roomId) this.#forget()
     let engine = this.engines.get(roomId)
     if (!engine) {
       engine = new Engine({ ...copyLevel(room.level), interconnected: true })
