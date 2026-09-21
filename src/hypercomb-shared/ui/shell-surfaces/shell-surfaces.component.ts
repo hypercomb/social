@@ -48,6 +48,10 @@ export class ShellSurfacesComponent implements OnDestroy {
   readonly #vcr = inject(ViewContainerRef)
   readonly #host: HTMLElement = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement
   readonly #mounted = new Map<string, Mounted>()
+  // Surfaces whose construction threw. One broken surface must never keep the
+  // rest from mounting: the surface that offers the upgrade is often the one
+  // needed when an older installed package breaks some other panel.
+  readonly #failed = new Set<string>()
 
   readonly #sync = (): void => {
     const surfaces = this.#registry?.all() ?? []
@@ -65,12 +69,19 @@ export class ShellSurfacesComponent implements OnDestroy {
         // to document.body) — never drag it back while enforcing order.
         if (m.node.parentElement !== this.#host) continue
       } else {
-        if (s.component) {
-          const ref = this.#vcr.createComponent(s.component)
-          m = { node: ref.location.nativeElement as HTMLElement, ref }
-        } else if (s.element) {
-          m = { node: document.createElement(s.element) }
-        } else continue
+        if (this.#failed.has(s.name)) continue
+        try {
+          if (s.component) {
+            const ref = this.#vcr.createComponent(s.component)
+            m = { node: ref.location.nativeElement as HTMLElement, ref }
+          } else if (s.element) {
+            m = { node: document.createElement(s.element) }
+          } else continue
+        } catch (error) {
+          this.#failed.add(s.name)
+          console.error(`[shell-surfaces] surface "${s.name}" failed to mount`, error)
+          continue
+        }
         this.#mounted.set(s.name, m)
       }
       const next: ChildNode | null = cursor ? cursor.nextSibling : this.#host.firstChild

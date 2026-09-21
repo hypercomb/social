@@ -83,7 +83,9 @@ type CanvasLike = EventTarget & {
   setZoom(value: number): void
   setPan(x: number, y: number): void
   setCascade(value: boolean): void
-  setPreview(active: boolean): void
+  // Optional: an essentials build from before the preview existed simply
+  // never dims for it (an old installed package, observed 2026-09-21).
+  setPreview?(active: boolean): void
   pictureSwatch(): string
   status(): string
   // The saved shelves. Optional: an essentials build from before they existed
@@ -275,7 +277,7 @@ export class BackgroundsWindowComponent implements OnDestroy {
     // asynchronously — refresh them alongside every repaint it asks for.
     this.#follow(CANVAS_KEY, () => {
       void this.#refreshSaved()
-      this.#canvas()?.setPreview(this.visible())
+      this.#canvas()?.setPreview?.(this.visible())
     })
   }
 
@@ -445,13 +447,13 @@ export class BackgroundsWindowComponent implements OnDestroy {
 
   open(): void {
     this.visible.set(true)
-    this.#canvas()?.setPreview(true)
+    this.#canvas()?.setPreview?.(true)
     EffectBus.emit('backgrounds:state', { open: true })
   }
 
   close(): void {
     this.cancelSpacePan()
-    this.#canvas()?.setPreview(false)
+    this.#canvas()?.setPreview?.(false)
     this.visible.set(false)
     EffectBus.emit('backgrounds:state', { open: false })
   }
