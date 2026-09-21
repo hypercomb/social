@@ -239,6 +239,35 @@ export const refuseInBrood = async (sig: string): Promise<BroodRecord | null> =>
   return next
 }
 
+/**
+ * THE PRODUCER. Run the rules over what just arrived, and hold whatever they
+ * do not clear to run. Called where bytes have been admitted and verified but
+ * nothing has been imported yet — the last moment at which holding still
+ * costs nothing (acquire.ts, before `activate`).
+ *
+ * Returns the signatures that will NOT run, which is the honest thing for a
+ * caller to report: it is re-derived through `mayRunBee`, so a bee already
+ * accepted by hand, or carried by enough vouches, is not counted as held.
+ * Never throws — a brood that cannot be written must not break an install
+ * that the authority gate already allowed.
+ */
+export const holdArrivals = async (
+  sigs: readonly string[],
+  kind: ArrivalKind,
+  source: Omit<BroodSource, 'kind'> = {},
+): Promise<readonly string[]> => {
+  const rules = await broodRules()
+  const heldBack: string[] = []
+  for (const sig of [...new Set(sigs)].filter(candidate => SIG.test(candidate))) {
+    try {
+      const record = await broodRecord(sig)
+      if (admitArrival(kind, rules, record?.vouches ?? []) !== 'run') await holdInBrood(sig, { ...source, kind })
+      if (!(await mayRunBee(sig))) heldBack.push(sig)
+    } catch { /* an install the authority allowed must not die in the brood */ }
+  }
+  return heldBack
+}
+
 /** Drop a record entirely — "I never want to be asked about this again". The
  *  bytes are content and are not touched; only the holding is forgotten. */
 export const forgetInBrood = async (sig: string): Promise<void> => {

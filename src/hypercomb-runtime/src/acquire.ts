@@ -41,7 +41,7 @@
 // `@hypercomb/core` is EXTERNAL — the import map resolves it to the runtime
 // the shim already loaded, so this bundle shares its instances rather than
 // minting a second set.
-import { INSTALL_IOC_KEY, MARKER_NAME, askUntried, hardDeleteVetoFor, registerPoolMeaning, SignatureService, SignatureStore, type EggProbe, type InstallProvider } from '@hypercomb/core'
+import { INSTALL_IOC_KEY, MARKER_NAME, askUntried, hardDeleteVetoFor, holdArrivals, registerPoolMeaning, SignatureService, SignatureStore, type ArrivalKind, type EggProbe, type InstallProvider } from '@hypercomb/core'
 // These two are PURE — stateless functions over bytes, no IoC registration, no
 // module state — which is the entire reason they may be bundled in here. The
 // walker IS the protocol; only the io wiring below is ours.
@@ -512,6 +512,19 @@ export const installPackage = async (
   // not a typed folder.
   await writeBags(store, inventory)
 
+  // THE BROOD (core/brood.ts). Bytes are admitted and verified; nothing has
+  // been imported. Anything the participant's rules do not clear is held here,
+  // and the loader refuses to read it until a hand — or enough vouches from
+  // communities they follow — says otherwise.
+  const heldBack = await holdArrivals(inventory.bees, arrivalKindOf(authority.by), {
+    zone: pkg.zone,
+    packageSig: pkg.packageSig,
+    how: 'package install',
+  })
+  if (heldBack.length) {
+    console.warn(`[acquire] ${heldBack.length} bee(s) held in the brood — accept them before they run`)
+  }
+
   await activate(pkg.packageSig, inventory, beeDeps, held.held, await enabledOf(pkg.packageSig, inventory.bees, layersIo))
   return {
     ok: true,
@@ -655,6 +668,19 @@ export const applySelection = async (
 }
 
 /** Has this shell already trusted a root — it ran here, or was admitted here? */
+/**
+ * WHICH RULE GOVERNS THIS ARRIVAL (brood-rules.ts). The authority gate has
+ * already decided the package MAY run here; this only says under whose name,
+ * so the participant's own rules can hold it anyway — "I wrote it, hold it
+ * until I have tested it" is the ordinary case.
+ *
+ * The seed bootstrap counts as followed, not as your own: it is somebody
+ * else's code, trusted once, and a participant who holds followed code should
+ * see it too.
+ */
+const arrivalKindOf = (by: 'self' | 'genesis' | 'attested'): ArrivalKind =>
+  by === 'self' ? 'own' : 'followed'
+
 const trustedHere = (sig: string): boolean => {
   try {
     const store = new SignatureStore()
@@ -696,6 +722,9 @@ export const pickRevision = async (
 
   let root = ''
   let refusal = ''
+  // A revision already trusted here is the participant's own; anything else is
+  // whatever the authority gate called it.
+  let pickedKind: ArrivalKind = 'own'
   for (const candidate of [...new Set([revision.root, ...(revision.roots ?? [])])].filter(sig => SIG_RE.test(sig))) {
     if ((await layerAt(candidate, path, io)) !== revision.layer) {
       refusal ||= `${candidate.slice(0, 12)}… does not carry that revision of ${path}`
@@ -711,6 +740,7 @@ export const pickRevision = async (
         attester: registeredAttester(),
       })
       if (!verdict.ok) { refusal = verdict.error; continue }
+      pickedKind = arrivalKindOf(verdict.by)
     }
     root = candidate
     break
@@ -735,6 +765,19 @@ export const pickRevision = async (
   fetched += bees.fetched
   present += bees.present
   if (!isComplete(bees)) return fail(`${bees.holes.length + bees.refused.length} bee(s) of ${path} could not be admitted`)
+
+  // THE BROOD (core/brood.ts). These bees just arrived from somebody else's
+  // root; they are verified and not yet imported. Whatever the participant's
+  // rules do not clear is held, and the loader will not read it until a hand
+  // — or enough vouches from communities they follow — says otherwise.
+  const pickedHeld = await holdArrivals(bees.held, pickedKind, {
+    zone: carried[0] ?? '',
+    packageSig: root,
+    how: `picked revision of ${path}`,
+  })
+  if (pickedHeld.length) {
+    console.warn(`[acquire] ${pickedHeld.length} bee(s) of ${path} held in the brood — accept them before they run`)
+  }
 
   // ITS NAMESPACE BUNDLES: every dependency the root lists whose alias falls
   // under the path — read where held, else fetched, verified, and kept only
