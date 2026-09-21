@@ -6342,14 +6342,17 @@ export class ChatWindowComponent implements OnDestroy {
         const offered = callableBehaviours(behaviourEntries).filter(entry => entry.machine && (entry.machine.reach ?? 'editing') !== 'destructive')
         if (!offered.length) return undefined
         // The page's tiles, names only, under the OpenRouter read grant (Jev
-        // mode already requires it). Its snapshot guards the run below.
+        // mode already requires it). The single-tile read, not the strict
+        // tree walk: one child this device cannot see must not blank the
+        // listing (the tree walk refused the root outright in the harness).
+        // Its snapshot guards the run below.
         let tiles: string[] = []
-        if (treeReader?.readTree) {
+        if (treeReader?.readNode) {
           try {
-            const listed = await treeReader.readTree(grammarContext.segments, { maxDepth: 1, maxNodes: 48, maxBytes: 8_000, signal })
+            const listed = await treeReader.readNode(grammarContext.segments, { maxBytes: 8_000, withContent: false, signal })
             if (listed.ok) {
-              tiles = listed.nodes.filter(node => node.depth === 1).map(node => node.name).filter(Boolean).slice(0, 48)
-              snapshotIds.push(listed.snapshot)
+              tiles = listed.children.map(child => child.name).filter(Boolean).slice(0, 48)
+              if (listed.snapshot) snapshotIds.push(listed.snapshot)
             }
           } catch (error) { if (signal?.aborted) throw error }
         }

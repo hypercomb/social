@@ -52,7 +52,8 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   const page = await context.newPage()
   page.on('pageerror', e => console.log('[pageerror]', String(e).slice(0, 200)))
 
-  const workerCalls = [], jevCalls = [], directCalls = [], verifyCalls = []
+  const workerCalls = [], jevCalls = [], directCalls = [], verifyCalls = [], fileCalls = []
+  let fileAnswer = 'here'
   let doLine = ''
   let scenario = 'main'
   const sse = text => {
@@ -66,6 +67,14 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   await page.route('https://openrouter.ai/**', route => {
     const url = route.request().url()
     const headers = { 'access-control-allow-origin': '*', 'content-type': 'application/json' }
+    if (url.includes('/api/alpha/decisions') && JSON.parse(route.request().postData() || '{}').questions?.where) {
+      const body = JSON.parse(route.request().postData() || '{}')
+      const criteria = body.questions.where.criteria ?? {}
+      fileCalls.push({ note: body.state?.note, tiles: body.state?.tiles })
+      const key = Object.entries(criteria).find(([, name]) => name === fileAnswer)?.[0] ?? 'here'
+      const answers = { where: { type: 'choice', choice: key, confidence: 0.92 } }
+      return route.fulfill({ status: 200, headers, body: JSON.stringify({ id: 'gen-dec-file', model: 'typesafe/jev-1.13-fake', answers, usage: { input_tokens: 120, output_tokens: 0, cost: 0.000005 } }) })
+    }
     if (url.includes('/api/alpha/decisions') && JSON.parse(route.request().postData() || '{}').questions?.supported) {
       const body = JSON.parse(route.request().postData() || '{}')
       verifyCalls.push({ scenario, answer: body.state?.answer, evidence: body.state?.evidence?.length })
@@ -338,8 +347,36 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
     !!outcomes && outcomes.some(o => o.startsWith('read:ran')) && outcomes.some(o => o.startsWith('do:ran')) && outcomes.some(o => o.startsWith('answer:answered'))
       && outcomes.some(o => o.startsWith('direct:ran:additive')) && outcomes.some(o => o.startsWith('direct:passed'))
       && outcomes.some(o => o.startsWith('verify:unverified')) && outcomes.some(o => o.startsWith('verify:verified'))
-      && outcomes.every(o => o.endsWith(':signed')),
+      && outcomes.filter(o => !o.startsWith('file:')).every(o => o.endsWith(':signed')),
     JSON.stringify(outcomes))
+
+  // ── THE FILE WORD: a note lands on the tile Jev picks, or waits ─────────
+  const fileRun = async (note, answer) => {
+    fileAnswer = answer
+    return page.evaluate(async text => {
+      let said = ''
+      const off = window.__hypercombEffectBus.on('toast:show', payload => { said = payload?.message ?? '' })
+      await window.ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone').executePublicCanonical('file', text)
+      await new Promise(r => setTimeout(r, 600))
+      off?.()
+      return said
+    }, note)
+  }
+  const filedToast = await fileRun('water the tomatoes', 'jev-proof-direct')
+  const filedNotes = await waitFor(() => page.evaluate(async () => {
+    const notes = await window.ioc.get('@diamondcoreprocessor.com/NotesService').getNotesAtSegments(['jev-proof-direct'])
+    return notes.some(n => JSON.stringify(n).includes('water the tomatoes')) ? notes.length : null
+  }), 8_000, 400)
+  check('file puts the note on the tile Jev picks from this page, the words kept exactly',
+    fileCalls.length === 1 && fileCalls[0].note === 'water the tomatoes' && fileCalls[0].tiles.includes('jev-proof-direct') && !!filedNotes && /Filed under jev-proof-direct/.test(filedToast),
+    JSON.stringify({ toast: filedToast, tiles: fileCalls[0]?.tiles, notes: filedNotes }))
+  const unsureToast = await fileRun('something vague', 'here')
+  check('when Jev keeps it here at the root, the word says so instead of guessing', /Not sure where this goes/.test(unsureToast), unsureToast)
+  const fileOutcomes = await waitFor(() => page.evaluate(() => {
+    const kinds = (window.ioc.get('@diamondcoreprocessor.com/JevOutcomes')?.records?.() ?? []).filter(r => r.plan === 'file').map(r => r.outcome)
+    return kinds.includes('ran') && kinds.includes('passed') ? kinds : null
+  }), 8_000, 400)
+  check('filing records what happened: placed, or left for the participant', !!fileOutcomes, JSON.stringify(fileOutcomes))
 
   // THE GOLDEN SET: every stored decision, decided again offline, the same way.
   const replay = await page.evaluate(() => new Promise(resolve => {

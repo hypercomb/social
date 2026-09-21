@@ -7,6 +7,7 @@ import { openRouterRouting, providerBlock } from './providers/openrouter-routing
 import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevResult, jevState, type JevInput, type JevResult } from './jev-decision.js'
 import { jevDirectInput, jevDirectQuestions, jevDirectResult, jevDirectState, type JevDirectInput, type JevDirectResult } from './jev-direct.js'
 import { jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyResult } from './jev-verify.js'
+import { jevFileInput, jevFileQuestions, jevFileResult, type JevFileResult } from './jev-file.js'
 
 /** A subset of material ALREADY sent to / received from the worker whose
  * table is being judged. Never fetches hive content, accepts signatures to
@@ -116,6 +117,24 @@ export class JevDecisionService {
     if (JSON.stringify(input).length > (llmHiveAccess.budget('openrouter') ?? 24_000) + 8_000) throw new Error('Jev verification exceeds the OpenRouter read budget')
     const result = await this.#post({ state: input, questions: jevVerifyQuestions() }, jevVerifyResult, signal)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
+    return result
+  }
+
+  /** For a word the participant says directly (no worker): Jev switched on,
+   *  and OpenRouter allowed to read the hive, because hive names travel. */
+  readyForHive(): boolean {
+    return this.enabled() && llmHiveAccess.mayRead('openrouter')
+  }
+
+  /** JEV FILES A NOTE (jev-file.ts): which tile on this page does the
+   *  participant's note belong under? Only their words and the page's tile
+   *  names travel; the answer only chooses where to write. */
+  async place(raw: unknown, signal?: AbortSignal): Promise<JevFileResult> {
+    signal?.throwIfAborted()
+    if (!this.readyForHive()) throw new Error('Filing needs Jev switched on and OpenRouter allowed to read the hive')
+    const input = jevFileInput(raw)
+    const result = await this.#post({ state: input, questions: jevFileQuestions(input) }, body => jevFileResult(body, input), signal)
+    if (!this.readyForHive()) throw new Error('OpenRouter access changed during the decision')
     return result
   }
 

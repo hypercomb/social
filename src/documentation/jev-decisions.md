@@ -213,6 +213,23 @@ change with nothing read since is not checked, because there is nothing to
 check it against. Each check records `verify:verified` or
 `verify:unverified` in `jev:outcomes`.
 
+## 5c. The `file` word
+
+Built 2026-09-21 (`jev-creative-plan.md` §4). `file <text>` puts the note on
+the tile on the current page it belongs to: one Jev choice (`where`, over the
+page's tile names plus `here`, ≥ .70; `assistant/jev-file.ts`) chooses the
+place, and the participant's words are written exactly, never rewritten.
+Unsure, the note stays in the tile the participant is standing in; at the
+root, where there is no such tile, the word says so instead of guessing. It
+needs Jev switched on and OpenRouter allowed to read the hive, because the
+tile names travel. It is a census behaviour with a machine block, so workers
+and the direct path can offer it too.
+
+Both the direct path and `file` list the page with the single-tile read
+(`readNode`), not the strict tree walk: one child this device cannot resolve
+made the walk refuse the whole root, which left the direct path with no
+tiles to choose from until this was found.
+
 ## 6. The whole provider suite
 
 Jev serves EVERY worker — a local model, a direct vendor key, an OpenRouter

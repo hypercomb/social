@@ -164,6 +164,10 @@ table.
 Each is ONE behaviour with a `machine` block, so it enters the census and the
 possibility table for free.
 
+**`file` LANDED 2026-09-21** as a typed word (`assistant/file.queen.ts`,
+`jev-file.ts`); harness 34/34. The drop gesture, the `interest` matcher and
+keep-or-drop compaction remain; the last two wait on jwize's grant decisions.
+
 - **`file` (or the drop gesture):** a dropped note/file/link is placed under
   the tile Jev picks — `where` choice over the current layer's children +
   `here`, `kind` choice (note, picture, link, task), confidence shown. Below
