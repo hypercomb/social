@@ -19,6 +19,12 @@ export interface JevSource {
   readonly messages: readonly { readonly content: string }[]
 }
 
+/** A refusal at the source boundary or the budget: Jev is there, but this
+ *  packet may not go to it, so the chat asks the participant. Any other
+ *  failure means Jev is not there, and the regular model carries on
+ *  (documentation/jev-decisions.md §5d). */
+const boundary = (message: string): Error => Object.assign(new Error(message), { name: 'JevBoundaryError' })
+
 /** THE SOURCE BOUNDARY. Every field must already exist in the worker's system
  * text or conversation; nothing new reaches Jev. Compared as the worker could
  * have written it: verbatim, JSON-escaped (a table is JSON in an assistant
@@ -84,8 +90,8 @@ export class JevDecisionService {
     if (!this.ready(source.providerId)) throw new Error('Jev requires an enabled worker and the OpenRouter hive read grant')
     const input = jevInput(raw)
     const missing = jevUnseen(input, source)
-    if (missing) throw new Error(`Jev may only judge what this worker already saw, and it could not find ${missing} as written`)
-    if (JSON.stringify(jevState(input)).length > (llmHiveAccess.budget('openrouter') ?? 24_000)) throw new Error('Jev context exceeds the OpenRouter read budget')
+    if (missing) throw boundary(`Jev may only judge what this worker already saw, and it could not find ${missing} as written`)
+    if (JSON.stringify(jevState(input)).length > (llmHiveAccess.budget('openrouter') ?? 24_000)) throw boundary('Jev context exceeds the OpenRouter read budget')
     const result = await this.#request(input, signal)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
     return result
@@ -100,8 +106,10 @@ export class JevDecisionService {
     const input = jevFrontInput(raw)
     const missing = input.direct ? jevDirectUnseen(input.direct, source)
       : source.messages.some(message => message.content.includes(input.request)) ? null : 'the request'
-    if (missing) throw new Error(`Jev may only judge what the participant said and the hive listed, and it could not find ${missing} as written`)
-    const result = await this.#post({ state: jevFrontState(input), questions: jevFrontQuestions(input) }, body => jevFrontResult(body, input), signal)
+    if (missing) throw boundary(`Jev may only judge what the participant said and the hive listed, and it could not find ${missing} as written`)
+    // The whole turn waits on the door, and Jev answers in well under a
+    // second; past JEV_FRONT_TIMEOUT_MS the turn goes on without it.
+    const result = await this.#post({ state: jevFrontState(input), questions: jevFrontQuestions(input) }, body => jevFrontResult(body, input), signal, JEV_FRONT_TIMEOUT_MS)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
     return result
   }
@@ -116,8 +124,8 @@ export class JevDecisionService {
     const seen = (part: string): boolean => source.messages.some(message => message.content.includes(part))
     const missing = !seen(input.request) ? 'the request' : !seen(input.answer) ? 'the answer'
       : input.evidence.findIndex(part => !seen(part)) >= 0 ? `evidence ${input.evidence.findIndex(part => !seen(part)) + 1}` : null
-    if (missing) throw new Error(`Jev may only judge what this worker already saw, and it could not find ${missing} as written`)
-    if (JSON.stringify(input).length > (llmHiveAccess.budget('openrouter') ?? 24_000) + 8_000) throw new Error('Jev verification exceeds the OpenRouter read budget')
+    if (missing) throw boundary(`Jev may only judge what this worker already saw, and it could not find ${missing} as written`)
+    if (JSON.stringify(input).length > (llmHiveAccess.budget('openrouter') ?? 24_000) + 8_000) throw boundary('Jev verification exceeds the OpenRouter read budget')
     const result = await this.#post({ state: input, questions: jevVerifyQuestions() }, jevVerifyResult, signal)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
     return result
@@ -157,7 +165,7 @@ export class JevDecisionService {
     return this.#post({ state: jevState(input), questions: jevQuestions(input) }, body => jevResult(body, input), signal)
   }
 
-  async #post<T>(packet: { state: unknown; questions: unknown }, parse: (body: unknown) => T, signal?: AbortSignal): Promise<T> {
+  async #post<T>(packet: { state: unknown; questions: unknown }, parse: (body: unknown) => T, signal?: AbortSignal, timeoutMs = 20_000): Promise<T> {
     signal?.throwIfAborted()
     if (!this.enabled()) throw new Error('Add and enable Jev Latest with an OpenRouter key first')
     const key = llmKeyStore.get('openrouter')
@@ -165,7 +173,7 @@ export class JevDecisionService {
     const controller = new AbortController()
     const cancel = (): void => controller.abort(signal?.reason)
     signal?.addEventListener('abort', cancel, { once: true })
-    const timer = setTimeout(() => controller.abort(new Error('Jev decision timed out')), 20_000)
+    const timer = setTimeout(() => controller.abort(new Error('Jev decision timed out')), timeoutMs)
     try {
       const response = await fetch(JEV_ENDPOINT, {
         method: 'POST',
@@ -191,6 +199,9 @@ export class JevDecisionService {
     }
   }
 }
+
+/** How long a turn waits at the front door before running without Jev. */
+export const JEV_FRONT_TIMEOUT_MS = 5_000
 
 // No completed-result cache across turns: a rolling model alias can change.
 export const jevDecision = new JevDecisionService()

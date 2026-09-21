@@ -348,6 +348,16 @@ export const doFailedMessage = (ran: readonly string[], stoppedAt: string, reaso
 export const blockRefusedMessage = (kind: WorkKind, reason: string, request: string): string =>
   `Your ${kind === 'read' ? READ_FENCE_LANG : kind === 'table' ? TABLE_FENCE_LANG : DO_FENCE_LANG} block was not used: ${reason}. Send a corrected block, or answer.${carry(request)}`
 
+/** JEV WENT AWAY MID-TURN: unreachable, timed out, or no longer allowed.
+ *  Carries what the worker is told as it takes the rest of the turn itself,
+ *  exactly as with Jev off (documentation/jev-decisions.md §5d). */
+export class JevGone extends Error {
+  constructor(reason: string) {
+    super(`Jev is not available for the rest of this turn (${reason}), so choose the next step yourself: one ${READ_FENCE_LANG} or ${DO_FENCE_LANG} block, or answer in prose. Send no ${TABLE_FENCE_LANG} block.`)
+    this.name = 'JevGone'
+  }
+}
+
 export const HELD_DO_NOTE = `Your ${DO_FENCE_LANG} block was not run: the same reply also asked to read. Read first; propose changes in a later reply.`
 
 export const lastRoundMessage = (request: string): string =>

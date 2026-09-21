@@ -54,6 +54,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
 
   const workerCalls = [], jevCalls = [], directCalls = [], verifyCalls = [], fileCalls = []
   let fileAnswer = 'here'
+  let downCalls = 0
   let doLine = ''
   let scenario = 'main'
   const sse = text => {
@@ -67,6 +68,11 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   await page.route('https://openrouter.ai/**', route => {
     const url = route.request().url()
     const headers = { 'access-control-allow-origin': '*', 'content-type': 'application/json' }
+    // JEV IS DOWN: every decision call fails, as an outage would.
+    if (url.includes('/api/alpha/decisions') && scenario === 'down') {
+      downCalls++
+      return route.fulfill({ status: 503, headers, body: JSON.stringify({ error: { message: 'Jev is unavailable' } }) })
+    }
     if (url.includes('/api/alpha/decisions') && JSON.parse(route.request().postData() || '{}').questions?.where) {
       const body = JSON.parse(route.request().postData() || '{}')
       const criteria = body.questions.where.criteria ?? {}
@@ -100,6 +106,11 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
       }
       return route.fulfill({ status: 200, headers, body: JSON.stringify({ id: 'gen-dec-direct', model: 'typesafe/jev-1.13-fake', answers, usage: { input_tokens: 350, output_tokens: 0, cost: 0.00001 } }) })
     }
+    // JEV GOES AWAY MID-TURN: the front door answered, the table decision fails.
+    if (url.includes('/api/alpha/decisions') && scenario === 'midway') {
+      downCalls++
+      return route.fulfill({ status: 503, headers, body: JSON.stringify({ error: { message: 'Jev is unavailable' } }) })
+    }
     if (url.includes('/api/alpha/decisions')) {
       const body = JSON.parse(route.request().postData() || '{}')
       const rows = body.state?.rows ?? []
@@ -127,9 +138,16 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
       const last = String(messages[messages.length - 1]?.content ?? '')
       const system = JSON.stringify(body)
       // With Jev stepped aside the worker is asked as ordinary chat.
-      if (scenario === 'aside' && body.stream && /haiku/.test(last)) {
+      if (['aside', 'down', 'off'].includes(scenario) && body.stream && /haiku/.test(last)) {
         workerCalls.push({ system, last, model: body.model, stream: true, scenario })
-        return route.fulfill({ status: 200, headers: { ...headers, 'content-type': 'text/event-stream' }, body: sse('ASIDE ANSWER: rain taps the tiles; the hive hums on.') })
+        return route.fulfill({ status: 200, headers: { ...headers, 'content-type': 'text/event-stream' }, body: sse(`${scenario.toUpperCase()} ANSWER: rain taps the tiles; the hive hums on.`) })
+      }
+      if (scenario === 'midway' && body.stream) {
+        workerCalls.push({ system, last, model: body.model, stream: true, scenario })
+        const text = /JEV RUNS THE SHOW/.test(system)
+          ? table([{ id: 'a', kind: 'read', label: 'See what is here', line: 'list here' }, { id: 'c', kind: 'answer', label: 'Answer now' }])
+          : 'MIDWAY ANSWER: carried on without Jev.'
+        return route.fulfill({ status: 200, headers: { ...headers, 'content-type': 'text/event-stream' }, body: sse(text) })
       }
       // Other callers (the route-flow organizer) share the model; they get an empty organizer answer, not a table.
       if (!/JEV RUNS THE SHOW/.test(system)) return route.fulfill({ status: 200, headers, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: '{"nodes":[]}' } }] }) })
@@ -375,6 +393,40 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
     (asideText ?? '').slice(-160))
   const tiers = await page.evaluate(() => window.__routeTiers)
   check('the weight Jev read routes the worker, over the word list', tiers.length === 1 && tiers[0] === 'deep', JSON.stringify(tiers))
+
+  // ── WITHOUT JEV the regular model answers: Jev down, then Jev switched off
+  for (const which of ['down', 'off']) {
+    scenario = which
+    if (which === 'off') await page.evaluate(JEV => window.ioc.get('@diamondcoreprocessor.com/LlmActivationStore').setEnabled(`openrouter:${JEV}`, false), JEV)
+    const decisionsBefore = jevCalls.length + directCalls.length + verifyCalls.length, downBefore = downCalls
+    const startedAt = Date.now()
+    const convo = await newConvo([['assistant', 'Ready.']])
+    await openAndSend(convo, 'Tell me a haiku about rain.')
+    const said = await storedAnswer(convo, `${which.toUpperCase()} ANSWER`)
+    const asked = workerCalls.filter(c => c.scenario === which)
+    const plain = asked.length === 1 && asked[0].stream && !/JEV RUNS THE SHOW/.test(asked[0].system) && !!said && !/Tokens —/.test(said)
+    if (which === 'down') {
+      check('when Jev does not answer, the regular model answers the turn as ordinary chat, streaming',
+        plain && downCalls - downBefore === 1 && Date.now() - startedAt < 30_000,
+        JSON.stringify({ decisionCalls: downCalls - downBefore, workers: asked.length, ms: Date.now() - startedAt, said: (said ?? '').slice(0, 80) }))
+    } else {
+      check('with Jev switched off, no decision is asked and the regular model answers',
+        plain && jevCalls.length + directCalls.length + verifyCalls.length === decisionsBefore,
+        JSON.stringify({ workers: asked.length, said: (said ?? '').slice(0, 80) }))
+      await page.evaluate(JEV => window.ioc.get('@diamondcoreprocessor.com/LlmActivationStore').setEnabled(`openrouter:${JEV}`, true), JEV)
+    }
+  }
+  scenario = 'midway'
+  const midwayDownBefore = downCalls
+  const midwayConvo = await newConvo([['assistant', 'Ready.']])
+  await openAndSend(midwayConvo, 'What is on this page?')
+  const midwayText = await storedAnswer(midwayConvo, 'MIDWAY ANSWER')
+  const midway = workerCalls.filter(c => c.scenario === 'midway')
+  check('when Jev goes away mid-turn, the regular model is told and carries the turn on without it',
+    !!midwayText && downCalls - midwayDownBefore === 1 && midway.length === 2
+      && /JEV RUNS THE SHOW/.test(midway[0].system) && !/JEV RUNS THE SHOW/.test(midway[1].system)
+      && /Jev is not available for the rest of this turn/.test(midway[1].last) && !/hypercomb-question/.test(midwayText),
+    JSON.stringify({ decisionCalls: downCalls - midwayDownBefore, rounds: midway.length, told: (midway[1]?.last ?? '').slice(0, 120), said: (midwayText ?? '').slice(-100) }))
 
   // WHAT HAPPENED AFTER JEV DECIDED is recorded, one outcome per decided round.
   const outcomes = await waitFor(() => page.evaluate(() => {

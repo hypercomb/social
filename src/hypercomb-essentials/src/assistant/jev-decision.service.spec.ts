@@ -6,7 +6,7 @@ vi.mock('./llm-model-choice.js', () => ({ llmModelChoice: { saved: () => state.s
 vi.mock('./llm-hive-access.js', () => ({ llmHiveAccess: { mayRead: () => state.granted, budget: () => 24_000 } }))
 vi.mock('./llm-provider-registry.js', () => ({ publishService: () => {}, llmProviderRegistry: () => ({ get: (id: string) => ({ id, decisionOnly: id === 'jev' }) }) }))
 vi.mock('./providers/openrouter-routing.js', () => ({ openRouterRouting: { get: () => ({}) }, providerBlock: () => ({ data_collection: 'deny' }) }))
-const { JevDecisionService } = await import('./jev-decision.service.js')
+const { JevDecisionService, JEV_FRONT_TIMEOUT_MS } = await import('./jev-decision.service.js')
 const input = { request: 'Organize notes', doctrine: 'Preserve history.', evidence: 'These notes exist.', rows: [{ id: 'a', kind: 'do', label: 'Group', lines: ['/group notes'] }] }
 const source = { providerId: 'worker', system: input.doctrine, messages: [{ content: input.request }, { content: input.evidence }, { content: JSON.stringify({ rows: input.rows }) }] }
 const body = { model: 'resolved-jev', answers: { a_toward: { type: 'noul', noul: 1 }, a_beyond: { type: 'noul', noul: 0 }, a_grounded: { type: 'noul', noul: 1 }, a_rule0: { type: 'noul', noul: 0 }, next: { type: 'choice', choice: 'a', confidence: 0.99, probabilities: { a: 0.99, none: 0.01 } } } }
@@ -56,6 +56,7 @@ describe('Jev OpenRouter boundary', () => {
     expect((await new JevDecisionService().evaluate(slashed, bareSource)).plan.kind).toBe('do')
     await expect(new JevDecisionService().evaluate({ ...input, rows: [{ ...input.rows[0], label: 'Never said' }] }, source)).rejects.toThrow('the label of row a')
     await expect(new JevDecisionService().evaluate({ ...input, evidence: 'Unshared secret' }, source)).rejects.toThrow('evidence 1')
+    await expect(new JevDecisionService().evaluate({ ...input, evidence: 'Unshared secret' }, source)).rejects.toMatchObject({ name: 'JevBoundaryError' })
   })
   it('keeps the hive reach out of the request body', async () => {
     await new JevDecisionService().evaluate({ ...input, rows: [{ ...input.rows[0], reach: 'additive' }] }, source)
@@ -91,6 +92,14 @@ describe('Jev OpenRouter boundary', () => {
     await expect(service.evaluate({ ...input, rows: [{ ...input.rows[0], lines: ['/remove notes'] }] }, source)).rejects.toThrow()
     expect(fetchMock).not.toHaveBeenCalled()
     expect((await service.evaluate(input, { ...source, providerId: 'local' })).plan.kind).toBe('do')
+  })
+  it('gives up at the front door within a few seconds, so the turn can go on without Jev', async () => {
+    vi.useFakeTimers()
+    fetchMock.mockImplementation((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))))
+    const settled = expect(new JevDecisionService().front({ request: 'hello' }, { providerId: 'worker', system: '', messages: [{ content: 'hello' }] })).rejects.toThrow('timed out')
+    await vi.advanceTimersByTimeAsync(JEV_FRONT_TIMEOUT_MS)
+    await settled
+    expect(JEV_FRONT_TIMEOUT_MS).toBeLessThanOrEqual(5_000)
   })
   it('requires both the read grant and activation, even with a key', async () => {
     state.granted = false

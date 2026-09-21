@@ -266,6 +266,16 @@ tables judged by Jev, answers checked. The door records `front:ran`,
 (§9), and its receipt is a `jev-front` resource. Where nothing can change,
 the door still asks `hive` and `weight`, with the request alone.
 
+**Without Jev, the regular model answers.** Jev switched off, no OpenRouter
+key or no read grant: no decision is asked, and every turn is ordinary chat
+routed by the word list. Jev on but not answering at the door (an error, a
+malformed reply, or nothing within `JEV_FRONT_TIMEOUT_MS`, 5 s): the turn
+steps aside as above. Jev failing later in the turn: the worker is told Jev
+is gone (`JevGone`) and takes the next step itself with a read or do block,
+or answers, for the rest of the turn. None of this retries Jev (§7). Only a
+source-boundary or budget refusal (`JevBoundaryError`: Jev is there, but the
+packet may not go to it) still asks the participant.
+
 ## 6. The whole provider suite
 
 Jev serves EVERY worker — a local model, a direct vendor key, an OpenRouter

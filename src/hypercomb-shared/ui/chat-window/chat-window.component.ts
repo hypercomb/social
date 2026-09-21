@@ -145,6 +145,7 @@ import { executionLineParts } from './execution-line'
 import {
   blockRefusedMessage,
   doFailedMessage,
+  JevGone,
   doRanMessage,
   doSkippedMessage,
   HELD_DO_NOTE,
@@ -6173,7 +6174,15 @@ export class ChatWindowComponent implements OnDestroy {
           result = await jev.evaluate(input, { providerId, system, messages }, signal)
         } catch (error) {
           if (signal?.aborted) throw error
-          result = participant(error instanceof Error ? error.message : 'Jev could not evaluate this direction.')
+          // A boundary or budget refusal is the participant's to settle. Any
+          // other failure means Jev is not there: the regular model takes the
+          // rest of the turn itself, exactly as with Jev off.
+          if (!(error instanceof Error && error.name === 'JevBoundaryError')) {
+            jevTurn = false
+            system = systemFor(continuationModel, component.designated()?.label, pinned)
+            throw new JevGone(error instanceof Error ? error.message : 'no answer')
+          }
+          result = participant(error.message)
         }
         stillHere()
         if (snapshotIds.length && treeReader && !await treeReader.validateSnapshots(snapshotIds, signal)) {
@@ -6346,8 +6355,13 @@ export class ChatWindowComponent implements OnDestroy {
       type Door = { readonly answer?: string; readonly aside: boolean; readonly weight?: MessageEffort; readonly carry: boolean }
       const frontDoor = async (): Promise<Door> => {
         const stay: Door = { aside: false, carry: false }
+        // JEV IS NOT THERE — not ready for this worker, or no answer in time:
+        // the turn runs on the regular model exactly as with Jev off, rather
+        // than leaving the participant to pick what Jev would have picked.
+        const without: Door = { aside: true, carry: false }
         const providerId = pinned ?? router.designatedProviderId?.(need) ?? ''
-        if (!jev?.front || !jev.ready(providerId)) return stay
+        if (!jev?.front) return stay
+        if (!jev.ready(providerId)) return without
         // The direct path is offered only where the hive can change.
         const offered = canChange
           ? callableBehaviours(behaviourEntries).filter(entry => entry.machine && (entry.machine.reach ?? 'editing') !== 'destructive')
@@ -6381,8 +6395,8 @@ export class ChatWindowComponent implements OnDestroy {
           }, { providerId, system: vocabulary, messages: [{ content: message }, { content: tiles.join('\n') }] }, signal)
         } catch (error) {
           if (signal?.aborted) throw error
-          console.warn('[chat] the front door could not decide:', error)
-          return stay
+          console.warn('[chat] Jev did not answer at the front door; this turn runs on the regular model:', error)
+          return without
         }
         decisionCalls++
         settledAttempts.push({ round: 0, attempt: decisionCalls, providerId: 'openrouter', model: decision.model || JEV_MODEL,
@@ -6713,15 +6727,16 @@ export class ChatWindowComponent implements OnDestroy {
         } catch (error) {
           // Stop belongs to the participant: never turn it into a message.
           if (signal?.aborted) throw error
-          if (!isWorkRefusal(error)) {
+          if (!isWorkRefusal(error) && !(error instanceof JevGone)) {
             const detail = error instanceof Error ? error.message : 'the work could not continue'
             wrote = true
             yield `\n\nHypercomb stopped the work: ${detail}.`
             return ''
           }
           // A refusal goes back to the model in the gate's own words, so it
-          // can correct the block rather than guess.
-          reply = blockRefusedMessage(work.request.kind, (error as Error).message, message)
+          // can correct the block rather than guess. Jev gone says so, and
+          // the model carries on without it.
+          reply = error instanceof JevGone ? error.message : blockRefusedMessage(work.request.kind, (error as Error).message, message)
         }
         if (work.heldDo) reply = `${HELD_DO_NOTE}\n\n${reply}`
         if (rounds >= MAX_WORK_ROUNDS - 1) {
