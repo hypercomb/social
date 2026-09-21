@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   doFailedMessage,
   identityInstruction,
+  parseWriteBlock,
   splitWork,
   transcriptForModel,
   workInstruction,
@@ -26,6 +27,20 @@ describe('the work fence', () => {
     const split = splitWork('```hypercomb-read\nread here\n```\n```hypercomb-do\ntitle x = y\n```')
     expect(split.request?.kind).toBe('read')
     expect(split.heldDo).toBe(true)
+  })
+
+  it('takes a write block whole, as code, and reads its header', () => {
+    const sig = 'a'.repeat(64)
+    const split = splitWork(`Here is the section.\n\n\`\`\`hypercomb-write\n${sig} src/games/solomon/labyrinth.ts\nvar rooms = "fresh";\n  // indented\n\`\`\``)
+    expect(split.prose).toBe('Here is the section.')
+    expect(split.request).toEqual({ kind: 'write', lines: [`${sig} src/games/solomon/labyrinth.ts`, 'var rooms = "fresh";', '  // indented'] })
+    expect(parseWriteBlock(split.request!.lines)).toEqual({ beeSig: sig, section: 'src/games/solomon/labyrinth.ts', body: 'var rooms = "fresh";\n  // indented' })
+    // A read in the same reply wins and the write is held; an unclosed write is not code to run.
+    expect(splitWork(`\`\`\`hypercomb-read\nread here\n\`\`\`\n\`\`\`hypercomb-write\n${sig} src/a.ts\nx\n\`\`\``)).toMatchObject({ request: { kind: 'read' }, heldDo: true })
+    expect(splitWork(`\`\`\`hypercomb-write\n${sig} src/a.ts\nx`).request).toEqual({ kind: 'write', lines: [] })
+    expect(parseWriteBlock([])).toHaveProperty('error')
+    expect(parseWriteBlock(['not a header', 'x'])).toHaveProperty('error')
+    expect(parseWriteBlock([`${sig} src/a.ts`])).toHaveProperty('error')
   })
 
   it('leaves an ordinary code block alone', () => {

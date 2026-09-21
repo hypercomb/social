@@ -199,6 +199,32 @@ describe('opening what a signature names', () => {
     ])
     expect(parseHypercombObservationGrammars(['/code'], ['here']).observations[0]).toEqual({ grammar: '/code', verb: 'code', segments: [] })
     expect(() => parseHypercombObservationGrammars([`/list ${target} 10`], [])).toThrow()
+    // One source section of a module, with or without a place to continue from.
+    expect(parseHypercombObservationGrammars([`/read ${target} src/games/solomon/labyrinth.ts`, `/read ${target} src/a.ts 400`], []).observations).toEqual([
+      { grammar: `/read ${target} src/games/solomon/labyrinth.ts`, verb: 'read', segments: [], sig: target, section: 'src/games/solomon/labyrinth.ts' },
+      { grammar: `/read ${target} src/a.ts 400`, verb: 'read', segments: [], sig: target, section: 'src/a.ts', from: 400 },
+    ])
+    expect(() => parseHypercombObservationGrammars([`/list ${target} src/a.ts`], [])).toThrow()
+  })
+
+  it('opens one section of a module and passes the section index through', async () => {
+    const reader: HypercombTreeReader = {
+      readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+      validateSnapshots: vi.fn(async () => true),
+      readBytesBySig: vi.fn(async (sig, { from, section }) => ({
+        ok: true as const, root: sig, sig, of: 'bee' as const, type: 'text/javascript', size: 90, from,
+        text: section ? '// src/a.ts\nvar a = 1;\n' : '// src/a.ts', truncated: false,
+        ...(section ? { section } : { sections: [{ path: 'src/a.ts', lines: 2 }, { path: 'src/b.ts', lines: 3 }] }),
+      })),
+    }
+    const receipt = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars([`/read ${target} src/a.ts`], []), reader))
+    expect(reader.readBytesBySig).toHaveBeenCalledWith(target, expect.objectContaining({ from: 0, section: 'src/a.ts' }))
+    expect(receipt).toContain('"section":"src/a.ts"')
+    expect(receipt).toContain('var a = 1;')
+    const index = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars([`/read ${target} 1`], []), reader))
+    expect(index).toContain('"sections":[{"path":"src/a.ts","lines":2},{"path":"src/b.ts","lines":3}]')
   })
 
   it('opens a module when the signature is not a layer, pages through it, and lists code by name', async () => {

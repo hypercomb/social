@@ -109,6 +109,12 @@ import {
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
+// THE SOURCE LIVES IN THE HIVE: a model writes a module section back and the
+// hive runs it here as a draft (documentation/hive-read-fence.md, "Writing a
+// module"; runtime module-drafts.ts).
+import { draftModule } from '@hypercomb/runtime/module-drafts'
+import { installedPackageSig } from '@hypercomb/runtime/installed-package'
+import { parseWriteBlock, writeFailedMessage, writeRanMessage, writeSkippedMessage } from './hypercomb-work-fence'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
@@ -5972,6 +5978,9 @@ export class ChatWindowComponent implements OnDestroy {
     // an essentials build without the queue leaves the model answer-only.
     const canChange = !!queue && !!slash?.executePublicCanonical && callableBehaviours(behaviourEntries).length > 0
     const canRead = !!queue && !!treeReader?.readTree && !!treeReader?.validateSnapshots
+    // WRITING CODE needs an installed package to draft onto — the dev shell
+    // imports modules directly and has none — and the same door changes take.
+    const canWrite = canChange && canRead && !!installedPackageSig()
     const namedProvider = namedModel ? router?.providerIdForModel?.(namedModel) : undefined
     const localEndpoint = router?.providerMachineEndpoint?.('local')
     const localReadyAndTrusted = router?.providerIsMachineLocal?.('local') === true
@@ -6069,6 +6078,7 @@ export class ChatWindowComponent implements OnDestroy {
         readsPerBlock: MAX_OBSERVATIONS,
         canChange,
         vocabulary,
+        canWrite,
       }),
       !(canRead || canChange)
         ? ''
@@ -6519,6 +6529,38 @@ export class ChatWindowComponent implements OnDestroy {
         }
       }
 
+      // A MODULE SECTION WRITTEN BACK (hypercomb-write). The block waits in
+      // Execution as an edit — the participant's policy or hand decides —
+      // then the hive drafts the module and picks it over the installed
+      // package. The running code changes on reload, and the model is told so.
+      const runWrite = async (lines: readonly string[], providerId: string, model: string): Promise<string> => {
+        if (!canWrite || !queue) throw new WorkRefused('writing code is not available here: nothing is installed to draft onto')
+        const parsed = parseWriteBlock(lines)
+        if ('error' in parsed) throw new WorkRefused(parsed.error)
+        const grammar = `write ${parsed.beeSig.slice(0, 12)}… ${parsed.section}`
+        const entry = queue.request({
+          convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal,
+        })
+        waitingOn(entry.id)
+        if (await entry.decision === 'skip') {
+          if (signal?.aborted) throw stopped()
+          lastRun = 'skipped'
+          return writeSkippedMessage(parsed.section, message)
+        }
+        stillHere()
+        const outcome = await draftModule(parsed)
+        if (!outcome.ok) {
+          queue.settle(entry.id, 'failed', outcome.error)
+          lastRun = 'failed'
+          return writeFailedMessage(outcome.error, message)
+        }
+        ran.push(grammar)
+        queue.settle(entry.id, 'ran')
+        lastRun = 'ran'
+        EffectBus.emit('toast:show', { type: 'success', message: `Draft of ${parsed.section} applied — reload to run it` })
+        return writeRanMessage({ section: parsed.section, beeSig: outcome.beeSig, path: outcome.path }, message)
+      }
+
       // THE PARTICIPANT SPEAKS THE HIVE'S LANGUAGE. A table question offers
       // behaviour sentences; when the message IS one of the sentences the
       // previous turn offered, it runs as that behaviour through Execution,
@@ -6734,7 +6776,9 @@ export class ChatWindowComponent implements OnDestroy {
           } else {
             reply = work.request.kind === 'read'
               ? await runRead(work.request.lines, pinned, roundModel)
-              : await runDo(work.request.lines, pinned, roundModel)
+              : work.request.kind === 'write'
+                ? await runWrite(work.request.lines, pinned, roundModel)
+                : await runDo(work.request.lines, pinned, roundModel)
           }
         } catch (error) {
           // Stop belongs to the participant: never turn it into a message.

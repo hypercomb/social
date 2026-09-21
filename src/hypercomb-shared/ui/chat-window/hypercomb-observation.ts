@@ -52,6 +52,9 @@ export type HypercombObservation = {
   readonly query?: string
   /** `/read <sig> <from>`: where to continue a long resource or module. */
   readonly from?: number
+  /** `/read <sig> src/path.ts`: one source section of a module (core
+   *  module-sections.ts) instead of the whole bundle. */
+  readonly section?: string
 }
 
 /** `/read <sig>` on anything that is not a layer: the module, dependency or
@@ -70,6 +73,11 @@ export type HypercombBytesRead =
     readonly truncated: boolean
     /** Where `/read <sig> <next>` continues, when there is more. */
     readonly next?: number
+    /** The source section this page is of, when one was asked for. */
+    readonly section?: string
+    /** A module's source sections by path — what `/read <sig> <path>` can
+     *  open and a `hypercomb-write` block can replace. On the first page only. */
+    readonly sections?: readonly { readonly path: string; readonly lines: number }[]
   }
   | { readonly ok: false; readonly root: string; readonly code: string }
 
@@ -213,6 +221,7 @@ export type HypercombTreeReader = {
   readBytesBySig?(sig: string, options: {
     readonly from: number
     readonly maxBytes: number
+    readonly section?: string
     readonly signal?: AbortSignal
   }): Promise<HypercombBytesRead>
   /** `/code` and `/code <word>` — the running code by name. */
@@ -269,13 +278,17 @@ const parseObservation = (
   // or summary (the summary is keyed by the sig, but asked for via the route).
   // `/read <sig> <from>` continues a long resource or module where the last
   // page stopped.
-  const bySig = /^\/(read|list)\s+([0-9a-f]{64})(?:\s+(\d{1,9}))?$/.exec(grammar)
+  // `/read <sig> src/path.ts [from]` opens one source section of a module.
+  const bySig = /^\/(read|list)\s+([0-9a-f]{64})(?:\s+(src\/[A-Za-z0-9_.@/-]{1,200}))?(?:\s+(\d{1,9}))?$/.exec(grammar)
   if (bySig) {
-    if (bySig[3] !== undefined && bySig[1] !== 'read') {
-      throw new HypercombObservationError('only /read <sig> takes a place to continue from')
+    if ((bySig[3] !== undefined || bySig[4] !== undefined) && bySig[1] !== 'read') {
+      throw new HypercombObservationError('only /read <sig> takes a section or a place to continue from')
     }
-    const from = bySig[3] === undefined ? 0 : Number(bySig[3])
-    return { grammar, verb: bySig[1] as HypercombObservationVerb, segments: [], sig: bySig[2], ...(from > 0 ? { from } : {}) }
+    const from = bySig[4] === undefined ? 0 : Number(bySig[4])
+    return {
+      grammar, verb: bySig[1] as HypercombObservationVerb, segments: [], sig: bySig[2],
+      ...(bySig[3] ? { section: bySig[3] } : {}), ...(from > 0 ? { from } : {}),
+    }
   }
   // /find <word>: names under the current page.
   const find = /^\/find\s+(\S.*)$/.exec(grammar)
@@ -392,21 +405,23 @@ export const executeHypercombObservationPlan = async (
     if (options.signal?.aborted) {
       throw new DOMException('The Hypercomb tree read was stopped', 'AbortError')
     }
-    const { grammar, verb, segments, sig, query, from } = observation
+    const { grammar, verb, segments, sig, query, from, section } = observation
     const root = verb === 'code' ? 'code' : sig ? sig : segments.length ? `/${segments.join('/')}` : '/'
     // OPEN WHAT A SIGNATURE NAMES (Jaime, 2026-09-13: "open and review every
     // resource and including the code"): a sig that is no layer is a module,
     // a dependency or a resource, and its bytes come back a page at a time.
     const openBytes = async (start: number): Promise<HypercombBytesRead> => {
       if (!reader.readBytesBySig) throw new HypercombObservationError('this hive cannot open resources or code by signature')
-      return safeBytes(await reader.readBytesBySig(sig!, { from: start, maxBytes, signal: options.signal }), root, maxBytes)
+      return safeBytes(await reader.readBytesBySig(sig!, {
+        from: start, maxBytes, ...(section ? { section } : {}), signal: options.signal,
+      }), root, maxBytes)
     }
     if (verb === 'code') {
       if (!reader.listCode) throw new HypercombObservationError('this hive cannot list its code')
       const read = safeCode(await reader.listCode(query ?? '', { maxEntries: CODE_ENTRIES, signal: options.signal }), root, CODE_ENTRIES)
       results.push({ grammar, kind: 'code', read })
-    } else if (sig && verb === 'read' && (from ?? 0) > 0) {
-      results.push({ grammar, kind: 'bytes', read: await openBytes(from!) })
+    } else if (sig && verb === 'read' && ((from ?? 0) > 0 || section)) {
+      results.push({ grammar, kind: 'bytes', read: await openBytes(from ?? 0) })
     } else if (sig) {
       if (!reader.readNodeBySig) throw new HypercombObservationError(`this hive cannot answer /${verb} by signature`)
       const read = safeNode(await reader.readNodeBySig(sig, {
@@ -488,7 +503,11 @@ const safeBytes = (read: HypercombBytesRead, expectedRoot: string, maxBytes: num
     || CONTROL_CHARACTER.test(read.type) || !Number.isInteger(read.size) || read.size < 0
     || !Number.isInteger(read.from) || read.from < 0
     || (read.text !== undefined && (typeof read.text !== 'string' || read.text.length > maxBytes))
-    || (read.next !== undefined && (!Number.isInteger(read.next) || read.next <= read.from))) {
+    || (read.next !== undefined && (!Number.isInteger(read.next) || read.next <= read.from))
+    || (read.section !== undefined && (typeof read.section !== 'string' || read.section.length > 200 || CONTROL_CHARACTER.test(read.section)))
+    || (read.sections !== undefined && (!Array.isArray(read.sections) || read.sections.length > MAX_SECTIONS
+      || read.sections.some(entry => typeof entry?.path !== 'string' || entry.path.length > 200 || CONTROL_CHARACTER.test(entry.path)
+        || !Number.isInteger(entry.lines) || entry.lines < 0)))) {
     throw new HypercombObservationError('the hive reader returned malformed resource data')
   }
   return {
@@ -496,8 +515,13 @@ const safeBytes = (read: HypercombBytesRead, expectedRoot: string, maxBytes: num
     ...(read.text !== undefined ? { text: read.text } : {}),
     truncated: read.truncated === true,
     ...(read.next !== undefined ? { next: read.next } : {}),
+    ...(read.section !== undefined ? { section: read.section } : {}),
+    ...(read.sections !== undefined ? { sections: read.sections.map(entry => ({ path: entry.path, lines: entry.lines })) } : {}),
   }
 }
+
+/** A module's section index is bounded like every list a model is shown. */
+const MAX_SECTIONS = 400
 
 const safeCode = (read: HypercombCodeRead, expectedRoot: string, maxEntries: number): HypercombCodeRead => {
   if (!read || read.root !== expectedRoot) {
@@ -623,6 +647,8 @@ export const formatHypercombObservationReceipt = (
           ...(opened.text !== undefined ? { text: opened.text } : { text: null, note: 'not text; only its type and size can be shown' }),
           truncated: opened.truncated,
           ...(opened.next !== undefined ? { next: opened.next } : {}),
+          ...(opened.section !== undefined ? { section: opened.section } : {}),
+          ...(opened.sections !== undefined ? { sections: opened.sections } : {}),
         }
         : { grammar, root: read.root, error: opened.code }
     }

@@ -13,7 +13,7 @@
 // allowing an action based on what the model saw. No bridge, navigation, view
 // state, content slot, or filesystem surface participates.
 
-import { CHILD_SLOTS, childSigsOfLayer } from '@hypercomb/core'
+import { CHILD_SLOTS, childSigsOfLayer, sectionIndex, sectionOf } from '@hypercomb/core'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
@@ -743,11 +743,11 @@ export class HypercombHiveTreeReader {
    */
   async readBytesBySig(
     sig: string,
-    options: { readonly from?: number; readonly maxBytes?: number; readonly signal?: AbortSignal } = {},
+    options: { readonly from?: number; readonly maxBytes?: number; readonly section?: string; readonly signal?: AbortSignal } = {},
   ): Promise<HypercombBytesRead> {
     if (options.signal?.aborted) throw stopped()
     const from = Math.max(0, Math.floor(Number(options.from) || 0))
-    const key = `bytes|${JSON.stringify([sig, from, options.maxBytes])}`
+    const key = `bytes|${JSON.stringify([sig, from, options.maxBytes, options.section ?? ''])}`
     const hit = this.#cacheGet<HypercombBytesRead>(key)
     if (hit) return hit
     const read = await this.#readBytesBySigLive(sig, from, options)
@@ -758,7 +758,7 @@ export class HypercombHiveTreeReader {
   async #readBytesBySigLive(
     sig: string,
     from: number,
-    options: { readonly maxBytes?: number; readonly signal?: AbortSignal },
+    options: { readonly maxBytes?: number; readonly section?: string; readonly signal?: AbortSignal },
   ): Promise<HypercombBytesRead> {
     const root = sig
     const store = this.#store()
@@ -789,16 +789,26 @@ export class HypercombHiveTreeReader {
         bytes = await blobBytes(blob)
       }
       if (options.signal?.aborted) throw stopped()
-      const text = textOf(bytes)
-      if (text === undefined) {
+      const whole = textOf(bytes)
+      if (whole === undefined) {
         return { ok: true, root, sig, of, type: type || 'application/octet-stream', size: bytes.byteLength, from: 0, truncated: false }
       }
+      // A MODULE IS READABLE BY SOURCE FILE (core module-sections.ts): asked
+      // for a section, the page is of that section alone and `from` counts
+      // within it; asked for the whole, the first page also names every
+      // section, so the next read can be exact.
+      const section = options.section ? sectionOf(whole, options.section) : null
+      if (options.section && !section) return { ok: false, root, code: 'not-found' }
+      const text = section ? whole.slice(section.from, section.to) : whole
       const page = text.slice(from, from + maxBytes)
       const end = from + page.length
       const more = end < text.length
+      const sections = !section && from === 0 ? sectionIndex(whole).slice(0, 400).map(entry => ({ path: entry.path, lines: entry.lines })) : []
       return {
         ok: true, root, sig, of, type: type || 'text/plain', size: bytes.byteLength, from, text: page,
         truncated: more, ...(more ? { next: end } : {}),
+        ...(section ? { section: options.section } : {}),
+        ...(sections.length ? { sections } : {}),
       }
     } catch (error) {
       if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
