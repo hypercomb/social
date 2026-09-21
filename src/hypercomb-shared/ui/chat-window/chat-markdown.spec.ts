@@ -118,3 +118,14 @@ describe('hive paths', () => {
     expect(html).not.toContain('href')
   })
 })
+
+describe('renderChatMarkdown — hive sentences', () => {
+  it('lets the host draw a code span as a sentence before the hive-path rule', () => {
+    const sentence = (code: string): string | null => code.replace(/^\//, '').startsWith('find') ? `<span class="hc-sentence">${code.replace(/^\//, '')}</span>` : null
+    expect(renderChatMarkdown('use `/find` then `/dolphin/site`', { sentence }))
+      .toContain('<span class="hc-sentence">find</span>')
+    expect(renderChatMarkdown('use `/find` then `/dolphin/site`', { sentence }))
+      .toContain('data-hive-path="/dolphin/site"')
+    expect(renderChatMarkdown('use `/find`')).toContain('data-hive-path="/find"')
+  })
+})

@@ -562,7 +562,10 @@
                     [disabled]="waiting()"
                     (click)="pickOption(entry.index, $index, question.options)">
                     <span class="chat-question-n" aria-hidden="true">{{ $index + 1 }}</span>
-                    <span class="chat-question-label">{{ option }}</span>
+                    <span class="chat-question-label">@if (optionParts(option); as parts) {<span class="hc-sentence">@for (part of parts; track $index) {<span
+                      [class]="'hc-sentence-' + part.role"
+                      [style.color]="part.color || null"
+                    >{{ part.text }}</span>}</span>} @else {{{ option }}}</span>
                   </button>
                 }
                 <p class="chat-question-hint">{{ 'chat.question.hint' | t }}</p>
@@ -1115,8 +1118,10 @@
               }
               <div class="chat-exec-lines">
                 @for (line of row.lines; track $index) {
-                  <code class="chat-exec-line">@for (part of executionLineParts(line); track $index) {<span
+                  <code class="chat-exec-line">@for (part of sentenceParts(line); track $index) {<span
+                    [class]="'hc-sentence-' + part.role"
                     [class.chat-exec-sig]="part.signature"
+                    [style.color]="part.color || null"
                     [attr.title]="part.signature || null"
                     [attr.aria-label]="part.signature || null"
                   >{{ part.text }}</span>}</code>

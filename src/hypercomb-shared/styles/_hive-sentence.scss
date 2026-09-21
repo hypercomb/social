@@ -1,0 +1,41 @@
+// THE HIVE'S LANGUAGE HAS ONE LOOK (jwize, 2026-09-20).
+//
+// Every behaviour sentence, on every surface, is drawn from these rules and
+// nothing else: the chat, table questions, the Execution column, receipts.
+// Markup comes from `ui/hive-sentence/hive-sentence.ts`.
+//
+// It is the command line's own reading, carried out of the box: the verb in
+// the command register's colour — or, inline, its behaviour's own colour —
+// underlined so colour is never the only signal; arguments in ordinary ink;
+// filler receding; an ambiguous word dashed. No slash anywhere on the page.
+
+.hc-sentence {
+  border-radius: 0.3em;
+  padding: 0 0.28em;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hc-sentence-verb {
+  color: var(--hc-status-warn);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+}
+
+.hc-sentence-arg {
+  color: inherit;
+}
+
+.hc-sentence-residue {
+  color: inherit;
+  opacity: 0.6;
+}
+
+.hc-sentence-ambiguity {
+  color: #b48ad8;
+  text-decoration: underline dashed;
+  text-underline-offset: 0.22em;
+}

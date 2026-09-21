@@ -114,7 +114,8 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
 import { highlightBlocks } from './chat-highlight'
 import { resolveEntryImageUrl } from '../clipboard-thumbs'
-import { hivePathSegments, renderChatMarkdown } from './chat-markdown'
+import { hivePathSegments, renderChatMarkdown, type ChatMarkdownOptions } from './chat-markdown'
+import { hiveSentenceHtml, hiveSentenceParts, type SentencePart, type SentenceReader } from '../hive-sentence/hive-sentence'
 import { liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
 import {
   callableBehaviours,
@@ -134,6 +135,7 @@ import {
   executeHypercombObservationPlan,
   formatHypercombObservationReceipt,
   MAX_OBSERVATIONS,
+  OBSERVATION_VERBS,
   parseHypercombObservationGrammars,
   type HypercombTreeReader,
 } from './hypercomb-observation'
@@ -1393,6 +1395,9 @@ type ModeRegistryLike = {
   exit(mode: string, owner: string): void
 }
 
+/** Words that open a read sentence, for the one look (ui/hive-sentence). */
+const READ_VERBS: ReadonlySet<string> = new Set(OBSERVATION_VERBS)
+
 @Component({
   selector: 'hc-chat-window',
   standalone: true,
@@ -2557,7 +2562,7 @@ export class ChatWindowComponent implements OnDestroy {
   #markdown(text: string): SafeHtml {
     const hit = this.#rendered.get(text)
     if (hit) return hit
-    const html = this.#sanitizer.bypassSecurityTrustHtml(renderChatMarkdown(text))
+    const html = this.#sanitizer.bypassSecurityTrustHtml(renderChatMarkdown(text, this.#markdownOptions))
     if (this.#rendered.size >= RENDER_CACHE_MAX) {
       // Oldest first — Map preserves insertion order, and the oldest turn in a
       // long thread is the one furthest from the screen.
@@ -2948,6 +2953,27 @@ export class ChatWindowComponent implements OnDestroy {
   readonly execAuto = signal<readonly ExecutionKindLike[]>(['read'])
   readonly execRows = signal<readonly ExecutionRequestLike[]>([])
   readonly executionLineParts = executionLineParts
+
+  // ── THE HIVE'S LANGUAGE HAS ONE LOOK (ui/hive-sentence) ────────────────
+  // The command line's own reader reads every sentence here too, so a word
+  // is the same colour in the command line, the chat and Execution.
+  #sentenceReader(): SentenceReader | undefined {
+    return ioc()?.get('@diamondcoreprocessor.com/UtteranceReader') as SentenceReader | undefined
+  }
+  /** An Execution line is parsed grammar already: always a sentence. */
+  sentenceParts(line: string): readonly SentencePart[] {
+    return hiveSentenceParts(line, this.#sentenceReader(), { force: true }) ?? []
+  }
+  /** A question option is a sentence only when it reads as one. */
+  optionParts(option: string): readonly SentencePart[] | null {
+    return hiveSentenceParts(option, this.#sentenceReader(), { verbs: READ_VERBS })
+  }
+  readonly #markdownOptions: ChatMarkdownOptions = {
+    sentence: code => {
+      const parts = hiveSentenceParts(code, this.#sentenceReader(), { verbs: READ_VERBS })
+      return parts ? hiveSentenceHtml(parts) : null
+    },
+  }
   readonly execWaiting = computed(() => this.execRows().filter(row => row.state === 'waiting').length)
   readonly execModes: readonly ExecutionModeLike[] = ['manual', 'auto', 'everything']
   readonly execKinds: readonly ExecutionKindLike[] = ['read', 'additive', 'editing', 'destructive']
@@ -4181,7 +4207,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  every chunk is a new string, and caching them would be a leak with a
    *  hit rate of zero. */
   readonly streamHtml = computed(() =>
-    this.#sanitizer.bypassSecurityTrustHtml(renderChatMarkdown(this.streaming())))
+    this.#sanitizer.bypassSecurityTrustHtml(renderChatMarkdown(this.streaming(), this.#markdownOptions)))
 
   // ── waiting honesty ─────────────────────────────────────────────────────
 

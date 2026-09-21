@@ -21,6 +21,8 @@ const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/
  *  local model or a provider they granted (llm-hive-access.ts). */
 export type HypercombObservationVerb = 'tree' | 'read' | 'list' | 'history' | 'summary' | 'find' | 'code'
 const VERBS: readonly HypercombObservationVerb[] = ['tree', 'read', 'list', 'history', 'summary', 'find', 'code']
+/** The read verbs, for anything that must recognise a read sentence. */
+export const OBSERVATION_VERBS: readonly HypercombObservationVerb[] = VERBS
 const SIG = /^[0-9a-f]{64}$/
 const MAX_QUERY_LENGTH = 64
 /** Modules and dependencies named per `/code` answer; `total` says how many matched. */

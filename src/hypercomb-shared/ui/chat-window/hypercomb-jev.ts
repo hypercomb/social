@@ -120,7 +120,7 @@ export const parseTable = (lines: readonly string[]): readonly Row[] => {
  * the vocabulary the census teaches — never labels. What the participant
  * picks is a sentence the hive can run as it stands. */
 export const tableQuestion = (rows: readonly Row[], reason: string, prompt = 'Which step should the hive take?'): string => {
-  const details = rows.map(row => `**${row.label}**${row.kind === 'answer' ? '' : `\n${row.lines.join('\n').replace(/[`~]/g, '')}`}`).join('\n\n')
+  const details = rows.map(row => `**${row.label}**${row.kind === 'answer' ? '' : `\n${row.lines.map(line => `\`${line.replace(/[`~]/g, '')}\``).join('\n')}`}`).join('\n\n')
   const sentences = [...new Set(rows.flatMap(row => row.kind === 'read' || row.kind === 'do' ? row.lines.map(line => line.replace(/[\r\n`]/g, ' ').trim()) : []))]
   return `${reason}\n\n${details}\n\n\`\`\`hypercomb-question\n${JSON.stringify({
     prompt: prompt.replace(/[\r\n`]/g, ' '), options: [...sentences, 'Something else'],

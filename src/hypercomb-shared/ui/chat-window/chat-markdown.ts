@@ -103,7 +103,15 @@ const hiveChip = (path: string, label: string): string =>
  *   5. emphasis, on text that now contains no markup at all
  *   6. put the anchors back, then the code spans
  */
-const inline = (raw: string): string => {
+/** What the host may lend the renderer. `sentence` turns a code span that
+ *  is a hive sentence into its standard look (ui/hive-sentence), or returns
+ *  null to leave it alone. Asked BEFORE the hive-path rule, so `/find` — a
+ *  behaviour — is never mistaken for a tile called "find". */
+export interface ChatMarkdownOptions {
+  readonly sentence?: (code: string) => string | null
+}
+
+const inline = (raw: string, options: ChatMarkdownOptions = {}): string => {
   const codes: string[] = []
   const links: string[] = []
 
@@ -148,6 +156,8 @@ const inline = (raw: string): string => {
 
   return text.replace(new RegExp(`${CODE_MARK}(\\d+)${CODE_MARK}`, 'g'), (_match, index: string) => {
     const code = codes[Number(index)] ?? ''
+    const sentence = options.sentence?.(code)
+    if (sentence) return sentence
     return isHivePath(code)
       ? hiveChip(code, esc(code.trim()))
       : `<code>${esc(code)}</code>`
@@ -177,7 +187,8 @@ type ListFrame = { tag: 'ul' | 'ol'; indent: number }
  * so a partial answer renders as the answer it is becoming rather than as a
  * wall of pipes that snaps into shape on the last chunk.
  */
-export const renderChatMarkdown = (source: string): string => {
+export const renderChatMarkdown = (source: string, options: ChatMarkdownOptions = {}): string => {
+  const inlineWith = (raw: string): string => inline(raw, options)
   const clean = String(source ?? '').replace(/[\u0000\u0001]/g, '')
   const lines = clean.split('\n')
   const out: string[] = []
@@ -198,21 +209,21 @@ export const renderChatMarkdown = (source: string): string => {
 
   const closeParagraph = (): void => {
     if (!paragraph.length) return
-    out.push(`<p>${inline(paragraph.join(' '))}</p>`)
+    out.push(`<p>${inlineWith(paragraph.join(' '))}</p>`)
     paragraph = []
   }
 
   const closeQuote = (): void => {
     if (!quote.length) return
-    out.push(`<blockquote>${inline(quote.join(' '))}</blockquote>`)
+    out.push(`<blockquote>${inlineWith(quote.join(' '))}</blockquote>`)
     quote = []
   }
 
   const closeTable = (): void => {
     if (!table) return
-    const head = table.head.map(cell => `<th>${inline(cell)}</th>`).join('')
+    const head = table.head.map(cell => `<th>${inlineWith(cell)}</th>`).join('')
     const body = table.rows
-      .map(row => `<tr>${row.map(cell => `<td>${inline(cell)}</td>`).join('')}</tr>`)
+      .map(row => `<tr>${row.map(cell => `<td>${inlineWith(cell)}</td>`).join('')}</tr>`)
       .join('')
     // Its own horizontal scroller: a wide table must never widen the panel.
     out.push(`<div class="chat-table"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`)
@@ -284,7 +295,7 @@ export const renderChatMarkdown = (source: string): string => {
     if (heading) {
       flush()
       const level = heading[1].length
-      out.push(`<h${level}>${inline(heading[2].replace(/\s+#+\s*$/, ''))}</h${level}>`)
+      out.push(`<h${level}>${inlineWith(heading[2].replace(/\s+#+\s*$/, ''))}</h${level}>`)
       continue
     }
     if (/^\s{0,3}([-*_])\s*(\1\s*){2,}$/.test(line)) {
@@ -322,7 +333,7 @@ export const renderChatMarkdown = (source: string): string => {
         lists.push({ tag, indent })
         out.push(`<${tag}>`)
       }
-      out.push(`<li>${inline(bullet[3])}</li>`)
+      out.push(`<li>${inlineWith(bullet[3])}</li>`)
       continue
     }
 
