@@ -38,7 +38,7 @@ const arrayHas = (value: unknown, id: string): boolean => Array.isArray(value) &
 
 const KEYS = new Set([
   'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'w', 'a', 's', 'd', ' ',
-  'z', 'j', 'x', 'k', 'r', 'c', 'v', 'n', 'b', 'e', 'enter', 'm', 'i', 'f', 'escape',
+  'z', 'j', 'x', 'k', 'r', 'c', 'v', 'n', 'b', 'e', 'enter', 'm', 'i', 'escape',
 ])
 const element = (tag: string, className = '', text = ''): HTMLElement => {
   const result = document.createElement(tag)
@@ -645,7 +645,9 @@ export class SolomonLabyrinthOverlay {
     return bar
   }
 
-  /** The browser's own full screen, on or off. The land already fills the window. */
+  /** The browser's own full screen, on or off. The land already fills the
+   *  window. Menu only — the bare F key sat one key right of D on the walk
+   *  cluster and fired by accident (jwize, 2026-09-21). */
   #toggleFullScreen(): void {
     if (document.fullscreenElement) void document.exitFullscreen?.()?.catch(() => {})
     else void document.documentElement.requestFullscreen?.()?.catch(() => {})
@@ -786,7 +788,6 @@ export class SolomonLabyrinthOverlay {
     if ((key === 'enter' || key === ' ') && event.target instanceof HTMLButtonElement) return
     event.preventDefault(); event.stopPropagation()
     this.#audio.unlock()
-    if (key === 'f' && !event.repeat) { this.#toggleFullScreen(); return }
     if (this.#busy) { if (key === 'm') this.#request({ kind: 'home' }); return }
     if (key === 'm') { this.#request({ kind: 'home' }); return }
     if (key === 'i' && !event.repeat) { this.#openItems(); return }

@@ -49,8 +49,8 @@ M returns to the world; Escape — or the right mouse button, as anywhere in the
 hive — closes a dialog, a table, or steps up one place. In labyrinth rooms only: Space jumps, Z or J casts/dispels the
 labyrinth's own wand-brick, X or K throws a fireball, R retries the room, C
 strikes with a held weapon, V casts a held spell, N cycles held weapons, and
-B cycles held spells. I opens the **Items** table from anywhere. F puts the
-browser itself full screen, or takes it back.
+B cycles held spells. I opens the **Items** table from anywhere. Full screen
+is a menu option only — a bare F key sat beside D and fired by accident.
 
 Nothing sits outside the land: the place fills the window. The **menu** — the
 hexagon at the top right, or Escape on the island — is a settings screen over
