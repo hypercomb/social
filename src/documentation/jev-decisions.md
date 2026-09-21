@@ -141,6 +141,19 @@ exist, or it exists without a machine declaration. On 2026-09-20 about 25
 behaviours were machine-callable out of roughly 114 behaviour files; that
 gap, not the loop, is the limit on what chat can do.
 
+**Every refusal is recorded.** When the census refuses a sentence — a table
+row, or a plain change block — the chat emits `machine:miss` and essentials
+(`assistant/machine-misses.ts`) keeps one immutable record per miss in the
+`machine:misses` pool. The word `misses` reads them back grouped by the
+missing word, most asked-for first. That list is what to build or declare
+next, taken from real requests rather than guessed.
+
+**A change's reach decides its gates.** Each change row carries the reach its
+behaviours declare on themselves, read from the census by the loop and never
+sent to Jev. Additive changes need fit and doctrine but not prior evidence;
+editing needs fit, doctrine and grounding; anything that takes something
+away always waits for the participant (`JEV_REACH_GATES`).
+
 ## 6. The whole provider suite
 
 Jev serves EVERY worker — a local model, a direct vendor key, an OpenRouter

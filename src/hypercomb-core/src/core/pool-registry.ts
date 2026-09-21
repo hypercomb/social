@@ -348,6 +348,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // not a derivation of layers (optimize-phase.md litmus).
   'breaks:log',
   'breaks:queue',
+  // WHAT THE HIVE WAS ASKED FOR AND COULD NOT DO (essentials/assistant/
+  // machine-misses.ts, read with `misses`). One record per sentence a model
+  // proposed that the census refused. An event, not a derivation of layers,
+  // so never the optimize phase's to mint.
+  'machine:misses',
   // WHAT THE PARTICIPANT PUT AWAY — the concealment records behind "hide
   // first, delete second" (essentials/concealment/concealment.ts). A pool
   // and not the optimize phase's business by the litmus in optimize-phase.md:

@@ -6290,7 +6290,13 @@ export class ChatWindowComponent implements OnDestroy {
         if (!canChange || !slash?.executePublicCanonical || !queue) throw new WorkRefused('changing the hive is not available here')
         // Parse EVERY line before anything is queued, let alone run: one bad
         // tail can never leave a half-run prefix.
-        const plan = parseHypercombGrammars(lines, behaviourEntries)
+        let plan: ReturnType<typeof parseHypercombGrammars>
+        try { plan = parseHypercombGrammars(lines, behaviourEntries) } catch (error) {
+          EffectBus.emit('machine:miss', {
+            sentence: lines.join(' · '), reason: error instanceof Error ? error.message : 'the hive cannot run it', model, at: Date.now(),
+          })
+          throw error
+        }
         const grammars = plan.actions.map(action => action.grammar)
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
@@ -6514,7 +6520,11 @@ export class ChatWindowComponent implements OnDestroy {
                 }
                 return [row]
               } catch (error) {
-                dropped.push({ id: row.id, reason: error instanceof Error ? error.message : 'the hive cannot run it' })
+                const reason = error instanceof Error ? error.message : 'the hive cannot run it'
+                dropped.push({ id: row.id, reason })
+                // WHAT THE HIVE COULD NOT DO is recorded, not thrown away
+                // (essentials assistant/machine-misses.ts; read with `misses`).
+                EffectBus.emit('machine:miss', { sentence: row.lines.join(' · '), reason, model: roundModel, at: Date.now() })
                 return []
               }
             })

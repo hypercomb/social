@@ -194,6 +194,21 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   check('round 4 told the worker to answer in prose', /Answer the participant now in prose/.test(workerCalls[3]?.last ?? ''))
   check('the change waited in Execution and ran without forced review', decided.some(d => d.kind !== 'read' && !d.forceReview), JSON.stringify(decided))
 
+  // WHAT THE HIVE COULD NOT DO is recorded, and the misses word reads it.
+  const misses = await waitFor(() => page.evaluate(async () => {
+    const list = await window.ioc.get('@diamondcoreprocessor.com/MachineMisses')?.list?.()
+    return list?.find(row => row.verb === 'frobnicate') ? list : null
+  }), 10_000, 400)
+  check('the refused row is recorded as a miss', misses?.[0]?.verb === 'frobnicate' && misses[0].count === 1, JSON.stringify(misses))
+  const toast = await page.evaluate(async () => {
+    let said = ''
+    const off = window.__hypercombEffectBus.on('toast:show', payload => { said = payload?.message ?? '' })
+    await window.ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone').executePublicCanonical('misses', '')
+    await new Promise(r => setTimeout(r, 300))
+    off?.()
+    return said
+  })
+  check('the misses word reports it', /frobnicate × 1/.test(toast), toast)
   await browser.close()
   const failed = results.filter(r => !r.ok).length
   console.log(`\n${results.length - failed}/${results.length} checks passed`)
