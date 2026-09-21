@@ -13,6 +13,11 @@ step all enrol the same way, into the same kind of set.
 
 ## The rule
 
+These rules govern ARTIFACTS and how they relate. They do not govern the tile
+tree: a tile holding child tiles is how every hive is built, and creating,
+naming, nesting or arranging tiles is ordinary use of the hive, never a
+container artifact.
+
 1. **Every artifact is atomic and standalone.** It carries what it says and
    nothing about anyone else. Delete any other artifact and it is still valid.
 2. **No artifact depends on another.** There are no parent artifacts, no

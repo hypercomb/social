@@ -83,7 +83,9 @@ conversation. Doctrine is the verbatim `# Doctrine` section of the anatomy.
 ## 4. Composition (`jevResult` → `plan`)
 
 Gates (`JEV_GATES`, conservative starting values, not measured rates): fit
-≥ .90 (reads ≥ .80), rules ≥ .95, grounded ≥ .90, reject at rules ≤ .05;
+≥ .90 (reads ≥ .60 — lowered from .80 after the first real scoreboard, where
+a root read at .66 waited for the participant although a read changes
+nothing), rules ≥ .95, grounded ≥ .90, reject at rules ≤ .05;
 choice confidence ≥ .85, winner ≥ .85, margin over runner-up ≥ .20.
 
 1. `next` is confident and the chosen row passes its gates →

@@ -79,6 +79,11 @@ describe('composition', () => {
     expect(() => withReach('sideways')).toThrow()
     expect(() => jevInput({ request: 'r', doctrine: 'd', evidence: 'e', rows: [{ id: 'a', kind: 'read', label: 'x', line: 'y', reach: 'additive' }] })).toThrow()
   })
+  it('runs a read Jev only half-trusts, because a read changes nothing', () => {
+    const scoreboard = response('none', { a_fit: noul(0.66), c_fit: noul(0.17), c_rules: noul(0.5), c_grounded: noul(0.13) })
+    expect(jevResult(scoreboard, input).plan).toEqual({ kind: 'read', rows: ['a'] })
+    expect(jevResult(response('none', { a_fit: noul(0.55) }), input).plan.kind).toBe('participant')
+  })
   it('reads first when the choice is unclear or conflicts with doctrine', () => {
     const unclear = jevResult(response('none'), input)
     expect(unclear.plan).toEqual({ kind: 'read', rows: ['a'] })

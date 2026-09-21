@@ -57,7 +57,9 @@ type Choice = { type: 'choice'; instructions: string; criteria: Record<string, s
 export type JevQuestions = Record<string, Noul | Choice>
 
 /** Conservative initial gates, not calibrated success percentages. */
-export const JEV_GATES = { fit: 0.9, readFit: 0.8, rules: 0.95, grounded: 0.9, reject: 0.05, confidence: 0.85, winner: 0.85, margin: 0.2 } as const
+/** readFit was .80 until the first real scoreboard (2026-09-21): a root read
+ *  at .66 waited for the participant, though a read changes nothing. */
+export const JEV_GATES = { fit: 0.9, readFit: 0.6, rules: 0.95, grounded: 0.9, reject: 0.05, confidence: 0.85, winner: 0.85, margin: 0.2 } as const
 
 /** WHICH GATES A CHANGE MUST PASS, BY ITS DECLARED REACH. A change that only
  *  mints something new is one undo away, so it needs fit and doctrine but not
