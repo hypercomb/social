@@ -50,6 +50,13 @@ describe('Jev OpenRouter boundary', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://openrouter.ai/api/alpha/decisions')
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model: '~typesafe/jev-latest', provider: { data_collection: 'deny' }, state: { ...input, evidence: [input.evidence] } })
   })
+  it('sees a line the worker wrote without the slash, and names what it cannot see', async () => {
+    const slashed = { ...input, rows: [{ ...input.rows[0], lines: ['/group notes'] }] }
+    const bareSource = { ...source, messages: [{ content: input.request }, { content: input.evidence }, { content: 'group notes' }, { content: 'Group' }] }
+    expect((await new JevDecisionService().evaluate(slashed, bareSource)).plan.kind).toBe('do')
+    await expect(new JevDecisionService().evaluate({ ...input, rows: [{ ...input.rows[0], label: 'Never said' }] }, source)).rejects.toThrow('the label of row a')
+    await expect(new JevDecisionService().evaluate({ ...input, evidence: 'Unshared secret' }, source)).rejects.toThrow('evidence 1')
+  })
   it('keeps the hive reach out of the request body', async () => {
     await new JevDecisionService().evaluate({ ...input, rows: [{ ...input.rows[0], reach: 'additive' }] }, source)
     expect(fetchMock.mock.calls[0][1].body).not.toContain('reach')

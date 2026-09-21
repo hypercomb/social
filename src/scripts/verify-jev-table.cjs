@@ -54,6 +54,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
 
   const workerCalls = [], jevCalls = []
   let doLine = ''
+  let scenario = 'main'
   const sse = text => {
     const frames = [
       { choices: [{ delta: { content: text } }] },
@@ -87,9 +88,15 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
       const system = JSON.stringify(body)
       // Other callers (the route-flow organizer) share the model; they get an empty organizer answer, not a table.
       if (!/JEV RUNS THE SHOW/.test(system)) return route.fulfill({ status: 200, headers, body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: '{"nodes":[]}' } }] }) })
-      workerCalls.push({ system, last, model: body.model, stream: !!body.stream })
+      workerCalls.push({ system, last, model: body.model, stream: !!body.stream, scenario })
       let text
-      if (/Answer the participant now in prose/.test(last)) text = 'PROOF DONE: Jev chose the read, then the change, then this answer. Nothing was decided by me.'
+      if (scenario === 'bare') {
+        text = /The participant ran your|The hive ran/.test(last)
+          ? 'BARE DONE: the block ran after Jev judged it.'
+          : '```hypercomb-do\n' + doLine + '\n```'
+      } else if (scenario === 'pick') {
+        text = 'PICK DONE: continuing from the sentence you chose.'
+      } else if (/Answer the participant now in prose/.test(last)) text = 'PROOF DONE: Jev chose the read, then the change, then this answer. Nothing was decided by me.'
       else if (/The participant ran your|The hive ran/.test(last)) text = table([{ id: 'c', kind: 'answer', label: 'Answer now' }, { id: 'v', kind: 'read', label: 'Verify the tile is there', line: 'list here' }])
       else if (/HIVE RESULTS/.test(last)) text = table([{ id: 'b', kind: 'do', label: 'Make the proof tile', lines: [doLine], why: 'the request asks for it' }, { id: 'c', kind: 'answer', label: 'Answer now' }])
       else text = table([
@@ -175,7 +182,6 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
     }
     return null
   }), 120_000, 500)
-  clearInterval(runner)
   if (!final) console.log('THREAD TAIL:', await page.evaluate(() => [...document.querySelectorAll('.chat-msg')].map(e => e.className + ': ' + (e.textContent || '').slice(0, 300)).join(' || ')))
   const decline = final ? '' : await page.evaluate(() => (document.querySelector('.chat-thread')?.textContent || '').slice(-600))
   check('the turn ends with the worker\'s prose after Jev chose answer', !!final, final ? '' : decline)
@@ -193,6 +199,53 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   check('round 3 told the worker Jev chose the change and that it ran', /Jev chose Make the proof tile/.test(workerCalls[2]?.last ?? '') && /The participant ran your/.test(workerCalls[2]?.last ?? ''), (workerCalls[2]?.last ?? '').slice(0, 220))
   check('round 4 told the worker to answer in prose', /Answer the participant now in prose/.test(workerCalls[3]?.last ?? ''))
   check('the change waited in Execution and ran without forced review', decided.some(d => d.kind !== 'read' && !d.forceReview), JSON.stringify(decided))
+
+
+  // ── A BARE CHANGE BLOCK IN JEV MODE is judged as a one-row table ────────
+  const newConvo = seed => page.evaluate(async seed => {
+    const threads = window.ioc.get('@diamondcoreprocessor.com/ChatThreads')
+    const id = threads.newConvoId()
+    for (const [role, text] of seed) await threads.appendTurn(id, role, text)
+    return id
+  }, seed)
+  const openAndSend = async (convoId, text) => {
+    await page.evaluate(id => window.__hypercombEffectBus.emit('chat:open', { convoId: id }), convoId)
+    await sleep(900)
+    await page.locator('hc-chat-window .chat-input').click()
+    await page.keyboard.type(text)
+    await page.keyboard.press('Enter')
+  }
+  const storedAnswer = (convoId, marker) => waitFor(() => page.evaluate(async ([id, mark]) => {
+    const turns = await window.ioc.get('@diamondcoreprocessor.com/ChatThreads').readTurns(id)
+    return turns.find(t => t.role === 'assistant' && t.text.includes(mark))?.text ?? null
+  }, [convoId, marker]), 60_000, 500)
+
+  scenario = 'bare'
+  const jevBefore = jevCalls.length
+  const decidedBefore = decided.length
+  const bareConvo = await newConvo([['assistant', 'Ready.']])
+  await openAndSend(bareConvo, 'Copy the drafts.')
+  const bareText = await storedAnswer(bareConvo, 'BARE DONE')
+  const bareJev = jevCalls.slice(jevBefore)
+  if (process.env.JEV_DEBUG) console.log('BARE DEBUG', JSON.stringify({ calls: workerCalls.filter(c => c.scenario === 'bare').map(c => c.last.slice(0, 300)), turns: await page.evaluate(async id => (await window.ioc.get('@diamondcoreprocessor.com/ChatThreads').readTurns(id)).map(t => t.role + ': ' + t.text.slice(0, 300)), bareConvo) }, null, 1))
+  check('a bare change block in Jev mode is judged as a one-row table', bareJev.length === 1 && bareJev[0].rows.join() === 'do:action', JSON.stringify(bareJev.map(c => c.rows)))
+  check('the judged block ran from Execution and the worker continued', !!bareText && /Ran in the hive:/.test(bareText) && decided.slice(decidedBefore).some(d => d.lines.join() === '/' + doLine), (bareText ?? '').slice(-160))
+
+  // ── A PICKED SENTENCE runs as a behaviour, with no decision bought ──────
+  scenario = 'pick'
+  const pickJevBefore = jevCalls.length
+  const pickDecidedBefore = decided.length
+  const pickCallsBefore = workerCalls.length
+  const question = 'The evidence was not clear enough.\n\n**Copy the drafts**\n`' + doLine + '`\n\n```hypercomb-question\n'
+    + JSON.stringify({ prompt: 'Which step should the hive take?', options: [doLine, 'list /', 'Something else'] }) + '\n```'
+  const pickConvo = await newConvo([['user', 'Copy the drafts.'], ['assistant', question]])
+  await openAndSend(pickConvo, doLine)
+  const pickText = await storedAnswer(pickConvo, 'PICK DONE')
+  const pickCall = workerCalls.slice(pickCallsBefore)[0]
+  check('a picked sentence runs through Execution before the worker is asked', decided.slice(pickDecidedBefore).some(d => d.lines.join() === '/' + doLine) && /The participant chose a sentence from your table and the hive ran it/.test(pickCall?.last ?? ''), (pickCall?.last ?? '').slice(0, 200))
+  check('a picked sentence buys no Jev decision', jevCalls.length === pickJevBefore, String(jevCalls.length - pickJevBefore))
+  check('the worker answers from the receipt', !!pickText, (pickText ?? '').slice(0, 120))
+  clearInterval(runner)
 
   // WHAT THE HIVE COULD NOT DO is recorded, and the misses word reads it.
   const misses = await waitFor(() => page.evaluate(async () => {

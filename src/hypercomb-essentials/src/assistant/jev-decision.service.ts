@@ -15,6 +15,31 @@ export interface JevSource {
   readonly messages: readonly { readonly content: string }[]
 }
 
+/** THE SOURCE BOUNDARY. Every field must already exist in the worker's system
+ * text or conversation; nothing new reaches Jev. Compared as the worker could
+ * have written it: verbatim, JSON-escaped (a table is JSON in an assistant
+ * turn), or without the leading slash the hive adds to canonical grammar.
+ * Returns the first field it cannot find, in words, or null when all are seen. */
+export const jevUnseen = (input: JevInput, source: JevSource): string | null => {
+  const forms = (part: string): string[] => {
+    const bare = part.replace(/^\//, '')
+    return [...new Set([part, bare, JSON.stringify(part).slice(1, -1), JSON.stringify(bare).slice(1, -1)])]
+  }
+  const seen = (part: string): boolean =>
+    forms(part).some(form => source.messages.some(message => message.content.includes(form)))
+  if (!source.system.includes(input.doctrine)) return 'the doctrine'
+  if (!seen(input.request)) return 'the request'
+  const evidence = input.evidence.findIndex(part => !seen(part))
+  if (evidence >= 0) return `evidence ${evidence + 1}`
+  for (const row of input.rows) {
+    if (!seen(row.label)) return `the label of row ${row.id}`
+    const line = row.lines.find(part => !seen(part))
+    if (line !== undefined) return `the line "${line.slice(0, 80)}" of row ${row.id}`
+    if (row.why && !seen(row.why)) return `the why of row ${row.id}`
+  }
+  return null
+}
+
 /** JEV SERVES THE WHOLE PROVIDER SUITE. Any worker — local, direct vendor,
  * OpenRouter — lists the possibilities; Jev, reached through OpenRouter,
  * decides. The one disclosure gate is therefore OpenRouter's own "may read
@@ -38,13 +63,8 @@ export class JevDecisionService {
     signal?.throwIfAborted()
     if (!this.ready(source.providerId)) throw new Error('Jev requires an enabled worker and the OpenRouter hive read grant')
     const input = jevInput(raw)
-    const contains = (part: string): boolean => source.messages.some(message =>
-      message.content.includes(part) || message.content.includes(JSON.stringify(part).slice(1, -1)))
-    // Refuse arbitrary additional material. Every field must already exist
-    // verbatim in the worker's system text or conversation.
-    if (!source.system.includes(input.doctrine) || !contains(input.request) || input.evidence.some(part => !contains(part))
-      || input.rows.some(row => !contains(row.label) || row.lines.some(line => !contains(line)) || (row.why && !contains(row.why))))
-      throw new Error('Jev may only judge context already shared with this worker')
+    const missing = jevUnseen(input, source)
+    if (missing) throw new Error(`Jev may only judge what this worker already saw, and it could not find ${missing} as written`)
     if (JSON.stringify(jevState(input)).length > (llmHiveAccess.budget('openrouter') ?? 24_000)) throw new Error('Jev context exceeds the OpenRouter read budget')
     const result = await this.#request(input, signal)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')

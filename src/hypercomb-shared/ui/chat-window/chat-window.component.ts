@@ -6491,7 +6491,13 @@ export class ChatWindowComponent implements OnDestroy {
           // JEV RUNS THE SHOW: a table is judged; a bare do block in Jev mode is
           // a one-row table. Reads are safe and run as written.
           const table = work.request.kind === 'table' ? work.request.lines
-            : jevMode && work.request.kind === 'do' ? [JSON.stringify({ rows: [{ id: 'action', kind: 'do', label: 'Run this block', lines: work.request.lines }] })]
+            // The label is the worker's own first line, bare: the source
+            // boundary only lets Jev see what the worker itself wrote.
+            : jevMode && work.request.kind === 'do' ? [JSON.stringify({ rows: [{
+                id: 'action', kind: 'do',
+                label: work.request.lines[0].replace(/^\//, '').replace(/[\u0000-\u001f\u007f`~*]/g, ' ').trim().slice(0, 70) || 'change',
+                lines: work.request.lines,
+              }] })]
             : undefined
           if (table) {
             let rows: readonly Row[]
