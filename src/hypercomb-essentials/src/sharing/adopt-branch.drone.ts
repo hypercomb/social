@@ -18,6 +18,11 @@
 // The dialog counts each offer and lets the participant pick whose version
 // arrives; the freshest publisher (the one the canvas painted) leads.
 //
+// TAKING THE PARENT DOES NOT CLOSE THE DOOR. A tile you hold keeps it while
+// the publisher still has anything beneath it that you never took, at any
+// depth — SwarmAdoptDrone's divergence scan walks their branch against yours
+// by name (branch-difference.ts) — and it goes out once nothing is left.
+//
 // The question is drawn by this module (adopt-branch-picker.ts), not by the
 // shell. Asking it through a new core export made every package carrying it
 // require a newer shell — the admission gate refuses such a package by name —
@@ -31,6 +36,7 @@
 
 import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { askWhichBranch, type BranchOffer } from './adopt-branch-picker.js'
+import { peerDivergesAt } from './peer-divergence.js'
 import type { OverlayActionDescriptor, OverlayTileContext } from '../presentation/tiles/tile-overlay.drone.js'
 
 const OWNER = '@diamondcoreprocessor.com/AdoptBranchDrone'
@@ -74,6 +80,20 @@ const eligible = (label: string): boolean => {
   try { return ioc<SwarmAdoptLike>(SWARM_ADOPT_KEY)?.wandEligible?.(label) === true } catch { return false }
 }
 
+const resolvable = (label: string): boolean => {
+  try { return !!ioc<SwarmAdoptLike>(SWARM_ADOPT_KEY)?.peerBranchFor?.(label) } catch { return false }
+}
+
+/** A peer's tile shows the door while it is offered. A tile you HOLD shows it
+ *  while the publisher still has something beneath it you never took — at any
+ *  depth (the divergence scan, rules 3 and 4) — so taking a parent does not
+ *  hide the way to the rest of its branch. Held, it also needs an offer the
+ *  press can resolve, or the door would open onto "nobody is offering". */
+const visible = (ctx: OverlayTileContext): boolean =>
+  ctx.isExternal === false
+    ? peerDivergesAt(ctx.label) && resolvable(ctx.label)
+    : eligible(ctx.label)
+
 const DESCRIPTOR: OverlayActionDescriptor = {
   name: ACTION,
   owner: OWNER,
@@ -81,19 +101,24 @@ const DESCRIPTOR: OverlayActionDescriptor = {
   x: 0,
   y: 0,
   hoverTint: 0xb8f0c8,
-  // Peer tiles only — the profile the overlay assigns a tile that is not
-  // yours. Your own tile has nothing to adopt.
   profile: 'public-external',
-  visibleWhen: (ctx: OverlayTileContext) => eligible(ctx.label),
+  visibleWhen: visible,
   labelKey: 'action.adopt-branch',
   descriptionKey: 'action.adopt-branch.description',
 }
+
+/** Peer tiles (public-external) and the tiles you hold, in a swarm
+ *  (public-own) or taken from a public host in private mode (private). One
+ *  descriptor per profile: the overlay keys descriptors by name, so all three
+ *  share `visible`, which reads the tile's own state rather than the profile. */
+const DESCRIPTORS: OverlayActionDescriptor[] = (['public-external', 'public-own', 'private'] as const)
+  .map(profile => ({ ...DESCRIPTOR, profile }))
 
 export class AdoptBranchDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'sharing'
   public override description =
-    'The branch door on a peer tile: counts the tiles under it, names the participants they come from, asks, then adopts the whole branch through the same fold every explicit adopt uses.'
+    'The branch door on a peer tile, and on a held tile while anything beneath it is still untaken: counts the tiles under it, names the participants they come from, asks, then adopts the whole branch through the same fold every explicit adopt uses.'
 
   protected override listens = ['render:host-ready', 'overlay:request-register', 'tile:action']
   protected override emits = ['overlay:register-action', 'activity:log']
@@ -108,8 +133,8 @@ export class AdoptBranchDrone extends Drone {
     // Same handshake as every other icon provider: emit once the overlay
     // exists, and again whenever it asks (idempotent — descriptors are
     // name-keyed, so a repeat is a no-op).
-    this.onEffect('render:host-ready', () => this.emitEffect('overlay:register-action', DESCRIPTOR))
-    this.onEffect('overlay:request-register', () => this.emitEffect('overlay:register-action', DESCRIPTOR))
+    this.onEffect('render:host-ready', () => this.emitEffect('overlay:register-action', DESCRIPTORS))
+    this.onEffect('overlay:request-register', () => this.emitEffect('overlay:register-action', DESCRIPTORS))
     this.onEffect<TileActionPayload>('tile:action', (p) => {
       if (p?.action !== ACTION) return
       const label = String(p.label ?? '').trim()

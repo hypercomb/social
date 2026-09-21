@@ -55,6 +55,7 @@ import {
   isAdoptTombstoned,
 } from './adopted-roots.js'
 import { setDivergedLabels, clearPeerDivergence } from './peer-divergence.js'
+import { publisherHoldsUnheldBelow } from './branch-difference.js'
 import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
@@ -132,7 +133,7 @@ interface LineageLike {
 }
 
 interface BrokerLike {
-  adopt: (rootSig: string, opts?: { layersOnly?: boolean; silent?: boolean }) => Promise<{ layers: number; leaves: number; failed: number }>
+  adopt: (rootSig: string, opts?: { layersOnly?: boolean; silent?: boolean; quiet?: boolean }) => Promise<{ layers: number; leaves: number; failed: number }>
   noteDomainsForSig?: (sig: string, domains: string[]) => void
   getKnownDomains?: (sig: string) => string[]
 }
@@ -1250,6 +1251,9 @@ export class SwarmAdoptDrone extends Drone {
       // the installer's config fold, so when the installer went the marker
       // would have gone stale for every adopt that isn't one.
       this.#recordFoldedBranch(branch.layerSig, branch.label, [...branch.at])
+      // The whole branch is here now — re-judge so the adopt-all door on this
+      // tile goes out without waiting for a peer burst.
+      this.#scheduleDivergenceScan()
       // The row's outcome still settles; the per-tile panel landing is gone.
       if (!opts?.silent) {
         EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: true, message: '' })
@@ -1560,6 +1564,26 @@ export class SwarmAdoptDrone extends Drone {
 
   #divergenceTimer: ReturnType<typeof setTimeout> | null = null
 
+  // Rule 4 reads the publisher's branch from this device. Taking a tile brings
+  // its own layer, not the ones beneath it, so the first walk under a held
+  // tile usually stops short. Bring that branch's LAYER RECORDS here — the
+  // broker's layers-only walk, a handful of small JSONs and never a picture,
+  // the same walk the adopt-all dialog runs to count — then judge again. Once
+  // per branch sig per session: a publisher who changes the branch mints a new
+  // sig, and a walk that could not finish is not retried on every peer burst.
+  // Nothing is committed; the records sit in the pool until an adopt uses them.
+  readonly #localizedBranches = new Set<string>()
+
+  #localizeBranchLayers = (sig: string): void => {
+    if (this.#localizedBranches.has(sig)) return
+    this.#localizedBranches.add(sig)
+    const broker = this.#ioc()?.get?.(BROKER_KEY) as BrokerLike | undefined
+    if (!broker?.adopt) return
+    void broker.adopt(sig, { layersOnly: true, silent: true, quiet: true })
+      .then(stats => { if (stats.layers > 0) this.#scheduleDivergenceScan() })
+      .catch(() => undefined)
+  }
+
   #scheduleDivergenceScan = (): void => {
     if (this.#divergenceTimer) clearTimeout(this.#divergenceTimer)
     this.#divergenceTimer = setTimeout(() => {
@@ -1570,15 +1594,17 @@ export class SwarmAdoptDrone extends Drone {
 
   /**
    * Which HELD tiles at this location have something a peer is offering
-   * that we don't have. Pure detection — this pass NEVER commits, folds,
-   * or fetches. Its only output is the sync-readable set the overlay
-   * reads to decide whether `adopt` appears on a tile you already hold.
+   * that we don't have. Pure detection — this pass NEVER commits or folds.
+   * The only bytes it asks for are the layer records of a branch whose
+   * root you already hold (rule 4, #localizeBranchLayers). Its only output
+   * is the sync-readable set the overlay reads to decide whether the
+   * adopt-all door appears on a tile you already hold.
    *
    * Depth: rules 1 and 2 (receipt / announced-sig watch) cover a held
    * tile at ANY depth, because the publisher's handle seals their whole
-   * subtree. Rule 3 (name diff) sees ONE level into a held tile — deeper
-   * differences surface as the participant navigates in, which is also
-   * where they'd act on them.
+   * subtree. Rule 3 (name diff) sees ONE level into a held tile from the
+   * mesh cache; rule 4 walks the publisher's branch by name to any depth,
+   * so a parent stays marked while anything beneath it is still untaken.
    */
   #divergenceScanPass = async (): Promise<void> => {
     const ioc = this.#ioc()
@@ -1688,7 +1714,20 @@ export class SwarmAdoptDrone extends Drone {
       const unheld = tile.static
         ? await this.#staticOffersUnheldChildren(statics, history, target, held.layer)
         : await this.#peerOffersUnheldChildren(swarm, history, target, held.layer)
-      if (unheld) diverged.add(name)
+      if (unheld) { diverged.add(name); continue }
+
+      // ── rule 4: name diff at ANY depth ────────────────────────────────
+      // Rule 3 sees one level in. Walk the publisher's whole branch from the
+      // sig their offer carries against the tile held here, so a grandchild
+      // never taken keeps the adopt-all door lit on every ancestor that was
+      // (branch-difference.ts). Local reads only — a publisher layer not here
+      // yet is skipped, and #localizeBranchLayers brings their layer records
+      // over so the next scan can answer.
+      if (SIG_RE.test(sig)) {
+        const below = await publisherHoldsUnheldBelow(history, sig, held.layer, target, isAdoptTombstoned)
+        if (below.unheld) diverged.add(name)
+        else if (below.incomplete) this.#localizeBranchLayers(sig)
+      }
     }
     if (setDivergedLabels(diverged)) {
       EffectBus.emit('swarm:divergence-changed', { labels: [...diverged] })

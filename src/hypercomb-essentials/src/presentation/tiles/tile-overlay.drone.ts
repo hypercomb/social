@@ -166,6 +166,9 @@ export type OverlayTileContext = {
   hasLink: boolean
   isHidden: boolean
   hasNotes: boolean
+  /** A peer's tile you do not hold (the public-external profile). Optional so
+   *  a context built elsewhere reads as "not known", never as "held". */
+  isExternal?: boolean
 }
 
 export type OverlayProfileKey = 'private' | 'public-own' | 'public-external' | 'world'
@@ -1495,6 +1498,7 @@ export class TileOverlayDrone extends Drone {
       hasLink: this.#linkLabels.has(label),
       isHidden: this.#hiddenLabels.has(label),
       hasNotes: this.#hasNotesFor(label),
+      isExternal: this.#externalLabels.has(label),
     }
   }
 
@@ -1833,6 +1837,7 @@ export class TileOverlayDrone extends Drone {
       hasLink: this.#linkLabels.has(entry.label),
       isHidden: this.#hiddenLabels.has(entry.label),
       hasNotes: this.#hasNotesFor(entry.label),
+      isExternal: this.#externalLabels.has(entry.label),
     }
 
     for (const action of this.#actions) {
