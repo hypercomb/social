@@ -161,6 +161,14 @@ export const JEV_CHOICE_GATES: Readonly<Record<'answer' | 'ask' | 'read' | 'addi
   editing: 0.85,
 }
 
+/** Candidate thresholds for an offline replay (jev-replay.ts). Only the
+ *  numbers can move: which gates a reach needs, and that removals are never
+ *  automatic, are doctrine and are not offered here. */
+export interface JevRubric {
+  readonly gates?: Partial<Record<keyof typeof JEV_GATES, number>>
+  readonly choice?: Partial<Record<keyof typeof JEV_CHOICE_GATES, number>>
+}
+
 // ── shape ──────────────────────────────────────────────────────────────────
 
 const ID = /^[a-z][a-z0-9_-]{0,23}$/
@@ -260,10 +268,11 @@ const noul = (answers: Record<string, unknown>, key: string): number => {
 
 /** Compose the answers into the round's plan. No averaging can compensate for
  *  a failed rule; reads are the cheap way out of any uncertainty. */
-export const jevResult = (raw: unknown, input: JevInput): JevResult => {
+export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {}): JevResult => {
   const body = object(raw)
   const answers = object(body['answers'])
-  const G = JEV_GATES
+  const G = { ...JEV_GATES, ...rubric.gates }
+  const C = { ...JEV_CHOICE_GATES, ...rubric.choice }
   const byId = new Map(input.rows.map(row => [row.id, row]))
   const value = (row: JevRow, key: string): number => noul(answers, `${row.id}_${key}`)
   // The worst doctrine section for each change: the rule it comes closest to breaking.
@@ -294,8 +303,8 @@ export const jevResult = (raw: unknown, input: JevInput): JevResult => {
   const confidence = next['confidence'] === undefined ? undefined : probability(next['confidence'])
   const chosen = choice !== 'none' && confidence !== undefined && confidence >= G.floor ? byId.get(choice) : undefined
   const choiceGate = (row: JevRow): number => row.kind === 'do'
-    ? (row.reach === 'destructive' ? Infinity : JEV_CHOICE_GATES[row.reach ?? 'editing'])
-    : JEV_CHOICE_GATES[row.kind]
+    ? (row.reach === 'destructive' ? Infinity : C[row.reach ?? 'editing'])
+    : C[row.kind]
   // THE NUMBERS, SHOWN. Gates are starting values; a participant who sees
   // "toward .72" next to a row they would have run can tell us where to move them.
   const two = (n: number): string => n.toFixed(2).replace(/^0/, '')

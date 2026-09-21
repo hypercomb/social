@@ -341,6 +341,19 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
       && outcomes.every(o => o.endsWith(':signed')),
     JSON.stringify(outcomes))
 
+  // THE GOLDEN SET: every stored decision, decided again offline, the same way.
+  const replay = await page.evaluate(() => new Promise(resolve => {
+    const bus = window.__hypercombEffectBus
+    const started = Date.now()
+    const off = bus.on('jev:replay-result', result => { if (result?.at >= started) { off?.(); resolve(result) } })
+    bus.emit('jev:replay', { candidates: [{ name: 'current' }, { name: 'loose', gates: { toward: 0.5 }, choice: { additive: 0.3 } }] })
+    setTimeout(() => resolve(null), 15_000)
+  }))
+  const current = replay?.reports?.find(r => r.name === 'current')
+  check('replaying the stored decisions under today\'s thresholds reproduces every one of them',
+    !!current && current.decisions >= 4 && current.same === current.decisions,
+    JSON.stringify({ reports: replay?.reports, skipped: replay?.skipped }))
+
   // WHAT THE HIVE COULD NOT DO is recorded, and the misses word reads it.
   const misses = await waitFor(() => page.evaluate(async () => {
     const list = await window.ioc.get('@diamondcoreprocessor.com/MachineMisses')?.list?.()

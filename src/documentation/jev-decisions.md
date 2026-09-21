@@ -270,6 +270,25 @@ the change's reach and whether it waited for review. The Jev row of the
 providers window shows the tally. These are the numbers the gates are tuned
 against — a skipped automatic change is a gate set too low.
 
+**Tuning from the outcomes: the golden set** (`jev-creative-plan.md` §3).
+Every decision's receipt names, by signature, everything Jev was shown and
+everything it answered, so any past decision can be decided again offline
+under candidate thresholds, with no Jev call (`assistant/jev-replay.ts`).
+Run it against the attached hive:
+
+```bash
+node scripts/jev-golden.cjs
+```
+
+It prints, per candidate, how many decisions come out the same, how many
+would newly run on their own, and how many would newly be held, each split by
+whether the participant ran or skipped the step when asked. A skipped change
+a candidate would run on its own is a gate set too low. Replaying under
+today's thresholds reproduces every stored decision (checked by the 4250
+harness). Change `JEV_GATES` only by hand, from that table, and add the run
+here. Only the numbers are candidates: which gates a reach needs, and that
+removals are never automatic, are doctrine.
+
 ## 10. Audit against TypeSafe's guidance (2026-09-21)
 
 Read from TypeSafe's own docs: their agent skill, the building guide, the

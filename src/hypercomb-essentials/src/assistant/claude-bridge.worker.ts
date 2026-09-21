@@ -1932,6 +1932,10 @@ export class ClaudeBridgeWorker extends Worker {
     // an image from out there. It hands the act back to the hive, which holds
     // the pixels. See assistant/visual-distribution.drone.ts.
     'parts:distribute-visual',
+    // Jev's golden set (assistant/jev-replay.ts): decides stored decisions
+    // again under candidate thresholds and reports. Reads receipts, writes
+    // nothing, decides nothing live. scripts/jev-golden.cjs asks for it.
+    'jev:replay',
   ])
 
   async #effectEmit(req: BridgeRequest): Promise<BridgeResponse> {

@@ -137,6 +137,11 @@ Step-down is proven only by jwize on real models.
 **Idea (TypeSafe's skill, Nate Herk, LangChain's Jev-as-judge):** never trust
 thresholds you did not validate on your data.
 
+**LANDED 2026-09-21** as `assistant/jev-replay.ts` (the `jev:replay` bridge
+intent) and `scripts/jev-golden.cjs`; harness 31/31. The replay runs in the
+hive, where the receipts live, so the script needs the broker and the
+attached hive. See `jev-decisions.md` §9.
+
 **What to build.** `scripts/jev-golden.cjs`: reads the `jev:outcomes` pool
 and the decision receipts it names (`persistJevInput` already keeps every
 request, evidence, row and answer by signature), and for each past decision
