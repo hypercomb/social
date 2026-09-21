@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { splitQuestion } from '@hypercomb/core'
-import { parseTable, tableQuestion, tableChoiceNote, persistJevInput, persistJevReceipt, formatJevUsage, type Row } from './hypercomb-jev'
+import { doctrineSections, parseTable, tableQuestion, tableChoiceNote, persistJevInput, persistJevReceipt, formatJevUsage, type Row } from './hypercomb-jev'
 import { Blob as NodeBlob } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { splitWork, WorkStreamGuard } from './hypercomb-work-fence'
@@ -30,6 +30,25 @@ describe('Jev usage report', () => {
     expect(formatJevUsage([{}])).toBe('Tokens — workers: input unavailable, output unavailable; Jev: no calls.')
   })
 })
+describe('the doctrine, section by section', () => {
+  const anatomy = [
+    '# Hypercomb anatomy', '', 'What the hive is.', '',
+    '# Doctrine', '', 'The rules below are lifted verbatim.', '',
+    '### Nothing is deleted', '(source: a.md)', '', 'Hide first; delete second.', '', '---', '',
+    '### The core rule', '(source: b.md)', '', 'Content is addressed by signature.', '',
+  ].join('\n')
+  it('cuts the doctrine into its sections, each a verbatim piece of what the worker was sent', () => {
+    const sections = doctrineSections(anatomy)
+    expect(sections.map(section => section.split('\n')[0])).toEqual(['### Nothing is deleted', '### The core rule'])
+    for (const section of sections) expect(anatomy.includes(section)).toBe(true)
+    expect(sections.join('')).not.toContain('What the hive is')
+  })
+  it('falls back to the whole text when there is no doctrine heading', () => {
+    expect(doctrineSections('Follow the request.')).toEqual(['Follow the request.'])
+    expect(doctrineSections('')).toEqual([])
+  })
+})
+
 describe('the possibility table protocol', () => {
   it('reuses signed content while changed evidence creates new provenance', async () => {
     const records = new Map<string, unknown>()
@@ -41,16 +60,16 @@ describe('the possibility table protocol', () => {
     const original = globalThis.Blob
     globalThis.Blob = NodeBlob as typeof Blob
     try {
-      const input = { request: 'Organize', doctrine: 'Append history.', evidence: ['Before'], rows }
+      const input = { request: 'Organize', doctrine: ['Append history.', 'Hide first.'], evidence: ['Before'], rows }
       const first = await persistJevInput(store, input)
       expect(await persistJevInput(store, input)).toBe(first)
       const second = await persistJevInput(store, { ...input, evidence: ['After'] })
       expect(second).not.toBe(first)
       const a = records.get(first!) as Record<string, unknown>
       const b = records.get(second!) as Record<string, unknown>
-      expect(a['doctrine']).toBe(b['doctrine'])
+      expect(a['doctrine']).toEqual(b['doctrine'])
       expect(a['rows']).toEqual(b['rows'])
-      expect(records.get(a['doctrine'] as string)).toBe(input.doctrine)
+      expect((a['doctrine'] as string[]).map(sig => records.get(sig))).toEqual(input.doctrine)
       expect(a).not.toHaveProperty('state')
       const receipt = await persistJevReceipt(store, second!, { plan: { kind: 'revise' }, rejected: ['b'], model: 'resolved', reason: 'Conflict', answers: { b_rules: 0.01 } })
       const decision = records.get(receipt!) as Record<string, unknown>

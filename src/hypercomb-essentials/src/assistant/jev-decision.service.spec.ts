@@ -9,7 +9,7 @@ vi.mock('./providers/openrouter-routing.js', () => ({ openRouterRouting: { get: 
 const { JevDecisionService } = await import('./jev-decision.service.js')
 const input = { request: 'Organize notes', doctrine: 'Preserve history.', evidence: 'These notes exist.', rows: [{ id: 'a', kind: 'do', label: 'Group', lines: ['/group notes'] }] }
 const source = { providerId: 'worker', system: input.doctrine, messages: [{ content: input.request }, { content: input.evidence }, { content: JSON.stringify({ rows: input.rows }) }] }
-const body = { model: 'resolved-jev', answers: { a_fit: { type: 'noul', noul: 1 }, a_rules: { type: 'noul', noul: 1 }, a_grounded: { type: 'noul', noul: 1 }, next: { type: 'choice', choice: 'a', confidence: 0.99, probabilities: { a: 0.99, none: 0.01 } } } }
+const body = { model: 'resolved-jev', answers: { a_toward: { type: 'noul', noul: 1 }, a_beyond: { type: 'noul', noul: 0 }, a_grounded: { type: 'noul', noul: 1 }, a_rule0: { type: 'noul', noul: 0 }, next: { type: 'choice', choice: 'a', confidence: 0.99, probabilities: { a: 0.99, none: 0.01 } } } }
 let fetchMock: ReturnType<typeof vi.fn>
 beforeEach(() => {
   state.key = 'test-key'; state.enabled = true; state.granted = true; state.saved = true; state.jevEnabled = true
@@ -31,8 +31,8 @@ describe('Jev OpenRouter boundary', () => {
   it('tests the decision endpoint with public synthetic data and reports usage without a hive grant', async () => {
     state.granted = false
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ model: 'resolved-jev',
-      answers: { blue_fit: { type: 'noul', noul: 1 }, blue_rules: { type: 'noul', noul: 1 }, blue_grounded: { type: 'noul', noul: 1 },
-        red_fit: { type: 'noul', noul: 0 }, red_rules: { type: 'noul', noul: 1 }, red_grounded: { type: 'noul', noul: 1 },
+      answers: { blue_toward: { type: 'noul', noul: 1 }, blue_beyond: { type: 'noul', noul: 0 }, blue_grounded: { type: 'noul', noul: 1 }, blue_rule0: { type: 'noul', noul: 0 },
+        red_toward: { type: 'noul', noul: 0 }, red_beyond: { type: 'noul', noul: 0 }, red_grounded: { type: 'noul', noul: 1 }, red_rule0: { type: 'noul', noul: 0 },
         next: { type: 'choice', choice: 'blue', confidence: 0.99, probabilities: { blue: 0.99, red: 0.01, none: 0 } } },
       usage: { input_tokens: 42, output_tokens: 0, cost: 0.000001764 },
     }) })
@@ -48,7 +48,7 @@ describe('Jev OpenRouter boundary', () => {
   it('uses the latest alias, decisions endpoint and existing routing controls', async () => {
     expect((await new JevDecisionService().evaluate(input, source)).plan).toEqual({ kind: 'do', row: 'a', review: false })
     expect(fetchMock.mock.calls[0][0]).toBe('https://openrouter.ai/api/alpha/decisions')
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model: '~typesafe/jev-latest', provider: { data_collection: 'deny' }, state: { ...input, evidence: [input.evidence] } })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model: '~typesafe/jev-latest', provider: { data_collection: 'deny' }, state: { request: input.request, evidence: [input.evidence], rows: input.rows } })
   })
   it('sees a line the worker wrote without the slash, and names what it cannot see', async () => {
     const slashed = { ...input, rows: [{ ...input.rows[0], lines: ['/group notes'] }] }

@@ -161,7 +161,7 @@ import {
   workLineGrammar,
   WorkStreamGuard,
 } from './hypercomb-work-fence'
-import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, persistJevInput, persistJevReceipt, formatJevUsage, type JevLike, type Row, type Decision } from './hypercomb-jev'
+import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, doctrineSections, persistJevInput, persistJevReceipt, formatJevUsage, type JevLike, type Row, type Decision } from './hypercomb-jev'
 import { offeredSentence, prepareTable, stepFor, tableFor, type RoundCensus } from './jev-round'
 
 type TurnRole = 'user' | 'assistant'
@@ -6127,6 +6127,8 @@ export class ChatWindowComponent implements OnDestroy {
       let system = systemFor(firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(need))
       const snapshotIds: string[] = []
       const ran: string[] = []
+      // How the last read or change settled — what jev:outcome reports.
+      let lastRun: 'ran' | 'skipped' | 'failed' = 'failed'
       let decisionCalls = 0
       let decisionChars = 0
       const evidence = [message]
@@ -6142,9 +6144,8 @@ export class ChatWindowComponent implements OnDestroy {
         const participant = (reason: string): Decision => ({ plan: { kind: 'participant', rows: rows.filter(row => row.kind !== 'answer').map(row => row.id) }, reason, model: JEV_MODEL, answers: {}, rejected: [] })
         if (!jevMode || !jev?.ready(providerId)) return participant('Jev is unavailable; the participant must choose.')
         // Mechanics are already implemented by the harness; only the verbatim
-        // doctrine section is needed for this semantic judgment.
-        const doctrineStart = anatomyText.indexOf('# Doctrine')
-        const doctrine = doctrineStart >= 0 ? anatomyText.slice(doctrineStart) : anatomyText
+        // doctrine is needed, section by section, each judged on its own.
+        const doctrine = doctrineSections(anatomyText)
         const input = { request: message, doctrine, evidence: [...evidence], rows }
         const chars = JSON.stringify(input).length
         const budget = hiveAccess?.budget?.('openrouter') ?? MAX_OBSERVATION_CONTEXT_CHARS
@@ -6184,7 +6185,7 @@ export class ChatWindowComponent implements OnDestroy {
           ...(result.usage ? { usage: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, estimatedCostUsd: result.usage.cost } } : {}),
         })
         writeTurnMeta(providerId, continuationModel)
-        return result
+        return receiptSig ? { ...result, receipt: receiptSig } : result
       }
 
       const writeTurnMeta = (providerId?: string, model?: string): void => {
@@ -6251,6 +6252,7 @@ export class ChatWindowComponent implements OnDestroy {
         waitingOn(entry.id)
         if (await entry.decision === 'skip') {
           if (signal?.aborted) throw stopped()
+          lastRun = 'skipped'
           return readSkippedMessage(grammars, message)
         }
         try {
@@ -6284,6 +6286,7 @@ export class ChatWindowComponent implements OnDestroy {
           while (known.size > 64) known.delete(known.keys().next().value as string)
           component.#readSignatures.set(convoId, known)
           queue.settle(entry.id, 'ran', `${content.length} characters`)
+          lastRun = 'ran'
           return readResultMessage(content, message)
         } catch (error) {
           queue.settle(entry.id, signal?.aborted ? 'skipped' : 'failed', error instanceof Error ? error.message : undefined)
@@ -6325,6 +6328,7 @@ export class ChatWindowComponent implements OnDestroy {
         if (!review) waitingOn(entry.id)
         if (await entry.decision === 'skip') {
           if (signal?.aborted) throw stopped()
+          lastRun = 'skipped'
           return doSkippedMessage(grammars, message)
         }
         // The snapshot check happens in the serialized lane, immediately
@@ -6354,6 +6358,7 @@ export class ChatWindowComponent implements OnDestroy {
           // What the model read is now older than what it changed.
           snapshotIds.length = 0
           queue.settle(entry.id, 'ran')
+          lastRun = 'ran'
           return doRanMessage(receipt.grammars, message)
         } catch (error) {
           if (signal?.aborted) {
@@ -6509,24 +6514,43 @@ export class ChatWindowComponent implements OnDestroy {
             }
             const i18n = ioc()?.get('@hypercomb.social/I18n') as { t?: (key: string) => string } | undefined
             const word = (key: string, fallback: string): string => { const said = i18n?.t?.(key); return said && said !== key ? said : fallback }
-            const step = stepFor(await judge(prepared.rows, pinned), prepared, {
+            const decision = await judge(prepared.rows, pinned)
+            const step = stepFor(decision, prepared, {
               which: word('chat.jev.which', 'Which step should the hive take?'),
               other: word('chat.jev.other', 'Something else'),
             })
-            if (step.kind === 'refuse') throw new WorkRefused(step.reason)
+            // WHAT HAPPENED AFTER JEV DECIDED, so the gates are tuned on real
+            // outcomes (essentials assistant/jev-outcomes.ts).
+            const plan = decision.plan
+            const decidedRow = plan.kind === 'do' ? prepared.rows.find(row => row.id === plan.row) : undefined
+            const reportOutcome = (outcome: string): void => {
+              EffectBus.emit('jev:outcome', {
+                decision: decision.receipt, plan: plan.kind, outcome, at: Date.now(),
+                ...(plan.kind === 'do' && plan.review ? { review: true } : {}),
+                ...(decidedRow?.reach ? { reach: decidedRow.reach } : {}),
+              })
+            }
+            if (step.kind === 'refuse') { reportOutcome('refused'); throw new WorkRefused(step.reason) }
             if (step.kind === 'question') {
+              reportOutcome('deferred')
               if (ran.length) yield `\n\nEarlier commands ran: ${ran.join(' · ')}`
               yield `\n\n${formatJevUsage(settledAttempts)}`
               yield `\n\n${step.text}`
               return ''
             }
             if (step.kind === 'answer') {
+              reportOutcome('answered')
               reply = step.reply
               lastRound = true
-            } else if (step.kind === 'read') {
-              reply = `${step.note}\n\n${await runRead(step.grammars, pinned, roundModel)}`
             } else {
-              reply = `${step.note}\n\n${await runDo(step.grammars, pinned, roundModel, step.review)}`
+              lastRun = 'failed'
+              try {
+                reply = step.kind === 'read'
+                  ? `${step.note}\n\n${await runRead(step.grammars, pinned, roundModel)}`
+                  : `${step.note}\n\n${await runDo(step.grammars, pinned, roundModel, step.review)}`
+              } finally {
+                if (!signal?.aborted) reportOutcome(lastRun)
+              }
             }
           } else {
             reply = work.request.kind === 'read'

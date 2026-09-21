@@ -12,8 +12,8 @@ const buttons = (selector: string): HTMLButtonElement[] => [...document.querySel
 const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => {
   if (url.endsWith('/endpoints')) return { data: { id: JEV_MODEL, name: 'TypeSafe: Jev Latest', architecture: { output_modalities: ['decisions'] } } }
   if (url.endsWith('/decisions')) return { model: 'jev-test-resolved',
-    answers: { blue_fit: { type: 'noul', noul: 1 }, blue_rules: { type: 'noul', noul: 1 }, blue_grounded: { type: 'noul', noul: 1 },
-      red_fit: { type: 'noul', noul: 0 }, red_rules: { type: 'noul', noul: 1 }, red_grounded: { type: 'noul', noul: 1 },
+    answers: { blue_toward: { type: 'noul', noul: 1 }, blue_beyond: { type: 'noul', noul: 0 }, blue_grounded: { type: 'noul', noul: 1 }, blue_rule0: { type: 'noul', noul: 0 },
+      red_toward: { type: 'noul', noul: 0 }, red_beyond: { type: 'noul', noul: 0 }, red_grounded: { type: 'noul', noul: 1 }, red_rule0: { type: 'noul', noul: 0 },
       next: { type: 'choice', choice: 'blue', confidence: 0.99, probabilities: { blue: 0.99, red: 0.01, none: 0 } } },
     usage: { input_tokens: 48, output_tokens: 0, cost: 0.000002016 },
   }

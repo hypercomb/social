@@ -72,10 +72,14 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
       jevCalls.push({ questions: Object.keys(body.questions ?? {}), rows: rows.map(r => `${r.kind}:${r.id}`), model: body.model })
       const read = rows.find(r => r.kind === 'read'), doRow = rows.find(r => r.kind === 'do'), answer = rows.find(r => r.kind === 'answer')
       const pick = read && doRow ? read : doRow ? doRow : answer ?? rows[0]
+      // Every question gets an answer: the picked row's positive questions
+      // high, everyone's negative ones (known, beyond, a broken rule) low.
       const answers = {}
-      for (const r of rows) {
-        answers[`${r.id}_fit`] = { type: 'noul', noul: r === pick ? 0.98 : 0.15 }
-        if (r.kind === 'do') { answers[`${r.id}_rules`] = { type: 'noul', noul: 0.99 }; answers[`${r.id}_grounded`] = { type: 'noul', noul: 0.97 } }
+      for (const key of Object.keys(body.questions ?? {})) {
+        if (key === 'next') continue
+        const [id, what] = [key.slice(0, key.indexOf('_')), key.slice(key.indexOf('_') + 1)]
+        const negative = what === 'known' || what === 'beyond' || /^rule\d+$/.test(what)
+        answers[key] = { type: 'noul', noul: negative ? 0.02 : id === pick.id ? 0.98 : 0.15 }
       }
       const probabilities = Object.fromEntries([...rows.map(r => [r.id, r === pick ? 0.96 : 0]), ['none', 0.04]])
       answers['next'] = { type: 'choice', choice: pick.id, confidence: 0.95, probabilities }
@@ -194,7 +198,11 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   check('the worker was asked four rounds: table, table, table, prose', workerCalls.length === 4, workerCalls.map(c => c.last.slice(0, 60)).join(' | '))
   check('three Jev decisions, one per table', jevCalls.length === 3, JSON.stringify(jevCalls.map(c => c.rows)))
   check('the unrunnable row never reached Jev', jevCalls.every(c => !c.rows.includes('do:x')))
-  check('Jev saw the batched questions: fit for every row, rules+grounded for changes, next', jevCalls[0]?.questions.sort().join() === ['a_fit', 'b_fit', 'b_grounded', 'b_rules', 'c_fit', 'next'].sort().join(), JSON.stringify(jevCalls[0]?.questions))
+  const asked = jevCalls[0]?.questions ?? []
+  check('Jev saw one condition per question, one question per doctrine section for the change, and the choice',
+    ['a_needed', 'a_known', 'b_toward', 'b_beyond', 'b_grounded', 'c_answered', 'next'].every(key => asked.includes(key))
+      && asked.filter(key => /^b_rule\d+$/.test(key)).length >= 6 && !asked.some(key => /_fit$|_rules$/.test(key)),
+    JSON.stringify(asked))
   check('round 2 told the worker Jev chose the read, and fed HIVE RESULTS back', /Jev chose to read: See what is here/.test(workerCalls[1]?.last ?? '') && /HIVE RESULTS/.test(workerCalls[1]?.last ?? '') && /frobnicate|x \(/.test(workerCalls[1]?.last ?? ''), (workerCalls[1]?.last ?? '').slice(0, 220))
   check('round 3 told the worker Jev chose the change and that it ran', /Jev chose Make the proof tile/.test(workerCalls[2]?.last ?? '') && /The participant ran your/.test(workerCalls[2]?.last ?? ''), (workerCalls[2]?.last ?? '').slice(0, 220))
   check('round 4 told the worker to answer in prose', /Answer the participant now in prose/.test(workerCalls[3]?.last ?? ''))
@@ -246,6 +254,16 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
   check('a picked sentence buys no Jev decision', jevCalls.length === pickJevBefore, String(jevCalls.length - pickJevBefore))
   check('the worker answers from the receipt', !!pickText, (pickText ?? '').slice(0, 120))
   clearInterval(runner)
+
+  // WHAT HAPPENED AFTER JEV DECIDED is recorded, one outcome per decided round.
+  const outcomes = await waitFor(() => page.evaluate(() => {
+    const records = window.ioc.get('@diamondcoreprocessor.com/JevOutcomes')?.records?.() ?? []
+    return records.length >= 4 ? records.map(r => `${r.plan}:${r.outcome}${r.reach ? ':' + r.reach : ''}${r.decision ? ':signed' : ''}`) : null
+  }), 10_000, 400)
+  check('every decided round records its outcome, tied to its signed receipt',
+    !!outcomes && outcomes.some(o => o.startsWith('read:ran')) && outcomes.some(o => o.startsWith('do:ran')) && outcomes.some(o => o.startsWith('answer:answered'))
+      && outcomes.every(o => o.endsWith(':signed')),
+    JSON.stringify(outcomes))
 
   // WHAT THE HIVE COULD NOT DO is recorded, and the misses word reads it.
   const misses = await waitFor(() => page.evaluate(async () => {

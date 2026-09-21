@@ -26,6 +26,8 @@ export interface Decision {
   readonly model: string
   readonly answers: Record<string, unknown>
   readonly usage?: { inputTokens?: number; outputTokens?: number; cost?: number }
+  /** The decision receipt's signature, once the store has kept it. */
+  readonly receipt?: string
 }
 export interface JevLike {
   ready(providerId: string): boolean
@@ -55,20 +57,31 @@ interface ResourceWriter { putResource?(blob: Blob, options: { emit: boolean }):
 const resource = (store: ResourceWriter, value: unknown): Promise<string | undefined> =>
   store.putResource?.(new Blob([JSON.stringify(value)], { type: 'application/json' }), { emit: false }) ?? Promise.resolve(undefined)
 
+/** THE DOCTRINE, SECTION BY SECTION, cut from the anatomy the worker was sent.
+ *  Jev judges each section in its own question (jev-decision.ts); each piece
+ *  is a verbatim span of the worker's own system text, so the source boundary
+ *  still holds. The sections come from the anatomy — never a list kept here. */
+export const doctrineSections = (anatomy: string): string[] => {
+  const start = anatomy.indexOf('# Doctrine')
+  if (start < 0) return anatomy.trim() ? [anatomy.trim()] : []
+  const sections = anatomy.slice(start).split(/\n(?=### )/).slice(1).map(section => section.trim()).filter(Boolean)
+  return sections.length ? sections : [anatomy.slice(start).trim()]
+}
+
 /** Durable provenance references immutable content; only the wire packet is inline. */
 export const persistJevInput = async (store: ResourceWriter | undefined, input: {
-  request: string; doctrine: string; evidence: readonly string[]; rows: readonly Row[]
+  request: string; doctrine: readonly string[]; evidence: readonly string[]; rows: readonly Row[]
 }): Promise<string | undefined> => {
   if (!store?.putResource) return undefined
   const request = await resource(store, input.request)
-  const doctrine = await resource(store, input.doctrine)
+  const doctrine = await Promise.all(input.doctrine.map(section => resource(store, section)))
   const evidence = await Promise.all(input.evidence.map(value => resource(store, value)))
   const rows = await Promise.all(input.rows.map(async row => resource(store, {
     id: row.id, kind: row.kind, label: await resource(store, row.label), lines: await resource(store, row.lines),
     ...(row.why ? { why: await resource(store, row.why) } : {}),
     ...(row.reach ? { reach: row.reach } : {}),
   })))
-  return resource(store, { kind: 'jev-input', model: JEV_MODEL, rubric: 4, request, doctrine, evidence, rows })
+  return resource(store, { kind: 'jev-input', model: JEV_MODEL, rubric: 5, request, doctrine, evidence, rows })
 }
 
 export const persistJevReceipt = async (store: ResourceWriter | undefined, source: string, result: Decision): Promise<string | undefined> => {

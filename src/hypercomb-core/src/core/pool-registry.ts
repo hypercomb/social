@@ -353,6 +353,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // proposed that the census refused. An event, not a derivation of layers,
   // so never the optimize phase's to mint.
   'machine:misses',
+  // WHAT HAPPENED AFTER JEV DECIDED (essentials/assistant/jev-outcomes.ts):
+  // ran, skipped, failed, answered, deferred or refused, one record per
+  // decided round, so the gates are tuned on outcomes. Events, never truth.
+  'jev:outcomes',
   // WHAT THE PARTICIPANT PUT AWAY — the concealment records behind "hide
   // first, delete second" (essentials/concealment/concealment.ts). A pool
   // and not the optimize phase's business by the litmus in optimize-phase.md:

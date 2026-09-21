@@ -32,6 +32,7 @@ import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
 import { JEV_MODEL } from './jev-decision.js'
 import { jevDecision } from './jev-decision.service.js'
+import { jevOutcomes } from './jev-outcomes.js'
 import { MAX_BUDGET, MIN_BUDGET, llmHiveAccess } from './llm-hive-access.js'
 import { CHAT_NEED, TIERS, USAGE_PLANS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
@@ -1767,6 +1768,20 @@ export class ProvidersWindowView extends EventTarget {
       status.textContent = missing
         ? `${this.#t('providers.jevOff', 'Jev mode for chat: off — ')}${missing}`
         : this.#t('providers.jevOn', 'Jev mode for chat: on — any worker lists the possibilities, Jev decides')
+      // WHAT HAPPENED AFTER JEV DECIDED (jev-outcomes.ts): the numbers the
+      // gates are tuned against, where the participant can see them.
+      const tally = jevOutcomes.tally()
+      if (tally.decisions) {
+        const count = document.createElement('span')
+        count.className = 'hc-provider-catalog-price'
+        count.textContent = [
+          `${tally.decisions} ${this.#t('providers.jevDecisions', 'decisions')}`,
+          `${tally.ran} ${this.#t('providers.jevRan', 'ran')}`,
+          `${tally.skipped} ${this.#t('providers.jevSkipped', 'skipped')}`,
+          `${tally.deferred} ${this.#t('providers.jevDeferred', 'left to you')}`,
+        ].join(' · ')
+        status.append(document.createElement('br'), count)
+      }
       jevStatus = status
     }
     if (entry) {

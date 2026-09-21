@@ -27,7 +27,8 @@ export const jevUnseen = (input: JevInput, source: JevSource): string | null => 
   }
   const seen = (part: string): boolean =>
     forms(part).some(form => source.messages.some(message => message.content.includes(form)))
-  if (!source.system.includes(input.doctrine)) return 'the doctrine'
+  const section = input.doctrine.findIndex(part => !source.system.includes(part))
+  if (section >= 0) return `doctrine section ${section + 1}`
   if (!seen(input.request)) return 'the request'
   const evidence = input.evidence.findIndex(part => !seen(part))
   if (evidence >= 0) return `evidence ${evidence + 1}`

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { JEV_MAX_READS, jevInput, jevQuestions, jevResult, jevState } from './jev-decision.js'
+import { JEV_CHOICE_GATES, JEV_MAX_READS, jevInput, jevQuestions, jevResult, jevState } from './jev-decision.js'
 
+const doctrine = ['### Nothing is deleted\nHide first; delete second.', '### The core rule\nContent is addressed by signature.']
 const rows = [
   { id: 'a', kind: 'read', label: 'See the people', lines: ['/list /business/people'] },
   { id: 'b', kind: 'read', label: 'Find cigar', lines: ['/find cigar'] },
@@ -8,12 +9,16 @@ const rows = [
   { id: 'd', kind: 'answer', label: 'Answer now' },
   { id: 'e', kind: 'ask', label: 'Ask how to group', lines: ['By city or by role?'] },
 ]
-const input = jevInput({ request: 'Organize the people', doctrine: 'Preserve history.', evidence: ['Nothing read yet.'], rows })
+const build = (overrides: Partial<Record<string, unknown>> = {}) =>
+  jevInput({ request: 'Organize the people', doctrine, evidence: ['Nothing read yet.'], rows: rows.map(row => row.id === 'c' ? { ...row, ...overrides } : row) })
+const input = build()
 const noul = (value: number) => ({ type: 'noul', noul: value })
-const choice = (pick: string, probabilities: Record<string, number>, confidence = 0.96) => ({ type: 'choice', choice: pick, confidence, probabilities })
+const choice = (pick: string, confidence = 0.96) => ({ type: 'choice', choice: pick, confidence, probabilities: { a: 0, b: 0, c: 0, d: 0, e: 0, none: 0, [pick]: 1 } })
 const response = (pick: string, over: Partial<Record<string, unknown>> = {}) => ({ model: 'typesafe/jev-resolved', answers: {
-  a_fit: noul(0.95), b_fit: noul(0.3), c_fit: noul(0.97), c_rules: noul(0.99), c_grounded: noul(0.96), d_fit: noul(0.1), e_fit: noul(0.2),
-  next: choice(pick, { a: 0, b: 0, c: 0, d: 0, e: 0, none: 0, [pick]: 1 }),
+  a_needed: noul(0.95), a_known: noul(0.1), b_needed: noul(0.3), b_known: noul(0.1),
+  c_toward: noul(0.97), c_beyond: noul(0.03), c_grounded: noul(0.96), c_rule0: noul(0.01), c_rule1: noul(0.02),
+  d_answered: noul(0.1), e_open: noul(0.2),
+  next: choice(pick),
   ...over,
 }, usage: { input_tokens: 500, output_tokens: 0, cost: 0.00002 } })
 
@@ -31,86 +36,111 @@ describe('the possibility table', () => {
     expect(bad(Array.from({ length: 9 }, (_, i) => ({ id: `r${i}`, kind: 'answer', label: `L${i}` })))).toThrow()
     expect(jevInput({ request: 'r', doctrine: 'd', evidence: 'e', rows: [{ id: 'a', kind: 'do', label: 'x', line: 'y' }] }).rows[0].lines).toEqual(['y'])
   })
-  it('asks one snap question per factor in one batch, plus the choice', () => {
-    const questions = jevQuestions(input)
-    expect(Object.keys(questions).sort()).toEqual(['a_fit', 'b_fit', 'c_fit', 'c_grounded', 'c_rules', 'd_fit', 'e_fit', 'next'].sort())
-    expect((questions['next'] as { criteria: Record<string, string> }).criteria).toHaveProperty('none')
-    expect((questions['c_rules'] as { instructions: string }).instructions).toContain('`rows[2].lines`')
-    expect((questions['a_fit'] as { instructions: string }).instructions).toContain('not yet contain')
+  it('takes doctrine as sections, or as one string for older callers', () => {
+    expect(input.doctrine).toEqual(doctrine)
+    expect(jevInput({ request: 'r', doctrine: 'Follow the request.', evidence: 'e', rows: [rows[3]] }).doctrine).toEqual(['Follow the request.'])
+    expect(() => jevInput({ request: 'r', doctrine: [], evidence: 'e', rows: [rows[3]] })).toThrow()
   })
-  it('never sends the hive reach to Jev', () => {
-    const reached = jevInput({ request: 'r', doctrine: 'd', evidence: 'e', rows: [{ id: 'a', kind: 'do', label: 'x', line: 'create y', reach: 'additive' }] })
-    expect(reached.rows[0].reach).toBe('additive')
-    expect(JSON.stringify(jevState(reached))).not.toContain('reach')
+})
+
+describe('the questions follow the vendor guidance our doctrine allows', () => {
+  const questions = jevQuestions(input)
+  it('asks one condition per question, with what yes and no mean', () => {
+    expect(Object.keys(questions).sort()).toEqual([
+      'a_known', 'a_needed', 'b_known', 'b_needed',
+      'c_beyond', 'c_grounded', 'c_rule0', 'c_rule1', 'c_toward',
+      'd_answered', 'e_open', 'next',
+    ])
+    for (const [key, question] of Object.entries(questions)) {
+      if (key === 'next') continue
+      const criteria = (question as { criteria: { true: string; false: string } }).criteria
+      expect(question.type).toBe('noul')
+      expect(criteria.true).toBeTruthy()
+      expect(criteria.false).toBeTruthy()
+    }
+  })
+  it('carries each doctrine section in its own question, never the whole doctrine', () => {
+    expect(questions['c_rule0'].instructions).toContain('Hide first; delete second.')
+    expect(questions['c_rule0'].instructions).not.toContain('addressed by signature')
+    expect(questions['c_rule1'].instructions).toContain('`rows[2].lines`')
+  })
+  it('keeps doctrine and the hive reach out of the shared state', () => {
+    const state = JSON.stringify(jevState(build({ reach: 'additive' })))
+    expect(state).not.toContain('Hide first')
+    expect(state).not.toContain('reach')
+    expect(state).toContain('Organize the people')
+  })
+  it('keeps the choice free of policy: the preferences live in code', () => {
+    expect(questions['next'].instructions).not.toMatch(/prefer/i)
+    expect((questions['next'] as { criteria: Record<string, string> }).criteria).toHaveProperty('none')
   })
 })
 
 describe('composition', () => {
-  it('runs a confident, gated do row without review', () => {
+  it('runs a confident change that passes every gate', () => {
     const result = jevResult(response('c'), input)
     expect(result.plan).toEqual({ kind: 'do', row: 'c', review: false })
     expect(result.usage).toEqual({ inputTokens: 500, outputTokens: 0, cost: 0.00002 })
-    expect(result.model).toBe('typesafe/jev-resolved')
-  })
-  it('batches the reads that pass when Jev chooses a read, best fit first', () => {
-    const result = jevResult(response('b', { b_fit: noul(0.9) }), input)
-    expect(result.plan).toEqual({ kind: 'read', rows: ['b', 'a'].slice(0, JEV_MAX_READS) })
-  })
-  it('ends the work when Jev decides the evidence answers the request', () => {
-    expect(jevResult(response('d', { d_fit: noul(0.95) }), input).plan).toEqual({ kind: 'answer' })
-  })
-  it('turns an ask row into a participant question', () => {
-    expect(jevResult(response('e', { e_fit: noul(0.95) }), input).plan).toEqual({ kind: 'ask', row: 'e' })
-  })
-  it('sends a chosen change to review when a gate fails, and never averages past a rule', () => {
-    expect(jevResult(response('c', { c_grounded: noul(0.5) }), input).plan).toEqual({ kind: 'do', row: 'c', review: true })
-    expect(jevResult(response('c', { c_rules: noul(0.5), c_fit: noul(1), c_grounded: noul(1) }), input).plan).toEqual({ kind: 'do', row: 'c', review: true })
   })
   it('gates a change by the reach its behaviours declare', () => {
-    const withReach = (reach: string) => jevInput({ request: 'Organize the people', doctrine: 'Preserve history.', evidence: ['Nothing read yet.'], rows: rows.map(row => row.id === 'c' ? { ...row, reach } : row) })
     const thin = { c_grounded: noul(0.4) }
-    expect(jevResult(response('c', thin), withReach('additive')).plan).toEqual({ kind: 'do', row: 'c', review: false })
-    expect(jevResult(response('c', thin), withReach('editing')).plan).toEqual({ kind: 'do', row: 'c', review: true })
+    expect(jevResult(response('c', thin), build({ reach: 'additive' })).plan).toEqual({ kind: 'do', row: 'c', review: false })
+    expect(jevResult(response('c', thin), build({ reach: 'editing' })).plan).toEqual({ kind: 'do', row: 'c', review: true })
     expect(jevResult(response('c', thin), input).plan).toEqual({ kind: 'do', row: 'c', review: true })
-    const destructive = jevResult(response('c'), withReach('destructive'))
+    const destructive = jevResult(response('c'), build({ reach: 'destructive' }))
     expect(destructive.plan).toEqual({ kind: 'do', row: 'c', review: true })
     expect(destructive.reason).toContain('always reviews')
-    expect(jevResult(response('c', { c_rules: noul(0.5) }), withReach('additive')).plan).toEqual({ kind: 'do', row: 'c', review: true })
-    expect(() => withReach('sideways')).toThrow()
-    expect(() => jevInput({ request: 'r', doctrine: 'd', evidence: 'e', rows: [{ id: 'a', kind: 'read', label: 'x', line: 'y', reach: 'additive' }] })).toThrow()
   })
-  it('runs a read Jev only half-trusts, because a read changes nothing', () => {
-    const scoreboard = response('none', { a_fit: noul(0.66), c_fit: noul(0.17), c_rules: noul(0.5), c_grounded: noul(0.13) })
-    expect(jevResult(scoreboard, input).plan).toEqual({ kind: 'read', rows: ['a'] })
-    expect(jevResult(response('none', { a_fit: noul(0.55) }), input).plan.kind).toBe('participant')
+  it('scales the choice threshold with risk', () => {
+    const at = (confidence: number) => ({ next: choice('c', confidence) })
+    expect(JEV_CHOICE_GATES.additive).toBeLessThan(JEV_CHOICE_GATES.editing)
+    expect(jevResult(response('c', at(0.75)), build({ reach: 'additive' })).plan).toEqual({ kind: 'do', row: 'c', review: false })
+    expect(jevResult(response('c', at(0.75)), build({ reach: 'editing' })).plan).toEqual({ kind: 'do', row: 'c', review: true })
+    expect(jevResult(response('d', { d_answered: noul(0.95), next: choice('d', 0.65) }), input).plan).toEqual({ kind: 'answer' })
+    expect(jevResult(response('c', at(0.45)), input).plan).toEqual({ kind: 'read', rows: ['a'] })
   })
-  it('reads first when the choice is unclear or conflicts with doctrine', () => {
-    const unclear = jevResult(response('none'), input)
-    expect(unclear.plan).toEqual({ kind: 'read', rows: ['a'] })
-    const conflict = jevResult(response('c', { c_rules: noul(0.01) }), input)
-    expect(conflict.plan).toEqual({ kind: 'read', rows: ['a'] })
-    expect(conflict.rejected).toEqual(['c'])
-    expect(conflict.reason).toContain('doctrine')
+  it('sends a change that strays beyond the request to review', () => {
+    expect(jevResult(response('c', { c_beyond: noul(0.5) }), input).plan).toEqual({ kind: 'do', row: 'c', review: true })
   })
-  it('asks the participant when nothing passes, excluding rejected rows; revises when every change conflicts', () => {
-    const nothing = jevResult(response('none', { a_fit: noul(0.2) }), input)
+  it('holds a change on any doubtful doctrine section, and rejects a clear breach, naming the rule', () => {
+    const doubt = jevResult(response('c', { c_rule1: noul(0.3) }), input)
+    expect(doubt.plan).toEqual({ kind: 'do', row: 'c', review: true })
+    expect(doubt.reason).toContain('rules .30 (The core rule)')
+    const breach = jevResult(response('c', { c_rule0: noul(0.97) }), input)
+    expect(breach.rejected).toEqual(['c'])
+    expect(breach.plan).toEqual({ kind: 'read', rows: ['a'] })
+    expect(breach.reason).toContain('conflicts with Hypercomb doctrine')
+  })
+  it('runs a read Jev only half-trusts, but never re-reads what the evidence already shows', () => {
+    const replay = response('none', { a_needed: noul(0.66), c_toward: noul(0.17), c_rule0: noul(0.5), c_grounded: noul(0.13) })
+    expect(jevResult(replay, input).plan).toEqual({ kind: 'read', rows: ['a'] })
+    expect(jevResult(response('none', { a_known: noul(0.8) }), input).plan.kind).toBe('participant')
+    expect(jevResult(response('none', { a_needed: noul(0.55) }), input).plan.kind).toBe('participant')
+  })
+  it('batches the reads that pass when Jev chooses a read, most needed first', () => {
+    const result = jevResult(response('b', { b_needed: noul(0.9) }), input)
+    expect(result.plan).toEqual({ kind: 'read', rows: ['b', 'a'].slice(0, JEV_MAX_READS) })
+  })
+  it('ends the work, or asks, when those rows pass', () => {
+    expect(jevResult(response('d', { d_answered: noul(0.95) }), input).plan).toEqual({ kind: 'answer' })
+    expect(jevResult(response('e', { e_open: noul(0.95) }), input).plan).toEqual({ kind: 'ask', row: 'e' })
+  })
+  it('asks the participant when nothing passes, excluding rejected rows; revises when every change breaks doctrine', () => {
+    const nothing = jevResult(response('none', { a_needed: noul(0.2) }), input)
     expect(nothing.plan).toEqual({ kind: 'participant', rows: ['a', 'b', 'c', 'e'] })
-    const one = jevInput({ request: 'r', doctrine: 'd', evidence: 'e', rows: [rows[2]] })
-    expect(jevResult({ answers: { c_fit: noul(1), c_rules: noul(0.01), c_grounded: noul(1), next: choice('c', { c: 1, none: 0 }) } }, one).plan).toEqual({ kind: 'revise' })
+    const one = jevInput({ request: 'r', doctrine, evidence: 'e', rows: [rows[2]] })
+    const answers = { c_toward: noul(1), c_beyond: noul(0), c_grounded: noul(1), c_rule0: noul(0.99), c_rule1: noul(0), next: { type: 'choice', choice: 'c', confidence: 1 } }
+    expect(jevResult({ answers }, one).plan).toEqual({ kind: 'revise' })
   })
-  it('defers to the participant when confidence data is weak or absent', () => {
-    const weak = jevResult(response('c', { a_fit: noul(0.2), next: choice('c', { a: 0, b: 0, c: 0.6, d: 0, e: 0, none: 0.4 }, 0.6) }), input)
-    expect(weak.plan.kind).toBe('participant')
-    const absent = jevResult(response('c', { a_fit: noul(0.2), next: { type: 'choice', choice: 'c' } }), input)
+  it('defers to the participant when confidence is absent', () => {
+    const absent = jevResult(response('c', { a_needed: noul(0.2), next: { type: 'choice', choice: 'c' } }), input)
     expect(absent.plan.kind).toBe('participant')
     expect(absent.reason).toContain('confidence')
-    expect(weak.reason).toContain('Create people: fit .97 rules .99 grounded .96')
-    expect(weak.reason).toContain('next c .60')
   })
   it('fails closed on missing answers, foreign choices and invalid probabilities', () => {
     expect(() => jevResult({ answers: {} }, input)).toThrow()
     expect(() => jevResult(response('execute'), input)).toThrow()
-    expect(() => jevResult(response('c', { next: choice('c', { a: NaN, b: 0, c: 1, d: 0, e: 0, none: 0 }) }), input)).toThrow()
-    expect(() => jevResult(response('c', { c_rules: { type: 'choice', choice: 'yes' } }), input)).toThrow()
+    expect(() => jevResult(response('c', { next: { ...choice('c'), probabilities: { a: Number.NaN } } }), input)).toThrow()
+    expect(() => jevResult(response('c', { c_rule0: { type: 'choice', choice: 'yes' } }), input)).toThrow()
   })
 })
