@@ -1717,6 +1717,8 @@
   "publish.row.status": "Stato",
   "publish.switch.on": "Pubblicato qui — spegni per nasconderlo su questo dominio",
   "publish.switch.off": "Non pubblicato qui — accendi per pubblicarlo su questo dominio",
+  "publish.here.root": "Posizionati su una tessera per pubblicarla sui tuoi domini.",
+  "publish.here.no-domains": "Ancora nessun dominio — aggiungine uno con Gestisci host.",
   "publish.done": "Pubblicato — l'host pubblico lo sta servendo.",
   "publish.done-unconfirmed": "Pubblicato — l'host pubblico non lo ha ancora servito. Questa riga ricontrolla da sola.",
   "publish.unpublished": "Rimosso dall'indice del tuo alveare. I byte restano ospitati e i link già condivisi continuano a funzionare — questo ne ferma l'annuncio, non annulla la condivisione.",

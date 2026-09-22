@@ -73,31 +73,41 @@
       @if (whyKey(row)) {
         <p class="pcur-why">{{ whyKey(row) | t: whyParams(row) }}</p>
       }
+    } @else {
+      <!-- No tile to act on (the hive root, still checking, no key yet): the
+           domains are listed all the same, switched by nothing until you
+           stand on a tile. -->
+      <p class="pcur-why">{{ hereHint() | t }}</p>
+    }
 
+    <!-- EVERY DOMAIN YOU PUBLISH TO, always — one switch each. -->
+    @if (domains().length === 0) {
+      <p class="pcur-why">{{ 'publish.here.no-domains' | t }}</p>
+    }
       <ul class="pdoors">
-        @for (zone of hosts(); track zone) {
+        @for (zone of domains(); track zone) {
           <li
             class="pdoor"
             role="switch"
             tabindex="0"
-            [attr.aria-checked]="doorOn(row, zone)"
-            [attr.aria-disabled]="!canSwitch(row)"
-            [class.lit]="doorOn(row, zone)"
-            [class.off]="!doorOn(row, zone)"
-            [class.busy]="!!row.busyPhase"
-            [attr.title]="(doorOn(row, zone) ? 'publish.switch.on' : 'publish.switch.off') | t"
-            (click)="flipDoor(row, zone)"
-            (keydown.enter)="flipDoor(row, zone)"
-            (keydown.space)="flipDoor(row, zone); $event.preventDefault()"
+            [attr.aria-checked]="doorOn(current(), zone)"
+            [attr.aria-disabled]="!canSwitch(current())"
+            [class.lit]="doorOn(current(), zone)"
+            [class.off]="!doorOn(current(), zone)"
+            [class.busy]="!!current()?.busyPhase"
+            [attr.title]="(doorOn(current(), zone) ? 'publish.switch.on' : 'publish.switch.off') | t"
+            (click)="flipDoor(current(), zone)"
+            (keydown.enter)="flipDoor(current(), zone)"
+            (keydown.space)="flipDoor(current(), zone); $event.preventDefault()"
           >
             <div class="pdoor-meta">
               <span class="pdoor-zone">{{ zone }}</span>
-              <span class="pdoor-address">{{ address(row, zone) }}</span>
+              <span class="pdoor-address">{{ address(current(), zone) }}</span>
             </div>
-            @if (doorOn(row, zone)) {
+            @if (doorOn(current(), zone)) {
               <a
                 class="pdoor-go"
-                [href]="addressUrl(row, zone)"
+                [href]="addressUrl(current(), zone)"
                 target="_blank"
                 rel="noopener"
                 [attr.aria-label]="'publish.action.visit' | t"
@@ -107,7 +117,7 @@
                 (keydown.space)="$event.stopPropagation()"
               >↗</a>
             }
-            <span class="pdoor-bulb" [class.on]="doorOn(row, zone)" aria-hidden="true">
+            <span class="pdoor-bulb" [class.on]="doorOn(current(), zone)" aria-hidden="true">
               <span class="mat-sym">lightbulb</span>
             </span>
           </li>
@@ -116,6 +126,8 @@
       <button class="pcur-hosts-manage" type="button" (click)="openHosts()">
         {{ 'publish.action.manage-hosts' | t }}
       </button>
+
+    @if (current(); as row) {
 
       <!-- THE DETAILS, folded — one section open at a time, all closed on
            arrival (ui/accordion.ts). -->
@@ -301,8 +313,6 @@
           </div>
         }
       </section>
-    } @else {
-      <p class="publish-empty">{{ 'publish.empty' | t }}</p>
     }
   </aside>
 }

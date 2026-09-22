@@ -1717,6 +1717,8 @@
   "publish.row.status": "상태",
   "publish.switch.on": "여기에 게시됨 — 이 도메인에서 숨기려면 끄기",
   "publish.switch.off": "여기에 게시 안 됨 — 이 도메인에 게시하려면 켜기",
+  "publish.here.root": "타일에 서면 내 도메인에 게시할 수 있습니다.",
+  "publish.here.no-domains": "아직 도메인이 없습니다 — 호스트 관리에서 추가하세요.",
   "publish.done": "게시했습니다 — 공개 호스트가 제공하고 있습니다.",
   "publish.done-unconfirmed": "게시했습니다 — 공개 호스트가 아직 되돌려주지 않았습니다. 이 행은 알아서 다시 확인합니다.",
   "publish.unpublished": "하이브 색인에서 제거했습니다. 바이트는 계속 호스팅되고 이미 공유한 링크도 열립니다 — 알리기를 멈출 뿐, 공유를 취소하지는 않습니다.",

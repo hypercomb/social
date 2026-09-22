@@ -1717,6 +1717,8 @@
   "publish.row.status": "Status",
   "publish.switch.on": "Hier veröffentlicht — ausschalten, um es auf dieser Domain zu verbergen",
   "publish.switch.off": "Hier nicht veröffentlicht — einschalten, um es auf dieser Domain zu veröffentlichen",
+  "publish.here.root": "Stell dich auf eine Kachel, um sie auf deinen Domains zu veröffentlichen.",
+  "publish.here.no-domains": "Noch keine Domains — füge eine über „Hosts verwalten“ hinzu.",
   "publish.done": "Veröffentlicht — der öffentliche Host liefert es aus.",
   "publish.done-unconfirmed": "Veröffentlicht — der öffentliche Host hat es noch nicht ausgeliefert. Diese Zeile prüft von selbst nach.",
   "publish.unpublished": "Aus Ihrem Bienenstock-Index entfernt. Die Bytes bleiben gehostet und bereits geteilte Links funktionieren weiter — das beendet nur die Ankündigung, es macht das Teilen nicht rückgängig.",

@@ -1717,6 +1717,8 @@
   "publish.row.status": "Statut",
   "publish.switch.on": "Publié ici — désactivez pour le masquer sur ce domaine",
   "publish.switch.off": "Non publié ici — activez pour le publier sur ce domaine",
+  "publish.here.root": "Placez-vous sur une tuile pour la publier sur vos domaines.",
+  "publish.here.no-domains": "Aucun domaine pour l’instant — ajoutez-en un via Gérer les hôtes.",
   "publish.done": "Publié — l'hôte public le sert.",
   "publish.done-unconfirmed": "Publié — l'hôte public ne l'a pas encore servi. Cette ligne revérifie d'elle-même.",
   "publish.unpublished": "Retiré de l'index de votre ruche. Les octets restent hébergés et les liens déjà partagés fonctionnent toujours — cela cesse de l'annoncer, cela n'annule pas le partage.",

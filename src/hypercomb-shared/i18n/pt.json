@@ -1717,6 +1717,8 @@
   "publish.row.status": "Estado",
   "publish.switch.on": "Publicado aqui — desligue para ocultar neste domínio",
   "publish.switch.off": "Não publicado aqui — ligue para publicar neste domínio",
+  "publish.here.root": "Posicione-se num mosaico para o publicar nos seus domínios.",
+  "publish.here.no-domains": "Ainda sem domínios — adicione um em Gerir hosts.",
   "publish.done": "Publicado — o host público está servindo.",
   "publish.done-unconfirmed": "Publicado — o host público ainda não serviu de volta. Esta linha verifica sozinha.",
   "publish.unpublished": "Removido do índice da sua colmeia. Os bytes seguem hospedados e os links já compartilhados continuam funcionando — isto para o anúncio, não desfaz o compartilhamento.",

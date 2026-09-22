@@ -168,6 +168,11 @@ export class PublishPanelComponent implements OnDestroy {
    *  the drone validates, and a refusal comes back as a toast with nothing
    *  moved, which is the honest outcome. */
   readonly hosts = signal<string[]>([])
+  readonly pubkey = signal('')
+  /** Every domain you publish to: the ones you carry, plus any the current
+   *  tile already names — a door that is on must never be missing its row. */
+  readonly domains = computed<string[]>(() =>
+    [...new Set([...this.hosts(), ...(this.current()?.zones ?? [])])].sort())
   readonly index = signal<PublishIndexState>('checking')
   readonly indexCreatedAt = signal(0)
   readonly indexStale = signal(false)
@@ -285,29 +290,29 @@ export class PublishPanelComponent implements OnDestroy {
   /** Is this branch published on this domain? Only while the signed index
    *  names it — and, when its entry lists doors, only on those. An entry with
    *  no doors opens everywhere (every index written before doors). */
-  doorOn(row: PublishRow, zone: string): boolean {
-    if (!row.live) return false
+  doorOn(row: PublishRow | null, zone: string): boolean {
+    if (!row?.live) return false
     return row.doors === null || row.doors.includes(zone)
   }
 
   /** One domain's switch. The drone decides what the flip costs: a signed
    *  doors rewrite for a published branch, a full publish for the first
    *  domain, a withdrawal for the last. */
-  flipDoor(row: PublishRow, zone: string): void {
-    if (!this.canSwitch(row)) return
+  flipDoor(row: PublishRow | null, zone: string): void {
+    if (!row || !this.canSwitch(row)) return
     EffectBus.emit('publish:door', { key: row.key, zone, on: !this.doorOn(row, zone) })
   }
 
   /** The address as a person reads it: name.zone (the zone itself at root). */
-  address(row: PublishRow, zone: string): string {
-    const name = this.label(row)
+  address(row: PublishRow | null, zone: string): string {
+    const name = row ? this.label(row) : ''
     return name ? `${name}.${zone}` : zone
   }
 
   /** Where ONE address lives once published. A branch with no name of its own
    *  (the hive root) has no subdomain — the zone IS the address. */
-  addressUrl(row: PublishRow, zone: string): string {
-    const name = this.label(row)
+  addressUrl(row: PublishRow | null, zone: string): string {
+    const name = row ? this.label(row) : ''
     return `https://${name ? `${name}.` : ''}${zone}`
   }
 
@@ -327,6 +332,7 @@ export class PublishPanelComponent implements OnDestroy {
       if (!p) return
       this.zone.set(String(p.zone ?? '') || String(p.host ?? '').replace(/^content\./, ''))
       this.hosts.set(Array.isArray(p.hosts) ? p.hosts.map(String).filter(Boolean) : [])
+      this.pubkey.set(String(p.pubkey ?? ''))
       const nextCurrent = String(p.currentKey ?? '')
       // Walking to another tile re-aims the pane. A selection made by hand
       // survives repeated renders of the SAME page, so a refresh mid-edit does
@@ -487,8 +493,16 @@ export class PublishPanelComponent implements OnDestroy {
 
   /** A row published from another device has no branch here to seal or
    *  withdraw, and a row mid-act or still comparing has nothing to flip yet. */
-  canSwitch(row: PublishRow): boolean {
-    return row.segments.length > 0 && !row.busyPhase && row.state !== 'comparing'
+  canSwitch(row: PublishRow | null): boolean {
+    return !!row && row.segments.length > 0 && !row.busyPhase && row.state !== 'comparing'
+  }
+
+  /** Why nothing can be switched right now: no key to sign with, a first
+   *  read still running, or the hive root, which is no tile. */
+  hereHint(): string {
+    if (!this.pubkey()) return 'publish.failure.no-signer'
+    if (this.refreshing() && this.rows().length === 0) return 'publish.header.index-checking'
+    return 'publish.here.root'
   }
 
   /** The one extra press a switched-ON row can owe: its content changed here

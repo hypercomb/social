@@ -1717,6 +1717,8 @@
   "publish.row.status": "Status",
   "publish.switch.on": "Terbit di sini — matikan untuk menyembunyikannya di domain ini",
   "publish.switch.off": "Belum terbit di sini — nyalakan untuk menerbitkannya di domain ini",
+  "publish.here.root": "Berdirilah di sebuah ubin untuk menerbitkannya di domain Anda.",
+  "publish.here.no-domains": "Belum ada domain — tambahkan lewat Kelola host.",
   "publish.done": "Diterbitkan — host publik sudah menyajikannya.",
   "publish.done-unconfirmed": "Diterbitkan — host publik belum menyajikannya kembali. Baris ini memeriksa sendiri.",
   "publish.unpublished": "Dihapus dari indeks sarangmu. Bytenya tetap di-host dan tautan yang sudah dibagikan tetap berfungsi — ini menghentikan pengumumannya, bukan membatalkan pembagiannya.",

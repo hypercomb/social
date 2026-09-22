@@ -1717,6 +1717,8 @@
   "publish.row.status": "Durum",
   "publish.switch.on": "Burada yayında — bu alan adında gizlemek için kapatın",
   "publish.switch.off": "Burada yayında değil — bu alan adında yayınlamak için açın",
+  "publish.here.root": "Alan adlarınızda yayınlamak için bir karonun üzerine gelin.",
+  "publish.here.no-domains": "Henüz alan adı yok — Hostları yönet ile bir tane ekleyin.",
   "publish.done": "Yayınlandı — herkese açık sunucu sunuyor.",
   "publish.done-unconfirmed": "Yayınlandı — herkese açık sunucu henüz geri sunmadı. Bu satır kendi kendine yeniden kontrol eder.",
   "publish.unpublished": "Kovan dizininden kaldırıldı. Baytlar sunulmaya devam ediyor ve paylaşılmış bağlantılar hâlâ çalışıyor — bu yalnızca duyurmayı durdurur, paylaşımı geri almaz.",

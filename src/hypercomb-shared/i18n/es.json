@@ -1717,6 +1717,8 @@
   "publish.row.status": "Estado",
   "publish.switch.on": "Publicado aquí — apágalo para ocultarlo en este dominio",
   "publish.switch.off": "No publicado aquí — enciéndelo para publicarlo en este dominio",
+  "publish.here.root": "Sitúate en una tesela para publicarla en tus dominios.",
+  "publish.here.no-domains": "Aún no hay dominios — añade uno con Gestionar hosts.",
   "publish.done": "Publicado — el host público lo está sirviendo.",
   "publish.done-unconfirmed": "Publicado — el host público aún no lo ha servido de vuelta. Esta fila lo vuelve a comprobar sola.",
   "publish.unpublished": "Quitado del índice de tu colmena. Los bytes siguen alojados y los enlaces ya compartidos siguen funcionando — esto deja de anunciarlo, no lo descomparte.",

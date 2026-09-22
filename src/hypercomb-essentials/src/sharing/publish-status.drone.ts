@@ -240,6 +240,8 @@ export class PublishStatusDrone extends Drone {
    *  nothing else: a host is here because it was ADDED, never because some
    *  branch once claimed it. */
   #community: string[] = []
+  /** The domains your host actually SERVES, read from its own ledger. */
+  #served: string[] = []
 
   /** Where each branch says it publishes — the marks it wears, by key. */
   readonly #branchHosts = new Map<string, string[]>()
@@ -313,7 +315,7 @@ export class PublishStatusDrone extends Drone {
     this.onEffect<{ zones?: string[] }>('hosts:render', (p) => {
       this.#community = Array.isArray(p?.zones) ? p.zones.map(hostZone).filter(Boolean) : []
       if (!this.#open) return
-      this.#payload = { ...this.#payload, hosts: [...this.#community] }
+      this.#payload = { ...this.#payload, hosts: this.#knownZones() }
       this.#emit()
     })
 
@@ -387,10 +389,14 @@ export class PublishStatusDrone extends Drone {
       // constant is what lets the panel show a target that can change.
       const host = hostSync?.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || ''
       this.#zone = host.replace(/^content\./, '')
+      // The domains come first: they are listed whether or not a key or a
+      // tile is ready, so the panel is never an empty page.
+      this.#community = await listCommunityHosts()
+      this.#served = await servedZones(this.#zone)
       const pubkey = String((await signer?.getPublicKeyHex?.()) ?? '').toLowerCase()
       if (!SIG_RE.test(pubkey)) {
         this.#payload = {
-          ...this.#payload, open: this.#open, host, zone: this.#zone, pubkey: '',
+          ...this.#payload, open: this.#open, host, zone: this.#zone, pubkey: '', hosts: this.#knownZones(),
           index: 'checking', refreshing: false, rows: [], collisions: [],
         }
         this.#emit()
@@ -414,20 +420,17 @@ export class PublishStatusDrone extends Drone {
         if (!candidates.has(key)) candidates.set(key, segments)
       }
 
-      // THE CURRENT PAGE decides what the panel shows: the nearest branch at
-      // or above where the participant stands — or where they stand itself,
-      // added as the branch a first publish would create. The hive IS the
-      // list; walking to a tile selects it.
+      // THE CURRENT TILE decides what the panel shows — added as the branch a
+      // first publish would create when it is not published yet. The hive IS
+      // the list; walking to a tile selects it.
       const nav = get<{ segments?: () => string[] }>('@hypercomb.social/Navigation')
       const here = (nav?.segments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+      // Exactly the tile you are on — "Publish / <tile>" acts on that tile,
+      // never on a published ancestor above it.
       let currentKey = ''
-      for (let i = here.length; i > 0; i--) {
-        const k = lineageKey(here.slice(0, i))
-        if (candidates.has(k)) { currentKey = k; break }
-      }
-      if (!currentKey && here.length > 0) {
+      if (here.length > 0) {
         currentKey = lineageKey(here)
-        candidates.set(currentKey, here)
+        if (!candidates.has(currentKey)) candidates.set(currentKey, here)
       }
       // The current row starts as the properties-pane subject, so its gap
       // check runs without requiring a list click.
@@ -443,7 +446,6 @@ export class PublishStatusDrone extends Drone {
         const named = await hostsOfBranch(segments.length > 0 ? segments : key.split('/').filter(Boolean))
         if (named.length > 0) this.#branchHosts.set(key, named)
       }
-      this.#community = await listCommunityHosts()
 
       // THE DOORS IN USE: the standing default plus every branch's own
       // choice. Every zone fronts the same per-key index, but a row is
@@ -840,7 +842,10 @@ export class PublishStatusDrone extends Drone {
     // was never withdrawn, so one mistyped hostname stayed in this list
     // forever, on every branch, with nothing anywhere able to remove it. What
     // you carry is now a set of artifacts you can delete.
-    return [...this.#community]
+    // Plus every domain your host SERVES, from its own ledger: a zone the
+    // worker routes is a publish domain whether or not the Hosts list names
+    // it, and disconnecting it from the worker is what removes it here.
+    return [...new Set([...this.#community, ...this.#served])]
   }
 
   #zonesFor(key: string): string[] {
@@ -883,3 +888,26 @@ const _publishStatus = new PublishStatusDrone()
   '@diamondcoreprocessor.com/PublishStatusDrone',
   _publishStatus,
 )
+
+/** Every domain a host serves, read from its `/publications.json`: each door
+ *  is `<name>.<zone>`, so the zones are the doors less their first label.
+ *  Best-effort and bounded — no answer means no extra domains, never an error. */
+async function servedZones(zone: string): Promise<string[]> {
+  const apex = String(zone ?? '').trim().toLowerCase()
+  if (!apex || LOOPBACK_RE.test(apex)) return []
+  try {
+    const res = await fetch(`https://${apex}/publications.json`, { cache: 'no-store', signal: AbortSignal.timeout(6000) })
+    if (!res.ok) return []
+    const sites = (await res.json() as { sites?: { hosts?: { host?: string }[] }[] })?.sites
+    if (!Array.isArray(sites)) return []
+    const zones = new Set<string>([apex])
+    for (const site of sites) {
+      for (const door of site?.hosts ?? []) {
+        const host = String(door?.host ?? '').toLowerCase()
+        const dot = host.indexOf('.')
+        if (dot > 0 && host.slice(dot + 1).includes('.')) zones.add(host.slice(dot + 1))
+      }
+    }
+    return [...zones].map(hostZone).filter(Boolean)
+  } catch { return [] }
+}

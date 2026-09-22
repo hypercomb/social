@@ -1707,6 +1707,8 @@
   "publish.row.status": "Status",
   "publish.switch.on": "Published here — turn off to hide it on this domain",
   "publish.switch.off": "Not published here — turn on to publish it on this domain",
+  "publish.here.root": "Stand on a tile to publish it on your domains.",
+  "publish.here.no-domains": "No domains yet — add one with Manage hosts.",
   "publish.done": "Published — the public host is serving it.",
   "publish.done-unconfirmed": "Published — the public host has not served it back yet. This row re-checks on its own.",
   "publish.unpublished": "Removed from your hive index. The bytes stay hosted and links already shared still resolve — this stops it being advertised, it does not un-share it.",
