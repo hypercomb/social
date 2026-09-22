@@ -4,7 +4,9 @@
 //
 //   1. a model writes a module through the chat; Jev judges the write
 //   2. `module commit` publishes the whole package and opens a SANDBOX:
-//      install:try-<change>, never the live channel
+//      install:try-<change>, never the live channel; the change (each drafted
+//      file before and after) is published beside it, and the host's AI reads
+//      it — review:try-<change>
 //   3. a tester opens try-<change>.<zone>: a full hive whose door names that
 //      package, and runs the model's code — while followers are NOT told
 //   4. `module promote` moves the live channel to the same root: the follower
@@ -13,7 +15,7 @@
 //      follower, and every earlier file is still on the host
 //   6. `module withdraw` closes the door; the files stay
 //
-//   node scripts/local-content-host.mjs 4291 http://localhost:4260   (the content host's own worker)
+//   node scripts/local-content-host.mjs 4291 http://localhost:4260 --ai-stub   (the content host's own worker)
 //   node scripts/verify-hive-publish.cjs [web=http://localhost:4260] [host=localhost:4291]
 //
 // Fresh Playwright profiles on the WEB shell; the door is served on
@@ -87,6 +89,22 @@ const announcedOn = page => page.evaluate(() => {
   check('the host holds the whole package, so the door can serve it alone', state1.content.length >= 200 && state1.content.includes(sandboxRoot), `${state1.content.length} files`)
   check('the publisher is told where the door is', (shown ?? []).some(m => m.includes(DOOR)), DOOR)
 
+  // ── 2b. THE CHANGE IS PUBLIC, AND THE HOST'S AI READS IT ────────────────
+  const reviewed = await H.toastsUntil(page, /AI read |review cannot run/, 120_000)
+  console.log('   review:', JSON.stringify((reviewed ?? []).filter(m => / AI |review/.test(m))))
+  const stateR = await hostState()
+  const changeSig = channelOf(stateR, pubkey, `change:${SANDBOX}`)
+  const reviewSig = channelOf(stateR, pubkey, `review:${SANDBOX}`)
+  const fromHost = async sig => (await fetch(`http://${HOST}/${sig}`)).text()
+  const changeRecord = changeSig ? JSON.parse(await fromHost(changeSig)) : null
+  const drafted = changeRecord?.changes?.[0]
+  const [beforeText, afterText] = drafted ? await Promise.all([fromHost(drafted.before), fromHost(drafted.after)]) : ['', '']
+  check('the change is published beside the sandbox, file by file', !!changeSig && drafted?.section === target.section && afterText.includes(MARKER) && !beforeText.includes(MARKER))
+  const reviewRecord = reviewSig ? JSON.parse(await fromHost(reviewSig)) : null
+  const findings = reviewRecord ? await fromHost(reviewRecord.findings) : ''
+  check('the host AI read the change, and its reading is published beside it', reviewRecord?.verdict === 'accept' && reviewRecord?.change === changeSig, reviewRecord ? `${reviewRecord.verdict} by ${reviewRecord.model}` : 'no review')
+  check('the host AI was shown the changed code itself, from its own heap', /__hivePublishProof: yes/.test(findings) && /Context files shown: 2/.test(findings), findings.split('\n').slice(1, 3).join(' '))
+
   // ── 3. A TESTER OPENS THE DOOR ──────────────────────────────────────────
   // The door is read from the tester's browser: Chrome resolves *.localhost
   // to loopback, Node on Windows does not.
@@ -96,6 +114,7 @@ const announcedOn = page => page.evaluate(() => {
   await tester.goto(DOOR, { waitUntil: 'domcontentloaded', timeout: 180_000 })
   const site = await tester.evaluate(() => fetch('/site.json', { cache: 'no-store' }).then(r => r.json())).catch(() => null)
   check('the door describes itself as the sandbox of that package', site?.sandbox === true && site?.package === sandboxRoot && site?.pubkey === pubkey)
+  check('the door names the change and the review, for anyone to read', site?.change === changeSig && site?.review === reviewSig)
   const testerRuns = await H.waitFor(() => H.installedOf(tester), 180_000, 1000)
   check('the tester\'s hive at the door installed exactly the sandbox package', testerRuns === sandboxRoot, String(testerRuns).slice(0, 12))
   check('the tester runs the code the model wrote', await proofOf(tester) === MARKER)

@@ -158,6 +158,9 @@ export type ModuleCommitOutcome =
     readonly files: readonly string[]
     /** The draft paths the new package took, and the paths it no longer reaches. */
     readonly drafts: readonly string[]
+    /** Each drafted source file: its path in the package, the section, the
+     *  module it was written into (`from`) and the module that replaced it (`to`). */
+    readonly changes: readonly { readonly path: string; readonly section: string; readonly from: string; readonly to: string }[]
     readonly off: readonly string[]
   }
   | { readonly ok: false; readonly error: string }

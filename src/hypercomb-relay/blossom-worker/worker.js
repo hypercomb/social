@@ -621,7 +621,11 @@ async function sandboxRoot(env, site, selected) {
   for (const publisher of publishers) {
     const index = await read(publisher.pubkey)
     const root = String(index?.roots?.[channel] || '').toLowerCase()
-    if (SIG_RE.test(root)) return { root, pubkey: publisher.pubkey, label: publisher.label || '', publishedAt: index.createdAt }
+    if (!SIG_RE.test(root)) continue
+    // Beside the sandbox, the change as a reader needs it and the host AI's
+    // reading of it (essentials module-review.ts) — public, by signature.
+    const beside = (key) => { const sig = String(index?.roots?.[key] || '').toLowerCase(); return SIG_RE.test(sig) ? sig : null }
+    return { root, pubkey: publisher.pubkey, label: publisher.label || '', publishedAt: index.createdAt, change: beside(`change:${site.lineage}`), review: beside(`review:${site.lineage}`) }
   }
   return null
 }
@@ -640,6 +644,7 @@ async function serveSandbox(request, env, site, zone) {
     return json(200, {
       sandbox: true, title: site.lineage, channel: `install:${site.lineage}`, package: found.root,
       pubkey: found.pubkey, publisher: found.label, publishedAt: found.publishedAt, hosts: [url.host],
+      ...(found.change ? { change: found.change } : {}), ...(found.review ? { review: found.review } : {}),
     }, { 'Cache-Control': 'no-store' })
   }
   const moduleMatch = url.pathname.match(/^\/content\/([0-9a-f]{64})$/)

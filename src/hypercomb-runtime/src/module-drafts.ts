@@ -301,7 +301,13 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
   // WHAT CHANGES: the drafts (picks whose root says it is a draft) and the paths turned off.
   const picks = deps.picks()
   const drafts = new Map<string, string>()
-  for (const [path, pick] of Object.entries(picks)) if ((await read(pick.root))?.['draft']) drafts.set(path, pick.layer)
+  const sections = new Map<string, { section: string; from: string }>()
+  for (const [path, pick] of Object.entries(picks)) {
+    const draft = (await read(pick.root))?.['draft'] as { section?: unknown; from?: unknown } | undefined
+    if (!draft) continue
+    drafts.set(path, pick.layer)
+    sections.set(path, { section: String(draft.section ?? ''), from: String(draft.from ?? '') })
+  }
   const off = new Set([...deps.off()].filter(path => !drafts.has(path)))
   if (!drafts.size && !off.size) return fail('nothing to commit: no draft is picked and nothing is turned off')
   const touches = (path: string): boolean =>
@@ -376,7 +382,10 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
   if (!pool) return fail(`the package runs here now, but this shell holds no ${HOST_PACKAGES_MEANING} pool to publish it into`)
   const index = (markerIndices(await pool.names()).pop() ?? -1) + 1
   await pool.write(poolEntryName(index), formatMember(rootSig, label))
-  return { ok: true, rootSig, index, atoms: await newAtoms(trunk, rootSig, io), files: await packageFiles(rootSig, io), drafts: [...drafts.keys()].sort(), off: [...off].sort() }
+  return { ok: true, rootSig, index, atoms: await newAtoms(trunk, rootSig, io), files: await packageFiles(rootSig, io), drafts: [...drafts.keys()].sort(), off: [...off].sort(),
+    // WHAT CHANGED, file by file: the section each draft wrote, the module it
+    // was written into, and the module that replaced it — what a reviewer reads.
+    changes: [...sections].sort(([a], [b]) => a.localeCompare(b)).map(([path, { section, from }]) => ({ path, section, from, to: renames.get(from) ?? '' })) }
 }
 
 /** The files the new package holds that the old one did not — layers, modules

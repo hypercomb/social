@@ -25,12 +25,20 @@
 //   module withdraw <change> [@<host>]
 //                          the sandbox pointer is removed: its door answers
 //                          "nothing here", and every file stays on the host.
+//   module review <change> [@<host>]
+//                          the host's AI reads the change again (it reads it
+//                          once on every commit): module-review.ts.
 //
-// All three publishing words are the participant's alone: a model proposing
+// Every commit also publishes THE CHANGE — each drafted source file before and
+// after — as change:try-<change>, and the host's AI's reading of it as
+// review:try-<change>. Both are public beside the sandbox: its door names them.
+//
+// All four publishing words are the participant's alone: a model proposing
 // them is refused, whatever the Execution policy.
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, MODULE_DRAFTS_IOC_KEY, type I18nProvider, type ModuleDraftsProvider } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
+import { publishChange, readChange, reviewChange, type ModuleChangeRecord, type ReviewDeps } from './module-review.js'
 import { INSTALL_CHANNEL_PREFIX, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 
 /** The host backup service's participant-triggered upload (sharing/host-sync.service.ts). */
@@ -45,7 +53,57 @@ export const SANDBOX_ZONE = 'hypercomb.com'
 export const SANDBOX_PREFIX = 'try-'
 const CHANNEL_RE = /^[a-z][a-z0-9-]*$/
 const PATH_RE = /^[a-z0-9][a-z0-9._-]{0,63}(?:\/[a-z0-9][a-z0-9._-]{0,63})*$/i
-const PUBLISHING = new Set(['commit', 'promote', 'withdraw'])
+const PUBLISHING = new Set(['commit', 'promote', 'withdraw', 'review'])
+const STORE_KEY = '@hypercomb.social/Store'
+const HOST_AI_KEY = '@diamondcoreprocessor.com/HostAi'
+
+type StoreLike = {
+  putResource?(blob: Blob, options?: { emit?: boolean }): Promise<string>
+  getResource?(sig: string): Promise<Blob | null>
+}
+type HostAiLike = {
+  askWhole?(host: string, question: string, context: readonly string[]): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string }>
+}
+type Say = (key: string, fallback: string, params?: Record<string, string | number>) => string
+type Toast = (message: string, type?: string) => void
+
+/** What the review reads and writes, from this hive's store and the host. */
+const reviewDeps = (drafts: ModuleDraftsProvider, sync: HostSyncLike): ReviewDeps | null => {
+  const store = window.ioc?.get?.(STORE_KEY) as StoreLike | undefined
+  const ai = window.ioc?.get?.(HOST_AI_KEY) as HostAiLike | undefined
+  const putResource = store?.putResource?.bind(store)
+  const getResource = store?.getResource?.bind(store)
+  const askWhole = ai?.askWhole?.bind(ai)
+  const publishAtoms = sync.publishAtoms?.bind(sync)
+  if (!putResource || !getResource || !askWhole || !publishAtoms) return null
+  const bytesOf = async (sig: string): Promise<Uint8Array | null> => {
+    const held = await drafts.bytesOf(sig).catch(() => null)
+    if (held) return held
+    const blob = await getResource(sig).catch(() => null)
+    return blob ? new Uint8Array(await blob.arrayBuffer()) : null
+  }
+  return {
+    put: (text, type) => putResource(new Blob([text], { type }), { emit: false }),
+    get: async sig => (await getResource(sig).catch(() => null))?.text() ?? null,
+    bytesOf,
+    publish: async (host, sigs) => {
+      const done = await publishAtoms(host, sigs, bytesOf)
+      return done.ok ? { ok: true } : { ok: false, error: done.error }
+    },
+    ask: (host, question, context) => askWhole(host, question, context),
+    stamp: (host, key, sig) => setHiveRoot(host, key, sig),
+    now: Date.now,
+  }
+}
+
+/** Ask the host's AI, publish its reading, and say the verdict. */
+const review = async (host: string, changeSig: string, record: ModuleChangeRecord, deps: ReviewDeps, t: Say, toast: Toast): Promise<void> => {
+  toast(t('module.reviewing', "Asking {host}'s AI to review {name}…", { host, name: record.sandbox }))
+  const read = await reviewChange(host, changeSig, record, deps)
+  if (!read.ok) { toast(t('module.noreview', 'The review cannot run here: {reason}.', { reason: read.error }), 'warning'); return }
+  toast(t('module.reviewed', "{host}'s AI read {name}: {verdict}. The review is public beside it.", { host, name: record.sandbox, verdict: read.verdict }), read.verdict === 'accept' ? 'success' : 'warning')
+  EffectBus.emit('module:reviewed', { name: record.sandbox, host, verdict: read.verdict, review: read.sig, change: changeSig, model: read.model })
+}
 
 /** A change's sandbox name: `try-<change>`, one DNS label. */
 export const sandboxName = (change: string): string => {
@@ -67,7 +125,7 @@ export class ModuleQueenBee extends QueenBee {
   readonly command = 'module'
   override description = 'See, drop, try in public, or promote what runs here'
   override descriptionKey = 'slash.module'
-  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>']
+  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>']
   override examples = [
     { input: '/module', result: 'Lists the drafts picked over the installed package' },
     { input: '/module commit fresh-rooms', result: 'Publishes what runs here to try-fresh-rooms.hypercomb.com, not to followers' },
@@ -88,7 +146,7 @@ export class ModuleQueenBee extends QueenBee {
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw '].filter(word => word.startsWith(typed) && word.trim() !== typed)
+    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review '].filter(word => word.startsWith(typed) && word.trim() !== typed)
   }
 
   protected async execute(args: string): Promise<void> {
@@ -118,7 +176,7 @@ export class ModuleQueenBee extends QueenBee {
       toast(t('module.dropped', 'Dropped the draft at {path} — reload to run the package as it was.', { path }), 'success')
       return
     }
-    if (!PUBLISHING.has(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change> or withdraw <change>.'), 'warning'); return }
+    if (!PUBLISHING.has(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change> or review <change>.'), 'warning'); return }
 
     // [@<host>] publishes to a host of your own (a machine running
     // hypercomb-serve, a relay) instead of the public one; the other words are
@@ -137,6 +195,19 @@ export class ModuleQueenBee extends QueenBee {
       const stamped = await setHiveRoot(host, `${INSTALL_CHANNEL_PREFIX}${live}`, root).catch(error => ({ ok: false, reason: error instanceof Error ? error.message : 'refused' }))
       if (!stamped.ok) { toast(t('module.unstamped', 'The install channel was not stamped: {reason}', { reason: stamped.reason ?? 'refused' }), 'warning'); return }
       toast(t('module.promoted', 'Promoted {name}: {channel} now names {root}. Followers are told on their next boot.', { name, channel: `${INSTALL_CHANNEL_PREFIX}${live}`, root: root.slice(0, 12) + '…' }), 'success')
+      return
+    }
+
+    if (word === 'review') {
+      const name = sandboxName(words[0] ?? '')
+      if (!name) { toast(t('module.which', 'Say which sandbox, like: module review fresh-rooms.'), 'warning'); return }
+      const sync = window.ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as HostSyncLike | undefined
+      const deps = sync ? reviewDeps(drafts, sync) : null
+      if (!deps) { toast(t('module.noreview', 'The review cannot run here: {reason}.', { reason: 'the host AI or the store is not loaded' }), 'warning'); return }
+      const changeSig = await ownHiveRoot(host, `change:${name}`).catch(() => null)
+      const record = changeSig ? await readChange(changeSig, deps) : null
+      if (!changeSig || !record) { toast(t('module.nochange', 'There is no published change for {name} on {host}.', { name, host }), 'warning'); return }
+      await review(host, changeSig, record, deps, t, toast)
       return
     }
 
@@ -177,6 +248,14 @@ export class ModuleQueenBee extends QueenBee {
       const door = sandboxDoorUrl(name, host)
       toast(t('module.sandboxed', 'Sandbox {name} is open at {door}. Promote it when you are happy with it.', { name, door }), 'success')
       EffectBus.emit('module:sandboxed', { name, door, root: committed.rootSig, host })
+
+      // THE CHANGE, PUBLIC, AND THE HOST'S READING OF IT. Never a gate: a
+      // failure here leaves the sandbox open and says why.
+      const deps = reviewDeps(drafts, sync)
+      if (!deps) { toast(t('module.noreview', 'The review cannot run here: {reason}.', { reason: 'the host AI or the store is not loaded' }), 'warning'); return }
+      const change = await publishChange(host, name, committed.rootSig, committed.changes, committed.off, deps)
+      if (!change.ok) { toast(t('module.noreview', 'The review cannot run here: {reason}.', { reason: change.error }), 'warning'); return }
+      await review(host, change.sig, change.record, deps, t, toast)
     } catch (error) {
       toast(t('module.unstamped', 'The install channel was not stamped: {reason}', { reason: error instanceof Error ? error.message : 'refused' }), 'warning')
     }

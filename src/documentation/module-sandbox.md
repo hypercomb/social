@@ -1,6 +1,6 @@
 # Module sandbox — every module change is reviewed in public before it goes live
 
-**Status: steps 1–2 BUILT and proven on this machine (2026-09-22, `scripts/verify-hive-publish.cjs` 26/26); steps 3–4 and the communal build not built; the worker is not deployed.** Builds on `hive-read-fence.md` ("Writing a module"), `jev-audit-2026-09-21.md` §6, `install-by-replication.md`.
+**Status: the sandbox, its door and the host AI review BUILT and proven on this machine (2026-09-22, `scripts/verify-hive-publish.cjs` 30/30); public assessments and the communal build not built; the worker is not deployed.** Builds on `hive-read-fence.md` ("Writing a module"), `jev-audit-2026-09-21.md` §6, `install-by-replication.md`.
 
 jwize: "The idea of making a module — then we should go and debug it on a sub domain of one of our hosts, and that way we can review the code from our AI on that host, allowing us to make sure that it's in sandbox until we are happy with it. This should be the paradigm [for] new module changes, because you're basically publishing them to the public as well, so other people can view the code and make their own assessments."
 
@@ -50,7 +50,8 @@ A module change is never published straight to the live channel. It goes to a **
 - **The boot** (web `ensure-install.ts` `sandboxDoor`): on a `try-` origin the cold boot takes its package from the door alone — never another host, so a sandbox can never silently run the live package.
 - **Loopback**: any `*.localhost` is loopback in the runtime, the upload and the signed index, so a door is proven at `try-<change>.localhost:<port>` and writes go to `content.localhost:<port>`, the zone's content face, as in production.
 - **Back-to-back writes**: the signed index stamps whole seconds and the host refuses a same-age index as a rollback; every write now names the index it replaces and is stamped at least one second after it (`putHiveManifest` `replaces`).
-- **Proof**: `node scripts/local-content-host.mjs 4291 http://localhost:4260` (the real worker code over memory storage; `POST /__bind` stands in for the operator's binding), the web shell on 4260, then `node scripts/verify-hive-publish.cjs` → 26/26. Shared harness pieces: `scripts/hive-harness.cjs`.
+- **The change and the host AI's review** (`assistant/module-review.ts`, a dependency the `module` queen drives): every commit writes THE CHANGE down — each drafted source file before and after, each its own resource, plus the paths left out — publishes it and stamps `change:try-<change>`; then asks the host the sandbox lives on (`/ai/ask`, NIP-98 signed, `HostAiService.askWhole`) with those before/after files as context, so the host reads the code from its own heap; the findings and a verdict (accept · refuse · unclear, the last `VERDICT:` line) are published as `review:try-<change>`. The door's `/site.json` names `change` and `review`. `module review <change>` reads it again. A verdict is a reading, never a gate: promotion stays the participant's word. The host AI sees at most 8 files of 16 KB, which is why the change is cut to sections and never handed over as whole bundles.
+- **Proof**: `node scripts/local-content-host.mjs 4291 http://localhost:4260 --ai-stub` (the real worker code over memory storage; `POST /__bind` stands in for the operator's binding; `--ai-stub` answers only the upstream Anthropic call, and says how many files it was shown and whether the changed code was among them), the web shell on 4260, then `node scripts/verify-hive-publish.cjs` → 30/30. Shared harness pieces: `scripts/hive-harness.cjs`.
 
 ## Before it runs on hypercomb.com (jwize's acts)
 
@@ -67,10 +68,10 @@ Almost every piece is a primitive the hive already has; the missing ones are dis
 |---|---|---|
 | **A trial** — anyone opens a door, drafts on top, commits their own `try-` | the sandbox paradigm | built (doors need the key to be approved on the zone) |
 | **Finding the trials** — every open `try-` door on a zone, whose, when | the worker already lists doors (`/publications.json`, the ledger); a `try-` listing is the same read over `install:try-*` keys | missing |
-| **One difference at a time** — what a sandbox changes against the live root | `movedPaths` / `changedBeneath` (runtime) name the paths; `module-sections` names the source files inside a module | missing: the door's "what changed" panel |
+| **One difference at a time** — what a sandbox changes against the live root | the published change record (`change:try-<change>`): every drafted file before and after, by signature | the data is built; missing: the door's "what changed" panel that walks it |
 | **Your own build** — take one community change at one path, leave the rest | picks (`pick`, `revisionsOf` over any roots) — a sandbox root is just another root | exists; missing: feeding sandbox roots into `revisionsOf` |
 | **A build for everybody** — fold several people's changes into one root | `commitSelection` folds drafts; a picked revision stays a pick | missing: folding picks (their namespace bundles come with them — `composeDependencies` exists) |
 | **Two changes to one path** | one layer per path: they cannot both be picked | a model writes the merge as a new draft of the section, judged by Jev like any write |
-| **Deciding directions** | adoption (who took which change), the host's AI review (brood audit + Jev score), signed notes from people | missing: publishing adoption as a signed mark; an AI pass that reads every open trial with those signals and proposes where to focus |
+| **Deciding directions** | adoption (who took which change), the host's AI review (`review:try-<change>`, built), signed notes from people | missing: publishing adoption as a signed mark; an AI pass that reads every open trial's change and review and proposes where to focus |
 
 The order that pays off first: the trial listing and the "what changed" panel (people can already walk the doors one at a time), then sandbox roots offered as revisions (personal builds from community changes), then folding picks into a commit (the communal build), then the AI direction pass.

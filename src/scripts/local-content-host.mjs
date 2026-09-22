@@ -3,7 +3,7 @@
 // this machine over in-memory storage, for proving publish and replication
 // end to end without touching the real host.
 //
-//   node scripts/local-content-host.mjs [port=4291] [shell=http://localhost:4260]
+//   node scripts/local-content-host.mjs [port=4291] [shell=http://localhost:4260] [--ai-stub]
 //
 // Everything a browser meets is the real worker (hypercomb-relay/blossom-worker
 // worker.js): NIP-98 signed uploads checked against the body's sha256, the
@@ -13,11 +13,36 @@
 // harness to assert on. `POST /__bind {zone, pubkey}` binds a zone to a
 // publisher as the operator's SITE_BINDINGS would, so `try-<change>.localhost`
 // is a sandbox door; its shell is fetched from the second argument.
+//
+// `--ai-stub` stands in for Anthropic behind the worker's `/ai/ask`: the real
+// endpoint runs (NIP-98, the context read from the heap by signature, the
+// meter), and only the upstream call is answered here — with a reading that
+// says how many files it was shown and whether the change's proof marker was
+// among them, so a harness can prove the host's AI read the changed code.
 import http from 'node:http'
 import worker from '../hypercomb-relay/blossom-worker/worker.js'
 
 const port = Number(process.argv[2] || 4291)
-const shell = process.argv[3] || 'http://localhost:4260'
+const shell = process.argv[3] && !process.argv[3].startsWith('--') ? process.argv[3] : 'http://localhost:4260'
+const aiStub = process.argv.includes('--ai-stub')
+
+if (aiStub) {
+  const upstream = globalThis.fetch
+  globalThis.fetch = async (input, init) => {
+    const url = String(input?.url ?? input)
+    if (!url.startsWith('https://api.anthropic.com/')) return upstream(input, init)
+    const body = JSON.parse(String(init?.body ?? '{}'))
+    const asked = String(body.messages?.[0]?.content ?? '')
+    const files = (asked.match(/^--- context [0-9a-f]{12}… ---$/gm) ?? []).length
+    const text = [
+      'Stub reading (the local content host stands in for Anthropic).',
+      `Context files shown: ${files}.`,
+      `The change sets __hivePublishProof: ${asked.includes('__hivePublishProof') ? 'yes' : 'no'}.`,
+      'VERDICT: accept',
+    ].join('\n')
+    return new Response(JSON.stringify({ type: 'message', model: 'local-stub', content: [{ type: 'text', text }] }), { headers: { 'content-type': 'application/json' } })
+  }
+}
 
 const bytesOf = (value) => value instanceof Uint8Array ? value
   : value instanceof ArrayBuffer ? new Uint8Array(value)
@@ -60,7 +85,7 @@ const kv = () => {
 }
 
 const bindings = {}
-const env = { CONTENT: r2(), HIVES: kv(), GRANTS: kv(), AUTO_GRANT: '1', SANDBOX_SHELL_ORIGIN: shell, SITE_BINDINGS: '{}' }
+const env = { CONTENT: r2(), HIVES: kv(), GRANTS: kv(), AUTO_GRANT: '1', SANDBOX_SHELL_ORIGIN: shell, SITE_BINDINGS: '{}', ...(aiStub ? { ANTHROPIC_API_KEY: 'local-stub' } : {}) }
 
 http.createServer(async (req, res) => {
   const url = `http://${req.headers.host || `localhost:${port}`}${req.url}`

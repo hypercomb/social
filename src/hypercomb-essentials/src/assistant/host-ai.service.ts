@@ -174,6 +174,37 @@ export class HostAiService extends EventTarget {
     return full
   }
 
+  /**
+   * ONE WHOLE ANSWER FROM A NAMED HOST — not the participant's AI host, the
+   * host the question is about. A sandbox's review is asked of the host the
+   * sandbox was published to, because that host holds the changed files the
+   * context names (documentation/module-sandbox.md). Not streamed: a review is
+   * read once, whole. The model that answered is reported by the host.
+   */
+  async askWhole(host: string, question: string, contextSigs: readonly string[] = [], signal?: AbortSignal): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string }> {
+    const bare = String(host ?? '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+    const q = String(question ?? '').trim()
+    if (!bare || !q) return { ok: false, error: 'no host or no question' }
+    const scheme = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(bare) ? 'http' : 'https'
+    const url = `${scheme}://${bare}/ai/ask`
+    const auth = await this.#nip98(url, 'POST')
+    if (!auth) return { ok: false, error: 'no Nostr signer is available to sign the ask' }
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q, context: contextSigs.slice(0, 8), stream: false }),
+        signal,
+      })
+      if (!res.ok) return { ok: false, error: `${bare} said ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}` }
+      const body = await res.json() as { content?: { type?: string; text?: string }[]; model?: string }
+      const text = (body.content ?? []).filter(part => part.type === 'text').map(part => part.text ?? '').join('').trim()
+      return text ? { ok: true, text, model: res.headers.get('x-ai-model') ?? body.model ?? '' } : { ok: false, error: `${bare} answered with no text` }
+    } catch (error) {
+      return { ok: false, error: `${bare} could not be reached${error instanceof Error ? ` (${error.message})` : ''}` }
+    }
+  }
+
   /** One-shot convenience: full answer as a string. */
   async askText(question: string, opts: AskOptions = {}): Promise<string> {
     let full = ''

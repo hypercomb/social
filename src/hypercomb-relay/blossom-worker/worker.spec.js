@@ -623,3 +623,11 @@ test('a try- door hands every other path to the participant shell', async () => 
     assert.deepEqual(seen, ['https://shell.example/main.js?v=1'])
   } finally { globalThis.fetch = original }
 })
+
+test('a try- door names the published change and the host AI review beside the sandbox', async () => {
+  const [root, change, review] = ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64)]
+  const env = await sandboxEnv({ 'install:try-fresh-rooms': root, 'change:try-fresh-rooms': change, 'review:try-fresh-rooms': review })
+  const site = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
+  assert.equal(site.change, change)
+  assert.equal(site.review, review)
+})
