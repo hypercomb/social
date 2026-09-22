@@ -11,7 +11,8 @@
     "dev": "wrangler dev",
     "predeploy": "npm run build:site",
     "deploy": "wrangler deploy",
-    "deploy:pluginthematrix": "npm run build:site && wrangler deploy --config wrangler.pluginthematrix.toml"
+    "deploy:pluginthematrix": "npm run build:site && wrangler deploy --config wrangler.pluginthematrix.toml",
+    "connect": "node scripts/connect-domain.mjs"
   },
   "dependencies": {
     "@noble/curves": "^1.9.0"
