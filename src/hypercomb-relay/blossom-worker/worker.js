@@ -541,8 +541,20 @@ async function servePublications(request, env) {
 // nothing under it is an honest 404 (a host with no packages yet), never the
 // SPA fallback: a 307 to / or a page of HTML at a pool's address is the one
 // answer that makes a live host read as "does not answer".
+// Only these pools are LISTED in public — the same list the relay keeps
+// (hypercomb-relay/replicate.js PUBLIC_POOL_MEANINGS). Every other address is
+// "no pool at this address", so a derivable one (a word's pool, a path's
+// history bag) never enumerates what a publisher switched off.
+const PUBLIC_POOL_MEANINGS = ['host:packages', 'community:hosts', 'community:offers']
+
 async function servePoolListing(request, env, sig) {
   const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
+  const publicPools = await Promise.all(PUBLIC_POOL_MEANINGS.map(poolAddress))
+  if (!publicPools.includes(sig)) {
+    return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
+      status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
+    })
+  }
   const prefix = `${sig}/`
   const names = []
   if (env.CONTENT?.list) {

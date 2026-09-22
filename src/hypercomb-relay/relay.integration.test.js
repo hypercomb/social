@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -175,6 +175,15 @@ test('a replicated package is discoverable and can be pulled and published by an
     assert.equal(firstListing.status, 200)
     assert.equal(await firstListing.text(), '00000000')
     assert.equal(await (await fetch(`${firstBase}/${HOST_PACKAGES_POOL}/00000000`)).text(), `${rootSig}\nsource-main`)
+
+    // Only public pools are listed. A history bag or molecule pool the store
+    // holds answers exactly like a pool it does not hold.
+    const privateBag = createHash('sha256').update('some/private/path').digest('hex')
+    mkdirSync(join(firstDir, privateBag), { recursive: true })
+    writeFileSync(join(firstDir, privateBag, '00000000'), rootSig)
+    const hidden = await fetch(`${firstBase}/${privateBag}/`)
+    assert.equal(hidden.status, 404)
+    assert.equal(await hidden.text(), await (await fetch(`${firstBase}/${'f'.repeat(64)}/`)).text())
     assert.equal((await fetch(`${firstBase}/${leafSig}`, { method: 'HEAD' })).status, 200)
 
     // The first relay is now the source. Its ordinary signature endpoints

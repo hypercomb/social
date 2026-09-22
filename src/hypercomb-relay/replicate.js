@@ -31,6 +31,17 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 // address is derived here rather than copied from a build so every host and
 // every client asks the same meaning for the same directory.
 export const HOST_PACKAGES_POOL = sha256(Buffer.from('host:packages', 'utf8'))
+
+// THE POOLS A HOST LISTS IN PUBLIC. A listing (`GET /<sig>/`) answers only
+// for these; every other directory the store holds — lineage history bags,
+// molecule pools, a participant's own pools — answers the same 404 as a pool
+// that is not held, so a derivable address (sign(word), a path's bag) is never
+// a way to enumerate what a publisher switched off. Bytes by signature stay
+// open (holding the signature IS the permission); only DISCOVERY is gated.
+// A host's packages are public because it is a host; the community pools are
+// the directory hosts publish to each other.
+export const PUBLIC_POOL_MEANINGS = Object.freeze(['host:packages', 'community:hosts', 'community:offers'])
+export const PUBLIC_POOL_ADDRESSES = new Set(PUBLIC_POOL_MEANINGS.map(m => sha256(Buffer.from(m, 'utf8'))))
 const PACKAGE_ENTRY_RE = /^[0-9]{8}$/
 const packageEntryName = index => String(index).padStart(8, '0')
 

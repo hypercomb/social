@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { schnorr } from '@noble/curves/secp256k1'
 import worker from './worker.js'
 
+const sha256Hex = async (text) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))))
 const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
 const sk = Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 1 : 0)
 const pubkey = hex(schnorr.getPublicKey(sk))
@@ -341,7 +342,7 @@ test('a site may declare its own icon, and only a same-origin one', async () => 
 })
 
 test('a pool address on a site door answers the directory branch, never the SPA fallback', async () => {
-  const pool = 'd'.repeat(64)
+  const pool = await sha256Hex('host:packages')
   const { env, assetRequests } = await fixture()
   // nothing under the prefix: an honest 404, text, no-store, cross-origin readable
   const empty = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${pool}/`), env)
@@ -363,6 +364,13 @@ test('a pool address on a site door answers the directory branch, never the SPA 
   assert.equal(listing.headers.get('cache-control'), 'no-store')
   assert.equal(await listing.text(), '00000000\n00000001\n')
   assert.deepEqual(assetRequests, [])
+
+  // A pool that is not public is never listed — even with members under it,
+  // it answers exactly as an empty address does.
+  const privatePool = 'd'.repeat(64)
+  const hidden = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${privatePool}/`), env)
+  assert.equal(hidden.status, 404)
+  assert.equal(await hidden.text(), 'no pool at this address' + String.fromCharCode(10))
 })
 
 test('a site door is readable cross-origin — its manifest carries the open CORS header', async () => {

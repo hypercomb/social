@@ -26,7 +26,7 @@ import { verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { verifyNip98 } from './http-auth.js'
 import { blockedSourcesReason } from './address-guard.js'
-import { contentDirectoryIO, HOST_PACKAGES_POOL, parseReplicationRequest, publishReplicatedPackage, resolvePackageClosure, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
+import { contentDirectoryIO, HOST_PACKAGES_POOL, PUBLIC_POOL_ADDRESSES, parseReplicationRequest, publishReplicatedPackage, resolvePackageClosure, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
 import { ReceiptIndex } from './receipt-index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -871,6 +871,10 @@ function tryServeContent(req, res) {
   // host's ship can write byte-identical bytes at the same address.
   const dirMatch = urlPath.match(/^\/([0-9a-f]{64})\/$/)
   if (dirMatch) {
+    // Only a PUBLIC pool is listed (replicate.js PUBLIC_POOL_ADDRESSES). Any
+    // other directory, such as a history bag or a molecule pool, answers "not
+    // held", the exact answer an absent pool gets, so the 404 reveals nothing.
+    if (!PUBLIC_POOL_ADDRESSES.has(dirMatch[1])) { respondText(res, 404, 'pool not held'); return true }
     const dir = join(resolve(cfg.contentDir), dirMatch[1])
     let names
     try {
