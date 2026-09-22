@@ -59,7 +59,16 @@ A publish **is** the website deployment. There is no separately maintained
 static-site copy of a creation and no per-site application build. DCP seals a
 creation into a Merkle root, pushes every missing signature object, proves the
 closure is publicly readable, and only then advances the publisher-signed hive
-index. The domain is a human entrance to that signed tree:
+index. The domain is a human entrance to that signed tree.
+
+**Open is a signed mark (2026-09-22).** A door — named or wildcard — shows a
+page, its descriptor and its engine files only while the publisher's signed
+index names its lineage. Publish writes the entry (open); unpublish withdraws
+it (hidden: an honest 404 on the door). The bytes are never removed, so anyone
+already holding a signature — a shared link carries the sealed head — still
+resolves it, and nobody without one can find it from the domain. The earlier
+global `VISITOR_HOLD` curtain and its per-browser cookie are retired.
+
 
 ```text
 custom domain

@@ -372,55 +372,39 @@ test('a site door is readable cross-origin — its manifest carries the open COR
   assert.equal(res.headers.get('access-control-allow-origin'), '*')
 })
 
-// ── the hold ─────────────────────────────────────────────────────────────────
+// ── open is a signed mark ────────────────────────────────────────────────────
 
 const page = (url, extra = {}) =>
   new Request(url, { headers: { 'sec-fetch-dest': 'document', accept: 'text/html,*/*', ...extra } })
 
-test('a held door answers the page with a holding note, and nothing else', async () => {
+test('a door the signed index names serves the engine — no hold, no cookie', async () => {
   const { env, assetRequests } = await fixture()
-  env.VISITOR_HOLD = '1'
-  const held = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
-  assert.equal(held.status, 200)
-  assert.equal(held.headers.get('x-reason'), 'visitor hold')
-  assert.equal(held.headers.get('cache-control'), 'no-store')
-  const body = await held.text()
-  assert.match(body, /not open yet/)
-  assert.match(body, /noindex/)
-  // the page names the key that opens it, and mirrors it into the cookie
-  assert.match(body, /hc:visitor:open/)
-  assert.match(body, /hc-visitor-open=1/)
-  assert.deepEqual(assetRequests, [])
-
-  // files are never held: the descriptor, the manifest, a chunk
-  const manifest = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/content/manifest.json'), env)
-  assert.equal(manifest.headers.get('x-reason'), null)
-  assert.deepEqual(assetRequests, ['/content/manifest.json'])
-  const descriptor = await worker.fetch(page('https://revolucion.pluginthematrix.com/site.json'), env)
-  assert.equal(descriptor.status, 200)
-  assert.equal(descriptor.headers.get('x-reason'), null)
-})
-
-test('an opened door serves the engine; ?visitor=off closes it again', async () => {
-  const { env, assetRequests } = await fixture()
-  env.VISITOR_HOLD = '1'
-  const opened = await worker.fetch(page('https://revolucion.pluginthematrix.com/', { cookie: 'a=b; hc-visitor-open=1' }), env)
-  assert.equal(opened.headers.get('x-reason'), null)
-  assert.equal(await opened.text(), 'visitor engine')
-  assert.deepEqual(assetRequests, ['/'])
-
-  const closed = await worker.fetch(page('https://revolucion.pluginthematrix.com/?visitor=off', { cookie: 'hc-visitor-open=1' }), env)
-  assert.equal(closed.headers.get('x-reason'), 'visitor hold')
-  assert.match(closed.headers.get('set-cookie'), /hc-visitor-open=; Path=\/; Max-Age=0/)
-  assert.match(await closed.text(), /removeItem/)
-  assert.deepEqual(assetRequests, ['/'])
-})
-
-test('without the var, no door holds', async () => {
-  const { env } = await fixture()
+  env.VISITOR_HOLD = '1' // retired: the var no longer closes anything
   const res = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
   assert.equal(res.headers.get('x-reason'), null)
   assert.equal(await res.text(), 'visitor engine')
+  assert.deepEqual(assetRequests, ['/'])
+})
+
+test('a named door whose lineage is not in the signed index is hidden — page, files and descriptor', async () => {
+  const { env, assetRequests } = await fixture(await signedIndex({ pluginthematrix: head }))
+  const res = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
+  assert.equal(res.status, 404)
+  assert.match(await res.text(), /nothing published at revolucion.pluginthematrix.com/)
+  const manifest = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/content/manifest.json'), env)
+  assert.equal(manifest.status, 404)
+  const descriptor = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)
+  assert.equal(descriptor.status, 404)
+  assert.deepEqual(assetRequests, [])
+})
+
+test('an index whose signature fails opens nothing', async () => {
+  const forged = await signedIndex({ pluginthematrix: head, revolucion: head })
+  forged.sig = '0'.repeat(128)
+  const { env, assetRequests } = await fixture(forged)
+  const res = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
+  assert.equal(res.status, 404)
+  assert.deepEqual(assetRequests, [])
 })
 
 test('under /content/ a miss is an honest 404, never the SPA page — the pool walk stops at the gap', async () => {

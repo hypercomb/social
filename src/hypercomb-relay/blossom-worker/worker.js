@@ -192,53 +192,16 @@ function nothingHere(hostname, zone) {
   )
 }
 
-// ── the hold ─────────────────────────────────────────────────────────────────
+// ── open is a signed mark ────────────────────────────────────────────────────
 //
-// VISITOR_HOLD = "1" keeps every published door closed to the public: a
-// request for the PAGE answers a quiet holding note instead of the engine.
-// Files are never held — /content/, the descriptors, the mark, the chunks —
-// only the document a person would look at, so a held door still replicates
-// and still answers every machine question.
-//
-// Opening a door is per browser and deliberate. The holding page's own script
-// mirrors `localStorage['hc:visitor:open'] === '1'` into a cookie the worker
-// can see and reloads; the engine then serves as before. `?visitor=off`
-// clears both again. A hold is operator configuration (wrangler [vars]), so
-// lifting it for everyone is a deploy, never a code change.
-const HOLD_COOKIE = 'hc-visitor-open'
-const HOLD_KEY = 'hc:visitor:open'
-
-function visitorHold(request, env) {
-  if (String(env.VISITOR_HOLD || '') !== '1') return null
-  const dest = String(request.headers.get('sec-fetch-dest') || '').toLowerCase()
-  const accept = String(request.headers.get('accept') || '').toLowerCase()
-  const wantsPage = dest === 'document' || (!dest && accept.includes('text/html'))
-  if (!wantsPage) return null
-  const off = new URL(request.url).searchParams.get('visitor') === 'off'
-  const cookies = String(request.headers.get('cookie') || '')
-  const open = new RegExp(`(?:^|;\\s*)${HOLD_COOKIE}=1(?:;|$)`).test(cookies)
-  if (open && !off) return null
-
-  const headers = {
-    'Content-Type': 'text/html; charset=utf-8',
-    'Cache-Control': 'no-store',
-    'X-Reason': 'visitor hold',
-    'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self'",
-    ...CORS,
-  }
-  if (off) headers['Set-Cookie'] = `${HOLD_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax; Secure`
-  const grant = `${HOLD_COOKIE}=1; Path=/; Max-Age=31536000; SameSite=Lax; Secure`
-  const script = off
-    ? `try{localStorage.removeItem(${JSON.stringify(HOLD_KEY)})}catch(e){}`
-    : `try{if(localStorage.getItem(${JSON.stringify(HOLD_KEY)})==='1'){document.cookie=${JSON.stringify(grant)};location.replace(location.pathname)}}catch(e){}`
-  const body =
-    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">` +
-    `<link rel="icon" href="/favicon.ico" sizes="48x48"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><title>not open yet</title>` +
-    `<body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0b1218;color:#dce7ef;font:16px/1.6 system-ui,sans-serif">` +
-    `<main style="text-align:center;padding:2rem"><h1 style="font-size:1.3rem;margin:0 0 .5rem">not open yet</h1>` +
-    `<p style="opacity:.7;margin:0">This page is being worked on.</p></main><script>${script}</script>`
-  return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers })
-}
+// A door shows a page only while the publisher's SIGNED index names its
+// lineage. That entry IS the open mark: only the publisher's key can write it
+// (putHive), and it is re-verified on every read (verifiedIndex). Withdrawing
+// the entry (unpublish) hides the door again — the bytes stay content-
+// addressed, so anyone already holding a signature (a shared link carries the
+// sealed head) still resolves it, and nobody without one can find it here.
+// There is no global hold and no per-browser override: the retired
+// VISITOR_HOLD curtain hid what was signed open and opened what was not.
 
 /** A publisher's index, parsed and signature-checked: `{roots, createdAt}`, or
  *  null when the key holds nothing this host will trust. */
@@ -1366,16 +1329,15 @@ export default {
       // (an empty/HTML Content-Type), which bricked every module load.
       const moduleMatch = pathname.match(/^\/content\/([0-9a-f]{64})$/)
       if (moduleMatch) return serveModule(request, env, moduleMatch[1])
-      // An implicit name is a website only once an approved publisher's
-      // signed index carries its lineage — until then, an honest 404 page.
-      if (implicit && !(await anyPublishedRoot(env, site))) {
-        return nothingHere(requestUrl.hostname, siteZone)
+      // A door — named or wildcard — is a website only while an approved
+      // publisher's signed index carries its lineage (the open mark, above).
+      // Until then, and again after a withdrawal, an honest 404 page.
+      if (!(await anyPublishedRoot(env, site))) {
+        return nothingHere(requestUrl.hostname, implicit ? siteZone : null)
       }
       // Everything under /content/ is a FILE the build shipped — the package
       // pool above all — and is never held and never a page.
       if (pathname.startsWith('/content/')) return serveVisitorAsset(request, env, { spa: false })
-      const held = visitorHold(request, env)
-      if (held) return held
       return serveVisitorAsset(request, env)
     }
 
