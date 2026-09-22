@@ -128,45 +128,68 @@
             @if (ind.actionable) {
               <button
                 class="indicator-pill action"
-                [class.worded]="!!ind.words?.length"
-                [title]="ind.label"
+                [class.menu]="!!ind.items?.length"
+                [class.open]="menuIndicator()?.key === ind.key"
+                [attr.title]="ind.items?.length ? null : ind.label"
                 [attr.aria-label]="ind.label"
-                (mousedown)="$event.preventDefault(); indicatorActivate.emit(ind.key)">
-                <ng-container *ngTemplateOutlet="pillBody; context: { $implicit: ind }"></ng-container>
+                [attr.aria-expanded]="ind.items?.length ? menuIndicator()?.key === ind.key : null"
+                (pointerenter)="openMenu(ind, $event)"
+                (pointerleave)="closeMenuSoon()"
+                (focus)="openMenu(ind, $event)"
+                (blur)="closeMenuSoon()"
+                (keydown.escape)="closeMenu()"
+                (mousedown)="$event.preventDefault(); activateIndicator(ind.key)">
+                <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
               </button>
             } @else if (ind.dismissable !== false) {
               <button
                 class="indicator-pill"
-                [class.worded]="!!ind.words?.length"
                 [title]="ind.label"
                 (mousedown)="$event.preventDefault(); indicatorDismiss.emit(ind.key)">
-                <ng-container *ngTemplateOutlet="pillBody; context: { $implicit: ind }"></ng-container>
+                <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
                 <span class="indicator-x">×</span>
               </button>
             } @else {
-              <span class="indicator-pill info" [class.worded]="!!ind.words?.length" [title]="ind.label">
-                <ng-container *ngTemplateOutlet="pillBody; context: { $implicit: ind }"></ng-container>
+              <span class="indicator-pill info" [title]="ind.label">
+                <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
               </span>
             }
           }
+
+          <!-- THE ROLL-DOWN — a pill that carries items unrolls them here while
+               it is hovered or focused: its label as the heading, one row per
+               thing it is about, and its action as the closing verb. Fixed
+               (see command-shell.ts #placeMenu), so it lives beside the pills
+               only to share their hover and pointer events. -->
+          @if (menuIndicator(); as menu) {
+            <div class="indicator-menu"
+                 [class.up]="menuPlace().up"
+                 [style.right.px]="menuPlace().right"
+                 [style.top.px]="menuPlace().top"
+                 [style.bottom.px]="menuPlace().bottom"
+                 (pointerenter)="keepMenu()"
+                 (pointerleave)="closeMenuSoon()">
+              <div class="indicator-menu-title">{{ menu.label }}</div>
+              @for (item of menu.items; track $index) {
+                <div class="indicator-menu-row">
+                  <span>{{ item.text }}</span>
+                  @if (item.detail) {
+                    <span class="indicator-menu-detail">{{ item.detail }}</span>
+                  }
+                </div>
+              }
+              @if (menu.action) {
+                <button class="indicator-menu-action" type="button"
+                        (focus)="keepMenu()"
+                        (blur)="closeMenuSoon()"
+                        (keydown.escape)="closeMenu()"
+                        (mousedown)="$event.preventDefault(); activateIndicator(menu.key)"
+                        (keydown.enter)="activateIndicator(menu.key)">{{ menu.action }}</button>
+              }
+            </div>
+          }
         </div>
       }
-
-      <!-- A pill's face: its glyph, then its words — each word behind its own
-           tint dot, so a pill can name what it is about. -->
-      <ng-template #pillBody let-ind>
-        @if (ind.icon) {
-          <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
-        }
-        @for (word of ind.words ?? []; track $index) {
-          <span class="indicator-word">
-            @if (word.tint) {
-              <span class="indicator-dot" [style.background]="word.tint"></span>
-            }
-            <span class="indicator-word-text">{{ word.text }}</span>
-          </span>
-        }
-      </ng-template>
 
     </div>
   </div>

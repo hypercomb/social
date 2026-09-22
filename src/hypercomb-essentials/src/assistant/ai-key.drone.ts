@@ -6,12 +6,13 @@
 // participant's money without asking again — translation, expand, break-apart,
 // chat — so the fact that it CAN is always on the command line.
 //
-// ONE light, and it NAMES the vendors: each configured provider's label behind
-// the same family dot the Providers window draws for it. A click opens that
-// window, which is where a key is cleared. It used to be one sparkle per
-// vendor, each with an ×: identical glyphs that said nothing until hovered,
-// and an × that hid a light only until the next load. The light has no × —
-// the way to put it out is to clear the key.
+// ONE light — a key — and it NAMES the vendors: hovering it rolls down a list
+// of every provider whose key is on this device, each by name beside a masked
+// key (`sk-ant-…9f2a`), and its one verb opens the Providers window on the
+// keys, which is where a key is cleared. It used to be one sparkle per vendor,
+// each with an ×: identical glyphs that said nothing until hovered, and an ×
+// that hid a light only until the next load. The light has no × — the way to
+// put it out is to clear the key.
 //
 // The roster is the LlmKeyStore's `configured()` crossed with the provider
 // registry for labels, so the day a descriptor registers and a key is pasted,
@@ -20,7 +21,6 @@
 // that can spend is exactly the case you most want shown.
 
 import { Drone, EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
-import { modelPalette } from '../presentation/avatars/agent-model.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
 
@@ -30,8 +30,15 @@ const INDICATOR_KEY = 'ai-spend'
  *  them back beside this one on reload; clearing them once evicts them from
  *  its storage for good. */
 const LEGACY_PREFIX = 'ai-active:'
-/** Names shown before the rest fold into "+N". The tooltip names them all. */
-const NAMED = 2
+
+/** Which key, without the key: the vendor's own prefix and the last four. */
+const masked = (key: string): string =>
+  `${(/^[a-z]+(?:-[a-z0-9]+)?-/i.exec(key)?.[0] ?? '').slice(0, 8)}…${key.slice(-4)}`
+
+const t = (key: string, fallback: string): string => {
+  const value = window.ioc.get<I18nProvider>(I18N_IOC_KEY)?.t(key)
+  return value && value !== key ? value : fallback
+}
 
 export class AiKeyIndicatorDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -67,30 +74,20 @@ export class AiKeyIndicatorDrone extends Drone {
 
   #sync(): void {
     const registry = llmProviderRegistry()
-    const vendors = llmKeyStore.configured().map(id => {
-      const provider = registry.get(id)
-      return { text: provider?.label ?? id, tint: modelPalette(provider?.defaultModel ?? id).body }
-    })
-    if (vendors.length === 0) {
+    const items = llmKeyStore.configured()
+      .map(id => ({ text: registry.get(id)?.label ?? id, detail: masked(llmKeyStore.get(id) ?? '') }))
+      .sort((a, b) => a.text.localeCompare(b.text))
+    if (items.length === 0) {
       EffectBus.emit('indicator:clear', { key: INDICATOR_KEY })
       return
     }
 
-    // Folding one name into "+1" saves nothing, so fold only past NAMED + 1.
-    const shown = vendors.length > NAMED + 1 ? vendors.slice(0, NAMED) : vendors
-    const words: { text: string; tint?: string }[] = [...shown]
-    if (shown.length < vendors.length) words.push({ text: `+${vendors.length - shown.length}` })
-
-    const names = new Intl.ListFormat(document.documentElement.lang || undefined, { type: 'conjunction' })
-      .format(vendors.map(v => v.text))
-    const label = window.ioc.get<I18nProvider>(I18N_IOC_KEY)?.t('providers.spend', { names })
-
     EffectBus.emit('indicator:set', {
       key: INDICATOR_KEY,
-      label: label && label !== 'providers.spend'
-        ? label
-        : `Can spend without asking: ${names}. Click to manage keys.`,
-      words,
+      icon: 'key',
+      label: t('providers.spend', 'Can spend without asking'),
+      items,
+      action: t('providers.manageKeys', 'Manage keys'),
       dismissable: false,
       actionable: true,
     })

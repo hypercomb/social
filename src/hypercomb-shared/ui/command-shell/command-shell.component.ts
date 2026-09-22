@@ -4,27 +4,38 @@
 // ghost text, suggestion dropdown, keyboard navigation) while delegating
 // all business logic to the parent via inputs/outputs.
 
-import { NgTemplateOutlet } from '@angular/common'
 import { Component, computed, effect, ElementRef, HostBinding, inject, input, output, signal, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { TextScaleComponent, surfaceScale, stepSurfaceScale } from '../text-scale/text-scale.component'
 
-/** One status pill, as a producer states it on `indicator:set`. A pill shows
- *  its `icon`, its `words`, or both; `label` is the tooltip. A word may carry a
- *  `tint`, drawn as a dot before it — the pill NAMES the things it is about
- *  (the AI key light names its vendors) instead of repeating one glyph. */
+/** One status pill, as a producer states it on `indicator:set`. `label` is
+ *  its name (tooltip and aria-label). An actionable pill may carry `items`:
+ *  hovering or focusing it rolls them down in a short list headed by the label
+ *  — what the pill is about, by name, each row with an optional quiet
+ *  `detail`. `action` closes the list as its one verb; choosing it activates
+ *  the pill, as a click on the pill does. */
 export interface CommandIndicator {
   key: string
-  icon?: string
+  icon: string
   label: string
-  words?: readonly { text: string; tint?: string }[]
+  items?: readonly { text: string; detail?: string }[]
+  action?: string
   dismissable?: boolean
   actionable?: boolean
 }
 
+type IndicatorMenu = CommandIndicator & { items: NonNullable<CommandIndicator['items']> }
+
 /** How long a view toggle must be held (no modifier) to count as a disable —
  *  the touch-friendly equivalent of a cmd/ctrl-click. */
 const VIEW_TOGGLE_LONG_PRESS_MS = 500
+
+/** Grace before a pill's roll-down closes once the pointer leaves — long
+ *  enough to cross the gap from the pill into the list. */
+const MENU_CLOSE_MS = 160
+
+/** Gap between a pill and the list it rolls down, in viewport pixels. */
+const MENU_GAP = 6
 
 /** One frozen empty array for rows with no other spellings — a fresh `[]` per
  *  call would hand `@for` a new identity on every change-detection pass. */
@@ -37,7 +48,7 @@ const COMPLETION_WINDOW = 'command-intel'
 @Component({
   selector: 'hc-command-shell',
   standalone: true,
-  imports: [NgTemplateOutlet, TranslatePipe, TextScaleComponent],
+  imports: [TranslatePipe, TextScaleComponent],
   templateUrl: './command-shell.component.html',
   styleUrls: ['./command-shell.component.scss']
 })
@@ -454,6 +465,65 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Emitted when a producer-owned attention indicator is activated. */
   readonly indicatorActivate = output<string>()
 
+  // ── the roll-down under a pill that carries items ─────────
+  // Presentational state only: which pill's list is open, and where it sits.
+
+  readonly #menuKey = signal<string | null>(null)
+  #menuTimer: ReturnType<typeof setTimeout> | null = null
+  readonly menuPlace = signal<{ right: number; top: number | null; bottom: number | null; up: boolean }>(
+    { right: 0, top: null, bottom: null, up: false },
+  )
+  readonly menuIndicator = computed<IndicatorMenu | null>(() => {
+    const key = this.#menuKey()
+    const ind = key ? this.indicators().find(i => i.key === key) : undefined
+    return ind?.items?.length ? { ...ind, items: ind.items } : null
+  })
+
+  openMenu(ind: CommandIndicator, event: Event): void {
+    if (!ind.items?.length) return
+    this.keepMenu()
+    this.#placeMenu(event.currentTarget as HTMLElement)
+    this.#menuKey.set(ind.key)
+  }
+
+  keepMenu(): void {
+    if (this.#menuTimer) clearTimeout(this.#menuTimer)
+    this.#menuTimer = null
+  }
+
+  closeMenuSoon(): void {
+    this.keepMenu()
+    this.#menuTimer = setTimeout(() => this.closeMenu(), MENU_CLOSE_MS)
+  }
+
+  closeMenu(): void {
+    this.keepMenu()
+    this.#menuKey.set(null)
+  }
+
+  activateIndicator(key: string): void {
+    this.closeMenu()
+    this.indicatorActivate.emit(key)
+  }
+
+  /** Fixed, for the intellisense panel's reason — the bar is an overflow-
+   *  clipped chain — and right-aligned under the pill, opening UP off a bar in
+   *  the lower half. The header is CSS-zoomed and so is the list inside it, so
+   *  the viewport pixels the rect reports are divided back into the list's. */
+  #placeMenu(pill: HTMLElement): void {
+    const r = pill.getBoundingClientRect()
+    const zoom = (pill as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom || 1
+    const vw = window.innerWidth || document.documentElement.clientWidth
+    const vh = window.innerHeight || document.documentElement.clientHeight
+    const up = r.top > vh / 2
+    this.menuPlace.set({
+      right: Math.max(8, vw - r.right) / zoom,
+      top: up ? null : (r.bottom + MENU_GAP) / zoom,
+      bottom: up ? (vh - r.top + MENU_GAP) / zoom : null,
+      up,
+    })
+  }
+
   /** Emitted when the user clicks the armed-resource thumbnail to dismiss it. */
   readonly armedResourceDismiss = output<void>()
 
@@ -684,6 +754,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.#reflowTeardown?.()
+    this.keepMenu()
   }
 
   // ── public API for parent ───────────────────────────────

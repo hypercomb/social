@@ -821,41 +821,106 @@ $bp-phone-max: 599px;
   transition: opacity 150ms ease;
 }
 
-// A WORDED pill names what it is about — the AI key light's vendors, each
-// behind the family dot the Providers window draws for it. It is a readout,
-// not an alert, so an actionable one keeps the quiet chrome rather than the
-// attention accent: the words are what it says.
-.indicator-pill.worded {
-  gap: 0.5rem;
-  padding: 0.15rem 0.45rem;
+// ── the roll-down (an actionable pill that carries items) ──
+//
+// Hovering or focusing such a pill unrolls a short list from it: what the pill
+// is about, by name — the AI key light lists the vendors whose keys can spend.
+// FIXED for the intellisense panel's reason (the bar is an overflow-clipped
+// chain), and that panel's surface, so the command line has one kind of popup.
+.indicator-pill.menu {
+  // Standing state, not an alert: an ordinary pill's quiet chrome rather than
+  // the attention accent the other actionable pills wear.
+  color: var(--hc-chrome-ink-quiet);
+  border-color: rgba(var(--glow-color-rgb), 0.25);
+  background: rgba(var(--glow-color-rgb), 0.12);
 
-  &.action {
-    color: var(--hc-chrome-ink-quiet);
-    border-color: rgba(var(--glow-color-rgb), 0.25);
-    background: rgba(var(--glow-color-rgb), 0.12);
-
-    &:hover {
-      color: var(--hc-chrome-ink-plain);
-      border-color: rgba(var(--glow-color-rgb), 0.45);
-      background: rgba(var(--glow-color-rgb), 0.2);
-    }
+  &:hover,
+  &.open {
+    color: var(--hc-chrome-ink-plain);
+    border-color: rgba(var(--glow-color-rgb), 0.45);
+    background: rgba(var(--glow-color-rgb), 0.2);
   }
 }
 
-.indicator-word {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
+.indicator-menu {
+  position: fixed;
+  z-index: 60001;   // above the fixed header-bar (z 60000), as .command-intel
+  min-width: 15rem;
+  max-width: 24rem;
+  padding: 0.3rem;
+  border-radius: var(--hc-radius-floating);
+  background: rgba(var(--hc-panel-pane), 0.98);
+  backdrop-filter: blur(12px);
+  border: 1.5px solid var(--hc-window-line);
+  box-shadow: var(--md-elev-3);
+  font-family: var(--hc-mono);
+  font-size: 0.85em;
+  color: var(--hc-window-ink-loud);
+  // `backwards`, not `both`: the clip must be gone once the roll ends, or it
+  // would cut the panel's own shadow off.
+  animation: indicator-menu-roll 170ms var(--md-easing-standard) backwards;
+
+  &.up { animation-name: indicator-menu-roll-up; }
+
+  @media (prefers-reduced-motion: reduce) { animation: none; }
+}
+
+// The roll: the list unrolls from the pill's edge — a clip, never a scale, so
+// the text does not stretch on the way.
+@keyframes indicator-menu-roll {
+  from { clip-path: inset(0 0 100% 0); transform: translateY(-3px); }
+  to   { clip-path: inset(0);          transform: none; }
+}
+
+@keyframes indicator-menu-roll-up {
+  from { clip-path: inset(100% 0 0 0); transform: translateY(3px); }
+  to   { clip-path: inset(0);          transform: none; }
+}
+
+.indicator-menu-title {
+  padding: 0.4rem 0.55rem 0.35rem;
+  font-size: 0.72em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-quiet);
+}
+
+.indicator-menu-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.35rem 0.55rem;
   white-space: nowrap;
 }
 
-// Round because a family dot IS round — the disc the Providers window puts
-// before the vendor's row.
-.indicator-dot {
-  flex: none;
-  width: 0.6em;
-  height: 0.6em;
-  border-radius: 50%;
+.indicator-menu-detail {
+  color: var(--hc-window-ink-quiet);
+  font-size: 0.9em;
+}
+
+// The list's one verb: a plain word under a hairline, as the Providers
+// console says its secondary actions — no border, no fill.
+.indicator-menu-action {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.45rem 0.55rem 0.3rem;
+  border: 0;
+  border-top: 1px solid var(--hc-window-line);
+  border-radius: 0;
+  background: none;
+  color: var(--hc-window-ink-plain);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--hc-window-ink-loud);
+    text-decoration: underline;
+    outline: none;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1217,9 +1282,6 @@ $default-face: #c8b8ff;
     font-size: 1.4em;
   }
   .reading { font-size: 1.4em; }   // the marks mirror the input's metrics, always
-  // The line is the phone's whole width to type in, so a worded pill keeps its
-  // dots and its "+N" and drops the names — a tap opens where they are named.
-  .indicator-dot + .indicator-word-text { display: none; }
   .prompt-glyph {
     width: 1.55em;
     height: 1.55em;
