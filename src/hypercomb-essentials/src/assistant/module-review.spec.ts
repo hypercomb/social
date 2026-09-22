@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { publishChange, readChange, reviewChange, reviewContext, reviewQuestion, sectionText, verdictOf, type ReviewDeps } from './module-review.js'
+import { assessSandbox, isSandboxSite, publishChange, readChange, reviewChange, reviewContext, reviewQuestion, sectionText, tallyAssessments, verdictOf, type ReviewDeps } from './module-review.js'
 
 const BEFORE = ['// src/preferences/settings.ts', 'export const zoom = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
 const AFTER = ['// src/preferences/settings.ts', 'export const zoom = 2;', 'globalThis.__proof = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
@@ -84,5 +84,28 @@ describe('module review', () => {
     const refused = await reviewChange('h', change.sig, change.record, { ...w.deps, ask: async () => ({ ok: false, error: 'h said 503: AI is not configured' }) })
     expect(refused).toEqual({ ok: false, error: 'h said 503: AI is not configured' })
     expect(w.stamped.map(([key]) => key)).toEqual(['change:try-zoom'])
+  })
+})
+
+describe('public assessments', () => {
+  it("signs an assessment into the assessor's own index as assess:<root>, with the note by signature", async () => {
+    const w = await world()
+    const root = 'e'.repeat(64)
+    const signed = await assessSandbox('content.example.com', { title: 'try-zoom', package: root, change: 'c'.repeat(64) }, 'refuse', '  writes to storage it did not before  ', w.deps)
+    expect(signed.ok).toBe(true)
+    if (!signed.ok) return
+    expect(signed.record).toMatchObject({ kind: 'module-assessment', sandbox: 'try-zoom', root, change: 'c'.repeat(64), verdict: 'refuse' })
+    expect(w.heap.get(signed.record.note)).toBe('writes to storage it did not before')
+    expect(w.published.at(-1)).toEqual([signed.record.note, signed.sig])
+    expect(w.stamped.at(-1)).toEqual([`assess:${root}`, signed.sig])
+    expect(await assessSandbox('h', { title: 'try-zoom', package: root }, 'maybe' as never, '', w.deps)).toEqual({ ok: false, error: 'a verdict is accept, refuse or unclear' })
+  })
+
+  it("reads a door's descriptor and counts how people assessed it", () => {
+    expect(isSandboxSite({ sandbox: true, title: 'try-zoom', package: 'a'.repeat(64), pubkey: 'p' })).toBe(true)
+    expect(isSandboxSite({ title: 'a site', package: 'a'.repeat(64) })).toBe(false)
+    const assessments = ['accept', 'refuse', 'accept', 'odd'].map((verdict, i) => ({ pubkey: String(i), record: 'r', verdict: verdict as never, at: 0 }))
+    expect(tallyAssessments({ assessments })).toEqual({ accept: 2, refuse: 1, unclear: 1 })
+    expect(tallyAssessments({})).toEqual({ accept: 0, refuse: 0, unclear: 0 })
   })
 })

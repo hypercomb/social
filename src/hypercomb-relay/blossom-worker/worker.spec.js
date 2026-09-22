@@ -679,3 +679,52 @@ test('a try- door names the published change and the host AI review beside the s
   assert.equal(site.change, change)
   assert.equal(site.review, review)
 })
+
+// ── public assessments: anyone assesses a sandbox under their own key ─────
+const assessorKey = Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 2 : 0)
+const assessor = hex(schnorr.getPublicKey(assessorKey))
+async function indexBy(key, roots, createdAt = 1_800_000_100) {
+  const event = { pubkey: hex(schnorr.getPublicKey(key)), created_at: createdAt, kind: 30564, tags: [], content: JSON.stringify({ roots }) }
+  const serial = JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content])
+  event.id = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serial))))
+  event.sig = hex(schnorr.sign(event.id, key))
+  return event
+}
+const kvMap = (values = new Map()) => ({ values, get: async (k) => values.get(k) ?? null, put: async (k, v) => { values.set(k, String(v)) } })
+
+test('writing an index that names assess:<root> lists its signer as an assessor of that root', async () => {
+  const root = 'e'.repeat(64)
+  const HIVES = kvMap()
+  const env = { SITE_BINDINGS: '{}', HIVES }
+  const url = `https://content.hypercomb.com/hive/${assessor}`
+  const body = JSON.stringify(await indexBy(assessorKey, { [`assess:${root}`]: 'f'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
+  assert.equal(response.status, 201)
+  assert.deepEqual(JSON.parse(HIVES.values.get(`assessors:${root}`)), [assessor])
+})
+
+test('a try- door lists every signed assessment of its root, and the host AI verdict', async () => {
+  const [root, reviewSig, goodRecord] = ['b'.repeat(64), 'd'.repeat(64), 'c'.repeat(64)]
+  const HIVES = kvMap(new Map([
+    [pubkey, JSON.stringify(await signedIndex({ 'install:try-fresh-rooms': root, 'review:try-fresh-rooms': reviewSig }))],
+    [assessor, JSON.stringify(await indexBy(assessorKey, { [`assess:${root}`]: goodRecord }))],
+    [`assessors:${root}`, JSON.stringify([assessor, 'not-a-key'])],
+  ]))
+  const records = new Map([
+    [goodRecord, { kind: 'module-assessment', root, verdict: 'refuse', note: 'a'.repeat(64) }],
+    [reviewSig, { kind: 'module-review', verdict: 'accept' }],
+  ])
+  const env = {
+    SITE_BINDINGS: JSON.stringify({ 'hypercomb.com': { title: 'Hypercomb', lineage: 'hypercomb', publishers: [{ pubkey, label: 'Jaime', primary: true }] } }),
+    HIVES,
+    CONTENT: { get: async (k) => records.has(k) ? { arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(records.get(k))).buffer } : null, head: async () => null, list: async () => ({ objects: [], truncated: false }) },
+    SANDBOX_SHELL_ORIGIN: 'https://shell.example',
+  }
+  const site = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
+  assert.equal(site.reviewVerdict, 'accept')
+  assert.deepEqual(site.assessments.map((a) => [a.pubkey, a.record, a.verdict]), [[assessor, goodRecord, 'refuse']])
+  // A record that assesses another root is not an assessment of this one.
+  records.set(goodRecord, { kind: 'module-assessment', root: 'a'.repeat(64), verdict: 'accept' })
+  const again = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
+  assert.deepEqual(again.assessments, [])
+})

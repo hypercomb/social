@@ -645,12 +645,66 @@ async function serveSandbox(request, env, site, zone) {
       sandbox: true, title: site.lineage, channel: `install:${site.lineage}`, package: found.root,
       pubkey: found.pubkey, publisher: found.label, publishedAt: found.publishedAt, hosts: [url.host],
       ...(found.change ? { change: found.change } : {}), ...(found.review ? { review: found.review } : {}),
+      ...(found.review ? { reviewVerdict: await heapRecord(env, found.review).then((r) => ASSESS_VERDICTS.has(r?.verdict) ? r.verdict : 'unclear') } : {}),
+      assessments: await assessmentsOf(env, found.root, indexReader(env)),
     }, { 'Cache-Control': 'no-store' })
   }
   const moduleMatch = url.pathname.match(/^\/content\/([0-9a-f]{64})$/)
   if (moduleMatch) return serveModule(request, env, moduleMatch[1])
   if (url.pathname.startsWith('/content/')) return new Response(body('not held\n'), { status: 404, headers: plain })
   return serveSandboxShell(request, env)
+}
+
+// ── public assessments (documentation/module-sandbox.md) ─────────────────
+//
+// ANYONE MAY ASSESS A SANDBOX, under their own key: an assessment is a record
+// in the heap (verdict + a note, both by signature) that the assessor names in
+// their OWN signed index as `assess:<package root>`. The signature on their
+// index is the signature on the assessment. The door lists every assessment
+// of its root, so the index write keeps a derived list of who assessed which
+// root — never trusted on its own: every listed assessor's index is read and
+// re-verified, and one who dropped the key is simply not shown.
+const ASSESS_KEY_RE = /^assess:([0-9a-f]{64})$/
+const ASSESS_VERDICTS = new Set(['accept', 'refuse', 'unclear'])
+const ASSESSORS_MAX = 500
+const ASSESSMENTS_SHOWN = 50
+
+async function noteAssessors(env, pubkey, evt) {
+  let roots = {}
+  try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  for (const key of Object.keys(roots)) {
+    const root = ASSESS_KEY_RE.exec(key)?.[1]
+    if (!root) continue
+    const listKey = `assessors:${root}`
+    let listed = []
+    try { listed = JSON.parse((await env.HIVES.get(listKey)) ?? '[]') } catch { listed = [] }
+    if (!Array.isArray(listed) || listed.includes(pubkey)) continue
+    await env.HIVES.put(listKey, JSON.stringify([...listed, pubkey].slice(-ASSESSORS_MAX)))
+  }
+}
+
+/** A small JSON record from the heap, or null. */
+async function heapRecord(env, sig) {
+  if (!SIG_RE.test(String(sig || ''))) return null
+  try {
+    const obj = await env.CONTENT.get(sig)
+    return obj ? JSON.parse(new TextDecoder().decode(await obj.arrayBuffer())) : null
+  } catch { return null }
+}
+
+/** Every current, signed assessment of a package root. */
+async function assessmentsOf(env, root, read) {
+  let listed = []
+  try { listed = JSON.parse((await env.HIVES.get(`assessors:${root}`)) ?? '[]') } catch { listed = [] }
+  const out = []
+  for (const pubkey of (Array.isArray(listed) ? listed : []).filter((pk) => SIG_RE.test(String(pk))).slice(-ASSESSMENTS_SHOWN)) {
+    const index = await read(pubkey)
+    const record = String(index?.roots?.[`assess:${root}`] || '').toLowerCase()
+    const body = await heapRecord(env, record)
+    if (body?.kind !== 'module-assessment' || body.root !== root) continue
+    out.push({ pubkey, record, verdict: ASSESS_VERDICTS.has(body.verdict) ? body.verdict : 'unclear', at: Number(index.createdAt || 0) })
+  }
+  return out
 }
 
 /** The participant shell, fetched from where it is deployed. https only, but
@@ -1193,6 +1247,7 @@ async function putHive(request, env, pubkey) {
     }
   }
   await env.HIVES.put(pubkey, JSON.stringify(evt))
+  await noteAssessors(env, pubkey, evt)
   // NOTE: the message rides the X-Reason header (ByteString) — ASCII only.
   return text(stored ? 200 : 201, `hive index updated for ${pubkey.slice(0, 12)}...`)
 }

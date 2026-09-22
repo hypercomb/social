@@ -8,7 +8,9 @@
 //      file before and after) is published beside it, and the host's AI reads
 //      it — review:try-<change>
 //   3. a tester opens try-<change>.<zone>: a full hive whose door names that
-//      package, and runs the model's code — while followers are NOT told
+//      package, and runs the model's code — while followers are NOT told; the
+//      door tells the tester's hive what it runs, the tester signs a public
+//      assessment under their own key, and the publisher reads the tally
 //   4. `module promote` moves the live channel to the same root: the follower
 //      is told, replicates it from the host, and runs it
 //   5. a unit turned off and committed + promoted is unreachable for the
@@ -118,6 +120,29 @@ const announcedOn = page => page.evaluate(() => {
   const testerRuns = await H.waitFor(() => H.installedOf(tester), 180_000, 1000)
   check('the tester\'s hive at the door installed exactly the sandbox package', testerRuns === sandboxRoot, String(testerRuns).slice(0, 12))
   check('the tester runs the code the model wrote', await proofOf(tester) === MARKER)
+
+  // ── 3b. ANYONE ASSESSES IT, UNDER THEIR OWN KEY ─────────────────────────
+  const told = await H.waitFor(() => tester.evaluate(() => {
+    let got = null
+    const off = globalThis.__hypercombEffectBus.on('module:door', s => { got = s })
+    if (typeof off === 'function') off()
+    return got
+  }), 60_000, 800)
+  check('the door tells the hive at it what it runs and how the host AI read it', told?.package === sandboxRoot && told?.reviewVerdict === 'accept')
+  const testerKey = await tester.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/NostrSigner').getPublicKeyHex())
+  await H.watchToasts(tester)
+  await H.say(tester, `module assess ${CHANGE} refuse raises zoom without asking @${WRITE}`)
+  console.log('   tester toasts:', JSON.stringify(await H.toastsUntil(tester, /assessment/)))
+  const listed = await tester.evaluate(() => fetch('/site.json', { cache: 'no-store' }).then(r => r.json()))
+  const mine = (listed.assessments ?? []).find(a => a.pubkey === testerKey)
+  const assessment = mine ? JSON.parse(await fromHost(mine.record)) : null
+  const note = assessment ? await fromHost(assessment.note) : ''
+  check('anyone at the door can sign an assessment, and the door lists it under their key', mine?.verdict === 'refuse' && testerKey !== pubkey, JSON.stringify(listed.assessments))
+  check('the assessment names the change it read, and its note is public', assessment?.root === sandboxRoot && assessment?.change === changeSig && note === 'raises zoom without asking')
+  await H.watchToasts(page)
+  await H.say(page, `module assess ${CHANGE} @${WRITE}`)
+  const tally = await H.toastsUntil(page, /people say/)
+  check('the publisher reads how people assessed it, from its own hive', (tally ?? []).some(m => /AI says accept/.test(m) && /1 refuse/.test(m)), JSON.stringify(tally))
   await fol.page.reload({ waitUntil: 'domcontentloaded' })
   await H.sleep(8000)
   check('the follower is not told of a sandbox', (await announcedOn(fol.page)) !== sandboxRoot)

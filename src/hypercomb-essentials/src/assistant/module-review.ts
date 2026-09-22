@@ -163,6 +163,74 @@ export const reviewChange = async (
   return { ok: true, sig, verdict: review.verdict, model: review.model, findings: answered.text }
 }
 
+// ── public assessments ─────────────────────────────────────────────────────
+//
+// ANYONE MAY ASSESS A SANDBOX, under their own key: a verdict and a note, the
+// note a resource, the record a resource, both uploaded to the host, and the
+// record named in the ASSESSOR'S OWN signed index as `assess:<package root>`.
+// The signature on their index is the signature on the assessment; the host
+// lists every assessment of a root on the sandbox's door (worker
+// assessmentsOf), re-verifying each index as it reads it. Like the host AI's
+// review, an assessment is a reading, never a gate.
+
+export const VERDICTS: readonly ReviewVerdict[] = ['accept', 'refuse', 'unclear']
+
+export interface ModuleAssessmentRecord {
+  readonly kind: 'module-assessment'
+  readonly sandbox: string
+  /** The package root the assessment is of — what the door lists it under. */
+  readonly root: string
+  /** The published change it read, when the sandbox had one. */
+  readonly change: string | null
+  readonly verdict: ReviewVerdict
+  /** Resource signature of the note. */
+  readonly note: string
+  readonly at: number
+}
+
+/** What a sandbox's door says about itself (worker serveSandbox /site.json). */
+export interface SandboxSite {
+  readonly sandbox: true
+  readonly title: string
+  readonly package: string
+  readonly pubkey: string
+  readonly publisher?: string
+  readonly change?: string
+  readonly review?: string
+  readonly reviewVerdict?: ReviewVerdict
+  readonly assessments?: readonly { readonly pubkey: string; readonly record: string; readonly verdict: ReviewVerdict; readonly at: number }[]
+}
+
+/** Is this what a sandbox door answers at /site.json? */
+export const isSandboxSite = (value: unknown): value is SandboxSite => {
+  const site = value as Partial<SandboxSite> | null
+  return !!site && site.sandbox === true && typeof site.title === 'string' && /^[a-f0-9]{64}$/.test(String(site.package ?? ''))
+}
+
+/** How the people who assessed a sandbox read it, counted. */
+export const tallyAssessments = (site: Pick<SandboxSite, 'assessments'>): Record<ReviewVerdict, number> => {
+  const tally: Record<ReviewVerdict, number> = { accept: 0, refuse: 0, unclear: 0 }
+  for (const assessment of site.assessments ?? []) tally[VERDICTS.includes(assessment.verdict) ? assessment.verdict : 'unclear']++
+  return tally
+}
+
+/** Sign an assessment of a sandbox with this hive's key and make it public. */
+export const assessSandbox = async (
+  host: string, site: Pick<SandboxSite, 'title' | 'package' | 'change'>, verdict: ReviewVerdict, note: string, deps: ReviewDeps,
+): Promise<{ ok: true; sig: string; record: ModuleAssessmentRecord } | { ok: false; error: string }> => {
+  if (!VERDICTS.includes(verdict)) return { ok: false, error: 'a verdict is accept, refuse or unclear' }
+  const noteSig = await deps.put(note.trim() || '(no note)', 'text/plain; charset=utf-8')
+  const record: ModuleAssessmentRecord = {
+    kind: 'module-assessment', sandbox: site.title, root: site.package, change: site.change ?? null, verdict, note: noteSig, at: deps.now(),
+  }
+  const sig = await deps.put(JSON.stringify(record), 'application/json')
+  const published = await deps.publish(host, [noteSig, sig])
+  if (!published.ok) return { ok: false, error: published.error }
+  const stamped = await deps.stamp(host, `assess:${site.package}`, sig)
+  if (!stamped.ok) return { ok: false, error: stamped.reason ?? 'the assessment was not signed into your index' }
+  return { ok: true, sig, record }
+}
+
 /** A change record held here or on the host, parsed, or null. */
 export const readChange = async (sig: string, deps: Pick<ReviewDeps, 'get'>): Promise<ModuleChangeRecord | null> => {
   try {

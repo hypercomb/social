@@ -28,17 +28,22 @@
 //   module review <change> [@<host>]
 //                          the host's AI reads the change again (it reads it
 //                          once on every commit): module-review.ts.
+//   module assess <change> [accept|refuse|unclear <note…>] [@<host>]
+//                          anyone's own signed reading of a sandbox: without a
+//                          verdict it says how the host's AI and people read
+//                          it; with one it signs yours, under YOUR key, into
+//                          your own index as assess:<package root>.
 //
 // Every commit also publishes THE CHANGE — each drafted source file before and
 // after — as change:try-<change>, and the host's AI's reading of it as
 // review:try-<change>. Both are public beside the sandbox: its door names them.
 //
-// All four publishing words are the participant's alone: a model proposing
+// All five publishing words are the participant's alone: a model proposing
 // them is refused, whatever the Execution policy.
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, MODULE_DRAFTS_IOC_KEY, type I18nProvider, type ModuleDraftsProvider } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
-import { publishChange, readChange, reviewChange, type ModuleChangeRecord, type ReviewDeps } from './module-review.js'
+import { assessSandbox, isSandboxSite, publishChange, readChange, reviewChange, tallyAssessments, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite } from './module-review.js'
 import { INSTALL_CHANNEL_PREFIX, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 
 /** The host backup service's participant-triggered upload (sharing/host-sync.service.ts). */
@@ -53,7 +58,7 @@ export const SANDBOX_ZONE = 'hypercomb.com'
 export const SANDBOX_PREFIX = 'try-'
 const CHANNEL_RE = /^[a-z][a-z0-9-]*$/
 const PATH_RE = /^[a-z0-9][a-z0-9._-]{0,63}(?:\/[a-z0-9][a-z0-9._-]{0,63})*$/i
-const PUBLISHING = new Set(['commit', 'promote', 'withdraw', 'review'])
+const PUBLISHING = new Set(['commit', 'promote', 'withdraw', 'review', 'assess'])
 const STORE_KEY = '@hypercomb.social/Store'
 const HOST_AI_KEY = '@diamondcoreprocessor.com/HostAi'
 
@@ -105,6 +110,18 @@ const review = async (host: string, changeSig: string, record: ModuleChangeRecor
   EffectBus.emit('module:reviewed', { name: record.sandbox, host, verdict: read.verdict, review: read.sig, change: changeSig, model: read.model })
 }
 
+/** What a sandbox's door says about itself — read from the door itself when
+ *  this hive IS that door, and across origins otherwise (the host answers
+ *  /site.json with CORS). Null when no sandbox answers. */
+const sandboxSite = async (name: string, host: string): Promise<SandboxSite | null> => {
+  const here = location.hostname.toLowerCase().startsWith(`${name}.`)
+  try {
+    const res = await fetch(here ? '/site.json' : `${sandboxDoorUrl(name, host)}/site.json`, { cache: 'no-store' })
+    const site = res.ok ? await res.json() as unknown : null
+    return isSandboxSite(site) ? site : null
+  } catch { return null }
+}
+
 /** A change's sandbox name: `try-<change>`, one DNS label. */
 export const sandboxName = (change: string): string => {
   const bare = String(change ?? '').toLowerCase().replace(/^try-/, '').replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50)
@@ -125,7 +142,7 @@ export class ModuleQueenBee extends QueenBee {
   readonly command = 'module'
   override description = 'See, drop, try in public, or promote what runs here'
   override descriptionKey = 'slash.module'
-  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>']
+  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>', 'assess <change> [accept|refuse|unclear <note>]']
   override examples = [
     { input: '/module', result: 'Lists the drafts picked over the installed package' },
     { input: '/module commit fresh-rooms', result: 'Publishes what runs here to try-fresh-rooms.hypercomb.com, not to followers' },
@@ -146,7 +163,7 @@ export class ModuleQueenBee extends QueenBee {
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review '].filter(word => word.startsWith(typed) && word.trim() !== typed)
+    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess '].filter(word => word.startsWith(typed) && word.trim() !== typed)
   }
 
   protected async execute(args: string): Promise<void> {
@@ -176,7 +193,7 @@ export class ModuleQueenBee extends QueenBee {
       toast(t('module.dropped', 'Dropped the draft at {path} — reload to run the package as it was.', { path }), 'success')
       return
     }
-    if (!PUBLISHING.has(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change> or review <change>.'), 'warning'); return }
+    if (!PUBLISHING.has(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change> or assess <change>.'), 'warning'); return }
 
     // [@<host>] publishes to a host of your own (a machine running
     // hypercomb-serve, a relay) instead of the public one; the other words are
@@ -195,6 +212,29 @@ export class ModuleQueenBee extends QueenBee {
       const stamped = await setHiveRoot(host, `${INSTALL_CHANNEL_PREFIX}${live}`, root).catch(error => ({ ok: false, reason: error instanceof Error ? error.message : 'refused' }))
       if (!stamped.ok) { toast(t('module.unstamped', 'The install channel was not stamped: {reason}', { reason: stamped.reason ?? 'refused' }), 'warning'); return }
       toast(t('module.promoted', 'Promoted {name}: {channel} now names {root}. Followers are told on their next boot.', { name, channel: `${INSTALL_CHANNEL_PREFIX}${live}`, root: root.slice(0, 12) + '…' }), 'success')
+      return
+    }
+
+    if (word === 'assess') {
+      const name = sandboxName(words[0] ?? '')
+      if (!name) { toast(t('module.which', 'Say which sandbox, like: module assess fresh-rooms accept reads well.'), 'warning'); return }
+      const site = await sandboxSite(name, host)
+      if (!site) { toast(t('module.nosite', 'No sandbox {name} answers at {door}.', { name, door: sandboxDoorUrl(name, host) }), 'warning'); return }
+      const verdict = (VERDICTS as readonly string[]).includes(words[1] ?? '') ? words[1] as ReviewVerdict : null
+      if (!verdict) {
+        const tally = tallyAssessments(site)
+        toast(t('module.assessments', "{name}: the host's AI says {review}; people say {accept} accept, {refuse} refuse, {unclear} unclear.", {
+          name, review: site.reviewVerdict ?? t('module.unreviewed', 'nothing yet'), accept: tally.accept, refuse: tally.refuse, unclear: tally.unclear,
+        }))
+        return
+      }
+      const sync = window.ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as HostSyncLike | undefined
+      const deps = sync ? reviewDeps(drafts, sync) : null
+      if (!deps) { toast(t('module.noreview', 'The review cannot run here: {reason}.', { reason: 'the store is not loaded' }), 'warning'); return }
+      const signed = await assessSandbox(host, site, verdict, words.slice(2).join(' '), deps)
+      if (!signed.ok) { toast(t('module.unassessed', 'Your assessment was not published: {reason}', { reason: signed.error }), 'warning'); return }
+      toast(t('module.assessed', 'Your assessment of {name} ({verdict}) is signed with your key and public beside it.', { name, verdict }), 'success')
+      EffectBus.emit('module:assessed', { name, host, verdict, record: signed.sig, root: site.package })
       return
     }
 
