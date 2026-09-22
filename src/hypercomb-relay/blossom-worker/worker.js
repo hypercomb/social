@@ -129,6 +129,9 @@ function normalizeBinding(rawHost, raw) {
     // job. Advertising a door that cannot be dialled is this file's job.
     routed: raw.routed !== false,      // is THIS host served?
     wildcard: raw.wildcard !== false,  // is `*.<host>` served?
+    // THE FRONT DOOR: this host is a domain's entrance (management + the
+    // hives switched on here), not a hive — the shim host card answers it.
+    frontDoor: raw.frontDoor === true,
   }]
 }
 
@@ -560,6 +563,21 @@ async function servePoolListing(request, env, sig) {
   }
   names.sort()
   return new Response(request.method === 'HEAD' ? null : names.join('\n') + '\n', { status: 200, headers })
+}
+
+/** The shim host card, fetched from its static origin and answered as this
+ *  domain's own page. Same path, same query; the origin is configuration. */
+async function serveFrontDoor(request, env) {
+  const origin = String(env.HOST_DOOR_ORIGIN || '').replace(/\/+$/, '')
+  if (!origin.startsWith('https://')) return text(503, 'front door is not configured')
+  const url = new URL(request.url)
+  const upstream = await fetch(origin + url.pathname + url.search, {
+    method: request.method,
+    headers: { accept: request.headers.get('accept') || '*/*' },
+  })
+  const headers = new Headers(upstream.headers)
+  headers.set('Access-Control-Allow-Origin', '*')
+  return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
 }
 
 async function serveVisitorAsset(request, env, { spa = true } = {}) {
@@ -1266,10 +1284,15 @@ export default {
         // worker) and gets a JavaScript MIME; every other consumer gets the
         // stored type. No typed prefix needed for modules either.
         const dest = String(request.headers.get('sec-fetch-dest') || '').toLowerCase()
-        if (dest === 'script' || dest === 'worker' || dest === 'sharedworker') {
-          return serveModule(request, env, sigMatch[2])
+        const heap = (dest === 'script' || dest === 'worker' || dest === 'sharedworker')
+          ? await serveModule(request, env, sigMatch[2])
+          : await serveBlob(request, env, sigMatch[2], named ? suffixType(pathname) : null)
+        // A front-door apex also serves the shim's OWN bytes (its pinned
+        // bootstrap, its packages), which live with the card, not in the heap.
+        if (heap.status === 404 && siteBindings(env)[requestUrl.hostname.toLowerCase()]?.frontDoor) {
+          return serveFrontDoor(request, env)
         }
-        return serveBlob(request, env, sigMatch[2], named ? suffixType(pathname) : null)
+        return heap
       }
       if (method === 'PUT' && !isAlias && !named) return putSig(request, env, sigMatch[2])
       return text(405, 'method not allowed')
@@ -1333,6 +1356,15 @@ export default {
       if (method === 'GET' || method === 'HEAD') return getHive(request, env, hiveMatch[1])
       if (method === 'PUT') return putHive(request, env, hiveMatch[1])
       return text(405, 'method not allowed')
+    }
+
+    // THE FRONT DOOR — an apex is the entrance to its domain, not a hive: the
+    // shim host card (HOST_DOOR_ORIGIN, a static Pages deployment) draws it,
+    // and lists the hives switched on here from /publications.json. Every
+    // machine read stays on this worker — flat sigs and pools are answered
+    // above, the index and the ledger here — so the card reads the one heap.
+    if (site?.frontDoor && (method === 'GET' || method === 'HEAD') && pathname !== '/publications.json') {
+      return serveFrontDoor(request, env)
     }
 
     // A published application domain is a normal Core host over the same heap.

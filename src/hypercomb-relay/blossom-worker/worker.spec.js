@@ -426,6 +426,24 @@ test('signed doors switch a branch per domain — on where listed, hidden elsewh
   assert.deepEqual(susan.hosts.map((door) => door.host), ['susan.hypercomb.com'])
 })
 
+test('a front-door apex is the shim host card; the ledger and the heap stay on the worker', async () => {
+  const bindings = { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], lineage: 'pluginthematrix.com', frontDoor: true } }
+  const { env, assetRequests } = await fixture(undefined, bindings)
+  env.HOST_DOOR_ORIGIN = 'https://door.example/'
+  const asked = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => { asked.push(String(url)); return new Response('host card', { headers: { 'content-type': 'text/html' } }) }
+  try {
+    const card = await worker.fetch(page('https://pluginthematrix.com/?x=1'), env)
+    assert.equal(await card.text(), 'host card')
+    assert.deepEqual(asked, ['https://door.example/?x=1'])
+    const ledger = await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)
+    assert.ok(Array.isArray((await ledger.json()).sites))
+    assert.deepEqual(asked, ['https://door.example/?x=1'])
+    assert.deepEqual(assetRequests, [])
+  } finally { globalThis.fetch = realFetch }
+})
+
 test('under /content/ a miss is an honest 404, never the SPA page — the pool walk stops at the gap', async () => {
   const pool = 'e'.repeat(64)
   const { env, assetRequests } = await fixture()

@@ -177,3 +177,42 @@ export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: s
     footer: PLATFORM_LINKS.filter(door => !links.some(link => sameDoor(link.href, door.href, origin))),
   }
 }
+
+/** THE LIVE DIRECTORY — every hive this domain opens a door for, read from the
+ *  host's own `/publications.json` (the worker answers it on every door, and
+ *  it lists only what a publisher's SIGNED index switches on here). A staged
+ *  welcome.json still leads when it names doors; this is the default, so an
+ *  apex is the entrance to its public hives with nothing hand-kept.
+ *
+ *  A door counts when its host is this domain or under it. The shape is
+ *  validated, never trusted — an SPA fallback answers any path 200 with HTML. */
+export const readPublicDoors = async (zone: string): Promise<WelcomeDoor[]> => {
+  const here = String(zone ?? '').trim().toLowerCase()
+  if (!here) return []
+  try {
+    const response = await fetch('/publications.json', { cache: 'no-store' })
+    if (!response.ok) return []
+    return publicDoorsIn(await response.json(), here)
+  } catch { return [] }
+}
+
+/** The pure half of readPublicDoors — one door per hive, on this domain. */
+export const publicDoorsIn = (ledger: unknown, zone: string): WelcomeDoor[] => {
+  const sites = (ledger as { sites?: unknown })?.sites
+  if (!Array.isArray(sites)) return []
+  const doors: WelcomeDoor[] = []
+  const seen = new Set<string>()
+  for (const site of sites as Record<string, unknown>[]) {
+    const published = Array.isArray(site?.['publishers']) &&
+      (site['publishers'] as Record<string, unknown>[]).some(p => typeof p?.['head'] === 'string' && p['head'])
+    if (!published) continue
+    const hosts = Array.isArray(site['hosts']) ? site['hosts'] as Record<string, unknown>[] : []
+    const door = hosts
+      .map(h => String(h?.['host'] ?? '').toLowerCase())
+      .find(h => h !== zone && h.endsWith(`.${zone}`))
+    if (!door || seen.has(door)) continue
+    seen.add(door)
+    doors.push({ title: String(site['title'] ?? '') || door.split('.')[0]!, host: door })
+  }
+  return doors.sort((a, b) => a.title.localeCompare(b.title))
+}

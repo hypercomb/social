@@ -40,6 +40,9 @@ routes = [
   # able to hold the live ones hostage. Re-enable the moment the zone reads
   # Active. RE-ENABLED 2026-09-21: the zone reads Active (NS jack/margaret).
   { pattern = "*.realones.online/*", zone_name = "realones.online" },
+  # The apex is the domain's FRONT DOOR (2026-09-22): the shim host card,
+  # served through this worker from HOST_DOOR_ORIGIN.
+  { pattern = "realones.online", custom_domain = true },
   # THIRD ZONE — hypercomb.com. Same script, same bindings: one worker serves
   # every zone, so a new domain is routes + SITE_BINDINGS and nothing else.
   # Zone ACTIVE 2026-08-30 (registrar NS moved to jack/margaret) with a
@@ -145,6 +148,9 @@ binding = "HIVES"
 id = "186c91f7458b421abea02d7647f27821"
 
 [vars]
+# The front door every frontDoor apex serves: the shim host card, a static
+# Pages deployment (npm --prefix hypercomb-shim run host:deploy -- --project hypercomb-host).
+HOST_DOOR_ORIGIN = "https://hypercomb-host.pages.dev"
 # There is no visitor hold: a door opens only while the publisher's SIGNED
 # index names its lineage (worker.js "open is a signed mark"). Unpublish hides it.
 AUTO_GRANT = "1"
@@ -167,7 +173,7 @@ AI_WRITERS = ""
 #   hypercomb.com    routed:false  — apex still `A → Azure`; it answers 200 with the
 #                                    Azure page, so a status code proves NOTHING here
 #   jwize.com        routed:false  — anchor apex never routed; the `*` route is LIVE (2026-09-21)
-#   realones.online  routed:false  — anchor apex never routed; the `*` route is LIVE (2026-09-21)
+#   realones.online  apex = FRONT DOOR (shim host card); the `*` route is LIVE
 #
 # replication.hypercomb.com carries NO flag on purpose, even though its own
 # custom-domain route is commented out above: a commented route is not the test.
@@ -183,4 +189,4 @@ AI_WRITERS = ""
 # so no hive location can ever mint a lineage containing a dot. A plausible
 # anchor lineage like "realones" would instead sit in the publications ledger's
 # `named` set and silently deny a real hive of that name its plate.
-SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false},"hypercomb.com":{"title":"Hypercomb","lineage":"hypercomb","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false},"replication.hypercomb.com":{"title":"Replication by Signature","lineage":"hypercomb/architecture/replication-by-signature","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"jwize.com":{"title":"jwize","lineage":"jwize.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false}}'
+SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true},"hypercomb.com":{"title":"Hypercomb","lineage":"hypercomb","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false},"replication.hypercomb.com":{"title":"Replication by Signature","lineage":"hypercomb/architecture/replication-by-signature","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"jwize.com":{"title":"jwize","lineage":"jwize.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false}}'
