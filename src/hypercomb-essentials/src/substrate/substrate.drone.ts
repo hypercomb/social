@@ -4,14 +4,17 @@
 //   • Warms up the active source on startup and after changes
 //   • Applies substrate to blank tiles as they render
 //   • Clears cell assignments when cells are removed
-//   • Opens the organizer on indicator click
-//   • Prompts for folder re-grant when a linked folder needs permission
+//   • Prompts for folder re-grant when a linked folder needs permission —
+//     a command-line pill whose click IS the re-grant gesture
 //   • Re-scans linked folders on tab focus so new images appear live
 
 import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { SubstrateService } from './substrate.service.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
+
+/** The reconnect pill's key on the command line. */
+const RECONNECT_KEY = 'substrate-reconnect'
 
 export class SubstrateDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -23,9 +26,9 @@ export class SubstrateDrone extends Drone {
     'clipboard:paste-start', 'clipboard:paste-done',
     'editor:mode', 'render:cell-count',
     'cell:attach-pending',
-    'indicator:click',
+    'indicator:query', 'indicator:activate',
   ]
-  protected override emits = ['substrate:applied', 'substrate:ready', 'indicator:set', 'indicator:clear', 'substrate-organizer:open', 'activity:log']
+  protected override emits = ['substrate:applied', 'substrate:ready', 'indicator:set', 'indicator:clear', 'activity:log']
 
   #initialized = false
   #pastePending = false
@@ -109,41 +112,42 @@ export class SubstrateDrone extends Drone {
       })
     })
 
-    // Folder source needs a user-gesture re-grant. Show an indicator; clicking
-    // it triggers requestPermission inside the gesture.
+    // Folder source needs a user-gesture re-grant. Show the reconnect pill;
+    // clicking it triggers requestPermission inside the gesture.
     this.onEffect<{ handleId: string; permission: string }>('substrate:folder-permission', ({ handleId, permission }) => {
       if (permission === 'granted') return
       this.#pendingPermissionHandleId = handleId
-      EffectBus.emit('indicator:set', {
-        key: 'substrate-reconnect',
-        icon: 'link_off',
-        label: 'Substrate folder — click to reconnect',
-      })
+      this.#publishReconnect()
     })
 
-    // Indicator clicks → either reconnect a folder or open the organizer.
-    this.onEffect<{ key: string }>('indicator:click', async ({ key }) => {
+    // The command line asks producers to replay when it mounts after them —
+    // after it has restored what it persisted. This pill used to be persisted
+    // (it did not say `dismissable: false`), so a stale copy can come back
+    // from storage with no re-grant pending; publishing clears it unless one is.
+    this.onEffect('indicator:query', () => this.#publishReconnect())
+
+    // The pill's click is the re-grant. The command line activates on
+    // mousedown — a user gesture — and the bus is synchronous, so
+    // requestFolderAccess starts inside the press. It used to listen for
+    // `indicator:click`, which nothing emits: the pill wore an × that hid it
+    // and the folder never reconnected.
+    this.onEffect<{ key: string }>('indicator:activate', async ({ key }) => {
+      if (key !== RECONNECT_KEY || !this.#pendingPermissionHandleId) return
       const svc = this.#service()
       if (!svc) return
-      if (key === 'substrate-reconnect' && this.#pendingPermissionHandleId) {
-        const result = await svc.requestFolderAccess(this.#pendingPermissionHandleId)
-        if (result === 'granted') {
-          EffectBus.emit('indicator:clear', { key: 'substrate-reconnect' })
-          this.#pendingPermissionHandleId = null
-          await svc.warmUp()
-          this.#syncIndicator()
-          const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
-          EffectBus.emit('activity:log', { message: i18n?.t('substrate.folder-reconnected') ?? 'substrate folder reconnected', icon: '◈' })
-        } else {
-          const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
-          EffectBus.emit('activity:log', { message: i18n?.t('substrate.folder-access-denied') ?? 'substrate folder access denied', icon: '◈' })
-        }
-        return
-      }
-      if (key === 'substrate') {
-        EffectBus.emit('substrate-organizer:open', {})
+      const result = await svc.requestFolderAccess(this.#pendingPermissionHandleId)
+      const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+      if (result === 'granted') {
+        this.#pendingPermissionHandleId = null
+        this.#publishReconnect()
+        await svc.warmUp()
+        this.#syncIndicator()
+        EffectBus.emit('activity:log', { message: i18n?.t('substrate.folder-reconnected') ?? 'substrate folder reconnected', icon: '◈' })
+      } else {
+        EffectBus.emit('activity:log', { message: i18n?.t('substrate.folder-access-denied') ?? 'substrate folder access denied', icon: '◈' })
       }
     })
+    this.#publishReconnect()
 
     // Re-scan linked folders when the tab regains focus — new images dropped
     // into the folder appear without a manual refresh.
@@ -162,6 +166,23 @@ export class SubstrateDrone extends Drone {
 
   #syncIndicator(): void {
     EffectBus.emit('indicator:clear', { key: 'substrate' })
+  }
+
+  /** The reconnect pill, stated from the one fact behind it: a linked folder
+   *  waiting on a re-grant. Producer-owned, so never persisted — a restored
+   *  copy would outlive its grant — and actionable: a click re-grants. */
+  #publishReconnect(): void {
+    if (!this.#pendingPermissionHandleId) {
+      EffectBus.emit('indicator:clear', { key: RECONNECT_KEY })
+      return
+    }
+    EffectBus.emit('indicator:set', {
+      key: RECONNECT_KEY,
+      icon: 'link_off',
+      label: 'Substrate folder — click to reconnect',
+      dismissable: false,
+      actionable: true,
+    })
   }
 
   #service(): SubstrateService | undefined {
