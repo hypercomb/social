@@ -46,10 +46,19 @@ if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(domain)) {
 }
 
 const ok = (m) => console.log(`  ✔ ${m}`)
-const stop = (m) => { console.error(`  ✖ ${m}`); process.exit(1) }
+// Never process.exit mid-flight: on Windows it aborts while a fetch handle is
+// still closing (libuv UV_HANDLE_CLOSING assertion). Throw, and let the one
+// catch at the bottom set the exit code and return.
+class Stop extends Error {}
+const stop = (m) => { throw new Stop(m) }
 
 // A scoped token first; wrangler's OAuth login reads zones but cannot write DNS.
 function token() {
+  // wrangler's OAuth token lives about an hour; any wrangler command refreshes
+  // it. Without this, a stale token reads as "no such zone".
+  if (!process.env.CLOUDFLARE_API_TOKEN) {
+    try { execSync('npx wrangler whoami', { cwd: workerDir, stdio: 'ignore' }) } catch { /* the zone read below reports it */ }
+  }
   if (process.env.CLOUDFLARE_API_TOKEN) return { value: process.env.CLOUDFLARE_API_TOKEN, scoped: true }
   const candidates = [
     join(process.env.APPDATA ?? '', 'xdg.config', '.wrangler', 'config', 'default.toml'),
@@ -78,10 +87,16 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 console.log(`connect ${domain}`)
 
+async function main() {
+
 // ── 1. the zone ───────────────────────────────────────────────────────────
 const tok = token()
 if (!tok) stop('no Cloudflare credentials — set CLOUDFLARE_API_TOKEN (Zone:Read + DNS:Edit) or run `npx wrangler login`')
 const zones = await cf(tok, `/zones?name=${domain}`)
+if (!zones.ok) {
+  const why = (zones.body?.errors ?? []).map(e => e.message).join('; ') || 'no answer'
+  stop(`Cloudflare refused the zone lookup (${why}) — run npx wrangler login, or set CLOUDFLARE_API_TOKEN`)
+}
 const zone = zones.body?.result?.[0]
 if (!zone) stop(`${domain} is not a zone in this Cloudflare account — add it in the dashboard (Add a site), then run this again`)
 if (zone.status !== 'active') {
@@ -159,7 +174,7 @@ try { run('node --test worker.spec.js') } catch { stop('worker tests failed — 
 ok('worker tests pass')
 if (!deploy) {
   console.log('  • --no-deploy: config written, not shipped')
-  process.exit(0)
+  return
 }
 try { run('npm run deploy:pluginthematrix') } catch { stop('deploy failed') }
 ok('deployed')
@@ -184,3 +199,10 @@ ok(`content.${domain} answers the index`)
 if (!routed) stop(`${probe}.${domain} is not reaching the worker — check the wildcard record and the route`)
 ok(`${domain} doors reach the worker`)
 console.log(`\n${domain} is connected. Add it in Hosts and it is a switch on every layer's Publish panel.`)
+}
+
+try { await main() } catch (err) {
+  if (err instanceof Stop) console.error(`  ✖ ${err.message}`)
+  else console.error(err)
+  process.exitCode = 1
+}
