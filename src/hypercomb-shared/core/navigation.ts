@@ -34,6 +34,17 @@ export class Navigation extends hypercomb {
   /** The written URL for `clean`: the base prefix is implied by the host,
    *  so it never appears in the path. Non-matching paths pass through —
    *  navigating outside the base keeps an explicit URL. */
+  /** The path segments a LINK to `segments` carries on this origin — the part
+   *  the host already names (a site door's subdomain) is dropped, exactly as
+   *  every URL this service writes. Anything that builds a link from a hive
+   *  path must go through this, or the link repeats the subdomain. */
+  public urlSegments = (segments: readonly string[]): readonly string[] => {
+    const base = this.#urlBase
+    if (base.length === 0 || segments.length < base.length) return segments
+    const matches = base.every((b, i) => this.cleanSegment(segments[i] ?? '') === b)
+    return matches ? segments.slice(base.length) : segments
+  }
+
   #stripUrlBase = (clean: readonly string[]): readonly string[] => {
     const base = this.#urlBase
     if (base.length === 0 || clean.length < base.length) return clean

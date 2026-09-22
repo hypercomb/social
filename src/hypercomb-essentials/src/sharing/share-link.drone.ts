@@ -27,6 +27,7 @@ import { deliverLink } from './deliver-link.js'
 import { hostCurrentBranch } from './host-gesture.js'
 
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
+const NAVIGATION_KEY = '@hypercomb.social/Navigation'
 const ICON_PROVIDER_REGISTRY_KEY = '@hypercomb.social/IconProviderRegistry'
 
 // Material Icons Filled `link` — 24×24, white fill (tinted at sprite level).
@@ -106,9 +107,14 @@ export class ShareLinkDrone extends Drone {
    *  land; bootstrap-history opens the context panel for them. */
   #buildUrl(label: string): string {
     const lineage = this.#ioc()?.get<LineageLike>(LINEAGE_KEY)
-    const parent = (lineage?.explorerSegments?.() ?? [])
+    const full = (lineage?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
+    // On a site door the subdomain already names the creation — the link
+    // drops that part, exactly as Navigation's own URL writes do, or it
+    // reads `behaviors.<zone>/behaviors/[tile]`.
+    const navigation = this.#ioc()?.get<{ urlSegments?: (s: readonly string[]) => readonly string[] }>(NAVIGATION_KEY)
+    const parent = navigation?.urlSegments?.(full) ?? full
     const path = [...parent.map(encodeURIComponent), `[${encodeURIComponent(label)}]`].join('/')
     return `${window.location.origin}/${path}`
   }

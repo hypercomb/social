@@ -165,6 +165,15 @@ window.addEventListener('hypercomb:runtime-ready', () => {
       route.shift()
       history.replaceState(history.state, '', '/' + route.map(encodeURIComponent).join('/') + location.search + location.hash)
     }
+    // THE BASE GOES IN FIRST. The engine walks into the creation before it
+    // reports `preview:mode`, and any URL written in that window carried the
+    // creation's own name (`behaviors.<zone>/behaviors`) — and stuck, since
+    // nothing wrote the bar again. Set the base from the descriptor's
+    // segments now; `preview:mode` below corrects it for a nested mount.
+    type VisitorNavigation = { go?: (parts: readonly string[]) => void; setUrlBase?: (parts: readonly string[]) => void }
+    if (await waitForIoc('@hypercomb.social/Navigation', 5_000)) {
+      window.ioc?.get<VisitorNavigation>('@hypercomb.social/Navigation')?.setUrlBase?.(segments)
+    }
     // Keep every URL the engine writes 1:1 with the subdomain via
     // Navigation's own URL base (navigation.ts #urlBase): readers prepend
     // the creation's name, writers strip it. The previous history.pushState
