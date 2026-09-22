@@ -50,7 +50,7 @@ export function darkenHex(hex: string, k = 0.45): string {
   return `rgb(${Math.floor(((n >> 16) & 255) * k)},${Math.floor(((n >> 8) & 255) * k)},${Math.floor((n & 255) * k)})`
 }
 
-const IOC_KEY = '@diamondcoreprocessor.com/ArkanoidThemes'
+export const ARKANOID_THEMES_IOC_KEY = '@diamondcoreprocessor.com/ArkanoidThemes'
 const LS_KEY = 'ark:theme'
 
 /** Holds every registered theme + the participant's active pick. The pick lives in
@@ -88,12 +88,9 @@ export class ThemeRegistry extends EventTarget {
   #stored(): string | null { try { return localStorage.getItem(LS_KEY) } catch { return null } }
 }
 
-/** The singleton registry, shared via IoC so any module — built-in or community —
- *  finds and feeds the same one. */
-export const arkanoidThemes: ThemeRegistry = ((): ThemeRegistry => {
-  const existing = window.ioc?.get<ThemeRegistry>(IOC_KEY)
-  if (existing) return existing
-  const reg = new ThemeRegistry()
-  window.ioc?.register(IOC_KEY, reg)
-  return reg
-})()
+/** The singleton registry. arkanoid.drone.ts registers it in IoC so any theme —
+ *  built-in or community — finds and feeds the same one. This module only
+ *  READS: a second copy of it adopts the registered instance instead of
+ *  minting its own. Registration is the bee's act (atomic-modules-plan.md). */
+export const arkanoidThemes: ThemeRegistry =
+  window.ioc?.get<ThemeRegistry>(ARKANOID_THEMES_IOC_KEY) ?? new ThemeRegistry()

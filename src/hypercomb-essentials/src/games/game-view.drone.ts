@@ -23,7 +23,10 @@
 import { Drone, EffectBus } from '@hypercomb/core'
 import { isFeatureHidden } from '../sharing/feature-hidden.js'
 import type { BackGesture } from '../navigation/back-gesture.service.js'
+import type { VisualBeeRegistry } from '../commands/visual-bee-registry.js'
+import { ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn } from '../sharing/behavior-enablement.js'
 import { onEnablementChanged } from './game-enablement.js'
+import { GameQueenBee } from './game.queen.js'
 import {
   GAME_PLAY_KIND, GAME_VIEW, gamePlayAt, isPlayable, playableGame,
   type GamePlayPayload, type PlayableGame,
@@ -38,6 +41,10 @@ const HEXAGONS = 'hexagons'
  *  work too, so the fallback is a slow poll. Slow on purpose: it exists to
  *  release a surface, never to drive anything. */
 const ACTIVE_POLL_MS = 400
+
+/** How long an arrival waits for its game's bee to register before it
+ *  falls back to the hexagons. */
+const GAME_ARRIVAL_WAIT_MS = 10_000
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -169,6 +176,7 @@ export class GameViewDrone extends Drone {
     // hive that already warmed it pays nothing.
     if (payload && !playableGame(payload.gameId)) {
       await this.#ensureGamesLoaded()
+      await this.#awaitGame(payload.gameId, gen)
       if (gen !== this.#gen || this.#vm()?.mode !== GAME_VIEW) return
     }
 
@@ -194,6 +202,23 @@ export class GameViewDrone extends Drone {
       .then(m => m.preloadEffects())
       .catch(() => undefined)
     await this.#gamesLoading
+  }
+
+  /** A GAME IS ITS OWN BEE. In the dev shell the lane above imports it; in
+   *  the web runtime the runtime loads it and this frame never compiles in a
+   *  copy (atomic-modules-plan.md), so an arrival can land before the game
+   *  registers. Wait for it through the IoC feed — bounded, and abandoned
+   *  the moment the frame moves on. */
+  #awaitGame(gameId: string, gen: number): Promise<void> {
+    if (playableGame(gameId)) return Promise.resolve()
+    const ioc = (window as { ioc?: { onRegister?: (cb: () => void) => () => void } }).ioc
+    return new Promise(done => {
+      let off: (() => void) | undefined
+      const finish = (): void => { off?.(); clearTimeout(timer); done() }
+      const timer = setTimeout(finish, GAME_ARRIVAL_WAIT_MS)
+      off = ioc?.onRegister?.(() => { if (gen !== this.#gen || playableGame(gameId)) finish() })
+      if (!off) finish()
+    })
   }
 
   #open(payload: GamePlayPayload): void {
@@ -234,3 +259,66 @@ export class GameViewDrone extends Drone {
 
 const _gameView = new GameViewDrone()
 window.ioc.register('@diamondcoreprocessor.com/GameViewDrone', _gameView)
+
+// THE BEE WIRES. The queen, the cohort light and the registry record are
+// the game feature's registrations, so they live in its one behaviour;
+// game.queen.ts is a dependency and registers nothing (atomic-modules-plan.md).
+/** THE GAME FACE MUST NOT ARRIVE DARK.
+ *
+ *  A kind nobody has ever seen is globally off until the participant lights
+ *  it in the roster — right for a new behaviour, wrong here for the same
+ *  reason it was wrong for the lounge: the tile now OPENS AS the game, so a
+ *  dark behaviour means walking in lands on bare hexagons and the game looks
+ *  broken. Note this is the FACE's light, not the game's: `game:<id>` stays
+ *  the switch for the game itself, and a participant who turned Arkanoid off
+ *  keeps it off — `isPlayable` asks that switch too.
+ *
+ *  Lit as a COHORT: once, on a hive that already has an on-list, and refused
+ *  outright on a hive that opened dark (`'*'` in the ledger). */
+const GAME_FACE_COHORT = 'game-face'
+
+const lightGameFaceOnce = (): void => {
+  // ONLY once the census seed has materialized the on-list. Calling before
+  // that records the cohort without lighting anything, and the ledger never
+  // forgets — the light would be lost for the life of the hive.
+  if (!readGlobalOnKinds()) return
+  seedCohortOn(GAME_FACE_COHORT, [GAME_PLAY_KIND])
+}
+lightGameFaceOnce()
+EffectBus.on(ENABLEMENT_CHANGED, lightGameFaceOnce)
+
+const _game = new GameQueenBee()
+window.ioc.register('@diamondcoreprocessor.com/GameQueenBee', _game)
+
+;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
+  '@diamondcoreprocessor.com/VisualBeeRegistry',
+  registry => registry.register({
+    view: GAME_VIEW,
+    slashCommand: '/game',
+    iconName: 'sports_esports',
+    toggleIcon: 'sports_esports',
+    behavior: 'render',
+    decorationKind: GAME_PLAY_KIND,
+    labelKey: 'view.game',
+    descriptionKey: 'view.game.description',
+    queenKey: '@diamondcoreprocessor.com/GameQueenBee',
+    // The game travels: the record names the game by the id its bee
+    // declares, and the bee itself rides the signed closure, so adopting
+    // the tile carries the whole thing.
+    adoptable: true,
+    // A cell that IS a game can be marked as one out of thin air — the bee
+    // is already loaded, so there is nothing to build first.
+    attachable: true,
+    // The tile's game icon plays it from where you stand; walking into the
+    // tile is the fuller gesture, and the cell's `view:default` mark makes
+    // that walk the way in.
+    opensOnTileClick: true,
+    // DELIBERATELY NOT `replacesTileRender`. The game is the cell's face
+    // once you are AT it — but on the parent's grid the cell must stay a
+    // hexagon you can see and press, because that hexagon is the door.
+    //
+    // NODE-LOCAL, not a branch scope: a game is one place, not an
+    // application its children live inside.
+    pheromones: ['platform:mobile', 'platform:desktop'],
+  }),
+)

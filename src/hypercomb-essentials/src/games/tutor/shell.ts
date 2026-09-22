@@ -15,12 +15,6 @@
 // a fixed host below the Pixi layer. Keyboard input is fully isolated
 // (capture phase) so a typed answer never leaks to the command line.
 
-import './game-registry.js'                          // registers the TutorGameRegistry singleton
-import './letter-reveal/letter-reveal.game.js'       // self-registers a game
-import './flashcard/flashcard.game.js'               // self-registers a game
-import './multiple-choice/multiple-choice.game.js'   // self-registers a game
-import './scramble/scramble.game.js'                 // self-registers a game
-import './hangman/hangman.game.js'                   // self-registers a game
 import { TutorScheduler } from './scheduler.js'
 import { Shaker, ParticleField } from '../juice.js'
 import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'

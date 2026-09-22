@@ -73,7 +73,3 @@ export const HANGMAN_DESCRIPTOR: TutorGameDescriptor = {
   create: (ctx) => new HangmanGame(ctx),
 }
 
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<{ register: (d: TutorGameDescriptor) => void }>(
-  '@diamondcoreprocessor.com/TutorGameRegistry',
-  (registry) => registry.register(HANGMAN_DESCRIPTOR),
-)

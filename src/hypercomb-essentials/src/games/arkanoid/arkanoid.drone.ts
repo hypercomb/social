@@ -24,8 +24,11 @@
 // every reload would be hostile. The toggle drives it explicitly.
 
 import { Drone, EffectBus } from '@hypercomb/core'
+import { ArkanoidQueenBee } from './arkanoid.queen.js'
 import { gameKind, isGameDormant, onEnablementChanged } from '../game-enablement.js'
-import { ArkanoidOverlay } from './overlay.js'
+import type { ArkanoidOverlay } from './overlay.js'
+import { LazyOverlay } from '../lazy-overlay.js'
+import { ARKANOID_THEMES_IOC_KEY, arkanoidThemes } from './theme.js'
 
 export class ArkanoidDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -44,7 +47,17 @@ export class ArkanoidDrone extends Drone {
   protected override listens = ['arkanoid:toggle', 'keymap:invoke']
   protected override emits = ['arkanoid:state']
 
-  #overlay: ArkanoidOverlay | null = null
+  // The game itself loads when it opens (lazy-overlay.ts): this bee stays
+  // small, and nothing of the game arrives until somebody plays it.
+  readonly #overlay = new LazyOverlay<ArkanoidOverlay>(
+    () => Promise.all([import('./overlay.js'), import('./themes/register-themes.js')]).then(([m, t]) => {
+      // The built-in themes are part of the game, so they arrive with it.
+      for (const theme of t.BUILT_IN_THEMES) arkanoidThemes.register(theme)
+      return (onClose: () => void) => new m.ArkanoidOverlay(onClose)
+    }),
+    () => this.close(),
+    () => this.#emitState(),
+  )
   #wired = false
   #unsubs: (() => void)[] = []
 
@@ -88,7 +101,12 @@ export class ArkanoidDrone extends Drone {
    *  when the participant unhides the dormant tile, without spelling it. */
   public get behaviorKind(): string { return gameKind(this.gameId) }
 
-  public isActive(): boolean { return !!this.#overlay?.isMounted() }
+  /** Open, or still loading after an open — either way it is on its way. */
+  public isActive(): boolean { return this.#overlay.isActive() }
+
+  /** Load the game's code without opening it: the seam for a preloader that
+   *  knows where the participant is and which games are near. */
+  public prefetch(): Promise<void> { return this.#overlay.prefetch().then(() => undefined) }
 
   public toggle(): boolean {
     if (this.isActive()) { this.close(); return false }
@@ -102,8 +120,7 @@ export class ArkanoidDrone extends Drone {
     // The roster's light is the outer gate: dormant means this game is not
     // here at all — no header icon, no launcher tile, nothing to open.
     if (this.gameDormant || this.isActive()) return
-    this.#overlay = new ArkanoidOverlay(() => this.close())
-    this.#overlay.mount()
+    this.#overlay.open()
     window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'arkanoid' } }))
     this.#emitState()
   }
@@ -111,13 +128,11 @@ export class ArkanoidDrone extends Drone {
   /** Open the overlay straight into the level designer. */
   public openDesigner(): void {
     this.open()
-    this.#overlay?.showDesigner()
+    if (!this.gameDormant) this.#overlay.open(overlay => overlay.showDesigner())
   }
 
   public close(): void {
-    if (!this.#overlay) { this.#emitState(); return }
-    this.#overlay.unmount()
-    this.#overlay = null
+    if (!this.#overlay.close()) { this.#emitState(); return }
     window.dispatchEvent(new CustomEvent('portal:closed', { detail: { target: 'arkanoid' } }))
     this.#emitState()
   }
@@ -135,3 +150,9 @@ export class ArkanoidDrone extends Drone {
 
 const _arkanoid = new ArkanoidDrone()
 window.ioc.register('@diamondcoreprocessor.com/ArkanoidDrone', _arkanoid)
+
+// The bee wires: the queen is a dependency and never registers itself.
+window.ioc.register('@diamondcoreprocessor.com/ArkanoidQueenBee', new ArkanoidQueenBee())
+// The theme registry is a dependency; the bee registers it so community
+// themes find it. The built-in themes register when the game loads.
+window.ioc.register(ARKANOID_THEMES_IOC_KEY, arkanoidThemes)

@@ -133,10 +133,11 @@ export class TutorGameRegistry extends EventTarget {
   }
 }
 
-// Singleton: one instance per app, registered with window.ioc so every
-// game module (and the shell) shares it.
-const _tutorGameRegistry = new TutorGameRegistry()
-;(window as { ioc?: { register: (k: string, v: unknown) => void } }).ioc?.register(
-  '@diamondcoreprocessor.com/TutorGameRegistry',
-  _tutorGameRegistry,
-)
+export const TUTOR_GAME_REGISTRY_IOC_KEY = '@diamondcoreprocessor.com/TutorGameRegistry'
+
+/** Singleton: one instance per app. The tutor's bee (tutorial/tutor-view.drone.ts)
+ *  registers it in IoC and registers the built-in games into it; this module
+ *  only READS, so a second copy adopts the registered instance. */
+export const tutorGameRegistry: TutorGameRegistry =
+  (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(TUTOR_GAME_REGISTRY_IOC_KEY) as TutorGameRegistry | undefined
+  ?? new TutorGameRegistry()

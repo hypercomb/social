@@ -96,7 +96,3 @@ export const MULTIPLE_CHOICE_DESCRIPTOR: TutorGameDescriptor = {
   create: (ctx) => new MultipleChoiceGame(ctx),
 }
 
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<{ register: (d: TutorGameDescriptor) => void }>(
-  '@diamondcoreprocessor.com/TutorGameRegistry',
-  (registry) => registry.register(MULTIPLE_CHOICE_DESCRIPTOR),
-)

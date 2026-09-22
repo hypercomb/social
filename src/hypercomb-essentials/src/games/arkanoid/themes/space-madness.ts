@@ -5,7 +5,7 @@
 // saucer, twinkles, and a goofy cartoon horse drifting by. Self-registers into the
 // shared registry, so authoring a new theme is: copy this file, swap the paint.
 
-import { type ArkanoidTheme, type ThemeBand, type ThemeEnv, darkenHex, arkanoidThemes } from '../theme.js'
+import { type ArkanoidTheme, type ThemeBand, type ThemeEnv, darkenHex } from '../theme.js'
 
 // Twinkle tints for the starfield (the hero ball stays the only PURE white in play).
 const STAR_TINTS = ['#ffffff', '#fff3b0', '#bfe3ff', '#ffd0f0', '#d7ffe0']
@@ -198,4 +198,3 @@ export const spaceMadness: ArkanoidTheme = {
   },
 }
 
-arkanoidThemes.register(spaceMadness)

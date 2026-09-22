@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
-import { build } from 'esbuild'
+import { build, type Plugin } from 'esbuild'
 
 // -------------------------------------------------
 // esm globals
@@ -160,12 +160,24 @@ interface BeeDepCacheEntry {
 // source mtimes do not change when this builder changes, so a version-6 cache
 // would otherwise take the whole-build early exit and leave the old root in
 // place without the new field.
+// version 8 = a NAMESPACE bundle is keyed on everything it really inlined
+// (esbuild metafile), as a bee has been since v5, and the quick scan stats
+// every recorded input, not just entries. A v7 namespace recorded its member
+// entries only, so the bump makes each one re-record its real inputs.
+// version 10 = atoms and atomized barrels carry the LAZY marker on line 2.
+// version 9 = ATOMIC MODULES (documentation/atomic-modules-plan.md). Every
+// non-bee file under an atomized root (games/) builds ALONE as a dependency
+// atom with its own specifier, and every unit reaches it through the import
+// map instead of inlining it. Source content did not change, the builder did,
+// so every v8 bee/namespace that inlined a game file must rebuild.
 interface BuildCache {
-  version: 7
+  version: 10
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   namespaces: Record<string, UnitCache>
   bees: Record<string, UnitCache>
+  /** relPath → atom unit; `imports` = the atom specifiers it statically imports. */
+  atoms?: Record<string, UnitCache & { imports: string[] }>
   layerCache?: Record<string, LayerCacheEntry>
   docCache?: Record<string, DocCacheEntry>
   beeDepCache?: Record<string, BeeDepCacheEntry>
@@ -177,7 +189,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 7) return raw
+    if (raw?.version === 10) return raw
   } catch {}
   return null
 }
@@ -483,6 +495,94 @@ const specifierFromNamespaceRelDir = (namespaceRelDir: string): string =>
     ? `@${namespaceRelDir}`
     : `${PACKAGE_SPECIFIER}/${namespaceRelDir}`
 
+// -------------------------------------------------
+// atomic modules (documentation/atomic-modules-plan.md)
+// -------------------------------------------------
+//
+// Under an atomized root, a feature is ONE bee plus dependency ATOMS: every
+// non-bee file compiles alone, sig-named, headed by its own specifier
+// (`// @hypercomb/essentials/games/solomon/labyrinth`), and every unit that
+// imports it — bee, atom, or namespace bundle — reaches it through the import
+// map instead of inlining a copy. The namespace bundle becomes a BARREL of
+// `export *` lines, so a consumer of `@hypercomb/essentials/games/solomon`
+// keeps working unchanged. Atoms nest: an atom imports atoms the same way.
+
+const ATOMIZED_ROOTS: readonly string[] = ['games']
+
+const isAtomizedRelPath = (relPath: string): boolean =>
+  ATOMIZED_ROOTS.some(root => relPath === root || relPath.startsWith(`${root}/`))
+
+const atomSpecifier = (relPath: string): string =>
+  `${PACKAGE_SPECIFIER}/${stripExt(relPath)}`
+
+/** LINE 2 of every atom and atomized barrel. An atom registers nothing, so it
+ *  has no reason to load until something imports it: the runtime's
+ *  DependencyLoader skips a dependency carrying this line instead of
+ *  blob-importing it at boot, and the atom loads once, through the import
+ *  map, when a bee reaches it. Keep in step with `LAZY_MARKER` in
+ *  hypercomb-runtime/src/dependency-loader.ts. */
+const LAZY_MARKER_LINE = '// lazy — an atom: it loads through the import map when something imports it'
+
+/** The bee files under the atomized roots, filled once discovery has run. */
+const atomizedBees = new Set<string>()
+
+/** Relative imports that land on an atom become that atom's specifier,
+ *  external — the one rule that makes a copy impossible. `self` is the entry
+ *  being compiled, which must of course be inlined into itself.
+ *
+ *  A BEE NEVER CONTAINS ANOTHER BEE. An import that lands on a bee under an
+ *  atomized root becomes an empty module: the runtime loads that bee on its
+ *  own, and a unit that wants it waits for it to register (the IoC census),
+ *  never compiles in a second copy. A NAMED import of a bee's value fails
+ *  the build here, loudly, rather than shipping a copy. */
+const atomExternalPlugin = (atomByAbs: ReadonlyMap<string, string>, self?: string): Plugin => ({
+  name: 'atom-external',
+  setup(b) {
+    b.onResolve({ filter: /^\.\.?\// }, args => {
+      if (args.kind === 'entry-point') return undefined
+      const base = resolve(args.resolveDir, args.path)
+      const candidates = base.endsWith('.js')
+        ? [base.slice(0, -3) + '.ts', base]
+        : [base, `${base}.ts`, join(base, 'index.ts')]
+      for (const candidate of candidates) {
+        if (candidate === self) return undefined
+        const specifier = atomByAbs.get(candidate)
+        if (specifier) return { path: specifier, external: true }
+        if (atomizedBees.has(candidate)) return { path: candidate, namespace: 'bee-elsewhere' }
+      }
+      return undefined
+    })
+    b.onLoad({ filter: /.*/, namespace: 'bee-elsewhere' }, () => ({ contents: 'export {}', loader: 'js' }))
+  },
+})
+
+/** Static import cycles among atoms, each as its member specifiers. Inlining
+ *  used to hide a cycle; as separate modules a cycle can read a binding in
+ *  its temporal dead zone at load, so the build refuses one outright. */
+const atomCycles = (graph: ReadonlyMap<string, readonly string[]>): string[][] => {
+  let counter = 0
+  const index = new Map<string, number>()
+  const low = new Map<string, number>()
+  const stack: string[] = []
+  const onStack = new Set<string>()
+  const cycles: string[][] = []
+  const visit = (v: string): void => {
+    index.set(v, counter); low.set(v, counter++); stack.push(v); onStack.add(v)
+    for (const w of graph.get(v) ?? []) {
+      if (!graph.has(w)) continue
+      if (!index.has(w)) { visit(w); low.set(v, Math.min(low.get(v)!, low.get(w)!)) }
+      else if (onStack.has(w)) low.set(v, Math.min(low.get(v)!, index.get(w)!))
+    }
+    if (low.get(v) !== index.get(v)) return
+    const members: string[] = []
+    let w: string
+    do { w = stack.pop()!; onStack.delete(w); members.push(w) } while (w !== v)
+    if (members.length > 1 || (graph.get(v) ?? []).includes(v)) cycles.push(members.sort())
+  }
+  for (const v of [...graph.keys()].sort()) if (!index.has(v)) visit(v)
+  return cycles
+}
+
 const prefixesForNamespaceRelDir = (nsRelDir: string): string[] => {
   const parts = splitPath(nsRelDir)
   const out: string[] = []
@@ -678,9 +778,24 @@ const buildLayersFromTree = async (
 const buildNamespaceDependency = async (
   namespaceRelDir: string,
   directMemberFiles: SourceFile[],
-  allNamespaceSpecifiers: string[]
-): Promise<{ sig: string; bytes: Uint8Array } | null> => {
+  allNamespaceSpecifiers: string[],
+  atomByAbs: ReadonlyMap<string, string>,
+): Promise<{ sig: string; bytes: Uint8Array; inputs: string[] } | null> => {
   const namespaceSpecifier = specifierFromNamespaceRelDir(namespaceRelDir)
+
+  // An atomized namespace is a BARREL: its members are atoms, so it names
+  // them and holds no code of its own.
+  if (isAtomizedRelPath(namespaceRelDir)) {
+    const lines = directMemberFiles
+      .map(f => atomByAbs.get(f.entry))
+      .filter((spec): spec is string => !!spec)
+      .sort()
+      .map(spec => `export * from '${spec}';`)
+    if (!lines.length) return null
+    const bytes = textToBytes(`// ${namespaceSpecifier}\n${LAZY_MARKER_LINE}\n${lines.join('\n')}\n`)
+    const sig = await SignatureService.sign(toArrayBuffer(bytes))
+    return { sig, bytes, inputs: directMemberFiles.map(f => f.entry) }
+  }
   const namespaceRootFs = join(SRC_ROOT, namespaceRelDir)
   const resolveDir = existsSync(namespaceRootFs) ? namespaceRootFs : SRC_ROOT
 
@@ -715,6 +830,8 @@ const buildNamespaceDependency = async (
     sourcemap: false,
     tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
     external: externals,
+    plugins: [atomExternalPlugin(atomByAbs)],
+    metafile: true,
   })
 
   const compiled = r.outputFiles?.[0]?.text
@@ -725,7 +842,11 @@ const buildNamespaceDependency = async (
 
   const bytes = textToBytes(`// ${namespaceSpecifier}\n${compiled}`)
   const sig = await SignatureService.sign(toArrayBuffer(bytes))
-  return { sig, bytes }
+  // Every real file the bundle inlined (the virtual stdin entry is not one).
+  const inputs = Object.keys(r.metafile?.inputs ?? {})
+    .map(rel => resolve(process.cwd(), rel))
+    .filter(abs => { try { return statSync(abs).isFile() } catch { return false } })
+  return { sig, bytes, inputs }
 }
 
 /** Compile one bee, and report every file esbuild actually inlined.
@@ -736,7 +857,8 @@ const buildNamespaceDependency = async (
 const buildBee = async (
   entry: string,
   externals: string[],
-): Promise<{ bytes: Uint8Array; inputs: string[] }> => {
+  atomByAbs: ReadonlyMap<string, string> = new Map(),
+): Promise<{ bytes: Uint8Array; inputs: string[]; imports: string[] }> => {
   const r = await build({
     entryPoints: [entry],
     bundle: true,
@@ -747,11 +869,24 @@ const buildBee = async (
     sourcemap: false,
     tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
     external: externals,
+    plugins: [atomExternalPlugin(atomByAbs, entry)],
     metafile: true,
   })
 
   const compiled = r.outputFiles?.[0]?.text
-  if (!compiled) throw new Error(`no output: ${entry}`)
+  // A types-only atom compiles to nothing and stays an atom, so a barrel's
+  // `export *` of it still resolves.
+  if (compiled === undefined || (!compiled.trim() && !atomByAbs.has(entry))) throw new Error(`no output: ${entry}`)
+
+  // The atoms this unit STATICALLY imports (a dynamic import cannot close a
+  // load-time cycle, so it is left out of the cycle check).
+  const atomSpecs = new Set(atomByAbs.values())
+  const imports = uniqSorted(
+    Object.values(r.metafile?.outputs ?? {})
+      .flatMap(o => o.imports)
+      .filter(i => i.external && i.kind !== 'dynamic-import' && atomSpecs.has(i.path))
+      .map(i => i.path),
+  )
 
   // metafile keys are cwd-relative; virtual/synthetic entries resolve to
   // nothing on disk and are dropped. The entry is always tracked.
@@ -760,7 +895,7 @@ const buildBee = async (
     .filter(abs => { try { return statSync(abs).isFile() } catch { return false } })
   if (!inputs.includes(entry)) inputs.push(entry)
 
-  return { bytes: textToBytes(compiled), inputs }
+  return { bytes: textToBytes(compiled.trim() ? compiled : 'export {};\n'), inputs, imports }
 }
 
 // -------------------------------------------------
@@ -798,33 +933,46 @@ const main = async (): Promise<void> => {
   const allNs = Array.from(nsAll).sort()
   const allSpecifiers = allNs.map(specifierFromNamespaceRelDir)
   const beeSources = sources.filter(s => s.kind === 'bee')
+  const atomSources = deps.filter(s => isAtomizedRelPath(s.relPath))
+  const atomByAbs = new Map(atomSources.map(s => [s.entry, atomSpecifier(s.relPath)] as const))
+  for (const s of beeSources) if (isAtomizedRelPath(s.relPath)) atomizedBees.add(s.entry)
+  const atomSpecifierSet = new Set(atomByAbs.values())
+  const collidingAtoms = atomSources.filter(s => allSpecifiers.includes(atomSpecifier(s.relPath)))
+  if (collidingAtoms.length) {
+    throw new Error(`atom specifier collides with a namespace: ${collidingAtoms.map(s => s.relPath).join(', ')}`)
+  }
 
-  // Quick mtime scan: check if ANY file has a changed mtime
+  // Quick mtime scan: check if ANY file has a changed mtime — every file a
+  // unit really bundled, not only its entries. A bundle inlines modules from
+  // other folders through relative imports; checking entries alone let a
+  // change to such a module skip the build and ship the old copy (2026-09-22:
+  // the commands and safety bundles kept an old Jev rubric that registered
+  // over the new one).
+  const unitMoved = (cachedUnit: UnitCache, entries: readonly string[]): boolean => {
+    for (const entry of entries) if (!cachedUnit.files[entry]) return true
+    for (const [file, prev] of Object.entries(cachedUnit.files)) {
+      try { if (statSync(file).mtimeMs !== prev.mtime) return true } catch { return true }
+    }
+    return false
+  }
   let anyMtimeChanged = !cache
   if (cache && !anyMtimeChanged) {
-    // Check namespace files
     for (const ns of allNs) {
-      const members = namespaceToMembers.get(ns) ?? []
       const cachedUnit = cache.namespaces[ns]
-      if (!cachedUnit) { anyMtimeChanged = true; break }
-      for (const m of members) {
-        const prev = cachedUnit.files[m.entry]
-        if (!prev) { anyMtimeChanged = true; break }
-        const mt = statSync(m.entry).mtimeMs
-        if (mt !== prev.mtime) { anyMtimeChanged = true; break }
-      }
-      if (anyMtimeChanged) break
+      if (!cachedUnit || unitMoved(cachedUnit, (namespaceToMembers.get(ns) ?? []).map(m => m.entry))) { anyMtimeChanged = true; break }
     }
-    // Check bee files
     if (!anyMtimeChanged) {
       for (const src of beeSources) {
         const cachedUnit = cache.bees[src.relPath]
-        if (!cachedUnit) { anyMtimeChanged = true; break }
-        const prev = cachedUnit.files[src.entry]
-        if (!prev) { anyMtimeChanged = true; break }
-        const mt = statSync(src.entry).mtimeMs
-        if (mt !== prev.mtime) { anyMtimeChanged = true; break }
+        if (!cachedUnit || unitMoved(cachedUnit, [src.entry])) { anyMtimeChanged = true; break }
       }
+    }
+    if (!anyMtimeChanged) {
+      for (const src of atomSources) {
+        const cachedUnit = cache.atoms?.[src.relPath]
+        if (!cachedUnit || unitMoved(cachedUnit, [src.entry])) { anyMtimeChanged = true; break }
+      }
+      if (Object.keys(cache.atoms ?? {}).length !== atomSources.length) anyMtimeChanged = true
     }
     // Also check file count hasn't changed (files added/removed)
     if (!anyMtimeChanged) {
@@ -872,6 +1020,7 @@ const main = async (): Promise<void> => {
 
   const newNamespaces: Record<string, UnitCache> = {}
   const newBees: Record<string, UnitCache> = {}
+  const newAtoms: Record<string, UnitCache & { imports: string[] }> = {}
   const allUnitSigs: string[] = []
 
   let cacheHits = 0
@@ -891,13 +1040,19 @@ const main = async (): Promise<void> => {
         }).sort().join('\n') + '\n'
       : 'export {};\n'
 
-    const { leaves, inputSig } = await resolveUnitInputs(
-      members.map(m => m.entry),
+    // The namespace's inputs are the LAST build's actual bundle contents, as
+    // a bee's are (v5): its member entries AND every module they inline from
+    // other folders. Keyed on the entries alone, a change to an inlined module
+    // never rebuilt the bundle, and the stale copy shipped.
+    const recordedNs = cache?.namespaces[ns]
+      ? Object.keys(cache.namespaces[ns].files).filter(f => { try { return statSync(f).isFile() } catch { return false } })
+      : []
+    let { leaves, inputSig } = await resolveUnitInputs(
+      [...new Set([...members.map(m => m.entry), ...recordedNs])],
       cache?.namespaces[ns]?.files,
       entrySource
     )
 
-    allUnitSigs.push(inputSig)
     const cachedUnit = cache?.namespaces[ns]
     const cachedFile = cachedUnit ? join(OUTPUT_CACHE_DIR, `${cachedUnit.outputSig}.js`) : null
 
@@ -907,20 +1062,71 @@ const main = async (): Promise<void> => {
       addToBucket(resourcesByDir, ns, jsFileName(cachedUnit.outputSig), 'dep')
       for (const f of members) addToBucket(resourcesByDir, f.relDir, jsFileName(cachedUnit.outputSig), 'dep')
       newNamespaces[ns] = { files: leaves, inputSig, outputSig: cachedUnit.outputSig }
+      allUnitSigs.push(inputSig)
       cacheHits++
     } else {
-      const built = await buildNamespaceDependency(ns, members, allSpecifiers)
+      const built = await buildNamespaceDependency(ns, members, allSpecifiers, atomByAbs)
       if (!built) continue
       dependencyBytes.set(built.sig, built.bytes)
       addToBucket(resourcesByDir, ns, jsFileName(built.sig), 'dep')
       for (const f of members) addToBucket(resourcesByDir, f.relDir, jsFileName(built.sig), 'dep')
       writeFileSync(join(OUTPUT_CACHE_DIR, `${built.sig}.js`), built.bytes)
+      // Re-key on what was really bundled, so the NEXT run sees a change in
+      // any inlined module rather than only in the member entries.
+      ;({ leaves, inputSig } = await resolveUnitInputs([...new Set([...members.map(m => m.entry), ...built.inputs])], cachedUnit?.files, entrySource))
       newNamespaces[ns] = { files: leaves, inputSig, outputSig: built.sig }
+      allUnitSigs.push(inputSig)
       cacheMisses++
     }
   }
 
   console.log(`[build-module] dependencies: ${cacheHits} cached, ${cacheMisses} built`)
+
+  // --- ATOMS: one sig-named dependency per non-bee file under an atomized
+  // root. Keyed like a bee on everything it really inlined (files outside the
+  // atomized roots are still inlined until their domain is atomized too).
+  const atomExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers, ...atomSpecifierSet]
+  const atomAliasBySig = new Map<string, string>()
+  let atomHits = 0
+  let atomMisses = 0
+  for (const src of atomSources) {
+    const specifier = atomByAbs.get(src.entry)!
+    const cachedUnit = cache?.atoms?.[src.relPath]
+    const recorded = cachedUnit
+      ? Object.keys(cachedUnit.files).filter(f => { try { return statSync(f).isFile() } catch { return false } })
+      : []
+    const inputPaths = recorded.includes(src.entry) ? recorded : [src.entry, ...recorded]
+    let { leaves, inputSig } = await resolveUnitInputs(inputPaths, cachedUnit?.files, specifier)
+    const cachedFile = cachedUnit ? join(OUTPUT_CACHE_DIR, `${cachedUnit.outputSig}.js`) : null
+
+    let bytes: Uint8Array
+    let sig: string
+    let imports: string[]
+    if (cachedUnit?.inputSig === inputSig && cachedFile && existsSync(cachedFile)) {
+      bytes = new Uint8Array(readFileSync(cachedFile))
+      sig = cachedUnit.outputSig
+      imports = cachedUnit.imports
+      atomHits++
+    } else {
+      const built = await buildBee(src.entry, atomExternals, atomByAbs)
+      bytes = textToBytes(`// ${specifier}\n${LAZY_MARKER_LINE}\n${new TextDecoder().decode(built.bytes)}`)
+      sig = await SignatureService.sign(toArrayBuffer(bytes))
+      imports = built.imports
+      writeFileSync(join(OUTPUT_CACHE_DIR, `${sig}.js`), bytes)
+      ;({ leaves, inputSig } = await resolveUnitInputs(built.inputs, cachedUnit?.files, specifier))
+      atomMisses++
+    }
+    newAtoms[src.relPath] = { files: leaves, inputSig, outputSig: sig, imports }
+    allUnitSigs.push(inputSig)
+    dependencyBytes.set(sig, bytes)
+    atomAliasBySig.set(sig, specifier)
+    addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'dep')
+  }
+  const cycles = atomCycles(new Map(Object.values(newAtoms).map((unit, i) => [atomByAbs.get(atomSources[i].entry)!, unit.imports])))
+  if (cycles.length) {
+    throw new Error(`import cycle among atoms — break it before it can load in a dead zone:\n  ${cycles.map(c => c.join(' ↔ ')).join('\n  ')}`)
+  }
+  console.log(`[build-module] atoms: ${atomHits} cached, ${atomMisses} built across ${ATOMIZED_ROOTS.join(', ')}`)
 
   const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
   const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
@@ -1006,7 +1212,7 @@ const main = async (): Promise<void> => {
       newBees[src.relPath] = { files: leaves, inputSig, outputSig: cachedUnit.outputSig }
       beeCacheHits++
     } else {
-      const built = await buildBee(src.entry, beeExternals)
+      const built = await buildBee(src.entry, beeExternals, atomByAbs)
       bytes = built.bytes
       sig = await SignatureService.sign(toArrayBuffer(bytes))
       writeFileSync(join(OUTPUT_CACHE_DIR, `${sig}.js`), bytes)
@@ -1201,6 +1407,7 @@ const main = async (): Promise<void> => {
   for (const [ns, unit] of Object.entries(newNamespaces)) {
     depAliasBySig.set(unit.outputSig, specifierFromNamespaceRelDir(ns))
   }
+  for (const [sig, alias] of atomAliasBySig) depAliasBySig.set(sig, alias)
 
   const depEntries: BagEntry[] = Array.from(dependencyBytes.keys()).map(sig => {
     const alias = depAliasBySig.get(sig) ?? ''
@@ -1358,11 +1565,12 @@ const main = async (): Promise<void> => {
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 7,
+    version: 10,
     rootHash,
     rootLayerSig,
     namespaces: newNamespaces,
     bees: newBees,
+    atoms: newAtoms,
     layerCache: newLayerCache,
     docCache: newDocCache,
     beeDepCache: newBeeDepCache,

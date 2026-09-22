@@ -3,6 +3,17 @@
 import { EffectBus } from '@hypercomb/core'
 import { Store } from './store'
 
+/** Line 2 of an atom or atomized barrel, written by the essentials build
+ *  (`LAZY_MARKER_LINE` in build-module.ts). */
+const LAZY_MARKER = '// lazy'
+
+/** True when the dependency is an atom: its SECOND line carries the marker.
+ *  Line 1 stays the alias every other reader parses. */
+export const isLazyDependency = (bytes: Uint8Array): boolean => {
+  const head = new TextDecoder().decode(bytes.subarray(0, 512)).split('\n', 3)
+  return (head[1] ?? '').startsWith(LAZY_MARKER)
+}
+
 export class DependencyLoader extends EventTarget {
 
   private get store(): Store { return <Store>get("@hypercomb.social/Store") }
@@ -59,12 +70,15 @@ export class DependencyLoader extends EventTarget {
 
       const loadedSigs: string[] = []
       const failedSigs: string[] = []
+      let lazyCount = 0
 
       for (let i = 0; i < results.length; i++) {
         const r = results[i]
         const { sig } = pending[i]
 
-        if (r.status === 'fulfilled') {
+        if (r.status === 'fulfilled' && r.value === 'lazy') {
+          lazyCount++
+        } else if (r.status === 'fulfilled') {
           this.#loaded.add(sig)
           loadedSigs.push(sig)
         } else {
@@ -72,6 +86,8 @@ export class DependencyLoader extends EventTarget {
           failedSigs.push(sig)
         }
       }
+
+      if (lazyCount) console.log(`[dependency-loader] ${lazyCount} atom(s) left to load through the import map on demand`)
 
       this.#dependencyCount = this.#dependencyCount + loadedSigs.length
       this.#loadedSignatures = [...this.#loadedSignatures, ...loadedSigs]
@@ -147,9 +163,8 @@ export class DependencyLoader extends EventTarget {
     return pending
   }
 
-  #verifyAndImport = async (sig: string, alias: string): Promise<string> => {
+  #verifyAndImport = async (sig: string, alias: string): Promise<'imported' | 'lazy'> => {
     const pureSig = sig.replace(/\.js$/i, '')
-    console.log(`[dependency-loader] importing ${alias} (${pureSig})`)
 
     // Import from verified OPFS bytes via a self-typed blob URL — the same
     // pattern Store.getBee uses for bees, and for the same reason: the
@@ -165,6 +180,13 @@ export class DependencyLoader extends EventTarget {
     // does control. Reading the verified bytes ourselves and blob-wrapping
     // them removes the dependency on the worker (and the host) entirely.
     const bytes = this.store.opfsAvailable ? await this.store.getDependencyBytes(pureSig) : null
+    // AN ATOM IS NEVER IMPORTED HERE. It registers nothing, so it has no
+    // reason to load at boot; and a blob import would be a SECOND instance
+    // beside the one every importer reaches through the import map
+    // (documentation/atomic-modules-plan.md, step 4). It loads once, on
+    // demand, when a bee imports its specifier.
+    if (bytes && isLazyDependency(bytes)) return 'lazy'
+    console.log(`[dependency-loader] importing ${alias} (${pureSig})`)
     if (bytes) {
       const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
       const blobUrl = URL.createObjectURL(new Blob([exact], { type: 'application/javascript' }))
@@ -180,7 +202,7 @@ export class DependencyLoader extends EventTarget {
       await import(/* @vite-ignore */ alias)
     }
     console.log(`[dependency-loader] imported ${alias}`)
-    return sig
+    return 'imported'
   }
 
   #readAliasFromFirstLine = (text: string): string | null => {

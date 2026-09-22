@@ -72,7 +72,3 @@ export const FLASHCARD_DESCRIPTOR: TutorGameDescriptor = {
   create: (ctx) => new FlashcardGame(ctx),
 }
 
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<{ register: (d: TutorGameDescriptor) => void }>(
-  '@diamondcoreprocessor.com/TutorGameRegistry',
-  (registry) => registry.register(FLASHCARD_DESCRIPTOR),
-)

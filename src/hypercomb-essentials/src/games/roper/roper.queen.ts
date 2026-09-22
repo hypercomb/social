@@ -48,5 +48,3 @@ export class RoperQueenBee extends QueenBee {
   }
 }
 
-const _roper = new RoperQueenBee()
-window.ioc.register('@diamondcoreprocessor.com/RoperQueenBee', _roper)

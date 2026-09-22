@@ -54,5 +54,3 @@ export class SolomonQueenBee extends QueenBee {
   }
 }
 
-const _solomon = new SolomonQueenBee()
-window.ioc.register('@diamondcoreprocessor.com/SolomonQueenBee', _solomon)

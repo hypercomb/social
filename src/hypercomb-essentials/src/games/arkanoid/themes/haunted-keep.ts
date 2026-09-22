@@ -5,7 +5,7 @@
 // alternate skin AND as the worked example of a second theme: the registry swaps it
 // for Space Madness (or any community theme) with zero gameplay change.
 
-import { type ArkanoidTheme, type ThemeBand, type ThemeEnv, arkanoidThemes } from '../theme.js'
+import type { ArkanoidTheme, ThemeBand, ThemeEnv } from '../theme.js'
 
 // One floor palette per ascent band; the keep climbs (green crypts → violet halls →
 // crimson belfry → gold spire) then cycles.
@@ -137,4 +137,3 @@ export const hauntedKeep: ArkanoidTheme = {
   },
 }
 
-arkanoidThemes.register(hauntedKeep)

@@ -52,5 +52,3 @@ export class BubbleQueenBee extends QueenBee {
   }
 }
 
-const _bubble = new BubbleQueenBee()
-window.ioc.register('@diamondcoreprocessor.com/BubbleQueenBee', _bubble)

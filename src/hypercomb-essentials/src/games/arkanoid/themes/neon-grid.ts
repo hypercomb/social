@@ -101,7 +101,7 @@ export const neonGrid: ArkanoidTheme = {
   },
 }
 
-// Decoupled registration: wait for the registry to exist in IoC (it may load before
-// OR after this module), then register. No import of the game's singleton — this is
-// the pattern an externally-shipped theme module/bee uses verbatim.
-window.ioc.whenReady<ThemeRegistry>(THEMES_KEY, reg => reg.register(neonGrid))
+// Registration is the BEE's act (atomic-modules-plan.md): arkanoid.drone.ts
+// registers this theme from BUILT_IN_THEMES; an externally shipped theme would
+// be its own bee, waiting on the registry with ioc.whenReady and registering
+// itself there. This file only exports.

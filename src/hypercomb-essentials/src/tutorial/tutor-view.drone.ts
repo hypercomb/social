@@ -18,7 +18,8 @@
 import { Drone } from '@hypercomb/core'
 import { TUTOR_SLOT } from './tutor-slot.js'
 import { isFeatureHidden } from '../sharing/feature-hidden.js'
-import { TutorShell } from '../games/tutor/shell.js'
+import type { TutorShell } from '../games/tutor/shell.js'
+import { TUTOR_GAME_REGISTRY_IOC_KEY, tutorGameRegistry } from '../games/tutor/game-registry.js'
 import type { StudyItem } from '../games/tutor/deck.types.js'
 
 const TUTOR_VIEW = 'tutor'
@@ -43,6 +44,7 @@ export class TutorViewDrone extends Drone {
     'Full-viewport study takeover. When ViewMode is "tutor", mounts the current cell\'s study deck as a game session.'
 
   #mount: MountState | null = null
+  #shellClass: Promise<typeof TutorShell> | null = null
   #viewActive = false
   #registered = false
   #lineageBound = false
@@ -197,6 +199,16 @@ export class TutorViewDrone extends Drone {
     }
     if (!items.length) { this.#teardown(); return }
 
+    let Shell: typeof TutorShell
+    try { Shell = await this.#loadShell() } catch (error) {
+      console.warn('[tutor-view] the study shell failed to load', error)
+      this.#teardown()
+      return
+    }
+    // The load is the one wait here — the participant may have left meanwhile.
+    const vm = this.#vm()
+    if (vm && vm.mode !== TUTOR_VIEW) return
+
     this.#teardown()
 
     const host = document.createElement('div')
@@ -212,11 +224,40 @@ export class TutorViewDrone extends Drone {
     host.setAttribute('data-consumes-wheel', '')
     document.body.appendChild(host)
 
-    const shell = new TutorShell(items, locationSig, () => this.#vm()?.setMode('hexagons'))
+    const shell = new Shell(items, locationSig, () => this.#vm()?.setMode('hexagons'))
     shell.mount(host)
 
     this.#mount = { host, itemsKey: key, shell }
     this.#setViewActive(true)
+  }
+
+  /** THE STUDY LOADS WHEN SOMEBODY STUDIES (atomic-modules-plan.md, step 4b).
+   *  The shell and the built-in study games are dependencies this bee never
+   *  pulls at boot; the first study loads them and registers the games, in the
+   *  order the shell offers them. A failed load is forgotten so the next
+   *  study retries. */
+  #loadShell(): Promise<typeof TutorShell> {
+    this.#shellClass ??= Promise.all([
+      import('../games/tutor/shell.js'),
+      import('../games/tutor/letter-reveal/letter-reveal.game.js'),
+      import('../games/tutor/flashcard/flashcard.game.js'),
+      import('../games/tutor/multiple-choice/multiple-choice.game.js'),
+      import('../games/tutor/scramble/scramble.game.js'),
+      import('../games/tutor/hangman/hangman.game.js'),
+    ]).then(([shell, letterReveal, flashcard, multipleChoice, scramble, hangman]) => {
+      for (const game of [
+        letterReveal.LETTER_REVEAL_DESCRIPTOR,
+        flashcard.FLASHCARD_DESCRIPTOR,
+        multipleChoice.MULTIPLE_CHOICE_DESCRIPTOR,
+        scramble.SCRAMBLE_DESCRIPTOR,
+        hangman.HANGMAN_DESCRIPTOR,
+      ]) if (!tutorGameRegistry.get(game.id)) tutorGameRegistry.register(game)
+      return shell.TutorShell
+    }).catch(error => {
+      this.#shellClass = null
+      throw error
+    })
+    return this.#shellClass
   }
 
   #teardown(): void {
@@ -240,6 +281,11 @@ export class TutorViewDrone extends Drone {
     else modes?.exit('view:active', 'tutor-view')
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): the game registry is a dependency
+// this bee registers at load, so community study games find it; the built-in
+// study games register when the first study loads them (#loadShell).
+window.ioc.register(TUTOR_GAME_REGISTRY_IOC_KEY, tutorGameRegistry)
 
 const _tutorView = new TutorViewDrone()
 window.ioc.register('@diamondcoreprocessor.com/TutorViewDrone', _tutorView)

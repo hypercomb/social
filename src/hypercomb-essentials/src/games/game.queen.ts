@@ -16,15 +16,11 @@
 // never invite a typo into a record.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import type { VisualBeeRegistry } from '../commands/visual-bee-registry.js'
 import {
   listDecorations,
   removeDecorationAndWait,
   replaceDecoration,
 } from '../commands/decoration-manifest.js'
-import {
-  ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn,
-} from '../sharing/behavior-enablement.js'
 import { gameCensus } from './game-enablement.js'
 import { GAME_PLAY_KIND, GAME_VIEW, gameDescriptor, type GamePlayPayload } from './game-play.js'
 
@@ -126,63 +122,3 @@ export class GameQueenBee extends QueenBee {
     EffectBus.emit('activity:log', { message: 'The game is off this cell', icon: 'sports_esports' })
   }
 }
-
-/** THE GAME FACE MUST NOT ARRIVE DARK.
- *
- *  A kind nobody has ever seen is globally off until the participant lights
- *  it in the roster — right for a new behaviour, wrong here for the same
- *  reason it was wrong for the lounge: the tile now OPENS AS the game, so a
- *  dark behaviour means walking in lands on bare hexagons and the game looks
- *  broken. Note this is the FACE's light, not the game's: `game:<id>` stays
- *  the switch for the game itself, and a participant who turned Arkanoid off
- *  keeps it off — `isPlayable` asks that switch too.
- *
- *  Lit as a COHORT: once, on a hive that already has an on-list, and refused
- *  outright on a hive that opened dark (`'*'` in the ledger). */
-const GAME_FACE_COHORT = 'game-face'
-
-const lightGameFaceOnce = (): void => {
-  // ONLY once the census seed has materialized the on-list. Calling before
-  // that records the cohort without lighting anything, and the ledger never
-  // forgets — the light would be lost for the life of the hive.
-  if (!readGlobalOnKinds()) return
-  seedCohortOn(GAME_FACE_COHORT, [GAME_PLAY_KIND])
-}
-lightGameFaceOnce()
-EffectBus.on(ENABLEMENT_CHANGED, lightGameFaceOnce)
-
-const _game = new GameQueenBee()
-window.ioc.register('@diamondcoreprocessor.com/GameQueenBee', _game)
-
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
-  '@diamondcoreprocessor.com/VisualBeeRegistry',
-  registry => registry.register({
-    view: GAME_VIEW,
-    slashCommand: '/game',
-    iconName: 'sports_esports',
-    toggleIcon: 'sports_esports',
-    behavior: 'render',
-    decorationKind: GAME_PLAY_KIND,
-    labelKey: 'view.game',
-    descriptionKey: 'view.game.description',
-    queenKey: '@diamondcoreprocessor.com/GameQueenBee',
-    // The game travels: the record names the game by the id its bee
-    // declares, and the bee itself rides the signed closure, so adopting
-    // the tile carries the whole thing.
-    adoptable: true,
-    // A cell that IS a game can be marked as one out of thin air — the bee
-    // is already loaded, so there is nothing to build first.
-    attachable: true,
-    // The tile's game icon plays it from where you stand; walking into the
-    // tile is the fuller gesture, and the cell's `view:default` mark makes
-    // that walk the way in.
-    opensOnTileClick: true,
-    // DELIBERATELY NOT `replacesTileRender`. The game is the cell's face
-    // once you are AT it — but on the parent's grid the cell must stay a
-    // hexagon you can see and press, because that hexagon is the door.
-    //
-    // NODE-LOCAL, not a branch scope: a game is one place, not an
-    // application its children live inside.
-    pheromones: ['platform:mobile', 'platform:desktop'],
-  }),
-)

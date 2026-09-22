@@ -24,8 +24,10 @@
 // reload would be hostile. The toggle drives it explicitly.
 
 import { Drone, EffectBus } from '@hypercomb/core'
+import { RoperQueenBee } from './roper.queen.js'
 import { gameKind, isGameDormant, onEnablementChanged } from '../game-enablement.js'
-import { RoperOverlay } from './overlay.js'
+import type { RoperOverlay } from './overlay.js'
+import { LazyOverlay } from '../lazy-overlay.js'
 
 export class RoperDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -44,7 +46,13 @@ export class RoperDrone extends Drone {
   protected override listens = ['roper:toggle', 'keymap:invoke']
   protected override emits = ['roper:state']
 
-  #overlay: RoperOverlay | null = null
+  // The game itself loads when it opens (lazy-overlay.ts): this bee stays
+  // small, and nothing of the game arrives until somebody plays it.
+  readonly #overlay = new LazyOverlay<RoperOverlay>(
+    () => import('./overlay.js').then(m => (onClose: () => void) => new m.RoperOverlay(onClose)),
+    () => this.close(),
+    () => this.#emitState(),
+  )
   #wired = false
   #unsubs: (() => void)[] = []
 
@@ -88,7 +96,12 @@ export class RoperDrone extends Drone {
    *  when the participant unhides the dormant tile, without spelling it. */
   public get behaviorKind(): string { return gameKind(this.gameId) }
 
-  public isActive(): boolean { return !!this.#overlay?.isMounted() }
+  /** Open, or still loading after an open — either way it is on its way. */
+  public isActive(): boolean { return this.#overlay.isActive() }
+
+  /** Load the game's code without opening it: the seam for a preloader that
+   *  knows where the participant is and which games are near. */
+  public prefetch(): Promise<void> { return this.#overlay.prefetch().then(() => undefined) }
 
   public toggle(): boolean {
     if (this.isActive()) { this.close(); return false }
@@ -102,16 +115,13 @@ export class RoperDrone extends Drone {
     // The roster's light is the outer gate: dormant means this game is not
     // here at all — no header icon, no launcher tile, nothing to open.
     if (this.gameDormant || this.isActive()) return
-    this.#overlay = new RoperOverlay(() => this.close())
-    this.#overlay.mount()
+    this.#overlay.open()
     window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'roper' } }))
     this.#emitState()
   }
 
   public close(): void {
-    if (!this.#overlay) { this.#emitState(); return }
-    this.#overlay.unmount()
-    this.#overlay = null
+    if (!this.#overlay.close()) { this.#emitState(); return }
     window.dispatchEvent(new CustomEvent('portal:closed', { detail: { target: 'roper' } }))
     this.#emitState()
   }
@@ -129,3 +139,6 @@ export class RoperDrone extends Drone {
 
 const _roper = new RoperDrone()
 window.ioc.register('@diamondcoreprocessor.com/RoperDrone', _roper)
+
+// The bee wires: the queen is a dependency and never registers itself.
+window.ioc.register('@diamondcoreprocessor.com/RoperQueenBee', new RoperQueenBee())

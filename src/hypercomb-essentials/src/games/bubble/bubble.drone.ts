@@ -25,8 +25,10 @@
 // every reload would be hostile. The toggle drives it explicitly.
 
 import { Drone, EffectBus } from '@hypercomb/core'
+import { BubbleQueenBee } from './bubble.queen.js'
 import { gameKind, isGameDormant, onEnablementChanged } from '../game-enablement.js'
-import { BubbleOverlay } from './overlay.js'
+import type { BubbleOverlay } from './overlay.js'
+import { LazyOverlay } from '../lazy-overlay.js'
 
 export class BubbleDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -45,7 +47,13 @@ export class BubbleDrone extends Drone {
   protected override listens = ['bubble:toggle', 'keymap:invoke']
   protected override emits = ['bubble:state']
 
-  #overlay: BubbleOverlay | null = null
+  // The game itself loads when it opens (lazy-overlay.ts): this bee stays
+  // small, and nothing of the game arrives until somebody plays it.
+  readonly #overlay = new LazyOverlay<BubbleOverlay>(
+    () => import('./overlay.js').then(m => (onClose: () => void) => new m.BubbleOverlay(onClose)),
+    () => this.close(),
+    () => this.#emitState(),
+  )
   #wired = false
   #unsubs: (() => void)[] = []
 
@@ -97,7 +105,12 @@ export class BubbleDrone extends Drone {
    *  when the participant unhides the dormant tile, without spelling it. */
   public get behaviorKind(): string { return gameKind(this.gameId) }
 
-  public isActive(): boolean { return !!this.#overlay?.isMounted() }
+  /** Open, or still loading after an open — either way it is on its way. */
+  public isActive(): boolean { return this.#overlay.isActive() }
+
+  /** Load the game's code without opening it: the seam for a preloader that
+   *  knows where the participant is and which games are near. */
+  public prefetch(): Promise<void> { return this.#overlay.prefetch().then(() => undefined) }
 
   public toggle(): boolean {
     if (this.isActive()) { this.close(); return false }
@@ -111,17 +124,14 @@ export class BubbleDrone extends Drone {
     // The roster's light is the outer gate: dormant means this game is not
     // here at all — no header icon, no launcher tile, nothing to open.
     if (this.gameDormant || this.isActive()) return
-    this.#overlay = new BubbleOverlay(() => this.close())
-    this.#overlay.mount()
+    this.#overlay.open()
     // Tell overlays/screensaver the hive is covered (suspends the idle saver).
     window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'bubble' } }))
     this.#emitState()
   }
 
   public close(): void {
-    if (!this.#overlay) { this.#emitState(); return }
-    this.#overlay.unmount()
-    this.#overlay = null
+    if (!this.#overlay.close()) { this.#emitState(); return }
     window.dispatchEvent(new CustomEvent('portal:closed', { detail: { target: 'bubble' } }))
     this.#emitState()
   }
@@ -139,3 +149,6 @@ export class BubbleDrone extends Drone {
 
 const _bubble = new BubbleDrone()
 window.ioc.register('@diamondcoreprocessor.com/BubbleDrone', _bubble)
+
+// The bee wires: the queen is a dependency and never registers itself.
+window.ioc.register('@diamondcoreprocessor.com/BubbleQueenBee', new BubbleQueenBee())

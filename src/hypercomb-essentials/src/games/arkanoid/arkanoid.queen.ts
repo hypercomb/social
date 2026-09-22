@@ -50,5 +50,3 @@ export class ArkanoidQueenBee extends QueenBee {
   }
 }
 
-const _arkanoid = new ArkanoidQueenBee()
-window.ioc.register('@diamondcoreprocessor.com/ArkanoidQueenBee', _arkanoid)
