@@ -8,13 +8,13 @@ const sk = Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 1 : 0)
 const pubkey = hex(schnorr.getPublicKey(sk))
 const head = 'a'.repeat(64)
 
-async function signedIndex(roots, createdAt = 1_800_000_000) {
+async function signedIndex(roots, createdAt = 1_800_000_000, doors) {
   const event = {
     pubkey,
     created_at: createdAt,
     kind: 30564,
     tags: [],
-    content: JSON.stringify({ roots }),
+    content: JSON.stringify(doors ? { roots, doors } : { roots }),
   }
   const serial = JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content])
   event.id = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serial))))
@@ -405,6 +405,25 @@ test('an index whose signature fails opens nothing', async () => {
   const res = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
   assert.equal(res.status, 404)
   assert.deepEqual(assetRequests, [])
+})
+
+test('signed doors switch a branch per domain — on where listed, hidden elsewhere', async () => {
+  const index = await signedIndex({ pluginthematrix: head, susan: head }, undefined, { susan: ['hypercomb.com'] })
+  const { env, assetRequests } = await fixture(index, TWO_ZONES)
+  const on = await worker.fetch(page('https://susan.hypercomb.com/'), env)
+  assert.equal(await on.text(), 'visitor engine')
+  const off = await worker.fetch(page('https://susan.pluginthematrix.com/'), env)
+  assert.equal(off.status, 404)
+  const descriptor = await worker.fetch(new Request('https://susan.pluginthematrix.com/site.json'), env)
+  assert.equal(descriptor.status, 404)
+  // no doors entry = open on every domain (every index written before doors)
+  const legacy = await worker.fetch(page('https://pluginthematrix.com/'), env)
+  assert.equal(await legacy.text(), 'visitor engine')
+  assert.deepEqual(assetRequests, ['/', '/'])
+  // the ledger lists susan only where it opens
+  const ledger = await (await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)).json()
+  const susan = ledger.sites.find((site) => site.lineage === 'susan')
+  assert.deepEqual(susan.hosts.map((door) => door.host), ['susan.hypercomb.com'])
 })
 
 test('under /content/ a miss is an honest 404, never the SPA page — the pool walk stops at the gap', async () => {

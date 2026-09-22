@@ -50,385 +50,258 @@
       <p class="publish-warn">{{ 'publish.header.collision' | t: collisionParams(collision) }}</p>
     }
 
-    <!-- THE PROPERTIES PANE. It opens on the page you are standing on and
-         follows the list below — tapping a row re-aims it, so every branch is
-         configurable, not only the current one. At the hive ROOT there is no
-         current branch at all, which is why it falls through to the first row
-         rather than rendering nothing. -->
-    @if (subject(); as row) {
+    <!-- THE LAYER YOU ARE ON — like behaviours. The heading is the tile;
+         under it, every domain you carry, each one switch: on = this branch
+         is published there, off = it is not. The hive is the list: walk to
+         another tile and the panel follows it. -->
+    @if (current(); as row) {
       <div class="pcur" [attr.data-state]="row.state" [class.is-busy]="!!row.busyPhase">
-        <span class="pcur-light" aria-hidden="true"></span>
+        <span
+          class="pcur-light"
+          aria-hidden="true"
+          [attr.data-tip]="('publish.state.' + row.state) | t"
+        ></span>
         <div class="pcur-meta">
-          <span class="pcur-path" [title]="row.path">{{ row.path }}</span>
-          <span class="pcur-state">{{ ('publish.state.' + row.state) | t }}</span>
+          <span class="pcur-path" [title]="row.path">{{ label(row) }}</span>
+          <span class="pcur-state">{{ (row.busyPhase ? 'publish.state.pending' : 'publish.state.' + row.state) | t }}</span>
         </div>
-        @if (actionKey(row); as action) {
-          <button
-            class="pcur-action"
-            type="button"
-            (click)="act(row)"
-          >{{ action | t }}</button>
-        }
-      </div>
-
-      <!-- WHERE THIS ONE PUBLISHES — chosen on the line item, because it is a
-           fact about THIS branch and nothing else. Several may be ticked: a
-           branch answers on every host it names, and the first is the door the
-           index write goes through. The choices are the hosts you carry; the
-           Hosts panel is where that set is kept. -->
-      <div class="pcur-hosts-head">
-        <span>{{ 'publish.row.hosts' | t }}</span>
-        <button class="pcur-hosts-manage" type="button" (click)="openHosts()">
-          {{ 'publish.action.manage-hosts' | t }}
-        </button>
-      </div>
-      <div class="pdet-domains pcur-hosts" role="group" [attr.aria-label]="'publish.row.hosts' | t">
-        @for (choice of hostChoices(row); track choice.zone) {
-          <span class="pdet-domain" [class.is-chosen]="choice.chosen" [class.is-primary]="choice.primary">
-            <button
-              class="pdet-domain-pick"
-              type="button"
-              role="switch"
-              [attr.aria-checked]="choice.chosen"
-              [attr.data-tip]="addressUrl(row, choice.zone)"
-              (click)="toggleHost(row, choice.zone)"
-            >
-              <span class="pdet-domain-tick" aria-hidden="true"></span>
-              <span class="pdet-address">{{ choice.zone }}</span>
-            </button>
-            @if (choice.chosen && !choice.primary) {
-              <button
-                class="pdet-domain-lead"
-                type="button"
-                [attr.data-tip]="'publish.row.domain-primary' | t"
-                [attr.aria-label]="'publish.row.domain-primary' | t"
-                (click)="makePrimary(row, choice.zone)"
-              >↑</button>
-            }
-            @if (choice.chosen && row.live) {
-              <a
-                class="pdet-domain-go"
-                [href]="addressUrl(row, choice.zone)"
-                target="_blank"
-                rel="noopener"
-                [attr.data-tip]="'publish.action.visit' | t"
-                [attr.aria-label]="'publish.action.visit' | t"
-              >↗</a>
-            }
-          </span>
+        @if (updateKey(row); as update) {
+          <button class="pcur-action" type="button" (click)="run(row)">{{ update | t }}</button>
         }
       </div>
       @if (whyKey(row)) {
         <p class="pcur-why">{{ whyKey(row) | t: whyParams(row) }}</p>
       }
 
-      <nav class="publish-tabs" role="tablist" [attr.aria-label]="'publish.title' | t">
-        <button
-          class="ptab" type="button" role="tab"
-          [class.active]="effectiveTab(row) === 'status'"
-          [attr.aria-selected]="effectiveTab(row) === 'status'"
-          (click)="setTab('status')"
-        >{{ 'publish.tab.status' | t }}</button>
-        @if (row.segments.length > 0 && viewsFor(row).length > 0) {
+      <ul class="pdoors">
+        @for (zone of hosts(); track zone) {
+          <li
+            class="pdoor"
+            role="switch"
+            tabindex="0"
+            [attr.aria-checked]="doorOn(row, zone)"
+            [attr.aria-disabled]="!canSwitch(row)"
+            [class.lit]="doorOn(row, zone)"
+            [class.off]="!doorOn(row, zone)"
+            [class.busy]="!!row.busyPhase"
+            [attr.title]="(doorOn(row, zone) ? 'publish.switch.on' : 'publish.switch.off') | t"
+            (click)="flipDoor(row, zone)"
+            (keydown.enter)="flipDoor(row, zone)"
+            (keydown.space)="flipDoor(row, zone); $event.preventDefault()"
+          >
+            <div class="pdoor-meta">
+              <span class="pdoor-zone">{{ zone }}</span>
+              <span class="pdoor-address">{{ address(row, zone) }}</span>
+            </div>
+            @if (doorOn(row, zone)) {
+              <a
+                class="pdoor-go"
+                [href]="addressUrl(row, zone)"
+                target="_blank"
+                rel="noopener"
+                [attr.aria-label]="'publish.action.visit' | t"
+                [attr.data-tip]="'publish.action.visit' | t"
+                (click)="$event.stopPropagation()"
+                (keydown.enter)="$event.stopPropagation()"
+                (keydown.space)="$event.stopPropagation()"
+              >↗</a>
+            }
+            <span class="pdoor-bulb" [class.on]="doorOn(row, zone)" aria-hidden="true">
+              <span class="mat-sym">lightbulb</span>
+            </span>
+          </li>
+        }
+      </ul>
+      <button class="pcur-hosts-manage" type="button" (click)="openHosts()">
+        {{ 'publish.action.manage-hosts' | t }}
+      </button>
+
+      <!-- THE DETAILS, folded — one section open at a time, all closed on
+           arrival (ui/accordion.ts). -->
+      @if (row.segments.length > 0 && viewsFor(row).length > 0) {
+        <section class="psec">
           <button
-            class="ptab" type="button" role="tab"
-            [class.active]="effectiveTab(row) === 'opens'"
-            [attr.aria-selected]="effectiveTab(row) === 'opens'"
-            (click)="setTab('opens')"
+            class="psec-head"
+            type="button"
+            [attr.aria-expanded]="sectionsOpen.isOpen('opens')"
+            (click)="sectionsOpen.toggle('opens')"
           >{{ 'publish.row.opens-as' | t }}</button>
-        }
-        @if (row.versions.length > 0) {
-          <button
-            class="ptab" type="button" role="tab"
-            [class.active]="effectiveTab(row) === 'versions'"
-            [attr.aria-selected]="effectiveTab(row) === 'versions'"
-            (click)="setTab('versions')"
-          >{{ 'publish.row.versions' | t }}</button>
-        }
-      </nav>
-
-      <div class="publish-body">
-        @switch (effectiveTab(row)) {
-
-          @case ('opens') {
-            <!-- OPENS AS — the branch root's face, the one thing a visitor
-                 lands on. One atomic view:default decorator: picking here is
-                 the same write every arrival surface reads, and it changes
-                 the head — the differential then shows the republish this
-                 pin now owes. -->
-            <div class="pdet-views" role="radiogroup" [attr.aria-label]="'publish.row.opens-as' | t">
-              @for (v of viewsFor(row); track v.view) {
-                <button
-                  class="pdet-view"
-                  type="button"
-                  role="radio"
-                  [class.selected]="row.opensAs === v.view"
-                  [class.dormant]="v.dormant"
-                  [attr.aria-checked]="row.opensAs === v.view"
-                  [attr.aria-label]="v.label"
-                  [attr.data-tip]="v.label"
-                  (click)="pickView(row, v.view)"
-                  [innerHTML]="v.icon"
-                ></button>
-              }
+          @if (sectionsOpen.isOpen('opens')) {
+            <div class="psec-body">
+        <div class="pdet-views" role="radiogroup" [attr.aria-label]="'publish.row.opens-as' | t">
+          @for (v of viewsFor(row); track v.view) {
+            <button
+              class="pdet-view"
+              type="button"
+              role="radio"
+              [class.selected]="row.opensAs === v.view"
+              [class.dormant]="v.dormant"
+              [attr.aria-checked]="row.opensAs === v.view"
+              [attr.aria-label]="v.label"
+              [attr.data-tip]="v.label"
+              (click)="pickView(row, v.view)"
+              [innerHTML]="v.icon"
+            ></button>
+          }
+        </div>
             </div>
           }
-
-          @case ('versions') {
-            <!-- VERSIONS — the head this branch is serving, and behind a fold
-                 every head it ever published. Closed by default: "which
-                 version is out there" is ONE row, and a standing list of the
-                 whole ledger is scrollback, not an answer. A version IS a
-                 signature; tapping one copies it. -->
-            <ul class="pdet-versions">
-              @for (v of versionsShown(row); track v.sig) {
-                <li>
-                  <button
-                    class="pdet-version"
-                    type="button"
-                    [class.current]="v.sig === row.live"
-                    [attr.title]="v.sig"
-                    (click)="copySig(v.sig)"
-                  >
-                    <code class="pdet-sig">{{ short(v.sig) }}</code>
-                    <span class="pdet-vage">{{ age(v.at) }}</span>
-                    @if (v.sig === row.live) {
-                      <span class="pdet-vlive">{{ 'publish.state.live' | t }}</span>
-                    }
-                  </button>
-                  <!-- HIDE, never delete. The live head is never on offer:
-                       the row that says what is out there right now is not a
-                       row you can lose. -->
-                  @if (v.sig !== row.live) {
-                    <button
-                      class="pdet-version-hide"
-                      type="button"
-                      [attr.data-tip]="'publish.hidden.hide' | t"
-                      [attr.aria-label]="'publish.hidden.hide' | t"
-                      (click)="hideVersion(row, v)"
-                    >✕</button>
-                  }
-                </li>
-              }
-            </ul>
-            @if (versionsOpen() || versionsFolded(row) > 0) {
+        </section>
+      }
+      @if (row.versions.length > 0 || hiddenFor(row).length > 0) {
+        <section class="psec">
+          <button
+            class="psec-head"
+            type="button"
+            [attr.aria-expanded]="sectionsOpen.isOpen('versions')"
+            (click)="sectionsOpen.toggle('versions')"
+          >{{ 'publish.row.versions' | t }}</button>
+          @if (sectionsOpen.isOpen('versions')) {
+            <div class="psec-body">
+        <ul class="pdet-versions">
+          @for (v of versionsShown(row); track v.sig) {
+            <li>
               <button
-                class="pdet-versions-more"
+                class="pdet-version"
                 type="button"
-                [attr.aria-expanded]="versionsOpen()"
-                (click)="versionsOpen.set(!versionsOpen())"
-              >{{ versionsOpen()
-                   ? ('publish.row.versions-fewer' | t)
-                   : ('publish.row.versions-more' | t: { count: versionsFolded(row) }) }}</button>
-            }
-
-            <!-- THE DELETE AREA — only what you put away, and the only place
-                 deleting is on the table. Deleting a version here forgets the
-                 listing; the head itself is in your history and on whatever
-                 host it was published to, untouched. -->
-            @if (hiddenFor(row); as put) {
-              @if (put.length > 0) {
-                <button
-                  class="pdet-versions-more"
-                  type="button"
-                  [attr.aria-expanded]="hiddenOpen()"
-                  (click)="toggleHiddenArea()"
-                >{{ (hiddenOpen() ? 'publish.hidden.close' : 'publish.hidden.open') | t: { count: put.length } }}</button>
-
-                @if (hiddenOpen()) {
-                  <p class="pdet-hidden-note">{{ 'publish.hidden.note' | t }}</p>
-                  <ul class="pdet-versions pdet-hidden-list">
-                    @for (item of put; track item.sig) {
-                      <li>
-                        <span class="pdet-version">
-                          <code class="pdet-sig" [attr.title]="item.sig">{{ short(item.sig) }}</code>
-                          <span class="pdet-vage">{{ item.label }}</span>
-                        </span>
-                        <button
-                          class="pdet-version-restore"
-                          type="button"
-                          (click)="restoreVersion(item)"
-                        >{{ 'publish.hidden.restore' | t }}</button>
-                        @if (item.deletable) {
-                          <button
-                            class="pdet-version-delete"
-                            type="button"
-                            [attr.data-tip]="'publish.hidden.delete-tip' | t"
-                            (click)="destroyVersion(item)"
-                          >{{ 'publish.hidden.delete' | t }}</button>
-                        }
-                      </li>
-                    }
-                  </ul>
+                [class.current]="v.sig === row.live"
+                [attr.title]="v.sig"
+                (click)="copySig(v.sig)"
+              >
+                <code class="pdet-sig">{{ short(v.sig) }}</code>
+                <span class="pdet-vage">{{ age(v.at) }}</span>
+                @if (v.sig === row.live) {
+                  <span class="pdet-vlive">{{ 'publish.state.live' | t }}</span>
                 }
+              </button>
+              <!-- HIDE, never delete. The live head is never on offer:
+                   the row that says what is out there right now is not a
+                   row you can lose. -->
+              @if (v.sig !== row.live) {
+                <button
+                  class="pdet-version-hide"
+                  type="button"
+                  [attr.data-tip]="'publish.hidden.hide' | t"
+                  [attr.aria-label]="'publish.hidden.hide' | t"
+                  (click)="hideVersion(row, v)"
+                >✕</button>
               }
-            }
+            </li>
           }
+        </ul>
+        @if (versionsOpen() || versionsFolded(row) > 0) {
+          <button
+            class="pdet-versions-more"
+            type="button"
+            [attr.aria-expanded]="versionsOpen()"
+            (click)="versionsOpen.set(!versionsOpen())"
+          >{{ versionsOpen()
+               ? ('publish.row.versions-fewer' | t)
+               : ('publish.row.versions-more' | t: { count: versionsFolded(row) }) }}</button>
+        }
 
-          @default {
-            @if (row.live) {
-              <div class="pdet-line">
-                <span class="pdet-label">{{ 'publish.row.live-head' | t }}</span>
-                <code class="pdet-sig" [attr.title]="row.live">{{ short(row.live) }}</code>
-              </div>
-            }
-            @if (row.here) {
-              <div class="pdet-line">
-                <span class="pdet-label">{{ 'publish.row.here-head' | t }}</span>
-                <code class="pdet-sig" [attr.title]="row.here">{{ short(row.here) }}</code>
-              </div>
-            }
-            @if (row.publishedAt) {
-              <div class="pdet-line pdet-age">{{ 'publish.row.published-at' | t: { age: age(row.publishedAt) } }}</div>
-            }
+        <!-- THE DELETE AREA — only what you put away, and the only place
+             deleting is on the table. Deleting a version here forgets the
+             listing; the head itself is in your history and on whatever
+             host it was published to, untouched. -->
+        @if (hiddenFor(row); as put) {
+          @if (put.length > 0) {
+            <button
+              class="pdet-versions-more"
+              type="button"
+              [attr.aria-expanded]="hiddenOpen()"
+              (click)="toggleHiddenArea()"
+            >{{ (hiddenOpen() ? 'publish.hidden.close' : 'publish.hidden.open') | t: { count: put.length } }}</button>
 
-            <!-- Objects in the published closure that are not served: a
-                 visitor following this branch would get a 404. -->
-            @if (row.gaps.length > 0) {
-              <div class="pdet-line pdet-gaps">{{ 'publish.why.gaps' | t: { count: row.gaps.length } }}</div>
-              <ul class="pdet-gaplist">
-                @for (gap of gapsShown(row); track gap) {
-                  <li><code class="pdet-sig" [title]="gap">{{ short(gap) }}</code></li>
+            @if (hiddenOpen()) {
+              <p class="pdet-hidden-note">{{ 'publish.hidden.note' | t }}</p>
+              <ul class="pdet-versions pdet-hidden-list">
+                @for (item of put; track item.sig) {
+                  <li>
+                    <span class="pdet-version">
+                      <code class="pdet-sig" [attr.title]="item.sig">{{ short(item.sig) }}</code>
+                      <span class="pdet-vage">{{ item.label }}</span>
+                    </span>
+                    <button
+                      class="pdet-version-restore"
+                      type="button"
+                      (click)="restoreVersion(item)"
+                    >{{ 'publish.hidden.restore' | t }}</button>
+                    @if (item.deletable) {
+                      <button
+                        class="pdet-version-delete"
+                        type="button"
+                        [attr.data-tip]="'publish.hidden.delete-tip' | t"
+                        (click)="destroyVersion(item)"
+                      >{{ 'publish.hidden.delete' | t }}</button>
+                    }
+                  </li>
                 }
               </ul>
             }
-
-            <div class="pdet-actions">
-              @if (row.link) {
-                <button class="pdet-btn" type="button" (click)="copyLink(row)">{{ 'publish.action.copy-link' | t }}</button>
-              }
-              @if (row.segments.length > 0) {
-                <button class="pdet-btn" type="button" (click)="visit(row)">{{ 'publish.action.visit' | t }}</button>
-              }
-            </div>
-
-            @if (row.link) {
-              <code class="pdet-link" [attr.title]="row.link">{{ row.link }}</code>
-            }
-
-            <!-- Unpublish states its honest limit ABOVE the button, every
-                 time: it stops the branch being advertised, it does not
-                 un-share what has already been shared. -->
-            @if (row.segments.length > 0 && row.live) {
-              <p class="pdet-warn">{{ 'publish.unpublish-warning' | t }}</p>
-              <button
-                class="pdet-btn pdet-unpublish"
-                type="button"
-                (click)="unpublish(row)"
-              >{{ 'publish.action.unpublish' | t }}</button>
-            }
           }
         }
-      </div>
-    } @else if (!hasRows()) {
-      <!-- Nothing anywhere. With rows in the list but none for HERE, the list
-           speaks for itself — an empty line above a populated list is a lie. -->
-      <p class="publish-empty">{{ 'publish.empty' | t }}</p>
-    }
+            </div>
+          }
+        </section>
+      }
+      <section class="psec">
+        <button
+          class="psec-head"
+          type="button"
+          [attr.aria-expanded]="sectionsOpen.isOpen('status')"
+          (click)="sectionsOpen.toggle('status')"
+        >{{ 'publish.row.status' | t }}</button>
+        @if (sectionsOpen.isOpen('status')) {
+          <div class="psec-body">
+        @if (row.live) {
+          <div class="pdet-line">
+            <span class="pdet-label">{{ 'publish.row.live-head' | t }}</span>
+            <code class="pdet-sig" [attr.title]="row.live">{{ short(row.live) }}</code>
+          </div>
+        }
+        @if (row.here) {
+          <div class="pdet-line">
+            <span class="pdet-label">{{ 'publish.row.here-head' | t }}</span>
+            <code class="pdet-sig" [attr.title]="row.here">{{ short(row.here) }}</code>
+          </div>
+        }
+        @if (row.publishedAt) {
+          <div class="pdet-line pdet-age">{{ 'publish.row.published-at' | t: { age: age(row.publishedAt) } }}</div>
+        }
 
-    <!-- THE LIST — every branch this hive knows about, filed under its
-         verdict. The tabbed block above is the CURRENT page; this is the rest
-         of them, and the row for the page you are on wears `is-current` so the
-         two readings line up. -->
-    @if (hasRows()) {
-      <div class="publish-scroll">
-
-        <!-- Rows whose verdict has not landed yet. They paint at once and
-             drop into their section as the verdicts land; until then they
-             belong to no section, because none of them would be true yet. -->
-        @if (comparing().length > 0) {
-          <ul class="publish-list comparing">
-            @for (row of comparing(); track row.key) {
-              <li
-                class="publish-row is-quiet"
-                [class.is-current]="row.key === currentKey()"
-                [class.is-subject]="row.key === subject()?.key"
-                [attr.data-state]="row.state"
-              >
-                <div
-                  class="prow-head"
-                  role="button"
-                  tabindex="0"
-                  (click)="select(row)"
-                  (keydown.enter)="select(row)"
-                  (keydown.space)="select(row); $event.preventDefault()"
-                >
-                  <span class="prow-light" aria-hidden="true"></span>
-                  <div class="prow-meta">
-                    <span class="prow-path" [title]="row.path">{{ row.path }}</span>
-                    <span class="prow-state">{{ 'publish.state.comparing' | t }}</span>
-                  </div>
-                </div>
-
-              </li>
+        <!-- Objects in the published closure that are not served: a
+             visitor following this branch would get a 404. -->
+        @if (row.gaps.length > 0) {
+          <div class="pdet-line pdet-gaps">{{ 'publish.why.gaps' | t: { count: row.gaps.length } }}</div>
+          <ul class="pdet-gaplist">
+            @for (gap of gapsShown(row); track gap) {
+              <li><code class="pdet-sig" [title]="gap">{{ short(gap) }}</code></li>
             }
           </ul>
         }
 
-        @for (section of sections(); track section.key) {
-          <section class="publish-section">
-            <header class="psection-header">
-              <span class="psection-label">{{ section.titleKey | t }}</span>
-              <span class="psection-count">{{ section.rows.length }}</span>
-            </header>
-            <ul class="publish-list">
-              @for (row of section.rows; track row.key) {
-                <li
-                  class="publish-row"
-                  [class.is-quiet]="isQuiet(row)"
-                  [class.is-current]="row.key === currentKey()"
-                  [class.is-subject]="row.key === subject()?.key"
-                  [class.is-busy]="!!row.busyPhase"
-                  [attr.data-state]="row.state"
-                >
-                  <div
-                    class="prow-head"
-                    role="button"
-                    tabindex="0"
-                    (click)="select(row)"
-                    (keydown.enter)="select(row)"
-                    (keydown.space)="select(row); $event.preventDefault()"
-                  >
-                    <span
-                      class="prow-light"
-                      aria-hidden="true"
-                      [attr.data-tip]="('publish.state.' + row.state) | t"
-                    ></span>
-                    <div class="prow-meta">
-                      <span class="prow-path" [title]="row.path">{{ row.path }}</span>
-                      <!-- WHERE THIS ONE GOES. Each branch carries its own
-                           domains, so with several in play the list has to say
-                           which is which — otherwise "publish" is a button you
-                           press without knowing the destination. Primary only;
-                           the rest are one tap away in the pane above. -->
-                      @if (row.zones[0]; as zone) {
-                        <span class="prow-zone" [title]="addressUrl(row, zone)">{{ zone }}</span>
-                      }
-                      <span class="prow-state">{{ ('publish.state.' + row.state) | t }}</span>
-                    </div>
-                    @if (opensAsIcon(row); as face) {
-                      <span
-                        class="prow-face"
-                        aria-hidden="true"
-                        [attr.data-tip]="row.opensAs"
-                        [innerHTML]="face"
-                      ></span>
-                    }
-                    @if (actionKey(row); as action) {
-                      <button
-                        class="prow-action"
-                        type="button"
-                        (click)="act(row); $event.stopPropagation()"
-                      >{{ action | t }}</button>
-                    }
-                  </div>
+        <div class="pdet-actions">
+          @if (row.link) {
+            <button class="pdet-btn" type="button" (click)="copyLink(row)">{{ 'publish.action.copy-link' | t }}</button>
+          }
+          @if (row.segments.length > 0) {
+            <button class="pdet-btn" type="button" (click)="visit(row)">{{ 'publish.action.visit' | t }}</button>
+          }
+        </div>
 
-                </li>
-              }
-            </ul>
-          </section>
+        @if (row.link) {
+          <code class="pdet-link" [attr.title]="row.link">{{ row.link }}</code>
         }
-      </div>
+
+            @if (row.live) {
+              <p class="pdet-warn">{{ 'publish.unpublish-warning' | t }}</p>
+            }
+          </div>
+        }
+      </section>
+    } @else {
+      <p class="publish-empty">{{ 'publish.empty' | t }}</p>
     }
   </aside>
 }

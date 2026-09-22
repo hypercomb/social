@@ -30,6 +30,11 @@ export interface HiveManifest {
   createdAt: number
   /** Publisher pubkey the signature verified against. */
   pubkey: string
+  /** lineageKey → the root domains that branch OPENS on. A key with no entry
+   *  opens on every domain (the shape every index had before doors). The
+   *  host serves a branch's page only on a domain listed here — this map,
+   *  signed with the roots, is the per-domain on/off switch. */
+  doors?: Record<string, string[]>
 }
 
 /** Why an index read produced no manifest. `fetchHiveManifest` collapses all
@@ -101,7 +106,19 @@ export async function fetchHiveIndex(host: string, pubkey: string): Promise<Hive
     if (!k.trim() || !SIG_RE.test(sig)) return { ok: false, reason: 'malformed' }
     roots[k] = sig
   }
-  return { ok: true, manifest: { roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key } }
+  return { ok: true, manifest: { roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key, doors: readDoors(content?.['doors'], roots) } }
+}
+
+/** The signed doors map, leniently: a malformed entry drops that entry (the
+ *  branch then opens everywhere, the pre-doors reading), never the index. */
+function readDoors(raw: unknown, roots: Record<string, string>): Record<string, string[]> {
+  const doors: Record<string, string[]> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return doors
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(k in roots) || !Array.isArray(v)) continue
+    doors[k] = [...new Set(v.map(z => String(z ?? '').trim().toLowerCase()).filter(Boolean))]
+  }
+  return doors
 }
 
 /** Fetch + verify one host's copy of the publisher's hive index. Returns
@@ -144,7 +161,11 @@ export interface PutHiveResult {
  *  the COMPLETE public map (lineageKey → sealed head sig) — the index is
  *  replaceable, not mergeable, so callers merge before writing (see the
  *  /host queen). Never throws. */
-export async function putHiveManifest(host: string, roots: Record<string, string>): Promise<PutHiveResult> {
+export async function putHiveManifest(
+  host: string,
+  roots: Record<string, string>,
+  doors: Record<string, string[]> = {},
+): Promise<PutHiveResult> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
   if (!signer?.signEvent) return { ok: false, pubkey: '', createdAt: 0, reason: 'no signer' }
 
@@ -154,7 +175,7 @@ export async function putHiveManifest(host: string, roots: Record<string, string
       kind: HIVE_INDEX_EVENT_KIND,
       created_at: Math.floor(Date.now() / 1000),
       tags: [],
-      content: JSON.stringify({ v: HIVE_LINK_VERSION, roots }),
+      content: JSON.stringify({ v: HIVE_LINK_VERSION, roots, ...signedDoors(roots, doors) }),
     })
   } catch { return { ok: false, pubkey: '', createdAt: 0, reason: 'signing failed' } }
   const pubkey = String(signed?.['pubkey'] ?? '').toLowerCase()
@@ -177,6 +198,16 @@ export async function putHiveManifest(host: string, roots: Record<string, string
     if (!res.ok) return { ok: false, pubkey, createdAt, reason: `host said ${res.status}: ${res.headers.get('X-Reason') ?? ''}`.trim() }
     return { ok: true, pubkey, createdAt }
   } catch { return { ok: false, pubkey, createdAt, reason: 'host unreachable' } }
+}
+
+/** The doors a write carries: only keys it also names as roots, and omitted
+ *  entirely when empty so a doorless index stays byte-identical to before. */
+function signedDoors(roots: Record<string, string>, doors: Record<string, string[]>): { doors?: Record<string, string[]> } {
+  const kept: Record<string, string[]> = {}
+  for (const [k, zones] of Object.entries(doors ?? {})) {
+    if (k in roots && Array.isArray(zones)) kept[k] = [...zones]
+  }
+  return Object.keys(kept).length > 0 ? { doors: kept } : {}
 }
 
 export interface SetHiveRootResult {
@@ -231,12 +262,15 @@ export async function setHiveRoot(host: string, key: string, sig: string, deps: 
   if (read.ok) existing = read.manifest.roots
   else if (read.reason === 'http' && read.status === 404) existing = {}
   else return refuse(`index-unsafe: ${read.reason}`)
+  // Carry every branch's doors through untouched — a root set must never
+  // quietly reopen a branch on domains its publisher switched off.
+  const doors = read.ok ? read.manifest.doors ?? {} : {}
 
   if (existing[cleanKey] === cleanSig) {
     return { ok: true, key: cleanKey, sig: cleanSig, host, pubkey, createdAt: read.ok ? read.manifest.createdAt : 0, reason: 'unchanged' }
   }
 
-  const put = await putManifest(host, { ...existing, [cleanKey]: cleanSig })
+  const put = await putManifest(host, { ...existing, [cleanKey]: cleanSig }, doors)
   if (!put.ok) return refuse(put.reason ?? 'index write failed')
   return { ok: true, key: cleanKey, sig: cleanSig, host, pubkey: put.pubkey, createdAt: put.createdAt }
 }

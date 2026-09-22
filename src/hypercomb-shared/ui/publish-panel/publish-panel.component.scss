@@ -1,9 +1,9 @@
 // hypercomb-shared/ui/publish-panel/publish-panel.component.scss
 //
-// Right-docked "Publish" panel — a properties window over a list of branches.
-// The window opens on the page you are standing on and follows the list: a
-// tapped row becomes its subject, so every branch is configurable, not only
-// the current one. Not a dimming modal — the hive stays visible behind it.
+// Right-docked "Publish" panel — the layer you are standing on, like the
+// Behaviours window: the tile is the heading, and every domain you carry is
+// one switch (published there, or not). Details fold below, one at a time.
+// Not a dimming modal — the hive stays visible behind it.
 // Cold steel chrome
 // (126,182,214) like every other tool window; colour is spent ONLY where a
 // claim was actually proved:
@@ -278,48 +278,7 @@ $quiet: #8ea2b0;
 }
 
 // ── the tabs ──────────────────────────────────────────────
-// One row of quiet labels; the active one wears the accent underline. The
-// choice is sticky — like every adjustment in this panel.
-.publish-tabs {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 0.15em;
-  padding: 0 0.75em;
-  border-bottom: 1px solid rgba(var(--acc), 0.18);
-}
-
-.ptab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--hc-window-ink-quiet);
-  font: inherit;
-  font-size: 0.72em;
-  letter-spacing: 0.04em;
-  padding: 0.4em 0.7em 0.35em;
-  cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
-
-  &:hover { color: var(--hc-panel-text); }
-  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
-
-  &.active {
-    color: var(--hc-window-accent);
-    border-bottom-color: rgba(var(--acc), 0.8);
-  }
-}
-
-// ── the window body ───────────────────────────────────────
-.publish-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35em;
-  padding: 0.7em 1em 0.9em;
-}
+// One row of quiet labels;
 
 .pdet-line {
   display: flex;
@@ -344,94 +303,6 @@ $quiet: #8ea2b0;
 
 .pdet-age { color: var(--hc-window-ink-quiet); }
 
-// ── the addresses ─────────────────────────────────────────
-//
-// The hosts you know, and which of them this branch answers on. Not a field:
-// a domain is a host that exists and serves your index, so this is a pick,
-// and the pick-list is the whole control. An unchosen host is still shown —
-// dimmed — because "where else could this go" is the question the pane is
-// answering, and hiding the answer would leave a list that looks like a fact
-// rather than a choice.
-//
-// The line reads as the URL it is: the branch's own name is fixed furniture
-// (quiet), the host is the part you choose (bright once chosen).
-
-.pdet-domains {
-  display: flex;
-  flex-direction: column;
-}
-
-.pdet-domain {
-  display: flex;
-  align-items: center;
-  gap: 0.3em;
-  min-height: 2.1em;
-  border-left: 2px solid transparent;
-  border-radius: tw.$radius-control;
-  transition: background 0.12s ease, border-color 0.12s ease;
-
-  &:hover { background: rgba(var(--acc), 0.05); }
-
-  // THE PRIMARY: the door the index write goes through, and where a bare
-  // visit lands. Marked by the rail, not by a badge — a word here would
-  // repeat what the arrow control already offers to change.
-  &.is-primary { border-left-color: rgba(var(--acc), 0.7); }
-}
-
-// The whole address is the switch — a 2px checkbox beside a long label is a
-// target you miss on a phone, and there is nothing else on the line to hit.
-.pdet-domain-pick {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0.35em 0.55em;
-  background: none;
-  border: none;
-  border-radius: tw.$radius-control;
-  font: inherit;
-  font-size: 0.78em;
-  text-align: left;
-  cursor: pointer;
-
-  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
-}
-
-.pdet-domain-tick {
-  flex: 0 0 auto;
-  position: relative;
-  width: 0.85em;
-  height: 0.85em;
-  border-radius: tw.$radius-control;
-  border: 1px solid rgba(var(--acc), 0.4);
-  background: transparent;
-  transition: background 0.12s ease, border-color 0.12s ease;
-
-  // The mark is drawn, not typed: a glyph here would inherit the mono font's
-  // metrics and sit off-centre at every panel scale.
-  &::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    margin: auto;
-    width: 0.3em;
-    height: 0.15em;
-    border-left: 1.5px solid var(--hc-panel-text);
-    border-bottom: 1.5px solid var(--hc-panel-text);
-    transform: translateY(-15%) rotate(-45deg);
-    opacity: 0;
-    transition: opacity 0.12s ease;
-  }
-}
-
-.pdet-domain.is-chosen .pdet-domain-tick {
-  border-color: rgba(var(--acc), 0.85);
-  background: rgba(var(--acc), 0.35);
-
-  &::after { opacity: 1; }
-}
-
 .pdet-address {
   flex: 1 1 auto;
   min-width: 0;
@@ -445,71 +316,11 @@ $quiet: #8ea2b0;
 // on its own, said once in the note rather than repeated down the list.
 .pdet-address { color: var(--hc-window-ink-quiet); }
 
-// A domain this branch answers on reads as real; the rest are still offers.
-.pdet-domain.is-chosen .pdet-address { color: var(--hc-panel-text); }
-
-// ── the line's controls ───────────────────────────────────
-// Summoned by the pointer being on the line, always present where there is
-// no pointer. Same size and shape so the row never reflows between states.
-.pdet-domain-go,
-.pdet-domain-lead {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.8em;
-  height: 1.8em;
-  margin-right: 0.15em;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: tw.$radius-control;
-  color: var(--hc-window-ink-quiet);
-  font: inherit;
-  font-size: 0.9em;
-  text-decoration: none;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.14s ease, background 0.12s ease, color 0.12s ease;
-
-  &:hover { background: rgba(var(--acc), 0.14); color: var(--hc-panel-text); }
-  &:focus-visible { opacity: 1; outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
-}
-
-// WHERE IT WAS DEPLOYED — the only control here that leaves the app, so it is
-// the only one that carries the accent rather than the panel's grey.
-.pdet-domain-go {
-  color: var(--hc-window-accent-quiet);
-
-  &:hover { background: rgba(var(--acc), 0.18); color: rgb(var(--acc)); }
-}
-
-.pdet-domain:hover .pdet-domain-go,
-.pdet-domain:hover .pdet-domain-lead,
-.pdet-domain:focus-within .pdet-domain-go,
-.pdet-domain:focus-within .pdet-domain-lead { opacity: 1; }
-
-// A published address keeps a whisper of its door even unhovered: it is the
-// answer to "where is this", which the line should not make you hunt for.
-.pdet-domain .pdet-domain-go { opacity: 0.5; }
+// A domain this branch answers on reads as real;
 
 @media (hover: none) {
   .pdet-domain-go, .pdet-domain-lead { opacity: 1; }
 }
-
-// One quiet sentence under the list: what this pane decides, and what it
-// does not.
-.pdet-domain-note {
-  margin: 0.5em 0 0;
-  padding-left: 0.55em;
-  font-size: 0.64em;
-  line-height: 1.4;
-  color: var(--hc-window-ink-quiet);
-}
-
-// The panel is narrow — the line's tips grow inward from the right edge they
-// sit on, or they clip.
-.pdet-domain-go[data-tip]::after,
-.pdet-domain-lead[data-tip]::after { left: auto; right: 0; }
 
 // ── opens-as: the branch root's face ──────────────────────
 //
@@ -771,274 +582,15 @@ $quiet: #8ea2b0;
 // ── THE LIST ──────────────────────────────────────────────
 //
 // Every branch the hive knows about, filed under its verdict. The tabbed
-// block above is the CURRENT page in full; this is the same rows read as an
-// index — one line each, opened one at a time. The two share the panel's
-// height: the properties body is capped so the list always has somewhere to
-// live, and each scrolls inside its own box rather than moving the panel.
-
-.publish-body {
-  flex: 0 1 auto;
-  max-height: 55%;
-
-  // With no list under it the cap has nothing to leave room for, and holding
-  // it would only strand the bottom of the window. (Angular's `@if` leaves
-  // comment nodes, which `:last-child` does not count.)
-  &:last-child {
-    flex: 1 1 auto;
-    max-height: none;
-  }
-}
-
-.publish-scroll {
-  flex: 1 1 auto;
-  min-height: 4em;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 0.25em 0 0.5em;
-  border-top: 1px solid rgba(var(--hc-panel-ink), 0.07);
-}
-
-.publish-section {
-  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.05);
-}
-
-.psection-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0.55em 1em 0.3em;
-}
-
-.psection-label {
-  flex: 1;
-  font-size: 0.7em;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--hc-window-accent-quiet);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.psection-count {
-  flex: 0 0 auto;
-  min-width: 1.1em;
-  padding: 0.02em 0.4em;
-  border-radius: tw.$radius-pill;
-  text-align: center;
-  font-size: 0.6em;
-  font-family: var(--hc-mono, monospace);
-  color: var(--hc-window-accent);
-  background: rgba(var(--acc), 0.12);
-}
-
-.publish-list {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0.35em;
-
-  // The leading unlabelled block: rows still being compared. Dimmer than a
-  // section so it does not read as a category of its own.
-  &.comparing { opacity: 0.75; }
-}
-
-.publish-row {
-  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.035);
-
-  &:last-child { border-bottom: none; }
-}
-
-// The page you are standing on. Not hidden from the list and not lifted out
-// of it — marked, so the block above and the row below read as one fact.
-// The row the properties pane is describing. Selection is louder than the
-// "you are here" mark because it is the one you chose.
-.publish-row.is-subject {
-  background: rgba(var(--acc), 0.07);
-  box-shadow: inset 2px 0 0 rgb(var(--acc));
-}
-
-.publish-row.is-current {
-  box-shadow: inset 2px 0 0 rgba(var(--acc), 0.7);
-
-  .prow-path { color: var(--hc-window-ink-loud); }
-}
-
-.prow-head {
-  display: flex;
-  align-items: center;
-  gap: 0.55em;
-  padding: 0.3em 1em;
-  cursor: pointer;
-  transition: background 120ms ease;
-
-  &:hover { background: rgba(var(--acc), 0.07); }
-  &:focus-visible {
-    outline: 1px solid rgba(var(--acc), 0.7);
-    outline-offset: -1px;
-  }
-}
-
-// ── THE LIGHT ─────────────────────────────────────────────
-// One dot per row, and the ONLY thing in the list that carries a verdict's
-// colour. Data-state on the row drives it, so a new state is a new rule here
-// and nothing else. Default (comparing, and anything unrecognised) is grey.
-.prow-light {
-  flex: 0 0 auto;
-  align-self: center;
-  width: 0.62em;
-  height: 0.62em;
-  border-radius: 50%;
-  border: 1px solid rgba(var(--hc-panel-ink), 0.18);
-  background: rgba(var(--hc-panel-ink), 0.06);
-  transition: background 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
-}
-
-.publish-row[data-state='live'] .prow-light {
-  border-color: rgba($mint, 0.9);
-  background: $mint;
-  box-shadow: 0 0 6px rgba($mint, 0.6);
-}
-
-.publish-row[data-state='drift'] .prow-light,
-.publish-row[data-state='pending'] .prow-light,
-.publish-row[data-state='stale-edge'] .prow-light {
-  border-color: rgba($amber, 0.9);
-  background: $amber;
-  box-shadow: 0 0 6px rgba($amber, 0.45);
-}
-
-// The only 404-backed absence. Everything else that "looks broken" is quiet.
-.publish-row[data-state='gone'] .prow-light {
-  border-color: rgba($alarm, 0.9);
-  background: $alarm;
-  box-shadow: 0 0 6px rgba($alarm, 0.45);
-}
-
-// Never published, nothing claimed: an empty ring.
-.publish-row[data-state='unpublished'] .prow-light {
-  border-color: rgba(var(--acc), 0.5);
-  background: transparent;
-}
-
-// ── ONE LINE PER LIST ROW ─────────────────────────────────
-// A list row is an index entry, not a report: name, verdict, one line. The
-// properties pane above carries the full report for the selected branch.
-.prow-meta {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  gap: 0.5em;
-}
-
-.prow-path {
-  flex: 1 1 auto;
-  font-size: 0.86em;
-  color: var(--hc-window-ink-loud);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.prow-state {
-  flex: 0 0 auto;
-  font-size: 0.66em;
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-  color: var(--hc-window-ink-quiet);
-}
-
-// The full reason is a sentence, so it stays in the properties pane.
-
-// Quiet rows — `unknown`, `cannot-compare`, `comparing`. Nothing was proved,
-// so the row recedes rather than shouting.
-.publish-row.is-quiet {
-  .prow-path { color: var(--hc-window-ink-quiet); }
-  .prow-state { color: var(--hc-window-ink-quiet); }
-}
-
-.publish-row.is-busy .prow-state { color: tw.ink($amber); }
-
-.prow-action {
-  flex: 0 0 auto;
-  background: none;
-  border: 1px solid rgba(var(--acc), 0.35);
-  border-radius: tw.$radius-control;
-  color: var(--hc-window-ink-loud);
-  font: inherit;
-  font-size: 0.68em;
-  padding: tw.$button-padding-compact-block tw.$button-padding-compact-inline;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-
-  &:hover { background: rgba(var(--acc), 0.16); color: var(--hc-panel-text); }
-  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
-}
-
-// A row that has moved on here carries the panel's one warm verb.
-.publish-row[data-state='drift'] .prow-action,
-.publish-row[data-state='unpublished'] .prow-action,
-.publish-row[data-state='gone'] .prow-action {
-  border-color: rgba($amber, 0.55);
-  color: tw.ink(#f0d9b6);
-
-  &:hover { background: rgba($amber, 0.2); color: var(--hc-panel-text); }
-}
+// block above is the CURRENT page in full;
 
 // ── focus: controls appear when the row is engaged ────────
 //
-// A column of buttons is noise; a row's action belongs to the row you are
-// ON. Hidden with opacity (not display) so the row's geometry never shifts,
-// and revealed for hover, keyboard focus, and busy rows.
-// Pointerless devices (hover: none) keep every action visible — a control
-// you cannot summon is a control you do not have.
-
-.prow-action,
-.prow-face {
-  opacity: 0;
-  transition: opacity 0.14s ease;
-}
-
-.publish-row:hover .prow-action,
-.publish-row:focus-within .prow-action,
-.publish-row.is-busy .prow-action,
-.publish-row:hover .prow-face,
-.publish-row:focus-within .prow-face {
-  opacity: 1;
-}
-
-// The face mark keeps a whisper of presence even unhovered — it is status,
-// not an action.
-.publish-row .prow-face { opacity: 0.35; }
+// A column of buttons is noise;
 
 @media (hover: none) {
   .prow-action, .prow-face { opacity: 1; }
 }
-
-// Row face mark: which view this branch opens as, at a glance.
-.prow-face {
-  flex: 0 0 auto;
-  width: 1.35em;
-  height: 1.35em;
-  align-self: center;
-}
-
-// [innerHTML] svg carries no _ngcontent attribute — style it through
-// ::ng-deep or the rules match nothing, silently.
-.prow-face ::ng-deep svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-  stroke: var(--hc-window-ink-loud);
-}
-
-// The panel is narrow and its list scrolls, so a centred tip would be clipped
-// at whichever edge it grows past. Each mark grows its tip INWARD.
-.prow-light[data-tip]::after { left: 0; }
-.prow-face[data-tip]::after { right: 0; }
 
 // The ledger's fold. Quiet — it opens scrollback, it is not a verb.
 .pdet-versions-more {
@@ -1056,21 +608,6 @@ $quiet: #8ea2b0;
 
   &:hover { color: rgb(var(--acc)); }
   &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
-}
-
-// WHERE THIS ROW GOES — its primary domain, on the row's own line. With
-// several domains in play the list has to say which branch lands where, or
-// publishing is a button pressed without a known destination. Quiet: it is
-// context for the name, not a second name.
-.prow-zone {
-  flex: 0 0 auto;
-  font-size: 0.62em;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  color: var(--hc-window-accent-quiet);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 11em;
 }
 
 // ── responsive: stay flush below the header at every header height ──
@@ -1130,29 +667,139 @@ $quiet: #8ea2b0;
   color: var(--hc-window-accent-quiet);
 }
 
-.pcur-hosts-head > span { flex: 1 1 auto; }
+// ── THE DOMAINS — one switch each, the behaviours row exactly ─────
+// The whole row is the switch; the bulb lights when this branch is published
+// on that domain. Same ground, same two states, same bulb as the Behaviours
+// window (features-viewer), so publishing reads as one more thing you turn on.
+$bulb-warm: #ffcd64;
+
+.pdoors {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pdoor {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.9rem;
+  padding: 0.4rem 0.72rem;
+  border-radius: tw.$radius-card;
+  cursor: pointer;
+  transition: background 120ms ease;
+
+  &:hover { background: rgba(var(--acc), 0.06); }
+  &:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px rgba(var(--acc), 0.55); }
+  &.lit { background: rgba($bulb-warm, 0.05); }
+  &.lit:hover { background: rgba($bulb-warm, 0.09); }
+  &.busy, &[aria-disabled='true'] { opacity: 0.55; cursor: progress; }
+}
+
+.pdoor-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pdoor-zone {
+  font-size: 0.8rem;
+  font-weight: 620;
+  line-height: 1.3;
+  color: var(--hc-window-ink-loud);
+}
+
+.pdoor.off .pdoor-zone { color: var(--hc-window-ink-quiet); }
+
+.pdoor-address {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.66rem;
+  line-height: 1.45;
+  color: var(--hc-window-ink-quiet);
+}
+
+.pdoor-go {
+  flex: 0 0 auto;
+  padding: 0.1rem 0.35rem;
+  color: var(--hc-window-ink-quiet);
+  text-decoration: none;
+
+  &:hover { color: var(--hc-window-ink-loud); }
+}
+
+.pdoor-bulb {
+  flex: 0 0 auto;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--hc-window-ink-quiet);
+  transition: color 260ms ease, background 260ms ease, box-shadow 260ms ease;
+
+  .mat-sym {
+    font-size: 1.2rem;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    transition: font-variation-settings 260ms ease, text-shadow 260ms ease;
+  }
+
+  &.on {
+    color: tw.ink(#ffd97a);
+    background: radial-gradient(circle at 50% 42%, rgba($bulb-warm, 0.16), transparent 70%);
+    box-shadow: 0 0 18px rgba(255, 195, 80, 0.12);
+
+    .mat-sym {
+      font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      text-shadow: 0 0 8px rgba(255, 208, 100, 0.9), 0 0 22px rgba(255, 185, 60, 0.45);
+    }
+  }
+}
 
 .pcur-hosts-manage {
-  flex: 0 0 auto;
+  align-self: flex-start;
+  margin: 0.35rem 0 0.2rem 0.72rem;
   padding: 0.25em 0.45em;
   border: 1px solid rgba(var(--acc), 0.22);
   border-radius: tw.$radius-control;
   background: none;
   color: var(--hc-window-ink-quiet);
   font: inherit;
-  font-size: 0.95em;
-  letter-spacing: 0;
-  text-transform: none;
+  font-size: 0.7rem;
   cursor: pointer;
 
   &:hover { background: rgba(var(--acc), 0.1); color: var(--hc-window-ink-loud); }
   &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 }
 
-.pcur-hosts {
-  flex-flow: row wrap;
-  gap: 0.15rem 0.6rem;
-  margin: 0.15rem 0 0.35rem;
+// ── THE DETAILS — folded, one open at a time (ui/accordion.ts) ────
+.psec { border-top: 1px solid rgba(var(--acc), 0.1); }
+
+.psec-head {
+  display: block;
+  width: 100%;
+  padding: 0.55rem 0.72rem;
+  border: 0;
+  background: none;
+  color: var(--hc-window-ink-quiet);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+
+  &::before { content: '▸'; display: inline-block; width: 1em; transition: transform 160ms ease; }
+  &[aria-expanded='true'] { color: var(--hc-window-ink-loud); }
+  &[aria-expanded='true']::before { transform: rotate(90deg); }
+  &:hover { color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
 }
-.pcur-hosts .pdet-domain { flex: 0 0 auto; }
-.pcur-hosts .pdet-address { font-size: 0.78rem; }
+
+.psec-body { padding: 0 0.72rem 0.7rem; }

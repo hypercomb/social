@@ -168,9 +168,9 @@ function resolveSite(env, hostname) {
   }
 }
 
-async function anyPublishedRoot(env, site, read = indexReader(env)) {
+async function anyPublishedRoot(env, site, read = indexReader(env), host = '') {
   for (const publisher of site.publishers ?? []) {
-    if (await publishedRoot(env, publisher, site.lineage, read)) return true
+    if (await publishedRoot(env, publisher, site.lineage, read, host)) return true
   }
   return false
 }
@@ -213,7 +213,8 @@ async function verifiedIndex(env, pubkey) {
   let content
   try { content = JSON.parse(evt.content) } catch { return null }
   if (!content?.roots || typeof content.roots !== 'object') return null
-  return { roots: content.roots, createdAt: Number(evt.created_at || 0) }
+  const doors = content.doors && typeof content.doors === 'object' && !Array.isArray(content.doors) ? content.doors : {}
+  return { roots: content.roots, doors, createdAt: Number(evt.created_at || 0) }
 }
 
 /** One request's index reads, memoized by pubkey. The ledger asks the same
@@ -334,10 +335,26 @@ async function bindingsEnv(env, read = indexReader(env)) {
   return view
 }
 
-async function publishedRoot(env, publisher, lineage, read = indexReader(env)) {
+/** Does the signed doors map open this lineage on this host? A lineage with
+ *  no doors entry opens everywhere (every index before doors existed); one
+ *  with an entry opens only on a host at or under a listed domain. This is
+ *  the per-domain on/off switch — signed with the roots, so only the
+ *  publisher can flip it. */
+function opensOn(index, lineage, host) {
+  const listed = index?.doors?.[lineage]
+  if (!host || !Array.isArray(listed)) return true
+  const h = String(host).toLowerCase()
+  return listed.some((z) => {
+    const zone = String(z || '').toLowerCase()
+    return !!zone && (h === zone || h.endsWith('.' + zone))
+  })
+}
+
+async function publishedRoot(env, publisher, lineage, read = indexReader(env), host = '') {
   const index = await read(publisher.pubkey)
   const head = String(index?.roots?.[lineage] || '').toLowerCase()
   if (!SIG_RE.test(head)) return null
+  if (!opensOn(index, lineage, host)) return null
   return {
     head,
     pubkey: publisher.pubkey,
@@ -352,7 +369,7 @@ async function serveSiteDescriptor(request, env, site) {
     ? site.publishers.find((p) => p.pubkey === selected)
     : site.publishers.find((p) => p.primary) || site.publishers[0]
   if (!allowed) return json(404, { error: 'no approved publisher is configured for this domain' }, { 'Cache-Control': 'no-store' })
-  const publication = await publishedRoot(env, allowed, site.lineage)
+  const publication = await publishedRoot(env, allowed, site.lineage, indexReader(env), new URL(request.url).hostname)
   if (!publication) return json(404, { error: 'the approved publisher has not published this lineage yet' }, { 'Cache-Control': 'no-store' })
   return json(200, {
     title: site.title,
@@ -388,7 +405,7 @@ async function ledgerEntry(env, read, protocol, host, site) {
     title: site.title,
     lineage: site.lineage,
     publishers: await Promise.all(site.publishers.map(async (publisher) => {
-      const publication = await publishedRoot(env, publisher, site.lineage, read)
+      const publication = await publishedRoot(env, publisher, site.lineage, read, host)
       return {
         pubkey: publisher.pubkey,
         label: publisher.label || publisher.pubkey.slice(0, 12) + '…',
@@ -452,7 +469,7 @@ async function hostsOfLineage(env, read, lineage) {
     if (zone && claimed.has(zone)) return
     const { site, implicit } = resolveSite(env, host)
     if (!site || site.lineage !== lineage) return
-    if (!(await anyPublishedRoot(env, site, read))) return
+    if (!(await anyPublishedRoot(env, site, read, host))) return
     if (zone) claimed.add(zone)
     doors.push({ host, implicit })
   }
@@ -501,6 +518,8 @@ async function servePublications(request, env) {
         const host = `${lineage}.${zone}`
         const resolved = resolveSite(env, host)
         if (!resolved.implicit || resolved.site?.lineage !== lineage) continue
+        // Switched off on this domain: the next zone that opens it keeps the plate.
+        if (!opensOn(index, lineage, host)) continue
         named.add(lineage)
         sites.push(await ledgerEntry(env, read, protocol, host, resolved.site))
       }
@@ -1332,7 +1351,7 @@ export default {
       // A door — named or wildcard — is a website only while an approved
       // publisher's signed index carries its lineage (the open mark, above).
       // Until then, and again after a withdrawal, an honest 404 page.
-      if (!(await anyPublishedRoot(env, site))) {
+      if (!(await anyPublishedRoot(env, site, indexReader(env), requestUrl.hostname))) {
         return nothingHere(requestUrl.hostname, implicit ? siteZone : null)
       }
       // Everything under /content/ is a FILE the build shipped — the package

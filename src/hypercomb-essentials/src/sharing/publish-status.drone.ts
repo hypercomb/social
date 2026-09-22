@@ -59,6 +59,7 @@ import { clearDefaultView, defaultViewAt, writeDefaultView } from '../commands/v
 import { visualBeeIconSvg } from '../commands/visual-bee-icon-svg.js'
 import {
   publishBranch,
+  setBranchDoors,
   unpublishBranch,
   type PublishFailure,
   type PublishProgress,
@@ -148,6 +149,10 @@ export interface PublishRow {
   /** Every root domain this branch claims, primary first. The name is the
    *  subdomain on each; the first is the door writes and probes go through. */
   zones: string[]
+  /** The root domains the signed index OPENS this branch on — the per-domain
+   *  switches. null = the entry names no doors, so it opens on every domain
+   *  (and on none while it is not published). */
+  doors: string[] | null
   /** Present while this row is publishing. */
   busyPhase: string | null
   /** The view the branch ROOT opens as — its own `view:default` mark, '' for
@@ -220,7 +225,7 @@ export class PublishStatusDrone extends Drone {
   protected override listens: string[] = [
     'publish:view-toggle', 'publish:close', 'publish:refresh',
     'publish:run', 'publish:unpublish', 'publish:inspect', 'publish:copy-link',
-    'publish:opens-as', 'publish:set-target',
+    'publish:opens-as', 'publish:set-target', 'publish:door',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render',
   ]
@@ -313,6 +318,9 @@ export class PublishStatusDrone extends Drone {
     })
 
     this.onEffect<{ key?: string }>('publish:run', (p) => { void this.#run(String(p?.key ?? '')) })
+    this.onEffect<{ key?: string; zone?: string; on?: boolean }>('publish:door', (p) => {
+      void this.#door(String(p?.key ?? ''), String(p?.zone ?? ''), p?.on === true)
+    })
     this.onEffect<{ key?: string }>('publish:unpublish', (p) => { void this.#unpublish(String(p?.key ?? '')) })
     this.onEffect<{ key?: string }>('publish:copy-link', (p) => { void this.#copyLink(String(p?.key ?? '')) })
     this.onEffect<{ key?: string; view?: string }>('publish:opens-as', (p) => {
@@ -457,11 +465,13 @@ export class PublishStatusDrone extends Drone {
       // ONE index read per door answers every row behind that door.
       const indexes = new Map<string, {
         state: PublishIndexState; roots: Record<string, string>
+        doors: Record<string, string[]>
         createdAt: number; stale: boolean
       }>()
       for (const door of doors) {
         const read = await fetchHiveIndex(door, pubkey)
         const roots = read.ok ? read.manifest.roots : {}
+        const doorsMap = read.ok ? read.manifest.doors ?? {} : {}
         const createdAt = read.ok ? read.manifest.createdAt : 0
         const state: PublishIndexState = read.ok
           ? 'ok'
@@ -470,7 +480,7 @@ export class PublishStatusDrone extends Drone {
         // which are recorded per host — can say.
         const highWater = await highWaterIndexStamp(door, pubkey)
         indexes.set(door, {
-          state, roots, createdAt,
+          state, roots, doors: doorsMap, createdAt,
           stale: read.ok && highWater > 0 && createdAt < highWater,
         })
       }
@@ -510,6 +520,7 @@ export class PublishStatusDrone extends Drone {
         const entry = ledger.get(key)
         const live = indexes.get(hostFor(key))?.roots[key] ?? null
         const row = this.#draftRow(key, segments, live, entry)
+        row.doors = indexes.get(hostFor(key))?.doors[key] ?? null
         row.versions = versionsByKey.get(key) ?? []
         draft.push(row)
       }
@@ -603,6 +614,7 @@ export class PublishStatusDrone extends Drone {
       // Every row has an address the moment it has a name — an unpublished
       // branch shows where it WILL live, which is where the domain is edited.
       zones: this.#zonesFor(key),
+      doors: null,
       busyPhase: null,
       opensAs: '',
       versions: [],
@@ -746,6 +758,42 @@ export class PublishStatusDrone extends Drone {
       result.status === 'confirmed'
         ? 'Published — the public host is serving it.'
         : 'Published — the public host has not served it back yet. This row re-checks on its own.')
+    void this.#refresh()
+  }
+
+  /** ONE DOMAIN'S SWITCH for one branch. The branch's host marks follow the
+   *  switches (they are the durable record of where it publishes), then:
+   *  off everywhere → withdraw; on for a branch the index does not name yet →
+   *  publish it (seal, upload, index — the doors ride along from the marks);
+   *  anything else → one signed doors rewrite, no seal, no upload. */
+  async #door(key: string, rawZone: string, on: boolean): Promise<void> {
+    const row = this.#rows.find(r => r.key === key)
+    const zone = hostZone(rawZone)
+    if (!row || row.segments.length === 0 || !zone || row.busyPhase) return
+    const everywhere = this.#knownZones()
+    const openNow = row.live ? (row.doors ?? everywhere) : []
+    const next = on
+      ? [...new Set([...openNow, zone])]
+      : openNow.filter(z => z !== zone)
+
+    // Paint the switch now; the writes behind it re-state the truth.
+    const beforeDoors = row.doors
+    row.doors = next
+    this.#paintZones(key, next)
+    await setBranchHosts(row.segments, next)
+
+    if (next.length === 0) { await this.#unpublish(key); return }
+    if (!row.live) { await this.#run(key); return }
+
+    row.busyPhase = 'indexing'
+    this.#emit()
+    const result = await setBranchDoors(row.segments, next)
+    row.busyPhase = null
+    if (!result.ok) {
+      row.doors = beforeDoors
+      this.#toast('error', `publish.failure.${result.failure}`, PUBLISH_FAILURE_TEXT[result.failure])
+    }
+    this.#emit()
     void this.#refresh()
   }
 

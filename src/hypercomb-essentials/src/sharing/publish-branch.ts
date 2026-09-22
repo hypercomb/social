@@ -320,8 +320,16 @@ export async function publishBranch(
   const ledger = await knownRoots(indexHost, pubkey)
   const missingFromIndex = Object.keys(ledger).filter(k => k !== key && !(k in existing))
 
+  // THE DOORS: where this branch opens. The branch's own host marks when it
+  // wears any (the panel's per-domain switches write those marks), else the
+  // entry it already had — every other branch's doors ride through as-is.
+  const doors = { ...(read.ok ? read.manifest.doors ?? {} : {}) }
+  let marked: string[] = []
+  try { marked = await hostsOfBranch(segs) } catch { /* no marks — keep what the index says */ }
+  if (marked.length > 0) doors[key] = marked
+
   const roots = { ...existing, [key]: sealed }
-  const put = await putHiveManifest(indexHost, roots)
+  const put = await putHiveManifest(indexHost, roots, doors)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason, sealed }
 
   // 7. The stable bearer link: segments + pubkey + hosts (+ the sealed head
@@ -446,8 +454,10 @@ export async function unpublishBranch(
   if (!(key in read.manifest.roots)) return { ok: true, removed: false }
   const roots = { ...read.manifest.roots }
   delete roots[key]
+  const doors = { ...(read.manifest.doors ?? {}) }
+  delete doors[key]
 
-  const put = await putHiveManifest(indexHost, roots)
+  const put = await putHiveManifest(indexHost, roots, doors)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
 
   // Local mark follows the index, so the two cannot disagree afterwards.
@@ -455,4 +465,38 @@ export async function unpublishBranch(
   const name = segs[segs.length - 1] ?? ''
   if (isBranchPublic(parentLocation, name)) setBranchPublic(parentLocation, name, false)
   return { ok: true, removed: true }
+}
+
+/** Say which domains an ALREADY-PUBLISHED branch opens on — the per-domain
+ *  switch. One signed index rewrite, no seal and no upload: the bytes are
+ *  already hosted, so turning a domain on or off is as fast as the index
+ *  write. An empty set is a withdrawal (unpublishBranch). A branch not in the
+ *  index yet has nothing to open — the caller publishes it instead. */
+export async function setBranchDoors(
+  segments: readonly string[],
+  zones: readonly string[],
+): Promise<{ ok: true; removed?: boolean } | { ok: false; failure: PublishFailure; reason?: string }> {
+  const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
+  if (!signer?.getPublicKeyHex) return { ok: false, failure: 'services' }
+  const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+  if (segs.length === 0) return { ok: false, failure: 'no-branch' }
+  const wanted = [...new Set(zones.map(z => normalizeHost(z)).filter(Boolean))]
+  if (wanted.length === 0) {
+    const out = await unpublishBranch(segs)
+    return out.ok ? { ok: true, removed: out.removed } : out
+  }
+
+  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
+  const key = lineageKey(segs)
+  const nodes = await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY))
+  if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
+  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
+  if (!read.ok) return { ok: false, failure: 'index-unsafe', reason: read.reason }
+  if (!(key in read.manifest.roots)) return { ok: false, failure: 'no-branch', reason: 'not published yet' }
+
+  const doors = { ...(read.manifest.doors ?? {}), [key]: wanted }
+  const put = await putHiveManifest(indexHost, read.manifest.roots, doors)
+  if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
+  return { ok: true }
 }

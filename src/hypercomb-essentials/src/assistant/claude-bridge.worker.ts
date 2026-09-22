@@ -1926,7 +1926,7 @@ export class ClaudeBridgeWorker extends Worker {
   // effects, and `synchronize` stays processor-only by doctrine.
   static readonly #REMOTE_INTENTS = new Set([
     'publish:run', 'publish:unpublish', 'publish:refresh', 'publish:inspect',
-    'publish:view-toggle', 'publish:close', 'publish:opens-as',
+    'publish:view-toggle', 'publish:close', 'publish:opens-as', 'publish:door',
     // A responder that just created parts over the bridge owes them each an
     // appearance (website-artifact paradigm, rules 10 and 11) and cannot cut
     // an image from out there. It hands the act back to the hive, which holds
