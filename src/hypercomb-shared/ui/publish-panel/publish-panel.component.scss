@@ -66,6 +66,10 @@ $quiet: #8ea2b0;
 
 .publish-title {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.9em;
   letter-spacing: 0.05em;
   color: var(--hc-window-accent);
@@ -803,3 +807,7 @@ $bulb-warm: #ffcd64;
 }
 
 .psec-body { padding: 0 0.72rem 0.7rem; }
+
+// "Publish / <tile>": the tile's name reads louder than the panel's own word.
+.publish-crumb { color: var(--hc-window-ink-quiet); }
+.publish-crumb b { font-weight: 620; color: var(--hc-window-ink-loud); }

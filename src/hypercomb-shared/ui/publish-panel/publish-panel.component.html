@@ -16,7 +16,9 @@
     [attr.aria-label]="'publish.title' | t"
   >
     <header class="publish-header">
-      <span class="publish-title">{{ 'publish.title' | t }}</span>
+      <!-- PUBLISH / <the tile you are on>: the heading names the one thing
+           the switches below act on. -->
+      <span class="publish-title">{{ 'publish.title' | t }}@if (current(); as here) {<span class="publish-crumb"> / <b [title]="here.path">{{ label(here) }}</b></span>}</span>
       <button
         class="publish-chip"
         type="button"
@@ -62,7 +64,6 @@
           [attr.data-tip]="('publish.state.' + row.state) | t"
         ></span>
         <div class="pcur-meta">
-          <span class="pcur-path" [title]="row.path">{{ label(row) }}</span>
           <span class="pcur-state">{{ (row.busyPhase ? 'publish.state.pending' : 'publish.state.' + row.state) | t }}</span>
         </div>
         @if (updateKey(row); as update) {
