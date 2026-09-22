@@ -15,6 +15,7 @@ import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 import { clickNeedsCoordinateHitTest, resolveTilePress, usesTileCloseUp } from './tile-tap-policy.js'
 import { openTileMenu } from './viewer-walk.js'
+import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; swarmTakeLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[]; flatPaths?: Record<string, string[]>; filterBlocked?: string[] }
 
@@ -294,6 +295,7 @@ const SWAP_CUE_FONT_SIZE = 4.5
 const SWAP_CUE_TAKE_COLOR = 0xffc480   // amber: something LEAVES the tile
 const SWAP_CUE_COPY_COLOR = 0xeaf0ff   // near-white: something is GAINED
 const CUE_SETTLED_COLOR = 0x9fb4c8     // steel: nothing to do, already so
+const HEX_WALK_COLOR = 0x8fe8d8        // mint: the next step lands on the grid
 const SWAP_CUE_MARGIN = 4              // gap between hex top edge and pill
 
 // ── Pool icon wrapper (tracks identity for drag) ──────────────────
@@ -471,6 +473,10 @@ export class TileOverlayDrone extends Drone {
   #tagRemovalArmed = false
   /** The clipboard window is open — see the `clipboard:open` listener. */
   #clipboardArmed = false
+  /** `h` is armed: the next step opens as hexagons (view.bee decides it,
+   *  this drone only SHOWS it — the frame and the hover's hex-walk rim). */
+  #hexWalkArmed = false
+  #hexWalkFrame: HTMLElement | null = null
 
   /** Swap mode proper: the window is open AND the gesture came from a
    *  POINTER. A finger has no ctrl to walk with, so on touch the clipboard
@@ -541,7 +547,7 @@ export class TileOverlayDrone extends Drone {
   #swapCue: Container | null = null
   /** Last `clipboard:verb` published, so a per-move refresh that resolves to
    *  the same verb costs nothing on the bus. `undefined` = never published. */
-  #swapVerbSent: 'take' | 'copy' | null | undefined = undefined
+  #swapVerbSent: 'take' | 'copy' | 'enter' | null | undefined = undefined
 
   /** The rendered pill's verb key — the same-state guard (see #cueVerbFor). */
   #swapCueKey: string | null = null
@@ -588,6 +594,7 @@ export class TileOverlayDrone extends Drone {
     'icon:edit-mode', 'icon:override-changed',
     'tags:view-state', 'tags:removal-pending', 'tags:apply-pending', 'tags:changed',
     'clipboard:open',
+    'navigation:hexagons-once',
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
   ]
@@ -1197,6 +1204,17 @@ export class TileOverlayDrone extends Drone {
         else this.#hideSwapCue()
       })
 
+      // ── THE HEXAGON WALK ────────────────────────────────────────────
+      // `h` armed the next step to open as hexagons. Themed like the cut
+      // mode: the screen wears a frame, the hovered tile a rim (concentric
+      // hexagons stepping inward) and a pill. Last-value replayed.
+      this.onEffect<{ armed?: boolean }>('navigation:hexagons-once', (payload) => {
+        this.#hexWalkArmed = payload?.armed === true
+        this.#setHexWalkFrame(this.#hexWalkArmed)
+        this.#swapCueKey = null
+        this.#refreshSwapCue(false)
+      })
+
       // (No `tags:apply-pending` listener: a bouquet in hand no longer takes
       // the hive over. Collecting rides ctrl+click in SelectionInputDrone, and
       // show-cell still reads the staged set for the future-add marks.)
@@ -1225,6 +1243,7 @@ export class TileOverlayDrone extends Drone {
   protected override dispose(): void {
     this.#clearHint()
     this.#hideSwapCue()
+    this.#setHexWalkFrame(false)
     document.removeEventListener('keydown', this.#onSwapModifier)
     document.removeEventListener('keyup', this.#onSwapModifier)
     this.#unregisterBackingWatch?.()
@@ -4137,11 +4156,12 @@ export class TileOverlayDrone extends Drone {
    *  exactly as it is, so per-move calls cost one string compare. */
   #cueVerbFor(label: string, copy: boolean): {
     key: string; glyph: string; word: string; color: number; cursorCopy?: boolean
-    /** Set ONLY by the clipboard's two verbs. The hive's tiles answer this
-     *  with the cut rim (see the swap branch in hex-sdf.shader.ts) — the pill
+    /** Set by the clipboard's two verbs and the hexagon walk ('enter'). The
+     *  hive's tiles answer this with a rim (see the swap branch in
+     *  hex-sdf.shader.ts) — the pill
      *  says what the click does, the rim says it is going to happen to THIS
      *  tile, and both are resolved here so they can never disagree. */
-    swap?: 'take' | 'copy'
+    swap?: 'take' | 'copy' | 'enter'
   } | null {
     const i18n = this.#resolveI18n()
     const t = (k: string, fallback: string): string => i18n?.t(k) ?? fallback
@@ -4186,6 +4206,13 @@ export class TileOverlayDrone extends Drone {
         : { key: 'take', glyph: '✂', word: t('clipboard.cue.take', 'take'), color: SWAP_CUE_TAKE_COLOR, swap: 'take' }
     }
 
+    // THE HEXAGON WALK. The click still walks in — it just lands on the grid,
+    // whatever view the place would open as. Last: every mode above takes
+    // the click over, and this one only reshapes where it lands.
+    if (this.#hexWalkArmed) {
+      return { key: 'hexwalk', glyph: '⬡', word: t('view.hexagons-once.cue', 'hexagons'), color: HEX_WALK_COLOR, swap: 'enter' }
+    }
+
     return null
   }
 
@@ -4213,10 +4240,46 @@ export class TileOverlayDrone extends Drone {
   /** Tell the hive which verb (if any) the hovered tile is under. Idempotent:
    *  a repeat of the same verb never reaches the bus, so this is free to call
    *  from every pointer move. */
-  #publishSwapVerb(verb: 'take' | 'copy' | null, color?: number): void {
+  #publishSwapVerb(verb: 'take' | 'copy' | 'enter' | null, color?: number): void {
     if (this.#swapVerbSent === verb) return
     this.#swapVerbSent = verb
     this.emitEffect('clipboard:verb', { verb, color })
+  }
+
+  /** The screen half of the hexagon walk: a mint frame around the viewport
+   *  with one line saying what the next step does. Pointer-transparent, so
+   *  it never stands between the participant and the tile they aim at. */
+  #setHexWalkFrame(on: boolean): void {
+    if (!on) {
+      this.#hexWalkFrame?.remove()
+      this.#hexWalkFrame = null
+      return
+    }
+    if (this.#hexWalkFrame) return
+    const hex = `#${HEX_WALK_COLOR.toString(16).padStart(6, '0')}`
+    const frame = document.createElement('div')
+    frame.setAttribute('aria-live', 'polite')
+    frame.style.cssText = [
+      'position:fixed', 'inset:0', 'pointer-events:none', 'z-index:9000',
+      `box-shadow:inset 0 0 0 2px ${hex}, inset 0 0 28px ${hex}55`,
+    ].join(';')
+    const label = document.createElement('div')
+    // On a deployed site the grid a visitor walks into is THEIR REPLICA of
+    // it — the layers already copied to them — so the frame says that.
+    const replica = isPublishedVisitorShell()
+    const i18n = this.#resolveI18n()
+    label.textContent = replica
+      ? `⬡ ${i18n?.t('view.hexagons-once.replica') ?? 'Next step opens your replica of this site'}`
+      : `⬡ ${i18n?.t('view.hexagons-once.armed') ?? 'Next step opens as hexagons'}`
+    label.style.cssText = [
+      'position:absolute', 'top:calc(env(safe-area-inset-top, 0px) + 10px)', 'left:50%',
+      'transform:translateX(-50%)', 'padding:3px 12px', 'border-radius:999px',
+      `color:${hex}`, `border:1px solid ${hex}88`, 'background:rgba(8,14,18,0.78)',
+      'font:600 0.8rem var(--hc-font, system-ui, sans-serif)', 'white-space:nowrap',
+    ].join(';')
+    frame.appendChild(label)
+    document.body.appendChild(frame)
+    this.#hexWalkFrame = frame
   }
 
   /** Pixi's EventSystem owns the canvas cursor — route the copy cursor

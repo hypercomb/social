@@ -5374,7 +5374,8 @@ export class ShowCellDrone extends Drone {
     this.#emitRenderTags(cells)
   }
 
-  /** 0 = not swapping · 1 = the click takes the hovered tile · 2 = copies it.
+  /** 0 = not swapping · 1 = the click takes the hovered tile · 2 = copies it
+   *  · 3 = the hexagon walk (the click enters, landing on the grid).
    *  Pushed by `clipboard:verb` (TileOverlayDrone's cue is the one resolver). */
   #swapMode = 0
   /** The verb's colour, normalised — amber for take, near-white for copy. */
@@ -6792,9 +6793,9 @@ export class ShowCellDrone extends Drone {
     // resolved in exactly one place — TileOverlayDrone's cue, which also
     // draws the pill above the hex — and pushed here, so the pill and the
     // rim can never disagree about what the click is about to do.
-    this.onEffect<{ verb: 'take' | 'copy' | null; color?: number }>('clipboard:verb', (payload) => {
+    this.onEffect<{ verb: 'take' | 'copy' | 'enter' | null; color?: number }>('clipboard:verb', (payload) => {
       const verb = payload?.verb ?? null
-      this.#swapMode = verb === 'copy' ? 2 : verb === 'take' ? 1 : 0
+      this.#swapMode = verb === 'enter' ? 3 : verb === 'copy' ? 2 : verb === 'take' ? 1 : 0
       if (payload?.color !== undefined) {
         const c = payload.color
         this.#swapColor = [((c >> 16) & 0xff) / 255, ((c >> 8) & 0xff) / 255, (c & 0xff) / 255]

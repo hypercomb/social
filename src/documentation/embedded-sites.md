@@ -87,6 +87,43 @@ escape a site.
 Verify: `node scripts/drive-site-exit-spawn.cjs --url http://localhost:4251`
 (arrival / toggle / indirect on a live shell) + `site-return.spec.ts`.
 
+**The peel — Ctrl/⌘-click the exit.** The spawn is the right answer for
+*closing* a site, and exactly the wrong one for a cell whose `view:default`
+is the site: every exit lands on the parent, so that cell's own hexagons
+were unreachable, and with them the rail's ctrl-click that clears the
+default. Ctrl/⌘-click on the exit button stays on the page being read and
+shows ITS hexagons; view.bee's arrival latch already holds that address, so
+the default mark does not reopen the site underneath. While Ctrl/⌘ is held
+over the button it wears the `hexagon` glyph, naming what the click will do.
+One button, two meanings, the same shape as the rail's own icon.
+
+## The chrome corner
+
+Every site is a different page, and the exit button sits over all of them.
+So the corner it occupies is a **standard the pages leave room for**, not a
+spot the button hopes is empty: the bottom-right `3.5rem` square (its
+`0.75rem` offset, `2.25rem` body and `0.5rem` of breath, plus the device's
+safe-area inset).
+
+- **The host publishes it** on `#hc-site-view-host` as
+  `--hc-site-chrome-bottom` and `--hc-site-chrome-right`. Outside the hive
+  the vars are unset, so a page writes them with a `0px` fallback and
+  renders the same standalone.
+- **The host reserves it at the end of the scroll** — a
+  `[data-hc-site-chrome-reserve]` block after the page's last child — so
+  the last line of flowing content (a footer's right-hand link, typically)
+  always lifts clear of the button, whether or not the page knows this
+  rule. In a column or grid body it lifts the footer; it never adds width.
+- **A page keeps its own FIXED bottom-right furniture out of the corner**:
+  a floating chat bubble, back-to-top button or toast rides
+  `bottom: calc(1rem + var(--hc-site-chrome-bottom, 0px))`; a full-width
+  fixed bottom bar pads its right end with
+  `padding-right: var(--hc-site-chrome-right, 0px)`. The host cannot move a
+  page's fixed elements for it — this half is the page's.
+- **The button sits in the SITE's corner, not the viewport's**: offset by a
+  docked panel's `--hc-inset-right` and by the host's own scrollbar, so it
+  never covers a panel or the page's scroll thumb.
+
 ## Rendering (what the bee does)
 
 The surface is gated on `ViewMode`. In hexagons mode the bee tears down

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { assessSandbox, isSandboxSite, publishChange, readChange, reviewChange, reviewContext, reviewQuestion, sectionText, tallyAssessments, verdictOf, type ReviewDeps } from './module-review.js'
+import { assessSandbox, isSandboxSite, publishChange, readChange, reviewChange, reviewContext, reviewQuestion, sectionText, tallyAssessments, trialsOf, verdictOf, type ReviewDeps } from './module-review.js'
 
 const BEFORE = ['// src/preferences/settings.ts', 'export const zoom = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
 const AFTER = ['// src/preferences/settings.ts', 'export const zoom = 2;', 'globalThis.__proof = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
@@ -57,6 +57,7 @@ describe('module review', () => {
     expect(w.heap.get(file!.after)).toContain('__proof')
     expect(w.published[0]).toEqual([file!.before, file!.after, change.sig])
     expect(w.stamped).toEqual([['change:try-zoom', change.sig]])
+    expect(change.record.at).toBe(1_700_000_000_000)
     expect(await readChange(change.sig, w.deps)).toEqual(change.record)
 
     const read = await reviewChange('content.example.com', change.sig, change.record, w.deps)
@@ -107,5 +108,29 @@ describe('public assessments', () => {
     const assessments = ['accept', 'refuse', 'accept', 'odd'].map((verdict, i) => ({ pubkey: String(i), record: 'r', verdict: verdict as never, at: 0 }))
     expect(tallyAssessments({ assessments })).toEqual({ accept: 2, refuse: 1, unclear: 1 })
     expect(tallyAssessments({})).toEqual({ accept: 0, refuse: 0, unclear: 0 })
+  })
+})
+
+describe('the trials on a zone', () => {
+  it('reads a listing newest first, and leaves out what is not a trial', () => {
+    const sig = (c: string) => c.repeat(64)
+    const trial = (name: string, at: unknown, extra: Record<string, unknown> = {}) =>
+      ({ name, door: `https://${name}.hypercomb.com`, package: sig('a'), pubkey: sig('b'), publisher: 'Jaime', at, sections: ['src/a.ts', 7], off: [], ...extra })
+    const trials = trialsOf({ zone: 'hypercomb.com', trials: [
+      trial('try-old', 1000, { review: sig('c'), reviewVerdict: 'refuse' }),
+      trial('try-new', 2000, { change: sig('d'), reviewVerdict: 'accept' }),
+      trial('try-undated', 'soon'),
+      trial('fresh-rooms', 3000),
+      trial('try-no-package', 4000, { package: 'x' }),
+      { ...trial('try-no-door', 5000), door: 'javascript:alert(1)' },
+    ] })
+    expect(trials.map(t => t.name)).toEqual(['try-new', 'try-old', 'try-undated'])
+    const [fresh, old, undated] = trials
+    expect(fresh).toMatchObject({ change: sig('d'), sections: ['src/a.ts'] })
+    expect(fresh!.reviewVerdict).toBeUndefined()
+    expect(old).toMatchObject({ review: sig('c'), reviewVerdict: 'refuse' })
+    expect(undated!.at).toBeNull()
+    expect(trialsOf(null)).toEqual([])
+    expect(trialsOf({ trials: 'none' })).toEqual([])
   })
 })

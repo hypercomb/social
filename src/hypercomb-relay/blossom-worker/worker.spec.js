@@ -728,3 +728,48 @@ test('a try- door lists every signed assessment of its root, and the host AI ver
   const again = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
   assert.deepEqual(again.assessments, [])
 })
+
+// ── the trials on a zone: every open try- door, from what the door serves ─
+test('a zone lists every open trial from what its door serves, newest first', async () => {
+  const [older, newer, changeOld, changeNew, review] = ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64), 'e'.repeat(64), 'f'.repeat(64)]
+  const HIVES = kvMap(new Map([
+    [pubkey, JSON.stringify(await signedIndex({
+      'install:try-old-rooms': older, 'change:try-old-rooms': changeOld,
+      'install:try-new-rooms': newer, 'change:try-new-rooms': changeNew, 'review:try-new-rooms': review,
+      'install:essentials': head, 'try-not-a-channel': head,
+    }))],
+    // A second approved publisher: its own trial is listed, and the trial the
+    // first publisher also names is the first publisher's — as its door serves.
+    [assessor, JSON.stringify(await indexBy(assessorKey, { 'install:try-new-rooms': 'a'.repeat(64), 'install:try-theirs': 'a'.repeat(64) }))],
+  ]))
+  const records = new Map([
+    [changeOld, { kind: 'module-change', changes: [{ section: 'src/a.ts' }], off: ['games/pong'], at: 1000 }],
+    [changeNew, { kind: 'module-change', changes: [{ section: 'src/b.ts' }, { section: 7 }], off: [], at: 2000 }],
+    [review, { kind: 'module-review', verdict: 'refuse' }],
+  ])
+  const zone = (extra = {}) => JSON.stringify({ 'hypercomb.com': { title: 'Hypercomb', lineage: 'hypercomb', publishers: [{ pubkey, label: 'Jaime', primary: true }, { pubkey: assessor, label: 'Other' }], ...extra } })
+  const env = {
+    SITE_BINDINGS: zone({ frontDoor: true }),
+    HOST_DOOR_ORIGIN: 'https://door.example',
+    HIVES,
+    CONTENT: { get: async (k) => records.has(k) ? { arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(records.get(k))).buffer } : null, head: async () => null, list: async () => ({ objects: [], truncated: false }) },
+    SANDBOX_SHELL_ORIGIN: 'https://shell.example',
+  }
+  // The front door answers the listing itself; it never goes to the host card.
+  const listing = await (await worker.fetch(new Request('https://hypercomb.com/trials.json'), env)).json()
+  assert.equal(listing.zone, 'hypercomb.com')
+  assert.deepEqual(listing.trials.map((t) => [t.name, t.pubkey, t.package]), [
+    ['try-new-rooms', pubkey, newer], ['try-old-rooms', pubkey, older], ['try-theirs', assessor, 'a'.repeat(64)],
+  ])
+  const [fresh, old, theirs] = listing.trials
+  assert.equal(fresh.door, 'https://try-new-rooms.hypercomb.com')
+  assert.deepEqual([fresh.at, fresh.sections, fresh.review, fresh.reviewVerdict], [2000, ['src/b.ts'], review, 'refuse'])
+  assert.deepEqual([old.sections, old.off, old.reviewVerdict], [['src/a.ts'], ['games/pong'], undefined])
+  assert.deepEqual([theirs.at, theirs.publisher, theirs.sections], [null, 'Other', []])
+  // Any door on the zone answers the same listing.
+  const fromDoor = await (await worker.fetch(new Request('https://try-old-rooms.hypercomb.com/trials.json'), env)).json()
+  assert.deepEqual(fromDoor.trials.map((t) => t.name), ['try-new-rooms', 'try-old-rooms', 'try-theirs'])
+  // A zone whose * route is not up lists nothing: none of its doors can be dialled.
+  const offZone = await (await worker.fetch(new Request('https://hypercomb.com/trials.json'), { ...env, SITE_BINDINGS: zone({ wildcard: false }) })).json()
+  assert.deepEqual(offZone.trials, [])
+})

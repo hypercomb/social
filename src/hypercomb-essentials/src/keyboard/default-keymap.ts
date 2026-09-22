@@ -46,6 +46,16 @@ export const globalKeyMap: KeyMapLayer = {
       category: 'Navigation',
     },
     {
+      // ONE-SHOT: the next arrival (in or out) opens as hexagons even where
+      // the layer has a default view. Tap to arm, tap again to disarm — or
+      // hold it while clicking the tile; view.bee consumes it on arrival.
+      cmd: 'navigation.hexagonsOnce',
+      sequence: [[{ key: 'h' }]],
+      description: 'Next navigation opens as hexagons, skipping the default view',
+      descriptionKey: 'keymap.hexagons-once',
+      category: 'Navigation',
+    },
+    {
       cmd: 'render.togglePivot',
       sequence: [[{ key: '8', code: 'digit8', primary: true, shift: true }]],
       description: 'Toggle grid pivot',

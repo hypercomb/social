@@ -1,5 +1,6 @@
 {
   "activity.added": "„{cell}“ hinzugefügt",
+  "activity.gathered": "„{cell}\" in {group} erstellt — hier gesammelt",
   "activity.removed": "„{cell}“ entfernt",
   "activity.pasted.one": "{count} Kachel eingefügt",
   "activity.pasted.other": "{count} Kacheln eingefügt",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "Halten für das Schnellmenü — in eine Richtung schnippen, loslassen zum Wählen",
   "keymap.hexagons-once": "Nächste Navigation öffnet als Sechsecke, ohne Standardansicht",
   "view.hexagons-once.armed": "Nächster Schritt öffnet als Sechsecke",
-  "view.hexagons-once.disarmed": "Standardansichten wiederhergestellt",
+  "view.hexagons-once.cue": "Sechsecke",
+  "view.hexagons-once.replica": "Nächster Schritt öffnet deine Replik dieser Seite",
+  "view.hexagons-once.replica-now": "Das ist deine Replik der Seite",
   "hive.empty.title": "Dein Bienenstock ist leer",
   "hive.empty.body": "Alles, was du hier aufbewahrst, lebt als Kachel — Notizen, Bilder, Seiten, ganze Projekte. Benenne deine erste, oder lass dir von der Biene alles zeigen.",
   "hive.empty.notice": "Füge das Erste hinzu, das du behalten willst.",

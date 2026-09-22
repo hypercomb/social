@@ -10,12 +10,14 @@
 //   3. a tester opens try-<change>.<zone>: a full hive whose door names that
 //      package, and runs the model's code — while followers are NOT told; the
 //      door tells the tester's hive what it runs, the tester signs a public
-//      assessment under their own key, and the publisher reads the tally
+//      assessment under their own key, and the publisher reads the tally;
+//      the zone lists every open trial, and anyone finds this one there
 //   4. `module promote` moves the live channel to the same root: the follower
 //      is told, replicates it from the host, and runs it
 //   5. a unit turned off and committed + promoted is unreachable for the
 //      follower, and every earlier file is still on the host
-//   6. `module withdraw` closes the door; the files stay
+//   6. `module withdraw` closes the door and takes it off the zone's list;
+//      the files stay
 //
 //   node scripts/local-content-host.mjs 4291 http://localhost:4260 --ai-stub   (the content host's own worker)
 //   node scripts/verify-hive-publish.cjs [web=http://localhost:4260] [host=localhost:4291]
@@ -39,6 +41,8 @@ const DOOR = `http://${SANDBOX}.${HOST}`
 // the relay, never a site); the door opens on the zone itself.
 const WRITE = `content.${HOST}`
 const hostState = async () => (await fetch(`http://${HOST}/__state`)).json()
+// The zone's own listing of its trials (the local binding makes the zone an apex site).
+const trialsOnZone = async () => (await (await fetch(`http://${HOST}/trials.json`, { cache: 'no-store' })).json()).trials ?? []
 const channelOf = (state, pubkey, key) => state.hives[pubkey] ? JSON.parse(state.hives[pubkey].content).roots[key] ?? null : null
 const selectionHas = (page, path) => page.evaluate(async p => (await window.ioc.get('@hypercomb.social/Install').selection()).nodes.some(n => n.path === p), path)
 const proofOf = page => H.waitFor(() => page.evaluate(() => globalThis.__hivePublishProof ?? null), 90_000, 800)
@@ -143,6 +147,15 @@ const announcedOn = page => page.evaluate(() => {
   await H.say(page, `module assess ${CHANGE} @${WRITE}`)
   const tally = await H.toastsUntil(page, /people say/)
   check('the publisher reads how people assessed it, from its own hive', (tally ?? []).some(m => /AI says accept/.test(m) && /1 refuse/.test(m)), JSON.stringify(tally))
+
+  // ── 3c. THE ZONE LISTS ITS TRIALS — anyone finds this one there ─────────
+  const trial = (await trialsOnZone()).find(t => t.name === SANDBOX)
+  check('the zone lists the trial: whose, its door, its package', trial?.pubkey === pubkey && trial?.door === DOOR && trial?.package === sandboxRoot, JSON.stringify(trial))
+  check('the listing says what the trial changes, when, and how the host AI read it', !!trial && trial.sections.includes(target.section) && Number.isFinite(trial.at) && trial.reviewVerdict === 'accept' && trial.change === changeSig)
+  await H.watchToasts(tester)
+  await H.say(tester, `module trials @${WRITE}`)
+  const found = await H.toastsUntil(tester, /AI says|No trials|did not list/)
+  check('anyone finds the trials with a word — from inside another trial, too', (found ?? []).some(m => m.startsWith(`${SANDBOX} by publisher`) && m.includes(target.section) && m.includes(DOOR)), JSON.stringify(found))
   await fol.page.reload({ waitUntil: 'domcontentloaded' })
   await H.sleep(8000)
   check('the follower is not told of a sandbox', (await announcedOn(fol.page)) !== sandboxRoot)
@@ -178,6 +191,8 @@ const announcedOn = page => page.evaluate(() => {
   check('a unit turned off, committed and promoted is the live root', channelOf(state2, pubkey, 'install:essentials') === offRoot && offRoot !== sandboxRoot, `${offPath}: ${offRoot?.slice(0, 12)}`)
   check('the new root does not reach the unit that was turned off', !(await selectionHas(page, offPath)))
   check('the host still holds every earlier file — unreachable, not deleted', state1.content.every(sig => state2.content.includes(sig)))
+  const offTrial = (await trialsOnZone()).find(t => t.name === `${SANDBOX}-off`)
+  check('the listing says what a trial turned off', !!offTrial && offTrial.off.includes(offPath), JSON.stringify(offTrial?.off))
   const taken2 = await fol.page.evaluate(([root, host]) => window.ioc.get('@hypercomb.social/Install').acquire(root, [host]), [offRoot, WRITE])
   check('the follower takes it, and the unit is gone from its package', taken2.ok && !(await selectionHas(fol.page, offPath)), JSON.stringify(taken2))
 
@@ -189,6 +204,7 @@ const announcedOn = page => page.evaluate(() => {
   const state3 = await hostState()
   check('the withdrawn door answers nothing here', closed.status === 404, String(closed.status))
   check('its package is still on the host', state3.content.includes(sandboxRoot))
+  check('the zone no longer lists the withdrawn trial', !(await trialsOnZone()).some(t => t.name === SANDBOX))
 
   await browser.close()
   process.exit(finish() ? 0 : 1)

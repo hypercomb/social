@@ -1,5 +1,6 @@
 {
   "activity.added": "menambahkan ”{cell}”",
+  "activity.gathered": "\"{cell}\" dibuat di {group} — dikumpulkan di sini",
   "activity.removed": "menghapus ”{cell}”",
   "activity.pasted.one": "menempelkan {count} ubin",
   "activity.pasted.other": "menempelkan {count} ubin",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "Tahan untuk menu cepat — sentak ke satu arah, lepas untuk memilih",
   "keymap.hexagons-once": "Navigasi berikutnya terbuka sebagai heksagon, melewati tampilan bawaan",
   "view.hexagons-once.armed": "Langkah berikutnya terbuka sebagai heksagon",
-  "view.hexagons-once.disarmed": "Tampilan bawaan dipulihkan",
+  "view.hexagons-once.cue": "heksagon",
+  "view.hexagons-once.replica": "Langkah berikutnya membuka replika situs ini milikmu",
+  "view.hexagons-once.replica-now": "Ini replika situs milikmu",
   "hive.empty.title": "Sarang Anda kosong",
   "hive.empty.body": "Semua yang Anda simpan di sini hidup sebagai ubin — catatan, gambar, halaman, proyek utuh. Beri nama yang pertama, atau biarkan lebah mengajak Anda berkeliling.",
   "hive.empty.notice": "Tambahkan hal pertama yang ingin Anda simpan.",

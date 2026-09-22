@@ -1,5 +1,6 @@
 {
   "activity.added": "”{cell}” 추가됨",
+  "activity.gathered": "\"{cell}\"을(를) {group}에 만들었습니다 — 여기에 모음",
   "activity.removed": "”{cell}” 제거됨",
   "activity.pasted.one": "타일 {count}개 붙여넣기됨",
   "activity.pasted.other": "타일 {count}개 붙여넣기됨",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "길게 눌러 빠른 메뉴 — 방향으로 튕긴 뒤 떼면 선택",
   "keymap.hexagons-once": "다음 이동은 기본 보기를 건너뛰고 육각형으로 열립니다",
   "view.hexagons-once.armed": "다음 단계는 육각형으로 열립니다",
-  "view.hexagons-once.disarmed": "기본 보기로 복원됨",
+  "view.hexagons-once.cue": "육각형",
+  "view.hexagons-once.replica": "다음 단계에서 이 사이트의 내 복제본이 열립니다",
+  "view.hexagons-once.replica-now": "이것은 사이트의 내 복제본입니다",
   "hive.empty.title": "하이브가 비어 있습니다",
   "hive.empty.body": "여기에 간직하는 모든 것은 타일로 삽니다 — 메모, 사진, 페이지, 프로젝트 전체까지. 첫 번째 타일의 이름을 짓거나, 벌이 안내하도록 해 보세요.",
   "hive.empty.notice": "간직하고 싶은 첫 번째 것을 추가하세요.",

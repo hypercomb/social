@@ -61,6 +61,10 @@ const SIG_RE = /^[a-f0-9]{64}$/
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
 
+/** The dev shell registers its source catalog: its modules are its working
+ *  tree, so a revision it takes is a pointer it follows, never code it runs. */
+const runsSource = (): boolean => !!ioc('@hypercomb.social/DevSourceCatalog')
+
 /** A caption, or its plain-English stand-in — `t()` echoes an unknown key. */
 const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
   const fill = (text: string): string =>
@@ -329,6 +333,28 @@ type View = 'domains' | 'list' | 'revisions' | 'creations' | 'mine'
 
 type Warning = { revision: InstallRevision; replaced: string[]; picksBeneath: string[] }
 
+/** THEIR CODE FROM THEN ON. Replicating a package from another domain means
+ *  that domain's code runs your hive from the next restart — signatures prove
+ *  the bytes are what it published, never what the code does. So the first
+ *  time a domain's code would run here, the window says so and waits. A
+ *  domain you accept is remembered (a per-participant consent, local to this
+ *  browser); your own origin and the publisher you follow never ask. */
+const CODE_TRUST_KEY = 'hc:hosts:code-trusted'
+type CodeGate = { host: string; sig: string; go: () => void }
+
+function readCodeTrust(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CODE_TRUST_KEY) ?? '[]')
+    return new Set(Array.isArray(raw) ? raw.map(zoneOf).filter(Boolean) : [])
+  } catch { return new Set() }
+}
+
+function writeCodeTrust(host: string): void {
+  const trusted = readCodeTrust()
+  trusted.add(host)
+  try { localStorage.setItem(CODE_TRUST_KEY, JSON.stringify([...trusted])) } catch { /* private browsing — asks again next time */ }
+}
+
 /** The install port, or an older shell's port read as a tree one level deep. */
 type Port = {
   install: InstallProvider
@@ -380,6 +406,7 @@ export class HostDirectoryElement extends HTMLElement {
   #revPath = ''
   #revisions: InstallRevision[] | null = null
   #warning: Warning | null = null
+  #codeGate: CodeGate | null = null
 
   #creations = new Map<string, { rows: CreationRow[]; answered: boolean }>()
   #mine: MineRow[] = []
@@ -555,6 +582,7 @@ export class HostDirectoryElement extends HTMLElement {
    *  drill, the walk, the open section. On the shut accordion it has nothing. */
   #back(): boolean {
     if (this.#query) { this.#query = ''; this.#render(); return true }
+    if (this.#codeGate) { this.#codeGate = null; this.#renderBody(); return true }
     if (this.#warning) { this.#warning = null; this.#renderBody(); return true }
     if (this.#view === 'revisions' || this.#view === 'creations' || this.#view === 'mine') {
       this.#view = this.#at ? 'list' : 'domains'
@@ -605,11 +633,57 @@ export class HostDirectoryElement extends HTMLElement {
     const body = this.#refs.get('body')
     if (!body) return
     body.replaceChildren()
+    if (this.#codeGate) this.#renderCodeGate(body, this.#codeGate)
     if (this.#view === 'domains') this.#renderAccordion(body)
     else if (this.#view === 'revisions') this.#renderRevisions(body)
     else if (this.#view === 'creations') this.#renderCreations(body)
     else if (this.#view === 'mine') this.#renderMine(body)
     else this.#renderBranch(body)
+  }
+
+  #renderCodeGate(body: HTMLElement, gate: CodeGate): void {
+    const box = make('div', 'hd-warning')
+    box.setAttribute('role', 'alertdialog')
+    box.append(
+      make('p', 'hd-warning-title', t('hosts.their-code.title', "From now on, {host}'s code runs your hive", { host: gate.host })),
+      make('p', 'hd-note', t('hosts.their-code.body', 'Your tiles stay yours, on this device. But the code decides what you see and what happens to them — the signature {sig} proves it is what {host} published, not what it does. Run it only if you trust {host}.', { host: gate.host, sig: gate.sig.slice(0, 8) })),
+    )
+    const run = button('hd-primary', t('hosts.their-code.run', "Run {host}'s code", { host: gate.host }))
+    run.disabled = !!this.#busy
+    run.addEventListener('click', () => {
+      writeCodeTrust(gate.host)
+      this.#codeGate = null
+      gate.go()
+    })
+    const cancel = button('hd-quiet', t('hosts.their-code.cancel', 'Not now'))
+    cancel.addEventListener('click', () => { this.#codeGate = null; this.#renderBody() })
+    const acts = make('div', 'hd-warning-acts')
+    acts.append(run, cancel)
+    box.append(acts, make('p', 'hd-note', t('hosts.their-code.note', 'Asked once per domain. Your own domain and the publisher you follow never ask.')))
+    body.append(box)
+  }
+
+  /** The domain whose code this act would run, when it has to ask first —
+   *  '' when every source is your origin, the publisher you follow, or a
+   *  domain you already accepted (any one such source is enough: the bytes
+   *  are the same signature wherever they come from). */
+  #foreignCodeHost(zones: readonly string[]): string {
+    const known = zones.map(zoneOf).filter(Boolean)
+    if (!known.length) return ''
+    const trusted = readCodeTrust()
+    const followed = new Set(this.#channelSources().map(zoneOf))
+    if (known.some(zone => zone === this.#home || followed.has(zone) || trusted.has(zone))) return ''
+    return known[0]
+  }
+
+  /** Ask before `go` when it would run a domain's code for the first time.
+   *  True = the question is on screen and the act waits for it. */
+  #askForCode(zones: readonly string[], sig: string, go: () => void): boolean {
+    const host = this.#foreignCodeHost(zones)
+    if (!host) return false
+    this.#codeGate = { host, sig, go }
+    this.#renderBody()
+    return true
   }
 
   #domains(): DomainRow[] {
@@ -747,7 +821,9 @@ export class HostDirectoryElement extends HTMLElement {
     if (lines.childElementCount) section.append(lines)
 
     // EVERYTHING THE FOLLOWED PUBLISHER MOVED, in one act — this origin only.
-    if (!zone && trunk && this.#next && this.#next.root !== trunk) {
+    // It is a source shell's one act too: it follows the channel, so taking the
+    // revision records it while the code it runs stays its working tree.
+    if (!zone && (trunk || runsSource()) && this.#next && this.#next.root !== trunk) {
       const bar = make('div', 'hd-updates')
       bar.setAttribute('role', 'status')
       bar.append(make('span', '', t('packages.updates.shared', 'An update is ready')))
@@ -1030,6 +1106,13 @@ export class HostDirectoryElement extends HTMLElement {
   async #toggle(row: DirectoryRow): Promise<void> {
     const reach = port()
     if (!reach || this.#busy || row.blockedBy) return
+    if (!row.on && !row.held) {
+      const tree = this.#carrying(row.path)
+      const zones = tree && tree !== this.#next
+        ? [...this.#served].filter(([, served]) => served === tree).map(([zone]) => zone)
+        : []
+      if (this.#askForCode(zones, row.layerSig, () => { void this.#toggle(row) })) return
+    }
     const { install } = reach
     this.#busy = row.path
     this.#error = ''
@@ -1136,6 +1219,10 @@ export class HostDirectoryElement extends HTMLElement {
     const reach = port()
     const trunk = this.#selection?.trunk ?? null
     if (!reach?.recursive || !trunk) return
+    // A source with no zone is held here or named by the followed publisher.
+    const zones = revision.sources.map(source => source.zone)
+    if (!zones.some(zone => !zone)
+      && this.#askForCode(zones, revision.layer, () => { void this.#pick(path, revision, hides) })) return
     const roots = rootsFor(revision, trunk)
     this.#busy = revision.layer
     this.#error = ''
@@ -1227,6 +1314,9 @@ export class HostDirectoryElement extends HTMLElement {
   }
 
   async #selectionOf(reach: Port): Promise<InstallSelection | null> {
+    // Whatever a source shell has taken, it runs its working tree: nothing here
+    // reads as running, and nothing turns on, off, or to another revision.
+    if (runsSource()) return { trunk: null, picks: {}, applied: [], eclipsed: [], nodes: [] }
     if (reach.recursive) return reach.install.selection().catch(() => null)
     const trunk = reach.install.installedSig()
     const tree = trunk ? await this.#tree(trunk, []) : null

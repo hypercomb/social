@@ -86,6 +86,20 @@ const EXIT_OVERLAY_CSS = [
   'pointer-events:auto', 'opacity:.38', 'transition:opacity .16s ease,background .16s ease',
 ].join(';')
 
+/** THE CHROME CORNER — the standard every embedded page leaves room for. The
+ *  exit button is the one piece of hive chrome in website mode and it always
+ *  sits in the page's bottom-right corner; this is the square it holds there
+ *  (its 0.75rem offset + 2.25rem body + 0.5rem of breath). The host publishes
+ *  it as `--hc-site-chrome-bottom` / `--hc-site-chrome-right`, so a page keeps
+ *  its own FIXED bottom-right furniture clear of the button
+ *  (`bottom: calc(1rem + var(--hc-site-chrome-bottom, 0px))`), and reserves it
+ *  after the page's last child, so the end of every page's scroll — a footer's
+ *  right-hand link, typically — lifts out from under it whether or not the page
+ *  knows the standard. Outside the hive the vars are unset and resolve to 0.
+ *  Doctrine: `documentation/embedded-sites.md` → *The chrome corner*. */
+const CHROME_CORNER_BOTTOM = 'calc(3.5rem + env(safe-area-inset-bottom, 0px))'
+const CHROME_CORNER_RIGHT = 'calc(3.5rem + env(safe-area-inset-right, 0px))'
+
 /** Raw-DOM review-gate card. Out-of-Angular, opaque full-viewport backdrop:
  *  shown over a FOREIGN, unverified page INSTEAD of mounting it, so nothing of
  *  the page renders, runs, or fetches until the participant reviews and enables
@@ -171,6 +185,13 @@ export class SiteViewDrone extends Drone {
    * than into a menu.
    */
   #exitOverlay: HTMLButtonElement | null = null
+  /** Pointer is over the exit / Ctrl-or-⌘ is held while it is — the button
+   *  then wears the hexagon, naming the peel its click will do. */
+  #exitOver = false
+  #exitPeek = false
+  /** Set for the one synchronous ViewMode flip of a Ctrl/⌘-click: leave the
+   *  site for THIS page's hexagons instead of returning to the spawn. */
+  #peelHere = false
   #exitTogglesBound = false
   /** Raw-DOM review gate — shown over a FOREIGN, unverified page in place of
    *  mounting it. While present, the page is NOT in the document: no scripts
@@ -314,8 +335,9 @@ export class SiteViewDrone extends Drone {
       // another surface (slides/tutor) is a change of face on this cell, not
       // an exit, and the launcher's dismiss-then-enter navigates itself right
       // after this listener. Gated on a site having actually been on screen
-      // this session, so an unrelated mode flip never moves anyone.
-      if (vm?.mode === 'hexagons' && (entry || this.#mount)) this.#returnToSpawn(spawn)
+      // this session, so an unrelated mode flip never moves anyone. A PEEL
+      // (Ctrl/⌘-click on the exit) stays right here, on this page's hexagons.
+      if (vm?.mode === 'hexagons' && !this.#peelHere && (entry || this.#mount)) this.#returnToSpawn(spawn)
     }
     void this.#reconcile()
   }
@@ -760,7 +782,8 @@ export class SiteViewDrone extends Drone {
       // from `viewport:inset`) so the Views window can stay open beside the page.
       'position:fixed;top:0;bottom:0;' +
       'left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);' +
-      'z-index:59988;overflow:auto;'
+      'z-index:59988;overflow:auto;' +
+      `--hc-site-chrome-bottom:${CHROME_CORNER_BOTTOM};--hc-site-chrome-right:${CHROME_CORNER_RIGHT};`
     // The site host IS the page's scroll surface. Without this opt-out the
     // always-on hex wheel-zoom handler (MousewheelZoomInput) preventDefaults
     // every wheel/trackpad event over the full-viewport canvas — which is only
@@ -819,6 +842,19 @@ export class SiteViewDrone extends Drone {
     if (body) {
       while (body.firstChild) host.appendChild(body.firstChild)
     }
+
+    // THE CHROME CORNER, reserved at the end of the scroll: the page's last
+    // line always lifts clear of the exit button. Spans a grid body, never
+    // shrinks in a flex one; in a column layout it simply lifts the footer.
+    const reserve = document.createElement('div')
+    reserve.setAttribute('data-hc-site-chrome-reserve', '')
+    reserve.setAttribute('aria-hidden', 'true')
+    reserve.style.cssText = 'display:block;flex:none;grid-column:1/-1;height:var(--hc-site-chrome-bottom);margin:0;padding:0;border:0;pointer-events:none'
+    host.appendChild(reserve)
+    // The host's scrollbar comes and goes with the page's height (images
+    // landing, a section opening); the button follows it off the thumb.
+    const placeExit = new ResizeObserver(() => this.#placeExitOverlay(host))
+    placeExit.observe(host)
 
     // Re-create <script> elements so they actually execute. innerHTML
     // / appendChild of inert <script> nodes won't run; cloning into a
@@ -879,6 +915,7 @@ export class SiteViewDrone extends Drone {
       unmount: () => {
         host.removeEventListener('click', onAnchorClick, true)
         rootObserver.disconnect()
+        placeExit.disconnect()
         for (const node of styleNodes) node.remove()
         for (const node of linkNodes) node.remove()
         for (const node of scriptNodes) node.remove()
@@ -905,7 +942,11 @@ export class SiteViewDrone extends Drone {
       btn.id = 'hc-site-exit'
       btn.type = 'button'
       btn.style.cssText = EXIT_OVERLAY_CSS
-      btn.addEventListener('click', () => { this.#exitToHive() })
+      // Click = close the site (back to its spawn). Ctrl/⌘-click = stay on
+      // this page and show ITS hexagons — the one way to reach the grid of a
+      // cell whose default view is the site, where the rail's ctrl-click on
+      // the site's icon then clears that default.
+      btn.addEventListener('click', (e) => { this.#exitToHive(e.ctrlKey || e.metaKey) })
       // Rest/active affordance without a stylesheet — cheap inline listeners.
       // Dim at rest so it stops competing with the page; solid on approach.
       const wake = (): void => {
@@ -916,10 +957,14 @@ export class SiteViewDrone extends Drone {
         btn.style.opacity = '.38'
         btn.style.background = 'rgba(12,17,24,.82)'
       }
-      btn.addEventListener('pointerenter', wake)
+      btn.addEventListener('pointerenter', (e) => { this.#exitOver = true; wake(); this.#peekExit(e) })
+      btn.addEventListener('pointermove', this.#peekExit)
       btn.addEventListener('focus', wake)
-      btn.addEventListener('pointerleave', rest)
+      btn.addEventListener('pointerleave', (e) => { this.#exitOver = false; rest(); this.#peekExit(e) })
       btn.addEventListener('blur', rest)
+      window.addEventListener('keydown', this.#peekExit, true)
+      window.addEventListener('keyup', this.#peekExit, true)
+      window.addEventListener('blur', this.#peekExit)
       document.body.appendChild(btn)
       // Touch has no hover: show it solid for a beat when the site opens, then
       // let it settle into the dimmed rest state.
@@ -930,29 +975,65 @@ export class SiteViewDrone extends Drone {
     this.#refreshExitOverlay()
   }
 
+  /** While Ctrl/⌘ is held over the button it wears the hexagon — the button
+   *  says what the click is about to do before it is pressed. A window blur
+   *  (the key released somewhere else) drops the peek. */
+  readonly #peekExit = (e: Event): void => {
+    const held = e.type !== 'blur' && ((e as MouseEvent | KeyboardEvent).ctrlKey || (e as MouseEvent | KeyboardEvent).metaKey)
+    const peek = this.#exitOver && held
+    if (peek === this.#exitPeek) return
+    this.#exitPeek = peek
+    this.#refreshExitOverlay()
+  }
+
   #refreshExitOverlay(): void {
     const btn = this.#exitOverlay
     if (!btn) return
-    btn.textContent = this.#siteIcon || 'grid_view'
-    const label = 'Exit website'
-    btn.title = label
-    btn.setAttribute('aria-label', label)
+    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+    const hexagons = i18n?.t('site-exit.hexagons') ?? 'Show this page\'s hexagons'
+    btn.textContent = this.#exitPeek ? 'hexagon' : (this.#siteIcon || 'grid_view')
+    btn.title = this.#exitPeek
+      ? hexagons
+      : `${i18n?.t('site-exit.label') ?? 'Exit website'}\n${i18n?.t('site-exit.hint') ?? 'Ctrl-click: show this page\'s hexagons'}`
+    btn.setAttribute('aria-label', this.#exitPeek ? hexagons : (i18n?.t('site-exit.label') ?? 'Exit website'))
+    this.#placeExitOverlay(this.#mount?.host)
+  }
+
+  /** Seat the button in the SITE's corner, not the viewport's: clear of a
+   *  docked panel's reservation and of the host's own scrollbar, so it never
+   *  sits on the page's scroll thumb. */
+  #placeExitOverlay(host: HTMLElement | undefined): void {
+    const btn = this.#exitOverlay
+    if (!btn) return
+    const gutter = host?.isConnected ? Math.max(0, host.offsetWidth - host.clientWidth) : 0
+    btn.style.right = `calc(var(--hc-inset-right, 0px) + ${gutter}px + 0.75rem + env(safe-area-inset-right, 0px))`
   }
 
   /** Exit the website straight back to WHERE IT WAS SPAWNED FROM — no
    *  intermediate websites-directory step. Flipping ViewMode is the whole
    *  exit: the mode-change handler restores both halves of the spawn, the
    *  view that was up and the page it was up on, wherever the reader browsed
-   *  inside the site. */
-  #exitToHive(): void {
+   *  inside the site. A PEEL (Ctrl/⌘-click) skips the spawn: the reader stays
+   *  on the page they are reading and sees its hexagons. view.bee's arrival
+   *  latch already holds this address, so the site's default mark does not
+   *  reopen it under them. */
+  #exitToHive(peel = false): void {
     const ioc = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
-    ioc?.get<{ setMode(m: string): void }>('@hypercomb.social/ViewMode')?.setMode('hexagons')
+    this.#peelHere = peel
+    try {
+      ioc?.get<{ setMode(m: string): void }>('@hypercomb.social/ViewMode')?.setMode('hexagons')
+    } finally { this.#peelHere = false }
   }
 
   #removeExitOverlay(): void {
     if (this.#exitOverlay) {
       this.#exitOverlay.remove()
       this.#exitOverlay = null
+      window.removeEventListener('keydown', this.#peekExit, true)
+      window.removeEventListener('keyup', this.#peekExit, true)
+      window.removeEventListener('blur', this.#peekExit)
+      this.#exitOver = false
+      this.#exitPeek = false
     }
   }
 

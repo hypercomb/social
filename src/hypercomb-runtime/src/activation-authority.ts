@@ -26,10 +26,13 @@
 //             lives — essentials/sharing/package-attestation.ts).
 //   FLOOR     the shell found the live package below its floor: it cannot
 //             answer the update door, so it can never move itself
-//             (hypercomb-web package-floor.ts). No attester is loaded, since
-//             the old package has none, and the offer comes from the ONE named
-//             seed. It is genesis again: the bootstrap trust spent a second
-//             time, for a package that can vouch for nothing.
+//             (hypercomb-web package-floor.ts). The old package has no
+//             attester, and the offer comes from the ONE named seed. It is
+//             genesis again: the bootstrap trust spent a second time, for a
+//             package that can vouch for nothing. An attester that IS loaded
+//             beside it came from the pool, not from the package — a move cut
+//             short leaves the head's modules there, and an install with no
+//             bag loads them — so the floor is answered before it is asked.
 //
 // Everything else is REFUSED, by name, before a single byte is fetched. Fail
 // closed: no attester loaded means no foreign package, never a free pass. The
@@ -76,11 +79,11 @@ export const activationAuthority = async (q: ActivationQuestion): Promise<Activa
   const zone = hostZone(q.zone)
   const self = hostZone(q.self)
   if (zone && zone === self) return { ok: true, by: 'self' }
+  if (q.floor === true && DEFAULT_HOST_ZONES.includes(zone)) return { ok: true, by: 'floor' }
 
   const attester = q.attester ?? null
   if (!attester) {
     if (q.installed === null && DEFAULT_HOST_ZONES.includes(zone)) return { ok: true, by: 'genesis' }
-    if (q.floor === true && DEFAULT_HOST_ZONES.includes(zone)) return { ok: true, by: 'floor' }
     return {
       ok: false,
       error: `${zone || 'this host'} offers a package nothing here can vouch for — no publisher attester is loaded`,

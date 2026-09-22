@@ -158,7 +158,7 @@ export class HexSdfTextureShader {
   }
 
   /** THE SWAP HOVER. 0 = off · 1 = the click takes this tile · 2 = it copies
-   *  it. Anything but 0 replaces the navigation ring on the hovered tile with
+   *  it · 3 = the hexagon walk (enter, landing on the grid). Anything but 0 replaces the navigation ring on the hovered tile with
    *  the cut rim — see the fragment source. */
   public setSwapMode = (mode: number): void => {
     this.#ug.uniforms.u_swapMode = mode
@@ -758,7 +758,21 @@ export class HexSdfTextureShader {
       //     "focused, stops here" highlight that never masquerades as the
       //     accent-coloured pathway glow.
       if (u_hoveredIndex >= 0.0 && abs(vCellIndex - u_hoveredIndex) < 0.5) {
-        if (u_swapMode > 0.5) {
+        if (u_swapMode > 2.5) {
+          // ── THE HEXAGON WALK ────────────────────────────────────────
+          // the h key is armed: the click still enters, but lands on the grid
+          // whatever view the place would open as. Said in the grid's own
+          // shape — a solid rim and two hexagons stepping inward, a corridor
+          // of hexagons you are about to walk down. Solid (never the cut
+          // rim's dashes) because nothing leaves the page.
+          color.rgb *= 1.05;
+          float walkRim = 1.0 - smoothstep(0.0, aa * 2.2, abs(d + aa * 1.3));
+          float walkMid = 1.0 - smoothstep(0.0, aa * 1.5, abs(d + u_radiusPx * 0.24));
+          float walkIn = 1.0 - smoothstep(0.0, aa * 1.3, abs(d + u_radiusPx * 0.46));
+          color.rgb = mix(color.rgb, u_swapColor, walkRim * 0.95);
+          color.rgb = mix(color.rgb, u_swapColor, walkMid * 0.6);
+          color.rgb = mix(color.rgb, u_swapColor, walkIn * 0.35);
+        } else if (u_swapMode > 0.5) {
           // ── THE SWAP HOVER ──────────────────────────────────────────
           // The clipboard window is open, so this click does not navigate —
           // it MOVES the tile. Every other hover on this hive promises the

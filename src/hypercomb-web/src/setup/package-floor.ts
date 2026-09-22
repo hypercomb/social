@@ -26,10 +26,20 @@
 //
 // A package that answers the door is never touched here. Updating it stays the
 // participant's choice (the Packages window), exactly as before.
+//
+// Except when the install is known only by the bundled install's old stamp.
+// That package went live before the shared stamp existed (2026-08-31), so it
+// predates the door (2026-09-12), and whatever answers the door on it came
+// from the pool, not from the package: an install that old has no dependency
+// bag, so its import map loads every dependency the pool holds. Observed
+// 2026-09-22 on hypercomb.io: a reload landed mid-move, the head's atoms stayed
+// in the pool, the next boot loaded the head's Packages window beside the old
+// package — listening on the door, with no hosts drone to open it — and the
+// floor stood aside for good. For such an install the bus is not asked.
 
 import { EffectBus } from '@hypercomb/core'
 import { acquire, headPackage } from '@hypercomb/runtime/acquire'
-import { installedPackageSig } from '@hypercomb/runtime/installed-package'
+import { INSTALLED_KEY, installedPackageSig } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { cacheImportMap } from './resolve-import-map'
 
@@ -51,14 +61,17 @@ export type FloorPlan =
 /** Pure: should the shell move the live package, and to what? */
 export const planFloor = (q: {
   installed: string | null
+  /** The install is known only by the old bundled stamp — older than the
+   *  door, so the door's answer is not its own. */
+  legacyRecord?: boolean
   /** Does anything answer the update door? null when the bus cannot say. */
   doorAnswered: boolean | null
   head: { packageSig: string; zone: string } | null
   reloadedFor: string | null
 }): FloorPlan => {
   if (!q.installed) return { act: false, why: 'nothing installed' }
-  if (q.doorAnswered === null) return { act: false, why: 'the bus cannot say who listens' }
-  if (q.doorAnswered) return { act: false, why: 'the package answers the update door' }
+  if (!q.legacyRecord && q.doorAnswered === null) return { act: false, why: 'the bus cannot say who listens' }
+  if (!q.legacyRecord && q.doorAnswered) return { act: false, why: 'the package answers the update door' }
   if (!q.head) return { act: false, why: 'the seed offered no head' }
   if (q.head.packageSig === q.installed) return { act: false, why: 'already on the seed head' }
   if (q.reloadedFor === q.head.packageSig) return { act: false, why: 'this session already moved to it and it did not stick' }
@@ -68,6 +81,11 @@ export const planFloor = (q: {
 const doorAnswered = (): boolean | null => {
   const bus = EffectBus as { listens?: (effect: string) => boolean }
   return typeof bus.listens === 'function' ? bus.listens(UPDATE_DOOR) : null
+}
+
+/** Is the live package on the shared stamp, or only on the old one? */
+const stamped = (): boolean => {
+  try { return /^[a-f0-9]{64}$/.test(localStorage.getItem(INSTALLED_KEY) ?? '') } catch { return false }
 }
 
 const seedHead = async (): Promise<{ packageSig: string; zone: string } | null> => {
@@ -100,12 +118,14 @@ const quiet = (): Promise<void> => new Promise(resolve => {
 /** One check. Moves the live package and reloads when it is below the floor. */
 export const checkPackageFloor = async (): Promise<FloorPlan> => {
   const installed = installedPackageSig()
+  const legacyRecord = !!installed && !stamped()
   const answered = doorAnswered()
+  const below = legacyRecord || answered === false
   // Only a package below the floor costs a network call.
-  const head = installed && answered === false ? await seedHead() : null
-  const plan = planFloor({ installed, doorAnswered: answered, head, reloadedFor: readSession(FLOOR_RELOADED_KEY) })
+  const head = installed && below ? await seedHead() : null
+  const plan = planFloor({ installed, legacyRecord, doorAnswered: answered, head, reloadedFor: readSession(FLOOR_RELOADED_KEY) })
   if (!plan.act) {
-    if (answered === false) console.warn(`[package-floor] below the floor, not moved: ${plan.why}`)
+    if (below) console.warn(`[package-floor] below the floor, not moved: ${plan.why}`)
     return plan
   }
 

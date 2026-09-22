@@ -47,6 +47,9 @@ export interface ModuleChangeRecord {
   readonly root: string
   readonly changes: readonly ChangeFile[]
   readonly off: readonly string[]
+  /** When it was committed — what a zone's trial listing orders by. Changes
+   *  committed before 2026-09-22 carry none. */
+  readonly at?: number
 }
 
 export interface ModuleReviewRecord {
@@ -113,7 +116,7 @@ export const verdictOf = (text: string): ReviewVerdict => {
  * signature and every signature a host must serve for it to be read.
  */
 export const recordChange = async (
-  sandbox: string, root: string, changes: readonly CommittedChange[], off: readonly string[], deps: Pick<ReviewDeps, 'put' | 'bytesOf'>,
+  sandbox: string, root: string, changes: readonly CommittedChange[], off: readonly string[], deps: Pick<ReviewDeps, 'put' | 'bytesOf' | 'now'>,
 ): Promise<{ sig: string; files: string[]; record: ModuleChangeRecord } | { error: string }> => {
   const files: ChangeFile[] = []
   for (const change of changes) {
@@ -123,7 +126,7 @@ export const recordChange = async (
     const after = await deps.put(sectionText(decode(now), change.section), 'text/javascript')
     files.push({ ...change, before, after })
   }
-  const record: ModuleChangeRecord = { kind: 'module-change', sandbox, root, changes: files, off: [...off] }
+  const record: ModuleChangeRecord = { kind: 'module-change', sandbox, root, changes: files, off: [...off], at: deps.now() }
   const sig = await deps.put(JSON.stringify(record), 'application/json')
   return { sig, files: [...new Set(files.flatMap(file => [file.before, file.after])), sig], record }
 }
@@ -201,10 +204,59 @@ export interface SandboxSite {
   readonly assessments?: readonly { readonly pubkey: string; readonly record: string; readonly verdict: ReviewVerdict; readonly at: number }[]
 }
 
+/** One open trial on a zone, as the zone's /trials.json lists it (worker
+ *  serveTrials): what its door serves, what its change touched, when it was
+ *  committed, and the host AI's verdict. */
+export interface SandboxTrial {
+  readonly name: string
+  readonly door: string
+  readonly package: string
+  readonly pubkey: string
+  readonly publisher: string
+  readonly at: number | null
+  readonly sections: readonly string[]
+  readonly off: readonly string[]
+  readonly change?: string
+  readonly review?: string
+  readonly reviewVerdict?: ReviewVerdict
+}
+
+const TRIAL_NAME_RE = /^try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?$/
+const SIG_RE = /^[a-f0-9]{64}$/
+const strings = (value: unknown): string[] => (Array.isArray(value) ? value : []).filter((item): item is string => typeof item === 'string' && !!item)
+
+/** A listed trial as it arrives: every field unknown until it is checked. */
+type TrialEntry = {
+  readonly name?: unknown; readonly door?: unknown; readonly package?: unknown; readonly pubkey?: unknown
+  readonly publisher?: unknown; readonly at?: unknown; readonly sections?: unknown; readonly off?: unknown
+  readonly change?: unknown; readonly review?: unknown; readonly reviewVerdict?: unknown
+} | null
+
+/** The trials a zone lists, newest first. An entry that is not a trial —
+ *  no try- name, no door, no package — is left out, never guessed at. */
+export const trialsOf = (listing: unknown): SandboxTrial[] => {
+  const raw = (listing as { trials?: unknown } | null)?.trials
+  const trials: SandboxTrial[] = []
+  for (const entry of Array.isArray(raw) ? raw as TrialEntry[] : []) {
+    if (!entry || !TRIAL_NAME_RE.test(String(entry.name ?? '')) || !/^https?:\/\//.test(String(entry.door ?? ''))) continue
+    if (!SIG_RE.test(String(entry.package ?? '')) || !SIG_RE.test(String(entry.pubkey ?? ''))) continue
+    const verdict = VERDICTS.includes(entry.reviewVerdict as ReviewVerdict) ? entry.reviewVerdict as ReviewVerdict : undefined
+    trials.push({
+      name: String(entry.name), door: String(entry.door), package: String(entry.package), pubkey: String(entry.pubkey),
+      publisher: typeof entry.publisher === 'string' ? entry.publisher : '',
+      at: Number.isFinite(entry.at) ? Number(entry.at) : null,
+      sections: strings(entry.sections), off: strings(entry.off),
+      ...(SIG_RE.test(String(entry.change ?? '')) ? { change: String(entry.change) } : {}),
+      ...(SIG_RE.test(String(entry.review ?? '')) ? { review: String(entry.review), ...(verdict ? { reviewVerdict: verdict } : {}) } : {}),
+    })
+  }
+  return trials.sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+}
+
 /** Is this what a sandbox door answers at /site.json? */
 export const isSandboxSite = (value: unknown): value is SandboxSite => {
   const site = value as Partial<SandboxSite> | null
-  return !!site && site.sandbox === true && typeof site.title === 'string' && /^[a-f0-9]{64}$/.test(String(site.package ?? ''))
+  return !!site && site.sandbox === true && typeof site.title === 'string' && SIG_RE.test(String(site.package ?? ''))
 }
 
 /** How the people who assessed a sandbox read it, counted. */

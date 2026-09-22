@@ -32,7 +32,11 @@
 // Silence rules — the scout only ever ANNOUNCES a divergence, never argues:
 //   - no follow (no record and no key in the file, or 'off') → dormant
 //     (the bundled check still runs)
-//   - no installed sig recorded   → silent (genesis belongs to install flows)
+//   - no installed sig recorded   → silent (genesis belongs to install flows),
+//     except on a shell that runs its working tree (the dev shell registers
+//     its source catalog): nothing there ever installs, so no stamp is not
+//     genesis — it is a hive that has not taken the channel's revision yet,
+//     and taking it records the revision while the code stays source
 //   - index unreachable/forged    → silent (fetchHiveManifestFromAny → null)
 //   - channel root absent         → silent
 //   - root equals installed sig   → silent (never emits available:false —
@@ -56,6 +60,8 @@ export const INSTALL_FOLLOW_KEY = 'hc:install-follow'
  *  shell's older bundled stamp is only a fallback. Reading the shared stamp is
  *  what stops an adopted channel update from being announced again. */
 const INSTALLED_SIG_KEYS = ['hc:shim:installed-package', 'sentinel.sync-signature']
+/** Registered only by the dev shell, whose modules are its working tree. */
+const SOURCE_CATALOG_KEY = '@hypercomb.social/DevSourceCatalog'
 /** Off the boot path — after first paint, bees, and the shell's own
  *  bundled-diff check (which runs at boot). */
 const BOOT_CHECK_DELAY_MS = 12_000
@@ -102,10 +108,12 @@ export function scoutVerdict(
   roots: Record<string, string>,
   channel: string,
   installedSig: string | null,
+  /** The shell runs its working tree and never installs a package. */
+  runsSource = false,
 ): string | null {
   const installed = String(installedSig ?? '').trim().toLowerCase()
-  if (!SIG_RE.test(installed)) return null          // genesis is not an update
   const published = installRootOf(roots, channel)
+  if (!SIG_RE.test(installed)) return runsSource ? published : null   // genesis is not an update
   if (!published || published === installed) return null
   return published
 }
@@ -116,6 +124,8 @@ type ScoutDeps = {
   /** The publisher this package names; defaults to install-publisher.json. */
   publisher?: unknown
   emit?: (payload: Record<string, unknown>) => void
+  /** Does this shell run its working tree? Asks IoC for the source catalog. */
+  runsSource?: boolean
 }
 
 export class UpdateScoutService {
@@ -143,7 +153,9 @@ export class UpdateScoutService {
     try {
       installed = INSTALLED_SIG_KEYS.map(key => storage.getItem(key)).find(sig => !!sig && SIG_RE.test(sig)) ?? null
     } catch { return null }
-    const sig = scoutVerdict(manifest.roots, follow.channel, installed)
+    const runsSource = deps.runsSource
+      ?? !!(globalThis as { ioc?: { get?: (key: string) => unknown } }).ioc?.get?.(SOURCE_CATALOG_KEY)
+    const sig = scoutVerdict(manifest.roots, follow.channel, installed, runsSource)
     if (!sig) return null
 
     const emit = deps.emit ?? (payload => EffectBus.emit('update:available', payload))

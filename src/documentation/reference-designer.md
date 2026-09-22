@@ -224,6 +224,19 @@ picker's source and lands the choices under the same holder. Nothing is
 written; the line is absent while the holder gathers nothing, and while the
 group is the very portal in hand.
 
+**Making a tile on a holder makes a member (BUILT 2026-09-22).** Typing
+`bob` on `friends` used to mint a `bob` only `friends` knew about. Now the
+create path asks the reference door where the tile lands
+(`commands/create-landing.ts`, `CanonicalReferenceService.landing`): on a page
+whose references outnumber its ordinary tiles, the new tile is made in the
+derived group (`/people/bob`) and the holder gathers it (`place`), so the same
+`bob` is reachable from both. A name the holder already lists is walked, never
+re-made — `susan/phone` where `susan` is a reference lands at
+`/people/susan/phone`. Standing INSIDE a reference (a deep link, back/forward,
+a click before the index warmed) makes the tile at the target, never in the
+reference's own bag. The hive itself and pages of ordinary tiles are
+unchanged.
+
 **Showing who a holder references — the facet, not a pair-word.** A pool named
 `associates:people` was considered and set aside: two user words around a
 colon is refused by the address gate (`address-syntax.md` rule 3), and nobody

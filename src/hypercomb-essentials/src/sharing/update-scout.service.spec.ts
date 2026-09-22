@@ -60,6 +60,12 @@ describe('scoutVerdict', () => {
     expect(scoutVerdict({ 'install:essentials': INSTALLED }, 'essentials', INSTALLED)).toBeNull()
     expect(scoutVerdict({}, 'essentials', INSTALLED)).toBeNull()
   })
+
+  it('offers the channel to a shell that runs its working tree — it never installs, so no stamp is not genesis', () => {
+    expect(scoutVerdict({ 'install:essentials': PUBLISHED }, 'essentials', null, true)).toBe(PUBLISHED)
+    expect(scoutVerdict({}, 'essentials', null, true)).toBeNull()
+    expect(scoutVerdict({ 'install:essentials': PUBLISHED }, 'essentials', PUBLISHED, true)).toBeNull()
+  })
 })
 
 describe('UpdateScoutService.check', () => {
@@ -101,6 +107,18 @@ describe('UpdateScoutService.check', () => {
     })
     expect(sig).toBeNull()
     expect(emitted).toEqual([])
+  })
+
+  it('offers a source shell the channel revision, and goes quiet once taking it recorded it', async () => {
+    const emitted: Record<string, unknown>[] = []
+    const scout = new UpdateScoutService()
+    const fetchManifest = async () => manifestOf({ 'install:essentials': PUBLISHED })
+    const emit = (payload: Record<string, unknown>) => { emitted.push(payload) }
+    expect(await scout.check({ storage: storageOf({ [INSTALL_FOLLOW_KEY]: follow }), fetchManifest, emit, runsSource: true })).toBe(PUBLISHED)
+    expect(await scout.check({ storage: storageOf({ [INSTALL_FOLLOW_KEY]: follow, 'hc:shim:installed-package': PUBLISHED }), fetchManifest, emit, runsSource: true })).toBeNull()
+    // A shell that installs is still at genesis with nothing recorded.
+    expect(await scout.check({ storage: storageOf({ [INSTALL_FOLLOW_KEY]: follow }), fetchManifest, emit, runsSource: false })).toBeNull()
+    expect(emitted).toHaveLength(1)
   })
 
   it('never emits when dormant, unverified, or current — silence is silence', async () => {

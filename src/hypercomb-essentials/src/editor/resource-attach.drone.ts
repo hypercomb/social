@@ -27,6 +27,10 @@ type AttachPayload = {
    *  participant is looking, instead of at the tail of the spiral. `index` is
    *  the pinned-layout slot — the same property the layout pass writes. */
   atTop?: boolean
+  /** The page the cell was MADE on, when that is not the page stood on — a
+   *  tile typed on a holder is made in the group it gathers from
+   *  (commands/create-landing.ts), and its picture belongs there. */
+  segments?: readonly string[]
 }
 
 type YouTubeMetadataQueue = {
@@ -52,11 +56,13 @@ export class ResourceAttachDrone {
     // stamp the image against wherever the user had navigated to in the
     // meantime — a cross-layer content graft.
     const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
-    const segments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    const segments: readonly string[] = payload.segments ?? lineage?.explorerSegments?.() ?? []
     const target = portalEditTarget(
       segments,
       payload.cell,
-      referenceEditsRootDefaultForLabel(payload.cell)
+      // The label index reads the page stood on — it says nothing about a
+      // cell made elsewhere.
+      !payload.segments && referenceEditsRootDefaultForLabel(payload.cell)
         ? referenceTargetForLabel(payload.cell)
         : null,
     )

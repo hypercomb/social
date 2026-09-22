@@ -1,5 +1,6 @@
 {
   "activity.added": "「{cell}」を追加しました",
+  "activity.gathered": "「{cell}」を{group}に作成 — ここに集めました",
   "activity.removed": "「{cell}」を削除しました",
   "activity.pasted.one": "{count}個のタイルを貼り付けました",
   "activity.pasted.other": "{count}個のタイルを貼り付けました",
@@ -2557,7 +2558,9 @@
   "keymap.quick-menu": "長押しでクイックメニュー — 方向をはじき、離して選ぶ",
   "keymap.hexagons-once": "次の移動はデフォルトビューを飛ばして六角形で開きます",
   "view.hexagons-once.armed": "次の移動は六角形で開きます",
-  "view.hexagons-once.disarmed": "デフォルトビューに戻しました",
+  "view.hexagons-once.cue": "六角形",
+  "view.hexagons-once.replica": "次の移動でこのサイトのあなたのレプリカを開きます",
+  "view.hexagons-once.replica-now": "これはあなたのサイトのレプリカです",
   "hive.empty.title": "ハイブはまだ空です",
   "hive.empty.body": "ここに置くものはすべてタイルになります — メモ、写真、ページ、プロジェクトまで。最初のタイルに名前を付けるか、ミツバチに案内してもらいましょう。",
   "hive.empty.notice": "最初に残したいものを追加しましょう。",

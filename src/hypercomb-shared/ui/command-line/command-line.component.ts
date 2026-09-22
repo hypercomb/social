@@ -21,7 +21,8 @@ import {
   REMOTE_SUBMIT, canonicalVerbOf,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type RemoteSubmitAction,
   admitMachineCall, spokenEntry, currentMachineGrant, type AdmissionEntry,
-  isReservedPoolWord,
+  isReservedPoolWord, CANONICAL_REFERENCE_SERVICE_KEY,
+  type PlaceCanonicalReferenceOptions,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
@@ -4121,15 +4122,37 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // — each affected ancestor commits exactly once with the union of
     // changes. The leaf event still drives UI fade-in via cell:added,
     // marked `viaUpdate: true` so the per-event commit listener skips it.
-    const baseSegments = (this.lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
+    const standing = (this.lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
+
+    // WHERE THE TILE IS MADE — not always where you stand. Behind a doorway
+    // it is made at the reference's target; on a holder (a page of references
+    // gathered from one group) it is made IN the group and the holder gathers
+    // it as a reference, so `bob` typed on `friends` is one of the people.
+    // hypercomb-essentials/src/commands/create-landing.ts. No reference door
+    // loaded = the old answer: here.
+    const references = (window as unknown as { ioc: { get(key: string): unknown } }).ioc.get(
+      CANONICAL_REFERENCE_SERVICE_KEY,
+    ) as {
+      landing?: (standing: readonly string[], parts: readonly string[]) => Promise<{
+        base: readonly string[]
+        parts: readonly string[]
+        gather: PlaceCanonicalReferenceOptions | null
+      }>
+      place?: (options: PlaceCanonicalReferenceOptions) => Promise<string | null>
+    } | undefined
+    const landing = await references?.landing?.(standing, parts).catch(() => null) ?? null
+    const baseSegments = [...(landing?.base ?? standing)]
+    const made = [...(landing?.parts ?? parts)]
+    const moved = baseSegments.join('/') !== standing.join('/')
+
     const events: { cell: string; segments: string[] }[] = []
     const accumulated: string[] = [...baseSegments]
-    for (const part of parts) {
+    for (const part of made) {
       events.push({ cell: part, segments: accumulated.slice() })
       accumulated.push(part)
     }
 
-    const leafCell = parts[parts.length - 1]
+    const leafCell = made[made.length - 1]
     const armed = this.armedResource()
 
     const committer = (window as unknown as { ioc: { get(key: string): unknown } }).ioc.get(
@@ -4173,8 +4196,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       await committer.importTree(updates)
     }
 
+    // The holder gathers what was just made in its group — after the commit,
+    // because a reference must point at a tile that exists.
+    if (landing?.gather) {
+      await references?.place?.(landing.gather)
+      EffectBus.emit('activity:log', {
+        message: this.#utteranceText('activity.gathered', `made "{cell}" in {group} — gathered here`)
+          .replace('{cell}', landing.gather.name)
+          .replace('{group}', baseSegments[baseSegments.length - 1] ?? ''),
+        icon: '⬡',
+      })
+    }
+
     if (armed) {
       EffectBus.emit('cell:attach-resource', {
+        // Made elsewhere: the picture belongs where the tile was made.
+        ...(moved ? { segments: [...baseSegments, ...made.slice(0, -1)] } : {}),
         cell: leafCell,
         largeSig: armed.largeSig,
         smallPointSig: armed.smallPointSig,
@@ -4190,8 +4227,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.requestSynchronize()
 
     if (navigateAfterCreate) {
-      const baseSegments = this.navigation.segmentsRaw()
-      const target = [...baseSegments, ...parts]
+      const target = moved ? [...baseSegments, ...made] : [...this.navigation.segmentsRaw(), ...parts]
       this.navigation.goRaw(target)
       this.clear()
     } else if (parts.length > 1) {

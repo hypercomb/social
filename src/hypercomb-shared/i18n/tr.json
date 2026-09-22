@@ -1,5 +1,6 @@
 {
   "activity.added": "”{cell}” eklendi",
+  "activity.gathered": "\"{cell}\", {group} içinde oluşturuldu — burada toplandı",
   "activity.removed": "”{cell}” kaldırıldı",
   "activity.pasted.one": "{count} döşeme yapıştırıldı",
   "activity.pasted.other": "{count} döşeme yapıştırıldı",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "Hızlı menü için basılı tut — bir yöne fiske at, seçmek için bırak",
   "keymap.hexagons-once": "Sonraki gezinme varsayılan görünümü atlayıp altıgen olarak açılır",
   "view.hexagons-once.armed": "Sonraki adım altıgen olarak açılır",
-  "view.hexagons-once.disarmed": "Varsayılan görünümler geri yüklendi",
+  "view.hexagons-once.cue": "altıgenler",
+  "view.hexagons-once.replica": "Sonraki adım bu sitenin kopyanı açar",
+  "view.hexagons-once.replica-now": "Bu, sitenin senin kopyan",
   "hive.empty.title": "Kovanın boş",
   "hive.empty.body": "Burada sakladığın her şey döşeme olarak yaşar — notlar, resimler, sayfalar, koca projeler. İlkine ad ver ya da bırak arı seni gezdirsin.",
   "hive.empty.notice": "Saklamak istediğin ilk şeyi ekle.",

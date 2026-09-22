@@ -1,5 +1,6 @@
 {
   "activity.added": "se añadió \"{cell}\"",
+  "activity.gathered": "\"{cell}\" creado en {group} — reunido aquí",
   "activity.removed": "se eliminó \"{cell}\"",
   "activity.pasted.one": "se pegó {count} mosaico",
   "activity.pasted.other": "se pegaron {count} mosaicos",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "Mantén pulsado para el menú rápido — lanza en una dirección y suelta para elegir",
   "keymap.hexagons-once": "La siguiente navegación abre como hexágonos, sin la vista predeterminada",
   "view.hexagons-once.armed": "El siguiente paso abre como hexágonos",
-  "view.hexagons-once.disarmed": "Vistas predeterminadas restauradas",
+  "view.hexagons-once.cue": "hexágonos",
+  "view.hexagons-once.replica": "El siguiente paso abre tu réplica de este sitio",
+  "view.hexagons-once.replica-now": "Esta es tu réplica del sitio",
   "hive.empty.title": "Tu colmena está vacía",
   "hive.empty.body": "Todo lo que guardas aquí vive como un mosaico — notas, imágenes, páginas, proyectos enteros. Nombra el primero, o deja que la abeja te lo enseñe.",
   "hive.empty.notice": "Añade la primera cosa que quieras guardar.",

@@ -46,6 +46,20 @@ describe('activationAuthority', () => {
     expect(stranger.ok).toBe(false)
   })
 
+  it('answers the floor before an attester the old package never had', async () => {
+    // A move cut short leaves the head's modules in the pool, and an install
+    // with no bag loads them: an attester is present that is not the package's.
+    const installed = 'c'.repeat(64)
+    const no = attesterSaying({ ok: false, reason: 'not-named' })
+    expect(await activationAuthority({ packageSig: SIG, zone: SEED, self: 'hypercomb.io', installed, attester: no, floor: true }))
+      .toEqual({ ok: true, by: 'floor' })
+    expect(no.attest).not.toHaveBeenCalled()
+    // A stranger still answers to the attester, floor or not.
+    const stranger = await activationAuthority({ packageSig: SIG, zone: 'evil.example', self: 'hypercomb.io', installed, attester: no, floor: true })
+    expect(stranger.ok).toBe(false)
+    expect(no.attest).toHaveBeenCalledTimes(1)
+  })
+
   it('fails closed when no attester is loaded', async () => {
     const verdict = await activationAuthority({ packageSig: SIG, zone: 'friend.example', self: 'hypercomb.io', installed: 'c'.repeat(64) })
     expect(verdict).toMatchObject({ ok: false })

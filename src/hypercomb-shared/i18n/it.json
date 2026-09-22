@@ -1,5 +1,6 @@
 {
   "activity.added": "aggiunto \"{cell}\"",
+  "activity.gathered": "\"{cell}\" creato in {group} — raccolto qui",
   "activity.removed": "rimosso \"{cell}\"",
   "activity.pasted.one": "incollata {count} tessera",
   "activity.pasted.other": "incollate {count} tessere",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "Tieni premuto per il menu rapido — scatta in una direzione, rilascia per scegliere",
   "keymap.hexagons-once": "La prossima navigazione si apre come esagoni, saltando la vista predefinita",
   "view.hexagons-once.armed": "Il prossimo passo si apre come esagoni",
-  "view.hexagons-once.disarmed": "Viste predefinite ripristinate",
+  "view.hexagons-once.cue": "esagoni",
+  "view.hexagons-once.replica": "Il prossimo passo apre la tua replica di questo sito",
+  "view.hexagons-once.replica-now": "Questa è la tua replica del sito",
   "hive.empty.title": "Il tuo alveare è vuoto",
   "hive.empty.body": "Tutto ciò che conservi qui vive come tessera — note, immagini, pagine, interi progetti. Nomina la tua prima, o lascia che l'ape ti faccia da guida.",
   "hive.empty.notice": "Aggiungi la prima cosa che vuoi conservare.",

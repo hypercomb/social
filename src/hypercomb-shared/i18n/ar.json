@@ -1,5 +1,6 @@
 {
   "activity.added": "تمت إضافة \"{cell}\"",
+  "activity.gathered": "أُنشئ \"{cell}\" في {group} — وأُضيف هنا",
   "activity.removed": "تمت إزالة \"{cell}\"",
   "activity.pasted.one": "تم لصق {count} بلاطة",
   "activity.pasted.other": "تم لصق {count} بلاطات",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "اضغط مع الاستمرار لفتح القائمة السريعة — انفض باتجاه، ثم أفلت للاختيار",
   "keymap.hexagons-once": "التنقل التالي يفتح كسداسيات متجاوزًا العرض الافتراضي",
   "view.hexagons-once.armed": "الخطوة التالية تفتح كسداسيات",
-  "view.hexagons-once.disarmed": "تمت استعادة العروض الافتراضية",
+  "view.hexagons-once.cue": "سداسيات",
+  "view.hexagons-once.replica": "الخطوة التالية تفتح نسختك المتماثلة من هذا الموقع",
+  "view.hexagons-once.replica-now": "هذه نسختك المتماثلة من الموقع",
   "hive.empty.title": "خليتك فارغة",
   "hive.empty.body": "كل ما تحتفظ به هنا يعيش كبلاطة — ملاحظات وصور وصفحات ومشاريع كاملة. سمِّ أولى بلاطاتك، أو دع النحلة تأخذك في جولة.",
   "hive.empty.notice": "أضف أول شيء تريد الاحتفاظ به.",

@@ -1,5 +1,6 @@
 {
   "activity.added": "adicionou \"{cell}\"",
+  "activity.gathered": "\"{cell}\" criado em {group} — reunido aqui",
   "activity.removed": "removeu \"{cell}\"",
   "activity.pasted.one": "colou {count} bloco",
   "activity.pasted.other": "colou {count} blocos",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "Segure para o menu rápido — lance numa direção e solte para escolher",
   "keymap.hexagons-once": "A próxima navegação abre como hexágonos, ignorando a vista padrão",
   "view.hexagons-once.armed": "O próximo passo abre como hexágonos",
-  "view.hexagons-once.disarmed": "Vistas padrão restauradas",
+  "view.hexagons-once.cue": "hexágonos",
+  "view.hexagons-once.replica": "O próximo passo abre a sua réplica deste site",
+  "view.hexagons-once.replica-now": "Esta é a sua réplica do site",
   "hive.empty.title": "Sua colmeia está vazia",
   "hive.empty.body": "Tudo que você guarda aqui vive como um bloco — notas, imagens, páginas, projetos inteiros. Nomeie o primeiro, ou deixe a abelha te mostrar tudo.",
   "hive.empty.notice": "Adicione a primeira coisa que você quer guardar.",

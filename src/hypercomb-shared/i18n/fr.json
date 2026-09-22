@@ -1,5 +1,6 @@
 {
   "activity.added": "ajouté \"{cell}\"",
+  "activity.gathered": "« {cell} » créé dans {group} — rassemblé ici",
   "activity.removed": "supprimé \"{cell}\"",
   "activity.pasted.one": "collé {count} tuile",
   "activity.pasted.other": "collé {count} tuiles",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "Maintenir pour le menu rapide — donnez une direction, relâchez pour choisir",
   "keymap.hexagons-once": "La prochaine navigation s’ouvre en hexagones, sans la vue par défaut",
   "view.hexagons-once.armed": "La prochaine étape s’ouvre en hexagones",
-  "view.hexagons-once.disarmed": "Vues par défaut rétablies",
+  "view.hexagons-once.cue": "hexagones",
+  "view.hexagons-once.replica": "La prochaine étape ouvre ta réplique de ce site",
+  "view.hexagons-once.replica-now": "Voici ta réplique du site",
   "hive.empty.title": "Votre ruche est vide",
   "hive.empty.body": "Tout ce que vous gardez ici vit sous forme de tuile — notes, images, pages, projets entiers. Nommez la première, ou laissez l'abeille vous faire visiter.",
   "hive.empty.notice": "Ajoutez la première chose que vous voulez garder.",

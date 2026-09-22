@@ -1,5 +1,6 @@
 {
   "activity.added": "”{cell}” जोड़ा गया",
+  "activity.gathered": "\"{cell}\" {group} में बनाया गया — यहाँ जोड़ा गया",
   "activity.removed": "”{cell}” हटाया गया",
   "activity.pasted.one": "{count} टाइल चिपकाई गई",
   "activity.pasted.other": "{count} टाइलें चिपकाई गईं",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "क्विक मेन्यू के लिए दबाए रखें — किसी दिशा में झटका दें, चुनने के लिए छोड़ें",
   "keymap.hexagons-once": "अगला नेविगेशन डिफ़ॉल्ट व्यू छोड़कर षट्भुज के रूप में खुलेगा",
   "view.hexagons-once.armed": "अगला कदम षट्भुज के रूप में खुलेगा",
-  "view.hexagons-once.disarmed": "डिफ़ॉल्ट व्यू बहाल",
+  "view.hexagons-once.cue": "षट्भुज",
+  "view.hexagons-once.replica": "अगला कदम इस साइट की आपकी प्रतिकृति खोलेगा",
+  "view.hexagons-once.replica-now": "यह साइट की आपकी प्रतिकृति है",
   "hive.empty.title": "आपका हाइव खाली है",
   "hive.empty.body": "यहाँ आप जो कुछ रखते हैं वह टाइल बनकर रहता है — नोट्स, तस्वीरें, पेज, पूरी परियोजनाएँ। अपनी पहली टाइल को नाम दें, या मधुमक्खी से घुमा-फिराकर दिखवाएँ।",
   "hive.empty.notice": "जो पहली चीज़ रखना चाहते हैं उसे जोड़ें।",

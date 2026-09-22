@@ -29,6 +29,17 @@ describe('planFloor', () => {
     expect(planFloor({ installed: HEAD.packageSig, doorAnswered: false, head: HEAD, reloadedFor: null }).act).toBe(false)
   })
 
+  it('moves an install known only by the old stamp even when something answers the door', () => {
+    // An interrupted move leaves the head's dependencies in the pool; an install
+    // that old has no bag, so they load, and their Packages window answers a door
+    // the package itself never had.
+    expect(planFloor({ installed: OLD, legacyRecord: true, doorAnswered: true, head: HEAD, reloadedFor: null }))
+      .toEqual({ act: true, from: OLD, to: HEAD.packageSig, zone: 'jwize.com' })
+    expect(planFloor({ installed: OLD, legacyRecord: true, doorAnswered: null, head: HEAD, reloadedFor: null }).act).toBe(true)
+    expect(planFloor({ installed: HEAD.packageSig, legacyRecord: true, doorAnswered: true, head: HEAD, reloadedFor: null }).act).toBe(false)
+    expect(planFloor({ installed: OLD, legacyRecord: true, doorAnswered: true, head: HEAD, reloadedFor: HEAD.packageSig }).act).toBe(false)
+  })
+
   it('moves once per session: a reload that did not stick is not retried', () => {
     expect(planFloor({ installed: OLD, doorAnswered: false, head: HEAD, reloadedFor: HEAD.packageSig }).act).toBe(false)
   })

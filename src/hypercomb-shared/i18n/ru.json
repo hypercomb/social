@@ -1,5 +1,6 @@
 {
   "activity.added": "добавлено \"{cell}\"",
+  "activity.gathered": "«{cell}» создан в {group} — собран здесь",
   "activity.removed": "удалено \"{cell}\"",
   "activity.pasted.one": "вставлена {count} плитка",
   "activity.pasted.other": "вставлено {count} плиток",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "Удерживайте для быстрого меню — смахните в сторону и отпустите, чтобы выбрать",
   "keymap.hexagons-once": "Следующий переход откроется шестиугольниками, минуя вид по умолчанию",
   "view.hexagons-once.armed": "Следующий шаг откроется шестиугольниками",
-  "view.hexagons-once.disarmed": "Виды по умолчанию восстановлены",
+  "view.hexagons-once.cue": "шестиугольники",
+  "view.hexagons-once.replica": "Следующий шаг откроет вашу реплику этого сайта",
+  "view.hexagons-once.replica-now": "Это ваша реплика сайта",
   "hive.empty.title": "Ваш улей пуст",
   "hive.empty.body": "Всё, что вы здесь храните, живёт плиткой — заметки, изображения, страницы, целые проекты. Назовите первую или позвольте пчеле всё показать.",
   "hive.empty.notice": "Добавьте первое, что хотите сохранить.",

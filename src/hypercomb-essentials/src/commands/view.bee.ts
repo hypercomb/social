@@ -127,7 +127,7 @@ export class ViewBee extends Worker {
   public override description =
     'ViewBee — surfaces available view behaviors (e.g. website) as command-line toggles and flips the global render surface.'
 
-  protected override emits: string[] = ['view-toggles:changed', 'view:arrival']
+  protected override emits: string[] = ['view-toggles:changed', 'view:arrival', 'navigation:hexagons-once']
 
   /** Microtask coalescing — a single navigation fires several triggers
    *  (lineage change + render:cell-count + decorations:changed); collapse
@@ -145,6 +145,12 @@ export class ViewBee extends Worker {
    *  still up when we land somewhere new": the participant's choice rides
    *  along on a walk, but a PLACE's claim ends where the place does. */
   #autoOpenedView = ''
+
+  /** ONE-SHOT HEXAGONS — armed by the `h` key (`navigation.hexagonsOnce`).
+   *  The next arrival at a NEW address (in or out) ignores every default
+   *  and opens as hexagons, then disarms. Arriving is what consumes it, so
+   *  arming while standing still changes nothing here. */
+  #hexagonsOnce = false
 
   /** Cancel handle for a release that is waiting on the destination's
    *  paint (see #releaseWhenPainted). Non-null while one is armed. */
@@ -237,6 +243,15 @@ export class ViewBee extends Worker {
     })
     EffectBus.on('feature:restored', () => this.#schedule())
 
+    // `h` — the next navigation lands on the hexagons even under a default
+    // view. A tap toggles; holding it while clicking works because the
+    // keydown arms before the click lands (auto-repeat is ignored so a held
+    // key never flips it back off).
+    EffectBus.on<{ cmd?: string; event?: KeyboardEvent | null }>('keymap:invoke', (payload) => {
+      if (payload?.cmd !== 'navigation.hexagonsOnce' || payload.event?.repeat) return
+      this.#hexagonsKey()
+    })
+
     // The GLOBAL roster (behavior-enablement lens). A behavior flipped off
     // there goes dormant everywhere at once: drop its toggle, and if it owns
     // the current surface, release it — same transition as feature:hidden.
@@ -315,6 +330,35 @@ export class ViewBee extends Worker {
     const segments = (lineage?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
     return this.#autoOpenedKey === segments.join(SEGMENT_SEPARATOR)
+  }
+
+  /** The `h` press. Never refused, a deployed site included: a visitor has
+   *  already REPLICATED the layers they are looking at, so the hexagons are
+   *  simply their copy of the hive — hiding it would protect nothing. */
+  #hexagonsKey(): void {
+    // IN A VIEW, `h` shows the hexagons NOW — the same as Escape. Arming
+    // is for walking; standing in a view, the grid is one press away.
+    const vmNow = get<ViewModeLike>('@hypercomb.social/ViewMode')
+    if (vmNow && vmNow.mode !== DEFAULT_SURFACE) {
+      this.#pendingRelease?.()
+      vmNow.setMode(DEFAULT_SURFACE)
+      if (this.#hexagonsOnce) {
+        this.#hexagonsOnce = false
+        EffectBus.emit('navigation:hexagons-once', { armed: false })
+      }
+      if (isPublishedVisitorShell()) {
+        const i18n = get<I18nProvider>(I18N_IOC_KEY)
+        EffectBus.emitTransient('toast:show', {
+          type: 'info',
+          title: i18n?.t('view.hexagons-once.replica-now') ?? 'This is your replica of the site',
+        })
+      }
+      return
+    }
+    this.#hexagonsOnce = !this.#hexagonsOnce
+    // The hive answers like the cut mode does — a frame on the screen and
+    // a rim + pill on the hovered tile (TileOverlayDrone owns both).
+    EffectBus.emit('navigation:hexagons-once', { armed: this.#hexagonsOnce })
   }
 
   #schedule(): void {
@@ -558,6 +602,18 @@ export class ViewBee extends Worker {
     // decorations, ViewMode change, enablement flips), and a second pass must
     // not undo an Escape back to the hexagons.
     this.#autoOpenedKey = key
+    // ONE-SHOT HEXAGONS: this arrival lands on the grid whatever the place
+    // (or a surface riding along) would open as. Consumed here, so the next
+    // navigation is back to normal. The surface releases only once the
+    // destination is painted, the same no-glitch rule as a walk-out.
+    if (this.#hexagonsOnce) {
+      this.#hexagonsOnce = false
+      EffectBus.emit('navigation:hexagons-once', { armed: false })
+      if (vm.mode !== DEFAULT_SURFACE) this.#releaseWhenPainted(vm, vm.mode)
+      this.#autoOpenedView = ''
+      EffectBus.emit('view:arrival', { segments: [...segments], view: '' })
+      return
+    }
     const available = !!want && toggles.some(t => t.view === want)
     // Whose is the surface that's up? A view the PARTICIPANT chose rides
     // along on a walk — never yank them out of it into the one the layer

@@ -1,5 +1,6 @@
 {
   "activity.added": "已添加「{cell}」",
+  "activity.gathered": "已在{group}中创建「{cell}」— 已收集到这里",
   "activity.removed": "已移除「{cell}」",
   "activity.pasted.one": "已粘贴 {count} 个磁贴",
   "activity.pasted.other": "已粘贴 {count} 个磁贴",
@@ -2242,7 +2243,9 @@
   "keymap.quick-menu": "按住打开快捷菜单 — 朝一个方向轻拨，松手即可选择",
   "keymap.hexagons-once": "下一次导航跳过默认视图，以六边形打开",
   "view.hexagons-once.armed": "下一步以六边形打开",
-  "view.hexagons-once.disarmed": "已恢复默认视图",
+  "view.hexagons-once.cue": "六边形",
+  "view.hexagons-once.replica": "下一步打开你对此站点的副本",
+  "view.hexagons-once.replica-now": "这是你的站点副本",
   "hive.empty.title": "你的蜂巢是空的",
   "hive.empty.body": "你在这里保存的一切都以磁贴的形式存在 — 笔记、图片、页面、整个项目。为你的第一个磁贴命名，或者让小蜜蜂带你转一圈。",
   "hive.empty.notice": "添加你想保存的第一样东西。",

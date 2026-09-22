@@ -614,9 +614,8 @@ const SANDBOX_LABEL_RE = /^try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?$/
 const HOST_PACKAGES_MEANING = 'host:packages'
 
 /** The approved publisher whose signed index names this sandbox, and its root. */
-async function sandboxRoot(env, site, selected) {
+async function sandboxRoot(env, site, selected, read = indexReader(env)) {
   const channel = `install:${site.lineage}`
-  const read = indexReader(env)
   const publishers = selected ? site.publishers.filter((p) => p.pubkey === selected) : site.publishers
   for (const publisher of publishers) {
     const index = await read(publisher.pubkey)
@@ -705,6 +704,57 @@ async function assessmentsOf(env, root, read) {
     out.push({ pubkey, record, verdict: ASSESS_VERDICTS.has(body.verdict) ? body.verdict : 'unclear', at: Number(index.createdAt || 0) })
   }
   return out
+}
+
+// ── the trials on a zone (documentation/module-sandbox.md, "The communal build")
+//
+// EVERY OPEN TRIAL, LISTED FROM WHAT ITS DOOR SERVES. A trial is an
+// `install:try-<change>` key in the verified index of a publisher the zone
+// approves; its door is `try-<change>.<zone>`. Each candidate goes through
+// resolveSite and sandboxRoot — the two reads the door itself makes — so the
+// listing never names a door that answers "nothing here", and where two
+// publishers name one trial it lists the one the door serves. Beside each: the
+// source files its change touched and the paths it turned off (the change
+// record), when it was committed, and the host AI's verdict. People's
+// assessments stay at each door's /site.json, re-verified as they are read.
+const TRIALS_SHOWN = 100
+
+async function serveTrials(request, env, zone) {
+  const url = new URL(request.url)
+  const bindings = siteBindings(env)
+  const trials = []
+  if (wildcardZones(bindings).includes(zone)) {
+    const read = indexReader(env)
+    const listed = new Set()
+    const paths = (list) => (Array.isArray(list) ? list : []).filter((path) => typeof path === 'string' && path).slice(0, 20)
+    for (const publisher of bindings[zone].publishers) {
+      const index = await read(publisher.pubkey)
+      for (const key of Object.keys(index?.roots ?? {})) {
+        const name = key.startsWith('install:') ? key.slice('install:'.length) : ''
+        if (!SANDBOX_LABEL_RE.test(name) || listed.has(name) || trials.length >= TRIALS_SHOWN) continue
+        const resolved = resolveSite(env, `${name}.${zone}`)
+        if (!resolved.implicit || resolved.zone !== zone) continue
+        const found = await sandboxRoot(env, resolved.site, '', read)
+        if (!found) continue
+        listed.add(name)
+        const [change, review] = await Promise.all([
+          found.change ? heapRecord(env, found.change) : null,
+          found.review ? heapRecord(env, found.review) : null,
+        ])
+        trials.push({
+          name, door: `${url.protocol}//${name}.${zone}${url.port ? ':' + url.port : ''}`,
+          package: found.root, pubkey: found.pubkey, publisher: found.label,
+          at: Number.isFinite(change?.at) ? change.at : null,
+          sections: paths(Array.isArray(change?.changes) ? change.changes.map((file) => file?.section) : []),
+          off: paths(change?.off),
+          ...(found.change ? { change: found.change } : {}),
+          ...(found.review ? { review: found.review, reviewVerdict: ASSESS_VERDICTS.has(review?.verdict) ? review.verdict : 'unclear' } : {}),
+        })
+      }
+    }
+  }
+  trials.sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+  return json(200, { zone, trials }, { 'Cache-Control': 'no-store' })
 }
 
 /** The participant shell, fetched from where it is deployed. https only, but
@@ -1561,7 +1611,7 @@ export default {
     // and lists the hives switched on here from /publications.json. Every
     // machine read stays on this worker — flat sigs and pools are answered
     // above, the index and the ledger here — so the card reads the one heap.
-    if (site?.frontDoor && (method === 'GET' || method === 'HEAD') && pathname !== '/publications.json') {
+    if (site?.frontDoor && (method === 'GET' || method === 'HEAD') && pathname !== '/publications.json' && pathname !== '/trials.json') {
       return serveFrontDoor(request, env)
     }
 
@@ -1569,6 +1619,8 @@ export default {
     // Machine endpoints expose only signed coordinates; EVERY human route,
     // including /revisions, receives the shared read-only engine.
     if (site && (method === 'GET' || method === 'HEAD')) {
+      // Every open trial on this zone — from its apex or any door on it.
+      if (pathname === '/trials.json') return serveTrials(request, env, implicit ? siteZone : requestUrl.hostname)
       // A `try-` name under a zone is a sandbox door, not a website.
       if (implicit && SANDBOX_LABEL_RE.test(site.lineage)) return serveSandbox(request, env, site, siteZone)
       if (pathname === '/site.json') return serveSiteDescriptor(request, env, site)

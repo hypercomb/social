@@ -29,11 +29,13 @@ import {
 } from '@hypercomb/core'
 import {
   childLayerOf,
+  childNamesOf,
   resolveLayerAt,
   type PlacementHistory,
   type PlacementLayer,
 } from '../history/layer-placement.js'
-import { referenceTargetAt } from './decoration-kind-index.js'
+import { ensureDecorationsIndexed, referenceTargetAt } from './decoration-kind-index.js'
+import { createLanding, type CreateLanding } from './create-landing.js'
 
 /** Colon-scoped: a tile name can never produce it. */
 const CANONICAL_VARIANTS_MEANING = 'canonical:variants'
@@ -181,6 +183,23 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
       cell: name, segments: [...parentSegments], viaUpdate: true, reference: true,
     })
     return name
+  }
+
+  /** Where tiles typed on `standing` are actually made — behind a doorway at
+   *  its target, on a holder in the group it gathers from (create-landing.ts).
+   *  The shell's create path asks this before it commits anything. */
+  async landing(standing: readonly string[], parts: readonly string[]): Promise<CreateLanding> {
+    const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    if (!history) return { base: [...standing], parts: [...parts], gather: null }
+    return createLanding(standing, parts, {
+      targetAt: async segments => {
+        const label = segments[segments.length - 1]
+        if (label) await ensureDecorationsIndexed([label], segments.slice(0, -1))
+        return referenceTargetAt(segments)
+      },
+      childNames: async page => childNamesOf(history, await resolveLayerAt(history, lineage?.domain, page)),
+    })
   }
 }
 
