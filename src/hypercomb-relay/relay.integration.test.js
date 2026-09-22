@@ -184,6 +184,11 @@ test('a replicated package is discoverable and can be pulled and published by an
     const hidden = await fetch(`${firstBase}/${privateBag}/`)
     assert.equal(hidden.status, 404)
     assert.equal(await hidden.text(), await (await fetch(`${firstBase}/${'f'.repeat(64)}/`)).text())
+    // and a guessed member name reads exactly like one under a missing dir
+    const marker = await fetch(`${firstBase}/${privateBag}/00000000`)
+    const missing = await fetch(`${firstBase}/${'f'.repeat(64)}/00000000`)
+    assert.equal(marker.status, missing.status)
+    assert.notEqual(await marker.text(), rootSig)
     assert.equal((await fetch(`${firstBase}/${leafSig}`, { method: 'HEAD' })).status, 200)
 
     // The first relay is now the source. Its ordinary signature endpoints

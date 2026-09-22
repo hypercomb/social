@@ -915,6 +915,17 @@ function tryServeContent(req, res) {
     // Legacy typed path (/__bees__/<sig>.js, /__layers__/<sig>.json, …),
     // kept during the migration to bare-sig URLs. Resolve under
     // contentDir, then verify the result is still inside it.
+    //
+    // A MEMBER of a directory that is not a public pool (a history bag's
+    // 00000000 marker, a molecule pool's entry) is read exactly as a path that
+    // does not exist: the listing is gated above, and a guessable member name
+    // must not be a second way in.
+    const memberMatch = urlPath.match(/^\/([0-9a-f]{64})\/[^/]+$/)
+    if (memberMatch && !PUBLIC_POOL_ADDRESSES.has(memberMatch[1])) {
+      let isDir = false
+      try { isDir = statSync(join(resolve(cfg.contentDir), memberMatch[1])).isDirectory() } catch { /* absent */ }
+      if (isDir) return false
+    }
     resolved = resolve(cfg.contentDir, '.' + urlPath)
     const rootDir = resolve(cfg.contentDir)
     if (!resolved.startsWith(rootDir + sep) && resolved !== rootDir) return false
