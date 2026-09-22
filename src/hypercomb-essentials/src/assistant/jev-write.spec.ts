@@ -3,13 +3,15 @@
 // every doctrine section; it reaches as editing; Jev never sees the code.
 
 import { describe, expect, it } from 'vitest'
-import { JEV_CHOICE_GATES, JEV_ROW_QUESTIONS, WRITE_REACH, isChangeRow, jevInput, jevQuestions, jevResult, jevState } from './jev-decision.js'
+import { JEV_CHOICE_GATES, JEV_ROW_QUESTIONS, WRITE_REACH, isChangeRow, isDoctrineWrite, jevInput, jevQuestions, jevResult, jevState } from './jev-decision.js'
+import { jevUnseen } from './jev-decision.service.js'
 
 const SIG = 'a'.repeat(64)
-const LINE = `write ${SIG} src/games/solomon/labyrinth.ts`
+/** The block's header exactly as the worker wrote it. */
+const LINE = `${SIG} src/games/solomon/labyrinth.ts`
 const doctrine = ['### Nothing is deleted\nHide first; delete second.', '### The core rule\nContent is addressed by signature.']
 const rows = [
-  { id: 'w', kind: 'write', label: 'Write src/games/solomon/labyrinth.ts', lines: [LINE], why: 'rooms must start fresh' },
+  { id: 'w', kind: 'write', label: 'src/games/solomon/labyrinth.ts', lines: [LINE], why: 'rooms must start fresh' },
   { id: 'a', kind: 'answer', label: 'Answer now' },
 ]
 const input = jevInput({ request: 'Make labyrinth rooms start fresh', doctrine, evidence: [`// src/games/solomon/labyrinth.ts\nvar rooms = "remembered";`], rows })
@@ -28,9 +30,12 @@ describe('a write row', () => {
     expect(input.rows[0]!.reach).toBe(WRITE_REACH)
     expect(WRITE_REACH).toBe('editing')
     expect(() => jevInput({ request: 'r', doctrine, evidence: ['e'], rows: [{ id: 'w', kind: 'write', label: 'W', lines: ['write the file'] }] }))
-      .toThrow('A write row carries one line: write <module signature> <src/path.ts>')
+      .toThrow('A write row carries one line: the write block header')
     expect(() => jevInput({ request: 'r', doctrine, evidence: ['e'], rows: [{ id: 'w', kind: 'write', label: 'W', lines: [LINE], reach: 'additive' }] }))
-      .toThrow('Only a do row carries a reach')
+      .toThrow('A write row reaches as editing')
+    // The row exactly as the chat hands it over: the hive's own reach on it (2026-09-22,
+    // the live run: the chat marked the write editing and the service refused the row).
+    expect(jevInput({ request: 'r', doctrine, evidence: ['e'], rows: [{ id: 'w', kind: 'write', label: 'W', lines: [LINE], reach: 'editing' }] }).rows[0]!.reach).toBe('editing')
   })
 
   it('is asked fit, overreach and grounding, plus one question per doctrine section; the code never travels', () => {
@@ -44,7 +49,7 @@ describe('a write row', () => {
   it('runs without review when every gate passes and Jev is sure past the editing gate', () => {
     const result = jevResult(response(), input)
     expect(result.plan).toEqual({ kind: 'do', row: 'w', review: false })
-    expect(result.reason).toContain('Jev chose Write src/games/solomon/labyrinth.ts')
+    expect(result.reason).toContain('Jev chose src/games/solomon/labyrinth.ts')
     expect(JEV_CHOICE_GATES.editing).toBe(0.85)
   })
 
@@ -58,5 +63,35 @@ describe('a write row', () => {
     const result = jevResult(response({ w_rule0: noul(0.98) }), input)
     expect(result.rejected).toEqual(['w'])
     expect(result.plan.kind).toBe('revise')
+  })
+
+  it('passes the source boundary: its line and label are the worker\'s own words', () => {
+    const block = ['```hypercomb-write', LINE, 'var rooms = "fresh";', '```'].join('\n')
+    const messages = [
+      { content: 'Make labyrinth rooms start fresh' },
+      { content: '// src/games/solomon/labyrinth.ts\nvar rooms = "remembered";' },
+      { content: `rooms must start fresh\n${block}` },
+    ]
+    // The table the hive builds from a write block holds the write row alone.
+    const written = jevInput({ request: 'Make labyrinth rooms start fresh', doctrine, evidence: ['// src/games/solomon/labyrinth.ts\nvar rooms = "remembered";'], rows: [rows[0]] })
+    expect(jevUnseen(written, { providerId: 'p', system: doctrine.join('\n\n'), messages })).toBeNull()
+  })
+})
+
+describe('a doctrine write', () => {
+  const doctrineInput = jevInput({
+    request: 'Loosen the nesting rule', doctrine, evidence: ['Nothing read yet.'],
+    rows: [{ id: 'w', kind: 'write', label: 'The rule', lines: ['doctrine The rule'] }, { id: 'a', kind: 'answer', label: 'Answer now' }],
+  })
+
+  it('is a write row whose header names the doctrine', () => {
+    expect(isDoctrineWrite(doctrineInput.rows[0]!)).toBe(true)
+    expect(isDoctrineWrite(input.rows[0]!)).toBe(false)
+  })
+
+  it('never runs on its own: every gate passing and Jev sure, the participant still reviews it', () => {
+    const result = jevResult(response({ w_grounded: noul(0.1) }), doctrineInput)
+    expect(result.plan).toEqual({ kind: 'do', row: 'w', review: true })
+    expect(result.reason).toContain('it changes the doctrine, so the participant always reviews it')
   })
 })

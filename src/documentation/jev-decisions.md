@@ -42,10 +42,18 @@ Fence `hypercomb-table` (`hypercomb-work-fence.ts`, kind `table`; replaces
   summary find code`). This is "finding information".
 - `do` — one to six behaviour sentences from the live vocabulary. This is
   "storing meta changes / organisation".
-- `write` — one module section written back (`hive-read-fence.md`, "Writing a
-  module"); `line` is `write <module signature> <src/path.ts>`. **The worker
+- `write` — one module section, or one doctrine section, written back
+  (`hive-read-fence.md`, "Writing a module"; `anatomy-context-need.md` §2a).
+  `line` is the block's header EXACTLY AS THE WORKER WROTE IT
+  (`<module signature> <src/path.ts>` or `doctrine <heading>`) and `label` is
+  what it names (the path, or the heading), so the source boundary finds both
+  in the worker's own message — a synthesized line was refused there, and
+  every write fell to the participant. **The worker
   never lists this row itself**: it sends the `hypercomb-write` block ALONE
   and the hive makes it a one-row write table (`jev-round.ts` `tableFor`).
+  **A doctrine write is never automatic** (`JEV_DOCTRINE_GATES`): Jev's answers
+  are shown and the participant always reviews it — the rules Jev judges by
+  are the participant's to change.
   Jev sees the header and the `why`, never the code — a section runs to
   hundreds of kilobytes and Jev's state to 24k, so the code is judged as the
   draft door already judges it, by running. Jev judges whether replacing
@@ -347,6 +355,8 @@ multiple questions together", "speculative fan-out"; OpenRouter cookbook
 *Jev-verified cascade*.
 
 ## 9. Outcomes
+
+**The real record (jwize's hive, read 2026-09-22 with `node scripts/jev-golden.cjs`, which now also prints outcomes by plan and turn timings).** 14 outcomes: the front door passed 11 times (the direct path never took a step) and stepped aside twice; the one table decision was deferred to the participant. 4 turns timed: judged turns a median 12.4 s with the first text at 12.4 s, one aside turn 23.8 s with first text at 1.6 s. No turn was timed with Jev off, so there is no baseline yet. Jev has not yet taken a step on its own in real use.
 
 Every decided round emits `jev:outcome`: ran, skipped, failed, answered,
 deferred to the participant, or refused; the front door adds passed (handed

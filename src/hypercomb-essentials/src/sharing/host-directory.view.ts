@@ -47,6 +47,7 @@ import {
   type WindowSession,
 } from '@hypercomb/core'
 import { hostZone } from './community-hosts.js'
+import { readInstallFollow } from './update-scout.service.js'
 
 export const HOST_DIRECTORY_SURFACE = 'hc-host-directory'
 const OWNER = '@diamondcoreprocessor.com/HostDirectoryView'
@@ -1079,7 +1080,7 @@ export class HostDirectoryElement extends HTMLElement {
     this.#error = ''
     this.#renderBody()
     try {
-      const outcome = await reach.install.acquire(next.root, this.#sources())
+      const outcome = await reach.install.acquire(next.root, [...new Set([...this.#sources(), ...this.#channelSources()])])
       if (!outcome.ok) { this.#error = outcome.error ?? 'package incomplete'; return }
       this.#restart()
     } catch (error) {
@@ -1165,6 +1166,16 @@ export class HostDirectoryElement extends HTMLElement {
     return [...new Set([this.#scope, ...this.#zones].filter(Boolean))]
   }
 
+  /** Where the followed channel's package is served: the carried hosts, and
+   *  the hosts the follow names. A package committed from inside a hive
+   *  (module commit) is uploaded to the host its signed pointer lives on,
+   *  which the participant need not carry. */
+  #channelSources(): string[] {
+    let follow: { hosts?: readonly string[] } | null = null
+    try { follow = readInstallFollow(localStorage) } catch { follow = null }
+    return [...new Set([...this.#zones, ...(follow?.hosts ?? []).map(zoneOf)].filter(Boolean))]
+  }
+
   #restart(): void {
     this.#restarting = true
     try { sessionStorage.setItem(REOPEN_KEY, JSON.stringify({ scope: this.#scope, at: this.#at })) } catch { /* opens fresh */ }
@@ -1185,10 +1196,11 @@ export class HostDirectoryElement extends HTMLElement {
       const trunk = this.#selection?.trunk ?? null
       const named = await this.#namedRoot(trunk)
       if (named && named !== trunk) {
-        if (this.#next?.root !== named) this.#next = await this.#tree(named, this.#zones)
+        const from = this.#channelSources()
+        if (this.#next?.root !== named) this.#next = await this.#tree(named, from)
         this.#moved = reach.recursive
-          ? new Set(await install.movedPaths(named, this.#zones).catch(() => []))
-          : trunk ? new Set(await install.movedUnits(trunk, named, this.#zones).catch(() => [])) : null
+          ? new Set(await install.movedPaths(named, from).catch(() => []))
+          : trunk ? new Set(await install.movedUnits(trunk, named, from).catch(() => [])) : null
       } else { this.#next = null; this.#moved = null }
       this.#render()
       // EVERY host's head, because the list is the union of them — each read

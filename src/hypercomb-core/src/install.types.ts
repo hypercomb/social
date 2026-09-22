@@ -150,6 +150,15 @@ export type ModuleCommitOutcome =
     readonly rootSig: string
     /** Its index in this host's `host:packages` pool. */
     readonly index: number
+    /** Every file the new package holds that the package it replaced did not:
+     *  the minted layers, the new root, and the drafted modules. These are
+     *  what a host must serve before followers are pointed at the root. */
+    readonly atoms: readonly string[]
+    /** Every file the new package holds — what a sandbox door serves whole. */
+    readonly files: readonly string[]
+    /** The draft paths the new package took, and the paths it no longer reaches. */
+    readonly drafts: readonly string[]
+    readonly off: readonly string[]
   }
   | { readonly ok: false; readonly error: string }
 
@@ -158,10 +167,16 @@ export interface ModuleDraftsProvider {
   list(): Promise<ModuleDraftInfo[]>
   /** Drop the draft at a path: the trunk's layer runs there again after a reload. */
   drop(path: string): Promise<{ ok: true } | { ok: false; error: string }>
-  /** COMMIT A DRAFT: the trunk re-minted with the draft's layer at its path
-   *  becomes a new package root, appended to this host's `host:packages`
-   *  pool under `label` and made the trunk here. Followers reach it once the
-   *  install channel is stamped — that is the caller's act (essentials
-   *  hive-pointer), because signing lives there. */
-  commit(path: string, label: string): Promise<ModuleCommitOutcome>
+  /** COMMIT WHAT RUNS HERE: the trunk re-minted with every draft at its path
+   *  and every path turned off left out, so the new root no longer reaches
+   *  it (nothing is deleted). It becomes a new package root, appended to this
+   *  host's `host:packages` pool under `label` and made the trunk here.
+   *  Followers reach it once its files are served and the install channel is
+   *  stamped — the caller's acts (essentials host-sync, hive-pointer),
+   *  because signing lives there. */
+  commit(label: string): Promise<ModuleCommitOutcome>
+  /** The paths this browser has turned off — what a commit leaves out. */
+  offPaths(): string[]
+  /** The bytes this store holds for a layer or module signature, or null. */
+  bytesOf(sig: string): Promise<Uint8Array | null>
 }

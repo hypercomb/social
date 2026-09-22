@@ -3,22 +3,22 @@
 // no network, no IoC.
 
 import { describe, expect, it } from 'vitest'
-import { setHiveRoot, type HiveIndexResult, type PutHiveResult } from './hive-pointer.js'
+import { clearHiveRoot, ownHiveRoot, setHiveRoot, type HiveIndexResult, type PutHiveResult } from './hive-pointer.js'
 
 const PUB = 'a'.repeat(64)
 const SIG = 'b'.repeat(64)
 const OTHER = 'c'.repeat(64)
 const HOST = 'content.example.com'
 
-type PutCall = { host: string; roots: Record<string, string> }
+type PutCall = { host: string; roots: Record<string, string>; replaces?: number }
 
 const harness = (read: HiveIndexResult) => {
   const puts: PutCall[] = []
   const deps = {
     publicKey: async () => PUB,
     fetchIndex: async (): Promise<HiveIndexResult> => read,
-    putManifest: async (host: string, roots: Record<string, string>): Promise<PutHiveResult> => {
-      puts.push({ host, roots })
+    putManifest: async (host: string, roots: Record<string, string>, _doors?: unknown, replaces?: number): Promise<PutHiveResult> => {
+      puts.push({ host, roots, ...(replaces ? { replaces } : {}) })
       return { ok: true, pubkey: PUB, createdAt: 1700000000 }
     },
   }
@@ -67,5 +67,36 @@ describe('setHiveRoot', () => {
     const { deps } = harness(verified({}))
     expect((await setHiveRoot(HOST, 'install:essentials', 'nope', deps)).reason).toBe('sig is not a 64-hex signature')
     expect((await setHiveRoot(HOST, 'install:essentials', SIG, { ...deps, publicKey: async () => null })).reason).toBe('no signer')
+  })
+})
+
+describe('clearHiveRoot — a sandbox withdrawn is unreachable, never deleted', () => {
+  it('takes exactly one key out of the verified roots, and leaves the rest', async () => {
+    const { deps, puts } = harness(verified({ 'install:try-fresh': SIG, 'install:essentials': OTHER, arkanoid: OTHER }))
+    const result = await clearHiveRoot(HOST, 'install:try-fresh', deps)
+    expect(result).toMatchObject({ ok: true, sig: SIG })
+    expect(puts).toEqual([{ host: HOST, roots: { 'install:essentials': OTHER, arkanoid: OTHER }, replaces: 1600000000 }])
+  })
+  it('no-ops on an absent key, and refuses an index it cannot trust', async () => {
+    const absent = harness(verified({ arkanoid: OTHER }))
+    expect((await clearHiveRoot(HOST, 'install:try-fresh', absent.deps)).reason).toBe('unchanged')
+    expect(absent.puts).toEqual([])
+    const forged = harness({ ok: false, reason: 'forged' } as HiveIndexResult)
+    expect((await clearHiveRoot(HOST, 'install:try-fresh', forged.deps)).ok).toBe(false)
+    expect(forged.puts).toEqual([])
+  })
+  it('ownHiveRoot reads one verified root, or null', async () => {
+    const { deps } = harness(verified({ 'install:try-fresh': SIG }))
+    expect(await ownHiveRoot(HOST, 'install:try-fresh', deps)).toBe(SIG)
+    expect(await ownHiveRoot(HOST, 'install:try-other', deps)).toBeNull()
+  })
+})
+
+describe('two writes in one second', () => {
+  it('every write names the index it replaces, so the next one is stamped newer', async () => {
+    const { deps, puts } = harness(verified({ 'install:try-fresh': SIG }))
+    await setHiveRoot(HOST, 'install:essentials', SIG, deps)
+    await clearHiveRoot(HOST, 'install:try-fresh', deps)
+    expect(puts.map(put => put.replaces)).toEqual([1600000000, 1600000000])
   })
 })

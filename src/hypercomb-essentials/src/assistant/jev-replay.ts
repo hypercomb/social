@@ -17,8 +17,8 @@
 // the report arrives as `jev:replay-result`.
 
 import { EffectBus } from '@hypercomb/core'
-import { jevInput, jevResult, type JevPlan, type JevRubric } from './jev-decision.js'
-import { jevOutcomes, type JevOutcome } from './jev-outcomes.js'
+import { JEV_RUBRIC, jevInput, jevResult, type JevPlan, type JevRubric } from './jev-decision.js'
+import { jevOutcomes, type JevOutcome, type JevSpeeds } from './jev-outcomes.js'
 
 export interface JevReplayCandidate extends JevRubric { readonly name: string }
 export interface JevReplayReport {
@@ -34,6 +34,13 @@ export interface JevReplayResult {
   readonly reports: readonly JevReplayReport[]
   /** Outcomes that could not be replayed, and why. */
   readonly skipped: Readonly<Record<string, number>>
+  /** WHAT JEV HAS DONE IN THIS HIVE, read-only: every outcome counted by the
+   *  plan it came from (`front ran`, `verify unverified`, `do skipped`, …),
+   *  and the median turn time per path (jev-outcomes.ts speeds). The honest
+   *  answer to "is Jev paying off here", without a second tab on the hive. */
+  readonly plans?: Readonly<Record<string, number>>
+  readonly speeds?: JevSpeeds
+  readonly turns?: number
 }
 
 const TABLE_PLANS = new Set(['do', 'read', 'answer', 'ask', 'participant', 'revise'])
@@ -89,7 +96,7 @@ export const loadCase = async (outcome: JevOutcome): Promise<ReplayCase | string
     const receipt = await read(outcome.decision) as Record<string, unknown>
     if (receipt['kind'] !== 'jev-decision') return 'not a decision receipt'
     const manifest = await read(receipt['source']) as Record<string, unknown>
-    if (manifest['kind'] !== 'jev-input' || manifest['rubric'] !== 5) return 'older rubric'
+    if (manifest['kind'] !== 'jev-input' || manifest['rubric'] !== JEV_RUBRIC) return 'older rubric'
     const rows = await Promise.all((await readAll(manifest['rows'])).map(async raw => {
       const row = raw as Record<string, unknown>
       return {
@@ -121,7 +128,9 @@ export const replayJevDecisions = async (candidates: readonly JevReplayCandidate
     else cases.push(loaded)
   }
   const named = candidates.some(candidate => candidate.name === 'current') ? candidates : [{ name: 'current' }, ...candidates]
-  return { at: Date.now(), reports: replayCases(cases, named), skipped }
+  const plans: Record<string, number> = {}
+  for (const record of jevOutcomes.records()) plans[`${record.plan} ${record.outcome}`] = (plans[`${record.plan} ${record.outcome}`] ?? 0) + 1
+  return { at: Date.now(), reports: replayCases(cases, named), skipped, plans, speeds: jevOutcomes.speeds(), turns: jevOutcomes.turns().length }
 }
 
 const candidatesOf = (payload: unknown): JevReplayCandidate[] => {

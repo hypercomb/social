@@ -1,0 +1,98 @@
+#!/usr/bin/env node
+// local-content-host — the public content host's OWN worker code, served from
+// this machine over in-memory storage, for proving publish and replication
+// end to end without touching the real host.
+//
+//   node scripts/local-content-host.mjs [port=4291] [shell=http://localhost:4260]
+//
+// Everything a browser meets is the real worker (hypercomb-relay/blossom-worker
+// worker.js): NIP-98 signed uploads checked against the body's sha256, the
+// signed hive index at /hive/<pubkey> with its rollback refusal, pool
+// listings, CORS. Only the storage is swapped — R2 and KV become maps that
+// live as long as the process. `GET /__state` answers what it holds, for a
+// harness to assert on. `POST /__bind {zone, pubkey}` binds a zone to a
+// publisher as the operator's SITE_BINDINGS would, so `try-<change>.localhost`
+// is a sandbox door; its shell is fetched from the second argument.
+import http from 'node:http'
+import worker from '../hypercomb-relay/blossom-worker/worker.js'
+
+const port = Number(process.argv[2] || 4291)
+const shell = process.argv[3] || 'http://localhost:4260'
+
+const bytesOf = (value) => value instanceof Uint8Array ? value
+  : value instanceof ArrayBuffer ? new Uint8Array(value)
+  : typeof value === 'string' ? new TextEncoder().encode(value)
+  : new Uint8Array(0)
+
+const r2 = () => {
+  const objects = new Map()
+  const meta = (key, entry) => ({
+    key, size: entry.bytes.byteLength, etag: key, httpEtag: `"${key}"`, httpMetadata: entry.httpMetadata ?? {},
+    writeHttpMetadata: (headers) => { if (entry.httpMetadata?.contentType) headers.set('content-type', entry.httpMetadata.contentType) },
+  })
+  return {
+    objects,
+    put: async (key, body, options = {}) => {
+      const bytes = body instanceof ReadableStream ? new Uint8Array(await new Response(body).arrayBuffer()) : bytesOf(body)
+      objects.set(key, { bytes, httpMetadata: options.httpMetadata })
+      return meta(key, objects.get(key))
+    },
+    head: async (key) => objects.has(key) ? meta(key, objects.get(key)) : null,
+    get: async (key) => {
+      const entry = objects.get(key)
+      if (!entry) return null
+      const copy = () => entry.bytes.slice()
+      return {
+        ...meta(key, entry),
+        get body() { return new Response(copy()).body },
+        arrayBuffer: async () => copy().buffer,
+        text: async () => new TextDecoder().decode(copy()),
+        json: async () => JSON.parse(new TextDecoder().decode(copy())),
+      }
+    },
+    list: async ({ prefix = '' } = {}) => ({ objects: [...objects.keys()].filter(key => key.startsWith(prefix)).sort().map(key => ({ key })), truncated: false }),
+    delete: async (key) => { objects.delete(key) },
+  }
+}
+const kv = () => {
+  const values = new Map()
+  return { values, get: async (key) => values.get(key) ?? null, put: async (key, value) => { values.set(key, String(value)) }, delete: async (key) => { values.delete(key) } }
+}
+
+const bindings = {}
+const env = { CONTENT: r2(), HIVES: kv(), GRANTS: kv(), AUTO_GRANT: '1', SANDBOX_SHELL_ORIGIN: shell, SITE_BINDINGS: '{}' }
+
+http.createServer(async (req, res) => {
+  const url = `http://${req.headers.host || `localhost:${port}`}${req.url}`
+  if (req.url === '/__state') {
+    res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' })
+    res.end(JSON.stringify({
+      content: [...env.CONTENT.objects.keys()].sort(),
+      hives: Object.fromEntries([...env.HIVES.values].map(([key, value]) => [key, JSON.parse(value)])),
+    }))
+    return
+  }
+  const chunks = []
+  for await (const chunk of req) chunks.push(chunk)
+  if (req.url === '/__bind' && req.method === 'POST') {
+    const { zone, pubkey } = JSON.parse(Buffer.concat(chunks).toString() || '{}')
+    bindings[String(zone)] = { title: zone, lineage: String(zone).split('.')[0], publishers: [{ pubkey, label: 'publisher', primary: true }] }
+    env.SITE_BINDINGS = JSON.stringify(bindings)
+    res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' })
+    res.end(JSON.stringify({ ok: true, bindings }))
+    return
+  }
+  const body = ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks)
+  try {
+    // A fresh view per request: the worker caches parsed bindings per env
+    // object, and a zone bound by /__bind must be seen on the next request.
+    const response = await worker.fetch(new Request(url, { method: req.method, headers: req.headers, body }), { ...env }, { waitUntil: () => {} })
+    const headers = {}
+    response.headers.forEach((value, key) => { headers[key] = value })
+    res.writeHead(response.status, headers)
+    res.end(req.method === 'HEAD' ? undefined : Buffer.from(await response.arrayBuffer()))
+  } catch (error) {
+    res.writeHead(500, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' })
+    res.end(String(error?.stack ?? error))
+  }
+}).listen(port, '127.0.0.1', () => console.log(`[local-content-host] the content host's worker on http://localhost:${port}`))

@@ -32,7 +32,8 @@
 import { MODULE_DRAFTS_IOC_KEY, SignatureService, isSectionPath, registerPoolMeaning, replaceSection, sectionOf, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
 import { applySelection, installedPackageSig, layersIoFor, unpickRevision, type SelectionOutcome } from './acquire.js'
 import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } from './host-pool.js'
-import { readPicks, sigsOf, walkTree, type Picks, type TreeWalk } from './package-tree.js'
+import { isOff, readPicks, sigsOf, walkTree, type Picks, type TreeWalk } from './package-tree.js'
+import { readOffUnits, writeOffUnits } from './package-units.js'
 import type { ReplicationIo } from './replication-walker.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -65,6 +66,7 @@ export type ModuleDraftOutcome =
 
 type StoreLike = {
   getBeeBytes?(sig: string): Promise<Uint8Array | null>
+  getDependencyBytes?(sig: string): Promise<Uint8Array | null>
   writeBeeBytes?(sig: string, bytes: Uint8Array): Promise<void>
   writeLayerBytes?(sig: string, bytes: ArrayBuffer): Promise<void>
   readonly hypercombRoot?: FileSystemDirectoryHandle
@@ -87,6 +89,9 @@ export type ModuleDraftDeps = {
   readonly now: () => number
   /** The pool a commit publishes into; null when this shell holds none. */
   readonly pool: () => Promise<PackagePool | null>
+  /** The paths this browser has turned off, and the write that replaces them. */
+  readonly off: () => ReadonlySet<string>
+  readonly setOff: (paths: readonly string[]) => void
 }
 
 const livePool = async (): Promise<PackagePool | null> => {
@@ -116,6 +121,8 @@ const liveDeps = (): ModuleDraftDeps => ({
   apply: applySelection,
   now: Date.now,
   pool: livePool,
+  off: readOffUnits,
+  setOff: paths => writeOffUnits(paths),
 })
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>
@@ -255,30 +262,34 @@ type CellRecord = { name?: unknown; cells?: unknown } & Record<string, unknown>
 const bareSig = (entry: unknown): string => (typeof entry === 'string' ? entry : '').replace(/\.js$/, '').toLowerCase()
 
 /**
- * COMMIT A DRAFT — "deploy later", from inside the hive (jwize, 2026-09-21:
- * "create new files and run them locally and then perhaps deploy them
- * later"). The pick at `path` stops being this browser's and becomes the
- * package: every layer from the trunk root down to the draft's parent is
- * re-minted naming the new child, the new root is appended to this host's
- * `host:packages` pool under `label` (the same member a build's publish
- * writes), and the selection is re-composed with the new root as the trunk.
+ * COMMIT WHAT RUNS HERE — "deploy later", from inside the hive (jwize,
+ * 2026-09-21: "create new files and run them locally and then perhaps deploy
+ * them later"; "if you turn something off it should be … not reachable" —
+ * "roots can be there but not served").
  *
- * Nothing is overwritten: the old root and its chain stay held, and the pool
- * is append-only. Only a DRAFT commits — a revision picked from a publisher
- * already has one, and its dependencies are theirs to carry.
+ * The selection this browser runs becomes the package: every DRAFT picked
+ * over the trunk takes its path, and every path turned OFF is left out of the
+ * new tree, so the published root no longer reaches it. Each layer that
+ * changes is re-minted, from the leaves up to a new root; the new root is
+ * appended to this host's `host:packages` pool under `label` (the member a
+ * build's publish writes) and becomes the trunk here.
+ *
+ * Nothing is removed. The old root, its layers and every module stay held and
+ * stay valid — a turned-off unit is unreachable from the new root, not gone,
+ * and turning it back on is taking an older revision at its path. The pool is
+ * append-only. A revision picked from a publisher is not committed: it stays
+ * a pick over the new trunk, its dependencies theirs to carry.
  *
  * Stamping the install channel so followers take it is the caller's act: the
  * signing key lives in essentials (hive-pointer.ts), not here.
  */
-export const commitDraft = async (path: string, label: string, deps: ModuleDraftDeps = liveDeps()): Promise<ModuleCommitOutcome> => {
+export const commitSelection = async (label: string, deps: ModuleDraftDeps = liveDeps()): Promise<ModuleCommitOutcome> => {
   const fail = (error: string): ModuleCommitOutcome => ({ ok: false, error })
   const trunk = deps.trunk()
   if (!trunk) return fail('nothing is installed here to commit onto')
-  const picks = deps.picks()
-  const pick = picks[path]
-  if (!pick) return fail(`no draft is picked at ${path}`)
   const store = deps.store()
   if (!store?.writeLayerBytes) return fail('the store cannot hold a commit here')
+  const writeLayer = store.writeLayerBytes.bind(store)
   const io = await deps.layers()
   if (!io) return fail('the layers are not readable here')
   const read = async (sig: string): Promise<CellRecord | null> => {
@@ -286,52 +297,114 @@ export const commitDraft = async (path: string, label: string, deps: ModuleDraft
     if (!bytes) return null
     try { return JSON.parse(decode(bytes)) as CellRecord } catch { return null }
   }
-  const root = await read(pick.root)
-  if (!root?.['draft']) return fail(`the pick at ${path} is a publisher's revision, not a draft; it commits with theirs`)
 
-  // THE CHAIN from the trunk root to the draft's parent, by name.
-  const segments = path.split('/')
-  const chain: { sig: string; record: CellRecord }[] = []
-  let at = trunk
-  for (const segment of segments) {
-    const record = await read(at)
-    if (!record) return fail(`the layer ${at.slice(0, 12)}… is not held here`)
-    chain.push({ sig: at, record })
-    let found = ''
-    for (const child of sigsOf(record.cells)) {
-      if (String((await read(child))?.name ?? '').trim() === segment) { found = child; break }
-    }
-    if (!found) return fail(`the installed package has no ${segments.slice(0, chain.length).join('/')}`)
-    at = found
+  // WHAT CHANGES: the drafts (picks whose root says it is a draft) and the paths turned off.
+  const picks = deps.picks()
+  const drafts = new Map<string, string>()
+  for (const [path, pick] of Object.entries(picks)) if ((await read(pick.root))?.['draft']) drafts.set(path, pick.layer)
+  const off = new Set([...deps.off()].filter(path => !drafts.has(path)))
+  if (!drafts.size && !off.size) return fail('nothing to commit: no draft is picked and nothing is turned off')
+  const touches = (path: string): boolean =>
+    [...drafts.keys(), ...off].some(changed => changed === path || changed.startsWith(`${path}/`))
+
+  // THE MODULES THE DRAFTS RENAMED, and the modules the new root still
+  // reaches. The root's render-priority hint (`criticalBees`) names bees by
+  // sig, so it follows a rename and drops what the new root no longer
+  // reaches; left alone it would name modules the package does not carry.
+  const renames = new Map<string, string>()
+  const walk = await walkTree(trunk, { ...io, fetch: async () => null })
+  if (!walk.complete) return fail('the installed package cannot be walked here')
+  for (const [path, layer] of drafts) {
+    const before = walk.nodes.find(candidate => candidate.path === path)?.bees ?? []
+    const after = sigsOf((await read(layer))?.['bees'])
+    const gone = before.filter(sig => !after.includes(sig))
+    const came = after.filter(sig => !before.includes(sig))
+    if (gone.length === 1 && came.length === 1) renames.set(gone[0]!, came[0]!)
   }
+  const kept = new Set([...walk.rootBees, ...walk.nodes.filter(node => !isOff(node.path, off)).flatMap(node => node.bees)])
 
-  // RE-MINTED BOTTOM-UP: each parent names the new child where it named the old.
+  // RE-MINTED FROM THE LEAVES UP: a layer is written again only when something
+  // beneath it changed; everything else keeps its signature.
   const minted: string[] = []
-  let oldChild = at
-  let newChild = pick.layer
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const { record } = chain[i]!
-    const cells = (Array.isArray(record.cells) ? record.cells : []).map(entry =>
-      bareSig(entry) === oldChild ? (typeof entry === 'string' ? entry.replace(oldChild, newChild) : entry) : entry)
-    const bytes = encode(JSON.stringify({ ...record, cells }))
-    const sig = await sigOf(bytes)
-    await store.writeLayerBytes(sig, bytes.buffer)
-    minted.push(sig)
-    oldChild = chain[i]!.sig
-    newChild = sig
+  const found = new Set<string>()
+  const mint = async (sig: string, path: string): Promise<string> => {
+    const record = await read(sig)
+    if (!record) throw new Error(`the layer ${sig.slice(0, 12)}… is not held here`)
+    const cells: unknown[] = []
+    let changed = false
+    for (const entry of Array.isArray(record.cells) ? record.cells : []) {
+      const child = bareSig(entry)
+      const name = String((await read(child))?.name ?? '').trim()
+      const at = path ? `${path}/${name}` : name
+      if (off.has(at)) { found.add(at); changed = true; continue }
+      let next = child
+      if (drafts.has(at)) { found.add(at); next = await mint(drafts.get(at)!, at) }
+      else if (name && touches(at)) next = await mint(child, at)
+      if (next !== child) changed = true
+      cells.push(next === child || typeof entry !== 'string' ? entry : entry.replace(child, next))
+    }
+    const critical = !path && Array.isArray(record['criticalBees'])
+      ? (record['criticalBees'] as unknown[]).flatMap(entry => {
+        if (typeof entry !== 'string') return [entry]
+        const bee = bareSig(entry)
+        if (renames.has(bee)) return [entry.replace(bee, renames.get(bee)!)]
+        return kept.has(bee) ? [entry] : []
+      })
+      : undefined
+    if (critical && JSON.stringify(critical) !== JSON.stringify(record['criticalBees'])) changed = true
+    if (!changed) return sig
+    const bytes = encode(JSON.stringify({ ...record, cells, ...(critical ? { criticalBees: critical } : {}) }))
+    const next = await sigOf(bytes)
+    await writeLayer(next, bytes.buffer)
+    minted.push(next)
+    return next
   }
-  const rootSig = newChild
+  let rootSig: string
+  try { rootSig = await mint(trunk, '') } catch (error) { return fail(error instanceof Error ? error.message : 'the package could not be re-minted') }
+  const missing = [...drafts.keys(), ...off].filter(path => !found.has(path))
+  if (missing.length) return fail(`the installed package has no ${missing.join(', ')}`)
 
-  // LIVE FIRST, PUBLISHED SECOND: a selection that fails to compose publishes nothing.
-  const { [path]: _dropped, ...rest } = picks
+  // LIVE FIRST, PUBLISHED SECOND: a selection that fails to compose publishes
+  // nothing. The committed drafts are part of the trunk now, so they are no
+  // longer picks; the committed off paths no longer exist to be off.
+  const rest = Object.fromEntries(Object.entries(picks).filter(([path]) => !drafts.has(path)))
   const outcome = await deps.apply(rootSig, minted, rest)
   if (!outcome.ok) return fail(outcome.error)
+  deps.setOff([...deps.off()].filter(path => !off.has(path)))
 
   const pool = await deps.pool()
   if (!pool) return fail(`the package runs here now, but this shell holds no ${HOST_PACKAGES_MEANING} pool to publish it into`)
   const index = (markerIndices(await pool.names()).pop() ?? -1) + 1
   await pool.write(poolEntryName(index), formatMember(rootSig, label))
-  return { ok: true, rootSig, index }
+  return { ok: true, rootSig, index, atoms: await newAtoms(trunk, rootSig, io), files: await packageFiles(rootSig, io), drafts: [...drafts.keys()].sort(), off: [...off].sort() }
+}
+
+/** The files the new package holds that the old one did not — layers, modules
+ *  and namespace bundles — read from what is held here. The old package was
+ *  replicated from a host, so everything it names is already served there;
+ *  only these must be uploaded before a follower can take the new one. */
+export const newAtoms = async (trunk: string, rootSig: string, io: ReplicationIo): Promise<string[]> => {
+  const [old, next] = await Promise.all([packageFiles(trunk, io), packageFiles(rootSig, io)])
+  return next.filter(sig => !old.includes(sig))
+}
+
+/** Every file a package holds — its layers, modules and namespace bundles —
+ *  read from what is held here. A sandbox door serves a package whole, so a
+ *  commit publishes all of it; the host skips what it already has. */
+export const packageFiles = async (rootSig: string, io: ReplicationIo): Promise<string[]> => {
+  const walk = await walkTree(rootSig, { ...io, fetch: async () => null })
+  return [...new Set([...walk.layers, ...walk.rootBees, ...walk.rootDependencies, ...walk.nodes.flatMap(node => node.bees)])].sort()
+}
+
+/** The bytes this store holds for a signature: a layer at the root, or a
+ *  module in the bees pool. */
+const bytesOf = async (sig: string, deps: ModuleDraftDeps = liveDeps()): Promise<Uint8Array | null> => {
+  if (!SIG_RE.test(sig)) return null
+  const io = await deps.layers()
+  const layer = await io?.read(sig).catch(() => null)
+  if (layer) return layer
+  const store = deps.store()
+  return (await store?.getBeeBytes?.(sig).catch(() => null)) ?? (await store?.getDependencyBytes?.(sig).catch(() => null)) ?? null
 }
 
 // THE PORT. Registered under the key core declares, so a queen that imports
@@ -342,7 +415,9 @@ const provider: ModuleDraftsProvider = {
     const outcome = await dropDraft(path)
     return outcome.ok ? { ok: true } : { ok: false, error: outcome.error }
   },
-  commit: (path, label) => commitDraft(path, label),
+  commit: label => commitSelection(label),
+  offPaths: () => [...readOffUnits()].sort(),
+  bytesOf: sig => bytesOf(sig),
 }
 try {
   ;(globalThis as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(MODULE_DRAFTS_IOC_KEY, provider)

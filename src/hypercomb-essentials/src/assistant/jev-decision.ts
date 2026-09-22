@@ -22,7 +22,11 @@ export const JEV_MAX_STATE_CHARS = 24_000
 export const JEV_MAX_ROWS = 8
 /** Read rows Jev may batch into one round: cheap, safe, and independent. */
 export const JEV_MAX_READS = 2
-export const JEV_RUBRIC = 4
+/** The version decision receipts are stamped with (hypercomb-jev.ts
+ *  persistJevInput) and replay admits (jev-replay.ts). Raise it only when an
+ *  existing row kind's questions change: a new row kind leaves every stored
+ *  decision replayable as it was. */
+export const JEV_RUBRIC = 5
 
 export type JevRowKind = 'read' | 'do' | 'write' | 'answer' | 'ask'
 /** A row that changes the hive: a behaviour sentence, or a module section
@@ -38,18 +42,25 @@ export interface JevRow {
   readonly kind: JevRowKind
   /** What the participant sees when they must choose. */
   readonly label: string
-  /** The read line, the do sentences, the write header (`write <module
-   *  signature> <src/path.ts>`), or the ask question. Absent for answer. */
+  /** The read line, the do sentences, the write block's header exactly as the
+   *  worker wrote it (`<module signature> <src/path.ts>` or `doctrine
+   *  <heading>`), or the ask question. Absent for answer. */
   readonly lines: readonly string[]
   readonly why?: string
   readonly reach?: JevReach
 }
-/** WHAT JEV SEES OF A WRITE: the header line and the why — never the code.
+/** WHAT JEV SEES OF A WRITE: the header line and the why — never the body.
+ *  The header is the worker's own line, so the source boundary holds.
  *  A section body runs to hundreds of kilobytes and Jev's state to 24k, so
  *  the code is judged the way the draft door already judges it: by running.
  *  Jev judges whether replacing THAT section of THAT module is what was asked,
  *  overreaches nothing, was read first, and breaks no doctrine section. */
 export const WRITE_REACH: JevReach = 'editing'
+/** A write's header, as the write fence accepts it (hypercomb-work-fence.ts). */
+const WRITE_HEADER = /^\/?(?:write\s+)?(?:[a-f0-9]{64}\s+src\/\S+|doctrine\s+\S.*)$/i
+/** A write whose target is the doctrine itself (anatomy/doctrine.ts). */
+export const isDoctrineWrite = (row: { readonly kind: JevRowKind; readonly lines: readonly string[] }): boolean =>
+  row.kind === 'write' && /^\/?(?:write\s+)?doctrine\s/i.test(row.lines[0] ?? '')
 export interface JevInput {
   readonly request: string
   /** The doctrine, one section per entry, each verbatim from the anatomy. */
@@ -105,12 +116,12 @@ export const JEV_ROW_QUESTIONS: Readonly<Record<JevRowKind, readonly NoulSpec[]>
       yes: 'The evidence shows what the lines rely on.', no: 'The lines rely on something the evidence does not show.' },
   ],
   write: [
-    { key: 'toward', ask: at => `Does replacing the module section named in \`${at}.lines\` carry out what \`request\` asks for, or a step toward it?`,
+    { key: 'toward', ask: at => `Does replacing the section named in \`${at}.lines\` (a module's source file, or a doctrine rule) carry out what \`request\` asks for, or a step toward it?`,
       yes: 'Changing that section does what the request asks, or a step toward it.', no: 'Changing that section does not help with what the request asks.' },
-    { key: 'beyond', ask: at => `Does \`${at}.lines\` change a module or section that \`request\` did not ask to change?`,
-      yes: 'The section or module is outside what was asked.', no: 'The section is within what was asked.' },
-    { key: 'grounded', ask: at => `Does \`evidence\` show the section named in \`${at}.lines\` as it is now — its code was read this turn?`,
-      yes: 'The evidence shows that section\'s current code.', no: 'The evidence does not show that section\'s code.' },
+    { key: 'beyond', ask: at => `Does \`${at}.lines\` name a module, file or rule that \`request\` did not ask to change?`,
+      yes: 'What it names is outside what was asked.', no: 'What it names is within what was asked.' },
+    { key: 'grounded', ask: at => `Does \`evidence\` show the current text of the section named in \`${at}.lines\`?`,
+      yes: 'The evidence shows that section as it is now.', no: 'The evidence does not show that section.' },
   ],
   answer: [
     { key: 'answered', ask: () => 'Does `evidence` hold everything needed to answer `request` fully?',
@@ -168,6 +179,12 @@ export const JEV_REACH_GATES: Readonly<Record<JevReach, { readonly grounded: boo
   destructive: { grounded: true, automatic: false },
 }
 
+/** A WRITE TO THE DOCTRINE is never automatic: the rules Jev judges by are the
+ *  participant's to change, so Jev's answers are shown and the participant
+ *  decides. The doctrine's current text is in the worker's system prompt, not
+ *  the evidence, so grounding is asked but not gated. */
+export const JEV_DOCTRINE_GATES = { grounded: false, automatic: false } as const
+
 /** THRESHOLDS SCALE WITH RISK (TypeSafe's confidence guidance, within our
  *  doctrine): how sure Jev's choice must be before its step runs on its own.
  *  Answering, asking and reading change nothing; a new tile is one undo away;
@@ -216,10 +233,13 @@ export const jevRow = (raw: unknown): JevRow => {
   if (kind === 'answer' ? lines.length : !lines.length) throw new Error(kind === 'answer' ? 'An answer row carries no line' : 'A row needs a line')
   if (kind !== 'do' && lines.length > 1) throw new Error('Only a do row may carry several lines')
   if (lines.length > 6 || lines.join('\n').length > 2_000) throw new Error('A row exceeds its budget')
-  if (kind === 'write' && !/^\/?write [a-f0-9]{64} src\/\S+$/i.test(lines[0])) throw new Error('A write row carries one line: write <module signature> <src/path.ts>')
+  if (kind === 'write' && !WRITE_HEADER.test(lines[0])) throw new Error('A write row carries one line: the write block header, <module signature> <src/path.ts> or doctrine <heading>')
   const why = row['why'] === undefined ? undefined : text(row['why'], 200)
   const reach = row['reach']
-  if (reach !== undefined && (kind !== 'do' || !Object.hasOwn(JEV_REACH_GATES, reach as string))) throw new Error('Only a do row carries a reach: additive, editing or destructive')
+  // The hive sets the reach from the census; a write always reaches as
+  // editing, and the shell may say so on the row it hands over.
+  if (reach !== undefined && kind === 'write' && reach !== WRITE_REACH) throw new Error(`A write row reaches as ${WRITE_REACH}`)
+  if (reach !== undefined && kind !== 'write' && (kind !== 'do' || !Object.hasOwn(JEV_REACH_GATES, reach as string))) throw new Error('Only a do row carries a reach: additive, editing or destructive')
   return { id, kind, label, lines, ...(why ? { why } : {}), ...(reach ? { reach: reach as JevReach } : kind === 'write' ? { reach: WRITE_REACH } : {}) }
 }
 
@@ -307,7 +327,7 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
     if (row.kind === 'read') { if (value(row, 'needed') >= G.readNeeded && value(row, 'known') <= G.readKnown) passes.add(row.id); continue }
     if (row.kind === 'answer') { if (value(row, 'answered') >= G.answered) passes.add(row.id); continue }
     if (row.kind === 'ask') { if (value(row, 'open') >= G.open) passes.add(row.id); continue }
-    const gates = JEV_REACH_GATES[row.kind === 'write' ? WRITE_REACH : row.reach ?? 'editing']
+    const gates = isDoctrineWrite(row) ? JEV_DOCTRINE_GATES : JEV_REACH_GATES[row.kind === 'write' ? WRITE_REACH : row.reach ?? 'editing']
     const rule = worst.get(row.id)!.score
     if (rule >= G.reject) rejected.add(row.id)
     if (gates.automatic && value(row, 'toward') >= G.toward && value(row, 'beyond') <= G.beyond && rule <= G.rule
@@ -323,7 +343,7 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
   const confidence = next['confidence'] === undefined ? undefined : probability(next['confidence'])
   const chosen = choice !== 'none' && confidence !== undefined && confidence >= G.floor ? byId.get(choice) : undefined
   const choiceGate = (row: JevRow): number => isChangeRow(row)
-    ? (row.reach === 'destructive' ? Infinity : C[row.reach ?? 'editing'])
+    ? (row.reach === 'destructive' || isDoctrineWrite(row) ? Infinity : C[row.reach ?? 'editing'])
     : C[row.kind as 'read' | 'answer' | 'ask']
   // THE NUMBERS, SHOWN. Gates are starting values; a participant who sees
   // "toward .72" next to a row they would have run can tell us where to move them.
@@ -349,9 +369,11 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
     reason = `Jev chose ${chosen.label}.`
   } else if (chosen && isChangeRow(chosen) && !rejected.has(chosen.id)) {
     plan = { kind: 'do', row: chosen.id, review: true }
-    reason = (JEV_REACH_GATES[chosen.reach ?? 'editing'].automatic
-      ? `Jev chose ${chosen.label}, but not every gate passed; the participant reviews it before it runs.`
-      : `Jev chose ${chosen.label}; it takes something away, so the participant always reviews it.`) + ` (${scoreboard})`
+    reason = (isDoctrineWrite(chosen)
+      ? `Jev chose ${chosen.label}; it changes the doctrine, so the participant always reviews it.`
+      : JEV_REACH_GATES[chosen.reach ?? 'editing'].automatic
+        ? `Jev chose ${chosen.label}, but not every gate passed; the participant reviews it before it runs.`
+        : `Jev chose ${chosen.label}; it takes something away, so the participant always reviews it.`) + ` (${scoreboard})`
   } else if (reads.length) {
     plan = { kind: 'read', rows: reads.slice(0, JEV_MAX_READS) }
     reason = (chosen && rejected.has(chosen.id)

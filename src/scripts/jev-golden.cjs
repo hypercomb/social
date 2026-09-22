@@ -53,5 +53,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
   }
   const skipped = Object.entries(result.skipped ?? {})
   if (skipped.length) console.log(`\nnot replayed: ${skipped.map(([why, n]) => `${n} ${why}`).join(', ')}`)
+  // WHAT JEV HAS DONE HERE (older hives answer without these fields).
+  const plans = Object.entries(result.plans ?? {}).sort((a, b) => b[1] - a[1])
+  if (plans.length) console.log(`\noutcomes by plan: ${plans.map(([key, n]) => `${key} ${n}`).join(' · ')}`)
+  const speeds = Object.entries(result.speeds ?? {})
+  if (result.turns !== undefined) console.log(`turns timed: ${result.turns}${speeds.length ? ` · median ${speeds.map(([path, s]) => `${path} ${s.ms}ms over ${s.turns}${s.firstMs ? ` (first text ${s.firstMs}ms)` : ''}`).join(' · ')}` : ''}`)
   console.log('\nA skipped change a candidate would run on its own is a gate set too low.')
 })().catch(error => { console.error(error.message); process.exit(1) })

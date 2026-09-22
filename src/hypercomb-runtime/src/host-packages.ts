@@ -31,8 +31,11 @@ import { HOST_PACKAGES_MEANING, headIndex, markerIndices, parseMember, parsePool
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
+/** Loopback speaks http. Every `*.localhost` name is loopback too (RFC 6761),
+ *  which is how a sandbox door (`try-<change>.localhost:4291`) is proven on
+ *  one machine before it runs on a real zone. */
 const isLoopback = (zone: string): boolean =>
-  /^(localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(zone)
+  /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(zone)
 
 /**
  * Every URL base worth asking, in order.

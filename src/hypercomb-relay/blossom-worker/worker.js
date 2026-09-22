@@ -592,6 +592,79 @@ async function serveFrontDoor(request, env) {
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
 }
 
+// ── the sandbox door ─────────────────────────────────────────────────────
+//
+// A MODULE CHANGE IS TRIED IN PUBLIC BEFORE IT GOES LIVE (documentation/
+// module-sandbox.md; jwize 2026-09-22). `module commit` in a hive uploads the
+// new package to this heap and stamps `install:try-<change>` in the
+// publisher's signed index. `try-<change>.<zone>` is its door: a full hive —
+// the participant shell, not the read-only visitor — whose own origin names
+// that package, so whoever opens it runs the change, reads its code, and can
+// draft on top of it. The origin is the sandbox: its storage is its own and
+// touches nobody's hive. Promotion is a pointer move elsewhere; withdrawing
+// the key closes the door and leaves every file where it was.
+//
+// The door answers three things itself, and hands everything else to the
+// participant shell (SANDBOX_SHELL_ORIGIN — the deployed web shell):
+//   /content/<sign('host:packages')>/          the pool, one member
+//   /content/<sign('host:packages')>/00000000  `<root>\n<label>`
+//   /content/<sig>                             the package's files, from the heap
+//   /site.json                                 who published it, and what
+const SANDBOX_LABEL_RE = /^try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?$/
+const HOST_PACKAGES_MEANING = 'host:packages'
+
+/** The approved publisher whose signed index names this sandbox, and its root. */
+async function sandboxRoot(env, site, selected) {
+  const channel = `install:${site.lineage}`
+  const read = indexReader(env)
+  const publishers = selected ? site.publishers.filter((p) => p.pubkey === selected) : site.publishers
+  for (const publisher of publishers) {
+    const index = await read(publisher.pubkey)
+    const root = String(index?.roots?.[channel] || '').toLowerCase()
+    if (SIG_RE.test(root)) return { root, pubkey: publisher.pubkey, label: publisher.label || '', publishedAt: index.createdAt }
+  }
+  return null
+}
+
+async function serveSandbox(request, env, site, zone) {
+  const url = new URL(request.url)
+  const found = await sandboxRoot(env, site, String(url.searchParams.get('publisher') || '').toLowerCase())
+  if (!found) return nothingHere(url.hostname, zone)
+  const pool = await poolAddress(HOST_PACKAGES_MEANING)
+  const plain = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
+  const body = (value) => (request.method === 'HEAD' ? null : value)
+  if (url.pathname === `/content/${pool}/`) return new Response(body('00000000\n'), { status: 200, headers: plain })
+  if (url.pathname === `/content/${pool}/00000000`) return new Response(body(`${found.root}\n${site.lineage}`), { status: 200, headers: plain })
+  if (url.pathname.startsWith(`/content/${pool}/`)) return new Response(body('not a member\n'), { status: 404, headers: plain })
+  if (url.pathname === '/site.json') {
+    return json(200, {
+      sandbox: true, title: site.lineage, channel: `install:${site.lineage}`, package: found.root,
+      pubkey: found.pubkey, publisher: found.label, publishedAt: found.publishedAt, hosts: [url.host],
+    }, { 'Cache-Control': 'no-store' })
+  }
+  const moduleMatch = url.pathname.match(/^\/content\/([0-9a-f]{64})$/)
+  if (moduleMatch) return serveModule(request, env, moduleMatch[1])
+  if (url.pathname.startsWith('/content/')) return new Response(body('not held\n'), { status: 404, headers: plain })
+  return serveSandboxShell(request, env)
+}
+
+/** The participant shell, fetched from where it is deployed. https only, but
+ *  a loopback origin on http, for proving the door on one machine. */
+async function serveSandboxShell(request, env) {
+  const origin = String(env.SANDBOX_SHELL_ORIGIN || '').replace(/\/+$/, '')
+  const loopback = /^http:\/\/((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(origin)
+  if (!origin.startsWith('https://') && !loopback) return text(503, 'the sandbox shell is not configured')
+  const url = new URL(request.url)
+  const upstream = await fetch(origin + url.pathname + url.search, {
+    method: request.method,
+    headers: { accept: request.headers.get('accept') || '*/*' },
+  })
+  const headers = new Headers(upstream.headers)
+  headers.delete('content-encoding')
+  headers.delete('content-length')
+  return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
+}
+
 async function serveVisitorAsset(request, env, { spa = true } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   let response = await env.ASSETS.fetch(request)
@@ -1383,6 +1456,8 @@ export default {
     // Machine endpoints expose only signed coordinates; EVERY human route,
     // including /revisions, receives the shared read-only engine.
     if (site && (method === 'GET' || method === 'HEAD')) {
+      // A `try-` name under a zone is a sandbox door, not a website.
+      if (implicit && SANDBOX_LABEL_RE.test(site.lineage)) return serveSandbox(request, env, site, siteZone)
       if (pathname === '/site.json') return serveSiteDescriptor(request, env, site)
       if (pathname === '/publications.json') return servePublications(request, env)
       // Signed module imports — the visitor engine maps bee/dependency

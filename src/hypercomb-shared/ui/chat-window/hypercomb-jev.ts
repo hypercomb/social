@@ -8,8 +8,10 @@
 export const JEV_IOC_KEY = '@hypercomb.social/JevDecision'
 export const JEV_MODEL = '~typesafe/jev-latest'
 export const JEV_MAX_ROWS = 8
-/** Mirrors JEV_RUBRIC in essentials jev-decision.ts; stamped on receipts. */
-export const JEV_RUBRIC = 4
+/** Mirrors JEV_RUBRIC in essentials jev-decision.ts, which replay admits;
+ *  stamped on receipts. The shell may not import a module, so the two are
+ *  kept equal by jev-rubric-parity.spec.ts. */
+export const JEV_RUBRIC = 5
 export type RowKind = 'read' | 'do' | 'write' | 'answer' | 'ask'
 /** Set by the hive from the census for do rows; decides gates, never sent to Jev. */
 export type Reach = 'additive' | 'editing' | 'destructive'
@@ -166,7 +168,7 @@ export const JEV_WORK_INSTRUCTION =
   + 'Every round, end your reply with ONE closed fence whose opening line is exactly three backticks followed by hypercomb-table (never json, never a bare fence), holding JSON: {"rows":[{"id":"a","kind":"read","label":"See who is under people","line":"list /business/people"},'
   + '{"id":"b","kind":"do","label":"Create the people tile","lines":["create people"]},{"id":"c","kind":"answer","label":"Answer now"},{"id":"d","kind":"ask","label":"Ask how to group","line":"Group by city or by role?"}]}. '
   + `Two to ${JEV_MAX_ROWS} rows. Kinds: read (one read line: tree, read, list, history, summary, find or code), do (one to six behaviour sentences from the vocabulary, in lines), answer (you could answer the request now from what the messages hold), ask (a question only the participant can answer, in line). `
-  + 'To change a module\'s code, send the hypercomb-write block ALONE instead of a table: the hive judges it as a one-row write table (read the section first, or the write is not grounded). A write row inside a table has no code and is dropped. '
+  + 'To change a module\'s code or a doctrine section, send the hypercomb-write block ALONE instead of a table: the hive judges it as a one-row write table (read a module section first, or the write is not grounded). A write row inside a table has no body and is dropped. '
   + 'Ids are lowercase letters, digits, underscores; labels under 70 characters and distinct; an optional why under 200 characters. '
   + 'List every step that could reasonably be next: the reads that would settle an assumption, the change the request asks for, the answer row whenever you might be done, the ask row when a preference is missing. '
   + 'Do not argue for a row, rank the rows, or reason about which is best — that is Jev\'s job and it is faster at it. Write no prose while working. '

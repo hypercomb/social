@@ -305,6 +305,30 @@ export const reportDivergence = (
 }
 
 /**
+ * The host row for a zone that SERVES a root's file, or null. Asked only for
+ * a root no carried pool lists. The bytes must hash to the name: a host that
+ * answers every path with its page (an SPA fallback) is not a holder.
+ */
+export const rootHolder = async (
+  zone: string,
+  packageSig: string,
+  get: (url: string) => Promise<ArrayBuffer | null> = async url => {
+    const res = await fetch(url, { cache: 'no-store' })
+    return res.ok ? res.arrayBuffer() : null
+  },
+): Promise<HostPackage | null> => {
+  for (const base of hostBases(zone)) {
+    try {
+      const bytes = await get(`${base}/${packageSig}`)
+      if (bytes && await SignatureService.sign(bytes) === packageSig) {
+        return { zone, base, packageSig, label: packageSig.slice(0, 12), at: '', generation: null, layers: [], bees: [], dependencies: [] }
+      }
+    } catch { /* this base does not answer; the next may */ }
+  }
+  return null
+}
+
+/**
  * ACQUIRE ONE SIGNATURE FROM THE DOMAINS YOU CARRY.
  *
  * The whole question, in the form it is actually asked: *here is a package
@@ -348,7 +372,15 @@ export const acquire = async (
     catch { return null }
   }))
 
-  const holders = answers.filter((p): p is HostPackage => p !== null)
+  let holders = answers.filter((p): p is HostPackage => p !== null)
+  // A NAMED ROOT NEEDS NO LISTING. A host's packages pool is how a package is
+  // FOUND; a root a followed publisher's signed pointer already names has
+  // been found. A package committed from inside a hive (module commit) is
+  // uploaded file by file to a host that serves signatures but whose pool the
+  // browser cannot append to, so its holders are the hosts that serve its
+  // root. Nothing is trusted more for it: the authority gate still decides
+  // whether it may run, and every file is checked against its own name.
+  if (!holders.length) holders = (await Promise.all(carried.map(zone => rootHolder(zone, packageSig)))).filter((p): p is HostPackage => p !== null)
   if (!holders.length) return fail(`no carried domain publishes ${packageSig.slice(0, 12)}…`)
 
   // The record is the SEAL and every holder declares the same one for the same

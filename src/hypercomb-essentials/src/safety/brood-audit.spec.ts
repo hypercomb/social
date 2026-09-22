@@ -63,8 +63,10 @@ describe('auditing held code', () => {
   it('lets JEV score the same material, and takes its verdict as a score only', async () => {
     const s = sig('d')
     await holdInBrood(s)
+    // The decision as the table design returns it (jev-decision.ts JevResult):
+    // a plan, not the retired `selected` field.
     const evaluate = vi.fn().mockResolvedValue({
-      outcome: 'selected', selected: 'accept', rejected: [], reason: 'ok', model: 'jev',
+      plan: { kind: 'do', row: 'accept', review: false }, rejected: [], reason: 'ok', model: 'jev',
       answers: { accept_fit: { type: 'noul', noul: 0.91 } },
     })
     hive({ jev: { ready: () => true, evaluate } })

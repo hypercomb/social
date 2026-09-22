@@ -33,6 +33,7 @@
 
 import { Drone } from '@hypercomb/core'
 import { LlmContextService } from './llm-context.js'
+import { DoctrineQueenBee } from './doctrine.queen.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/i
 
@@ -91,3 +92,8 @@ export class LlmContextDrone extends Drone {
 }
 
 window.ioc.register('@diamondcoreprocessor.com/LlmContextDrone', new LlmContextDrone())
+
+// THE BEE WIRES (atomic-modules-plan.md): the doctrine words are the context
+// feature's — the doctrine is what every model is sent first — so this bee
+// registers them; doctrine.queen.ts is a dependency and registers nothing.
+window.ioc.register('@diamondcoreprocessor.com/DoctrineQueenBee', new DoctrineQueenBee())

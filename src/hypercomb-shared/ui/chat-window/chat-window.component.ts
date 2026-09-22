@@ -105,6 +105,7 @@ import {
   isParticipantAiHostConfigured,
   settleQuestions,
   splitQuestion,
+  SignatureService,
   type SettledQuestion,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -114,7 +115,7 @@ import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 // module"; runtime module-drafts.ts).
 import { draftModule } from '@hypercomb/runtime/module-drafts'
 import { installedPackageSig } from '@hypercomb/runtime/installed-package'
-import { parseWriteBlock, writeFailedMessage, writeRanMessage, writeSkippedMessage } from './hypercomb-work-fence'
+import { doctrineFailedMessage, doctrineRanMessage, parseWriteBlock, writeFailedMessage, writeRanMessage, writeSkippedMessage } from './hypercomb-work-fence'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
@@ -1152,6 +1153,10 @@ const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
 const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
 /** assistant/anatomy/anatomy.service.ts — the static anatomy, over IoC. */
 const ANATOMY_IOC_KEY = '@hypercomb.social/Anatomy'
+/** The anatomy's doctrine (essentials anatomy/doctrine.ts), as the write door uses it. */
+type AnatomyDoctrineLike = {
+  write(heading: string, body: string): Promise<{ ok: true; state: { sections: readonly string[] } } | { ok: false; error: string }>
+}
 /** assistant/llm-hive-access.ts — which keyed providers may read the hive. */
 const LLM_HIVE_ACCESS_IOC_KEY = '@hypercomb.social/LlmHiveAccess'
 /** assistant/execution-queue.ts — what models ask to read and change. */
@@ -5981,6 +5986,10 @@ export class ChatWindowComponent implements OnDestroy {
     // WRITING CODE needs an installed package to draft onto — the dev shell
     // imports modules directly and has none — and the same door changes take.
     const canWrite = canChange && canRead && !!installedPackageSig()
+    // WRITING DOCTRINE needs only changes allowed and the anatomy's doctrine
+    // to be a hive artifact here (essentials anatomy/doctrine.ts).
+    const anatomyDoctrine = (ioc()?.get(ANATOMY_IOC_KEY) as { doctrine?: AnatomyDoctrineLike } | undefined)?.doctrine
+    const canWriteDoctrine = canChange && !!anatomyDoctrine?.write
     const namedProvider = namedModel ? router?.providerIdForModel?.(namedModel) : undefined
     const localEndpoint = router?.providerMachineEndpoint?.('local')
     const localReadyAndTrusted = router?.providerIsMachineLocal?.('local') === true
@@ -6079,6 +6088,7 @@ export class ChatWindowComponent implements OnDestroy {
         canChange,
         vocabulary,
         canWrite,
+        canWriteDoctrine,
       }),
       !(canRead || canChange)
         ? ''
@@ -6107,8 +6117,11 @@ export class ChatWindowComponent implements OnDestroy {
     // answer will be framed by, and the page/selection it was asked from —
     // the latter written as a small resource so the turn names it by sig.
     // `emit: false`: a context manifest is never a publish trigger.
-    const anatomySig = await (ioc()?.get(ANATOMY_IOC_KEY) as { signature?: () => Promise<string> } | undefined)
-      ?.signature?.().catch(() => undefined)
+    // Signed from the text this turn was framed by: the doctrine is a hive
+    // artifact now, and may have moved since anatomyText was taken.
+    const anatomySig = anatomyText
+      ? await SignatureService.sign(new TextEncoder().encode(anatomyText).buffer as ArrayBuffer).catch(() => undefined)
+      : undefined
     const contextStore = ioc()?.get('@hypercomb.social/Store') as
       { putResource?: (blob: Blob, options?: { emit?: boolean }) => Promise<string> } | undefined
     const contextSig = await contextStore?.putResource?.(
@@ -6534,9 +6547,10 @@ export class ChatWindowComponent implements OnDestroy {
       // then the hive drafts the module and picks it over the installed
       // package. The running code changes on reload, and the model is told so.
       const runWrite = async (lines: readonly string[], providerId: string, model: string, review = false): Promise<string> => {
-        if (!canWrite || !queue) throw new WorkRefused('writing code is not available here: nothing is installed to draft onto')
         const parsed = parseWriteBlock(lines)
         if ('error' in parsed) throw new WorkRefused(parsed.error)
+        if ('doctrine' in parsed) return runDoctrine(parsed.doctrine, parsed.body, providerId, model)
+        if (!canWrite || !queue) throw new WorkRefused('writing code is not available here: nothing is installed to draft onto')
         const grammar = `write ${parsed.beeSig.slice(0, 12)}… ${parsed.section}`
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
@@ -6561,6 +6575,38 @@ export class ChatWindowComponent implements OnDestroy {
         lastRun = 'ran'
         EffectBus.emit('toast:show', { type: 'success', message: `Draft of ${parsed.section} applied — reload to run it` })
         return writeRanMessage({ section: parsed.section, beeSig: outcome.beeSig, path: outcome.path }, message)
+      }
+
+      // A DOCTRINE SECTION WRITTEN (essentials anatomy/doctrine.ts). The rules
+      // every model is sent and Jev judges by are the participant's: the block
+      // ALWAYS waits in Execution for their hand, whatever Jev or the policy
+      // says, and runs as a forward commit — the doctrine it replaced is one
+      // `doctrine back` away. It applies from the next message: this turn's
+      // system text stays byte-stable.
+      const runDoctrine = async (heading: string, body: string, providerId: string, model: string): Promise<string> => {
+        if (!canWriteDoctrine || !queue) throw new WorkRefused('the doctrine cannot be written here')
+        const grammar = `write doctrine ${heading}`
+        EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
+        const entry = queue.request({
+          convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal, forceReview: true,
+        })
+        if (await entry.decision === 'skip') {
+          if (signal?.aborted) throw stopped()
+          lastRun = 'skipped'
+          return writeSkippedMessage(`the doctrine section "${heading}"`, message)
+        }
+        stillHere()
+        const outcome = await anatomyDoctrine!.write(heading, body)
+        if (!outcome.ok) {
+          queue.settle(entry.id, 'failed', outcome.error)
+          lastRun = 'failed'
+          return doctrineFailedMessage(outcome.error, message)
+        }
+        ran.push(grammar)
+        queue.settle(entry.id, 'ran')
+        lastRun = 'ran'
+        EffectBus.emit('toast:show', { type: 'success', message: `Doctrine section "${heading}" written` })
+        return doctrineRanMessage(heading, outcome.state.sections.length, message)
       }
 
       // THE PARTICIPANT SPEAKS THE HIVE'S LANGUAGE. A table question offers

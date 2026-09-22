@@ -191,16 +191,37 @@ export type WriteRequest = {
   readonly body: string
 }
 
+/** A write to the doctrine (essentials anatomy/doctrine.ts): the heading of
+ *  the section it replaces or adds, and the section's new text. */
+export type DoctrineWriteRequest = {
+  readonly doctrine: string
+  readonly body: string
+}
+
+/** The block's header as the model wrote it — the line Jev judges, verbatim,
+ *  so the source boundary finds it in the model's own message. */
+export const writeHeaderOf = (lines: readonly string[]): string =>
+  (lines.find(line => line.trim().length > 0) ?? '').trim().replace(/^`+|`+$/g, '').trim()
+
 /** The write block's header and body, or why it is not one. The header is
- *  the first non-empty line: the module's signature and the section path. */
-export const parseWriteBlock = (lines: readonly string[]): WriteRequest | { readonly error: string } => {
+ *  the first non-empty line: the module's signature and the section path, or
+ *  `doctrine <heading>` for a rule of the hive's own doctrine. */
+export const parseWriteBlock = (lines: readonly string[]): WriteRequest | DoctrineWriteRequest | { readonly error: string } => {
   const first = lines.findIndex(line => line.trim().length > 0)
-  if (first < 0) return { error: `a ${WRITE_FENCE_LANG} block must be closed, and must start with <module signature> <src/path.ts>` }
-  const header = /^\s*`?\/?(?:write\s+)?([0-9a-f]{64})\s+(src\/[A-Za-z0-9_.@/-]{1,200})`?\s*$/i.exec(lines[first])
-  if (!header) return { error: `a ${WRITE_FENCE_LANG} block starts with <module signature> <src/path.ts> on its first line; the section body follows` }
+  const usage = '<module signature> <src/path.ts>, or doctrine <heading>,'
+  if (first < 0) return { error: `a ${WRITE_FENCE_LANG} block must be closed, and must start with ${usage} on its first line` }
   const body = lines.slice(first + 1).join('\n')
-  if (!body.trim()) return { error: 'the write block has no body: the section would be emptied' }
-  return { beeSig: header[1].toLowerCase(), section: header[2], body }
+  const module = /^\s*`?\/?(?:write\s+)?([0-9a-f]{64})\s+(src\/[A-Za-z0-9_.@/-]{1,200})`?\s*$/i.exec(lines[first])
+  if (module) {
+    if (!body.trim()) return { error: 'the write block has no body: the section would be emptied' }
+    return { beeSig: module[1].toLowerCase(), section: module[2], body }
+  }
+  const doctrine = /^\s*`?\/?(?:write\s+)?doctrine\s+#*\s*([^`*~\r\n]{1,80}?)`?\s*$/i.exec(lines[first])
+  if (doctrine) {
+    if (!body.trim()) return { error: 'the write block has no body: a doctrine section is dropped by the participant, never emptied' }
+    return { doctrine: doctrine[1].trim(), body }
+  }
+  return { error: `a ${WRITE_FENCE_LANG} block starts with ${usage} on its first line; the body follows` }
 }
 
 /** Could a line that has only begun still turn out to be a fence line? */
@@ -312,6 +333,9 @@ export type WorkPowers = {
   /** A module section can be written back and run here as a draft: an
    *  installed package to draft onto, and changes allowed. */
   readonly canWrite?: boolean
+  /** The doctrine can be written: changes allowed and the anatomy's doctrine
+   *  is a hive artifact here (essentials anatomy/doctrine.ts). */
+  readonly canWriteDoctrine?: boolean
 }
 
 /** How to work in rounds, in words every model can follow. */
@@ -347,6 +371,11 @@ export const workInstruction = (powers: WorkPowers): string => {
     ].join('\n'))
   } else {
     parts.push('You cannot change the hive in this conversation.')
+  }
+  if (powers.canWriteDoctrine) {
+    parts.push([
+      `WRITING DOCTRINE — the rules under "# Doctrine" in the anatomy are the hive's own, and the participant can change them. To change one, or add one, reply with ONE block whose info string is \`${WRITE_FENCE_LANG}\`. Its first line is \`doctrine <heading>\` — the heading exactly as it follows ### — and every line after it is the section's complete new text, without the heading. A heading the doctrine does not have adds a section. The participant always reviews a doctrine change before it runs, and it applies from the next message. Only propose one when the participant asks to change a rule.`,
+    ].join('\n'))
   }
   if (powers.canWrite) {
     parts.push([
@@ -397,6 +426,12 @@ export const writeRanMessage = (draft: { section: string; beeSig: string; path: 
 
 export const writeSkippedMessage = (section: string, request: string): string =>
   `The participant skipped your ${WRITE_FENCE_LANG} block; ${section} was not written and nothing changed. Do not propose it again unless they ask. Continue, or answer.${carry(request)}`
+
+export const doctrineRanMessage = (heading: string, sections: number, request: string): string =>
+  `The participant ran your ${WRITE_FENCE_LANG} block. The doctrine section "${heading}" is written; the doctrine now has ${sections} sections, and every message from the next one on is sent with it. Do not write it again unless something is wrong with it.\n\nContinue, or answer.${carry(request)}`
+
+export const doctrineFailedMessage = (reason: string, request: string): string =>
+  `Your ${WRITE_FENCE_LANG} block could not change the doctrine: ${reason}. Nothing changed. Continue: correct it, or tell the participant what went wrong.${carry(request)}`
 
 export const writeFailedMessage = (reason: string, request: string): string =>
   `Your ${WRITE_FENCE_LANG} block could not be drafted: ${reason}. Nothing changed. Continue: correct it, or tell the participant what went wrong.${carry(request)}`

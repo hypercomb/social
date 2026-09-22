@@ -17,7 +17,7 @@
 
 import { splitQuestion } from '@hypercomb/core'
 import { JEV_ANSWER_NOW, parseTable, SENTENCE_JOIN, tableChoiceNote, tableQuestion, QUESTION_WORDS, type Decision, type QuestionWords, type Reach, type Row } from './hypercomb-jev'
-import { parseWriteBlock, WorkRefused, type WorkRequest } from './hypercomb-work-fence'
+import { parseWriteBlock, WorkRefused, writeHeaderOf, type WorkRequest } from './hypercomb-work-fence'
 
 /** The live census, as the loop reads it. Both throw on a line the hive refuses. */
 export interface RoundCensus {
@@ -56,24 +56,30 @@ export interface RoundTable {
   readonly write?: readonly string[]
 }
 
-/** The write row's one line, as Jev reads it and the receipt keeps it. */
-export const writeLine = (beeSig: string, section: string): string => `write ${beeSig} ${section}`
+/** A write row's label: what the header names — the section path, or the
+ *  doctrine heading — cut from the header itself, so the source boundary
+ *  finds it verbatim in the worker's message. */
+export const writeLabelOf = (lines: readonly string[]): string => {
+  const parsed = parseWriteBlock(lines)
+  if ('error' in parsed) return ''
+  const named = 'doctrine' in parsed ? parsed.doctrine : parsed.section
+  return named.length > 70 ? named.slice(-70) : named
+}
 
 /** The table this reply carries, or undefined when it carries none. A bare
  *  change block in Jev mode is a one-row table; its label is the worker's own
  *  first line, bare, because the source boundary only lets Jev see what the
- *  worker itself wrote. A WRITE BLOCK in Jev mode is a one-row write table:
- *  Jev sees the header (module and section), the code stays in the block.
- *  Reads run as written, never judged. */
+ *  worker itself wrote. A WRITE BLOCK in Jev mode is a one-row write table
+ *  whose line is the block's header AS WRITTEN and whose label is what the
+ *  header names; the body stays in the block. Reads run as written, never
+ *  judged. */
 export const tableFor = (request: WorkRequest, jevMode: boolean): RoundTable | undefined => {
   if (request.kind === 'table') return { lines: request.lines }
   if (!jevMode || !request.lines.length) return undefined
   if (request.kind === 'write') {
-    const parsed = parseWriteBlock(request.lines)
-    if ('error' in parsed) return { lines: [JSON.stringify({ rows: [] })], write: request.lines }
-    const line = writeLine(parsed.beeSig, parsed.section)
-    const label = `Write ${parsed.section}`.slice(0, 70)
-    return { lines: [JSON.stringify({ rows: [{ id: 'write', kind: 'write', label, line }] })], write: request.lines }
+    const label = writeLabelOf(request.lines)
+    if (!label) return { lines: [JSON.stringify({ rows: [] })], write: request.lines }
+    return { lines: [JSON.stringify({ rows: [{ id: 'write', kind: 'write', label, line: writeHeaderOf(request.lines) }] })], write: request.lines }
   }
   if (request.kind !== 'do') return undefined
   const label = request.lines[0].replace(/^\//, '').replace(/[\x00-\x1f\x7f`~*]/g, ' ').trim().slice(0, 70) || 'change'
@@ -104,7 +110,7 @@ export const prepareTable = (table: RoundTable, census: RoundCensus): PreparedTa
         return [{ ...row, reach }]
       }
       if (row.kind === 'write') {
-        if (!block || 'error' in block || writeLine(block.beeSig, block.section) !== row.lines[0].replace(/^\//, '')) throw new Error(WRITE_ROW_REFUSAL)
+        if (!block || 'error' in block || writeHeaderOf(table.write!) !== row.lines[0]) throw new Error(WRITE_ROW_REFUSAL)
         writeOf.set(row.id, table.write!)
         return [{ ...row, reach: 'editing' }]
       }

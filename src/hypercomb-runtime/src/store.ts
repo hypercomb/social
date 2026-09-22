@@ -1983,7 +1983,12 @@ export class Store extends EventTarget {
     const expected = signature.toLowerCase()
     const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
     if (await SignatureService.sign(exact) !== expected) return
-    const handle = await this.bees.getFileHandle(expected, { create: true })
+    // `<sig>.js`, the one name every reader of the pool asks for: the boot's
+    // install check, the loader's `/opfs/<pool>/<sig>.js` URL, and
+    // replication's own writes. A bare `<sig>` was readable only through
+    // getBeeBytes, so a module written here (a draft, a peer's bee) failed
+    // the boot check on the next reload and the install cache was wiped.
+    const handle = await this.bees.getFileHandle(`${expected}.js`, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(exact) } finally { await writable.close() }
   }

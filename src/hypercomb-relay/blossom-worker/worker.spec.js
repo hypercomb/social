@@ -576,3 +576,50 @@ test('the pool listing never reads an index for bindings, even on an operated zo
   assert.equal(response.status, 404)
   assert.deepEqual(hiveReads, [])
 })
+
+// ── the sandbox door (documentation/module-sandbox.md) ────────────────────
+// `try-<change>.<zone>` is a full hive whose own origin names the package the
+// approved publisher stamped as `install:try-<change>`; a door with no stamp
+// is "nothing here"; everything that is not the package goes to the shell.
+const sandboxEnv = async (roots, shellRequests = []) => ({
+  SITE_BINDINGS: JSON.stringify({ 'hypercomb.com': { title: 'Hypercomb', lineage: 'hypercomb', publishers: [{ pubkey, label: 'Jaime', primary: true }] } }),
+  HIVES: { get: async (key) => key === pubkey ? JSON.stringify(await signedIndex(roots)) : null },
+  CONTENT: { get: async () => null, head: async () => null, list: async () => ({ objects: [], truncated: false }) },
+  SANDBOX_SHELL_ORIGIN: 'https://shell.example',
+  __shellRequests: shellRequests,
+})
+const hostPackagesPool = async () => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('host:packages'))))
+
+test('a try- door names the stamped sandbox root as its one package', async () => {
+  const root = 'b'.repeat(64)
+  const env = await sandboxEnv({ 'install:try-fresh-rooms': root, 'install:essentials': head })
+  const pool = await hostPackagesPool()
+  const listing = await worker.fetch(new Request(`https://try-fresh-rooms.hypercomb.com/content/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(await listing.text(), '00000000\n')
+  const member = await worker.fetch(new Request(`https://try-fresh-rooms.hypercomb.com/content/${pool}/00000000`), env)
+  assert.equal(await member.text(), `${root}\ntry-fresh-rooms`)
+  const site = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
+  assert.equal(site.sandbox, true)
+  assert.equal(site.package, root)
+  assert.equal(site.pubkey, pubkey)
+  assert.equal(site.channel, 'install:try-fresh-rooms')
+})
+
+test('a try- door with no stamp is nothing here, and the live channel never opens one', async () => {
+  const env = await sandboxEnv({ 'install:essentials': head, 'try-fresh-rooms': head })
+  const response = await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/'), env)
+  assert.equal(response.status, 404)
+})
+
+test('a try- door hands every other path to the participant shell', async () => {
+  const env = await sandboxEnv({ 'install:try-fresh-rooms': 'b'.repeat(64) })
+  const seen = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (url) => { seen.push(String(url)); return new Response('<!doctype html>shell', { headers: { 'content-type': 'text/html' } }) }
+  try {
+    const response = await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/main.js?v=1'), env)
+    assert.equal(response.status, 200)
+    assert.deepEqual(seen, ['https://shell.example/main.js?v=1'])
+  } finally { globalThis.fetch = original }
+})

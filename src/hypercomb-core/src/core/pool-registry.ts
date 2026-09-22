@@ -472,6 +472,12 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // pool no tile may name, hence the colon. Written by essentials/assistant/
   // anatomy/anatomy.service.ts, advanced only when the sig changes.
   'system:anatomy',
+  // THE DOCTRINE AS A HIVE ARTIFACT (documentation/anatomy-context-need.md
+  // §2a). 8-digit `{ layerSig, at, by }` markers, each naming a doctrine
+  // record (a resource listing section resources by sig); the highest is the
+  // doctrine this hive runs. The seed is the build's; every other marker is
+  // the participant's. Written by essentials/assistant/anatomy/doctrine.ts.
+  'system:doctrine',
   // TILE SUMMARIES a model wrote, keyed sign(layerSig + anatomySig + modelId)
   // (documentation/anatomy-context-need.md §5). A derived cache — wipe-safe,
   // never load-bearing — but NOT optimize-phase: a model's text is not a

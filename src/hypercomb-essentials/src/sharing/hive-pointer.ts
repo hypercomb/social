@@ -59,7 +59,9 @@ const SIG_RE = /^[a-f0-9]{64}$/
 const NIP98_KIND = 27235
 // Loopback hosts use plain http (content-side analog of allow-loopback);
 // real domains use https. Same rule as HostSyncService / the invite queen.
-const LOOPBACK_RE = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i
+// Any *.localhost name is loopback too (RFC 6761): a zone's content face on
+// one machine is content.localhost.
+const LOOPBACK_RE = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 
 export function hiveIndexUrl(host: string, pubkey: string): string {
@@ -165,6 +167,11 @@ export async function putHiveManifest(
   host: string,
   roots: Record<string, string>,
   doors: Record<string, string[]> = {},
+  /** The `created_at` of the index this write replaces. The host refuses an
+   *  index no newer than the one it holds (a rollback), and the stamp is in
+   *  whole seconds, so two writes in one second — a sandbox stamped and
+   *  promoted back to back — must still move forward. */
+  replaces = 0,
 ): Promise<PutHiveResult> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
   if (!signer?.signEvent) return { ok: false, pubkey: '', createdAt: 0, reason: 'no signer' }
@@ -173,7 +180,7 @@ export async function putHiveManifest(
   try {
     signed = await signer.signEvent({
       kind: HIVE_INDEX_EVENT_KIND,
-      created_at: Math.floor(Date.now() / 1000),
+      created_at: Math.max(Math.floor(Date.now() / 1000), Math.floor(Number(replaces) || 0) + 1),
       tags: [],
       content: JSON.stringify({ v: HIVE_LINK_VERSION, roots, ...signedDoors(roots, doors) }),
     })
@@ -270,9 +277,44 @@ export async function setHiveRoot(host: string, key: string, sig: string, deps: 
     return { ok: true, key: cleanKey, sig: cleanSig, host, pubkey, createdAt: read.ok ? read.manifest.createdAt : 0, reason: 'unchanged' }
   }
 
-  const put = await putManifest(host, { ...existing, [cleanKey]: cleanSig }, doors)
+  const put = await putManifest(host, { ...existing, [cleanKey]: cleanSig }, doors, read.ok ? read.manifest.createdAt : 0)
   if (!put.ok) return refuse(put.reason ?? 'index write failed')
   return { ok: true, key: cleanKey, sig: cleanSig, host, pubkey: put.pubkey, createdAt: put.createdAt }
+}
+
+/** Take ONE root out of the participant's OWN index on `host` — the
+ *  counterpart of `setHiveRoot`, under the same rules: only a verified read
+ *  (or a 404) is a baseline, the merge touches exactly that key, and a key
+ *  already absent no-ops (`reason: 'unchanged'`). The bytes the key named are
+ *  not touched: a withdrawn root is unreachable, never deleted. */
+export async function clearHiveRoot(host: string, key: string, deps: SetHiveRootDeps = {}): Promise<SetHiveRootResult> {
+  const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
+  const putManifest = deps.putManifest ?? putHiveManifest
+  const publicKey = deps.publicKey ?? (() => get<SignerLike>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
+  const cleanKey = key.trim()
+  const refuse = (reason: string): SetHiveRootResult => ({ ok: false, key: cleanKey, sig: '', host, pubkey: '', createdAt: 0, reason })
+  if (!cleanKey) return refuse('empty key')
+  const pubkey = String((await publicKey().catch(() => null)) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return refuse('no signer')
+  const read = await fetchIndex(host, pubkey)
+  if (!read.ok && !(read.reason === 'http' && read.status === 404)) return refuse(`index-unsafe: ${read.reason}`)
+  const existing = read.ok ? read.manifest.roots : {}
+  if (!(cleanKey in existing)) return { ok: true, key: cleanKey, sig: '', host, pubkey, createdAt: read.ok ? read.manifest.createdAt : 0, reason: 'unchanged' }
+  const { [cleanKey]: gone, ...rest } = existing
+  const put = await putManifest(host, rest, read.ok ? read.manifest.doors ?? {} : {}, read.ok ? read.manifest.createdAt : 0)
+  if (!put.ok) return refuse(put.reason ?? 'index write failed')
+  return { ok: true, key: cleanKey, sig: String(gone), host, pubkey: put.pubkey, createdAt: put.createdAt }
+}
+
+/** A root the participant's OWN index names on `host`, verified, or null. */
+export async function ownHiveRoot(host: string, key: string, deps: Pick<SetHiveRootDeps, 'fetchIndex' | 'publicKey'> = {}): Promise<string | null> {
+  const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
+  const publicKey = deps.publicKey ?? (() => get<SignerLike>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
+  const pubkey = String((await publicKey().catch(() => null)) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return null
+  const read = await fetchIndex(host, pubkey)
+  const sig = read.ok ? String(read.manifest.roots[key.trim()] ?? '').toLowerCase() : ''
+  return SIG_RE.test(sig) ? sig : null
 }
 
 /** NIP-98 Authorization header — same envelope HostSyncService signs for

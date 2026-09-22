@@ -87,6 +87,46 @@ instruction becomes "static anatomy + live roster"; the bridge-listen
 bridge; the doctrine docs are the *source* the generator reads, not a fourth
 copy.
 
+## 2a. The doctrine is a hive artifact (2026-09-21)
+
+jwize: "the real goal is to create only hive artifacts that hold everything."
+The doctrine part of the anatomy was baked at `prepare`; a rule changed only
+when someone edited a document and rebuilt. Now the doctrine is content
+(`hypercomb-essentials/src/assistant/anatomy/doctrine.ts`):
+
+- **A section** is one resource: `### <heading>`, a `(source: …)` line, the
+  rule's text. **The record** is one resource,
+  `{ kind: 'doctrine', sections: [<sig>, …] }`. **The bag** is
+  `sign('system:doctrine')` (seeded in the pool registry), 8-digit markers
+  `{ layerSig: <record sig>, at, by }`; the highest is the doctrine this hive
+  runs.
+- **The anatomy is composed at runtime**: the build's mechanics
+  (`ANATOMY_MECHANICS`) then the head's sections (`composeAnatomy`). The seed
+  composes to the build's own `ANATOMY_TEXT` byte for byte, so a hive that has
+  never changed its doctrine sends exactly what it sent before, under the same
+  signature.
+- **The build is the seed.** `build-anatomy.ts` still lifts the sections from
+  their documents, now as `ANATOMY_SECTIONS`. An empty bag takes the seed as
+  marker zero. While the head is the seed's (`by: 'seed'`), a build whose
+  doctrine moved appends a new seed marker. Once the participant has changed
+  the doctrine (`by: 'hive'`), no build overwrites it; `doctrine` says the
+  build carries newer doctrine, and `doctrine seed` takes it.
+- **Who changes it.** A model PROPOSES a section through the write fence
+  (header `doctrine <heading>`, `hive-read-fence.md`); it ALWAYS waits in
+  Execution for the participant, and Jev's answers are shown but never run it
+  (`JEV_DOCTRINE_GATES`). The participant's own words are `doctrine`,
+  `doctrine back`, `doctrine drop <n>`, `doctrine seed`; the queen declares no
+  machine grammar, so no model can say them.
+- **Nothing is removed.** Every act is a forward commit — a new record and a
+  new marker. `doctrine back` commits the doctrine the head replaced, again.
+- **Provenance still holds.** The settled anatomy is written as a resource and
+  recorded in the `system:anatomy` bag as before; the seed that runs while the
+  store opens is written but not recorded, so a hive whose doctrine differs
+  from the seed does not add two markers per boot. A turn records the
+  signature of the text it was framed by, signed by the chat from that text.
+- A change applies from the next message: one answer's system text stays
+  byte-stable across its rounds.
+
 ## 3. Context — a manifest of sigs, bodies on demand
 
 The request carries a **context manifest**, itself sig-addressed:

@@ -1635,6 +1635,61 @@ export class HostSyncService extends EventTarget {
     } catch { return false }
   }
 
+  /**
+   * PUBLISH THESE FILES NOW, to one host, because the participant said so
+   * (`module commit`). Not the backup queue: that drains in the background
+   * behind its own opt-in, and a commit must know, before it moves the
+   * install pointer, that every file the new package holds is served. The
+   * participant's word is the consent; the same transport and the same proof
+   * apply — sha256 checked before sending, a NIP-98 signed PUT, and a fresh
+   * read-back. A file the host already serves is not sent again.
+   *
+   * Stops at the first file that cannot be published, and says which.
+   */
+  readonly publishAtoms = async (
+    host: string,
+    sigs: readonly string[],
+    bytesOf: (sig: string) => Promise<Uint8Array | null>,
+  ): Promise<{ ok: true; sent: number; held: number } | { ok: false; error: string; sig?: string }> => {
+    const domain = String(host ?? '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+    if (!domain) return { ok: false, error: 'no host to publish to' }
+    // Any *.localhost name is loopback (RFC 6761): a zone's content face on
+    // one machine is content.localhost.
+    const scheme = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(domain) ? 'http' : 'https'
+    let sent = 0
+    let held = 0
+    for (const sig of sigs) {
+      const url = `${scheme}://${domain}${this.#pathFor(sig)}`
+      // HELD ALREADY? A HEAD, not a download: a commit publishes the whole
+      // package so any door can serve it, and most of it is usually there.
+      // The host checked every body against its name when it took it; a page
+      // (an SPA fallback answering 200) is not a held file.
+      try {
+        const there = await fetch(url, { method: 'HEAD', cache: 'no-store' })
+        if (there.ok && !(there.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) { held++; continue }
+      } catch { /* not reachable yet — the PUT below says so */ }
+      const bytes = await bytesOf(sig)
+      if (!bytes) return { ok: false, error: `${sig.slice(0, 12)}… is not held here`, sig }
+      const body = bytes.slice().buffer as ArrayBuffer
+      if (await SignatureService.sign(body) !== sig) return { ok: false, error: `${sig.slice(0, 12)}… held here does not hash to its name`, sig }
+      const auth = await this.#nip98(url, 'PUT')
+      if (!auth) return { ok: false, error: 'no Nostr signer is available to sign the upload' }
+      try {
+        const put = await fetch(url, { method: 'PUT', headers: { Authorization: auth }, body })
+        if (put.status === 401 || put.status === 403) return { ok: false, error: `${domain} does not accept uploads from this key`, sig }
+        if (!put.ok) return { ok: false, error: `${domain} refused ${sig.slice(0, 12)}… (HTTP ${put.status})`, sig }
+        const back = await fetch(url, { cache: 'no-store' })
+        if (!back.ok || await SignatureService.sign(await back.arrayBuffer()) !== sig) {
+          return { ok: false, error: `${domain} accepted ${sig.slice(0, 12)}… but does not serve it back`, sig }
+        }
+      } catch {
+        return { ok: false, error: `${domain} could not be reached`, sig }
+      }
+      sent++
+    }
+    return { ok: true, sent, held }
+  }
+
   /** sig → host URL path. ONE FLAT HEAP: every sig lives at `/<sig>` —
    *  no typed pools, no extensions. The consumer knows the type (it holds
    *  the referring layer), the bytes authenticate themselves (sha256 ===

@@ -357,6 +357,11 @@ export const ensureInstall = async (): Promise<void> => {
  * `navigator.serviceWorker.ready` alone is not enough: it never settles when
  * no registration exists at all, which is precisely the first-load case.
  */
+/** This origin, when it is a sandbox door (`try-<change>.<zone>`): the one
+ *  host whose packages pool names the package this shell must run. */
+export const sandboxDoor = (hostname: string = location.hostname, host: string = location.host): string | null =>
+  /^try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?\./i.test(hostname) ? host.toLowerCase() : null
+
 const serviceWorkerSettled = async (timeoutMs = 4000): Promise<void> => {
   try {
     if (!('serviceWorker' in navigator)) return
@@ -373,8 +378,9 @@ const repairInstalled = async (cached: InstallManifest): Promise<boolean> => {
   const sig = installedPackageSig()
   if (!sig) return false
   try {
+    const door = sandboxDoor()
     const carried = await listHostZones()
-    const zones = [...new Set([...carried, ...DEFAULT_HOST_ZONES])]
+    const zones = [...new Set([...(door ? [door] : []), ...carried, ...DEFAULT_HOST_ZONES])]
     const outcome = await acquire(sig, zones)
     if (!outcome.ok) {
       console.warn(`[ensure-install] repair of ${sig.slice(0, 12)} incomplete —`, outcome.error ?? `${outcome.holes.length} hole(s)`)
@@ -394,8 +400,15 @@ export const installFromHosts = async (): Promise<boolean> => {
     // added is empty on a first run, and the drone that seeds it ships inside
     // the package we are trying to fetch — so falling back to the one known
     // host is not a convenience here, it is the only way the cycle opens.
-    const carried = await listHostZones()
-    const zones = carried.length ? carried : [...DEFAULT_HOST_ZONES]
+    //
+    // EXCEPT ON A SANDBOX DOOR. `try-<change>.<zone>` exists to run exactly the
+    // package its door names (documentation/module-sandbox.md): the door's own
+    // origin carries the packages pool with that one member. Falling back to
+    // another host there would silently run the live package under the
+    // sandbox's name, so the door is the only source.
+    const door = sandboxDoor()
+    const carried = door ? [door] : await listHostZones()
+    const zones = door ? carried : carried.length ? carried : [...DEFAULT_HOST_ZONES]
     if (!zones.length) return false
 
     // ASK EACH DOMAIN FOR ITS HEAD. Discovery is the pool at
