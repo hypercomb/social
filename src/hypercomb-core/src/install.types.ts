@@ -182,4 +182,9 @@ export interface ModuleDraftsProvider {
   offPaths(): string[]
   /** The bytes this store holds for a layer or module signature, or null. */
   bytesOf(sig: string): Promise<Uint8Array | null>
+  /** Write one section of a module back and pick it over the trunk. The
+   *  module is a bee or a dependency atom (atomic-modules-plan.md, step 5);
+   *  the running code changes on reload. */
+  draft?(request: { readonly sig: string; readonly section: string; readonly body: string }):
+    Promise<{ readonly ok: true; readonly sig: string; readonly of: 'bee' | 'dependency'; readonly path: string } | { readonly ok: false; readonly error: string }>
 }

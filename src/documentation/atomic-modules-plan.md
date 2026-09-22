@@ -1,6 +1,6 @@
 # Atomic modules — one behaviour, many dependencies
 
-**Status:** steps 1–3 BUILT on games 2026-09-22; steps 4 and 4b BUILT and browser-verified. Step 3 output: 88 game atoms + 11 barrels, zero dangling imports, zero atom cycles, every game module links through the alias map in Node, every game class exists exactly once in the build (Solomon bee ~1.3 MB → 4 KB, game view bee 1–2 MB → 16 KB). Step 4c (position-aware preloader), 5 and 6 open. Decided by jwize: every game (and eventually
+**Status:** steps 1–3 BUILT on games 2026-09-22; steps 4 and 4b BUILT and browser-verified. Step 3 output: 88 game atoms + 11 barrels, zero dangling imports, zero atom cycles, every game module links through the alias map in Node, every game class exists exactly once in the build (Solomon bee ~1.3 MB → 4 KB, game view bee 1–2 MB → 16 KB). Step 5 BUILT and browser-verified. Step 4c (position-aware preloader) and 6 open. Decided by jwize: every game (and eventually
 every feature) is ONE behaviour the hive registers, plus any number of
 dependencies the hive never registers. Dependencies are atoms in their own
 right — sig-addressed, shareable, deduplicated — but they never appear as
@@ -169,6 +169,26 @@ that sig in `dependencies[]`, the pick's import map re-resolves. The bee is
 untouched unless the bee file itself is drafted. `module-drafts.ts` needs:
 target may be a dependency sig; `renameBee` gains a `renameDependency`
 twin; the section slicer becomes trivial for atoms.
+
+**BUILT and browser-verified 2026-09-22.** An atom is not in any layer — the
+root lists it, and a pick takes the dependencies under its path from its own
+root. So `draftModule` on a dependency picks at the layer that holds the
+atom's namespace (`games/solomon` for `games/solomon/labyrinth`, `games` for
+`games/juice`), keeps that layer as it runs, and writes a draft root whose
+dependencies are the ones that path runs now with the one atom swapped. Line 1
+(the specifier) and line 2 (the lazy marker) are kept; a draft that changed
+the specifier is refused. Drafts at one path now STACK: a bee draft and an
+atom draft build on the pick already there instead of resetting to the
+trunk's dependencies. A commit lists what the selection runs — the trunk's
+dependencies with each drafted path's own — so a committed atom draft
+publishes the new atom. The drafts port (`ModuleDraftsProvider.draft`, core)
+lets a queen draft without importing the runtime.
+
+Proved on the web shell at 4260: drafting the Solomon labyrinth atom through
+the port, reloading, and opening Solomon ran the drafted code; the import map
+pointed the labyrinth specifier at the new atom and every other atom stayed
+as it was; dropping the draft restored the original. Tests:
+`module-drafts.atoms.spec.ts`.
 
 ### 6. Extend to every feature
 Flip the per-directory flag on for the rest of essentials one domain at a

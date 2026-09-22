@@ -32,7 +32,7 @@
 import { MODULE_DRAFTS_IOC_KEY, SignatureService, isSectionPath, registerPoolMeaning, replaceSection, sectionOf, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
 import { applySelection, installedPackageSig, layersIoFor, unpickRevision, type SelectionOutcome } from './acquire.js'
 import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } from './host-pool.js'
-import { isOff, readPicks, sigsOf, walkTree, type Picks, type TreeWalk } from './package-tree.js'
+import { composeDependencies, isOff, namespaceOf, ownerOf, readPicks, sigsOf, walkTree, within, type Picks, type TreeWalk } from './package-tree.js'
 import { readOffUnits, writeOffUnits } from './package-units.js'
 import type { ReplicationIo } from './replication-walker.js'
 
@@ -42,7 +42,8 @@ const STORE_KEY = '@hypercomb.social/Store'
 export const MAX_DRAFT_BODY = 400_000
 
 export type ModuleDraftRequest = {
-  /** The bee to draft from — the module as it runs now. */
+  /** The module to draft from, as it runs now: a bee, or a dependency — an
+   *  atom (atomic-modules-plan.md, step 5) or a namespace bundle. */
   readonly beeSig: string
   /** `src/games/solomon/labyrinth.ts` — the section to replace. */
   readonly section: string
@@ -55,6 +56,9 @@ export type ModuleDraftOutcome =
     readonly ok: true
     /** The new module's signature — what `read <sig>` opens from now on. */
     readonly beeSig: string
+    /** A bee's draft renames it in its layer; a dependency's draft swaps it in
+     *  the pick's dependencies and leaves the layer as it was. */
+    readonly of: 'bee' | 'dependency'
     readonly layerSig: string
     readonly rootSig: string
     /** The package path the draft is picked at (`games/solomon`). */
@@ -68,6 +72,7 @@ type StoreLike = {
   getBeeBytes?(sig: string): Promise<Uint8Array | null>
   getDependencyBytes?(sig: string): Promise<Uint8Array | null>
   writeBeeBytes?(sig: string, bytes: Uint8Array): Promise<void>
+  writeDependencyBytes?(sig: string, bytes: Uint8Array): Promise<void>
   writeLayerBytes?(sig: string, bytes: ArrayBuffer): Promise<void>
   readonly hypercombRoot?: FileSystemDirectoryHandle
 }
@@ -175,11 +180,21 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   const picks = deps.picks()
   const walk = await walkTree(trunk, local, picks)
   if (!walk.complete) return fail('the installed package cannot be walked here')
+  // THE DEPENDENCIES A PICK AT `path` RUNS NOW: its own root's when a pick is
+  // already there (so drafts at one path stack), else the trunk's.
+  const trunkBytes = await local.read(trunk)
+  let trunkRecord: { dependencies?: unknown } = {}
+  try { trunkRecord = JSON.parse(decode(trunkBytes!)) as { dependencies?: unknown } } catch { return fail('the installed package record could not be read') }
+  const dependenciesAt = async (path: string): Promise<string[] | null> => {
+    const pick = picks[path]
+    if (!pick) return sigsOf(trunkRecord.dependencies)
+    try { return sigsOf((JSON.parse(decode((await local.read(pick.root))!)) as { dependencies?: unknown }).dependencies) } catch { return null }
+  }
+
   const node = nodeNaming(walk, beeSig)
   if (!node) {
-    return fail(walk.rootBees.includes(beeSig)
-      ? 'that module sits on the package root, which has no path to pick at'
-      : 'that signature is not a module of the installed package')
+    if (walk.rootBees.includes(beeSig)) return fail('that module sits on the package root, which has no path to pick at')
+    return draftDependency(request, beeSig, { deps, store, local, trunk, picks, walk, dependenciesAt })
   }
 
   const held = await store.getBeeBytes(beeSig)
@@ -199,15 +214,15 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   const nextLayerSig = await sigOf(nextLayerBytes)
 
   // THE DRAFT ROOT: the record a pick reads its namespace dependencies from.
-  // It carries the trunk's, since a section edit changes no imports, and says
-  // what it is so a listing can tell a draft from a publisher's revision.
-  const trunkBytes = await local.read(trunk)
-  let trunkRecord: { dependencies?: unknown } = {}
-  try { trunkRecord = JSON.parse(decode(trunkBytes!)) as { dependencies?: unknown } } catch { return fail('the installed package record could not be read') }
+  // It carries the ones this path runs now, since a section edit changes no
+  // imports, and says what it is so a listing can tell a draft from a
+  // publisher's revision.
+  const dependencies = await dependenciesAt(node.path)
+  if (!dependencies) return fail(`the pick at ${node.path} could not be read`)
   const at = deps.now()
   const rootBytes = encode(JSON.stringify({
-    draft: { of: trunk, path: node.path, section: request.section, from: beeSig, at },
-    dependencies: sigsOf(trunkRecord.dependencies),
+    draft: { of: trunk, path: node.path, section: request.section, from: beeSig, to: nextBeeSig, kind: 'bee', at },
+    dependencies,
   }))
   const rootSig = await sigOf(rootBytes)
 
@@ -222,7 +237,71 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
     [node.path]: { layer: nextLayerSig, root: rootSig, hides: false, at },
   })
   if (!outcome.ok) return fail(outcome.error)
-  return { ok: true, beeSig: nextBeeSig, layerSig: nextLayerSig, rootSig, path: node.path, reload: true }
+  return { ok: true, beeSig: nextBeeSig, of: 'bee', layerSig: nextLayerSig, rootSig, path: node.path, reload: true }
+}
+
+type DraftContext = {
+  readonly deps: ModuleDraftDeps
+  readonly store: StoreLike
+  readonly local: ReplicationIo
+  readonly trunk: string
+  readonly picks: Picks
+  readonly walk: TreeWalk
+  readonly dependenciesAt: (path: string) => Promise<string[] | null>
+}
+
+/**
+ * A DEPENDENCY IS DRAFTED WHERE ITS NAMESPACE LIVES (atomic-modules-plan.md,
+ * step 5). An atom — or a namespace bundle — is not in any layer; the root
+ * lists it, and a pick takes the dependencies under its path from its own
+ * root. So the draft picks at the atom's directory: the layer there stays as
+ * it runs, and the pick's root carries the same dependencies with this one
+ * swapped. The bee that imports it is untouched and reaches the new atom
+ * through the import map, which follows the selection.
+ */
+const draftDependency = async (request: ModuleDraftRequest, fromSig: string, context: DraftContext): Promise<ModuleDraftOutcome> => {
+  const fail = (error: string): ModuleDraftOutcome => ({ ok: false, error })
+  const { deps, store, local, trunk, picks, walk, dependenciesAt } = context
+  const held = await store.getDependencyBytes?.(fromSig).catch(() => null)
+  if (!held) return fail('that signature is not a module of the installed package')
+  if (!store.writeDependencyBytes) return fail('the store cannot hold a draft of a dependency here')
+  const ns = namespaceOf(held)
+  if (!ns) return fail('that dependency names no namespace on its first line, so it has no path to pick at')
+
+  // The pick that already owns the namespace, else the deepest layer above it.
+  const owner = ownerOf(ns, walk.applied)
+  const node = owner
+    ? walk.nodes.find(candidate => candidate.path === owner)
+    : walk.nodes.filter(candidate => within(ns, candidate.path)).sort((a, b) => b.path.length - a.path.length)[0]
+  if (!node) return fail(`no layer of the installed package holds ${ns}`)
+  const dependencies = await dependenciesAt(node.path)
+  if (!dependencies) return fail(`the pick at ${node.path} could not be read`)
+  if (!dependencies.includes(fromSig)) return fail(`that dependency is not what runs at ${node.path} now`)
+
+  const text = decode(held)
+  if (!sectionOf(text, request.section)) return fail(`the module has no section ${request.section}; list <sig> names its sections`)
+  const nextText = replaceSection(text, request.section, request.body)
+  if (nextText === null) return fail('the section could not be replaced')
+  const nextBytes = encode(nextText)
+  if (namespaceOf(nextBytes) !== ns) return fail('the draft changed the line that names the dependency')
+  const nextSig = await sigOf(nextBytes)
+  if (nextSig === fromSig) return fail('the draft is byte-identical to the module it drafts from')
+
+  const at = deps.now()
+  const rootBytes = encode(JSON.stringify({
+    draft: { of: trunk, path: node.path, section: request.section, from: fromSig, to: nextSig, kind: 'dependency', at },
+    dependencies: dependencies.map(sig => sig === fromSig ? nextSig : sig),
+  }))
+  const rootSig = await sigOf(rootBytes)
+
+  await store.writeDependencyBytes(nextSig, nextBytes)
+  await store.writeLayerBytes!(rootSig, rootBytes.buffer)
+  const outcome = await deps.apply(trunk, [nextSig, rootSig], {
+    ...picks,
+    [node.path]: { layer: node.layerSig, root: rootSig, hides: false, at },
+  })
+  if (!outcome.ok) return fail(outcome.error)
+  return { ok: true, beeSig: nextSig, of: 'dependency', layerSig: node.layerSig, rootSig, path: node.path, reload: true }
 }
 
 export type ModuleDraft = {
@@ -301,12 +380,15 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
   // WHAT CHANGES: the drafts (picks whose root says it is a draft) and the paths turned off.
   const picks = deps.picks()
   const drafts = new Map<string, string>()
-  const sections = new Map<string, { section: string; from: string }>()
+  const sections = new Map<string, { section: string; from: string; to: string }>()
+  const draftSources: { path: string; dependencies: string[] }[] = []
   for (const [path, pick] of Object.entries(picks)) {
-    const draft = (await read(pick.root))?.['draft'] as { section?: unknown; from?: unknown } | undefined
+    const root = await read(pick.root)
+    const draft = root?.['draft'] as { section?: unknown; from?: unknown; to?: unknown } | undefined
     if (!draft) continue
     drafts.set(path, pick.layer)
-    sections.set(path, { section: String(draft.section ?? ''), from: String(draft.from ?? '') })
+    sections.set(path, { section: String(draft.section ?? ''), from: String(draft.from ?? ''), to: String(draft.to ?? '') })
+    draftSources.push({ path, dependencies: sigsOf(root?.['dependencies']) })
   }
   const off = new Set([...deps.off()].filter(path => !drafts.has(path)))
   if (!drafts.size && !off.size) return fail('nothing to commit: no draft is picked and nothing is turned off')
@@ -328,6 +410,17 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
     if (gone.length === 1 && came.length === 1) renames.set(gone[0]!, came[0]!)
   }
   const kept = new Set([...walk.rootBees, ...walk.nodes.filter(node => !isOff(node.path, off)).flatMap(node => node.bees)])
+
+  // THE DEPENDENCIES THE NEW ROOT LISTS are the ones this selection runs: the
+  // trunk's, with every drafted path taking its own from its draft's root. A
+  // dependency draft changes no layer, only this list, so without it the
+  // commit would publish the old atom.
+  const readNamespace = async (sig: string): Promise<string | null> =>
+    namespaceOf((await store?.getDependencyBytes?.(sig).catch(() => null)) ?? null) || null
+  const composed = draftSources.length
+    ? await composeDependencies(walk.rootDependencies, draftSources, [...drafts.keys()], readNamespace)
+    : walk.rootDependencies
+  const dependenciesMoved = JSON.stringify([...composed].sort()) !== JSON.stringify([...walk.rootDependencies].sort())
 
   // RE-MINTED FROM THE LEAVES UP: a layer is written again only when something
   // beneath it changed; everything else keeps its signature.
@@ -358,8 +451,13 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
       })
       : undefined
     if (critical && JSON.stringify(critical) !== JSON.stringify(record['criticalBees'])) changed = true
+    // The root's dependency list, spelled as the trunk spells it (`<sig>.js`).
+    const listed = Array.isArray(record['dependencies']) ? record['dependencies'] as unknown[] : []
+    const suffix = typeof listed[0] === 'string' && listed[0].endsWith('.js') ? '.js' : ''
+    const dependencies = !path && dependenciesMoved ? [...composed].sort().map(sig => `${sig}${suffix}`) : undefined
+    if (dependencies) changed = true
     if (!changed) return sig
-    const bytes = encode(JSON.stringify({ ...record, cells, ...(critical ? { criticalBees: critical } : {}) }))
+    const bytes = encode(JSON.stringify({ ...record, cells, ...(critical ? { criticalBees: critical } : {}), ...(dependencies ? { dependencies } : {}) }))
     const next = await sigOf(bytes)
     await writeLayer(next, bytes.buffer)
     minted.push(next)
@@ -385,7 +483,7 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
   return { ok: true, rootSig, index, atoms: await newAtoms(trunk, rootSig, io), files: await packageFiles(rootSig, io), drafts: [...drafts.keys()].sort(), off: [...off].sort(),
     // WHAT CHANGED, file by file: the section each draft wrote, the module it
     // was written into, and the module that replaced it — what a reviewer reads.
-    changes: [...sections].sort(([a], [b]) => a.localeCompare(b)).map(([path, { section, from }]) => ({ path, section, from, to: renames.get(from) ?? '' })) }
+    changes: [...sections].sort(([a], [b]) => a.localeCompare(b)).map(([path, { section, from, to }]) => ({ path, section, from, to: renames.get(from) ?? to })) }
 }
 
 /** The files the new package holds that the old one did not — layers, modules
@@ -427,6 +525,10 @@ const provider: ModuleDraftsProvider = {
   commit: label => commitSelection(label),
   offPaths: () => [...readOffUnits()].sort(),
   bytesOf: sig => bytesOf(sig),
+  draft: async ({ sig, section, body }) => {
+    const outcome = await draftModule({ beeSig: sig, section, body })
+    return outcome.ok ? { ok: true, sig: outcome.beeSig, of: outcome.of, path: outcome.path } : { ok: false, error: outcome.error }
+  },
 }
 try {
   ;(globalThis as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(MODULE_DRAFTS_IOC_KEY, provider)
