@@ -75,7 +75,7 @@ it('lab', () => {
     '#..:..V...#....#',
     '#..BBBB...#K...#',
     '#.........#BB..#',
-    '#.B.......#....#',
+    '#B........#....#',
     '#..B..g..*#....#',
     '#..BBBBBBB#..BB#',
     '#.........#....#',
@@ -83,13 +83,25 @@ it('lab', () => {
     '#.PA...........#',
     '################',
   ], (p, snap) => {
-    p.walkTo(4); p.jumpToward(5); snap('on step')
-    p.face(1); p.log.push('jumpcast ' + p.jumpCast()); snap('after jump-cast')
-    p.walkTo(2)
-    for (let i = 0; i < 8; i++) { p.wait(30); p.log.push(`t${i} ${p.foes()}`) }
-    snap('goblin gone?')
-    p.walkTo(4); p.jumpToward(5); p.walkTo(5); snap('under hole')
-    p.jumpToward(6); snap('through hole?')
+    p.walkTo(4); p.jumpToward(5)
+    p.face(1); p.jumpCast()
+    p.walkTo(2); p.wait(240)
+    p.walkTo(4); p.jumpToward(5); p.walkTo(5); p.jumpToward(6)
+    p.walkTo(9); snap('relic')
+    p.walkTo(6); p.jumpToward(3); snap('on bumper')
+    p.walkTo(3); p.jumpToward(1); snap('on (1,5)')
+    p.jumpToward(3); snap('on shelf')
+    p.walkTo(4); p.face(-1); p.log.push('c1 ' + p.cast()); p.log.push('c2 ' + p.cast()); snap('deep?')
+    p.walkTo(3); p.walkTo(6); snap('treasure+stele')
+    p.walkTo(9); p.wait(60); snap('dropped to terrace')
+    p.walkTo(10); p.wait(60); p.walkTo(11); snap('right side')
+    p.face(1); p.log.push('jc ' + p.jumpCast()); snap('step made')
+    p.jumpToward(12); snap('on step')
+    p.jumpToward(13); snap('on mid ledge')
+    p.walkTo(14); p.face(-1); p.log.push('jc2 ' + p.jumpCast()); snap('step2')
+    p.jumpToward(13); snap('on step2')
+    p.jumpToward(12); snap('on top')
+    p.walkTo(11); snap('key?')
   })
   // ── /EXPERIMENT ──
   writeFileSync(OUT, lines.join('\n'))
