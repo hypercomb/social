@@ -4181,9 +4181,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // take a tick to settle and gating the render on it makes creates
     // feel laggy. `viaUpdate: true` tells the LayerCommitter listener
     // to skip queueing because the upcoming importTree IS the commit.
-    for (const evt of events) {
-      EffectBus.emit('cell:added', { ...evt, viaUpdate: true })
+    //
+    // Made ELSEWHERE (landing moved), none of it is on this page to fade in,
+    // and announcing early only races the substrate against the commit. It
+    // is announced once the tile exists and is dressed (below).
+    const announce = (): void => {
+      for (const evt of events) {
+        EffectBus.emit('cell:added', { ...evt, viaUpdate: true })
+      }
     }
+    if (!moved) announce()
 
     // ONE atomic cascade: importTree commits every affected ancestor
     // exactly once. For `a/b/c` from root that's 1 marker each in root,
@@ -4196,19 +4203,26 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       await committer.importTree(updates)
     }
 
-    // The holder gathers what was just made in its group — after the commit,
-    // because a reference must point at a tile that exists.
-    if (landing?.gather) {
-      await references?.place?.(landing.gather)
-      EffectBus.emit('activity:log', {
-        message: this.#utteranceText('activity.gathered', `made "{cell}" in {group} — gathered here`)
-          .replace('{cell}', landing.gather.name)
-          .replace('{group}', baseSegments[baseSegments.length - 1] ?? ''),
-        icon: '⬡',
-      })
-    }
-
+    // A dropped resource is the participant's picture for the tile just made.
+    // On a holder it must LAND before the holder gathers the member (below),
+    // so the wait is armed before the attach is asked for; the replay of this
+    // flow's own `pending: true` is ignored, and a stalled attach never holds
+    // the gather hostage.
+    let attached: Promise<void> = Promise.resolve()
     if (armed) {
+      if (landing?.gather) {
+        attached = new Promise<void>(resolve => {
+          let live = false
+          const timer = setTimeout(() => { off(); resolve() }, 10_000)
+          const off = EffectBus.on<{ cell?: string; pending?: boolean }>('cell:attach-pending', payload => {
+            if (!live || payload?.cell !== leafCell || payload.pending !== false) return
+            clearTimeout(timer)
+            off()
+            resolve()
+          })
+          live = true
+        })
+      }
       EffectBus.emit('cell:attach-resource', {
         // Made elsewhere: the picture belongs where the tile was made.
         ...(moved ? { segments: [...baseSegments, ...made.slice(0, -1)] } : {}),
@@ -4222,6 +4236,38 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         atTop: armed.atTop === true,
       })
       this.onArmedResourceDismiss()
+    }
+
+    // The holder gathers what was just made in its group — after the commit,
+    // because a reference must point at a tile that exists.
+    //
+    // ONE PERSON, ONE FACE. The reference shares the member's details at the
+    // moment it is placed, so the member is dressed FIRST — with the dropped
+    // picture when it is the tile the drop was for, otherwise with its
+    // substrate default — then announced, then placed. Left to the early
+    // announcement, dressing and placing raced: a reference placed before the
+    // member was dressed had no picture to share and drew a different default
+    // of its own — two backgrounds for one `bob`.
+    const member = landing?.gather ?? null
+    if (member) {
+      if (armed && made.length === 1) {
+        await attached
+      } else {
+        const substrate = (window as unknown as { ioc: { get(key: string): unknown } }).ioc.get(
+          '@diamondcoreprocessor.com/SubstrateService',
+        ) as { applyToCell?: (label: string, segments?: readonly string[]) => Promise<boolean> } | undefined
+        await substrate?.applyToCell?.(member.name, member.sourceSegments.slice(0, -1)).catch(() => false)
+      }
+    }
+    if (moved) announce()
+    if (member) {
+      await references?.place?.(member)
+      EffectBus.emit('activity:log', {
+        message: this.#utteranceText('activity.gathered', `made "{cell}" in {group} — gathered here`)
+          .replace('{cell}', member.name)
+          .replace('{group}', baseSegments[baseSegments.length - 1] ?? ''),
+        icon: '⬡',
+      })
     }
 
     this.requestSynchronize()
