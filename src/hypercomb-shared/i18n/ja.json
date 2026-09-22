@@ -252,6 +252,7 @@
   "providers.endpoint": "エンドポイント",
   "providers.key": "APIキー",
   "providers.keySet": "キーは保存済みです — 貼り付けると置き換えます",
+  "providers.spend": "確認なしで課金できます: {names}。クリックしてキーを管理します。",
   "providers.keyPlaceholder": "APIキーを貼り付けてください",
   "providers.save": "保存",
   "providers.clear": "削除",

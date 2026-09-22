@@ -248,6 +248,7 @@
   "providers.endpoint": "Endpoint",
   "providers.key": "Chiave API",
   "providers.keySet": "Chiave salvata — incolla per sostituire",
+  "providers.spend": "Spesa senza conferma: {names}. Fai clic per gestire le chiavi.",
   "providers.keyPlaceholder": "Incolla la chiave API",
   "providers.save": "Salva",
   "providers.clear": "Cancella",

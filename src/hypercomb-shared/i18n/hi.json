@@ -248,6 +248,7 @@
   "providers.endpoint": "एंडपॉइंट",
   "providers.key": "API कुंजी",
   "providers.keySet": "कुंजी सहेजी गई — बदलने के लिए पेस्ट करें",
+  "providers.spend": "बिना पूछे खर्च हो सकता है: {names}। कुंजियाँ प्रबंधित करने के लिए क्लिक करें।",
   "providers.keyPlaceholder": "API कुंजी पेस्ट करें",
   "providers.save": "सहेजें",
   "providers.clear": "हटाएँ",

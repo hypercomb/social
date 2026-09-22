@@ -218,7 +218,15 @@ export class ProvidersWindowView extends EventTarget {
 
   constructor() {
     super()
-    EffectBus.on('providers:open', () => { this.toggle() })
+    // A door that names a tab lands ON it — the AI key light opens on the
+    // keys — and switches an already-open console to it rather than closing it.
+    EffectBus.on<{ tab?: ProviderTab }>('providers:open', ({ tab } = {}) => {
+      if (tab && TABS.some(entry => entry.id === tab)) {
+        if (this.#panel && this.#tab !== tab) { this.#setTab(tab); return }
+        this.#rememberTab(tab)
+      }
+      this.toggle()
+    })
     // THE CHAT ARRIVING OR LEAVING MOVES THIS CONSOLE'S HOME. Standing inside
     // the chat's reading row is the whole point, and that row only exists
     // while the chat is up; a console left where it was would either be
@@ -508,8 +516,11 @@ export class ProvidersWindowView extends EventTarget {
   #providersOn(tab: ProviderTab): LlmProviderDescriptor[] {
     return llmProviderRegistry().all()
       // A model added through OpenRouter shows as a line under OpenRouter,
-      // never a second time as a row of its own.
-      .filter(p => tabOf(p) === tab && this.#matches(p) && !foldedIntoOpenRouter(p.id) && !this.#removed(p) && !p.credentialsFrom)
+      // never a second time as a row of its own. A folded vendor row comes
+      // back only while it still HOLDS a key: a call that names the vendor
+      // still spends with it, and this row is the one place it can be seen
+      // and cleared. Cleared, the row folds away again.
+      .filter(p => tabOf(p) === tab && this.#matches(p) && (!foldedIntoOpenRouter(p.id) || llmKeyStore.has(p.id)) && !this.#removed(p) && !p.credentialsFrom)
   }
 
   /** Remember the tab without redrawing — for callers about to redraw anyway. */

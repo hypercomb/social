@@ -248,6 +248,7 @@
   "providers.endpoint": "Endpunkt",
   "providers.key": "API-Schlüssel",
   "providers.keySet": "Schlüssel gespeichert — zum Ersetzen einfügen",
+  "providers.spend": "Kosten ohne Rückfrage möglich: {names}. Klicke, um die Schlüssel zu verwalten.",
   "providers.keyPlaceholder": "API-Schlüssel einfügen",
   "providers.save": "Speichern",
   "providers.clear": "Löschen",

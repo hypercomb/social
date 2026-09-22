@@ -1,7 +1,7 @@
 // hypercomb-shared/ui/command-line/command-line.component.ts
 
 import { AfterViewInit, Component, computed, effect, ElementRef, inject, signal, ViewChild, type OnDestroy } from '@angular/core'
-import { CommandShellComponent } from '../command-shell/command-shell.component'
+import { CommandShellComponent, type CommandIndicator } from '../command-shell/command-shell.component'
 import { HintBarComponent } from '../hint-bar/hint-bar.component'
 import { PinnedEntrancesComponent } from '../pinned-entrances/pinned-entrances.component'
 import type { Lineage } from '../../core/lineage'
@@ -1074,13 +1074,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   // ── status indicators ─────────────────────────────────
 
-  readonly #indicators = signal<Map<string, {
-    key: string
-    icon: string
-    label: string
-    dismissable?: boolean
-    actionable?: boolean
-  }>>(new Map())
+  readonly #indicators = signal<Map<string, CommandIndicator>>(new Map())
   readonly activeIndicators = computed(() => [...this.#indicators().values()])
 
   #indicatorUnsubs: (() => void)[] = []
@@ -1202,13 +1196,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // Listen for indicator registration/removal
     this.#indicatorUnsubs.push(
-      EffectBus.on<{
-        key: string
-        icon: string
-        label: string
-        dismissable?: boolean
-        actionable?: boolean
-      }>('indicator:set', (p) => {
+      EffectBus.on<CommandIndicator>('indicator:set', (p) => {
         if (!p?.key) return
         this.#indicators.update(m => { const n = new Map(m); n.set(p.key, p); return n })
         this.#persistIndicators()
@@ -1265,20 +1253,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const saved = localStorage.getItem('hc:indicators')
     if (saved) {
       try {
-        const list = JSON.parse(saved) as {
-          key: string
-          icon: string
-          label: string
-          dismissable?: boolean
-          actionable?: boolean
-        }[]
-        const m = new Map<string, {
-          key: string
-          icon: string
-          label: string
-          dismissable?: boolean
-          actionable?: boolean
-        }>()
+        const list = JSON.parse(saved) as CommandIndicator[]
+        const m = new Map<string, CommandIndicator>()
         for (const ind of list) {
           if (!ind?.key || ind.dismissable === false) continue
           m.set(ind.key, ind)

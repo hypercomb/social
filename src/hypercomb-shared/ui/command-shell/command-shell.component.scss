@@ -821,6 +821,43 @@ $bp-phone-max: 599px;
   transition: opacity 150ms ease;
 }
 
+// A WORDED pill names what it is about — the AI key light's vendors, each
+// behind the family dot the Providers window draws for it. It is a readout,
+// not an alert, so an actionable one keeps the quiet chrome rather than the
+// attention accent: the words are what it says.
+.indicator-pill.worded {
+  gap: 0.5rem;
+  padding: 0.15rem 0.45rem;
+
+  &.action {
+    color: var(--hc-chrome-ink-quiet);
+    border-color: rgba(var(--glow-color-rgb), 0.25);
+    background: rgba(var(--glow-color-rgb), 0.12);
+
+    &:hover {
+      color: var(--hc-chrome-ink-plain);
+      border-color: rgba(var(--glow-color-rgb), 0.45);
+      background: rgba(var(--glow-color-rgb), 0.2);
+    }
+  }
+}
+
+.indicator-word {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+
+// Round because a family dot IS round — the disc the Providers window puts
+// before the vendor's row.
+.indicator-dot {
+  flex: none;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+}
+
 // ═══════════════════════════════════════════════════════════
 // THE ICON RAIL (right of the input)
 // ═══════════════════════════════════════════════════════════
@@ -1180,6 +1217,9 @@ $default-face: #c8b8ff;
     font-size: 1.4em;
   }
   .reading { font-size: 1.4em; }   // the marks mirror the input's metrics, always
+  // The line is the phone's whole width to type in, so a worded pill keeps its
+  // dots and its "+N" and drops the names — a tap opens where they are named.
+  .indicator-dot + .indicator-word-text { display: none; }
   .prompt-glyph {
     width: 1.55em;
     height: 1.55em;

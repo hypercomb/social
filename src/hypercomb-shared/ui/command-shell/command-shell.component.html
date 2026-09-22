@@ -128,27 +128,45 @@
             @if (ind.actionable) {
               <button
                 class="indicator-pill action"
+                [class.worded]="!!ind.words?.length"
                 [title]="ind.label"
                 [attr.aria-label]="ind.label"
                 (mousedown)="$event.preventDefault(); indicatorActivate.emit(ind.key)">
-                <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
+                <ng-container *ngTemplateOutlet="pillBody; context: { $implicit: ind }"></ng-container>
               </button>
             } @else if (ind.dismissable !== false) {
               <button
                 class="indicator-pill"
+                [class.worded]="!!ind.words?.length"
                 [title]="ind.label"
                 (mousedown)="$event.preventDefault(); indicatorDismiss.emit(ind.key)">
-                <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
+                <ng-container *ngTemplateOutlet="pillBody; context: { $implicit: ind }"></ng-container>
                 <span class="indicator-x">×</span>
               </button>
             } @else {
-              <span class="indicator-pill info" [title]="ind.label">
-                <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
+              <span class="indicator-pill info" [class.worded]="!!ind.words?.length" [title]="ind.label">
+                <ng-container *ngTemplateOutlet="pillBody; context: { $implicit: ind }"></ng-container>
               </span>
             }
           }
         </div>
       }
+
+      <!-- A pill's face: its glyph, then its words — each word behind its own
+           tint dot, so a pill can name what it is about. -->
+      <ng-template #pillBody let-ind>
+        @if (ind.icon) {
+          <span class="indicator-icon mat-sym">{{ ind.icon }}</span>
+        }
+        @for (word of ind.words ?? []; track $index) {
+          <span class="indicator-word">
+            @if (word.tint) {
+              <span class="indicator-dot" [style.background]="word.tint"></span>
+            }
+            <span class="indicator-word-text">{{ word.text }}</span>
+          </span>
+        }
+      </ng-template>
 
     </div>
   </div>

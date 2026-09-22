@@ -248,6 +248,7 @@
   "providers.endpoint": "Endpoint",
   "providers.key": "Kunci API",
   "providers.keySet": "Kunci tersimpan — tempel untuk mengganti",
+  "providers.spend": "Dapat mengeluarkan biaya tanpa bertanya: {names}. Klik untuk mengelola kunci.",
   "providers.keyPlaceholder": "Tempel kunci API",
   "providers.save": "Simpan",
   "providers.clear": "Hapus",

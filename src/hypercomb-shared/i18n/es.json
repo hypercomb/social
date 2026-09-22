@@ -248,6 +248,7 @@
   "providers.endpoint": "Endpoint",
   "providers.key": "Clave de API",
   "providers.keySet": "Clave guardada — pega para reemplazar",
+  "providers.spend": "Gasto sin confirmación: {names}. Haz clic para gestionar las claves.",
   "providers.keyPlaceholder": "Pega la clave de API",
   "providers.save": "Guardar",
   "providers.clear": "Borrar",

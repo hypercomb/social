@@ -248,6 +248,7 @@
   "providers.endpoint": "Uç nokta",
   "providers.key": "API anahtarı",
   "providers.keySet": "Anahtar kaydedildi — değiştirmek için yapıştırın",
+  "providers.spend": "Onay sormadan harcama yapabilir: {names}. Anahtarları yönetmek için tıkla.",
   "providers.keyPlaceholder": "API anahtarını yapıştırın",
   "providers.save": "Kaydet",
   "providers.clear": "Temizle",

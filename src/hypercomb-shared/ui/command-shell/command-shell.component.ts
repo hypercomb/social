@@ -4,9 +4,23 @@
 // ghost text, suggestion dropdown, keyboard navigation) while delegating
 // all business logic to the parent via inputs/outputs.
 
+import { NgTemplateOutlet } from '@angular/common'
 import { Component, computed, effect, ElementRef, HostBinding, inject, input, output, signal, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { TextScaleComponent, surfaceScale, stepSurfaceScale } from '../text-scale/text-scale.component'
+
+/** One status pill, as a producer states it on `indicator:set`. A pill shows
+ *  its `icon`, its `words`, or both; `label` is the tooltip. A word may carry a
+ *  `tint`, drawn as a dot before it — the pill NAMES the things it is about
+ *  (the AI key light names its vendors) instead of repeating one glyph. */
+export interface CommandIndicator {
+  key: string
+  icon?: string
+  label: string
+  words?: readonly { text: string; tint?: string }[]
+  dismissable?: boolean
+  actionable?: boolean
+}
 
 /** How long a view toggle must be held (no modifier) to count as a disable —
  *  the touch-friendly equivalent of a cmd/ctrl-click. */
@@ -23,7 +37,7 @@ const COMPLETION_WINDOW = 'command-intel'
 @Component({
   selector: 'hc-command-shell',
   standalone: true,
-  imports: [TranslatePipe, TextScaleComponent],
+  imports: [NgTemplateOutlet, TranslatePipe, TextScaleComponent],
   templateUrl: './command-shell.component.html',
   styleUrls: ['./command-shell.component.scss']
 })
@@ -269,13 +283,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Active status indicators shown as pills on the right side of the input.
    *  `actionable` indicators are producer-owned attention entries: clicking
    *  activates their workflow without dismissing the underlying state. */
-  readonly indicators = input<readonly {
-    key: string
-    icon: string
-    label: string
-    dismissable?: boolean
-    actionable?: boolean
-  }[]>([])
+  readonly indicators = input<readonly CommandIndicator[]>([])
 
   /**
    * Whether the "open for subscribers" floating icon is rendered. When

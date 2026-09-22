@@ -248,6 +248,7 @@
   "providers.endpoint": "Endpoint",
   "providers.key": "Chave de API",
   "providers.keySet": "Chave salva — cole para substituir",
+  "providers.spend": "Gastos sem confirmação: {names}. Clique para gerenciar as chaves.",
   "providers.keyPlaceholder": "Cole a chave de API",
   "providers.save": "Salvar",
   "providers.clear": "Limpar",

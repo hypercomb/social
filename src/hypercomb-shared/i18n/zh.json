@@ -248,6 +248,7 @@
   "providers.endpoint": "端点",
   "providers.key": "API 密钥",
   "providers.keySet": "密钥已保存 — 粘贴即可替换",
+  "providers.spend": "无需确认即可产生费用：{names}。点击管理密钥。",
   "providers.keyPlaceholder": "请粘贴 API 密钥",
   "providers.save": "保存",
   "providers.clear": "清除",

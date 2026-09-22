@@ -248,6 +248,7 @@
   "providers.endpoint": "نقطة النهاية",
   "providers.key": "مفتاح API",
   "providers.keySet": "تم حفظ المفتاح — الصق للاستبدال",
+  "providers.spend": "يمكن الإنفاق دون سؤال: {names}. انقر لإدارة المفاتيح.",
   "providers.keyPlaceholder": "الصق مفتاح API",
   "providers.save": "حفظ",
   "providers.clear": "مسح",
