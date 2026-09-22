@@ -29,8 +29,9 @@
 // activation record is what the loader reads at boot — so a draft that
 // applied still needs one reload to run, and the outcome says so.
 
-import { SignatureService, isSectionPath, replaceSection, sectionOf } from '@hypercomb/core'
+import { MODULE_DRAFTS_IOC_KEY, SignatureService, isSectionPath, registerPoolMeaning, replaceSection, sectionOf, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
 import { applySelection, installedPackageSig, layersIoFor, unpickRevision, type SelectionOutcome } from './acquire.js'
+import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } from './host-pool.js'
 import { readPicks, sigsOf, walkTree, type Picks, type TreeWalk } from './package-tree.js'
 import type { ReplicationIo } from './replication-walker.js'
 
@@ -66,6 +67,14 @@ type StoreLike = {
   getBeeBytes?(sig: string): Promise<Uint8Array | null>
   writeBeeBytes?(sig: string, bytes: Uint8Array): Promise<void>
   writeLayerBytes?(sig: string, bytes: ArrayBuffer): Promise<void>
+  readonly hypercombRoot?: FileSystemDirectoryHandle
+}
+
+/** This host's `host:packages` pool, as a commit appends to it. */
+export type PackagePool = {
+  /** Entry names held now. */
+  names(): Promise<string[]>
+  write(name: string, text: string): Promise<void>
 }
 
 /** Everything the draft door touches, so a spec can hand it a world. */
@@ -76,6 +85,27 @@ export type ModuleDraftDeps = {
   readonly picks: () => Picks
   readonly apply: (trunk: string, admitted: readonly string[], picks: Picks) => Promise<SelectionOutcome>
   readonly now: () => number
+  /** The pool a commit publishes into; null when this shell holds none. */
+  readonly pool: () => Promise<PackagePool | null>
+}
+
+const livePool = async (): Promise<PackagePool | null> => {
+  const root = window.ioc?.get?.<StoreLike>(STORE_KEY)?.hypercombRoot
+  if (!root) return null
+  const dir = await root.getDirectoryHandle(await registerPoolMeaning(HOST_PACKAGES_MEANING), { create: true })
+  return {
+    names: async () => {
+      const names: string[] = []
+      for await (const name of (dir as unknown as { keys(): AsyncIterable<string> }).keys()) names.push(name)
+      return names
+    },
+    write: async (name, text) => {
+      const file = await dir.getFileHandle(name, { create: true })
+      const writable = await file.createWritable()
+      await writable.write(text)
+      await writable.close()
+    },
+  }
 }
 
 const liveDeps = (): ModuleDraftDeps => ({
@@ -85,6 +115,7 @@ const liveDeps = (): ModuleDraftDeps => ({
   picks: readPicks,
   apply: applySelection,
   now: Date.now,
+  pool: livePool,
 })
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>
@@ -218,3 +249,101 @@ export const listDrafts = async (deps: Pick<ModuleDraftDeps, 'picks' | 'layers'>
 
 /** Drop the draft at a path: the trunk's layer runs there again after a reload. */
 export const dropDraft = (path: string): Promise<SelectionOutcome> => unpickRevision(path)
+
+type CellRecord = { name?: unknown; cells?: unknown } & Record<string, unknown>
+
+const bareSig = (entry: unknown): string => (typeof entry === 'string' ? entry : '').replace(/\.js$/, '').toLowerCase()
+
+/**
+ * COMMIT A DRAFT — "deploy later", from inside the hive (jwize, 2026-09-21:
+ * "create new files and run them locally and then perhaps deploy them
+ * later"). The pick at `path` stops being this browser's and becomes the
+ * package: every layer from the trunk root down to the draft's parent is
+ * re-minted naming the new child, the new root is appended to this host's
+ * `host:packages` pool under `label` (the same member a build's publish
+ * writes), and the selection is re-composed with the new root as the trunk.
+ *
+ * Nothing is overwritten: the old root and its chain stay held, and the pool
+ * is append-only. Only a DRAFT commits — a revision picked from a publisher
+ * already has one, and its dependencies are theirs to carry.
+ *
+ * Stamping the install channel so followers take it is the caller's act: the
+ * signing key lives in essentials (hive-pointer.ts), not here.
+ */
+export const commitDraft = async (path: string, label: string, deps: ModuleDraftDeps = liveDeps()): Promise<ModuleCommitOutcome> => {
+  const fail = (error: string): ModuleCommitOutcome => ({ ok: false, error })
+  const trunk = deps.trunk()
+  if (!trunk) return fail('nothing is installed here to commit onto')
+  const picks = deps.picks()
+  const pick = picks[path]
+  if (!pick) return fail(`no draft is picked at ${path}`)
+  const store = deps.store()
+  if (!store?.writeLayerBytes) return fail('the store cannot hold a commit here')
+  const io = await deps.layers()
+  if (!io) return fail('the layers are not readable here')
+  const read = async (sig: string): Promise<CellRecord | null> => {
+    const bytes = await io.read(sig)
+    if (!bytes) return null
+    try { return JSON.parse(decode(bytes)) as CellRecord } catch { return null }
+  }
+  const root = await read(pick.root)
+  if (!root?.['draft']) return fail(`the pick at ${path} is a publisher's revision, not a draft; it commits with theirs`)
+
+  // THE CHAIN from the trunk root to the draft's parent, by name.
+  const segments = path.split('/')
+  const chain: { sig: string; record: CellRecord }[] = []
+  let at = trunk
+  for (const segment of segments) {
+    const record = await read(at)
+    if (!record) return fail(`the layer ${at.slice(0, 12)}… is not held here`)
+    chain.push({ sig: at, record })
+    let found = ''
+    for (const child of sigsOf(record.cells)) {
+      if (String((await read(child))?.name ?? '').trim() === segment) { found = child; break }
+    }
+    if (!found) return fail(`the installed package has no ${segments.slice(0, chain.length).join('/')}`)
+    at = found
+  }
+
+  // RE-MINTED BOTTOM-UP: each parent names the new child where it named the old.
+  const minted: string[] = []
+  let oldChild = at
+  let newChild = pick.layer
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const { record } = chain[i]!
+    const cells = (Array.isArray(record.cells) ? record.cells : []).map(entry =>
+      bareSig(entry) === oldChild ? (typeof entry === 'string' ? entry.replace(oldChild, newChild) : entry) : entry)
+    const bytes = encode(JSON.stringify({ ...record, cells }))
+    const sig = await sigOf(bytes)
+    await store.writeLayerBytes(sig, bytes.buffer)
+    minted.push(sig)
+    oldChild = chain[i]!.sig
+    newChild = sig
+  }
+  const rootSig = newChild
+
+  // LIVE FIRST, PUBLISHED SECOND: a selection that fails to compose publishes nothing.
+  const { [path]: _dropped, ...rest } = picks
+  const outcome = await deps.apply(rootSig, minted, rest)
+  if (!outcome.ok) return fail(outcome.error)
+
+  const pool = await deps.pool()
+  if (!pool) return fail(`the package runs here now, but this shell holds no ${HOST_PACKAGES_MEANING} pool to publish it into`)
+  const index = (markerIndices(await pool.names()).pop() ?? -1) + 1
+  await pool.write(poolEntryName(index), formatMember(rootSig, label))
+  return { ok: true, rootSig, index }
+}
+
+// THE PORT. Registered under the key core declares, so a queen that imports
+// core and nothing else can list, drop and commit drafts.
+const provider: ModuleDraftsProvider = {
+  list: () => listDrafts(),
+  drop: async path => {
+    const outcome = await dropDraft(path)
+    return outcome.ok ? { ok: true } : { ok: false, error: outcome.error }
+  },
+  commit: (path, label) => commitDraft(path, label),
+}
+try {
+  ;(globalThis as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(MODULE_DRAFTS_IOC_KEY, provider)
+} catch { /* no ioc in this environment — direct importers still work */ }

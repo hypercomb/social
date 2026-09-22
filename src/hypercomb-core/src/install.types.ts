@@ -121,3 +121,47 @@ export interface InstallProvider {
   offUnits(): Set<string>
   setOffUnits(names: Iterable<string>): void
 }
+
+// ── MODULE DRAFTS: the source lives in the hive ─────────────────────────────
+//
+// A model writes one section of a running module back (runtime
+// module-drafts.ts): a new bee, a new layer naming it, and a pick over the
+// installed package — this browser's alone until committed. The words that
+// let the participant see, drop and commit drafts reach the runtime through
+// this key, so a queen imports core and nothing else.
+export const MODULE_DRAFTS_IOC_KEY = '@hypercomb.social/ModuleDrafts'
+
+export interface ModuleDraftInfo {
+  /** The package path the draft is picked at (`games/solomon`). */
+  readonly path: string
+  readonly layerSig: string
+  readonly rootSig: string
+  /** `src/games/solomon/labyrinth.ts` — the section that was written. */
+  readonly section: string
+  /** The module it was drafted from. */
+  readonly from: string
+  readonly at: number
+}
+
+export type ModuleCommitOutcome =
+  | {
+    readonly ok: true
+    /** The new package root — the revision this hive now runs and publishes. */
+    readonly rootSig: string
+    /** Its index in this host's `host:packages` pool. */
+    readonly index: number
+  }
+  | { readonly ok: false; readonly error: string }
+
+export interface ModuleDraftsProvider {
+  /** The drafts picked over the trunk right now. */
+  list(): Promise<ModuleDraftInfo[]>
+  /** Drop the draft at a path: the trunk's layer runs there again after a reload. */
+  drop(path: string): Promise<{ ok: true } | { ok: false; error: string }>
+  /** COMMIT A DRAFT: the trunk re-minted with the draft's layer at its path
+   *  becomes a new package root, appended to this host's `host:packages`
+   *  pool under `label` and made the trunk here. Followers reach it once the
+   *  install channel is stamped — that is the caller's act (essentials
+   *  hive-pointer), because signing lives there. */
+  commit(path: string, label: string): Promise<ModuleCommitOutcome>
+}

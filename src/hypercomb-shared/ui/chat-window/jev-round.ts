@@ -17,7 +17,7 @@
 
 import { splitQuestion } from '@hypercomb/core'
 import { JEV_ANSWER_NOW, parseTable, SENTENCE_JOIN, tableChoiceNote, tableQuestion, QUESTION_WORDS, type Decision, type QuestionWords, type Reach, type Row } from './hypercomb-jev'
-import { WorkRefused, type WorkRequest } from './hypercomb-work-fence'
+import { parseWriteBlock, WorkRefused, type WorkRequest } from './hypercomb-work-fence'
 
 /** The live census, as the loop reads it. Both throw on a line the hive refuses. */
 export interface RoundCensus {
@@ -32,6 +32,8 @@ export interface PreparedTable {
   readonly rows: readonly Row[]
   /** What each runnable row runs as. */
   readonly grammarOf: ReadonlyMap<string, readonly string[]>
+  /** A write row's block — header line and code — kept here, off Jev's wire. */
+  readonly writeOf: ReadonlyMap<string, readonly string[]>
   /** Rows the census refused, with the hive's reason — recorded as misses. */
   readonly dropped: readonly { readonly id: string; readonly reason: string; readonly sentence: string }[]
 }
@@ -42,28 +44,54 @@ export type RoundStep =
   | { readonly kind: 'answer'; readonly reply: string }
   | { readonly kind: 'read'; readonly grammars: readonly string[]; readonly note: string }
   | { readonly kind: 'do'; readonly grammars: readonly string[]; readonly review: boolean; readonly note: string }
+  | { readonly kind: 'write'; readonly lines: readonly string[]; readonly review: boolean; readonly note: string }
 
 export const TABLE_REFUSAL = 'send one closed hypercomb-table JSON block with two to eight distinct rows of kind read, do, answer or ask'
+export const WRITE_ROW_REFUSAL = 'a write row carries no code; send the hypercomb-write block alone and it is judged as a one-row table'
 
-/** The table this reply carries, as JSON lines, or undefined when it carries
- *  none. A bare change block in Jev mode is a one-row table; its label is the
- *  worker's own first line, bare, because the source boundary only lets Jev
- *  see what the worker itself wrote. Reads run as written, never judged. */
-export const tableFor = (request: WorkRequest, jevMode: boolean): readonly string[] | undefined => {
-  if (request.kind === 'table') return request.lines
-  if (!jevMode || request.kind !== 'do' || !request.lines.length) return undefined
+/** What a round hands Jev: the table's JSON lines, and — when the reply was a
+ *  write block — that block, so the code never has to fit in a row. */
+export interface RoundTable {
+  readonly lines: readonly string[]
+  readonly write?: readonly string[]
+}
+
+/** The write row's one line, as Jev reads it and the receipt keeps it. */
+export const writeLine = (beeSig: string, section: string): string => `write ${beeSig} ${section}`
+
+/** The table this reply carries, or undefined when it carries none. A bare
+ *  change block in Jev mode is a one-row table; its label is the worker's own
+ *  first line, bare, because the source boundary only lets Jev see what the
+ *  worker itself wrote. A WRITE BLOCK in Jev mode is a one-row write table:
+ *  Jev sees the header (module and section), the code stays in the block.
+ *  Reads run as written, never judged. */
+export const tableFor = (request: WorkRequest, jevMode: boolean): RoundTable | undefined => {
+  if (request.kind === 'table') return { lines: request.lines }
+  if (!jevMode || !request.lines.length) return undefined
+  if (request.kind === 'write') {
+    const parsed = parseWriteBlock(request.lines)
+    if ('error' in parsed) return { lines: [JSON.stringify({ rows: [] })], write: request.lines }
+    const line = writeLine(parsed.beeSig, parsed.section)
+    const label = `Write ${parsed.section}`.slice(0, 70)
+    return { lines: [JSON.stringify({ rows: [{ id: 'write', kind: 'write', label, line }] })], write: request.lines }
+  }
+  if (request.kind !== 'do') return undefined
   const label = request.lines[0].replace(/^\//, '').replace(/[\x00-\x1f\x7f`~*]/g, ' ').trim().slice(0, 70) || 'change'
-  return [JSON.stringify({ rows: [{ id: 'action', kind: 'do', label, lines: request.lines }] })]
+  return { lines: [JSON.stringify({ rows: [{ id: 'action', kind: 'do', label, lines: request.lines }] })] }
 }
 
 /** THE HIVE'S PARSERS GO FIRST. Jev only ever chooses among rows the hive can
  *  already run; a row it cannot is dropped and said. Throws WorkRefused when
- *  the table is malformed or nothing in it can run. */
-export const prepareTable = (lines: readonly string[], census: RoundCensus): PreparedTable => {
+ *  the table is malformed or nothing in it can run. A write row runs only when
+ *  the round's write block carries its header: the code is the block's, the
+ *  row is what Jev judges. */
+export const prepareTable = (table: RoundTable, census: RoundCensus): PreparedTable => {
   let parsed: readonly Row[]
-  try { parsed = parseTable(lines) } catch { throw new WorkRefused(TABLE_REFUSAL) }
+  try { parsed = parseTable(table.lines) } catch { throw new WorkRefused(table.write ? blockRefusal(table.write) : TABLE_REFUSAL) }
   const dropped: { id: string; reason: string; sentence: string }[] = []
   const grammarOf = new Map<string, readonly string[]>()
+  const writeOf = new Map<string, readonly string[]>()
+  const block = table.write ? parseWriteBlock(table.write) : undefined
   const rows = parsed.flatMap((row): Row[] => {
     try {
       if (row.kind === 'read') {
@@ -75,6 +103,11 @@ export const prepareTable = (lines: readonly string[], census: RoundCensus): Pre
         grammarOf.set(row.id, grammars)
         return [{ ...row, reach }]
       }
+      if (row.kind === 'write') {
+        if (!block || 'error' in block || writeLine(block.beeSig, block.section) !== row.lines[0].replace(/^\//, '')) throw new Error(WRITE_ROW_REFUSAL)
+        writeOf.set(row.id, table.write!)
+        return [{ ...row, reach: 'editing' }]
+      }
       return [row]
     } catch (error) {
       dropped.push({ id: row.id, reason: error instanceof Error ? error.message : 'the hive cannot run it', sentence: row.lines.join(' · ') })
@@ -82,7 +115,12 @@ export const prepareTable = (lines: readonly string[], census: RoundCensus): Pre
     }
   })
   if (!rows.length) throw new WorkRefused(`no row can run: ${dropped.map(row => `${row.id}: ${row.reason}`).join('; ')}`)
-  return { rows, grammarOf, dropped }
+  return { rows, grammarOf, writeOf, dropped }
+}
+
+const blockRefusal = (write: readonly string[]): string => {
+  const parsed = parseWriteBlock(write)
+  return 'error' in parsed ? parsed.error : TABLE_REFUSAL
 }
 
 /** Jev's plan, made into the one thing the loop does next. */
@@ -96,9 +134,14 @@ export const stepFor = (decision: Decision, table: PreparedTable, words: Questio
     case 'participant':
     case 'ask': {
       const asked = plan.kind === 'ask' ? row(plan.row) : undefined
-      // Best first, by Jev's own fit for each row; the worker's order breaks ties.
+      // Best first, by Jev's own fit for each row — the question that says a
+      // row helps the request (jev-decision.ts JEV_ROW_QUESTIONS: `needed`
+      // for a read, `toward` for a change, `open` for an ask); the worker's
+      // order breaks ties.
       const fit = (id: string): number => {
-        const answer = decision.answers[`${id}_fit`] as { noul?: unknown } | undefined
+        const kind = row(id)?.kind
+        const key = kind === 'read' ? 'needed' : kind === 'ask' ? 'open' : 'toward'
+        const answer = decision.answers[`${id}_${key}`] as { noul?: unknown } | undefined
         return typeof answer?.noul === 'number' ? answer.noul : 0
       }
       const choices = table.rows
@@ -112,8 +155,11 @@ export const stepFor = (decision: Decision, table: PreparedTable, words: Questio
       return { kind: 'answer', reply: `${note} ${JEV_ANSWER_NOW}` }
     case 'read':
       return { kind: 'read', grammars: plan.rows.flatMap(id => table.grammarOf.get(id) ?? []), note }
-    case 'do':
+    case 'do': {
+      const write = table.writeOf.get(plan.row)
+      if (write) return { kind: 'write', lines: write, review: plan.review, note }
       return { kind: 'do', grammars: table.grammarOf.get(plan.row) ?? [], review: plan.review, note }
+    }
   }
 }
 

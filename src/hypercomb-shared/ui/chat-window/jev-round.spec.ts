@@ -24,7 +24,7 @@ const census: RoundCensus = {
     return { grammars, reach: reaches.reduce((far, reach) => order.indexOf(reach) > order.indexOf(far) ? reach : far, 'additive' as const) }
   },
 }
-const table = (rows: unknown[]) => [JSON.stringify({ rows })]
+const table = (rows: unknown[]) => ({ lines: [JSON.stringify({ rows })] })
 const rows = [
   { id: 'a', kind: 'read', label: 'See the people', line: 'list /people' },
   { id: 'b', kind: 'do', label: 'Make people', lines: ['create people'] },
@@ -36,12 +36,12 @@ const decision = (plan: Decision['plan'], rejected: string[] = []): Decision => 
 
 describe('which reply is a table', () => {
   it('takes a table as written and leaves reads alone', () => {
-    expect(tableFor({ kind: 'table', lines: ['{"rows":[]}'] }, false)).toEqual(['{"rows":[]}'])
+    expect(tableFor({ kind: 'table', lines: ['{"rows":[]}'] }, false)).toEqual({ lines: ['{"rows":[]}'] })
     expect(tableFor({ kind: 'read', lines: ['/list /'] }, true)).toBeUndefined()
   })
   it('wraps a bare change block in Jev mode in the worker’s own words', () => {
     expect(tableFor({ kind: 'do', lines: ['/create jev-proof'] }, false)).toBeUndefined()
-    const wrapped = JSON.parse(tableFor({ kind: 'do', lines: ['/create jev-proof', '/move a b'] }, true)![0])
+    const wrapped = JSON.parse(tableFor({ kind: 'do', lines: ['/create jev-proof', '/move a b'] }, true)!.lines[0])
     expect(wrapped.rows).toEqual([{ id: 'action', kind: 'do', label: 'create jev-proof', lines: ['/create jev-proof', '/move a b'] }])
   })
 })
@@ -60,7 +60,7 @@ describe('the hive’s parsers go first', () => {
     expect(prepared.rows[0].reach).toBe('destructive')
   })
   it('refuses a malformed table, and a table where nothing can run', () => {
-    expect(() => prepareTable(['not json'], census)).toThrow(TABLE_REFUSAL)
+    expect(() => prepareTable({ lines: ['not json'] }, census)).toThrow(TABLE_REFUSAL)
     expect(() => prepareTable(table([rows[4]]), census)).toThrow('no row can run: x: /frobnicate is not a behaviour in this hive')
   })
 })
@@ -98,7 +98,7 @@ describe('the plan becomes one step', () => {
       { id: 'r3', kind: 'read', label: 'Three', line: 'list /three' },
       { id: 'd1', kind: 'do', label: 'Build', lines: ['create x', 'create x/y', 'create x/y/z'] },
     ]), census)
-    const ranked = { ...decision({ kind: 'participant', rows: [] }), answers: { r1_fit: { type: 'noul', noul: 0.1 }, r2_fit: { type: 'noul', noul: 0.9 }, r3_fit: { type: 'noul', noul: 0.5 }, d1_fit: { type: 'noul', noul: 0.7 } } }
+    const ranked = { ...decision({ kind: 'participant', rows: [] }), answers: { r1_needed: { type: 'noul', noul: 0.1 }, r2_needed: { type: 'noul', noul: 0.9 }, r3_needed: { type: 'noul', noul: 0.5 }, d1_toward: { type: 'noul', noul: 0.7 } } }
     const step = stepFor(ranked, many)
     const options = splitQuestion(step.kind === 'question' ? step.text : '').question?.options
     expect(options).toEqual(['list /two', 'create x · create x/y · create x/y/z', 'list /three', 'Something else'])

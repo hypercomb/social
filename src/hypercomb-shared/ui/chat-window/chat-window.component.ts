@@ -6533,15 +6533,17 @@ export class ChatWindowComponent implements OnDestroy {
       // Execution as an edit — the participant's policy or hand decides —
       // then the hive drafts the module and picks it over the installed
       // package. The running code changes on reload, and the model is told so.
-      const runWrite = async (lines: readonly string[], providerId: string, model: string): Promise<string> => {
+      const runWrite = async (lines: readonly string[], providerId: string, model: string, review = false): Promise<string> => {
         if (!canWrite || !queue) throw new WorkRefused('writing code is not available here: nothing is installed to draft onto')
         const parsed = parseWriteBlock(lines)
         if ('error' in parsed) throw new WorkRefused(parsed.error)
         const grammar = `write ${parsed.beeSig.slice(0, 12)}… ${parsed.section}`
+        if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal,
+          forceReview: review,
         })
-        waitingOn(entry.id)
+        if (!review) waitingOn(entry.id)
         if (await entry.decision === 'skip') {
           if (signal?.aborted) throw stopped()
           lastRun = 'skipped'
@@ -6735,7 +6737,15 @@ export class ChatWindowComponent implements OnDestroy {
             }
             const i18n = ioc()?.get('@hypercomb.social/I18n') as { t?: (key: string) => string } | undefined
             const word = (key: string, fallback: string): string => { const said = i18n?.t?.(key); return said && said !== key ? said : fallback }
-            const decision = await judge(prepared.rows, pinned)
+            // A write row's code is a resource the receipt names by
+            // signature; the row Jev judges carries only the header line.
+            const judged = await Promise.all(prepared.rows.map(async row => {
+              const write = prepared.writeOf.get(row.id)
+              if (!write || !contextStore?.putResource) return row
+              const body = await contextStore.putResource(new Blob([write.join('\n')], { type: 'text/plain' }), { emit: false })
+              return { ...row, body }
+            }))
+            const decision = await judge(judged, pinned)
             const step = stepFor(decision, prepared, {
               which: word('chat.jev.which', 'Which step should the hive take?'),
               other: word('chat.jev.other', 'Something else'),
@@ -6768,7 +6778,9 @@ export class ChatWindowComponent implements OnDestroy {
               try {
                 reply = step.kind === 'read'
                   ? `${step.note}\n\n${await runRead(step.grammars, pinned, roundModel)}`
-                  : `${step.note}\n\n${await runDo(step.grammars, pinned, roundModel, step.review)}`
+                  : step.kind === 'write'
+                    ? `${step.note}\n\n${await runWrite(step.lines, pinned, roundModel, step.review)}`
+                    : `${step.note}\n\n${await runDo(step.grammars, pinned, roundModel, step.review)}`
               } finally {
                 if (!signal?.aborted) reportOutcome(lastRun)
               }

@@ -42,6 +42,20 @@ Fence `hypercomb-table` (`hypercomb-work-fence.ts`, kind `table`; replaces
   summary find code`). This is "finding information".
 - `do` — one to six behaviour sentences from the live vocabulary. This is
   "storing meta changes / organisation".
+- `write` — one module section written back (`hive-read-fence.md`, "Writing a
+  module"); `line` is `write <module signature> <src/path.ts>`. **The worker
+  never lists this row itself**: it sends the `hypercomb-write` block ALONE
+  and the hive makes it a one-row write table (`jev-round.ts` `tableFor`).
+  Jev sees the header and the `why`, never the code — a section runs to
+  hundreds of kilobytes and Jev's state to 24k, so the code is judged as the
+  draft door already judges it, by running. Jev judges whether replacing
+  THAT section of THAT module is what was asked (`toward`), overreaches
+  nothing (`beyond`), was read this turn (`grounded`), and breaks no doctrine
+  section (`rule<k>`). A write always reaches as `editing`: all three gates
+  and the .85 choice gate, review when any fails. A `write` row inside a
+  table carries no code and is dropped with `WRITE_ROW_REFUSAL`. The receipt
+  keeps the code as a resource signature on the row (`body`), which Jev
+  never receives.
 - `answer` — the worker could answer now from what the messages hold.
 - `ask` — a preference only the participant can supply; `line` is the question.
 
@@ -317,8 +331,13 @@ is slowest.
 - `hypercomb-shared/ui/chat-window/hypercomb-jev.ts` — shell contract, table
   parser, instruction, participant question, choice note, provenance
   (`hypercomb-jev.spec.ts`).
+- `hypercomb-shared/ui/chat-window/jev-round.ts` — the round's decisions,
+  pure: `tableFor` (a bare do or write block becomes a one-row table),
+  `prepareTable`, `stepFor`, `offeredSentence` (`jev-round.spec.ts`,
+  `jev-round-write.spec.ts`).
 - `hypercomb-shared/ui/chat-window/chat-window.component.ts` — the round
-  loop: parsers first, `judge`, plan switch.
+  loop: parsers first, `judge`, plan switch (`runRead` / `runDo` /
+  `runWrite`, each taking Jev's review flag).
 
 Official references (checked 2026-09-20): OpenRouter Decisions API
 (`POST /api/alpha/decisions`, question types `noul` / `choice` / `score`,

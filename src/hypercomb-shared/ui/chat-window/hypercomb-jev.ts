@@ -8,10 +8,24 @@
 export const JEV_IOC_KEY = '@hypercomb.social/JevDecision'
 export const JEV_MODEL = '~typesafe/jev-latest'
 export const JEV_MAX_ROWS = 8
-export type RowKind = 'read' | 'do' | 'answer' | 'ask'
+/** Mirrors JEV_RUBRIC in essentials jev-decision.ts; stamped on receipts. */
+export const JEV_RUBRIC = 4
+export type RowKind = 'read' | 'do' | 'write' | 'answer' | 'ask'
 /** Set by the hive from the census for do rows; decides gates, never sent to Jev. */
 export type Reach = 'additive' | 'editing' | 'destructive'
-export interface Row { readonly id: string; readonly kind: RowKind; readonly label: string; readonly lines: readonly string[]; readonly why?: string; readonly reach?: Reach }
+export interface Row {
+  readonly id: string
+  readonly kind: RowKind
+  readonly label: string
+  /** The read line, the do sentences, the write header, or the ask question. */
+  readonly lines: readonly string[]
+  readonly why?: string
+  readonly reach?: Reach
+  /** A write row's code, as the signature of the resource holding it. Set by
+   *  the hive; the receipt keeps it, Jev never sees it (the essentials
+   *  parser rebuilds every row from its known fields). */
+  readonly body?: string
+}
 export type Plan =
   | { readonly kind: 'answer' }
   | { readonly kind: 'ask'; readonly row: string }
@@ -114,8 +128,9 @@ export const persistJevInput = async (store: ResourceWriter | undefined, input: 
     id: row.id, kind: row.kind, label: await resource(store, row.label), lines: await resource(store, row.lines),
     ...(row.why ? { why: await resource(store, row.why) } : {}),
     ...(row.reach ? { reach: row.reach } : {}),
+    ...(row.body ? { body: row.body } : {}),
   })))
-  return resource(store, { kind: 'jev-input', model: JEV_MODEL, rubric: 5, request, doctrine, evidence, rows })
+  return resource(store, { kind: 'jev-input', model: JEV_MODEL, rubric: JEV_RUBRIC, request, doctrine, evidence, rows })
 }
 
 /** The front door's provenance: what was asked, what Jev answered, what ran. */
@@ -151,6 +166,7 @@ export const JEV_WORK_INSTRUCTION =
   + 'Every round, end your reply with ONE closed fence whose opening line is exactly three backticks followed by hypercomb-table (never json, never a bare fence), holding JSON: {"rows":[{"id":"a","kind":"read","label":"See who is under people","line":"list /business/people"},'
   + '{"id":"b","kind":"do","label":"Create the people tile","lines":["create people"]},{"id":"c","kind":"answer","label":"Answer now"},{"id":"d","kind":"ask","label":"Ask how to group","line":"Group by city or by role?"}]}. '
   + `Two to ${JEV_MAX_ROWS} rows. Kinds: read (one read line: tree, read, list, history, summary, find or code), do (one to six behaviour sentences from the vocabulary, in lines), answer (you could answer the request now from what the messages hold), ask (a question only the participant can answer, in line). `
+  + 'To change a module\'s code, send the hypercomb-write block ALONE instead of a table: the hive judges it as a one-row write table (read the section first, or the write is not grounded). A write row inside a table has no code and is dropped. '
   + 'Ids are lowercase letters, digits, underscores; labels under 70 characters and distinct; an optional why under 200 characters. '
   + 'List every step that could reasonably be next: the reads that would settle an assumption, the change the request asks for, the answer row whenever you might be done, the ask row when a preference is missing. '
   + 'Do not argue for a row, rank the rows, or reason about which is best — that is Jev\'s job and it is faster at it. Write no prose while working. '
@@ -166,7 +182,7 @@ export const parseTable = (lines: readonly string[]): readonly Row[] => {
     const row = raw as Record<string, unknown>
     const kind = row['kind']
     if (typeof row['id'] !== 'string' || !/^[a-z][a-z0-9_-]{0,23}$/.test(row['id']) || row['id'] === 'none'
-      || (kind !== 'read' && kind !== 'do' && kind !== 'answer' && kind !== 'ask')
+      || (kind !== 'read' && kind !== 'do' && kind !== 'write' && kind !== 'answer' && kind !== 'ask')
       || typeof row['label'] !== 'string' || !row['label'].trim() || row['label'].length > 70 || /[\x00-\x1f\x7f`~*]/.test(row['label'])
       || row['label'].trim() === 'Something else') throw new Error('Invalid row')
     const raw_lines = row['lines'] ?? (row['line'] === undefined ? [] : [row['line']])
@@ -215,6 +231,8 @@ export const tableQuestion = (rows: readonly Row[], reason: string, prompt?: str
     return `${head}\n${row.lines.map(line => `\`${line.replace(/^\//, '').replace(/[`~]/g, '')}\``).join(' ')}`
   }).join('\n\n')
   const other = words.other.replace(/[\r\n`]/g, ' ').trim()
+  // A write is not a sentence the participant can say back: its code lives in
+  // the block, so it is shown, never offered.
   const options = [...new Set(rows
     .filter(row => row.kind === 'read' || row.kind === 'do')
     .map(rowSentence)

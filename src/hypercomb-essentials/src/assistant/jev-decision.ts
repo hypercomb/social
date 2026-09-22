@@ -24,7 +24,11 @@ export const JEV_MAX_ROWS = 8
 export const JEV_MAX_READS = 2
 export const JEV_RUBRIC = 4
 
-export type JevRowKind = 'read' | 'do' | 'answer' | 'ask'
+export type JevRowKind = 'read' | 'do' | 'write' | 'answer' | 'ask'
+/** A row that changes the hive: a behaviour sentence, or a module section
+ *  written back. Both are judged for fit, overreach, grounding and every
+ *  doctrine section; a write always reaches as `editing`. */
+export const isChangeRow = (row: { readonly kind: JevRowKind }): boolean => row.kind === 'do' || row.kind === 'write'
 /** How much a change row changes, as its behaviours DECLARE on themselves
  *  (MachineReach in core). Set by the hive from the census, never by the
  *  worker, and never sent to Jev: it chooses which gates apply. */
@@ -34,11 +38,18 @@ export interface JevRow {
   readonly kind: JevRowKind
   /** What the participant sees when they must choose. */
   readonly label: string
-  /** The read line, the do sentences, or the ask question. Absent for answer. */
+  /** The read line, the do sentences, the write header (`write <module
+   *  signature> <src/path.ts>`), or the ask question. Absent for answer. */
   readonly lines: readonly string[]
   readonly why?: string
   readonly reach?: JevReach
 }
+/** WHAT JEV SEES OF A WRITE: the header line and the why — never the code.
+ *  A section body runs to hundreds of kilobytes and Jev's state to 24k, so
+ *  the code is judged the way the draft door already judges it: by running.
+ *  Jev judges whether replacing THAT section of THAT module is what was asked,
+ *  overreaches nothing, was read first, and breaks no doctrine section. */
+export const WRITE_REACH: JevReach = 'editing'
 export interface JevInput {
   readonly request: string
   /** The doctrine, one section per entry, each verbatim from the anatomy. */
@@ -92,6 +103,14 @@ export const JEV_ROW_QUESTIONS: Readonly<Record<JevRowKind, readonly NoulSpec[]>
       yes: 'A line changes something outside what was asked.', no: 'Every change stays within what was asked.' },
     { key: 'grounded', ask: at => `Does \`evidence\` show the tiles, names and places that \`${at}.lines\` relies on?`,
       yes: 'The evidence shows what the lines rely on.', no: 'The lines rely on something the evidence does not show.' },
+  ],
+  write: [
+    { key: 'toward', ask: at => `Does replacing the module section named in \`${at}.lines\` carry out what \`request\` asks for, or a step toward it?`,
+      yes: 'Changing that section does what the request asks, or a step toward it.', no: 'Changing that section does not help with what the request asks.' },
+    { key: 'beyond', ask: at => `Does \`${at}.lines\` change a module or section that \`request\` did not ask to change?`,
+      yes: 'The section or module is outside what was asked.', no: 'The section is within what was asked.' },
+    { key: 'grounded', ask: at => `Does \`evidence\` show the section named in \`${at}.lines\` as it is now — its code was read this turn?`,
+      yes: 'The evidence shows that section\'s current code.', no: 'The evidence does not show that section\'s code.' },
   ],
   answer: [
     { key: 'answered', ask: () => 'Does `evidence` hold everything needed to answer `request` fully?',
@@ -188,7 +207,7 @@ export const jevRow = (raw: unknown): JevRow => {
   const id = text(row['id'], 24)
   if (!ID.test(id) || id === 'none') throw new Error('Invalid row id')
   const kind = row['kind']
-  if (kind !== 'read' && kind !== 'do' && kind !== 'answer' && kind !== 'ask') throw new Error('Row kind must be read, do, answer or ask')
+  if (kind !== 'read' && kind !== 'do' && kind !== 'write' && kind !== 'answer' && kind !== 'ask') throw new Error('Row kind must be read, do, write, answer or ask')
   const label = text(row['label'], 70)
   if (/[\x00-\x1f\x7f`~*]/.test(label)) throw new Error('Invalid row label')
   const linesRaw = row['lines'] ?? (row['line'] === undefined ? [] : [row['line']])
@@ -197,10 +216,11 @@ export const jevRow = (raw: unknown): JevRow => {
   if (kind === 'answer' ? lines.length : !lines.length) throw new Error(kind === 'answer' ? 'An answer row carries no line' : 'A row needs a line')
   if (kind !== 'do' && lines.length > 1) throw new Error('Only a do row may carry several lines')
   if (lines.length > 6 || lines.join('\n').length > 2_000) throw new Error('A row exceeds its budget')
+  if (kind === 'write' && !/^\/?write [a-f0-9]{64} src\/\S+$/i.test(lines[0])) throw new Error('A write row carries one line: write <module signature> <src/path.ts>')
   const why = row['why'] === undefined ? undefined : text(row['why'], 200)
   const reach = row['reach']
   if (reach !== undefined && (kind !== 'do' || !Object.hasOwn(JEV_REACH_GATES, reach as string))) throw new Error('Only a do row carries a reach: additive, editing or destructive')
-  return { id, kind, label, lines, ...(why ? { why } : {}), ...(reach ? { reach: reach as JevReach } : {}) }
+  return { id, kind, label, lines, ...(why ? { why } : {}), ...(reach ? { reach: reach as JevReach } : kind === 'write' ? { reach: WRITE_REACH } : {}) }
 }
 
 export const jevInput = (raw: unknown): JevInput => {
@@ -241,7 +261,7 @@ export const jevQuestions = (input: JevInput): JevQuestions => {
     for (const spec of JEV_ROW_QUESTIONS[row.kind]) {
       questions[`${row.id}_${spec.key}`] = { type: 'noul', instructions: DATA + spec.ask(at), criteria: { true: spec.yes, false: spec.no } }
     }
-    if (row.kind !== 'do') return
+    if (!isChangeRow(row)) return
     input.doctrine.forEach((section, k) => {
       questions[`${row.id}_rule${k}`] = { type: 'noul', instructions: RULE_QUESTION(at, section), criteria: { true: RULE_YES, false: RULE_NO } }
     })
@@ -276,7 +296,7 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
   const byId = new Map(input.rows.map(row => [row.id, row]))
   const value = (row: JevRow, key: string): number => noul(answers, `${row.id}_${key}`)
   // The worst doctrine section for each change: the rule it comes closest to breaking.
-  const worst = new Map(input.rows.filter(row => row.kind === 'do').map(row => {
+  const worst = new Map(input.rows.filter(isChangeRow).map(row => {
     const scores = input.doctrine.map((_, k) => noul(answers, `${row.id}_rule${k}`))
     const at = scores.reduce((best, score, k) => score > scores[best] ? k : best, 0)
     return [row.id, { score: scores[at] ?? 0, section: at }] as const
@@ -287,7 +307,7 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
     if (row.kind === 'read') { if (value(row, 'needed') >= G.readNeeded && value(row, 'known') <= G.readKnown) passes.add(row.id); continue }
     if (row.kind === 'answer') { if (value(row, 'answered') >= G.answered) passes.add(row.id); continue }
     if (row.kind === 'ask') { if (value(row, 'open') >= G.open) passes.add(row.id); continue }
-    const gates = JEV_REACH_GATES[row.reach ?? 'editing']
+    const gates = JEV_REACH_GATES[row.kind === 'write' ? WRITE_REACH : row.reach ?? 'editing']
     const rule = worst.get(row.id)!.score
     if (rule >= G.reject) rejected.add(row.id)
     if (gates.automatic && value(row, 'toward') >= G.toward && value(row, 'beyond') <= G.beyond && rule <= G.rule
@@ -302,15 +322,15 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
   if (next['probabilities'] !== undefined) Object.values(object(next['probabilities'])).forEach(probability)
   const confidence = next['confidence'] === undefined ? undefined : probability(next['confidence'])
   const chosen = choice !== 'none' && confidence !== undefined && confidence >= G.floor ? byId.get(choice) : undefined
-  const choiceGate = (row: JevRow): number => row.kind === 'do'
+  const choiceGate = (row: JevRow): number => isChangeRow(row)
     ? (row.reach === 'destructive' ? Infinity : C[row.reach ?? 'editing'])
-    : C[row.kind]
+    : C[row.kind as 'read' | 'answer' | 'ask']
   // THE NUMBERS, SHOWN. Gates are starting values; a participant who sees
   // "toward .72" next to a row they would have run can tell us where to move them.
   const two = (n: number): string => n.toFixed(2).replace(/^0/, '')
   const scoreboard = input.rows.map(row => {
     const parts = JEV_ROW_QUESTIONS[row.kind].map(spec => `${spec.key} ${two(value(row, spec.key))}`)
-    if (row.kind === 'do') {
+    if (isChangeRow(row)) {
       const { score, section } = worst.get(row.id)!
       parts.push(`rules ${two(score)}${score > G.rule ? ` (${headingOf(input.doctrine[section] ?? '')})` : ''}`, row.reach ?? 'editing')
     }
@@ -327,7 +347,7 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
       : chosen.kind === 'read' ? { kind: 'read', rows: [chosen.id, ...reads.filter(id => id !== chosen.id)].slice(0, JEV_MAX_READS) }
       : { kind: 'do', row: chosen.id, review: false }
     reason = `Jev chose ${chosen.label}.`
-  } else if (chosen && chosen.kind === 'do' && !rejected.has(chosen.id)) {
+  } else if (chosen && isChangeRow(chosen) && !rejected.has(chosen.id)) {
     plan = { kind: 'do', row: chosen.id, review: true }
     reason = (JEV_REACH_GATES[chosen.reach ?? 'editing'].automatic
       ? `Jev chose ${chosen.label}, but not every gate passed; the participant reviews it before it runs.`
