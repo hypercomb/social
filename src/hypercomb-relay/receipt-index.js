@@ -57,6 +57,18 @@ export class ReceiptIndex {
     return state
   }
 
+  /** The bytes are gone from this host (secure delete): no owner may keep a
+   *  receipt for them, or a later publish would skip the upload and name a
+   *  head nobody serves. Every owner is on disk and loaded at construction. */
+  forget(signatures) {
+    const gone = new Set(signatures)
+    for (const state of this.#owners.values()) {
+      let changed = false
+      for (const signature of gone) if (state.signatures.delete(signature)) changed = true
+      if (changed) this.#persist(state)
+    }
+  }
+
   document(owner) {
     const state = this.load(owner)
     return {

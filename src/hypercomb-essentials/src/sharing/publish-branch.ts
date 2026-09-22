@@ -34,11 +34,11 @@ import {
   encodeHiveLinkBundle,
   type HiveLinkBundle,
 } from './hive-link.js'
-import { fetchHiveIndex, putHiveManifest } from './hive-pointer.js'
+import { fetchHiveIndex, nip98Header, putHiveManifest } from './hive-pointer.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { hostsOfBranch } from './community-hosts.js'
 import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-actions.drone.js'
-import { knownRoots, writePublishRecord, type PublishRecord } from './publish-heads.js'
+import { knownRoots, listPublishRecords, writePublishRecord, type PublishRecord } from './publish-heads.js'
 import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.js'
 import { readGlobalOnKinds } from './behavior-enablement.js'
 
@@ -499,4 +499,106 @@ export async function setBranchDoors(
   const put = await putHiveManifest(indexHost, read.manifest.roots, doors)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
   return { ok: true }
+}
+
+// ── SECURE DELETE — remove a switched-off place from my hosts ──────────────
+//
+// (documentation/remove-from-my-hosts.md.) Everyday visibility is the domain
+// switch; this is the rare, deliberate act after it: the place is already off
+// everywhere, and now the hosts should stop HOLDING what only it used.
+//
+//   candidates = every sig reachable from every version this place published
+//   keep       = every sig reachable from every head the signed index still
+//                names — and if any open head cannot be walked completely,
+//                NOTHING is removed (an incomplete keep-set could delete
+//                something an open place needs)
+//   forget     = candidates − keep, sent to each host's POST /forget
+//
+// Each host guards again: the cloud deletes only bytes this key alone claims
+// (and never an open head); a relay never forgets what its packages need.
+// Deleting is the host forgetting — anyone who already holds the bytes keeps
+// them, and this hive's own copy is untouched.
+
+export type SecureDeleteFailure = 'services' | 'no-branch' | 'no-signer' | 'no-host' | 'index-unsafe' | 'still-open' | 'nothing-published' | 'keep-incomplete'
+
+export type SecureDeleteResult =
+  | { ok: true; asked: number; removed: number; kept: number; hosts: { host: string; removed: number; kept: number; error?: string }[] }
+  | { ok: false; failure: SecureDeleteFailure; reason?: string }
+
+interface ClosureWalker {
+  closureSigs?: (sig: string, kind?: 'layer') => Promise<{ sigs: Set<string>; complete: boolean }>
+}
+interface SigningSigner extends SignerLike {
+  signEvent?: (evt: { kind: number; created_at: number; tags: string[][]; content: string }) => Promise<Record<string, unknown>>
+}
+
+export async function secureDeleteBranch(segments: readonly string[]): Promise<SecureDeleteResult> {
+  const signer = get<SigningSigner>(NOSTR_SIGNER_KEY)
+  const hostSync = get<HostSyncLike & ClosureWalker>(HOST_SYNC_KEY)
+  if (!signer?.getPublicKeyHex || !signer.signEvent || !hostSync?.closureSigs) return { ok: false, failure: 'services' }
+  const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+  if (segs.length === 0) return { ok: false, failure: 'no-branch' }
+  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
+  const key = lineageKey(segs)
+
+  // Hide first: a place any domain still shows is not deletable.
+  const nodes = await nodesFor(segs, hostSync)
+  if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
+  const { read } = await resolveIndexDoor(nodes, pubkey)
+  let roots: Record<string, string> = {}
+  if (read.ok) roots = read.manifest.roots
+  else if (!(read.reason === 'http' && read.status === 404)) return { ok: false, failure: 'index-unsafe', reason: read.reason }
+  if (key in roots) return { ok: false, failure: 'still-open' }
+
+  const versions = (await listPublishRecords())
+    .filter(e => e.record.lineageKey === key && e.record.pubkey === pubkey)
+    .map(e => e.sealed)
+  if (versions.length === 0) return { ok: false, failure: 'nothing-published' }
+
+  const keep = new Set<string>()
+  for (const [rootKey, head] of Object.entries(roots)) {
+    const walk = await hostSync.closureSigs(head, 'layer')
+    for (const s of walk.sigs) keep.add(s)
+    // An open PLACE we cannot finish walking (published from another device,
+    // a cold child) stops the whole act: its bytes would look unused. A
+    // system root (install:<name>, vocabulary:…) keeps what it reaches here
+    // and the host guards the rest — relays keep every package closure.
+    if (!walk.complete && !rootKey.includes(':')) return { ok: false, failure: 'keep-incomplete', reason: rootKey }
+  }
+  const forget = new Set<string>()
+  for (const version of versions) {
+    for (const s of (await hostSync.closureSigs(version, 'layer')).sigs) if (!keep.has(s)) forget.add(s)
+  }
+
+  const sigs = [...forget]
+  const hosts: { host: string; removed: number; kept: number; error?: string }[] = []
+  for (const door of nodes) {
+    const bare = normalizeHost(door)
+    const url = `${LOOPBACK_RE.test(bare) ? 'http' : 'https'}://${bare}/forget`
+    let removed = 0, kept = 0, error: string | undefined
+    for (let i = 0; i < sigs.length && !error; i += 1000) {
+      const auth = await nip98Header(signer as Parameters<typeof nip98Header>[0], url, 'POST')
+      if (!auth) { error = 'signing failed'; break }
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { Authorization: auth, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sigs: sigs.slice(i, i + 1000) }),
+        })
+        if (!res.ok) { error = `host said ${res.status}`; break }
+        const out = await res.json() as { removed?: string[]; kept?: Record<string, string> }
+        removed += out.removed?.length ?? 0
+        kept += Object.keys(out.kept ?? {}).length
+      } catch { error = 'host unreachable' }
+    }
+    hosts.push({ host: bare, removed, kept, ...(error ? { error } : {}) })
+  }
+  return {
+    ok: true,
+    asked: sigs.length,
+    removed: hosts.reduce((n, h) => n + h.removed, 0),
+    kept: hosts.reduce((n, h) => n + h.kept, 0),
+    hosts,
+  }
 }

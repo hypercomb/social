@@ -189,6 +189,23 @@ test('a replicated package is discoverable and can be pulled and published by an
     const missing = await fetch(`${firstBase}/${'f'.repeat(64)}/00000000`)
     assert.equal(marker.status, missing.status)
     assert.notEqual(await marker.text(), rootSig)
+
+    // Secure delete: a loose atom goes, and so does its receipt; what the
+    // published package needs stays, whatever the caller names.
+    const loose = Buffer.from('forget me')
+    const looseSig = createHash('sha256').update(loose).digest('hex')
+    writeFileSync(join(firstDir, looseSig), loose)
+    const forgetUrl = `${firstBase}/forget`
+    const forgetBody = JSON.stringify({ sigs: [looseSig, rootSig] })
+    const forget = await fetch(forgetUrl, { method: 'POST', body: forgetBody, headers: { Authorization: auth(secret, forgetUrl, 'POST', forgetBody), 'Content-Type': 'application/json' } })
+    assert.equal(forget.status, 200)
+    const forgot = await forget.json()
+    assert.deepEqual(forgot.removed, [looseSig])
+    assert.equal(forgot.kept[rootSig], 'package')
+    assert.equal((await fetch(`${firstBase}/${looseSig}`, { method: 'HEAD' })).status, 404)
+    assert.equal((await fetch(`${firstBase}/${rootSig}`, { method: 'HEAD' })).status, 200)
+    const unsigned = await fetch(forgetUrl, { method: 'POST', body: forgetBody })
+    assert.equal(unsigned.status, 401)
     assert.equal((await fetch(`${firstBase}/${leafSig}`, { method: 'HEAD' })).status, 200)
 
     // The first relay is now the source. Its ordinary signature endpoints

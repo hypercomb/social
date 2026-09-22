@@ -1136,6 +1136,75 @@ function tryServeReplicationStatus(req, res) {
   return true
 }
 
+// POST /forget — SECURE DELETE (documentation/remove-from-my-hosts.md). An
+// authorized writer names sigs this host should stop holding. This relay has
+// one owner, so ownership is not the question; what it must never lose is
+// what its PUBLISHED PACKAGES need — every sig in the closure of a
+// host:packages member is kept. Only flat atoms are removed (never a pool or
+// a history bag), and their receipts go with them. Deleting is this host
+// forgetting: anyone who already holds the bytes keeps them.
+const FORGET_MAX = 1000
+
+function tryForget(req, res) {
+  if (req.method !== 'POST' || (req.url || '').split('?')[0] !== '/forget') return false
+  const auth = verifyNip98(req, writers, { devOpen: cfg.devOpenWrites })
+  if (!auth.ok) { respondText(res, 401, auth.reason); return true }
+  const chunks = []
+  let size = 0
+  let aborted = false
+  req.on('data', (c) => {
+    if (aborted) return
+    size += c.length
+    if (size > 256 * 1024) { aborted = true; respondText(res, 413, 'body too large'); req.destroy(); return }
+    chunks.push(c)
+  })
+  req.on('end', async () => {
+    if (aborted) return
+    let body
+    try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { respondText(res, 400, 'body is not JSON'); return }
+    const sigs = [...new Set((Array.isArray(body?.sigs) ? body.sigs : []).map(s => String(s || '').toLowerCase()))]
+      .filter(s => /^[0-9a-f]{64}$/.test(s))
+    if (sigs.length === 0) { respondText(res, 400, 'no sigs named'); return }
+    if (sigs.length > FORGET_MAX) { respondText(res, 413, `at most ${FORGET_MAX} sigs per call`); return }
+
+    const root = resolve(cfg.contentDir)
+    const localIO = {
+      read: async (sig) => { try { return readFileSync(join(root, sig)) } catch { return null } },
+      fetch: async () => null,
+      write: async () => { throw new Error('read-only walk') },
+    }
+    // What the published packages need is never forgotten.
+    const keep = new Set()
+    try {
+      const poolDir = join(root, HOST_PACKAGES_POOL)
+      for (const name of readdirSync(poolDir)) {
+        if (!/^\d{8}$/.test(name)) continue
+        const pkg = readFileSync(join(poolDir, name), 'utf8').split('\n')[0].trim().toLowerCase()
+        if (!/^[0-9a-f]{64}$/.test(pkg)) continue
+        const closure = await resolvePackageClosure(pkg, localIO)
+        for (const sig of closure.held) keep.add(sig)
+        keep.add(pkg)
+      }
+    } catch { /* no packages pool — nothing to protect */ }
+
+    const removed = []
+    const kept = {}
+    for (const sig of sigs) {
+      if (keep.has(sig)) { kept[sig] = 'package'; continue }
+      const path = join(root, sig)
+      let isFile = false
+      try { isFile = statSync(path).isFile() } catch { /* absent */ }
+      if (!isFile) { kept[sig] = 'not-held'; continue }
+      try { rmSync(path); removed.push(sig) } catch { kept[sig] = 'locked' }
+    }
+    if (removed.length > 0) receiptIndex.forget(removed)
+    const out = JSON.stringify({ removed, kept })
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(out)), 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' })
+    res.end(out)
+  })
+  return true
+}
+
 function tryServeReceipts(req, res) {
   if (req.method !== 'GET' || (req.url || '').split('?')[0] !== '/receipts') return false
   const auth = verifyNip98(req, writers, { devOpen: cfg.devOpenWrites })
@@ -1332,6 +1401,8 @@ const server = createServer((req, res) => {
   if (tryServeContent(req, res)) return
 
   if (tryServeReceipts(req, res)) return
+
+  if (tryForget(req, res)) return
 
   if (tryReplicate(req, res)) return
 

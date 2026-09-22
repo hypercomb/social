@@ -34,6 +34,7 @@ const currentIndex = (): HiveIndexResult => {
 }
 
 vi.mock('./hive-pointer.js', () => ({
+  nip98Header: async () => 'Nostr test',
   fetchHiveIndex: async (): Promise<HiveIndexResult> => currentIndex(),
   fetchHiveManifest: async () => {
     const read = currentIndex()

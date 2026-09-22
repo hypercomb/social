@@ -319,7 +319,7 @@ export async function ownHiveRoot(host: string, key: string, deps: Pick<SetHiveR
 
 /** NIP-98 Authorization header — same envelope HostSyncService signs for
  *  byte PUTs: a kind-27235 event binding method + url, base64'd. */
-async function nip98Header(signer: SignerLike, url: string, method: string): Promise<string | null> {
+export async function nip98Header(signer: SignerLike, url: string, method: string): Promise<string | null> {
   try {
     const signed = await signer.signEvent({
       kind: NIP98_KIND,

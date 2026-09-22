@@ -497,6 +497,22 @@ export class PublishPanelComponent implements OnDestroy {
     return !!row && row.segments.length > 0 && !row.busyPhase && row.state !== 'comparing'
   }
 
+  /** Secure delete is offered only for a place that is off everywhere and has
+   *  versions published from here (hide first, delete second). */
+  canForget(row: PublishRow): boolean {
+    return this.canSwitch(row) && !row.live && row.versions.length > 0
+  }
+
+  /** Asks once, in the participant's words, then hands the act to the drone. */
+  forget(row: PublishRow): void {
+    if (!this.canForget(row)) return
+    const i18n = window.ioc?.get<{ t?: (k: string, p?: Record<string, string>) => string }>('@hypercomb.social/I18n')
+    const question = i18n?.t?.('publish.forget.confirm', { name: this.label(row) })
+      ?? `Securely delete ${this.label(row)} from your hosts?`
+    if (!window.confirm(question)) return
+    EffectBus.emit('publish:forget', { key: row.key })
+  }
+
   /** Why nothing can be switched right now: no key to sign with, a first
    *  read still running, or the hive root, which is no tile. */
   hereHint(): string {

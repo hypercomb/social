@@ -452,6 +452,54 @@ test('a front-door apex is the shim host card; the ledger and the heap stay on t
   } finally { globalThis.fetch = realFetch }
 })
 
+// ── secure delete: the host forgets only what its owner alone claims ───────
+
+async function nip98(url, method, key = sk) {
+  const event = { pubkey: hex(schnorr.getPublicKey(key)), created_at: Math.floor(Date.now() / 1000), kind: 27235, tags: [['u', url], ['method', method]], content: '' }
+  const serial = JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content])
+  event.id = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serial))))
+  event.sig = hex(schnorr.sign(event.id, key))
+  return 'Nostr ' + btoa(JSON.stringify(event))
+}
+
+function heap(objects) {
+  return {
+    objects,
+    head: async (k) => objects.has(k) ? { size: 1, httpMetadata: {}, customMetadata: objects.get(k) } : null,
+    get: async (k) => objects.has(k) ? { body: 'x' } : null,
+    put: async (k, _b, o) => { objects.set(k, o?.customMetadata ?? {}) },
+    delete: async (k) => { objects.delete(k) },
+  }
+}
+
+test('forget deletes only what the caller alone claims, and never an open head', async () => {
+  const other = 'b'.repeat(64)
+  const [mine, shared, unclaimed, theirs, open] = ['1', '2', '3', '4', '5'].map((c) => c.repeat(64))
+  const objects = new Map([
+    [mine, { owner: pubkey }],
+    [shared, { owner: pubkey, shared: '1' }],
+    [unclaimed, {}],
+    [theirs, { owner: other }],
+    [open, { owner: pubkey }],
+  ])
+  const { env } = await fixture(await signedIndex({ revolucion: open }))
+  env.CONTENT = heap(objects)
+  const url = 'https://content.pluginthematrix.com/forget'
+  const res = await worker.fetch(new Request(url, {
+    method: 'POST', headers: { authorization: await nip98(url, 'POST'), 'content-type': 'application/json' },
+    body: JSON.stringify({ sigs: [mine, shared, unclaimed, theirs, open, 'f'.repeat(64)] }),
+  }), env)
+  assert.equal(res.status, 200)
+  const out = await res.json()
+  assert.deepEqual(out.removed, [mine])
+  assert.deepEqual(out.kept, { [shared]: 'shared', [unclaimed]: 'unclaimed', [theirs]: 'not-yours', [open]: 'still-open', ['f'.repeat(64)]: 'not-held' })
+  assert.equal(objects.has(mine), false)
+  assert.equal(objects.has(shared) && objects.has(unclaimed) && objects.has(theirs) && objects.has(open), true)
+
+  const anonymous = await worker.fetch(new Request(url, { method: 'POST', body: JSON.stringify({ sigs: [shared] }) }), env)
+  assert.equal(anonymous.status, 401)
+})
+
 test('under /content/ a miss is an honest 404, never the SPA page — the pool walk stops at the gap', async () => {
   const pool = 'e'.repeat(64)
   const { env, assetRequests } = await fixture()

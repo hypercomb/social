@@ -998,15 +998,63 @@ async function serveModule(request, env, sig) {
 async function storeBlob(env, pubkey, sig, body, contentType) {
   const existing = await env.CONTENT.head(sig)
   if (existing) {
-    // Same sig == same bytes — nothing to write, nothing to meter.
-    return { outcome: 'exists', size: existing.size, type: existing.httpMetadata?.contentType || 'application/octet-stream' }
+    // Same sig == same bytes — nothing to write, nothing to meter. But a
+    // SECOND publisher now relies on them: mark the object shared, so the
+    // first uploader's "remove from my hosts" can never take it away (see
+    // forgetSigs). Rare — identical bytes from two keys — and one rewrite.
+    const claim = existing.customMetadata ?? {}
+    const type = existing.httpMetadata?.contentType || 'application/octet-stream'
+    if (claim.owner && claim.owner !== pubkey && claim.shared !== '1') {
+      const obj = await env.CONTENT.get(sig)
+      if (obj) await env.CONTENT.put(sig, obj.body, { httpMetadata: { contentType: type }, customMetadata: { owner: claim.owner, shared: '1' } })
+    }
+    return { outcome: 'exists', size: existing.size, type }
   }
   const adm = await admit(env, pubkey, body.byteLength)
   if (!adm.ok) return { outcome: 'denied', kind: adm.kind, reason: adm.reason }
   const type = contentType || 'application/octet-stream'
-  await env.CONTENT.put(sig, body, { httpMetadata: { contentType: type } })
+  // THE CLAIM: who put these bytes here. Only an object its owner alone
+  // claims can ever be forgotten; anything stored before claims existed has
+  // none, and is never deleted.
+  await env.CONTENT.put(sig, body, { httpMetadata: { contentType: type }, customMetadata: { owner: pubkey } })
   await consume(env, pubkey, adm.grant, body.byteLength)
   return { outcome: 'stored', size: body.byteLength, type }
+}
+
+// POST /forget — REMOVE FROM MY HOSTS (documentation/remove-from-my-hosts.md).
+// A publisher (NIP-98, method POST) names sigs it no longer wants held. Each
+// is deleted only when the publisher is its sole claimant: the object's owner
+// is this key and no other publisher ever uploaded the same bytes. Unclaimed
+// (stored before claims), shared, someone else's, or a head the publisher's
+// own index still names: kept, with the reason. Deleting is the host
+// forgetting — anyone who already holds the bytes keeps them.
+const FORGET_MAX = 1000
+
+async function forgetSigs(request, env) {
+  const auth = await verifyNip98(request, parseAuthEvent(request), 'POST')
+  if (!auth.ok) return text(401, auth.reason)
+  let body
+  try { body = await request.json() } catch { return text(400, 'body is not JSON') }
+  const sigs = [...new Set((Array.isArray(body?.sigs) ? body.sigs : []).map((s) => String(s || '').toLowerCase()))]
+    .filter((s) => SIG_RE.test(s))
+  if (sigs.length === 0) return text(400, 'no sigs named')
+  if (sigs.length > FORGET_MAX) return text(413, `at most ${FORGET_MAX} sigs per call`)
+  const index = await verifiedIndex(env, auth.pubkey)
+  const heads = new Set(Object.values(index?.roots ?? {}).map((s) => String(s).toLowerCase()))
+  const removed = []
+  const kept = {}
+  for (const sig of sigs) {
+    if (heads.has(sig)) { kept[sig] = 'still-open'; continue }
+    const head = await env.CONTENT.head(sig)
+    if (!head) { kept[sig] = 'not-held'; continue }
+    const claim = head.customMetadata ?? {}
+    if (!claim.owner) { kept[sig] = 'unclaimed'; continue }
+    if (claim.owner !== auth.pubkey) { kept[sig] = 'not-yours'; continue }
+    if (claim.shared === '1') { kept[sig] = 'shared'; continue }
+    await env.CONTENT.delete(sig)
+    removed.push(sig)
+  }
+  return json(200, { removed, kept }, { 'Cache-Control': 'no-store' })
 }
 
 // PUT /<sig> — hypercomb host-sync shape (NIP-98). The URL names the
@@ -1426,6 +1474,11 @@ export default {
     if (!site && pathname === '/upload') {
       if (method === 'PUT') return putUpload(request, env)
       if (method === 'HEAD') return headUpload(request, env)
+      return text(405, 'method not allowed')
+    }
+
+    if (!site && pathname === '/forget') {
+      if (method === 'POST') return forgetSigs(request, env)
       return text(405, 'method not allowed')
     }
 

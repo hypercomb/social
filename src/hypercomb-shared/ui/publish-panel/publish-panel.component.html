@@ -310,6 +310,13 @@
             @if (row.live) {
               <p class="pdet-warn">{{ 'publish.unpublish-warning' | t }}</p>
             }
+            <!-- SECURE DELETE — hide first, delete second: only for a place
+                 that is off everywhere and was published from here. Everyday
+                 visibility stays the domain switches above. -->
+            @if (canForget(row)) {
+              <p class="pdet-warn">{{ 'publish.forget.note' | t }}</p>
+              <button class="pdet-btn pdet-unpublish" type="button" (click)="forget(row)">{{ 'publish.forget.action' | t }}</button>
+            }
           </div>
         }
       </section>

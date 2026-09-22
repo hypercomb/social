@@ -59,6 +59,7 @@ import { clearDefaultView, defaultViewAt, writeDefaultView } from '../commands/v
 import { visualBeeIconSvg } from '../commands/visual-bee-icon-svg.js'
 import {
   publishBranch,
+  secureDeleteBranch,
   setBranchDoors,
   unpublishBranch,
   type PublishFailure,
@@ -225,7 +226,7 @@ export class PublishStatusDrone extends Drone {
   protected override listens: string[] = [
     'publish:view-toggle', 'publish:close', 'publish:refresh',
     'publish:run', 'publish:unpublish', 'publish:inspect', 'publish:copy-link',
-    'publish:opens-as', 'publish:set-target', 'publish:door',
+    'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render',
   ]
@@ -323,6 +324,7 @@ export class PublishStatusDrone extends Drone {
     this.onEffect<{ key?: string; zone?: string; on?: boolean }>('publish:door', (p) => {
       void this.#door(String(p?.key ?? ''), String(p?.zone ?? ''), p?.on === true)
     })
+    this.onEffect<{ key?: string }>('publish:forget', (p) => { void this.#forget(String(p?.key ?? '')) })
     this.onEffect<{ key?: string }>('publish:unpublish', (p) => { void this.#unpublish(String(p?.key ?? '')) })
     this.onEffect<{ key?: string }>('publish:copy-link', (p) => { void this.#copyLink(String(p?.key ?? '')) })
     this.onEffect<{ key?: string; view?: string }>('publish:opens-as', (p) => {
@@ -796,6 +798,34 @@ export class PublishStatusDrone extends Drone {
       this.#toast('error', `publish.failure.${result.failure}`, PUBLISH_FAILURE_TEXT[result.failure])
     }
     this.#emit()
+    void this.#refresh()
+  }
+
+  /** SECURE DELETE — the rare act after "off everywhere": ask each host to
+   *  stop holding what only this place used (publish-branch.ts). The panel
+   *  confirms before emitting; the gates live in the routine, not here. */
+  async #forget(key: string): Promise<void> {
+    const row = this.#rows.find(r => r.key === key)
+    if (!row || row.segments.length === 0 || row.busyPhase) return
+    row.busyPhase = 'forgetting'
+    this.#emit()
+    const result = await secureDeleteBranch(row.segments)
+    row.busyPhase = null
+    this.#emit()
+    const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+    if (!result.ok) {
+      const key = result.failure === 'still-open' ? 'publish.forget.still-open'
+        : result.failure === 'keep-incomplete' ? 'publish.forget.keep-incomplete'
+        : 'publish.forget.failed'
+      EffectBus.emit('toast:show', { type: 'error', title: i18n?.t('publish.title') ?? 'Publish', message: i18n?.t(key) ?? 'Nothing was deleted.' })
+      return
+    }
+    EffectBus.emit('toast:show', {
+      type: 'success',
+      title: i18n?.t('publish.title') ?? 'Publish',
+      message: i18n?.t('publish.forget.done', { count: result.removed }) ?? `Your hosts forgot ${result.removed} object(s) only this place used.`,
+    })
+    this.emitEffect('activity:log', { message: `${key}: hosts forgot ${result.removed} of ${result.asked} (${result.hosts.map(h => h.host + (h.error ? ' ' + h.error : '')).join(', ')})` })
     void this.#refresh()
   }
 

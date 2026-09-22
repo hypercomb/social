@@ -1453,6 +1453,59 @@ export class HostSyncService extends EventTarget {
     return gaps
   }
 
+  /** EVERY signature in a closure, from local bytes — the same walk as
+   *  `closureGaps`, collecting instead of judging. `complete` is false when a
+   *  layer or resource in the closure is not held here, so its refs could not
+   *  be enumerated: a caller deciding what is safe to DELETE must treat an
+   *  incomplete keep-set as "keep everything" (remove-from-hosts does). */
+  public readonly closureSigs = async (
+    sig: string,
+    kind: HostSyncKind = 'layer',
+  ): Promise<{ sigs: Set<string>; complete: boolean }> => {
+    const root = String(sig ?? '').trim().toLowerCase()
+    const sigs = new Set<string>()
+    let complete = true
+    if (!SIG_RE.test(root)) return { sigs, complete: false }
+
+    const walk = async (s: string, k: HostSyncKind): Promise<void> => {
+      if (sigs.has(s)) return
+      sigs.add(s)
+      if (k === 'bee' || k === 'dependency') return
+      let bytes: ArrayBuffer | null = null
+      try { bytes = await this.#readLocalBytes(s, k) } catch { bytes = null }
+      if (!bytes) { complete = false; return }
+      if (k === 'layer') {
+        let layer: Record<string, unknown>
+        try { layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return }
+        if (!layer || typeof layer !== 'object') return
+        const incidence = metaIncidence(layer)
+        if (incidence) return await walk(incidence.sig, incidence.kind)
+        for (const [slot, value] of Object.entries(layer)) {
+          if (!Array.isArray(value)) continue
+          const refKind: HostSyncKind = CHILD_SLOT_SET.has(slot) ? 'layer'
+            : slot === 'bees' ? 'bee'
+            : slot === 'dependencies' ? 'dependency'
+            : 'resource'
+          for (const raw of value) {
+            const ref = String(raw ?? '').trim().toLowerCase()
+            if (SIG_RE.test(ref) && ref !== s) await walk(ref, refKind)
+          }
+        }
+      } else if (k === 'resource') {
+        const nested = [
+          ...await decorationClosureSigs(bytes, r => this.#readLocalBytes(r, 'resource')),
+          ...nestedResourceSigs(bytes),
+        ]
+        for (const ref of nested) {
+          if (SIG_RE.test(ref) && ref !== s) await walk(ref, 'resource')
+        }
+      }
+    }
+
+    await walk(root, kind)
+    return { sigs, complete }
+  }
+
   // ── read-only served probe (status surfaces) ──────────────────────────
   //
   // DELIBERATELY SEPARATE from #receiptStillHonored. That one is the drain's
