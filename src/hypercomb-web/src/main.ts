@@ -1,6 +1,11 @@
 // hypercomb-web/src/main.ts
 /// <reference path="../../hypercomb-shared/global.d.ts" />
 
+// FIRST, before any other module evaluates: a production origin's console is
+// quiet (log/info/debug are no-ops; warn/error stay). `hc:verbose` in
+// localStorage turns the trail back on. See quiet-console.ts.
+import { announce } from '@hypercomb/shared/core/quiet-console'
+
 // ── boot perf trail ──────────────────────────────────────────────────────────
 // Mirror of hypercomb-dev/src/main.ts. T0 = earliest point in the module graph.
 // Any shared/essentials code that calls window.__hcBoot('label') gets a
@@ -16,6 +21,8 @@
   const t = performance.now() - t0
   const msg = `+${t.toFixed(0)}ms ${label}${extra ? ` ${extra}` : ''}`
   console.log(`[boot] ${msg}`)
+  // The one boot line a quiet origin still says: first paint, and when.
+  if (label.startsWith('bootstrapApplication done')) announce(`[hypercomb] ready +${t.toFixed(0)}ms`)
   ;(window as any).__hcBootMarks.push(msg)
   try { localStorage.setItem('hc:perf-boot-marks', JSON.stringify((window as any).__hcBootMarks)) } catch {}
 }

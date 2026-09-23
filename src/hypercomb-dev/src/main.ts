@@ -1,5 +1,10 @@
 // hypercomb-dev/src/main.ts
 
+// FIRST, before any other module evaluates — parity with the web shell. A
+// loopback origin stays verbose, so this only matters when the dev build is
+// served from a real domain. See hypercomb-shared/core/quiet-console.ts.
+import '@hypercomb/shared/core/quiet-console'
+
 // ── boot perf trail ──────────────────────────────────────────────────────────
 // T0 = the earliest point we can capture inside the module graph. Any
 // shared/essentials code that calls window.__hcBoot('label') from here on

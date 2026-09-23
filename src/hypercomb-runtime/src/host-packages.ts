@@ -45,7 +45,7 @@ const isLoopback = (zone: string): boolean =>
  * — both are tried, and the pool probe settles which. `content.<zone>` is
  * the relay/write face that a wildcard zone gets for free, so it is asked too.
  */
-export const hostBases = (zone: string): string[] => {
+const allHostBases = (zone: string): string[] => {
   const scheme = isLoopback(zone) ? 'http' : 'https'
   // A zone that IS the content face already needs no second one: prefixing it
   // again asks for `content.content.<zone>`, which resolves nowhere and costs
@@ -55,6 +55,53 @@ export const hostBases = (zone: string): string[] => {
     ? [`${scheme}://${zone}`]
     : [`${scheme}://${zone}`, `${scheme}://content.${zone}`]
   return faces.flatMap(base => [`${base}/content`, base])
+}
+
+/**
+ * The bases ATOMS are fetched from. Once the pool probe has settled which base
+ * a zone answers on, that is the only one — a zone's faces are one store, and
+ * asking the other three for every atom turned each miss into four requests
+ * (one of them a CORS error against the apex's 404 page). Before the probe
+ * settles, every base is a candidate.
+ */
+export const hostBases = (zone: string): string[] => {
+  const settled = settledBase(zone)
+  return settled ? [settled] : allHostBases(zone)
+}
+
+/** Where a zone's pool last answered, remembered across sessions so the next
+ *  boot asks there first instead of walking the wrong bases into a row of
+ *  404s. The probe still tries every base, so a host whose layout moved is
+ *  found again and the memo corrected. */
+const answeredBase = new Map<string, string>()
+const BASE_MEMO_KEY = 'hc:host-base:'
+
+const settledBase = (zone: string): string | null => {
+  const held = answeredBase.get(zone)
+  if (held) return held
+  try {
+    const stored = globalThis.localStorage?.getItem(BASE_MEMO_KEY + zone)
+    if (stored && allHostBases(zone).includes(stored)) { answeredBase.set(zone, stored); return stored }
+  } catch { /* no storage here */ }
+  return null
+}
+
+const settleBase = (zone: string, base: string): void => {
+  answeredBase.set(zone, base)
+  try { globalThis.localStorage?.setItem(BASE_MEMO_KEY + zone, base) } catch { /* memory memo still holds */ }
+}
+
+/** Test seam: forget every settled base. */
+export const _resetSettledBases = (): void => {
+  answeredBase.clear()
+  try {
+    const store = globalThis.localStorage
+    if (!store) return
+    for (let i = store.length - 1; i >= 0; i--) {
+      const key = store.key(i)
+      if (key?.startsWith(BASE_MEMO_KEY)) store.removeItem(key)
+    }
+  } catch { /* nothing to forget */ }
 }
 
 export type HostPackage = {
@@ -153,16 +200,13 @@ type FoundPool = {
  *  different facts, and only the second is about reachability. */
 type PoolProbe = { pool: FoundPool | null; answered: boolean }
 
-/** The base each zone's pool last answered on. A host's layout does not move
- *  between opens, so the next probe asks there first instead of walking the
- *  wrong bases into a row of 404s. A hint only: every base is still tried. */
-const answeredBase = new Map<string, string>()
-
 const probePool = async (zone: string): Promise<PoolProbe> => {
   const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
   let answered = false
-  const remembered = answeredBase.get(zone)
-  const bases = hostBases(zone)
+  // The settled base first, then every other — a hint only here: the probe
+  // is what settles it, so it must keep looking when the memo is stale.
+  const remembered = settledBase(zone)
+  const bases = allHostBases(zone)
   const ordered = remembered && bases.includes(remembered) ? [remembered, ...bases.filter(base => base !== remembered)] : bases
 
   for (const base of ordered) {
@@ -178,7 +222,7 @@ const probePool = async (zone: string): Promise<PoolProbe> => {
     if (listing) {
       const indices = markerIndices(listing)
       if (indices.length) {
-        answeredBase.set(zone, base)
+        settleBase(zone, base)
         return { pool: { base, read, head: indices[indices.length - 1]!, indices }, answered }
       }
       continue   // the host holds this pool and it is empty — not a miss to retry elsewhere
@@ -186,7 +230,7 @@ const probePool = async (zone: string): Promise<PoolProbe> => {
 
     const head = await headIndex(async i => (await read(i)) !== null)
     if (head >= 0) {
-      answeredBase.set(zone, base)
+      settleBase(zone, base)
       return { pool: { base, read, head, indices: null }, answered: true }
     }
   }

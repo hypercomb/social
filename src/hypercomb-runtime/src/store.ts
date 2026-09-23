@@ -1080,9 +1080,18 @@ export class Store extends EventTarget {
   }
 
   /** Prefetch a resource into the in-memory cache. Safe to call concurrently
-   *  for the same signature — in-flight loads are deduped. */
+   *  for the same signature — in-flight loads are deduped.
+   *
+   *  LOCAL ONLY — memory → OPFS, never a host. A warm-up is speculative: it
+   *  reads pictures nobody is looking at yet, from indexes that can be stale
+   *  (the legacy tile-props index still names resources that no longer exist
+   *  anywhere). Letting it fall through to the host turned every stale entry
+   *  into a fan-out across every carried domain, three URL shapes each — a
+   *  wall of 404s on hypercomb.io for bytes no host was ever going to have.
+   *  A consumer that actually needs the resource reads it on demand through
+   *  `getResource`, which still falls back to the host. */
   public preheatResource = async (signature: string): Promise<Blob | null> =>
-    this.getResource(signature)
+    this.#getResolvedResource(signature, new Set(), true)
 
   /**
    * Cold-miss fallback for getResource: resolve the bytes from a host via

@@ -7,7 +7,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerPoolMeaning } from '@hypercomb/core'
-import { askHostPackages, headPackage, hostBases, listHostPackages } from './host-packages'
+import { _resetSettledBases, askHostPackages, headPackage, hostBases, listHostPackages } from './host-packages'
 import { HOST_PACKAGES_MEANING, poolEntryName } from './host-pool'
 
 const SIG_A = 'a'.repeat(64)
@@ -46,6 +46,8 @@ const poolWithoutListing = async (base: string, sigs: string[]): Promise<Served>
   const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
   return Object.fromEntries(sigs.map((sig, i) => [`${base}/${pool}/${poolEntryName(i)}`, sig]))
 }
+
+beforeEach(() => { _resetSettledBases() })
 
 describe('headPackage — discovery', () => {
   beforeEach(() => { vi.unstubAllGlobals() })
@@ -114,6 +116,23 @@ describe('headPackage — discovery', () => {
     expect(asked.some(url => url.startsWith('https://root.example/content/'))).toBe(false)
   })
 
+  it('once the pool has settled a base, atoms are fetched from that base alone', async () => {
+    vi.stubGlobal('fetch', serving(await poolAt('https://root.example', [SIG_A])))
+    expect(hostBases('root.example')).toHaveLength(4)
+
+    await headPackage('root.example')
+    expect(hostBases('root.example')).toEqual(['https://root.example'])
+  })
+
+  it('remembers the settled base across sessions, and forgets one that no longer fits the zone', async () => {
+    vi.stubGlobal('fetch', serving(await poolAt('https://root.example/content', [SIG_A])))
+    await headPackage('root.example')
+    expect(localStorage.getItem('hc:host-base:root.example')).toBe('https://root.example/content')
+
+    localStorage.setItem('hc:host-base:other.example', 'https://elsewhere.example')
+    expect(hostBases('other.example')).toHaveLength(4)
+  })
+
   it('answers null for a domain that publishes nothing at all', async () => {
     vi.stubGlobal('fetch', serving({}))
     expect(await headPackage('host.example')).toBeNull()
@@ -155,11 +174,11 @@ describe('listHostPackages — the browse surface', () => {
 
 describe('hostBases', () => {
   it('asks the content-scoped base before the bare one, http only for loopback', () => {
-    expect(hostBases('host.example')).toEqual([
-      'https://host.example/content',
-      'https://host.example',
-      'https://content.host.example/content',
-      'https://content.host.example',
+    expect(hostBases('unsettled.example')).toEqual([
+      'https://unsettled.example/content',
+      'https://unsettled.example',
+      'https://content.unsettled.example/content',
+      'https://content.unsettled.example',
     ])
     expect(hostBases('localhost:4270')[0]).toBe('http://localhost:4270/content')
   })
