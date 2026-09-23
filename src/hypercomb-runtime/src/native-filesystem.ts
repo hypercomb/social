@@ -312,9 +312,13 @@ class NativeFileHandle {
  *
  * Listing collapses correctly: a member whose key contains the prefix and no
  * further `/` is a FILE; a deeper key contributes its next segment once, as a
- * DIRECTORY. That distinction is load-bearing — `putPoolDoc` prunes prior
- * members with a `kind === 'file'` guard specifically so it cannot delete a
- * sub-bucket, and sub-bucket names are 64-hex too.
+ * DIRECTORY. That distinction is load-bearing for `putPoolDoc`'s prune of
+ * prior members — but `kind === 'file'` is NOT its shape guard (store.ts,
+ * putPoolDoc): a molecule's succession atoms are 64-hex files too. The prune
+ * runs only on positive proof that the target is the caller's own document
+ * space — a `subKey` sub-bucket, or a pool the registry declares a document
+ * — and never on a bare-word address. Reporting a sub-bucket as a directory
+ * still matters: a stale-member sweep must never see one as a member.
  */
 class NativeSigDirectory {
   readonly kind = 'directory' as const
@@ -462,9 +466,9 @@ class NativeSigDirectory {
     for (const entry of await this.#entries()) yield entry.name
   }
 
-  /** Yields sub-buckets as DIRECTORIES. `putPoolDoc` prunes stale members with
-   *  a `kind === 'file'` guard, and sub-bucket names are 64-hex too — so
-   *  reporting one as a file would let that prune delete a whole sub-bucket. */
+  /** Yields sub-buckets as DIRECTORIES, so no member sweep ever sees one as a
+   *  member. (The sweep's real guard is positive proof of the caller's own
+   *  document space — see store.ts putPoolDoc — not the entry kind.) */
   async *values(): AsyncGenerator<NativeFileHandle | NativeSigDirectory> {
     for (const entry of await this.#entries()) yield await this.#handleFor(entry)
   }
