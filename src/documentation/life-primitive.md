@@ -135,6 +135,27 @@ and undo restores it. Forgetting bytes is the delete area's act alone. A
 read OPENS the pool and never creates it. A note never mints an identity:
 without a cached key the facet write is skipped that time.
 
+## The sandbox trail wears it
+
+The records the module sandbox publishes (`module-sandbox.md`: the change,
+the host AI's review, an assessor's note, Jev's reading, Jev's pass) are new
+writers, and since 2026-09-23 every hop a reader OPENS in them is a meta
+envelope — a section's text before and after (`relation: 'before'` /
+`'after'`), the host AI's findings (`'findings'`), an assessor's note
+(`'note'`) — one `resource` payload each, minted by `mintMetaEnvelope` so
+the same hop is the same signature. What a reader MATCHES — the package root,
+the change a reading is of — stays a signature, as an index key does. Records
+written before that day hold raw signatures in those fields; `openHop`
+(`assistant/module-review.ts`) reads both, so nothing is migrated and nothing
+heals destructively, and an envelope is never wrapped: a hop resolves once.
+The host's AI and Jev are shown the text the hops name, never the envelopes.
+The runtime store already wears the same rule from the reading side:
+`Store.getResource` follows a `resource` incidence to the bytes it names,
+and `getResourceLocal` is the raw read for code that must see the envelope
+itself — a reader that will hand a TERMINAL signature to somebody else (the
+review sends the host the section text's signatures as context) reads raw
+first, or it hands over the envelope's signature by mistake.
+
 ## One roster, not four
 
 `CHILD_SLOTS = ['cells', 'layers', 'children']` — the slots a layer holds its

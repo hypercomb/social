@@ -130,14 +130,20 @@ const announcedOn = page => page.evaluate(() => {
   const changeSig = channelOf(stateR, pubkey, `change:${SANDBOX}`)
   const reviewSig = channelOf(stateR, pubkey, `review:${SANDBOX}`)
   const fromHost = async sig => (await fetch(`http://${HOST}/${sig}`)).text()
+  // A hop the trail publishes is a meta envelope: open it to the text it names (a raw signature opens to itself).
+  const hopOf = async sig => { try { return JSON.parse(await fromHost(sig)) } catch { return null } }
+  const openHop = async sig => { const hop = await hopOf(sig); return hop?.meta === 1 && hop.resource ? fromHost(hop.resource) : fromHost(sig) }
   const changeRecord = changeSig ? JSON.parse(await fromHost(changeSig)) : null
   const drafted = changeRecord?.changes?.[0]
-  const [beforeText, afterText] = drafted ? await Promise.all([fromHost(drafted.before), fromHost(drafted.after)]) : ['', '']
+  const [beforeText, afterText] = drafted ? await Promise.all([openHop(drafted.before), openHop(drafted.after)]) : ['', '']
   check('the change is published beside the sandbox, file by file', !!changeSig && drafted?.section === target.section && afterText.includes(MARKER) && !beforeText.includes(MARKER))
   const reviewRecord = reviewSig ? JSON.parse(await fromHost(reviewSig)) : null
-  const findings = reviewRecord ? await fromHost(reviewRecord.findings) : ''
+  const findings = reviewRecord ? await openHop(reviewRecord.findings) : ''
   check('the host AI read the change, and its reading is published beside it', reviewRecord?.verdict === 'accept' && reviewRecord?.change === changeSig, reviewRecord ? `${reviewRecord.verdict} by ${reviewRecord.model}` : 'no review')
   check('the host AI was shown the changed code itself, from its own heap', /__hivePublishProof: yes/.test(findings) && /Context files shown: 2/.test(findings), findings.split('\n').slice(1, 3).join(' '))
+  const [beforeHop, findingsHop] = drafted && reviewRecord ? await Promise.all([hopOf(drafted.before), hopOf(reviewRecord.findings)]) : [null, null]
+  const oneHop = hop => !!hop && hop.meta === 1 && ['layer', 'resource', 'dependency', 'bee'].filter(k => hop[k] !== undefined).length === 1 && /^[0-9a-f]{64}$/.test(hop.resource ?? '')
+  check('the trail wears the Life Primitive: every hop a reader opens is a meta envelope — one typed payload, its relation named', oneHop(beforeHop) && beforeHop.relation === 'before' && oneHop(findingsHop) && findingsHop.relation === 'findings', JSON.stringify(beforeHop))
 
   // ── 2c. JEV READS THE DIFF, RULE BY RULE, AND ITS READING IS PUBLIC ─────
   const jevToasts = await H.toastsUntil(page, /^Jev read |Jev did not read/, 60_000)
@@ -180,9 +186,11 @@ const announcedOn = page => page.evaluate(() => {
   const listed = await tester.evaluate(() => fetch('/site.json', { cache: 'no-store' }).then(r => r.json()))
   const mine = (listed.assessments ?? []).find(a => a.pubkey === testerKey)
   const assessment = mine ? JSON.parse(await fromHost(mine.record)) : null
-  const note = assessment ? await fromHost(assessment.note) : ''
+  const note = assessment ? await openHop(assessment.note) : ''
+  const noteHop = assessment ? await hopOf(assessment.note) : null
   check('anyone at the door can sign an assessment, and the door lists it under their key', mine?.verdict === 'refuse' && testerKey !== pubkey, JSON.stringify(listed.assessments))
   check('the assessment names the change it read, and its note is public', assessment?.root === sandboxRoot && assessment?.change === changeSig && note === 'raises zoom without asking')
+  check('the assessor\'s note is one typed hop too, under the assessor\'s own key', oneHop(noteHop) && noteHop.relation === 'note', JSON.stringify(noteHop))
   await H.watchToasts(page)
   await H.say(page, `module assess ${CHANGE} @${WRITE}`)
   const tally = await H.toastsUntil(page, /people say/)

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { assessSandbox, changedPaths, diffText, isSandboxSite, jevReadTrial, publishChange, readChange, readTrial, reviewChange, reviewContext, reviewQuestion, sectionText, takeTrial, tallyAssessments, trialsOf, verdictOf, type ReviewDeps, type TakeDeps, jevPassZone, trialAdoption, trialClashes, trialEvidence, type SandboxTrial } from './module-review.js'
+import { assessSandbox, changedPaths, diffText, isSandboxSite, jevReadTrial, publishChange, readChange, readTrial, recordChange, reviewChange, reviewContext, reviewQuestion, sectionText, takeTrial, tallyAssessments, trialsOf, verdictOf, type ReviewDeps, type TakeDeps, jevPassZone, trialAdoption, trialClashes, trialEvidence, type SandboxTrial, openChangeHops, openHop, putHop } from './module-review.js'
 import { diffLines } from './line-diff.js'
 
 const BEFORE = ['// src/preferences/settings.ts', 'export const zoom = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
@@ -54,9 +54,11 @@ describe('module review', () => {
     expect(change.ok).toBe(true)
     if (!change.ok) return
     const [file] = change.record.changes
-    expect(w.heap.get(file!.before)).toContain('zoom = 1')
-    expect(w.heap.get(file!.after)).toContain('__proof')
-    expect(w.published[0]).toEqual([file!.before, file!.after, change.sig])
+    // Each side is one typed hop to the section's text; the host serves both the text and the hop.
+    const [before, after] = await Promise.all([openHop(file!.before, w.deps.get), openHop(file!.after, w.deps.get)])
+    expect(before!.text).toContain('zoom = 1')
+    expect(after!.text).toContain('__proof')
+    expect(w.published[0]).toEqual([before!.sig, after!.sig, file!.before, file!.after, change.sig])
     expect(w.stamped).toEqual([['change:try-zoom', change.sig]])
     expect(change.record.at).toBe(1_700_000_000_000)
     expect(await readChange(change.sig, w.deps)).toEqual(change.record)
@@ -65,7 +67,7 @@ describe('module review', () => {
     expect(read).toMatchObject({ ok: true, verdict: 'accept', model: 'claude-haiku-4-5' })
     if (!read.ok) return
     expect(read.findings).toContain('Saw the new global')
-    expect(w.asked[0]!.context).toEqual([file!.after, file!.before])
+    expect(w.asked[0]!.context).toEqual([after!.sig, before!.sig])
     expect(w.asked[0]!.question).toContain('src/preferences/settings.ts')
     expect(w.asked[0]!.question).toContain('games/pong')
     const review = JSON.parse(w.heap.get(read.sig)!)
@@ -97,8 +99,9 @@ describe('public assessments', () => {
     expect(signed.ok).toBe(true)
     if (!signed.ok) return
     expect(signed.record).toMatchObject({ kind: 'module-assessment', sandbox: 'try-zoom', root, change: 'c'.repeat(64), verdict: 'refuse' })
-    expect(w.heap.get(signed.record.note)).toBe('writes to storage it did not before')
-    expect(w.published.at(-1)).toEqual([signed.record.note, signed.sig])
+    const note = await openHop(signed.record.note, w.deps.get)
+    expect(note!.text).toBe('writes to storage it did not before')
+    expect(w.published.at(-1)).toEqual([note!.sig, signed.record.note, signed.sig])
     expect(w.stamped.at(-1)).toEqual([`assess:${root}`, signed.sig])
     expect(await assessSandbox('h', { title: 'try-zoom', package: root }, 'maybe' as never, '', w.deps)).toEqual({ ok: false, error: 'a verdict is accept, refuse or unclear' })
   })
@@ -322,5 +325,50 @@ describe('Jev weighs a zone', () => {
     expect(w.published.at(-1)).toEqual([passed.sig])
     expect(w.stamped.at(-1)).toEqual(['pass:hypercomb.com', passed.sig])
     expect(await jevPassZone('h', 'z', [], jev, { ...w.deps, site: async () => null, reader: () => async () => null })).toEqual({ ok: false, error: 'no trial is open' })
+  })
+})
+
+describe('the trail wears the Life Primitive', () => {
+  it('writes every hop a reader opens as one typed envelope with its relation, and opens raw signatures too', async () => {
+    const w = await world()
+    const recorded = await recordChange('try-zoom', 'r'.repeat(64), [{ path: 'preferences', section: 'src/preferences/settings.ts', from: w.from, to: w.to }], [], w.deps)
+    if ('error' in recorded) throw new Error(recorded.error)
+    const before = JSON.parse(w.heap.get(recorded.record.changes[0]!.before)!)
+    expect(before).toEqual({ meta: 1, resource: expect.stringMatching(/^[0-9a-f]{64}$/), relation: 'before' })
+    expect(JSON.parse(w.heap.get(recorded.record.changes[0]!.after)!).relation).toBe('after')
+    expect(w.heap.get(before.resource)).toBe('// src/preferences/settings.ts\nexport const zoom = 1;\n')
+    // The host serves the text and the envelope: four hops' worth for one file, then the record.
+    expect(recorded.files).toHaveLength(5)
+    expect(recorded.files).toContain(before.resource)
+    // A hop opens to the text it names; a raw signature (a record from before the primitive) opens to itself.
+    expect(await openHop(recorded.record.changes[0]!.before, w.deps.get)).toEqual({ sig: before.resource, text: w.heap.get(before.resource) })
+    expect(await openHop(before.resource, w.deps.get)).toEqual({ sig: before.resource, text: w.heap.get(before.resource) })
+    expect(await openHop('0'.repeat(64), w.deps.get)).toBeNull()
+    expect((await openChangeHops(recorded.record, w.deps.get))!.changes[0]!.before).toBe(before.resource)
+    // The same hop is the same signature.
+    expect(await putHop(w.deps, 'resource', before.resource, 'before')).toBe(recorded.record.changes[0]!.before)
+  })
+
+  it('shows the host AI the text behind the hops, and wraps its findings and an assessor\'s note the same way', async () => {
+    const w = await world()
+    const change = await publishChange('h', 'try-zoom', 'r'.repeat(64), [{ path: 'preferences', section: 'src/preferences/settings.ts', from: w.from, to: w.to }], [], w.deps)
+    if (!change.ok) throw new Error(change.error)
+    const read = await reviewChange('h', change.sig, change.record, w.deps)
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    const context = w.asked.at(-1)!.context
+    expect(context.every(sig => { try { return !(JSON.parse(w.heap.get(sig)!) as { meta?: number }).meta } catch { return true } })).toBe(true)
+    expect(read.findings).toContain('Saw the new global.')
+    const review = JSON.parse(w.heap.get(read.sig)!)
+    expect(JSON.parse(w.heap.get(review.findings)!)).toEqual({ meta: 1, resource: expect.any(String), relation: 'findings' })
+    const signed = await assessSandbox('h', { title: 'try-zoom', package: 'r'.repeat(64), change: change.sig }, 'refuse', 'raises zoom', w.deps)
+    if (!signed.ok) throw new Error(signed.error)
+    expect(JSON.parse(w.heap.get(signed.record.note)!)).toEqual({ meta: 1, resource: expect.any(String), relation: 'note' })
+    // A reader opens every hop: the diff, the findings, the note.
+    const reading = await readTrial({ sandbox: true, title: 'try-zoom', package: 'r'.repeat(64), pubkey: 'p', change: change.sig, review: read.sig, assessments: [{ pubkey: 'q', record: signed.sig, verdict: 'refuse', at: 1 }] }, async sig => w.heap.get(sig) ?? null)
+    expect(reading.files[0]!.after).toContain('globalThis.__proof = 1;')
+    expect(reading.review?.findings).toContain('Saw the new global.')
+    expect(reading.people[0]!.note).toBe('raises zoom')
+    expect(reading.missing).toEqual([])
   })
 })

@@ -24,7 +24,7 @@
 //
 // A dependency: it registers nothing. The `module` queen drives it.
 
-import { broodRoster, sectionOf, SignatureService } from '@hypercomb/core'
+import { broodRoster, sectionOf, SignatureService, isMetaEnvelope, metaPayloadOf, mintMetaEnvelope } from '@hypercomb/core'
 import { diffLines, type DiffRow, type LineDiff } from './line-diff.js'
 import { JEV_READING_CHARS, JEV_READING_FILES, JEV_RUBRIC, type JevReadingFile, type JevReadingInput, type JevReadingResult, type JevReadingVerdict, type JevPassInput, type JevPassResult, type JevReadingRule, type JevTrialStanding, JEV_PASS_TRIALS } from './jev-decision.js'
 
@@ -81,6 +81,47 @@ export interface ReviewDeps {
   now(): number
 }
 
+// ── the trail wears the Life Primitive (documentation/life-primitive.md) ───
+//
+// EVERY HOP A READER OPENS IS A META ENVELOPE — one typed payload key that
+// says how the signature resolves, and the relation the record holds it by:
+// a section's text before and after, the host AI's findings, an assessor's
+// note. What a reader MATCHES (the package root, the change a reading is of)
+// stays a signature, as an index key does. Records written before 2026-09-23
+// hold raw signatures in these fields; `openHop` reads both, so nothing is
+// migrated and nothing heals destructively. An envelope is never wrapped: a
+// hop resolves once. jwize, 2026-09-23: "every part of the experience shares
+// the same properties".
+
+/** Put one typed incidence around an artifact. The same hop is the same bytes, so the same signature. */
+export const putHop = async (deps: Pick<ReviewDeps, 'put'>, kind: 'resource' | 'layer', sig: string, relation: string): Promise<string> =>
+  deps.put(JSON.stringify(mintMetaEnvelope({ [kind]: sig, relation })), 'application/json')
+
+/** Open a hop: the artifact an envelope names, or the bytes themselves when
+ *  the field holds a raw signature (a record from before the primitive). */
+export const openHop = async (sig: string, get: (sig: string) => Promise<string | null>): Promise<{ sig: string; text: string } | null> => {
+  const text = await get(sig)
+  if (text === null) return null
+  let value: unknown = null
+  try { value = JSON.parse(text) } catch { return { sig, text } }
+  if (!isMetaEnvelope(value)) return { sig, text }
+  const payload = metaPayloadOf(value)!
+  const inner = await get(payload.sig)
+  return inner === null ? null : { sig: payload.sig, text: inner }
+}
+
+/** The change with every hop opened to the text it names — what a reviewer is
+ *  shown. Null when a changed file is not held where it is read. */
+export const openChangeHops = async (record: ModuleChangeRecord, get: (sig: string) => Promise<string | null>): Promise<ModuleChangeRecord | null> => {
+  const changes: ChangeFile[] = []
+  for (const file of record.changes) {
+    const [before, after] = await Promise.all([openHop(file.before, get), openHop(file.after, get)])
+    if (!before || !after) return null
+    changes.push({ ...file, before: before.sig, after: after.sig })
+  }
+  return { ...record, changes }
+}
+
 /** The host AI reads at most eight files. */
 const CONTEXT_MAX = 8
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
@@ -127,19 +168,23 @@ export const recordChange = async (
   taken: readonly { path: string; root: string }[] = [],
 ): Promise<{ sig: string; files: string[]; record: ModuleChangeRecord } | { error: string }> => {
   const files: ChangeFile[] = []
+  const served: string[] = []
   for (const change of changes) {
     const [was, now] = await Promise.all([deps.bytesOf(change.from), deps.bytesOf(change.to)])
     if (!was || !now) return { error: `the module behind ${change.section} is not held here` }
-    const before = await deps.put(sectionText(decode(was), change.section), 'text/javascript')
-    const after = await deps.put(sectionText(decode(now), change.section), 'text/javascript')
+    const beforeText = await deps.put(sectionText(decode(was), change.section), 'text/javascript')
+    const afterText = await deps.put(sectionText(decode(now), change.section), 'text/javascript')
+    const before = await putHop(deps, 'resource', beforeText, 'before')
+    const after = await putHop(deps, 'resource', afterText, 'after')
     files.push({ ...change, before, after })
+    served.push(beforeText, afterText, before, after)
   }
   const record: ModuleChangeRecord = {
     kind: 'module-change', sandbox, root, changes: files, off: [...off], at: deps.now(),
     ...(taken.length ? { taken: taken.map(({ path, root: from }) => ({ path, root: from })) } : {}),
   }
   const sig = await deps.put(JSON.stringify(record), 'application/json')
-  return { sig, files: [...new Set(files.flatMap(file => [file.before, file.after])), sig], record }
+  return { sig, files: [...new Set(served), sig], record }
 }
 
 /** Publish the change and stamp `change:<sandbox>` beside the sandbox. */
@@ -163,15 +208,18 @@ export const publishChange = async (
 export const reviewChange = async (
   host: string, changeSig: string, record: ModuleChangeRecord, deps: ReviewDeps,
 ): Promise<{ ok: true; sig: string; verdict: ReviewVerdict; model: string; findings: string } | { ok: false; error: string }> => {
-  const answered = await deps.ask(host, reviewQuestion(record.sandbox, record.changes, record.off, record.taken ?? []), reviewContext(record.changes))
+  const opened = await openChangeHops(record, deps.get)
+  if (!opened) return { ok: false, error: 'a changed file is not held here' }
+  const answered = await deps.ask(host, reviewQuestion(opened.sandbox, opened.changes, opened.off, opened.taken ?? []), reviewContext(opened.changes))
   if (!answered.ok) return { ok: false, error: answered.error }
-  const findings = await deps.put(answered.text, 'text/plain; charset=utf-8')
+  const findingsText = await deps.put(answered.text, 'text/plain; charset=utf-8')
+  const findings = await putHop(deps, 'resource', findingsText, 'findings')
   const review: ModuleReviewRecord = {
     kind: 'module-review', sandbox: record.sandbox, root: record.root, change: changeSig, host,
     model: answered.model, findings, verdict: verdictOf(answered.text), at: deps.now(),
   }
   const sig = await deps.put(JSON.stringify(review), 'application/json')
-  const published = await deps.publish(host, [findings, sig])
+  const published = await deps.publish(host, [findingsText, findings, sig])
   if (!published.ok) return { ok: false, error: published.error }
   const stamped = await deps.stamp(host, `review:${record.sandbox}`, sig)
   if (!stamped.ok) return { ok: false, error: stamped.reason ?? 'the review pointer was not stamped' }
@@ -295,12 +343,13 @@ export const assessSandbox = async (
   host: string, site: Pick<SandboxSite, 'title' | 'package' | 'change'>, verdict: ReviewVerdict, note: string, deps: ReviewDeps,
 ): Promise<{ ok: true; sig: string; record: ModuleAssessmentRecord } | { ok: false; error: string }> => {
   if (!VERDICTS.includes(verdict)) return { ok: false, error: 'a verdict is accept, refuse or unclear' }
-  const noteSig = await deps.put(note.trim() || '(no note)', 'text/plain; charset=utf-8')
+  const noteText = await deps.put(note.trim() || '(no note)', 'text/plain; charset=utf-8')
+  const noteSig = await putHop(deps, 'resource', noteText, 'note')
   const record: ModuleAssessmentRecord = {
     kind: 'module-assessment', sandbox: site.title, root: site.package, change: site.change ?? null, verdict, note: noteSig, at: deps.now(),
   }
   const sig = await deps.put(JSON.stringify(record), 'application/json')
-  const published = await deps.publish(host, [noteSig, sig])
+  const published = await deps.publish(host, [noteText, noteSig, sig])
   if (!published.ok) return { ok: false, error: published.error }
   const stamped = await deps.stamp(host, `assess:${site.package}`, sig)
   if (!stamped.ok) return { ok: false, error: stamped.reason ?? 'the assessment was not signed into your index' }
@@ -359,12 +408,18 @@ export const readTrial = async (site: SandboxSite, read: (sig: string) => Promis
     const got = await text(sig)
     try { return got === null ? null : JSON.parse(got) as T } catch { return null }
   }
+  const hop = async (sig: unknown): Promise<string | null> => {
+    if (typeof sig !== 'string' || !SIG_RE.test(sig)) return null
+    const opened = await openHop(sig, read).catch(() => null)
+    if (!opened) missing.add(sig)
+    return opened?.text ?? null
+  }
   const verdict = (value: unknown): ReviewVerdict => VERDICTS.includes(value as ReviewVerdict) ? value as ReviewVerdict : 'unclear'
 
   const record = await json<ModuleChangeRecord>(site.change)
   const change = record?.kind === 'module-change' && Array.isArray(record.changes) ? record : null
   const files = await Promise.all((change?.changes ?? []).map(async (file): Promise<TrialFile> => {
-    const [before, after] = await Promise.all([text(file.before), text(file.after)])
+    const [before, after] = await Promise.all([hop(file.before), hop(file.after)])
     return {
       section: String(file.section ?? ''), path: String(file.path ?? ''), before: before ?? '', after: after ?? '',
       diff: before === null || after === null ? null : diffLines(before, after),
@@ -377,13 +432,13 @@ export const readTrial = async (site: SandboxSite, read: (sig: string) => Promis
     : null
   const reviewRecord = await json<ModuleReviewRecord>(site.review)
   const review = reviewRecord?.kind === 'module-review'
-    ? { verdict: verdict(reviewRecord.verdict), model: String(reviewRecord.model ?? ''), findings: (await text(reviewRecord.findings)) ?? '' }
+    ? { verdict: verdict(reviewRecord.verdict), model: String(reviewRecord.model ?? ''), findings: (await hop(reviewRecord.findings)) ?? '' }
     : null
 
   const people = (await Promise.all((site.assessments ?? []).slice(0, 50).map(async assessment => {
     const assessed = await json<ModuleAssessmentRecord>(assessment.record)
     if (assessed?.kind !== 'module-assessment' || assessed.root !== site.package) return null
-    return { pubkey: assessment.pubkey, verdict: verdict(assessed.verdict), note: (await text(assessed.note)) ?? '', at: assessment.at }
+    return { pubkey: assessment.pubkey, verdict: verdict(assessed.verdict), note: (await hop(assessed.note)) ?? '', at: assessment.at }
   }))).filter((person): person is NonNullable<typeof person> => person !== null)
 
   const taken = (Array.isArray(change?.taken) ? change!.taken : [])
@@ -505,9 +560,9 @@ export const jevReadTrial = async (
   const perFile = Math.floor(JEV_READING_CHARS / judged.length)
   const files: { section: string; diff: string }[] = []
   for (const file of judged) {
-    const [before, after] = await Promise.all([deps.get(file.before), deps.get(file.after)])
-    if (before === null || after === null) return { ok: false, error: `${file.section} is not held here` }
-    files.push({ section: file.section, diff: diffText(diffLines(before, after), perFile) })
+    const [before, after] = await Promise.all([openHop(file.before, deps.get), openHop(file.after, deps.get)])
+    if (!before || !after) return { ok: false, error: `${file.section} is not held here` }
+    files.push({ section: file.section, diff: diffText(diffLines(before.text, after.text), perFile) })
   }
   let read: JevReadingResult
   try { read = await jev({ sandbox: record.sandbox, files, doctrine }) } catch (error) {

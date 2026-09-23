@@ -93,7 +93,10 @@ const ANATOMY_KEY = '@hypercomb.social/Anatomy'
 
 type StoreLike = {
   putResource?(blob: Blob, options?: { emit?: boolean }): Promise<string>
+  /** Follows a resource incidence to the bytes it names (the Life Primitive, in the store). */
   getResource?(sig: string): Promise<Blob | null>
+  /** The bytes at a signature as written — the envelope itself, when it is one. */
+  getResourceLocal?(sig: string): Promise<Blob | null>
 }
 type HostAiLike = {
   askWhole?(host: string, question: string, context: readonly string[]): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string }>
@@ -113,6 +116,7 @@ const reviewDeps = (drafts: ModuleDraftsProvider, sync: HostSyncLike): ReviewDep
   const store = window.ioc?.get?.(STORE_KEY) as StoreLike | undefined
   const putResource = store?.putResource?.bind(store)
   const getResource = store?.getResource?.bind(store)
+  const getResourceLocal = store?.getResourceLocal?.bind(store)
   const publishAtoms = sync.publishAtoms?.bind(sync)
   if (!putResource || !getResource || !publishAtoms) return null
   const bytesOf = async (sig: string): Promise<Uint8Array | null> => {
@@ -123,7 +127,12 @@ const reviewDeps = (drafts: ModuleDraftsProvider, sync: HostSyncLike): ReviewDep
   }
   return {
     put: (text, type) => putResource(new Blob([text], { type }), { emit: false }),
-    get: async sig => (await getResource(sig).catch(() => null))?.text() ?? null,
+    // RAW FIRST: the store's getResource follows a resource incidence to the
+    // bytes it names, so a reader that must see the envelope itself — the
+    // review sends the host the TERMINAL signatures as context — reads what
+    // is written at the signature, and falls back to the resolving read only
+    // when the bytes are not held here.
+    get: async sig => ((await getResourceLocal?.(sig).catch(() => null)) ?? (await getResource(sig).catch(() => null)))?.text() ?? null,
     bytesOf,
     publish: async (host, sigs) => {
       const done = await publishAtoms(host, sigs, bytesOf)
