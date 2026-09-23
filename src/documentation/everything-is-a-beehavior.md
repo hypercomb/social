@@ -78,8 +78,16 @@ package revision list pretending to be hives.
 An upgrade is another signed hive/package revision, first tried at a
 `try-<change>.<zone>` door on its own origin. A model can propose the change
 from within a hive; the publisher commits it to that trial, where people and
-models can inspect the signed source and running result. Taking a trial into
-another hive and promoting it to a live door remain explicit acts. The zone
+models can inspect the signed source and running result. Inspection fetches
+bytes from the door by signature and verifies them for display; it does not
+pick a branch, install a package, or run that code in the reader's hive. The
+review shows the exact root, changed paths, before/after files, and any files
+that could not be read. Community assessments and AI readings name that exact
+root and remain evidence, not automatic authority. Only after this scrutiny
+may a person choose to take a selected branch into their hive, where new code
+is held pending a separate activation decision. Visiting the trial runs its
+package at the trial's isolated origin, never at the reader's hive origin.
+Promoting it to a live door remains an explicit publisher act. The zone
 may advertise trials, but a trial is never the zone's live head merely because
 it is newest. The command line and every richer view arrive as beehaviors;
 the cold door stays small enough to run before any adopted code.
