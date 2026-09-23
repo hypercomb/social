@@ -60,6 +60,12 @@
       "headers": {
         "cache-control": "public, max-age=0, must-revalidate"
       }
+    },
+    {
+      "route": "/404.txt",
+      "headers": {
+        "cache-control": "no-cache, no-store, must-revalidate"
+      }
     }
   ],
   "navigationFallback": {
@@ -90,5 +96,11 @@
   },
   "mimeTypes": {
     ".webmanifest": "application/manifest+json"
+  },
+  "responseOverrides": {
+    "404": {
+      "rewrite": "/404.txt",
+      "statusCode": 404
+    }
   }
 }
