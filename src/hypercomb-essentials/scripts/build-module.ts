@@ -19,6 +19,7 @@
 import { spawnSync } from 'child_process'
 import { createHash } from 'node:crypto'
 import { builtinModules } from 'node:module'
+import { TRANSFER_PACKS_MEANING, encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.js'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
@@ -1663,6 +1664,28 @@ const main = async (): Promise<void> => {
     writeFileSync(memberPath, memberBytes, 'utf8')
   }
   writeFileSync(join(poolDir, 'index.html'), '00000000', 'utf8')
+
+  // ── the transfer pack (hypercomb-runtime/src/transfer-pack.ts) ─────
+  //
+  // Every file of this package in ONE content-addressed file, so a cold
+  // install is one request instead of hundreds, and one member of the
+  // `transfer:packs` pool — named by the root, holding the pack's signature.
+  // A DERIVED record: the reader re-hashes every member against its own name,
+  // and a reader with no pack installs the same package from loose files.
+  const packMembers: Array<[string, Uint8Array]> = [
+    ...[...layers].map(([sig, json]): [string, Uint8Array] => [sig, textToBytes(json)]),
+    ...dependencyBytes,
+    ...resourceBytes,
+  ]
+  const packPlain = encodeTransferPack(packMembers)
+  const packBytes = await gzipBytes(packPlain)
+  const packSig = await SignatureService.sign(toArrayBuffer(packBytes))
+  writeSigFile(DIST_ROOT, packSig, packBytes)
+  const packPoolDir = join(DIST_ROOT, createHash('sha256').update(TRANSFER_PACKS_MEANING, 'utf8').digest('hex'))
+  ensureDir(packPoolDir)
+  writeFileSync(join(packPoolDir, rootLayerSig), packSig, 'utf8')
+  const mb = (n: number): string => (n / 1024 / 1024).toFixed(1)
+  console.log(`[build-module] transfer pack ${packSig.slice(0, 12)}: ${packMembers.length} files, ${mb(packPlain.byteLength)} MB → ${mb(packBytes.byteLength)} MB gzip`)
 
   // --- Phase 5: persist Merkle cache + GC ---
 

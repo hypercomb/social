@@ -567,6 +567,42 @@ render 1291 ms) the atomized hive is now faster on every boot measure. The
 remaining tail is bee scheduling and evaluation, not fetching. Lazy seams
 (4c) still cut what loads at all; they are no longer needed for speed.
 
+**Transfer packs — BUILT 2026-09-23.** The install's cost was the number of
+files and their size on the wire (sig-named files travel uncompressed).
+- *Format* (`hypercomb-runtime/src/transfer-pack.ts`, pure — the build and
+  the reader share it): a magic line, a JSON line of `[signature, length]`,
+  the members' bytes back to back, gzipped. A pack is an ordinary
+  content-addressed file.
+- *Discovery* is a derived record, not a reference: the `transfer:packs` pool
+  (census `index` — wipe-safe, credits nothing to the collector) holds one
+  member per package, named by the ROOT and holding the pack's signature. No
+  layer names a pack; a reader derives the address.
+- *The build* mints one per package (every layer, bee and dependency: 908
+  files, 8.1 MB → 2.2 MB); `copy-content` merges the pool into its targets
+  (it grows, so it is never skipped like a finished bag).
+- *The install* (`installPackage`) walks the layers loose, then asks: are at
+  least half the bees and dependencies — and at least 32 — missing here? Only
+  then does it fetch the pointer and the pack, hash every member against its
+  own name, and serve the walker from it; the walker hashes again at
+  admission. Anything the pack lacks, or a member that fails, is fetched
+  loose. An update that changes a handful of files never downloads a pack.
+
+Measured with the same harness, the install step alone under DevTools
+network emulation (523 files to fetch, 499 of them from the pack):
+
+| Network | Loose files | Transfer pack |
+|---|---|---|
+| none (localhost) | 5.3–6.7 s | 5.5–5.9 s |
+| 40 ms, 20 Mbps | 13.2 s | 6.5 s |
+| 150 ms, 5 Mbps | 30.7 s | 11.3 s |
+
+On localhost the install is hashing and OPFS writes, so a pack changes
+nothing there; over a real network it halves the install or better. The dev
+server is HTTP/1.1, so a real HTTP/2 host narrows the loose column somewhat;
+the 3.7× smaller transfer does not change. Not yet: packs for commits made
+in the hive (`module commit` publishes loose atoms), and a pack for a slice
+smaller than a whole package.
+
 ## Non-goals
 - No new pool, no new `__x__` folder. Atoms live in `sign('dependencies')`
   as today.

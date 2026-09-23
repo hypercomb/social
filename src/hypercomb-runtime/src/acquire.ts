@@ -63,6 +63,7 @@ export { installedPackageSig }
 export { headPackage, hostBases, listHostPackages, type HostPackage }
 import { validateSealedPackage } from './sealed-package.js'
 import { deriveBeeDeps } from './bee-deps.js'
+import { TRANSFER_PACKS_MEANING, decodeTransferPack, gunzipBytes } from './transfer-pack.js'
 import { checkCoreCompatibility, describeCoreMismatch } from './core-surface.js'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from './bags.js'
 // WHICH PARTS OF THE TREE RUN. The trunk with the participant's picks laid
@@ -104,6 +105,8 @@ export type InstallOutcome = {
   holes: string[]
   refused: string[]
   error?: string
+  /** Files that arrived inside a transfer pack rather than one by one. */
+  packed?: number
 }
 
 /** This origin's content bases — a byte source only through {@link originAmong}. */
@@ -141,6 +144,68 @@ const probeBytes = async (url: string): Promise<EggProbe<Uint8Array<ArrayBuffer>
  *  again a host that already said it does not (core/eggs.ts). */
 const fetchAcross = (origins: readonly string[]) => (sig: string): Promise<Uint8Array<ArrayBuffer> | null> =>
   askUntried(sig, origins, base => probeBytes(`${base}/${sig}`))
+
+/** THE TRANSFER PACK, when it pays (transfer-pack.ts). A package mostly
+ *  missing here arrives as one pack instead of file by file; an update that
+ *  changes a handful of files does not — a whole pack for a few files would
+ *  move more than it saves. Every member is hashed against its own name as it
+ *  is unpacked, and the walker hashes it again at admission; a member that
+ *  fails, and anything the pack does not carry, is fetched loose. */
+const PACK_MIN_MISSING = 32
+
+const packedFetch = async (
+  root: string,
+  wanted: readonly string[],
+  held: ReadonlySet<string>,
+  origins: readonly string[],
+  loose: (sig: string) => Promise<Uint8Array<ArrayBuffer> | null>,
+): Promise<{ fetch: (sig: string) => Promise<Uint8Array<ArrayBuffer> | null>; served: () => number }> => {
+  let served = 0
+  const plain = { fetch: loose, served: () => served }
+  const missing = wanted.filter(sig => !held.has(sig)).length
+  if (missing < PACK_MIN_MISSING || missing * 2 < wanted.length) return plain
+  const bytesAt = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+    const probed = await probeBytes(url)
+    return typeof probed === 'string' ? null : probed
+  }
+  const pool = await registerPoolMeaning(TRANSFER_PACKS_MEANING)
+  for (const base of origins) {
+    const pointer = await bytesAt(`${base}/${pool}/${root}`)
+    const packSig = pointer ? new TextDecoder().decode(pointer).trim() : ''
+    if (!SIG_RE.test(packSig)) continue
+    const packed = await bytesAt(`${base}/${packSig}`)
+    if (!packed || (await SignatureService.sign(packed.buffer)) !== packSig) continue
+    let members: Array<[string, Uint8Array<ArrayBuffer>]> | null
+    try { members = decodeTransferPack(await gunzipBytes(packed)) } catch { members = null }
+    if (!members) continue
+    const verified = new Map<string, Uint8Array<ArrayBuffer>>()
+    await Promise.all(members.map(async ([sig, bytes]) => {
+      if ((await SignatureService.sign(bytes.buffer)) === sig) verified.set(sig, bytes)
+    }))
+    console.log(`[acquire] transfer pack ${packSig.slice(0, 12)}: ${verified.size} of ${members.length} members verified for ${missing} missing files`)
+    return {
+      fetch: async sig => {
+        const hit = verified.get(sig)
+        if (!hit) return loose(sig)
+        verified.delete(sig)
+        served++
+        return hit
+      },
+      served: () => served,
+    }
+  }
+  return plain
+}
+
+/** The bare signatures a module pool holds (`<sig>.js` or `<sig>`). */
+const heldIn = async (dir: FileSystemDirectoryHandle | undefined): Promise<string[]> => {
+  const names: string[] = []
+  if (!dir) return names
+  try {
+    for await (const [name] of dir.entries()) names.push(name.replace(/\.js$/i, ''))
+  } catch { /* an unreadable pool holds nothing we can count on */ }
+  return names
+}
 
 const writeBytes = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
   const handle = await dir.getFileHandle(name, { create: true })
@@ -489,15 +554,19 @@ export const installPackage = async (
 
   reportDivergence(pkg.zone, pkg, inventory)
 
+  // A package mostly missing here comes as one transfer pack (packedFetch).
+  const heldModules = new Set([...await heldIn(store.dependencies), ...await heldIn(store.bees)])
+  const modules = await packedFetch(pkg.packageSig, [...inventory.dependencies, ...inventory.bees], heldModules, origins, fetchFrom)
+
   const results = await Promise.all([
     resolveInventory(pkg.packageSig, inventory.dependencies, {
       read: readFrom([store.dependencies], sig => [`${sig}.js`, sig]),
-      fetch: fetchFrom,
+      fetch: modules.fetch,
       write: writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8'),
     } satisfies ReplicationIo),
     resolveInventory(pkg.packageSig, inventory.bees, {
       read: readFrom([store.bees], sig => [`${sig}.js`, sig]),
-      fetch: fetchFrom,
+      fetch: modules.fetch,
       write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
     } satisfies ReplicationIo),
   ])
@@ -523,7 +592,7 @@ export const installPackage = async (
   if (Object.keys(readPicks()).length) {
     const selection = await applySelection(pkg.packageSig, held.held)
     if (!selection.ok) return fail(selection.error)
-    return { ok: true, packageSig: pkg.packageSig, fetched: held.fetched, present: held.present, holes: [], refused: [] }
+    return { ok: true, packageSig: pkg.packageSig, fetched: held.fetched, present: held.present, holes: [], refused: [], packed: modules.served() }
   }
 
   // CAN THIS SHELL RUN IT? (core-surface.ts). The modules just admitted name
@@ -573,6 +642,7 @@ export const installPackage = async (
     present: held.present,
     holes: [],
     refused: [],
+    packed: modules.served(),
   }
 }
 

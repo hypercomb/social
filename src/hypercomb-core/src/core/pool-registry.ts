@@ -489,6 +489,13 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // pure derivation, so it is minted only on an explicit `/summary` miss by
   // essentials/assistant/compaction.ts. Colon meaning: no tile may name it.
   'system:compaction',
+  // TRANSFER PACKS (atomic-modules-plan.md): one member per package, named by
+  // the package's root signature and holding the signature of a pack — one
+  // content-addressed file carrying that package's bytes, so a cold install
+  // is one request instead of hundreds. A derived cache: anyone may mint one,
+  // every member is verified against its own name on arrival, and a reader
+  // with no pack installs the same package from loose files.
+  'transfer:packs',
   'tutorial:artifacts',
   'usage:dwell',
   // Default tile art, keyed by the tile's NAME and holding a SIGNATURE (not

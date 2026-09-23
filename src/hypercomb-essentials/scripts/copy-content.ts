@@ -25,6 +25,7 @@ import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { createHash } from 'node:crypto'
 import { formatPoolEntry, packageClosure, poolEntries, retentionSet } from './retention.js'
+import { TRANSFER_PACKS_MEANING } from '../../hypercomb-runtime/src/transfer-pack.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -76,6 +77,9 @@ const MANIFEST_FILE = 'manifest.json'
 // ever produce this address.
 const HOST_PACKAGES_MEANING = 'host:packages'
 const HOST_PACKAGES_POOL = createHash('sha256').update(HOST_PACKAGES_MEANING, 'utf8').digest('hex')
+// One member per package (hypercomb-runtime/src/transfer-pack.ts), so this
+// pool grows and is merged into a target, never skipped as a finished bag.
+const TRANSFER_PACKS_POOL = createHash('sha256').update(TRANSFER_PACKS_MEANING, 'utf8').digest('hex')
 const poolEntryName = (index: number): string => String(index).padStart(8, '0')
 
 // A REVISION IS A DELIBERATE ACT. A build copies bytes; it does not enter the
@@ -213,6 +217,17 @@ const syncTarget = (
     // The package pool is written below, from what is PUBLISHED — never copied
     // wholesale from dist, whose one member is the build just made.
     if (name === HOST_PACKAGES_POOL) continue
+    // The transfer-packs pool GROWS — a member per package — so a target that
+    // already has it takes the members it lacks rather than skipping the
+    // folder the way a finished bag is skipped.
+    if (name === TRANSFER_PACKS_POOL && tgtEntries.has(name)) {
+      for (const member of readdirSync(join(DIST_ROOT, name))) {
+        if (existsSync(join(targetDir, name, member))) continue
+        copyFileSync(join(DIST_ROOT, name, member), join(targetDir, name, member))
+        copied++
+      }
+      continue
+    }
     if (tgtEntries.has(name)) {
       skipped++
       continue

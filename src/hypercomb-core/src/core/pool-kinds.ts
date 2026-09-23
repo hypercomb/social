@@ -128,6 +128,9 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // DERIVED CACHES — recomputable, wipe-safe, never sent.
   ['computed:genome', 'index'],
   ['manifests', 'index'],
+  // A package's transfer pack, keyed by its root (pool-registry.ts). Wipe-safe:
+  // a missing pack costs a slower install, never a wrong one.
+  ['transfer:packs', 'index'],
   ['molecule:index', 'index'],
   ['search:index', 'index'],
   ['thumbnails:hex', 'index'],
