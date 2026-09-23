@@ -14,9 +14,9 @@
 //   • the cold-install / Start welcome flow
 //   • sentinel resync, drift enforcement, upgrade orchestration
 //   • the visitor (read-only website) path
-// The shim's job is: gate storage, get the SW in control, get an install,
-// resolve the module graph, start the runtime, mount what registered. If
-// OPFS is cold it reports and stops rather than growing an install UI.
+// The shim's job is: gate storage, get the SW in control, show the verified
+// ESM host console, resolve the module graph, start the runtime, and mount
+// what registered. The console is the first UI on both cold and warm boots.
 //
 // Read the boot-race comments in hypercomb-web/src/main.ts before changing
 // the ORDER of anything here. They were paid for.
@@ -160,6 +160,7 @@ const attachImportMap = async (): Promise<void> => {
 const renderBootFailure = (error: unknown): void => {
   try {
     document.getElementById('hc-splash')?.remove()
+    document.querySelector('hc-shim-hosts')?.remove()
     const panel = document.createElement('main')
     panel.setAttribute('role', 'alert')
     panel.style.cssText = [
@@ -209,6 +210,19 @@ const boot = async (): Promise<void> => {
     acquisition ? `bootstrap ${acquisition.pin.slice(0, 12)} running` : 'bootstrap UNAVAILABLE',
   )
 
+  // The verified ESM bootstrap owns the first visible UI. Show its host and
+  // replication console before loading any adopted dependency or bee. A cold
+  // hive keeps it; a warm hive yields to a surface after the first pulse.
+  document.getElementById('hc-splash')?.remove()
+  if (!acquisition) {
+    renderBootFailure(new Error(
+      'The host and replication console could not be loaded. The origin must publish /pin and serve the bundle it names.',
+    ))
+    return
+  }
+  acquisition.prompt()
+  ;(window as any).__hcBoot('host console shown before package loading')
+
   // Dependency namespaces self-register their services before anything asks
   // for them.
   const loader = window.ioc?.get<DependencyLoader>('@hypercomb.social/DependencyLoader')
@@ -253,13 +267,12 @@ const boot = async (): Promise<void> => {
   // because the shim cannot see them at runtime. It may only go down.
   console.log(scoreboardLine(live), live.angularNames)
 
-  document.getElementById('hc-splash')?.remove()
   window.dispatchEvent(new Event('hypercomb:runtime-ready'))
 
   // /hosts is the same management door the full shell exposes. /@hypercomb is
   // its reserved alias for hosts whose content vocabulary already uses the
   // word "hosts". Both remain reachable on a warm host whose installed package
-  // owns normal routes. A cold host opens the same console automatically. The
+  // owns normal routes. A cold host keeps the console shown above. The
   // test is what actually MOUNTED
   // after a pulse, not what localStorage claims: a hive whose package was
   // half-written, or whose OPFS was cleared under a stale installed-marker, is
@@ -272,11 +285,8 @@ const boot = async (): Promise<void> => {
     console.log(managerRequested
       ? `[shim] ${managerPath} — opening the host console`
       : '[shim] 0 surfaces — no package is live')
-    if (acquisition) acquisition.prompt()
-    else renderBootFailure(new Error(
-      'Nothing is held here, and the bootstrap could not be loaded — so there is no way to replicate anything. ' +
-      'The origin must publish /pin and serve the bundle it names.',
-    ))
+  } else {
+    acquisition.dismiss()
   }
 }
 

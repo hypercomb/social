@@ -9,10 +9,9 @@
 // every other panel in the system arrives as a behaviour, through the very
 // package this card replicates.
 //
-// It appears only when nothing is held. A hive that already holds a package
-// boots straight past it and never sees it — but on an origin that publishes
-// for others to take, "nothing held" is every first visit, so this card is
-// also that origin's website and has to read like one.
+// It appears before adopted code loads. A hive that already holds a package
+// lets its surface take over after the first pulse; the card remains available
+// at /hosts and /@hypercomb. On an empty origin it is also the website.
 //
 // Framework-free by necessity, not taste. This runs BEFORE any bee exists, so
 // there is nothing to render with but the DOM.
@@ -173,6 +172,7 @@ class HostPanelElement extends HTMLElement {
     // The front door is read once per card, not once per render: adding a
     // domain must not re-ask the origin for a file that cannot have changed.
     if (this.#welcome === undefined) this.#welcome = await readWelcome()
+    if (!this.isConnected) return
     // Named as the zone it is — `localhost:4270` on a machine, the hostname
     // everywhere else — so the title and the box below it agree.
     const staged = frontDoorOf(this.#welcome, this.#self || location.hostname, location.origin, showsDeployedNodes())
@@ -183,9 +183,11 @@ class HostPanelElement extends HTMLElement {
     const door: FrontDoor = staged.doors.length > 0
       ? staged
       : { ...staged, doors: await readPublicDoors(location.hostname) }
+    if (!this.isConnected) return
     // The tab is named for the place, not for the shell that drew it.
     document.title = door.title
     const zones = (await listHostZones()).filter(zone => zone !== this.#self)
+    if (!this.isConnected) return
     this.#root.replaceChildren()
 
     const style = document.createElement('style')
@@ -496,4 +498,10 @@ export const showHostPanel = (): void => {
   if (!customElements.get(TAG)) customElements.define(TAG, HostPanelElement)
   if (document.querySelector(TAG)) return
   document.body.append(document.createElement(TAG))
+}
+
+/** A loaded package has supplied its own surface. Keep the host manager
+ * available through /hosts and /@hypercomb, but let that surface take over. */
+export const hideHostPanel = (): void => {
+  document.querySelector(TAG)?.remove()
 }

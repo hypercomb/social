@@ -26,7 +26,7 @@
 // unconditional (set before any OPFS access), so it resolves on the coldest
 // possible boot.
 
-import { showHostPanel } from './host-panel'
+import { hideHostPanel, showHostPanel } from './host-panel'
 import { acquire, installedPackageSig, listHostPackages } from './replicate'
 import { addHostZone, listHostZones } from './hosts'
 
@@ -40,6 +40,8 @@ export type BootstrapContext = {
 export type Acquisition = {
   /** Put the add-a-domain card up. Idempotent. */
   prompt(): void
+  /** Let an imported surface take over after its first pulse. */
+  dismiss(): void
 }
 
 /**
@@ -75,7 +77,7 @@ export const boot = (_context: BootstrapContext = {}): Acquisition => {
     }
   } catch { /* no window (tests) — the exports below still work */ }
 
-  return { prompt: showHostPanel }
+  return { prompt: showHostPanel, dismiss: hideHostPanel }
 }
 
 export { acquire, installPackage, installedPackageSig, listHostPackages } from './replicate'
