@@ -69,7 +69,7 @@ The cold ESM door lets a person carry a zone, see the hive doors that zone
 currently opens, and visit one. The hive's hexagon page offers adoption of the
 published hive subset or a chosen published cell/branch into the visitor's own hive.
 Replication copies and verifies the selected closure; adoption is an explicit
-local fold; code arrives held until separately enabled. The cold door needs
+local fold. The cold door needs
 only discovery, exact-signature verification, and a route to the adoption
 gesture. History, source review, and branch management can arrive as
 beehaviors. A missing directory is reported as missing, not replaced by a
@@ -77,17 +77,22 @@ package revision list pretending to be hives.
 
 **The zone's front page is its gallery.** The root domain welcomes visitors and
 shows the applications whose hive doors are currently published there. Each
-gallery entry opens its door and offers a simple **Turn on** choice. That
-choice sends the publisher key, hive path, and byte hosts back to the visitor's
-own domain; only that domain records the person's choice. It appears there as
-an offered, shaded hive. Turning it on does not fold tiles or run its code:
-the visitor takes cells as they walk, and admits code separately. Only hives
-turned on by that person are checked for later signed-head changes and shown
-as **Update available** at home. That notice can return them to the hosting
-gallery to inspect the changed offering before taking it. A newly published
-application elsewhere in the gallery is never an update notification in a
-hive that has not turned it on. The current cold Shim links to hive doors;
-the gallery handoff and per-offer update gate are still to be wired.
+gallery entry opens its door for inspection and offers a simple **Turn on**
+choice. The handshake runs in one direction: the host offers a signed hive;
+the participant visits and chooses it; the participant's local instance
+receives its publisher key, hive path, signed head, and byte hosts, then pulls,
+verifies, and installs the selected application and chosen dependencies.
+Only that local instance records what is on and runs the chosen beehaviors.
+Unchosen hive cells remain outside the local hive until taken.
+
+Only applications turned on by that person are checked for later signed-head
+changes. At home, **Update available** names the affected application and
+opens its page on the hosting site to inspect and take that revision. The
+update path needs no host package list. A list of installed applications and
+their exact revisions is available when the person chooses to browse it. A
+newly published application elsewhere in the gallery is never an update
+notification at home. The current cold Shim links to hive doors; the gallery
+handoff and per-application update gate are still to be wired.
 
 An upgrade is another signed hive/package revision, first tried at a
 `try-<change>.<zone>` door on its own origin. A model can propose the change
