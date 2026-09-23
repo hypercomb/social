@@ -24,6 +24,7 @@ import { ROOT_PLACE, STORY, STORY_BOARDS, type GuideStep } from './story.js'
 import { PLACES, LABYRINTH_PLACE, placeName, seatLabel, crumbLabel, floorLabel, groupOfPlace } from './places.js'
 import { CHAMBERS } from './chamber-places.js'
 import { installStory, readStoryBundle, STORY_SEEDS } from './story-addons.js'
+import { pluggedStories } from './story-tiles.js'
 import { WORLDS } from './worlds.js'
 import { worldMap } from './rpg-overworld.js'
 import { SIDE_CAVERNS, SideCavernRun } from './side-cavern.js'
@@ -899,7 +900,7 @@ export class SolomonLabyrinthOverlay {
     const seeds = (): unknown[] => STORY_SEEDS.map(seed => seed.bundle)
     try {
       const tiles = this.#tileSurface()
-      if (typeof tiles.ensureStories === 'function') return tiles.ensureStories(STORY_SEEDS).catch(seeds)
+      if (typeof tiles.ensureStories === 'function') return pluggedStories(tiles, STORY_SEEDS).catch(seeds)
     } catch { /* no hive under the game: the seeds alone */ }
     return seeds()
   }

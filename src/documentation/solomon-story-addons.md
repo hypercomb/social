@@ -30,7 +30,13 @@ that **the tiles are the add-ons**. The word for plugging one in is `story`
 - `story plug <sig>` — reads the JSON bundle stored under that signature,
   refuses it whole with the reason when anything is wrong, and otherwise writes
   it as the tile `stories/<bundle id>` (over any tile of that name).
-- `story list` — what the game holds: each add-on's places and seats.
+- `story unplug <id>` — puts an add-on away: HIDE FIRST, DELETE SECOND. The
+  tile stands; the story is not seated until it is plugged again. It is
+  concealed in the hive's one hidden pool (`hidden:items`, scope
+  `solomon-story`) by the signature of its bytes, and is never deletable.
+- `story plug <id>` — takes a put-away add-on back.
+- `story list` — what the game holds: each add-on's places and seats, and
+  which are unplugged.
 
 Making the tile by hand — a tile under `stories/` whose layer carries
 `solomonStory.bundle` — is the same act; editing the tile edits the add-on.
