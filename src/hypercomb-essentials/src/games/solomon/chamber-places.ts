@@ -686,6 +686,16 @@ export const UNDERCROFT: ChamberDefinition = {
   entrances: [
     { id: 'stair-down', col: 45, row: 27, style: 'stairs-down', empty: 'The stair goes on down into the dark, but nothing waits below it yet.', landing: { col: 44, row: 27 } },
   ],
+  // What lives down here: a goblin to a hall, and bats over the water.
+  foes: [
+    { id: 'goblin-west', kind: 'prowler', route: [{ col: 2, row: 5 }, { col: 8, row: 5 }, { col: 8, row: 3 }, { col: 2, row: 3 }] },
+    { id: 'goblin-mid', kind: 'prowler', route: [{ col: 16, row: 4 }, { col: 23, row: 4 }, { col: 23, row: 6 }, { col: 16, row: 6 }] },
+    { id: 'goblin-east', kind: 'prowler', route: [{ col: 31, row: 2 }, { col: 44, row: 2 }, { col: 44, row: 4 }, { col: 31, row: 4 }] },
+    { id: 'goblin-pool', kind: 'prowler', route: [{ col: 2, row: 12 }, { col: 9, row: 12 }, { col: 9, row: 16 }, { col: 2, row: 16 }] },
+    { id: 'bat-cistern', kind: 'flitter', route: [{ col: 20, row: 11 }, { col: 30, row: 11 }, { col: 30, row: 18 }, { col: 20, row: 18 }] },
+    { id: 'goblin-south', kind: 'prowler', route: [{ col: 3, row: 24 }, { col: 20, row: 24 }, { col: 20, row: 27 }, { col: 3, row: 27 }] },
+    { id: 'bat-south', kind: 'flitter', route: [{ col: 25, row: 23 }, { col: 44, row: 23 }, { col: 44, row: 27 }, { col: 25, row: 27 }] },
+  ],
   tablets: [
     { id: 'undercroft-arch', col: 5, row: 1, title: 'The Undercroft', text: 'Halls under halls. Your torch shows you a room at a time; the map in the corner keeps what you have seen. A surveyor once drew all of it — find her chart and the corner shows it whole.' },
     { id: 'twin-lamps', col: 19, row: 7, title: 'The Twin Lamps', text: 'Two lamps watch the lamp hall. Light both and the niche between them gives up what the dark kept.', pointsAt: ['lamp-west', 'lamp-east', 'lamp-niche'] },

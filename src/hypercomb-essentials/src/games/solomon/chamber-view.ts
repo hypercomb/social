@@ -25,7 +25,47 @@ import type { SigilRequirement } from './labyrinth.js'
 import type { PlaceSeed } from './place.js'
 import { CavernPainter, type CavernCamera, type CavernMap } from './cavern-paint.js'
 import { canvasContext } from './island-paint.js'
-import { PLAYER_LOOK, drawWalker } from './island-sprites.js'
+import { PLAYER_LOOK, drawWalker, type WalkerLook } from './island-sprites.js'
+import type { ChamberFoeKind } from './chamber.js'
+
+/** A cave goblin: green, in leather, no hat. */
+const PROWLER_LOOK: WalkerLook = { skin: '#86a85c', hair: '#2b3a22', robe: '#4a3a2b', trim: '#a08a58' }
+
+function foeName(kind: ChamberFoeKind): string { return kind === 'flitter' ? 'bat' : 'cave goblin' }
+
+/** A bat on the wing: two membranes beating, a small body, ears, and eyes
+ *  that go red when it has you. */
+function drawFlitter(ctx: CanvasRenderingContext2D, time: number, hunting: boolean): void {
+  const { width, height } = ctx.canvas
+  ctx.setTransform(width / 64, 0, 0, height / 64, 0, 0)
+  ctx.clearRect(0, 0, 64, 64)
+  const flap = Math.sin(time * (hunting ? 26 : 16)) * 10
+  ctx.fillStyle = '#2a2230'; ctx.strokeStyle = '#120c18'; ctx.lineWidth = 2; ctx.lineJoin = 'round'
+  for (const side of [-1, 1]) {
+    ctx.beginPath()
+    ctx.moveTo(32, 34)
+    ctx.quadraticCurveTo(32 + side * 14, 22 - flap, 32 + side * 28, 30 - flap)
+    ctx.quadraticCurveTo(32 + side * 22, 36 - flap * 0.4, 32 + side * 16, 40)
+    ctx.quadraticCurveTo(32 + side * 8, 44, 32, 40)
+    ctx.closePath(); ctx.fill(); ctx.stroke()
+  }
+  ctx.fillStyle = '#3a2c3a'
+  ctx.beginPath(); ctx.ellipse(32, 36, 7, 10, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
+  ctx.beginPath(); ctx.moveTo(27, 29); ctx.lineTo(25, 21); ctx.lineTo(30, 27); ctx.moveTo(37, 29); ctx.lineTo(39, 21); ctx.lineTo(34, 27); ctx.fill(); ctx.stroke()
+  ctx.fillStyle = hunting ? '#ff5a3c' : '#ffd36a'
+  ctx.beginPath(); ctx.arc(29, 33, 1.6, 0, Math.PI * 2); ctx.arc(35, 33, 1.6, 0, Math.PI * 2); ctx.fill()
+}
+
+/** Beyond the torch, only its eyes: two points in the dark, blinking. */
+function drawGlint(ctx: CanvasRenderingContext2D, kind: ChamberFoeKind, time: number): void {
+  const { width, height } = ctx.canvas
+  ctx.setTransform(width / 64, 0, 0, height / 64, 0, 0)
+  ctx.clearRect(0, 0, 64, 64)
+  if ((Math.sin(time * 2.6) + 1) / 2 < 0.12) return
+  ctx.fillStyle = kind === 'flitter' ? 'rgba(255, 90, 60, 0.9)' : 'rgba(214, 255, 120, 0.9)'
+  const y = kind === 'flitter' ? 33 : 26
+  ctx.beginPath(); ctx.arc(29, y, 1.7, 0, Math.PI * 2); ctx.arc(35, y, 1.7, 0, Math.PI * 2); ctx.fill()
+}
 import { VEIL_ZOOM, veilGridPicture, type VeilDirection, type VeilLeg, type VeilPicture, type VeilRgb } from './place-veil.js'
 
 /** One-shot audio cues a chamber can raise, beside the shared 'door-in' /
@@ -34,6 +74,7 @@ import { VEIL_ZOOM, veilGridPicture, type VeilDirection, type VeilLeg, type Veil
 export type ChamberSound =
   | 'push' | 'latch' | 'read' | 'lit' | 'complete' | 'settle'
   | 'unlock' | 'pull' | 'wand' | 'seal' | 'open' | 'claim' | 'finale'
+  | 'caught' | 'crush'
 
 /** What `RuntimeShell.instruments(place)` hands back for a chamber place —
  *  enough for a `GameAudio`-style helper to voice `ChamberSound` distinctly
@@ -111,7 +152,7 @@ const REVEAL_REACH = 3
 const SOUND_FOR: Readonly<Partial<Record<ChamberEvent['kind'], ChamberSound>>> = {
   pushed: 'push', latched: 'latch', read: 'read', lit: 'lit', completed: 'complete',
   unlocked: 'unlock', pulled: 'pull', wand: 'wand', seal: 'seal', settled: 'settle',
-  opened: 'open', claimed: 'claim', finale: 'finale',
+  opened: 'open', claimed: 'claim', finale: 'finale', caught: 'caught', crushed: 'crush',
 }
 
 /** Reduces a chamber's own, richer terrain vocabulary down to the three
@@ -121,6 +162,7 @@ const SOUND_FOR: Readonly<Partial<Record<ChamberEvent['kind'], ChamberSound>>> =
  *  and un-wanded cracks/runes/seals included: they read as solid until the
  *  wand (or a lamp set) says otherwise, matching what they actually are. */
 function paintSymbol(terrain: ChamberTerrain, authored: string, look: ChamberLook): string {
+  if (terrain === 'block') return 'X'
   if (terrain === 'water' || terrain === 'spring') return '~'
   if (look === 'wood') {
     // Preserve the authored forest landmarks: a grove is a place, not a
@@ -194,6 +236,7 @@ export class ChamberView {
   #dpr = 1
   #player: HTMLCanvasElement | null = null
   #sprite: CanvasRenderingContext2D | null = null
+  #foeSprites = new Map<string, { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null }>()
   #spriteKey = ''
   #cue: HTMLDivElement | null = null
   #status: HTMLDivElement | null = null
@@ -292,6 +335,14 @@ export class ChamberView {
     this.#player.setAttribute('role', 'img'); this.#player.setAttribute('aria-label', 'You')
     this.#sprite = canvasContext(this.#player)
     layer.append(this.#player)
+    for (const foe of def.foes ?? []) {
+      const canvas = element('canvas', `sol-chamber-foe sol-chamber-foe-${foe.kind}`)
+      canvas.width = 64; canvas.height = 64
+      canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', foeName(foe.kind))
+      canvas.hidden = true
+      this.#foeSprites.set(foe.id, { canvas, ctx: canvasContext(canvas) })
+      layer.append(canvas)
+    }
 
     this.#cue = element('div', 'sol-chamber-cue')
     this.#cue.hidden = true
@@ -443,6 +494,7 @@ export class ChamberView {
     this.#root = null; this.#map = null; this.#world = null; this.#minimap = null; this.#ctx = null
     this.#painter = null; this.#painterKey = ''
     this.#player = null; this.#sprite = null; this.#spriteKey = ''
+    this.#foeSprites.clear()
     this.#cue = null; this.#status = null
     this.#dialog = null; this.#dialogTitle = null; this.#dialogBody = null; this.#lastFocus = null
     this.#portals.clear(); this.#features.clear(); this.#blockMarkers.clear()
@@ -511,6 +563,7 @@ export class ChamberView {
     for (const event of events) {
       if (event.kind === 'navigate') { this.#onNavigate(event); continue }
       if (event.kind === 'knowledge') this.#hooks.learn?.(event.id, event.text)
+      if (event.kind === 'caught') this.#notice = this.#caughtWords(event.foe)
       const sound = SOUND_FOR[event.kind]
       if (sound) this.#hooks.sound?.(sound)
     }
@@ -633,6 +686,7 @@ export class ChamberView {
       this.#player.style.top = `${(this.model.y / rows) * 100}%`
       this.#drawPlayer()
     }
+    this.#drawFoes(cols, rows)
     this.#follow()
     if (this.#cue) {
       const cue = this.model.cue()
@@ -647,6 +701,34 @@ export class ChamberView {
     }
     if (this.#status && this.#status.textContent !== this.#notice) this.#status.textContent = this.#notice
     this.#draw()
+  }
+
+  /** Each creature where the model has it: drawn whole inside the torch's
+   *  reach, as a pair of eyes a little beyond it, and not at all in the dark. */
+  #drawFoes(cols: number, rows: number): void {
+    if (!this.#foeSprites.size) return
+    const torch = this.#definition.torch
+    for (const foe of this.model.foes) {
+      const sprite = this.#foeSprites.get(foe.id)
+      if (!sprite) continue
+      const d = Math.hypot(foe.x - this.model.x, foe.y - this.model.y)
+      const lit = foe.alive && d <= torch + 0.6, glint = foe.alive && !lit && d <= torch * 1.8
+      sprite.canvas.hidden = !lit && !glint
+      if (sprite.canvas.hidden || !sprite.ctx) continue
+      sprite.canvas.style.left = `${(foe.x / cols) * 100}%`
+      sprite.canvas.style.top = `${(foe.y / rows) * 100}%`
+      sprite.canvas.classList.toggle('is-hunting', foe.hunting)
+      if (!lit) { drawGlint(sprite.ctx, foe.kind, this.#time); continue }
+      if (foe.kind === 'prowler') drawWalker(sprite.ctx, PROWLER_LOOK, foe.facing, foe.hunting ? this.#time * 1.7 : this.#time)
+      else drawFlitter(sprite.ctx, this.#time, foe.hunting)
+    }
+  }
+
+  #caughtWords(id: string): string {
+    const kind = this.#definition.foes?.find(foe => foe.id === id)?.kind ?? 'prowler'
+    return kind === 'flitter'
+      ? 'A bat gets its claws in you. You come to where you came in, torch still burning.'
+      : 'A cave goblin catches you. You come to where you came in, torch still burning.'
   }
 
   #drawPlayer(): void {
@@ -765,6 +847,9 @@ const CHAMBER_VIEW_CSS = `
 .sol-chamber-block-stone{background:linear-gradient(145deg,#9fa6ad,#5e646b);box-shadow:inset 0 0 0 1px #2c2f33}
 .sol-chamber-block-barrel{background:radial-gradient(circle at 40% 30%,#c48a4a,#6b4522);border-radius:40%}
 .sol-chamber-player{position:absolute;width:calc(100% / var(--cols) * 1.5);transform:translate(-50%,-72%);pointer-events:none;z-index:3}
+.sol-chamber-foe{position:absolute;width:calc(100% / var(--cols) * 1.4);transform:translate(-50%,-70%);pointer-events:none;z-index:2}
+.sol-chamber-foe-flitter{transform:translate(-50%,-62%)}
+.sol-chamber-foe[hidden]{display:none}
 .sol-chamber-cue{position:absolute;left:0;top:0;transform:translate(-50%,-100%);width:max-content;max-width:200px;padding:5px 10px;border-radius:10px;background:rgba(14,22,26,.86);border:1px solid rgba(255,240,200,.3);color:#fff4d6;font-size:11.5px;font-weight:600;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.35);pointer-events:none;z-index:4}
 .sol-chamber-cue[data-action=tag]{font-weight:500;color:#d9e6df;border-style:dashed}
 .sol-chamber-cue.is-below{transform:translate(-50%,10px)}

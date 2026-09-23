@@ -186,7 +186,10 @@ export class CavernPainter {
       if (cell === '~') pool(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) !== '~', wood)
       else if (cell === 'B' && wood) boulderWood(ctx, col * tile, row * tile, tile, col, row)
       else if (cell === 'r' && wood) rubbleWood(ctx, col * tile, row * tile, tile, col, row)
-      else floor(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) === '#' || this.#at(col, row - 1) === 'T', wood, this.#ground(col, row))
+      else {
+        floor(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) === '#' || this.#at(col, row - 1) === 'T', wood, this.#ground(col, row))
+        if (cell === 'X') laidStone(ctx, col * tile, row * tile, tile, col, row)
+      }
     }
     for (let row = 0; row < this.#map.rows; row++) for (let col = 0; col < this.#map.cols; col++) {
       const cell = this.#at(col, row)
@@ -474,6 +477,23 @@ function wallWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number
 
 /** A landmark boulder, not a generic blocked square. The crack stays visible
  *  from the walking side so the grove's first chest has a readable location. */
+/** The wand's block: a squared stone set on the floor, lit from above. */
+function laidStone(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number): void {
+  const g = islandHash(col, row, 501)
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.38)'
+  ctx.fillRect(x + s * 0.12, y + s * 0.2, s * 0.82, s * 0.78)
+  const face = ctx.createLinearGradient(x, y, x, y + s)
+  face.addColorStop(0, '#aba498'); face.addColorStop(0.5, '#7e786c'); face.addColorStop(1, '#4a4741')
+  ctx.fillStyle = face
+  ctx.fillRect(x + s * 0.08, y + s * 0.1, s * 0.84, s * 0.8)
+  ctx.strokeStyle = '#2a2822'; ctx.lineWidth = Math.max(1, s * 0.05)
+  ctx.strokeRect(x + s * 0.08, y + s * 0.1, s * 0.84, s * 0.8)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.18)'
+  ctx.fillRect(x + s * 0.12, y + s * 0.14, s * 0.76, s * 0.12)
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)'; ctx.lineWidth = Math.max(1, s * 0.03)
+  ctx.beginPath(); ctx.moveTo(x + s * (0.3 + g * 0.3), y + s * 0.3); ctx.lineTo(x + s * (0.4 + g * 0.2), y + s * 0.72); ctx.stroke()
+}
+
 function boulderWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number): void {
   floorWood(ctx, x, y, s, col, row, false)
   const g = islandHash(col, row, 301)

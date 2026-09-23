@@ -612,6 +612,8 @@ export class SolomonLabyrinthOverlay {
       open: { freq: 620, endFreq: 780, dur: 0.16, vol: 0.06 },
       claim: { freq: 660, endFreq: 990, dur: 0.24, vol: 0.06 },
       finale: { freq: 500, endFreq: 1000, dur: 0.6, vol: 0.08 },
+      caught: { freq: 180, endFreq: 90, dur: 0.35, vol: 0.08 },
+      crush: { freq: 240, endFreq: 120, dur: 0.2, vol: 0.07 },
       hush: { freq: 220, endFreq: 160, dur: 0.3, vol: 0.05 },
       duel: { freq: 500, endFreq: 700, dur: 0.2, vol: 0.06 },
       strike: { freq: 700, endFreq: 500, dur: 0.06, vol: 0.05 },

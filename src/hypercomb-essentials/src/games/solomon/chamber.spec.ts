@@ -269,11 +269,15 @@ describe('the wand', () => {
     expect(model.terrainAt(CRACK.col, CRACK.row)).toBe('crack')
   })
   it('refuses when nothing answers the wand', () => {
-    const model = new ChamberModel(baseDef())
+    const model = new ChamberModel(baseDef({}, { [key(EXIT.landing.col + 1, EXIT.landing.row)]: '#' }))
+    model.arrive(EXIT.id)
+    model.turn('right') // rock
     const result = model.cast()
     expect(result.kind).toBe('message')
-    if (result.kind === 'message') expect(result.text).toMatch(/only cracked bricks/)
+    if (result.kind === 'message') expect(result.text).toMatch(/only bare floor, cracked bricks/)
     expect(result.events).toHaveLength(0)
+    model.turn('up') // the stair she came down: not bare floor either
+    expect(model.cast()).toMatchObject({ kind: 'message', text: expect.stringMatching(/bare floor/), events: [] })
   })
   it('refuses when a block occupies the faced cell', () => {
     const block: ChamberBlock = { id: 'block-1', col: CRACK.col, row: CRACK.row - 1, look: 'stone' }
