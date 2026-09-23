@@ -479,17 +479,23 @@ function destinationContentType(request) {
  * cache utilities
  * ------------------------------------- */
 
+// THE CACHE KEY IS THE URL WITHOUT ITS QUERY. Every path served from this
+// cache names its bytes (a signature), so a query — a cache-buster — never
+// changes what it answers. An exact match on that key is one lookup;
+// `ignoreSearch` scanned every entry on every lookup, and with a thousand
+// modules held a boot's four hundred lookups kept the worker busy for about
+// two seconds (atomic-modules-plan.md).
+function cacheKeyOf(request) {
+  const url = new URL(request.url)
+  url.search = ''
+  url.hash = ''
+  return new Request(url.href, { method: 'GET' })
+}
+
 async function tryCacheMatch(request) {
   try {
     const cache = await caches.open(CACHE_NAME)
-
-    // cache api only matches GET
-    const key =
-      request.method === 'HEAD'
-        ? new Request(request.url, { method: 'GET' })
-        : request
-
-    return await cache.match(key, { ignoreSearch: true })
+    return await cache.match(cacheKeyOf(request))
   } catch {
     return null
   }
@@ -500,7 +506,7 @@ async function cachePut(request, response) {
     // cache api only allows GET
     if (request.method !== 'GET') return
     const cache = await caches.open(CACHE_NAME)
-    await cache.put(request, response.clone())
+    await cache.put(cacheKeyOf(request), response.clone())
   } catch {}
 }
 

@@ -26,6 +26,14 @@
 // a build that emits a different shape yields fewer matches and no error. That
 // is survivable precisely because the map is a hint — a miss costs eager
 // loading, never a wrong install. Nothing may make it load-bearing.
+//
+// A BEE'S ATOM CLOSURE rides in the same map (atomic-modules-plan.md). An
+// atom is its own module, reached through the import map, and the browser
+// learns what an atom imports only after fetching it — so a chain of imports
+// is one round trip per level, up to eight or nine deep. Every atom a bee's
+// STATIC imports reach, at any depth, is listed here, and the preloader asks
+// for them all at once before the bee evaluates. A dynamic `import()` is a
+// lazy seam and is never followed.
 
 /** Classes a dependency bundle defines. esbuild emits both spellings. */
 const CLASS_RE = /(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/g
@@ -34,13 +42,27 @@ const CLASS_RE = /(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/g
 const DEPS_BLOCK_RE = /deps\s*=\s*\{([^}]+)\}/
 const DEP_NAME_RE = /@[^"'/]+\/(\w+)/g
 
+/** A dependency's alias: its first line, `// <specifier>`. */
+const ALIAS_RE = /^\/\/ (\S+)/
+
+/** Line 2 of an atom (`LAZY_MARKER_LINE` in build-module.ts). */
+const LAZY_MARKER = '// lazy'
+
+/** A static import of a bare specifier in esbuild output: `import … from "x"`,
+ *  `export … from "x"`, `import "x"`. Never `import("x")`. */
+const STATIC_IMPORT_RE = /(?:^|[;\n}])\s*(?:import|export)\s*(?:[^'"()]*?\bfrom\s*)?["']([^"'./][^"']*)["']/g
+
+const staticImports = (source: string): string[] => [...source.matchAll(STATIC_IMPORT_RE)].map(match => match[1]!)
+
 const text = (bytes: Uint8Array): string | null => {
   const decoded = new TextDecoder().decode(bytes)
   return decoded.includes('�') ? null : decoded
 }
 
 /**
- * Map each bee signature to the dependency signatures it claims.
+ * Map each bee signature to the dependency signatures it claims: the bundles
+ * defining the classes its `deps` block names, and every atom its static
+ * imports reach.
  *
  * `read` resolves a signature to its admitted bytes; a signature it cannot
  * answer for is skipped rather than failing the derivation — a partial map is
@@ -55,6 +77,8 @@ export const deriveBeeDeps = async (
   read: (signature: string) => Promise<Uint8Array | null>,
 ): Promise<Record<string, string[]>> => {
   const classToDep = new Map<string, string>()
+  const depByAlias = new Map<string, string>()
+  const importsOf = new Map<string, string[]>()
   for (const dependency of dependencies) {
     const bytes = await read(dependency)
     const source = bytes && text(bytes)
@@ -63,18 +87,39 @@ export const deriveBeeDeps = async (
       const name = match[1] || match[2]
       if (name) classToDep.set(name, dependency)
     }
+    // Only ATOMS join a closure (line 2 is the lazy marker —
+    // dependency-loader.ts `isLazyDependency`). An eager namespace bundle a
+    // bee imports must stay out of the map, or the loader would take it out of
+    // the boot pass where its services register.
+    const alias = source.match(ALIAS_RE)?.[1]
+    if (alias && (source.split('\n', 3)[1] ?? '').startsWith(LAZY_MARKER)) {
+      depByAlias.set(alias, dependency)
+      importsOf.set(dependency, staticImports(source))
+    }
   }
-  if (!classToDep.size) return {}
+  if (!classToDep.size && !depByAlias.size) return {}
+
+  /** Every dependency a list of specifiers reaches, at any depth. */
+  const closureOf = (specifiers: readonly string[]): Set<string> => {
+    const reached = new Set<string>()
+    const pending = [...specifiers]
+    while (pending.length) {
+      const dependency = depByAlias.get(pending.pop()!)
+      if (!dependency || reached.has(dependency)) continue
+      reached.add(dependency)
+      pending.push(...(importsOf.get(dependency) ?? []))
+    }
+    return reached
+  }
 
   const beeDeps: Record<string, string[]> = {}
   for (const bee of bees) {
     const bytes = await read(bee)
     const source = bytes && text(bytes)
     if (!source) continue
+    const claimed = closureOf(staticImports(source))
     const block = source.match(DEPS_BLOCK_RE)
-    if (!block?.[1]) continue
-    const claimed = new Set<string>()
-    for (const match of block[1].matchAll(DEP_NAME_RE)) {
+    for (const match of block?.[1]?.matchAll(DEP_NAME_RE) ?? []) {
       const dependency = match[1] && classToDep.get(match[1])
       if (dependency) claimed.add(dependency)
     }

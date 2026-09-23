@@ -32,6 +32,10 @@
     "tutorial",
     "editor",
     "navigation",
-    "history"
+    "history",
+    "presentation",
+    "sharing",
+    "assistant",
+    "commands"
   ]
 }

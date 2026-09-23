@@ -262,11 +262,21 @@ export const holdArrivals = async (
     try {
       const record = await broodRecord(sig)
       if (admitArrival(kind, rules, record?.vouches ?? []) !== 'run') await holdInBrood(sig, { ...source, kind })
+      else if (record && !record.ruling && TRUST[kind] > TRUST[record.source.kind ?? 'stranger']) {
+        // THE SAME BYTES, NOW VOUCHED FOR. Code first held as a stranger's —
+        // a community trial taken by hand — that arrives again from a publisher
+        // you follow (the trial they promoted) is theirs too, so your rules for
+        // that kind now decide it. A ruling you made is never touched.
+        await write({ ...record, source: { ...record.source, ...source, kind } })
+      }
       if (!(await mayRunBee(sig))) heldBack.push(sig)
     } catch { /* an install the authority allowed must not die in the brood */ }
   }
   return heldBack
 }
+
+/** How far an arrival's source is trusted — a record only ever moves up. */
+const TRUST: Record<ArrivalKind, number> = { stranger: 0, followed: 1, own: 2 }
 
 /** Drop a record entirely — "I never want to be asked about this again". The
  *  bytes are content and are not touched; only the holding is forgotten. */

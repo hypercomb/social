@@ -21,6 +21,7 @@
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
 import { OFFERS_OPEN } from './offers.view.js'
+import { OffersElement, OFFERS_SURFACE, OFFERS_VIEW_KEY } from './offers.view.js'
 
 export class OffersQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -38,6 +39,18 @@ export class OffersQueenBee extends QueenBee {
     EffectBus.emit(OFFERS_OPEN, { at: Date.now() })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): the view is a dependency; this bee
+// defines its element and adds it to the shell's surface registry — never a
+// tag in either app.html.
+window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
+  if (!customElements.get(OFFERS_SURFACE)) customElements.define(OFFERS_SURFACE, OffersElement)
+  try {
+    registry.add({ name: OFFERS_SURFACE, owner: OFFERS_VIEW_KEY, element: OFFERS_SURFACE, order: 142 })
+  } catch {
+    // duplicate add (hot reload) — the mounted surface is already live
+  }
+})
 
 const _offers = new OffersQueenBee()
 ;(window as unknown as { ioc?: { register?: (k: string, v: unknown) => void } })

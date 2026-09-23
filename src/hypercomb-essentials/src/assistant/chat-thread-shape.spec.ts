@@ -25,8 +25,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-// Shell globals BEFORE the module imports evaluate (chat-thread registers its
-// IoC surface at module scope; the Store is resolved via `get` at call time).
+// Shell globals BEFORE the module imports evaluate (the Store is resolved via
+// `get` at call time; the chat bee, not chat-thread, registers the surface).
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>
   g['get'] = () => undefined
@@ -319,13 +319,14 @@ describe('chat-thread — turns are contentSig manifests; legacy stays readable'
     expect(store.resourceReads - before).toBe(4)
   })
 
-  it('groups a conversation by who it waits on', () => {
+  it('groups a conversation by who it waits on', async () => {
+    const { conversationGroup } = await import('./chat-threads.js')
     const settled = { name: 'n', stands: 's', open: 0, total: 3, upTo: 4 }
-    expect(mod.conversationGroup({ asking: true, replied: true, turns: 4 }, settled)).toBe('waiting')
-    expect(mod.conversationGroup({ replied: true, turns: 4 }, settled)).toBe('done')
-    expect(mod.conversationGroup({ replied: true, turns: 6 }, settled)).toBe('open')
-    expect(mod.conversationGroup({ replied: true, turns: 4 }, { ...settled, open: 1 })).toBe('open')
-    expect(mod.conversationGroup({ replied: false, turns: 1 }, undefined)).toBe('open')
+    expect(conversationGroup({ asking: true, replied: true, turns: 4 }, settled)).toBe('waiting')
+    expect(conversationGroup({ replied: true, turns: 4 }, settled)).toBe('done')
+    expect(conversationGroup({ replied: true, turns: 6 }, settled)).toBe('open')
+    expect(conversationGroup({ replied: true, turns: 4 }, { ...settled, open: 1 })).toBe('open')
+    expect(conversationGroup({ replied: false, turns: 1 }, undefined)).toBe('open')
   })
 
   it('archiving is a marker in the thread’s own bucket, and every turn survives', async () => {

@@ -27,7 +27,6 @@ import { SignatureService } from '@hypercomb/core'
 import { callModel, type LlmCall, type LlmCallResult } from './llm-dispatch.js'
 import { rankProviders } from './model-policy.js'
 import { llmHiveAccess } from './llm-hive-access.js'
-import { publishService } from './llm-provider-registry.js'
 
 export const COMPACTION_IOC_KEY = '@hypercomb.social/Compaction'
 export const COMPACTION_POOL_MEANING = 'system:compaction'
@@ -154,6 +153,3 @@ export const compaction = {
   summarize: (inputSig: string, content: () => Promise<string | undefined>, signal?: AbortSignal) =>
     summarize(inputSig, content, liveDeps, signal),
 }
-
-window.ioc?.register(COMPACTION_IOC_KEY, compaction)
-publishService(COMPACTION_IOC_KEY, compaction)

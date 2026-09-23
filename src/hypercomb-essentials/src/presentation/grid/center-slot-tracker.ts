@@ -96,5 +96,4 @@ export class CenterSlotTracker {
   }
 }
 
-const _centerSlotTracker = new CenterSlotTracker()
-;(window as any).ioc?.register?.('@diamondcoreprocessor.com/CenterSlotTracker', _centerSlotTracker)
+// presentation/tiles/show-cell.drone.ts — the first paint reads it registers this (atomic-modules-plan.md): a dependency registers nothing.

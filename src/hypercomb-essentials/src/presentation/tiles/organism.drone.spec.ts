@@ -28,7 +28,8 @@ const services = new Map<string, unknown>()
   whenReady: () => void 0,
 }
 
-const { OrganismDrone, ORGANISM_SET, ORGANISM_CHANGED } = await import('./organism.drone.js')
+const { OrganismDrone } = await import('./organism.drone.js')
+const { ORGANISM_SET, ORGANISM_CHANGED } = await import('./organism-effects.js')
 type Organism = InstanceType<typeof OrganismDrone>
 
 /** A spiral big enough to hold the page and then some — the surplus is the

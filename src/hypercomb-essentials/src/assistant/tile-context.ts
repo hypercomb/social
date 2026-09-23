@@ -276,8 +276,9 @@ export const detachTileContext = (
 }
 
 // Reachable from the shell, which owns the window that manages this and may
-// never import essentials. Same loose-IoC seam ContextIndex uses.
-window.ioc.register('@diamondcoreprocessor.com/TileContext', {
+// never import essentials. Same loose-IoC seam ContextIndex uses; the
+// llm-context bee registers it (atomic-modules-plan.md).
+export const tileContextSeam = {
   branchesFor: contextBranchesFor,
   resolve: resolveTileContext,
   signaturesFor: contextSignaturesFor,
@@ -291,4 +292,4 @@ window.ioc.register('@diamondcoreprocessor.com/TileContext', {
     const { contextWithSummaries } = await import('./context-summary-gen.js')
     return contextWithSummaries(branches)
   },
-})
+}

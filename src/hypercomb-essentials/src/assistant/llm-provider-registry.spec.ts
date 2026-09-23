@@ -98,7 +98,7 @@ describe('the built-in roster', () => {
   it('registers every shipped vendor, each with a colour agent-model.ts knows', async () => {
     const mod = await registryHarness()
     const { KNOWN_VENDORS } = await import('../presentation/avatars/agent-model.js')
-    await import('./providers/builtin-providers.js')
+    ;(await import('./providers/builtin-providers.js')).startBuiltinLlmProviders()
 
     const registry = mod.llmProviderRegistry()
     const ids = registry.all().map(p => p.id).sort()
@@ -113,14 +113,14 @@ describe('the built-in roster', () => {
 
   it('asks for no key only where there is nobody to bill', async () => {
     const mod = await registryHarness()
-    await import('./providers/builtin-providers.js')
+    ;(await import('./providers/builtin-providers.js')).startBuiltinLlmProviders()
     const keyless = mod.llmProviderRegistry().all().filter(p => p.requiresKey === false)
     expect(keyless.map(p => p.id)).toEqual(['local'])
   })
 
   it('sends the Anthropic key in the header and never in the body', async () => {
     const mod = await registryHarness()
-    await import('./providers/builtin-providers.js')
+    ;(await import('./providers/builtin-providers.js')).startBuiltinLlmProviders()
     const anthropic = mod.llmProviderRegistry().get('anthropic')!
     const { url, init } = anthropic.toRequest({
       model: 'claude-sonnet-4-6',
@@ -135,7 +135,7 @@ describe('the built-in roster', () => {
 
   it('marks the system prompt for caching only when the caller asks', async () => {
     const mod = await registryHarness()
-    await import('./providers/builtin-providers.js')
+    ;(await import('./providers/builtin-providers.js')).startBuiltinLlmProviders()
     const anthropic = mod.llmProviderRegistry().get('anthropic')!
     const plain = anthropic.toRequest({
       model: 'claude-sonnet-4-6', messages: [], system: 'stable', apiKey: 'k',

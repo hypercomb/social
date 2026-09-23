@@ -230,7 +230,3 @@ export class HostAiService extends EventTarget {
     }
   }
 }
-
-// ── registration ────────────────────────────────────────
-const _hostAi = new HostAiService()
-window.ioc.register(HOST_AI_IOC_KEY, _hostAi)

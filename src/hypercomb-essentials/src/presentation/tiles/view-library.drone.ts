@@ -26,7 +26,7 @@ import { bindDocumentLinks, jumpEntry } from './document-view-links.js'
 import {
   EVIDENCE_ATLAS_KIND, EVIDENCE_ATLAS_VIEW,
   KNOWLEDGE_STUDIO_KIND, KNOWLEDGE_STUDIO_VIEW,
-} from '../../commands/view-library.queen.js'
+} from '../../commands/view-library-kind.js'
 
 type Surface = typeof EVIDENCE_ATLAS_VIEW | typeof KNOWLEDGE_STUDIO_VIEW
 type VM = EventTarget & { mode: string; setMode(next: string): void }

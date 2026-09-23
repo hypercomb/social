@@ -21,7 +21,7 @@
 // Stop:          /tutorial stop, the Skip button, or Escape.
 
 import { Drone, EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { removeTilesAt } from '../commands/remove.queen.js'
+import { removeTilesAt } from '../commands/remove-tiles.js'
 import { readTutorialRecord, writeTutorialRecord, clearTutorialRecord, tutorialPlannerSig } from './tutorial-provenance.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'

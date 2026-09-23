@@ -3,7 +3,6 @@
 // ChatGPT. The vendor whose wire format the others copied, so the whole
 // adapter is `openai-shape.ts` and this file is pure declaration.
 
-import { registerLlmProvider } from '../llm-provider-registry.js'
 import type { LlmProviderDescriptor } from './llm-provider.types.js'
 import { openAiRequest, openAiResponse, openAiStreamEvent } from './openai-shape.js'
 
@@ -27,5 +26,3 @@ export const OPENAI_PROVIDER: LlmProviderDescriptor = {
   fromResponse: openAiResponse,
   fromStreamEvent: openAiStreamEvent,
 }
-
-registerLlmProvider(OPENAI_PROVIDER)

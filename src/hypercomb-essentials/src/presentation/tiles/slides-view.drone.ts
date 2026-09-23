@@ -132,8 +132,8 @@ import {
   terminalContentSig,
   type SlidePayload,
 } from './slide-artifact.js'
-import { GALLERY_KIND, LIGHTBOX_VIEW } from '../../commands/lightbox.queen.js'
-import { SCROLLER_KIND, SCROLLER_VIEW } from '../../commands/scroller.queen.js'
+import { GALLERY_KIND, LIGHTBOX_VIEW } from '../../commands/lightbox-kind.js'
+import { SCROLLER_KIND, SCROLLER_VIEW } from '../../commands/scroller-kind.js'
 import { fetchImageBlob, sniffImageMime } from '../../link/photo.js'
 import { kindForMime, type PlayableKind } from '../../link/media.js'
 import { classifyLink } from './scroller-sections.js'

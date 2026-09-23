@@ -133,6 +133,5 @@ const attestation: PackageAttestation = {
   attest: (packageSig, zones) => attestPackage(packageSig, zones),
 }
 
-if (typeof window !== 'undefined') {
-  window.ioc?.register?.(ATTESTATION_IOC_KEY, attestation)
-}
+/** The attestation port; hosts.drone.ts registers it (atomic-modules-plan.md). */
+export { attestation as packageAttestation }

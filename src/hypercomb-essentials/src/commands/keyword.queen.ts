@@ -1,6 +1,7 @@
 // commands/keyword.queen.ts
 
 import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
+import { readNamedTarget } from './named-target.js'
 
 /**
  * /keyword — add or remove keywords (tags) on selected tiles.
@@ -94,23 +95,6 @@ export class KeywordQueenBee extends QueenBee {
   #log(message: string): void {
     EffectBus.emit('activity:log', { message, icon: '#' })
   }
-}
-
-/** `<cell> = <tags>` — the named form, or undefined when the line uses none.
- *  One reader for the parser and for the machine gate, so the two can never
- *  disagree about what a line means. */
-export const readNamedTarget = (
-  args: string,
-): { cell: string; tags: string } | { refuse: string } | undefined => {
-  const equals = args.indexOf('=')
-  if (equals === -1) return undefined
-  const cell = args.slice(0, equals).trim()
-  const tags = args.slice(equals + 1).trim()
-  if (!cell || cell.includes('/') || cell.includes(String.fromCharCode(92))) {
-    return { refuse: 'the named form is /keyword <cell> = <tag>, one tile on this page' }
-  }
-  if (!tags) return { refuse: '/keyword needs at least one tag after =' }
-  return { cell, tags }
 }
 
 // ── arg parsing ──────────────────────────────────────────

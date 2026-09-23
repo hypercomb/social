@@ -22,7 +22,7 @@ const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => {
 beforeAll(async () => {
   localStorage.clear()
   vi.stubGlobal('fetch', fetcher)
-  await import('./providers-window.view.js')
+  await import('./llm.drone.js')   // the llm bee registers the console and the roster (atomic-modules-plan.md)
   llmKeyStore.set('openrouter', `sk-or-v1-${'a1'.repeat(32)}`)
   ;(services.get('@diamondcoreprocessor.com/ProvidersWindowView') as { open(): void }).open()
   buttons('.hc-providers-tab').find(b => b.textContent?.startsWith('API'))!.click()

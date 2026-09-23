@@ -25,13 +25,7 @@ import {
   removeDecorationAndWait,
   replaceDecoration,
 } from './decoration-manifest.js'
-
-export const SQUARE_TILE_VIEW = 'square-tile-view'
-export const SQUARE_TILE_KIND = 'visual:square-tile:view'
-
-/** The retired Revolución names — read-side aliases only, never written. */
-export const LEGACY_WELCOME_VIEW = 'revolucion-welcome'
-export const LEGACY_WELCOME_KIND = 'visual:revolucion:welcome'
+import { LEGACY_WELCOME_KIND, LEGACY_WELCOME_VIEW, SQUARE_TILE_KIND, SQUARE_TILE_VIEW } from './square-tile-kind.js'
 
 /** Payload of a `visual:square-tile:view` record. Everything is optional —
  *  the view is built from the cell's CHILDREN, not from authored content. */

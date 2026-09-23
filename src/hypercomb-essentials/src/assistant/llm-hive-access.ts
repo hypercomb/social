@@ -12,7 +12,7 @@
 // Peer-lent models are refused at this door regardless of the flag: a peer
 // is someone else's machine.
 
-import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
+import { llmProviderRegistry } from './llm-provider-registry.js'
 
 /** The provider whose grant and budget this one uses (credential-owner.ts). */
 const ownerOf = (providerId: string): string | undefined =>
@@ -120,8 +120,3 @@ export const MIN_BUDGET = 2_000
 export const MAX_BUDGET = 200_000
 
 export const llmHiveAccess = new LlmHiveAccessStore()
-
-// Both lines: the first is what `prepare` looks for to load this module at
-// all; the second survives the early `window.ioc` map being replaced.
-window.ioc?.register(LLM_HIVE_ACCESS_IOC_KEY, llmHiveAccess)
-publishService(LLM_HIVE_ACCESS_IOC_KEY, llmHiveAccess)

@@ -48,20 +48,7 @@ import type { VisualBeeRegistry } from './visual-bee-registry.js'
 import { writeDecoration, listDecorations, removeDecoration } from './decoration-manifest.js'
 import { SITE_ARTIFACT_KIND } from '../pheromones/enrollment.js'
 import { mintContentRef, terminalContentSig } from '../presentation/tiles/artifact-content.js'
-
-/** Pictures held on a tile — the lightbox's own content, and a source for any
- *  view that renders a set this tile is enrolled in. Payload:
- *  `{ images: [ref, …] }`, where each ref is a Life Primitive content hop. */
-export const GALLERY_KIND = 'visual:lightbox:gallery'
-
-/** The slot a picture's incidence is held in. Distinct from a slide's, so the
- *  same bytes used both ways mint two envelopes rather than colliding. */
-export const PICTURE_RELATION = 'picture'
-
-/** The ViewMode surface this behaviour renders on. Matches the kind's own
- *  `visual:<view>:<noun>` middle segment — the vocabulary the command line's
- *  `name@lightbox` and the Beehaviors panel both read. */
-export const LIGHTBOX_VIEW = 'lightbox'
+import { GALLERY_KIND, LIGHTBOX_VIEW, PICTURE_RELATION, galleryImageSigsAt } from './lightbox-kind.js'
 
 const SIG = /^[0-9a-f]{64}$/
 
@@ -73,45 +60,6 @@ const OFF_KEYWORDS = new Set(['off', 'hex', 'hexagons', 'hexagon', 'close', 'sto
 type ViewModeShape = { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
 type StoreShape = { putResource(blob: Blob): Promise<string> }
-
-/**
- * Every picture held on a tile, RESOLVED to the signature of its bytes.
- *
- * The payload declares a Life Primitive hop — a meta envelope under the current
- * model, a raw resource signature under the retired one — and this seam follows
- * it, so every caller gets the same thing it always got. That matters because
- * `Store.getResource` does NOT follow the hop: a consumer handed an envelope
- * signature would fetch the envelope's JSON and try to paint it as a picture.
- * Resolving once, here, is what keeps the full-screen lightbox and the images
- * chooser both correct without either learning about incidences.
- *
- * An envelope whose target is not held locally resolves to itself, which is the
- * honest answer — the caller's own fetch cascade is what can still reach it, and
- * `fetchThroughContentHop` is how it should.
- */
-export async function galleryImageSigsAt(segments: readonly string[]): Promise<string[]> {
-  const out: string[] = []
-  const store = get<{ getResourceLocal?(sig: string): Promise<Blob | null> }>('@hypercomb.social/Store')
-  try {
-    const decorations = await listDecorations<{ images?: unknown }>({
-      kind: GALLERY_KIND,
-      segments,
-    })
-    for (const { record } of decorations) {
-      const images = record.payload?.images
-      if (!Array.isArray(images)) continue
-      for (const value of images) {
-        const ref = String(value)
-        if (!SIG.test(ref)) continue
-        const imageSig = store?.getResourceLocal
-          ? (await terminalContentSig(store as { getResourceLocal(s: string): Promise<Blob | null> }, ref)) ?? ref
-          : ref
-        if (!out.includes(imageSig)) out.push(imageSig)
-      }
-    }
-  } catch { /* no readable gallery at this location */ }
-  return out
-}
 
 export class LightboxQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'

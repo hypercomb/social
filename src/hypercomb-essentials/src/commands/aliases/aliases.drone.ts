@@ -18,7 +18,7 @@
 
 import { Drone } from '@hypercomb/core'
 import { ALIAS_SUGGESTIONS } from './alias-suggestions.js'
-import type { ParticipantAliases, RefusedName } from './participant-aliases.js'
+import { ParticipantAliases, type RefusedName } from './participant-aliases.js'
 
 export interface AliasRow {
   command: string
@@ -139,6 +139,9 @@ export class AliasesDrone extends Drone {
     this.emitEffect('aliases:render', payload)
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): the participant's own aliases.
+window.ioc.register('@diamondcoreprocessor.com/ParticipantAliases', new ParticipantAliases())
 
 const _aliasesDrone = new AliasesDrone()
 ;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(

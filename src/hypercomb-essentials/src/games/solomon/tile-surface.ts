@@ -10,6 +10,11 @@ import { isMenuAction, type MenuOption } from './game-menu.js'
 export const SOLOMON_MAZE_BRANCH = 'solomon-maze-v1'
 /** The menu's layer, beside the rooms: one child tile per option. */
 export const SOLOMON_MENU = 'menu'
+/** The story add-ons' layer, beside the rooms: one child tile per add-on,
+ *  each holding its bundle. After the first seeding the tiles ARE the
+ *  add-ons — a participant makes a new tile here to plug a story in. */
+export const SOLOMON_STORIES = 'stories'
+export interface StorySeedTile { readonly id: string; readonly bundle: unknown }
 const VERSION = 1
 
 export interface NativeTileLayer {
@@ -179,6 +184,48 @@ export class SolomonTileSurface {
     }
     await this.#committer.importTree(updates)
     return await this.readMenu() ?? [...defaults]
+  }
+
+  /** The story add-ons: the children of the `stories` layer, in order.
+   *  Seeded once from `defaults`; after that the layer is the list. */
+  ensureStories(defaults: readonly StorySeedTile[]): Promise<unknown[]> {
+    const run = this.#pending.then(() => this.#ensureStories(defaults))
+    this.#pending = run.catch(() => {})
+    return run
+  }
+
+  async #ensureStories(defaults: readonly StorySeedTile[]): Promise<unknown[]> {
+    const existing = await this.readStories()
+    if (existing) return existing
+    const branch = await this.#resolveAt(this.baseSegments)
+    const storiesSegments = [...this.baseSegments, SOLOMON_STORIES]
+    const updates: { segments: readonly string[]; layer: NativeTileLayer }[] = []
+    if (!branch) updates.push({ segments: this.baseSegments, layer: { name: SOLOMON_MAZE_BRANCH, solomonMaze: { version: VERSION } } })
+    updates.push({ segments: storiesSegments, layer: { name: SOLOMON_STORIES, solomonStories: { version: VERSION } } })
+    for (const seed of defaults) {
+      updates.push({ segments: [...storiesSegments, safeName(seed.id)], layer: { name: seed.id, solomonStory: { version: VERSION, bundle: seed.bundle } } })
+    }
+    await this.#committer.importTree(updates)
+    return await this.readStories() ?? defaults.map(seed => seed.bundle)
+  }
+
+  /** Every story tile's bundle, in the layer's order; null before the layer exists. */
+  async readStories(): Promise<unknown[] | null> {
+    const branch = await this.#resolveAt(this.baseSegments)
+    if (!branch) return null
+    if (!object(branch['solomonMaze']) || branch['solomonMaze']['version'] !== VERSION) {
+      throw new Error(`The ${SOLOMON_MAZE_BRANCH} tile already belongs to other content`)
+    }
+    const storiesSegments = [...this.baseSegments, SOLOMON_STORIES]
+    const layer = await this.#resolveAt(storiesSegments)
+    if (!layer) return null
+    const bundles: unknown[] = []
+    for (const child of await this.#children(layer)) {
+      const live = await this.#direct([...storiesSegments, child.name!]) ?? child
+      const data = live['solomonStory']
+      if (object(data) && 'bundle' in data) bundles.push(data['bundle'])
+    }
+    return bundles
   }
 
   async readMenu(): Promise<MenuOption[] | null> {

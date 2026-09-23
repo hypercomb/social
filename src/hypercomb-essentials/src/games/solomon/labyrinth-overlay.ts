@@ -23,8 +23,11 @@ import { PlacePath, entranceKey, seatAt, seatsOf, splitEntranceKey, MAX_PATH_DEP
 import { ROOT_PLACE, STORY, STORY_BOARDS, type GuideStep } from './story.js'
 import { PLACES, LABYRINTH_PLACE, placeName, seatLabel, crumbLabel, floorLabel, groupOfPlace } from './places.js'
 import { CHAMBERS } from './chamber-places.js'
+import { installStory, readStoryBundle, STORY_SEEDS } from './story-addons.js'
 import { WORLDS } from './worlds.js'
 import { worldMap } from './rpg-overworld.js'
+import { SIDE_CAVERNS, SideCavernRun } from './side-cavern.js'
+import { SideCavernRuntime } from './side-cavern-view.js'
 import { chamberInstruments, type ChamberInstruments, type ChamberSound } from './chamber-view.js'
 import { IslandRuntime, ChamberRuntime, LabyrinthRuntime, type PlaceRuntime, type RuntimeShell } from './place-runtimes.js'
 import { readAdventureSave, writeAdventureSave, type CarriedEntry } from './adventure-save.js'
@@ -206,8 +209,9 @@ export class SolomonLabyrinthOverlay {
     host.hidden = true
     this.#content!.append(host)
     let runtime: PlaceRuntime
-    const world = WORLDS.get(place)
+    const world = WORLDS.get(place), cavern = SIDE_CAVERNS.find(candidate => candidate.id === place)
     if (world) runtime = new IslandRuntime(host, this.#shell, world)
+    else if (cavern) runtime = new SideCavernRuntime(host, cavern, this.#shell)
     else if (place === LABYRINTH_PLACE.id) runtime = new LabyrinthRuntime(host, this.#shell, () => this.#tileSurface(), this.#loaded)
     else {
       const definition = CHAMBERS.find(chamber => chamber.id === place)
@@ -550,7 +554,12 @@ export class SolomonLabyrinthOverlay {
         if (!seat) return null
         // A world is shown whole, as a map, whether or not it was ever walked.
         const world = WORLDS.get(seat.place)
-        return world ? worldMap(world) : this.#runtimes.get(seat.place)?.seed() ?? null
+        if (world) return worldMap(world)
+        const live = this.#runtimes.get(seat.place)
+        if (live) return live.seed()
+        // A cavern never walked still shows its whole length.
+        const cavern = SIDE_CAVERNS.find(candidate => candidate.id === seat.place)
+        return cavern ? new SideCavernRun(cavern).seed() : null
       },
       found: (from, entrance) => { this.#found.add(entranceKey(from, entrance)); this.#dirty = true },
       openItems: () => this.#openItems(),
@@ -604,6 +613,8 @@ export class SolomonLabyrinthOverlay {
       open: { freq: 620, endFreq: 780, dur: 0.16, vol: 0.06 },
       claim: { freq: 660, endFreq: 990, dur: 0.24, vol: 0.06 },
       finale: { freq: 500, endFreq: 1000, dur: 0.6, vol: 0.08 },
+      caught: { freq: 180, endFreq: 90, dur: 0.35, vol: 0.08 },
+      crush: { freq: 240, endFreq: 120, dur: 0.2, vol: 0.07 },
       hush: { freq: 220, endFreq: 160, dur: 0.3, vol: 0.05 },
       duel: { freq: 500, endFreq: 700, dur: 0.2, vol: 0.06 },
       strike: { freq: 700, endFreq: 500, dur: 0.06, vol: 0.05 },
@@ -881,19 +892,63 @@ export class SolomonLabyrinthOverlay {
     for (const [id, text] of pairs) this.#knowledge.set(id, text)
   }
 
+  /** The story add-ons' bundles: read from the game's `stories` tiles
+   *  (seeded once with the worked example) when there is a hive to read
+   *  them from — a promise — or the seeds themselves, at once. */
+  #storiesFrom(): unknown[] | Promise<unknown[]> {
+    const seeds = (): unknown[] => STORY_SEEDS.map(seed => seed.bundle)
+    try {
+      const tiles = this.#tileSurface()
+      if (typeof tiles.ensureStories === 'function') return tiles.ensureStories(STORY_SEEDS).catch(seeds)
+    } catch { /* no hive under the game: the seeds alone */ }
+    return seeds()
+  }
+
+  /** Seats each bundle into the story. A refusal is said once, and the game
+   *  goes on without that add-on. */
+  #seatStories(raws: readonly unknown[]): void {
+    const refused: string[] = []
+    for (const raw of raws) {
+      const bundle = readStoryBundle(raw)
+      if (!bundle) { refused.push('a story add-on could not be read'); continue }
+      const result = installStory(bundle)
+      if (!result.ok) refused.push(`${bundle.name}: ${result.problem}`)
+    }
+    if (refused.length) this.#message(`Not seated — ${refused[0]}`)
+  }
+
   async #restoreSlot(): Promise<void> {
     if (!this.#slots || !this.#root) return
+    // The add-ons first: a save can only resume in a place that stands. Only
+    // a hive read makes this wait (and the game busy); the seeds seat at once.
+    const stories = this.#storiesFrom()
+    let busy: Busy | null = null
+    if (Array.isArray(stories)) this.#seatStories(stories)
+    else {
+      busy = { kind: 'restore', cancelled: false, intent: null }
+      this.#busy = busy
+      this.#root.setAttribute('aria-busy', 'true')
+      const raws = await stories
+      if (busy.cancelled || !this.#root) return
+      this.#seatStories(raws)
+    }
     const raw = this.#slots.read()
     this.#restoreFailed = false
     this.#lastSaved = ''
     const plan = readAdventureSave(raw, STORY)
     if (!plan) {
       if (raw !== null) { this.#restoreFailed = true; this.#message('This slot could not be read. Its saved adventure has been kept.') }
+      if (busy && !busy.cancelled) {
+        this.#busy = null
+        this.#root.removeAttribute('aria-busy')
+        const next = busy.intent
+        if (next) this.#request(next)
+      }
       this.#save()
       this.#updateSaveStatus()
       return
     }
-    const busy: Busy = { kind: 'restore', cancelled: false, intent: null }
+    busy ??= { kind: 'restore', cancelled: false, intent: null }
     this.#busy = busy
     this.#root.setAttribute('aria-busy', 'true')
     this.#message(`Continuing Slot ${this.#slots.activeSlot}…`)
@@ -903,7 +958,16 @@ export class SolomonLabyrinthOverlay {
       this.#carried = [...plan.carried]
       this.#extra = [...plan.extra]
       this.#readKnowledge(plan.knowledge)
-      for (const [place, facts] of plan.places) this.#dormant.set(place, facts)
+      // A place already standing (the island is built at mount, before the
+      // slot is read) takes its facts now; the rest wait in #dormant for the
+      // runtime that will be built for them. Parking a live place's facts
+      // there instead restored nothing: the island showed its start, and
+      // her first step saved that over the slot.
+      for (const [place, facts] of plan.places) {
+        const live = this.#runtimes.get(place)
+        if (live) live.restoreFacts(facts)
+        else this.#dormant.set(place, facts)
+      }
       this.#updateInventory()
 
       // Rule 2, the labyrinth's own share: hydrate whatever rooms its
@@ -1121,7 +1185,7 @@ const ADVENTURE_CSS = `
 .sol-menu-open:hover,.sol-menu-open:focus-visible{opacity:1;filter:brightness(1.15)}
 .sol-adventure .sol-rpg-world{padding:0}.sol-adventure .sol-rpg-world-controls,.sol-adventure .sol-rpg-world .sol-rpg-status{display:none}.sol-adventure .sol-rpg-map{border:0;border-radius:0;box-shadow:none}
 .sol-adventure .sol-chamber-view{position:relative;gap:0;justify-content:center;container-type:size}.sol-adventure .sol-chamber-heading,.sol-adventure .sol-chamber-controls{display:none}
-.sol-adventure .sol-chamber-map{width:min(100cqw,calc(100cqh * var(--cols) / var(--rows)));margin:auto;border-radius:0}
+.sol-adventure .sol-chamber-map{width:min(100cqw,calc(100cqh * var(--view-cols, var(--cols)) / var(--view-rows, var(--rows))));margin:auto;border-radius:0}
 .sol-adventure .sol-chamber-status{position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:6;width:max-content;max-width:70%;padding:4px 12px;border-radius:8px;background:#0f1e30b3;pointer-events:none}.sol-adventure .sol-chamber-status:empty{display:none}
 .sol-adventure .sol-native-room{position:relative;gap:0}.sol-adventure .sol-room-heading,.sol-adventure .sol-room-hint{display:none}.sol-adventure .sol-room-viewport{padding:6px}
 .sol-adventure .sol-room-status{position:absolute;left:12px;bottom:10px;z-index:6;max-width:45%;gap:10px;padding:4px 10px;border-radius:8px;background:#0f1e30b3;pointer-events:none}.sol-adventure .sol-room-status progress{width:90px}

@@ -586,9 +586,6 @@ export class TranslationService extends EventTarget {
 
 }
 
-const _translation = new TranslationService()
-window.ioc.register('@diamondcoreprocessor.com/TranslationService', _translation)
-
 // ── skip filters ─────────────────────────────────────
 // Free rejections: strings not worth an API call.
 

@@ -5,13 +5,15 @@
  *  Pure; no DOM, no storage. */
 
 import type { PlaceCatalog, PlaceDefinition, PlaceStep, StorySeat } from './place.js'
+import type { ChamberDefinition } from './chamber.js'
 import { levelsBelow, seatAt } from './place.js'
 import type { GroupRecord } from './chamber-places.js'
 import { CHAMBERS, GROUPS } from './chamber-places.js'
 import { SEVENFOLD_VALLEY, worldEncounters } from './rpg-overworld.js'
 import { STORY } from './story.js'
 import { GREENWOOD } from './worlds.js'
-import { ROOMS, squareEntrance } from './labyrinth.js'
+import { ROOMS, squareEntrance, squareName } from './labyrinth.js'
+import { SIDE_CAVERNS, type SideCavernDefinition } from './side-cavern.js'
 import type { WorldDefinition } from './rpg-overworld.js'
 
 export interface SeatLabel { readonly name: string; readonly subtitle: string; readonly levels: number }
@@ -41,6 +43,17 @@ export function worldPlace(world: WorldDefinition): PlaceDefinition {
   }
 }
 
+/** A side-view cavern: arrived at its mouth; its entrances are its way
+ *  deeper and every one of its squares. */
+export function sideCavernPlace(cavern: SideCavernDefinition): PlaceDefinition {
+  const { cols, rows } = cavern.level
+  return {
+    id: cavern.id, name: cavern.name, subtitle: cavern.subtitle, kind: 'sideview',
+    entrances: [...(cavern.deeper ? ['deeper'] : []), ...Array.from({ length: cols * rows }, (_, index) => squareName(index % cols, Math.floor(index / cols)))],
+    arrivals: [{ id: 'mouth', name: cavern.name }],
+  }
+}
+
 /** One place, reached through three different shrine doors, each landing at
  *  a different arrival. A room's doors lead to other rooms of the same place;
  *  its entrances are its SQUARES — any one of them, open air or a stone in
@@ -62,7 +75,7 @@ export const LABYRINTH_PLACE: PlaceDefinition = {
  *  entrances are its stairs and trapdoors, and every thing standing in it —
  *  a tablet, a chest, a lamp, a lever, a stone, an alcove, the artifact, a
  *  person — any of which a story may make lead elsewhere. */
-function chamberPlace(definition: (typeof CHAMBERS)[number]): PlaceDefinition {
+export function chamberPlace(definition: ChamberDefinition): PlaceDefinition {
   return {
     id: definition.id, name: definition.name, subtitle: definition.subtitle, kind: 'chamber',
     entrances: [
@@ -77,12 +90,22 @@ function chamberPlace(definition: (typeof CHAMBERS)[number]): PlaceDefinition {
 /** Insertion order: island, labyrinth, then every chamber in `CHAMBERS`'
  *  own order (the caverns' three floors each, the interior chain, the
  *  Hollow Grove last). */
-export const PLACES: PlaceCatalog = new Map<string, PlaceDefinition>([
+const catalog = new Map<string, PlaceDefinition>([
   [ISLAND_PLACE.id, ISLAND_PLACE],
   [LABYRINTH_PLACE.id, LABYRINTH_PLACE],
   [GREENWOOD.id, worldPlace(GREENWOOD)],
+  ...SIDE_CAVERNS.map((cavern): [string, PlaceDefinition] => [cavern.id, sideCavernPlace(cavern)]),
   ...CHAMBERS.map((definition): [string, PlaceDefinition] => [definition.id, chamberPlace(definition)]),
 ])
+export const PLACES: PlaceCatalog = catalog
+
+/** A story add-on's place, once read and checked (story-addons.ts), joins
+ *  the one catalog under its own new name. */
+export function registerPlace(definition: PlaceDefinition): boolean {
+  if (catalog.has(definition.id)) return false
+  catalog.set(definition.id, definition)
+  return true
+}
 
 export function placeName(place: string): string {
   return PLACES.get(place)?.name ?? place

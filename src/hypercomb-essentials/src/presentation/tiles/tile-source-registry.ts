@@ -119,7 +119,6 @@ export class TileSourceRegistry {
 // no-ops its peer-pull at show-cell.drone.ts:1921 → peer tiles arrive
 // in the swarm cache but never reach the renderer. That was the
 // "incognito sees nothing" bug.
-const _registry = new TileSourceRegistry()
-window.ioc.register(IOC_KEY, _registry)
+// presentation/tiles/show-cell.drone.ts — the first paint reads it registers this (atomic-modules-plan.md): a dependency registers nothing.
 
 export const TILE_SOURCE_REGISTRY_KEY = IOC_KEY

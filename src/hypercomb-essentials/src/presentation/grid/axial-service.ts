@@ -191,4 +191,4 @@ export class AxialService {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/AxialService', new AxialService())
+// presentation/tiles/pixi-host.worker.ts — the first paint reads it registers this (atomic-modules-plan.md): a dependency registers nothing.

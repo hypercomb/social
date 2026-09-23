@@ -12,7 +12,7 @@ import { hasDecorationKind, referenceTargetForLabel, tagsForLabel } from '../../
 import { cellLocationSig } from '../../editor/tile-properties.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
-import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
+import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-action-icons.js'
 import { clickNeedsCoordinateHitTest, resolveTilePress, usesTileCloseUp } from './tile-tap-policy.js'
 import { openTileMenu } from './viewer-walk.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'

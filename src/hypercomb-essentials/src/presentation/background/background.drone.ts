@@ -78,6 +78,13 @@ export class BackgroundDrone extends Drone {
 
 import { MoveBackgroundProvider } from './move-background.provider.js'
 import { EditorBackgroundProvider } from './editor-background.provider.js'
+import { BackgroundThemeService } from './background-theme.service.js'
+import { CanvasBackgroundService } from './canvas-background.service.js'
+
+// THE BEE WIRES (atomic-modules-plan.md). A render-critical bee registers
+// the services it needs for the first paint, so they exist before it.
+window.ioc.register('@diamondcoreprocessor.com/BackgroundThemes', new BackgroundThemeService())
+window.ioc.register('@diamondcoreprocessor.com/CanvasBackground', new CanvasBackgroundService())
 
 const _background = new BackgroundDrone()
 _background.addProvider(new MoveBackgroundProvider(_background.requestRedraw))

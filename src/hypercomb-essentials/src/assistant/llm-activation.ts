@@ -122,4 +122,3 @@ export class LlmActivationStore extends EventTarget {
 }
 
 export const llmActivation = new LlmActivationStore()
-window.ioc?.register?.('@diamondcoreprocessor.com/LlmActivationStore', llmActivation)

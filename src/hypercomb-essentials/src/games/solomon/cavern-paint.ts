@@ -22,6 +22,11 @@ export interface CavernMap { cols: number; rows: number; tiles: readonly string[
 export interface CavernCamera { x: number; y: number; width: number; height: number; tile: number; dpr: number }
 export interface CavernLight { x: number; y: number; radius: number }
 
+/** What a floor square is like, read off its neighbours: damp beside water;
+ *  in a broad patch of moss or rubble, from a slow field so the patches span
+ *  several squares the way ground does on an overhead map. */
+interface Ground { readonly damp: boolean; readonly moss: boolean; readonly rubble: boolean }
+
 const TAU = Math.PI * 2
 const TORCH_REACH = 3.6
 
@@ -35,6 +40,9 @@ export class CavernPainter {
   #rock: { key: string; canvas: HTMLCanvasElement | null } = { key: '', canvas: null }
   #hole: HTMLCanvasElement | null | undefined
   #glow: HTMLCanvasElement | null | undefined
+  /** The darkness, drawn on its own veil so the torch's hole reveals the
+   *  rock beneath instead of erasing it. */
+  #veil: HTMLCanvasElement | null = null
 
   constructor(map: CavernMap) {
     this.#map = map
@@ -77,13 +85,19 @@ export class CavernPainter {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.globalCompositeOperation = 'source-over'
     if (this.#wood) { this.#daylight(ctx, camera, time); return }
-    ctx.fillStyle = 'rgba(4, 5, 9, 0.8)'
-    ctx.fillRect(0, 0, width, height)
-    ctx.fillStyle = '#040509'
+    const veil = this.#veilFor(width, height, dpr)
+    const dark = veil ? canvasContext(veil) : null
+    if (!veil || !dark) return
+    dark.setTransform(dpr, 0, 0, dpr, 0, 0)
+    dark.globalCompositeOperation = 'source-over'
+    dark.clearRect(0, 0, width, height)
+    dark.fillStyle = 'rgba(4, 5, 9, 0.8)'
+    dark.fillRect(0, 0, width, height)
+    dark.fillStyle = '#040509'
     const c0 = Math.max(0, Math.floor(camera.x / tile)), c1 = Math.min(this.#map.cols - 1, Math.floor((camera.x + width) / tile))
     const r0 = Math.max(0, Math.floor(camera.y / tile)), r1 = Math.min(this.#map.rows - 1, Math.floor((camera.y + height) / tile))
     for (let row = r0; row <= r1; row++) for (let col = c0; col <= c1; col++) {
-      if (!this.seen[row * this.#map.cols + col]) ctx.fillRect(col * tile - camera.x - 0.5, row * tile - camera.y - 0.5, tile + 1, tile + 1)
+      if (!this.seen[row * this.#map.cols + col]) dark.fillRect(col * tile - camera.x - 0.5, row * tile - camera.y - 0.5, tile + 1, tile + 1)
     }
     this.#hole ??= radialSprite('0, 0, 0', [[0, 1], [0.45, 0.92], [1, 0]])
     this.#glow ??= radialSprite('255, 170, 80', [[0, 1], [1, 0]])
@@ -95,10 +109,13 @@ export class CavernPainter {
       return sx + r > 0 && sx - r < width && sy + r > 0 && sy - r < height
     })
     if (this.#hole) {
-      ctx.globalCompositeOperation = 'destination-out'
-      for (const [x, y, radius] of visible) ctx.drawImage(this.#hole, x * tile - camera.x - radius * tile, y * tile - camera.y - radius * tile, radius * tile * 2, radius * tile * 2)
-      ctx.globalCompositeOperation = 'source-over'
+      dark.globalCompositeOperation = 'destination-out'
+      for (const [x, y, radius] of visible) dark.drawImage(this.#hole, x * tile - camera.x - radius * tile, y * tile - camera.y - radius * tile, radius * tile * 2, radius * tile * 2)
+      dark.globalCompositeOperation = 'source-over'
     }
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.drawImage(veil, 0, 0)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     if (this.#glow) {
       ctx.globalAlpha = 0.14
       for (const [x, y, radius] of visible) ctx.drawImage(this.#glow, x * tile - camera.x - radius * tile, y * tile - camera.y - radius * tile, radius * tile * 2, radius * tile * 2)
@@ -134,6 +151,27 @@ export class CavernPainter {
 
   #at(col: number, row: number): string { return this.#map.tiles[row]?.[col] ?? '#' }
 
+  #veilFor(width: number, height: number, dpr: number): HTMLCanvasElement | null {
+    const w = Math.max(1, Math.ceil(width * dpr)), h = Math.max(1, Math.ceil(height * dpr))
+    if (!this.#veil) {
+      const canvas = document.createElement('canvas')
+      if (!canvasContext(canvas)) return null
+      this.#veil = canvas
+    }
+    if (this.#veil.width !== w || this.#veil.height !== h) { this.#veil.width = w; this.#veil.height = h }
+    return this.#veil
+  }
+
+  #ground(col: number, row: number): Ground {
+    const damp = [this.#at(col - 1, row), this.#at(col + 1, row), this.#at(col, row - 1), this.#at(col, row + 1)].some(t => t === '~')
+    // The mean of a 5×5 neighbourhood's hashes drifts slowly across the map:
+    // its high ground is moss, its low ground rubble, each in patches.
+    let sum = 0
+    for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) sum += islandHash(col + dc, row + dr, 401)
+    const field = sum / 25
+    return { damp, moss: field > 0.565, rubble: field < 0.435 }
+  }
+
   #bake(tile: number, dpr: number): HTMLCanvasElement | null {
     const scale = Math.min(dpr, 1.5)
     const canvas = document.createElement('canvas')
@@ -148,7 +186,10 @@ export class CavernPainter {
       if (cell === '~') pool(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) !== '~', wood)
       else if (cell === 'B' && wood) boulderWood(ctx, col * tile, row * tile, tile, col, row)
       else if (cell === 'r' && wood) rubbleWood(ctx, col * tile, row * tile, tile, col, row)
-      else floor(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) === '#' || this.#at(col, row - 1) === 'T', wood)
+      else {
+        floor(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) === '#' || this.#at(col, row - 1) === 'T', wood, this.#ground(col, row))
+        if (cell === 'X') laidStone(ctx, col * tile, row * tile, tile, col, row)
+      }
     }
     for (let row = 0; row < this.#map.rows; row++) for (let col = 0; col < this.#map.cols; col++) {
       const cell = this.#at(col, row)
@@ -198,12 +239,51 @@ function radialSprite(rgb: string, stops: readonly (readonly [number, number])[]
   return canvas
 }
 
-function floor(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, wallAbove: boolean, wood: boolean): void {
+function floor(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, wallAbove: boolean, wood: boolean, ground: Ground = { damp: false, moss: false, rubble: false }): void {
   if (wood) { floorWood(ctx, x, y, s, col, row, wallAbove); return }
   const g = islandHash(col, row, 201), h = islandHash(col, row, 203)
   const tone = 50 + Math.floor(g * 12)
   ctx.fillStyle = `rgb(${tone + 8}, ${tone + 1}, ${tone - 8})`
   ctx.fillRect(x, y, s, s)
+  // The ground's own character, under the flagstone lines: damp stone beside
+  // water, moss where the patch field runs high, rubble where it runs low.
+  if (ground.damp) {
+    ctx.fillStyle = 'rgba(18, 38, 46, 0.38)'
+    ctx.fillRect(x, y, s, s)
+    ctx.fillStyle = 'rgba(160, 220, 225, 0.12)'
+    ctx.fillRect(x + s * 0.1, y + s * (0.3 + g * 0.4), s * 0.5, Math.max(1, s * 0.035))
+  }
+  if (ground.moss) {
+    ctx.fillStyle = 'rgba(58, 96, 50, 0.36)'
+    ctx.fillRect(x, y, s, s)
+    for (let k = 0; k < 3; k++) {
+      ctx.fillStyle = k % 2 ? 'rgba(96, 140, 70, 0.42)' : 'rgba(40, 70, 36, 0.5)'
+      ctx.beginPath()
+      ctx.ellipse(x + s * (0.15 + islandHash(col + k, row, 403) * 0.7), y + s * (0.15 + islandHash(col, row + k, 405) * 0.7), s * (0.08 + islandHash(col + k, row + k, 407) * 0.1), s * 0.06, 0.5, 0, TAU)
+      ctx.fill()
+    }
+  }
+  if (ground.rubble) {
+    for (let k = 0; k < 5; k++) {
+      const px = x + s * (0.12 + islandHash(col, row + k, 409) * 0.76), py = y + s * (0.12 + islandHash(col + k, row, 411) * 0.76)
+      const r = s * (0.05 + islandHash(col + k, row + k, 413) * 0.06)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)'
+      ctx.beginPath(); ctx.ellipse(px + r * 0.3, py + r * 0.5, r, r * 0.7, 0.25, 0, TAU); ctx.fill()
+      ctx.fillStyle = k % 2 ? '#6c6455' : '#8a8170'
+      ctx.beginPath(); ctx.ellipse(px, py, r, r * 0.72, 0.25, 0, TAU); ctx.fill()
+    }
+  }
+  if (h > 0.5 && h < 0.535) {
+    // A long crack, wandering across the square.
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)'
+    ctx.lineWidth = Math.max(1, s * 0.03)
+    ctx.beginPath()
+    ctx.moveTo(x + s * 0.1, y + s * (0.2 + g * 0.6))
+    ctx.lineTo(x + s * 0.4, y + s * (0.35 + g * 0.3))
+    ctx.lineTo(x + s * 0.65, y + s * (0.3 + g * 0.5))
+    ctx.lineTo(x + s * 0.92, y + s * (0.5 + g * 0.3))
+    ctx.stroke()
+  }
   ctx.fillStyle = 'rgba(0, 0, 0, 0.28)'
   ctx.fillRect(x, y + s * 0.5 - 0.5, s, Math.max(1, s * 0.025))
   ctx.fillRect(x + s * (row % 2 ? 0.3 : 0.7), y, Math.max(1, s * 0.025), s * 0.5)
@@ -397,6 +477,23 @@ function wallWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number
 
 /** A landmark boulder, not a generic blocked square. The crack stays visible
  *  from the walking side so the grove's first chest has a readable location. */
+/** The wand's block: a squared stone set on the floor, lit from above. */
+function laidStone(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number): void {
+  const g = islandHash(col, row, 501)
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.38)'
+  ctx.fillRect(x + s * 0.12, y + s * 0.2, s * 0.82, s * 0.78)
+  const face = ctx.createLinearGradient(x, y, x, y + s)
+  face.addColorStop(0, '#aba498'); face.addColorStop(0.5, '#7e786c'); face.addColorStop(1, '#4a4741')
+  ctx.fillStyle = face
+  ctx.fillRect(x + s * 0.08, y + s * 0.1, s * 0.84, s * 0.8)
+  ctx.strokeStyle = '#2a2822'; ctx.lineWidth = Math.max(1, s * 0.05)
+  ctx.strokeRect(x + s * 0.08, y + s * 0.1, s * 0.84, s * 0.8)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.18)'
+  ctx.fillRect(x + s * 0.12, y + s * 0.14, s * 0.76, s * 0.12)
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)'; ctx.lineWidth = Math.max(1, s * 0.03)
+  ctx.beginPath(); ctx.moveTo(x + s * (0.3 + g * 0.3), y + s * 0.3); ctx.lineTo(x + s * (0.4 + g * 0.2), y + s * 0.72); ctx.stroke()
+}
+
 function boulderWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number): void {
   floorWood(ctx, x, y, s, col, row, false)
   const g = islandHash(col, row, 301)

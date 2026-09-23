@@ -1,6 +1,6 @@
 # Atomic modules — one behaviour, many dependencies
 
-**Status:** steps 1–3 BUILT on games 2026-09-22; steps 4 and 4b BUILT and browser-verified. Step 3 output: 88 game atoms + 11 barrels, zero dangling imports, zero atom cycles, every game module links through the alias map in Node, every game class exists exactly once in the build (Solomon bee ~1.3 MB → 4 KB, game view bee 1–2 MB → 16 KB). Step 5 BUILT and browser-verified. Step 4c (position-aware preloader) and 6 open. Decided by jwize: every game (and eventually
+**Status:** steps 1–3 BUILT on games 2026-09-22; steps 4 and 4b BUILT and browser-verified. Step 3 output: 88 game atoms + 11 barrels, zero dangling imports, zero atom cycles, every game module links through the alias map in Node, every game class exists exactly once in the build (Solomon bee ~1.3 MB → 4 KB, game view bee 1–2 MB → 16 KB). Step 5 BUILT and browser-verified. Step 6 DONE 2026-09-22 — every domain in the build is atomized (batches 1–8); the self-registration allowlist holds six files, none of them a registering dependency inside the build. Step 4c (position-aware preloader) open. Decided by jwize: every game (and eventually
 every feature) is ONE behaviour the hive registers, plus any number of
 dependencies the hive never registers. Dependencies are atoms in their own
 right — sig-addressed, shareable, deduplicated — but they never appear as
@@ -159,8 +159,8 @@ demand. Signatures make that safe — a variant that changes is a new
 signature, so the preloader's target moves with it and never warms a stale
 copy.
 
-The same lazy seam belongs on the tutor next: its bee still pulls 19 atoms at
-load.
+The tutor has the same lazy seam now (7251b17e1): its bee loads its shell
+and study games on first study, and boot fetches 10 game atoms, not 28.
 
 ### 5. Hive-side drafting follows the atoms
 `module read <sig>` on a dependency atom shows one file (the section IS the
@@ -294,6 +294,8 @@ boot bees so far:
 - `history/history.boot.drone.ts` — HistoryService (and its runtime contract
   key `@HistoryService`), HistoryCursorService, the LayerSlotRegistry, and
   history's own builds and snapshots slots.
+- `sharing/sharing.boot.drone.ts` and `commands/commands.boot.drone.ts` —
+  see batches 6 and 8.
 
 **Batch 4 — BUILT and browser-verified 2026-09-22:** navigation, history.
 Besides the boot bees: the zoom bee registers the mousewheel input too (it
@@ -305,20 +307,142 @@ its service. On the web shell: the boot lane ran between the dependencies
 the history warm-up ran; every baseline IoC key registered plus the two boot
 bees; zero breaks; 436 units linked; 252 atoms, 172 bees.
 
+**Batch 5 — BUILT and browser-verified 2026-09-22:** presentation. The
+render-critical bees own what the first paint reads: pixi-host adds
+AxialService (the runtime's render-critical readiness list names it);
+show-cell adds the index nurse, the center-slot tracker, the tile-source
+registry and the two render factories; background.drone the background
+themes and the canvas background. The agent bee owns its avatar registry.
+Three screensaver/hide/organism words became bees.
+
+**A bee is never imported for a value — so shared exports leave the bee.**
+The build now enforces it inside atomized domains (an import landing on a
+bee is an empty module, and a named value import fails the build — it caught
+the organism word importing its bee's effect names). Four new atoms:
+`tile-public.ts` (the hide list, per-tile public flag and branch-public list,
+out of tile-actions.drone), `tile-action-icons.ts` (the icon placement math),
+`tree-view-target.ts` (the tree view's name and the `/tree` target parser),
+`template-author-effects.ts` and `organism-effects.ts` (effect names). Types
+stay where they are: a type import vanishes at build.
+
+On the web shell every baseline key registered, plus the template-author bee,
+which never registered before; zero breaks; 559 units linked; 350 atoms,
+175 bees.
+
+**Batch 6 — BUILT and browser-verified 2026-09-22:** sharing. A third boot
+bee, `sharing/sharing.boot.drone.ts`, registers the Nostr signer and the host
+sync (and its runtime contract key `@HostSyncService`, which the store stages
+reads through); it also loads the retired-push collector, which ran at boot
+before. Services that start work when they load (the passive replication
+queue, the update scout, spotlight and its scroll input, HostSync's drain)
+keep that code and EXPORT their instance; the owner bee imports and registers
+it, so the work starts when its owner loads. Owners: swarm-adopt (adopt
+queue), content-broker (passive replication), hosts (update scout, package
+attestation, the host directory's face and surface), swarm (filter), the
+folder-sync word (its service and view), the offers word (its surface),
+hive-visit (the visitor door's surface), spotlight (spotlight + scroll). Out
+of bees into atoms: `peer-models-lending.ts`, `discover-effects.ts`.
+
+**Found and fixed: UNREACHABLE ATOMS.** An atom that does something when it
+loads — adds a shell surface, subscribes, declares a pool kind — used to run
+because its namespace bundle loaded at boot. As a lazy atom it runs only if a
+bee reaches it. Five views added their own shell surface (two vocabulary
+views, the targets window, the visitor door, the host directory) and nothing
+reached them, so in the web shell those windows were gone — in batches 2 and
+5 as well as this one — and the IoC-key comparison could not see it, because a
+surface is not an IoC key. Their bees now add their surfaces; the bee toggle
+is loaded by the avatar swarm; the vocabulary ledger's pool kind loads with
+the views that import it. The self-registration pattern now also catches a
+`whenReady` that ADDS and a module-scope `name()?.register?.(`. Two checks
+join the recipe:
+- every atom with module-scope effects must be reachable from a bee or an
+  eager bundle (barrels never count);
+- the web-shell comparison covers shell surfaces as well as IoC keys.
+
+On the web shell: every baseline key registered (the host directory's face
+back), all 60 shell surfaces registered and the checked ones mounted, zero
+breaks; 643 units linked; 402 atoms, 190 bees.
+
+**Batch 7 — BUILT and browser-verified 2026-09-22:** assistant. No boot bee:
+the chat window and the shell reach every assistant service through
+`whenReady` or at use. Five words became bees (conversation, file, llm,
+misses, module). Three new bees: `llm.drone.ts` (the provider registry, the
+roster, the activation / model-choice / removal / hive-access / policy
+stores, the router, the host's AI and the Providers console with its
+`/providers` `/models` words), `chat.drone.ts` (threads, compaction, the
+execution queue) and `jev.drone.ts` (decision, outcomes, replay). The
+context bee took the anatomy, context groups, hive tree reader, tile context
+and pictures and the context read half; the orchestrator the agent registry,
+panel and rail factory; the bridge worker the skills window and `/skills`;
+the misses word its record.
+
+- **The roster is data.** The vendor descriptors stopped registering
+  themselves; `builtin-providers.ts` lists them and `startBuiltinLlmProviders()`
+  (called once, by the llm bee) registers them in the order the registry
+  keeps, then the OpenRouter instances, the local model, the liveness watch
+  and discovery — all of which used to start when a file was imported.
+- **The ratchet counts the assistant's doors into the map**, at module scope:
+  `publishService(`, `registerLlmProvider(`, and a `whenReady` that
+  `addProvider`s a slash provider. A table a module keeps for itself
+  (screensaver motions, bubble styles, published-pool handlers) is not the
+  hive and is not counted. `llm-provider-registry.ts` stays on the allowlist:
+  it holds the map door itself (`publishService` and the accessor's heal).
+- **An import cycle the bundle forgave.** chat-thread → chat-route →
+  chat-steps → chat-thread worked while one bundle held all three; the build
+  refuses it for separately loaded atoms. The chat's IoC surface
+  (`ChatThreads`, the standings) left the foot of chat-thread for its own
+  atom, `chat-threads.ts`, above all three.
+- Out of bees into an atom: `reshape.ts` (the organize threshold and the
+  break-apart skip wording, which break-apart, expand and the slash drone
+  imported from other bees).
+
+On the web shell every baseline key registered plus the three new bees, all
+60 shell surfaces, the roster in its old order, zero breaks, zero unreachable
+atoms; 707 of 730 units linked (the rest need a DOM); 538 dependencies,
+198 bees.
+
+**Batch 8 — BUILT and browser-verified 2026-09-22:** commands. STEP 6 IS
+DONE: every domain in the build is atomized.
+
+- **A fourth boot bee**, `commands/commands.boot.drone.ts`, registers the
+  `decorations` slot (LayerCommitter subscribes only to a registered slot's
+  triggers, so a decoration written before the slot exists vanishes), the
+  `website` slot (the preloader warms registered slots), DecorationService
+  (the controls bar reads tile titles through it on its first render), the
+  decoration index's overlap metrics and context index, and VisualBeeRegistry
+  (every visual bee registers into it).
+- 61 words became bees, and `view.bee.ts`. Owner words took the rest: the
+  aliases drone its participant aliases, `/reference` the canonical
+  reference service (the one write door for portals), `/mobile` the
+  long-press that reveals the command line, `/keywords` its proposal surface
+  and generator, the translate sweep its translation service, and the slash
+  drone the utterance reader and spoken habits.
+- **Twelve values left their words for atoms**, because other bees imported
+  them: each view word's names (`brief-kind`, `postit-kind`,
+  `publications-kind`, `lightbox-kind` with every picture a tile holds,
+  `scroller-kind`, `square-tile-kind`, `view-library-kind`, `website-kind`),
+  `template-catalog` (the layouts on offer and the door that starts a
+  design), `remove-tiles` (what /remove and the tutorial's cleanup share),
+  and the named forms of /keyword and /accent (`named-target`,
+  `accent-target`). Types stayed with their words.
+
+The self-registration allowlist is down to six: `llm-provider-registry.ts`
+(the map door itself) and five `revolucionstyle.com` files, which are outside
+the build. On the web shell every baseline key registered plus the new bees,
+all 60 surfaces, both slots, zero breaks; the boot bees finished at +466 ms,
+Angular's first paint at +511 ms; 817 of 840 units linked; 579 dependencies,
+261 bees.
+
 **Found 2026-09-23: a word said before its bee registers.** With every word a
-bee, the census itself (`commands/slash-behaviour.drone.ts`) registers about
-1.9 s into a boot, a second after the command line starts listening. A
-`module commit …` said over the bridge in that window was read as plain text
-and became a tile named after the whole line. The command line now treats a
-miss as final only once the loader has settled (`loader:bees-done`): a line
-whose first word nothing claims yet waits for it, then is decided as usual
+bee, the census itself (`commands/slash-behaviour.drone.ts`, which also
+registers the utterance reader) registers about 1.9 s into a boot, a second
+after the command line starts listening. A `module commit …` said over the
+bridge in that window was read as plain text and became a tile named after
+the whole line. The command line now treats a miss as final only once the
+loader has settled (`loader:bees-done`): a line whose first word nothing
+claims yet waits for it, then is decided as usual
 (`hypercomb-shared/ui/command-line/word-arrival.ts`; proved by
 `scripts/verify-boot-word.cjs` on the web shell at 4260).
-
-Next: presentation, assistant, sharing, commands — each checked for boot
-services first (AxialService is read by the runtime; DecorationService,
-OverlapMetrics and VisualBeeRegistry by the command line; HostSync by the
-store). (`revolucionstyle.com` is outside the build.)
 
 ## Atomize for the editor, optimize for the reader
 
@@ -374,6 +498,85 @@ atoms.
 
 Order of work: lazy loading first (step 4 — the bigger saving, and it
 defines the closures packs are cut from), then packs, then merged modules.
+
+**Measured 2026-09-23, after step 6.** Headless Chromium against the web
+shell at 4264, a fresh context per package (its own storage), one install
+timed end to end, then three warm reloads (means). Three packages the web
+content still held: before any atomization (21 Sept, 59 dependencies), games
+only (22 Sept, 148), every domain (23 Sept, 579). Harness:
+`measure-atoms.cjs` (resource-timing buffer raised before the page runs —
+the default 250 entries hides most module fetches).
+
+| | Before | Games only | Everything |
+|---|---|---|---|
+| Install: files fetched, time | 185, 2.8 s | 176, 2.2 s | 515, 4.5 s |
+| Dependencies loaded | 367 ms | 318 ms | 282 ms |
+| First paint | 436 ms | 374 ms | 440 ms |
+| Bees ready for the first render (`first preloader.find`) | 1291 ms | 1014 ms | 830 ms |
+| Modules fetched through the import map at boot | 11 | 21 | 414 |
+| Last module arrives | 1.23 s | 1.01 s | 2.28 s |
+| IoC keys, breaks | 433, 0 | 436, 0 | 454, 0 |
+
+What it says:
+- **Per-module cost does not hurt the paint or the first render.** First
+  paint is flat; the bees the first render needs are ready 460 ms SOONER,
+  because a bee is small now and its atoms load in parallel.
+- **It costs a longer tail.** Every bee still loads at boot, so their static
+  closures (414 atoms) keep arriving after the first render — about a second
+  longer than before. Only the games and the tutor have lazy seams.
+- **It costs the install.** 515 separate files instead of 185; locally about
+  9 ms a file, and over a real network each file is a request.
+
+So the two costs have two different answers. The install is what a transfer
+pack removes (one file carrying many atoms, each re-verified on arrival). The
+tail is what lazy seams remove (step 4c): a feature's atoms loading when the
+feature is used, not when its bee boots. Merged modules are not indicated by
+anything measured here.
+
+**Found and fixed: npm code copied five times — vendor atoms.** Five atoms
+(`nostr-signer`, `head-claim-signer`, `hive-pointer`, `pheromone-deposits`,
+`vocabulary-signer`) each inlined `nostr-tools` and its `@noble` crypto, about
+200 KB apiece — a quarter of what a boot loaded. The build now finds every npm
+package two or more source files import (`VENDOR_PACKAGES`), builds it ONCE as
+a dependency named by the package itself (`// nostr-tools`, a bare specifier
+the way `pixi.js` is), and leaves it external everywhere else; the set is
+folded into `BUILD_SHAPE` so every unit rebuilds when it changes. Atoms a boot
+reaches: 3.93 MB → 3.17 MB. The update that shipped it fetched 16 files. On
+the web shell the import map serves `nostr-tools` from the dependencies pool,
+a sign-and-verify round trip passes, every key registered, zero breaks.
+
+The tail did NOT move (last module about 2.4 s, as before): it is set by the
+NUMBER of modules and their import chains, not their bytes. That settles the
+order — lazy seams next; a transfer pack would not shorten it either.
+
+**Found and fixed: the tail was two costs, and neither was the code.**
+1. *Import chains.* The browser learns what an atom imports only after
+   fetching it, so a chain is one round trip per level — up to eight or nine
+   deep (substrate → comfy → published-pools → intake-filter → …). The
+   install now derives each bee's whole STATIC atom closure from the admitted
+   bytes (`hypercomb-runtime/src/bee-deps.ts`, the same hint map as `beeDeps`;
+   eager namespace bundles stay out of it so their services still register at
+   boot), and the preloader imports the closure all at once before the bee
+   evaluates. Dynamic `import()` is never followed — seams stay lazy.
+2. *The service worker's cache lookup.* Every module request did
+   `cache.match(request, { ignoreSearch: true })`, which scans every cached
+   entry. With about a thousand modules held: 200 lookups took 611 ms that
+   way and 12 ms exactly. The worker now keys the cache on the URL without
+   its query and matches exactly — the same answer, since every path it
+   serves names its bytes (web, dev, shim and meadowverse workers;
+   `service-worker.spec.ts` refuses `ignoreSearch` back).
+
+| Everything atomized, same package | Before these two | After |
+|---|---|---|
+| One module fetch, median | about 490 ms | 2–3 ms |
+| Last module arrives | 2.39 s | 0.98 s |
+| Bees ready for the first render | 909 ms | 617 ms |
+| First paint | 534 ms | 320 ms |
+
+Against the package from before any atomization (last module 1.23 s, first
+render 1291 ms) the atomized hive is now faster on every boot measure. The
+remaining tail is bee scheduling and evaluation, not fetching. Lazy seams
+(4c) still cut what loads at all; they are no longer needed for speed.
 
 ## Non-goals
 - No new pool, no new `__x__` folder. Atoms live in `sign('dependencies')`

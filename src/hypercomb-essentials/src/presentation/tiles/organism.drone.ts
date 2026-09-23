@@ -53,11 +53,7 @@ import { organismWeights, type OrganismOntology } from './organism-weight.js'
 
 export type OrganismMode = 'off' | 'organism' | 'texture'
 
-/** Ask for a mode. `promote` names the tag lifted to the top layer, and is
- *  ignored by the texture. */
-export const ORGANISM_SET = 'organism:set'
-/** What the mode is now, for the chrome and for the word's answer. */
-export const ORGANISM_CHANGED = 'organism:changed'
+import { ORGANISM_CHANGED, ORGANISM_SET } from './organism-effects.js'
 
 export interface OrganismSetPayload {
   readonly mode: OrganismMode

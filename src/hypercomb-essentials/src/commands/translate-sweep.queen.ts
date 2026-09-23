@@ -1,7 +1,7 @@
 // commands/translate-sweep.queen.ts
 
 import { QueenBee } from '@hypercomb/core'
-import type { TranslationService } from './translation.service.js'
+import { TranslationService } from './translation.service.js'
 
 /**
  * /translate-sweep — batch-translate all tile labels and content to target locale(s).
@@ -86,6 +86,9 @@ const SUPPORTED_LOCALES = [
   'en', 'ja', 'zh', 'es', 'ar', 'pt', 'fr', 'de',
   'ko', 'ru', 'hi', 'id', 'tr', 'it',
 ]
+
+// The sweep word owns the translation service it drives (atomic-modules-plan.md).
+window.ioc.register('@diamondcoreprocessor.com/TranslationService', new TranslationService())
 
 const _sweep = new TranslateSweepQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/TranslateSweepQueenBee', _sweep)

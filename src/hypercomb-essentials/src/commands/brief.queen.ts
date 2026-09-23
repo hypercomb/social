@@ -16,9 +16,7 @@ import {
   writeViewSourceScope,
   type ViewSourceScope,
 } from './view-source-scope.js'
-
-export const LIVING_BRIEF_VIEW = 'living-brief'
-export const LIVING_BRIEF_KIND = 'visual:document:living-brief'
+import { LIVING_BRIEF_KIND, LIVING_BRIEF_VIEW } from './brief-kind.js'
 
 type ViewModeShape = { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }

@@ -31,7 +31,7 @@ import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-prop
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { noteVisualHosts, visualArtifactSigs } from './visual-hosts.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
-import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
+import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-public.js'
 import { referenceTargetForLabel, titlesForSegments } from '../commands/decoration-kind-index.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
 import { kindsForLabel } from '../commands/decoration-kind-index.js'
@@ -41,6 +41,7 @@ import { isWithinAdoptedRoot } from './adopted-roots.js'
 import { swarmFilterSelection } from './swarm-filter.service.js'
 import { allowsHere } from '../pheromones/intake-filter.js'
 import { withheldForShare, ENABLEMENT_CHANGED } from './behavior-enablement.js'
+import { swarmFilterService } from './swarm-filter.service.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -4639,6 +4640,10 @@ const payload: SwarmLayerPayload = myLabel
     return dir
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/SwarmFilterService', swarmFilterService)
 
 const _swarmDrone = new SwarmDrone()
 ;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(

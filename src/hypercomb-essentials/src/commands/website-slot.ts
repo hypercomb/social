@@ -43,20 +43,8 @@
 // `whenReady`. Kept alive against tree-shaking by the renderer's import
 // of `WEBSITE_SLOT` (site-view.drone.ts).
 
-import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
-
 /**
  * Slot name on the layer JSON. Constant so writers and the renderer
  * share one string and cross-references stay greppable.
  */
 export const WEBSITE_SLOT = 'website'
-
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<LayerSlotRegistry>(
-  '@diamondcoreprocessor.com/LayerSlotRegistry',
-  (slotRegistry) => {
-    slotRegistry.register({
-      slot: WEBSITE_SLOT,
-      triggers: [],
-    })
-  },
-)

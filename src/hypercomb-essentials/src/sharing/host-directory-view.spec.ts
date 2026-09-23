@@ -15,6 +15,8 @@ import { directoryRows, domainRows, isOlder, offAbove, replacedBeneath, revision
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..', '..', '..')
 const VIEW = readFileSync(join(here, 'host-directory.view.ts'), 'utf8')
+// The hosts bee defines the element and adds its surface (atomic-modules-plan.md).
+const HOSTS_BEE = readFileSync(join(here, 'hosts.drone.ts'), 'utf8')
 const HOSTS_DRONE = readFileSync(join(here, 'hosts.drone.ts'), 'utf8')
 const ACQUIRE = readFileSync(join(root, 'hypercomb-runtime', 'src', 'acquire.ts'), 'utf8')
 const TREE = readFileSync(join(root, 'hypercomb-runtime', 'src', 'package-tree.ts'), 'utf8')
@@ -148,8 +150,8 @@ describe('the host directory', () => {
   })
 
   it('is one element from essentials, docked as the hosts window the drone asks about — the Angular window is gone', () => {
-    expect(VIEW).toMatch(/customElements\.define\(HOST_DIRECTORY_SURFACE, HostDirectoryElement\)/)
-    expect(VIEW).toMatch(/registry\.add\(\{ name: HOST_DIRECTORY_SURFACE, owner: OWNER, element: HOST_DIRECTORY_SURFACE/)
+    expect(HOSTS_BEE).toMatch(/customElements\.define\(HOST_DIRECTORY_SURFACE, HostDirectoryElement\)/)
+    expect(HOSTS_BEE).toMatch(/registry\.add\(\{ name: HOST_DIRECTORY_SURFACE, owner: HOST_DIRECTORY_VIEW_KEY, element: HOST_DIRECTORY_SURFACE/)
     expect(VIEW).toMatch(/export const HOST_DIRECTORY_WINDOW = 'hosts-panel'/)
     expect(VIEW).toMatch(/id: HOST_DIRECTORY_WINDOW,[\s\S]{0,200}?launcherControlId: 'hosts'/)
     expect(HOSTS_DRONE).toMatch(/isWindowShowing\('hosts-panel'\)/)

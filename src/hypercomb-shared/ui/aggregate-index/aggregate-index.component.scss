@@ -647,6 +647,15 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   color: var(--hc-window-ink-loud);
 }
 
+// LINKED — the group the managed page gathers from (the Portals/References
+// pair). State, like home: it stays lit without hovering.
+.ai-action-link.is-linked {
+  background: rgba(var(--acc), 0.22);
+  border-color: rgba(var(--acc), 0.85);
+  color: var(--hc-window-ink-loud);
+}
+.ai-row.is-linked { box-shadow: inset 2px 0 0 rgba(var(--acc), 0.85); }
+
 // ── PORTALS: actions on the hovered row only ─────────────────────────────────
 //
 // Scoped to this one source rather than changed globally — the standing-dim
@@ -674,6 +683,10 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   // or not you are hovering it — otherwise finding which portal is home means
   // hovering every row in turn, which is the opposite of what a mark is for.
   .ai-action-home.is-home { opacity: 1; }
+  // While References manages a page, linking is THE verb here: every row shows
+  // where to press, and the linked row stands lit.
+  &.is-managing .ai-action-link { opacity: 0.55; }
+  .ai-action-link.is-linked { opacity: 1; }
 
   // RIGHT-ALIGNED while it stands alone. Invisible buttons still take up room,
   // so the lone mark used to sit where the strip began — adrift in the middle

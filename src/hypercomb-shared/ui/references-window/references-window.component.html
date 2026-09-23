@@ -36,7 +36,7 @@
         [attr.aria-label]="'references.add-target' | t"
         (input)="targetQuery.set($any($event.target).value); targetMiss.set(false)"
         (keydown.enter)="$event.preventDefault(); addTarget(targetQuery())" />
-      @if (targetMiss()) { <p class="ref-error">{{ 'references.target-miss' | t: { name: targetQuery() } }}</p> }
+      @if (targetMiss()) { <p class="ref-error">{{ targetReason() || ('references.target-miss' | t: { name: targetQuery() }) }}</p> }
       <p class="ref-hint">{{ 'references.picker-hint' | t }}</p>
       @if (!choosing()) {
         <button type="button" class="ref-save" (click)="beginSelection()">{{ 'references.choose-items' | t }}</button>
@@ -44,5 +44,74 @@
       <div class="ref-actions"><button type="button" class="ref-cancel" (click)="cancel()">{{ 'references.cancel' | t }}</button>
         <button type="submit" class="ref-save" [disabled]="(draft.createTile && (!targetName() || nameTaken())) || selected().length === 0 || saving()">{{ (saving() ? 'references.saving' : 'references.save') | t }}</button></div>
     </form>
+  </aside>
+}
+@if (visible() && !composition() && managePage()) {
+  <!-- MANAGE — the right half of the Portals/References pair (`/references`).
+       Portals on the left is where a group is picked (its link button); here is
+       what this page is: the groups it gathers from, and — as a group — the
+       pages it feeds. Follows you from page to page. -->
+  <aside class="ref-panel" hcDockInset="right" hcDockedPanel="references-window" [hcSession]="session"
+    (hcDockedPanelClose)="cancel()" dockSide="right" [minWidth]="260" [maxWidth]="560" [defaultWidth]="340"
+    data-consumes-wheel tabindex="-1" [attr.aria-label]="'references.title' | t">
+    <header class="ref-header"><div class="ref-heading"><span class="mat-sym">link</span><span>{{ 'references.title' | t }}</span></div>
+      <button type="button" class="ref-close" (click)="cancel()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button></header>
+    <div class="ref-details">
+      <div class="ref-target"><span class="ref-tile"><span>{{ managePageName().slice(0, 2).toUpperCase() }}</span></span>
+        <span class="ref-target-copy"><strong>{{ managePageName() }}</strong><small>{{ managePage()!.join(' / ') }}</small></span></div>
+
+      <label>{{ 'references.manage-from' | t }}</label>
+      @if (manageFrom().length > 0) {
+        <div class="ref-types">
+          @for (group of manageFrom(); track $index) {
+            <button type="button" class="ref-feed is-on" (click)="unlinkGroup(group)"
+              [title]="'references.unlink' | t: { name: group[group.length - 1] }">← {{ group[group.length - 1] }} ×</button>
+          }
+        </div>
+      } @else {
+        <p class="ref-hint">{{ 'references.manage-none' | t }}</p>
+      }
+
+      <!-- REVIEW — this page's OWN tiles against its group. Ticked from the
+           start only where nothing is lost; the rest wait for you to look. -->
+      @if (review(); as r) { @if (r.tiles.length > 0) {
+        <label>{{ 'references.own-tiles' | t: { page: managePageName() } }}</label>
+        <div class="ref-own">
+          @for (tile of r.tiles; track tile.name) {
+            <label class="ref-own-row">
+              <input type="checkbox" [checked]="ticked().has(tile.name)" (change)="toggleOwn(tile.name)" />
+              <span class="ref-own-name">{{ tile.name }}</span>
+              <small>
+                @if (!tile.inGroup) { {{ 'references.own-new' | t: { group: reviewGroupName() } }} }
+                @else if (tile.differs.length === 0) { {{ 'references.own-same' | t: { group: reviewGroupName() } }} }
+                @else {
+                  {{ 'references.own-differs' | t: { group: reviewGroupName() } }}
+                  @for (slot of tile.differs; track slot; let last = $last) { {{ ('references.slot.' + slot) | t }}{{ last ? '' : ', ' }} }
+                }
+              </small>
+            </label>
+          }
+        </div>
+        <button type="button" class="ref-save" [disabled]="ticked().size === 0 || gathering()" (click)="gatherOwn()">
+          {{ 'references.gather-own' | t: { count: ticked().size, group: reviewGroupName() } }}</button>
+      } }
+
+      <label>{{ 'references.targets' | t: { name: managePageName() } }}</label>
+      @if (targets().length > 0) {
+        <div class="ref-types">
+          @for (target of targets(); track target.key) {
+            <button type="button" class="ref-feed" [class.is-on]="target.on" [attr.aria-pressed]="target.on" (click)="toggleTarget(target)">{{ target.label }}</button>
+          }
+        </div>
+      }
+      <input class="ref-name" type="text" autocomplete="off" [value]="targetQuery()" [placeholder]="'references.add-target' | t"
+        [attr.aria-label]="'references.add-target' | t"
+        (input)="targetQuery.set($any($event.target).value); targetMiss.set(false)"
+        (keydown.enter)="$event.preventDefault(); addTarget(targetQuery())" />
+      @if (targetMiss()) { <p class="ref-error">{{ targetReason() || ('references.target-miss' | t: { name: targetQuery() }) }}</p> }
+      @if (feedingOn().length > 0 && manageSelected().length > 0) {
+        <button type="button" class="ref-save" (click)="feedSelected()">{{ 'references.feed-selected' | t: { count: manageSelected().length, pages: feedingNames() } }}</button>
+      }
+    </div>
   </aside>
 }

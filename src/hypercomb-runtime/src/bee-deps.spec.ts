@@ -95,3 +95,44 @@ describe('deriveBeeDeps', () => {
     expect(await deriveBeeDeps([BEE_ONE], [DEP_A], read)).toEqual({})
   })
 })
+
+describe('deriveBeeDeps — a bee claims its whole atom closure', () => {
+  const ATOM_A = 'c'.repeat(64)
+  const ATOM_B = 'd'.repeat(64)
+  const ATOM_C = 'e'.repeat(64)
+  const BUNDLE = 'f'.repeat(64)
+  /** An atom as the essentials build writes it: alias, lazy marker, code. */
+  const atom = (alias: string, code: string): string => `// ${alias}\n// lazy — an atom\n${code}`
+
+  it('lists every atom the bee reaches through static imports, at any depth', async () => {
+    const read = heap({
+      [ATOM_A]: atom('@hypercomb/essentials/x/a', 'import { b } from "@hypercomb/essentials/x/b";\nexport const a = b;'),
+      [ATOM_B]: atom('@hypercomb/essentials/x/b', 'export * from "nostr-tools";\nexport const b = 1;'),
+      [ATOM_C]: atom('nostr-tools', 'export const verifyEvent = () => true;'),
+      [BEE_ONE]: 'import { a } from "@hypercomb/essentials/x/a";\nvar Drone = class { heartbeat() { return a } }',
+    })
+
+    expect(await deriveBeeDeps([BEE_ONE], [ATOM_A, ATOM_B, ATOM_C], read)).toEqual({
+      [BEE_ONE]: [ATOM_A, ATOM_B, ATOM_C].sort(),
+    })
+  })
+
+  it('never follows a dynamic import — that is a lazy seam', async () => {
+    const read = heap({
+      [ATOM_A]: atom('@hypercomb/essentials/x/a', 'export const open = () => import("@hypercomb/essentials/x/b");'),
+      [ATOM_B]: atom('@hypercomb/essentials/x/b', 'export const b = 1;'),
+      [BEE_ONE]: 'import { open } from "@hypercomb/essentials/x/a";\nvar Drone = class {}',
+    })
+
+    expect(await deriveBeeDeps([BEE_ONE], [ATOM_A, ATOM_B], read)).toEqual({ [BEE_ONE]: [ATOM_A] })
+  })
+
+  it('leaves an eager namespace bundle out, so its services still register at boot', async () => {
+    const read = heap({
+      [BUNDLE]: '// @hypercomb/essentials/commands\nwindow.ioc.register("@x/Service", {});\nexport const s = 1;',
+      [BEE_ONE]: 'import { s } from "@hypercomb/essentials/commands";\nvar Drone = class {}',
+    })
+
+    expect(await deriveBeeDeps([BEE_ONE], [BUNDLE], read)).toEqual({})
+  })
+})

@@ -60,7 +60,7 @@ import {
   sweepCreationPool,
 } from './layout-creations.js'
 import type { ConcealedItem } from '../../concealment/concealment.js'
-import { findTemplate, knownTemplates, targetTemplate } from '../../commands/template.queen.js'
+import { findTemplate, knownTemplates, targetTemplate } from '../../commands/template-catalog.js'
 import { targetsIn } from './meaning-target.js'
 import {
   DEFAULT_HOLE_FAMILY,
@@ -81,29 +81,13 @@ import {
 } from '../../pheromones/enrollment.js'
 import type { VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 
-/** Published when the designer is open, and again after every intent lands.
- *  Sticky on the bus, so a panel opening mid-session hydrates at once. */
-export const TEMPLATE_STATE = 'template:state'
-/** The selected level, with a live preview of it under every value of every
- *  flex axis. The flex editor renders this and nothing else. */
-export const TEMPLATE_SELECTED = 'template:selected'
-/** The panel says whether it is showing; nothing is computed while it is not. */
-export const TEMPLATE_VIEW_STATE = 'template:view-state'
-
-/** THE OTHER QUESTION ABOUT AN ARRANGEMENT.
- *
- *  The designer asks what shape this container is. The targets window asks
- *  what BELONGS in it — every hole, what it is named, what that name addresses,
- *  and who is answering. Published on its own channel because it is a separate
- *  window with a separate cost: the seating read walks the hive, and nothing
- *  should pay for it to draw a palette chip. */
-export const TARGETS_STATE = 'targets:state'
-/** The targets window says whether it is showing. Same contract as the
- *  designer's: nothing is computed while it is not. */
-export const TARGETS_VIEW_STATE = 'targets:view-state'
-/** Ask the targets window to show itself, or to put itself away — `{ open, at }`.
- *  An INTENT, never a toggle, for the reason TEMPLATE_OPEN states. */
-export const TARGETS_OPEN = 'targets:open'
+import {
+  TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE, TEMPLATE_SELECTED, TEMPLATE_STATE, TEMPLATE_VIEW_STATE,
+} from './template-author-effects.js'
+import { LayoutTargetsElement, LAYOUT_TARGETS_SURFACE, LAYOUT_TARGETS_VIEW_KEY } from './layout-targets.view.js'
+export {
+  TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE, TEMPLATE_SELECTED, TEMPLATE_STATE, TEMPLATE_VIEW_STATE,
+} from './template-author-effects.js'
 
 type LineageShape = { explorerSegments?: () => readonly string[] }
 
@@ -1131,6 +1115,18 @@ export function levelsOf(root: LayoutNode): LevelState[] {
   walk(root, [])
   return out
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): the view is a dependency; this bee
+// defines its element and adds it to the shell's surface registry — never a
+// tag in either app.html.
+window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
+  if (!customElements.get(LAYOUT_TARGETS_SURFACE)) customElements.define(LAYOUT_TARGETS_SURFACE, LayoutTargetsElement)
+  try {
+    registry.add({ name: LAYOUT_TARGETS_SURFACE, owner: LAYOUT_TARGETS_VIEW_KEY, element: LAYOUT_TARGETS_SURFACE, order: 138 })
+  } catch {
+    // duplicate add (hot reload) — the mounted surface is already live
+  }
+})
 
 const _templateAuthor = new TemplateAuthorDrone()
 window.ioc.register('@TemplateAuthorDrone', _templateAuthor)

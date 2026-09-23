@@ -19,6 +19,7 @@
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { MOBILE_MODE_IOC_KEY, MOBILE_FRIENDLY, MOBILE_HOLD } from '../preferences/mobile-pheromones.js'
 import { addMobileRoot } from '../preferences/mobile-roots.js'
+import { EmptyLongPressInput } from './empty-long-press.input.js'
 import type { MobileModeService } from '../preferences/mobile-mode.service.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
@@ -272,6 +273,10 @@ export class MobileQueenBee extends QueenBee {
     }
   }
 }
+
+// The mobile word owns the phone's long-press that reveals the command line
+// (atomic-modules-plan.md).
+window.ioc.register('@diamondcoreprocessor.com/EmptyLongPressInput', new EmptyLongPressInput())
 
 const _mobile = new MobileQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/MobileQueenBee', _mobile)

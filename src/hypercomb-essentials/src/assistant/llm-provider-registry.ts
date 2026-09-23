@@ -192,21 +192,18 @@ export class LlmProviderRegistry extends EventTarget {
   }
 }
 
-// Singleton: one instance per app, registered with window.ioc so every
-// consumer (across bees, namespaces) shares it.
+// Singleton: one instance per app, registered with window.ioc by the llm bee
+// (llm.drone.ts) so every consumer (across bees, namespaces) shares it.
 const _llmProviderRegistry = new LlmProviderRegistry()
-window.ioc?.register?.(LLM_PROVIDER_REGISTRY_IOC_KEY, _llmProviderRegistry)
 
 /**
  * Resolve the singleton. Prefers the shell registry (what every other module
  * sees) and falls back to the module-local instance for node-side tests where
  * no shell has booted.
  *
- * THE HEAL. This module is evaluated very early — `ai-key.drone` imports it,
- * and that is the fourth entry in the side-effect barrel — which is before
- * the web shell finishes installing its OWN `window.ioc` map. The eager
- * registration above therefore lands in a map that is then replaced, and the
- * key silently disappears: `ioc.get('…/LlmProviderRegistry')` answers
+ * THE HEAL. The llm bee registers this early — possibly before the web shell
+ * finishes installing its OWN `window.ioc` map — so that registration can
+ * land in a map that is then replaced, and the key silently disappears: `ioc.get('…/LlmProviderRegistry')` answers
  * undefined in a fully-booted app while this file's own callers keep working
  * off the module-local instance. Anything resolving BY KEY (the command
  * line's model words, a drone, a bridge op) sees no registry at all.

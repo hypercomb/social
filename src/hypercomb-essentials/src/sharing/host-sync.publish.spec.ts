@@ -21,8 +21,10 @@ beforeAll(async () => {
   registry.set('@diamondcoreprocessor.com/NostrSigner', {
     signEvent: async (event: Record<string, unknown>) => ({ ...event, id: 'e', pubkey: 'p'.repeat(64), sig: 's' }),
   })
-  await import('./host-sync.service.js')
-  publishAtoms = (registry.get('@diamondcoreprocessor.com/HostSyncService') as { publishAtoms: Publish }).publishAtoms
+  // The sharing boot bee registers the host sync (atomic-modules-plan.md); the
+  // spec takes the instance the module exports.
+  const { hostSyncService } = await import('./host-sync.service.js')
+  publishAtoms = (hostSyncService as unknown as { publishAtoms: Publish }).publishAtoms
 })
 
 const file = async (text: string) => {

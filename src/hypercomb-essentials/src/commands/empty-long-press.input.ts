@@ -188,6 +188,3 @@ export class EmptyLongPressInput {
     return detector.pixelToAxial(local.x - this.#meshOffset.x, local.y - this.#meshOffset.y, this.#flat)
   }
 }
-
-const _emptyLongPress = new EmptyLongPressInput()
-window.ioc.register('@diamondcoreprocessor.com/EmptyLongPressInput', _emptyLongPress)

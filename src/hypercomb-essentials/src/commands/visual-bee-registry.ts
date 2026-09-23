@@ -583,8 +583,3 @@ export class VisualBeeRegistry extends EventTarget {
     }
   }
 }
-
-// Singleton: one instance per app, registered with window.ioc so every
-// consumer (across bees, namespaces) shares it.
-const _visualBeeRegistry = new VisualBeeRegistry()
-window.ioc.register('@diamondcoreprocessor.com/VisualBeeRegistry', _visualBeeRegistry)

@@ -74,6 +74,7 @@ import { Drone, EffectBus, isMetaEnvelope, registerPoolMeaning } from '@hypercom
 import { decorationClosureSigs } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
+import { PASSIVE_REPLICATION_KEY, passiveReplicationQueue } from './passive-replication-queue.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -2540,6 +2541,10 @@ export class ContentBrokerDrone extends Drone {
   #getStore = (): StoreApi | undefined =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(STORE_KEY) as StoreApi | undefined
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register(PASSIVE_REPLICATION_KEY, passiveReplicationQueue)
 
 const _broker = new ContentBrokerDrone()
 window.ioc.register('@diamondcoreprocessor.com/ContentBrokerDrone', _broker)

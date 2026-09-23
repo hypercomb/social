@@ -9,132 +9,14 @@ import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
 import { FILES_ICON } from '../../files/file-types.js'
 import { SWARM_INVITE_KIND } from '../../sharing/meeting-invite.js'
+import {
+  hideStorageKey, isBranchPublic, isCellPublic, isIndividuallyPublic, publicStorageKey,
+  readPublicBranches, readPublicLabels, setBranchPublic, setCellPublic, tilePath,
+} from './tile-public.js'
+import { EDGE_MARGIN, HEX_INRADIUS, ICON_SIZE, ICON_SPACING, ICON_Y, computeIconPositions } from './tile-action-icons.js'
 // Arrangement persistence currently disabled — `#getRootDir` returns
 // null pending the layer-slot read/write path, so the legacy
 // readCellProperties / writeCellProperties imports are no longer needed.
-
-/** Zone-scoped localStorage key for the hide list at this location.
- *  SwarmDrone writes `hc:current-zone` on every room/secret change
- *  (or clears it when going private), so we read it sync here and
- *  append it to the key when present. Bleed-protection: switching
- *  zone changes the suffix, so the new zone reads from an empty key
- *  even if the old zone's data is still on disk. Block list never
- *  uses this helper — block is device-scoped on purpose.
- *  Exported so show-cell uses the same key for its render-time read. */
-export function hideStorageKey(location: string): string {
-  const zone = localStorage.getItem('hc:current-zone') ?? ''
-  return zone
-    ? `hc:hidden-tiles:${location}:z${zone}`
-    : `hc:hidden-tiles:${location}`
-}
-
-// ── Per-tile public/private flag ──────────────────────────────────
-// A SELF-FACING marker: each tile is private by default; the owner can
-// flip individual tiles to public. Persistent + device-scoped (like the
-// block list), NOT zone-scoped and NOT in the layer — it's a participant-
-// local annotation, so it must never enter the signed lineage (that would
-// skew the layer signature across peers, same rule as hide/clipboard).
-// Absence from the set means private. We store only the PUBLIC exceptions.
-export function publicStorageKey(location: string): string {
-  // Normalize every location segment so the key is identical whether the
-  // location arrives as a RAW nav path (explorerLabel, e.g. "/My Folder") or
-  // a NORMALIZED descent path the publish walk builds ("/my-folder"). Without
-  // this, an individually-public tile is silently dropped from the broadcast
-  // when the publisher reaches its folder by descent. Branches already match
-  // because tilePath() normalizes; this brings the individual key in line.
-  const norm = location.split('/').map(s => s.trim()).filter(Boolean).map(s => normalizeCell(s) || s).join('/')
-  return `hc:public-tiles:/${norm}`
-}
-
-/** Public tile labels at `location`. Empty array on any parse failure. */
-export function readPublicLabels(location: string): string[] {
-  try {
-    const raw = localStorage.getItem(publicStorageKey(location))
-    const arr = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []
-  } catch {
-    return []
-  }
-}
-
-/** Flip a tile public/private at `location`. Returns the updated label set. */
-export function setCellPublic(location: string, label: string, makePublic: boolean): string[] {
-  const l = normalizeCell(label) || label
-  const list = readPublicLabels(location)
-  const has = list.includes(l)
-  let next = list
-  if (makePublic && !has) next = [...list, l]
-  else if (!makePublic && has) next = list.filter(x => x !== l)
-  try {
-    localStorage.setItem(publicStorageKey(location), JSON.stringify(next))
-  } catch { /* private-browsing edge case — flag won't persist */ }
-  return next
-}
-
-// ── Branch-public ─────────────────────────────────────────────────
-// "Make branch public" shares a tile AND its entire sub-tree in one click.
-// Rather than walk (and load) the whole tree at click time, we store the
-// branch ROOT's canonical path; a tile counts as public-via-branch when any
-// stored branch path is a prefix of (or equal to) the tile's own path. O(1)
-// per tile at render time, and it covers descendants that aren't loaded yet.
-const PUBLIC_BRANCHES_KEY = 'hc:public-branches'
-
-/** Canonical absolute path of a tile, with EVERY segment normalized so the
- *  stored branch-root path and a descendant's path agree even though nav
- *  segments are raw (Lineage keeps them un-normalized). Without normalizing
- *  the whole path, a branch rooted at "My Folder" (stored `/my-folder`) never
- *  matched a descendant whose location prefix carried the raw "My Folder". */
-export function tilePath(location: string, label: string): string {
-  const segs = location.split('/').map(s => s.trim()).filter(Boolean).map(s => normalizeCell(s) || s)
-  const l = normalizeCell(label) || label
-  return '/' + [...segs, l].join('/')
-}
-
-/** True when this tile is marked public INDIVIDUALLY (ignores branch cover).
- *  The make-public icon's tint uses this so it matches what its click toggles. */
-export function isIndividuallyPublic(location: string, label: string): boolean {
-  const l = normalizeCell(label) || label
-  return readPublicLabels(location).includes(l)
-}
-
-/** Lineage paths whose whole branch is public. Empty on any parse failure. */
-export function readPublicBranches(): string[] {
-  try {
-    const raw = localStorage.getItem(PUBLIC_BRANCHES_KEY)
-    const arr = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []
-  } catch {
-    return []
-  }
-}
-
-/** True when this exact tile is itself a public-branch root. */
-export function isBranchPublic(location: string, label: string): boolean {
-  return readPublicBranches().includes(tilePath(location, label))
-}
-
-/** Toggle the whole branch rooted at this tile public/private. */
-export function setBranchPublic(location: string, label: string, makePublic: boolean): string[] {
-  const p = tilePath(location, label)
-  const list = readPublicBranches()
-  const has = list.includes(p)
-  let next = list
-  if (makePublic && !has) next = [...list, p]
-  else if (!makePublic && has) next = list.filter(x => x !== p)
-  try {
-    localStorage.setItem(PUBLIC_BRANCHES_KEY, JSON.stringify(next))
-  } catch { /* private-browsing edge case — flag won't persist */ }
-  return next
-}
-
-/** True when this tile is public — either marked individually, or covered by
- *  a public branch rooted at it or any ancestor. */
-export function isCellPublic(location: string, label: string): boolean {
-  const l = normalizeCell(label) || label
-  if (readPublicLabels(location).includes(l)) return true
-  const p = tilePath(location, label)
-  return readPublicBranches().some(b => p === b || p.startsWith(b + '/'))
-}
 
 /** Current navigation location label, resolved straight from IoC so the
  *  module-level `tintWhen` predicate (no drone `this`) can read it. */
@@ -412,41 +294,6 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // one-level fold). `hide` dismisses a peer tile from view without
   // taking ownership.
   'public-external': ['hide', 'files', 'invite'],
-}
-
-// ── Position computation ──────────────────────────────────────────
-
-// Icons sit INSIDE the tile's label band, which grows on hover
-// (hex-sdf.shader.ts) to hold the NAME in its top row and the icons under it.
-// ICON_Y is the CENTRE of the icon block: the overlay centres one row on it and
-// straddles it with two (ICON_ROW_PITCH in tile-overlay.drone.ts). The band is
-// centred on the hex and the name takes exactly the top row, so the icon block
-// always centres one half-row BELOW the hex centre — half of ICON_ROW_PITCH,
-// whether the icons take one row or two. HINT_Y_OFFSET and POOL_Y_OFFSET there
-// are absolute and do not follow; the arrange hit-test derives from this
-// constant and does.
-const ICON_Y = 5
-const ICON_SPACING = 10       // tighter to match 75 % icon scale
-const ICON_SIZE = 7           // matches DEFAULT_ICON_SIZE in tile-overlay
-const HEX_INRADIUS = 27.7     // √3/2 × 32 — safe horizontal bound
-const EDGE_MARGIN = 3         // keep icons this far from hex edge
-
-function computeIconPositions(activeNames: string[]): { x: number; y: number }[] {
-  const count = activeNames.length
-  if (count === 0) return []
-
-  let spacing = ICON_SPACING
-
-  // Compress spacing when the row would overflow the hex
-  const available = (HEX_INRADIUS - EDGE_MARGIN) * 2
-  const idealWidth = (count - 1) * spacing
-  if (idealWidth > available && count > 1) {
-    spacing = available / (count - 1)
-  }
-
-  // Return CENTER positions — evenly spaced, symmetric about x=0, rounded to integers
-  const startX = Math.round(-(count - 1) * spacing / 2)
-  return activeNames.map((_, i) => ({ x: Math.round(startX + i * spacing), y: ICON_Y }))
 }
 
 // ── Persistence key in root properties ────────────────────────────
@@ -1180,7 +1027,7 @@ function removeHiddenLineage(parentSegments: readonly string[], name: string): v
 
 // ── Exports for overlay arrange mode ──────────────────────────────
 
-export { ICON_REGISTRY, DEFAULT_ACTIVE, ICON_SPACING, ICON_Y, computeIconPositions }
+export { ICON_REGISTRY, DEFAULT_ACTIVE }
 export type { IconArrangement }
 
 const _tileActions = new TileActionsDrone()

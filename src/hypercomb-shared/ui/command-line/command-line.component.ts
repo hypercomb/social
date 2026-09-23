@@ -4283,12 +4283,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (moved) announce()
     if (member) {
       await references?.place?.(member)
-      EffectBus.emit('activity:log', {
-        message: this.#utteranceText('activity.gathered', `made "{cell}" in {group} — gathered here`)
-          .replace('{cell}', member.name)
-          .replace('{group}', baseSegments[baseSegments.length - 1] ?? ''),
-        icon: '⬡',
-      })
+      const gatheredMessage = this.#utteranceText('activity.gathered', `made "{cell}" in {group} — gathered here`)
+        .replace('{cell}', member.name)
+        .replace('{group}', baseSegments[baseSegments.length - 1] ?? '')
+      EffectBus.emit('activity:log', { message: gatheredMessage, icon: '⬡' })
+      // Said where it is seen: the tile landed somewhere else, and a line in
+      // the activity strip alone is too quiet to notice (jwize, 2026-09-23).
+      EffectBus.emit('toast:show', { type: 'success', message: gatheredMessage })
     }
 
     // Made ON a group, what you made is also gathered into the group's targets
@@ -4300,11 +4301,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       ) as { feed?: (group: readonly string[], names: readonly string[]) => Promise<string[][]> } | undefined
       const fed = await link?.feed?.(baseSegments, [made[0]]).catch(() => [] as string[][]) ?? []
       if (fed.length > 0) {
-        EffectBus.emit('activity:log', {
-          message: this.#utteranceText('activity.fed', 'also gathered into {pages}')
-            .replace('{pages}', fed.map(page => page[page.length - 1]).join(', ')),
-          icon: 'alt_route',
-        })
+        const fedMessage = this.#utteranceText('activity.fed', 'also gathered into {pages}')
+          .replace('{pages}', fed.map(page => page[page.length - 1]).join(', '))
+        EffectBus.emit('activity:log', { message: fedMessage, icon: 'alt_route' })
+        EffectBus.emit('toast:show', { type: 'success', message: fedMessage })
       }
     }
 

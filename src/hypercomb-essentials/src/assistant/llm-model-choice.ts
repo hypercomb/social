@@ -12,7 +12,6 @@
 //
 // Naming a model in the chat still wins over this, as it always has.
 
-import { publishService } from './llm-provider-registry.js'
 
 export const LLM_MODEL_CHOICE_IOC_KEY = '@hypercomb.social/LlmModelChoice'
 
@@ -90,6 +89,3 @@ export class LlmModelChoiceStore extends EventTarget {
 }
 
 export const llmModelChoice = new LlmModelChoiceStore()
-
-window.ioc?.register(LLM_MODEL_CHOICE_IOC_KEY, llmModelChoice)
-publishService(LLM_MODEL_CHOICE_IOC_KEY, llmModelChoice)

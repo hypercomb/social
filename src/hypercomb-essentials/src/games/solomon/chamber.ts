@@ -2,8 +2,10 @@
 // walked, torchlit puzzle space — blocks, plates, gates, chests, doors,
 // shutters, levers, lamp sets, a wand, settling stones, an alcove and an
 // artifact — entered and left through portals that are PUSHED, never walked
-// onto. Zero enemies, zero combat, ever: that lives entirely in engine.ts's
-// separate labyrinth substrate. Pure: no DOM, no storage, no randomness.
+// onto. What lives down here (`foes`: prowlers on the floor, flitters in the
+// air) patrols its route, hunts her on sight, and sends her back to where
+// she came in when it catches her; the wand's stone block is her answer.
+// Pure: no DOM, no storage, no randomness.
 import type { SigilRequirement } from './labyrinth.js'
 import type { TreasureKind } from './island-treasure.js'
 import type { PlaceSeed } from './place.js'
@@ -16,6 +18,7 @@ export type ChamberLook = 'cavern' | 'cellar' | 'house' | 'wood'
 export type ChamberTerrain =
   | 'rock' | 'floor' | 'threshold' | 'water' | 'brick' | 'furniture'
   | 'crack' | 'rubble' | 'rune' | 'laid' | 'spring' | 'stone' | 'seal' | 'seal-open'
+  | 'block'
 export interface ChamberItem { readonly kind: TreasureKind; readonly name: string }
 export interface RuneOption { readonly id: string; readonly glyph: string; readonly label: string }
 /** id matches /^(map|lodestone|keepsake):[a-z0-9-]+$/ */
@@ -109,6 +112,22 @@ export interface ChamberFinale {
 }
 /** (2) A2.3 — gains its own `landing`, the push side, symmetric with ChamberEntrance. */
 export interface ChamberRisingLight extends ChamberCell { readonly id: string; readonly landing: ChamberCell }
+/** Something living in the chamber. A PROWLER walks the floor and cannot
+ *  cross water; a FLITTER flies, crossing water, and is never crushed. Each
+ *  walks its route, leg by leg, until she comes in sight — then it hunts
+ *  her, and gives her up again once it has lost her for a while. */
+export type ChamberFoeKind = 'prowler' | 'flitter'
+export interface ChamberFoe { readonly id: string; readonly kind: ChamberFoeKind; readonly route: readonly ChamberCell[] }
+export interface ChamberFoeState {
+  readonly id: string; readonly kind: ChamberFoeKind
+  readonly x: number; readonly y: number; readonly facing: Facing
+  readonly alive: boolean; readonly hunting: boolean
+}
+interface FoeRuntime {
+  readonly def: ChamberFoe
+  x: number; y: number; facing: Facing; alive: boolean; hunting: boolean
+  lost: number; leg: number; stuck: number; wing: number
+}
 
 export interface ChamberDefinition {
   readonly id: string
@@ -140,6 +159,7 @@ export interface ChamberDefinition {
   readonly artifact?: ChamberArtifact
   readonly risingLight?: ChamberRisingLight
   readonly finale?: ChamberFinale
+  readonly foes?: readonly ChamberFoe[]
 }
 
 export interface ChamberBuilt {
@@ -162,6 +182,19 @@ export const LANTERN_BONUS = 1.2
 /** (2) A2.3 — replaces WALK_ON_REACH (deleted): a portal that just delivered the
  *  traveller re-arms once the centre is this far from where they landed. */
 export const REARM_DISTANCE = 0.75
+export const FOE_RADIUS = 0.3
+/** How far a foe sees her, along a clear line. */
+export const FOE_SIGHT = 4.5
+export const FOE_PATROL_SPEED = 1.6
+export const FOE_HUNT_SPEED = 2.8
+export const FLITTER_SPEED = 3.6
+/** A flitter flies in bursts: this long on the wing, then a rest. */
+export const FLITTER_FLIGHT = 0.55
+export const FLITTER_REST = 0.4
+/** How long a hunter keeps after her once it has lost sight of her. */
+export const FOE_MEMORY = 1.5
+/** After a catch, nothing hunts or catches her for this long — time to move. */
+export const CATCH_GRACE = 1.5
 /** Distance (tiles, click-through) within which a click reads a tablet immediately. */
 const TABLET_CLICK_REACH = 4
 
@@ -198,6 +231,8 @@ export type ChamberEvent =
   | { readonly kind: 'opened'; readonly chest: string; readonly fresh: boolean }
   | { readonly kind: 'claimed'; readonly artifact: string; readonly fresh: boolean }
   | { readonly kind: 'finale' }
+  | { readonly kind: 'caught'; readonly foe: string }
+  | { readonly kind: 'crushed'; readonly foe: string }
   // (2) A2.3 — portal crossings are now events emitted from update(), not a separate interact()-only result:
   | { readonly kind: 'navigate'; readonly to: 'up'; readonly exit: string }
   | { readonly kind: 'navigate'; readonly to: 'down'; readonly entrance: string }
@@ -266,6 +301,8 @@ const BUILT_TERRAIN_FOR_CHAR: Readonly<Record<string, ChamberTerrain>> = {
   'f': 'floor', 'A': 'floor', 'h': 'floor', 's': 'floor', 'n': 'floor',
 }
 const LEGEND_CHARS = new Set(Object.keys(BUILT_TERRAIN_FOR_CHAR))
+/** Every glyph a chamber map may hold — what a participant's map is checked against. */
+export const CHAMBER_MAP_CHARS: ReadonlySet<string> = LEGEND_CHARS
 
 const DIR_VECTOR: Readonly<Record<Facing, ChamberCell>> = {
   up: { col: 0, row: -1 }, down: { col: 0, row: 1 }, left: { col: -1, row: 0 }, right: { col: 1, row: 0 },
@@ -279,6 +316,7 @@ function directionBetween(from: ChamberCell, to: ChamberCell): Facing | null {
   return null
 }
 const cellKey = (col: number, row: number): string => `${col},${row}`
+export const CRUSHED_WORDS = 'The stone comes down on it.'
 const centerDist = (x: number, y: number, cell: ChamberCell): number => Math.hypot(x - cell.col - 0.5, y - cell.row - 0.5)
 
 // ---------------------------------------------------------------------------
@@ -623,6 +661,11 @@ export class ChamberModel {
   #pushElapsed = 0
   #refusedKey: string | null = null
   #disarmedPortal: string | null = null
+  #foes: FoeRuntime[] = []
+  /** Where she came in by, and its landing — where a catch sends her back to. */
+  #arrivedVia: string | null = null
+  #arrivedAt: ChamberCell | null = null
+  #grace = 0
   #disarmedAt: { x: number; y: number } | null = null
 
   readonly #tabletsById: Map<string, ChamberTablet>
@@ -656,6 +699,7 @@ export class ChamberModel {
     this.#platesById = new Map(definition.plates.map(p => [p.id, p]))
     this.#blocksById = new Map(definition.blocks.map(b => [b.id, b]))
     this.#leversById = new Map(definition.levers.map(l => [l.id, l]))
+    this.#foes = (definition.foes ?? []).map(foe => this.#spawn(foe))
     this.#lampsById = new Map(definition.lamps.map(l => [l.id, l]))
     this.#lampSetsById = new Map(definition.lampSets.map(s => [s.id, s]))
     this.#sigilsById = new Map(definition.sigils.map(s => [s.id, s]))
@@ -687,6 +731,114 @@ export class ChamberModel {
     if (built === 'seal') return this.sealOpen() ? 'seal-open' : 'seal'
     if (WAND_CELLS.has(built) && this.#wand.has(cellKey(col, row))) return (WAND_MADE[built] as ChamberTerrain) ?? built
     return built
+  }
+
+  get foes(): readonly ChamberFoeState[] {
+    return this.#foes.map(foe => ({ id: foe.def.id, kind: foe.def.kind, x: foe.x, y: foe.y, facing: foe.facing, alive: foe.alive, hunting: foe.hunting }))
+  }
+
+  #spawn(def: ChamberFoe): FoeRuntime {
+    const post = def.route[0] ?? { col: 0, row: 0 }
+    return { def, x: post.col + 0.5, y: post.row + 0.5, facing: 'down', alive: true, hunting: false, lost: 0, leg: def.route.length > 1 ? 1 : 0, stuck: 0, wing: 0 }
+  }
+
+  /** Where a foe of this kind may stand: a flitter also over water; neither
+   *  on a portal, a thing, a pushed stone or the wand's block. */
+  foeOpen(kind: ChamberFoeKind, col: number, row: number): boolean {
+    if (!this.#inBounds(col, row)) return false
+    const terrain = this.terrainAt(col, row)
+    if ((terrain === 'water' || terrain === 'spring') && kind === 'flitter') return this.blockAt(col, row) === null && !this.#portalAt(col, row) && !this.built.featureAt(col, row)
+    return this.open(col, row)
+  }
+
+  #foeFits(kind: ChamberFoeKind, x: number, y: number): boolean {
+    const r = FOE_RADIUS
+    return [x - r, x + r].every(cx => [y - r, y + r].every(cy => this.foeOpen(kind, Math.floor(cx), Math.floor(cy))))
+  }
+
+  #seeThrough(col: number, row: number): boolean {
+    const t = this.terrainAt(col, row)
+    const clear = t === 'floor' || t === 'threshold' || t === 'water' || t === 'spring' || t === 'rubble' || t === 'rune' || t === 'stone' || t === 'seal-open'
+    return clear && this.blockAt(col, row) === null
+  }
+
+  #clearLine(x0: number, y0: number, x1: number, y1: number): boolean {
+    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 0.25))
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps
+      if (!this.#seeThrough(Math.floor(x0 + (x1 - x0) * t), Math.floor(y0 + (y1 - y0) * t))) return false
+    }
+    return true
+  }
+
+  #stepFoes(dt: number, events: ChamberEvent[]): void {
+    const grace = this.#grace > 0
+    if (grace) this.#grace -= dt
+    for (const foe of this.#foes) {
+      if (!foe.alive) continue
+      const dist = Math.hypot(this.#x - foe.x, this.#y - foe.y)
+      const sees = !grace && dist <= FOE_SIGHT && this.#clearLine(foe.x, foe.y, this.#x, this.#y)
+      if (sees) { foe.hunting = true; foe.lost = 0 }
+      else if (foe.hunting) { foe.lost += dt; if (foe.lost >= FOE_MEMORY) { foe.hunting = false; foe.lost = 0 } }
+      const flitter = foe.def.kind === 'flitter'
+      let speed = foe.hunting ? (flitter ? FLITTER_SPEED : FOE_HUNT_SPEED) : (flitter ? FLITTER_SPEED * 0.6 : FOE_PATROL_SPEED)
+      if (flitter) {
+        foe.wing = (foe.wing + dt) % (FLITTER_FLIGHT + FLITTER_REST)
+        if (foe.wing > FLITTER_FLIGHT) speed = 0
+      }
+      const leg = foe.def.route[foe.leg] ?? foe.def.route[0] ?? { col: Math.floor(foe.x), row: Math.floor(foe.y) }
+      const target = foe.hunting ? { x: this.#x, y: this.#y } : { x: leg.col + 0.5, y: leg.row + 0.5 }
+      if (speed > 0) this.#approach(foe, target, speed * dt, dt)
+      if (!foe.hunting && Math.hypot(target.x - foe.x, target.y - foe.y) < 0.2) foe.leg = (foe.leg + 1) % Math.max(1, foe.def.route.length)
+      if (!grace && Math.hypot(this.#x - foe.x, this.#y - foe.y) < CHAMBER_RADIUS + FOE_RADIUS) { this.#caughtBy(foe, events); return }
+    }
+  }
+
+  /** One step toward a point: the longer axis first, the other when that is
+   *  blocked. Dumb on purpose — a corner loses a hunter, and a patroller
+   *  stuck for a second gives up the leg and takes the next. */
+  #approach(foe: FoeRuntime, target: { x: number; y: number }, step: number, dt: number): void {
+    const dx = target.x - foe.x, dy = target.y - foe.y
+    const along = (axis: 'x' | 'y'): boolean => {
+      const d = axis === 'x' ? dx : dy
+      if (Math.abs(d) < 1e-6) return false
+      const s = Math.sign(d) * Math.min(step, Math.abs(d))
+      const nx = axis === 'x' ? foe.x + s : foe.x, ny = axis === 'y' ? foe.y + s : foe.y
+      if (!this.#foeFits(foe.def.kind, nx, ny)) return false
+      foe.x = nx; foe.y = ny
+      foe.facing = axis === 'x' ? (s > 0 ? 'right' : 'left') : (s > 0 ? 'down' : 'up')
+      return true
+    }
+    const first: 'x' | 'y' = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y'
+    if (along(first) || along(first === 'x' ? 'y' : 'x')) { foe.stuck = 0; return }
+    foe.stuck += dt
+    if (!foe.hunting && foe.stuck >= 1) { foe.stuck = 0; foe.leg = (foe.leg + 1) % Math.max(1, foe.def.route.length) }
+  }
+
+  #caughtBy(foe: FoeRuntime, events: ChamberEvent[]): void {
+    events.push({ kind: 'caught', foe: foe.def.id })
+    const landing = this.#arrivedAt ?? this.definition.exits[0]?.landing ?? { col: Math.floor(this.#x), row: Math.floor(this.#y) }
+    this.#x = landing.col + 0.5; this.#y = landing.row + 0.5
+    this.#facing = 'down'
+    this.#moving = false
+    this.#pushKey = null; this.#pushElapsed = 0
+    if (this.#arrivedVia) { this.#disarmedPortal = this.#arrivedVia; this.#disarmedAt = { x: this.#x, y: this.#y } }
+    // The chamber's creatures are back at their posts — every one of them.
+    this.#foes = this.#foes.map(other => this.#spawn(other.def))
+    this.#grace = CATCH_GRACE
+  }
+
+  /** The wand's block coming down on a foe's square: a prowler is crushed;
+   *  a flitter is only shooed to the nearest open square. */
+  #blockLaidOn(col: number, row: number, events: ChamberEvent[]): boolean {
+    let crushed = false
+    for (const foe of this.#foes) {
+      if (!foe.alive || Math.floor(foe.x) !== col || Math.floor(foe.y) !== row) continue
+      if (foe.def.kind === 'prowler') { foe.alive = false; foe.hunting = false; events.push({ kind: 'crushed', foe: foe.def.id }); crushed = true; continue }
+      const out = [[col + 1, row], [col - 1, row], [col, row + 1], [col, row - 1]].find(([c, r]) => this.foeOpen('flitter', c, r))
+      if (out) { foe.x = out[0] + 0.5; foe.y = out[1] + 0.5 }
+    }
+    return crushed
   }
 
   #kindOf(id: string): ChamberTargetKind | undefined {
@@ -1114,6 +1266,7 @@ export class ChamberModel {
       else this.#tabletDwell = { id: tablet.id, elapsed: dtClamped }
       if (this.#tabletDwell.elapsed >= TABLET_DWELL) { this.#readTablet(tablet.id, events); this.#tabletDwell = null }
     } else this.#tabletDwell = null
+    this.#stepFoes(dtClamped, events)
     return events
   }
 
@@ -1125,6 +1278,7 @@ export class ChamberModel {
     this.#x = target.landing.col + 0.5; this.#y = target.landing.row + 0.5
     this.#facing = target.facing
     this.#disarmedPortal = target.id; this.#disarmedAt = { x: this.#x, y: this.#y }
+    this.#arrivedVia = target.id; this.#arrivedAt = target.landing
   }
 
   land(entrance: string): void {
@@ -1138,6 +1292,7 @@ export class ChamberModel {
     this.#x = target.landing.col + 0.5; this.#y = target.landing.row + 0.5
     this.#facing = directionBetween(target, target.landing) ?? 'down'
     this.#disarmedPortal = target.id; this.#disarmedAt = { x: this.#x, y: this.#y }
+    this.#arrivedVia = target.id; this.#arrivedAt = target.landing
   }
 
   refuse(id: string): void {
@@ -1354,7 +1509,12 @@ export class ChamberModel {
     if (!WAND_CELLS.has(built)) return { kind: 'message', text: WAND_REFUSALS.nothing, events: [] }
     const key = cellKey(facedCol, facedRow)
     const toggled = this.#wand.has(key)
-    const closing = toggled // reverting an opened cell is a "closing" transition
+    // Reverting an opened cell is a "closing" transition; on bare floor it is
+    // the laying of the block that closes the cell.
+    const closing = built === 'floor' ? !toggled : toggled
+    if (built === 'floor' && closing && (this.built.featureAt(facedCol, facedRow) || this.#portalAt(facedCol, facedRow) || this.#builtTerrainAt(facedCol, facedRow) !== 'floor')) {
+      return { kind: 'message', text: WAND_REFUSALS.taken, events: [] }
+    }
     const r = CHAMBER_RADIUS
     const overlaps = this.#x + r > facedCol && this.#x - r < facedCol + 1 && this.#y + r > facedRow && this.#y - r < facedRow + 1
     if (closing && overlaps) return { kind: 'message', text: WAND_REFUSALS.standing, events: [] }
@@ -1367,6 +1527,7 @@ export class ChamberModel {
     if (toggled) this.#wand.delete(key); else this.#wand.add(key)
     const newTerrain = this.terrainAt(facedCol, facedRow)
     const events: ChamberEvent[] = [{ kind: 'wand', col: facedCol, row: facedRow, terrain: newTerrain }]
+    const crushed = newTerrain === 'block' && this.#blockLaidOn(facedCol, facedRow, events)
     if (built === 'rune') {
       const isOpen = this.sealOpen()
       if (wasOpen !== isOpen) {
@@ -1374,7 +1535,7 @@ export class ChamberModel {
         if (isOpen && this.definition.finale && 'seal' in this.definition.finale.when) this.#fireFinale(events)
       }
     }
-    const text = WAND_WORDS[newTerrain] ?? (built === 'rune' ? (this.sealOpen() ? WAND_SEAL_WORDS.open : WAND_SEAL_WORDS.closed) : '')
+    const text = crushed ? CRUSHED_WORDS : WAND_WORDS[newTerrain] ?? (built === 'rune' ? (this.sealOpen() ? WAND_SEAL_WORDS.open : WAND_SEAL_WORDS.closed) : '')
     return { kind: 'message', text, events }
   }
 
@@ -1400,7 +1561,7 @@ export class ChamberModel {
       rock: [46, 40, 36], floor: [92, 78, 60], threshold: [102, 88, 68], water: [40, 70, 92],
       brick: [70, 62, 54], furniture: [80, 60, 44], crack: [60, 52, 44], rubble: [110, 96, 74],
       rune: [70, 60, 96], laid: [140, 118, 60], spring: [50, 90, 110], stone: [120, 118, 110],
-      seal: [50, 44, 60], 'seal-open': [150, 140, 120],
+      seal: [50, 44, 60], 'seal-open': [150, 140, 120], block: [124, 118, 106],
     }
     let [r, g, b] = base[terrain]
     const feature = this.built.featureAt(col, row)

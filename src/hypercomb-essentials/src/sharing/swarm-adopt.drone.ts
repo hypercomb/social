@@ -57,6 +57,7 @@ import {
 import { setDivergedLabels, clearPeerDivergence } from './peer-divergence.js'
 import { publisherHoldsUnheldBelow } from './branch-difference.js'
 import { allows as intakeAllows } from '../pheromones/intake-filter.js'
+import { _adoptQueue } from './adopt-queue.service.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -2240,6 +2241,10 @@ export class SwarmAdoptDrone extends Drone {
   }
 
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/AdoptQueueService', _adoptQueue)
 
 const _swarmAdopt = new SwarmAdoptDrone()
 ;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(

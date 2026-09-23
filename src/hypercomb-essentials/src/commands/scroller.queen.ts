@@ -29,13 +29,7 @@
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
 import { ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn } from '../sharing/behavior-enablement.js'
-
-/** The view token — doubles as the ViewMode string. */
-export const SCROLLER_VIEW = 'scroller'
-
-/** The mark a branch wears to carry the feed. Payload-free: the feed is
- *  whatever the branch already holds, so writing the record IS the install. */
-export const SCROLLER_KIND = 'visual:scroller:feed'
+import { SCROLLER_KIND, SCROLLER_VIEW } from './scroller-kind.js'
 
 const get = <T,>(key: string): T | undefined => (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
 

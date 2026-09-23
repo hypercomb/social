@@ -162,6 +162,14 @@ export type ModuleCommitOutcome =
      *  module it was written into (`from`) and the module that replaced it (`to`). */
     readonly changes: readonly { readonly path: string; readonly section: string; readonly from: string; readonly to: string }[]
     readonly off: readonly string[]
+    /** Picks that were not drafts — a trial taken by hand, a revision picked
+     *  in Packages — folded into the new root at their path, with the root
+     *  each was picked from. */
+    readonly taken?: readonly { readonly path: string; readonly root: string }[]
+    /** Picks NOT folded because code they bring still waits in the brood: a
+     *  commit publishes under this hive's key, and unaccepted code never rides
+     *  out under it. They stay picks. */
+    readonly held?: readonly string[]
   }
   | { readonly ok: false; readonly error: string }
 
@@ -170,8 +178,9 @@ export interface ModuleDraftsProvider {
   list(): Promise<ModuleDraftInfo[]>
   /** Drop the draft at a path: the trunk's layer runs there again after a reload. */
   drop(path: string): Promise<{ ok: true } | { ok: false; error: string }>
-  /** COMMIT WHAT RUNS HERE: the trunk re-minted with every draft at its path
-   *  and every path turned off left out, so the new root no longer reaches
+  /** COMMIT WHAT RUNS HERE: the trunk re-minted with every draft — and every
+   *  other pick whose code may run here — at its path, and every path turned
+   *  off left out, so the new root no longer reaches
    *  it (nothing is deleted). It becomes a new package root, appended to this
    *  host's `host:packages` pool under `label` and made the trunk here.
    *  Followers reach it once its files are served and the install channel is

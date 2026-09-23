@@ -19,12 +19,8 @@
 // a view the same word undoes.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import {
-  ORGANISM_SET,
-  ORGANISM_CHANGED,
-  type OrganismChangedPayload,
-  type OrganismSetPayload,
-} from './organism.drone.js'
+import { ORGANISM_CHANGED, ORGANISM_SET } from './organism-effects.js'
+import type { OrganismChangedPayload, OrganismSetPayload } from './organism.drone.js'
 
 type Reading =
   | { readonly mode: 'off' }

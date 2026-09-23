@@ -111,6 +111,18 @@ when someone edited a document and rebuilt. Now the doctrine is content
   doctrine moved appends a new seed marker. Once the participant has changed
   the doctrine (`by: 'hive'`), no build overwrites it; `doctrine` says the
   build carries newer doctrine, and `doctrine seed` takes it.
+- **What the seed holds** (2026-09-23), in reading order: the signature rule;
+  THE LIFE PRIMITIVE — its shape and its rules (`life-primitive.md` › The
+  primitive, › Rules); data never heals; nothing is deleted; the known-location
+  pool rules; the website artifact rule; the optimize contract. Jev asks every
+  proposed change one question per section, so every change a model proposes
+  is judged against the primitive. jwize: "the primitive should be enforced so
+  everything is replayable and reviewable and every part of the experience
+  shares the same properties that allows us to orthogonally traverse our peer
+  networks as well as open communities." A section's `title` in
+  `build-anatomy.ts` names it where its own heading only makes sense inside
+  its document (Jev's scoreboard reports the rule a change comes closest to
+  breaking by that name).
 - **Who changes it.** A model PROPOSES a section through the write fence
   (header `doctrine <heading>`, `hive-read-fence.md`); it ALWAYS waits in
   Execution for the participant, and Jev's answers are shown but never run it

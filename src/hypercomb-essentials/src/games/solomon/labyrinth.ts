@@ -106,6 +106,47 @@ export function squareEntrance(roomId: string, cell: Cell): string {
 /** How long Dana walks against a solid square that leads in before it takes her. */
 const SQUARE_PUSH = 0.3
 
+/** The ways out of a side-view room — its seated squares, a cavern's mouth
+ *  and its way deeper — and who is passing through which. An open square is
+ *  passed by stepping into it, as a door is; a solid one (a stone in the
+ *  wall, a brick) by walking against it a moment. A way just used is held
+ *  until Dana steps away, so arriving never bounces her straight back. */
+export class SquarePasses {
+  #push: { id: string; t: number } | null = null
+  #held: { id: string; cell: Cell } | null = null
+
+  reset(): void { this.#push = null; this.#held = null }
+
+  /** Hold a way until Dana steps clear of it. */
+  hold(id: string, cell: Cell): void {
+    this.#push = null
+    this.#held = { id, cell }
+  }
+
+  /** The way Dana passes into this step, if any — reported once. `ways`
+   *  maps each way to its square. */
+  step(engine: Engine, ways: ReadonlyMap<string, Cell>, dt: number): string | null {
+    if (engine.state !== 'playing') { this.#push = null; return null }
+    const p = engine.player, cx = p.x + p.w / 2, cy = p.y + p.h / 2
+    if (this.#held && Math.hypot(cx - (this.#held.cell.col + 0.5) * TILE, cy - (this.#held.cell.row + 0.5) * TILE) > TILE * 1.25) this.#held = null
+    const bodyRow = Math.floor((p.y + p.h - 1) / TILE)
+    const ahead = Math.floor((engine.facing > 0 ? p.x + p.w + 1 : p.x - 1) / TILE)
+    const pressing = engine.facing > 0 ? engine.input.right : engine.input.left
+    let pushing: string | null = null
+    for (const [id, cell] of ways) {
+      if (this.#held?.id === id) continue
+      if (!engine.solidAt(cell.col, cell.row)) {
+        if (engine.rectOverlapsCell(p, cell.col, cell.row)) { this.hold(id, cell); return id }
+      } else if (pressing && cell.col === ahead && cell.row === bodyRow) pushing = id
+    }
+    if (!pushing) { this.#push = null; return null }
+    const t = (this.#push?.id === pushing ? this.#push.t : 0) + dt
+    if (t < SQUARE_PUSH) { this.#push = { id: pushing, t }; return null }
+    this.hold(pushing, ways.get(pushing)!)
+    return pushing
+  }
+}
+
 export function describeRequirement(requirement?: SigilRequirement): string {
   if (!requirement) return 'Open passage'
   if (requirement.kind === 'all') return requirement.requirements.map(describeRequirement).join(' + ')
@@ -679,10 +720,8 @@ export class LabyrinthJourney {
   engine: Engine | null = null
   lastRelic: RoomRelic | null = null
   #arrivalDoor: string | null = null
-  /** A solid square being walked against, and for how long. */
-  #squarePush: { id: string; t: number } | null = null
-  /** The square just passed through: it waits until Dana steps away. */
-  #squareHeld: { id: string; x: number; y: number } | null = null
+  /** The seated squares of the room she stands in, and who is passing which. */
+  readonly #squares = new SquarePasses()
   #lastRoom = new Map<string, string>()
   #stats: JourneyStats = {
     score: 0, lives: 3, fairyCount: 0, sealCount: 0, pageTime: false, pageSpace: false, ammo: [] as boolean[], ammoCap: MAX_AMMO,
@@ -927,8 +966,7 @@ export class LabyrinthJourney {
     this.visited.add(roomId)
     this.#lastRoom.set(room.labyrinthId, roomId)
     this.#arrivalDoor = null
-    this.#squarePush = null
-    this.#squareHeld = null
+    this.#squares.reset()
     this.lastRelic = null
     this.#applyGates()
     if (arrival) {
@@ -1004,30 +1042,8 @@ export class LabyrinthJourney {
    *  walking against it a moment. `seated` maps each square of this room
    *  that leads in to its cell. */
   enteringSquare(seated: ReadonlyMap<string, Cell>, dt: number): string | null {
-    const engine = this.engine
-    if (!engine || !this.room || engine.state !== 'playing') { this.#squarePush = null; return null }
-    const p = engine.player, cx = p.x + p.w / 2, cy = p.y + p.h / 2
-    if (this.#squareHeld && Math.hypot(cx - this.#squareHeld.x, cy - this.#squareHeld.y) > TILE * 0.75) this.#squareHeld = null
-    const bodyRow = Math.floor((p.y + p.h - 1) / TILE)
-    const ahead = Math.floor((engine.facing > 0 ? p.x + p.w + 1 : p.x - 1) / TILE)
-    const pressing = engine.facing > 0 ? engine.input.right : engine.input.left
-    let pushing: string | null = null
-    for (const [id, cell] of seated) {
-      if (this.#squareHeld?.id === id) continue
-      if (!engine.solidAt(cell.col, cell.row)) {
-        if (engine.rectOverlapsCell(p, cell.col, cell.row)) return this.#takeSquare(id, cx, cy)
-      } else if (pressing && cell.col === ahead && cell.row === bodyRow) pushing = id
-    }
-    if (!pushing) { this.#squarePush = null; return null }
-    const t = (this.#squarePush?.id === pushing ? this.#squarePush.t : 0) + dt
-    if (t < SQUARE_PUSH) { this.#squarePush = { id: pushing, t }; return null }
-    return this.#takeSquare(pushing, cx, cy)
-  }
-
-  #takeSquare(id: string, x: number, y: number): string {
-    this.#squarePush = null
-    this.#squareHeld = { id, x, y }
-    return id
+    if (!this.engine || !this.room) return null
+    return this.#squares.step(this.engine, seated, dt)
   }
 
   useDoor(id?: string): DoorResult {

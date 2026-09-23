@@ -8,6 +8,8 @@ import {
   type FolderImportResult,
   type FolderSyncService,
 } from './folder-sync.service.js'
+import { folderSyncService } from './folder-sync.service.js'
+import { folderSyncView } from './folder-sync.view.js'
 
 export class FolderSyncQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -200,6 +202,11 @@ export class FolderSyncQueenBee extends QueenBee {
     EffectBus.emit('toast:show', { type, title, message })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register(FOLDER_SYNC_KEY, folderSyncService)
+window.ioc.register('@diamondcoreprocessor.com/FolderSyncView', folderSyncView)
 
 const _folderSyncQueen = new FolderSyncQueenBee()
 ;(window as any).ioc?.register?.('@diamondcoreprocessor.com/FolderSyncQueenBee', _folderSyncQueen)

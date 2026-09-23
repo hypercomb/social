@@ -434,5 +434,3 @@ export class SpokenHabits {
     return before - this.#state.habits.length
   }
 }
-
-window.ioc?.register?.('@diamondcoreprocessor.com/SpokenHabits', new SpokenHabits())

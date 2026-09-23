@@ -169,7 +169,7 @@ export const importProviderSpec = async (
 // the probe knows what a provider is; nothing here knows how a domain was
 // learned. `accept` is deliberately the same call a pasted spec makes, so
 // there is exactly one path a provider can enter by.
-registerPublishedPool({
+const claimProvidersPool = (): void => registerPublishedPool({
   meaning: LLM_PROVIDERS_POOL,
   accept: async (record, origin) => (await importProviderSpec(record, { origin })).id,
 })
@@ -210,5 +210,14 @@ const awaitStoreThenSweep = (): void => {
   tick()
 }
 
-window.ioc?.whenReady?.('@hypercomb.social/Store', () => { sweepOnce() })
-awaitStoreThenSweep()
+/** Claim `llm:providers` for the probe, and bring the local pool into the
+ *  roster once the store exists. Called once, by the roster
+ *  (builtin-providers.ts), after the built-ins register. */
+let discovering = false
+export const startProviderDiscovery = (): void => {
+  if (discovering) return
+  discovering = true
+  claimProvidersPool()
+  window.ioc?.whenReady?.('@hypercomb.social/Store', () => { sweepOnce() })
+  awaitStoreThenSweep()
+}

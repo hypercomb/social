@@ -802,12 +802,6 @@ function ensureStyles(): void {
   document.head.appendChild(style)
 }
 
-;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void }) => void) => void } })
-  .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
-    if (!customElements.get(SURFACE)) customElements.define(SURFACE, VocabularyFindElement)
-    try {
-      registry.add({ name: SURFACE, owner: OWNER, element: SURFACE, order: 141 })
-    } catch {
-      // duplicate add (hot reload) — the mounted surface is already live
-    }
-  })
+// molecule/vocabulary-find.queen.ts defines this element and adds it to the shell's surface registry
+// (atomic-modules-plan.md): a dependency registers nothing.
+export { SURFACE as VOCABULARY_FIND_SURFACE, OWNER as VOCABULARY_FIND_VIEW_KEY }

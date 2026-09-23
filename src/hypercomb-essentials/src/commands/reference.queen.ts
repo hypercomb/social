@@ -47,6 +47,7 @@ import {
   normalizeReferenceMarks,
   type CanonicalReferenceService,
 } from '@hypercomb/core'
+import { CanonicalReferenceServiceImpl } from './canonical-reference.service.js'
 
 const get = <T,>(key: string): T | undefined => (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
 
@@ -249,6 +250,9 @@ export class ReferenceQueenBee extends QueenBee {
     EffectBus.emit('activity:log', { message, icon })
   }
 }
+
+// The reference word owns the one write door for portals (atomic-modules-plan.md).
+window.ioc.register(CANONICAL_REFERENCE_SERVICE_KEY, new CanonicalReferenceServiceImpl())
 
 const _reference = new ReferenceQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/ReferenceQueenBee', _reference)

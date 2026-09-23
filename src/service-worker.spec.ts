@@ -81,6 +81,19 @@ describe('service worker copies', () => {
   it('are byte-identical across the web and dev shells', () => {
     expect(readFileSync(DEV)).toEqual(readFileSync(WEB))
   })
+
+  // `ignoreSearch` scans every cached entry on every lookup. With a thousand
+  // modules held, a boot's four hundred module requests kept the worker busy
+  // for about two seconds (atomic-modules-plan.md). The key drops the query
+  // instead, and a lookup is exact.
+  it('match the module cache exactly — never with ignoreSearch', () => {
+    const workers = [WEB, DEV, at('./hypercomb-shim/public/hypercomb.worker.js'), at('./meadowverse/public/meadowverse.worker.js')]
+    for (const worker of workers) {
+      const code = readFileSync(worker, 'utf8').replace(/\/\/.*$/gm, '')
+      expect(code, worker).not.toMatch(/ignoreSearch/)
+      expect(code, worker).toMatch(/cache\.match\(cacheKeyOf\(request\)\)/)
+    }
+  })
 })
 
 describe('sniffBinaryContentType', () => {

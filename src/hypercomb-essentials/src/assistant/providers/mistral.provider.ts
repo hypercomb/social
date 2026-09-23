@@ -2,7 +2,6 @@
 //
 // Mistral. OpenAI-shaped, on Mistral's host.
 
-import { registerLlmProvider } from '../llm-provider-registry.js'
 import type { LlmProviderDescriptor } from './llm-provider.types.js'
 import { openAiRequest, openAiResponse, openAiStreamEvent } from './openai-shape.js'
 
@@ -25,5 +24,3 @@ export const MISTRAL_PROVIDER: LlmProviderDescriptor = {
   fromResponse: openAiResponse,
   fromStreamEvent: openAiStreamEvent,
 }
-
-registerLlmProvider(MISTRAL_PROVIDER)

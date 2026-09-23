@@ -22,6 +22,7 @@
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
 import { VOCABULARY_FIND } from './vocabulary-words.js'
+import { VocabularyFindElement, VOCABULARY_FIND_SURFACE, VOCABULARY_FIND_VIEW_KEY } from './vocabulary-find.view.js'
 
 export class VocabularyFindQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -42,6 +43,18 @@ export class VocabularyFindQueenBee extends QueenBee {
     EffectBus.emit(VOCABULARY_FIND, { word: String(args ?? '').trim(), at: Date.now() })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): the view is a dependency; this bee
+// defines its element and adds it to the shell's surface registry — never a
+// tag in either app.html.
+window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
+  if (!customElements.get(VOCABULARY_FIND_SURFACE)) customElements.define(VOCABULARY_FIND_SURFACE, VocabularyFindElement)
+  try {
+    registry.add({ name: VOCABULARY_FIND_SURFACE, owner: VOCABULARY_FIND_VIEW_KEY, element: VOCABULARY_FIND_SURFACE, order: 141 })
+  } catch {
+    // duplicate add (hot reload) — the mounted surface is already live
+  }
+})
 
 const _findWord = new VocabularyFindQueenBee()
 ;(window as unknown as { ioc?: { register?: (k: string, v: unknown) => void } })

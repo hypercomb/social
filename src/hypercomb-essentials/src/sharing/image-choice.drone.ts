@@ -42,7 +42,7 @@ import {
   writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
-import { galleryImageSigsAt } from '../commands/lightbox.queen.js'
+import { galleryImageSigsAt } from '../commands/lightbox-kind.js'
 import { fetchThroughContentHop } from '../presentation/tiles/artifact-content.js'
 import { canonicalPeerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 import { imageChoiceWriteTargets } from './image-choice-targets.js'

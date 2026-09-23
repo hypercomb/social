@@ -29,7 +29,7 @@
 // activation record is what the loader reads at boot — so a draft that
 // applied still needs one reload to run, and the outcome says so.
 
-import { MODULE_DRAFTS_IOC_KEY, SignatureService, isSectionPath, registerPoolMeaning, replaceSection, sectionOf, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
+import { MODULE_DRAFTS_IOC_KEY, SignatureService, isSectionPath, mayRunBee, registerPoolMeaning, replaceSection, sectionOf, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
 import { applySelection, installedPackageSig, layersIoFor, unpickRevision, type SelectionOutcome } from './acquire.js'
 import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } from './host-pool.js'
 import { composeDependencies, isOff, namespaceOf, ownerOf, readPicks, sigsOf, walkTree, within, type Picks, type TreeWalk } from './package-tree.js'
@@ -97,6 +97,9 @@ export type ModuleDraftDeps = {
   /** The paths this browser has turned off, and the write that replaces them. */
   readonly off: () => ReadonlySet<string>
   readonly setOff: (paths: readonly string[]) => void
+  /** May this module run here (core mayRunBee)? Code still held in the brood
+   *  is never folded into a commit. Absent: everything may. */
+  readonly mayRun?: (sig: string) => Promise<boolean>
 }
 
 const livePool = async (): Promise<PackagePool | null> => {
@@ -128,6 +131,7 @@ const liveDeps = (): ModuleDraftDeps => ({
   pool: livePool,
   off: readOffUnits,
   setOff: paths => writeOffUnits(paths),
+  mayRun: sig => mayRunBee(sig),
 })
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>
@@ -377,48 +381,75 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
     try { return JSON.parse(decode(bytes)) as CellRecord } catch { return null }
   }
 
-  // WHAT CHANGES: the drafts (picks whose root says it is a draft) and the paths turned off.
+  // WHAT CHANGES: every pick that shapes what runs here — the drafts (picks
+  // whose root says it is a draft), a trial taken by hand, a revision picked
+  // in Packages — and the paths turned off. A pick that does not apply (a pick
+  // above it hides it) changes nothing and is not folded. A pick whose code
+  // still waits in the brood is not folded either: a commit publishes under
+  // this hive's key, and code nobody here has accepted never rides out under
+  // it. It stays a pick, and the outcome names it.
   const picks = deps.picks()
+  const local: ReplicationIo = { ...io, fetch: async () => null }
+  const shape = await walkTree(trunk, local, picks)
+  if (!shape.complete) return fail('the selection names a layer that is not held here')
+  const readNamespace = async (sig: string): Promise<string | null> =>
+    namespaceOf((await store?.getDependencyBytes?.(sig).catch(() => null)) ?? null) || null
   const drafts = new Map<string, string>()
+  const folded = new Map<string, string>()
   const sections = new Map<string, { section: string; from: string; to: string }>()
-  const draftSources: { path: string; dependencies: string[] }[] = []
-  for (const [path, pick] of Object.entries(picks)) {
+  const sources: { path: string; dependencies: string[] }[] = []
+  const taken: { path: string; root: string }[] = []
+  const held: string[] = []
+  for (const path of shape.applied) {
+    const pick = picks[path]!
     const root = await read(pick.root)
     const draft = root?.['draft'] as { section?: unknown; from?: unknown; to?: unknown } | undefined
-    if (!draft) continue
-    drafts.set(path, pick.layer)
-    sections.set(path, { section: String(draft.section ?? ''), from: String(draft.from ?? ''), to: String(draft.to ?? '') })
-    draftSources.push({ path, dependencies: sigsOf(root?.['dependencies']) })
+    const dependencies = sigsOf(root?.['dependencies'])
+    if (draft) {
+      drafts.set(path, pick.layer)
+      sections.set(path, { section: String(draft.section ?? ''), from: String(draft.from ?? ''), to: String(draft.to ?? '') })
+    } else {
+      if (await stillHeld(pick.layer, path, dependencies, local, readNamespace, deps.mayRun)) { held.push(path); continue }
+      taken.push({ path, root: pick.root })
+    }
+    folded.set(path, pick.layer)
+    sources.push({ path, dependencies })
   }
-  const off = new Set([...deps.off()].filter(path => !drafts.has(path)))
-  if (!drafts.size && !off.size) return fail('nothing to commit: no draft is picked and nothing is turned off')
+  const off = new Set([...deps.off()].filter(path => !folded.has(path)))
+  if (!folded.size && !off.size) {
+    return fail(held.length
+      ? `nothing to commit: what you took at ${held.join(', ')} still waits in the brood — accept it there first`
+      : 'nothing to commit: no draft is picked and nothing is turned off')
+  }
   const touches = (path: string): boolean =>
-    [...drafts.keys(), ...off].some(changed => changed === path || changed.startsWith(`${path}/`))
+    [...folded.keys(), ...off].some(changed => changed === path || changed.startsWith(`${path}/`))
 
   // THE MODULES THE DRAFTS RENAMED, and the modules the new root still
-  // reaches. The root's render-priority hint (`criticalBees`) names bees by
-  // sig, so it follows a rename and drops what the new root no longer
-  // reaches; left alone it would name modules the package does not carry.
+  // reaches. The root's render-priority hint (`criticalBees`) and its boot
+  // lane (`bootBees`) name bees by sig, so each follows a rename and drops
+  // what the new root no longer reaches; left alone they would name modules
+  // the package does not carry — and a boot bee left on its old sig would
+  // load first and register first, so the draft's copy would never win.
   const renames = new Map<string, string>()
-  const walk = await walkTree(trunk, { ...io, fetch: async () => null })
+  const walk = await walkTree(trunk, local)
   if (!walk.complete) return fail('the installed package cannot be walked here')
-  for (const [path, layer] of drafts) {
+  for (const [path, layer] of folded) {
     const before = walk.nodes.find(candidate => candidate.path === path)?.bees ?? []
     const after = sigsOf((await read(layer))?.['bees'])
     const gone = before.filter(sig => !after.includes(sig))
     const came = after.filter(sig => !before.includes(sig))
     if (gone.length === 1 && came.length === 1) renames.set(gone[0]!, came[0]!)
   }
-  const kept = new Set([...walk.rootBees, ...walk.nodes.filter(node => !isOff(node.path, off)).flatMap(node => node.bees)])
+  // What the new root reaches: the trunk with every folded pick laid in.
+  const after = await walkTree(trunk, local, Object.fromEntries([...folded.keys()].map(path => [path, picks[path]!])))
+  const kept = new Set([...after.rootBees, ...after.nodes.filter(node => !isOff(node.path, off)).flatMap(node => node.bees)])
 
   // THE DEPENDENCIES THE NEW ROOT LISTS are the ones this selection runs: the
-  // trunk's, with every drafted path taking its own from its draft's root. A
-  // dependency draft changes no layer, only this list, so without it the
-  // commit would publish the old atom.
-  const readNamespace = async (sig: string): Promise<string | null> =>
-    namespaceOf((await store?.getDependencyBytes?.(sig).catch(() => null)) ?? null) || null
-  const composed = draftSources.length
-    ? await composeDependencies(walk.rootDependencies, draftSources, [...drafts.keys()], readNamespace)
+  // trunk's, with every folded path taking its own from the root it was
+  // picked from. A dependency draft changes no layer, only this list, so
+  // without it the commit would publish the old atom.
+  const composed = sources.length
+    ? await composeDependencies(walk.rootDependencies, sources, [...folded.keys()], readNamespace)
     : walk.rootDependencies
   const dependenciesMoved = JSON.stringify([...composed].sort()) !== JSON.stringify([...walk.rootDependencies].sort())
 
@@ -437,27 +468,30 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
       const at = path ? `${path}/${name}` : name
       if (off.has(at)) { found.add(at); changed = true; continue }
       let next = child
-      if (drafts.has(at)) { found.add(at); next = await mint(drafts.get(at)!, at) }
+      if (folded.has(at)) { found.add(at); next = await mint(folded.get(at)!, at) }
       else if (name && touches(at)) next = await mint(child, at)
       if (next !== child) changed = true
       cells.push(next === child || typeof entry !== 'string' ? entry : entry.replace(child, next))
     }
-    const critical = !path && Array.isArray(record['criticalBees'])
-      ? (record['criticalBees'] as unknown[]).flatMap(entry => {
+    const follow = (field: 'criticalBees' | 'bootBees'): unknown[] | undefined => !path && Array.isArray(record[field])
+      ? (record[field] as unknown[]).flatMap(entry => {
         if (typeof entry !== 'string') return [entry]
         const bee = bareSig(entry)
         if (renames.has(bee)) return [entry.replace(bee, renames.get(bee)!)]
         return kept.has(bee) ? [entry] : []
       })
       : undefined
+    const critical = follow('criticalBees')
+    const boot = follow('bootBees')
     if (critical && JSON.stringify(critical) !== JSON.stringify(record['criticalBees'])) changed = true
+    if (boot && JSON.stringify(boot) !== JSON.stringify(record['bootBees'])) changed = true
     // The root's dependency list, spelled as the trunk spells it (`<sig>.js`).
     const listed = Array.isArray(record['dependencies']) ? record['dependencies'] as unknown[] : []
     const suffix = typeof listed[0] === 'string' && listed[0].endsWith('.js') ? '.js' : ''
     const dependencies = !path && dependenciesMoved ? [...composed].sort().map(sig => `${sig}${suffix}`) : undefined
     if (dependencies) changed = true
     if (!changed) return sig
-    const bytes = encode(JSON.stringify({ ...record, cells, ...(critical ? { criticalBees: critical } : {}), ...(dependencies ? { dependencies } : {}) }))
+    const bytes = encode(JSON.stringify({ ...record, cells, ...(critical ? { criticalBees: critical } : {}), ...(boot ? { bootBees: boot } : {}), ...(dependencies ? { dependencies } : {}) }))
     const next = await sigOf(bytes)
     await writeLayer(next, bytes.buffer)
     minted.push(next)
@@ -465,13 +499,14 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
   }
   let rootSig: string
   try { rootSig = await mint(trunk, '') } catch (error) { return fail(error instanceof Error ? error.message : 'the package could not be re-minted') }
-  const missing = [...drafts.keys(), ...off].filter(path => !found.has(path))
+  const missing = [...folded.keys(), ...off].filter(path => !found.has(path))
   if (missing.length) return fail(`the installed package has no ${missing.join(', ')}`)
+  if (rootSig === trunk) return fail('nothing to commit: what runs here is already the package')
 
   // LIVE FIRST, PUBLISHED SECOND: a selection that fails to compose publishes
-  // nothing. The committed drafts are part of the trunk now, so they are no
+  // nothing. The folded picks are part of the trunk now, so they are no
   // longer picks; the committed off paths no longer exist to be off.
-  const rest = Object.fromEntries(Object.entries(picks).filter(([path]) => !drafts.has(path)))
+  const rest = Object.fromEntries(Object.entries(picks).filter(([path]) => !folded.has(path)))
   const outcome = await deps.apply(rootSig, minted, rest)
   if (!outcome.ok) return fail(outcome.error)
   deps.setOff([...deps.off()].filter(path => !off.has(path)))
@@ -481,9 +516,27 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
   const index = (markerIndices(await pool.names()).pop() ?? -1) + 1
   await pool.write(poolEntryName(index), formatMember(rootSig, label))
   return { ok: true, rootSig, index, atoms: await newAtoms(trunk, rootSig, io), files: await packageFiles(rootSig, io), drafts: [...drafts.keys()].sort(), off: [...off].sort(),
+    taken: taken.sort((a, b) => a.path.localeCompare(b.path)), held: held.sort(),
     // WHAT CHANGED, file by file: the section each draft wrote, the module it
     // was written into, and the module that replaced it — what a reviewer reads.
     changes: [...sections].sort(([a], [b]) => a.localeCompare(b)).map(([path, { section, from, to }]) => ({ path, section, from, to: renames.get(from) ?? to })) }
+}
+
+/** Does a picked branch bring code that still waits in the brood? Its layer's
+ *  modules, and the namespace bundles its root lists under the path. */
+const stillHeld = async (
+  layer: string, path: string, dependencies: readonly string[], io: ReplicationIo,
+  readNamespace: (sig: string) => Promise<string | null>, mayRun?: (sig: string) => Promise<boolean>,
+): Promise<boolean> => {
+  if (!mayRun) return false
+  const branch = await walkTree(layer, io)
+  const modules = [...branch.rootBees, ...branch.nodes.flatMap(node => node.bees)]
+  for (const sig of dependencies) {
+    const ns = await readNamespace(sig)
+    if (ns && within(ns, path)) modules.push(sig)
+  }
+  for (const sig of new Set(modules)) if (!(await mayRun(sig))) return true
+  return false
 }
 
 /** The files the new package holds that the old one did not — layers, modules

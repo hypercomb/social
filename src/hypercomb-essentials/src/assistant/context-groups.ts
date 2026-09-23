@@ -203,5 +203,3 @@ export class ContextGroups {
 }
 
 export const CONTEXT_GROUPS_IOC_KEY = '@diamondcoreprocessor.com/ContextGroups'
-
-window.ioc.register(CONTEXT_GROUPS_IOC_KEY, new ContextGroups())

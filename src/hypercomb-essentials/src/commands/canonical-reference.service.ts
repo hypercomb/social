@@ -214,6 +214,3 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     })
   }
 }
-
-const canonicalReferenceService = new CanonicalReferenceServiceImpl()
-window.ioc.register(CANONICAL_REFERENCE_SERVICE_KEY, canonicalReferenceService)

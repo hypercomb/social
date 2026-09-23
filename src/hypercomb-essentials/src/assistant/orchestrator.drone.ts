@@ -34,7 +34,9 @@
 // its findings back through the `agent-progress` op, onto this same bee.
 
 import { Drone, EffectBus } from '@hypercomb/core'
-import type { Agent, AgentRegistry } from './agent-registry.service.js'
+import { AgentRegistry, type Agent } from './agent-registry.service.js'
+import { AgentPanelView } from './agent-panel.view.js'
+import { agentTilesRailFactory } from './agent-tiles-rail.js'
 import { drainBlurbs } from './chat-blurb.js'
 import { drainRouteFlows } from './chat-route.js'
 
@@ -740,6 +742,13 @@ export class OrchestratorDrone extends Drone {
     for (const off of this.#flowOffs.splice(0)) off()
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): the agent registry, the panel that
+// shows it and the rail factory the shell's windows ask for. The registry
+// first — the panel reads it when it is made.
+window.ioc.register('@diamondcoreprocessor.com/AgentRegistry', new AgentRegistry())
+window.ioc.register('@diamondcoreprocessor.com/AgentPanelView', new AgentPanelView())
+window.ioc.register('@diamondcoreprocessor.com/AgentTilesRailFactory', agentTilesRailFactory)
 
 const _orchestrator = new OrchestratorDrone()
 window.ioc.register('@diamondcoreprocessor.com/OrchestratorDrone', _orchestrator)

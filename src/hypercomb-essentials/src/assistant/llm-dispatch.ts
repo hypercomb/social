@@ -38,9 +38,7 @@ import {
 import { chooseProvider, modelForTier, rankProviders, type ModelNeed } from './model-policy.js'
 import { isOpenRouterBatchModel } from './providers/openrouter-catalog.js'
 import { credentialOwner } from './providers/credential-owner.js'
-import { llmProviderRegistry, publishService, type LlmProviderRegistry } from './llm-provider-registry.js'
-import './providers/builtin-providers.js'
-import './jev-decision.service.js'
+import { llmProviderRegistry, type LlmProviderRegistry } from './llm-provider-registry.js'
 import type {
   LlmCallResult,
   LlmChatMessage,
@@ -884,4 +882,3 @@ export const llmRouter = {
   },
   stream: (call: LlmCall): AsyncGenerator<LlmRoutedChunk> => streamRoutedModel(call),
 }
-publishService(LLM_ROUTER_IOC_KEY, llmRouter)

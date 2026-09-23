@@ -51,6 +51,10 @@ export interface ModuleChangeRecord {
   /** When it was committed — what a zone's trial listing orders by. Changes
    *  committed before 2026-09-22 carry none. */
   readonly at?: number
+  /** Paths folded in from other builds — a trial taken by hand and accepted
+   *  here — with the root each came from. A build for everybody says whose
+   *  changes it carries. */
+  readonly taken?: readonly { readonly path: string; readonly root: string }[]
 }
 
 export interface ModuleReviewRecord {
@@ -91,7 +95,7 @@ export const reviewContext = (changes: readonly ChangeFile[]): string[] =>
   changes.flatMap(change => [change.after, change.before]).slice(0, CONTEXT_MAX)
 
 /** The question the host's AI is asked — within its 4000-character budget. */
-export const reviewQuestion = (sandbox: string, changes: readonly ChangeFile[], off: readonly string[]): string => {
+export const reviewQuestion = (sandbox: string, changes: readonly ChangeFile[], off: readonly string[], taken: readonly { path: string; root: string }[] = []): string => {
   const listed = changes.slice(0, CONTEXT_MAX / 2).map(change => `- ${change.section} (package path ${change.path})`).join('\n')
   const lines = [
     `Review a proposed change to the code of a Hypercomb hive before it goes live. It is published as the sandbox ${sandbox}.`,
@@ -99,6 +103,7 @@ export const reviewQuestion = (sandbox: string, changes: readonly ChangeFile[], 
     'The context holds each changed source file as a pair: the file AFTER the change first, then the same file BEFORE it.',
     `Changed files:\n${listed || '- none (the change only leaves parts out)'}`,
     off.length ? `Left out of the package (unreachable, not deleted): ${off.join(', ')}` : '',
+    taken.length ? `Folded in from other builds, taken by hand and accepted by the publisher: ${taken.map(t => `${t.path} (from ${t.root.slice(0, 12)}…)`).join(', ')}` : '',
     'Say briefly and concretely: what the change does; anything it reaches that the old code did not (network, storage, keys, other participants); anything that deletes or overwrites; anything that looks wrong or unfinished.',
     'End with exactly one line: VERDICT: accept, VERDICT: refuse, or VERDICT: unclear.',
   ].filter(Boolean)
@@ -118,6 +123,7 @@ export const verdictOf = (text: string): ReviewVerdict => {
  */
 export const recordChange = async (
   sandbox: string, root: string, changes: readonly CommittedChange[], off: readonly string[], deps: Pick<ReviewDeps, 'put' | 'bytesOf' | 'now'>,
+  taken: readonly { path: string; root: string }[] = [],
 ): Promise<{ sig: string; files: string[]; record: ModuleChangeRecord } | { error: string }> => {
   const files: ChangeFile[] = []
   for (const change of changes) {
@@ -127,7 +133,10 @@ export const recordChange = async (
     const after = await deps.put(sectionText(decode(now), change.section), 'text/javascript')
     files.push({ ...change, before, after })
   }
-  const record: ModuleChangeRecord = { kind: 'module-change', sandbox, root, changes: files, off: [...off], at: deps.now() }
+  const record: ModuleChangeRecord = {
+    kind: 'module-change', sandbox, root, changes: files, off: [...off], at: deps.now(),
+    ...(taken.length ? { taken: taken.map(({ path, root: from }) => ({ path, root: from })) } : {}),
+  }
   const sig = await deps.put(JSON.stringify(record), 'application/json')
   return { sig, files: [...new Set(files.flatMap(file => [file.before, file.after])), sig], record }
 }
@@ -135,8 +144,9 @@ export const recordChange = async (
 /** Publish the change and stamp `change:<sandbox>` beside the sandbox. */
 export const publishChange = async (
   host: string, sandbox: string, root: string, changes: readonly CommittedChange[], off: readonly string[], deps: ReviewDeps,
+  taken: readonly { path: string; root: string }[] = [],
 ): Promise<{ ok: true; sig: string; record: ModuleChangeRecord } | { ok: false; error: string }> => {
-  const recorded = await recordChange(sandbox, root, changes, off, deps)
+  const recorded = await recordChange(sandbox, root, changes, off, deps, taken)
   if ('error' in recorded) return { ok: false, error: recorded.error }
   const published = await deps.publish(host, recorded.files)
   if (!published.ok) return { ok: false, error: published.error }
@@ -152,7 +162,7 @@ export const publishChange = async (
 export const reviewChange = async (
   host: string, changeSig: string, record: ModuleChangeRecord, deps: ReviewDeps,
 ): Promise<{ ok: true; sig: string; verdict: ReviewVerdict; model: string; findings: string } | { ok: false; error: string }> => {
-  const answered = await deps.ask(host, reviewQuestion(record.sandbox, record.changes, record.off), reviewContext(record.changes))
+  const answered = await deps.ask(host, reviewQuestion(record.sandbox, record.changes, record.off, record.taken ?? []), reviewContext(record.changes))
   if (!answered.ok) return { ok: false, error: answered.error }
   const findings = await deps.put(answered.text, 'text/plain; charset=utf-8')
   const review: ModuleReviewRecord = {
@@ -314,6 +324,8 @@ export interface TrialFile {
 export interface TrialReading {
   readonly files: readonly TrialFile[]
   readonly off: readonly string[]
+  /** Paths the trial folded in from other builds, and where each came from. */
+  readonly taken: readonly { readonly path: string; readonly root: string }[]
   readonly at: number | null
   readonly review: { readonly verdict: ReviewVerdict; readonly model: string; readonly findings: string } | null
   readonly people: readonly { readonly pubkey: string; readonly verdict: ReviewVerdict; readonly note: string; readonly at: number }[]
@@ -355,8 +367,11 @@ export const readTrial = async (site: SandboxSite, read: (sig: string) => Promis
     return { pubkey: assessment.pubkey, verdict: verdict(assessed.verdict), note: (await text(assessed.note)) ?? '', at: assessment.at }
   }))).filter((person): person is NonNullable<typeof person> => person !== null)
 
+  const taken = (Array.isArray(change?.taken) ? change!.taken : [])
+    .filter(entry => PACKAGE_PATH_RE.test(String(entry?.path ?? '')) && SIG_RE.test(String(entry?.root ?? '')))
+    .map(entry => ({ path: String(entry.path), root: String(entry.root) }))
   return {
-    files, off: strings(change?.off), at: Number.isFinite(change?.at) ? Number(change!.at) : null,
+    files, off: strings(change?.off), taken, at: Number.isFinite(change?.at) ? Number(change!.at) : null,
     review, people, missing: [...missing],
   }
 }

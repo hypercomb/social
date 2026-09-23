@@ -283,5 +283,4 @@ export class AgentAvatarRegistry extends EventTarget {
   }
 }
 
-const _agentAvatars = new AgentAvatarRegistry()
-window.ioc.register('@diamondcoreprocessor.com/AgentAvatarRegistry', _agentAvatars)
+// presentation/avatars/agent-bee.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

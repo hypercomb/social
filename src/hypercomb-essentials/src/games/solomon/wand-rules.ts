@@ -4,8 +4,8 @@
  * which conjures/dispels bricks) — this module governs only the island and
  * ChamberModel. Pure data; no DOM, no storage, no behaviour. */
 
-export const WAND_CELLS: ReadonlySet<string> = new Set(['crack', 'rune', 'spring'])
-export const WAND_MADE: Readonly<Partial<Record<string, 'rubble' | 'laid' | 'stone'>>> = { crack: 'rubble', rune: 'laid', spring: 'stone' }
+export const WAND_CELLS: ReadonlySet<string> = new Set(['crack', 'rune', 'spring', 'floor'])
+export const WAND_MADE: Readonly<Partial<Record<string, 'rubble' | 'laid' | 'stone' | 'block'>>> = { crack: 'rubble', rune: 'laid', spring: 'stone', floor: 'block' }
 export const WAND_WALKABLE: ReadonlySet<string> = new Set(['rubble', 'rune', 'stone'])
 export const WAND_WORDS: Readonly<Partial<Record<string, string>>> = {
   rubble: 'The cracked brick crumbles to rubble.',
@@ -14,9 +14,14 @@ export const WAND_WORDS: Readonly<Partial<Record<string, string>>> = {
   rune: 'The brick lifts from the rune plate.',
   stone: 'A stepping stone rises out of the rune spring.',
   spring: 'The stone sinks back into the spring.',
+  // Bare floor: the wand lays a stone block there and lifts it again — the
+  // one thing that stops what lives in a cavern, or comes down on it.
+  block: 'A stone block settles onto the floor.',
+  floor: 'The stone block crumbles away.',
 }
 export const WAND_REFUSALS = {
-  nothing: 'The wand stirs, but only cracked bricks, rune plates and rune springs answer it.',
+  nothing: 'The wand stirs, but only bare floor, cracked bricks, rune plates and rune springs answer it.',
+  taken: 'The wand needs bare floor to lay a stone on.',
   standing: 'Step back first: the wand will not close the cell you are standing in.',
   seal: 'Step out of the doorway first: the seal would close on you.',
   block: 'A stone rests there. Move it before you use the wand.',

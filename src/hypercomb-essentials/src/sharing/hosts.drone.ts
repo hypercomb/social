@@ -36,6 +36,10 @@ import {
   listCommunityHosts,
   removeCommunityHost,
 } from './community-hosts.js'
+import { updateScout } from './update-scout.service.js'
+import { ATTESTATION_IOC_KEY } from '@hypercomb/core'
+import { packageAttestation } from './package-attestation.js'
+import { HOST_DIRECTORY_SURFACE, HOST_DIRECTORY_VIEW_KEY, HostDirectoryElement, hostDirectoryFacade } from './host-directory.view.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 
@@ -230,6 +234,25 @@ export class HostsDrone extends Drone {
     this.emitEffect('hosts:render', payload)
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/UpdateScoutService', updateScout)
+window.ioc.register(ATTESTATION_IOC_KEY, packageAttestation)
+
+// The host directory's IoC face and surface (atomic-modules-plan.md).
+window.ioc.register(HOST_DIRECTORY_VIEW_KEY, hostDirectoryFacade)
+// THE BEE WIRES (atomic-modules-plan.md): the view is a dependency; this bee
+// defines its element and adds it to the shell's surface registry — never a
+// tag in either app.html.
+window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
+  if (!customElements.get(HOST_DIRECTORY_SURFACE)) customElements.define(HOST_DIRECTORY_SURFACE, HostDirectoryElement)
+  try {
+    registry.add({ name: HOST_DIRECTORY_SURFACE, owner: HOST_DIRECTORY_VIEW_KEY, element: HOST_DIRECTORY_SURFACE, order: 144 })
+  } catch {
+    // duplicate add (hot reload) — the mounted surface is already live
+  }
+})
 
 const _hosts = new HostsDrone()
 ;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(

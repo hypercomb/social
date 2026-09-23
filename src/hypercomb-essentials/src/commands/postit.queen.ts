@@ -16,9 +16,7 @@ import {
   removeDecorationAndWait,
   replaceDecoration,
 } from './decoration-manifest.js'
-
-export const POSTIT_VIEW = 'postit'
-export const POSTIT_KIND = 'visual:postit:note'
+import { POSTIT_KIND, POSTIT_SIZE_KEY, POSTIT_VIEW } from './postit-kind.js'
 
 /**
  * The next record for a note, given what it already held and what this call
@@ -70,13 +68,6 @@ export interface PostitPayload {
    *  rather than grow with it (unlike `pin`, which is a PLACE on the glass). */
   readonly size?: { readonly w: number; readonly h: number }
 }
-
-/** Where the last size a participant resized a sticky to is remembered, so
- *  it becomes the default for every note that has not been resized itself.
- *  Participant-local presentation preference — the same class of setting as
- *  `hc:world-mode`, and deliberately NOT in the layer: it is about this
- *  person's screen, not about the note, so it must not travel on adoption. */
-export const POSTIT_SIZE_KEY = 'hc:postit:size'
 
 type ViewModeShape = { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }

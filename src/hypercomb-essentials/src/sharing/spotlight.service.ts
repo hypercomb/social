@@ -119,10 +119,8 @@ export class SpotlightService extends EventTarget {
 }
 
 const _spotlight = new SpotlightService()
-;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(
-  '@diamondcoreprocessor.com/SpotlightService',
-  _spotlight,
-)
+// presentation/tiles/spotlight.drone.ts registers this (atomic-modules-plan.md).
+export { _spotlight as spotlightService }
 
 // Reconcile when the swarm's peer set changes — covers peers going
 // stale, leaving, or joining. If our active peer evaporates, drop the

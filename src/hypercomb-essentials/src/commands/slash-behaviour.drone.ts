@@ -4,10 +4,12 @@ import {
   registerCommandRoot, commandRoot, type CommandObject, type CommandMember, type KeyMapLayer,
 } from '@hypercomb/core'
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
-import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
+import { BREAK_APART_SKIP_LABELS } from '../assistant/reshape.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'
-import { readNamedTarget } from './keyword.queen.js'
-import { readAccentTarget } from './accent.queen.js'
+import { readNamedTarget } from './named-target.js'
+import { readAccentTarget } from './accent-target.js'
+import { UtteranceReader } from './utterance/utterance-reader.js'
+import { SpokenHabits } from './utterance/spoken-habits.js'
 
 /** Participant-local lens: whether the prototypes filter is open. Read live
  *  on every presentation so `/prototypes` takes effect on the next keystroke
@@ -843,6 +845,11 @@ class ObserveProvider implements SlashBehaviourProvider {
 }
 
 // ── registration ────────────────────────────────────────
+
+// THE BEE WIRES (atomic-modules-plan.md): how a typed or spoken sentence is
+// read, and the spoken habits it learns — the command line reaches both here.
+window.ioc.register('@diamondcoreprocessor.com/UtteranceReader', new UtteranceReader())
+window.ioc.register('@diamondcoreprocessor.com/SpokenHabits', new SpokenHabits())
 
 const _slashBehaviours = new SlashBehaviourDrone()
 // THE DOOR TO THE WORKSHOP SHELF. Prototype behaviours are in the global —

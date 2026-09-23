@@ -368,3 +368,50 @@ describe('chamberInstruments', () => {
     expect(chamberInstruments(baseDef())).toEqual({ look: 'cavern', torch: 4, sconces: true })
   })
 })
+
+// A chamber larger than its window scrolls under a camera, like an overhead
+// map, and keeps a minimap of what the torch has shown.
+describe('the camera and the minimap', () => {
+  function wideDef(): ChamberDefinition {
+    const base = baseDef()
+    return { ...base, map: makeMap({ [key(EXIT.col, EXIT.row)]: '<', [key(EXIT.landing.col, EXIT.landing.row)]: '@', [key(ENTRANCE.col, ENTRANCE.row)]: '>', [key(CHEST.col, CHEST.row)]: 'K', [key(TABLET.col, TABLET.row)]: 't', [key(GATE.col, GATE.row)]: 'R', [key(ALCOVE.col, ALCOVE.row)]: 'h', [key(BLOCK.col, BLOCK.row)]: 'o', [key(ARTIFACT.col, ARTIFACT.row)]: 'A', [key(RISING.col, RISING.row)]: 'u' }, 40, 30) }
+  }
+
+  it('a chamber that fits its window never moves; a wider one slides under the camera as the traveller walks', () => {
+    const host = document.createElement('div')
+    const small = new ChamberView(baseDef(), stubHooks())
+    small.mount(host)
+    small.update(1 / 60, idle)
+    expect(small.window).toEqual({ x: 0, y: 0, width: 1, height: 1 })
+    expect(host.querySelector<HTMLElement>('.sol-chamber-world')!.style.width).toBe('100%')
+    small.dispose()
+
+    const wide = new ChamberView(wideDef(), stubHooks())
+    wide.mount(host)
+    wide.update(1 / 60, idle)
+    const world = host.querySelector<HTMLElement>('.sol-chamber-world')!
+    expect(world.style.width).toBe('200%')
+    expect(wide.window.width).toBe(0.5)
+    expect(wide.window.x).toBe(0)
+    // Far to the east, the window has followed.
+    wide.model.restoreState({ version: 1, place: 'test-cellar', player: { x: 36.5, y: 20.5, facing: 'right' } })
+    for (let i = 0; i < 120; i++) wide.update(1 / 60, idle)
+    expect(wide.window.x).toBeCloseTo(0.5, 1)
+    expect(parseFloat(world.style.transform.replace('translate(', ''))).toBeCloseTo(-50, 0)
+    wide.dispose()
+  })
+
+  it('keeps a minimap in the corner, and a surveyor’s chart shows the whole chamber on it', () => {
+    const host = document.createElement('div')
+    const known = new Set<string>()
+    const view = new ChamberView(wideDef(), stubHooks({ knows: id => known.has(id) }))
+    view.mount(host)
+    const minimap = host.querySelector<HTMLCanvasElement>('.sol-chamber-minimap')!
+    expect(minimap.width).toBe(40)
+    expect(minimap.height).toBe(30)
+    expect(view.charted).toBe(false)
+    known.add('map:test-cellar')
+    expect(view.charted).toBe(true)
+    view.dispose()
+  })
+})

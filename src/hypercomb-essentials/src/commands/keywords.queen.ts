@@ -5,6 +5,7 @@
 // items and presses Add.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
+import { KeywordGenerationService, KeywordSuggestionsView } from './keyword-suggestions.view.js'
 
 export class KeywordsQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -21,6 +22,11 @@ export class KeywordsQueenBee extends QueenBee {
     EffectBus.emit('keywords:open', { transcript: args.trim() })
   }
 }
+
+// The /keywords word owns the proposal surface it opens (atomic-modules-plan.md).
+const keywordGeneration = new KeywordGenerationService()
+window.ioc.register('@diamondcoreprocessor.com/KeywordGenerationService', keywordGeneration)
+window.ioc.register('@diamondcoreprocessor.com/KeywordSuggestionsView', new KeywordSuggestionsView(keywordGeneration))
 
 const _keywords = new KeywordsQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/KeywordsQueenBee', _keywords)

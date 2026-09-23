@@ -165,7 +165,8 @@ export class UpdateScoutService {
 }
 
 const scout = new UpdateScoutService()
-window.ioc?.register?.('@diamondcoreprocessor.com/UpdateScoutService', scout)
+/** The one scout; hosts.drone.ts registers it (atomic-modules-plan.md). */
+export const updateScout = scout
 // One check per boot, well after first paint and the shell's bundled check.
 if (typeof window !== 'undefined') {
   setTimeout(() => {

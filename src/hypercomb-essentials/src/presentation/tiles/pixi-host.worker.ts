@@ -13,6 +13,7 @@ import {
   type PhysicalAnchor,
 } from './stage-centering.js'
 import { Settings } from '../../preferences/settings.js'
+import { AxialService } from '../grid/axial-service.js'
 
 export type HostReadyPayload = {
   app: Application
@@ -530,6 +531,7 @@ export class PixiHostWorker extends Worker {
 // THE BEE WIRES (atomic-modules-plan.md). A render-critical bee registers
 // the services it needs for the first paint, so they exist before it.
 window.ioc.register('@diamondcoreprocessor.com/Settings', new Settings())
+window.ioc.register('@diamondcoreprocessor.com/AxialService', new AxialService())
 
 const _pixiHost = new PixiHostWorker()
 window.ioc.register('@diamondcoreprocessor.com/PixiHostWorker', _pixiHost)

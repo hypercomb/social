@@ -165,4 +165,4 @@ export class NostrSigner {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/NostrSigner', new NostrSigner())
+// sharing/sharing.boot.drone.ts — the boot lane registers this (atomic-modules-plan.md): a dependency registers nothing.

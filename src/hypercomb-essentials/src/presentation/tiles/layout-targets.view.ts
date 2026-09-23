@@ -65,7 +65,7 @@ import {
   EffectBus, I18N_IOC_KEY, attachDockedPanel, isPhoneViewport,
   type DockedPanel, type I18nProvider,
 } from '@hypercomb/core'
-import { TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE } from './template-author.drone.js'
+import { TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE } from './template-author-effects.js'
 import type { HoleState, TargetsState } from './template-author.drone.js'
 
 const SURFACE = 'hc-layout-targets'
@@ -1002,12 +1002,6 @@ function ensureStyles(): void {
 // Contribute the surface the doctrine way: define the element, then add it to
 // the registry — never a tag in either app.html, and never an Angular class in
 // the shared barrel.
-;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void }) => void) => void } })
-  .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
-    if (!customElements.get(SURFACE)) customElements.define(SURFACE, LayoutTargetsElement)
-    try {
-      registry.add({ name: SURFACE, owner: OWNER, element: SURFACE, order: 138 })
-    } catch {
-      // duplicate add (hot reload) — the mounted surface is already live
-    }
-  })
+// presentation/tiles/template-author.drone.ts defines this element and adds it to the shell's surface registry
+// (atomic-modules-plan.md): a dependency registers nothing.
+export { SURFACE as LAYOUT_TARGETS_SURFACE, OWNER as LAYOUT_TARGETS_VIEW_KEY }

@@ -2083,4 +2083,5 @@ export class FolderSyncService {
 }
 
 const _folderSync = new FolderSyncService()
-;(window as any).ioc?.register?.(FOLDER_SYNC_KEY, _folderSync)
+// folder-sync.queen.ts registers this (atomic-modules-plan.md).
+export { _folderSync as folderSyncService }

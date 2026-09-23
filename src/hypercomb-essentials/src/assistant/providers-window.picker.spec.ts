@@ -44,7 +44,7 @@ let choice: { chosen(id: string): string | undefined; saved(id: string): readonl
 
 beforeAll(async () => {
   localStorage.clear()
-  await import('./providers-window.view.js')
+  await import('./llm.drone.js')   // the llm bee registers the console and the roster (atomic-modules-plan.md)
   choice = (await import('./llm-model-choice.js')).llmModelChoice
   // Wide stages for the flow tests; the cap has its own test below.
   ;(await import('./providers/openrouter-stages.js')).openRouterStages.set({ fast: 1, balanced: 5, deep: 20 })

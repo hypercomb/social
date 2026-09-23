@@ -13,7 +13,11 @@
 //      assessment under their own key, and the publisher reads the tally;
 //      the zone lists every open trial, and anyone finds this one there;
 //      `module changes` opens what it changes, file by file, with the host
-//      AI's reading and the tester's signed note, read by signature
+//      AI's reading and the tester's signed note, read by signature; the
+//      follower TAKES the trial at its path by hand — held in the brood, inert
+//      across a reload, and running only once accepted there with both warnings;
+//      then the follower COMMITS ITS OWN BUILD, and what it took is folded in —
+//      part of its package, no longer a pick, named in its published change
 //   4. `module promote` moves the live channel to the same root: the follower
 //      is told, replicates it from the host, and runs it
 //   5. a unit turned off and committed + promoted is unreachable for the
@@ -60,6 +64,11 @@ const panelOf = page => H.waitFor(() => page.evaluate(() => {
   }
 }), 60_000, 800)
 const closePanel = page => page.evaluate(() => document.querySelector('.hc-trial')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+/** What the brood holds from one root, unruled. */
+const heldFrom = (page, root) => page.evaluate(async r => {
+  const core = await import('@hypercomb/core')
+  return (await core.broodRoster()).filter(record => record.source.packageSig === r && !record.ruling).map(record => record.sig)
+}, root)
 const announcedOn = page => page.evaluate(() => {
   let got = null
   const off = globalThis.__hypercombEffectBus.on('update:available', p => { if (p?.source === 'channel') got = p.packageSig })
@@ -92,6 +101,7 @@ const announcedOn = page => page.evaluate(() => {
   const judged = run.jevCalls.find(c => c.rows.some(r => r.startsWith('write:')))
   check('Jev judged the write as a write row, with the header as the model wrote it', !!judged && judged.rows.some(r => r.includes(`${target.bee} ${target.section}`)))
   check('Jev was asked toward, beyond, grounded and every doctrine section', !!judged && ['write_toward', 'write_beyond', 'write_grounded'].every(k => judged.questions.includes(k)) && judged.questions.filter(k => /^write_rule\d+$/.test(k)).length >= 3)
+  check('Jev judged the write against the Life Primitive — its shape and its rules', !!judged && ['### The Life Primitive', '### The Life Primitive — its rules'].every(rule => judged.rules.includes(rule)), JSON.stringify(judged?.rules))
   check('the write ran through Execution as an edit', run.decided.some(d => d.kind === 'editing' && /^write /.test(d.lines[0])), JSON.stringify(run.decided))
   check('the draft is picked at the module\'s path', !!run.drafted && run.drafted[0].path === target.path)
 
@@ -138,6 +148,10 @@ const announcedOn = page => page.evaluate(() => {
   const testerRuns = await H.waitFor(() => H.installedOf(tester), 180_000, 1000)
   check('the tester\'s hive at the door installed exactly the sandbox package', testerRuns === sandboxRoot, String(testerRuns).slice(0, 12))
   check('the tester runs the code the model wrote', await proofOf(tester) === MARKER)
+  // The tester's words run through the module word's bee: a word said before
+  // that bee loads is read as a tile's name, so wait for it.
+  await H.waitFor(() => tester.evaluate(() => (!!window.ioc?.get('@diamondcoreprocessor.com/ModuleQueenBee')
+    && !!window.ioc?.get('@diamondcoreprocessor.com/HostSyncService')?.publishAtoms) || null), 60_000, 500)
 
   // ── 3b. ANYONE ASSESSES IT, UNDER THEIR OWN KEY ─────────────────────────
   const told = await H.waitFor(() => tester.evaluate(() => {
@@ -185,6 +199,59 @@ const announcedOn = page => page.evaluate(() => {
   await fol.page.reload({ waitUntil: 'domcontentloaded' })
   await H.sleep(8000)
   check('the follower is not told of a sandbox', (await announcedOn(fol.page)) !== sandboxRoot)
+
+  // ── 3e. YOUR OWN BUILD — anyone takes a trial at one path, held ─────────
+  await H.watchToasts(fol.page)
+  await H.say(fol.page, `module take ${CHANGE} @${WRITE}`)
+  const took = await H.toastsUntil(fol.page, /^Took |was not taken/)
+  const pickTaken = await fol.page.evaluate(async path => (await window.ioc.get('@hypercomb.social/Install').selection()).picks[path] ?? null, target.path)
+  check('the follower takes the trial at the path its change touched, by hand', pickTaken?.root === sandboxRoot && pickTaken?.byHand === true && (took ?? []).some(m => m.startsWith(`Took ${target.path} from ${SANDBOX}`)), JSON.stringify(took))
+  const heldHere = await heldFrom(fol.page, sandboxRoot)
+  check('what it brought waits in the brood as a stranger\'s code — only what is new', heldHere.length >= 1 && heldHere.length < 10, `${heldHere.length} held`)
+  await fol.page.reload({ waitUntil: 'domcontentloaded' })
+  await H.waitFor(() => fol.page.evaluate(() => !!window.ioc?.get('@diamondcoreprocessor.com/ModuleQueenBee')), 120_000, 1000)
+  await H.sleep(6000)
+  check('held code does not run: after a reload the follower still does not run the trial', await fol.page.evaluate(() => globalThis.__hivePublishProof ?? null) === null)
+  // The participant accepts it with the brood's word: both warnings shown
+  // and dismissed (brood-accept.ts), for each thing the take left held.
+  await H.watchToasts(fol.page)
+  await fol.page.evaluate(() => {
+    const bus = globalThis.__hypercombEffectBus
+    let live = false
+    bus.on('confirm:request', request => { if (live && request?.id) queueMicrotask(() => bus.emit('confirm:response', { id: request.id, confirmed: true })) })
+    live = true
+  })
+  for (const sig of heldHere) await H.say(fol.page, `brood accept ${sig.slice(0, 12)}`)
+  const accepted = await H.toastsUntil(fol.page, /^Accepted/, 60_000)
+  check('accepting in the brood composes the take in', (accepted ?? []).some(m => m.startsWith('Accepted: what you took')), JSON.stringify(accepted))
+  check('nothing it brought is still held', (await heldFrom(fol.page, sandboxRoot)).length === 0)
+  await fol.page.reload({ waitUntil: 'domcontentloaded' })
+  check('once accepted by hand, the follower runs the trial it took', await proofOf(fol.page) === MARKER)
+
+  // ── 3f. A BUILD FOR EVERYBODY — the follower commits what it took ───────
+  // A word said before its bee has loaded is read as a tile's name: wait for it.
+  await H.waitFor(() => fol.page.evaluate(() => !!window.ioc?.get('@diamondcoreprocessor.com/ModuleQueenBee') || null), 60_000, 500)
+  // Its build is its own: the trial it took, plus a unit of its own turned off.
+  // (Folding the trial alone would rebuild the trial's root byte for byte —
+  // the same composition is the same signature, wherever it is made.)
+  const folOff = await fol.page.evaluate(async skip => {
+    const sel = await window.ioc.get('@hypercomb.social/Install').selection()
+    const leaf = sel.nodes.filter(node => !node.children.length && node.bees.length && !skip.some(path => node.path === path || node.path.startsWith(`${path}/`)))
+    return leaf.sort((a, b) => a.path.localeCompare(b.path))[0]?.path ?? null
+  }, [target.path, 'assistant', 'sharing', 'commands', 'keyboard'])
+  await fol.page.evaluate(path => { const install = window.ioc.get('@hypercomb.social/Install'); install.setOffUnits([...install.offUnits(), path]) }, folOff)
+  await H.watchToasts(fol.page)
+  await H.say(fol.page, `module commit ${CHANGE}-mine @${WRITE}`)
+  const folded = await H.toastsUntil(fol.page, /^Sandbox |not stamped|not published|nothing to commit/)
+  const folSel = await fol.page.evaluate(async path => {
+    const sel = await window.ioc.get('@hypercomb.social/Install').selection()
+    return { trunk: sel.trunk, picked: !!sel.picks[path], layer: sel.nodes.find(node => node.path === path)?.layerSig ?? null }
+  }, target.path)
+  check('the follower commits its own build, and what it took is folded in — part of its package, no longer a pick', !!folSel.trunk && folSel.trunk !== sandboxRoot && !folSel.picked && folSel.layer === pickTaken.layer && !(await selectionHas(fol.page, folOff)), `${folOff}: ${JSON.stringify(folded)}`)
+  const folKey = await fol.page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/NostrSigner').getPublicKeyHex())
+  const folChangeSig = await H.waitFor(async () => channelOf(await hostState(), folKey, `change:${SANDBOX}-mine`), 60_000, 1000)
+  const folRecord = folChangeSig ? JSON.parse(await fromHost(folChangeSig)) : null
+  check('its published change says whose change it carries', (folRecord?.taken ?? []).some(entry => entry.path === target.path && entry.root === sandboxRoot), JSON.stringify(folRecord?.taken))
 
   // ── 4. PROMOTE: the live channel moves to the same root ─────────────────
   await H.watchToasts(page)

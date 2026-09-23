@@ -96,15 +96,15 @@ type InstallLike = Parameters<typeof takeDepsFrom>[0] & {
 type Say = (key: string, fallback: string, params?: Record<string, string | number>) => string
 type Toast = (message: string, type?: string) => void
 
-/** What the review reads and writes, from this hive's store and the host. */
+/** What the review reads and writes, from this hive's store and the host.
+ *  The host's AI is looked up only when a review asks it: its bee may load
+ *  after this word's, and an assessment or a published change never needs it. */
 const reviewDeps = (drafts: ModuleDraftsProvider, sync: HostSyncLike): ReviewDeps | null => {
   const store = window.ioc?.get?.(STORE_KEY) as StoreLike | undefined
-  const ai = window.ioc?.get?.(HOST_AI_KEY) as HostAiLike | undefined
   const putResource = store?.putResource?.bind(store)
   const getResource = store?.getResource?.bind(store)
-  const askWhole = ai?.askWhole?.bind(ai)
   const publishAtoms = sync.publishAtoms?.bind(sync)
-  if (!putResource || !getResource || !askWhole || !publishAtoms) return null
+  if (!putResource || !getResource || !publishAtoms) return null
   const bytesOf = async (sig: string): Promise<Uint8Array | null> => {
     const held = await drafts.bytesOf(sig).catch(() => null)
     if (held) return held
@@ -119,7 +119,10 @@ const reviewDeps = (drafts: ModuleDraftsProvider, sync: HostSyncLike): ReviewDep
       const done = await publishAtoms(host, sigs, bytesOf)
       return done.ok ? { ok: true } : { ok: false, error: done.error }
     },
-    ask: (host, question, context) => askWhole(host, question, context),
+    ask: async (host, question, context) => {
+      const ai = window.ioc?.get?.(HOST_AI_KEY) as HostAiLike | undefined
+      return ai?.askWhole ? ai.askWhole(host, question, context) : { ok: false, error: 'the host AI service is not loaded yet' }
+    },
     stamp: (host, key, sig) => setHiveRoot(host, key, sig),
     now: Date.now,
   }
@@ -275,7 +278,7 @@ export class ModuleQueenBee extends QueenBee {
       if (!outcome.taken.length) return
       const took = { paths: outcome.taken.join(', '), name, held: outcome.held }
       if (outcome.held) {
-        toast(t('module.tookheld', 'Took {paths} from {name}. Its new code waits in the brood ({held} held): accept it there, and it runs after a reload.', took), 'success')
+        toast(t('module.tookheld', 'Took {paths} from {name}. Its new code is held ({held}) and does not run until you accept it: brood list shows it, brood accept 1 lets it run, then reload.', took), 'success')
         EffectBus.emit('brood:open', { at: Date.now() })
       } else {
         toast(t('module.took', 'Took {paths} from {name} — reload to run it.', took), 'success')
@@ -367,8 +370,13 @@ export class ModuleQueenBee extends QueenBee {
     const name = sandboxName(words[0] ?? held[0]?.path.split('/').pop() ?? 'change')
     const committed = await drafts.commit(name)
     if (!committed.ok) { toast(committed.error, 'error'); return }
-    const what = [...committed.drafts, ...committed.off.map(path => `-${path}`)].join(', ')
+    // Folded picks, and those held back (core ModuleCommitOutcome `taken` / `held`).
+    const { taken = [], held: heldBack = [] } = committed as { taken?: readonly { path: string; root: string }[]; held?: readonly string[] }
+    const what = [...committed.drafts, ...taken.map(pick => `${pick.path} (taken)`), ...committed.off.map(path => `-${path}`)].join(', ')
     toast(t('module.committed', 'Committed {what}: package {root} is entry {index} of this host, and runs here on reload.', { what, root: committed.rootSig.slice(0, 12) + '…', index: committed.index }), 'success')
+    // A BUILD FOR EVERYBODY carries only code this hive accepted: what still
+    // waits in the brood stayed a pick, and is named so it is not forgotten.
+    if (heldBack.length) toast(t('module.heldback', 'Not folded in: {paths} still waits in the brood — accept it there, then commit again.', { paths: heldBack.join(', ') }), 'warning')
 
     // THE FILES FIRST, ALL OF THEM. The door installs the package from the
     // host alone, so the host must hold every file of it, not only the new
@@ -394,7 +402,7 @@ export class ModuleQueenBee extends QueenBee {
       // failure here leaves the sandbox open and says why.
       const deps = reviewDeps(drafts, sync)
       if (!deps) { toast(t('module.noreview', 'The review cannot run here: {reason}.', { reason: 'the host AI or the store is not loaded' }), 'warning'); return }
-      const change = await publishChange(host, name, committed.rootSig, committed.changes, committed.off, deps)
+      const change = await publishChange(host, name, committed.rootSig, committed.changes, committed.off, deps, taken)
       if (!change.ok) { toast(t('module.noreview', 'The review cannot run here: {reason}.', { reason: change.error }), 'warning'); return }
       await review(host, change.sig, change.record, deps, t, toast)
     } catch (error) {

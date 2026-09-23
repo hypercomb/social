@@ -5,7 +5,7 @@ import '@hypercomb/runtime/ioc.web'
 
 import { BEE_RESOLVER_KEY, hypercomb } from '@hypercomb/core'
 import { DependencyLoader } from '../../hypercomb-shared/core'
-import { ensureInstall } from './ensure-install'
+import { ensureInstall, installedSignature } from './ensure-install'
 import { resolveImportMap } from './resolve-import-map'
 
 // ensure side-effect registration
@@ -47,12 +47,18 @@ const bootstrap = async (): Promise<void> => {
   await ensureInstall()
   await attachImportMap()
 
-  // load dependency namespaces so services self-register
+  // load the eager dependencies; an atom loads when a bee imports it
   const loader = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
   await loader?.load?.()
 
+  // The boot lane: bees whose services everything else reads before any other
+  // bee loads (atomic-modules-plan.md, step 6). A dependency no longer
+  // registers itself; these bees register what the eager bundles used to.
+  const preloader = get('@hypercomb.social/ScriptPreloader') as
+    { loadBootBees?: (root?: string | null) => Promise<void> } | undefined
+  await preloader?.loadBootBees?.(installedSignature())
+
   // wire up the bee resolver
-  const preloader = get('@hypercomb.social/ScriptPreloader')
   if (preloader) {
     register(BEE_RESOLVER_KEY, preloader)
   }

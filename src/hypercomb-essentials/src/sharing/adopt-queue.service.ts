@@ -177,9 +177,6 @@ export class AdoptQueueService extends EventTarget {
 }
 
 const _adoptQueue = new AdoptQueueService()
-;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(
-  '@diamondcoreprocessor.com/AdoptQueueService',
-  _adoptQueue,
-)
+// sharing/swarm-adopt.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.
 
 export { _adoptQueue }

@@ -19,9 +19,10 @@ import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sig
 import { mintBuildRecord } from '../history/builds-slot.js'
 import { putSummary, listSummaryRuns, type FeedbackSummaryRecord } from './feedback-summaries.js'
 import { compactBreaks, listBreaks, updateIssue } from './breaks.js'
-import { readPublicBranches } from '../presentation/tiles/tile-actions.drone.js'
+import { readPublicBranches } from '../presentation/tiles/tile-public.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
 import { bridgeMaySetRootKey, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+import { SkillsWindowView } from './skills-window.view.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -2252,6 +2253,24 @@ const bytesToBase64 = (bytes: Uint8Array): string => {
   }
   return btoa(binary)
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): the skills window is the bridge's —
+// its "use" lands a request on the bridge, which imports that one skill.
+type SlashRegistrar = { addProvider?: (provider: unknown) => void }
+
+window.ioc.register('@diamondcoreprocessor.com/SkillsWindowView', new SkillsWindowView())
+
+window.ioc.whenReady?.('@diamondcoreprocessor.com/SlashBehaviourDrone', (drone: SlashRegistrar) => {
+  drone.addProvider?.({
+    name: 'skills-provider',
+    priority: 100,
+    behaviours: [
+      { name: 'skills', description: 'Browse the skill library', descriptionKey: 'slash.skills',
+        examples: [{ input: '/skills', result: 'Opens the skills window' }] },
+    ],
+    execute: () => { EffectBus.emit('skills:open', {}) },
+  })
+})
 
 const _claudeBridgeWorker = new ClaudeBridgeWorker()
 window.ioc.register('@diamondcoreprocessor.com/ClaudeBridgeWorker', _claudeBridgeWorker)

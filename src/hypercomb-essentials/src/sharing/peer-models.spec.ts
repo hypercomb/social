@@ -109,7 +109,7 @@ describe('what this machine will lend', () => {
 
   it('is off until it is switched on', async () => {
     const { isLendingModels, setLendingModels, PEER_OFFER_STORAGE_KEY } =
-      await import('./peer-models.drone.js')
+      await import('./peer-models-lending.js')
     localStorage.removeItem(PEER_OFFER_STORAGE_KEY)
     expect(isLendingModels()).toBe(false)
     setLendingModels(true)

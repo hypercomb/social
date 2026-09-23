@@ -7,7 +7,6 @@
 // descriptor stays registered, its key stays until Clear, and Restore at the
 // foot of its tab puts it all back. Device-local, like the key it pairs with.
 
-import { publishService } from './llm-provider-registry.js'
 
 export const LLM_PROVIDER_REMOVAL_IOC_KEY = '@hypercomb.social/LlmProviderRemoval'
 const STORAGE_KEY = 'hc:llm:removed'
@@ -50,6 +49,3 @@ export class LlmProviderRemovalStore extends EventTarget {
 }
 
 export const llmProviderRemoval = new LlmProviderRemovalStore()
-
-window.ioc?.register(LLM_PROVIDER_REMOVAL_IOC_KEY, llmProviderRemoval)
-publishService(LLM_PROVIDER_REMOVAL_IOC_KEY, llmProviderRemoval)

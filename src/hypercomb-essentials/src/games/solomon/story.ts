@@ -12,7 +12,7 @@ export const ROOT_PLACE = 'island'
 
 /** The only reshuffle surface. Rows are relations ("place P sits in entrance
  *  E"), grouped by the part (the entrance), never by the parent. */
-export const STORY: readonly StorySeat[] = [
+const seats: StorySeat[] = [
   { entrance: 'island/dawn-shrine',        place: 'labyrinth', arrive: 'sunseed' },
   { entrance: 'island/tide-shrine',        place: 'labyrinth', arrive: 'tideglass' },
   { entrance: 'island/pyramid-shrine',     place: 'labyrinth', arrive: 'starbloom' },
@@ -26,6 +26,10 @@ export const STORY: readonly StorySeat[] = [
   { entrance: 'chandler-house/trapdoor',   place: 'chandler-cellar' },
   { entrance: 'island/valley-grove',       place: 'greenwood' },
   { entrance: 'greenwood/old-hollow',      place: 'hollow-grove' },
+  { entrance: 'greenwood/root-cave',       place: 'root-run' },
+  { entrance: 'root-run/deeper',           place: 'the-burrow' },
+  { entrance: 'greenwood/burrow',          place: 'the-burrow' },
+  { entrance: 'the-burrow/deeper',         place: 'undercroft' },
   // Entrances are marks, never kinds: whatever a seat names leads in. These
   // five are examples of things that are not doors — a signpost, a tablet on
   // a cave wall, a stone in a room's wall, a patch of open air.
@@ -35,6 +39,11 @@ export const STORY: readonly StorySeat[] = [
   { entrance: 'labyrinth/sunseed-porch-ii.cell-00-02', place: 'greenwood' },
   { entrance: 'labyrinth/sunseed-porch-ii.cell-14-02', place: 'hollow-grove' },
 ]
+export const STORY: readonly StorySeat[] = seats
+
+/** A story add-on's seats, once read and checked (story-addons.ts) — they
+ *  join the one story, and every reader of `STORY` sees them. */
+export function registerSeats(list: readonly StorySeat[]): void { seats.push(...list) }
 
 export type StorySlotLook = TreasureKind | 'triangle' | 'hexagon' | 'star' | 'socket' | 'place' | 'task' | 'plot' | 'memory'
 
@@ -112,6 +121,9 @@ const PLACE_SLOTS: readonly StorySlot[] = [
   { id: 'chandler-cellar', name: 'Wenna’s Cellar', look: 'place', fills: { done: 'chandler-cellar' }, attainment: 'place:chandler-cellar' },
   { id: 'greenwood', name: 'The Greenwood', look: 'place', fills: { done: 'greenwood' }, attainment: 'place:greenwood' },
   { id: 'hollow-grove', name: 'The Hollow Grove', look: 'place', fills: { done: 'hollow-grove' }, attainment: 'place:hollow-grove' },
+  { id: 'root-run', name: 'The Root Run', look: 'place', fills: { done: 'root-run' }, attainment: 'place:root-run' },
+  { id: 'the-burrow', name: 'The Burrow', look: 'place', fills: { done: 'the-burrow' }, attainment: 'place:the-burrow' },
+  { id: 'undercroft', name: 'The Undercroft', look: 'place', fills: { done: 'undercroft' }, attainment: 'place:undercroft' },
   { id: 'labyrinth', name: 'A labyrinth', look: 'place', fills: { done: 'labyrinth' }, attainment: 'place:labyrinth' },
   { id: 'grove-plot', name: 'Old Grove Plot', look: 'plot', fills: { done: 'island/found:grove-plot' }, attainment: 'plot:grove-plot' },
   { id: 'lakeside-plot', name: 'Lakeside Plot', look: 'plot', fills: { done: 'island/found:lakeside-plot' }, attainment: 'plot:lakeside-plot' },

@@ -1478,15 +1478,6 @@ type IocShape = {
 const hostIoc = (): IocShape | undefined =>
   typeof window === 'undefined' ? undefined : (window as { ioc?: IocShape }).ioc
 
-hostIoc()?.register?.(OWNER, facade)
-
-// Contribute the surface the doctrine way: define the element, then add it to
-// the registry — never a tag in either app.html, never an Angular class.
-hostIoc()?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
-  if (!customElements.get(HOST_DIRECTORY_SURFACE)) customElements.define(HOST_DIRECTORY_SURFACE, HostDirectoryElement)
-  try {
-    registry.add({ name: HOST_DIRECTORY_SURFACE, owner: OWNER, element: HOST_DIRECTORY_SURFACE, order: 144 })
-  } catch {
-    // duplicate add (hot reload) — the mounted surface is already live
-  }
-})
+// hosts.drone.ts registers the facade and adds this element to the shell's
+// surface registry (atomic-modules-plan.md): a dependency registers nothing.
+export { facade as hostDirectoryFacade, OWNER as HOST_DIRECTORY_VIEW_KEY }

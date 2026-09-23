@@ -29,9 +29,20 @@ const DOCS = resolve(__dirname, '../../documentation')
 const OUT = resolve(__dirname, '../src/assistant/anatomy/anatomy.generated.ts')
 
 /** A section lifted verbatim: the document and the `## ` heading it starts
- *  at. Order here is reading order in the anatomy. */
-const DOCTRINE: readonly { doc: string; heading: string; maxLines?: number }[] = [
+ *  at. Order here is reading order in the anatomy. A `title` names the
+ *  section where its own heading only makes sense inside its document —
+ *  Jev's scoreboard reports the rule a change comes closest to breaking by
+ *  this name.
+ *
+ *  THE LIFE PRIMITIVE is doctrine (jwize, 2026-09-23): every part of the hive
+ *  shares one shape — a meta envelope, one typed hop, recursive — so all of it
+ *  is replayable, reviewable and traversable the same way across peers and
+ *  open communities. Its shape and its rules sit right after the signature
+ *  rule, and Jev judges every proposed change against both. */
+const DOCTRINE: readonly { doc: string; heading: string; title?: string; maxLines?: number }[] = [
   { doc: 'signature-system.md', heading: 'The core rule' },
+  { doc: 'life-primitive.md', heading: 'The primitive', title: 'The Life Primitive' },
+  { doc: 'life-primitive.md', heading: 'Rules', title: 'The Life Primitive — its rules' },
   { doc: 'hypergraph-molecule-lineage.md', heading: 'Data never heals — it moves forward' },
   { doc: 'hypergraph-molecule-lineage.md', heading: 'Backward compatibility is mandatory — NOTHING is deleted' },
   { doc: 'known-location-pools.md', heading: 'The rules (enforced where possible)' },
@@ -40,7 +51,7 @@ const DOCTRINE: readonly { doc: string; heading: string; maxLines?: number }[] =
 ]
 const MAX_SECTION_LINES = 60
 
-const liftSection = (doc: string, heading: string, maxLines = MAX_SECTION_LINES): string => {
+const liftSection = (doc: string, heading: string, maxLines = MAX_SECTION_LINES, title?: string): string => {
   const path = join(DOCS, doc)
   if (!existsSync(path)) throw new Error(`[anatomy] missing source document ${doc}`)
   const lines = readFileSync(path, 'utf8').split(/\r?\n/)
@@ -52,7 +63,7 @@ const liftSection = (doc: string, heading: string, maxLines = MAX_SECTION_LINES)
   while (body.length && !body[0].trim()) body.shift()
   while (body.length && !body[body.length - 1].trim()) body.pop()
   const clipped = body.length > maxLines ? [...body.slice(0, maxLines), '…'] : body
-  return `### ${heading}\n(source: ${doc})\n\n${sanitise(clipped.join('\n'))}`
+  return `### ${title ?? heading}\n(source: ${doc}${title ? ` › ${heading}` : ''})\n\n${sanitise(clipped.join('\n'))}`
 }
 
 /** The doctrine names the retired typed folders (`__hive__`, …) in order to
@@ -136,7 +147,7 @@ summary rather than the subtree, say so.
 The rules below are lifted verbatim from the documents that decide them.
 `
 
-const sections = DOCTRINE.map(entry => liftSection(entry.doc, entry.heading, entry.maxLines))
+const sections = DOCTRINE.map(entry => liftSection(entry.doc, entry.heading, entry.maxLines, entry.title))
 // The composition anatomy.service.ts repeats at runtime (doctrine.ts composeAnatomy).
 const text = `${MECHANICS}\n${sections.join('\n\n')}\n`
 
