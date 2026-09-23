@@ -396,9 +396,11 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
     [...drafts.keys(), ...off].some(changed => changed === path || changed.startsWith(`${path}/`))
 
   // THE MODULES THE DRAFTS RENAMED, and the modules the new root still
-  // reaches. The root's render-priority hint (`criticalBees`) names bees by
-  // sig, so it follows a rename and drops what the new root no longer
-  // reaches; left alone it would name modules the package does not carry.
+  // reaches. The root's render-priority hint (`criticalBees`) and its boot
+  // lane (`bootBees`) name bees by sig, so each follows a rename and drops
+  // what the new root no longer reaches; left alone they would name modules
+  // the package does not carry — and a boot bee left on its old sig would
+  // load first and register first, so the draft's copy would never win.
   const renames = new Map<string, string>()
   const walk = await walkTree(trunk, { ...io, fetch: async () => null })
   if (!walk.complete) return fail('the installed package cannot be walked here')
@@ -442,22 +444,25 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
       if (next !== child) changed = true
       cells.push(next === child || typeof entry !== 'string' ? entry : entry.replace(child, next))
     }
-    const critical = !path && Array.isArray(record['criticalBees'])
-      ? (record['criticalBees'] as unknown[]).flatMap(entry => {
+    const follow = (field: 'criticalBees' | 'bootBees'): unknown[] | undefined => !path && Array.isArray(record[field])
+      ? (record[field] as unknown[]).flatMap(entry => {
         if (typeof entry !== 'string') return [entry]
         const bee = bareSig(entry)
         if (renames.has(bee)) return [entry.replace(bee, renames.get(bee)!)]
         return kept.has(bee) ? [entry] : []
       })
       : undefined
+    const critical = follow('criticalBees')
+    const boot = follow('bootBees')
     if (critical && JSON.stringify(critical) !== JSON.stringify(record['criticalBees'])) changed = true
+    if (boot && JSON.stringify(boot) !== JSON.stringify(record['bootBees'])) changed = true
     // The root's dependency list, spelled as the trunk spells it (`<sig>.js`).
     const listed = Array.isArray(record['dependencies']) ? record['dependencies'] as unknown[] : []
     const suffix = typeof listed[0] === 'string' && listed[0].endsWith('.js') ? '.js' : ''
     const dependencies = !path && dependenciesMoved ? [...composed].sort().map(sig => `${sig}${suffix}`) : undefined
     if (dependencies) changed = true
     if (!changed) return sig
-    const bytes = encode(JSON.stringify({ ...record, cells, ...(critical ? { criticalBees: critical } : {}), ...(dependencies ? { dependencies } : {}) }))
+    const bytes = encode(JSON.stringify({ ...record, cells, ...(critical ? { criticalBees: critical } : {}), ...(boot ? { bootBees: boot } : {}), ...(dependencies ? { dependencies } : {}) }))
     const next = await sigOf(bytes)
     await writeLayer(next, bytes.buffer)
     minted.push(next)
