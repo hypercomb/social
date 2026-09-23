@@ -176,7 +176,9 @@ describe('the path shell', () => {
   })
 
   it('says why a shrine cannot open while the hive’s tiles are not ready, and the next push tries again', async () => {
-    native.create.mockImplementationOnce(() => { throw new Error('Hypercomb tiles are not ready yet; reopen Solomon’s Key when the hive has loaded') })
+    // Once for the story add-ons the opening reads, once for the push.
+    const notReady = (): never => { throw new Error('Hypercomb tiles are not ready yet; reopen Solomon’s Key when the hive has loaded') }
+    native.create.mockImplementationOnce(notReady).mockImplementationOnce(notReady)
     const overlay = mount()
     await enterSunseed()
     expect(overlay.journey.room).toBeNull()
@@ -504,6 +506,20 @@ describe('saves v3 carry the labyrinth and the path across a reopen', () => {
     frame()
     expect(second.journey.room?.id).toBe(roomId('sunseed', 'steps'))
     expect([...second.journey.inventory.relicIds]).toEqual(relics)
+  })
+
+  it('seats the worked story add-on: the Greenwood’s signpost at the gate leads up onto the Mossback', async () => {
+    mount()
+    await settle()
+    await enterGrove()
+    // The walk in carries her a little past the signpost at the gate. A seated
+    // thing keeps its verb (a sign is read), and is entered by pushing into it:
+    // back down beside it, then push west into it.
+    walk('ArrowDown', 5)
+    walk('ArrowLeft', 14)
+    await settle()
+    frame()
+    expect(crumbs()).toEqual(['The Sevenfold Valley', 'The Greenwood', 'The Mossback'])
   })
 
   it('reopens inside a world within the world, where she stood', async () => {

@@ -31,7 +31,7 @@ export interface SideCavernDefinition {
   readonly keyed: boolean
 }
 
-interface CavernPlan {
+export interface CavernPlan {
   readonly id: string
   readonly name: string
   readonly subtitle: string
@@ -42,7 +42,7 @@ interface CavernPlan {
   readonly finds: readonly string[]
 }
 
-function drawCavern(plan: CavernPlan): SideCavernDefinition {
+export function drawCavern(plan: CavernPlan): SideCavernDefinition {
   const cols = plan.art[0]?.length ?? 0
   if (!cols || plan.art.some(line => line.length !== cols)) throw new Error(`${plan.id} is not drawn square`)
   let mouth: Cell | null = null, deeper: Cell | null = null
@@ -192,7 +192,15 @@ const PLANS: readonly CavernPlan[] = [
   },
 ]
 
-export const SIDE_CAVERNS: readonly SideCavernDefinition[] = PLANS.map(drawCavern)
+const caverns: SideCavernDefinition[] = PLANS.map(drawCavern)
+export const SIDE_CAVERNS: readonly SideCavernDefinition[] = caverns
+
+/** Adds a cavern — a participant's, drawn as data — under its own id. */
+export function registerSideCavern(definition: SideCavernDefinition): boolean {
+  if (caverns.some(cavern => cavern.id === definition.id)) return false
+  caverns.push(definition)
+  return true
+}
 
 // ── a walk through one ───────────────────────────────────────────────────
 

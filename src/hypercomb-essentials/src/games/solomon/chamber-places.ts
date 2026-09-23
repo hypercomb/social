@@ -748,6 +748,15 @@ export const UNDERCROFT: ChamberDefinition = {
   ],
 }
 
-export const CHAMBERS: readonly ChamberDefinition[] = [
+const chambers: ChamberDefinition[] = [
   WET_STEPS, CISTERN, SPRING_HEART, HALL_OF_HOURS, SIX_ROADS, ACCORD_SANCTUM, CHANDLER_HOUSE, CHANDLER_CELLAR, HOLLOW_GROVE, UNDERCROFT,
 ]
+export const CHAMBERS: readonly ChamberDefinition[] = chambers
+
+/** Adds a chamber — a participant's, arriving as data — under its own id.
+ *  A chamber already known keeps its definition. */
+export function registerChamber(definition: ChamberDefinition): boolean {
+  if (chambers.some(chamber => chamber.id === definition.id)) return false
+  chambers.push(definition)
+  return true
+}

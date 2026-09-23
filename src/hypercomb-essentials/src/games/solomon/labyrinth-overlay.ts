@@ -23,6 +23,7 @@ import { PlacePath, entranceKey, seatAt, seatsOf, splitEntranceKey, MAX_PATH_DEP
 import { ROOT_PLACE, STORY, STORY_BOARDS, type GuideStep } from './story.js'
 import { PLACES, LABYRINTH_PLACE, placeName, seatLabel, crumbLabel, floorLabel, groupOfPlace } from './places.js'
 import { CHAMBERS } from './chamber-places.js'
+import { installStory, readStoryBundle, STORY_SEEDS } from './story-addons.js'
 import { WORLDS } from './worlds.js'
 import { worldMap } from './rpg-overworld.js'
 import { SIDE_CAVERNS, SideCavernRun } from './side-cavern.js'
@@ -891,19 +892,63 @@ export class SolomonLabyrinthOverlay {
     for (const [id, text] of pairs) this.#knowledge.set(id, text)
   }
 
+  /** The story add-ons' bundles: read from the game's `stories` tiles
+   *  (seeded once with the worked example) when there is a hive to read
+   *  them from — a promise — or the seeds themselves, at once. */
+  #storiesFrom(): unknown[] | Promise<unknown[]> {
+    const seeds = (): unknown[] => STORY_SEEDS.map(seed => seed.bundle)
+    try {
+      const tiles = this.#tileSurface()
+      if (typeof tiles.ensureStories === 'function') return tiles.ensureStories(STORY_SEEDS).catch(seeds)
+    } catch { /* no hive under the game: the seeds alone */ }
+    return seeds()
+  }
+
+  /** Seats each bundle into the story. A refusal is said once, and the game
+   *  goes on without that add-on. */
+  #seatStories(raws: readonly unknown[]): void {
+    const refused: string[] = []
+    for (const raw of raws) {
+      const bundle = readStoryBundle(raw)
+      if (!bundle) { refused.push('a story add-on could not be read'); continue }
+      const result = installStory(bundle)
+      if (!result.ok) refused.push(`${bundle.name}: ${result.problem}`)
+    }
+    if (refused.length) this.#message(`Not seated — ${refused[0]}`)
+  }
+
   async #restoreSlot(): Promise<void> {
     if (!this.#slots || !this.#root) return
+    // The add-ons first: a save can only resume in a place that stands. Only
+    // a hive read makes this wait (and the game busy); the seeds seat at once.
+    const stories = this.#storiesFrom()
+    let busy: Busy | null = null
+    if (Array.isArray(stories)) this.#seatStories(stories)
+    else {
+      busy = { kind: 'restore', cancelled: false, intent: null }
+      this.#busy = busy
+      this.#root.setAttribute('aria-busy', 'true')
+      const raws = await stories
+      if (busy.cancelled || !this.#root) return
+      this.#seatStories(raws)
+    }
     const raw = this.#slots.read()
     this.#restoreFailed = false
     this.#lastSaved = ''
     const plan = readAdventureSave(raw, STORY)
     if (!plan) {
       if (raw !== null) { this.#restoreFailed = true; this.#message('This slot could not be read. Its saved adventure has been kept.') }
+      if (busy && !busy.cancelled) {
+        this.#busy = null
+        this.#root.removeAttribute('aria-busy')
+        const next = busy.intent
+        if (next) this.#request(next)
+      }
       this.#save()
       this.#updateSaveStatus()
       return
     }
-    const busy: Busy = { kind: 'restore', cancelled: false, intent: null }
+    busy ??= { kind: 'restore', cancelled: false, intent: null }
     this.#busy = busy
     this.#root.setAttribute('aria-busy', 'true')
     this.#message(`Continuing Slot ${this.#slots.activeSlot}…`)

@@ -301,6 +301,8 @@ const BUILT_TERRAIN_FOR_CHAR: Readonly<Record<string, ChamberTerrain>> = {
   'f': 'floor', 'A': 'floor', 'h': 'floor', 's': 'floor', 'n': 'floor',
 }
 const LEGEND_CHARS = new Set(Object.keys(BUILT_TERRAIN_FOR_CHAR))
+/** Every glyph a chamber map may hold — what a participant's map is checked against. */
+export const CHAMBER_MAP_CHARS: ReadonlySet<string> = LEGEND_CHARS
 
 const DIR_VECTOR: Readonly<Record<Facing, ChamberCell>> = {
   up: { col: 0, row: -1 }, down: { col: 0, row: 1 }, left: { col: -1, row: 0 }, right: { col: 1, row: 0 },

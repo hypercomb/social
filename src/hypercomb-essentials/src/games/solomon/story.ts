@@ -12,7 +12,7 @@ export const ROOT_PLACE = 'island'
 
 /** The only reshuffle surface. Rows are relations ("place P sits in entrance
  *  E"), grouped by the part (the entrance), never by the parent. */
-export const STORY: readonly StorySeat[] = [
+const seats: StorySeat[] = [
   { entrance: 'island/dawn-shrine',        place: 'labyrinth', arrive: 'sunseed' },
   { entrance: 'island/tide-shrine',        place: 'labyrinth', arrive: 'tideglass' },
   { entrance: 'island/pyramid-shrine',     place: 'labyrinth', arrive: 'starbloom' },
@@ -39,6 +39,11 @@ export const STORY: readonly StorySeat[] = [
   { entrance: 'labyrinth/sunseed-porch-ii.cell-00-02', place: 'greenwood' },
   { entrance: 'labyrinth/sunseed-porch-ii.cell-14-02', place: 'hollow-grove' },
 ]
+export const STORY: readonly StorySeat[] = seats
+
+/** A story add-on's seats, once read and checked (story-addons.ts) — they
+ *  join the one story, and every reader of `STORY` sees them. */
+export function registerSeats(list: readonly StorySeat[]): void { seats.push(...list) }
 
 export type StorySlotLook = TreasureKind | 'triangle' | 'hexagon' | 'star' | 'socket' | 'place' | 'task' | 'plot' | 'memory'
 
