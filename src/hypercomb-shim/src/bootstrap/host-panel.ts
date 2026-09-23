@@ -17,7 +17,7 @@
 // there is nothing to render with but the DOM.
 
 import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
-import { installPackage, type HostPackage } from './replicate'
+import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
 import { askHostPackages } from '@hypercomb/runtime/host-packages'
 import { frontDoorOf, readPublicDoors, readWelcome, showsDeployedNodes, type FrontDoor, type Welcome, type WelcomeDoor, type WelcomeLink } from './welcome'
 
@@ -114,6 +114,9 @@ li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; bo
 .status { min-height: 1.4em; margin: 1rem 0 0; color: #8fa3b4; }
 .status[data-tone="bad"] { color: #d98b8b; }
 .status[data-tone="good"] { color: #8fbf9f; }
+.revision { margin: 0; padding: .7rem .8rem; border: 1px solid rgba(126,182,214,.20); border-radius: 6px; }
+.revision code { display: block; color: #eaf2f8; overflow-wrap: anywhere; font-size: .83em; }
+.revision span { display: block; margin-top: .35rem; color: #8fa3b4; }
 
 /* the footer — where the platform explains itself, on every host */
 footer {
@@ -199,6 +202,8 @@ class HostPanelElement extends HTMLElement {
     panel.className = 'panel'
 
     panel.append(...this.#frontDoor(door))
+    panel.append(this.#current())
+    panel.append(this.#bySignature())
     if (this.#self) panel.append(this.#published())
     panel.append(this.#carried(zones))
     if (door.footer.length > 0) panel.append(this.#footer(door.footer))
@@ -286,6 +291,54 @@ class HostPanelElement extends HTMLElement {
     host.textContent = door.host
     anchor.append(title, host)
     return anchor
+  }
+
+  /** The revision this hive selected. The first screen can show it without
+   *  loading any package code or trusting a host's mutable listing. */
+  #current(): HTMLElement {
+    const section = document.createElement('section')
+    const heading = document.createElement('h2')
+    heading.className = 'lbl'
+    heading.textContent = 'Your package'
+    const revision = document.createElement('p')
+    revision.className = 'revision'
+    const sig = installedPackageSig()
+    if (sig) {
+      const code = document.createElement('code')
+      code.textContent = sig
+      const note = document.createElement('span')
+      note.textContent = 'Selected revision. Replicate another package below to switch, or replicate this one again to repair missing files.'
+      revision.append(code, note)
+    } else {
+      revision.textContent = 'No package selected. Choose one published by this host or a domain you add below.'
+    }
+    section.append(heading, revision)
+    return section
+  }
+
+  /** A known signature can be replicated even when no host lists it. The
+   *  same authority and byte-verification gates handle listed and pasted roots. */
+  #bySignature(): HTMLElement {
+    const section = document.createElement('section')
+    const heading = document.createElement('h2')
+    heading.className = 'lbl'
+    heading.textContent = 'Replicate a package by signature'
+    const form = document.createElement('form')
+    const input = document.createElement('input')
+    input.placeholder = '64-character package signature'
+    input.spellcheck = false
+    input.autocapitalize = 'off'
+    input.setAttribute('aria-label', 'Package signature')
+    const take = document.createElement('button')
+    take.type = 'submit'
+    take.textContent = 'Replicate'
+    form.append(input, take)
+    form.addEventListener('submit', event => {
+      event.preventDefault()
+      void this.#installSignature(input.value, take)
+    })
+    section.append(heading, form)
+    return section
   }
 
   /** What THIS origin publishes — the presentation of a host is what it
@@ -436,8 +489,9 @@ class HostPanelElement extends HTMLElement {
 
     const take = document.createElement('button')
     take.type = 'button'
-    take.textContent = 'Replicate'
-    take.addEventListener('click', () => { void this.#install(pkg, take) })
+    const action = pkg.packageSig === installedPackageSig() ? 'Repair' : 'Replicate'
+    take.textContent = action
+    take.addEventListener('click', () => { void this.#replicate(pkg.packageSig, take, () => installPackage(pkg)) })
 
     row.append(label, take)
     return row
@@ -461,18 +515,42 @@ class HostPanelElement extends HTMLElement {
     this.#say(`Removed ${zone}.`)
   }
 
-  async #install(pkg: HostPackage, button: HTMLButtonElement): Promise<void> {
+  async #installSignature(raw: string, button: HTMLButtonElement): Promise<void> {
+    if (this.#busy) return
+    const sig = raw.trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(sig)) {
+      this.#say('Enter a 64-character package signature.', 'bad')
+      return
+    }
+    const zones = [...new Set([this.#self, ...await listHostZones()].filter(Boolean))]
+    if (zones.length === 0) {
+      this.#say('Add a domain that holds this package first.', 'bad')
+      return
+    }
+    await this.#replicate(sig, button, () => acquire(sig, zones))
+  }
+
+  async #replicate(sig: string, button: HTMLButtonElement, run: () => Promise<InstallOutcome>): Promise<void> {
     if (this.#busy) return
     this.#busy = true
     for (const other of this.#root.querySelectorAll('button')) other.disabled = true
+    const action = button.textContent ?? 'Replicate'
     button.textContent = 'Replicating…'
-    this.#say(`Replicating ${pkg.packageSig.slice(0, 12)}… from ${pkg.zone}.`)
+    this.#say(`Replicating ${sig.slice(0, 12)}…`)
 
-    const outcome = await installPackage(pkg)
+    let outcome: InstallOutcome
+    try { outcome = await run() }
+    catch (error) {
+      this.#busy = false
+      for (const other of this.#root.querySelectorAll('button')) other.disabled = false
+      button.textContent = action
+      this.#say(error instanceof Error ? error.message : 'Replication failed.', 'bad')
+      return
+    }
     if (!outcome.ok) {
       this.#busy = false
       for (const other of this.#root.querySelectorAll('button')) other.disabled = false
-      button.textContent = 'Replicate'
+      button.textContent = action
       this.#say(outcome.error ?? 'Replication failed.', 'bad')
       console.warn('[shim] replication incomplete', outcome)
       return

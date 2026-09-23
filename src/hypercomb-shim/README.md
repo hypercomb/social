@@ -22,7 +22,10 @@ dependencies. It serves bytes that were signed elsewhere.
 ## Pure install
 
 `npm run build:pure` (or `npm run build:shim:pure` from `src/`) builds the cold harness: core, the signature fetcher,
-the runner and the pinned acquisition beehavior. It carries no application
+the runner and one pinned ESM host-management beehavior. Its UI appears before
+any adopted beehavior loads. It shows the selected package, lets a participant
+add or remove hosts, browse their offers, and replicate a package by signature.
+It carries no application
 package, locale catalogs, or Pixi renderer. An empty `/content` and no
 `host:packages` pool are valid until a participant adopts a package.
 
@@ -40,7 +43,8 @@ did not have to be invented, only unfused from Angular.
 
 ```
 ioc.web  →  packed-store gate  →  SW control  →  import map
-         →  DependencyLoader   →  initializeRuntime  →  mountSurfaces
+         →  verified ESM host UI  →  DependencyLoader  →  initializeRuntime
+         →  mountSurfaces  →  first pulse
 ```
 
 No Angular, no Vite, no `ng` builder — one `esbuild` call. If the boot needs a
@@ -117,10 +121,14 @@ SPA-fallback page can only ever cost a 404.
 > `hypercomb-web/public/hypercomb.worker.js`, which stays frozen for the live
 > deploy. Do not resync them — the shim is the survivor.
 
-## Add a domain. That is the whole interaction.
+## One screen for hosts and packages
 
-A cold node shows one card: a field, and the domains you carry. Add one, and
-its packages appear; click one, and it is yours.
+A cold node shows one card: its selected package, the domains it carries and
+their offers, and a field for a known package signature. Add a domain and its
+packages appear; select one or paste a signature to replicate it. The card
+remains reachable at `/hosts` after imported views take over. The in-hive
+command line, like every other view, arrives as a beehavior; the `host/` scripts
+in this repository are device setup and deployment tools.
 
 ```
 add a domain  →  <domain>/manifest.json  →  seal the record
