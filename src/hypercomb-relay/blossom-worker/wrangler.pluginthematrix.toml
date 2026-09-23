@@ -151,6 +151,9 @@ id = "186c91f7458b421abea02d7647f27821"
 # The front door every frontDoor apex serves: the shim host card, a static
 # Pages deployment (npm --prefix hypercomb-shim run host:deploy -- --project hypercomb-host).
 HOST_DOOR_ORIGIN = "https://hypercomb-host.pages.dev"
+# The participant shell a sandbox door (try-<label>.<zone>) proxies to for
+# everything that is not the package's own files (worker.js serveSandboxShell).
+SANDBOX_SHELL_ORIGIN = "https://hypercomb.io"
 # There is no visitor hold: a door opens only while the publisher's SIGNED
 # index names its lineage (worker.js "open is a signed mark"). Unpublish hides it.
 AUTO_GRANT = "1"
