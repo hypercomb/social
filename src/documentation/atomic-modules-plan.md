@@ -538,6 +538,35 @@ The tail did NOT move (last module about 2.4 s, as before): it is set by the
 NUMBER of modules and their import chains, not their bytes. That settles the
 order — lazy seams next; a transfer pack would not shorten it either.
 
+**Found and fixed: the tail was two costs, and neither was the code.**
+1. *Import chains.* The browser learns what an atom imports only after
+   fetching it, so a chain is one round trip per level — up to eight or nine
+   deep (substrate → comfy → published-pools → intake-filter → …). The
+   install now derives each bee's whole STATIC atom closure from the admitted
+   bytes (`hypercomb-runtime/src/bee-deps.ts`, the same hint map as `beeDeps`;
+   eager namespace bundles stay out of it so their services still register at
+   boot), and the preloader imports the closure all at once before the bee
+   evaluates. Dynamic `import()` is never followed — seams stay lazy.
+2. *The service worker's cache lookup.* Every module request did
+   `cache.match(request, { ignoreSearch: true })`, which scans every cached
+   entry. With about a thousand modules held: 200 lookups took 611 ms that
+   way and 12 ms exactly. The worker now keys the cache on the URL without
+   its query and matches exactly — the same answer, since every path it
+   serves names its bytes (web, dev, shim and meadowverse workers;
+   `service-worker.spec.ts` refuses `ignoreSearch` back).
+
+| Everything atomized, same package | Before these two | After |
+|---|---|---|
+| One module fetch, median | about 490 ms | 2–3 ms |
+| Last module arrives | 2.39 s | 0.98 s |
+| Bees ready for the first render | 909 ms | 617 ms |
+| First paint | 534 ms | 320 ms |
+
+Against the package from before any atomization (last module 1.23 s, first
+render 1291 ms) the atomized hive is now faster on every boot measure. The
+remaining tail is bee scheduling and evaluation, not fetching. Lazy seams
+(4c) still cut what loads at all; they are no longer needed for speed.
+
 ## Non-goals
 - No new pool, no new `__x__` folder. Atoms live in `sign('dependencies')`
   as today.

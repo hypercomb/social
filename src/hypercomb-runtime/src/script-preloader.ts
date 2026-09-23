@@ -128,6 +128,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   readonly #bySignature = new Map<string, ActionDescriptor>()
   readonly #beeCache = new Map<string, Bee>()
   readonly #loadedDeps = new Set<string>()
+  /** Dependency sig → alias, rebuilt whenever the alias map is replaced. */
+  #aliasBySig = new Map<string, string>()
+  #aliasBySigOf: Map<string, string> | null = null
   /** Signatures the brood held back, so the refusal is said once per session. */
   readonly #heldBack = new Set<string>()
   // In-flight dedup: prevents two callers from loading the same bee concurrently
@@ -797,29 +800,30 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const aliasMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
     if (!aliasMap) return
 
-    for (const depSig of needed) {
-      if (this.#loadedDeps.has(depSig)) continue
+    // Reverse index, once per alias map. Its values may carry the .js suffix
+    // (stored as filenames); the index is keyed on the bare signature.
+    if (this.#aliasBySigOf !== aliasMap) {
+      this.#aliasBySig = new Map([...aliasMap].map(([alias, sig]) => [sig.replace(/\.js$/i, ''), alias]))
+      this.#aliasBySigOf = aliasMap
+    }
 
-      // Reverse lookup: find alias for this dep signature
-      // aliasMap values may have .js suffix (stored as filenames); strip when comparing
-      let alias: string | undefined
-      for (const [a, s] of aliasMap) {
-        if (s.replace(/\.js$/i, '') === depSig) { alias = a; break }
-      }
+    // ALL AT ONCE (bee-deps.ts). The list holds the bee's whole atom closure,
+    // so every module in it is asked for together; one at a time, or left to
+    // the bee's own imports, each level of an import chain waits for the level
+    // above to arrive. Evaluation order is still the module graph's own.
+    await Promise.all(needed.filter(depSig => !this.#loadedDeps.has(depSig)).map(async depSig => {
+      const alias = this.#aliasBySig.get(depSig)
       if (!alias) {
         console.warn(`[script-preloader] no alias found for dep ${depSig} (bee ${beeSig})`)
-        continue
+        return
       }
-
       try {
-        console.log(`[script-preloader] loading dep ${depSig} (${alias}) for bee ${beeSig}`)
         await import(/* @vite-ignore */ alias)
         this.#loadedDeps.add(depSig)
-        console.log(`[script-preloader] dep ${depSig} loaded`)
       } catch (err) {
         console.warn(`[script-preloader] failed to load dep ${depSig} for bee ${beeSig}:`, err)
       }
-    }
+    }))
   }
 
   // -------------------------------------------------
