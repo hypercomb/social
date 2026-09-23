@@ -746,7 +746,7 @@ test('a zone lists every open trial from what its door serves, newest first', as
   ]))
   const records = new Map([
     [changeOld, { kind: 'module-change', changes: [{ section: 'src/a.ts' }], off: ['games/pong'], at: 1000 }],
-    [changeNew, { kind: 'module-change', changes: [{ section: 'src/b.ts' }, { section: 7 }], off: [], at: 2000 }],
+    [changeNew, { kind: 'module-change', changes: [{ section: 'src/b.ts' }, { section: 7 }], off: [], at: 2000, taken: [{ path: 'commands', root: older }, { path: 7, root: older }, { path: 'x', root: 'short' }] }],
     [review, { kind: 'module-review', verdict: 'refuse' }],
     ['a'.repeat(63) + '1', { kind: 'jev-reading', verdict: 'breaks' }],
   ])
@@ -768,6 +768,8 @@ test('a zone lists every open trial from what its door serves, newest first', as
   assert.equal(fresh.door, 'https://try-new-rooms.hypercomb.com')
   assert.deepEqual([fresh.at, fresh.sections, fresh.review, fresh.reviewVerdict], [2000, ['src/b.ts'], review, 'refuse'])
   assert.deepEqual([fresh.jev, fresh.jevVerdict, old.jevVerdict], ['a'.repeat(63) + '1', 'breaks', undefined])
+  // What a trial took from other builds travels with the listing: adoption is public.
+  assert.deepEqual([fresh.taken, old.taken, theirs.taken], [[{ path: 'commands', root: older }], [], []])
   assert.deepEqual([old.sections, old.off, old.reviewVerdict], [['src/a.ts'], ['games/pong'], undefined])
   assert.deepEqual([theirs.at, theirs.publisher, theirs.sections], [null, 'Other', []])
   // Any door on the zone answers the same listing.

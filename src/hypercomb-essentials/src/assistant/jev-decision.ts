@@ -478,3 +478,83 @@ export const jevDoctrineSections = (anatomy: string): string[] => {
   const sections = anatomy.slice(start).split(/\n(?=### )/).slice(1).map(section => section.trim()).filter(Boolean)
   return sections.length ? sections : [anatomy.slice(start).trim()]
 }
+
+// ── JEV WEIGHS A ZONE (documentation/module-sandbox.md, "Deciding directions") ──
+//
+// THE OPEN TRIALS ON A ZONE, WEIGHED TOGETHER. Code lists what is known about
+// each trial in plain words — what it changes, how the host's AI and Jev read
+// it, what the people who assessed it said, who took it into their own build,
+// and which other trial changes the same file — Jev answers one batch of snap
+// questions over that table, and code composes the pass: each trial's
+// standing (take · discuss · wait) and where to focus first. Jev weighs the
+// evidence as written; it never fetches, takes or folds. jwize, 2026-09-23:
+// "JEV can also make decisions across this network for us."
+
+export interface JevPassInput {
+  readonly zone: string
+  readonly trials: readonly { readonly name: string; readonly evidence: string }[]
+}
+export type JevTrialStanding = 'take' | 'discuss' | 'wait'
+export interface JevPassTrial { readonly name: string; readonly conforms: number; readonly refused: number; readonly standing: JevTrialStanding }
+export interface JevPassResult {
+  readonly trials: readonly JevPassTrial[]
+  /** The trial to focus on first when Jev's choice is confident; null otherwise. */
+  readonly focus: string | null
+  readonly confidence?: number
+  readonly model: string
+  readonly answers: Record<string, unknown>
+  readonly usage?: { inputTokens?: number; outputTokens?: number; cost?: number }
+}
+
+/** Trials weighed in one pass: the newest, one row each. */
+export const JEV_PASS_TRIALS = JEV_MAX_ROWS
+
+export const jevPassState = (input: JevPassInput): { request: string; evidence: readonly string[]; rows: readonly Omit<JevRow, 'reach'>[] } => ({
+  request: `Weigh the open trials on ${input.zone}. Each row is one trial that could be taken into a build for everybody; evidence[i] is what is known about it — what it changes, how the host's AI and Jev read it, what the people who assessed it said, and who took it.`,
+  evidence: input.trials.map(trial => trial.evidence),
+  rows: input.trials.map((trial, i) => ({ id: `t${i}`, kind: 'do' as const, label: trial.name, lines: [`take ${trial.name}`, `what is known is evidence[${i}]`] })),
+})
+
+/** Two questions per trial and one choice — one condition each. */
+export const jevPassQuestions = (input: JevPassInput): JevQuestions => {
+  const questions: JevQuestions = {}
+  input.trials.forEach((_, i) => {
+    questions[`t${i}_conforms`] = { type: 'noul', instructions: DATA + `Does \`evidence[${i}]\` say that both the host's AI and Jev read \`rows[${i}]\` as within the rules?`,
+      criteria: { true: 'Both readings are within the rules: the host\'s AI says accept and Jev says follows.', false: 'A reading is missing, unsure, or against it.' } }
+    questions[`t${i}_refused`] = { type: 'noul', instructions: DATA + `Does \`evidence[${i}]\` show that someone who assessed \`rows[${i}]\` refused it?`,
+      criteria: { true: 'At least one person refused it.', false: 'No one refused it.' } }
+  })
+  questions['focus'] = {
+    type: 'choice',
+    instructions: DATA + 'Which trial should the community focus on first: within the rules, welcomed by the people who assessed it, taken by others, and not changing a file another trial changes? Choose none when no trial stands out.',
+    criteria: Object.fromEntries([...input.trials.map((trial, i) => [`t${i}`, `rows[${i}]: ${trial.name}`]), ['none', 'No trial stands out']]),
+  }
+  return questions
+}
+
+/** Where each trial stands: a refusal past `beyond` is to discuss, conformance
+ *  past `toward` is to take, anything else waits. The focus is Jev's choice
+ *  when it is confident past the floor. */
+export const jevPassResult = (raw: unknown, input: JevPassInput, rubric: JevRubric = {}): JevPassResult => {
+  const body = object(raw)
+  const answers = object(body['answers'])
+  const G = { ...JEV_GATES, ...rubric.gates }
+  const trials = input.trials.map((trial, i) => {
+    const conforms = noul(answers, `t${i}_conforms`)
+    const refused = noul(answers, `t${i}_refused`)
+    const standing: JevTrialStanding = refused > G.beyond ? 'discuss' : conforms >= G.toward ? 'take' : 'wait'
+    return { name: trial.name, conforms, refused, standing }
+  })
+  const focus = object(answers['focus'])
+  const keys = [...input.trials.map((_, i) => `t${i}`), 'none']
+  if (focus['type'] !== 'choice' || typeof focus['choice'] !== 'string' || !keys.includes(focus['choice'])) throw new Error('Jev returned an unknown choice')
+  const confidence = focus['confidence'] === undefined ? undefined : probability(focus['confidence'])
+  const chosen = focus['choice'] !== 'none' && confidence !== undefined && confidence >= G.floor ? input.trials[Number(focus['choice'].slice(1))] : undefined
+  const usage = object(body['usage'] ?? {})
+  const count = (n: unknown): number | undefined => typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : undefined
+  return {
+    trials, focus: chosen?.name ?? null, ...(confidence === undefined ? {} : { confidence }), answers,
+    model: typeof body['model'] === 'string' ? body['model'] : JEV_MODEL,
+    usage: { inputTokens: count(usage['input_tokens']), outputTokens: count(usage['output_tokens']), cost: count(usage['cost']) },
+  }
+}

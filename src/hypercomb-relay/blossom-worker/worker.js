@@ -717,8 +717,9 @@ async function assessmentsOf(env, root, read) {
 // resolveSite and sandboxRoot — the two reads the door itself makes — so the
 // listing never names a door that answers "nothing here", and where two
 // publishers name one trial it lists the one the door serves. Beside each: the
-// source files its change touched and the paths it turned off (the change
-// record), when it was committed, and the host AI's verdict. People's
+// source files its change touched, the paths it turned off and what it took
+// from other builds (the change record), when it was committed, and how the
+// host's AI and Jev read it. People's
 // assessments stay at each door's /site.json, re-verified as they are read.
 const TRIALS_SHOWN = 100
 
@@ -751,6 +752,7 @@ async function serveTrials(request, env, zone) {
           at: Number.isFinite(change?.at) ? change.at : null,
           sections: paths(Array.isArray(change?.changes) ? change.changes.map((file) => file?.section) : []),
           off: paths(change?.off),
+          taken: (Array.isArray(change?.taken) ? change.taken : []).filter((pick) => typeof pick?.path === 'string' && pick.path && SIG_RE.test(String(pick?.root || ''))).slice(0, 20).map((pick) => ({ path: pick.path, root: pick.root })),
           ...(found.change ? { change: found.change } : {}),
           ...(found.review ? { review: found.review, reviewVerdict: ASSESS_VERDICTS.has(review?.verdict) ? review.verdict : 'unclear' } : {}),
           ...(found.jev ? { jev: found.jev, jevVerdict: JEV_VERDICTS.has(jev?.verdict) ? jev.verdict : 'unsure' } : {}),

@@ -4,7 +4,7 @@ import { llmModelChoice } from './llm-model-choice.js'
 import { llmHiveAccess } from './llm-hive-access.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import { openRouterRouting, providerBlock } from './providers/openrouter-routing.js'
-import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevReadingQuestions, jevReadingResult, jevReadingState, jevResult, jevState, type JevInput, type JevReadingInput, type JevReadingResult, type JevResult } from './jev-decision.js'
+import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevReadingQuestions, jevReadingResult, jevReadingState, jevResult, jevState, type JevInput, type JevReadingInput, type JevReadingResult, type JevResult, type JevPassInput, type JevPassResult, jevPassQuestions, jevPassResult, jevPassState } from './jev-decision.js'
 import type { JevDirectInput } from './jev-direct.js'
 import { jevFrontInput, jevFrontQuestions, jevFrontResult, jevFrontState, type JevFrontResult } from './jev-front.js'
 import { jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyResult } from './jev-verify.js'
@@ -109,6 +109,19 @@ export class JevDecisionService {
     const state = jevReadingState(input)
     if (JSON.stringify(state).length > (llmHiveAccess.budget('openrouter') ?? 24_000)) throw boundary('Jev reading exceeds the OpenRouter read budget')
     return this.#post({ state, questions: jevReadingQuestions(input) }, body => jevReadingResult(body, input), signal, 30_000)
+  }
+
+  /** JEV WEIGHS A ZONE (jev-decision.ts, "Jev weighs a zone"): the open
+   *  trials, from what the zone lists and their doors say, weighed in one
+   *  call — where each stands, and where to focus first. Gated like a
+   *  reading; the evidence is public by construction, so no worker boundary
+   *  applies. */
+  async pass(input: JevPassInput, signal?: AbortSignal): Promise<JevPassResult> {
+    signal?.throwIfAborted()
+    if (!this.readyForHive()) throw new Error('Jev requires Jev switched on and the OpenRouter hive read grant')
+    const state = jevPassState(input)
+    if (JSON.stringify(state).length > (llmHiveAccess.budget('openrouter') ?? 24_000)) throw boundary('Jev pass exceeds the OpenRouter read budget')
+    return this.#post({ state, questions: jevPassQuestions(input) }, body => jevPassResult(body, input), signal, 30_000)
   }
 
   /** THE FRONT DOOR (jev-front.ts): one call per message, before any worker

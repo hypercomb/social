@@ -152,10 +152,16 @@ const draftThroughChat = async (page, target, newBody) => {
         const q = body.questions[key]
         if (q.type === 'choice') {
           const keys = Object.keys(q.criteria ?? {})
-          const pick = key === 'next' ? (keys.find(k => k === 'write') ?? keys[0]) : keys.includes('none') ? 'none' : keys[keys.length - 1]
-          answers[key] = { type: 'choice', choice: pick, confidence: key === 'next' ? 0.95 : 0.4 }
+          // The pass's focus: the first trial the evidence says nobody refused.
+          const evidence = body.state?.evidence ?? []
+          const welcomed = keys.find(k => /^t\d+$/.test(k) && !/ [1-9]\d* refuse,/.test(String(evidence[Number(k.slice(1))] ?? '')))
+          const pick = key === 'next' ? (keys.find(k => k === 'write') ?? keys[0]) : key === 'focus' ? (welcomed ?? 'none') : keys.includes('none') ? 'none' : keys[keys.length - 1]
+          answers[key] = { type: 'choice', choice: pick, confidence: key === 'next' || key === 'focus' ? 0.95 : 0.4 }
           continue
         }
+        // A trial's refusal is read off its evidence, as Jev would.
+        const refused = /^t(\d+)_refused$/.exec(key)
+        if (refused) { answers[key] = { type: 'noul', noul: / [1-9]\d* refuse,/.test(String((body.state?.evidence ?? [])[Number(refused[1])] ?? '')) ? 0.9 : 0.03 }; continue }
         const negative = /_(beyond|known)$|_rule\d+$/.test(key) || key === 'single'
         answers[key] = { type: 'noul', noul: key === 'hive' ? 0.97 : negative ? 0.02 : 0.97 }
       }

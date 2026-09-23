@@ -26,7 +26,7 @@
 
 import { broodRoster, sectionOf, SignatureService } from '@hypercomb/core'
 import { diffLines, type DiffRow, type LineDiff } from './line-diff.js'
-import { JEV_READING_CHARS, JEV_READING_FILES, JEV_RUBRIC, type JevReadingFile, type JevReadingInput, type JevReadingResult, type JevReadingVerdict } from './jev-decision.js'
+import { JEV_READING_CHARS, JEV_READING_FILES, JEV_RUBRIC, type JevReadingFile, type JevReadingInput, type JevReadingResult, type JevReadingVerdict, type JevPassInput, type JevPassResult, type JevReadingRule, type JevTrialStanding, JEV_PASS_TRIALS } from './jev-decision.js'
 
 export type ReviewVerdict = 'accept' | 'refuse' | 'unclear'
 
@@ -234,6 +234,10 @@ export interface SandboxTrial {
   readonly change?: string
   readonly review?: string
   readonly reviewVerdict?: ReviewVerdict
+  readonly jev?: string
+  readonly jevVerdict?: JevReadingVerdict
+  /** Paths it folded in from other builds, and the root each came from. */
+  readonly taken?: readonly { readonly path: string; readonly root: string }[]
 }
 
 const TRIAL_NAME_RE = /^try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?$/
@@ -245,6 +249,7 @@ type TrialEntry = {
   readonly name?: unknown; readonly door?: unknown; readonly package?: unknown; readonly pubkey?: unknown
   readonly publisher?: unknown; readonly at?: unknown; readonly sections?: unknown; readonly off?: unknown
   readonly change?: unknown; readonly review?: unknown; readonly reviewVerdict?: unknown
+  readonly jev?: unknown; readonly jevVerdict?: unknown; readonly taken?: unknown
 } | null
 
 /** The trials a zone lists, newest first. An entry that is not a trial —
@@ -263,6 +268,10 @@ export const trialsOf = (listing: unknown): SandboxTrial[] => {
       sections: strings(entry.sections), off: strings(entry.off),
       ...(SIG_RE.test(String(entry.change ?? '')) ? { change: String(entry.change) } : {}),
       ...(SIG_RE.test(String(entry.review ?? '')) ? { review: String(entry.review), ...(verdict ? { reviewVerdict: verdict } : {}) } : {}),
+      ...(SIG_RE.test(String(entry.jev ?? '')) ? { jev: String(entry.jev), ...(JEV_VERDICTS.includes(entry.jevVerdict as JevReadingVerdict) ? { jevVerdict: entry.jevVerdict as JevReadingVerdict } : {}) } : {}),
+      taken: (Array.isArray(entry.taken) ? entry.taken as { path?: unknown; root?: unknown }[] : [])
+        .filter(pick => PACKAGE_PATH_RE.test(String(pick?.path ?? '')) && SIG_RE.test(String(pick?.root ?? '')))
+        .map(pick => ({ path: String(pick.path), root: String(pick.root) })),
     })
   }
   return trials.sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
@@ -514,4 +523,124 @@ export const jevReadTrial = async (
   const stamped = await deps.stamp(host, `jev:${record.sandbox}`, sig)
   if (!stamped.ok) return { ok: false, error: stamped.reason ?? 'the reading pointer was not stamped' }
   return { ok: true, sig, record: reading }
+}
+
+// ── JEV WEIGHS A ZONE (documentation/module-sandbox.md, "Deciding directions") ──
+//
+// THE OPEN TRIALS, WEIGHED TOGETHER. Code gathers what is known about each
+// trial from public records alone — the zone's listing, each door's site and
+// the signed change, reading and assessment records behind it — writes it in
+// plain words, and Jev weighs the table (jev-decision.ts, "Jev weighs a
+// zone"). Code adds what needs no judgment: which trials change one file (one
+// layer per path: only one can be folded, or a merge drafted) and who took
+// whose package (adoption, from the signed change records). The pass is
+// published under the participant's key as `pass:<zone>` — replayable and
+// reviewable like everything else. It proposes; it takes nothing and folds
+// nothing.
+
+export interface PassTrial {
+  readonly name: string
+  readonly package: string
+  readonly change: string | null
+  readonly standing: JevTrialStanding
+  readonly conforms: number
+  readonly refused: number
+  /** Trials that change one of the same source files. */
+  readonly clashes: readonly string[]
+  /** Trials that took this one's package at a path. */
+  readonly takenBy: readonly string[]
+}
+export interface JevPassRecord {
+  readonly kind: 'jev-pass'
+  readonly zone: string
+  readonly model: string
+  readonly rubric: number
+  readonly trials: readonly PassTrial[]
+  readonly focus: string | null
+  readonly at: number
+}
+
+const NOTES_TOLD = 6
+const NOTE_CHARS = 200
+
+/** Which trials change one of the same source files. */
+export const trialClashes = (trials: readonly Pick<SandboxTrial, 'name' | 'sections'>[]): Map<string, string[]> => {
+  const clashes = new Map(trials.map(trial => [trial.name, [] as string[]]))
+  for (const a of trials) for (const b of trials) {
+    if (a.name !== b.name && a.sections.some(section => b.sections.includes(section))) clashes.get(a.name)!.push(b.name)
+  }
+  return clashes
+}
+
+/** Which trials took a trial's package at a path. */
+export const trialAdoption = (trials: readonly Pick<SandboxTrial, 'name' | 'package' | 'taken'>[]): Map<string, string[]> => {
+  const takenBy = new Map(trials.map(trial => [trial.name, [] as string[]]))
+  for (const trial of trials) for (const other of trials) {
+    if (trial.name !== other.name && (other.taken ?? []).some(pick => pick.root === trial.package)) takenBy.get(trial.name)!.push(other.name)
+  }
+  return takenBy
+}
+
+/** What is known about a trial, in plain words. People's notes are their
+ *  words: data for Jev to weigh, never instructions. */
+export const trialEvidence = (trial: SandboxTrial, read: Pick<TrialReading, 'people' | 'jev'> | null, takenBy: readonly string[], clashes: readonly string[]): string => {
+  const people = read?.people ?? []
+  const tally: Record<ReviewVerdict, number> = { accept: 0, refuse: 0, unclear: 0 }
+  for (const person of people) tally[person.verdict]++
+  const notes = people.filter(person => person.note.trim()).slice(0, NOTES_TOLD)
+    .map(person => `${person.verdict} — "${person.note.replace(/\s+/g, ' ').trim().slice(0, NOTE_CHARS)}"`)
+  const worst = read?.jev?.files.reduce<JevReadingRule | null>((top, file) => !top || file.worst.breaks > top.breaks ? file.worst : top, null) ?? null
+  const what = [
+    trial.sections.length ? `changes ${trial.sections.join(', ')}` : 'no source changes',
+    trial.off.length ? `turns off ${trial.off.join(', ')}` : '',
+    trial.taken?.length ? `takes ${trial.taken.map(pick => pick.path).join(', ')} from other builds` : '',
+  ].filter(Boolean).join('; ')
+  return [
+    `${trial.name} by ${trial.publisher || trial.pubkey.slice(0, 12) + '…'}${trial.at ? `, ${new Date(trial.at).toISOString().slice(0, 10)}` : ''}: ${what}.`,
+    `The host's AI says ${trial.reviewVerdict ?? 'nothing yet'}. Jev says ${read?.jev ? `${read.jev.verdict}${worst ? ` (closest to breaking "${worst.rule}", ${Math.round(worst.breaks * 100)}%)` : ''}` : 'nothing yet'}.`,
+    `People: ${tally.accept} accept, ${tally.refuse} refuse, ${tally.unclear} unclear.${notes.length ? ` Notes: ${notes.join('; ')}.` : ''}`,
+    takenBy.length ? `Taken into ${takenBy.join(', ')}.` : '',
+    clashes.length ? `Changes a file that ${clashes.join(', ')} also changes.` : '',
+  ].filter(Boolean).join('\n')
+}
+
+export interface PassDeps extends Pick<ReviewDeps, 'put' | 'publish' | 'stamp' | 'now'> {
+  /** What a trial's door says about itself, or null when it does not answer. */
+  readonly site: (trial: SandboxTrial) => Promise<SandboxSite | null>
+  /** A reader of signatures from a trial's door. */
+  readonly reader: (door: string) => (sig: string) => Promise<string | null>
+}
+
+/** Gather every trial's evidence, ask Jev to weigh the table, publish the pass. */
+export const jevPassZone = async (
+  host: string, zone: string, listed: readonly SandboxTrial[], jev: (input: JevPassInput) => Promise<JevPassResult>, deps: PassDeps,
+): Promise<{ ok: true; sig: string; record: JevPassRecord } | { ok: false; error: string }> => {
+  const trials = listed.slice(0, JEV_PASS_TRIALS)
+  if (!trials.length) return { ok: false, error: 'no trial is open' }
+  const clashes = trialClashes(trials)
+  const takenBy = trialAdoption(trials)
+  const evidence = await Promise.all(trials.map(async trial => {
+    const site = await deps.site(trial)
+    const read = site ? await readTrial(site, deps.reader(trial.door)) : null
+    return trialEvidence(trial, read, takenBy.get(trial.name) ?? [], clashes.get(trial.name) ?? [])
+  }))
+  let weighed: JevPassResult
+  try { weighed = await jev({ zone, trials: trials.map((trial, i) => ({ name: trial.name, evidence: evidence[i]! })) }) } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Jev did not answer' }
+  }
+  const record: JevPassRecord = {
+    kind: 'jev-pass', zone, model: weighed.model, rubric: JEV_RUBRIC,
+    trials: trials.map((trial, i) => ({
+      name: trial.name, package: trial.package, change: trial.change ?? null,
+      standing: weighed.trials[i]!.standing, conforms: weighed.trials[i]!.conforms, refused: weighed.trials[i]!.refused,
+      clashes: clashes.get(trial.name) ?? [], takenBy: takenBy.get(trial.name) ?? [],
+    })),
+    focus: weighed.focus, at: deps.now(),
+  }
+  const sig = await deps.put(JSON.stringify(record), 'application/json')
+  const published = await deps.publish(host, [sig])
+  if (!published.ok) return { ok: false, error: published.error }
+  const stamped = await deps.stamp(host, `pass:${zone}`, sig)
+  if (!stamped.ok) return { ok: false, error: stamped.reason ?? 'the pass pointer was not stamped' }
+  return { ok: true, sig, record }
 }

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { assessSandbox, changedPaths, diffText, isSandboxSite, jevReadTrial, publishChange, readChange, readTrial, reviewChange, reviewContext, reviewQuestion, sectionText, takeTrial, tallyAssessments, trialsOf, verdictOf, type ReviewDeps, type TakeDeps } from './module-review.js'
+import { assessSandbox, changedPaths, diffText, isSandboxSite, jevReadTrial, publishChange, readChange, readTrial, reviewChange, reviewContext, reviewQuestion, sectionText, takeTrial, tallyAssessments, trialsOf, verdictOf, type ReviewDeps, type TakeDeps, jevPassZone, trialAdoption, trialClashes, trialEvidence, type SandboxTrial } from './module-review.js'
 import { diffLines } from './line-diff.js'
 
 const BEFORE = ['// src/preferences/settings.ts', 'export const zoom = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
@@ -268,5 +268,59 @@ describe('Jev reads a trial', () => {
     expect(text).toBe('  a\n− b\n+ B\n  c')
     const cut = diffText(diffLines('a\nb\nc\n', 'A\nB\nC\n'), 12)
     expect(cut).toBe('− a\n− b\n− c\n… (cut: 3 more rows)')
+  })
+})
+
+describe('Jev weighs a zone', () => {
+  const trial = (name: string, over: Partial<SandboxTrial> = {}): SandboxTrial => ({
+    name, door: `https://${name}.hypercomb.com`, package: 'r'.repeat(64), pubkey: 'p'.repeat(64), publisher: 'Jaime', at: 1_700_000_000_000,
+    sections: ['src/preferences/settings.ts'], off: [], taken: [], ...over,
+  })
+
+  it('lists what a trial took and how Jev read it', () => {
+    const listed = trialsOf({ trials: [{ name: 'try-a', door: 'https://try-a.z', package: 'c'.repeat(64), pubkey: 'd'.repeat(64), jev: 'e'.repeat(64), jevVerdict: 'breaks', taken: [{ path: 'commands', root: 'f'.repeat(64) }, { path: 7 }, { path: 'x', root: 'short' }] }] })
+    expect(listed[0]).toMatchObject({ jev: 'e'.repeat(64), jevVerdict: 'breaks', taken: [{ path: 'commands', root: 'f'.repeat(64) }] })
+  })
+
+  it('names which trials change one file, and who took whose package', () => {
+    const a = trial('try-a')
+    const b = trial('try-b', { package: 's'.repeat(64), sections: ['src/preferences/settings.ts', 'src/b.ts'] })
+    const c = trial('try-c', { package: 't'.repeat(64), sections: [], taken: [{ path: 'preferences', root: 'r'.repeat(64) }] })
+    expect([...trialClashes([a, b, c])]).toEqual([['try-a', ['try-b']], ['try-b', ['try-a']], ['try-c', []]])
+    expect([...trialAdoption([a, b, c])]).toEqual([['try-a', ['try-c']], ['try-b', []], ['try-c', []]])
+  })
+
+  it('writes what is known in plain words: the readings, the people, adoption and clashes', () => {
+    const read = { people: [{ pubkey: 'x', verdict: 'refuse' as const, note: 'raises  zoom\nwithout asking', at: 1 }], jev: { verdict: 'follows' as const, model: 'm', files: [{ section: 'src/a.ts', rules: [], worst: { rule: 'The core rule', breaks: 0.02 } }] } }
+    const text = trialEvidence(trial('try-a', { reviewVerdict: 'accept', off: ['games/pong'] }), read, ['try-c'], ['try-b'])
+    expect(text).toBe([
+      'try-a by Jaime, 2023-11-14: changes src/preferences/settings.ts; turns off games/pong.',
+      'The host\'s AI says accept. Jev says follows (closest to breaking "The core rule", 2%).',
+      'People: 0 accept, 1 refuse, 0 unclear. Notes: refuse — "raises zoom without asking".',
+      'Taken into try-c.',
+      'Changes a file that try-b also changes.',
+    ].join('\n'))
+    expect(trialEvidence(trial('try-d', { sections: [] }), null, [], [])).toContain('no source changes.\nThe host\'s AI says nothing yet. Jev says nothing yet.\nPeople: 0 accept, 0 refuse, 0 unclear.')
+  })
+
+  it('weighs every open trial from its door, publishes the pass, and stamps pass:<zone>', async () => {
+    const w = await world()
+    const a = trial('try-a', { reviewVerdict: 'accept' })
+    const b = trial('try-b', { package: 's'.repeat(64), sections: [], taken: [{ path: 'preferences', root: 'r'.repeat(64) }] })
+    const asked: unknown[] = []
+    const jev = async (input: { zone: string; trials: readonly { name: string; evidence: string }[] }) => {
+      asked.push(input)
+      return { model: 'typesafe/jev-fake', answers: {}, focus: 'try-b', trials: input.trials.map(t => ({ name: t.name, conforms: 0.95, refused: t.name === 'try-a' ? 0.9 : 0.02, standing: t.name === 'try-a' ? 'discuss' as const : 'take' as const })) }
+    }
+    const passed = await jevPassZone('h', 'hypercomb.com', [a, b], jev, { ...w.deps, site: async t => ({ sandbox: true, title: t.name, package: t.package, pubkey: t.pubkey }), reader: () => async () => null })
+    expect(passed.ok).toBe(true)
+    if (!passed.ok) return
+    expect((asked[0] as { trials: { evidence: string }[] }).trials[0]!.evidence).toContain('Taken into try-b.')
+    expect(passed.record).toMatchObject({ kind: 'jev-pass', zone: 'hypercomb.com', focus: 'try-b', rubric: 5, trials: [
+      { name: 'try-a', standing: 'discuss', takenBy: ['try-b'], clashes: [] }, { name: 'try-b', standing: 'take', takenBy: [], clashes: [] },
+    ] })
+    expect(w.published.at(-1)).toEqual([passed.sig])
+    expect(w.stamped.at(-1)).toEqual(['pass:hypercomb.com', passed.sig])
+    expect(await jevPassZone('h', 'z', [], jev, { ...w.deps, site: async () => null, reader: () => async () => null })).toEqual({ ok: false, error: 'no trial is open' })
   })
 })

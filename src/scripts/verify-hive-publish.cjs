@@ -18,7 +18,9 @@
 //      follower TAKES the trial at its path by hand — held in the brood, inert
 //      across a reload, and running only once accepted there with both warnings;
 //      then the follower COMMITS ITS OWN BUILD, and what it took is folded in —
-//      part of its package, no longer a pick, named in its published change
+//      part of its package, no longer a pick, named in its published change;
+//      then Jev WEIGHS every open trial on the zone — readings, assessments,
+//      adoption — and publishes where each stands and where to focus first
 //   4. `module promote` moves the live channel to the same root: the follower
 //      is told, replicates it from the host, and runs it
 //   5. a unit turned off and committed + promoted is unreachable for the
@@ -251,6 +253,9 @@ const announcedOn = page => page.evaluate(() => {
     return leaf.sort((a, b) => a.path.localeCompare(b.path))[0]?.path ?? null
   }, [target.path, 'assistant', 'sharing', 'commands', 'keyboard'])
   await fol.page.evaluate(path => { const install = window.ioc.get('@hypercomb.social/Install'); install.setOffUnits([...install.offUnits(), path]) }, folOff)
+  // The zone approves the follower as a publisher too (the operator's binding), so its door opens and the zone lists its trial.
+  const folKey = await fol.page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/NostrSigner').getPublicKeyHex())
+  await fetch(`http://${HOST}/__bind`, { method: 'POST', body: JSON.stringify({ zone: HOST.split(':')[0], pubkey: folKey, label: 'follower' }) })
   await H.watchToasts(fol.page)
   await H.say(fol.page, `module commit ${CHANGE}-mine @${WRITE}`)
   const folded = await H.toastsUntil(fol.page, /^Sandbox |not stamped|not published|nothing to commit/)
@@ -259,10 +264,20 @@ const announcedOn = page => page.evaluate(() => {
     return { trunk: sel.trunk, picked: !!sel.picks[path], layer: sel.nodes.find(node => node.path === path)?.layerSig ?? null }
   }, target.path)
   check('the follower commits its own build, and what it took is folded in — part of its package, no longer a pick', !!folSel.trunk && folSel.trunk !== sandboxRoot && !folSel.picked && folSel.layer === pickTaken.layer && !(await selectionHas(fol.page, folOff)), `${folOff}: ${JSON.stringify(folded)}`)
-  const folKey = await fol.page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/NostrSigner').getPublicKeyHex())
   const folChangeSig = await H.waitFor(async () => channelOf(await hostState(), folKey, `change:${SANDBOX}-mine`), 60_000, 1000)
   const folRecord = folChangeSig ? JSON.parse(await fromHost(folChangeSig)) : null
   check('its published change says whose change it carries', (folRecord?.taken ?? []).some(entry => entry.path === target.path && entry.root === sandboxRoot), JSON.stringify(folRecord?.taken))
+
+  // ── 3g. JEV WEIGHS THE ZONE — where each trial stands, where to focus ────
+  await H.watchToasts(page)
+  await H.say(page, `module focus @${WRITE}`)
+  const weighed = await H.toastsUntil(page, /^Jev weighed |Jev did not weigh|No trials|did not list/, 90_000)
+  const passSig = await H.waitFor(async () => channelOf(await hostState(), pubkey, `pass:${HOST}`), 30_000, 1000)
+  const pass = passSig ? JSON.parse(await fromHost(passSig)) : null
+  const standingOf = name => pass?.trials?.find(t => t.name === name) ?? null
+  check('Jev weighs every open trial on the zone — the readings and people\'s assessments — and the pass is published under the publisher\'s key', pass?.kind === 'jev-pass' && pass.zone === HOST && standingOf(SANDBOX)?.standing === 'discuss' && standingOf(`${SANDBOX}-mine`)?.standing === 'take', JSON.stringify(weighed))
+  check('the pass names adoption: whose package another trial took, from the signed change records', standingOf(SANDBOX)?.takenBy?.includes(`${SANDBOX}-mine`) === true && standingOf(`${SANDBOX}-mine`)?.takenBy?.length === 0, JSON.stringify(pass?.trials?.map(t => [t.name, t.takenBy])))
+  check('the pass says where to focus first, and the words say where each trial stands', pass?.focus === `${SANDBOX}-mine` && (weighed ?? []).some(m => m.includes(`Focus first on ${SANDBOX}-mine`)) && (weighed ?? []).some(m => m.startsWith(`${SANDBOX}: discuss`)) && (weighed ?? []).some(m => m.startsWith(`${SANDBOX}-mine: take`) && m.includes('nobody refused')), JSON.stringify(weighed))
 
   // ── 4. PROMOTE: the live channel moves to the same root ─────────────────
   await H.watchToasts(page)

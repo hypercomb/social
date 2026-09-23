@@ -25,6 +25,12 @@
 //   module withdraw <change> [@<host>]
 //                          the sandbox pointer is removed: its door answers
 //                          "nothing here", and every file stays on the host.
+//   module focus [@<host>]
+//                          Jev weighs every open trial on the zone — the
+//                          readings, people's assessments, who took what,
+//                          which trials change one file — and says where
+//                          each stands (take · discuss · wait) and where to
+//                          focus first. The pass is public under your key.
 //   module review <change> [@<host>]
 //                          the host's AI reads the change again, and so does
 //                          Jev — its diff, rule by rule, against the doctrine
@@ -62,8 +68,8 @@
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, type I18nProvider, type ModuleDraftsProvider } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
-import { JEV_IOC_KEY, jevDoctrineSections, type JevReadingInput, type JevReadingResult } from './jev-decision.js'
-import { assessSandbox, changedPaths, doorReader, isSandboxSite, jevReadTrial, publishChange, readChange, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial } from './module-review.js'
+import { JEV_IOC_KEY, jevDoctrineSections, type JevReadingInput, type JevReadingResult, type JevPassInput, type JevPassResult } from './jev-decision.js'
+import { assessSandbox, changedPaths, doorReader, isSandboxSite, jevReadTrial, publishChange, readChange, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
 import { INSTALL_CHANNEL_PREFIX, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 
 /** The host backup service's participant-triggered upload (sharing/host-sync.service.ts). */
@@ -78,7 +84,7 @@ export const SANDBOX_ZONE = 'hypercomb.com'
 export const SANDBOX_PREFIX = 'try-'
 const CHANNEL_RE = /^[a-z][a-z0-9-]*$/
 const PATH_RE = /^[a-z0-9][a-z0-9._-]{0,63}(?:\/[a-z0-9][a-z0-9._-]{0,63})*$/i
-const PUBLISHING = new Set(['commit', 'promote', 'withdraw', 'review', 'assess'])
+const PUBLISHING = new Set(['commit', 'promote', 'withdraw', 'review', 'assess', 'focus'])
 /** How many trials `module trials` says one by one; the rest are counted. */
 const TRIALS_TOLD = 6
 const STORE_KEY = '@hypercomb.social/Store'
@@ -92,7 +98,7 @@ type StoreLike = {
 type HostAiLike = {
   askWhole?(host: string, question: string, context: readonly string[]): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string }>
 }
-type JevLike = { enabled?(): boolean; reading?(input: JevReadingInput): Promise<JevReadingResult> }
+type JevLike = { enabled?(): boolean; readyForHive?(): boolean; reading?(input: JevReadingInput): Promise<JevReadingResult>; pass?(input: JevPassInput): Promise<JevPassResult> }
 /** The install provider, as far as these words need it (core InstallProvider). */
 type InstallLike = Parameters<typeof takeDepsFrom>[0] & {
   selection?(): Promise<{ picks: Record<string, { root: string; byHand?: boolean }> }>
@@ -204,7 +210,7 @@ export class ModuleQueenBee extends QueenBee {
   readonly command = 'module'
   override description = 'See, drop, try in public, or promote what runs here'
   override descriptionKey = 'slash.module'
-  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>', 'assess <change> [accept|refuse|unclear <note>]', 'trials [@<host>]', 'changes <change>', 'take <change> [<path>]']
+  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>', 'assess <change> [accept|refuse|unclear <note>]', 'trials [@<host>]', 'changes <change>', 'take <change> [<path>]', 'focus [@<host>]']
   override examples = [
     { input: '/module', result: 'Lists the drafts picked over the installed package' },
     { input: '/module commit fresh-rooms', result: 'Publishes what runs here to try-fresh-rooms.hypercomb.com, not to followers' },
@@ -226,7 +232,7 @@ export class ModuleQueenBee extends QueenBee {
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess ', 'trials', 'changes ', 'take '].filter(word => word.startsWith(typed) && word.trim() !== typed)
+    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess ', 'trials', 'changes ', 'take ', 'focus'].filter(word => word.startsWith(typed) && word.trim() !== typed)
   }
 
   protected async execute(args: string): Promise<void> {
@@ -260,7 +266,7 @@ export class ModuleQueenBee extends QueenBee {
       toast(t('module.dropped', 'Dropped the draft at {path} — reload to run the package as it was.', { path }), 'success')
       return
     }
-    if (!PUBLISHING.has(word) && !['trials', 'changes', 'take'].includes(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change>, trials, changes <change> or take <change> [<path>].'), 'warning'); return }
+    if (!PUBLISHING.has(word) && !['trials', 'changes', 'take'].includes(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change>, trials, changes <change>, take <change> [<path>] or focus.'), 'warning'); return }
 
     // [@<host>] publishes to a host of your own (a machine running
     // hypercomb-serve, a relay) instead of the public one; the other words are
@@ -315,6 +321,40 @@ export class ModuleQueenBee extends QueenBee {
       const door = location.hostname.toLowerCase().startsWith(`${name}.`) ? location.origin : sandboxDoorUrl(name, host)
       // The what-changed panel (sandbox-change.view.ts) opens on this; `at` guards the replay.
       EffectBus.emit('module:changes', { name, door, site, at: Date.now() })
+      return
+    }
+
+    if (word === 'focus') {
+      const zone = sandboxZoneUrl(host)
+      const listed = await zoneTrials(zone)
+      if (!listed.ok) { toast(t('module.notrials', '{zone} did not list its trials: {reason}.', { zone, reason: listed.reason }), 'warning'); return }
+      if (!listed.trials.length) { toast(t('module.notrial', 'No trials are open on {zone}.', { zone })); return }
+      const jev = window.ioc?.get?.(JEV_IOC_KEY) as JevLike | undefined
+      if (!jev?.pass || !jev.readyForHive?.()) { toast(t('module.unweighed', 'Jev did not weigh {zone}: {reason}.', { zone, reason: 'Jev is off, or OpenRouter may not read this hive' }), 'warning'); return }
+      const sync = window.ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as HostSyncLike | undefined
+      const deps = sync ? reviewDeps(drafts, sync) : null
+      if (!deps) { toast(t('module.unweighed', 'Jev did not weigh {zone}: {reason}.', { zone, reason: 'the store is not loaded' }), 'warning'); return }
+      toast(t('module.weighing', 'Asking Jev to weigh the {count} open trials on {zone}…', { count: listed.trials.length, zone }))
+      const passed = await jevPassZone(host, new URL(zone).host, listed.trials, input => jev.pass!(input), { ...deps, site: trial => sandboxSite(trial.name, host), reader: doorReader })
+      if (!passed.ok) { toast(t('module.unweighed', 'Jev did not weigh {zone}: {reason}.', { zone, reason: passed.error }), 'warning'); return }
+      const { record } = passed
+      // Each trial's standing first, the sum last.
+      for (const trial of record.trials.slice(0, TRIALS_TOLD)) {
+        const why = trial.standing === 'take' ? t('module.standtake', 'within the rules, and nobody refused it')
+          : trial.standing === 'discuss' ? t('module.standdiscuss', 'somebody refused it — read their note')
+          : t('module.standwait', 'not read yet, or unsure')
+        const more = [
+          trial.takenBy.length ? t('module.takenby', 'taken into {names}', { names: trial.takenBy.join(', ') }) : '',
+          trial.clashes.length ? t('module.clashes', 'changes a file {names} also changes — only one can be folded, or a merge drafted', { names: trial.clashes.join(', ') }) : '',
+        ].filter(Boolean)
+        toast(t('module.standing', '{name}: {standing} — {why}{more}', { name: trial.name, standing: trial.standing, why, more: more.length ? '; ' + more.join('; ') : '' }))
+      }
+      const count = (standing: string): number => record.trials.filter(trial => trial.standing === standing).length
+      toast(t('module.weighed', 'Jev weighed {count} trials on {zone}: {take} to take, {discuss} to discuss, {wait} waiting. {focus} The pass is public under your key.', {
+        count: record.trials.length, zone, take: count('take'), discuss: count('discuss'), wait: count('wait'),
+        focus: record.focus ? t('module.focuson', 'Focus first on {name}.', { name: record.focus }) : t('module.nofocus', 'No trial stands out yet.'),
+      }), 'success')
+      EffectBus.emit('module:focus', { zone, host, pass: passed.sig, record })
       return
     }
 

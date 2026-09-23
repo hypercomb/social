@@ -10,9 +10,10 @@
 // signed hive index at /hive/<pubkey> with its rollback refusal, pool
 // listings, CORS. Only the storage is swapped — R2 and KV become maps that
 // live as long as the process. `GET /__state` answers what it holds, for a
-// harness to assert on. `POST /__bind {zone, pubkey}` binds a zone to a
-// publisher as the operator's SITE_BINDINGS would, so `try-<change>.localhost`
-// is a sandbox door; its shell is fetched from the second argument.
+// harness to assert on. `POST /__bind {zone, pubkey, label?}` binds a zone to
+// a publisher as the operator's SITE_BINDINGS would, so `try-<change>.localhost`
+// is a sandbox door; a second call with another key approves that publisher
+// too. The door's shell is fetched from the second argument.
 //
 // `--ai-stub` stands in for Anthropic behind the worker's `/ai/ask`: the real
 // endpoint runs (NIP-98, the context read from the heap by signature, the
@@ -100,8 +101,10 @@ http.createServer(async (req, res) => {
   const chunks = []
   for await (const chunk of req) chunks.push(chunk)
   if (req.url === '/__bind' && req.method === 'POST') {
-    const { zone, pubkey } = JSON.parse(Buffer.concat(chunks).toString() || '{}')
-    bindings[String(zone)] = { title: zone, lineage: String(zone).split('.')[0], publishers: [{ pubkey, label: 'publisher', primary: true }] }
+    const { zone, pubkey, label = 'publisher' } = JSON.parse(Buffer.concat(chunks).toString() || '{}')
+    const bound = bindings[String(zone)]
+    if (!bound) bindings[String(zone)] = { title: zone, lineage: String(zone).split('.')[0], publishers: [{ pubkey, label, primary: true }] }
+    else if (!bound.publishers.some((publisher) => publisher.pubkey === pubkey)) bound.publishers.push({ pubkey, label })
     env.SITE_BINDINGS = JSON.stringify(bindings)
     res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' })
     res.end(JSON.stringify({ ok: true, bindings }))

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { JEV_CHOICE_GATES, JEV_MAX_READS, jevDoctrineSections, jevInput, jevQuestions, jevReadingQuestions, jevReadingResult, jevReadingState, jevResult, jevState } from './jev-decision.js'
+import { JEV_CHOICE_GATES, JEV_MAX_READS, jevDoctrineSections, jevInput, jevQuestions, jevReadingQuestions, jevReadingResult, jevReadingState, jevResult, jevState, jevPassQuestions, jevPassResult, jevPassState } from './jev-decision.js'
 
 const doctrine = ['### Nothing is deleted\nHide first; delete second.', '### The core rule\nContent is addressed by signature.']
 const rows = [
@@ -180,5 +180,36 @@ describe('Jev reads a trial', () => {
     expect(jevDoctrineSections(anatomy)).toEqual(['### One\nfirst rule', '### Two\nsecond rule'])
     expect(jevDoctrineSections('no doctrine here')).toEqual(['no doctrine here'])
     expect(jevDoctrineSections('')).toEqual([])
+  })
+})
+
+describe('Jev weighs a zone', () => {
+  const pass = { zone: 'hypercomb.com', trials: [
+    { name: 'try-rooms', evidence: 'try-rooms by Jaime: changes src/a.ts.\nThe host\'s AI says accept. Jev says follows.\nPeople: 0 accept, 1 refuse, 0 unclear. Notes: refuse — "raises zoom without asking".' },
+    { name: 'try-rooms-mine', evidence: 'try-rooms-mine by Other: no source changes; takes commands from other builds.\nThe host\'s AI says accept. Jev says follows.\nPeople: 0 accept, 0 refuse, 0 unclear.' },
+  ] }
+
+  it('asks whether each trial conforms and whether anyone refused it, and which to focus on', () => {
+    const questions = jevPassQuestions(pass)
+    expect(Object.keys(questions).sort()).toEqual(['focus', 't0_conforms', 't0_refused', 't1_conforms', 't1_refused'])
+    expect(questions['t1_refused']!.instructions).toContain('evidence[1]')
+    expect((questions['focus'] as { criteria: Record<string, string> }).criteria).toEqual({ t0: 'rows[0]: try-rooms', t1: 'rows[1]: try-rooms-mine', none: 'No trial stands out' })
+    const state = jevPassState(pass)
+    expect(state.rows.map(row => `${row.kind}:${row.label}`)).toEqual(['do:try-rooms', 'do:try-rooms-mine'])
+    expect(state.evidence[0]).toContain('raises zoom without asking')
+  })
+
+  it('reads each standing from the gates and the focus from a confident choice', () => {
+    const answer = (focus: string, confidence: number, over: Record<string, number> = {}) => ({ model: 'typesafe/jev-resolved', answers: {
+      ...Object.fromEntries(Object.entries({ t0_conforms: 0.96, t0_refused: 0.9, t1_conforms: 0.95, t1_refused: 0.02, ...over }).map(([key, value]) => [key, noul(value)])),
+      focus: { type: 'choice', choice: focus, confidence },
+    }, usage: { input_tokens: 42 } })
+    const weighed = jevPassResult(answer('t1', 0.9), pass)
+    expect(weighed.trials.map(trial => `${trial.name}:${trial.standing}`)).toEqual(['try-rooms:discuss', 'try-rooms-mine:take'])
+    expect([weighed.focus, weighed.confidence, weighed.model, weighed.usage?.inputTokens]).toEqual(['try-rooms-mine', 0.9, 'typesafe/jev-resolved', 42])
+    expect(jevPassResult(answer('t1', 0.3), pass).focus).toBeNull()
+    expect(jevPassResult(answer('none', 0.9), pass).focus).toBeNull()
+    expect(jevPassResult(answer('t1', 0.9, { t1_conforms: 0.5 }), pass).trials[1]!.standing).toBe('wait')
+    expect(() => jevPassResult(answer('t9', 0.9), pass)).toThrow()
   })
 })
