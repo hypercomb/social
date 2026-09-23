@@ -640,6 +640,104 @@ export const HOLLOW_GROVE: ChamberDefinition = {
   effects: [],
 }
 
+// ---------------------------------------------------------------------------
+// The Undercroft — below the Burrow: halls and corridors bigger than the
+// window, walked with a camera and a minimap (jwize: "the overhead, like
+// Warcraft to some degree").
+// ---------------------------------------------------------------------------
+export const UNDERCROFT: ChamberDefinition = {
+  id: 'undercroft', name: 'The Undercroft', subtitle: 'Halls under halls, further than the torch reaches',
+  look: 'cavern', torch: 3.6, sconces: true,
+  map: [
+    '##<#############################################',
+    '#.@..t....#####.f...k..f.#####...............K.#',
+    '#.........#####..........#####.................#',
+    '#........................#####........n........#',
+    '#.........#####................................#',
+    '#.........#####..........#####.............==..#',
+    '#.........#####..........#####.................#',
+    '####.##########....t.....######.################',
+    '####.##########################.################',
+    '####.##########################.################',
+    '####.#############............L.####...........#',
+    '#........t.#######..............####.........K.#',
+    '#..........#######..............####...........#',
+    '#..~~~~~...#######....~~~~~~....####...........#',
+    '#..~~~~~..............~~~~~~....####...........#',
+    '#..~~~~~...#######....~~~~~~.......|...........#',
+    '#..........#######....~~~~~~....####...........#',
+    '#..........#######..............####....h......#',
+    '##################..............####...........#',
+    '##################..............################',
+    '##################..............################',
+    '####################.###########################',
+    '####################.###.......................#',
+    '####################.###..t....................#',
+    '#.....................##....~~~~~~~............#',
+    '#.....................##....~~~~~~~............#',
+    '#......................D.......................#',
+    '#.....................##.....................>.#',
+    '#.....................##......=................#',
+    '################################################',
+  ],
+  exits: [
+    { id: 'stair-up', col: 2, row: 0, style: 'stairs-up', label: 'The Burrow', landing: { col: 2, row: 1 }, facing: 'down' },
+  ],
+  entrances: [
+    { id: 'stair-down', col: 45, row: 27, style: 'stairs-down', empty: 'The stair goes on down into the dark, but nothing waits below it yet.', landing: { col: 44, row: 27 } },
+  ],
+  tablets: [
+    { id: 'undercroft-arch', col: 5, row: 1, title: 'The Undercroft', text: 'Halls under halls. Your torch shows you a room at a time; the map in the corner keeps what you have seen. A surveyor once drew all of it — find her chart and the corner shows it whole.' },
+    { id: 'twin-lamps', col: 19, row: 7, title: 'The Twin Lamps', text: 'Two lamps watch the lamp hall. Light both and the niche between them gives up what the dark kept.', pointsAt: ['lamp-west', 'lamp-east', 'lamp-niche'] },
+    { id: 'cistern-mark', col: 9, row: 11, title: 'The Cistern Mark', text: 'The west cistern feeds the great hall’s pool. The lever on the hall’s north wall lifts the gallery shutter.', pointsAt: ['gallery-lever'] },
+    { id: 'deep-hall', col: 26, row: 23, title: 'The Deep Hall', text: 'The stair in the east corner goes on down. Whoever makes what lies below it will be the first to walk there.' },
+  ],
+  gates: [],
+  chests: [
+    { id: 'lamp-niche', col: 20, row: 1, name: 'Lamp Niche', subtitle: 'Between the twin lamps', items: [{ kind: 'gem', name: 'Undercroft garnet' }], lore: 'A garnet the colour of the lamps, kept in the niche the twin lamps showed.', hiddenUntil: 'twin-lamp-pair' },
+    { id: 'surveyor-chest', col: 45, row: 1, name: 'Surveyor’s Chest', subtitle: 'Under the surveyor’s table', items: [{ kind: 'map', name: 'Chart of the Undercroft' }], lore: 'Orrin’s chart of every hall down here, each corridor paced and inked.', grants: [{ id: 'map:undercroft', text: 'Orrin’s chart of the Undercroft. Its halls now show whole on your minimap.' }] },
+    { id: 'gallery-chest', col: 45, row: 11, name: 'Gallery Coffer', subtitle: 'At the gallery’s end', items: [{ kind: 'key', name: 'Vault key' }], lore: 'A vault key, waiting behind the shutter for whoever found the lever.' },
+  ],
+  doors: [
+    { id: 'vault-door', col: 23, row: 26, name: 'Vault door', lock: 'small' },
+  ],
+  shutters: [
+    { id: 'gallery-shutter', col: 35, row: 15, name: 'Gallery shutter', lever: 'gallery-lever' },
+  ],
+  plates: [],
+  blocks: [],
+  levers: [
+    { id: 'gallery-lever', col: 30, row: 10, name: 'Gallery lever', shutter: 'gallery-shutter' },
+  ],
+  lamps: [
+    { id: 'lamp-west', col: 16, row: 1, name: 'West lamp' },
+    { id: 'lamp-east', col: 23, row: 1, name: 'East lamp' },
+  ],
+  lampSets: [
+    { id: 'twin-lamp-pair', lamps: ['lamp-west', 'lamp-east'], ordered: false },
+  ],
+  sigils: [],
+  alcoves: [
+    { id: 'gallery-alcove', col: 40, row: 17, memoryId: 'undercroft-gallery', text: 'Whoever cut these halls cut them wider than any torch. They meant them to be mapped, not merely walked.', locked: ALCOVE_LOCKED },
+  ],
+  residents: [
+    {
+      id: 'orrin', col: 38, row: 3, name: 'Orrin', role: 'Surveyor', color: '#c9a05a',
+      lines: [
+        'Bigger than it looks from the stair, isn’t it. The corner map keeps what your torch has shown you.',
+        'My chart is in the chest under the table. Carry it and the corner shows every hall at once.',
+        'The lever in the great hall lifts the gallery shutter. The vault key is at the gallery’s end.',
+      ],
+    },
+  ],
+  furniture: [
+    { col: 43, row: 5, look: 'table' }, { col: 44, row: 5, look: 'shelf' }, { col: 30, row: 28, look: 'barrels' },
+  ],
+  effects: [
+    { col: 8, row: 14, kind: 'drip' }, { col: 21, row: 12, kind: 'drip' }, { col: 27, row: 23, kind: 'drip' },
+  ],
+}
+
 export const CHAMBERS: readonly ChamberDefinition[] = [
-  WET_STEPS, CISTERN, SPRING_HEART, HALL_OF_HOURS, SIX_ROADS, ACCORD_SANCTUM, CHANDLER_HOUSE, CHANDLER_CELLAR, HOLLOW_GROVE,
+  WET_STEPS, CISTERN, SPRING_HEART, HALL_OF_HOURS, SIX_ROADS, ACCORD_SANCTUM, CHANDLER_HOUSE, CHANDLER_CELLAR, HOLLOW_GROVE, UNDERCROFT,
 ]

@@ -10,13 +10,13 @@ import { storyRefs } from './story-when.js'
 import { COMBAT_SKILLS } from './engine.js'
 
 describe('STORY', () => {
-  it('has exactly the twenty-one seats the spec pins, in order', () => {
+  it('has exactly the twenty-two seats the spec pins, in order', () => {
     expect(STORY.map(seat => seat.entrance)).toEqual([
       'island/dawn-shrine', 'island/tide-shrine', 'island/pyramid-shrine',
       'island/wayfarer-cavern', 'wet-steps/stairs-down', 'cistern/stairs-down',
       'island/highland-cavern', 'hall-of-hours/stairs-down', 'six-roads/stairs-down',
       'island/chandler-door', 'chandler-house/trapdoor', 'island/valley-grove', 'greenwood/old-hollow',
-      'greenwood/root-cave', 'root-run/deeper', 'greenwood/burrow',
+      'greenwood/root-cave', 'root-run/deeper', 'greenwood/burrow', 'the-burrow/deeper',
       'island/valley-east-sign', 'greenwood/pond-sign', 'wet-steps/drip-line',
       'labyrinth/sunseed-porch-ii.cell-00-02', 'labyrinth/sunseed-porch-ii.cell-14-02',
     ])
@@ -53,7 +53,7 @@ describe('PLACES', () => {
     expect([...PLACES.keys()]).toEqual([
       'island', 'labyrinth', 'greenwood', 'root-run', 'the-burrow',
       'wet-steps', 'cistern', 'spring-heart', 'hall-of-hours', 'six-roads', 'accord-sanctum',
-      'chandler-house', 'chandler-cellar', 'hollow-grove',
+      'chandler-house', 'chandler-cellar', 'hollow-grove', 'undercroft',
     ])
   })
 
@@ -108,8 +108,8 @@ describe('labels', () => {
     const cistern = seatLabel('wet-steps/stairs-down')
     expect(cistern).toMatchObject({ name: 'The Cistern' })
     // cistern, spring-heart — and the Greenwood behind the Drip-Line tablet, with the Hollow Grove,
-    // the Root Run and the Burrow in it
-    expect(seatLabel('island/wayfarer-cavern')?.levels).toBe(6)
+    // the Root Run, the Burrow and the Undercroft in it
+    expect(seatLabel('island/wayfarer-cavern')?.levels).toBe(7)
     expect(seatLabel('island/not-a-real-entrance')).toBeNull()
   })
 
