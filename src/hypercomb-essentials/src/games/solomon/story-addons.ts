@@ -13,6 +13,7 @@ import { PLACES, chamberPlace, registerPlace, sideCavernPlace, worldPlace } from
 import type { WorldDefinition } from './rpg-overworld.js'
 import { drawCavern, registerSideCavern, type CavernPlan, type SideCavernDefinition } from './side-cavern.js'
 import { ROOT_PLACE, STORY, registerSeats } from './story.js'
+import type { StorySeedTile } from './tile-surface.js'
 import { registerWorld, sanitizeWorld } from './worlds.js'
 
 export const STORY_BUNDLE_VERSION = 1
@@ -36,7 +37,6 @@ export type StoryInstall =
 
 /** What the game seeds into its `stories` layer the first time it opens —
  *  one worked example a participant can copy: a tile, holding a bundle. */
-export interface StorySeedTile { readonly id: string; readonly bundle: unknown }
 export const STORY_SEEDS: readonly StorySeedTile[] = [{ id: 'mossback', bundle: MOSSBACK_STORY }]
 
 // ── reading ──────────────────────────────────────────────────────────────
