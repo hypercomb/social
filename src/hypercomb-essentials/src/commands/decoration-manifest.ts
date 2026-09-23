@@ -318,63 +318,9 @@ export async function listDecorations<TPayload>(opts: {
 
 // ── Slot registration ────────────────────────────────────────────────
 //
-// Register the `decorations` slot once LayerSlotRegistry is available.
-// Module-load-order independent via `whenReady`. The active trigger
-// `decorations:changed` makes the slot self-cascading: visual bees emit
-// the event, LayerCommitter picks it up and writes the manifest.
-//
-// ── Why this is a FUNCTION, called from the service ───────────────────
-//
-// This module is not in the side-effects barrel (prepare.ts lists modules
-// that call `window.ioc.register`, and this one does not) — it is pulled in
-// only for its exported functions. Its bare module-scope registration was
-// therefore not running, and because `ioc.whenReady` swallows callback
-// exceptions and the call site is optional-chained, it failed SILENTLY: the
-// slot was absent, so LayerCommitter had no `decorations:changed`
-// subscription, so every decoration write in the app — pheromone tags,
-// website pages, tutor decks, workflow steps — minted its resource and then
-// vanished, with no error anywhere.
-//
-// So the registration is an exported function, invoked from
-// `decoration.service.ts`, which IS in the barrel and self-registers in IoC.
-// Idempotent (the registry no-ops an identical re-registration), so calling
-// it from both places is safe.
-
-export function registerDecorationsSlot(attempt = 0): void {
-  const ioc = (window as {
-    ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void }
-  }).ioc
-  if (!ioc?.whenReady) {
-    // NOT a failure yet — this file is imported at module-evaluation time,
-    // which can precede the container's own registration. It used to warn
-    // immediately and give up, so every boot printed "decorations slot NOT
-    // registered" while the slot went on to register perfectly well from
-    // decoration.service.ts: an alarm that cried wolf on a healthy boot, in
-    // the one console line that should mean something. Wait for the container
-    // and say nothing; only a container that never arrives is worth a warning.
-    if (attempt < 20) {
-      setTimeout(() => registerDecorationsSlot(attempt + 1), 50)
-      return
-    }
-    console.warn('[decoration-manifest] ioc.whenReady never became available — decorations slot NOT registered')
-    return
-  }
-  ioc.whenReady<LayerSlotRegistry>(
-    '@diamondcoreprocessor.com/LayerSlotRegistry',
-    (slotRegistry) => {
-      // Registration failures must be LOUD: whenReady swallows what a
-      // callback throws, and a silently missing slot is exactly the failure
-      // this file already paid for once.
-      try {
-        slotRegistry.register({
-          slot: DECORATIONS_SLOT,
-          triggers: [DECORATIONS_TRIGGER],
-        })
-      } catch (error) {
-        console.error('[decoration-manifest] decorations slot registration FAILED', error)
-      }
-    },
-  )
-}
-
-registerDecorationsSlot()
+// The `decorations` slot is registered by the commands BOOT bee
+// (commands.boot.drone.ts), before the runtime and the shell start: the
+// active trigger `decorations:changed` makes the slot self-cascading, and
+// LayerCommitter subscribes only to a registered slot's triggers — a slot
+// that is missing when a decoration is written makes that write vanish,
+// silently. A dependency never registers (atomic-modules-plan.md).

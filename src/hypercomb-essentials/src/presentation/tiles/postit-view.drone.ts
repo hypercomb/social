@@ -27,7 +27,8 @@ import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../
 import { readTilePropertiesAt, tilePictureCandidates } from '../../editor/tile-properties.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { trackScrollGutter } from './scroll-gutter.js'
-import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY, type PostitPayload } from '../../commands/postit.queen.js'
+import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY } from '../../commands/postit-kind.js'
+import type { PostitPayload } from '../../commands/postit.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 
 /** This drone's name in the owner-counted `view:active` mode. */

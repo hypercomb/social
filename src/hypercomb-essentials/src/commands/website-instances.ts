@@ -16,7 +16,7 @@
 
 import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { removeDecoration } from './decoration-manifest.js'
-import { WEBSITE_PENDING_KIND } from './website.queen.js'
+import { WEBSITE_PENDING_KIND } from './website-kind.js'
 
 const STYLE_ID = 'wl-overlay-styles'
 function t(key: string, params?: Record<string, string | number>): string {

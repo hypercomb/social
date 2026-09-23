@@ -2,16 +2,9 @@
 
 import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
 import { writeTilePropertiesAt } from '../editor/tile-properties.js'
-const STORAGE_KEY = 'hc:neon-color'
+import { ACCENT_NAMES, readAccentTarget } from './accent-target.js'
 
-// Accent preset names → neon color index (maps to NEON_PRESETS in hex-overlay.shader)
-const ACCENT_NAMES: Record<string, number> = {
-  glacier: 0,
-  bloom: 1,
-  aurora: 2,
-  ember: 3,
-  nebula: 4,
-}
+const STORAGE_KEY = 'hc:neon-color'
 
 const ACCENT_INDEX_TO_NAME: string[] = ['glacier', 'bloom', 'aurora', 'ember', 'nebula']
 const get = (key: string) => (window as any).ioc?.get?.(key)
@@ -177,22 +170,3 @@ function loadIndex(): number {
 
 const _accent = new AccentQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/AccentQueenBee', _accent)
-
-/** `<cell> = <preset>` — the named form, or undefined when the line uses none.
- *  One reader for the parser and for the machine gate, so the two can never
- *  disagree about what a line means. */
-export const readAccentTarget = (
-  args: string,
-): { cell: string; preset: string } | { refuse: string } | undefined => {
-  const equals = args.indexOf('=')
-  if (equals === -1) return undefined
-  const cell = args.slice(0, equals).trim()
-  const preset = args.slice(equals + 1).trim()
-  if (!cell || cell.includes('/') || cell.includes(String.fromCharCode(92))) {
-    return { refuse: 'the named form is /accent <cell> = <preset>, one tile on this page' }
-  }
-  if (!(preset in ACCENT_NAMES)) {
-    return { refuse: `"${preset || '(nothing)'}" is not a known accent preset` }
-  }
-  return { cell, preset }
-}

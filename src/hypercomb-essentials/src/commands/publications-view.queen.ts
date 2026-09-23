@@ -22,9 +22,7 @@ import {
 import {
   ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn,
 } from '../sharing/behavior-enablement.js'
-
-export const PUBLICATIONS_VIEW = 'publications'
-export const PUBLICATIONS_KIND = 'visual:publications:view'
+import { PUBLICATIONS_KIND, PUBLICATIONS_VIEW } from './publications-kind.js'
 
 /** Payload of a `visual:publications:view` record. Everything is optional —
  *  the page is built from the ledger, not from authored content. */

@@ -34,10 +34,8 @@ import {
   buildTileBriefPanel, TILE_BRIEF_CSS,
   type BriefPanelOptions, type BriefSibling,
 } from './tile-brief-panel.js'
-import {
-  SQUARE_TILE_KIND, SQUARE_TILE_VIEW, LEGACY_WELCOME_KIND,
-  type SquareTilePayload,
-} from '../../commands/square-tile-view.queen.js'
+import { SQUARE_TILE_KIND, SQUARE_TILE_VIEW, LEGACY_WELCOME_KIND } from '../../commands/square-tile-kind.js'
+import type { SquareTilePayload } from '../../commands/square-tile-view.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }

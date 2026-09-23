@@ -639,9 +639,3 @@ export class KeywordSuggestionsView {
     document.head.append(style)
   }
 }
-
-const _keywordGeneration = new KeywordGenerationService()
-window.ioc.register('@diamondcoreprocessor.com/KeywordGenerationService', _keywordGeneration)
-
-const _keywordSuggestions = new KeywordSuggestionsView(_keywordGeneration)
-window.ioc.register('@diamondcoreprocessor.com/KeywordSuggestionsView', _keywordSuggestions)

@@ -1,6 +1,6 @@
 # Atomic modules — one behaviour, many dependencies
 
-**Status:** steps 1–3 BUILT on games 2026-09-22; steps 4 and 4b BUILT and browser-verified. Step 3 output: 88 game atoms + 11 barrels, zero dangling imports, zero atom cycles, every game module links through the alias map in Node, every game class exists exactly once in the build (Solomon bee ~1.3 MB → 4 KB, game view bee 1–2 MB → 16 KB). Step 5 BUILT and browser-verified. Step 4c (position-aware preloader) and 6 open. Decided by jwize: every game (and eventually
+**Status:** steps 1–3 BUILT on games 2026-09-22; steps 4 and 4b BUILT and browser-verified. Step 3 output: 88 game atoms + 11 barrels, zero dangling imports, zero atom cycles, every game module links through the alias map in Node, every game class exists exactly once in the build (Solomon bee ~1.3 MB → 4 KB, game view bee 1–2 MB → 16 KB). Step 5 BUILT and browser-verified. Step 6 DONE 2026-09-22 — every domain in the build is atomized (batches 1–8); the self-registration allowlist holds six files, none of them a registering dependency inside the build. Step 4c (position-aware preloader) open. Decided by jwize: every game (and eventually
 every feature) is ONE behaviour the hive registers, plus any number of
 dependencies the hive never registers. Dependencies are atoms in their own
 right — sig-addressed, shareable, deduplicated — but they never appear as
@@ -294,6 +294,8 @@ boot bees so far:
 - `history/history.boot.drone.ts` — HistoryService (and its runtime contract
   key `@HistoryService`), HistoryCursorService, the LayerSlotRegistry, and
   history's own builds and snapshots slots.
+- `sharing/sharing.boot.drone.ts` and `commands/commands.boot.drone.ts` —
+  see batches 6 and 8.
 
 **Batch 4 — BUILT and browser-verified 2026-09-22:** navigation, history.
 Besides the boot bees: the zoom bee registers the mousewheel input too (it
@@ -399,9 +401,37 @@ On the web shell every baseline key registered plus the three new bees, all
 atoms; 707 of 730 units linked (the rest need a DOM); 538 dependencies,
 198 bees.
 
-Next: commands — checked for boot services first (DecorationService,
-OverlapMetrics and VisualBeeRegistry are read by the command line).
-(`revolucionstyle.com` is outside the build.)
+**Batch 8 — BUILT and browser-verified 2026-09-22:** commands. STEP 6 IS
+DONE: every domain in the build is atomized.
+
+- **A fourth boot bee**, `commands/commands.boot.drone.ts`, registers the
+  `decorations` slot (LayerCommitter subscribes only to a registered slot's
+  triggers, so a decoration written before the slot exists vanishes), the
+  `website` slot (the preloader warms registered slots), DecorationService
+  (the controls bar reads tile titles through it on its first render), the
+  decoration index's overlap metrics and context index, and VisualBeeRegistry
+  (every visual bee registers into it).
+- 61 words became bees, and `view.bee.ts`. Owner words took the rest: the
+  aliases drone its participant aliases, `/reference` the canonical
+  reference service (the one write door for portals), `/mobile` the
+  long-press that reveals the command line, `/keywords` its proposal surface
+  and generator, the translate sweep its translation service, and the slash
+  drone the utterance reader and spoken habits.
+- **Twelve values left their words for atoms**, because other bees imported
+  them: each view word's names (`brief-kind`, `postit-kind`,
+  `publications-kind`, `lightbox-kind` with every picture a tile holds,
+  `scroller-kind`, `square-tile-kind`, `view-library-kind`, `website-kind`),
+  `template-catalog` (the layouts on offer and the door that starts a
+  design), `remove-tiles` (what /remove and the tutorial's cleanup share),
+  and the named forms of /keyword and /accent (`named-target`,
+  `accent-target`). Types stayed with their words.
+
+The self-registration allowlist is down to six: `llm-provider-registry.ts`
+(the map door itself) and five `revolucionstyle.com` files, which are outside
+the build. On the web shell every baseline key registered plus the new bees,
+all 60 surfaces, both slots, zero breaks; the boot bees finished at +466 ms,
+Angular's first paint at +511 ms; 817 of 840 units linked; 579 dependencies,
+261 bees.
 
 ## Atomize for the editor, optimize for the reader
 

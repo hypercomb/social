@@ -60,7 +60,7 @@ import {
   sweepCreationPool,
 } from './layout-creations.js'
 import type { ConcealedItem } from '../../concealment/concealment.js'
-import { findTemplate, knownTemplates, targetTemplate } from '../../commands/template.queen.js'
+import { findTemplate, knownTemplates, targetTemplate } from '../../commands/template-catalog.js'
 import { targetsIn } from './meaning-target.js'
 import {
   DEFAULT_HOLE_FAMILY,

@@ -692,22 +692,24 @@ export function countLabelsWithTag(name: string): number {
   return n
 }
 
-// Register the overlap-metric reader so the shell can resolve it via IoC,
-// mirroring how it reaches DecorationService / VisualBeeRegistry.
-window.ioc.register('@diamondcoreprocessor.com/OverlapMetrics', {
+// The overlap-metric reader the shell resolves via IoC, mirroring how it
+// reaches DecorationService / VisualBeeRegistry. The commands boot bee
+// registers it.
+export const overlapMetrics = {
   kindCount: countLabelsWithKind,
   tagCount: countLabelsWithTag,
-})
+}
 
 // The context index, reachable from OUTSIDE essentials — the shell writes these
 // attachments (the portals drop lives in shared, which may never import
 // essentials) and an ask composer has to read them back. Same loose-IoC seam
-// OverlapMetrics uses, and the only route there is.
-window.ioc.register('@diamondcoreprocessor.com/ContextIndex', {
+// OverlapMetrics uses, and the only route there is. The commands boot bee
+// registers it.
+export const contextIndex = {
   targetsForLabel: contextTargetsForLabel,
   targetsForSegments: contextTargetsForSegments,
   sigFor: contextSigFor,
-})
+}
 
 type StoreLike = {
   getResource(sig: string): Promise<Blob | null>

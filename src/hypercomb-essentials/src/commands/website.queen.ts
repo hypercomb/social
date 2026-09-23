@@ -74,16 +74,7 @@ import { writeDecoration, listDecorations, removeDecoration } from './decoration
 //     IconProviderRegistry; dispatches clicks to the bee's queen
 import './decoration-kind-index.js'
 import './visual-bee-icons.js'
-
-/**
- * Build-intent marker kind. `/website here` drops a decoration of this kind
- * on the current cell; the next gen pass / `website-build` skill reads them
- * as the authoritative queue of cells to turn into pages, then replaces each
- * with a `visual:website:page` decoration once generated. Distinct from the
- * page kind so SiteViewDrone (which mounts `visual:website:page` + htmlSig)
- * and ViewBee's presence check never confuse a request for a built page.
- */
-export const WEBSITE_PENDING_KIND = 'visual:website:pending'
+import { WEBSITE_PENDING_KIND } from './website-kind.js'
 
 // View-mode toggle constants. These are the args /website accepts as
 // "I want to switch rendering surface" instead of "stamp / export."

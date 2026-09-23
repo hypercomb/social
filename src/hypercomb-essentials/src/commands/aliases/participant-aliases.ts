@@ -309,5 +309,3 @@ export class ParticipantAliases {
     catch { /* a full or blocked store costs the cache, never the pool */ }
   }
 }
-
-window.ioc?.register?.('@diamondcoreprocessor.com/ParticipantAliases', new ParticipantAliases())

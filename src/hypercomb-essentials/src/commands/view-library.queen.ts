@@ -13,11 +13,7 @@ import {
   writeViewSourceScope,
   type ViewSourceScope,
 } from './view-source-scope.js'
-
-export const EVIDENCE_ATLAS_VIEW = 'evidence-atlas'
-export const EVIDENCE_ATLAS_KIND = 'visual:document:evidence-atlas'
-export const KNOWLEDGE_STUDIO_VIEW = 'knowledge-studio'
-export const KNOWLEDGE_STUDIO_KIND = 'visual:document:knowledge-studio'
+import { EVIDENCE_ATLAS_KIND, EVIDENCE_ATLAS_VIEW, KNOWLEDGE_STUDIO_KIND, KNOWLEDGE_STUDIO_VIEW } from './view-library-kind.js'
 
 type Mode = { mode: string; setMode(next: string): void }
 type Lineage = { explorerSegments?: () => readonly string[] }

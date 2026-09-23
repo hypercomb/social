@@ -9,7 +9,7 @@ import {
   titleForSegments,
 } from '../../commands/decoration-kind-index.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
-import { LIVING_BRIEF_KIND, LIVING_BRIEF_VIEW } from '../../commands/brief.queen.js'
+import { LIVING_BRIEF_KIND, LIVING_BRIEF_VIEW } from '../../commands/brief-kind.js'
 import {
   viewSourceConfigAt,
   writeViewSourceSelection,

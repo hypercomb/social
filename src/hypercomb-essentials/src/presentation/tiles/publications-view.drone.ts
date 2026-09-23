@@ -33,10 +33,8 @@ import { offerFromCard } from '../../sharing/static-peers.js'
 import { lineageKey } from '../../history/lineage-key.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { openExternalLink } from './document-view-links.js'
-import {
-  PUBLICATIONS_KIND, PUBLICATIONS_VIEW,
-  type PublicationsPayload,
-} from '../../commands/publications-view.queen.js'
+import { PUBLICATIONS_KIND, PUBLICATIONS_VIEW } from '../../commands/publications-kind.js'
+import type { PublicationsPayload } from '../../commands/publications-view.queen.js'
 import { DISCOVER_EFFECT } from '../../sharing/discover-effects.js'
 import type { DiscoverPayload } from '../../sharing/discover.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'

@@ -49,5 +49,3 @@ export class UtteranceReader {
     return registry?.color?.(category) || undefined
   }
 }
-
-window.ioc?.register?.('@diamondcoreprocessor.com/UtteranceReader', new UtteranceReader())
