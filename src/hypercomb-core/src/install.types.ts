@@ -75,6 +75,8 @@ export interface InstallOutcomeInfo {
   fetched: number
   present: number
   error?: string
+  /** Paths whose picks a whole-root take released — the new root runs there. */
+  released?: readonly string[]
 }
 
 export interface InstallProvider {
@@ -112,7 +114,9 @@ export interface InstallProvider {
   ): Promise<InstallOutcomeInfo>
   /** Drop the pick at a path — the trunk's layer runs there again. */
   unpick(path: string): Promise<InstallOutcomeInfo>
-  /** Make a root yours through the one verified, gated acquisition. */
+  /** Make a root yours through the one verified, gated acquisition. This is
+   *  the participant taking the WHOLE root (Update all): a pick the root moves
+   *  past is released, except a confirmed downgrade or a trial taken by hand. */
   acquire(root: string, zones: readonly string[]): Promise<InstallOutcomeInfo>
   /** Re-write the activation record from what is held — the repoint a toggle
    *  needs. False when the held selection does not resolve. */

@@ -71,7 +71,7 @@ import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, ord
 import { changedUnits, dependencyUnits, packageUnits, readOffUnits, writeOffUnits } from './package-units.js'
 import {
   composeDependencies, enabledBees, isPath, layerAt, missingNamespaces, movedPaths, namespaceOf, orderRevisions,
-  readPicks, sigsOf, walkTree, withAncestors, within, writePicks, type Picks, type RevisionSource,
+  readPicks, releasedByTakeAll, sigsOf, walkTree, withAncestors, within, writePicks, type Picks, type RevisionSource,
 } from './package-tree.js'
 
 // Store is reached STRUCTURALLY, never imported. Importing the module would
@@ -107,6 +107,8 @@ export type InstallOutcome = {
   error?: string
   /** Files that arrived inside a transfer pack rather than one by one. */
   packed?: number
+  /** Paths whose picks Update all released — the new root runs there now. */
+  released?: string[]
 }
 
 /** This origin's content bases — a byte source only through {@link originAmong}. */
@@ -477,8 +479,11 @@ export const acquire = async (
   packageSig: string,
   zones: readonly string[],
   /** `floor`: the shell found the live package below its floor
-   *  (activation-authority.ts, FLOOR). Only the shell passes it. */
-  opts: { floor?: boolean } = {},
+   *  (activation-authority.ts, FLOOR). Only the shell passes it.
+   *  `takeAll`: the participant pressed Update all — picks the new root moves
+   *  past are released. Only the install port passes it; boot repair and the
+   *  floor never do, so neither can move what the participant picked. */
+  opts: { floor?: boolean; takeAll?: boolean } = {},
 ): Promise<InstallOutcome> => {
   const fail = (error: string): InstallOutcome =>
     ({ ok: false, packageSig, fetched: 0, present: 0, holes: [], refused: [], error })
@@ -528,7 +533,7 @@ export const installPackage = async (
   /** Extra domains to pull the SAME signature from. Every carried host that
    *  publishes it is a byte source for it — see {@link acquire}. */
   alsoFrom: readonly string[] = [],
-  opts: { floor?: boolean } = {},
+  opts: { floor?: boolean; takeAll?: boolean } = {},
 ): Promise<InstallOutcome> => {
   const fail = (error: string): InstallOutcome =>
     ({ ok: false, packageSig: pkg.packageSig, fetched: 0, present: 0, holes: [], refused: [], error })
@@ -654,11 +659,34 @@ export const installPackage = async (
   // PICKS RIDE ACROSS A TRUNK MOVE. What the participant took at a path stays
   // taken on the new trunk, so the selection is composed over what is now
   // held — and passes every gate below again, over the composed set.
-  if (Object.keys(readPicks()).length) {
-    const selection = await applySelection(pkg.packageSig, held.held)
-    if (!selection.ok) return fail(selection.error)
-    return { ok: true, packageSig: pkg.packageSig, fetched: held.fetched, present: held.present, holes: [], refused: [], packed: modules.served() }
+  //
+  // EXCEPT WHEN THE PARTICIPANT TOOK EVERYTHING (`takeAll`, Update all): a pick
+  // the new root moves past is released, because the update at that path is
+  // exactly what they asked for (releasedByTakeAll, package-tree.ts). Without
+  // this a pick taken months ago kept an old build of that package running
+  // forever — its chat organizer, with no rate-limit back-off, among them.
+  let picks = readPicks()
+  let released: string[] = []
+  if (opts.takeAll && Object.keys(picks).length) {
+    const decided = await releasedByTakeAll(picks, path => layerAt(pkg.packageSig, path, layersIo))
+    picks = decided.kept
+    released = decided.released
+    if (released.length) console.info(`[acquire] Update all released the picks at ${released.join(', ')} — the new root runs there`)
   }
+  if (Object.keys(picks).length) {
+    // The brood speaks before anything is composed. This branch used to
+    // return before the hold below ever ran, so a participant with any pick
+    // took the new trunk's bees unheld whatever their rules said.
+    await holdArrivals(inventory.bees, arrivalKindOf(authority.by), {
+      zone: pkg.zone,
+      packageSig: pkg.packageSig,
+      how: 'package install',
+    })
+    const selection = await applySelection(pkg.packageSig, held.held, picks)
+    if (!selection.ok) return fail(selection.error)
+    return { ok: true, packageSig: pkg.packageSig, fetched: held.fetched, present: held.present, holes: [], refused: [], packed: modules.served(), ...(released.length ? { released } : {}) }
+  }
+  const releaseAll = released.length > 0
 
   // CAN THIS SHELL RUN IT? (core-surface.ts). The modules just admitted name
   // what they import from `@hypercomb/core`; the shell's runtime core is asked
@@ -700,6 +728,9 @@ export const installPackage = async (
   }
 
   await activate(pkg.packageSig, inventory, beeDeps, held.held, await enabledOf(pkg.packageSig, inventory.bees, layersIo))
+  // Every pick was released by Update all: the trunk alone runs now, so the
+  // picks record goes — only after the activation it describes is written.
+  if (releaseAll) writePicks({})
   return {
     ok: true,
     packageSig: pkg.packageSig,
@@ -708,6 +739,7 @@ export const installPackage = async (
     holes: [],
     refused: [],
     packed: modules.served(),
+    ...(released.length ? { released } : {}),
   }
 }
 
@@ -1258,9 +1290,17 @@ const installProvider: InstallProvider = {
     const outcome = await unpickRevision(path)
     return { ok: outcome.ok, fetched: 0, present: 0, ...(outcome.ok ? {} : { error: outcome.error }) }
   },
+  // The port's acquire is the participant taking a whole root — the Packages
+  // window's Update all is its one caller — so it takes everything the root
+  // offers. Decided here, not by the window, so an installed window from any
+  // older package gets it the moment the shell ships.
   acquire: async (root, zones) => {
-    const outcome = await acquire(root, zones)
-    return { ok: outcome.ok, fetched: outcome.fetched, present: outcome.present, ...(outcome.error ? { error: outcome.error } : {}) }
+    const outcome = await acquire(root, zones, { takeAll: true })
+    return {
+      ok: outcome.ok, fetched: outcome.fetched, present: outcome.present,
+      ...(outcome.error ? { error: outcome.error } : {}),
+      ...(outcome.released?.length ? { released: outcome.released } : {}),
+    }
   },
   applyUnits,
   offUnits: () => readOffUnits(),

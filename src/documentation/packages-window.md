@@ -62,7 +62,19 @@ pick puts the trunk's layer back.
   name. The picks are written only once all of that holds. A pick from the
   trunk itself is pruned.
 - **`installPackage`** composes the picks over a new trunk, so what you took at
-  a path stays taken across Update all.
+  a path stays taken across a trunk move — boot repair and the floor never
+  touch a pick.
+- **Update all takes every update** (*2026-09-23*, jwize: "you have to choose
+  what you want updated" — Update all is choosing all of it). The install
+  port's `acquire` passes `takeAll`, and `releasedByTakeAll` releases each pick
+  the new root moves past, so the new root's layer runs there. Kept: a path the
+  new root does not name, a downgrade confirmed with **Take it anyway**
+  (`hides`), and a trial taken by hand (`byHand`). Nothing is deleted — the
+  bytes stay held and the revisions list takes any of them back. Found live: a
+  pick taken before `assistant` was split into atoms kept the old chat
+  organizer, with no rate-limit back-off, running after every Update all.
+- The brood holds the new trunk's bees on this path too: a pick used to skip
+  `holdArrivals` entirely.
 
 ## On and off
 

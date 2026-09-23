@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
 import {
   PICKS_KEY, changedBeneath, composeDependencies, enabledBees, missingNamespaces, movedPaths, namespaceOf,
-  orderRevisions, ownerOf, readPicks, walkTree, withAncestors, writePicks, type PackagePick,
+  orderRevisions, ownerOf, readPicks, releasedByTakeAll, walkTree, withAncestors, writePicks, type PackagePick,
 } from './package-tree'
 import type { ReplicationIo } from './replication-walker'
 
@@ -187,6 +187,26 @@ describe('the package tree', () => {
       readAtoms,
     )
     expect(movedPast).toEqual(['p1', 't2', 't3', 't4'])
+  })
+
+  it('Update all releases the picks the new root moves past, and keeps what the participant confirmed', async () => {
+    const pickAt = (layer: string, extra: Partial<PackagePick> = {}): PackagePick =>
+      ({ layer, root: 'r'.repeat(64), hides: false, at: 1, ...extra })
+    const newRoot: Record<string, string> = {
+      assistant: 'n1'.padEnd(64, '0'),
+      games: 'n2'.padEnd(64, '0'),
+      notes: 'n3'.padEnd(64, '0'),
+      'games/solomon': 'n4'.padEnd(64, '0'),
+    }
+    const { kept, released } = await releasedByTakeAll({
+      assistant: pickAt('o1'.padEnd(64, '0')),                          // moved past → released
+      games: pickAt('o2'.padEnd(64, '0'), { hides: true }),              // confirmed downgrade → kept
+      'games/solomon': pickAt('o4'.padEnd(64, '0'), { byHand: true }),   // a trial → kept
+      notes: pickAt(newRoot['notes']!),                                  // the same layer → dropped, not listed
+      extras: pickAt('o5'.padEnd(64, '0')),                              // the root has no such path → kept
+    }, async path => newRoot[path] ?? '')
+    expect(released).toEqual(['assistant'])
+    expect(Object.keys(kept).sort()).toEqual(['extras', 'games', 'games/solomon'])
   })
 
   it('names the namespaces a module imports that the selection does not run', async () => {

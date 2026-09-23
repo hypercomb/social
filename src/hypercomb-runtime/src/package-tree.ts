@@ -213,6 +213,32 @@ export const layerAt = async (rootSig: string, path: string, io: ReplicationIo):
   return at
 }
 
+/**
+ * WHAT "UPDATE ALL" TAKES. The participant chose every update the followed
+ * publisher offers, so a pick the new root moves past is released and the
+ * root's own layer runs there — that is the update the row's mark offered.
+ * Kept: a pick whose path the new root does not name (it adds, it does not
+ * lag), a downgrade the participant confirmed with "Take it anyway" (`hides`),
+ * and a pick taken by hand from a root nothing vouches for (`byHand`, a
+ * trial). A pick of the very layer the root names is dropped as a no-op.
+ * Nothing is deleted: the bytes stay held and the revisions list takes any of
+ * them back.
+ */
+export const releasedByTakeAll = async (
+  picks: Picks,
+  layerOfNewRoot: (path: string) => Promise<string>,
+): Promise<{ kept: Picks; released: string[] }> => {
+  const kept: Picks = {}
+  const released: string[] = []
+  for (const [path, pick] of Object.entries(picks)) {
+    if (pick.hides || pick.byHand) { kept[path] = pick; continue }
+    const now = await layerOfNewRoot(path).catch(() => '')
+    if (!now) { kept[path] = pick; continue }
+    if (now !== pick.layer) released.push(path)
+  }
+  return { kept, released: released.sort() }
+}
+
 /** Is this path off — itself, or any branch above it? */
 export const isOff = (path: string, off: ReadonlySet<string>): boolean => {
   for (const above of off) if (within(path, above)) return true
