@@ -75,9 +75,27 @@ gesture. History, source review, and branch management can arrive as
 beehaviors. A missing directory is reported as missing, not replaced by a
 package revision list pretending to be hives.
 
-**The zone's front page is its gallery.** The root domain welcomes visitors and
-shows the applications whose hive doors are currently published there. Each
-gallery entry opens its door for inspection and offers a simple **Turn on**
+**One variable root, simple host.** Keep the host's small welcome page and
+show its active offerings plainly. A domain or subdomain is a stable door
+bound to a publisher and hive path. The publisher's signed index chooses the
+root signature currently shown at that door, so the root can change without
+changing the address or the install protocol. If the operator wants that
+address to focus on another hive path, change its binding instead. The same
+published hive may answer at several doors. No domain per revision and no new
+catalog are required. A richer gallery can later be a beehavior over the same
+door coordinates. The page can query its own origin's browser-local properties;
+the participant's hive on another origin answers only after the handoff back
+to that local instance.
+
+The participant's **Home** is a separate local choice: pin any portal in the
+Portals window and `/` shows that portal's existing route. Unpinning shows the
+hive root again. Neither action moves or deletes tiles, so no save-and-clear
+copy is needed. Publishing a route to a domain remains an explicit choice;
+the private Home pin never silently changes a public door. Clearing a public
+route withdraws its signed head while previously served signature files remain
+servable to people who know their names.
+
+Each gallery entry opens its door for inspection and offers a simple **Turn on**
 choice. The handshake runs in one direction: the host offers a signed hive;
 the participant visits and chooses it; the participant's local instance
 receives its publisher key, hive path, signed head, and byte hosts, then pulls,
@@ -92,7 +110,9 @@ update path needs no host package list. A list of installed applications and
 their exact revisions is available when the person chooses to browse it. A
 newly published application elsewhere in the gallery is never an update
 notification at home. The current cold Shim links to hive doors; the gallery
-handoff and per-application update gate are still to be wired.
+handoff and per-application update gate are still to be wired. The global
+package update scout currently watches one install channel; it must not stand
+in for per-application interest.
 
 An upgrade is another signed hive/package revision, first tried at a
 `try-<change>.<zone>` door on its own origin. A model can propose the change

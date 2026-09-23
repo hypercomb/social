@@ -9,10 +9,8 @@
      The bee now opens the roster — the same window `/tutorial` opens — which
      docks, resizes, searches, and remembers what you have flown. -->
 
-<!-- Legacy recent-portals picker. Home ownership no longer lives in the
-     Portals window: Ctrl/⌘+clicking the global Home control toggles the current
-     lineage directly. Kept render-compatible while older callers may still
-     open the recent list. -->
+<!-- Recent-portals picker. Home can be chosen here, on a Portals row, or by
+     Ctrl/⌘+clicking the global Home control at the current lineage. -->
 @if (homeMenuOpen()) {
   <div class="tour-menu home-menu"
        [style.left.px]="homeMenuPos().x"
