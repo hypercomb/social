@@ -11,7 +11,7 @@ import { byDeadline, CARD_DEADLINE_MS, PICTURE_DEADLINE_MS, SAFETY_DEADLINE_MS }
 import { verifyLinkDropCard } from './link-drop-card.view.js'
 import type { TileEditorService } from '../editor/tile-editor.service.js'
 import type { ImageEditorService } from '../editor/image-editor.service.js'
-import type { LinkSafetyService, SafetyVerdict } from '../safety/link-safety.service.js'
+import { LinkSafetyService, type SafetyVerdict } from '../safety/link-safety.service.js'
 import { armImageBlob, storeImageResources } from '../editor/arm-resource.js'
 import {
   linkDropDestination,
@@ -19,7 +19,7 @@ import {
   type DroppedLinkImage,
 } from './link-drop-destination.js'
 import './youtube-metadata-queue.js'
-import type { YouTubeMetadataQueue } from './youtube-metadata-queue.js'
+import { YOUTUBE_METADATA_QUEUE_IOC_KEY, YouTubeMetadataQueue } from './youtube-metadata-queue.js'
 import {
   cellLocationSig,
   isParticipantImage,
@@ -515,6 +515,11 @@ export class LinkDropWorker extends Worker {
     return get('@diamondcoreprocessor.com/LinkSafetyService') as LinkSafetyService | undefined
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register(YOUTUBE_METADATA_QUEUE_IOC_KEY, new YouTubeMetadataQueue())
+window.ioc.register('@diamondcoreprocessor.com/LinkSafetyService', new LinkSafetyService())
 
 const _linkDrop = new LinkDropWorker()
 window.ioc.register('@diamondcoreprocessor.com/LinkDropWorker', _linkDrop)

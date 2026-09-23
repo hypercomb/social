@@ -415,5 +415,4 @@ interface FrameRecordPayload {
   patternSig?: string
 }
 
-const _frameService = new FrameService()
-window.ioc.register('@FrameService', _frameService)
+// sequence/sequence-cycle.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

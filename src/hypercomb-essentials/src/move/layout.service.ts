@@ -54,4 +54,4 @@ export class LayoutService {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/LayoutService', new LayoutService())
+// presentation/tiles/show-cell.drone.ts — the first paint reads it registers this (atomic-modules-plan.md): a dependency registers nothing.

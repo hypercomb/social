@@ -12,6 +12,22 @@
     "format",
     "document",
     "search",
-    "computation"
+    "computation",
+    "selection",
+    "clipboard",
+    "contact",
+    "quickmenu",
+    "files",
+    "comfy",
+    "workflow",
+    "substrate",
+    "move",
+    "preferences",
+    "pheromones",
+    "link",
+    "molecule",
+    "sequence",
+    "safety",
+    "keyboard"
   ]
 }

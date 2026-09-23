@@ -942,5 +942,4 @@ export class QuickMenuInput {
   }
 }
 
-const _quickMenuInput = new QuickMenuInput()
-window.ioc.register('@diamondcoreprocessor.com/QuickMenuInput', _quickMenuInput)
+// quickmenu/quickmenu.queen.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

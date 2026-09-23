@@ -1,6 +1,6 @@
 // core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
-import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
+import { ClipboardService, type ClipboardOp } from './clipboard.service.js'
 import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig } from '../history/layer-placement.js'
 import { seedLayerKeyedEntries } from '../editor/tile-properties.js'
 
@@ -1148,6 +1148,12 @@ function readExclusions(): ReadonlySet<string> {
 function clearExclusions(): void {
   try { localStorage.removeItem(EXCLUSIONS_KEY) } catch { /* ignore */ }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/ClipboardService', new ClipboardService())
+// Announce clipboard availability so shared UI can gate clipboard controls
+EffectBus.emit('clipboard:available', { available: true })
 
 const _clipboard = new ClipboardWorker()
 window.ioc.register('@diamondcoreprocessor.com/ClipboardWorker', _clipboard)

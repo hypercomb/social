@@ -406,7 +406,4 @@ export const moleculeIndexReader = (service: MoleculeIndexService): MoleculeInde
     rootSig: () => service.rootSig(),
   })
 
-if ((window as unknown as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register) {
-  (window as unknown as { ioc: { register: (k: string, v: unknown) => void } })
-    .ioc.register(MOLECULE_INDEX_SERVICE_KEY, moleculeIndexReader(new MoleculeIndexService()))
-}
+// molecule/molecule-index.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

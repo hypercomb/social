@@ -278,4 +278,4 @@ export class TouchMoveInput {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/TouchMoveInput', new TouchMoveInput())
+// move/move.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

@@ -171,7 +171,4 @@ export class LinkSafetyService {
   }
 }
 
-window.ioc.register(
-  '@diamondcoreprocessor.com/LinkSafetyService',
-  new LinkSafetyService(),
-)
+// link/link-drop.worker.ts — the link drop is what it guards registers this (atomic-modules-plan.md): a dependency registers nothing.

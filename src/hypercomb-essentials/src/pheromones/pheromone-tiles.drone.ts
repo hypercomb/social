@@ -45,6 +45,9 @@
 
 import { Drone, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { tagsForLabel } from '../commands/decoration-kind-index.js'
+import { addSigMark, marksOf, removeSigMark, sigMarksKnown, sigMarksOf } from './pheromone-marks.js'
+import { allows, allowsHere } from './intake-filter.js'
+import { PHEROMONE_DEPOSIT_KIND, depositKindsKnown, depositKindsOf, forgetDeposits, knownPheromoneKinds, mintDeposit } from './pheromone-deposits.js'
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
 type DecorationServiceLike = {
@@ -498,5 +501,13 @@ export class PheromoneTilesDrone extends Drone {
 }
 
 // ── registration ────────────────────────────────────────
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/PheromoneMarks', { marksOf, sigMarksOf, sigMarksKnown, addSigMark, removeSigMark })
+window.ioc.register('@diamondcoreprocessor.com/IntakeFilter', { allows, allowsHere })
+window.ioc.register('@diamondcoreprocessor.com/PheromoneDeposits', {
+  PHEROMONE_DEPOSIT_KIND, mintDeposit, depositKindsOf, depositKindsKnown, forgetDeposits, knownPheromoneKinds,
+})
+
 const _pheromoneTiles = new PheromoneTilesDrone()
 window.ioc.register('@diamondcoreprocessor.com/PheromoneTilesDrone', _pheromoneTiles)

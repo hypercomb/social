@@ -121,5 +121,4 @@ export class PhotoView extends EventTarget {
   }
 }
 
-const _photoView = new PhotoView()
-window.ioc.register('@diamondcoreprocessor.com/PhotoView', _photoView)
+// link/link-open.worker.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

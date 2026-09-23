@@ -322,7 +322,7 @@ const registersItself = (f: string): boolean => {
  *  are shared; as a lone bee it would carry private copies of them. */
 const isBee = (f: string): boolean =>
   f.endsWith('.drone.ts') || f.endsWith('.drone.js') || f.endsWith('.worker.ts') || f.endsWith('.worker.js')
-  || (/\.queen\.[tj]s$/.test(f) && isAtomizedRelPath(relPosix(SRC_ROOT, f)) && registersItself(f))
+  || (/\.(queen|bee)\.[tj]s$/.test(f) && isAtomizedRelPath(relPosix(SRC_ROOT, f)) && registersItself(f))
 
 const isEntry = (f: string): boolean =>
   f.endsWith('.entry.ts') || f.endsWith('.entry.js')

@@ -52,6 +52,8 @@ import {
   listSequenceTargetHere,
   removeSequenceTarget,
 } from './sequence-target.js'
+import { FrameService } from './frame.service.js'
+import { SequenceService } from './sequence.service.js'
 
 type CellCountPayload = {
   count: number
@@ -529,6 +531,11 @@ export class SequenceCycleDrone extends Drone {
     this.emitEffect('toast:show', { type: 'tip', message })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@FrameService', new FrameService())
+window.ioc.register('@diamondcoreprocessor.com/SequenceService', new SequenceService())
 
 const _sequenceCycle = new SequenceCycleDrone()
 window.ioc.register('@diamondcoreprocessor.com/SequenceCycleDrone', _sequenceCycle)

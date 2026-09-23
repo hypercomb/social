@@ -162,9 +162,5 @@ export function removeContact(sig: string, segments: readonly string[]): void {
 // resource, emit `contacts:changed`, and LayerCommitter folds the sig into the
 // layer and commits — the same mechanical path as `decorations` / `notes`.
 
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<LayerSlotRegistry>(
-  '@diamondcoreprocessor.com/LayerSlotRegistry',
-  (slotRegistry) => {
-    slotRegistry.register({ slot: CONTACTS_SLOT, triggers: [CONTACTS_TRIGGER] })
-  },
-)
+/** The slot as the LayerSlotRegistry declares it; contact.drone.ts registers it. */
+export const CONTACTS_SLOT_DECLARATION = { slot: CONTACTS_SLOT, triggers: [CONTACTS_TRIGGER] }

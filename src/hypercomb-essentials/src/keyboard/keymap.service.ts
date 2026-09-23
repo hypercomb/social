@@ -272,4 +272,4 @@ export class KeyMapService extends EventTarget {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/KeyMapService', new KeyMapService())
+// keyboard/keyboard.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

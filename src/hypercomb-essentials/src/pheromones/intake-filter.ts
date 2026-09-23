@@ -252,4 +252,4 @@ export const allows = async (target: IntakeTarget): Promise<boolean> => {
 // The gate, reachable from OUTSIDE essentials — the same loose-IoC seam
 // PheromoneMarks uses, so a shell surface can show WHY something was refused
 // without importing a module.
-window.ioc.register('@diamondcoreprocessor.com/IntakeFilter', { allows, allowsHere })
+// pheromones/pheromone-tiles.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

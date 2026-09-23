@@ -41,6 +41,6 @@ export class Settings  {
     public fillColor = "#242a30"
 }
 
-window.ioc.register('@diamondcoreprocessor.com/Settings', new Settings())
+// presentation/tiles/pixi-host.worker.ts — the first paint reads it registers this (atomic-modules-plan.md): a dependency registers nothing.
 
 

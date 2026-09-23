@@ -226,5 +226,4 @@ export class QuickMenuRegistry extends EventTarget {
   }
 }
 
-const _quickMenuRegistry = new QuickMenuRegistry()
-window.ioc.register('@diamondcoreprocessor.com/QuickMenuRegistry', _quickMenuRegistry)
+// quickmenu/quickmenu.queen.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

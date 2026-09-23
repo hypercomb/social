@@ -175,5 +175,4 @@ export class ContactService {
   }
 }
 
-const _contact = new ContactService()
-window.ioc.register('@diamondcoreprocessor.com/ContactService', _contact)
+// contact/contact.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

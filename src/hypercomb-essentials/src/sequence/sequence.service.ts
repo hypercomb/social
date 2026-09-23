@@ -250,5 +250,4 @@ export class SequenceService extends EventTarget {
   }
 }
 
-const _sequenceService = new SequenceService()
-window.ioc.register('@diamondcoreprocessor.com/SequenceService', _sequenceService)
+// sequence/sequence-cycle.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

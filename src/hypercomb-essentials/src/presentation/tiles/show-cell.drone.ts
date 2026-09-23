@@ -28,6 +28,8 @@ import type { HistoryService, LayerContent } from '../../history/history.service
 import { lineageKey } from '../../history/lineage-key.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
+import { LayoutService } from '../../move/layout.service.js'
+import { SubstrateService } from '../../substrate/substrate.service.js'
 
 // Render-path diagnostics are opt-in (localStorage 'hc:diag' = '1').
 // resolveChildNames runs on every non-memoized pass; the per-pass info
@@ -11696,6 +11698,11 @@ export class ShowCellDrone extends Drone {
     return this.#pushBuffer('aHeat')
   }
 }
+// THE BEE WIRES (atomic-modules-plan.md). A render-critical bee registers
+// the services it needs for the first paint, so they exist before it.
+window.ioc.register('@diamondcoreprocessor.com/LayoutService', new LayoutService())
+window.ioc.register('@diamondcoreprocessor.com/SubstrateService', new SubstrateService())
+
 const showCell = new ShowCellDrone()
 window.ioc.register('@diamondcoreprocessor.com/ShowCellDrone', showCell)
 console.log('[hypercomb] show-cell: pendingRecenter no longer leaks across layer changes; mesh.position and overlay #meshOffset stay in sync (2026-05-07n)')

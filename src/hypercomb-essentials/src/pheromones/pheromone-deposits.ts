@@ -445,11 +445,4 @@ export async function knownPheromoneKinds(): Promise<readonly string[]> {
 
 // Reachable from OUTSIDE essentials — the same loose-IoC seam PheromoneMarks
 // and IntakeFilter use.
-window.ioc.register('@diamondcoreprocessor.com/PheromoneDeposits', {
-  PHEROMONE_DEPOSIT_KIND,
-  mintDeposit,
-  depositKindsOf,
-  depositKindsKnown,
-  forgetDeposits,
-  knownPheromoneKinds,
-})
+// pheromones/pheromone-tiles.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

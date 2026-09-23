@@ -533,8 +533,7 @@ export class ComfyService extends EventTarget {
 }
 
 export const comfyService = new ComfyService()
-
-window.ioc?.register?.(COMFY_SERVICE_KEY, comfyService)
+// comfy/comfy.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.
 
 /** The live map is REPLACED after the early barrel modules register (the
  *  lesson in llm-provider-registry). Re-assert on a post-boot path so a

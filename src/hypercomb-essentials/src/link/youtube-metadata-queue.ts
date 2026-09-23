@@ -10,7 +10,8 @@ import {
 } from './youtube.js'
 
 const STORAGE_KEY = 'hc:youtube-metadata-queue:v1'
-const IOC_KEY = '@diamondcoreprocessor.com/YouTubeMetadataQueue'
+export const YOUTUBE_METADATA_QUEUE_IOC_KEY = '@diamondcoreprocessor.com/YouTubeMetadataQueue'
+const IOC_KEY = YOUTUBE_METADATA_QUEUE_IOC_KEY
 const OWNER = 'youtube-metadata-review'
 const STYLE_ID = 'hc-youtube-metadata-styles'
 
@@ -384,5 +385,4 @@ export class YouTubeMetadataQueue extends EventTarget {
   }
 }
 
-const queue = new YouTubeMetadataQueue()
-window.ioc.register(IOC_KEY, queue)
+// link/link-drop.worker.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

@@ -233,11 +233,34 @@ first batch, when only 6 of 140 bees rebuilt.
 website, widgets, references, recording, meeting, format, document, search,
 computation. Three queens became bees; the search service, both computation
 services and the document slot moved under their bees. 436 of 436 IoC keys
-registered after the swap; 169 units linked. Next, by size: selection,
-clipboard, contact, quickmenu, files, comfy, workflow, substrate, move,
-preferences, pheromones, link, molecule, sequence, safety, keyboard,
-tutorial, navigation, editor, history, presentation, assistant, sharing,
-commands. (`revolucionstyle.com` is outside the build.)
+registered after the swap; 169 units linked.
+
+**A service the first paint needs is registered by the render-critical bee
+that needs it.** Before atomization every namespace bundle loaded before any
+bee, so a service always existed first; an owner bee loads concurrently with
+the rest. The render-critical bees (`PixiHostWorker`, `ShowCellDrone`,
+`BackgroundDrone`) load before the paint, so a service they read for it is
+theirs to register: Settings (pixi-host), LayoutService and SubstrateService
+(show-cell — the tile order and the fallback tile pictures). Everything else
+the shell and the bees already look up when used, or through `whenReady`.
+
+**A self-registering `*.bee.ts` is a bee** in an atomized domain, as a queen
+is (`sequence/sequence-editor.bee.ts`).
+
+**Batch 2 — BUILT and browser-verified 2026-09-22:** selection, clipboard,
+contact, quickmenu, files, comfy, workflow, substrate, move, preferences,
+pheromones, link, molecule, sequence, safety, keyboard. 17 queens and the
+sequence editor became bees; 30 other registrations moved under owner bees.
+The keyboard had no bee, so it has one now (`keyboard/keyboard.drone.ts`,
+registering the keymap service and the Escape cascade's back entry); the
+quick menu's word owns its registry and input; the link drop owns the link
+safety service it guards; the workflow's built-in step kinds became a list the
+runner registers. On the web shell every baseline IoC key registered, plus the
+new keyboard bee — and two sequence words (`frame`, `pattern`) that never
+registered before now do. 330 units linked; 185 atoms, 160 bees.
+
+Next, by size: tutorial, navigation, editor, history, presentation,
+assistant, sharing, commands. (`revolucionstyle.com` is outside the build.)
 
 ## Atomize for the editor, optimize for the reader
 

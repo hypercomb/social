@@ -126,5 +126,4 @@ export class DropboxService {
   }
 }
 
-const _dropbox = new DropboxService()
-window.ioc.register('@diamondcoreprocessor.com/DropboxService', _dropbox)
+// files/dropbox.queen.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

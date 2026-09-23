@@ -18,6 +18,7 @@
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { parseAccept } from './file-types.js'
 import { writeDropbox, removeDropbox, listDropboxHere } from './files-attachment.js'
+import { DropboxService } from './dropbox.service.js'
 
 const get = (key: string): any => (window as any).ioc?.get?.(key)
 
@@ -83,6 +84,10 @@ export class DropboxQueenBee extends QueenBee {
     EffectBus.emit('activity:log', { message, icon })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/DropboxService', new DropboxService())
 
 const _dropbox = new DropboxQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/DropboxQueenBee', _dropbox)

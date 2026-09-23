@@ -2637,28 +2637,5 @@ export class SubstrateService extends EventTarget {
   #lineage(): LineageHandle | undefined { return get('@hypercomb.social/Lineage') }
 }
 
-const _substrateService = new SubstrateService()
-window.ioc.register('@diamondcoreprocessor.com/SubstrateService', _substrateService)
+// presentation/tiles/show-cell.drone.ts — the first paint reads it registers this (atomic-modules-plan.md): a dependency registers nothing.
 
-// BOOT-TIME RECONCILE — stamps label-index image assignments into the
-// canonical 0000 so the tile's image travels everywhere its layer does:
-// the swarm publish inlines canonical props (readTilePropertiesAt), stamping
-// fires cell:0000-changed, and SwarmDrone's existing listener republishes —
-// so the witness sees the EXACT image + position the host renders, and
-// adopts carry both.
-//
-// RETRY SCHEDULE, not a one-shot: a single 15s timer raced the hive boot
-// (install/preload can exceed it) — if History/Store/bags weren't ready the
-// pass no-opped silently and never ran again that session. Each attempt
-// logs its summary; retries stop early once a pass actually stamps, and the
-// passes are idempotent so overlapping schedules are harmless.
-{
-  const delays = [15_000, 45_000, 120_000, 300_000]
-  let done = false
-  for (const d of delays) {
-    setTimeout(() => {
-      if (done) return
-      void _substrateService.reconcileCanonicalImageStamps().then(n => { if (n > 0) done = true })
-    }, d)
-  }
-}

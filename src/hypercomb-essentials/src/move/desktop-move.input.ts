@@ -287,4 +287,4 @@ export class DesktopMoveInput {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/DesktopMoveInput', new DesktopMoveInput())
+// move/move.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

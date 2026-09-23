@@ -30,7 +30,4 @@ export class LayerTransferService {
   }
 }
 
-window.ioc.register(
-  '@diamondcoreprocessor.com/LayerTransferService',
-  new LayerTransferService(),
-)
+// move/move.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

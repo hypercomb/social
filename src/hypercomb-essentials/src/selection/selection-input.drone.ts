@@ -3,7 +3,7 @@ import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import type { Axial } from '../navigation/hex-detector.js'
-import type { SelectionService } from './selection.service.js'
+import { SelectionService } from './selection.service.js'
 import type { InputGate } from '../navigation/input-gate.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
 
@@ -584,6 +584,10 @@ class SelectionInputDrone extends Drone {
 function axialKey(q: number, r: number): string {
   return `${q},${r}`
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/SelectionService', new SelectionService())
 
 const _tileSelection = new SelectionInputDrone()
 window.ioc.register('@diamondcoreprocessor.com/SelectionInputDrone', _tileSelection)

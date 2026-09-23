@@ -26,7 +26,7 @@
 import { Drone } from '@hypercomb/core'
 import { comfyFolder } from './comfy-folder.js'
 import { comfyHost, type ComfyFileRef } from './comfy-host.js'
-import { comfyService, type ComfyJob } from './comfy.service.js'
+import { COMFY_SERVICE_KEY, comfyService, type ComfyJob } from './comfy.service.js'
 import { offeredKnobs, readParams, type ComfyParams } from './comfy-workflow.js'
 import {
   activeWorkflow,
@@ -360,6 +360,10 @@ export class ComfyDrone extends Drone {
     this.emitEffect('comfy:render', payload)
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register(COMFY_SERVICE_KEY, comfyService)
 
 const _comfy = new ComfyDrone()
 ;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(

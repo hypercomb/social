@@ -237,10 +237,4 @@ export async function marksOf(target: MarkTarget): Promise<readonly string[]> {
 
 // The union read + sig carrier, reachable from OUTSIDE essentials — the same
 // loose-IoC seam OverlapMetrics and ContextIndex use.
-window.ioc.register('@diamondcoreprocessor.com/PheromoneMarks', {
-  marksOf,
-  sigMarksOf,
-  sigMarksKnown,
-  addSigMark,
-  removeSigMark,
-})
+// pheromones/pheromone-tiles.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

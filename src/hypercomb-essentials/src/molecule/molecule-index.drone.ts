@@ -49,7 +49,7 @@
 // convention.
 
 import { Drone } from '@hypercomb/core'
-import { MoleculeIndexService } from './molecule-index.service.js'
+import { MOLECULE_INDEX_SERVICE_KEY, MoleculeIndexService, moleculeIndexReader } from './molecule-index.service.js'
 
 /** Manifest reads per idle pass, for the committed spine. A pass that runs out
  *  stops cleanly; the next one picks up, and every branch it did finish is a
@@ -133,5 +133,9 @@ export class MoleculeIndexDrone extends Drone {
     } catch { /* derived cache — the cold path is the answer until it lands */ }
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register(MOLECULE_INDEX_SERVICE_KEY, moleculeIndexReader(new MoleculeIndexService()))
 
 window.ioc.register('@diamondcoreprocessor.com/MoleculeIndexDrone', new MoleculeIndexDrone())

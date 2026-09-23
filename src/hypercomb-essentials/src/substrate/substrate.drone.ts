@@ -190,5 +190,31 @@ export class SubstrateDrone extends Drone {
   }
 }
 
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+// BOOT-TIME RECONCILE — stamps label-index image assignments into the
+// canonical 0000 so the tile's image travels everywhere its layer does:
+// the swarm publish inlines canonical props (readTilePropertiesAt), stamping
+// fires cell:0000-changed, and SwarmDrone's existing listener republishes —
+// so the witness sees the EXACT image + position the host renders, and
+// adopts carry both.
+//
+// RETRY SCHEDULE, not a one-shot: a single 15s timer raced the hive boot
+// (install/preload can exceed it) — if History/Store/bags weren't ready the
+// pass no-opped silently and never ran again that session. Each attempt
+// logs its summary; retries stop early once a pass actually stamps, and the
+// passes are idempotent so overlapping schedules are harmless.
+{
+  const delays = [15_000, 45_000, 120_000, 300_000]
+  let done = false
+  for (const d of delays) {
+    setTimeout(() => {
+      if (done) return
+      void (window.ioc.get('@diamondcoreprocessor.com/SubstrateService') as SubstrateService | undefined)
+        ?.reconcileCanonicalImageStamps().then(n => { if (n > 0) done = true })
+    }, d)
+  }
+}
+
 const _substrateDrone = new SubstrateDrone()
 window.ioc.register('@diamondcoreprocessor.com/SubstrateDrone', _substrateDrone)

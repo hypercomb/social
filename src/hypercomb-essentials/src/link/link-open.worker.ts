@@ -7,7 +7,7 @@ import { fetchImageBlob, isImageUrl } from './photo.js'
 import { normalizeLink } from './normalize.js'
 import { parseYouTubeVideoId } from './youtube.js'
 import { readCellProperties, readTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
-import type { PhotoView } from './photo.view.js'
+import { PhotoView } from './photo.view.js'
 import type { YouTubeMetadataQueue } from './youtube-metadata-queue.js'
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
@@ -135,6 +135,10 @@ export class LinkOpenWorker extends Worker {
     return get('@diamondcoreprocessor.com/PhotoView') as PhotoView | undefined
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/PhotoView', new PhotoView())
 
 const _linkOpen = new LinkOpenWorker()
 window.ioc.register('@diamondcoreprocessor.com/LinkOpenWorker', _linkOpen)

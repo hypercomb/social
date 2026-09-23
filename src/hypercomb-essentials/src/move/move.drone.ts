@@ -7,6 +7,9 @@ import { writeTilePropertiesAt, seedLayerKeyedEntries } from '../editor/tile-pro
 import { childNamesOfStrict, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig, flattenLayerTree } from '../history/layer-placement.js'
 import type { PlacementHistory, PlacementLayer } from '../history/layer-placement.js'
 import { getLaneScrollAxis } from '../sequence/lane-viewport-mode.js'
+import { LayerTransferService } from './layer-transfer.service.js'
+import { DesktopMoveInput } from './desktop-move.input.js'
+import { TouchMoveInput } from './touch-move.input.js'
 
 // Committer/store shapes for the Ctrl-drag COPY path — it re-homes a dragged
 // cell's whole subtree under a fresh sibling name using the SAME signature-
@@ -1437,6 +1440,12 @@ export class MoveDrone extends Drone {
     this.#end(source)
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/LayerTransferService', new LayerTransferService())
+window.ioc.register('@diamondcoreprocessor.com/DesktopMoveInput', new DesktopMoveInput())
+window.ioc.register('@diamondcoreprocessor.com/TouchMoveInput', new TouchMoveInput())
 
 const _move = new MoveDrone()
 window.ioc.register('@diamondcoreprocessor.com/MoveDrone', _move)

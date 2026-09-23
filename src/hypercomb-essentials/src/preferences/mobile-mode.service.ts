@@ -127,12 +127,4 @@ export class MobileModeService extends EventTarget {
 }
 
 // ── registration ────────────────────────────────────────
-const _mobileMode = new MobileModeService()
-window.ioc.register(MOBILE_MODE_IOC_KEY, _mobileMode)
-// Seed the channel so late subscribers (the gate) read the current state
-// even before the first change. EffectBus replays the last value.
-try {
-  EffectBus.emit(MOBILE_MODE_EFFECT, { active: _mobileMode.active })
-} catch {
-  /* ignore */
-}
+// preferences/settings.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

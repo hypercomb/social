@@ -12,8 +12,8 @@
 // Escape dismisses. Same geometry, same slots, no button held.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import type { QuickMenuRegistry } from './quick-menu-registry.service.js'
-import type { QuickMenuInput } from './quick-menu.input.js'
+import { QuickMenuRegistry } from './quick-menu-registry.service.js'
+import { QuickMenuInput } from './quick-menu.input.js'
 
 const get = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
@@ -73,6 +73,11 @@ export class QuickMenuQueenBee extends QueenBee {
     EffectBus.emit('activity:log', { message, icon })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/QuickMenuRegistry', new QuickMenuRegistry())
+window.ioc.register('@diamondcoreprocessor.com/QuickMenuInput', new QuickMenuInput())
 
 const _quickMenu = new QuickMenuQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/QuickMenuQueenBee', _quickMenu)

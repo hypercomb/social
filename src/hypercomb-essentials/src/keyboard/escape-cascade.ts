@@ -224,14 +224,10 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
 // registry orders them instead. Clipboard mode covers the page without being a
 // view, which is exactly what `active` is for.
 
-const whenReady = (window as unknown as {
-  ioc?: { whenReady?<T>(key: string, callback: (value: T) => void): void }
-}).ioc?.whenReady
-
-whenReady?.<BackGesture>('@diamondcoreprocessor.com/BackGesture', gesture => {
-  gesture.register({
-    owner: 'clipboard-mode',
-    active: () => clipboardActive,
-    back: () => EffectBus.emit('clipboard:close', undefined),
-  })
-})
+/** The clipboard-mode entry for the BackGesture registry; keyboard.drone.ts
+ *  registers it (atomic-modules-plan.md). */
+export const CLIPBOARD_MODE_BACK_ENTRY = {
+  owner: 'clipboard-mode',
+  active: (): boolean => clipboardActive,
+  back: (): void => EffectBus.emit('clipboard:close', undefined),
+}

@@ -228,12 +228,5 @@ export async function listWorkflows(): Promise<
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<LayerSlotRegistry>(
-  '@diamondcoreprocessor.com/LayerSlotRegistry',
-  (slotRegistry) => {
-    slotRegistry.register({
-      slot: WORKFLOW_SLOT,
-      triggers: [],
-    })
-  },
-)
+/** The slot as the LayerSlotRegistry declares it; workflow-runner.drone.ts registers it. */
+export const WORKFLOW_SLOT_DECLARATION = { slot: WORKFLOW_SLOT, triggers: [] as string[] }

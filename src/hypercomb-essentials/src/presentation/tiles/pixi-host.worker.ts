@@ -12,6 +12,7 @@ import {
   type WindowMetrics,
   type PhysicalAnchor,
 } from './stage-centering.js'
+import { Settings } from '../../preferences/settings.js'
 
 export type HostReadyPayload = {
   app: Application
@@ -525,6 +526,10 @@ export class PixiHostWorker extends Worker {
     ;(window as any).__hcBoot?.('render:host-ready emitted')
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md). A render-critical bee registers
+// the services it needs for the first paint, so they exist before it.
+window.ioc.register('@diamondcoreprocessor.com/Settings', new Settings())
 
 const _pixiHost = new PixiHostWorker()
 window.ioc.register('@diamondcoreprocessor.com/PixiHostWorker', _pixiHost)

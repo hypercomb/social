@@ -196,75 +196,73 @@ export class WorkflowStepRegistry extends EventTarget {
 // both need the runner's own machinery (the slash drone; the depth cap).
 // `ask` and `note` are self-contained and carry their own.
 
-const _registry = new WorkflowStepRegistry()
-window.ioc.register('@diamondcoreprocessor.com/WorkflowStepRegistry', _registry)
-
-_registry.register({
-  kind: 'command',
-  icon: 'terminal',
-  label: 'Command',
-  labelKey: 'workflow.kind.command',
-  description: 'Run any slash command, with arguments.',
-  descriptionKey: 'workflow.kind.command.description',
-  group: 'control',
-  fields: ['command', 'args'],
-})
-
-_registry.register({
-  kind: 'sub',
-  icon: 'account_tree',
-  label: 'Sub-workflow',
-  labelKey: 'workflow.kind.sub',
-  description: "Run this step's own child tiles as a workflow.",
-  descriptionKey: 'workflow.kind.sub.description',
-  group: 'control',
-})
-
-_registry.register({
-  kind: 'note',
-  icon: 'sticky_note_2',
-  label: 'Note',
-  labelKey: 'workflow.kind.note',
-  description: 'Write a line onto this step\'s tile as the run passes through.',
-  descriptionKey: 'workflow.kind.note.description',
-  group: 'control',
-  fields: ['text'],
-  async run(ctx) {
-    const text = ctx.interpolate(ctx.step.text ?? '').trim()
-    if (!text) return { status: 'skipped', detail: 'no text' }
-    const notes = window.ioc.get<{
-      addAtSegments?: (
-        parentSegments: readonly string[], cellLabel: string, text: string,
-      ) => Promise<void>
-    }>('@diamondcoreprocessor.com/NotesService')
-    if (!notes?.addAtSegments) return { status: 'failed', detail: 'NotesService not available' }
-    await notes.addAtSegments(ctx.segments.slice(0, -1), ctx.cell, text)
-    return { status: 'done', detail: text.slice(0, 80) }
+/** The built-in kinds, in palette order. workflow-runner.drone.ts registers the
+ *  registry and these (atomic-modules-plan.md): a dependency registers nothing. */
+export const BUILT_IN_STEP_KINDS: readonly WorkflowStepKind[] = [
+  {
+    kind: 'command',
+    icon: 'terminal',
+    label: 'Command',
+    labelKey: 'workflow.kind.command',
+    description: 'Run any slash command, with arguments.',
+    descriptionKey: 'workflow.kind.command.description',
+    group: 'control',
+    fields: ['command', 'args'],
   },
-})
-
-_registry.register({
-  kind: 'ask',
-  icon: 'help',
-  label: 'Ask',
-  labelKey: 'workflow.kind.ask',
-  description: 'Hand a question to an AI pass. Deposits the request and stops — the answer comes back in the feedback window.',
-  descriptionKey: 'workflow.kind.ask.description',
-  group: 'control',
-  fields: ['text', 'model'],
-  async run(ctx) {
-    const request = ctx.interpolate(ctx.step.text ?? '').trim()
-    if (!request) return { status: 'skipped', detail: 'no question' }
-    const { depositRequest } = await import('./workflow-ask.js')
-    await depositRequest({
-      segments: ctx.segments,
-      request,
-      model: ctx.step.model,
-      workflowName: ctx.workflowName,
-    })
-    return { status: 'asked', detail: request.slice(0, 80) }
+  {
+    kind: 'sub',
+    icon: 'account_tree',
+    label: 'Sub-workflow',
+    labelKey: 'workflow.kind.sub',
+    description: "Run this step's own child tiles as a workflow.",
+    descriptionKey: 'workflow.kind.sub.description',
+    group: 'control',
   },
-})
+  {
+    kind: 'note',
+    icon: 'sticky_note_2',
+    label: 'Note',
+    labelKey: 'workflow.kind.note',
+    description: 'Write a line onto this step\'s tile as the run passes through.',
+    descriptionKey: 'workflow.kind.note.description',
+    group: 'control',
+    fields: ['text'],
+    async run(ctx) {
+      const text = ctx.interpolate(ctx.step.text ?? '').trim()
+      if (!text) return { status: 'skipped', detail: 'no text' }
+      const notes = window.ioc.get<{
+        addAtSegments?: (
+          parentSegments: readonly string[], cellLabel: string, text: string,
+        ) => Promise<void>
+      }>('@diamondcoreprocessor.com/NotesService')
+      if (!notes?.addAtSegments) return { status: 'failed', detail: 'NotesService not available' }
+      await notes.addAtSegments(ctx.segments.slice(0, -1), ctx.cell, text)
+      return { status: 'done', detail: text.slice(0, 80) }
+    },
+  },
+  {
+    kind: 'ask',
+    icon: 'help',
+    label: 'Ask',
+    labelKey: 'workflow.kind.ask',
+    description: 'Hand a question to an AI pass. Deposits the request and stops — the answer comes back in the feedback window.',
+    descriptionKey: 'workflow.kind.ask.description',
+    group: 'control',
+    fields: ['text', 'model'],
+    async run(ctx) {
+      const request = ctx.interpolate(ctx.step.text ?? '').trim()
+      if (!request) return { status: 'skipped', detail: 'no question' }
+      const { depositRequest } = await import('./workflow-ask.js')
+      await depositRequest({
+        segments: ctx.segments,
+        request,
+        model: ctx.step.model,
+        workflowName: ctx.workflowName,
+      })
+      return { status: 'asked', detail: request.slice(0, 80) }
+    },
+  },
+]
 
 // ── helpers ───────────────────────────────────────────────────────────
 

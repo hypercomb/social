@@ -73,8 +73,4 @@ export class ClipboardService extends EventTarget {
   }
 }
 
-const _clipboardService = new ClipboardService()
-window.ioc.register('@diamondcoreprocessor.com/ClipboardService', _clipboardService)
-
-// Announce clipboard availability so shared UI can gate clipboard controls
-EffectBus.emit('clipboard:available', { available: true })
+// clipboard/clipboard.worker.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

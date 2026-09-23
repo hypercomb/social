@@ -27,6 +27,9 @@ import {
   removeContact,
   type ContactPayload,
 } from './contact-card.js'
+import { ContactService } from './contact.service.js'
+import { CONTACTS_SLOT_DECLARATION } from './contact-card.js'
+import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
 type ContactServiceLike = { active(): boolean; hasCards(label: string): boolean }
@@ -269,6 +272,11 @@ function trimField(key: keyof ContactPayload, value: string | undefined): Partia
   const v = (value ?? '').trim()
   return v ? { [key]: v } : {}
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/ContactService', new ContactService())
+window.ioc.whenReady<LayerSlotRegistry>('@diamondcoreprocessor.com/LayerSlotRegistry', slots => slots.register(CONTACTS_SLOT_DECLARATION))
 
 const _contact = new ContactDrone()
 window.ioc.register('@diamondcoreprocessor.com/ContactDrone', _contact)

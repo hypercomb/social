@@ -39,11 +39,13 @@
 // slot.
 
 import { Drone, EffectBus } from '@hypercomb/core'
-import { readWorkflow } from './workflow-slot.js'
+import { WORKFLOW_SLOT_DECLARATION, readWorkflow } from './workflow-slot.js'
 import { readSteps, type WorkflowStep, type WorkflowStepView } from './workflow-step.js'
-import type {
-  WorkflowRunContext, WorkflowStepKind, WorkflowStepOutcome, WorkflowStepRegistry,
+import {
+  BUILT_IN_STEP_KINDS, WorkflowStepRegistry,
+  type WorkflowRunContext, type WorkflowStepKind, type WorkflowStepOutcome,
 } from './workflow-step-registry.js'
+import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 
 /** How deep `sub` steps may nest before the runner refuses. A workflow that
  *  reaches its own ancestor would otherwise run forever; the cap is the
@@ -380,6 +382,15 @@ function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error ?? 'failed')
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+{
+  const steps = new WorkflowStepRegistry()
+  window.ioc.register('@diamondcoreprocessor.com/WorkflowStepRegistry', steps)
+  for (const kind of BUILT_IN_STEP_KINDS) steps.register(kind)
+}
+window.ioc.whenReady<LayerSlotRegistry>('@diamondcoreprocessor.com/LayerSlotRegistry', slots => slots.register(WORKFLOW_SLOT_DECLARATION))
 
 const _workflowRunner = new WorkflowRunnerDrone()
 window.ioc.register('@diamondcoreprocessor.com/WorkflowRunnerDrone', _workflowRunner)

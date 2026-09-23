@@ -19,4 +19,4 @@ export const ZoomSettings = (): ZoomSettingsType => ({
   pinchForceTakeover: true
 })
 
-window.ioc.register('@diamondcoreprocessor.com/ZoomSettings', ZoomSettings())
+// preferences/settings.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.
