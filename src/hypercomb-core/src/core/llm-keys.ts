@@ -28,8 +28,18 @@
 // written — a `set('anthropic', …)` lands in the scheme above. `clear` does
 // remove it, because a key you asked to be gone being still readable is the
 // failure this file exists to prevent; that is a drain, not a write.
+//
+// ── at a sandbox door ─────────────────────────────────────────────────
+//
+// A door (`try-<change>.<zone>`, sandbox-door.ts) runs a PUBLISHER'S package
+// with full page power, so a key typed there is typed into their code. At a
+// door this store holds nothing: `set` does not store, and every read comes
+// back empty — a surface that offers a key field finds no key and saves none.
+// It is a courtesy the publisher's code could route around, never the guard;
+// the guard is not typing a key at a door, which the door bar says.
 
 import { register } from '../ioc/ioc.js'
+import { isSandboxDoor } from './sandbox-door.js'
 
 /** IoC key. Resolve via `window.ioc.get(LLM_KEY_STORE_IOC_KEY)`. */
 export const LLM_KEY_STORE_IOC_KEY = '@hypercomb.social/LlmKeyStore'
@@ -91,6 +101,7 @@ export class LlmKeyStore extends EventTarget {
 
   /** This provider's key, or `''`. Falls back to the legacy slot. */
   get(providerId: string): string {
+    if (isSandboxDoor()) return ''
     return this.#fields.get(this.#id(providerId)) ?? ''
   }
 
@@ -101,13 +112,14 @@ export class LlmKeyStore extends EventTarget {
 
   /** Provider ids with a key, sorted. The roster an indicator reads. */
   configured(): string[] {
+    if (isSandboxDoor()) return []
     return [...this.#fields.keys()].sort()
   }
 
   /** Store (or, with an empty value, clear) a provider's key. */
   set(providerId: string, key: string): void {
     const id = this.#id(providerId)
-    if (!id) return
+    if (!id || isSandboxDoor()) return
     const clean = (key ?? '').trim()
     if (!clean) { this.clear(id); return }
     this.#fields.set(id, clean)

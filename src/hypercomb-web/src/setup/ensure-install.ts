@@ -22,7 +22,7 @@ import { deriveBeeDeps } from '@hypercomb/runtime/bee-deps'
 import { checkCoreCompatibility, CoreMismatchError, describeCoreMismatch } from '@hypercomb/runtime/core-surface'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from '@hypercomb/runtime/bags'
 import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from '@hypercomb/runtime/host-pool'
-import { registerPoolMeaning } from '@hypercomb/core'
+import { registerPoolMeaning, sandboxDoorOf } from '@hypercomb/core'
 import { installedPackageSig, stampInstalledPackage } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { cacheImportMap } from './resolve-import-map'
@@ -360,7 +360,7 @@ export const ensureInstall = async (): Promise<void> => {
 /** This origin, when it is a sandbox door (`try-<change>.<zone>`): the one
  *  host whose packages pool names the package this shell must run. */
 export const sandboxDoor = (hostname: string = location.hostname, host: string = location.host): string | null =>
-  /^try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?\./i.test(hostname) ? host.toLowerCase() : null
+  sandboxDoorOf(hostname) ? host.toLowerCase() : null
 
 const serviceWorkerSettled = async (timeoutMs = 4000): Promise<void> => {
   try {

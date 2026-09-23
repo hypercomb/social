@@ -818,6 +818,20 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual, [], 'plaintext credential in a persisted or broadcast payload')
   })
 
+  it('a sandbox door is recognised in ONE place — never by a local try- regex', () => {
+    // At `try-<change>.<zone>` the page runs a PUBLISHER'S package, so what the
+    // shell does differently there — no keys, no signer, the door bar, the
+    // courtesy refusals — hangs on one question: is this a door? Five copies
+    // of the label rule once answered it (the install gate, the door bee, the
+    // trial list, the module words), each free to drift from the host's. Ask
+    // hypercomb-core/src/core/sandbox-door.ts (`sandboxDoorOf`,
+    // `isSandboxDoor`, `isSandboxLabel`) instead. Strips of the prefix
+    // (`/^try-/`) are not a door rule and do not match; `try-` followed by a
+    // character class does. Empty allowlist, and it stays empty.
+    const actual = filesMatching(/try-\[/).filter(file => file !== 'hypercomb-core/src/core/sandbox-door.ts')
+    assertRatchet(actual, [], 'local sandbox-door regex')
+  })
+
   it('no tool window closes a SIBLING by name — the lane decides what fits, and it parks', () => {
     // A window that shuts another one runs the OTHER's `close()`, which is the
     // participant's own verb: it empties gathered lists, selections, brushes

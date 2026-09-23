@@ -806,3 +806,109 @@ test('a zone lists every open trial from what its door serves, newest first', as
   const offZone = await (await worker.fetch(new Request('https://hypercomb.com/trials.json'), { ...env, SITE_BINDINGS: zone({ wildcard: false }) })).json()
   assert.deepEqual(offZone.trials, [])
 })
+
+// ── door safety: the door's page wears its own policy, and a door writes nothing
+const doorShell = async (url, env) => {
+  const original = globalThis.fetch
+  globalThis.fetch = async () => new Response('<!doctype html>shell', { headers: { 'content-type': 'text/html', 'set-cookie': 'shell=1', 'content-encoding': 'gzip' } })
+  try { return await worker.fetch(new Request(url), env) } finally { globalThis.fetch = original }
+}
+const connectSrc = (response) => response.headers.get('content-security-policy').split(';')
+  .map((directive) => directive.trim().split(/\s+/)).find(([name]) => name === 'connect-src').slice(1)
+const REFUSED = 'a sandbox door writes nothing — do this from your own hive\n'
+
+test('a door wears its own policy: never framed, no bare http or ws, no cookie', async () => {
+  const env = await sandboxEnv({ 'install:try-fresh-rooms': 'b'.repeat(64) })
+  const response = await doorShell('https://try-fresh-rooms.hypercomb.com/', env)
+  assert.equal(response.status, 200)
+  assert.equal(await response.text(), '<!doctype html>shell')
+  const csp = response.headers.get('content-security-policy')
+  for (const directive of ["frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'", "form-action 'none'"]) assert.ok(csp.includes(directive), directive)
+  // Scripts are left alone: the shell injects an import map and loads blob: bees.
+  assert.doesNotMatch(csp, /default-src|script-src/)
+  // Exactly these — no ws:, no bare http:, no origin on this machine.
+  assert.deepEqual(connectSrc(response), ["'self'", 'https:', 'wss:', 'blob:', 'data:'])
+  assert.equal(response.headers.get('cross-origin-opener-policy'), 'same-origin')
+  assert.equal(response.headers.get('referrer-policy'), 'no-referrer')
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
+  assert.match(response.headers.get('permissions-policy'), /camera=\(\), microphone=\(\)/)
+  // No data: worker (an opaque origin); the shell's own and blob: workers only.
+  assert.ok(csp.includes("worker-src 'self' blob:"))
+  assert.equal(response.headers.get('set-cookie'), null)
+  assert.equal(response.headers.get('content-encoding'), null)
+  // An unconfigured shell still answers under the door's policy.
+  const unconfigured = await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/'), { ...env, SANDBOX_SHELL_ORIGIN: '' })
+  assert.equal(unconfigured.status, 503)
+  assert.match(unconfigured.headers.get('content-security-policy'), /frame-ancestors 'none'/)
+})
+
+test('a door on a loopback zone reaches exactly its own two http faces', async () => {
+  const env = await sandboxEnv({ 'install:try-fresh-rooms': 'b'.repeat(64) })
+  env.SITE_BINDINGS = JSON.stringify({ localhost: { title: 'local', lineage: 'localhost', publishers: [{ pubkey, label: 'Jaime', primary: true }] } })
+  const response = await doorShell('http://try-fresh-rooms.localhost:4291/', env)
+  assert.equal(response.status, 200)
+  assert.deepEqual(connectSrc(response), ["'self'", 'https:', 'wss:', 'blob:', 'data:', 'http://localhost:4291', 'http://content.localhost:4291'])
+})
+
+test('a door writes nothing at our hosts — refused before any route, while home and Node still write', async () => {
+  // The signed index: a real NIP-98 PUT that succeeds from anywhere but a door.
+  const url = `https://content.hypercomb.com/hive/${assessor}`
+  const body = JSON.stringify(await indexBy(assessorKey, { 'try-fresh-rooms': head }))
+  const putHive = async (origin) => {
+    const env = { SITE_BINDINGS: '{}', HIVES: kvMap() }
+    const headers = { authorization: await nip98(url, 'PUT', assessorKey), ...(origin ? { origin } : {}) }
+    const response = await worker.fetch(new Request(url, { method: 'PUT', headers, body }), env)
+    return { status: response.status, text: await response.text(), written: env.HIVES.values.has(assessor) }
+  }
+  // A door on any zone, the loopback harness's included — and an OPAQUE
+  // origin, which is what a sandboxed frame or data: worker a door opens sends.
+  for (const door of ['https://try-x.hypercomb.com', 'https://try-x.pluginthematrix.com', 'http://try-x.localhost:4291', 'null']) {
+    assert.deepEqual(await putHive(door), { status: 403, text: REFUSED, written: false }, door)
+  }
+  for (const home of ['https://hypercomb.com', undefined]) {
+    const { status, written } = await putHive(home)
+    assert.deepEqual({ status, written }, { status: 201, written: true }, String(home))
+  }
+
+  // The flat heap's PUT /<sig>: the same gate, the same answer.
+  const bytes = 'bytes a door would plant'
+  const sig = await sha256Hex(bytes)
+  const sigUrl = `https://content.hypercomb.com/${sig}`
+  const putSig = async (origin) => {
+    const objects = new Map()
+    const env = { SITE_BINDINGS: '{}', CONTENT: heap(objects), GRANTS: kvMap() }
+    const headers = { authorization: await nip98(sigUrl, 'PUT'), ...(origin ? { origin } : {}) }
+    const response = await worker.fetch(new Request(sigUrl, { method: 'PUT', headers, body: bytes }), env)
+    return { status: response.status, held: objects.has(sig) }
+  }
+  assert.deepEqual(await putSig('https://try-x.hypercomb.com'), { status: 403, held: false })
+  assert.deepEqual(await putSig('https://hypercomb.com'), { status: 201, held: true })
+  assert.deepEqual(await putSig(undefined), { status: 201, held: true })
+})
+
+test('a door runs no worker from the heap — its package cannot start one outside the door policy', async () => {
+  const bytes = 'self.onmessage = () => new WebSocket("ws://localhost:2401")'
+  const sig = await sha256Hex(bytes)
+  const objects = new Map([[sig, {}]])
+  const env = { SITE_BINDINGS: '{}', CONTENT: heap(objects) }
+  const ask = (host, dest) => worker.fetch(new Request(`https://${host}/${sig}`, { headers: { 'sec-fetch-dest': dest } }), env)
+  for (const dest of ['serviceworker', 'worker', 'sharedworker']) {
+    assert.equal((await ask('try-x.hypercomb.com', dest)).status, 403, dest)
+  }
+  // The same bytes still load as a module at a door, and as a worker anywhere else.
+  assert.notEqual((await ask('try-x.hypercomb.com', 'script')).status, 403)
+  assert.notEqual((await ask('content.hypercomb.com', 'worker')).status, 403)
+})
+
+test('a door is told only the reads it may make, and its reads still answer', async () => {
+  const env = { SITE_BINDINGS: '{}', HIVES: kvMap(new Map([[assessor, JSON.stringify(await indexBy(assessorKey, { 'try-fresh-rooms': head }))]])) }
+  const url = `https://content.hypercomb.com/hive/${assessor}`
+  const preflight = (origin) => worker.fetch(new Request(url, { method: 'OPTIONS', headers: { origin, 'access-control-request-method': 'PUT' } }), env)
+  const fromDoor = await preflight('https://try-x.hypercomb.com')
+  assert.equal(fromDoor.status, 204)
+  assert.equal(fromDoor.headers.get('access-control-allow-methods'), 'GET, HEAD, OPTIONS')
+  assert.match((await preflight('https://hypercomb.com')).headers.get('access-control-allow-methods'), /PUT/)
+  const read = await worker.fetch(new Request(url, { headers: { origin: 'https://try-x.hypercomb.com' } }), env)
+  assert.equal(read.status, 200)
+  assert.equal((await read.json()).pubkey, assessor)
+})

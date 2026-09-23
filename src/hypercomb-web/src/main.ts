@@ -6,6 +6,26 @@
 // localStorage turns the trail back on. See quiet-console.ts.
 import { announce } from '@hypercomb/shared/core/quiet-console'
 
+// A SANDBOX DOOR HAS NO SIGNER. At `try-<change>.<zone>` the package that runs
+// is a publisher's, with full page power — and a NIP-07 extension's
+// `window.nostr` would hand that code your key's signature on a single
+// approval. So on a door it is pinned to undefined, non-writable and
+// non-configurable, as the first statement of this module: ESM evaluates every
+// static import of this file before it, and none of them reads `nostr`; the
+// package's code arrives only after bootstrap. An extension may already have
+// defined it configurably — redefining replaces it; one it made
+// non-configurable throws, and is left as it is. The limit: a package can
+// still speak the extension's own postMessage protocol, so the extension's
+// prompt stays the last guard, and the door bar says to refuse prompts here.
+import { isSandboxDoor } from '@hypercomb/core'
+import { showDoorBar } from './setup/door-bar'
+if (isSandboxDoor()) {
+  try {
+    Object.defineProperty(window, 'nostr', { value: undefined, writable: false, configurable: false, enumerable: false })
+  } catch { /* already pinned by the extension — nothing more a page can do */ }
+  showDoorBar()
+}
+
 // ── boot perf trail ──────────────────────────────────────────────────────────
 // Mirror of hypercomb-dev/src/main.ts. T0 = earliest point in the module graph.
 // Any shared/essentials code that calls window.__hcBoot('label') gets a

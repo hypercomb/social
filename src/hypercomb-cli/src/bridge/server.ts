@@ -5,9 +5,14 @@ import { BRIDGE_PORT } from '@hypercomb/sdk'
 // ── TRUST MODEL ─────────────────────────────────────────────────────────
 // The broker relays ops that CREATE TILES, WRITE RESOURCES AND COMMIT LAYERS
 // on a live hive. Anything that can reach the port can drive the hive, so the
-// port itself is the security boundary. Three gates, matched to the actual
-// threat (someone else on your LAN), not to ceremony:
+// port itself is the security boundary. Four gates, matched to the actual
+// threats (someone else on your LAN, or a page in your own browser), not to
+// ceremony:
 //
+//   0. A BROWSER PAGE IS JUDGED BY ITS ORIGIN, not its socket. Any page you
+//      open dials localhost from your own machine, so a loopback socket says
+//      nothing about it; a handshake whose Origin is not a page served from
+//      this machine is refused. No Origin = a Node client.
 //   1. LOOPBACK BIND BY DEFAULT. The socket is not on the network at all
 //      unless BRIDGE_HOST is set deliberately.
 //   2. RENDERER REGISTRATION IS LOOPBACK-ONLY, always. A hive tab always dials
@@ -33,6 +38,22 @@ function isLoopback(req: IncomingMessage): boolean {
   return LOOPBACK_RE.test(String(req?.socket?.remoteAddress || ''))
 }
 
+// A browser always stamps an Origin on the handshake; a Node client sends
+// none. Present passes only for a page served from this machine — exactly
+// localhost, 127.0.0.1 or [::1], any port, http or https (try-x.localhost is a
+// door, not the hive). Twin: scripts/bridge/bridge-origin.cjs.
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+export function bridgeOriginAllowed(origin: string | null | undefined): boolean {
+  if (origin === undefined || origin === null) return true
+  try {
+    const url = new URL(String(origin))
+    return (url.protocol === 'http:' || url.protocol === 'https:') && LOOPBACK_HOSTS.has(url.hostname)
+  } catch {
+    return false
+  }
+}
+
 function presentedToken(req: IncomingMessage): string {
   const header = String(req?.headers?.['authorization'] || '')
   const m = /^Bearer\s+(.+)$/i.exec(header)
@@ -45,11 +66,13 @@ export function runBridge(): void {
 
   // A browser logs a refused WebSocket before application code can handle it.
   // Expose a tiny CORS-enabled probe so the renderer only opens its socket
-  // after this broker is actually listening.
+  // after this broker is actually listening. CORS is granted only to a page
+  // the socket would admit — a door page must not even learn the broker runs.
   const server = createServer((req, res) => {
     if (req.url === '/healthz') {
+      const origin = req.headers.origin
       res.writeHead(200, {
-        'access-control-allow-origin': '*',
+        ...(origin && bridgeOriginAllowed(origin) ? { 'access-control-allow-origin': origin } : {}),
         'cache-control': 'no-store',
         'content-type': 'application/json',
       })
@@ -59,7 +82,14 @@ export function runBridge(): void {
     res.writeHead(404)
     res.end()
   })
-  const wss = new WebSocketServer({ server })
+  const wss = new WebSocketServer({
+    server,
+    verifyClient: (info, done) => {
+      if (bridgeOriginAllowed(info.origin)) return done(true)
+      console.warn(`[bridge] refused a browser handshake from origin ${info.origin}`)
+      done(false, 403)
+    },
+  })
   server.listen(BRIDGE_PORT, BRIDGE_HOST)
 
   let renderer: WebSocket | null = null

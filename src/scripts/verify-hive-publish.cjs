@@ -10,8 +10,11 @@
 //      section — jev:try-<change> — and both readings are public
 //   3. a tester opens try-<change>.<zone>: a full hive whose door names that
 //      package, and runs the model's code — while followers are NOT told; the
-//      door tells the tester's hive what it runs, the tester signs a public
-//      assessment under their own key, and the publisher reads the tally;
+//      door tells the tester's hive what it runs, and is SAFE for them: its
+//      own policy (https/wss only, never framed), no dial to the local bridge,
+//      no write at the host, no key kept, no extension signer, the shell's door
+//      bar, and the writing words refusing there; a reader signs a public
+//      assessment from their OWN hive, and the publisher reads the tally;
 //      the zone lists every open trial, and anyone finds this one there;
 //      `module changes` opens what it changes, file by file, with the host
 //      AI's reading and the tester's signed note, read by signature; the
@@ -158,7 +161,7 @@ const announcedOn = page => page.evaluate(() => {
   const testerContext = await H.freshContext(browser)
   const tester = await testerContext.newPage()
   H.logPage(tester, 'tester')
-  await tester.goto(DOOR, { waitUntil: 'domcontentloaded', timeout: 180_000 })
+  const doorResponse = await tester.goto(DOOR, { waitUntil: 'domcontentloaded', timeout: 180_000 })
   const site = await tester.evaluate(() => fetch('/site.json', { cache: 'no-store' }).then(r => r.json())).catch(() => null)
   check('the door describes itself as the sandbox of that package', site?.sandbox === true && site?.package === sandboxRoot && site?.pubkey === pubkey)
   check('the door names the change and the review, for anyone to read', site?.change === changeSig && site?.review === reviewSig)
@@ -171,7 +174,6 @@ const announcedOn = page => page.evaluate(() => {
   await H.waitFor(() => tester.evaluate(() => (!!window.ioc?.get('@diamondcoreprocessor.com/ModuleQueenBee')
     && !!window.ioc?.get('@diamondcoreprocessor.com/HostSyncService')?.publishAtoms) || null), 60_000, 500)
 
-  // ── 3b. ANYONE ASSESSES IT, UNDER THEIR OWN KEY ─────────────────────────
   const told = await H.waitFor(() => tester.evaluate(() => {
     let got = null
     const off = globalThis.__hypercombEffectBus.on('module:door', s => { got = s })
@@ -179,16 +181,53 @@ const announcedOn = page => page.evaluate(() => {
     return got
   }), 60_000, 800)
   check('the door tells the hive at it what it runs and how the host AI read it', told?.package === sandboxRoot && told?.reviewVerdict === 'accept')
-  const testerKey = await tester.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/NostrSigner').getPublicKeyHex())
+
+  // ── 3a. THE DOOR IS SAFE FOR WHOEVER TRIES IT ───────────────────────────
+  // The publisher's code runs here with full page power; nothing of the
+  // visitor's may be within its reach, and it may write nothing anywhere.
+  const csp = doorResponse?.headers()['content-security-policy'] ?? ''
+  check('the door page carries its own policy: https and wss only, never framed', /connect-src 'self' https: wss:/.test(csp) && /frame-ancestors 'none'/.test(csp) && !/\bws:|\bhttp:(?!\/\/)/.test(csp), csp)
+  const bridgeDial = await tester.evaluate(() => new Promise(resolve => {
+    document.addEventListener('securitypolicyviolation', e => resolve(`violation:${e.effectiveDirective}`), { once: true })
+    try { new WebSocket('ws://localhost:2401') } catch (error) { resolve(`threw:${error?.name}`) }
+    setTimeout(() => resolve('allowed'), 3000)
+  }))
+  check('the door cannot dial the visitor\'s own machine (the local bridge)', bridgeDial !== 'allowed', bridgeDial)
+  const doorKey = await tester.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/NostrSigner').getPublicKeyHex())
+  const doorWrite = await tester.evaluate(([host, key]) => fetch(`http://${host}/hive/${key}`, { method: 'PUT', body: '{}' })
+    .then(r => `status:${r.status}`, error => `refused:${error?.name}`), [WRITE, doorKey])
+  check('the door writes nothing at the host', doorWrite === 'status:403' || doorWrite.startsWith('refused:'), doorWrite)
+  const doorShell = await tester.evaluate(async () => {
+    const core = await import('@hypercomb/core')
+    core.llmKeyStore.set('openrouter', 'sk-door-test')
+    const nostr = Object.getOwnPropertyDescriptor(window, 'nostr')
+    return {
+      keyKept: !!core.llmKeyStore.get('openrouter'),
+      nostrPinned: window.nostr === undefined && !!nostr && nostr.configurable === false,
+      bar: document.querySelector('[data-door-bar]')?.textContent ?? '',
+    }
+  })
+  check('a key typed at the door is kept nowhere', doorShell.keyKept === false)
+  check('the door has no signer from an extension (window.nostr pinned away)', doorShell.nostrPinned === true)
+  check('the shell says whose code this is, at the door', /Sandbox/.test(doorShell.bar) && /keys/.test(doorShell.bar), doorShell.bar)
   await H.watchToasts(tester)
-  await H.say(tester, `module assess ${CHANGE} refuse raises zoom without asking @${WRITE}`)
-  console.log('   tester toasts:', JSON.stringify(await H.toastsUntil(tester, /assessment/)))
+  await H.say(tester, `module assess ${CHANGE} refuse at the door @${WRITE}`)
+  const refusedAtDoor = await H.toastsUntil(tester, /writes nothing/, 20_000).catch(() => null)
+  check('the words that write say so at the door, and point home', !!refusedAtDoor, JSON.stringify(refusedAtDoor))
+
+  // ── 3b. ANYONE ASSESSES IT, FROM THEIR OWN HIVE ─────────────────────────
+  // A door writes nothing, so an assessment is signed at home — here the
+  // follower's hive, a stranger to the publisher, under its own key.
+  const testerKey = await fol.page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/NostrSigner').getPublicKeyHex())
+  await H.watchToasts(fol.page)
+  await H.say(fol.page, `module assess ${CHANGE} refuse raises zoom without asking @${WRITE}`)
+  console.log('   assessor toasts:', JSON.stringify(await H.toastsUntil(fol.page, /assessment/)))
   const listed = await tester.evaluate(() => fetch('/site.json', { cache: 'no-store' }).then(r => r.json()))
   const mine = (listed.assessments ?? []).find(a => a.pubkey === testerKey)
   const assessment = mine ? JSON.parse(await fromHost(mine.record)) : null
   const note = assessment ? await openHop(assessment.note) : ''
   const noteHop = assessment ? await hopOf(assessment.note) : null
-  check('anyone at the door can sign an assessment, and the door lists it under their key', mine?.verdict === 'refuse' && testerKey !== pubkey, JSON.stringify(listed.assessments))
+  check('anyone signs an assessment from their own hive, and the door lists it under their key', mine?.verdict === 'refuse' && testerKey !== pubkey, JSON.stringify(listed.assessments))
   check('the assessment names the change it read, and its note is public', assessment?.root === sandboxRoot && assessment?.change === changeSig && note === 'raises zoom without asking')
   check('the assessor\'s note is one typed hop too, under the assessor\'s own key', oneHop(noteHop) && noteHop.relation === 'note', JSON.stringify(noteHop))
   await H.watchToasts(page)

@@ -20,11 +20,9 @@
 // the brood (`brood:ruled`), this bee composes the selection again, so what
 // was accepted is what runs after a reload.
 
-import { Drone, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, sandboxDoorOf, type I18nProvider } from '@hypercomb/core'
 import { isSandboxSite, tallyAssessments } from './module-review.js'
 import { SANDBOX_CHANGE_OWNER, SANDBOX_CHANGE_SURFACE, SandboxChangeElement } from './sandbox-change.view.js'
-
-const DOOR_RE = /^(try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?)\./i
 
 export class SandboxDoorDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -38,12 +36,12 @@ export class SandboxDoorDrone extends Drone {
 
   #done = false
 
-  protected override sense = (): boolean => !this.#done && DOOR_RE.test(location.hostname)
+  protected override sense = (): boolean => !this.#done && !!sandboxDoorOf(location.hostname)
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#done) return
     this.#done = true
-    const name = DOOR_RE.exec(location.hostname)?.[1]?.toLowerCase() ?? ''
+    const name = sandboxDoorOf(location.hostname)?.label ?? ''
     let site: unknown = null
     try {
       const res = await fetch('/site.json', { cache: 'no-store' })
@@ -61,7 +59,7 @@ export class SandboxDoorDrone extends Drone {
     EffectBus.emit('toast:show', {
       type: 'info',
       message: t('module.door',
-        "You are in sandbox {name}, by {publisher} — not promoted yet. The host's AI says {review}; people say {accept} accept, {refuse} refuse, {unclear} unclear. See what it changes: module changes {change}. Add yours: module assess {change} accept|refuse <note>.",
+        "You are in sandbox {name}, by {publisher} — not promoted yet. The host's AI says {review}; people say {accept} accept, {refuse} refuse, {unclear} unclear. See what it changes: module changes {change}. Assess it from your own hive: module assess {change} accept|refuse <note>.",
         {
           name, change, publisher: site.publisher || site.pubkey.slice(0, 12) + '…',
           review: site.reviewVerdict ?? t('module.unreviewed', 'nothing yet', {}),
