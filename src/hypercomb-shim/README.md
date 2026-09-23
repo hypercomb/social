@@ -123,6 +123,12 @@ SPA-fallback page can only ever cost a 404.
 
 ## One screen for hosts and packages
 
+This describes the current diagnostic console. The intended visitor entrance
+is a zone's active hive doors, then one hive's hexagon page and its explicit
+adoption action. The `host:packages` pool remains the code transport inventory;
+its labels and revisions are not hives. See
+[everything-is-a-beehavior.md](../documentation/everything-is-a-beehavior.md).
+
 A cold node shows one card: its selected revision, the hosts it carries and
 each host's latest offered revision, and a field for a known package signature.
 Older publication history is opened on request and grouped by publication

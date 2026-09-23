@@ -56,14 +56,33 @@ inside the package tree, such as `navigation/pan`; it has its own layer
 signature and may be picked independently. A publication label and a package
 branch must never be shown as the same thing.
 
-Replication copies and verifies files. Selection chooses a package revision or
-a branch revision for this hive. Activation runs only the beehaviors enabled
-here. The first ESM door shows the latest offer from each host and opens older
-publication history on request. The command line and every richer view arrive
-as beehaviors; the door stays small enough to run before any adopted code.
-After a root package is selected, a package-management beehavior may show its
-named tree paths and offer branch revisions through the existing pick protocol.
-That tree browser does not belong in the cold door.
+**The visible hierarchy is the hive hierarchy.** A domain is a zone that can
+open several doors. Each active door (usually a subdomain) presents one
+published hive, identified by its publisher and signed head. Its hexagons are
+the hive's named cells and branches; code and views are beehaviors carried by
+those branches. The package pool is a transport and diagnostic inventory, not
+the visitor's directory of creations. Its publication labels must not become
+top-level hive names. A zone's directory may point to its active doors, but
+each door's signed coordinates and content must be checked when visited.
+
+The cold ESM door lets a person carry a zone, see the hive doors that zone
+currently opens, and visit one. The hive's hexagon page offers adoption of the
+whole published hive or a chosen cell/branch into the visitor's own hive.
+Replication copies and verifies the selected closure; adoption is an explicit
+local fold; code arrives held until separately enabled. The cold door needs
+only discovery, exact-signature verification, and a route to the adoption
+gesture. History, source review, and branch management can arrive as
+beehaviors. A missing directory is reported as missing, not replaced by a
+package revision list pretending to be hives.
+
+An upgrade is another signed hive/package revision, first tried at a
+`try-<change>.<zone>` door on its own origin. A model can propose the change
+from within a hive; the publisher commits it to that trial, where people and
+models can inspect the signed source and running result. Taking a trial into
+another hive and promoting it to a live door remain explicit acts. The zone
+may advertise trials, but a trial is never the zone's live head merely because
+it is newest. The command line and every richer view arrive as beehaviors;
+the cold door stays small enough to run before any adopted code.
 
 "Deploy" = mint the artifact (sign the bytes), place them at any origin,
 move the pin. "Import" = resolve the pin, pull the sigs, verify, adopt.
