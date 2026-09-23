@@ -24,9 +24,18 @@ solomon-maze-v1/
 ```
 
 The first time the game opens it seeds `stories/` with the worked example. After
-that **the tiles are the add-ons**: to plug a story in, make a tile under
-`stories/` whose layer carries `solomonStory.bundle`; to change one, edit the
-tile. The game reads them when it opens (before it continues a save, so a save
+that **the tiles are the add-ons**. The word for plugging one in is `story`
+(`games/story.queen.ts`):
+
+- `story plug <sig>` — reads the JSON bundle stored under that signature,
+  refuses it whole with the reason when anything is wrong, and otherwise writes
+  it as the tile `stories/<bundle id>` (over any tile of that name).
+- `story list` — what the game holds: each add-on's places and seats.
+
+Making the tile by hand — a tile under `stories/` whose layer carries
+`solomonStory.bundle` — is the same act; editing the tile edits the add-on.
+
+The game reads the tiles when it opens (before it continues a save, so a save
 made inside an add-on's place can resume there). An add-on already seated this
 session keeps its first reading; a reload picks up edits.
 

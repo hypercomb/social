@@ -209,6 +209,24 @@ export class SolomonTileSurface {
     return await this.readStories() ?? defaults.map(seed => seed.bundle)
   }
 
+  /** Writes one story add-on's tile — `stories/<id>` — over any tile of
+   *  that name; the layer is seeded first (with `seeds`) if it is not
+   *  there yet, so a participant's first add-on never displaces the worked
+   *  example. The game reads it the next time it opens. */
+  plugStory(id: string, bundle: unknown, seeds: readonly StorySeedTile[] = []): Promise<void> {
+    const run = this.#pending.then(() => this.#plugStory(id, bundle, seeds))
+    this.#pending = run.catch(() => {})
+    return run
+  }
+
+  async #plugStory(id: string, bundle: unknown, seeds: readonly StorySeedTile[]): Promise<void> {
+    await this.#ensureStories(seeds)
+    await this.#committer.importTree([{
+      segments: [...this.baseSegments, SOLOMON_STORIES, safeName(id)],
+      layer: { name: id, solomonStory: { version: VERSION, bundle } },
+    }])
+  }
+
   /** Every story tile's bundle, in the layer's order; null before the layer exists. */
   async readStories(): Promise<unknown[] | null> {
     const branch = await this.#resolveAt(this.baseSegments)

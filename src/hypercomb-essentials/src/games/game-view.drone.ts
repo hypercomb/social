@@ -27,6 +27,7 @@ import type { VisualBeeRegistry } from '../commands/visual-bee-registry.js'
 import { ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn } from '../sharing/behavior-enablement.js'
 import { onEnablementChanged } from './game-enablement.js'
 import { GameQueenBee } from './game.queen.js'
+import { StoryQueenBee } from './story.queen.js'
 import {
   GAME_PLAY_KIND, GAME_VIEW, gamePlayAt, isPlayable, playableGame,
   type GamePlayPayload, type PlayableGame,
@@ -289,6 +290,8 @@ EffectBus.on(ENABLEMENT_CHANGED, lightGameFaceOnce)
 
 const _game = new GameQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/GameQueenBee', _game)
+const _story = new StoryQueenBee()
+window.ioc.register('@diamondcoreprocessor.com/StoryQueenBee', _story)
 
 ;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
   '@diamondcoreprocessor.com/VisualBeeRegistry',
