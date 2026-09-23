@@ -560,6 +560,38 @@ describe('saves v3 carry the labyrinth and the path across a reopen', () => {
     expect(crumbs()).toEqual(['The Sevenfold Valley', 'A labyrinth'])
   })
 
+  it('enters a participant’s labyrinth — a place of its own — whose rooms hydrate and show like any other', async () => {
+    // Seated before the game opens, as an add-on tile would be: a two-room
+    // warren behind Mira, the keeper of beginnings — a person is a thing too.
+    const { installStory, readStoryBundle } = await import('./story-addons.js')
+    const { fromAscii } = await import('./levels.js')
+    const level = (name: string) => fromAscii(name, ['############', '#..........#', '#..K....g..#', '#..BBBB....#', '#..........#', '#P........D#', '############'])
+    const story = readStoryBundle({
+      version: 1, id: 'warren-test', name: 'Warren',
+      labyrinths: [{ id: 'warren', name: 'A Warren', rooms: [
+        { id: 'porch', level: level('Porch'), doors: [{ id: 'on', col: 10, row: 1, targetRoomId: 'deep', targetDoorId: 'back' }] },
+        { id: 'deep', level: level('Deep'), doors: [{ id: 'back', col: 1, row: 1, targetRoomId: 'porch', targetDoorId: 'on' }] },
+      ] }],
+      seats: [{ entrance: 'island/mira', place: 'warren' }],
+    })!
+    expect(installStory(story).ok).toBe(true)
+    const overlay = mount()
+    await settle()
+    // Mira stands one square east and one north of the start: a person, a
+    // thing — pushed into, the way anything seated is entered.
+    walk('ArrowUp', 5)
+    walk('ArrowRight', 14)
+    await settle()
+    frame()
+    expect(crumbs()).toEqual(['The Sevenfold Valley', 'A Warren'])
+    expect(overlay.journey.room?.id).toBe('warren-porch')
+    expect(native.ensure).toHaveBeenCalledWith(expect.objectContaining({ id: 'warren-porch' }))
+    // Its door on works like any room's.
+    overlay.engine!.arrive(overlay.journey.room!.doors.find(door => door.id === 'on')!)
+    frame()
+    expect(overlay.journey.room?.id).toBe('warren-deep')
+  })
+
   it('does not revive a closed overlay when an in-flight native room finishes loading', async () => {
     let resolve!: (value: LoadedTileRoom) => void
     let requested!: RoomDef

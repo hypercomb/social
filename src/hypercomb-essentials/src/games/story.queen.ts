@@ -7,13 +7,25 @@
 // never deleted — and `story plug <id>` takes it back. `story list` says
 // what the game holds.
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { readStoryBundle, STORY_BUNDLE_BYTES, STORY_SEEDS } from './solomon/story-addons.js'
-import { readStoryTiles, replugStory, storySig, storyTileNamed, unplugStory } from './solomon/story-tiles.js'
+import { loadCreations } from './solomon/levels.js'
+import { seatAt, splitEntranceKey } from './solomon/place.js'
+import { PLACES } from './solomon/places.js'
+import { STORY } from './solomon/story.js'
+import { installStory, readStoryBundle, STORY_BUNDLE_BYTES, STORY_SEEDS } from './solomon/story-addons.js'
+import { pluggedStories, readStoryTiles, replugStory, storySig, storyTileNamed, unplugStory } from './solomon/story-tiles.js'
 import { createSolomonTileSurface } from './solomon/tile-surface.js'
 
 const ICON = 'auto_stories'
 const SIGNATURE = /^[0-9a-f]{64}$/i
 const ID = /^[a-z0-9-]{1,64}$/
+/** A Designer creation's id, or enough of its start to name one. */
+const CREATION = /^[0-9a-f]{8,64}$/i
+/** The first word, and everything after it. */
+const verbAndRest = (args: string): [string, string] => {
+  const trimmed = args.trim()
+  const space = trimmed.search(/\s/)
+  return space < 0 ? [trimmed, ''] : [trimmed.slice(0, space), trimmed.slice(space).trim()]
+}
 
 type StoreShape = { getResource(sig: string): Promise<Blob | null> }
 const get = <T,>(key: string): T | undefined =>
@@ -24,38 +36,91 @@ export class StoryQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'story'
   override description = 'A story add-on for Solomon’s Key — a participant’s places and seats, plugged into the story'
-  override options = ['plug <sig>', 'plug <id>', 'unplug <id>', 'list']
+  override options = ['plug <sig>', 'plug <id>', 'unplug <id>', 'room <creation> <entrance>', 'list']
   override examples = [
     { input: '/story plug 3f2a…', result: 'Reads the bundle at that signature and seats it into the story' },
+    { input: '/story room 9c1e4b02 mossback/old-mine', result: 'Seats a room saved in the Designer behind that entrance, as a labyrinth of its own' },
     { input: '/story unplug mossback', result: 'Puts that add-on away — hidden, not deleted' },
     { input: '/story plug mossback', result: 'Takes a put-away add-on back' },
     { input: '/story list', result: 'Lists the story add-ons the game holds' },
   ]
   override machine = {
-    forms: 'plug <sig> | plug <id> | unplug <id> | list',
+    forms: 'plug <sig> | plug <id> | unplug <id> | room <creation> <entrance> | list',
     example: '/story list',
     reach: 'editing' as const,
     scope: 'hive' as const,
     refuse: (args: string): string | undefined => {
-      const [verb = '', rest = ''] = args.trim().split(/\s+/, 2)
+      const [verb, rest] = verbAndRest(args)
       if (verb === 'list') return undefined
       if (verb === 'plug') return SIGNATURE.test(rest) || ID.test(rest) ? undefined : 'plug takes the 64-hex signature of a JSON bundle, or the id of a put-away add-on'
       if (verb === 'unplug') return ID.test(rest) ? undefined : 'unplug takes the id of an add-on the game holds'
-      return 'say plug <sig>, unplug <id> or list'
+      if (verb === 'room') {
+        const [creation = '', entrance = ''] = rest.split(/\s+/, 2)
+        return CREATION.test(creation) && splitEntranceKey(entrance) ? undefined : 'room takes a saved room’s id (its first eight characters or more) and an entrance, <place>/<thing>'
+      }
+      return 'say plug <sig>, unplug <id>, room <creation> <entrance> or list'
     },
   }
 
   override slashComplete(args: string): readonly string[] {
     const [verb = ''] = args.trim().toLowerCase().split(/\s+/, 1)
-    return ['plug', 'unplug', 'list'].filter(option => option.startsWith(verb))
+    return ['plug', 'unplug', 'room', 'list'].filter(option => option.startsWith(verb))
   }
 
   protected async execute(args: string): Promise<void> {
-    const [verb = '', rest = ''] = args.trim().split(/\s+/, 2)
+    const [verb, rest] = verbAndRest(args)
     if (verb === 'list') { await this.#list(); return }
     if (verb === 'plug') { await this.#plug(rest.trim()); return }
     if (verb === 'unplug') { await this.#unplug(rest.trim()); return }
-    say('A story add-on is plugged in by its signature: story plug <sig>. story unplug <id> puts one away; story list says what the game holds.')
+    if (verb === 'room') { const [creation = '', entrance = ''] = rest.trim().split(/\s+/, 2); await this.#room(creation, entrance); return }
+    say('A story add-on is plugged in by its signature: story plug <sig>. story room <creation> <entrance> seats a room from the Designer; story unplug <id> puts one away; story list says what the game holds.')
+  }
+
+  /** Seats every plugged story tile the game holds, as its opening would;
+   *  an add-on already seated this session keeps its first reading. */
+  async #seatKnown(): Promise<void> {
+    let raws: unknown[]
+    try { raws = await pluggedStories(createSolomonTileSurface(), STORY_SEEDS) } catch { return }
+    for (const raw of raws) {
+      const bundle = readStoryBundle(raw)
+      if (bundle) installStory(bundle)
+    }
+  }
+
+  /** `story room <creation> <entrance>`: a room saved in the Designer becomes
+   *  a labyrinth of its own, seated behind the entrance — one act, no JSON. */
+  async #room(creation: string, entrance: string): Promise<void> {
+    if (!CREATION.test(creation)) { say('story room takes a saved room’s id from the Designer (its first eight characters or more) and the entrance to seat it behind, like mossback/old-mine.'); return }
+    const found = loadCreations().filter(candidate => candidate.id.startsWith(creation.toLowerCase()))
+    if (!found.length) { say(`No saved room starts with ${creation} — the Designer’s saved rooms are what this seats.`); return }
+    if (found.length > 1) { say(`${found.length} saved rooms start with ${creation}; give more of the id.`); return }
+    const split = splitEntranceKey(entrance)
+    if (!split) { say('The entrance is <place>/<thing>, like mossback/old-mine.'); return }
+    // An add-on's own place stands only once its tile is seated — the game
+    // does that at opening; the word does it now, so the Mossback's things
+    // are entrances before the game has been opened this session.
+    if (!PLACES.has(split.place)) await this.#seatKnown()
+    const host = PLACES.get(split.place)
+    if (!host) { say(`"${split.place}" is not a place.`); return }
+    if (!host.entrances.includes(split.entrance)) { say(`"${split.place}" has nothing called "${split.entrance}".`); return }
+    if (seatAt(STORY, entrance)) { say(`"${entrance}" already has a place seated behind it.`); return }
+    const [saved] = found
+    const name = saved!.level.name.trim() || 'A room', stem = saved!.id.slice(0, 8), labyrinthId = `room-${stem}`
+    const raw = {
+      version: 1, id: labyrinthId, name,
+      labyrinths: [{ id: labyrinthId, name, rooms: [{ id: 'room', level: saved!.level }] }],
+      seats: [{ entrance, place: labyrinthId }],
+    }
+    const bundle = readStoryBundle(raw)
+    if (!bundle) { say(`The room ${stem}… cannot be seated as it is — it has to run as a level, with Dana’s start inside its walls.`); return }
+    try {
+      await createSolomonTileSurface().plugStory(bundle.id, raw, STORY_SEEDS)
+      await replugStory(await storySig(raw))
+    } catch (error) {
+      say(`Could not write the story tile: ${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
+    say(`“${name}” is seated behind ${entrance} as a labyrinth of its own. It stands the next time Solomon’s Key opens; walk in, and come back out with Escape.`)
   }
 
   /** `story unplug <id>`: put away, never deleted. The tile stands; the
@@ -104,8 +169,9 @@ export class StoryQueenBee extends QueenBee {
       say(`Could not write the story tile: ${error instanceof Error ? error.message : String(error)}`)
       return
     }
-    const places = [...bundle.worlds, ...bundle.chambers, ...bundle.caverns].map(place => place.id)
-    say(`“${bundle.name}” is plugged in — ${places.length} place${places.length === 1 ? '' : 's'} (${places.join(', ')}), ${bundle.seats.length} seat${bundle.seats.length === 1 ? '' : 's'}. It stands the next time Solomon’s Key opens.`)
+    const places = [...bundle.worlds, ...bundle.chambers, ...bundle.caverns].map(place => place.id), labyrinths = bundle.labyrinths.map(labyrinth => labyrinth.definition.id)
+    const count = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
+    say(`“${bundle.name}” is plugged in — ${count(places.length, 'place')}${places.length ? ` (${places.join(', ')})` : ''}, ${count(labyrinths.length, 'labyrinth')}${labyrinths.length ? ` (${labyrinths.join(', ')})` : ''}, ${count(bundle.seats.length, 'seat')}. It stands the next time Solomon’s Key opens.`)
   }
 
   async #list(): Promise<void> {
@@ -118,8 +184,8 @@ export class StoryQueenBee extends QueenBee {
     const lines = tiles.map(tile => {
       const bundle = readStoryBundle(tile.raw)
       if (!bundle) return 'an add-on the game cannot read'
-      const places = [...bundle.worlds, ...bundle.chambers, ...bundle.caverns].map(place => place.id)
-      return `${bundle.name} (${bundle.id}${tile.unplugged ? ', unplugged' : ''}): ${places.join(', ') || 'no places'}; ${bundle.seats.map(seat => `${seat.entrance} → ${seat.place}`).join(', ') || 'no seats'}`
+      const places = [...bundle.worlds, ...bundle.chambers, ...bundle.caverns].map(place => place.id), labyrinths = bundle.labyrinths.map(labyrinth => labyrinth.definition.id)
+      return `${bundle.name} (${bundle.id}${tile.unplugged ? ', unplugged' : ''}): ${[...places, ...labyrinths].join(', ') || 'no places'}; ${bundle.seats.map(seat => `${seat.entrance} → ${seat.arrive ? `${seat.place} (${seat.arrive})` : seat.place}`).join(', ') || 'no seats'}`
     })
     say(lines.length ? `Story add-ons: ${lines.join(' · ')}` : 'The stories layer is there, with nothing in it yet.')
   }

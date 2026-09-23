@@ -296,7 +296,8 @@ const hslToRgb = (h: number, s: number, l: number): Rgb => {
 }
 
 export class LabyrinthRuntime implements PlaceRuntime {
-  readonly place = 'labyrinth'
+  /** The valley's one labyrinth place, or a participant's labyrinth place of its own. */
+  readonly place: string
   readonly host: HTMLElement
   readonly view: LabyrinthRoomView
   readonly #shell: RuntimeShell
@@ -329,19 +330,31 @@ export class LabyrinthRuntime implements PlaceRuntime {
   /** The squares of the room she stands in that lead somewhere. */
   #seated: { readonly room: string; readonly squares: ReadonlyMap<string, Cell> } | null = null
 
-  constructor(host: HTMLElement, shell: RuntimeShell, surface: () => SolomonTileSurface, loaded: Map<string, LoadedTileRoom>) {
+  constructor(host: HTMLElement, shell: RuntimeShell, surface: () => SolomonTileSurface, loaded: Map<string, LoadedTileRoom>, place: string = LABYRINTH_PLACE.id) {
+    this.place = place
     this.host = host
     this.#shell = shell
     this.#journey = shell.journey()
     this.#surface = surface
     this.#loaded = loaded
     this.view = new LabyrinthRoomView(host, this.#journey, id => this.#door(id), entrance =>
-      shell.seat(LABYRINTH_PLACE.id, entrance) ? { seed: shell.seatSeed(LABYRINTH_PLACE.id, entrance) } : null)
+      shell.seat(this.place, entrance) ? { seed: shell.seatSeed(this.place, entrance) } : null)
     this.#veil = new PlaceVeil(host)
   }
 
+  /** The labyrinth a seat with no `arrive` means: the valley's first, or —
+   *  for a participant's labyrinth place — the place itself. */
+  #defaultLabyrinth(): string | undefined {
+    return this.place === LABYRINTH_PLACE.id ? LABYRINTH_PLACE.arrivals[0]?.id : this.place
+  }
+
+  /** Whether a room belongs to a labyrinth this place stands for. */
+  #owns(labyrinthId: string): boolean {
+    return this.place === LABYRINTH_PLACE.id ? LABYRINTH_PLACE.arrivals.some(arrival => arrival.id === labyrinthId) : labyrinthId === this.place
+  }
+
   async prepare(seat: StorySeat, cancelled: () => boolean): Promise<true | string> {
-    const labyrinthId = seat.arrive ?? LABYRINTH_PLACE.arrivals[0]?.id
+    const labyrinthId = seat.arrive ?? this.#defaultLabyrinth()
     if (!labyrinthId) return 'This shrine leads nowhere yet.'
     const rooms = ROOMS.filter(room => room.labyrinthId === labyrinthId)
     if (!rooms.length) return 'This shrine’s chambers are still missing.'
@@ -382,12 +395,14 @@ export class LabyrinthRuntime implements PlaceRuntime {
     return true
   }
 
-  canResume(): boolean { return this.#journey.room !== null }
+  canResume(): boolean { const room = this.#journey.room; return room !== null && this.#owns(room.labyrinthId) }
 
   show(arrival: RuntimeArrival): void {
     this.host.hidden = false
-    if (arrival.from === 'above') {
-      const labyrinthId = arrival.arrive ?? LABYRINTH_PLACE.arrivals[0]?.id
+    const standing = this.#journey.room
+    if (arrival.from === 'above' || (arrival.from === 'save' && !(standing && this.#owns(standing.labyrinthId)))) {
+      // A seat with no arrive of its own reaches here as '' — the place's own labyrinth, then.
+      const labyrinthId = (arrival.from === 'above' ? arrival.arrive : undefined) || this.#defaultLabyrinth()
       if (labyrinthId) this.#journey.enterLabyrinth(labyrinthId)
     }
     const room = this.#journey.room
@@ -412,7 +427,7 @@ export class LabyrinthRuntime implements PlaceRuntime {
     this.#recordRelic()
     this.#passDoor()
     const into = this.#journey.enteringSquare(this.#seatedHere(), dt)
-    if (into) this.#shell.enter(LABYRINTH_PLACE.id, into)
+    if (into) this.#shell.enter(this.place, into)
     if (engine) this.#diffSounds(engine)
     this.#time += dt
     this.view.render(this.#time)
@@ -457,8 +472,10 @@ export class LabyrinthRuntime implements PlaceRuntime {
   get isDialogOpen(): boolean { return false }
   closeDialog(): void { /* no dialog surface of its own */ }
 
-  exportFacts(): unknown { return this.#journey.exportState() }
-  restoreFacts(raw: unknown): void { this.#journey.restoreState(raw) }
+  /** The one journey is saved once, under the valley's labyrinth place; a
+   *  participant's labyrinth place carries no facts of its own. */
+  exportFacts(): unknown { return this.place === LABYRINTH_PLACE.id ? this.#journey.exportState() : null }
+  restoreFacts(raw: unknown): void { if (this.place === LABYRINTH_PLACE.id) this.#journey.restoreState(raw) }
 
   leaveLeg(_direction: VeilDirection, _at?: { readonly x: number; readonly y: number }): VeilLeg | null {
     return this.view.leaveLeg(_direction)
@@ -523,7 +540,7 @@ export class LabyrinthRuntime implements PlaceRuntime {
       const squares = new Map<string, Cell>()
       for (let row = 0; row < room.level.rows; row++) for (let col = 0; col < room.level.cols; col++) {
         const entrance = squareEntrance(room.id, { col, row })
-        if (this.#shell.seat(LABYRINTH_PLACE.id, entrance)) squares.set(entrance, { col, row })
+        if (this.#shell.seat(this.place, entrance)) squares.set(entrance, { col, row })
       }
       this.#seated = { room: room.id, squares }
     }

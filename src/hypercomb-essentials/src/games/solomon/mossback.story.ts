@@ -3,6 +3,27 @@
 // its gate — a thing, not a door — leads up onto the ridge the sign names.
 // Seeded into the game's `stories` layer the first time it opens; after
 // that the tile is the story, and editing it is editing the world.
+//
+// Its shut mine is the worked example of a ROOM as an add-on: one room on
+// the labyrinth engine, drawn here as the Designer would save it (a level),
+// seated behind the mine's timbers as a labyrinth of its own.
+import { fromAscii } from './levels.js'
+
+const MINE_SHAFT = fromAscii('The Old Mine', [
+  '################',
+  '#..............#',
+  '#..K.......g...#',
+  '#..BBB....BBB..#',
+  '#..............#',
+  '#......BB......#',
+  '#..............#',
+  '#.BB........BB.#',
+  '#..............#',
+  '#....BBBBBB....#',
+  '#P............D#',
+  '################',
+])
+
 export const MOSSBACK_STORY: unknown = {
   version: 1,
   id: 'mossback',
@@ -52,7 +73,11 @@ export const MOSSBACK_STORY: unknown = {
   ],
   chambers: [],
   caverns: [],
+  labyrinths: [
+    { id: 'mossback-mine', name: 'The Old Mine', description: 'Timbers, then dark, then a goblin.', rooms: [{ id: 'shaft', level: MINE_SHAFT }] },
+  ],
   seats: [
     { entrance: 'greenwood/grove-gate-sign', place: 'mossback' },
+    { entrance: 'mossback/old-mine', place: 'mossback-mine' },
   ],
 }

@@ -213,7 +213,7 @@ export class SolomonLabyrinthOverlay {
     const world = WORLDS.get(place), cavern = SIDE_CAVERNS.find(candidate => candidate.id === place)
     if (world) runtime = new IslandRuntime(host, this.#shell, world)
     else if (cavern) runtime = new SideCavernRuntime(host, cavern, this.#shell)
-    else if (place === LABYRINTH_PLACE.id) runtime = new LabyrinthRuntime(host, this.#shell, () => this.#tileSurface(), this.#loaded)
+    else if (place === LABYRINTH_PLACE.id || PLACES.get(place)?.kind === 'labyrinth') runtime = new LabyrinthRuntime(host, this.#shell, () => this.#tileSurface(), this.#loaded, place)
     else {
       const definition = CHAMBERS.find(chamber => chamber.id === place)
       if (!definition) throw new Error(`labyrinth-overlay.ts: no chamber definition for "${place}"`)

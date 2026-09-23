@@ -7,9 +7,12 @@
 // of it. Pure: no DOM, no storage.
 import { buildChamber, ChamberModel, CHAMBER_MAP_CHARS, type ChamberDefinition } from './chamber.js'
 import { registerChamber } from './chamber-places.js'
+import { Engine } from './engine.js'
+import { ROOMS, LABYRINTHS, registerLabyrinth, type LabyrinthDef, type RoomDef, type RoomDoor } from './labyrinth.js'
+import { sanitizeLevel } from './levels.js'
 import { MOSSBACK_STORY } from './mossback.story.js'
 import { splitEntranceKey, seatAt, validateStory, type PlaceCatalog, type PlaceDefinition, type StorySeat } from './place.js'
-import { PLACES, chamberPlace, registerPlace, sideCavernPlace, worldPlace } from './places.js'
+import { PLACES, chamberPlace, labyrinthPlace, registerPlace, sideCavernPlace, worldPlace } from './places.js'
 import type { WorldDefinition } from './rpg-overworld.js'
 import { drawCavern, registerSideCavern, type CavernPlan, type SideCavernDefinition } from './side-cavern.js'
 import { ROOT_PLACE, STORY, registerSeats } from './story.js'
@@ -20,6 +23,11 @@ export const STORY_BUNDLE_VERSION = 1
 /** The most a bundle may weigh, serialized. */
 export const STORY_BUNDLE_BYTES = 256 * 1024
 
+/** A participant's labyrinth: rooms on the labyrinth engine — drawn in
+ *  the Designer or as data — joined by their doors, standing as a labyrinth
+ *  place of its own under the labyrinth's id. */
+export interface StoryLabyrinth { readonly definition: LabyrinthDef; readonly rooms: readonly RoomDef[] }
+
 export interface StoryBundle {
   readonly version: typeof STORY_BUNDLE_VERSION
   /** /^[a-z0-9-]{1,64}$/ — the add-on's own name, and its tile's. */
@@ -28,11 +36,12 @@ export interface StoryBundle {
   readonly worlds: readonly WorldDefinition[]
   readonly chambers: readonly ChamberDefinition[]
   readonly caverns: readonly SideCavernDefinition[]
+  readonly labyrinths: readonly StoryLabyrinth[]
   readonly seats: readonly StorySeat[]
 }
 
 export type StoryInstall =
-  | { readonly ok: true; readonly id: string; readonly places: readonly string[]; readonly seats: number; readonly already: boolean }
+  | { readonly ok: true; readonly id: string; readonly places: readonly string[]; readonly labyrinths: readonly string[]; readonly seats: number; readonly already: boolean }
   | { readonly ok: false; readonly id: string; readonly problem: string }
 
 /** What the game seeds into its `stories` layer the first time it opens —
@@ -123,6 +132,55 @@ export function sanitizeCavern(raw: unknown): SideCavernDefinition | null {
   try { return drawCavern(plan) } catch { return null }
 }
 
+/** Reads a labyrinth a participant made: rooms whose levels read through
+ *  the Designer's own `sanitizeLevel` and run on the engine, with doors
+ *  paired room to room. Room ids are namespaced under the labyrinth's
+ *  (`<labyrinth>-<room>`) so two participants' "porch" never collide; a
+ *  participant's rooms carry no sigil relics or gates — those are the
+ *  valley's own story. */
+export function sanitizeLabyrinth(raw: unknown): StoryLabyrinth | null {
+  const fields = record(raw)
+  if (!fields) return null
+  const id = text(fields['id'], 64), name = text(fields['name'], 80), description = text(fields['description'] ?? '', 160)
+  const color = text(fields['color'] ?? '#9aa8b5', 16)
+  if (!id || !ID.test(id) || name === null || description === null || color === null || !/^#[0-9a-f]{6}$/i.test(color)) return null
+  const rawRooms = list(fields['rooms'], 16, value => record(value))
+  if (!rawRooms || !rawRooms.length) return null
+  const shortIds = new Set<string>()
+  const rooms: RoomDef[] = []
+  for (const [index, room] of rawRooms.entries()) {
+    const roomId = text(room['id'], 32)
+    if (!roomId || !ID.test(roomId) || shortIds.has(roomId)) return null
+    shortIds.add(roomId)
+    const level = sanitizeLevel(room['level'])
+    if (!level) return null
+    const depth = room['depth'] === undefined ? index : whole(room['depth'], 0, 64)
+    if (depth === null) return null
+    if (room['relics'] !== undefined && (!Array.isArray(room['relics']) || room['relics'].length)) return null
+    if (room['gates'] !== undefined && (!Array.isArray(room['gates']) || room['gates'].length)) return null
+    const doors = list(room['doors'] ?? [], 8, value => {
+      const door = record(value)
+      if (!door || !plain(door)) return null
+      const doorId = text(door['id'], 32), target = text(door['targetRoomId'], 32), targetDoor = text(door['targetDoorId'], 32)
+      const col = whole(door['col'], 0, level.cols - 1), row = whole(door['row'], 0, level.rows - 1)
+      const keyed = door['keyed']
+      if (!doorId || !ID.test(doorId) || !target || !ID.test(target) || !targetDoor || !ID.test(targetDoor) || col === null || row === null) return null
+      if (keyed !== undefined && typeof keyed !== 'boolean') return null
+      return { id: doorId, col, row, targetRoomId: `${id}-${target}`, targetDoorId: targetDoor, ...(keyed ? { keyed: true } : {}) } satisfies RoomDoor
+    })
+    if (!doors || new Set(doors.map(door => door.id)).size !== doors.length) return null
+    rooms.push({ id: `${id}-${roomId}`, labyrinthId: id, depth, level: { ...level, interconnected: true }, doors, relics: [], gates: [] })
+  }
+  for (const room of rooms) for (const door of room.doors) {
+    const target = rooms.find(candidate => candidate.id === door.targetRoomId)
+    if (!target || !target.doors.some(back => back.id === door.targetDoorId)) return null
+  }
+  const entry = text(fields['entryRoomId'] ?? rawRooms[0]!['id'], 32)
+  if (!entry || !shortIds.has(entry)) return null
+  try { for (const room of rooms) new Engine({ ...room.level, tiles: [...room.level.tiles] }) } catch { return null }
+  return { definition: { id, name, description, entryRoomId: `${id}-${entry}`, goalRelicId: '', color }, rooms }
+}
+
 /** Reads a bundle. Anything wrong anywhere refuses the whole add-on: null. */
 export function readStoryBundle(raw: unknown): StoryBundle | null {
   const fields = record(raw)
@@ -135,14 +193,15 @@ export function readStoryBundle(raw: unknown): StoryBundle | null {
   const worlds = list(fields['worlds'] ?? [], 8, sanitizeWorld)
   const chambers = list(fields['chambers'] ?? [], 16, sanitizeChamber)
   const caverns = list(fields['caverns'] ?? [], 8, sanitizeCavern)
+  const labyrinths = list(fields['labyrinths'] ?? [], 8, sanitizeLabyrinth)
   const seats = list(fields['seats'] ?? [], 64, value => {
     const seat = record(value), entrance = text(seat?.['entrance'], 160), place = text(seat?.['place'], 64)
     const arrive = seat?.['arrive'] === undefined ? undefined : text(seat['arrive'], 64)
     if (!entrance || !splitEntranceKey(entrance) || !place || !ID.test(place) || arrive === null) return null
     return arrive === undefined ? { entrance, place } : { entrance, place, arrive }
   })
-  if (!worlds || !chambers || !caverns || !seats) return null
-  return { version: STORY_BUNDLE_VERSION, id, name, worlds, chambers, caverns, seats }
+  if (!worlds || !chambers || !caverns || !labyrinths || !seats) return null
+  return { version: STORY_BUNDLE_VERSION, id, name, worlds, chambers, caverns, labyrinths, seats }
 }
 
 // ── seating ──────────────────────────────────────────────────────────────
@@ -160,11 +219,18 @@ export function installStory(bundle: StoryBundle): StoryInstall {
   const already = installed.get(bundle.id)
   if (already) return { ...already, already: true }
   const refuse = (problem: string): StoryInstall => ({ ok: false, id: bundle.id, problem })
-  const fresh: PlaceDefinition[] = [...bundle.worlds.map(worldPlace), ...bundle.chambers.map(chamberPlace), ...bundle.caverns.map(sideCavernPlace)]
+  const fresh: PlaceDefinition[] = [
+    ...bundle.worlds.map(worldPlace), ...bundle.chambers.map(chamberPlace), ...bundle.caverns.map(sideCavernPlace),
+    ...bundle.labyrinths.map(labyrinth => labyrinthPlace(labyrinth.definition, labyrinth.rooms)),
+  ]
   const names = new Set<string>()
   for (const place of fresh) {
     if (PLACES.has(place.id) || names.has(place.id)) return refuse(`a place named "${place.id}" already stands`)
     names.add(place.id)
+  }
+  for (const labyrinth of bundle.labyrinths) {
+    if (LABYRINTHS.some(known => known.id === labyrinth.definition.id)) return refuse(`a labyrinth named "${labyrinth.definition.id}" already stands`)
+    for (const room of labyrinth.rooms) if (ROOMS.some(known => known.id === room.id)) return refuse(`a room named "${room.id}" already stands`)
   }
   const catalog: PlaceCatalog = new Map([...PLACES, ...fresh.map((place): [string, PlaceDefinition] => [place.id, place])])
   for (const seat of bundle.seats) {
@@ -183,8 +249,9 @@ export function installStory(bundle: StoryBundle): StoryInstall {
   for (const chamber of bundle.chambers) registerChamber(chamber)
   for (const cavern of bundle.caverns) registerSideCavern(cavern)
   for (const place of fresh) registerPlace(place)
+  for (const labyrinth of bundle.labyrinths) registerLabyrinth(labyrinth.definition, labyrinth.rooms)
   registerSeats(bundle.seats)
-  const result = { ok: true as const, id: bundle.id, places: fresh.map(place => place.id), seats: bundle.seats.length, already: false }
+  const result = { ok: true as const, id: bundle.id, places: fresh.map(place => place.id), labyrinths: bundle.labyrinths.map(labyrinth => labyrinth.definition.id), seats: bundle.seats.length, already: false }
   installed.set(bundle.id, result)
   return result
 }

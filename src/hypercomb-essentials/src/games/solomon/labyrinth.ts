@@ -704,6 +704,17 @@ function buildRooms(): RoomDef[] {
 
 export const ROOMS: RoomDef[] = buildRooms()
 
+/** Adds a participant's labyrinth — its definition and its rooms — under
+ *  new ids (story-addons.ts reads and checks them first). Refused whole
+ *  when the labyrinth's id or any room's is taken. */
+export function registerLabyrinth(definition: LabyrinthDef, rooms: readonly RoomDef[]): boolean {
+  if (LABYRINTHS.some(labyrinth => labyrinth.id === definition.id)) return false
+  if (rooms.some(room => room.labyrinthId !== definition.id || ROOMS.some(known => known.id === room.id))) return false
+  LABYRINTHS.push(definition)
+  ROOMS.push(...rooms)
+  return true
+}
+
 function copyLevel(level: LevelDef): LevelDef {
   return { ...level, tiles: [...level.tiles], player: { ...level.player }, door: { ...level.door }, enemies: level.enemies.map(e => ({ ...e })), items: level.items.map(i => ({ ...i })), mirrors: level.mirrors.map(m => ({ ...m })) }
 }

@@ -12,7 +12,7 @@ import { CHAMBERS, GROUPS } from './chamber-places.js'
 import { SEVENFOLD_VALLEY, worldEncounters } from './rpg-overworld.js'
 import { STORY } from './story.js'
 import { GREENWOOD } from './worlds.js'
-import { ROOMS, squareEntrance, squareName } from './labyrinth.js'
+import { ROOMS, squareEntrance, squareName, type LabyrinthDef, type RoomDef } from './labyrinth.js'
 import { SIDE_CAVERNS, type SideCavernDefinition } from './side-cavern.js'
 import type { WorldDefinition } from './rpg-overworld.js'
 
@@ -58,15 +58,27 @@ export function sideCavernPlace(cavern: SideCavernDefinition): PlaceDefinition {
  *  a different arrival. A room's doors lead to other rooms of the same place;
  *  its entrances are its SQUARES — any one of them, open air or a stone in
  *  the wall, can have a place seated behind it. */
+const roomSquares = (room: RoomDef): string[] => Array.from({ length: room.level.cols * room.level.rows }, (_, index) =>
+  squareEntrance(room.id, { col: index % room.level.cols, row: Math.floor(index / room.level.cols) }))
 export const LABYRINTH_PLACE: PlaceDefinition = {
   id: 'labyrinth', name: 'A labyrinth', subtitle: 'Sealed rooms below a shrine', kind: 'labyrinth',
-  entrances: ROOMS.flatMap(room => Array.from({ length: room.level.cols * room.level.rows }, (_, index) =>
-    squareEntrance(room.id, { col: index % room.level.cols, row: Math.floor(index / room.level.cols) }))),
+  entrances: ROOMS.flatMap(roomSquares),
   arrivals: [
     { id: 'sunseed', name: 'Sunseed' },
     { id: 'tideglass', name: 'Tideglass' },
     { id: 'starbloom', name: 'Pyramid of Accord' },
   ],
+}
+
+/** A participant's labyrinth (story-addons.ts) is a labyrinth place of its
+ *  own — one arrival, itself — never an arrival of the valley's, which would
+ *  put the one labyrinth place inside a place its own squares lead to. */
+export function labyrinthPlace(definition: LabyrinthDef, rooms: readonly RoomDef[]): PlaceDefinition {
+  return {
+    id: definition.id, name: definition.name, subtitle: definition.description, kind: 'labyrinth',
+    entrances: rooms.flatMap(roomSquares),
+    arrivals: [{ id: definition.id, name: definition.name }],
+  }
 }
 
 /** A chamber's own map declares exactly one spawn point (`arrive()` always

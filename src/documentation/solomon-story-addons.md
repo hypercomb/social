@@ -30,6 +30,11 @@ that **the tiles are the add-ons**. The word for plugging one in is `story`
 - `story plug <sig>` — reads the JSON bundle stored under that signature,
   refuses it whole with the reason when anything is wrong, and otherwise writes
   it as the tile `stories/<bundle id>` (over any tile of that name).
+- `story room <creation> <entrance>` — the one-act path from the Designer:
+  a room saved there (its id, or its first eight characters) becomes a
+  labyrinth of its own, seated behind the entrance — no JSON. The tile it
+  writes is an ordinary add-on (`room-<stem>`), listed and unplugged like
+  any other.
 - `story unplug <id>` — puts an add-on away: HIDE FIRST, DELETE SECOND. The
   tile stands; the story is not seated until it is plugged again. It is
   concealed in the hive's one hidden pool (`hidden:items`, scope
@@ -57,7 +62,9 @@ Plain data, JSON-shaped:
   "worlds":   [ … WorldDefinition-shaped … ],
   "chambers": [ … ChamberDefinition-shaped … ],
   "caverns":  [ … { id, name, subtitle, theme, meters, art, finds } … ],
-  "seats":    [ { "entrance": "greenwood/grove-gate-sign", "place": "mossback" } ]
+  "labyrinths": [ … { id, name, description?, entryRoomId?, rooms: [ { id, level, doors?, depth? } … ] } … ],
+  "seats":    [ { "entrance": "greenwood/grove-gate-sign", "place": "mossback" },
+                { "entrance": "mossback/old-mine", "place": "mossback-mine" } ]
 }
 ```
 
@@ -72,6 +79,18 @@ Plain data, JSON-shaped:
 - `caverns` are ASCII plans drawn exactly like the game's own (`drawCavern`):
   `art` lines of equal width with one `<` mouth, optional `>` deeper, `:` deep
   finds; `finds` a second layer of item glyphs.
+- `labyrinths` are rooms on the labyrinth engine — Solomon's Key rooms, as
+  the Designer saves them: each room's `level` reads through the Designer's
+  own `sanitizeLevel` and must run; `doors` pair room to room
+  (`targetRoomId`/`targetDoorId` by the rooms' short ids) and may be
+  `keyed`; room ids are namespaced under the labyrinth's (`<labyrinth>-<room>`);
+  no sigil relics or gates — those are the valley's own story. A labyrinth
+  is a **place of its own** (kind `labyrinth`, id = the labyrinth's): seat
+  it with `{ "place": "<labyrinth id>" }`. (Never an arrival of the valley's
+  one labyrinth place — whose own squares seat other places — or a place
+  could end up inside itself.) Its rooms are hydrated into hive tiles on
+  first entry like every room; Escape comes back out, and re-entry lands at
+  the last room, fresh.
 - `seats`: `entrance` is `"<host place>/<entrance id>"`; the host may be a
   built-in place or one in this bundle; the entrance must be something the host
   really has; nothing may be seated behind it yet; `arrive` names one of the
@@ -88,14 +107,14 @@ are checked with `validateStory` together with the built-in story).
 
 `mossback.story.ts`: one world, **The Mossback** — the ridge the Greenwood's
 signpost names — seated behind that very signpost (`greenwood/grove-gate-sign`).
-It carries a shepherd, a cairn, a kite's nest and a shut mine (`old-mine`) that
-nothing is seated behind: an invitation for the next add-on, exactly as the
-Greenwood's own unseated doors were.
+It carries a shepherd, a cairn, a kite's nest and a shut mine (`old-mine`) —
+and behind the mine's timbers, the worked example of a **room** as an add-on:
+one Solomon's Key room (a key, a goblin, bricks) drawn as the Designer would
+save it, seated as the labyrinth `mossback-mine`. The Sump's down-stair stays
+seated by nobody: the open invitation.
 
 ## What an add-on cannot do (yet)
 
 - Redefine or reseat a built-in place, or an entrance the story already uses.
-- Add labyrinth rooms (rooms hydrate from their own tiles; a room add-on is a
-  different act).
 - Carry attainment rows or guide steps; its places show in crumbs, saves and
   the found-set only.
