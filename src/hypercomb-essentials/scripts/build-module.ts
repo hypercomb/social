@@ -709,12 +709,13 @@ const buildLayersFromTree = async (
   out: Map<string, string>,
   rootDependencies: string[],
   rootCriticalBees: readonly string[],
+  rootBootBees: readonly string[],
   docsByDir: Map<string, Record<string, BeeDocEntry>>,
   prevLayerCache?: Record<string, LayerCacheEntry>
 ): Promise<string | null> => {
   const layers: string[] = []
   for (const c of node.children) {
-    const childSig = await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, rootCriticalBees, docsByDir, prevLayerCache)
+    const childSig = await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, rootCriticalBees, rootBootBees, docsByDir, prevLayerCache)
     if (childSig) layers.push(childSig)
   }
 
@@ -726,6 +727,7 @@ const buildLayersFromTree = async (
   const beeSigs = uniqSorted(entry.bees)
   const depSigs = node.rel ? [] : rootDependencies
   const criticalBeeSigs = node.rel ? [] : uniqSorted([...rootCriticalBees])
+  const bootBeeSigs = node.rel ? [] : uniqSorted([...rootBootBees])
   const docsKey = docsByDir.has(node.rel) ? JSON.stringify(docsByDir.get(node.rel)) : ''
   let folderDocSig = ''
   if (node.rel) {
@@ -743,7 +745,7 @@ const buildLayersFromTree = async (
   // cache happily returns the OLD JSON under the OLD sig.
   const shapeDescriptor = node.rel
     ? 'cells:name:bees:dependencies'
-    : 'cells:name:bees:dependencies:criticalBees'
+    : 'cells:name:bees:dependencies:criticalBees:bootBees'
 
   const layerInputParts = [
     shapeDescriptor,
@@ -752,6 +754,7 @@ const buildLayersFromTree = async (
     depSigs.join(':'),
     layers.join(':'),
     criticalBeeSigs.join(':'),
+    bootBeeSigs.join(':'),
     docsKey,
     folderDocSig,
   ]
@@ -790,6 +793,10 @@ const buildLayersFromTree = async (
   }
 
   if (!node.rel) layer.criticalBees = criticalBeeSigs
+  // THE BOOT LANE (atomic-modules-plan.md, step 6): bees that register a
+  // service the runtime or the shell reads before any other bee loads. Named
+  // only when there are some, so a package without them is byte-identical.
+  if (!node.rel && bootBeeSigs.length) layer.bootBees = bootBeeSigs
   if (docs) layer.docs = docs
 
   const { sig, json } = await signJson(layer)
@@ -1210,6 +1217,8 @@ const main = async (): Promise<void> => {
   const criticalBeeMatches = new Map<string, string[]>(
     RENDER_CRITICAL_BEE_CLASSES.map(className => [className, []]),
   )
+  /** `*.boot.drone.ts` — the boot lane's bees, named in the root. */
+  const bootBees: string[] = []
   const beeExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
   let beeCacheHits = 0
   let beeCacheMisses = 0
@@ -1255,6 +1264,7 @@ const main = async (): Promise<void> => {
 
     resourceBytes.set(sig, bytes)
     addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'bee')
+    if (/\.boot\.drone\.[tj]s$/.test(src.entry)) bootBees.push(sig)
 
     // beeline: cache bee doc extraction by content signature
     const beeFileLeaf = newBees[src.relPath]?.files[src.entry]
@@ -1361,7 +1371,7 @@ const main = async (): Promise<void> => {
   }
 
   const tree = readDirTree(SRC_ROOT, '')
-  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, criticalBees, docsByDir, cache?.layerCache)
+  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, criticalBees, uniqSorted(bootBees), docsByDir, cache?.layerCache)
   // The root node (`node.rel === ''`) always builds a layer — the null
   // early-return in buildLayersFromTree is gated on `node.rel`, so only a
   // non-root empty dir returns null. Assert it here so the rest of the
@@ -1499,7 +1509,7 @@ const main = async (): Promise<void> => {
     if (!inManifestLayers.has(rootLayerSig)) errors.push(`root layer ${rootLayerSig.slice(0, 12)} missing from manifest.layers`)
 
     for (const [sig, json] of layers) {
-      let parsed: { name?: string; cells?: unknown[]; bees?: unknown[]; dependencies?: unknown[]; criticalBees?: unknown[] }
+      let parsed: { name?: string; cells?: unknown[]; bees?: unknown[]; dependencies?: unknown[]; criticalBees?: unknown[]; bootBees?: unknown[] }
       try { parsed = JSON.parse(json) } catch { errors.push(`layer ${sig.slice(0, 12)} is not valid JSON`); continue }
       const tag = `layer "${parsed.name ?? '?'}" (${sig.slice(0, 12)})`
       for (const child of (Array.isArray(parsed.cells) ? parsed.cells : [])) {
@@ -1527,8 +1537,13 @@ const main = async (): Promise<void> => {
           else if (!onDiskBees.has(criticalRef)) errors.push(`${tag} has critical bee ${criticalRef.slice(0, 12)} missing on disk`)
           else if (!inManifestBees.has(criticalRef)) errors.push(`${tag} has critical bee ${criticalRef.slice(0, 12)} missing from manifest.bees`)
         }
-      } else if (parsed.criticalBees !== undefined) {
-        errors.push(`${tag} declares criticalBees outside the package root`)
+        for (const bootRef of (Array.isArray(parsed.bootBees) ? parsed.bootBees : []).map(bare)) {
+          if (!isSig(bootRef)) errors.push(`${tag} has a boot bee with an invalid signature: ${bootRef}`)
+          else if (!onDiskBees.has(bootRef)) errors.push(`${tag} has boot bee ${bootRef.slice(0, 12)} missing on disk`)
+          else if (!inManifestBees.has(bootRef)) errors.push(`${tag} has boot bee ${bootRef.slice(0, 12)} missing from manifest.bees`)
+        }
+      } else if (parsed.criticalBees !== undefined || parsed.bootBees !== undefined) {
+        errors.push(`${tag} declares criticalBees or bootBees outside the package root`)
       }
     }
 

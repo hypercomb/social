@@ -116,5 +116,4 @@ export class InputGate extends EventTarget {
   }
 }
 
-const _inputGate = new InputGate()
-window.ioc.register('@diamondcoreprocessor.com/InputGate', _inputGate)
+// navigation/navigation.boot.drone.ts — the boot lane: the shell reads these before any other bee loads registers this (atomic-modules-plan.md): a dependency registers nothing.

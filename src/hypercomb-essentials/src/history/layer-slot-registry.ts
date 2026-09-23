@@ -229,5 +229,4 @@ export class LayerSlotRegistry {
 
 // Singleton: one instance per app, registered with window.ioc so every
 // consumer (across bees, namespaces) shares it.
-const _layerSlotRegistry = new LayerSlotRegistry()
-window.ioc.register('@diamondcoreprocessor.com/LayerSlotRegistry', _layerSlotRegistry)
+// history/history.boot.drone.ts — the boot lane: the runtime and the shell read these before any other bee loads registers this (atomic-modules-plan.md): a dependency registers nothing.

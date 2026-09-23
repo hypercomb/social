@@ -160,12 +160,5 @@ export function findSnapshot(records: readonly SnapshotRecord[], label: string):
   return null
 }
 
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<LayerSlotRegistry>(
-  '@diamondcoreprocessor.com/LayerSlotRegistry',
-  (slotRegistry) => {
-    slotRegistry.register({
-      slot: SNAPSHOTS_SLOT,
-      triggers: [],
-    })
-  },
-)
+/** The slot as the LayerSlotRegistry declares it; history.boot.drone.ts registers it. */
+export const SNAPSHOTS_SLOT_DECLARATION = { slot: SNAPSHOTS_SLOT, triggers: [] as string[] }

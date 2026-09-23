@@ -1,7 +1,7 @@
 // core/history-slider.drone.ts
 import { EffectBus, I18N_IOC_KEY, type I18nProvider, type KeyMapLayer } from '@hypercomb/core'
 import type { HistoryCursorService, CursorState } from './history-cursor.service.js'
-import type { GlobalTimeClock } from './global-time-clock.service.js'
+import { GlobalTimeClock } from './global-time-clock.service.js'
 
 /**
  * Revision clock — a compact timestamp display that appears under the
@@ -395,6 +395,10 @@ export class HistorySliderDrone {
   }
 
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/GlobalTimeClock', new GlobalTimeClock())
 
 const _historySliderDrone = new HistorySliderDrone()
 ;(window as any).ioc.register('@diamondcoreprocessor.com/HistorySliderDrone', _historySliderDrone)

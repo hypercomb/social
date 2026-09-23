@@ -152,5 +152,4 @@ export class OrderProjection {
   }
 }
 
-const _orderProjection = new OrderProjection()
-;(window as any).ioc.register('@diamondcoreprocessor.com/OrderProjection', _orderProjection)
+// history/history-recorder.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

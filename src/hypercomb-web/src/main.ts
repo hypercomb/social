@@ -293,6 +293,11 @@ const bootstrap = async (): Promise<void> => {
   await loader?.load?.()
   ;(window as any).__hcBoot('DependencyLoader.load done')
 
+  // The boot lane: bees whose services the runtime and the shell read before
+  // any other bee loads (atomic-modules-plan.md, step 6).
+  await (get('@hypercomb.social/ScriptPreloader') as { loadBootBees?: () => Promise<void> } | undefined)?.loadBootBees?.()
+  ;(window as any).__hcBoot('boot bees loaded')
+
   // Run runtime init (i18n catalogs, layer materialization, etc.) BEFORE
   // bootstrapApplication. Without this, bootstrap fires Angular's first
   // change-detection pass while CoreAdapter.initialize() is still loading

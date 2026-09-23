@@ -97,5 +97,4 @@ export class GlobalTimeClock extends EventTarget {
   }
 }
 
-const _globalTimeClock = new GlobalTimeClock()
-;(window as any).ioc.register('@diamondcoreprocessor.com/GlobalTimeClock', _globalTimeClock)
+// history/history-slider.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

@@ -812,5 +812,4 @@ const sameNameSet = (a: string[], b: string[]): boolean => {
   return true
 }
 
-const _historyCursorService = new HistoryCursorService()
-;(window as any).ioc.register('@diamondcoreprocessor.com/HistoryCursorService', _historyCursorService)
+// history/history.boot.drone.ts — the boot lane: the runtime and the shell read these before any other bee loads registers this (atomic-modules-plan.md): a dependency registers nothing.

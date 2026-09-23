@@ -105,5 +105,4 @@ export class ModeRegistry {
   }
 }
 
-const _modeRegistry = new ModeRegistry()
-window.ioc.register('@diamondcoreprocessor.com/ModeRegistry', _modeRegistry)
+// navigation/navigation.boot.drone.ts — the boot lane: the shell reads these before any other bee loads registers this (atomic-modules-plan.md): a dependency registers nothing.

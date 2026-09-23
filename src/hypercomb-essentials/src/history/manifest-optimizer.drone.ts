@@ -24,6 +24,7 @@
 
 import { Drone } from '@hypercomb/core'
 import type { HistoryService } from './history.service.js'
+import { ACTIVE_GENOME_KEY, ActiveGenomeService } from './active-genome.service.js'
 
 // ONE FILE PER LAYER, AND IT CARRIES THE VISUALS. The manifest was already
 // the layer's full child array (name, branch-status, every slot) — but it
@@ -258,6 +259,10 @@ export class ManifestOptimizerDrone extends Drone {
    *  entry keeps the sig and the atlas reads that one file itself. */
   static readonly #MAX_INLINE_BYTES = 64 * 1024
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register(ACTIVE_GENOME_KEY, new ActiveGenomeService())
 
 const _manifestOptimizer = new ManifestOptimizerDrone()
 window.ioc.register('@diamondcoreprocessor.com/ManifestOptimizerDrone', _manifestOptimizer)

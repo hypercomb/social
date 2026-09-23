@@ -79,4 +79,4 @@ export class PinchZoomInput {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/PinchZoomInput', new PinchZoomInput())
+// navigation/zoom/zoom.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

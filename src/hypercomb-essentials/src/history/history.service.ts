@@ -4670,8 +4670,4 @@ export class HistoryService {
 
 }
 
-const _historyService = new HistoryService()
-;(window as any).ioc.register('@diamondcoreprocessor.com/HistoryService', _historyService)
-// RUNTIME CONTRACT KEY — @hypercomb/runtime names no essentials namespace and
-// resolves this as '@HistoryService'.
-;(window as any).ioc.register('@HistoryService', _historyService)
+// history/history.boot.drone.ts — the boot lane: the runtime and the shell read these before any other bee loads registers this (atomic-modules-plan.md): a dependency registers nothing.

@@ -215,6 +215,11 @@ const boot = async (): Promise<void> => {
   await loader?.load?.()
   ;(window as any).__hcBoot('DependencyLoader.load done')
 
+  // The boot lane: bees whose services the runtime and the shell read before
+  // any other bee loads (atomic-modules-plan.md, step 6).
+  await window.ioc?.get<{ loadBootBees?: () => Promise<void> }>('@hypercomb.social/ScriptPreloader')?.loadBootBees?.()
+  ;(window as any).__hcBoot('boot bees loaded')
+
   // i18n catalogs, layer materialization, host resolution.
   await initializeRuntime({ logOpfs: false, catalogs: signatureCatalogs })
   ;(window as any).__hcBoot('initializeRuntime done')

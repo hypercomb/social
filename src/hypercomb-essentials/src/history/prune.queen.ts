@@ -21,7 +21,7 @@
 // have clicked.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import type { PruneService } from './prune.service.js'
+import { PruneService } from './prune.service.js'
 
 export class PruneQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -44,6 +44,10 @@ export class PruneQueenBee extends QueenBee {
     EffectBus.emit('history:view-open', undefined)
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/PruneService', new PruneService())
 
 const _prune = new PruneQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/PruneQueenBee', _prune)

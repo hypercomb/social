@@ -602,6 +602,4 @@ export class TouchGestureCoordinator {
   }
 }
 
-// Self-register. In dev mode, _deps array in app.ts prevents tree-shaking.
-// In production, zoom.drone.ts co-locates a redundant registration as safety net.
-window.ioc.register('@diamondcoreprocessor.com/TouchGestureCoordinator', new TouchGestureCoordinator())
+// navigation/zoom/zoom.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

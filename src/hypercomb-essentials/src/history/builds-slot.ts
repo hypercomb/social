@@ -208,12 +208,5 @@ export async function mintBuildRecord(
   return { sig, seal, label: name, unchanged: false }
 }
 
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<LayerSlotRegistry>(
-  '@diamondcoreprocessor.com/LayerSlotRegistry',
-  (slotRegistry) => {
-    slotRegistry.register({
-      slot: BUILDS_SLOT,
-      triggers: [],
-    })
-  },
-)
+/** The slot as the LayerSlotRegistry declares it; history.boot.drone.ts registers it. */
+export const BUILDS_SLOT_DECLARATION = { slot: BUILDS_SLOT, triggers: [] as string[] }

@@ -146,6 +146,32 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // find — marker-driven, called by the processor
   // -------------------------------------------------
 
+  /**
+   * THE BOOT LANE (documentation/atomic-modules-plan.md, step 6). A boot bee
+   * registers a service the runtime or the shell reads before any other bee
+   * loads — the history service, the input gate. The package root names them
+   * (`bootBees`, accepted from the root only, like `criticalBees`), and a
+   * shell calls this right after the dependencies load, before the runtime
+   * initializer and the shell itself start. Every later load finds them
+   * already held. A root that names none costs one layer read.
+   */
+  public loadBootBees = async (): Promise<void> => {
+    const root = installedPackageSig()
+    if (!root || !this.store) return
+    let named: unknown
+    try {
+      const bytes = await this.store.getLayerBytes(root)
+      named = bytes ? (JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>)['bootBees'] : undefined
+    } catch { return }
+    const sigs = (Array.isArray(named) ? named : [])
+      .map(entry => this.#stripExt(String(entry ?? '')).toLowerCase())
+      .filter(sig => /^[a-f0-9]{64}$/.test(sig))
+    if (!sigs.length) return
+    const results = await Promise.allSettled(sigs.map(sig => this.#loadBeeBySignature(sig)))
+    const failed = results.filter(r => r.status === 'rejected' || !r.value).length
+    console.log(`[script-preloader] boot lane: ${sigs.length - failed} of ${sigs.length} boot bees loaded`)
+  }
+
   public find = async (_grammar: string): Promise<Bee[]> => {
     if (this.#registeredBees) {
       if (!ScriptPreloader.#firstFindMarked) {

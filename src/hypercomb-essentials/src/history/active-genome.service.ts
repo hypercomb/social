@@ -418,5 +418,4 @@ export class ActiveGenomeService {
   }
 }
 
-const _activeGenome = new ActiveGenomeService()
-window.ioc.register(ACTIVE_GENOME_KEY, _activeGenome)
+// history/manifest-optimizer.drone.ts — the census is a derived cache registers this (atomic-modules-plan.md): a dependency registers nothing.

@@ -578,8 +578,7 @@ export class PruneService extends EventTarget {
   }
 }
 
-const _prune = new PruneService()
-window.ioc.register('@diamondcoreprocessor.com/PruneService', _prune)
+// history/prune.queen.ts registers this (atomic-modules-plan.md): a dependency registers nothing.
 
 // NOTHING RE-READS THE LOCATION AFTER A PURGE — deliberately.
 //

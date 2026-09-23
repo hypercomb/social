@@ -217,5 +217,4 @@ export class BackGesture {
   }
 }
 
-const _backGesture = new BackGesture()
-window.ioc.register('@diamondcoreprocessor.com/BackGesture', _backGesture)
+// navigation/navigation.boot.drone.ts — the boot lane: the shell reads these before any other bee loads registers this (atomic-modules-plan.md): a dependency registers nothing.

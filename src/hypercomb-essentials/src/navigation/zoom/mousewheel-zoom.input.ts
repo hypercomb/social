@@ -240,4 +240,4 @@ export class MousewheelZoomInput {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/MousewheelZoomInput', new MousewheelZoomInput())
+// navigation/zoom/zoom.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.

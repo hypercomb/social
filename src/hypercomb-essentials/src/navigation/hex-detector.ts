@@ -64,7 +64,4 @@ export class HexDetector {
   }
 }
 
-window.ioc.register(
-  '@diamondcoreprocessor.com/HexDetector',
-  new HexDetector(DEFAULT_HEX_GEOMETRY.spacing)
-)
+// navigation/navigation.boot.drone.ts — the boot lane: the shell reads these before any other bee loads registers this (atomic-modules-plan.md): a dependency registers nothing.

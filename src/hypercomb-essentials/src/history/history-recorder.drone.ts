@@ -1,9 +1,7 @@
 // history/history-recorder.drone.ts
 //
-// Side-effect imports trigger HistoryService and HistoryCursorService
-// self-registration. Every other import in the codebase is `import
-// type { ... }`, which TypeScript erases — without these bare imports
-// the services never run their `window.ioc.register(...)` calls.
+// It owns the order projection (atomic-modules-plan.md). The history service
+// and its cursor are registered by history.boot.drone.ts, in the boot lane.
 //
 // Historically this drone wrote a parallel "ops log" via
 // `historyService.record()` on every cell lifecycle / tag / layout
@@ -17,14 +15,16 @@
 // removed. The committer (layer-committer.drone) is now the sole
 // writer in the bag's numeric namespace.
 //
-// This drone is kept as a side-effect anchor only.
-import './history.service.js'
-import './history-cursor.service.js'
+import { OrderProjection } from './order-projection.js'
 
 export class HistoryRecorder {
   // No subscriptions, no writes. The bag's per-event timeline is the
   // marker series the committer mints; nothing else writes here.
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/OrderProjection', new OrderProjection())
 
 const _historyRecorder = new HistoryRecorder()
 window.ioc.register('@diamondcoreprocessor.com/HistoryRecorder', _historyRecorder)

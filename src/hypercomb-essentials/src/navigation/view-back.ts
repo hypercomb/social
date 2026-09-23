@@ -204,5 +204,4 @@ export class ViewBack {
   }
 }
 
-const _viewBack = new ViewBack()
-window.ioc.register('@diamondcoreprocessor.com/ViewBack', _viewBack)
+// navigation/navigation.boot.drone.ts — the boot lane: the shell reads these before any other bee loads registers this (atomic-modules-plan.md): a dependency registers nothing.

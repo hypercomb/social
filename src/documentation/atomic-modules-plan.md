@@ -281,8 +281,34 @@ registered by something that runs before the shell and the runtime read it.
 navigation and history hold these and wait on that decision; presentation,
 sharing, assistant and commands must be checked for them too.
 
-Next: navigation, history (boot services), then presentation, assistant,
-sharing, commands. (`revolucionstyle.com` is outside the build.)
+**THE BOOT LANE — decided by jwize 2026-09-22, BUILT.** A boot service is
+registered by its domain's BOOT BEE: a drone named `*.boot.drone.ts`. The
+build names boot bees in the package root (`bootBees`, root only, like
+`criticalBees`, checked by the closure pass), and every shell calls
+`ScriptPreloader.loadBootBees()` right after the dependencies load — before
+the runtime initializer, the Lineage and Angular start. Registration stays a
+bee's act; the timing is what the eager namespace bundles used to give. Two
+boot bees so far:
+- `navigation/navigation.boot.drone.ts` — InputGate, ModeRegistry,
+  InputModeStack, BackGesture, ViewBack, HexDetector.
+- `history/history.boot.drone.ts` — HistoryService (and its runtime contract
+  key `@HistoryService`), HistoryCursorService, the LayerSlotRegistry, and
+  history's own builds and snapshots slots.
+
+**Batch 4 — BUILT and browser-verified 2026-09-22:** navigation, history.
+Besides the boot bees: the zoom bee registers the mousewheel input too (it
+already held pinch and the touch coordinator); the slider owns the global
+time clock, the recorder the order projection (it was only a side-effect
+anchor before), the manifest optimizer the genome census, and the prune word
+its service. On the web shell: the boot lane ran between the dependencies
+(+535 ms) and the Lineage (+602 ms); the runtime found `@HistoryService` and
+the history warm-up ran; every baseline IoC key registered plus the two boot
+bees; zero breaks; 436 units linked; 252 atoms, 172 bees.
+
+Next: presentation, assistant, sharing, commands — each checked for boot
+services first (AxialService is read by the runtime; DecorationService,
+OverlapMetrics and VisualBeeRegistry by the command line; HostSync by the
+store). (`revolucionstyle.com` is outside the build.)
 
 ## Atomize for the editor, optimize for the reader
 
