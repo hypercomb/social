@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { JEV_CHOICE_GATES, JEV_MAX_READS, jevInput, jevQuestions, jevResult, jevState } from './jev-decision.js'
+import { JEV_CHOICE_GATES, JEV_MAX_READS, jevDoctrineSections, jevInput, jevQuestions, jevReadingQuestions, jevReadingResult, jevReadingState, jevResult, jevState } from './jev-decision.js'
 
 const doctrine = ['### Nothing is deleted\nHide first; delete second.', '### The core rule\nContent is addressed by signature.']
 const rows = [
@@ -142,5 +142,43 @@ describe('composition', () => {
     expect(() => jevResult(response('execute'), input)).toThrow()
     expect(() => jevResult(response('c', { next: { ...choice('c'), probabilities: { a: Number.NaN } } }), input)).toThrow()
     expect(() => jevResult(response('c', { c_rule0: { type: 'choice', choice: 'yes' } }), input)).toThrow()
+  })
+})
+
+describe('Jev reads a trial', () => {
+  const reading = { sandbox: 'try-zoom', doctrine, files: [
+    { section: 'src/a.ts', diff: '+ export const zoom = 2;\n− export const zoom = 1;' },
+    { section: 'src/b.ts', diff: '+ globalThis.__proof = 1;' },
+  ] }
+
+  it('asks the write\'s own rule question, once per file per doctrine section, and nothing else', () => {
+    const questions = jevReadingQuestions(reading)
+    expect(Object.keys(questions).sort()).toEqual(['f0_rule0', 'f0_rule1', 'f1_rule0', 'f1_rule1'])
+    expect(questions['f1_rule0']!.instructions).toContain('rows[1].lines')
+    expect(questions['f1_rule0']!.instructions).toContain('Hide first; delete second.')
+    const state = jevReadingState(reading)
+    expect(state.rows.map(row => `${row.kind}:${row.label}`)).toEqual(['write:src/a.ts', 'write:src/b.ts'])
+    expect(state.evidence[1]).toBe('+ globalThis.__proof = 1;')
+    expect(state.rows[1]!.lines).toEqual(['write src/b.ts', 'the change is evidence[1]'])
+  })
+
+  it('reads the standing from the worst rule: follows within the gate, breaks past reject, unsure between', () => {
+    const answer = (over: Record<string, number>) => ({ model: 'typesafe/jev-resolved', answers: Object.fromEntries(
+      Object.entries({ f0_rule0: 0.01, f0_rule1: 0.02, f1_rule0: 0.03, f1_rule1: 0.01, ...over }).map(([key, value]) => [key, noul(value)])), usage: { input_tokens: 42, cost: 0.00001 } })
+    const follows = jevReadingResult(answer({}), reading)
+    expect(follows.verdict).toBe('follows')
+    expect(follows.files.map(file => file.worst)).toEqual([{ rule: 'The core rule', breaks: 0.02 }, { rule: 'Nothing is deleted', breaks: 0.03 }])
+    expect(follows.files[0]!.rules.map(rule => rule.rule)).toEqual(['Nothing is deleted', 'The core rule'])
+    expect([follows.model, follows.usage?.inputTokens]).toEqual(['typesafe/jev-resolved', 42])
+    expect(jevReadingResult(answer({ f1_rule1: 0.5 }), reading).verdict).toBe('unsure')
+    expect(jevReadingResult(answer({ f0_rule0: 0.97 }), reading).verdict).toBe('breaks')
+    expect(() => jevReadingResult({ answers: {} }, reading)).toThrow()
+  })
+
+  it('cuts the doctrine from the anatomy the way a write does', () => {
+    const anatomy = '# Hypercomb anatomy\n\nmechanics\n\n# Doctrine\n\nlifted verbatim\n\n### One\nfirst rule\n\n### Two\nsecond rule\n'
+    expect(jevDoctrineSections(anatomy)).toEqual(['### One\nfirst rule', '### Two\nsecond rule'])
+    expect(jevDoctrineSections('no doctrine here')).toEqual(['no doctrine here'])
+    expect(jevDoctrineSections('')).toEqual([])
   })
 })

@@ -624,7 +624,7 @@ async function sandboxRoot(env, site, selected, read = indexReader(env)) {
     // Beside the sandbox, the change as a reader needs it and the host AI's
     // reading of it (essentials module-review.ts) — public, by signature.
     const beside = (key) => { const sig = String(index?.roots?.[key] || '').toLowerCase(); return SIG_RE.test(sig) ? sig : null }
-    return { root, pubkey: publisher.pubkey, label: publisher.label || '', publishedAt: index.createdAt, change: beside(`change:${site.lineage}`), review: beside(`review:${site.lineage}`) }
+    return { root, pubkey: publisher.pubkey, label: publisher.label || '', publishedAt: index.createdAt, change: beside(`change:${site.lineage}`), review: beside(`review:${site.lineage}`), jev: beside(`jev:${site.lineage}`) }
   }
   return null
 }
@@ -645,6 +645,8 @@ async function serveSandbox(request, env, site, zone) {
       pubkey: found.pubkey, publisher: found.label, publishedAt: found.publishedAt, hosts: [url.host],
       ...(found.change ? { change: found.change } : {}), ...(found.review ? { review: found.review } : {}),
       ...(found.review ? { reviewVerdict: await heapRecord(env, found.review).then((r) => ASSESS_VERDICTS.has(r?.verdict) ? r.verdict : 'unclear') } : {}),
+      // Jev's reading of the change, rule by rule (essentials module-review.ts jevReadTrial).
+      ...(found.jev ? { jev: found.jev, jevVerdict: await heapRecord(env, found.jev).then((r) => JEV_VERDICTS.has(r?.verdict) ? r.verdict : 'unsure') } : {}),
       assessments: await assessmentsOf(env, found.root, indexReader(env)),
     }, { 'Cache-Control': 'no-store' })
   }
@@ -665,6 +667,7 @@ async function serveSandbox(request, env, site, zone) {
 // re-verified, and one who dropped the key is simply not shown.
 const ASSESS_KEY_RE = /^assess:([0-9a-f]{64})$/
 const ASSESS_VERDICTS = new Set(['accept', 'refuse', 'unclear'])
+const JEV_VERDICTS = new Set(['follows', 'unsure', 'breaks'])
 const ASSESSORS_MAX = 500
 const ASSESSMENTS_SHOWN = 50
 
@@ -737,9 +740,10 @@ async function serveTrials(request, env, zone) {
         const found = await sandboxRoot(env, resolved.site, '', read)
         if (!found) continue
         listed.add(name)
-        const [change, review] = await Promise.all([
+        const [change, review, jev] = await Promise.all([
           found.change ? heapRecord(env, found.change) : null,
           found.review ? heapRecord(env, found.review) : null,
+          found.jev ? heapRecord(env, found.jev) : null,
         ])
         trials.push({
           name, door: `${url.protocol}//${name}.${zone}${url.port ? ':' + url.port : ''}`,
@@ -749,6 +753,7 @@ async function serveTrials(request, env, zone) {
           off: paths(change?.off),
           ...(found.change ? { change: found.change } : {}),
           ...(found.review ? { review: found.review, reviewVerdict: ASSESS_VERDICTS.has(review?.verdict) ? review.verdict : 'unclear' } : {}),
+          ...(found.jev ? { jev: found.jev, jevVerdict: JEV_VERDICTS.has(jev?.verdict) ? jev.verdict : 'unsure' } : {}),
         })
       }
     }

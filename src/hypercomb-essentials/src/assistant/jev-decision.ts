@@ -396,3 +396,85 @@ export const jevResult = (raw: unknown, input: JevInput, rubric: JevRubric = {})
     usage: { inputTokens: count(usage['input_tokens']), outputTokens: count(usage['output_tokens']), cost: count(usage['cost']) },
   }
 }
+
+// ── JEV READS A TRIAL (documentation/module-sandbox.md) ────────────────────
+//
+// THE CHANGE A COMMIT PUBLISHED, judged against every doctrine section with
+// the same rule question a write faces — over what a write never shows Jev:
+// the changed lines themselves. Each changed file is one write row whose
+// evidence is its diff (every line added and removed, a little of what stayed
+// around each), cut to the read budget. A reading is a reading, never a gate:
+// it is published beside the trial (`jev:<sandbox>`) so the door, the trial
+// listing and the what-changed panel say where the change stands, rule by
+// rule. jwize, 2026-09-23: "the primitive should be enforced so everything is
+// replayable and reviewable".
+
+export interface JevReadingInput {
+  readonly sandbox: string
+  readonly files: readonly { readonly section: string; readonly diff: string }[]
+  readonly doctrine: readonly string[]
+}
+export type JevReadingVerdict = 'follows' | 'unsure' | 'breaks'
+export interface JevReadingRule { readonly rule: string; readonly breaks: number }
+export interface JevReadingFile { readonly section: string; readonly rules: readonly JevReadingRule[]; readonly worst: JevReadingRule }
+export interface JevReadingResult {
+  readonly verdict: JevReadingVerdict
+  readonly files: readonly JevReadingFile[]
+  readonly model: string
+  readonly answers: Record<string, unknown>
+  readonly usage?: { inputTokens?: number; outputTokens?: number; cost?: number }
+}
+
+/** Files judged per reading; the rest are named in the record, not judged. */
+export const JEV_READING_FILES = 6
+/** Diff characters across every file of one reading, within the read budget. */
+export const JEV_READING_CHARS = 18_000
+
+export const jevReadingState = (input: JevReadingInput): { request: string; evidence: readonly string[]; rows: readonly Omit<JevRow, 'reach'>[] } => ({
+  request: `Review the change published as the sandbox ${input.sandbox}. Each row is one changed source file; evidence[i] is that file's diff — every line added (+) and removed (−), with a little of what stayed around each.`,
+  evidence: input.files.map(file => file.diff),
+  rows: input.files.map((file, i) => ({ id: `f${i}`, kind: 'write' as const, label: file.section, lines: [`write ${file.section}`, `the change is evidence[${i}]`] })),
+})
+
+/** One rule question per file per doctrine section — the write's own question. */
+export const jevReadingQuestions = (input: JevReadingInput): JevQuestions => {
+  const questions: JevQuestions = {}
+  input.files.forEach((_, i) => {
+    input.doctrine.forEach((section, k) => {
+      questions[`f${i}_rule${k}`] = { type: 'noul', instructions: RULE_QUESTION(`rows[${i}]`, section), criteria: { true: RULE_YES, false: RULE_NO } }
+    })
+  })
+  return questions
+}
+
+/** Where the change stands: every rule's chance of being broken, per file; the
+ *  worst decides — past `reject` it breaks, within `rule` it follows. */
+export const jevReadingResult = (raw: unknown, input: JevReadingInput, rubric: JevRubric = {}): JevReadingResult => {
+  const body = object(raw)
+  const answers = object(body['answers'])
+  const G = { ...JEV_GATES, ...rubric.gates }
+  const files = input.files.map((file, i) => {
+    const rules = input.doctrine.map((section, k) => ({ rule: headingOf(section), breaks: noul(answers, `f${i}_rule${k}`) }))
+    const worst = rules.reduce((top, rule) => rule.breaks > top.breaks ? rule : top, rules[0] ?? { rule: 'a rule', breaks: 0 })
+    return { section: file.section, rules, worst }
+  })
+  const worst = files.reduce((top, file) => file.worst.breaks > top ? file.worst.breaks : top, 0)
+  const verdict: JevReadingVerdict = worst >= G.reject ? 'breaks' : worst <= G.rule ? 'follows' : 'unsure'
+  const usage = object(body['usage'])
+  const count = (n: unknown): number | undefined => typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : undefined
+  return {
+    verdict, files, answers,
+    model: typeof body['model'] === 'string' ? body['model'] : JEV_MODEL,
+    usage: { inputTokens: count(usage['input_tokens']), outputTokens: count(usage['output_tokens']), cost: count(usage['cost']) },
+  }
+}
+
+/** THE DOCTRINE, SECTION BY SECTION, cut from the anatomy — the same cut the
+ *  chat makes for a write (hypercomb-jev.ts doctrineSections), so a reading
+ *  judges by exactly the sections a write is judged by. */
+export const jevDoctrineSections = (anatomy: string): string[] => {
+  const start = anatomy.indexOf('# Doctrine')
+  if (start < 0) return anatomy.trim() ? [anatomy.trim()] : []
+  const sections = anatomy.slice(start).split(/\n(?=### )/).slice(1).map(section => section.trim()).filter(Boolean)
+  return sections.length ? sections : [anatomy.slice(start).trim()]
+}

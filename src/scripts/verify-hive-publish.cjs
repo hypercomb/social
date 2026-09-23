@@ -6,7 +6,8 @@
 //   2. `module commit` publishes the whole package and opens a SANDBOX:
 //      install:try-<change>, never the live channel; the change (each drafted
 //      file before and after) is published beside it, and the host's AI reads
-//      it — review:try-<change>
+//      it — review:try-<change>; Jev reads its diff against every doctrine
+//      section — jev:try-<change> — and both readings are public
 //   3. a tester opens try-<change>.<zone>: a full hive whose door names that
 //      package, and runs the model's code — while followers are NOT told; the
 //      door tells the tester's hive what it runs, the tester signs a public
@@ -61,6 +62,7 @@ const panelOf = page => H.waitFor(() => page.evaluate(() => {
   return {
     title: panel.querySelector('.hc-trial-title')?.textContent ?? '', files: all('.hc-trial-file-name'),
     added: all('.hc-trial-row.is-add'), verdicts: all('.hc-trial-verdict'), people: all('.hc-trial-person'),
+    jev: all('.hc-trial-quiet').filter(text => text.includes('closest to breaking')),
   }
 }), 60_000, 800)
 const closePanel = page => page.evaluate(() => document.querySelector('.hc-trial')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
@@ -135,6 +137,13 @@ const announcedOn = page => page.evaluate(() => {
   check('the host AI read the change, and its reading is published beside it', reviewRecord?.verdict === 'accept' && reviewRecord?.change === changeSig, reviewRecord ? `${reviewRecord.verdict} by ${reviewRecord.model}` : 'no review')
   check('the host AI was shown the changed code itself, from its own heap', /__hivePublishProof: yes/.test(findings) && /Context files shown: 2/.test(findings), findings.split('\n').slice(1, 3).join(' '))
 
+  // ── 2c. JEV READS THE DIFF, RULE BY RULE, AND ITS READING IS PUBLIC ─────
+  const jevToasts = await H.toastsUntil(page, /^Jev read |Jev did not read/, 60_000)
+  const jevSig = await H.waitFor(async () => channelOf(await hostState(), pubkey, `jev:${SANDBOX}`), 30_000, 1000)
+  const jevRecord = jevSig ? JSON.parse(await fromHost(jevSig)) : null
+  check('Jev read the change\'s diff against every doctrine section, and its reading is published beside the trial', jevRecord?.kind === 'jev-reading' && jevRecord.change === changeSig && jevRecord.verdict === 'follows' && jevRecord.files?.[0]?.section === target.section && jevRecord.files[0].rules.length >= 8, JSON.stringify(jevToasts))
+  check('the reading names the rule each file comes closest to breaking, the Life Primitive among those judged', !!jevRecord && jevRecord.files.every(file => typeof file.worst?.rule === 'string' && typeof file.worst?.breaks === 'number') && jevRecord.files[0].rules.some(rule => rule.rule === 'The Life Primitive — its rules'))
+
   // ── 3. A TESTER OPENS THE DOOR ──────────────────────────────────────────
   // The door is read from the tester's browser: Chrome resolves *.localhost
   // to loopback, Node on Windows does not.
@@ -145,6 +154,7 @@ const announcedOn = page => page.evaluate(() => {
   const site = await tester.evaluate(() => fetch('/site.json', { cache: 'no-store' }).then(r => r.json())).catch(() => null)
   check('the door describes itself as the sandbox of that package', site?.sandbox === true && site?.package === sandboxRoot && site?.pubkey === pubkey)
   check('the door names the change and the review, for anyone to read', site?.change === changeSig && site?.review === reviewSig)
+  check('the door names Jev\'s reading and where the change stands', site?.jev === jevSig && site?.jevVerdict === 'follows')
   const testerRuns = await H.waitFor(() => H.installedOf(tester), 180_000, 1000)
   check('the tester\'s hive at the door installed exactly the sandbox package', testerRuns === sandboxRoot, String(testerRuns).slice(0, 12))
   check('the tester runs the code the model wrote', await proofOf(tester) === MARKER)
@@ -190,6 +200,7 @@ const announcedOn = page => page.evaluate(() => {
   const panel = await panelOf(page)
   check('the publisher opens what the trial changes, file by file, read from the door', panel?.title === SANDBOX && panel.files.includes(target.section) && panel.added.some(row => row.includes(MARKER)), JSON.stringify(panel?.files))
   check('the panel carries the host AI reading and the tester\'s signed note', !!panel && panel.verdicts.some(v => v.startsWith('accept')) && panel.people.some(row => row.includes('refuse') && row.includes('raises zoom without asking')), JSON.stringify(panel?.people))
+  check('the panel carries Jev\'s reading: the standing, and each file\'s rule closest to breaking', !!panel && panel.verdicts.some(v => v.startsWith('follows')) && panel.jev.some(row => row.startsWith(target.section) && row.includes('closest to breaking')), JSON.stringify(panel?.jev))
   if (process.env.HIVE_SHOT) await page.screenshot({ path: process.env.HIVE_SHOT })
   await closePanel(page)
   await H.say(tester, `module changes ${CHANGE}`)

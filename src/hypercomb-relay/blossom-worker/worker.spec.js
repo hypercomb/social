@@ -706,13 +706,14 @@ test('writing an index that names assess:<root> lists its signer as an assessor 
 test('a try- door lists every signed assessment of its root, and the host AI verdict', async () => {
   const [root, reviewSig, goodRecord] = ['b'.repeat(64), 'd'.repeat(64), 'c'.repeat(64)]
   const HIVES = kvMap(new Map([
-    [pubkey, JSON.stringify(await signedIndex({ 'install:try-fresh-rooms': root, 'review:try-fresh-rooms': reviewSig }))],
+    [pubkey, JSON.stringify(await signedIndex({ 'install:try-fresh-rooms': root, 'review:try-fresh-rooms': reviewSig, 'jev:try-fresh-rooms': 'e'.repeat(64) }))],
     [assessor, JSON.stringify(await indexBy(assessorKey, { [`assess:${root}`]: goodRecord }))],
     [`assessors:${root}`, JSON.stringify([assessor, 'not-a-key'])],
   ]))
   const records = new Map([
     [goodRecord, { kind: 'module-assessment', root, verdict: 'refuse', note: 'a'.repeat(64) }],
     [reviewSig, { kind: 'module-review', verdict: 'accept' }],
+    ['e'.repeat(64), { kind: 'jev-reading', verdict: 'follows' }],
   ])
   const env = {
     SITE_BINDINGS: JSON.stringify({ 'hypercomb.com': { title: 'Hypercomb', lineage: 'hypercomb', publishers: [{ pubkey, label: 'Jaime', primary: true }] } }),
@@ -722,6 +723,7 @@ test('a try- door lists every signed assessment of its root, and the host AI ver
   }
   const site = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
   assert.equal(site.reviewVerdict, 'accept')
+  assert.deepEqual([site.jev, site.jevVerdict], ['e'.repeat(64), 'follows'])
   assert.deepEqual(site.assessments.map((a) => [a.pubkey, a.record, a.verdict]), [[assessor, goodRecord, 'refuse']])
   // A record that assesses another root is not an assessment of this one.
   records.set(goodRecord, { kind: 'module-assessment', root: 'a'.repeat(64), verdict: 'accept' })
@@ -735,7 +737,7 @@ test('a zone lists every open trial from what its door serves, newest first', as
   const HIVES = kvMap(new Map([
     [pubkey, JSON.stringify(await signedIndex({
       'install:try-old-rooms': older, 'change:try-old-rooms': changeOld,
-      'install:try-new-rooms': newer, 'change:try-new-rooms': changeNew, 'review:try-new-rooms': review,
+      'install:try-new-rooms': newer, 'change:try-new-rooms': changeNew, 'review:try-new-rooms': review, 'jev:try-new-rooms': 'a'.repeat(63) + '1',
       'install:essentials': head, 'try-not-a-channel': head,
     }))],
     // A second approved publisher: its own trial is listed, and the trial the
@@ -746,6 +748,7 @@ test('a zone lists every open trial from what its door serves, newest first', as
     [changeOld, { kind: 'module-change', changes: [{ section: 'src/a.ts' }], off: ['games/pong'], at: 1000 }],
     [changeNew, { kind: 'module-change', changes: [{ section: 'src/b.ts' }, { section: 7 }], off: [], at: 2000 }],
     [review, { kind: 'module-review', verdict: 'refuse' }],
+    ['a'.repeat(63) + '1', { kind: 'jev-reading', verdict: 'breaks' }],
   ])
   const zone = (extra = {}) => JSON.stringify({ 'hypercomb.com': { title: 'Hypercomb', lineage: 'hypercomb', publishers: [{ pubkey, label: 'Jaime', primary: true }, { pubkey: assessor, label: 'Other' }], ...extra } })
   const env = {
@@ -764,6 +767,7 @@ test('a zone lists every open trial from what its door serves, newest first', as
   const [fresh, old, theirs] = listing.trials
   assert.equal(fresh.door, 'https://try-new-rooms.hypercomb.com')
   assert.deepEqual([fresh.at, fresh.sections, fresh.review, fresh.reviewVerdict], [2000, ['src/b.ts'], review, 'refuse'])
+  assert.deepEqual([fresh.jev, fresh.jevVerdict, old.jevVerdict], ['a'.repeat(63) + '1', 'breaks', undefined])
   assert.deepEqual([old.sections, old.off, old.reviewVerdict], [['src/a.ts'], ['games/pong'], undefined])
   assert.deepEqual([theirs.at, theirs.publisher, theirs.sections], [null, 'Other', []])
   // Any door on the zone answers the same listing.

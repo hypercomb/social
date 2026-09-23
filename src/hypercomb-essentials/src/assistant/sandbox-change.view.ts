@@ -226,6 +226,19 @@ export class SandboxChangeElement extends HTMLElement {
       body.appendChild(el('p', 'hc-trial-quiet', t('module.panel.unreviewed', "The host's AI has not read this change.")))
     }
 
+    // Jev: the diff against the doctrine, rule by rule.
+    body.appendChild(el('h3', 'hc-trial-section', t('module.panel.jev', 'Jev — the doctrine, rule by rule')))
+    if (reading.jev) {
+      body.appendChild(el('p', `hc-trial-verdict is-${reading.jev.verdict}`, `${reading.jev.verdict}${reading.jev.model ? ` · ${reading.jev.model}` : ''}`))
+      for (const file of reading.jev.files) {
+        body.appendChild(el('p', 'hc-trial-quiet', t('module.panel.jevfile', '{section}: closest to breaking "{rule}" ({percent}%)', {
+          section: file.section, rule: file.worst.rule, percent: Math.round(file.worst.breaks * 100),
+        })))
+      }
+    } else {
+      body.appendChild(el('p', 'hc-trial-quiet', t('module.panel.unjev', 'Jev has not read this change.')))
+    }
+
     // People.
     const tally = tallyAssessments(site)
     body.appendChild(el('h3', 'hc-trial-section', t('module.panel.people', 'People — {accept} accept · {refuse} refuse · {unclear} unclear', tally)))
@@ -376,6 +389,9 @@ function ensureStyles(): void {
     .hc-trial-verdict { margin: 0.2rem 0; font-weight: 600; }
     .hc-trial-verdict.is-accept { color: var(--hc-status-ok, #3fbf8f); }
     .hc-trial-verdict.is-refuse { color: var(--hc-status-alert, #e07a72); }
+    .hc-trial-verdict.is-follows { color: var(--hc-status-ok, #3fbf8f); }
+    .hc-trial-verdict.is-breaks { color: var(--hc-status-alert, #e07a72); }
+    .hc-trial-verdict.is-unsure { color: var(--hc-status-warn, #d9a441); }
     .hc-trial-findings, .hc-trial-rows {
       margin: 0.25rem 0 0.5rem; padding: 0.4rem 0.5rem; border-radius: 2px;
       background: var(--hc-window-tint, rgba(255, 255, 255, 0.045));

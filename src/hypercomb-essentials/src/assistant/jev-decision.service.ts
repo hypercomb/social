@@ -4,7 +4,7 @@ import { llmModelChoice } from './llm-model-choice.js'
 import { llmHiveAccess } from './llm-hive-access.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import { openRouterRouting, providerBlock } from './providers/openrouter-routing.js'
-import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevResult, jevState, type JevInput, type JevResult } from './jev-decision.js'
+import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevReadingQuestions, jevReadingResult, jevReadingState, jevResult, jevState, type JevInput, type JevReadingInput, type JevReadingResult, type JevResult } from './jev-decision.js'
 import type { JevDirectInput } from './jev-direct.js'
 import { jevFrontInput, jevFrontQuestions, jevFrontResult, jevFrontState, type JevFrontResult } from './jev-front.js'
 import { jevVerifyInput, jevVerifyQuestions, jevVerifyResult, type JevVerifyResult } from './jev-verify.js'
@@ -95,6 +95,20 @@ export class JevDecisionService {
     const result = await this.#request(input, signal)
     if (!this.ready(source.providerId)) throw new Error('OpenRouter access changed during the decision')
     return result
+  }
+
+  /** JEV READS A TRIAL (jev-decision.ts, "Jev reads a trial"): the change a
+   *  commit published, file by file, against every doctrine section. Gated
+   *  like every Jev act — switched on, and OpenRouter allowed to read the hive
+   *  — and bounded by the same read budget. The source boundary is the
+   *  published change itself: the caller reads each file before and after by
+   *  signature from the store, so nothing but what is public is judged. */
+  async reading(input: JevReadingInput, signal?: AbortSignal): Promise<JevReadingResult> {
+    signal?.throwIfAborted()
+    if (!this.enabled() || !llmHiveAccess.mayRead('openrouter')) throw new Error('Jev requires Jev switched on and the OpenRouter hive read grant')
+    const state = jevReadingState(input)
+    if (JSON.stringify(state).length > (llmHiveAccess.budget('openrouter') ?? 24_000)) throw boundary('Jev reading exceeds the OpenRouter read budget')
+    return this.#post({ state, questions: jevReadingQuestions(input) }, body => jevReadingResult(body, input), signal, 30_000)
   }
 
   /** THE FRONT DOOR (jev-front.ts): one call per message, before any worker

@@ -33,11 +33,12 @@ const trialSite = async () => {
   const change = await put(JSON.stringify({ kind: 'module-change', sandbox: 'try-zoom', root, off: ['games/pong'], at: 1_700_000_000_000, changes: [{ path: 'p', section: 'src/a.ts', from: 'x', to: 'y', before, after }], taken: [{ path: 'notes', root: 'f'.repeat(64) }] }))
   const findings = await put('Looks fine.\nVERDICT: accept')
   const review = await put(JSON.stringify({ kind: 'module-review', verdict: 'accept', model: 'm', findings }))
+  const jev = await put(JSON.stringify({ kind: 'jev-reading', verdict: 'follows', model: 'jev', files: [{ section: 'src/a.ts', worst: { rule: 'The Life Primitive', breaks: 0.02 }, rules: [] }] }))
   const note = await put('<img src=x onerror=alert(1)> raises zoom')
   const record = await put(JSON.stringify({ kind: 'module-assessment', root, verdict: 'refuse', note }))
   return {
     sandbox: true as const, title: 'try-zoom', package: root, pubkey: 'b'.repeat(64), publisher: 'Jaime', change, review,
-    reviewVerdict: 'accept' as const, assessments: [{ pubkey: 'c'.repeat(64), record, verdict: 'refuse' as const, at: 1 }],
+    reviewVerdict: 'accept' as const, jev, jevVerdict: 'follows' as const, assessments: [{ pubkey: 'c'.repeat(64), record, verdict: 'refuse' as const, at: 1 }],
   }
 }
 
@@ -75,6 +76,10 @@ describe('the what-changed panel', () => {
     expect(panelText()).toContain('src/a.ts')
     expect(panelText()).toContain('+1 −1')
     expect(panelText()).toContain('Looks fine.')
+    // Jev's reading: the standing, and each file's rule closest to breaking.
+    expect(panelText()).toContain('Jev — the doctrine, rule by rule')
+    expect(panelText()).toContain('follows · jev')
+    expect(panelText()).toContain('src/a.ts: closest to breaking "The Life Primitive" (2%)')
     expect(panelText()).toContain('games/pong')
     // What the build folded in from other builds, and where each came from.
     expect(panelText()).toContain('What it takes from other builds')

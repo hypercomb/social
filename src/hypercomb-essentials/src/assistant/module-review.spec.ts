@@ -5,7 +5,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { assessSandbox, changedPaths, isSandboxSite, publishChange, readChange, readTrial, reviewChange, reviewContext, reviewQuestion, sectionText, takeTrial, tallyAssessments, trialsOf, verdictOf, type ReviewDeps, type TakeDeps } from './module-review.js'
+import { assessSandbox, changedPaths, diffText, isSandboxSite, jevReadTrial, publishChange, readChange, readTrial, reviewChange, reviewContext, reviewQuestion, sectionText, takeTrial, tallyAssessments, trialsOf, verdictOf, type ReviewDeps, type TakeDeps } from './module-review.js'
+import { diffLines } from './line-diff.js'
 
 const BEFORE = ['// src/preferences/settings.ts', 'export const zoom = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
 const AFTER = ['// src/preferences/settings.ts', 'export const zoom = 2;', 'globalThis.__proof = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
@@ -186,7 +187,7 @@ describe('reading a trial', () => {
 
   it('reads a trial with no change and no review as exactly that', async () => {
     const reading = await readTrial({ sandbox: true, title: 'try-zoom', package: 'e'.repeat(64), pubkey: 'p' }, async () => null)
-    expect(reading).toEqual({ files: [], off: [], taken: [], at: null, review: null, people: [], missing: [] })
+    expect(reading).toEqual({ files: [], jev: null, off: [], taken: [], at: null, review: null, people: [], missing: [] })
   })
 })
 
@@ -229,5 +230,43 @@ describe('taking a trial into your own build', () => {
     const file = (path: string) => ({ path, section: 's', from: 'x', to: 'y', before: 'b', after: 'a' })
     expect(changedPaths({ changes: [file('preferences'), file('preferences'), file('games/pong'), file('../escape')] })).toEqual(['preferences', 'games/pong'])
     expect(changedPaths(null)).toEqual([])
+  })
+})
+
+describe('Jev reads a trial', () => {
+  it('judges every changed file\'s diff against the doctrine, publishes the reading, and stamps jev:<sandbox>', async () => {
+    const w = await world()
+    const change = await publishChange('h', 'try-zoom', 'r'.repeat(64), [{ path: 'preferences', section: 'src/preferences/settings.ts', from: w.from, to: w.to }], [], w.deps)
+    if (!change.ok) throw new Error(change.error)
+    const asked: unknown[] = []
+    const jev = async (input: { sandbox: string; files: readonly { section: string; diff: string }[]; doctrine: readonly string[] }) => {
+      asked.push(input)
+      return { verdict: 'follows' as const, model: 'typesafe/jev-fake', answers: {}, files: input.files.map(file => ({ section: file.section, worst: { rule: 'The Life Primitive', breaks: 0.02 }, rules: [{ rule: 'The Life Primitive', breaks: 0.02 }] })) }
+    }
+    const read = await jevReadTrial('h', change.sig, change.record, ['### The Life Primitive\nOne typed hop.'], jev, w.deps)
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    const input = asked[0] as { files: { section: string; diff: string }[]; doctrine: string[] }
+    expect(input.files[0]!.section).toBe('src/preferences/settings.ts')
+    expect(input.files[0]!.diff).toContain('+ globalThis.__proof = 1;')
+    expect(input.files[0]!.diff).toContain('− export const zoom = 1;')
+    expect(input.doctrine).toEqual(['### The Life Primitive\nOne typed hop.'])
+    expect(read.record).toMatchObject({ kind: 'jev-reading', sandbox: 'try-zoom', change: change.sig, verdict: 'follows', model: 'typesafe/jev-fake', rubric: 5 })
+    expect(w.published.at(-1)).toEqual([read.sig])
+    expect(w.stamped.at(-1)).toEqual(['jev:try-zoom', read.sig])
+    // The door names it; a reader gets the standing and each file's worst rule.
+    const reading = await readTrial({ sandbox: true, title: 'try-zoom', package: 'r'.repeat(64), pubkey: 'p', change: change.sig, jev: read.sig, jevVerdict: 'follows' }, async sig => w.heap.get(sig) ?? null)
+    expect(reading.jev).toEqual({ verdict: 'follows', model: 'typesafe/jev-fake', files: read.record.files })
+    // Jev not answering is said, and nothing is stamped.
+    const refused = await jevReadTrial('h', change.sig, change.record, ['rule'], async () => { throw new Error('Jev requires Jev switched on') }, w.deps)
+    expect(refused).toEqual({ ok: false, error: 'Jev requires Jev switched on' })
+    expect(w.stamped.filter(([key]) => key === 'jev:try-zoom')).toHaveLength(1)
+  })
+
+  it('writes a diff the way Jev reads it, and cuts a long one with a count', () => {
+    const text = diffText(diffLines('a\nb\nc\n', 'a\nB\nc\n'), 1_000)
+    expect(text).toBe('  a\n− b\n+ B\n  c')
+    const cut = diffText(diffLines('a\nb\nc\n', 'A\nB\nC\n'), 12)
+    expect(cut).toBe('− a\n− b\n− c\n… (cut: 3 more rows)')
   })
 })

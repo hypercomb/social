@@ -25,7 +25,8 @@
 // A dependency: it registers nothing. The `module` queen drives it.
 
 import { broodRoster, sectionOf, SignatureService } from '@hypercomb/core'
-import { diffLines, type LineDiff } from './line-diff.js'
+import { diffLines, type DiffRow, type LineDiff } from './line-diff.js'
+import { JEV_READING_CHARS, JEV_READING_FILES, JEV_RUBRIC, type JevReadingFile, type JevReadingInput, type JevReadingResult, type JevReadingVerdict } from './jev-decision.js'
 
 export type ReviewVerdict = 'accept' | 'refuse' | 'unclear'
 
@@ -212,6 +213,9 @@ export interface SandboxSite {
   readonly change?: string
   readonly review?: string
   readonly reviewVerdict?: ReviewVerdict
+  /** Jev's reading of the change (`jev:<sandbox>`), and where it stands. */
+  readonly jev?: string
+  readonly jevVerdict?: JevReadingVerdict
   readonly assessments?: readonly { readonly pubkey: string; readonly record: string; readonly verdict: ReviewVerdict; readonly at: number }[]
 }
 
@@ -323,6 +327,8 @@ export interface TrialFile {
 
 export interface TrialReading {
   readonly files: readonly TrialFile[]
+  /** Jev's reading, when the trial has one. */
+  readonly jev: { readonly verdict: JevReadingVerdict; readonly model: string; readonly files: readonly JevReadingFile[] } | null
   readonly off: readonly string[]
   /** Paths the trial folded in from other builds, and where each came from. */
   readonly taken: readonly { readonly path: string; readonly root: string }[]
@@ -356,6 +362,10 @@ export const readTrial = async (site: SandboxSite, read: (sig: string) => Promis
     }
   }))
 
+  const jevRecord = await json<JevReadingRecord>(site.jev)
+  const jev = jevRecord?.kind === 'jev-reading' && Array.isArray(jevRecord.files)
+    ? { verdict: JEV_VERDICTS.includes(jevRecord.verdict) ? jevRecord.verdict : 'unsure' as JevReadingVerdict, model: String(jevRecord.model ?? ''), files: jevRecord.files }
+    : null
   const reviewRecord = await json<ModuleReviewRecord>(site.review)
   const review = reviewRecord?.kind === 'module-review'
     ? { verdict: verdict(reviewRecord.verdict), model: String(reviewRecord.model ?? ''), findings: (await text(reviewRecord.findings)) ?? '' }
@@ -371,7 +381,7 @@ export const readTrial = async (site: SandboxSite, read: (sig: string) => Promis
     .filter(entry => PACKAGE_PATH_RE.test(String(entry?.path ?? '')) && SIG_RE.test(String(entry?.root ?? '')))
     .map(entry => ({ path: String(entry.path), root: String(entry.root) }))
   return {
-    files, off: strings(change?.off), taken, at: Number.isFinite(change?.at) ? Number(change!.at) : null,
+    files, jev, off: strings(change?.off), taken, at: Number.isFinite(change?.at) ? Number(change!.at) : null,
     review, people, missing: [...missing],
   }
 }
@@ -437,3 +447,71 @@ export const takeDepsFrom = (install: Pick<TakeDeps, 'revisionsOf' | 'pick'>): T
   pick: (path, revision, zones, options) => install.pick(path, revision, zones, options),
   held: async root => (await broodRoster()).filter(record => record.source.packageSig === root && !record.ruling).length,
 })
+
+// ── Jev reads a trial ──────────────────────────────────────────────────────
+//
+// JEV'S READING OF A CHANGE, PUBLIC BESIDE IT (jev-decision.ts, "Jev reads a
+// trial"). Every changed file's diff is judged against every doctrine
+// section; the record names each file's chance of breaking each rule and the
+// worst of them, and the change's standing: follows · unsure · breaks. It is
+// stamped as `jev:<sandbox>` in the publisher's index. A reading is a reading,
+// never a gate: promotion stays the participant's word.
+
+export const JEV_VERDICTS: readonly JevReadingVerdict[] = ['follows', 'unsure', 'breaks']
+
+export interface JevReadingRecord {
+  readonly kind: 'jev-reading'
+  readonly sandbox: string
+  readonly root: string
+  readonly change: string
+  readonly model: string
+  readonly rubric: number
+  readonly verdict: JevReadingVerdict
+  readonly files: readonly JevReadingFile[]
+  readonly at: number
+}
+
+/** A diff as Jev reads it: one line per row, cut to `maxChars` with a count of what was cut. */
+export const diffText = (diff: LineDiff, maxChars: number): string => {
+  const lines: string[] = []
+  let used = 0
+  for (let i = 0; i < diff.rows.length; i++) {
+    const row: DiffRow = diff.rows[i]!
+    const line = row.kind === 'skip' ? `⋯ ${row.count} unchanged lines` : `${row.kind === 'add' ? '+' : row.kind === 'remove' ? '−' : ' '} ${row.text}`
+    if (used + line.length + 1 > maxChars) { lines.push(`… (cut: ${diff.rows.length - i} more rows)`); break }
+    lines.push(line)
+    used += line.length + 1
+  }
+  return lines.join('\n')
+}
+
+/** Read every changed file before and after, judge the diffs, publish the reading. */
+export const jevReadTrial = async (
+  host: string, changeSig: string, record: ModuleChangeRecord, doctrine: readonly string[],
+  jev: (input: JevReadingInput) => Promise<JevReadingResult>, deps: ReviewDeps,
+): Promise<{ ok: true; sig: string; record: JevReadingRecord } | { ok: false; error: string }> => {
+  const judged = record.changes.slice(0, JEV_READING_FILES)
+  if (!judged.length) return { ok: false, error: 'the change has no source file to read' }
+  if (!doctrine.length) return { ok: false, error: 'no doctrine is loaded to judge by' }
+  const perFile = Math.floor(JEV_READING_CHARS / judged.length)
+  const files: { section: string; diff: string }[] = []
+  for (const file of judged) {
+    const [before, after] = await Promise.all([deps.get(file.before), deps.get(file.after)])
+    if (before === null || after === null) return { ok: false, error: `${file.section} is not held here` }
+    files.push({ section: file.section, diff: diffText(diffLines(before, after), perFile) })
+  }
+  let read: JevReadingResult
+  try { read = await jev({ sandbox: record.sandbox, files, doctrine }) } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Jev did not answer' }
+  }
+  const reading: JevReadingRecord = {
+    kind: 'jev-reading', sandbox: record.sandbox, root: record.root, change: changeSig, model: read.model, rubric: JEV_RUBRIC,
+    verdict: read.verdict, files: read.files, at: deps.now(),
+  }
+  const sig = await deps.put(JSON.stringify(reading), 'application/json')
+  const published = await deps.publish(host, [sig])
+  if (!published.ok) return { ok: false, error: published.error }
+  const stamped = await deps.stamp(host, `jev:${record.sandbox}`, sig)
+  if (!stamped.ok) return { ok: false, error: stamped.reason ?? 'the reading pointer was not stamped' }
+  return { ok: true, sig, record: reading }
+}

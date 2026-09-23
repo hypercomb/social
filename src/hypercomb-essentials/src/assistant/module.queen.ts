@@ -26,8 +26,9 @@
 //                          the sandbox pointer is removed: its door answers
 //                          "nothing here", and every file stays on the host.
 //   module review <change> [@<host>]
-//                          the host's AI reads the change again (it reads it
-//                          once on every commit): module-review.ts.
+//                          the host's AI reads the change again, and so does
+//                          Jev — its diff, rule by rule, against the doctrine
+//                          (both read it once on every commit): module-review.ts.
 //   module assess <change> [accept|refuse|unclear <note…>] [@<host>]
 //                          anyone's own signed reading of a sandbox: without a
 //                          verdict it says how the host's AI and people read
@@ -61,7 +62,8 @@
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, type I18nProvider, type ModuleDraftsProvider } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
-import { assessSandbox, changedPaths, doorReader, isSandboxSite, publishChange, readChange, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial } from './module-review.js'
+import { JEV_IOC_KEY, jevDoctrineSections, type JevReadingInput, type JevReadingResult } from './jev-decision.js'
+import { assessSandbox, changedPaths, doorReader, isSandboxSite, jevReadTrial, publishChange, readChange, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial } from './module-review.js'
 import { INSTALL_CHANNEL_PREFIX, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 
 /** The host backup service's participant-triggered upload (sharing/host-sync.service.ts). */
@@ -81,6 +83,7 @@ const PUBLISHING = new Set(['commit', 'promote', 'withdraw', 'review', 'assess']
 const TRIALS_TOLD = 6
 const STORE_KEY = '@hypercomb.social/Store'
 const HOST_AI_KEY = '@diamondcoreprocessor.com/HostAi'
+const ANATOMY_KEY = '@hypercomb.social/Anatomy'
 
 type StoreLike = {
   putResource?(blob: Blob, options?: { emit?: boolean }): Promise<string>
@@ -89,6 +92,7 @@ type StoreLike = {
 type HostAiLike = {
   askWhole?(host: string, question: string, context: readonly string[]): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string }>
 }
+type JevLike = { enabled?(): boolean; reading?(input: JevReadingInput): Promise<JevReadingResult> }
 /** The install provider, as far as these words need it (core InstallProvider). */
 type InstallLike = Parameters<typeof takeDepsFrom>[0] & {
   selection?(): Promise<{ picks: Record<string, { root: string; byHand?: boolean }> }>
@@ -126,6 +130,22 @@ const reviewDeps = (drafts: ModuleDraftsProvider, sync: HostSyncLike): ReviewDep
     stamp: (host, key, sig) => setHiveRoot(host, key, sig),
     now: Date.now,
   }
+}
+
+/** Ask Jev to read the change's diffs against the doctrine, publish its
+ *  reading, and say where the change stands. Quiet when Jev is off. */
+const jevRead = async (host: string, changeSig: string, record: ModuleChangeRecord, deps: ReviewDeps, t: Say, toast: Toast): Promise<void> => {
+  const jev = window.ioc?.get?.(JEV_IOC_KEY) as JevLike | undefined
+  if (!jev?.reading || !jev.enabled?.()) return
+  const doctrine = jevDoctrineSections((window.ioc?.get?.(ANATOMY_KEY) as { text?: string } | undefined)?.text ?? '')
+  const read = await jevReadTrial(host, changeSig, record, doctrine, input => jev.reading!(input), deps)
+  if (!read.ok) { toast(t('module.nojev', 'Jev did not read {name}: {reason}.', { name: record.sandbox, reason: read.error }), 'warning'); return }
+  const worst = read.record.files.reduce((top, file) => file.worst.breaks > top.breaks ? file.worst : top, read.record.files[0]!.worst)
+  const standing = read.record.verdict === 'follows'
+    ? t('module.jevfollows', 'it follows every rule')
+    : t(read.record.verdict === 'breaks' ? 'module.jevbreaks' : 'module.jevunsure', read.record.verdict === 'breaks' ? 'it breaks "{rule}"' : 'it may break "{rule}"', { rule: worst.rule })
+  toast(t('module.jevread', 'Jev read {name}: {standing}. Its reading is public beside it.', { name: record.sandbox, standing }), read.record.verdict === 'breaks' ? 'warning' : 'success')
+  EffectBus.emit('module:jevread', { name: record.sandbox, host, verdict: read.record.verdict, reading: read.sig, change: changeSig })
 }
 
 /** Ask the host's AI, publish its reading, and say the verdict. */
@@ -352,6 +372,7 @@ export class ModuleQueenBee extends QueenBee {
       const record = changeSig ? await readChange(changeSig, deps) : null
       if (!changeSig || !record) { toast(t('module.nochange', 'There is no published change for {name} on {host}.', { name, host }), 'warning'); return }
       await review(host, changeSig, record, deps, t, toast)
+      await jevRead(host, changeSig, record, deps, t, toast)
       return
     }
 
@@ -405,6 +426,7 @@ export class ModuleQueenBee extends QueenBee {
       const change = await publishChange(host, name, committed.rootSig, committed.changes, committed.off, deps, taken)
       if (!change.ok) { toast(t('module.noreview', 'The review cannot run here: {reason}.', { reason: change.error }), 'warning'); return }
       await review(host, change.sig, change.record, deps, t, toast)
+      await jevRead(host, change.sig, change.record, deps, t, toast)
     } catch (error) {
       toast(t('module.unstamped', 'The install channel was not stamped: {reason}', { reason: error instanceof Error ? error.message : 'refused' }), 'warning')
     }
