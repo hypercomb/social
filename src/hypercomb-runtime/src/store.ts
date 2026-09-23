@@ -62,22 +62,44 @@ export class Store extends EventTarget {
    *  documentation/sign-meaning-pool-migration-plan.md. */
   public static readonly BEES_MEANING = 'bees'
   public static readonly DEPENDENCIES_MEANING = 'dependencies'
-  public static readonly CLIPBOARD_MEANING = 'clipboard'
-  public static readonly THREADS_MEANING = 'threads'
-  public static readonly COMPUTATION_MEANING = 'computation'
+  // THE COLON MIGRATION (jwize, 2026-09-23; documentation/sign-meaning-pool-
+  // migration-plan.md "The colon spellings"). A system pool's meaning carries
+  // a colon so no tile can ever name its address: `sign('clipboard')` was
+  // also the lineage bag of a tile named "clipboard", which is why the word
+  // had to be reserved. The bare spelling is now a DRAIN SOURCE — opened
+  // without create, read as a fallback, absorbed into the colon pool after
+  // boot and removed once empty — exactly the template the `__x__` dirs
+  // followed. `bees` and `dependencies` stay bare: their addresses are the
+  // install layout every host, the shell's service worker and the native
+  // client share, so their move is a protocol change, taken separately.
+  public static readonly CLIPBOARD_MEANING = 'system:clipboard'
+  public static readonly THREADS_MEANING = 'system:threads'
+  public static readonly COMPUTATION_MEANING = 'system:computation'
   /** Children manifests: per-parent derived cache that inlines the
    *  resolved child layer objects, KEYED BY PARENT LAYER SIG (not by
    *  content sig — it is a cache, not authored content). Lets show-cell
    *  skip the per-child sig→layer lookup on cold load. Orphaned when the
    *  parent is superseded — pure derived state, safe to GC. */
-  public static readonly MANIFESTS_MEANING = 'manifests'
+  public static readonly MANIFESTS_MEANING = 'system:manifests'
   /** Savvy-user i18n override layer (`overrides/i18n.json`) and the
    *  per-locale translation cache (`translations/`). Historically these
    *  were the last human-named folders at the OPFS root — NOT `__x__`,
    *  but still non-signed, which the standard forbids. Now sign(meaning)
    *  pools like everything else, self-cleaned from their legacy dirs. */
-  public static readonly OVERRIDES_MEANING = 'overrides'
-  public static readonly TRANSLATIONS_MEANING = 'translations'
+  public static readonly OVERRIDES_MEANING = 'system:overrides'
+  public static readonly TRANSLATIONS_MEANING = 'system:translations'
+  /** The bare spellings the seven system pools had until 2026-09-23 — drain
+   *  sources now (`#absorbBarePools`), never written. They stay in
+   *  core's BARE_WORD_POOL_MEANINGS (reserved, seeded) until every replica
+   *  has drained: a same-named tile would otherwise share a directory with
+   *  the records still waiting there. */
+  public static readonly LEGACY_CLIPBOARD_MEANING = 'clipboard'
+  public static readonly LEGACY_THREADS_MEANING = 'threads'
+  public static readonly LEGACY_COMPUTATION_MEANING = 'computation'
+  public static readonly LEGACY_MANIFESTS_MEANING = 'manifests'
+  public static readonly LEGACY_OPTIMIZATION_MEANING = 'optimization'
+  public static readonly LEGACY_OVERRIDES_MEANING = 'overrides'
+  public static readonly LEGACY_TRANSLATIONS_MEANING = 'translations'
 
   public static readonly LEGACY_HIVE_DIRECTORY = '__hive__'
   public static readonly LEGACY_HYPERCOMB_IO_DIRECTORY = 'hypercomb.io'
@@ -123,7 +145,7 @@ export class Store extends EventTarget {
    *  registry. The legacy `__optimization__` folder is a migration
    *  source only: absorbed into the pool and deleted on boot, with
    *  dual-reads until it is gone. */
-  public static readonly OPTIMIZATION_MEANING = 'optimization'
+  public static readonly OPTIMIZATION_MEANING = 'system:optimization'
   public static readonly LEGACY_OPTIMIZATION_DIRECTORY = '__optimization__'
 
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
@@ -194,6 +216,18 @@ export class Store extends EventTarget {
    *  Read-fallback + absorb source only. */
   public legacyOverrides?: FileSystemDirectoryHandle
   public legacyTranslations?: FileSystemDirectoryHandle
+  /** The seven system pools under their BARE spellings (sign('clipboard') …),
+   *  as they were until the colon migration: opened without create, read as
+   *  a fallback where the `__x__` sources were, drained by `#absorbBarePools`.
+   *  A same-named tile's lineage bag shares this directory — its markers
+   *  are never moved. */
+  #bareClipboard?: FileSystemDirectoryHandle
+  #bareThreads?: FileSystemDirectoryHandle
+  #bareComputation?: FileSystemDirectoryHandle
+  #bareManifests?: FileSystemDirectoryHandle
+  #bareOptimization?: FileSystemDirectoryHandle
+  #bareOverrides?: FileSystemDirectoryHandle
+  #bareTranslations?: FileSystemDirectoryHandle
 
   /** sign(meaning) → pool address: sha256 of the UTF-8 bytes of the
    *  meaning string, memoized. The derivation IS the address — any tier
@@ -496,6 +530,10 @@ export class Store extends EventTarget {
     const legacy = async (name: string) => {
       try { return await this.opfsRoot.getDirectoryHandle(name) } catch { return undefined }
     }
+    // A bare-word system pool as it was until the colon migration: the
+    // registry keeps the spelling seeded (a root walk must still know the
+    // directory is a pool), and it is opened exactly as a `__x__` source is.
+    const bare = async (meaning: string) => legacy(await Store.poolSignature(meaning))
 
     try {
       // The user-content root IS the OPFS root. Root inventory: sig
@@ -555,6 +593,23 @@ export class Store extends EventTarget {
         legacy(Store.LEGACY_OPTIMIZATION_DIRECTORY),
         legacy(Store.LEGACY_OVERRIDES_DIRECTORY),
         legacy(Store.LEGACY_TRANSLATIONS_DIRECTORY),
+      ])
+      ;[
+        this.#bareClipboard,
+        this.#bareThreads,
+        this.#bareComputation,
+        this.#bareManifests,
+        this.#bareOptimization,
+        this.#bareOverrides,
+        this.#bareTranslations,
+      ] = await Promise.all([
+        bare(Store.LEGACY_CLIPBOARD_MEANING),
+        bare(Store.LEGACY_THREADS_MEANING),
+        bare(Store.LEGACY_COMPUTATION_MEANING),
+        bare(Store.LEGACY_MANIFESTS_MEANING),
+        bare(Store.LEGACY_OPTIMIZATION_MEANING),
+        bare(Store.LEGACY_OVERRIDES_MEANING),
+        bare(Store.LEGACY_TRANSLATIONS_MEANING),
       ])
       // Bounded absorbs, detached from the boot path: small RECORD
       // pools drain copy→remove per record into their sign(meaning)
@@ -1308,11 +1363,14 @@ export class Store extends EventTarget {
       const handle = await this.optimization.getFileHandle(signature)
       return await handle.getFile()
     } catch { /* miss — fall through to the legacy migration source */ }
-    if (!this.#legacyOptimization) return null
-    try {
-      const handle = await this.#legacyOptimization.getFileHandle(signature)
-      return await handle.getFile()
-    } catch { return null }
+    for (const source of [this.#bareOptimization, this.#legacyOptimization]) {
+      if (!source) continue
+      try {
+        const handle = await source.getFileHandle(signature)
+        return await handle.getFile()
+      } catch { /* not in this source */ }
+    }
+    return null
   }
 
   // ── Optimized-visual cache ─────────────────────────────────────────
@@ -1400,8 +1458,9 @@ export class Store extends EventTarget {
     }
     let removed = false
     try { await this.optimization.removeEntry(signature); removed = true } catch { /* not in pool */ }
-    if (this.#legacyOptimization) {
-      try { await this.#legacyOptimization.removeEntry(signature); removed = true } catch { /* not in legacy */ }
+    for (const source of [this.#bareOptimization, this.#legacyOptimization]) {
+      if (!source) continue
+      try { await source.removeEntry(signature); removed = true } catch { /* not in this source */ }
     }
     return removed
   }
@@ -1421,8 +1480,9 @@ export class Store extends EventTarget {
       }
     }
     await collect(this.optimization)
-    if (this.#legacyOptimization) {
-      try { await collect(this.#legacyOptimization) } catch { /* deleted mid-absorb — pool holds everything */ }
+    for (const source of [this.#bareOptimization, this.#legacyOptimization]) {
+      if (!source) continue
+      try { await collect(source) } catch { /* deleted mid-absorb — pool holds everything */ }
     }
     return [...sigs]
   }
@@ -1475,6 +1535,31 @@ export class Store extends EventTarget {
       this.legacyTranslations, this.translations, Store.LEGACY_TRANSLATIONS_DIRECTORY, true)) {
       this.legacyTranslations = undefined
     }
+    await this.#absorbBarePools()
+  }
+
+  /** THE COLON MIGRATION'S DRAIN: each system pool's bare-spelled directory
+   *  into its `system:` pool. Sub-buckets first (a thread, a computation
+   *  lookup, an override bucket), then plain files — with one rule the
+   *  `__x__` drains never needed: a MARKER is never moved. `sign('clipboard')`
+   *  is also the lineage bag of a tile named "clipboard", so its `0000…`
+   *  files are somebody's history, not our records; they stay, and a
+   *  directory that keeps them is simply never removed. Copy → remove per
+   *  record, resumable, the final removeEntry non-recursive. */
+  #absorbBarePools = async (): Promise<void> => {
+    const drain = async (source: FileSystemDirectoryHandle | undefined, target: FileSystemDirectoryHandle, meaning: string): Promise<boolean> => {
+      if (!source) return true
+      const name = await Store.poolSignature(meaning)
+      await this.#absorbLegacyBucketDir(source, target, name)
+      return this.#absorbLegacyPool(source, target, name, true)
+    }
+    if (await drain(this.#bareClipboard, this.clipboard, Store.LEGACY_CLIPBOARD_MEANING)) this.#bareClipboard = undefined
+    if (await drain(this.#bareThreads, this.threads, Store.LEGACY_THREADS_MEANING)) this.#bareThreads = undefined
+    if (await drain(this.#bareComputation, this.computation, Store.LEGACY_COMPUTATION_MEANING)) this.#bareComputation = undefined
+    if (await drain(this.#bareManifests, this.manifests, Store.LEGACY_MANIFESTS_MEANING)) this.#bareManifests = undefined
+    if (await drain(this.#bareOptimization, this.optimization, Store.LEGACY_OPTIMIZATION_MEANING)) this.#bareOptimization = undefined
+    if (await drain(this.#bareOverrides, this.overrides, Store.LEGACY_OVERRIDES_MEANING)) this.#bareOverrides = undefined
+    if (await drain(this.#bareTranslations, this.translations, Store.LEGACY_TRANSLATIONS_MEANING)) this.#bareTranslations = undefined
   }
 
   static #bytesEqual = (a: ArrayBuffer, b: ArrayBuffer): boolean => {
@@ -1605,10 +1690,14 @@ export class Store extends EventTarget {
     legacy: FileSystemDirectoryHandle,
     target: FileSystemDirectoryHandle,
     legacyName: string,
+    /** True for a BARE-WORD pool: its directory is also a same-named tile's
+     *  lineage bag, so a marker file is history and is never moved. */
+    skipMarkers = false,
   ): Promise<boolean> => {
     try {
       for await (const [name, handle] of (legacy as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
         if (handle.kind !== 'file') continue
+        if (skipMarkers && classifyDirectoryEntry(name) === 'marker') continue
         try {
           const blob = await (handle as FileSystemFileHandle).getFile()
           // A non-empty pool entry under the same name wins (the legacy
@@ -2302,7 +2391,7 @@ export class Store extends EventTarget {
     // sign('manifests') pool first, then the legacy `__manifests__` dir
     // until the boot absorb drains it. Derived cache — a miss in both
     // just re-resolves and re-writes.
-    for (const source of [this.manifests, this.legacyManifests]) {
+    for (const source of [this.manifests, this.#bareManifests, this.legacyManifests]) {
       if (!source) continue
       try {
         const handle = await source.getFileHandle(parentLayerSig, { create: false })

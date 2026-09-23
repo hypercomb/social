@@ -535,16 +535,16 @@ const makeStore = (pool: MockDir) => {
     opened,
     optimizations,
     counts,
-    getPool: async (meaning = 'threads') => {
+    getPool: async (meaning = 'system:threads') => {
       opened.push(meaning)
-      if (meaning === 'threads') return pool as unknown as FileSystemDirectoryHandle
+      if (meaning === 'system:threads') return pool as unknown as FileSystemDirectoryHandle
       let dir = pools.get(meaning)
       if (!dir) { dir = new MockDir(meaning); pools.set(meaning, dir) }
       return dir as unknown as FileSystemDirectoryHandle
     },
     openPool: async (meaning: string) => {
       opened.push(meaning)
-      if (meaning === 'threads') return pool as unknown as FileSystemDirectoryHandle
+      if (meaning === 'system:threads') return pool as unknown as FileSystemDirectoryHandle
       return (pools.get(meaning) ?? null) as unknown as FileSystemDirectoryHandle | null
     },
     // The runtime Store's document-pool rule: `<pool>/<sign(subKey)>/<sign(bytes)>`,

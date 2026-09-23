@@ -54,6 +54,9 @@ use crate::sig::{sign_str, PoolAddr, Sig};
 pub const BARE_WORD_MEANINGS: &[&str] = &[
     "authored",
     "bees",
+    // clipboard, computation, manifests, optimization, overrides, threads and
+    // translations moved to `system:` spellings on 2026-09-23 (SCOPED_MEANINGS);
+    // they stay here, reserved and seeded, as drain sources.
     "clipboard",
     "computation",
     "dependencies",
@@ -80,6 +83,15 @@ pub const BARE_WORD_MEANINGS: &[&str] = &[
 /// An entry here *reserves a spelling*; it does not assert the pool exists or
 /// has members. The spelling is the expensive half.
 pub const SCOPED_MEANINGS: &[&str] = &[
+    // The system pools, colon-spelled (2026-09-23). Their bare spellings stay
+    // in BARE_WORD_MEANINGS as drain sources until every replica has drained.
+    "system:clipboard",
+    "system:computation",
+    "system:manifests",
+    "system:optimization",
+    "system:overrides",
+    "system:threads",
+    "system:translations",
     "pheromones:deposits",
     "substrate:references",
     "substrate:sources",

@@ -28,7 +28,7 @@ import { EffectBus, splitQuestion } from '@hypercomb/core'
 /** Pool of meaning holding conversations. Bare word, already in the frozen
  *  registry — do NOT re-spell it; `sign()` of a new spelling is a different
  *  address forever and would strand every existing thread. */
-export const THREADS_POOL = 'threads'
+export const THREADS_POOL = 'system:threads'
 
 export type TurnRole = 'user' | 'assistant'
 

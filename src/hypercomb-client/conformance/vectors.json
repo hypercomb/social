@@ -504,6 +504,48 @@
       "address": "17deba5bf2d5bceded9326cba402164b576529d811d73f5f2d2285cd5d038fbb",
       "scoped": true,
       "collidesWithSameNamedTile": false
+    },
+    {
+      "meaning": "system:clipboard",
+      "address": "683ecd2cbdfb5f583dee4742a106cb9b587ca961e9b14cd9d4a6f4867db549ca",
+      "scoped": true,
+      "collidesWithSameNamedTile": false
+    },
+    {
+      "meaning": "system:threads",
+      "address": "f8b73cf8c3d9f10d3fe29594208b38798ca47917c5ded0c9c0b2d655b7e19453",
+      "scoped": true,
+      "collidesWithSameNamedTile": false
+    },
+    {
+      "meaning": "system:computation",
+      "address": "fb6341f22bb748085333ab3b722b8dcdbdaea8a3115b7646addf18d51e03fe1f",
+      "scoped": true,
+      "collidesWithSameNamedTile": false
+    },
+    {
+      "meaning": "system:manifests",
+      "address": "76146fea3b28da5fe2908c72919e5d5d1f76b9f5a00173135e07fb4f91688471",
+      "scoped": true,
+      "collidesWithSameNamedTile": false
+    },
+    {
+      "meaning": "system:optimization",
+      "address": "926d2531756fe880ef77620d7b497a8a2b719c413f85d1d82ed85e20adb1f541",
+      "scoped": true,
+      "collidesWithSameNamedTile": false
+    },
+    {
+      "meaning": "system:overrides",
+      "address": "b49c9797d330db0fa4b4aefb75cd3d88feb9f612a2995f11d06b999633aa8aa0",
+      "scoped": true,
+      "collidesWithSameNamedTile": false
+    },
+    {
+      "meaning": "system:translations",
+      "address": "e592c40f12536ebb445d186becc411e90babed08df6e151f9f5289a493296942",
+      "scoped": true,
+      "collidesWithSameNamedTile": false
     }
   ],
   "layers": [

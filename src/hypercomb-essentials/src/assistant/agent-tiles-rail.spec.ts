@@ -113,7 +113,7 @@ const plantedBlurbs: Record<string, unknown> = {}
 services['@hypercomb.social/Store'] = {
   getResource: async () => null,
   getPool: async (meaning: string) =>
-    meaning === 'threads' ? threadsPool : meaning === 'chat:blurbs' ? blurbPool : {},
+    meaning === 'system:threads' ? threadsPool : meaning === 'chat:blurbs' ? blurbPool : {},
   getPoolDoc: async (pool: unknown, subKey?: string) => {
     if (pool !== blurbPool) return draftDoc
     const held = subKey ? plantedBlurbs[subKey] : undefined

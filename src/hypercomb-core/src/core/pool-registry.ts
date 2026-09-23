@@ -48,6 +48,11 @@ import { SignatureService } from './signature.service.js'
 export const BARE_WORD_POOL_MEANINGS: readonly string[] = Object.freeze([
   'authored',
   'bees',
+  // 'clipboard', 'computation', 'manifests', 'optimization', 'overrides',
+  // 'threads' and 'translations' moved to `system:` spellings on 2026-09-23
+  // (SCOPED_POOL_MEANINGS). They stay here as DRAIN SOURCES: still reserved
+  // as tile names, still seeded so a root walk knows the directory is a
+  // pool. Remove one only when its bare directory is gone from every replica.
   'clipboard',
   'computation',
   'dependencies',
@@ -81,6 +86,20 @@ export const BARE_WORD_POOL_MEANINGS: readonly string[] = Object.freeze([
  *  is the expensive half: `sign()` of a typo mints a different address forever,
  *  so a later correction is a data migration, not an edit. */
 export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
+  // THE SYSTEM POOLS, colon-spelled (jwize, 2026-09-23; the runtime Store's
+  // *_MEANING constants). Each replaces a bare word below that was also the
+  // lineage bag of a same-named tile. The bare spellings STAY in
+  // BARE_WORD_POOL_MEANINGS — reserved and seeded — until every replica has
+  // drained them (runtime store.ts `#absorbBarePools`); only then may the
+  // word be given back. `bees` and `dependencies` are not here: their
+  // addresses are the install layout every host and the native client share.
+  'system:clipboard',
+  'system:computation',
+  'system:manifests',
+  'system:optimization',
+  'system:overrides',
+  'system:threads',
+  'system:translations',
   // The participant's saved screen backdrops, sorted into the world they
   // suit — one content-addressed doc { light: [sigs], dark: [sigs] } written
   // by CanvasBackgroundService (presentation/background). The sigs point at

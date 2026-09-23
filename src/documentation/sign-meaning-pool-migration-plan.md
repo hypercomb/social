@@ -191,3 +191,50 @@ of the reasoning:
 - No human-named folders introduced — sig files at the root, lineage sigbags,
   and `sign(meaning)` pools are the entire vocabulary. No new `__x__` dirs,
   ever — a new need is a new pool of meaning.
+
+## The colon spellings — 2026-09-23
+
+jwize: the nine bare-word system pools the store opened at boot move to
+colon meanings ("let's do 2 as well"). A bare word is also the lineage bag of
+a same-named root tile, which is why those words had to be reserved; a colon
+can never appear in a lineage key, so a `system:` pool collides with nothing.
+
+| Was | Is | `sign(meaning)` |
+|---|---|---|
+| `clipboard` | `system:clipboard` | `683ecd2cbdfb5f583dee4742a106cb9b587ca961e9b14cd9d4a6f4867db549ca` |
+| `threads` | `system:threads` | `f8b73cf8c3d9f10d3fe29594208b38798ca47917c5ded0c9c0b2d655b7e19453` |
+| `computation` | `system:computation` | `fb6341f22bb748085333ab3b722b8dcdbdaea8a3115b7646addf18d51e03fe1f` |
+| `manifests` | `system:manifests` | `76146fea3b28da5fe2908c72919e5d5d1f76b9f5a00173135e07fb4f91688471` |
+| `optimization` | `system:optimization` | `926d2531756fe880ef77620d7b497a8a2b719c413f85d1d82ed85e20adb1f541` |
+| `overrides` | `system:overrides` | `b49c9797d330db0fa4b4aefb75cd3d88feb9f612a2995f11d06b999633aa8aa0` |
+| `translations` | `system:translations` | `e592c40f12536ebb445d186becc411e90babed08df6e151f9f5289a493296942` |
+
+The same template as the `__x__` sweep, with two differences:
+
+- **The bare directory is a drain source, opened without create** (runtime
+  `store.ts`, `#absorbBarePools`, after the `__x__` drains): sub-buckets
+  first, then plain files, copy → remove per record, the final removeEntry
+  non-recursive. Reads fall back to it where they fell back to the `__x__`
+  source (optimization get/list/remove, the children-manifest read); the
+  other pools drain within seconds of boot, as the record pools always did.
+- **A marker is never moved.** `sign('clipboard')` is also the bag of a tile
+  named `clipboard`, so a `0000…` file there is somebody's history. The
+  bare drain skips markers, and a directory that keeps them is never removed.
+
+**The words stay reserved.** `BARE_WORD_POOL_MEANINGS` (core) and
+`BARE_WORD_MEANINGS` (the native client's protocol crate) keep the seven bare
+spellings — seeded, so a root walk still knows the directory is a pool, and
+reserved, so no tile is named into a directory that may still hold records.
+A word is given back only when its bare directory is gone from every replica.
+That is the honest half of "data never heals": the payoff of the migration,
+the words, comes last.
+
+**Not moved: `bees` and `dependencies`.** Their addresses are the install
+layout — the web shell's installer and import map, the service worker, every
+host's `/opfs/<sign('bees')>/…` URL, the native client's conformance vectors.
+Moving them is a protocol change with its own plan and jwize's go.
+
+The native client's registry learned the seven spellings and the conformance
+vectors carry their addresses; `cargo test` could not be run on this machine
+(see the memory note), so that half is written to the same rule and awaits a
+run where cargo works.

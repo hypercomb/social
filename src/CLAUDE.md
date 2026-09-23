@@ -260,6 +260,23 @@ of meaning**, never a `__name__` dir). The model:
     | `threads` | `4cc500db62ede737f8f7a8c83c02b5fc5cbcebf26bffc48fb49b4540ffc67306` |
     | `computation` | `fb209e75cfb94344539afe813559f0950250a5ab843fcb30d1231021428d11ac` |
     | `manifests` | `c7af7c7a948db8800f71f26f3c90280cf09dfc3141b72318c5ff31ffc9470a59` |
+    | `system:clipboard` | `683ecd2cbdfb5f583dee4742a106cb9b587ca961e9b14cd9d4a6f4867db549ca` |
+    | `system:threads` | `f8b73cf8c3d9f10d3fe29594208b38798ca47917c5ded0c9c0b2d655b7e19453` |
+    | `system:computation` | `fb6341f22bb748085333ab3b722b8dcdbdaea8a3115b7646addf18d51e03fe1f` |
+    | `system:manifests` | `76146fea3b28da5fe2908c72919e5d5d1f76b9f5a00173135e07fb4f91688471` |
+    | `system:optimization` | `926d2531756fe880ef77620d7b497a8a2b719c413f85d1d82ed85e20adb1f541` |
+    | `system:overrides` | `b49c9797d330db0fa4b4aefb75cd3d88feb9f612a2995f11d06b999633aa8aa0` |
+    | `system:translations` | `e592c40f12536ebb445d186becc411e90babed08df6e151f9f5289a493296942` |
+
+    **THE COLON MIGRATION (jwize, 2026-09-23):** the seven system pools
+    `clipboard`, `threads`, `computation`, `manifests`, `optimization`,
+    `overrides` and `translations` are WRITTEN under their `system:`
+    spellings; each bare directory is a drain source (opened without
+    create, absorbed after boot, markers never moved, removed once empty —
+    `hypercomb-runtime/src/store.ts` `#absorbBarePools`). The bare words
+    stay reserved and seeded until every replica has drained. `bees` and
+    `dependencies` stay bare: their addresses are the install layout every
+    host and the native client share (a protocol change, separately).
     | `websites:menu` | `17deba5bf2d5bceded9326cba402164b576529d811d73f5f2d2285cd5d038fbb` |
 
     **DOCTRINE 2026-09-02 — HYPERGRAPH MOLECULE LINEAGE (READ FIRST):
@@ -279,8 +296,10 @@ of meaning**, never a `__name__` dir). The model:
     — older versions must keep working. Colon meanings stay reserved for
     SYSTEM pools no tile should name (`websites:menu`, `usage:dwell`). The
     seven bare-word system pools above are RESERVED NAMES (decided
-    2026-09-04, step 5 of the doc's execution order, LANDED): no drain, no
-    new spelling — `BARE_WORD_POOL_MEANINGS` in
+    2026-09-04, step 5 of the doc's execution order, LANDED; the "no drain,
+    no new spelling" half SUPERSEDED 2026-09-23 by the colon migration
+    above — they now drain, and the reservation outlives the drain) —
+    `BARE_WORD_POOL_MEANINGS` in
     `hypercomb-core/src/core/pool-registry.ts` IS the reserved-name list
     (frozen, may only shrink), `isReservedPoolWord(name)` asks the one
     question the collision poses (folded as a molecule address folds, so
