@@ -700,7 +700,7 @@ export const UNDERCROFT: ChamberDefinition = {
     { id: 'undercroft-arch', col: 5, row: 1, title: 'The Undercroft', text: 'Halls under halls. Your torch shows you a room at a time; the map in the corner keeps what you have seen. A surveyor once drew all of it — find her chart and the corner shows it whole.' },
     { id: 'twin-lamps', col: 19, row: 7, title: 'The Twin Lamps', text: 'Two lamps watch the lamp hall. Light both and the niche between them gives up what the dark kept.', pointsAt: ['lamp-west', 'lamp-east', 'lamp-niche'] },
     { id: 'cistern-mark', col: 9, row: 11, title: 'The Cistern Mark', text: 'The west cistern feeds the great hall’s pool. The lever on the hall’s north wall lifts the gallery shutter.', pointsAt: ['gallery-lever'] },
-    { id: 'deep-hall', col: 26, row: 23, title: 'The Deep Hall', text: 'The stair in the east corner goes on down. Whoever makes what lies below it will be the first to walk there.' },
+    { id: 'deep-hall', col: 26, row: 23, title: 'The Deep Hall', text: 'The stair in the east corner goes on down, to the Sump — where all this water goes. Take a full torch: what lives down there hunts by it.' },
   ],
   gates: [],
   chests: [
@@ -748,8 +748,91 @@ export const UNDERCROFT: ChamberDefinition = {
   ],
 }
 
+/** Below the Undercroft's deep hall: where its water goes. One causeway
+ *  crosses a wide black pool under two bats; past it the goblins keep a
+ *  warren of one-wide corridors, where the wand's stone is the only way to
+ *  hold a corner; the Sump key waits at the warren's one dead end; and
+ *  behind the door under it, the heart — a pearl, a memory, a goblin that
+ *  guards them, and a stair going on down that nothing waits below yet. */
+export const THE_SUMP: ChamberDefinition = {
+  id: 'the-sump', name: 'The Sump', subtitle: 'Where the Undercroft’s water goes',
+  look: 'cavern', torch: 3.2, sconces: true,
+  map: [
+    '##<#####################################',
+    '#.@..t..n..#############################',
+    '#..........#############################',
+    '#..~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...#',
+    '#..~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...#',
+    '#..~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...#',
+    '#......................................#',
+    '#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...#',
+    '#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...#',
+    '#####################################..#',
+    '#####################################..#',
+    '#############..........................#',
+    '#############.#######.#######.#######..#',
+    '#############.#K#####.#######.#######..#',
+    '#############.#.#####.#######.#######..#',
+    '#############.#.#####.#######.#######..#',
+    '#############..........................#',
+    '#############D##########################',
+    '#..........................#############',
+    '#...........t..............#############',
+    '#.....~~~~~~~..............#############',
+    '#.....~~~~~~~..............#############',
+    '#.........h................#############',
+    '#..K...................>...#############',
+    '#..........................#############',
+    '########################################',
+  ],
+  exits: [
+    { id: 'stair-up', col: 2, row: 0, style: 'stairs-up', label: 'The Undercroft', landing: { col: 2, row: 1 }, facing: 'down' },
+  ],
+  entrances: [
+    { id: 'stair-down', col: 23, row: 23, style: 'stairs-down', empty: 'The stair goes on down, into water-sound and dark. Nothing waits below it yet.', landing: { col: 22, row: 23 } },
+  ],
+  // Bats over the pool, goblins in the warren, one goblin in the heart.
+  foes: [
+    { id: 'bat-pool-west', kind: 'flitter', route: [{ col: 6, row: 4 }, { col: 30, row: 4 }, { col: 30, row: 8 }, { col: 6, row: 8 }] },
+    { id: 'bat-pool-east', kind: 'flitter', route: [{ col: 34, row: 8 }, { col: 12, row: 8 }, { col: 12, row: 4 }, { col: 34, row: 4 }] },
+    { id: 'goblin-warren-west', kind: 'prowler', route: [{ col: 13, row: 11 }, { col: 21, row: 11 }, { col: 21, row: 16 }, { col: 13, row: 16 }] },
+    { id: 'goblin-warren-east', kind: 'prowler', route: [{ col: 29, row: 16 }, { col: 37, row: 16 }, { col: 37, row: 11 }, { col: 29, row: 11 }] },
+    { id: 'goblin-heart', kind: 'prowler', route: [{ col: 14, row: 19 }, { col: 25, row: 19 }, { col: 25, row: 22 }, { col: 14, row: 22 }] },
+  ],
+  tablets: [
+    { id: 'sump-arch', col: 5, row: 1, title: 'The Sump', text: 'Where the Undercroft’s water goes. One causeway crosses the pool; the bats hunt what they see, and the wand’s stone will not lie on water. Run it.' },
+    { id: 'sump-heart', col: 12, row: 19, title: 'The Heart of the Sump', text: 'The pearl was left for whoever came through the warren with their torch still lit. The stair in the corner goes on down; whoever makes what lies below it will be the first to walk there.' },
+  ],
+  gates: [],
+  chests: [
+    { id: 'warren-chest', col: 15, row: 13, name: 'Warren Chest', subtitle: 'At the warren’s dead end', items: [{ kind: 'key', name: 'Sump key' }], lore: 'The key to the Sump’s heart, at the end of the one corridor the goblins never take.' },
+    { id: 'pearl-chest', col: 3, row: 23, name: 'Pearl Chest', subtitle: 'In the heart of the Sump', items: [{ kind: 'gem', name: 'Sump pearl' }], lore: 'A pearl grown in black water, for whoever crossed the pool and held the warren.' },
+  ],
+  doors: [
+    { id: 'heart-door', col: 13, row: 17, name: 'Heart door', lock: 'small' },
+  ],
+  shutters: [], plates: [], blocks: [], levers: [], lamps: [], lampSets: [], sigils: [],
+  alcoves: [
+    { id: 'heart-alcove', col: 10, row: 22, memoryId: 'sump-heart-memory', text: 'The water that runs through every hall above gathers here and goes on down. Nothing that was cut was cut to hold it.', locked: ALCOVE_LOCKED },
+  ],
+  residents: [
+    {
+      id: 'wick', col: 8, row: 1, name: 'Wick', role: 'Lamplighter', color: '#7f9ac2',
+      lines: [
+        'Down from the Undercroft with a torch still burning? Good. The pool has bats; they take what they see. Cross the causeway at a run.',
+        'Past the pool the goblins keep a warren of narrow ways. Lay a stone behind you and they lose you; lay one on one and it is done with.',
+        'The key is at the warren’s dead end. The door under it is the heart of the Sump, and there is a pearl for whoever reaches it.',
+      ],
+    },
+  ],
+  furniture: [],
+  effects: [
+    { col: 18, row: 6, kind: 'drip' }, { col: 4, row: 20, kind: 'drip' }, { col: 20, row: 24, kind: 'drip' },
+  ],
+}
+
 const chambers: ChamberDefinition[] = [
-  WET_STEPS, CISTERN, SPRING_HEART, HALL_OF_HOURS, SIX_ROADS, ACCORD_SANCTUM, CHANDLER_HOUSE, CHANDLER_CELLAR, HOLLOW_GROVE, UNDERCROFT,
+  WET_STEPS, CISTERN, SPRING_HEART, HALL_OF_HOURS, SIX_ROADS, ACCORD_SANCTUM, CHANDLER_HOUSE, CHANDLER_CELLAR, HOLLOW_GROVE, UNDERCROFT, THE_SUMP,
 ]
 export const CHAMBERS: readonly ChamberDefinition[] = chambers
 

@@ -30,6 +30,7 @@ const seats: StorySeat[] = [
   { entrance: 'root-run/deeper',           place: 'the-burrow' },
   { entrance: 'greenwood/burrow',          place: 'the-burrow' },
   { entrance: 'the-burrow/deeper',         place: 'undercroft' },
+  { entrance: 'undercroft/stair-down',     place: 'the-sump' },
   // Entrances are marks, never kinds: whatever a seat names leads in. These
   // five are examples of things that are not doors — a signpost, a tablet on
   // a cave wall, a stone in a room's wall, a patch of open air.
