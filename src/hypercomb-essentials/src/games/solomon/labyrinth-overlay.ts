@@ -1129,7 +1129,7 @@ const ADVENTURE_CSS = `
 .sol-menu-open:hover,.sol-menu-open:focus-visible{opacity:1;filter:brightness(1.15)}
 .sol-adventure .sol-rpg-world{padding:0}.sol-adventure .sol-rpg-world-controls,.sol-adventure .sol-rpg-world .sol-rpg-status{display:none}.sol-adventure .sol-rpg-map{border:0;border-radius:0;box-shadow:none}
 .sol-adventure .sol-chamber-view{position:relative;gap:0;justify-content:center;container-type:size}.sol-adventure .sol-chamber-heading,.sol-adventure .sol-chamber-controls{display:none}
-.sol-adventure .sol-chamber-map{width:min(100cqw,calc(100cqh * var(--cols) / var(--rows)));margin:auto;border-radius:0}
+.sol-adventure .sol-chamber-map{width:min(100cqw,calc(100cqh * var(--view-cols, var(--cols)) / var(--view-rows, var(--rows))));margin:auto;border-radius:0}
 .sol-adventure .sol-chamber-status{position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:6;width:max-content;max-width:70%;padding:4px 12px;border-radius:8px;background:#0f1e30b3;pointer-events:none}.sol-adventure .sol-chamber-status:empty{display:none}
 .sol-adventure .sol-native-room{position:relative;gap:0}.sol-adventure .sol-room-heading,.sol-adventure .sol-room-hint{display:none}.sol-adventure .sol-room-viewport{padding:6px}
 .sol-adventure .sol-room-status{position:absolute;left:12px;bottom:10px;z-index:6;max-width:45%;gap:10px;padding:4px 10px;border-radius:8px;background:#0f1e30b3;pointer-events:none}.sol-adventure .sol-room-status progress{width:90px}

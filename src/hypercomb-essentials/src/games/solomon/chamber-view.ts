@@ -235,6 +235,8 @@ export class ChamberView {
     this.#viewRows = Math.min(VIEW_ROWS, rows)
     map.style.setProperty('--cols', String(cols))
     map.style.setProperty('--rows', String(rows))
+    map.style.setProperty('--view-cols', String(this.#viewCols))
+    map.style.setProperty('--view-rows', String(this.#viewRows))
     map.style.aspectRatio = `${this.#viewCols} / ${this.#viewRows}`
     map.setAttribute('role', 'group')
     map.setAttribute('aria-label', `${def.name}. Move with arrow keys or W A S D. Approach a portal or feature, then press Enter or E, or click, to interact. Z raises the wand.`)
