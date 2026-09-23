@@ -24,7 +24,7 @@
 //
 // A dependency: it registers nothing. The `module` queen drives it.
 
-import { broodRoster, sectionOf, SignatureService, isMetaEnvelope, metaPayloadOf, mintMetaEnvelope } from '@hypercomb/core'
+import { broodRoster, sectionOf, SignatureService, isMetaEnvelope, isSandboxLabel, metaPayloadOf, mintMetaEnvelope } from '@hypercomb/core'
 import { diffLines, type DiffRow, type LineDiff } from './line-diff.js'
 import { JEV_READING_CHARS, JEV_READING_FILES, JEV_RUBRIC, type JevReadingFile, type JevReadingInput, type JevReadingResult, type JevReadingVerdict, type JevPassInput, type JevPassResult, type JevReadingRule, type JevTrialStanding, JEV_PASS_TRIALS } from './jev-decision.js'
 
@@ -288,7 +288,6 @@ export interface SandboxTrial {
   readonly taken?: readonly { readonly path: string; readonly root: string }[]
 }
 
-const TRIAL_NAME_RE = /^try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?$/
 const SIG_RE = /^[a-f0-9]{64}$/
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value : []).filter((item): item is string => typeof item === 'string' && !!item)
 
@@ -306,7 +305,7 @@ export const trialsOf = (listing: unknown): SandboxTrial[] => {
   const raw = (listing as { trials?: unknown } | null)?.trials
   const trials: SandboxTrial[] = []
   for (const entry of Array.isArray(raw) ? raw as TrialEntry[] : []) {
-    if (!entry || !TRIAL_NAME_RE.test(String(entry.name ?? '')) || !/^https?:\/\//.test(String(entry.door ?? ''))) continue
+    if (!entry || !isSandboxLabel(String(entry.name ?? '')) || !/^https?:\/\//.test(String(entry.door ?? ''))) continue
     if (!SIG_RE.test(String(entry.package ?? '')) || !SIG_RE.test(String(entry.pubkey ?? ''))) continue
     const verdict = VERDICTS.includes(entry.reviewVerdict as ReviewVerdict) ? entry.reviewVerdict as ReviewVerdict : undefined
     trials.push({

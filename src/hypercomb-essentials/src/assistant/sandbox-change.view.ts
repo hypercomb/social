@@ -23,7 +23,7 @@
 // A dependency: it exports the element; the sandbox feature's bee
 // (sandbox-door.drone.ts) defines it and adds it to the ShellSurfaceRegistry.
 
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, isSandboxDoor, type I18nProvider } from '@hypercomb/core'
 import type { DiffRow } from './line-diff.js'
 import { doorReader, isSandboxSite, readTrial, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
 
@@ -142,6 +142,13 @@ export class SandboxChangeElement extends HTMLElement {
     const shown = this.#shown
     const deps = this.taker()
     if (!shown || this.#taking.has(path)) return
+    // A DOOR WRITES NOTHING: taking is done from your own hive (a courtesy —
+    // the host refuses a door's writes whatever this panel does).
+    if (isSandboxDoor()) {
+      this.#taking.set(path, { text: t('module.atdoor', 'A sandbox door writes nothing — say {word} from your own hive.', { word: 'module take' }), held: false })
+      this.#render()
+      return
+    }
     if (!deps) {
       this.#taking.set(path, { text: t('module.panel.nottaken', 'not taken: {reason}', { reason: 'nothing is installed here' }), held: false })
       this.#render()
@@ -243,7 +250,7 @@ export class SandboxChangeElement extends HTMLElement {
     const tally = tallyAssessments(site)
     body.appendChild(el('h3', 'hc-trial-section', t('module.panel.people', 'People — {accept} accept · {refuse} refuse · {unclear} unclear', tally)))
     if (!reading.people.length) {
-      body.appendChild(el('p', 'hc-trial-quiet', t('module.panel.nobody', 'No one has assessed it yet. Add yours: module assess {change} accept|refuse <note>.', { change: shown.name.replace(/^try-/, '') })))
+      body.appendChild(el('p', 'hc-trial-quiet', t('module.panel.nobody', 'No one has assessed it yet. Assess it from your own hive: module assess {change} accept|refuse <note>.', { change: shown.name.replace(/^try-/, '') })))
     }
     for (const person of reading.people) {
       const row = el('p', 'hc-trial-person')

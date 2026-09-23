@@ -835,11 +835,12 @@ function tryServeContent(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') return false
 
   // CORS preflight — relays serve from <op>.domain, askers come from
-  // other origins (hypercomb.io, alice.dev, etc.); blanket-permit.
+  // other origins (hypercomb.io, alice.dev, etc.); blanket-permit — but a
+  // door is told only the reads it may make, since every write refuses it.
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, HEAD, PUT, POST, OPTIONS',
+      'Access-Control-Allow-Methods': fromSandboxDoor(req) ? 'GET, HEAD, OPTIONS' : 'GET, HEAD, PUT, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization, If-None-Match',
       'Access-Control-Max-Age': '86400',
     })
@@ -990,6 +991,26 @@ function tryServeContent(req, res) {
 function respondText(res, code, msg) {
   res.writeHead(code, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
   res.end(msg)
+}
+
+// ── doors write nothing (documentation/module-sandbox.md) ───────────────────
+//
+// A sandbox door — `try-<change>.<zone>` — runs its publisher's package with
+// full page power, so a request whose Origin is a door never writes here: a
+// signed PUT or POST from it (the visitor's own key through NIP-07, or one the
+// package minted) would move this host as if the visitor's hive had. Reads
+// stay open. The label is the content worker's SANDBOX_LABEL_RE
+// (blossom-worker/worker.js), on any zone.
+const SANDBOX_LABEL_RE = /^try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?$/
+
+// An opaque origin (`Origin: null` — a sandboxed frame or data: worker the
+// package opens) counts as a door too; no writer of ours sends it. Writes made
+// from the browser stop here; a signature replayed from elsewhere is the
+// extension prompt's to refuse (see the content worker's fromSandboxDoor).
+function fromSandboxDoor(req) {
+  const origin = req.headers.origin
+  if (origin === 'null') return true
+  try { return SANDBOX_LABEL_RE.test(new URL(String(origin)).hostname.split('.')[0]) } catch { return false }
 }
 
 // ── content-host (HTTP write — the backup/push side) ─────────────────────────
@@ -1383,6 +1404,12 @@ function tryLanding(req, res) {
 // installer code under any circumstances. See the landing handler above.
 
 const server = createServer((req, res) => {
+  // Doors write nothing — refused before any write route can run.
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && fromSandboxDoor(req)) {
+    respondText(res, 403, 'a sandbox door writes nothing — do this from your own hive\n')
+    return
+  }
+
   // NIP-11 relay metadata (Accept: application/nostr+json)
   if (req.headers.accept?.includes('application/nostr+json')) {
     res.writeHead(200, { 'Content-Type': 'application/nostr+json', 'Access-Control-Allow-Origin': '*' })

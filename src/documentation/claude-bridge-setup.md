@@ -39,7 +39,12 @@ it is answered when a responder next connects.
 
 **Trust model**: the broker binds to loopback only. Registration as a renderer
 is *always* loopback-only. Nothing on your network can touch your hive unless
-you deliberately bind wide **and** set a shared token (covered below).
+you deliberately bind wide **and** set a shared token (covered below). And no
+web page can either: a browser always says which page opened a socket, so the
+broker refuses any `Origin` that is not exactly localhost, 127.0.0.1 or [::1]
+(`scripts/bridge/bridge-origin.cjs`) — a site, or a sandbox door you are
+trying, cannot drive your bridge. Agents (Node) send no Origin and are
+unaffected.
 
 ---
 

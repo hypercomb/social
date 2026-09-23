@@ -107,7 +107,7 @@ describe('owed install stamps', () => {
   it('answers the renderer health probe over HTTP', async () => {
     const ws = workspace([])
     const broker = await startBroker(ws)
-    await expect(health(broker.port)).resolves.toEqual({ status: 200, cors: '*' })
+    await expect(health(broker.port)).resolves.toEqual({ status: 200, cors: undefined })
   })
 
   it('keeps one debt per channel, the newest build replacing an older one', () => {

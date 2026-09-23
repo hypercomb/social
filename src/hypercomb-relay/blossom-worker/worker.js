@@ -664,7 +664,7 @@ async function serveSandbox(request, env, site, zone) {
   const moduleMatch = url.pathname.match(/^\/content\/([0-9a-f]{64})$/)
   if (moduleMatch) return serveModule(request, env, moduleMatch[1])
   if (url.pathname.startsWith('/content/')) return new Response(body('not held\n'), { status: 404, headers: plain })
-  return serveSandboxShell(request, env)
+  return serveSandboxShell(request, env, zone)
 }
 
 // ── public assessments (documentation/module-sandbox.md) ─────────────────
@@ -775,20 +775,46 @@ async function serveTrials(request, env, zone) {
   return json(200, { zone, trials }, { 'Cache-Control': 'no-store' })
 }
 
+// A LOOPBACK ZONE is this machine (scripts/local-content-host.mjs): there a
+// door and its zone's content face speak plain http.
+const LOOPBACK_ZONE_RE = /^(?:[a-z0-9-]+\.)*localhost$/
+// No device for any page this worker serves — a published site or a door.
+const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
+
 /** The participant shell, fetched from where it is deployed. https only, but
- *  a loopback origin on http, for proving the door on one machine. */
-async function serveSandboxShell(request, env) {
+ *  a loopback origin on http, for proving the door on one machine.
+ *
+ *  THE DOOR'S OWN POLICY, on every response it sends. The publisher's package
+ *  runs here with full page power, so the page is held to what a hive needs:
+ *  it reaches https and wss hosts — on a loopback zone also exactly that
+ *  zone's two http faces, never a bare http: or ws: that would open the
+ *  visitor's own machine (a local model, the bridge) — it is never framed,
+ *  posts no form, takes no device and keeps no cookie. Scripts are left alone
+ *  on purpose: the shell injects an import map and loads its bees as blob:
+ *  modules, and a script-src would stop the boot. */
+async function serveSandboxShell(request, env, zone) {
   const origin = String(env.SANDBOX_SHELL_ORIGIN || '').replace(/\/+$/, '')
   const loopback = /^http:\/\/((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(origin)
-  if (!origin.startsWith('https://') && !loopback) return text(503, 'the sandbox shell is not configured')
   const url = new URL(request.url)
-  const upstream = await fetch(origin + url.pathname + url.search, {
-    method: request.method,
-    headers: { accept: request.headers.get('accept') || '*/*' },
-  })
+  const upstream = origin.startsWith('https://') || loopback
+    ? await fetch(origin + url.pathname + url.search, {
+      method: request.method,
+      headers: { accept: request.headers.get('accept') || '*/*' },
+    })
+    : text(503, 'the sandbox shell is not configured')
   const headers = new Headers(upstream.headers)
   headers.delete('content-encoding')
   headers.delete('content-length')
+  const port = url.port ? `:${url.port}` : ''
+  const local = LOOPBACK_ZONE_RE.test(String(zone || '')) ? ` http://${zone}${port} http://content.${zone}${port}` : ''
+  // worker-src keeps a data: worker (an opaque origin) out; blob: and the
+  // shell's own scripts are what a hive's workers are made of.
+  headers.set('Content-Security-Policy', `connect-src 'self' https: wss: blob: data:${local}; worker-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'none'`)
+  headers.set('Permissions-Policy', PERMISSIONS_POLICY)
+  headers.set('Referrer-Policy', 'no-referrer')
+  headers.set('Cross-Origin-Opener-Policy', 'same-origin')
+  headers.set('X-Content-Type-Options', 'nosniff')
+  headers.delete('set-cookie')
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
 }
 
@@ -807,7 +833,7 @@ async function serveVisitorAsset(request, env, { spa = true } = {}) {
   }
   const headers = new Headers(response.headers)
   headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'")
-  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
+  headers.set('Permissions-Policy', PERMISSIONS_POLICY)
   headers.set('Referrer-Policy', 'no-referrer')
   headers.set('X-Content-Type-Options', 'nosniff')
   // A door exists to be pulled FROM. The visitor engine's own assets — the
@@ -833,6 +859,25 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range, X-SHA-256, X-Content-Length',
   'Access-Control-Expose-Headers': 'ETag, Accept-Ranges, Content-Range, Content-Length, X-Reason',
   'Access-Control-Max-Age': '86400',
+}
+
+// DOORS WRITE NOTHING (documentation/module-sandbox.md). A sandbox door runs
+// its publisher's package with full page power, so a request whose Origin is a
+// door — a `try-` first label, on any zone — is told only the reads it may
+// make: the router refuses it every write, and its preflight advertises none.
+const DOOR_CORS = { ...CORS, 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS' }
+
+// An OPAQUE origin (`Origin: null`) is treated as a door too: it is what a
+// sandboxed srcdoc frame or a data: worker the package opens sends, and no
+// writer of ours sends it (the CLI and native clients send no Origin; shells
+// have real ones). The limit, said plainly: this stops writes made FROM the
+// browser. A signature the package coaxes out of an extension can be replayed
+// from elsewhere, so the extension's own prompt — and the door bar's "refuse
+// prompts here" — stay the real guard for that.
+function fromSandboxDoor(request) {
+  const origin = request.headers.get('origin')
+  if (origin === 'null') return true
+  try { return SANDBOX_LABEL_RE.test(new URL(origin).hostname.split('.')[0]) } catch { return false }
 }
 
 // Immutable forever — content-addressed bytes can never change under a sig.
@@ -1510,6 +1555,15 @@ export default {
       return routing
     }
 
+    // DOORS WRITE NOTHING, at any host this worker serves. A signed request
+    // from a door — the visitor's own key through NIP-07, or one the package
+    // minted — would write as if the visitor's hive had. Assessing, taking,
+    // drafting and committing happen at home, so this sits above every route.
+    const fromDoor = fromSandboxDoor(request)
+    if (fromDoor && method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+      return text(403, 'a sandbox door writes nothing — do this from your own hive')
+    }
+
     // Application domains run Core with a narrower host capability profile.
     // The relay host may accept signed writes; a published Core host never
     // does. Keep this boundary above every mutation endpoint so adding another
@@ -1518,7 +1572,19 @@ export default {
       return text(405, 'published Core hosts are read-only')
     }
 
-    if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
+    if (method === 'OPTIONS') return new Response(null, { status: 204, headers: fromDoor ? DOOR_CORS : CORS })
+
+    // A DOOR RUNS NO WORKER FROM THE HEAP. A worker takes its policy from its
+    // own script's response, not from the page, and heap bytes carry only
+    // `sandbox`, which a worker ignores — so a package that uploads a script
+    // and starts it as a (service) worker at its door would escape the door's
+    // connect-src and reach the visitor's machine. The shell's own workers are
+    // never heap bytes, so on a door host a worker asking for one is refused.
+    if (SANDBOX_LABEL_RE.test(requestUrl.hostname.split('.')[0])
+      && /^(?:worker|sharedworker|serviceworker)$/.test(String(request.headers.get('sec-fetch-dest') || '').toLowerCase())
+      && /^\/(?:(?:@resource\/)?[0-9a-f]{64}(?:\/[^/]+)?|content\/[0-9a-f]{64})$/.test(pathname)) {
+      return text(403, 'a sandbox door runs no worker from the heap')
+    }
 
     // Flat sig endpoint — the canonical read: https://<host>/<sig>.
     // Lowercase 64-hex only; this bucket is flat from birth (no legacy

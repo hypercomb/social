@@ -5,8 +5,14 @@
 // The broker relays ops that CREATE TILES, WRITE RESOURCES AND COMMIT LAYERS
 // on a live hive. It used to accept anything that could reach the port, which
 // meant anyone on the network could drive the hive — or claim the renderer
-// slot and displace the real tab. Two gates now, matched to the actual threat
-// (someone else on your LAN), not to ceremony:
+// slot and displace the real tab. Three gates now, matched to the actual
+// threats (someone else on your LAN, or a page in your own browser), not to
+// ceremony:
+//
+//   0. A BROWSER PAGE IS JUDGED BY ITS ORIGIN, not its socket. Any page you
+//      open dials localhost from your own machine, so a loopback socket says
+//      nothing about it; a handshake whose Origin is not a page served from
+//      this machine is refused (bridge-origin.cjs). No Origin = a Node client.
 //
 //   1. RENDERER REGISTRATION IS LOOPBACK-ONLY, always. A hive tab always dials
 //      a broker on its own machine (the bee hardcodes ws://localhost), so a
@@ -31,6 +37,7 @@ const { WebSocketServer, WebSocket } = require('ws')
 const { createServer } = require('node:http')
 const { watchFile } = require('node:fs')
 const { OWED_FILE, readOwed, settleOwed, followedPubkey, servedByRelay } = require('./owed-stamps.cjs')
+const { bridgeOriginAllowed } = require('./bridge-origin.cjs')
 
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 2401)
 const BRIDGE_HOST = process.env.BRIDGE_HOST || '127.0.0.1'
@@ -39,11 +46,13 @@ const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
 // Browsers cannot test whether a TCP/WebSocket port is open without creating
 // a WebSocket, and Chromium logs every refused WebSocket in the console. This
 // small CORS-enabled probe lets an opted-in renderer wait quietly until the
-// broker actually exists.
+// broker actually exists. CORS is granted only to a page the socket would
+// admit — a door page must not even learn the broker is running.
 const server = createServer((req, res) => {
   if (req.url === '/healthz') {
+    const origin = req.headers.origin
     res.writeHead(200, {
-      'access-control-allow-origin': '*',
+      ...(origin && bridgeOriginAllowed(origin) ? { 'access-control-allow-origin': origin } : {}),
       'cache-control': 'no-store',
       'content-type': 'application/json',
     })
@@ -53,7 +62,14 @@ const server = createServer((req, res) => {
   res.writeHead(404)
   res.end()
 })
-const wss = new WebSocketServer({ server })
+const wss = new WebSocketServer({
+  server,
+  verifyClient: (info, done) => {
+    if (bridgeOriginAllowed(info.origin)) return done(true)
+    console.warn(`[bridge] refused a browser handshake from origin ${info.origin}`)
+    done(false, 403)
+  },
+})
 server.listen(BRIDGE_PORT, BRIDGE_HOST)
 
 let renderer = null

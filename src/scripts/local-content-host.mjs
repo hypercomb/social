@@ -90,8 +90,17 @@ const env = { CONTENT: r2(), HIVES: kv(), GRANTS: kv(), AUTO_GRANT: '1', SANDBOX
 
 http.createServer(async (req, res) => {
   const url = `http://${req.headers.host || `localhost:${port}`}${req.url}`
+  // THE HARNESS'S OWN ENDPOINTS answer the harness alone. It calls them from Node,
+  // which sends neither an Origin nor Sec-Fetch-Site; any page in this machine's
+  // browser — a sandbox door above all — sends one (a same-origin GET carries no
+  // Origin, but always Sec-Fetch-Site), and must not bind a zone or read the store.
+  if ((req.url === '/__state' || req.url === '/__bind') && (req.headers.origin || req.headers['sec-fetch-site'])) {
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end('the harness endpoints answer the harness, not a page\n')
+    return
+  }
   if (req.url === '/__state') {
-    res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' })
+    res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({
       content: [...env.CONTENT.objects.keys()].sort(),
       hives: Object.fromEntries([...env.HIVES.values].map(([key, value]) => [key, JSON.parse(value)])),
@@ -106,7 +115,7 @@ http.createServer(async (req, res) => {
     if (!bound) bindings[String(zone)] = { title: zone, lineage: String(zone).split('.')[0], publishers: [{ pubkey, label, primary: true }] }
     else if (!bound.publishers.some((publisher) => publisher.pubkey === pubkey)) bound.publishers.push({ pubkey, label })
     env.SITE_BINDINGS = JSON.stringify(bindings)
-    res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' })
+    res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ ok: true, bindings }))
     return
   }
