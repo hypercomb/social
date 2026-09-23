@@ -83,6 +83,28 @@ describe('the what-changed panel', () => {
     expect(element.querySelector<HTMLAnchorElement>('.hc-trial-door')?.href).toBe('https://try-zoom.hypercomb.com/')
   })
 
+  it('takes one file\'s change into this hive by hand, and points to the brood where it waits', async () => {
+    const site = await trialSite()
+    const picked: string[] = []
+    element.taker = () => ({
+      revisionsOf: async (_path, _zones, roots) => [{ layer: 'd'.repeat(64), sources: roots.map(root => ({ root })) }],
+      pick: async (path, revision, zones, options) => { picked.push(`${path}|${revision.root.slice(0, 4)}|${zones.join()}|${options.byHand}`); return { ok: true } },
+      held: async () => 1,
+    })
+    await element.show({ name: 'try-zoom', door: 'https://try-zoom.hypercomb.com', site, at: Date.now() })
+    const take = element.querySelector<HTMLButtonElement>('.hc-trial-take')!
+    expect(take.textContent).toBe('take')
+    take.click()
+    await vi.waitFor(() => expect(element.querySelector('.hc-trial-taken')?.textContent).toBe('taken — it waits in the brood until you accept it'))
+    expect(picked).toEqual(['p|eeee|try-zoom.hypercomb.com|true'])
+    let opened = false
+    const off = EffectBus.on<{ at?: number }>('brood:open', payload => { if (Date.now() - (payload?.at ?? 0) < 1_000) opened = true })
+    element.querySelector<HTMLButtonElement>('.hc-trial-take')!.click()
+    off()
+    expect(opened).toBe(true)
+    expect(element.isOpen).toBe(false)
+  })
+
   it('opens on a fresh request only, and closes on Escape', async () => {
     const site = await trialSite()
     EffectBus.emit(SANDBOX_CHANGE_EFFECT, { name: 'try-zoom', door: 'https://try-zoom.hypercomb.com', site, at: 0 })

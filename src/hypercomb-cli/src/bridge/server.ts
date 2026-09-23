@@ -64,7 +64,7 @@ export function runBridge(): void {
 
   let renderer: WebSocket | null = null
   const pending = new Map<string, WebSocket>()
-
+  
   wss.on('connection', (ws, req) => {
     let identified = false
     const local = isLoopback(req)

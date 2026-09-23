@@ -1629,10 +1629,6 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/commands/visual-bee-registry.ts',
       'hypercomb-essentials/src/commands/website-slot.ts',
       'hypercomb-essentials/src/commands/website.queen.ts',
-      'hypercomb-essentials/src/editor/image-editor.service.ts',
-      'hypercomb-essentials/src/editor/tile-editor.service.ts',
-      'hypercomb-essentials/src/editor/tile-editor.view.ts',
-      'hypercomb-essentials/src/editor/tile-properties.ts',
       'hypercomb-essentials/src/history/active-genome.service.ts',
       'hypercomb-essentials/src/history/builds-slot.ts',
       'hypercomb-essentials/src/history/consolidate-history.queen.ts',
@@ -1698,15 +1694,6 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/sharing/swarm-mode.queen.ts',
       'hypercomb-essentials/src/sharing/update-scout.service.ts',
       'hypercomb-essentials/src/sharing/use-live-relay.queen.ts',
-      'hypercomb-essentials/src/tutorial/lessons/beginner.lessons.ts',
-      'hypercomb-essentials/src/tutorial/lessons/expert.lessons.ts',
-      'hypercomb-essentials/src/tutorial/lessons/intermediate.lessons.ts',
-      'hypercomb-essentials/src/tutorial/lessons/starter.lessons.ts',
-      'hypercomb-essentials/src/tutorial/tutor-slot.ts',
-      'hypercomb-essentials/src/tutorial/tutor.queen.ts',
-      'hypercomb-essentials/src/tutorial/tutorial-lesson.ts',
-      'hypercomb-essentials/src/tutorial/tutorial-overlay.view.ts',
-      'hypercomb-essentials/src/tutorial/tutorial.queen.ts',
     ], 'dependency self-registration')
   })
 

@@ -159,6 +159,18 @@ describe('the package tree', () => {
     )
     expect(deps).toEqual(['d2', 'p1', 't3'])
     expect(namespaceOf(new TextEncoder().encode('// @hypercomb/essentials/presentation/tiles\nx'))).toBe('presentation/tiles')
+
+    // A picked bundle held in the brood WAITS: it is not composed, and the
+    // trunk's bundle for its namespace keeps running until it is accepted.
+    const held = new Set(['d2'])
+    const waiting = await composeDependencies(
+      ['t1', 't2', 't3'],
+      [{ path: 'games', dependencies: ['p1', 'p2', 'p3'] }, { path: 'games/arkanoid', dependencies: ['d2'] }],
+      ['games', 'games/arkanoid'],
+      read,
+      async sig => !held.has(sig),
+    )
+    expect(waiting).toEqual(['p1', 't2', 't3'])
     expect(namespaceOf(new TextEncoder().encode('// @other/thing\nx'))).toBe('')
   })
 
@@ -213,5 +225,8 @@ describe('the package tree', () => {
     expect(readPicks(storage)).toEqual({ 'games/arkanoid': { layer: 'a'.repeat(64), root: 'b'.repeat(64), hides: true, at: 1 } })
     writePicks({}, storage)
     expect(storage.getItem(PICKS_KEY)).toBeNull()
+    // A pick made by hand remembers it: what it brought waits in the brood.
+    writePicks({ games: { ...pick('a'.repeat(64), 'b'.repeat(64)), byHand: true } }, storage)
+    expect(readPicks(storage).games?.byHand).toBe(true)
   })
 })

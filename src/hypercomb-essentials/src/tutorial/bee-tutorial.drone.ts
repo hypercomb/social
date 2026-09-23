@@ -26,18 +26,18 @@ import { readTutorialRecord, writeTutorialRecord, clearTutorialRecord, tutorialP
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
 import { storeImageResources, type ImageResources } from '../editor/arm-resource.js'
-import type { BeeTutorialOverlayElement, SayResult } from './tutorial-overlay.view.js'
+import { BeeTutorialOverlayElement, OVERLAY_SURFACE_NAME, onOverlayMounted, type SayResult } from './tutorial-overlay.view.js'
 import {
   tutorialLessons, courseMeaning, courseSignature,
   type TutorialLesson, type TutorialLevel,
 } from './tutorial-lesson.js'
 import type { CoverFactory, StageRect, TutorialStage } from './tutorial-stage.js'
-// Registering the shipped courses is a side effect of loading them — the
-// runner never names a lesson, so a course can grow without touching this file.
-import './lessons/starter.lessons.js'
-import './lessons/beginner.lessons.js'
-import './lessons/intermediate.lessons.js'
-import './lessons/expert.lessons.js'
+// The shipped courses are dependencies; this bee registers them, in course
+// order. The runner never names a lesson, so a course grows in its own file.
+import { STARTER_LESSONS } from './lessons/starter.lessons.js'
+import { BEGINNER_LESSONS } from './lessons/beginner.lessons.js'
+import { INTERMEDIATE_LESSONS } from './lessons/intermediate.lessons.js'
+import { EXPERT_LESSONS } from './lessons/expert.lessons.js'
 
 type Pt = { x: number; y: number }
 type Axial = { q: number; r: number }
@@ -867,6 +867,23 @@ export class BeeTutorialDrone extends Drone {
     overlay.highlight({ x: point.x, y: point.y, r: r + 8 })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/TutorialLessonRegistry', tutorialLessons)
+for (const lesson of [...STARTER_LESSONS, ...BEGINNER_LESSONS, ...INTERMEDIATE_LESSONS, ...EXPERT_LESSONS]) tutorialLessons.register(lesson)
+
+// The overlay: defined here, added to the shell's surface registry — never a
+// tag in either app.html — and registered once the surface host mounts it.
+if (!customElements.get(OVERLAY_SURFACE_NAME)) customElements.define(OVERLAY_SURFACE_NAME, BeeTutorialOverlayElement)
+window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
+  try {
+    registry.add({ name: OVERLAY_SURFACE_NAME, owner: '@diamondcoreprocessor.com/BeeTutorialDrone', element: OVERLAY_SURFACE_NAME, order: 900 })
+  } catch {
+    // duplicate add (hot reload) — the mounted surface is already live
+  }
+})
+onOverlayMounted(overlay => { if (!window.ioc.get(OVERLAY_KEY)) window.ioc.register(OVERLAY_KEY, overlay) })
 
 const _beeTutorial = new BeeTutorialDrone()
 window.ioc.register('@diamondcoreprocessor.com/BeeTutorialDrone', _beeTutorial)

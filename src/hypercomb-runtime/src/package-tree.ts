@@ -59,6 +59,9 @@ export type PackagePick = {
   hides: boolean
   /** When it was taken — orders picks, never dates a revision. */
   at: number
+  /** Picked by hand from a root nothing here vouches for (the gate's HAND
+   *  door): what it brought waits in the brood until it is accepted. */
+  byHand?: boolean
 }
 
 export type Picks = Record<string, PackagePick>
@@ -258,17 +261,24 @@ export const composeDependencies = async (
   sources: readonly { path: string; dependencies: readonly string[] }[],
   applied: readonly string[],
   readNamespace: (sig: string) => Promise<string | null>,
+  /** May this bundle run (core mayRunBee)? A picked bundle held in the brood
+   *  WAITS: it is not composed, and the trunk's bundle for its namespace
+   *  keeps running until it is accepted. */
+  mayRun: (sig: string) => Promise<boolean> = async () => true,
 ): Promise<string[]> => {
   const kept = new Set<string>()
-  for (const sig of trunk) {
-    const ns = await readNamespace(sig)
-    if (ownerOf(ns ?? '', applied) === '') kept.add(sig)
-  }
+  const waiting = new Set<string>()
   for (const source of sources) {
     for (const sig of source.dependencies) {
       const ns = await readNamespace(sig)
-      if (ns && ownerOf(ns, applied) === source.path) kept.add(sig)
+      if (!ns || ownerOf(ns, applied) !== source.path) continue
+      if (await mayRun(sig)) kept.add(sig)
+      else waiting.add(ns)
     }
+  }
+  for (const sig of trunk) {
+    const ns = await readNamespace(sig)
+    if (ownerOf(ns ?? '', applied) === '' || waiting.has(ns ?? '')) kept.add(sig)
   }
   return [...kept].sort()
 }
@@ -383,7 +393,7 @@ export const readPicks = (storage: Pick<Storage, 'getItem'> = localStorage): Pic
     const picks: Picks = {}
     for (const [path, pick] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
       if (!isPath(path) || !SIG_RE.test(String(pick?.layer)) || !SIG_RE.test(String(pick?.root))) continue
-      picks[path] = { layer: pick.layer!, root: pick.root!, hides: pick.hides === true, at: Number(pick.at) || 0 }
+      picks[path] = { layer: pick.layer!, root: pick.root!, hides: pick.hides === true, at: Number(pick.at) || 0, ...(pick.byHand === true ? { byHand: true } : {}) }
     }
     return picks
   } catch { return {} }

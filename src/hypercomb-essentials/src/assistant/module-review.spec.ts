@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { assessSandbox, isSandboxSite, publishChange, readChange, readTrial, reviewChange, reviewContext, reviewQuestion, sectionText, tallyAssessments, trialsOf, verdictOf, type ReviewDeps } from './module-review.js'
+import { assessSandbox, changedPaths, isSandboxSite, publishChange, readChange, readTrial, reviewChange, reviewContext, reviewQuestion, sectionText, takeTrial, tallyAssessments, trialsOf, verdictOf, type ReviewDeps, type TakeDeps } from './module-review.js'
 
 const BEFORE = ['// src/preferences/settings.ts', 'export const zoom = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
 const AFTER = ['// src/preferences/settings.ts', 'export const zoom = 2;', 'globalThis.__proof = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
@@ -172,5 +172,47 @@ describe('reading a trial', () => {
   it('reads a trial with no change and no review as exactly that', async () => {
     const reading = await readTrial({ sandbox: true, title: 'try-zoom', package: 'e'.repeat(64), pubkey: 'p' }, async () => null)
     expect(reading).toEqual({ files: [], off: [], at: null, review: null, people: [], missing: [] })
+  })
+})
+
+describe('taking a trial into your own build', () => {
+  const root = 'e'.repeat(64)
+  const deps = (carried: Record<string, string>, refuse: Record<string, string> = {}) => {
+    const picked: { path: string; layer: string; root: string; zones: readonly string[]; byHand: boolean }[] = []
+    const take: TakeDeps = {
+      revisionsOf: async (path, _zones, roots) => carried[path]
+        ? [{ layer: 'a'.repeat(64), sources: [{ root: 'f'.repeat(64) }] }, { layer: carried[path]!, sources: roots.map(r => ({ root: r })) }]
+        : [],
+      pick: async (path, revision, zones, options) => {
+        picked.push({ path, ...revision, zones, byHand: options.byHand })
+        return refuse[path] ? { ok: false, error: refuse[path] } : { ok: true }
+      },
+      held: async held => held === root ? 2 : 0,
+    }
+    return { take, picked }
+  }
+
+  it('picks the trial\'s own layer at each path, by hand, and says how much waits in the brood', async () => {
+    const { take, picked } = deps({ preferences: 'c'.repeat(64), 'games/pong': 'd'.repeat(64) })
+    const outcome = await takeTrial(root, ['preferences', 'games/pong'], ['try-zoom.hypercomb.com'], take)
+    expect(outcome).toEqual({ taken: ['preferences', 'games/pong'], refused: [], held: 2 })
+    expect(picked).toEqual([
+      { path: 'preferences', layer: 'c'.repeat(64), root, zones: ['try-zoom.hypercomb.com'], byHand: true },
+      { path: 'games/pong', layer: 'd'.repeat(64), root, zones: ['try-zoom.hypercomb.com'], byHand: true },
+    ])
+  })
+
+  it('names what it could not take, and counts nothing held when nothing was taken', async () => {
+    const { take } = deps({ preferences: 'c'.repeat(64) }, { preferences: 'nothing is installed here to pick onto' })
+    expect(await takeTrial(root, ['preferences', 'notes'], ['h'], take)).toEqual({
+      taken: [], held: 0,
+      refused: [{ path: 'preferences', error: 'nothing is installed here to pick onto' }, { path: 'notes', error: 'the trial does not carry notes' }],
+    })
+  })
+
+  it('takes the paths a change touched, once each', () => {
+    const file = (path: string) => ({ path, section: 's', from: 'x', to: 'y', before: 'b', after: 'a' })
+    expect(changedPaths({ changes: [file('preferences'), file('preferences'), file('games/pong'), file('../escape')] })).toEqual(['preferences', 'games/pong'])
+    expect(changedPaths(null)).toEqual([])
   })
 })

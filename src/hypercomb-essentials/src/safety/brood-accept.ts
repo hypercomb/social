@@ -14,7 +14,16 @@
 // and said what it saw; no model, agent or community can accept on the
 // participant's behalf, and the second dialog is where that is said out loud.
 
-import { acceptIntoHive, refuseInBrood, requestConfirm, type BroodRecord } from '@hypercomb/core'
+import { acceptIntoHive, EffectBus, refuseInBrood, requestConfirm, type BroodRecord } from '@hypercomb/core'
+
+/** Said once a hand has ruled — `{ sig, verdict, at }`. A selection that was
+ *  waiting on held code (a trial taken by hand) composes again on it. */
+export const BROOD_RULED = 'brood:ruled'
+
+const ruled = (record: BroodRecord | null): BroodRecord | null => {
+  if (record?.ruling) EffectBus.emit(BROOD_RULED, { sig: record.sig, verdict: record.ruling.verdict, at: Date.now() })
+  return record
+}
 
 export const WARNING_NOT_SAFE = 'not-safe'
 export const WARNING_AUDIT_IS_NOT_APPROVAL = 'audit-is-not-approval'
@@ -63,10 +72,10 @@ export const acceptByHand = async (record: BroodRecord): Promise<BroodRecord | n
   })
   if (!second) return null
 
-  return await acceptIntoHive(record.sig, [WARNING_NOT_SAFE, WARNING_AUDIT_IS_NOT_APPROVAL])
+  return ruled(await acceptIntoHive(record.sig, [WARNING_NOT_SAFE, WARNING_AUDIT_IS_NOT_APPROVAL]))
 }
 
 /** Refusing needs no ceremony: it is the safe direction, and it is reversible
  *  by the same hand that made it. */
 export const refuseByHand = async (record: BroodRecord): Promise<BroodRecord | null> =>
-  await refuseInBrood(record.sig)
+  ruled(await refuseInBrood(record.sig))

@@ -254,7 +254,7 @@ export class TutorialLessonRegistry extends EventTarget {
 }
 
 const _registry = new TutorialLessonRegistry()
-window.ioc.register('@diamondcoreprocessor.com/TutorialLessonRegistry', _registry)
+// tutorial/bee-tutorial.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.
 
 /** Module-local handle — lesson files register through this, so registration
  *  never depends on IoC resolution order at module load. */

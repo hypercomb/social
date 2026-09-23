@@ -38,9 +38,13 @@
 // with no lesson at all. Retiring a window means retiring its lesson in the
 // same pass, exactly as adding one means adding a lesson.
 
-import { tutorialLessons, TUTORIAL_DEMO_MARK as PRACTICE_MARK } from '../tutorial-lesson.js'
+import { type TutorialLesson, TUTORIAL_DEMO_MARK as PRACTICE_MARK } from '../tutorial-lesson.js'
 import { hasBehaviour, hasWindow, showFilter, subject, subjects } from './lesson-kit.js'
 import { isLocalClaudeBridgeConfigured, isParticipantAiHostConfigured } from '@hypercomb/core'
+
+/** The expert course, in order. bee-tutorial.drone.ts registers it — a
+ *  dependency registers nothing (atomic-modules-plan.md). */
+export const EXPERT_LESSONS: TutorialLesson[] = []
 
 const L = 'expert' as const
 const chatConfigured = (): boolean =>
@@ -57,7 +61,7 @@ const names = (stage: { t(k: string, f: string): string }): string[] => [
 // The window everything else is reachable from. Creation, depth, filtering
 // and every slash behaviour ride this one box.
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-command-line',
   level: L,
   order: 10,
@@ -92,7 +96,7 @@ tutorialLessons.register({
 
 // ── 20 · the command palette ───────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-palette',
   level: L,
   order: 20,
@@ -126,7 +130,7 @@ tutorialLessons.register({
 
 // ── 30 · the reference ─────────────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-help',
   level: L,
   order: 30,
@@ -152,7 +156,7 @@ tutorialLessons.register({
 
 // ── 40 · the tile editor ───────────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-editor',
   level: L,
   order: 40,
@@ -186,7 +190,7 @@ tutorialLessons.register({
 // and carries that look to others. It is the only copy-appearance verb in the
 // hive and had no lesson at all.
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-format',
   level: L,
   order: 45,
@@ -223,7 +227,7 @@ tutorialLessons.register({
 
 // ── 50 · the notes window ──────────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-notes',
   level: L,
   order: 50,
@@ -267,7 +271,7 @@ tutorialLessons.register({
 // you WRITE (a dense tree, edited in place); the reader is where you READ (one
 // note at a time, big, with its hierarchy around it). Taught back to back.
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-reader',
   level: L,
   order: 55,
@@ -311,7 +315,7 @@ tutorialLessons.register({
 
 // ── 60 · the files window ──────────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-files',
   level: L,
   order: 60,
@@ -339,7 +343,7 @@ tutorialLessons.register({
 
 // ── 70 · the tags window ───────────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-tags',
   level: L,
   order: 70,
@@ -381,7 +385,7 @@ tutorialLessons.register({
 
 // ── 80 · the collections index ─────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-collections',
   level: L,
   order: 80,
@@ -420,7 +424,7 @@ tutorialLessons.register({
 
 // ── 100 · the clipboard window ─────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-clipboard',
   level: L,
   order: 100,
@@ -462,7 +466,7 @@ tutorialLessons.register({
 
 // ── 110 · the arrangements window ──────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-sequence',
   level: L,
   order: 110,
@@ -493,7 +497,7 @@ tutorialLessons.register({
 // docked window that had no lesson. Its central claim is worth teaching
 // first: THE CANVAS IS THE WORKFLOW.
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-workflow',
   level: L,
   order: 115,
@@ -529,7 +533,7 @@ tutorialLessons.register({
 
 // ── 120 · the history window ───────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-history',
   level: L,
   order: 120,
@@ -560,7 +564,7 @@ tutorialLessons.register({
 
 // ── 130 · the rewind window ────────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-rewind',
   level: L,
   order: 130,
@@ -598,7 +602,7 @@ tutorialLessons.register({
 //
 // `window-views` is retired as a lesson id. The teaching is all here.
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-features',
   level: L,
   order: 140,
@@ -648,7 +652,7 @@ tutorialLessons.register({
 
 // ── 160 · the assistant ────────────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-assistant',
   level: L,
   order: 160,
@@ -688,7 +692,7 @@ tutorialLessons.register({
 // course's one-lesson-per-window rule): what ATTACHED CONTEXT is, where it is
 // managed, and the promise that what is listed is what a question reads.
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-context',
   level: L,
   order: 165,
@@ -717,7 +721,7 @@ tutorialLessons.register({
 
 // ── 170 · the observe window ───────────────────────────────────────────
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-observe',
   level: L,
   order: 170,
@@ -761,7 +765,7 @@ tutorialLessons.register({
 // STATE. Strictly read-only here — course rule 2: nothing is ever published
 // from a tutorial, so every row is pointed at and none is pressed.
 
-tutorialLessons.register({
+EXPERT_LESSONS.push({
   id: 'window-publish',
   level: L,
   order: 175,

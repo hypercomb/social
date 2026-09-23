@@ -24,6 +24,14 @@
 //   ATTESTED  a publisher the participant FOLLOWS has signed a sentinel
 //             naming it (core ATTESTATION_IOC_KEY, implemented where nostr
 //             lives — essentials/sharing/package-attestation.ts).
+//   HAND      the participant picked ONE revision at ONE path, by hand, from
+//             a root nothing here vouches for — a community trial
+//             (documentation/module-sandbox.md, "Your own build"). It is let in
+//             as a STRANGER's arrival: every bee and dependency bundle it brings
+//             that the trunk does not already run is HELD in the brood, and
+//             runs only after the participant accepts it with the two warnings
+//             (core/brood.ts). Only a pick asks this (acquire.ts pickRevision);
+//             an install never does, and a forged index is never answered by it.
 //   FLOOR     the shell found the live package below its floor: it cannot
 //             answer the update door, so it can never move itself
 //             (hypercomb-web package-floor.ts). The old package has no
@@ -45,7 +53,7 @@ import { ATTESTATION_IOC_KEY, type AttestationRefusal, type PackageAttestation }
 import { DEFAULT_HOST_ZONES, hostZone } from './host-zones.js'
 
 export type ActivationVerdict =
-  | { ok: true; by: 'self' | 'genesis' | 'attested' | 'floor' }
+  | { ok: true; by: 'self' | 'genesis' | 'attested' | 'floor' | 'hand' }
   | { ok: false; error: string }
 
 export type ActivationQuestion = {
@@ -64,6 +72,9 @@ export type ActivationQuestion = {
   /** The shell found the live package below its floor (package-floor.ts).
    *  Only the shell sets it, and only the seed may answer it. */
   floor?: boolean
+  /** One revision at one path, picked by the participant's own hand. Only a
+   *  pick sets it; what it admits is held in the brood (the HAND door). */
+  byHand?: boolean
 }
 
 /** The attester runtime finds through IoC — null when no module has
@@ -76,6 +87,15 @@ export const registeredAttester = (): PackageAttestation | null => {
 }
 
 export const activationAuthority = async (q: ActivationQuestion): Promise<ActivationVerdict> => {
+  const verdict = await answer(q)
+  // HAND: what no door admits, the participant's own pick may bring in —
+  // held, never run. A forged index is the loudest condition in the protocol
+  // and is never waved through, by hand or otherwise.
+  if (!verdict.ok && q.byHand === true && !('forged' in verdict)) return { ok: true, by: 'hand' }
+  return verdict.ok ? verdict : { ok: false, error: verdict.error }
+}
+
+const answer = async (q: ActivationQuestion): Promise<ActivationVerdict | { ok: false; error: string; forged: true }> => {
   const zone = hostZone(q.zone)
   const self = hostZone(q.self)
   if (zone && zone === self) return { ok: true, by: 'self' }
@@ -94,7 +114,8 @@ export const activationAuthority = async (q: ActivationQuestion): Promise<Activa
   try {
     const verdict = await attester.attest(q.packageSig, [...new Set(offering)])
     if (verdict.ok) return { ok: true, by: 'attested' }
-    return { ok: false, error: refusalText(verdict.reason, zone, verdict.detail) }
+    const error = refusalText(verdict.reason, zone, verdict.detail)
+    return verdict.reason === 'forged' ? { ok: false, error, forged: true } : { ok: false, error }
   } catch {
     return { ok: false, error: `${zone}'s build could not be attested — the attester failed, so it stays unapplied` }
   }

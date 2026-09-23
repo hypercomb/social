@@ -85,25 +85,9 @@ export const TILE_PROPERTIES_SLOT = 'properties'
 // Register the slot once the registry is ready. Module load order is
 // non-deterministic, so we use `whenReady` rather than a direct `get` —
 // the registration fires exactly when the registry exists on ioc.
-type LayerSlotRegistryLike = {
-  register: (slot: { slot: string; triggers: readonly string[] }) => void
-}
-;(window as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc?.whenReady?.(
-  '@diamondcoreprocessor.com/LayerSlotRegistry',
-  (registry) => {
-    try {
-      (registry as LayerSlotRegistryLike).register({
-        slot: TILE_PROPERTIES_SLOT,
-        triggers: [],
-      })
-    } catch (err) {
-      // Idempotent re-registration with the same name + payload is
-      // safe; only a collision throws. Surface anything else so we
-      // notice if another subsystem claims `properties` first.
-      console.warn('[tile-properties] slot register failed:', err)
-    }
-  },
-)
+/** The slot as the LayerSlotRegistry declares it. The first paint reads tile
+ *  properties, so show-cell.drone.ts — render-critical — registers it. */
+export const TILE_PROPERTIES_SLOT_DECLARATION = { slot: TILE_PROPERTIES_SLOT, triggers: [] as string[] }
 
 export const isSignature = (value: unknown): boolean =>
   typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)

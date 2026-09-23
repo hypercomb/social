@@ -86,6 +86,25 @@ describe('activationAuthority', () => {
     expect(verdict.ok).toBe(false)
   })
 
+  it('lets a pick made by hand in as a stranger — never over a forged index, never when a door already admits it', async () => {
+    // What no door admits, the participant's own pick brings in, held.
+    const notNamed = attesterSaying({ ok: false, reason: 'not-named' })
+    expect(await activationAuthority({ packageSig: SIG, zone: 'try-x.hypercomb.com', self: 'hypercomb.io', installed: 'c'.repeat(64), attester: notNamed, byHand: true }))
+      .toEqual({ ok: true, by: 'hand' })
+    expect(await activationAuthority({ packageSig: SIG, zone: 'try-x.hypercomb.com', self: 'hypercomb.io', installed: 'c'.repeat(64), attester: null, byHand: true }))
+      .toEqual({ ok: true, by: 'hand' })
+    // The same offer without the hand is still refused.
+    expect((await activationAuthority({ packageSig: SIG, zone: 'try-x.hypercomb.com', self: 'hypercomb.io', installed: 'c'.repeat(64), attester: notNamed })).ok).toBe(false)
+    // A forged index is never waved through.
+    const forged = attesterSaying({ ok: false, reason: 'forged' })
+    expect(await activationAuthority({ packageSig: SIG, zone: 'try-x.hypercomb.com', self: 'hypercomb.io', installed: 'c'.repeat(64), attester: forged, byHand: true }))
+      .toEqual({ ok: false, error: refusalText('forged', 'try-x.hypercomb.com') })
+    // A root a followed publisher vouches for is theirs, not a stranger's.
+    const yes = attesterSaying({ ok: true, pubkey: PUB, witnessed: 'current' })
+    expect(await activationAuthority({ packageSig: SIG, zone: 'friend.example', self: 'hypercomb.io', installed: 'c'.repeat(64), attester: yes, byHand: true }))
+      .toEqual({ ok: true, by: 'attested' })
+  })
+
   it('names the way forward in every refusal', () => {
     expect(refusalText('no-follow', 'x.example')).toMatch(/visit x\.example/)
     expect(refusalText('forged', 'x.example')).toMatch(/refused/)

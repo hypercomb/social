@@ -11,6 +11,10 @@
 // its note; and steps to the previous or next trial the zone lists, so a
 // group working together can walk every trial in turn without leaving.
 //
+// Each changed file can be TAKEN into this hive at its path (module-review.ts
+// takeTrial, the same act as `module take`): made by hand, so what it brings
+// waits in the brood until the participant accepts it there.
+//
 // Everything is read BY SIGNATURE from the trial's door (the worker's flat
 // read), and only bytes that hash to the signature asked for are believed.
 // Text from the heap is drawn as text, never as markup: notes and findings
@@ -19,9 +23,9 @@
 // A dependency: it exports the element; the sandbox feature's bee
 // (sandbox-door.drone.ts) defines it and adds it to the ShellSurfaceRegistry.
 
-import { EffectBus, I18N_IOC_KEY, SignatureService, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { DiffRow } from './line-diff.js'
-import { isSandboxSite, readTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TrialReading } from './module-review.js'
+import { doorReader, isSandboxSite, readTrial, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
 
 export const SANDBOX_CHANGE_SURFACE = 'hc-sandbox-change'
 export const SANDBOX_CHANGE_OWNER = '@diamondcoreprocessor.com/SandboxChangeView'
@@ -47,13 +51,8 @@ const t = (key: string, fallback: string, params?: Record<string, string | numbe
   return value && value !== key ? value : fallback.replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name] ?? ''))
 }
 
-/** Reads a signature from the door, believing only bytes that hash to it. */
-export const doorReader = (door: string) => async (sig: string): Promise<string | null> => {
-  const res = await fetch(`${door.replace(/\/+$/, '')}/${sig}`, { cache: 'force-cache' }).catch(() => null)
-  if (!res?.ok) return null
-  const bytes = await res.arrayBuffer()
-  return (await SignatureService.sign(bytes)) === sig ? new TextDecoder().decode(bytes) : null
-}
+const INSTALL_KEY = '@hypercomb.social/Install'
+const BROOD_OPEN = 'brood:open'
 
 /** The zone a door hangs off: its origin without the trial's own label. */
 const zoneOf = (door: string, name: string): string => door.replace(`//${name}.`, '//')
@@ -65,9 +64,16 @@ export class SandboxChangeElement extends HTMLElement {
   #reading: TrialReading | null = null
   #trials: readonly SandboxTrial[] = []
   #turn = 0
+  /** What taking each path came to, while this trial is shown. */
+  #taking = new Map<string, { text: string; held: boolean }>()
 
-  /** SEAM, replaced in a spec so no test reads a real door. */
+  /** SEAMS, replaced in a spec so no test reads a real door or a real install. */
   reader: (door: string) => (sig: string) => Promise<string | null> = doorReader
+  taker: () => TakeDeps | null = () => {
+    type Install = Parameters<typeof takeDepsFrom>[0]
+    const install = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(INSTALL_KEY) as Partial<Install> | undefined
+    return install?.pick && install.revisionsOf ? takeDepsFrom(install as Install) : null
+  }
 
   connectedCallback(): void {
     ensureStyles()
@@ -86,6 +92,7 @@ export class SandboxChangeElement extends HTMLElement {
   /** Open on one trial and read it. Resolves once it is drawn. */
   async show(payload: SandboxChangePayload): Promise<void> {
     const turn = ++this.#turn
+    if (this.#shown?.name !== payload.name) this.#taking.clear()
     this.#shown = payload
     this.#reading = null
     this.#open()
@@ -128,6 +135,28 @@ export class SandboxChangeElement extends HTMLElement {
     if (event.key !== 'Escape') return
     event.stopPropagation()
     this.close()
+  }
+
+  /** Take this trial's layer at one path into this hive, by hand. */
+  async #take(path: string): Promise<void> {
+    const shown = this.#shown
+    const deps = this.taker()
+    if (!shown || this.#taking.has(path)) return
+    if (!deps) {
+      this.#taking.set(path, { text: t('module.panel.nottaken', 'not taken: {reason}', { reason: 'nothing is installed here' }), held: false })
+      this.#render()
+      return
+    }
+    this.#taking.set(path, { text: t('module.panel.taking', 'taking…'), held: false })
+    this.#render()
+    const outcome = await takeTrial(shown.site.package, [path], [new URL(shown.door).host], deps)
+    const refused = outcome.refused[0]
+    this.#taking.set(path, refused
+      ? { text: t('module.panel.nottaken', 'not taken: {reason}', { reason: refused.error }), held: false }
+      : outcome.held
+        ? { text: t('module.panel.takenheld', 'taken — it waits in the brood until you accept it'), held: true }
+        : { text: t('module.panel.taken', 'taken — reload to run it'), held: false })
+    this.#render()
   }
 
   /** The neighbouring trial on the zone, read from its own door. */
@@ -231,6 +260,23 @@ export class SandboxChangeElement extends HTMLElement {
     const head = el('div', 'hc-trial-file-head')
     head.appendChild(el('span', 'hc-trial-file-name', file.section))
     if (file.diff) head.appendChild(el('span', 'hc-trial-file-count', `+${file.diff.added} −${file.diff.removed}`))
+    if (file.path) {
+      const taking = this.#taking.get(file.path)
+      if (taking) head.appendChild(el('span', 'hc-trial-taken', taking.text))
+      else {
+        const take = word(t('module.panel.take', 'take'), t('module.panel.takewhy', 'Take this change into your hive at {path} — held until you accept it', { path: file.path }), () => void this.#take(file.path))
+        take.classList.add('hc-trial-take')
+        head.appendChild(take)
+      }
+      if (taking?.held) {
+        const brood = word(t('module.panel.brood', 'open the brood'), t('module.panel.brood', 'open the brood'), () => {
+          this.close()
+          EffectBus.emit(BROOD_OPEN, { at: Date.now() })
+        })
+        brood.classList.add('hc-trial-take')
+        head.appendChild(brood)
+      }
+    }
     block.appendChild(head)
     if (!file.diff) {
       block.appendChild(el('p', 'hc-trial-quiet', t('module.panel.unreadable', 'This file could not be read from the door.')))
@@ -337,6 +383,8 @@ function ensureStyles(): void {
     .hc-trial-file-head { display: flex; gap: 0.75rem; align-items: baseline; }
     .hc-trial-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hc-window-ink-loud, #eef2f5); }
     .hc-trial-file-count { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
+    .hc-trial-word.hc-trial-take { min-width: 0; height: auto; padding: 0; font-size: 0.92em; text-decoration: underline; }
+    .hc-trial-taken { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); font-style: italic; }
     .hc-trial-rows { overflow-x: auto; }
     .hc-trial-row { white-space: pre; min-width: max-content; padding: 0 0.25rem; }
     .hc-trial-row.is-same { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }

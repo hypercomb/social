@@ -41,7 +41,7 @@
 // `@hypercomb/core` is EXTERNAL — the import map resolves it to the runtime
 // the shim already loaded, so this bundle shares its instances rather than
 // minting a second set.
-import { INSTALL_IOC_KEY, MARKER_NAME, askUntried, hardDeleteVetoFor, holdArrivals, registerPoolMeaning, SignatureService, SignatureStore, type ArrivalKind, type EggProbe, type InstallProvider } from '@hypercomb/core'
+import { INSTALL_IOC_KEY, MARKER_NAME, askUntried, hardDeleteVetoFor, holdArrivals, mayRunBee, registerPoolMeaning, SignatureService, SignatureStore, type ArrivalKind, type EggProbe, type InstallProvider } from '@hypercomb/core'
 // These two are PURE — stateless functions over bytes, no IoC registration, no
 // module state — which is the entire reason they may be bundled in here. The
 // walker IS the protocol; only the io wiring below is ours.
@@ -670,8 +670,16 @@ export const applySelection = async (
     if (!record) return fail(`the root ${path} was picked from is not held here`)
     sources.push({ path, dependencies: sigsOf(record.dependencies) })
   }
+  // Only what may run is composed: a picked bundle held in the brood waits,
+  // and the trunk's bundle for its namespace keeps running meanwhile.
+  const runs = new Map<string, Promise<boolean>>()
+  const mayRun = (sig: string): Promise<boolean> => {
+    let known = runs.get(sig)
+    if (!known) { known = mayRunBee(sig).catch(() => false); runs.set(sig, known) }
+    return known
+  }
   const dependencies = sources.length
-    ? await composeDependencies(walk.rootDependencies, sources, walk.applied, readNamespace)
+    ? await composeDependencies(walk.rootDependencies, sources, walk.applied, readNamespace, mayRun)
     : walk.rootDependencies
   const bees = [...new Set([...walk.rootBees, ...walk.nodes.flatMap(node => node.bees)])].sort()
   for (const sig of [...bees, ...dependencies]) {
@@ -680,6 +688,10 @@ export const applySelection = async (
   const inventory: PackageInventory = { layers: walk.layers, bees, dependencies }
   const off = readOffUnits()
   const enabled = enabledBees(walk, off)
+  // Held code is inert: its imports need not resolve and its core surface need
+  // not match until it is accepted — then the selection is composed again.
+  const runnable = async (sigs: readonly string[]): Promise<string[]> =>
+    (await Promise.all(sigs.map(async sig => (await mayRun(sig)) ? sig : null))).filter((sig): sig is string => !!sig)
 
   // SIDEWAYS. A picked module that imports a namespace the selection does not
   // carry would die at evaluation — refused, by name. Only what the picks
@@ -691,14 +703,14 @@ export const applySelection = async (
     const trunkWalk = await walkTree(trunk, local)
     const before = new Set(await missingNamespaces(
       [...enabledBees(trunkWalk, off), ...walk.rootDependencies], await provided(walk.rootDependencies), readModule))
-    const missing = (await missingNamespaces([...enabled, ...dependencies], await provided(dependencies), readModule))
+    const missing = (await missingNamespaces([...await runnable(enabled), ...dependencies], await provided(dependencies), readModule))
       .filter(ns => !before.has(ns))
     if (missing.length) {
       return fail(`this selection needs ${missing.join(', ')}, which nothing picked and nothing on the trunk carries — take ${missing.length === 1 ? 'it' : 'them'} as well`)
     }
   }
 
-  const compat = await checkCoreCompatibility([...bees, ...dependencies], readModule)
+  const compat = await checkCoreCompatibility([...await runnable(bees), ...dependencies], readModule)
   if (!compat.ok) return fail(`selection ${describeCoreMismatch(compat.missing)}`)
   const beeDeps = await deriveBeeDeps(bees, dependencies, readModule)
   await writeBags(store, inventory)
@@ -718,8 +730,8 @@ export const applySelection = async (
  * else's code, trusted once, and a participant who holds followed code should
  * see it too.
  */
-const arrivalKindOf = (by: 'self' | 'genesis' | 'attested' | 'floor'): ArrivalKind =>
-  by === 'self' ? 'own' : 'followed'
+const arrivalKindOf = (by: 'self' | 'genesis' | 'attested' | 'floor' | 'hand'): ArrivalKind =>
+  by === 'self' ? 'own' : by === 'hand' ? 'stranger' : 'followed'
 
 const trustedHere = (sig: string): boolean => {
   try {
@@ -740,12 +752,19 @@ const trustedHere = (sig: string): boolean => {
  * carrying it. Then only what the pick needs is admitted: the branch's layers
  * and bees, and the root's namespace bundles under the path. Nothing becomes
  * live until the selection composes (applySelection).
+ *
+ * BY HAND (`byHand`): the participant's own pick of a root nothing here
+ * vouches for — a community trial — passes the gate's HAND door as a
+ * STRANGER's arrival. Every bee and bundle it brings that the trunk does not
+ * already run is held in the brood; the root itself is never recorded as
+ * trusted, so the next pick from it asks again; and the pick remembers it was
+ * made by hand.
  */
 export const pickRevision = async (
   path: string,
   revision: { layer: string; root: string; roots?: readonly string[] },
   zones: readonly string[],
-  options: { hides?: boolean } = {},
+  options: { hides?: boolean; byHand?: boolean } = {},
 ): Promise<InstallOutcome> => {
   let fetched = 0
   let present = 0
@@ -778,6 +797,7 @@ export const pickRevision = async (
         installed: trunk,
         zones: carried.slice(1),
         attester: registeredAttester(),
+        byHand: options.byHand === true,
       })
       if (!verdict.ok) { refusal = verdict.error; continue }
       pickedKind = arrivalKindOf(verdict.by)
@@ -810,7 +830,12 @@ export const pickRevision = async (
   // root; they are verified and not yet imported. Whatever the participant's
   // rules do not clear is held, and the loader will not read it until a hand
   // — or enough vouches from communities they follow — says otherwise.
-  const pickedHeld = await holdArrivals(bees.held, pickedKind, {
+  // A stranger's pick holds only what is NEW here: a bee byte-identical to one
+  // the trunk runs is the trunk's own code, and holding its signature would
+  // hold the trunk's copy too.
+  const stranger = pickedKind === 'stranger'
+  const trunkCode = stranger ? await trunkCodeOf(trunk, io) : new Set<string>()
+  const pickedHeld = await holdArrivals(stranger ? bees.held.filter(sig => !trunkCode.has(sig)) : bees.held, pickedKind, {
     zone: carried[0] ?? '',
     packageSig: root,
     how: `picked revision of ${path}`,
@@ -831,22 +856,45 @@ export const pickRevision = async (
   const readDependency = readFrom([store.dependencies], sig => [`${sig}.js`, sig])
   const writeDependency = writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8')
   const unreadable: string[] = []
+  const bundles: string[] = []
   for (const sig of rootDependencies) {
-    if (await readDependency(sig)) { present++; continue }
+    const held = await readDependency(sig)
+    if (held) {
+      present++
+      if (within(namespaceOf(held), path)) bundles.push(sig)
+      continue
+    }
     const bytes = await fetchFrom(sig)
     if (!bytes || (await SignatureService.sign(bytes.buffer)) !== sig) { unreadable.push(sig); continue }
     if (!within(namespaceOf(bytes), path)) continue
     await writeDependency(sig, bytes)
+    bundles.push(sig)
     fetched++
   }
   if (unreadable.length) return fail(`${unreadable.length} namespace bundle(s) of ${root.slice(0, 12)}… could not be admitted`)
+  // A bundle is code too: a stranger's is held like its bees, and while it is
+  // held the selection keeps the trunk's bundle for its namespace.
+  if (stranger) {
+    await holdArrivals(bundles.filter(sig => !trunkCode.has(sig)), pickedKind, {
+      zone: carried[0] ?? '',
+      packageSig: root,
+      how: `picked revision of ${path} — a dependency bundle`,
+    })
+  }
 
-  const outcome = await applySelection(trunk, [root, ...branch.result.held, ...bees.held], {
+  const outcome = await applySelection(trunk, [...(stranger ? [] : [root]), ...branch.result.held, ...bees.held], {
     ...readPicks(),
-    [path]: { layer: revision.layer, root, hides: options.hides === true, at: Date.now() },
+    [path]: { layer: revision.layer, root, hides: options.hides === true, at: Date.now(), ...(stranger ? { byHand: true } : {}) },
   })
   if (!outcome.ok) return fail(outcome.error)
   return { ok: true, packageSig: root, fetched, present, holes: [], refused: [] }
+}
+
+/** Every bee and dependency bundle the trunk's own tree runs — read from what
+ *  is held, never fetched. */
+const trunkCodeOf = async (trunk: string, io: ReplicationIo): Promise<Set<string>> => {
+  const walk = await walkTree(trunk, { ...io, fetch: async () => null })
+  return new Set([...walk.rootBees, ...walk.nodes.flatMap(node => node.bees), ...walk.rootDependencies])
 }
 
 /** Drop the pick at a path: the trunk's layer runs there again. */

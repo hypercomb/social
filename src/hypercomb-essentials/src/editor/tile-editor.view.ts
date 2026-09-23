@@ -41,7 +41,9 @@ import { installTileEditorStyles, TILE_EDITOR_SURFACE } from './tile-editor.styl
 import type { EditorSurfaceKind, TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
-const OWNER = '@diamondcoreprocessor.com/TileEditorView'
+/** The view's IoC key — tile-editor.drone.ts registers the facade under it. */
+export const TILE_EDITOR_VIEW_KEY = '@diamondcoreprocessor.com/TileEditorView'
+const OWNER = TILE_EDITOR_VIEW_KEY
 const WINDOW_ID = 'tile-editor'
 const INSET_OWNER = 'tile-editor'
 const DEFAULT_BORDER = '#c8975a'
@@ -1538,19 +1540,9 @@ export class TileEditorElement extends HTMLElement {
   }
 }
 
-window.ioc.register(OWNER, facade)
+/** The view's IoC face, for the bee that registers it. */
+export { facade as tileEditorViewFacade }
 
-// Contribute the surface the doctrine way: define the element, then add it to
-// the registry — never a tag in either app.html, never an Angular class.
-;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void; all?(): { name: string; component?: unknown }[] }) => void) => void } })
-  .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
-    // An older shell still carrying the Angular editor keeps it: two
-    // presenters for one session would fight over the same picture.
-    if (registry.all?.().some(surface => surface.name === TILE_EDITOR_SURFACE && surface.component)) return
-    if (!customElements.get(TILE_EDITOR_SURFACE)) customElements.define(TILE_EDITOR_SURFACE, TileEditorElement)
-    try {
-      registry.add({ name: TILE_EDITOR_SURFACE, owner: OWNER, element: TILE_EDITOR_SURFACE, order: 220 })
-    } catch {
-      // duplicate add (hot reload) — the mounted surface is already live
-    }
-  })
+// tile-editor.drone.ts registers the facade and adds this element to the
+// shell's surface registry (atomic-modules-plan.md): a dependency registers
+// nothing.

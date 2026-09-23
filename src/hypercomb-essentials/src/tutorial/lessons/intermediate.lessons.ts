@@ -9,8 +9,12 @@
 // Every lesson gates on the behaviour it teaches actually being registered
 // (`requires`), so a build without a behaviour simply has one lesson fewer.
 
-import { tutorialLessons, TUTORIAL_DEMO_MARK as PRACTICE_MARK } from '../tutorial-lesson.js'
+import { type TutorialLesson, TUTORIAL_DEMO_MARK as PRACTICE_MARK } from '../tutorial-lesson.js'
 import { hasBehaviour, showFilter, subject, subjects } from './lesson-kit.js'
+
+/** The intermediate course, in order. bee-tutorial.drone.ts registers it — a
+ *  dependency registers nothing (atomic-modules-plan.md). */
+export const INTERMEDIATE_LESSONS: TutorialLesson[] = []
 
 const L = 'intermediate' as const
 
@@ -20,7 +24,7 @@ const names = (stage: { t(k: string, f: string): string }): string[] => [
   stage.t('tutorial.name.note2', 'Errands'),
 ]
 
-tutorialLessons.register({
+INTERMEDIATE_LESSONS.push({
   id: 'keyword',
   level: L,
   order: 10,
@@ -51,7 +55,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+INTERMEDIATE_LESSONS.push({
   id: 'filter',
   level: L,
   order: 20,
@@ -78,7 +82,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+INTERMEDIATE_LESSONS.push({
   id: 'title',
   level: L,
   order: 30,
@@ -106,7 +110,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+INTERMEDIATE_LESSONS.push({
   id: 'reference',
   level: L,
   order: 40,
@@ -141,7 +145,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+INTERMEDIATE_LESSONS.push({
   id: 'into',
   level: L,
   order: 45,
@@ -198,7 +202,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+INTERMEDIATE_LESSONS.push({
   id: 'palette',
   level: L,
   order: 50,
@@ -229,7 +233,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+INTERMEDIATE_LESSONS.push({
   id: 'history',
   level: L,
   order: 60,
@@ -253,7 +257,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+INTERMEDIATE_LESSONS.push({
   id: 'snapshot',
   level: L,
   order: 70,

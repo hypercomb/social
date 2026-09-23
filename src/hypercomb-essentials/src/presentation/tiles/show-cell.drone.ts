@@ -9,7 +9,7 @@ import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
-import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex, recoverableTileImageSig, seedLayerKeyedEntries } from '../../editor/tile-properties.js'
+import { TILE_PROPERTIES_SLOT_DECLARATION, isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex, recoverableTileImageSig, seedLayerKeyedEntries } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
@@ -11702,6 +11702,13 @@ export class ShowCellDrone extends Drone {
 // the services it needs for the first paint, so they exist before it.
 window.ioc.register('@diamondcoreprocessor.com/LayoutService', new LayoutService())
 window.ioc.register('@diamondcoreprocessor.com/SubstrateService', new SubstrateService())
+window.ioc.whenReady('@diamondcoreprocessor.com/LayerSlotRegistry', (slots: { register(slot: { slot: string; triggers: readonly string[] }): void }) => {
+  try { slots.register(TILE_PROPERTIES_SLOT_DECLARATION) } catch (err) {
+    // Idempotent re-registration with the same name + payload is safe; only a
+    // collision throws. Surface anything else so a rival claim is noticed.
+    console.warn('[tile-properties] slot register failed:', err)
+  }
+})
 
 const showCell = new ShowCellDrone()
 window.ioc.register('@diamondcoreprocessor.com/ShowCellDrone', showCell)

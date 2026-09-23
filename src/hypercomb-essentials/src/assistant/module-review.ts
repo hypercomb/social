@@ -24,7 +24,7 @@
 //
 // A dependency: it registers nothing. The `module` queen drives it.
 
-import { sectionOf } from '@hypercomb/core'
+import { broodRoster, sectionOf, SignatureService } from '@hypercomb/core'
 import { diffLines, type LineDiff } from './line-diff.js'
 
 export type ReviewVerdict = 'accept' | 'refuse' | 'unclear'
@@ -360,3 +360,65 @@ export const readTrial = async (site: SandboxSite, read: (sig: string) => Promis
     review, people, missing: [...missing],
   }
 }
+
+/** Reads a signature from a trial's door, believing only bytes that hash to it. */
+export const doorReader = (door: string) => async (sig: string): Promise<string | null> => {
+  const res = await fetch(`${door.replace(/\/+$/, '')}/${sig}`, { cache: 'force-cache' }).catch(() => null)
+  if (!res?.ok) return null
+  const bytes = await res.arrayBuffer()
+  return (await SignatureService.sign(bytes)) === sig ? new TextDecoder().decode(bytes) : null
+}
+
+// ── your own build: take one community change at one path ─────────────────
+//
+// TAKE A TRIAL AT THE PATHS ITS CHANGE TOUCHED, LEAVE THE REST (documentation/
+// module-sandbox.md, "Your own build"; jwize 2026-09-22: anyone's, held). The
+// trial's layer at each path becomes a pick in this hive, made BY HAND: the
+// gate lets a root nothing here vouches for in as a stranger's (runtime
+// activation-authority.ts, the HAND door), and every bee and bundle it brings
+// that the trunk does not already run waits in the brood until the
+// participant accepts it with the two warnings. Nothing it brought runs
+// before that. `module drop <path>` gives the path back to the trunk.
+
+/** The install provider, as far as taking needs it (core InstallProvider). */
+export interface TakeDeps {
+  revisionsOf(path: string, zones: readonly string[], roots: readonly string[]): Promise<readonly { readonly layer: string; readonly sources: readonly { readonly root: string }[] }[]>
+  pick(path: string, revision: { layer: string; root: string }, zones: readonly string[], options: { byHand: true }): Promise<{ ok: boolean; error?: string }>
+  /** How much of what came from `root` waits in the brood, unruled. */
+  held(root: string): Promise<number>
+}
+
+export interface TakeOutcome {
+  readonly taken: readonly string[]
+  readonly refused: readonly { readonly path: string; readonly error: string }[]
+  readonly held: number
+}
+
+const PACKAGE_PATH_RE = /^[a-z0-9][a-z0-9._-]{0,63}(?:\/[a-z0-9][a-z0-9._-]{0,63})*$/i
+
+/** The package paths a change touched, once each, in order. */
+export const changedPaths = (record: Pick<ModuleChangeRecord, 'changes'> | null): string[] =>
+  [...new Set((record?.changes ?? []).map(file => String(file.path ?? '')).filter(path => PACKAGE_PATH_RE.test(path)))]
+
+/** Take the trial rooted at `root` at each path, by hand. */
+export const takeTrial = async (root: string, paths: readonly string[], zones: readonly string[], deps: TakeDeps): Promise<TakeOutcome> => {
+  const taken: string[] = []
+  const refused: { path: string; error: string }[] = []
+  for (const path of paths) {
+    const revisions = await deps.revisionsOf(path, zones, [root]).catch(() => [])
+    const layer = revisions.find(revision => revision.sources.some(source => source.root === root))?.layer
+    if (!layer) { refused.push({ path, error: `the trial does not carry ${path}` }); continue }
+    const picked = await deps.pick(path, { layer, root }, zones, { byHand: true })
+      .catch((error: unknown) => ({ ok: false, error: error instanceof Error ? error.message : 'the pick failed' }))
+    if (picked.ok) taken.push(path)
+    else refused.push({ path, error: picked.error ?? 'the pick was refused' })
+  }
+  return { taken, refused, held: taken.length ? await deps.held(root).catch(() => 0) : 0 }
+}
+
+/** What a take needs, from this hive's install provider and its brood. */
+export const takeDepsFrom = (install: Pick<TakeDeps, 'revisionsOf' | 'pick'>): TakeDeps => ({
+  revisionsOf: (path, zones, roots) => install.revisionsOf(path, zones, roots),
+  pick: (path, revision, zones, options) => install.pick(path, revision, zones, options),
+  held: async root => (await broodRoster()).filter(record => record.source.packageSig === root && !record.ruling).length,
+})

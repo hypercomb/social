@@ -25,6 +25,15 @@
 // scout bundles into its own verified bytes (update-scout.service.ts). The
 // package stamped now predates the file; the next build carries it.
 //
+// ONLY WHEN ASKED (`--adopt-publisher`). A stamp answered by a hive holding a
+// DIFFERENT key than the file names is refused and left owed, exactly as the
+// broker refuses an owed stamp (run-bridge.cjs). Observed 2026-09-22: a stamp
+// signed by a second key flipped the file, the next build baked that key in,
+// the usual key then stamped that build and flipped the file back — and every
+// hypercomb.io instance bounced between two builds that each named the other
+// as the update, forever. The signer is a fact about which tab answered the
+// bridge, never a decision about who builds follow.
+//
 // The stamp is idempotent (an unchanged root no-ops), so the printed retry is
 // always safe to run — and a HAND invocation stays best-effort (exit 0) so
 // re-running it while the hive is closed is a nudge, not a failure.
@@ -43,6 +52,7 @@ const PUBLISHER_FILE = resolve(__dirname, '..', 'src', 'sharing', 'install-publi
 const owedStamps = createRequire(import.meta.url)('../../scripts/bridge/owed-stamps.cjs') as {
   recordOwed(channel: string, sig: string, host?: string): boolean
   settleOwed(channel: string, sig: string): boolean
+  followedPubkey(): string | null
 }
 
 const argv = process.argv.slice(2)
@@ -52,6 +62,7 @@ const flag = (name: string): string | undefined => {
 }
 const channel = argv.find(a => !a.startsWith('--') && a !== flag('--sig') && a !== flag('--host')) || 'essentials'
 const require_ = argv.includes('--require')
+const adoptPublisher = argv.includes('--adopt-publisher')
 
 /** The package this build made, read from dist's own `host:packages` member —
  *  the same thing a host publishes and a client reads, rather than a document
@@ -122,6 +133,15 @@ if (!sig) {
 
 try {
   const data = await stamp(sig)
+  const signer = String(data['pubkey'] ?? '').trim().toLowerCase()
+  const followed = channel === 'essentials' ? owedStamps.followedPubkey() : null
+  if (followed && signer !== followed && !adoptPublisher) {
+    throw new Error(
+      `signed by ${signer.slice(0, 12) || 'an unknown key'}…, but builds follow ${followed.slice(0, 12)}… — ` +
+      `the index that moved is one no build reads. Attach the hive holding ${followed.slice(0, 12)}… and retry, ` +
+      `or pass --adopt-publisher to move every future build onto the signing key`,
+    )
+  }
   if (data['unchanged']) {
     console.log(`[stamp-install-channel] install:${channel} already at ${sig.slice(0, 12)}… — sentinel current`)
   } else {

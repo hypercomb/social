@@ -28,6 +28,8 @@
     "molecule",
     "sequence",
     "safety",
-    "keyboard"
+    "keyboard",
+    "tutorial",
+    "editor"
   ]
 }

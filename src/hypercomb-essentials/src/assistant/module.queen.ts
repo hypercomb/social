@@ -43,6 +43,14 @@
 //                          after, with the host AI's reading and people's
 //                          signed notes, and steps through the zone's other
 //                          trials (sandbox-change.view.ts). It reads.
+//   module take <change> [<path>] [@<host>]
+//                          YOUR OWN BUILD: the trial's layer at each path its
+//                          change touched (or the one named) becomes a pick
+//                          here, made by hand — so the code it brings waits in
+//                          the brood until you accept it there, and runs after
+//                          a reload. `module drop <path>` gives the path back.
+//                          Only the participant says it: a model never brings
+//                          somebody else's code into a hive.
 //
 // Every commit also publishes THE CHANGE — each drafted source file before and
 // after — as change:try-<change>, and the host's AI's reading of it as
@@ -51,9 +59,9 @@
 // All five publishing words are the participant's alone: a model proposing
 // them is refused, whatever the Execution policy.
 
-import { QueenBee, EffectBus, I18N_IOC_KEY, MODULE_DRAFTS_IOC_KEY, type I18nProvider, type ModuleDraftsProvider } from '@hypercomb/core'
+import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, type I18nProvider, type ModuleDraftsProvider } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
-import { assessSandbox, isSandboxSite, publishChange, readChange, reviewChange, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial } from './module-review.js'
+import { assessSandbox, changedPaths, doorReader, isSandboxSite, publishChange, readChange, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial } from './module-review.js'
 import { INSTALL_CHANNEL_PREFIX, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 
 /** The host backup service's participant-triggered upload (sharing/host-sync.service.ts). */
@@ -80,6 +88,10 @@ type StoreLike = {
 }
 type HostAiLike = {
   askWhole?(host: string, question: string, context: readonly string[]): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string }>
+}
+/** The install provider, as far as these words need it (core InstallProvider). */
+type InstallLike = Parameters<typeof takeDepsFrom>[0] & {
+  selection?(): Promise<{ picks: Record<string, { root: string; byHand?: boolean }> }>
 }
 type Say = (key: string, fallback: string, params?: Record<string, string | number>) => string
 type Toast = (message: string, type?: string) => void
@@ -169,7 +181,7 @@ export class ModuleQueenBee extends QueenBee {
   readonly command = 'module'
   override description = 'See, drop, try in public, or promote what runs here'
   override descriptionKey = 'slash.module'
-  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>', 'assess <change> [accept|refuse|unclear <note>]', 'trials [@<host>]', 'changes <change>']
+  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>', 'assess <change> [accept|refuse|unclear <note>]', 'trials [@<host>]', 'changes <change>', 'take <change> [<path>]']
   override examples = [
     { input: '/module', result: 'Lists the drafts picked over the installed package' },
     { input: '/module commit fresh-rooms', result: 'Publishes what runs here to try-fresh-rooms.hypercomb.com, not to followers' },
@@ -184,13 +196,14 @@ export class ModuleQueenBee extends QueenBee {
     refuse: (args: string): string | undefined => {
       const [word = 'list'] = args.trim().split(/\s+/)
       if (PUBLISHING.has(word)) return `/module ${word} publishes; only the participant says it`
+      if (word === 'take') return '/module take brings somebody else\'s code into this hive; only the participant says it'
       return ['list', 'drop'].includes(word) ? undefined : '/module takes list or drop <path>'
     },
   }
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess ', 'trials', 'changes '].filter(word => word.startsWith(typed) && word.trim() !== typed)
+    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess ', 'trials', 'changes ', 'take '].filter(word => word.startsWith(typed) && word.trim() !== typed)
   }
 
   protected async execute(args: string): Promise<void> {
@@ -207,8 +220,12 @@ export class ModuleQueenBee extends QueenBee {
     if (word === 'list') {
       const held = await drafts.list()
       const off = drafts.offPaths()
-      if (!held.length && !off.length) { toast(t('module.none', 'No drafts are picked here, and nothing is turned off.')); return }
+      const install = window.ioc?.get?.(INSTALL_IOC_KEY) as InstallLike | undefined
+      const picks = (await install?.selection?.().catch(() => null))?.picks ?? {}
+      const taken = Object.entries(picks).filter(([, pick]) => pick.byHand === true)
+      if (!held.length && !off.length && !taken.length) { toast(t('module.none', 'No drafts are picked here, and nothing is turned off.')); return }
       for (const draft of held) toast(t('module.draft', '{path}: {section} (from {from})', { path: draft.path, section: draft.section, from: draft.from.slice(0, 12) + '…' }))
+      for (const [path, pick] of taken) toast(t('module.taken', '{path}: taken by hand from {root}', { path, root: pick.root.slice(0, 12) + '…' }))
       if (off.length) toast(t('module.off', 'Turned off, left out of the next commit: {paths}', { paths: off.join(', ') }))
       return
     }
@@ -220,7 +237,7 @@ export class ModuleQueenBee extends QueenBee {
       toast(t('module.dropped', 'Dropped the draft at {path} — reload to run the package as it was.', { path }), 'success')
       return
     }
-    if (!PUBLISHING.has(word) && word !== 'trials' && word !== 'changes') { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change>, trials or changes <change>.'), 'warning'); return }
+    if (!PUBLISHING.has(word) && !['trials', 'changes', 'take'].includes(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change>, trials, changes <change> or take <change> [<path>].'), 'warning'); return }
 
     // [@<host>] publishes to a host of your own (a machine running
     // hypercomb-serve, a relay) instead of the public one; the other words are
@@ -239,6 +256,31 @@ export class ModuleQueenBee extends QueenBee {
       const stamped = await setHiveRoot(host, `${INSTALL_CHANNEL_PREFIX}${live}`, root).catch(error => ({ ok: false, reason: error instanceof Error ? error.message : 'refused' }))
       if (!stamped.ok) { toast(t('module.unstamped', 'The install channel was not stamped: {reason}', { reason: stamped.reason ?? 'refused' }), 'warning'); return }
       toast(t('module.promoted', 'Promoted {name}: {channel} now names {root}. Followers are told on their next boot.', { name, channel: `${INSTALL_CHANNEL_PREFIX}${live}`, root: root.slice(0, 12) + '…' }), 'success')
+      return
+    }
+
+    if (word === 'take') {
+      const name = sandboxName(words[0] ?? '')
+      if (!name) { toast(t('module.which', 'Say which sandbox, like: module take fresh-rooms.'), 'warning'); return }
+      const install = window.ioc?.get?.(INSTALL_IOC_KEY) as InstallLike | undefined
+      if (!install?.pick || !install.revisionsOf) { toast(t('module.unavailable', 'Module drafts are not available here: nothing is installed to draft onto.'), 'warning'); return }
+      const site = await sandboxSite(name, host)
+      if (!site) { toast(t('module.nosite', 'No sandbox {name} answers at {door}.', { name, door: sandboxDoorUrl(name, host) }), 'warning'); return }
+      const door = location.hostname.toLowerCase().startsWith(`${name}.`) ? location.origin : sandboxDoorUrl(name, host)
+      const named = PATH_RE.test(words[1] ?? '') ? [words[1]!] : null
+      const paths = named ?? (site.change ? changedPaths(await readChange(site.change, { get: doorReader(door) })) : [])
+      if (!paths.length) { toast(t('module.takewhat', 'Say which path to take from {name}, like: module take {change} preferences.', { name, change: name.replace(/^try-/, '') }), 'warning'); return }
+      const outcome = await takeTrial(site.package, paths, [new URL(door).host], takeDepsFrom(install))
+      for (const refused of outcome.refused) toast(t('module.nottaken', '{path} was not taken: {reason}', { path: refused.path, reason: refused.error }), 'warning')
+      if (!outcome.taken.length) return
+      const took = { paths: outcome.taken.join(', '), name, held: outcome.held }
+      if (outcome.held) {
+        toast(t('module.tookheld', 'Took {paths} from {name}. Its new code waits in the brood ({held} held): accept it there, and it runs after a reload.', took), 'success')
+        EffectBus.emit('brood:open', { at: Date.now() })
+      } else {
+        toast(t('module.took', 'Took {paths} from {name} — reload to run it.', took), 'success')
+      }
+      EffectBus.emit('module:taken', { name, root: site.package, paths: outcome.taken, held: outcome.held })
       return
     }
 

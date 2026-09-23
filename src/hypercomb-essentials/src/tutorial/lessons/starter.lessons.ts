@@ -6,9 +6,13 @@
 // (`/tutorial go-in`). Order is the curriculum: create, then in, then out,
 // then children, then travel, then the camera, then Home.
 
-import { tutorialLessons } from '../tutorial-lesson.js'
+import { type TutorialLesson } from '../tutorial-lesson.js'
 import { plannerCoverImage, dayCoverImage } from '../tutorial-images.js'
 import { subject } from './lesson-kit.js'
+
+/** The starter course, in order. bee-tutorial.drone.ts registers it — a
+ *  dependency registers nothing (atomic-modules-plan.md). */
+export const STARTER_LESSONS: TutorialLesson[] = []
 
 const L = 'starter' as const
 
@@ -17,7 +21,7 @@ const L = 'starter' as const
 const plannerName = (stage: { t(k: string, f: string): string }): string =>
   stage.t('tutorial.name.planner', 'Weekly Planner')
 
-tutorialLessons.register({
+STARTER_LESSONS.push({
   id: 'create',
   level: L,
   order: 10,
@@ -42,7 +46,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+STARTER_LESSONS.push({
   id: 'go-in',
   level: L,
   order: 20,
@@ -67,7 +71,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+STARTER_LESSONS.push({
   id: 'go-out',
   level: L,
   order: 30,
@@ -101,7 +105,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+STARTER_LESSONS.push({
   id: 'children',
   level: L,
   order: 40,
@@ -134,7 +138,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+STARTER_LESSONS.push({
   id: 'travel',
   level: L,
   order: 50,
@@ -164,7 +168,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+STARTER_LESSONS.push({
   id: 'zoom',
   level: L,
   order: 60,
@@ -193,7 +197,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+STARTER_LESSONS.push({
   id: 'pan',
   level: L,
   order: 70,
@@ -210,7 +214,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+STARTER_LESSONS.push({
   id: 'home',
   level: L,
   order: 80,

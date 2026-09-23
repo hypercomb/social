@@ -9,8 +9,25 @@
 // buttons are interactive — so the participant can always ignore the tour
 // and keep using the app directly. Escape asks the drone to end the tour.
 
-const OVERLAY_IOC_KEY = '@diamondcoreprocessor.com/BeeTutorialOverlay'
 const SURFACE_NAME = 'hc-bee-tutorial'
+/** The overlay's element name, for the bee that adds it to the surface registry. */
+export const OVERLAY_SURFACE_NAME = SURFACE_NAME
+
+// THE OVERLAY ANNOUNCES ITSELF; ITS BEE REGISTERS IT (atomic-modules-plan.md).
+// The shell's surface host creates the element, so no bee holds it before it
+// connects: connecting announces it, and bee-tutorial.drone.ts registers it.
+let mountedOverlay: BeeTutorialOverlayElement | null = null
+const mountWaiters: ((overlay: BeeTutorialOverlayElement) => void)[] = []
+const announceMounted = (overlay: BeeTutorialOverlayElement): void => {
+  if (mountedOverlay) return
+  mountedOverlay = overlay
+  for (const waiter of mountWaiters.splice(0)) waiter(overlay)
+}
+/** Run once the overlay element has connected (at once if it already has). */
+export const onOverlayMounted = (callback: (overlay: BeeTutorialOverlayElement) => void): void => {
+  if (mountedOverlay) callback(mountedOverlay)
+  else mountWaiters.push(callback)
+}
 
 export type SayResult = 'continue' | 'secondary' | 'skip'
 
@@ -307,8 +324,7 @@ export class BeeTutorialOverlayElement extends HTMLElement {
 
     this.#reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
 
-    const existing = window.ioc.get?.(OVERLAY_IOC_KEY)
-    if (!existing) window.ioc.register(OVERLAY_IOC_KEY, this)
+    announceMounted(this)
   }
 
   disconnectedCallback(): void {
@@ -653,20 +669,5 @@ export class BeeTutorialOverlayElement extends HTMLElement {
   }
 }
 
-// Contribute the surface the doctrine way: define the element, then add it
-// to the registry — never a template tag in either app.html.
-window.ioc.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
-  if (!customElements.get(SURFACE_NAME)) {
-    customElements.define(SURFACE_NAME, BeeTutorialOverlayElement)
-  }
-  try {
-    registry.add({
-      name: SURFACE_NAME,
-      owner: '@diamondcoreprocessor.com/BeeTutorialDrone',
-      element: SURFACE_NAME,
-      order: 900,
-    })
-  } catch {
-    // duplicate add (hot reload) — the mounted surface is already live
-  }
-})
+// bee-tutorial.drone.ts defines this element and adds it to the shell's
+// surface registry (atomic-modules-plan.md): a dependency registers nothing.

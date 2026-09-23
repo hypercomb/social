@@ -8,8 +8,12 @@
 // Ordered most obvious and simplest first: you must be able to SELECT before
 // copy or remove mean anything, so selection leads.
 
-import { tutorialLessons } from '../tutorial-lesson.js'
+import { type TutorialLesson } from '../tutorial-lesson.js'
 import { cover, subject, subjects } from './lesson-kit.js'
+
+/** The beginner course, in order. bee-tutorial.drone.ts registers it — a
+ *  dependency registers nothing (atomic-modules-plan.md). */
+export const BEGINNER_LESSONS: TutorialLesson[] = []
 
 const L = 'beginner' as const
 
@@ -20,7 +24,7 @@ const names = (stage: { t(k: string, f: string): string }): string[] => [
   stage.t('tutorial.name.note2', 'Errands'),
 ]
 
-tutorialLessons.register({
+BEGINNER_LESSONS.push({
   id: 'select',
   level: L,
   order: 10,
@@ -52,7 +56,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+BEGINNER_LESSONS.push({
   id: 'edit',
   level: L,
   order: 20,
@@ -76,7 +80,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+BEGINNER_LESSONS.push({
   id: 'note',
   level: L,
   order: 30,
@@ -105,7 +109,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+BEGINNER_LESSONS.push({
   id: 'copy-paste',
   level: L,
   order: 40,
@@ -142,7 +146,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+BEGINNER_LESSONS.push({
   id: 'remove',
   level: L,
   order: 50,
@@ -166,7 +170,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+BEGINNER_LESSONS.push({
   id: 'undo-redo',
   level: L,
   order: 60,
@@ -203,7 +207,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+BEGINNER_LESSONS.push({
   id: 'fit',
   level: L,
   order: 70,
@@ -222,7 +226,7 @@ tutorialLessons.register({
   },
 })
 
-tutorialLessons.register({
+BEGINNER_LESSONS.push({
   id: 'arrange',
   level: L,
   order: 80,

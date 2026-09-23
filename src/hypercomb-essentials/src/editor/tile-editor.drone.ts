@@ -5,8 +5,10 @@ import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../c
 import { portalEditTarget } from './portal-edit-target.js'
 import { parseHexColour } from './hex-capture.js'
 import { editorSurface } from './editor-surface.js'
-import type { TileEditorService } from './tile-editor.service.js'
-import type { ImageEditorService } from './image-editor.service.js'
+import { TileEditorService } from './tile-editor.service.js'
+import { ImageEditorService } from './image-editor.service.js'
+import { TILE_EDITOR_VIEW_KEY, TileEditorElement, tileEditorViewFacade } from './tile-editor.view.js'
+import { TILE_EDITOR_SURFACE } from './tile-editor.styles.js'
 
 // SVG markup for the pencil "edit" icon. Owned by this drone so that
 // when the editor is toggled off in DCP the icon never reaches the
@@ -368,6 +370,25 @@ export class TileEditorDrone {
     })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/TileEditorService', new TileEditorService())
+window.ioc.register('@diamondcoreprocessor.com/ImageEditorService', new ImageEditorService())
+window.ioc.register(TILE_EDITOR_VIEW_KEY, tileEditorViewFacade)
+// The view's surface: defined here and added to the registry — never a tag in
+// either app.html, never an Angular class.
+window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void; all?(): { name: string; component?: unknown }[] }) => {
+  // An older shell still carrying the Angular editor keeps it: two
+  // presenters for one session would fight over the same picture.
+  if (registry.all?.().some(surface => surface.name === TILE_EDITOR_SURFACE && surface.component)) return
+  if (!customElements.get(TILE_EDITOR_SURFACE)) customElements.define(TILE_EDITOR_SURFACE, TileEditorElement)
+  try {
+    registry.add({ name: TILE_EDITOR_SURFACE, owner: TILE_EDITOR_VIEW_KEY, element: TILE_EDITOR_SURFACE, order: 220 })
+  } catch {
+    // duplicate add (hot reload) — the mounted surface is already live
+  }
+})
 
 window.ioc.register(
   '@diamondcoreprocessor.com/TileEditorDrone',

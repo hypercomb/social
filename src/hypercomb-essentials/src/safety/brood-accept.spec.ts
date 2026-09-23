@@ -88,3 +88,24 @@ describe('accepting held code by hand', () => {
     expect(auditLine(record)).toMatch(/nothing has read this code/i)
   })
 })
+
+describe('a ruling is said aloud', () => {
+  it('says brood:ruled when a hand accepts or refuses, and nothing when it stops', async () => {
+    const heard: { sig: string; verdict: string }[] = []
+    let live = false
+    const off = EffectBus.on<{ sig: string; verdict: string }>('brood:ruled', ruled => { if (live) heard.push({ sig: ruled.sig, verdict: ruled.verdict }) })
+    live = true
+    const stopped = await held('7')
+    const first = answering([false])
+    await acceptByHand(stopped)
+    first.off()
+    expect(heard).toEqual([])
+    const accepted = await held('8')
+    const both = answering([true, true])
+    await acceptByHand(accepted)
+    both.off()
+    await refuseByHand(await held('9'))
+    off()
+    expect(heard).toEqual([{ sig: sig('8'), verdict: 'accepted' }, { sig: sig('9'), verdict: 'refused' }])
+  })
+})

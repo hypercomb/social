@@ -53,12 +53,5 @@ import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
  */
 export const TUTOR_SLOT = 'tutor'
 
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<LayerSlotRegistry>(
-  '@diamondcoreprocessor.com/LayerSlotRegistry',
-  (slotRegistry) => {
-    slotRegistry.register({
-      slot: TUTOR_SLOT,
-      triggers: [],
-    })
-  },
-)
+/** The slot as the LayerSlotRegistry declares it; tutor-view.drone.ts registers it. */
+export const TUTOR_SLOT_DECLARATION = { slot: TUTOR_SLOT, triggers: [] as string[] }

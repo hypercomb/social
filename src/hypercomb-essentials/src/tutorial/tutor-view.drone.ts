@@ -16,7 +16,8 @@
 // gracefully.)
 
 import { Drone } from '@hypercomb/core'
-import { TUTOR_SLOT } from './tutor-slot.js'
+import { TUTOR_SLOT, TUTOR_SLOT_DECLARATION } from './tutor-slot.js'
+import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { isFeatureHidden } from '../sharing/feature-hidden.js'
 import type { TutorShell } from '../games/tutor/shell.js'
 import { TUTOR_GAME_REGISTRY_IOC_KEY, tutorGameRegistry } from '../games/tutor/game-registry.js'
@@ -286,6 +287,7 @@ export class TutorViewDrone extends Drone {
 // this bee registers at load, so community study games find it; the built-in
 // study games register when the first study loads them (#loadShell).
 window.ioc.register(TUTOR_GAME_REGISTRY_IOC_KEY, tutorGameRegistry)
+window.ioc.whenReady<LayerSlotRegistry>('@diamondcoreprocessor.com/LayerSlotRegistry', slots => slots.register(TUTOR_SLOT_DECLARATION))
 
 const _tutorView = new TutorViewDrone()
 window.ioc.register('@diamondcoreprocessor.com/TutorViewDrone', _tutorView)

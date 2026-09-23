@@ -242,7 +242,4 @@ export class TileEditorService extends EventTarget {
   }
 }
 
-window.ioc.register(
-  '@diamondcoreprocessor.com/TileEditorService',
-  new TileEditorService()
-)
+// editor/tile-editor.drone.ts registers this (atomic-modules-plan.md): a dependency registers nothing.
