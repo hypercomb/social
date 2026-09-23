@@ -114,4 +114,3 @@ export const listMisses = async (): Promise<MissSummary[] | null> => {
 EffectBus.on('machine:miss', payload => { void recordMiss(payload).catch(() => { /* the chat never waits on this */ }) })
 
 export const machineMisses = { list: listMisses }
-window.ioc?.register(MACHINE_MISSES_IOC_KEY, machineMisses)

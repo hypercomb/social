@@ -2,7 +2,7 @@ import { llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
 import { llmModelChoice } from './llm-model-choice.js'
 import { llmHiveAccess } from './llm-hive-access.js'
-import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
+import { llmProviderRegistry } from './llm-provider-registry.js'
 import { openRouterRouting, providerBlock } from './providers/openrouter-routing.js'
 import { JEV_ENDPOINT, JEV_IOC_KEY, JEV_MODEL, jevInput, jevQuestions, jevResult, jevState, type JevInput, type JevResult } from './jev-decision.js'
 import type { JevDirectInput } from './jev-direct.js'
@@ -205,5 +205,3 @@ export const JEV_FRONT_TIMEOUT_MS = 5_000
 
 // No completed-result cache across turns: a rolling model alias can change.
 export const jevDecision = new JevDecisionService()
-window.ioc?.register(JEV_IOC_KEY, jevDecision)
-publishService(JEV_IOC_KEY, jevDecision)

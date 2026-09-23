@@ -361,9 +361,47 @@ On the web shell: every baseline key registered (the host directory's face
 back), all 60 shell surfaces registered and the checked ones mounted, zero
 breaks; 643 units linked; 402 atoms, 190 bees.
 
-Next: assistant, commands — each checked for boot services first
-(DecorationService, OverlapMetrics and VisualBeeRegistry are read by the
-command line). (`revolucionstyle.com` is outside the build.)
+**Batch 7 — BUILT and browser-verified 2026-09-22:** assistant. No boot bee:
+the chat window and the shell reach every assistant service through
+`whenReady` or at use. Five words became bees (conversation, file, llm,
+misses, module). Three new bees: `llm.drone.ts` (the provider registry, the
+roster, the activation / model-choice / removal / hive-access / policy
+stores, the router, the host's AI and the Providers console with its
+`/providers` `/models` words), `chat.drone.ts` (threads, compaction, the
+execution queue) and `jev.drone.ts` (decision, outcomes, replay). The
+context bee took the anatomy, context groups, hive tree reader, tile context
+and pictures and the context read half; the orchestrator the agent registry,
+panel and rail factory; the bridge worker the skills window and `/skills`;
+the misses word its record.
+
+- **The roster is data.** The vendor descriptors stopped registering
+  themselves; `builtin-providers.ts` lists them and `startBuiltinLlmProviders()`
+  (called once, by the llm bee) registers them in the order the registry
+  keeps, then the OpenRouter instances, the local model, the liveness watch
+  and discovery — all of which used to start when a file was imported.
+- **The ratchet counts the assistant's doors into the map**, at module scope:
+  `publishService(`, `registerLlmProvider(`, and a `whenReady` that
+  `addProvider`s a slash provider. A table a module keeps for itself
+  (screensaver motions, bubble styles, published-pool handlers) is not the
+  hive and is not counted. `llm-provider-registry.ts` stays on the allowlist:
+  it holds the map door itself (`publishService` and the accessor's heal).
+- **An import cycle the bundle forgave.** chat-thread → chat-route →
+  chat-steps → chat-thread worked while one bundle held all three; the build
+  refuses it for separately loaded atoms. The chat's IoC surface
+  (`ChatThreads`, the standings) left the foot of chat-thread for its own
+  atom, `chat-threads.ts`, above all three.
+- Out of bees into an atom: `reshape.ts` (the organize threshold and the
+  break-apart skip wording, which break-apart, expand and the slash drone
+  imported from other bees).
+
+On the web shell every baseline key registered plus the three new bees, all
+60 shell surfaces, the roster in its old order, zero breaks, zero unreachable
+atoms; 707 of 730 units linked (the rest need a DOM); 538 dependencies,
+198 bees.
+
+Next: commands — checked for boot services first (DecorationService,
+OverlapMetrics and VisualBeeRegistry are read by the command line).
+(`revolucionstyle.com` is outside the build.)
 
 ## Atomize for the editor, optimize for the reader
 

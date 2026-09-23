@@ -37,7 +37,6 @@ import { MAX_BUDGET, MIN_BUDGET, llmHiveAccess } from './llm-hive-access.js'
 import { CHAT_NEED, TIERS, USAGE_PLANS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
-import './providers/builtin-providers.js'
 import { importProviderSpec, providerOrigin } from './providers/provider-discovery.js'
 import { isAddedProvider } from './providers/provider-spec.js'
 import type { LlmProviderDescriptor } from './providers/llm-provider.types.js'
@@ -2330,23 +2329,3 @@ export class ProvidersWindowView extends EventTarget {
     document.head.appendChild(style)
   }
 }
-
-// ── slash behaviour: /providers toggles the window ──────────────────────────
-type SlashRegistrar = { addProvider?: (provider: unknown) => void }
-
-const _providersWindow = new ProvidersWindowView()
-window.ioc.register('@diamondcoreprocessor.com/ProvidersWindowView', _providersWindow)
-
-window.ioc.whenReady?.('@diamondcoreprocessor.com/SlashBehaviourDrone', (drone: SlashRegistrar) => {
-  drone.addProvider?.({
-    name: 'providers-provider',
-    priority: 100,
-    behaviours: [
-      { name: 'providers', description: 'Manage AI providers and API keys', descriptionKey: 'slash.providers',
-        examples: [{ input: '/providers', result: 'Opens the AI providers console' }] },
-      { name: 'models', description: 'Manage AI providers and API keys', descriptionKey: 'slash.providers',
-        examples: [{ input: '/models', result: 'Opens the AI providers console' }] },
-    ],
-    execute: () => { EffectBus.emit('providers:open', {}) },
-  })
-})

@@ -604,6 +604,3 @@ export class AgentRegistry extends EventTarget {
     this.dispatchEvent(new CustomEvent('change'))
   }
 }
-
-const _agents = new AgentRegistry()
-window.ioc.register('@diamondcoreprocessor.com/AgentRegistry', _agents)

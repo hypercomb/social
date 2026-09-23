@@ -1487,7 +1487,14 @@ describe('doctrine ratchets', () => {
   // arguments holding `=>`, and an unindented module-scope `x.register(…)`.
   // A whenReady that ADDS (a shell surface into its registry) is registration
   // too, and so is a module-scope call-result registration (`hostIoc()?.register?.(`).
-  const SELF_REGISTRATION = /\bioc\s*\??\.\s*register\s*(?:\?\.)?\s*(?:<[^>]*>)?\s*\(|registerShellSurface\s*\(|\bwhenReady\s*(?:\?\.)?\s*(?:<[\s\S]{0,200}?>)?\s*(?:\?\.)?\s*\([\s\S]{0,400}?\.(?:register|add)\s*(?:\?\.)?\s*\(|^register\s*(?:<[^>]*>)?\s*\(|^[\w$.]+(?:\(\))?\s*\??\.\s*register\s*(?:\?\.)?\s*\(/m
+  // The assistant's own doors into the map count at module scope:
+  // `publishService` (an IoC register that polls until the shell map holds
+  // it), `registerLlmProvider` (the IoC provider registry), and a whenReady
+  // that `addProvider`s a slash provider. Called inside a function they run
+  // when a bee asks, which is the bee's act. A table a module keeps for
+  // itself (screensaver motions, bubble styles, published-pool handlers) is
+  // not the hive and is not counted.
+  const SELF_REGISTRATION = /\bioc\s*\??\.\s*register\s*(?:\?\.)?\s*(?:<[^>]*>)?\s*\(|registerShellSurface\s*\(|^(?:publishService|registerLlmProvider)\s*\(|\bwhenReady\s*(?:\?\.)?\s*(?:<[\s\S]{0,200}?>)?\s*(?:\?\.)?\s*\([\s\S]{0,400}?\.(?:register|add|addProvider)\s*(?:\?\.)?\s*\(|^register\s*(?:<[^>]*>)?\s*\(|^[\w$.]+(?:\(\))?\s*\??\.\s*register\s*(?:\?\.)?\s*\(/m
   const registersItself = (file: string): boolean => SELF_REGISTRATION.test(stripComments(readFileSync(file, 'utf8')))
   const inAtomizedRoot = (file: string): boolean => {
     const rel = relative(join(ROOT, 'hypercomb-essentials/src'), file).replace(/\\/g, '/')
@@ -1528,35 +1535,7 @@ describe('doctrine ratchets', () => {
       if (registersItself(file)) actual.push(relative(ROOT, file).replace(/\\/g, '/'))
     }
     assertRatchet(actual.sort(), [
-      'hypercomb-essentials/src/assistant/agent-panel.view.ts',
-      'hypercomb-essentials/src/assistant/agent-registry.service.ts',
-      'hypercomb-essentials/src/assistant/agent-tiles-rail.ts',
-      'hypercomb-essentials/src/assistant/anatomy/anatomy.service.ts',
-      'hypercomb-essentials/src/assistant/chat-thread.ts',
-      'hypercomb-essentials/src/assistant/compaction.ts',
-      'hypercomb-essentials/src/assistant/context-groups.ts',
-      'hypercomb-essentials/src/assistant/conversation.queen.ts',
-      'hypercomb-essentials/src/assistant/execution-queue.ts',
-      'hypercomb-essentials/src/assistant/file.queen.ts',
-      'hypercomb-essentials/src/assistant/hive-tree-reader.service.ts',
-      'hypercomb-essentials/src/assistant/host-ai.service.ts',
-      'hypercomb-essentials/src/assistant/jev-decision.service.ts',
-      'hypercomb-essentials/src/assistant/jev-outcomes.ts',
-      'hypercomb-essentials/src/assistant/jev-replay.ts',
-      'hypercomb-essentials/src/assistant/llm-activation.ts',
-      'hypercomb-essentials/src/assistant/llm-context.ts',
-      'hypercomb-essentials/src/assistant/llm-hive-access.ts',
-      'hypercomb-essentials/src/assistant/llm-model-choice.ts',
       'hypercomb-essentials/src/assistant/llm-provider-registry.ts',
-      'hypercomb-essentials/src/assistant/llm-provider-removal.ts',
-      'hypercomb-essentials/src/assistant/llm.queen.ts',
-      'hypercomb-essentials/src/assistant/machine-misses.ts',
-      'hypercomb-essentials/src/assistant/misses.queen.ts',
-      'hypercomb-essentials/src/assistant/module.queen.ts',
-      'hypercomb-essentials/src/assistant/providers-window.view.ts',
-      'hypercomb-essentials/src/assistant/skills-window.view.ts',
-      'hypercomb-essentials/src/assistant/tile-context.ts',
-      'hypercomb-essentials/src/assistant/tile-pictures.ts',
       'hypercomb-essentials/src/commands/accent.queen.ts',
       'hypercomb-essentials/src/commands/adopt.queen.ts',
       'hypercomb-essentials/src/commands/aliases/aliases.queen.ts',

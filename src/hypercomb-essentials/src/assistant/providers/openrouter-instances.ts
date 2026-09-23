@@ -99,7 +99,16 @@ export const syncOpenRouterInstances = (): void => {
   }
 }
 
-llmModelChoice.addEventListener('change', syncOpenRouterInstances)
-openRouterCatalogEvents.addEventListener('loaded', syncOpenRouterInstances)
-openRouterStages.addEventListener('change', syncOpenRouterInstances)
-syncOpenRouterInstances()
+/** Keep the instances in step with the saved models, the catalog and the
+ *  stages from now on. Called once, by the roster (builtin-providers.ts),
+ *  right after the OpenRouter descriptor registers: the registry keeps
+ *  registration order, and an instance belongs after its configurator. */
+let watching = false
+export const watchOpenRouterInstances = (): void => {
+  if (watching) return
+  watching = true
+  llmModelChoice.addEventListener('change', syncOpenRouterInstances)
+  openRouterCatalogEvents.addEventListener('loaded', syncOpenRouterInstances)
+  openRouterStages.addEventListener('change', syncOpenRouterInstances)
+  syncOpenRouterInstances()
+}

@@ -31,7 +31,7 @@
 import { Drone, EffectBus } from '@hypercomb/core'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { PendingAskIndex } from './ask-scope.js'
-import { ORGANIZE_THRESHOLD } from './organize.drone.js'
+import { ORGANIZE_THRESHOLD } from './reshape.js'
 import { mintCreationId } from './creation.js'
 
 /** Upper bound on the new tiles a responder should mint for one expand. */

@@ -355,21 +355,3 @@ export class SkillsWindowView extends EventTarget {
     document.head.appendChild(style)
   }
 }
-
-// ── slash behaviour: /skills toggles the window ─────────────────────────────
-type SlashRegistrar = { addProvider?: (provider: unknown) => void }
-
-const _skillsWindow = new SkillsWindowView()
-window.ioc.register('@diamondcoreprocessor.com/SkillsWindowView', _skillsWindow)
-
-window.ioc.whenReady?.('@diamondcoreprocessor.com/SlashBehaviourDrone', (drone: SlashRegistrar) => {
-  drone.addProvider?.({
-    name: 'skills-provider',
-    priority: 100,
-    behaviours: [
-      { name: 'skills', description: 'Browse the skill library', descriptionKey: 'slash.skills',
-        examples: [{ input: '/skills', result: 'Opens the skills window' }] },
-    ],
-    execute: () => { EffectBus.emit('skills:open', {}) },
-  })
-})

@@ -6,7 +6,7 @@
 // build from.
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { listMisses } from './machine-misses.js'
+import { MACHINE_MISSES_IOC_KEY, listMisses, machineMisses } from './machine-misses.js'
 
 export class MissesQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -32,6 +32,9 @@ export class MissesQueenBee extends QueenBee {
     EffectBus.emit('toast:show', { type: 'info', message: `${t('misses.header', 'Asked for but not available:')} ${lines.join(' · ')}` })
   }
 }
+
+// The misses word owns the record it lists (atomic-modules-plan.md).
+window.ioc.register(MACHINE_MISSES_IOC_KEY, machineMisses)
 
 const _misses = new MissesQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/MissesQueenBee', _misses)

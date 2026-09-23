@@ -2,7 +2,6 @@
 //
 // Grok. OpenAI-shaped wire format on xAI's own host.
 
-import { registerLlmProvider } from '../llm-provider-registry.js'
 import type { LlmProviderDescriptor } from './llm-provider.types.js'
 import { openAiRequest, openAiResponse, openAiStreamEvent } from './openai-shape.js'
 
@@ -26,5 +25,3 @@ export const XAI_PROVIDER: LlmProviderDescriptor = {
   fromResponse: openAiResponse,
   fromStreamEvent: openAiStreamEvent,
 }
-
-registerLlmProvider(XAI_PROVIDER)

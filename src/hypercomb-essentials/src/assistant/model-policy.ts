@@ -42,7 +42,7 @@ import { isOpenRouterBatchModel } from './providers/openrouter-catalog.js'
 import { foldedIntoOpenRouter } from './providers/openrouter-supersedes.js'
 import { credentialOwner } from './providers/credential-owner.js'
 import { localModelServerUp } from './providers/local-liveness.js'
-import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
+import { llmProviderRegistry } from './llm-provider-registry.js'
 import type { LlmProviderDescriptor, LlmTier } from './providers/llm-provider.types.js'
 
 const PIN_KEY = (tier: LlmTier): string => `hc:llm:pin:${tier}`
@@ -262,7 +262,6 @@ export class LlmPolicyStore extends EventTarget {
 }
 
 export const llmPolicy = new LlmPolicyStore()
-publishService('@diamondcoreprocessor.com/LlmPolicyStore', llmPolicy)
 
 // ── selection ─────────────────────────────────────────────────────────────
 

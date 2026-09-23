@@ -4,7 +4,6 @@
 // and `deepseek-chat` are the whole line-up, so there is no fast tier to
 // invent — a descriptor lists what a vendor actually sells.
 
-import { registerLlmProvider } from '../llm-provider-registry.js'
 import type { LlmProviderDescriptor } from './llm-provider.types.js'
 import { openAiRequest, openAiResponse, openAiStreamEvent } from './openai-shape.js'
 
@@ -27,5 +26,3 @@ export const DEEPSEEK_PROVIDER: LlmProviderDescriptor = {
   fromResponse: openAiResponse,
   fromStreamEvent: openAiStreamEvent,
 }
-
-registerLlmProvider(DEEPSEEK_PROVIDER)

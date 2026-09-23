@@ -32,7 +32,13 @@
 // by construction, not by convention.
 
 import { Drone } from '@hypercomb/core'
-import { LlmContextService } from './llm-context.js'
+import { LLM_CONTEXT_SERVICE_KEY, LlmContextService, llmContextReader } from './llm-context.js'
+import { publishService } from './llm-provider-registry.js'
+import { ANATOMY_IOC_KEY, anatomy } from './anatomy/anatomy.service.js'
+import { CONTEXT_GROUPS_IOC_KEY, ContextGroups } from './context-groups.js'
+import { HIVE_TREE_READER_IOC_KEY, HypercombHiveTreeReader } from './hive-tree-reader.js'
+import { tileContextSeam } from './tile-context.js'
+import { TILE_PICTURES_IOC_KEY, TilePictures } from './tile-pictures.js'
 import { DoctrineQueenBee } from './doctrine.queen.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/i
@@ -90,6 +96,17 @@ export class LlmContextDrone extends Drone {
     }
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md) the context every model reads: the
+// anatomy, the context groups, the hive tree reader, the tile-context seam
+// and its pictures, and the READ half of the context cache (the minter above
+// stays unregistered).
+publishService(ANATOMY_IOC_KEY, anatomy)
+window.ioc.register(CONTEXT_GROUPS_IOC_KEY, new ContextGroups())
+window.ioc.register(HIVE_TREE_READER_IOC_KEY, new HypercombHiveTreeReader())
+window.ioc.register('@diamondcoreprocessor.com/TileContext', tileContextSeam)
+window.ioc.register(TILE_PICTURES_IOC_KEY, new TilePictures())
+window.ioc.register(LLM_CONTEXT_SERVICE_KEY, llmContextReader(new LlmContextService()))
 
 window.ioc.register('@diamondcoreprocessor.com/LlmContextDrone', new LlmContextDrone())
 

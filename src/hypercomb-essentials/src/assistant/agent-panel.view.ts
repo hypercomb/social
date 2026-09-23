@@ -1457,6 +1457,3 @@ export class AgentPanelView extends EventTarget {
     document.head.appendChild(style)
   }
 }
-
-const _agentPanel = new AgentPanelView()
-window.ioc.register('@diamondcoreprocessor.com/AgentPanelView', _agentPanel)

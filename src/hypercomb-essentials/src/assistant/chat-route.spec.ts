@@ -717,13 +717,13 @@ describe('ChatThreads names the live run', () => {
     ioc.register = (key, value) => { registered.set(key, value) }
     try {
       vi.resetModules()
-      // chat-thread FIRST, so the cycle chat-thread → chat-route →
-      // chat-steps → chat-thread evaluates from the end that instantiates the
-      // class at module scope. A field initialiser would read chat-steps'
-      // binding in its temporal dead zone here and throw on import.
-      const thread = await import('./chat-thread.js')
+      // The chat bee registers the surface (atomic-modules-plan.md). The
+      // surface is its own atom, above the route and the steps, so no import
+      // order can leave a binding in its temporal dead zone.
+      const { CHAT_THREADS_IOC_KEY } = await import('./chat-threads.js')
+      await import('./chat.drone.js')
       const steps = await import('./chat-steps.js')
-      const threads = registered.get(thread.CHAT_THREADS_IOC_KEY) as {
+      const threads = registered.get(CHAT_THREADS_IOC_KEY) as {
         runIdForAsk?: (sig: string) => Promise<string>
         organizeRoute?: (convoId: string, liveRunId?: string, waiting?: boolean) => Promise<number>
         assimilateRouteSelection?: (convoId: string, selectedText: string, focusNodeId?: string) => Promise<unknown>
@@ -731,7 +731,7 @@ describe('ChatThreads names the live run', () => {
       }
       expect(typeof threads?.runIdForAsk).toBe('function')
       expect(await threads.runIdForAsk!(ASK)).toBe(await steps.runIdForAsk(ASK))
-      // A method, never an own field: read at call time, after the cycle.
+      // A method, never an own field: read at call time.
       expect(Object.prototype.hasOwnProperty.call(threads, 'runIdForAsk')).toBe(false)
       // organizeRoute is on the same surface, for the same reason — and the
       // per-exchange labeller it replaced is gone.
@@ -748,7 +748,8 @@ describe('ChatThreads names the live run', () => {
   it('the id it names is the one readRoute draws as live', async () => {
     const pool = new MockDir('threads')
     const { thread, steps } = await load(makeStore(pool))
-    const threads = new thread.ChatThreads()
+    const { ChatThreads } = await import('./chat-threads.js')
+    const threads = new ChatThreads()
     const liveRunId = await threads.runIdForAsk(ASK)
     await thread.appendTurn(CONVO, 'user', 'go')
     await steps.appendStep({ convoId: CONVO, runId: liveRunId, seq: 0, verb: 'put-resource', at: Date.now(), outcome: 'ok' })
@@ -1373,6 +1374,8 @@ const twoExchanges = async (
  *  graph chat-route's lazy imports resolve into. */
 const loadFlows = async (store: ReturnType<typeof makeStore>) => {
   const loaded = await load(store)
+  // The roster registers when the llm bee starts it (atomic-modules-plan.md).
+  ;(await import('./providers/builtin-providers.js')).startBuiltinLlmProviders()
   return {
     ...loaded,
     registry: (await import('./llm-provider-registry.js')).llmProviderRegistry(),

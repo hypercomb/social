@@ -10,7 +10,6 @@
 // rather than a first message, which is exactly why the descriptor owns
 // request-building instead of the caller.
 
-import { registerLlmProvider } from '../llm-provider-registry.js'
 import type {
   LlmCallResult,
   LlmHttpRequest,
@@ -138,5 +137,3 @@ export const ANTHROPIC_PROVIDER: LlmProviderDescriptor = {
   fromResponse: anthropicResponse,
   fromStreamEvent: anthropicStreamEvent,
 }
-
-registerLlmProvider(ANTHROPIC_PROVIDER)

@@ -92,10 +92,12 @@ import {
   HIVE_PATH, foldTileConversations, listRailConversations, listTileDrafts,
   newTileConvoId, readConversationSummary, tileConvoId,
   tilePath, tilePathOf,
-  conversationGroup, readConversationStandings,
-  type ConversationGroup, type ConversationStanding,
   type TileConversation,
 } from './chat-thread.js'
+import {
+  conversationGroup, readConversationStandings,
+  type ConversationGroup, type ConversationStanding,
+} from './chat-threads.js'
 import { readBlurbs, type ChatBlurb } from './chat-blurb.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
@@ -2184,6 +2186,7 @@ export class AgentTilesRail {
 // loose-IoC seam TileContext uses. A fresh rail per call, with that surface's
 // profile: each keeps its own trail, its own picks, its own idea of what a
 // click means.
-window.ioc.register('@diamondcoreprocessor.com/AgentTilesRailFactory', {
+// The orchestrator bee registers it (atomic-modules-plan.md).
+export const agentTilesRailFactory = {
   create: (profile?: RailProfile): AgentTilesRail => new AgentTilesRail(profile),
-})
+}

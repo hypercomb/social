@@ -14,7 +14,6 @@
 // Design: documentation/anatomy-context-need.md §2, §2a, §6, §7.
 
 import { SignatureService } from '@hypercomb/core'
-import { publishService } from '../llm-provider-registry.js'
 import { ANATOMY_MECHANICS, ANATOMY_SECTIONS, ANATOMY_SOURCES } from './anatomy.generated.js'
 import {
   DOCTRINE_BAG_MEANING, commitDoctrine, composeAnatomy, headingOf, isHeading, loadDoctrine, previousDoctrine, sourceOf, writeSection,
@@ -232,9 +231,3 @@ export const anatomy: AnatomyLike = {
   sources: ANATOMY_SOURCES,
   doctrine,
 }
-
-// Both lines are needed. The first is what `prepare` looks for to classify
-// this file as a side-effect module and load it at all; the second survives
-// the early `window.ioc` map being replaced (see llm-provider-registry.ts).
-window.ioc?.register(ANATOMY_IOC_KEY, anatomy)
-publishService(ANATOMY_IOC_KEY, anatomy)

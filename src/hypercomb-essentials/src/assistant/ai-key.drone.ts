@@ -22,7 +22,6 @@
 
 import { Drone, EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
 import { llmProviderRegistry } from './llm-provider-registry.js'
-import './providers/builtin-providers.js'
 
 const INDICATOR_KEY = 'ai-spend'
 /** The retired one-light-per-vendor keys. Those lights did not say

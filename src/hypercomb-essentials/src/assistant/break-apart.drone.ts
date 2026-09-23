@@ -35,7 +35,7 @@
 import { Drone, EffectBus, normalizeCell } from '@hypercomb/core'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { PendingAskIndex } from './ask-scope.js'
-import { ORGANIZE_THRESHOLD } from './organize.drone.js'
+import { BREAK_APART_SKIP_LABELS, ORGANIZE_THRESHOLD } from './reshape.js'
 import { mintCreationId } from './creation.js'
 import { ReceiptBuilder, describeReceipt } from './receipt.js'
 
@@ -63,15 +63,6 @@ type LayerChild = { name: string; childCount: number }
 /** Why a tile was or wasn't asked about. A caller reporting to the
  *  participant needs the REASON — "3 of 8" with no explanation is the kind of
  *  silent shortfall that reads as a bug. */
-/** Wording for every way a break-apart can decline. Exported so the slash
- *  provider phrases the selection case identically — two doors, one voice. */
-export const BREAK_APART_SKIP_LABELS: Record<string, (n: number) => string> = {
-  'has-children': n => `${n} already had children`,
-  'already-queued': n => `${n} already queued`,
-  'ancestor-busy': n => `${n} waiting on a parent already being reshaped`,
-  'failed': n => `${n} could not be read`,
-}
-
 export type BreakApartOutcome = 'queued' | 'has-children' | 'already-queued' | 'ancestor-busy' | 'failed'
 
 export class BreakApartDrone extends Drone {

@@ -19,7 +19,6 @@
 // The optional ranking headers (`HTTP-Referer`, `X-Title`) are deliberately
 // NOT sent: they would hand the hive's origin to the router on every call.
 
-import { registerLlmProvider } from '../llm-provider-registry.js'
 import type { LlmProviderDescriptor } from './llm-provider.types.js'
 import { openAiRequest, openAiResponse, openAiStreamEvent } from './openai-shape.js'
 import { isOpenRouterBatchModel } from './openrouter-catalog.js'
@@ -73,5 +72,3 @@ export const OPENROUTER_PROVIDER: LlmProviderDescriptor = {
   fromResponse: openAiResponse,
   fromStreamEvent: openAiStreamEvent,
 }
-
-registerLlmProvider(OPENROUTER_PROVIDER)

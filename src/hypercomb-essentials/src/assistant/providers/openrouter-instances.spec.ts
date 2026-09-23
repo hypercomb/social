@@ -8,7 +8,7 @@ g.window.ioc ??= { register: () => {}, get: () => undefined, whenReady: () => {}
 
 const { llmModelChoice } = await import('../llm-model-choice.js')
 const { llmProviderRegistry } = await import('../llm-provider-registry.js')
-await import('./builtin-providers.js')
+;(await import('./builtin-providers.js')).startBuiltinLlmProviders()   // what the llm bee does
 const { instanceId } = await import('./openrouter-instances.js')
 const { candidatesFor } = await import('../model-policy.js')
 const { buildRequest } = await import('../llm-dispatch.js')

@@ -73,5 +73,3 @@ export class TilePictures {
 }
 
 export const TILE_PICTURES_IOC_KEY = '@diamondcoreprocessor.com/TilePictures'
-
-window.ioc.register(TILE_PICTURES_IOC_KEY, new TilePictures())

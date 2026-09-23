@@ -17,7 +17,7 @@
 // Requests live for the session — the conversation's turns are the record.
 // The policy is device-local and sticky, like the grant it sits beside.
 
-import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
+import { llmProviderRegistry } from './llm-provider-registry.js'
 import { llmHiveAccess } from './llm-hive-access.js'
 
 export const EXECUTION_QUEUE_IOC_KEY = '@hypercomb.social/ExecutionQueue'
@@ -272,8 +272,3 @@ export class ExecutionQueueStore extends EventTarget {
 }
 
 export const executionQueue = new ExecutionQueueStore()
-
-// Both lines: the first is what `prepare` looks for to load this module at
-// all; the second survives the early `window.ioc` map being replaced.
-window.ioc?.register(EXECUTION_QUEUE_IOC_KEY, executionQueue)
-publishService(EXECUTION_QUEUE_IOC_KEY, executionQueue)

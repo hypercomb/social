@@ -145,4 +145,3 @@ EffectBus.on('jev:replay', payload => {
     .then(result => EffectBus.emit('jev:replay-result', result))
     .catch(error => EffectBus.emit('jev:replay-result', { at: Date.now(), reports: [], skipped: { [String(error?.message ?? error)]: 1 } }))
 })
-window.ioc?.register('@diamondcoreprocessor.com/JevReplay', { replay: replayJevDecisions })

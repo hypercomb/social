@@ -15,7 +15,6 @@
 // is whatever the participant pulled, and `resolveModelId` passes an
 // unrecognised name straight through for exactly this case.
 
-import { registerLlmProvider } from '../llm-provider-registry.js'
 import type { LlmProviderDescriptor } from './llm-provider.types.js'
 import { openAiRequest, openAiResponse, openAiStreamEvent } from './openai-shape.js'
 
@@ -105,5 +104,3 @@ export const LOCAL_PROVIDER: LlmProviderDescriptor = {
   fromResponse: openAiResponse,
   fromStreamEvent: openAiStreamEvent,
 }
-
-registerLlmProvider(LOCAL_PROVIDER)

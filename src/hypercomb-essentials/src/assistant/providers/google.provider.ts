@@ -5,7 +5,6 @@
 // role is spelled `model`, and the system prompt is its own
 // `systemInstruction` object. All of that is why `toRequest` exists.
 
-import { registerLlmProvider } from '../llm-provider-registry.js'
 import type {
   LlmCallResult,
   LlmHttpRequest,
@@ -118,5 +117,3 @@ export const GOOGLE_PROVIDER: LlmProviderDescriptor = {
   fromResponse: googleResponse,
   fromStreamEvent: googleStreamEvent,
 }
-
-registerLlmProvider(GOOGLE_PROVIDER)

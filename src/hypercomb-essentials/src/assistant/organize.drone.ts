@@ -36,13 +36,8 @@ import { readChildrenStrict, type PlacementHistory } from '../history/layer-plac
 import { PendingAskIndex } from './ask-scope.js'
 import { mintCreationId, stampCreation } from './creation.js'
 import { ReceiptBuilder, describeReceipt } from './receipt.js'
+import { ORGANIZE_THRESHOLD } from './reshape.js'
 
-/** Below this, a layer is already manageable — organizing it would add a
- *  level of navigation to save nothing. Above it, a layer is CROWDED, and
- *  crowded is the condition that decides which operation a page needs:
- *  `/break-apart` on a crowded layer routes here instead of deepening. The
- *  participant should never have to know which of the two they want. */
-export const ORGANIZE_THRESHOLD = 12
 
 /** The shape to aim for. Not hard limits — the responder is told to prefer
  *  honest clusters over hitting a number — but a plan that ignores them

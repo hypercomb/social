@@ -27,7 +27,7 @@ const button = (scope: string, text: string): HTMLButtonElement =>
 
 beforeAll(async () => {
   localStorage.clear()
-  await import('./providers-window.view.js')
+  await import('./llm.drone.js')   // the llm bee registers the console and the roster (atomic-modules-plan.md)
   const view = services.get('@diamondcoreprocessor.com/ProvidersWindowView') as { open(): void }
   view.open()
   ;[...document.querySelectorAll<HTMLElement>('.hc-providers-tab')].find(t => t.textContent?.startsWith('API'))?.click()

@@ -4,7 +4,7 @@ import {
   registerCommandRoot, commandRoot, type CommandObject, type CommandMember, type KeyMapLayer,
 } from '@hypercomb/core'
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
-import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
+import { BREAK_APART_SKIP_LABELS } from '../assistant/reshape.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'
 import { readNamedTarget } from './keyword.queen.js'
 import { readAccentTarget } from './accent.queen.js'

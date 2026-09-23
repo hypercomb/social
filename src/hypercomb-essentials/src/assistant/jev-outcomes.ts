@@ -231,4 +231,3 @@ class JevOutcomes {
 export const jevOutcomes = new JevOutcomes()
 EffectBus.on('jev:outcome', payload => { void jevOutcomes.record(payload).catch(() => { /* the chat never waits on this */ }) })
 EffectBus.on('jev:turn', payload => { void jevOutcomes.recordTurn(payload).catch(() => { /* the chat never waits on this */ }) })
-window.ioc?.register(JEV_OUTCOMES_IOC_KEY, jevOutcomes)

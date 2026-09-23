@@ -450,10 +450,6 @@ export const llmContextReader = (service: LlmContextService): LlmContextReader =
 
 export const LLM_CONTEXT_SERVICE_KEY = '@diamondcoreprocessor.com/LlmContext'
 
-if ((window as unknown as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register) {
-  (window as unknown as { ioc: { register: (k: string, v: unknown) => void } })
-    .ioc.register(LLM_CONTEXT_SERVICE_KEY, llmContextReader(new LlmContextService()))
-}
 
 /**
  * THE LENS — what `inflate()` substitutes under, when asked (history/
