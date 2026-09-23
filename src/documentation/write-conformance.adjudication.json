@@ -982,7 +982,12 @@
    "verdict": "confirmed",
    "check": 1,
    "reason": "`writeTilePropsIndex` is unchanged: `localStorage.setItem(TILE_PROPS_INDEX_KEY, JSON.stringify(index))`, a per-device store outside the graph; write-conformance.md lists `hc:tile-props-index` among the five stores left open as an OWNER DECISION (not fixed), so the deviation stands by the doc's own account. Two details the census got right and are still true: the write path keys by lineage sig only (`seedLayerKeyedTileProps(lockKey, ...)` guarded by `isSignature(lockKey)`), and `lookupTilePropsSig` still falls back to `index[label]`, so a bare-label legacy entry can still be READ across same-named locations. Blast radius local: the `properties` slot is authoritative and `writeTilePropertiesAt` reads its own overrides from the layer, never from this index.",
-   "area": "features"
+   "area": "features",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "tile-properties.ts keeps the index in MEMORY ONLY (the properties slot is authoritative); the localStorage key is read once at first use and never written."
+   }
   },
   {
    "file": "hypercomb-essentials/src/notes/notes.drone.ts",
@@ -1453,7 +1458,12 @@
    "verdict": "confirmed",
    "check": 1,
    "reason": "`#write` still does `localStorage.setItem('hc:saved-locations', JSON.stringify(v))` — a fixed human key holding a participant-authored list, outside the graph. write-conformance.md records the five localStorage stores as an explicit OWNER DECISION left open, so this remains a live, acknowledged deviation.",
-   "area": "shell"
+   "area": "shell",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "saved-locations-store.ts is a ParticipantDocument in the `locations:saved` pool (kind document: one current member, per participant, never sent — \"mine by default\", jwize 2026-09-23); the localStorage key is read once at construction and never written."
+   }
   },
   {
    "file": "hypercomb-shared/core/pinned-entrances.store.ts",
@@ -1462,7 +1472,12 @@
    "verdict": "confirmed",
    "check": 4,
    "reason": "`storageKey(segments)` at :74-75 is still `${KEY_PREFIX}${normalizePath(segments).join('/')}` and `#write` at :178 sets it — a PATH-keyed address minted new, plus participant state outside the graph (check 1 as well). Owner decision per write-conformance.md; the file's own :21-25 argument about not skewing layer sigs is correct about the layer and does not reach localStorage.",
-   "area": "shell"
+   "area": "shell",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "pinned-entrances.store.ts is a ParticipantDocument in `entrances:pinned` (document kind, never sent); the path-keyed localStorage entries are read once as a walk-back and never written — no path is minted as an address."
+   }
   },
   {
    "file": "hypercomb-shared/core/recent-portals.store.ts",
@@ -1471,7 +1486,12 @@
    "verdict": "confirmed",
    "check": 1,
    "reason": "`#write` at :191 and `#writePin` at :217 still write fixed keys (`KEY`, `PIN_KEY`) via localStorage.setItem from `#commit`. Same family and same owner decision as saved-locations.",
-   "area": "shell"
+   "area": "shell",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "recent-portals.store.ts holds the list and the home mark as ParticipantDocuments in `portals:recent`; legacy keys read once, never written."
+   }
   },
   {
    "file": "hypercomb-shared/core/icon-override.store.ts",
@@ -1480,7 +1500,12 @@
    "verdict": "confirmed",
    "check": 1,
    "reason": "`#persist()` at :75 still writes the whole override map to `localStorage['hc:icon-overrides']`; a per-tile icon is a decoration the artifact should wear, and here it cannot travel or be undone. Owner decision per write-conformance.md.",
-   "area": "shell"
+   "area": "shell",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "icon-override.store.ts is a ParticipantDocument in `icons:overrides`; legacy key read once, never written."
+   }
   },
   {
    "file": "hypercomb-web/src/setup/ensure-install.ts",

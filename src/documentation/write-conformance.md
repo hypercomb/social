@@ -495,9 +495,14 @@ The five `fix-incomplete` verdicts of the adjudication were read again
   optimize phase mints the pack; the ratchet lists the store and the optimizer
   as the only writers.
 
-No `fix-incomplete` verdict remains, and no check-7 site is open. What is
-left of the `deviation → confirmed` list is owner decisions (the five
-browser-storage side records; the eagerly opened bare-word pools). The dead
-code is gone (the layer-graph resolver file no longer exists; the unused
-layout-mode persister was deleted on 2026-09-23) and the native-filesystem
-docstring now agrees with the store.
+- **check 1 and 4, the five browser-storage side records** — fixed since:
+  saved locations, pinned entrances, recent portals and icon overrides are
+  `ParticipantDocument`s in colon-scoped DOCUMENT pools (per participant,
+  never sent — "mine by default", jwize 2026-09-23), their localStorage keys
+  read once and never written; the tile-props index is memory only.
+
+No `fix-incomplete` verdict remains, no check-7 site is open, and the side
+records are pools. The dead code is gone and the native-filesystem docstring
+agrees with the store. ONE owner decision is left on the census's list, and
+jwize took it on 2026-09-23: the nine bare-word system pools opened eagerly at
+boot move to colon meanings (the colon migration).
