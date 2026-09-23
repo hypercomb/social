@@ -67,7 +67,7 @@ each door's signed coordinates and content must be checked when visited.
 
 The cold ESM door lets a person carry a zone, see the hive doors that zone
 currently opens, and visit one. The hive's hexagon page offers adoption of the
-whole published hive or a chosen cell/branch into the visitor's own hive.
+published hive subset or a chosen published cell/branch into the visitor's own hive.
 Replication copies and verifies the selected closure; adoption is an explicit
 local fold; code arrives held until separately enabled. The cold door needs
 only discovery, exact-signature verification, and a route to the adoption
@@ -141,8 +141,13 @@ property that makes "from everywhere" safe to want.
 
 **Walking through the door: publish → adopt → hypercomb.io.** The published
 files are a *subset of your hive* — exactly the tiles you marked public and
-nothing else; publishing is per-tile consent. That subset then becomes the
-source of its own adoption: visitors adopt from the artifact, never from
+nothing else; publishing is per-tile consent. The publisher also chooses which
+dependencies to put on a host. Once a signature-addressed file is there,
+anyone who knows its signature may request and verify it; a signature is an
+address, not a secret or a second permission check. Thus unpublished hive
+content must not be placed in the public heap merely because its name is hard
+to guess. The published subset becomes the source of its own adoption:
+visitors adopt from the artifact, never from
 your live client. And the walk-in IS the onboarding: an "add to hypercomb"
 gesture on any domain hands off to hypercomb.io with that hive staged — you
 arrive, you accept the adopt, and you have it. An instant introduction to
