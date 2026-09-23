@@ -37,6 +37,13 @@ type InstallManifest = {
   beeDeps?: Record<string, string[]>
 }
 
+/** The package this meadow installed, or null. It keeps its own record, so
+ *  the runtime's live-package key never names it. */
+export const installedSignature = (): string | null => {
+  const sig = (localStorage.getItem(INSTALLED_KEY) ?? '').trim().toLowerCase()
+  return SIGNATURE_REGEX.test(sig) ? sig : null
+}
+
 export const ensureInstall = async (): Promise<void> => {
   const sigStore = new SignatureStore()
   register('@hypercomb/SignatureStore', sigStore)

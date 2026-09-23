@@ -153,10 +153,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    * (`bootBees`, accepted from the root only, like `criticalBees`), and a
    * shell calls this right after the dependencies load, before the runtime
    * initializer and the shell itself start. Every later load finds them
-   * already held. A root that names none costs one layer read.
+   * already held. A root that names none costs one layer read. A shell that
+   * keeps its own install record (meadowverse) names its root; every other
+   * shell reads the live package.
    */
-  public loadBootBees = async (): Promise<void> => {
-    const root = installedPackageSig()
+  public loadBootBees = async (root: string | null = installedPackageSig()): Promise<void> => {
     if (!root || !this.store) return
     let named: unknown
     try {
