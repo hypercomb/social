@@ -103,6 +103,7 @@ import {
   hostWireText,
   isLocalClaudeBridgeConfigured,
   isParticipantAiHostConfigured,
+  reachPhrase,
   settleQuestions,
   splitQuestion,
   SignatureService,
@@ -6573,8 +6574,14 @@ export class ChatWindowComponent implements OnDestroy {
         ran.push(grammar)
         queue.settle(entry.id, 'ran')
         lastRun = 'ran'
-        EffectBus.emit('toast:show', { type: 'success', message: `Draft of ${parsed.section} applied — reload to run it` })
-        return writeRanMessage({ section: parsed.section, beeSig: outcome.beeSig, path: outcome.path }, message)
+        // THE DRAFT AUDIT: code that newly reaches something is held in the
+        // brood until the participant accepts it (runtime module-drafts.ts);
+        // JEV's reading of every draft follows on its own (brood.drone.ts).
+        const held = outcome.reaches.length ? reachPhrase(outcome.reaches) : ''
+        EffectBus.emit('toast:show', held
+          ? { type: 'warning', message: `Draft of ${parsed.section} held: it newly reaches ${held}. Say brood to read it, brood accept to let it run.` }
+          : { type: 'success', message: `Draft of ${parsed.section} applied — reload to run it` })
+        return writeRanMessage({ section: parsed.section, beeSig: outcome.beeSig, path: outcome.path, held }, message)
       }
 
       // A DOCTRINE SECTION WRITTEN (essentials anatomy/doctrine.ts). The rules

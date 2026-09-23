@@ -21,7 +21,7 @@
 // (brood-accept.ts), which is the only door there is.
 
 import {
-  broodRoster, broodRules, EffectBus, get, I18N_IOC_KEY, QueenBee, setBroodRules,
+  broodRoster, broodRules, EffectBus, get, I18N_IOC_KEY, mayRunBee, QueenBee, setBroodRules,
   type BroodRecord, type I18nProvider,
 } from '@hypercomb/core'
 import { acceptByHand, auditLine, broodLabel, refuseByHand } from '../safety/brood-accept.js'
@@ -97,15 +97,24 @@ export class BroodQueenBee extends QueenBee {
       this.#say('Nothing is held. Every automaton here has been cleared by your rules.')
       return
     }
+    // Your own drafts are recorded here too (the draft audit), and most of
+    // them run — so each row says whether it runs, and why not when it does not.
+    const runs = await Promise.all(roster.map(record => mayRunBee(record.sig).catch(() => false)))
     roster.forEach((record, row) => {
-      const ruling = record.ruling ? record.ruling.verdict : 'held'
+      const flag = record.flags?.[record.flags.length - 1]
+      const state = record.ruling
+        ? record.ruling.verdict
+        : flag ? `held: ${flag.reason}`
+        : runs[row] ? ((record.source.kind ?? 'stranger') === 'own' ? 'yours, runs' : 'runs')
+        : 'held'
       const vouches = record.vouches.filter(vouch => vouch.verdict === 'accepted').length
       EffectBus.emit('activity:log', {
-        message: `${row + 1}. ${broodLabel(record)} — ${ruling}${vouches ? `, ${vouches} vouching` : ''}`,
-        icon: record.ruling?.verdict === 'accepted' ? '◆' : '○',
+        message: `${row + 1}. ${broodLabel(record)} — ${state}${vouches ? `, ${vouches} vouching` : ''}`,
+        icon: runs[row] ? '◆' : '○',
       })
     })
-    this.#say(`${roster.length} held — see the activity log, then: brood read 1`)
+    const held = runs.filter(run => !run).length
+    this.#say(`${held} held of ${roster.length} — see the activity log, then: brood read 1`)
   }
 
   async #read(key: string): Promise<void> {

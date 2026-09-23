@@ -46,12 +46,20 @@ const ALARM = '214, 126, 126'
 const standing = (record: BroodRecord, rules: BroodRules): string => {
   if (record.ruling?.verdict === 'accepted') return 'You accepted this — it runs.'
   if (record.ruling?.verdict === 'refused') return 'You refused this — it stays held.'
+  const flag = record.flags?.[record.flags.length - 1]
+  if (flag) return `Held: ${flag.reason}. It will not run until you accept it.`
   const accepted = record.vouches.filter(vouch => vouch.verdict === 'accepted').length
   const refused = record.vouches.filter(vouch => vouch.verdict === 'refused').length
   if (refused) return `A community you follow read this and refused it.`
   if (rules.vouchesNeeded > 0 && accepted) return `${accepted} of ${rules.vouchesNeeded} communities you follow stand behind it.`
+  if (runsByRule(record, rules)) return 'Yours — it runs. A reading is advice, never permission.'
   return 'Held. It will not run.'
 }
+
+/** Your own code that nothing held: the rules run it, so there is nothing to
+ *  accept (the draft audit records every draft here, held or not). */
+const runsByRule = (record: BroodRecord, rules: BroodRules): boolean =>
+  !record.ruling && !record.flags?.length && (record.source.kind ?? 'stranger') === 'own' && rules.own === 'run'
 
 const whereFrom = (record: BroodRecord): string => {
   const zone = record.source.zone?.trim()
@@ -200,7 +208,9 @@ class BroodElement extends HTMLElement {
       const { auditHeldBee } = await import('./brood-audit.js')
       await auditHeldBee(record.sig)
     }))
-    if (!accepted) acts.appendChild(this.#act('Accept', record, async () => { await acceptByHand(record) }, true))
+    if (!accepted && !runsByRule(record, this.#rules ?? { own: 'run', followed: 'run', stranger: 'hold', vouchesNeeded: 0, vouchesAdmitStrangers: false })) {
+      acts.appendChild(this.#act('Accept', record, async () => { await acceptByHand(record) }, true))
+    }
     if (record.ruling?.verdict !== 'refused') {
       acts.appendChild(this.#act('Refuse', record, async () => { await refuseByHand(record) }))
     }

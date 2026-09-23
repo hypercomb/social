@@ -28,8 +28,20 @@
 // Modules already imported keep running until the page reloads — the
 // activation record is what the loader reads at boot — so a draft that
 // applied still needs one reload to run, and the outcome says so.
+//
+// THE DRAFT AUDIT (jwize, 2026-09-23: "a code safety audit so we can author
+// our own new code in real time"). What IS checked before a draft can run is
+// what it newly reaches: core code-reach.ts compares the section it replaces
+// with the one it writes, and anything the new code reaches that the old did
+// not — the network, stored data, secrets and keys, text run as code, a way
+// out of the page, disguise — holds it in the brood (core flagInBrood) BEFORE
+// the pick is made, so there is no reload at which it runs unread. Every
+// draft is recorded there as your own code, which is where JEV's reading of
+// it lands (essentials safety/brood-audit.ts auditDraft, on `module:drafted`);
+// that reading may hold it too. Only the participant's hand lets held code
+// run, and a commit never folds it.
 
-import { MODULE_DRAFTS_IOC_KEY, SignatureService, isSectionPath, mayRunBee, registerPoolMeaning, replaceSection, sectionOf, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
+import { EffectBus, MODULE_DRAFTS_IOC_KEY, SignatureService, flagInBrood, holdInBrood, isSectionPath, mayRunBee, newReaches, reachPhrase, registerPoolMeaning, replaceSection, sectionOf, type CodeReach, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
 import { applySelection, installedPackageSig, layersIoFor, unpickRevision, type SelectionOutcome } from './acquire.js'
 import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } from './host-pool.js'
 import { composeDependencies, isOff, namespaceOf, ownerOf, readPicks, sigsOf, walkTree, within, type Picks, type TreeWalk } from './package-tree.js'
@@ -66,6 +78,9 @@ export type ModuleDraftOutcome =
     readonly path: string
     /** The running code is unchanged until the page reloads. */
     readonly reload: true
+    /** What the new section reaches that the old one did not. Non-empty: the
+     *  draft is HELD in the brood and does not run until it is accepted. */
+    readonly reaches: readonly CodeReach[]
   }
   | { readonly ok: false; readonly error: string }
 
@@ -101,6 +116,44 @@ export type ModuleDraftDeps = {
   /** May this module run here (core mayRunBee)? Code still held in the brood
    *  is never folded into a commit. Absent: everything may. */
   readonly mayRun?: (sig: string) => Promise<boolean>
+  /** Record a draft in the brood BEFORE its pick is made — held when it
+   *  newly reaches anything. Throws when a hold cannot be recorded. Absent: a
+   *  draft that reaches nothing new applies, and one that does is refused. */
+  readonly admit?: (draft: DraftAdmission) => Promise<void>
+}
+
+/** A draft about to be made live, as the brood records it. */
+export type DraftAdmission = {
+  readonly sig: string
+  readonly from: string
+  readonly section: string
+  readonly path: string
+  readonly reaches: readonly CodeReach[]
+}
+
+/** Every draft is your own code; one that newly reaches something is held
+ *  for a reason until you accept it. */
+const admitInBrood = async ({ sig, section, path, reaches }: DraftAdmission): Promise<void> => {
+  const source = { kind: 'own' as const, how: `a draft of ${section} at ${path}` }
+  if (reaches.length) await flagInBrood(sig, { by: 'scan', reason: `it newly reaches ${reachPhrase(reaches)}`, reaches }, source, section)
+  else await holdInBrood(sig, source, section)
+}
+
+/** Record the draft; null when it may be made live, else why not. */
+const admitDraft = async (deps: ModuleDraftDeps, draft: DraftAdmission): Promise<string | null> => {
+  const refused = `it newly reaches ${reachPhrase(draft.reaches)} and could not be held for you to read first, so nothing was applied`
+  if (!deps.admit) return draft.reaches.length ? refused : null
+  try {
+    await deps.admit(draft)
+    return null
+  } catch {
+    return draft.reaches.length ? refused : null
+  }
+}
+
+/** Tell the hive a draft landed — the reading (auditDraft) starts from here. */
+const announce = (draft: DraftAdmission & { readonly of: 'bee' | 'dependency'; readonly at: number }): void => {
+  try { EffectBus.emit('module:drafted', draft) } catch { /* nobody listening */ }
 }
 
 const livePool = async (): Promise<PackagePool | null> => {
@@ -133,6 +186,7 @@ const liveDeps = (): ModuleDraftDeps => ({
   off: readOffUnits,
   setOff: paths => writeOffUnits(paths),
   mayRun: sig => mayRunBee(sig),
+  admit: admitInBrood,
 })
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>
@@ -205,7 +259,8 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   const held = await store.getBeeBytes(beeSig)
   if (!held) return fail('the module\'s bytes are not held here')
   const text = decode(held)
-  if (!sectionOf(text, request.section)) return fail(`the module has no section ${request.section}; list <sig> names its sections`)
+  const replaced = sectionOf(text, request.section)
+  if (!replaced) return fail(`the module has no section ${request.section}; list <sig> names its sections`)
   const nextText = replaceSection(text, request.section, request.body)
   if (nextText === null) return fail('the section could not be replaced')
   const nextBytes = encode(nextText)
@@ -231,9 +286,17 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   }))
   const rootSig = await sigOf(rootBytes)
 
-  // WRITTEN, THEN MADE LIVE. Every atom is sig-named, so a draft that fails
-  // the selection gates leaves only unreferenced bytes behind — content, not
-  // state — and the running selection is exactly what it was.
+  // AUDITED, WRITTEN, THEN MADE LIVE. The brood hears of the draft before
+  // the pick exists, so the selection that makes it live already holds it
+  // when it reaches anything new. Every atom is sig-named, so a draft that
+  // fails the selection gates leaves only unreferenced bytes behind — content,
+  // not state — and the running selection is exactly what it was.
+  const admission: DraftAdmission = {
+    sig: nextBeeSig, from: beeSig, section: request.section, path: node.path,
+    reaches: newReaches(text.slice(replaced.from, replaced.to), request.body),
+  }
+  const refused = await admitDraft(deps, admission)
+  if (refused) return fail(refused)
   await store.writeBeeBytes(nextBeeSig, nextBytes)
   await store.writeLayerBytes(nextLayerSig, nextLayerBytes.buffer)
   await store.writeLayerBytes(rootSig, rootBytes.buffer)
@@ -242,7 +305,8 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
     [node.path]: { layer: nextLayerSig, root: rootSig, hides: false, at },
   })
   if (!outcome.ok) return fail(outcome.error)
-  return { ok: true, beeSig: nextBeeSig, of: 'bee', layerSig: nextLayerSig, rootSig, path: node.path, reload: true }
+  announce({ ...admission, of: 'bee', at })
+  return { ok: true, beeSig: nextBeeSig, of: 'bee', layerSig: nextLayerSig, rootSig, path: node.path, reload: true, reaches: admission.reaches }
 }
 
 type DraftContext = {
@@ -284,7 +348,8 @@ const draftDependency = async (request: ModuleDraftRequest, fromSig: string, con
   if (!dependencies.includes(fromSig)) return fail(`that dependency is not what runs at ${node.path} now`)
 
   const text = decode(held)
-  if (!sectionOf(text, request.section)) return fail(`the module has no section ${request.section}; list <sig> names its sections`)
+  const replaced = sectionOf(text, request.section)
+  if (!replaced) return fail(`the module has no section ${request.section}; list <sig> names its sections`)
   const nextText = replaceSection(text, request.section, request.body)
   if (nextText === null) return fail('the section could not be replaced')
   const nextBytes = encode(nextText)
@@ -299,6 +364,12 @@ const draftDependency = async (request: ModuleDraftRequest, fromSig: string, con
   }))
   const rootSig = await sigOf(rootBytes)
 
+  const admission: DraftAdmission = {
+    sig: nextSig, from: fromSig, section: request.section, path: node.path,
+    reaches: newReaches(text.slice(replaced.from, replaced.to), request.body),
+  }
+  const refused = await admitDraft(deps, admission)
+  if (refused) return fail(refused)
   await store.writeDependencyBytes(nextSig, nextBytes)
   await store.writeLayerBytes!(rootSig, rootBytes.buffer)
   const outcome = await deps.apply(trunk, [nextSig, rootSig], {
@@ -306,7 +377,8 @@ const draftDependency = async (request: ModuleDraftRequest, fromSig: string, con
     [node.path]: { layer: node.layerSig, root: rootSig, hides: false, at },
   })
   if (!outcome.ok) return fail(outcome.error)
-  return { ok: true, beeSig: nextSig, of: 'dependency', layerSig: node.layerSig, rootSig, path: node.path, reload: true }
+  announce({ ...admission, of: 'dependency', at })
+  return { ok: true, beeSig: nextSig, of: 'dependency', layerSig: node.layerSig, rootSig, path: node.path, reload: true, reaches: admission.reaches }
 }
 
 export type ModuleDraft = {
@@ -386,9 +458,10 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
   // whose root says it is a draft), a trial taken by hand, a revision picked
   // in Packages — and the paths turned off. A pick that does not apply (a pick
   // above it hides it) changes nothing and is not folded. A pick whose code
-  // still waits in the brood is not folded either: a commit publishes under
-  // this hive's key, and code nobody here has accepted never rides out under
-  // it. It stays a pick, and the outcome names it.
+  // still waits in the brood is not folded either — a draft the audit held
+  // as much as a trial taken by hand: a commit publishes under this hive's
+  // key, and code nobody here has accepted never rides out under it. It stays
+  // a pick, and the outcome names it.
   const picks = deps.picks()
   const local: ReplicationIo = { ...io, fetch: async () => null }
   const shape = await walkTree(trunk, local, picks)
@@ -406,11 +479,11 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
     const root = await read(pick.root)
     const draft = root?.['draft'] as { section?: unknown; from?: unknown; to?: unknown } | undefined
     const dependencies = sigsOf(root?.['dependencies'])
+    if (await stillHeld(pick.layer, path, dependencies, local, readNamespace, deps.mayRun)) { held.push(path); continue }
     if (draft) {
       drafts.set(path, pick.layer)
       sections.set(path, { section: String(draft.section ?? ''), from: String(draft.from ?? ''), to: String(draft.to ?? '') })
     } else {
-      if (await stillHeld(pick.layer, path, dependencies, local, readNamespace, deps.mayRun)) { held.push(path); continue }
       taken.push({ path, root: pick.root })
     }
     folded.set(path, pick.layer)
@@ -419,7 +492,7 @@ export const commitSelection = async (label: string, deps: ModuleDraftDeps = liv
   const off = new Set([...deps.off()].filter(path => !folded.has(path)))
   if (!folded.size && !off.size) {
     return fail(held.length
-      ? `nothing to commit: what you took at ${held.join(', ')} still waits in the brood — accept it there first`
+      ? `nothing to commit: the code at ${held.join(', ')} still waits in the brood — accept it there first`
       : 'nothing to commit: no draft is picked and nothing is turned off')
   }
   const touches = (path: string): boolean =>
@@ -608,7 +681,7 @@ const provider: ModuleDraftsProvider = {
   bytesOf: sig => bytesOf(sig),
   draft: async ({ sig, section, body }) => {
     const outcome = await draftModule({ beeSig: sig, section, body })
-    return outcome.ok ? { ok: true, sig: outcome.beeSig, of: outcome.of, path: outcome.path } : { ok: false, error: outcome.error }
+    return outcome.ok ? { ok: true, sig: outcome.beeSig, of: outcome.of, path: outcome.path, reaches: outcome.reaches } : { ok: false, error: outcome.error }
   },
   pack: files => packFiles(files),
 }

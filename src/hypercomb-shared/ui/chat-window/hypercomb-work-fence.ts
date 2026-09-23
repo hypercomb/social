@@ -421,8 +421,10 @@ const fenceLangOf = (kind: WorkKind): string =>
 export const blockRefusedMessage = (kind: WorkKind, reason: string, request: string): string =>
   `Your ${fenceLangOf(kind)} block was not used: ${reason}. Send a corrected block, or answer.${carry(request)}`
 
-export const writeRanMessage = (draft: { section: string; beeSig: string; path: string }, request: string): string =>
-  `The participant ran your ${WRITE_FENCE_LANG} block. The hive drafted the module: ${draft.section} was written into a new module ${draft.beeSig}, picked at ${draft.path} over the installed package. It runs after the participant reloads; until then the old module is still running. read ${draft.beeSig} ${draft.section} opens what you wrote. Do not write it again unless something is wrong with it.\n\nContinue: tell the participant to reload and what to try, or answer.${carry(request)}`
+export const writeRanMessage = (draft: { section: string; beeSig: string; path: string; held?: string }, request: string): string =>
+  draft.held
+    ? `The participant ran your ${WRITE_FENCE_LANG} block. The hive drafted the module — ${draft.section} was written into a new module ${draft.beeSig}, picked at ${draft.path} — and HELD it: the new code newly reaches ${draft.held}, so it does not run until the participant reads it and accepts it themselves (brood, then brood accept). Do not try to get around the hold. If the change did not need that reach, write the section again without it; if it did, tell the participant why.\n\nContinue, or answer.${carry(request)}`
+    : `The participant ran your ${WRITE_FENCE_LANG} block. The hive drafted the module: ${draft.section} was written into a new module ${draft.beeSig}, picked at ${draft.path} over the installed package. It runs after the participant reloads; until then the old module is still running. read ${draft.beeSig} ${draft.section} opens what you wrote. Do not write it again unless something is wrong with it.\n\nContinue: tell the participant to reload and what to try, or answer.${carry(request)}`
 
 export const writeSkippedMessage = (section: string, request: string): string =>
   `The participant skipped your ${WRITE_FENCE_LANG} block; ${section} was not written and nothing changed. Do not propose it again unless they ask. Continue, or answer.${carry(request)}`
