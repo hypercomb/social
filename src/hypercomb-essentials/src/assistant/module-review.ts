@@ -25,6 +25,7 @@
 // A dependency: it registers nothing. The `module` queen drives it.
 
 import { sectionOf } from '@hypercomb/core'
+import { diffLines, type LineDiff } from './line-diff.js'
 
 export type ReviewVerdict = 'accept' | 'refuse' | 'unclear'
 
@@ -289,4 +290,73 @@ export const readChange = async (sig: string, deps: Pick<ReviewDeps, 'get'>): Pr
     const record = JSON.parse((await deps.get(sig)) ?? '') as ModuleChangeRecord
     return record?.kind === 'module-change' && Array.isArray(record.changes) ? record : null
   } catch { return null }
+}
+
+// ── one difference at a time ───────────────────────────────────────────────
+//
+// A TRIAL AS A READER WALKS IT: every file its change touched, before and
+// after as diff rows, the paths it turned off, what the host's AI said, and
+// what people said with their notes. Everything is read by signature through
+// `read`, which the caller makes answer only bytes that hash to the name
+// asked for; a record that is not what its kind says is left out, and every
+// signature that could not be read is named, so a missing file is never
+// shown as a file that was emptied.
+
+export interface TrialFile {
+  readonly section: string
+  readonly path: string
+  readonly before: string
+  readonly after: string
+  /** Null when either side could not be read. */
+  readonly diff: LineDiff | null
+}
+
+export interface TrialReading {
+  readonly files: readonly TrialFile[]
+  readonly off: readonly string[]
+  readonly at: number | null
+  readonly review: { readonly verdict: ReviewVerdict; readonly model: string; readonly findings: string } | null
+  readonly people: readonly { readonly pubkey: string; readonly verdict: ReviewVerdict; readonly note: string; readonly at: number }[]
+  readonly missing: readonly string[]
+}
+
+export const readTrial = async (site: SandboxSite, read: (sig: string) => Promise<string | null>): Promise<TrialReading> => {
+  const missing = new Set<string>()
+  const text = async (sig: unknown): Promise<string | null> => {
+    if (typeof sig !== 'string' || !SIG_RE.test(sig)) return null
+    const got = await read(sig).catch(() => null)
+    if (got === null) missing.add(sig)
+    return got
+  }
+  const json = async <T,>(sig: unknown): Promise<T | null> => {
+    const got = await text(sig)
+    try { return got === null ? null : JSON.parse(got) as T } catch { return null }
+  }
+  const verdict = (value: unknown): ReviewVerdict => VERDICTS.includes(value as ReviewVerdict) ? value as ReviewVerdict : 'unclear'
+
+  const record = await json<ModuleChangeRecord>(site.change)
+  const change = record?.kind === 'module-change' && Array.isArray(record.changes) ? record : null
+  const files = await Promise.all((change?.changes ?? []).map(async (file): Promise<TrialFile> => {
+    const [before, after] = await Promise.all([text(file.before), text(file.after)])
+    return {
+      section: String(file.section ?? ''), path: String(file.path ?? ''), before: before ?? '', after: after ?? '',
+      diff: before === null || after === null ? null : diffLines(before, after),
+    }
+  }))
+
+  const reviewRecord = await json<ModuleReviewRecord>(site.review)
+  const review = reviewRecord?.kind === 'module-review'
+    ? { verdict: verdict(reviewRecord.verdict), model: String(reviewRecord.model ?? ''), findings: (await text(reviewRecord.findings)) ?? '' }
+    : null
+
+  const people = (await Promise.all((site.assessments ?? []).slice(0, 50).map(async assessment => {
+    const assessed = await json<ModuleAssessmentRecord>(assessment.record)
+    if (assessed?.kind !== 'module-assessment' || assessed.root !== site.package) return null
+    return { pubkey: assessment.pubkey, verdict: verdict(assessed.verdict), note: (await text(assessed.note)) ?? '', at: assessment.at }
+  }))).filter((person): person is NonNullable<typeof person> => person !== null)
+
+  return {
+    files, off: strings(change?.off), at: Number.isFinite(change?.at) ? Number(change!.at) : null,
+    review, people, missing: [...missing],
+  }
 }

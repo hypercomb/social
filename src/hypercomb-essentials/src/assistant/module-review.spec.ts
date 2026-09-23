@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { assessSandbox, isSandboxSite, publishChange, readChange, reviewChange, reviewContext, reviewQuestion, sectionText, tallyAssessments, trialsOf, verdictOf, type ReviewDeps } from './module-review.js'
+import { assessSandbox, isSandboxSite, publishChange, readChange, readTrial, reviewChange, reviewContext, reviewQuestion, sectionText, tallyAssessments, trialsOf, verdictOf, type ReviewDeps } from './module-review.js'
 
 const BEFORE = ['// src/preferences/settings.ts', 'export const zoom = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
 const AFTER = ['// src/preferences/settings.ts', 'export const zoom = 2;', 'globalThis.__proof = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
@@ -132,5 +132,45 @@ describe('the trials on a zone', () => {
     expect(undated!.at).toBeNull()
     expect(trialsOf(null)).toEqual([])
     expect(trialsOf({ trials: 'none' })).toEqual([])
+  })
+})
+
+describe('reading a trial', () => {
+  it('walks the change file by file, with the host AI reading and every assessment of this root', async () => {
+    const w = await world()
+    const put = (text: string) => w.deps.put(text, 'text/plain')
+    const root = 'e'.repeat(64)
+    const gone = 'f'.repeat(64)
+    const [b1, a1, b2] = await Promise.all([put('export const zoom = 1;\n'), put('export const zoom = 2;\nglobalThis.__proof = 1;\n'), put('export {};\n')])
+    const change = await put(JSON.stringify({
+      kind: 'module-change', sandbox: 'try-zoom', root, off: ['games/pong'], at: 1234,
+      changes: [
+        { path: 'preferences', section: 'src/a.ts', from: 'x', to: 'y', before: b1, after: a1 },
+        { path: 'other', section: 'src/b.ts', from: 'x', to: 'y', before: b2, after: gone },
+      ],
+    }))
+    const findings = await put('It raises zoom.\nVERDICT: refuse')
+    const review = await put(JSON.stringify({ kind: 'module-review', verdict: 'refuse', model: 'claude-haiku-4-5', findings }))
+    const note = await put('reads well')
+    const mine = await put(JSON.stringify({ kind: 'module-assessment', root, verdict: 'accept', note }))
+    const elsewhere = await put(JSON.stringify({ kind: 'module-assessment', root: 'a'.repeat(64), verdict: 'refuse', note }))
+    const reading = await readTrial({
+      sandbox: true, title: 'try-zoom', package: root, pubkey: 'p', change, review,
+      assessments: [{ pubkey: 'k1', record: mine, verdict: 'accept', at: 5 }, { pubkey: 'k2', record: elsewhere, verdict: 'refuse', at: 6 }],
+    }, async sig => w.heap.get(sig) ?? null)
+
+    const [readable, unreadable] = reading.files
+    expect([readable!.section, readable!.diff?.added, readable!.diff?.removed]).toEqual(['src/a.ts', 2, 1])
+    // A side that cannot be read is named as missing, never drawn as an emptied file.
+    expect(unreadable!.diff).toBeNull()
+    expect(reading.missing).toEqual([gone])
+    expect([reading.off, reading.at]).toEqual([['games/pong'], 1234])
+    expect(reading.review).toEqual({ verdict: 'refuse', model: 'claude-haiku-4-5', findings: 'It raises zoom.\nVERDICT: refuse' })
+    expect(reading.people).toEqual([{ pubkey: 'k1', verdict: 'accept', note: 'reads well', at: 5 }])
+  })
+
+  it('reads a trial with no change and no review as exactly that', async () => {
+    const reading = await readTrial({ sandbox: true, title: 'try-zoom', package: 'e'.repeat(64), pubkey: 'p' }, async () => null)
+    expect(reading).toEqual({ files: [], off: [], at: null, review: null, people: [], missing: [] })
   })
 })

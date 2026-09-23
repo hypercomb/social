@@ -9,9 +9,15 @@
 // more (the change and review signatures open with `read <sig>`).
 //
 // Anywhere else it does nothing: `sense` is false off a sandbox door.
+//
+// It is also the bee that WIRES this feature's surface: the what-changed
+// panel (sandbox-change.view.ts), which `module changes <change>` opens over
+// any hive. The view only exports its element; defining it and adding it to
+// the ShellSurfaceRegistry is this bee's act.
 
 import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { isSandboxSite, tallyAssessments } from './module-review.js'
+import { SANDBOX_CHANGE_OWNER, SANDBOX_CHANGE_SURFACE, SandboxChangeElement } from './sandbox-change.view.js'
 
 const DOOR_RE = /^(try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?)\./i
 
@@ -50,7 +56,7 @@ export class SandboxDoorDrone extends Drone {
     EffectBus.emit('toast:show', {
       type: 'info',
       message: t('module.door',
-        "You are in sandbox {name}, by {publisher} — not promoted yet. The host's AI says {review}; people say {accept} accept, {refuse} refuse, {unclear} unclear. Add yours: module assess {change} accept|refuse <note>.",
+        "You are in sandbox {name}, by {publisher} — not promoted yet. The host's AI says {review}; people say {accept} accept, {refuse} refuse, {unclear} unclear. See what it changes: module changes {change}. Add yours: module assess {change} accept|refuse <note>.",
         {
           name, change, publisher: site.publisher || site.pubkey.slice(0, 12) + '…',
           review: site.reviewVerdict ?? t('module.unreviewed', 'nothing yet', {}),
@@ -62,3 +68,13 @@ export class SandboxDoorDrone extends Drone {
 
 const _door = new SandboxDoorDrone()
 window.ioc.register('@diamondcoreprocessor.com/SandboxDoorDrone', _door)
+
+;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void }) => void) => void } })
+  .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
+    if (!customElements.get(SANDBOX_CHANGE_SURFACE)) customElements.define(SANDBOX_CHANGE_SURFACE, SandboxChangeElement)
+    try {
+      registry.add({ name: SANDBOX_CHANGE_SURFACE, owner: SANDBOX_CHANGE_OWNER, element: SANDBOX_CHANGE_SURFACE, order: 152 })
+    } catch {
+      // duplicate add (hot reload) — the mounted surface is already live
+    }
+  })

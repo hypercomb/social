@@ -11,7 +11,9 @@
 //      package, and runs the model's code — while followers are NOT told; the
 //      door tells the tester's hive what it runs, the tester signs a public
 //      assessment under their own key, and the publisher reads the tally;
-//      the zone lists every open trial, and anyone finds this one there
+//      the zone lists every open trial, and anyone finds this one there;
+//      `module changes` opens what it changes, file by file, with the host
+//      AI's reading and the tester's signed note, read by signature
 //   4. `module promote` moves the live channel to the same root: the follower
 //      is told, replicates it from the host, and runs it
 //   5. a unit turned off and committed + promoted is unreachable for the
@@ -21,6 +23,7 @@
 //
 //   node scripts/local-content-host.mjs 4291 http://localhost:4260 --ai-stub   (the content host's own worker)
 //   node scripts/verify-hive-publish.cjs [web=http://localhost:4260] [host=localhost:4291]
+//   (HIVE_SHOT=<file.png> also saves the publisher's what-changed panel)
 //
 // Fresh Playwright profiles on the WEB shell; the door is served on
 // try-<change>.localhost:<port> (any *.localhost is loopback). Only
@@ -46,6 +49,17 @@ const trialsOnZone = async () => (await (await fetch(`http://${HOST}/trials.json
 const channelOf = (state, pubkey, key) => state.hives[pubkey] ? JSON.parse(state.hives[pubkey].content).roots[key] ?? null : null
 const selectionHas = (page, path) => page.evaluate(async p => (await window.ioc.get('@hypercomb.social/Install').selection()).nodes.some(n => n.path === p), path)
 const proofOf = page => H.waitFor(() => page.evaluate(() => globalThis.__hivePublishProof ?? null), 90_000, 800)
+/** The what-changed panel, once its reading is drawn. */
+const panelOf = page => H.waitFor(() => page.evaluate(() => {
+  const panel = document.querySelector('.hc-trial')
+  if (!panel || !panel.querySelector('.hc-trial-row')) return null
+  const all = selector => [...panel.querySelectorAll(selector)].map(node => node.textContent ?? '')
+  return {
+    title: panel.querySelector('.hc-trial-title')?.textContent ?? '', files: all('.hc-trial-file-name'),
+    added: all('.hc-trial-row.is-add'), verdicts: all('.hc-trial-verdict'), people: all('.hc-trial-person'),
+  }
+}), 60_000, 800)
+const closePanel = page => page.evaluate(() => document.querySelector('.hc-trial')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
 const announcedOn = page => page.evaluate(() => {
   let got = null
   const off = globalThis.__hypercombEffectBus.on('update:available', p => { if (p?.source === 'channel') got = p.packageSig })
@@ -156,6 +170,18 @@ const announcedOn = page => page.evaluate(() => {
   await H.say(tester, `module trials @${WRITE}`)
   const found = await H.toastsUntil(tester, /AI says|No trials|did not list/)
   check('anyone finds the trials with a word — from inside another trial, too', (found ?? []).some(m => m.startsWith(`${SANDBOX} by publisher`) && m.includes(target.section) && m.includes(DOOR)), JSON.stringify(found))
+
+  // ── 3d. ONE DIFFERENCE AT A TIME — what the trial changes ───────────────
+  await H.say(page, `module changes ${CHANGE} @${WRITE}`)
+  const panel = await panelOf(page)
+  check('the publisher opens what the trial changes, file by file, read from the door', panel?.title === SANDBOX && panel.files.includes(target.section) && panel.added.some(row => row.includes(MARKER)), JSON.stringify(panel?.files))
+  check('the panel carries the host AI reading and the tester\'s signed note', !!panel && panel.verdicts.some(v => v.startsWith('accept')) && panel.people.some(row => row.includes('refuse') && row.includes('raises zoom without asking')), JSON.stringify(panel?.people))
+  if (process.env.HIVE_SHOT) await page.screenshot({ path: process.env.HIVE_SHOT })
+  await closePanel(page)
+  await H.say(tester, `module changes ${CHANGE}`)
+  const atDoor = await panelOf(tester)
+  check('at the door the same word opens the same change, with no host named', atDoor?.title === SANDBOX && atDoor.added.some(row => row.includes(MARKER)))
+  await closePanel(tester)
   await fol.page.reload({ waitUntil: 'domcontentloaded' })
   await H.sleep(8000)
   check('the follower is not told of a sandbox', (await announcedOn(fol.page)) !== sandboxRoot)

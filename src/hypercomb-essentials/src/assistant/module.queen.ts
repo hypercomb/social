@@ -38,6 +38,11 @@
 //                          when, what it changes, how the host's AI read it,
 //                          and its door — so anyone can walk them one at a
 //                          time. It reads; it publishes nothing.
+//   module changes <change> [@<host>]
+//                          opens the trial's change file by file, before and
+//                          after, with the host AI's reading and people's
+//                          signed notes, and steps through the zone's other
+//                          trials (sandbox-change.view.ts). It reads.
 //
 // Every commit also publishes THE CHANGE — each drafted source file before and
 // after — as change:try-<change>, and the host's AI's reading of it as
@@ -164,7 +169,7 @@ export class ModuleQueenBee extends QueenBee {
   readonly command = 'module'
   override description = 'See, drop, try in public, or promote what runs here'
   override descriptionKey = 'slash.module'
-  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>', 'assess <change> [accept|refuse|unclear <note>]', 'trials [@<host>]']
+  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>', 'assess <change> [accept|refuse|unclear <note>]', 'trials [@<host>]', 'changes <change>']
   override examples = [
     { input: '/module', result: 'Lists the drafts picked over the installed package' },
     { input: '/module commit fresh-rooms', result: 'Publishes what runs here to try-fresh-rooms.hypercomb.com, not to followers' },
@@ -185,7 +190,7 @@ export class ModuleQueenBee extends QueenBee {
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess ', 'trials'].filter(word => word.startsWith(typed) && word.trim() !== typed)
+    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess ', 'trials', 'changes '].filter(word => word.startsWith(typed) && word.trim() !== typed)
   }
 
   protected async execute(args: string): Promise<void> {
@@ -215,7 +220,7 @@ export class ModuleQueenBee extends QueenBee {
       toast(t('module.dropped', 'Dropped the draft at {path} — reload to run the package as it was.', { path }), 'success')
       return
     }
-    if (!PUBLISHING.has(word) && word !== 'trials') { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change> or trials.'), 'warning'); return }
+    if (!PUBLISHING.has(word) && word !== 'trials' && word !== 'changes') { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change>, trials or changes <change>.'), 'warning'); return }
 
     // [@<host>] publishes to a host of your own (a machine running
     // hypercomb-serve, a relay) instead of the public one; the other words are
@@ -234,6 +239,17 @@ export class ModuleQueenBee extends QueenBee {
       const stamped = await setHiveRoot(host, `${INSTALL_CHANNEL_PREFIX}${live}`, root).catch(error => ({ ok: false, reason: error instanceof Error ? error.message : 'refused' }))
       if (!stamped.ok) { toast(t('module.unstamped', 'The install channel was not stamped: {reason}', { reason: stamped.reason ?? 'refused' }), 'warning'); return }
       toast(t('module.promoted', 'Promoted {name}: {channel} now names {root}. Followers are told on their next boot.', { name, channel: `${INSTALL_CHANNEL_PREFIX}${live}`, root: root.slice(0, 12) + '…' }), 'success')
+      return
+    }
+
+    if (word === 'changes') {
+      const name = sandboxName(words[0] ?? '')
+      if (!name) { toast(t('module.which', 'Say which sandbox, like: module changes fresh-rooms.'), 'warning'); return }
+      const site = await sandboxSite(name, host)
+      if (!site) { toast(t('module.nosite', 'No sandbox {name} answers at {door}.', { name, door: sandboxDoorUrl(name, host) }), 'warning'); return }
+      const door = location.hostname.toLowerCase().startsWith(`${name}.`) ? location.origin : sandboxDoorUrl(name, host)
+      // The what-changed panel (sandbox-change.view.ts) opens on this; `at` guards the replay.
+      EffectBus.emit('module:changes', { name, door, site, at: Date.now() })
       return
     }
 
