@@ -19,7 +19,7 @@ describe('anything in a cavern can lead in', () => {
   it('lets the story seat a place behind any thing in a chamber or any square of a room', () => {
     const seats = [
       ...STORY,
-      { entrance: 'hollow-grove/bark-marks', place: 'wet-steps' },
+      { entrance: 'hollow-grove/bark-marks', place: 'chandler-house' },
       { entrance: 'hollow-grove/pool-chest', place: 'cistern' },
       { entrance: `labyrinth/${squareEntrance(roomId('sunseed', 'porch'), { col: 5, row: 1 })}`, place: 'greenwood' },
     ]

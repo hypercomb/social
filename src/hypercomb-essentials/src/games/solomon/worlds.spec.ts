@@ -57,7 +57,8 @@ describe('worlds inside worlds', () => {
   it('seats the Greenwood behind the valley grove and the one-room Hollow Grove inside it, and the story still validates', () => {
     expect(validateStory(STORY, PLACES, ROOT_PLACE)).toEqual([])
     expect(PLACES.get('greenwood')).toMatchObject({ kind: 'island', entrances: ['moss', 'tamsin', 'climbers-cache', 'grove-gate-sign', 'pond-sign', 'root-cave', 'burrow', 'old-hollow'] })
-    expect(routeTo(STORY, PLACES, ROOT_PLACE, 'hollow-grove')?.map(step => step.via)).toEqual([null, 'island/valley-grove', 'greenwood/old-hollow'])
+    expect(routeTo(STORY, PLACES, ROOT_PLACE, 'greenwood')?.map(step => step.via)).toEqual([null, 'island/valley-grove'])
+    expect(routeTo(STORY, PLACES, 'greenwood', 'hollow-grove')?.map(step => step.via)).toEqual([null, 'greenwood/old-hollow'])
     expect(WORLDS.get('island')).toBe(SEVENFOLD_VALLEY)
     expect(WORLDS.get('greenwood')).toBe(GREENWOOD)
   })
@@ -82,7 +83,7 @@ describe('worlds inside worlds', () => {
 
   it('makes anything an entrance the moment a story seats a place behind it — and a thing with its own verb keeps it', () => {
     // Any thing in a world may be seated; the story decides, not the kind.
-    expect(validateStory([...STORY, { entrance: 'greenwood/pond-sign', place: 'wet-steps' }, { entrance: 'greenwood/moss', place: 'cistern' }], PLACES, ROOT_PLACE)).toEqual([])
+    expect(validateStory([...STORY, { entrance: 'greenwood/climbers-cache', place: 'cistern' }, { entrance: 'greenwood/moss', place: 'chandler-house' }], PLACES, ROOT_PLACE)).toEqual([])
     const seated = new Set(['pond-sign', 'moss'])
     const entered: string[] = []
     const model = new RpgOverworld({ ...hooks, seat: id => seated.has(id), onEntrance: id => entered.push(id) }, GREENWOOD)

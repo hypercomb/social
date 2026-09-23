@@ -10,12 +10,14 @@ import { storyRefs } from './story-when.js'
 import { COMBAT_SKILLS } from './engine.js'
 
 describe('STORY', () => {
-  it('has exactly the thirteen seats the spec pins, in order', () => {
+  it('has exactly the eighteen seats the spec pins, in order', () => {
     expect(STORY.map(seat => seat.entrance)).toEqual([
       'island/dawn-shrine', 'island/tide-shrine', 'island/pyramid-shrine',
       'island/wayfarer-cavern', 'wet-steps/stairs-down', 'cistern/stairs-down',
       'island/highland-cavern', 'hall-of-hours/stairs-down', 'six-roads/stairs-down',
       'island/chandler-door', 'chandler-house/trapdoor', 'island/valley-grove', 'greenwood/old-hollow',
+      'island/valley-east-sign', 'greenwood/pond-sign', 'wet-steps/drip-line',
+      'labyrinth/sunseed-porch-ii.cell-00-02', 'labyrinth/sunseed-porch-ii.cell-14-02',
     ])
   })
 
@@ -25,9 +27,10 @@ describe('STORY', () => {
   })
 
   it('the valley grove opens onto a whole world, and the Hollow Grove is one room inside it', () => {
-    expect(STORY.filter(seat => seat.place === 'greenwood')).toEqual([{ entrance: 'island/valley-grove', place: 'greenwood' }])
-    expect(STORY.filter(seat => seat.place === 'hollow-grove')).toEqual([{ entrance: 'greenwood/old-hollow', place: 'hollow-grove' }])
-    expect(routeTo(STORY, PLACES, ROOT_PLACE, 'hollow-grove')?.map(step => step.place)).toEqual(['island', 'greenwood', 'hollow-grove'])
+    expect(STORY).toContainEqual({ entrance: 'island/valley-grove', place: 'greenwood' })
+    expect(STORY).toContainEqual({ entrance: 'greenwood/old-hollow', place: 'hollow-grove' })
+    expect(routeTo(STORY, PLACES, ROOT_PLACE, 'greenwood')?.map(step => step.via)).toEqual([null, 'island/valley-grove'])
+    expect(routeTo(STORY, PLACES, 'greenwood', 'hollow-grove')?.map(step => step.via)).toEqual([null, 'greenwood/old-hollow'])
   })
 
   it('validates clean against PLACES, rooted at ROOT_PLACE', () => {
@@ -59,10 +62,11 @@ describe('PLACES', () => {
     }
   })
 
-  it('LABYRINTH_PLACE offers every square of every room as an entrance, seats none yet, and offers the three shrine arrivals', () => {
+  it('LABYRINTH_PLACE offers every square of every room as an entrance and offers the three shrine arrivals', () => {
     expect(LABYRINTH_PLACE.entrances).toHaveLength(12 * 16 * 12)
     expect(LABYRINTH_PLACE.entrances).toContain('sunseed-porch-ii.cell-03-10')
-    expect(STORY.filter(seat => seat.entrance.startsWith('labyrinth/'))).toEqual([])
+    // Only the Sun Porch's two example squares lead anywhere.
+    expect(STORY.filter(seat => seat.entrance.startsWith('labyrinth/')).map(seat => seat.entrance)).toEqual(['labyrinth/sunseed-porch-ii.cell-00-02', 'labyrinth/sunseed-porch-ii.cell-14-02'])
     expect(LABYRINTH_PLACE.arrivals.map(a => a.id).sort()).toEqual(['starbloom', 'sunseed', 'tideglass'])
   })
 
@@ -102,7 +106,8 @@ describe('labels', () => {
   it('seatLabel reads the seated place\'s own name/subtitle and how much lies below it', () => {
     const cistern = seatLabel('wet-steps/stairs-down')
     expect(cistern).toMatchObject({ name: 'The Cistern' })
-    expect(seatLabel('island/wayfarer-cavern')?.levels).toBe(2) // cistern, spring-heart
+    // cistern, spring-heart — and the Greenwood behind the Drip-Line tablet, with the Hollow Grove in it
+    expect(seatLabel('island/wayfarer-cavern')?.levels).toBe(4)
     expect(seatLabel('island/not-a-real-entrance')).toBeNull()
   })
 

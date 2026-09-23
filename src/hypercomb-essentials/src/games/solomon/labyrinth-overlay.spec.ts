@@ -282,6 +282,19 @@ describe('the path shell', () => {
     expect(document.querySelector('.sol-rpg-map')).not.toBeNull()
   })
 
+  it('lets a patch of open air in the Sun Porch lead into another place: it shows where, and stepping in goes there', async () => {
+    const overlay = mount()
+    await enterSunseed()
+    // The story seats the Hollow Grove behind the porch's top-right corner:
+    // the square wears a window onto it before anyone steps in.
+    expect(document.querySelectorAll('.sol-passage.sol-seated').length).toBe(2)
+    overlay.engine!.arrive({ col: 14, row: 2 })
+    frame()
+    frame()
+    expect(crumbs().length).toBe(3)
+    expect(crumbs()[2]).toContain('Hollow Grove')
+  })
+
   it('pushes into a cavern chamber from the island, and a crumb click returns to the island', () => {
     mount()
     walk('ArrowRight', 24)

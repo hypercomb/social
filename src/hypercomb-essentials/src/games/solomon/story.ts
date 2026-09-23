@@ -26,6 +26,14 @@ export const STORY: readonly StorySeat[] = [
   { entrance: 'chandler-house/trapdoor',   place: 'chandler-cellar' },
   { entrance: 'island/valley-grove',       place: 'greenwood' },
   { entrance: 'greenwood/old-hollow',      place: 'hollow-grove' },
+  // Entrances are marks, never kinds: whatever a seat names leads in. These
+  // five are examples of things that are not doors — a signpost, a tablet on
+  // a cave wall, a stone in a room's wall, a patch of open air.
+  { entrance: 'island/valley-east-sign',   place: 'greenwood' },
+  { entrance: 'greenwood/pond-sign',       place: 'hollow-grove' },
+  { entrance: 'wet-steps/drip-line',       place: 'greenwood' },
+  { entrance: 'labyrinth/sunseed-porch-ii.cell-00-02', place: 'greenwood' },
+  { entrance: 'labyrinth/sunseed-porch-ii.cell-14-02', place: 'hollow-grove' },
 ]
 
 export type StorySlotLook = TreasureKind | 'triangle' | 'hexagon' | 'star' | 'socket' | 'place' | 'task' | 'plot' | 'memory'
