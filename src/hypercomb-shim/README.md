@@ -123,10 +123,12 @@ SPA-fallback page can only ever cost a 404.
 
 ## One screen for hosts and packages
 
-A cold node shows one card: its selected package, the domains it carries and
-their offers, and a field for a known package signature. Add a domain and its
-packages appear; select one or paste a signature to replicate it. The card
-remains reachable at `/hosts` after imported views take over. The in-hive
+A cold node shows one card: its selected revision, the hosts it carries and
+each host's latest offered revision, and a field for a known package signature.
+Older publication history is opened on request and grouped by publication
+label. A label such as `essentials` names a publication series; a package
+branch is a path inside the signed root and is picked by a later beehavior.
+The card remains reachable at `/hosts` after imported views take over. The in-hive
 command line, like every other view, arrives as a beehavior; the `host/` scripts
 in this repository are device setup and deployment tools.
 

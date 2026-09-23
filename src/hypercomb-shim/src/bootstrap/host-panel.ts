@@ -111,6 +111,13 @@ li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; bo
 .label b { display: block; font-weight: 500; color: #eaf2f8; }
 .label span { color: #7d8f9e; font-size: .85em; font-variant-numeric: tabular-nums; }
 .muted { padding: .55rem .75rem; margin: 0; color: #7d8f9e; border-top: 1px solid rgba(126,182,214,.12); }
+.history { padding: .65rem .75rem; border-top: 1px solid rgba(126,182,214,.12); }
+.history summary { cursor: pointer; color: #b9cbd8; }
+.history > div { padding-top: .75rem; }
+.history > div > details { margin-bottom: .55rem; border: 1px solid rgba(126,182,214,.16); border-radius: 5px; }
+.history > div > details > summary { padding: .45rem .6rem; }
+.history > div > details > ul { border-top: 1px solid rgba(126,182,214,.12); }
+.history > div > button { margin-top: .5rem; }
 .status { min-height: 1.4em; margin: 1rem 0 0; color: #8fa3b4; }
 .status[data-tone="bad"] { color: #d98b8b; }
 .status[data-tone="good"] { color: #8fbf9f; }
@@ -203,9 +210,9 @@ class HostPanelElement extends HTMLElement {
 
     panel.append(...this.#frontDoor(door))
     panel.append(this.#current())
+    panel.append(this.#carried(zones))
     panel.append(this.#bySignature())
     if (this.#self) panel.append(this.#published())
-    panel.append(this.#carried(zones))
     if (door.footer.length > 0) panel.append(this.#footer(door.footer))
 
     card.append(panel)
@@ -299,7 +306,7 @@ class HostPanelElement extends HTMLElement {
     const section = document.createElement('section')
     const heading = document.createElement('h2')
     heading.className = 'lbl'
-    heading.textContent = 'Your package'
+    heading.textContent = 'Selected revision here'
     const revision = document.createElement('p')
     revision.className = 'revision'
     const sig = installedPackageSig()
@@ -310,7 +317,7 @@ class HostPanelElement extends HTMLElement {
       note.textContent = 'Selected revision. Replicate another package below to switch, or replicate this one again to repair missing files.'
       revision.append(code, note)
     } else {
-      revision.textContent = 'No package selected. Choose one published by this host or a domain you add below.'
+      revision.textContent = 'No package revision selected. Choose a host offer below or enter a known signature.'
     }
     section.append(heading, revision)
     return section
@@ -360,10 +367,10 @@ class HostPanelElement extends HTMLElement {
     const section = document.createElement('section')
     const heading = document.createElement('h2')
     heading.className = 'lbl'
-    heading.textContent = 'Add a domain'
+    heading.textContent = 'Hosts'
     const lede = document.createElement('p')
     lede.className = 'lede'
-    lede.textContent = 'Carry another host and what it publishes appears here. Replication fetches the whole closure of a signature, and every byte is verified against its own name before it is admitted.'
+    lede.textContent = 'Add a host to see its latest offer. Open its publication history only when you need an older revision.'
 
     const form = document.createElement('form')
     const input = document.createElement('input')
@@ -450,7 +457,7 @@ class HostPanelElement extends HTMLElement {
   }
 
   async #ask(zone: string): Promise<Answer> {
-    try { return await askHostPackages(zone) } catch { return { packages: [], answered: false } }
+    try { return await askHostPackages(zone, { limit: 1 }) } catch { return { packages: [], answered: false } }
   }
 
   /** "Publishes nothing" and "did not answer" are different facts, and only
@@ -467,24 +474,80 @@ class HostPanelElement extends HTMLElement {
       body.append(none)
       return
     }
+    const latest = document.createElement('p')
+    latest.className = 'lbl'
+    latest.textContent = 'Latest offered revision'
     const list = document.createElement('ul')
-    for (const pkg of packages) list.append(this.#packageRow(pkg))
-    body.append(list)
+    list.append(this.#packageRow(packages[0]!))
+
+    const history = document.createElement('details')
+    history.className = 'history'
+    const summary = document.createElement('summary')
+    summary.textContent = 'Browse publication history'
+    const contents = document.createElement('div')
+    history.append(summary, contents)
+    let loaded = false
+    history.addEventListener('toggle', () => {
+      if (!history.open || loaded) return
+      loaded = true
+      void this.#loadHistory(packages[0]!.zone, contents, [])
+    })
+    body.append(latest, list, history)
   }
 
-  #packageRow(pkg: HostPackage): HTMLElement {
+  async #loadHistory(zone: string, into: HTMLElement, held: HostPackage[]): Promise<void> {
+    const before = held.at(-1)?.poolIndex
+    into.textContent = 'Loading revisions…'
+    let page: HostPackage[]
+    try { page = (await askHostPackages(zone, { limit: 25, ...(before !== undefined ? { before } : {}) })).packages }
+    catch {
+      into.textContent = 'Could not read publication history.'
+      return
+    }
+    if (!into.isConnected) return
+    const rows = [...held, ...page]
+    into.replaceChildren()
+    const groups = new Map<string, HostPackage[]>()
+    for (const row of rows) {
+      const name = row.label || 'Unlabeled'
+      const group = groups.get(name) ?? []
+      group.push(row)
+      groups.set(name, group)
+    }
+    for (const [name, revisions] of groups) {
+      const group = document.createElement('details')
+      const title = document.createElement('summary')
+      title.textContent = name
+      const list = document.createElement('ul')
+      for (const revision of revisions) list.append(this.#packageRow(revision, true))
+      group.append(title, list)
+      into.append(group)
+    }
+    if (page.length === 25 && rows.at(-1)?.poolIndex !== 0) {
+      const more = document.createElement('button')
+      more.type = 'button'
+      more.textContent = 'Load older revisions'
+      more.addEventListener('click', () => { void this.#loadHistory(zone, into, rows) })
+      into.append(more)
+    }
+  }
+
+  #packageRow(pkg: HostPackage, revision = false): HTMLElement {
     const row = document.createElement('li')
 
     const label = document.createElement('div')
     label.className = 'label'
     const title = document.createElement('b')
-    title.textContent = pkg.label
+    title.textContent = revision ? `Revision ${pkg.packageSig.slice(0, 12)}…` : pkg.label
     const detail = document.createElement('span')
     const atoms = pkg.bees.length + pkg.dependencies.length + pkg.layers.length
-    detail.textContent = atoms > 0
-      ? `${pkg.packageSig.slice(0, 12)}… · ${atoms} atoms · ` +
+    detail.textContent = revision
+      ? (pkg.at ? pkg.at.slice(0, 10) : pkg.packageSig)
+      : atoms > 0
+      ? `Revision ${pkg.packageSig.slice(0, 12)}… · ${atoms} atoms · ` +
         `${pkg.bees.length} bees, ${pkg.dependencies.length} deps, ${pkg.layers.length} layers`
-      : `${pkg.packageSig.slice(0, 12)}…${pkg.at ? ` · ${pkg.at.slice(0, 10)}` : ''}`
+      : `Revision ${pkg.packageSig.slice(0, 12)}…${pkg.at ? ` · ${pkg.at.slice(0, 10)}` : ''}`
+    detail.title = pkg.packageSig
     label.append(title, detail)
 
     const take = document.createElement('button')

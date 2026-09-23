@@ -45,6 +45,26 @@ same mechanics (flat sig files + a pin naming the roots):
 - **Packages** — code: bees, dependencies, a manifest. Imported into the
   OPFS pools and registered in IoC through the roster.
 
+**Names at the first door.** A *host* serves signature-named bytes. A *package*
+is a root layer and the closed set of files it names. A *revision* is one exact
+root signature. A host's `host:packages` pool appends those signatures; its
+optional *publication label* (for example `essentials`) groups entries for
+people but is not package identity or authority. The newest pool entry is the
+*latest offered revision*, not necessarily the publisher's current release.
+Only a publisher's signed head can make that claim. A *branch* is a named path
+inside the package tree, such as `navigation/pan`; it has its own layer
+signature and may be picked independently. A publication label and a package
+branch must never be shown as the same thing.
+
+Replication copies and verifies files. Selection chooses a package revision or
+a branch revision for this hive. Activation runs only the beehaviors enabled
+here. The first ESM door shows the latest offer from each host and opens older
+publication history on request. The command line and every richer view arrive
+as beehaviors; the door stays small enough to run before any adopted code.
+After a root package is selected, a package-management beehavior may show its
+named tree paths and offer branch revisions through the existing pick protocol.
+That tree browser does not belong in the cold door.
+
 "Deploy" = mint the artifact (sign the bytes), place them at any origin,
 move the pin. "Import" = resolve the pin, pull the sigs, verify, adopt.
 The same artifact can be served by a domain, handed peer-to-peer over the
