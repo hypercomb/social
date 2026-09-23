@@ -4,7 +4,7 @@
 // tick: a journey holds its changed tile projection until that journey ends.
 
 import type { Cell, LevelDef } from './engine.js'
-import type { RoomDef } from './labyrinth.js'
+import { squareName, type RoomDef } from './labyrinth.js'
 import { isMenuAction, type MenuOption } from './game-menu.js'
 
 export const SOLOMON_MAZE_BRANCH = 'solomon-maze-v1'
@@ -71,8 +71,7 @@ const safeName = (value: string): string => {
   }
   return value
 }
-const cellName = (col: number, row: number): string =>
-  `cell-${String(col).padStart(2, '0')}-${String(row).padStart(2, '0')}`
+const cellName = squareName
 const at = (a: Cell, b: Cell): boolean => a.col === b.col && a.row === b.row
 const belongs = (cell: Cell, level: Pick<LevelDef, 'cols' | 'rows'>): boolean =>
   Number.isInteger(cell.col) && Number.isInteger(cell.row)

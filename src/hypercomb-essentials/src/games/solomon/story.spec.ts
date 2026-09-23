@@ -59,8 +59,10 @@ describe('PLACES', () => {
     }
   })
 
-  it('LABYRINTH_PLACE hosts nothing below it and offers the three shrine arrivals', () => {
-    expect(LABYRINTH_PLACE.entrances).toEqual([])
+  it('LABYRINTH_PLACE offers every square of every room as an entrance, seats none yet, and offers the three shrine arrivals', () => {
+    expect(LABYRINTH_PLACE.entrances).toHaveLength(12 * 16 * 12)
+    expect(LABYRINTH_PLACE.entrances).toContain('sunseed-porch-ii.cell-03-10')
+    expect(STORY.filter(seat => seat.entrance.startsWith('labyrinth/'))).toEqual([])
     expect(LABYRINTH_PLACE.arrivals.map(a => a.id).sort()).toEqual(['starbloom', 'sunseed', 'tideglass'])
   })
 

@@ -88,6 +88,24 @@ function roomTopology(room: RoomDef): string {
 const NPC_RELICS: readonly RoomRelic[] = [{ id: 'mira-dawn-triangle', kind: 'triangle', point: 0, col: 0, row: 0 }]
 export type DoorResult = { kind: 'travelled' | 'locked' | 'out-of-range' | 'inactive'; message: string }
 
+/** A room square's name, as the hive names it: every square of a room is one
+ *  of its child layers (tile-surface.ts). */
+export function squareName(col: number, row: number): string {
+  return `cell-${String(col).padStart(2, '0')}-${String(row).padStart(2, '0')}`
+}
+
+/** A square as an entrance of the labyrinth place: `<room id>.<square>`.
+ *  Being an entrance is a mark, never a kind (jwize, 2026-09-22: "whatever
+ *  you decide becomes an entrance becomes an entrance" — a picture on the
+ *  wall you look into and then go right into): ANY square of any room can
+ *  have a place seated behind it. */
+export function squareEntrance(roomId: string, cell: Cell): string {
+  return `${roomId}.${squareName(cell.col, cell.row)}`
+}
+
+/** How long Dana walks against a solid square that leads in before it takes her. */
+const SQUARE_PUSH = 0.3
+
 export function describeRequirement(requirement?: SigilRequirement): string {
   if (!requirement) return 'Open passage'
   if (requirement.kind === 'all') return requirement.requirements.map(describeRequirement).join(' + ')
@@ -661,6 +679,10 @@ export class LabyrinthJourney {
   engine: Engine | null = null
   lastRelic: RoomRelic | null = null
   #arrivalDoor: string | null = null
+  /** A solid square being walked against, and for how long. */
+  #squarePush: { id: string; t: number } | null = null
+  /** The square just passed through: it waits until Dana steps away. */
+  #squareHeld: { id: string; x: number; y: number } | null = null
   #lastRoom = new Map<string, string>()
   #stats: JourneyStats = {
     score: 0, lives: 3, fairyCount: 0, sealCount: 0, pageTime: false, pageSpace: false, ammo: [] as boolean[], ammoCap: MAX_AMMO,
@@ -905,6 +927,8 @@ export class LabyrinthJourney {
     this.visited.add(roomId)
     this.#lastRoom.set(room.labyrinthId, roomId)
     this.#arrivalDoor = null
+    this.#squarePush = null
+    this.#squareHeld = null
     this.lastRelic = null
     this.#applyGates()
     if (arrival) {
@@ -972,6 +996,38 @@ export class LabyrinthJourney {
   /** Why a shut door is shut, in the words the room says it. */
   lockMessage(door: RoomDoor): string {
     return this.has(door.requires) ? 'This room’s key opens this door.' : `${describeRequirement(door.requires)} opens this passage.`
+  }
+
+  /** The seated square Dana passes into this step, if any — reported once,
+   *  then held until she steps away. An open square is passed by stepping
+   *  into it, as a door is; a solid one (a stone in the wall, a brick) by
+   *  walking against it a moment. `seated` maps each square of this room
+   *  that leads in to its cell. */
+  enteringSquare(seated: ReadonlyMap<string, Cell>, dt: number): string | null {
+    const engine = this.engine
+    if (!engine || !this.room || engine.state !== 'playing') { this.#squarePush = null; return null }
+    const p = engine.player, cx = p.x + p.w / 2, cy = p.y + p.h / 2
+    if (this.#squareHeld && Math.hypot(cx - this.#squareHeld.x, cy - this.#squareHeld.y) > TILE * 0.75) this.#squareHeld = null
+    const bodyRow = Math.floor((p.y + p.h - 1) / TILE)
+    const ahead = Math.floor((engine.facing > 0 ? p.x + p.w + 1 : p.x - 1) / TILE)
+    const pressing = engine.facing > 0 ? engine.input.right : engine.input.left
+    let pushing: string | null = null
+    for (const [id, cell] of seated) {
+      if (this.#squareHeld?.id === id) continue
+      if (!engine.solidAt(cell.col, cell.row)) {
+        if (engine.rectOverlapsCell(p, cell.col, cell.row)) return this.#takeSquare(id, cx, cy)
+      } else if (pressing && cell.col === ahead && cell.row === bodyRow) pushing = id
+    }
+    if (!pushing) { this.#squarePush = null; return null }
+    const t = (this.#squarePush?.id === pushing ? this.#squarePush.t : 0) + dt
+    if (t < SQUARE_PUSH) { this.#squarePush = { id: pushing, t }; return null }
+    return this.#takeSquare(pushing, cx, cy)
+  }
+
+  #takeSquare(id: string, x: number, y: number): string {
+    this.#squarePush = null
+    this.#squareHeld = { id, x, y }
+    return id
   }
 
   useDoor(id?: string): DoorResult {

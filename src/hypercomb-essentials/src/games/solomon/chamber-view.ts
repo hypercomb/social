@@ -90,6 +90,8 @@ export interface ChamberViewHooks {
   seatSeed?(entrance: string): PlaceSeed | null
   /** Records that this portal has been reached, for the found ledger (2) A9.1. */
   found?(entrance: string): void
+  /** A place is seated behind this thing: it leads in. */
+  seat?(id: string): boolean
 }
 
 const TILE = 40
@@ -194,7 +196,7 @@ export class ChamberView {
   constructor(definition: ChamberDefinition, hooks: ChamberViewHooks) {
     this.#definition = definition
     this.#hooks = hooks
-    this.model = new ChamberModel(definition, { has: hooks.has, knows: hooks.knows })
+    this.model = new ChamberModel(definition, { has: hooks.has, knows: hooks.knows, seat: hooks.seat })
   }
 
   get isDialogOpen(): boolean { return this.#dialog !== null && !this.#dialog.hidden }
@@ -239,6 +241,16 @@ export class ChamberView {
     for (const alcove of def.alcoves) this.#mountFeature(layer, alcove.id, 'alcove', alcove, 'Memory alcove')
     if (def.artifact) this.#mountFeature(layer, def.artifact.id, 'artifact', def.artifact, def.artifact.name)
     for (const resident of def.residents) this.#mountFeature(layer, resident.id, 'resident', resident, resident.name)
+    // A thing that leads in wears a window onto the place behind it: look at
+    // it and see a map of where it goes, then walk into it.
+    const things: readonly { readonly id: string; readonly cell: ChamberCell; readonly label: string }[] = [
+      ...def.tablets.map(t => ({ id: t.id, cell: t, label: t.title })), ...def.chests.map(c => ({ id: c.id, cell: c, label: c.name })),
+      ...def.levers.map(l => ({ id: l.id, cell: l, label: l.name })), ...def.lamps.map(l => ({ id: l.id, cell: l, label: l.name })),
+      ...def.sigils.map(s => ({ id: s.id, cell: s, label: 'Settling stone' })), ...def.alcoves.map(a => ({ id: a.id, cell: a, label: 'Memory alcove' })),
+      ...(def.artifact ? [{ id: def.artifact.id, cell: def.artifact, label: def.artifact.name }] : []),
+      ...def.residents.map(r => ({ id: r.id, cell: r, label: r.name })),
+    ]
+    for (const thing of things) if (this.#hooks.seat?.(thing.id)) this.#mountPortal(layer, thing.id, thing.cell, thing.label)
     for (const block of def.blocks) {
       const marker = element('div', `sol-chamber-block sol-chamber-block-${block.look}`)
       marker.setAttribute('aria-hidden', 'true')
@@ -408,7 +420,12 @@ export class ChamberView {
   }
   #tryLand(id?: string): boolean {
     const target = id !== undefined ? this.#definition.entrances.find(e => e.id === id) : this.#definition.entrances[0]
-    if (!target) return false
+    if (!target) {
+      // A thing that led in: stand where you went in.
+      if (id === undefined || !this.model.leadsIn(id)) return false
+      this.model.land(id)
+      return true
+    }
     this.model.land(target.id)
     return true
   }

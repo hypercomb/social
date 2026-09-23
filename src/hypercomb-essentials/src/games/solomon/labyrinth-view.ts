@@ -1,6 +1,7 @@
 import { TILE, WALL, BRICK, CRACKED, SKILL_NAMES, type Cell, type Engine, type LevelDef } from './engine.js'
 import { bakeRoomRelic, bakeRoomTile, ROOM_GATE_SHIMMER_CSS, ROOM_RELIC_FALLBACK, ROOM_TILE_FALLBACK, ROOM_TILE_VARIANTS, type RoomTileKind } from './labyrinth-tiles.js'
-import { LABYRINTHS, LabyrinthJourney, ROOMS, describeRequirement, type RoomDef } from './labyrinth.js'
+import { LABYRINTHS, LabyrinthJourney, ROOMS, describeRequirement, squareEntrance, type RoomDef } from './labyrinth.js'
+import type { PlaceSeed } from './place.js'
 import { PlaceVeil, VEIL_ZOOM, veilGridPicture, type VeilDirection, type VeilLeg, type VeilRgb } from './place-veil.js'
 import { Renderer } from './renderer.js'
 import { type LoadedTileRoom, syncTerrain } from './tile-surface.js'
@@ -14,6 +15,28 @@ import { type LoadedTileRoom, syncTerrain } from './tile-surface.js'
 // its shape are hashed from the room it leads TO, and the same room's own
 // door back wears the colour of where IT leads — so "the green round door"
 // always means the same place, from either side.
+
+/** A place's seed as a canvas, one pixel per square. */
+function seedCanvas(seed: PlaceSeed): HTMLCanvasElement | null {
+  if (seed.cols < 1 || seed.rows < 1 || seed.rgb.length < seed.cols * seed.rows * 3) return null
+  const canvas = document.createElement('canvas')
+  canvas.className = 'sol-door-seed'
+  canvas.width = seed.cols
+  canvas.height = seed.rows
+  canvas.setAttribute('aria-hidden', 'true')
+  let context: CanvasRenderingContext2D | null = null
+  try { context = canvas.getContext('2d') } catch { context = null }
+  if (!context) return canvas
+  const image = context.createImageData(seed.cols, seed.rows)
+  for (let cell = 0; cell < seed.cols * seed.rows; cell++) {
+    image.data[cell * 4] = seed.rgb[cell * 3]!
+    image.data[cell * 4 + 1] = seed.rgb[cell * 3 + 1]!
+    image.data[cell * 4 + 2] = seed.rgb[cell * 3 + 2]!
+    image.data[cell * 4 + 3] = 255
+  }
+  context.putImageData(image, 0, 0)
+  return canvas
+}
 
 export const DOOR_SHAPES = ['arch', 'round', 'peak', 'gate', 'keyhole'] as const
 export type DoorShape = typeof DOOR_SHAPES[number]
@@ -81,12 +104,19 @@ export class LabyrinthRoomView {
   #loaded: LoadedTileRoom | null = null
   #tiles: HTMLDivElement[] = []
   #descriptions: string[] = []
+  /** Whether a square leads somewhere, and the map of where — null when it
+   *  does not. */
+  readonly #inside: (entrance: string) => { readonly seed: PlaceSeed | null } | null
+  /** The seated squares of the room last drawn, by square index. */
+  #insideRoom = ''
+  #insideSquares = new Map<number, { readonly entrance: string; readonly seed: PlaceSeed | null }>()
   #scale = 1
   #frameKey = ''
   #promptKey = ''
   #tilePx = TILE
 
-  constructor(host: HTMLElement, private readonly journey: LabyrinthJourney, onDoor: (id: string) => void) {
+  constructor(host: HTMLElement, private readonly journey: LabyrinthJourney, onDoor: (id: string) => void, inside: (entrance: string) => { readonly seed: PlaceSeed | null } | null = () => null) {
+    this.#inside = inside
     this.element.className = 'sol-native-room'
     const head = document.createElement('div')
     head.className = 'sol-room-heading'
@@ -244,8 +274,17 @@ export class LabyrinthRoomView {
     if (!loaded || !engine || this.journey.room?.id !== loaded.room.id) return
     const room = loaded.room
     syncTerrain(loaded, engine.grid)
+    if (this.#insideRoom !== room.id) {
+      this.#insideRoom = room.id
+      this.#insideSquares.clear()
+      loaded.tiles.forEach((cell, index) => {
+        const entrance = squareEntrance(room.id, cell), inside = this.#inside(entrance)
+        if (inside) this.#insideSquares.set(index, { entrance, seed: inside.seed })
+      })
+    }
     for (let i = 0; i < loaded.tiles.length; i++) {
       const cell = loaded.tiles[i], plate = this.#tiles[i]
+      const inside = this.#insideSquares.get(i)
       const door = room.doors.find(d => d.col === cell.col && d.row === cell.row)
       const relic = room.relics.find(r => r.col === cell.col && r.row === cell.row && !this.journey.collected(r.id))
       const gate = room.gates?.find(g => g.col === cell.col && g.row === cell.row)
@@ -253,7 +292,7 @@ export class LabyrinthRoomView {
       const locked = !!door && !this.journey.canPass(door)
       const gateLocked = !!gate && !this.journey.has(gate.requires)
       const variant = (cell.col * 7 + cell.row * 13) % ROOM_TILE_VARIANTS
-      const description = `${terrain}|${door?.id ?? ''}|${locked}|${door ? this.journey.visited.has(door.targetRoomId) : ''}|${relic?.id ?? ''}|${gateLocked}|${this.#tilePx}|${variant}`
+      const description = `${terrain}|${door?.id ?? ''}|${locked}|${door ? this.journey.visited.has(door.targetRoomId) : ''}|${relic?.id ?? ''}|${gateLocked}|${this.#tilePx}|${variant}|${inside ? 'in' : ''}`
       if (description === this.#descriptions[i]) continue
       this.#descriptions[i] = description
       plate.dataset['terrain'] = terrain
@@ -299,6 +338,18 @@ export class LabyrinthRoomView {
         passage.setAttribute('aria-label', label)
         if (target) passage.append(this.#seed(target))
         plate.append(passage)
+      }
+      if (inside && !door) {
+        // A square the story made lead elsewhere: look into it and see a map
+        // of where, then step into it (or walk against it, if it is stone).
+        const opening = document.createElement('span')
+        opening.className = 'sol-passage in sol-seated'
+        opening.dataset['shape'] = doorShape(inside.entrance)
+        opening.style.setProperty('--door-h', String(doorHue(inside.entrance)))
+        const map = inside.seed ? seedCanvas(inside.seed) : null
+        if (map) opening.append(map)
+        plate.append(opening)
+        label += terrain === 'air' ? ' — a way into another place: step in' : ' — a way into another place: walk into it'
       }
       if (relic) {
         const gem = document.createElement('span')

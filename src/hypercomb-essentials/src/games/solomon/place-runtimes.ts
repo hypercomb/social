@@ -11,8 +11,8 @@
 // (M8) — exactly like the door tones and `shell.recordRelic()` already fire
 // from here today.
 
-import { BRICK, CRACKED, SIM_DT, SKILL_NAMES, WALL, type CombatSkillId, type Engine } from './engine.js'
-import { ROOMS, type LabyrinthJourney, type RoomDef } from './labyrinth.js'
+import { BRICK, CRACKED, SIM_DT, SKILL_NAMES, WALL, type Cell, type CombatSkillId, type Engine } from './engine.js'
+import { ROOMS, squareEntrance, type LabyrinthJourney, type RoomDef } from './labyrinth.js'
 import { LabyrinthRoomView, doorHue } from './labyrinth-view.js'
 import type { SolomonTileSurface, LoadedTileRoom } from './tile-surface.js'
 import { RpgOverworldView, SEVENFOLD_VALLEY, type WorldDefinition, type WorldGainRequest } from './rpg-overworld.js'
@@ -256,6 +256,7 @@ export class ChamberRuntime implements PlaceRuntime {
       sound: kind => shell.sound(kind),
       seatSeed: entrance => shell.seatSeed(this.place, entrance),
       found: entrance => shell.found(this.place, entrance),
+      seat: id => shell.seat(this.place, id) !== null,
     })
     this.view.mount(host)
   }
@@ -325,6 +326,8 @@ export class LabyrinthRuntime implements PlaceRuntime {
   #prevBat = 0
   #prevClang = 0
   #prevCatch = 0
+  /** The squares of the room she stands in that lead somewhere. */
+  #seated: { readonly room: string; readonly squares: ReadonlyMap<string, Cell> } | null = null
 
   constructor(host: HTMLElement, shell: RuntimeShell, surface: () => SolomonTileSurface, loaded: Map<string, LoadedTileRoom>) {
     this.host = host
@@ -332,7 +335,8 @@ export class LabyrinthRuntime implements PlaceRuntime {
     this.#journey = shell.journey()
     this.#surface = surface
     this.#loaded = loaded
-    this.view = new LabyrinthRoomView(host, this.#journey, id => this.#door(id))
+    this.view = new LabyrinthRoomView(host, this.#journey, id => this.#door(id), entrance =>
+      shell.seat(LABYRINTH_PLACE.id, entrance) ? { seed: shell.seatSeed(LABYRINTH_PLACE.id, entrance) } : null)
     this.#veil = new PlaceVeil(host)
   }
 
@@ -407,6 +411,8 @@ export class LabyrinthRuntime implements PlaceRuntime {
     while (this.#acc >= SIM_DT) { this.#journey.update(SIM_DT); this.#acc -= SIM_DT }
     this.#recordRelic()
     this.#passDoor()
+    const into = this.#journey.enteringSquare(this.#seatedHere(), dt)
+    if (into) this.#shell.enter(LABYRINTH_PLACE.id, into)
     if (engine) this.#diffSounds(engine)
     this.#time += dt
     this.view.render(this.#time)
@@ -509,6 +515,21 @@ export class LabyrinthRuntime implements PlaceRuntime {
    *  journey's own arrival guard). A door that cannot open yet says what it
    *  needs, once per approach, and stays a door. E still works for anyone
    *  who reaches for it (see `interact()`'s fallthrough). */
+  /** Every square of the current room a story has seated a place behind. */
+  #seatedHere(): ReadonlyMap<string, Cell> {
+    const room = this.#journey.room
+    if (!room) return new Map()
+    if (this.#seated?.room !== room.id) {
+      const squares = new Map<string, Cell>()
+      for (let row = 0; row < room.level.rows; row++) for (let col = 0; col < room.level.cols; col++) {
+        const entrance = squareEntrance(room.id, { col, row })
+        if (this.#shell.seat(LABYRINTH_PLACE.id, entrance)) squares.set(entrance, { col, row })
+      }
+      this.#seated = { room: room.id, squares }
+    }
+    return this.#seated.squares
+  }
+
   #passDoor(): void {
     const door = this.#journey.nearDoor()
     if (!door) { this.#lockedSaid = ''; return }

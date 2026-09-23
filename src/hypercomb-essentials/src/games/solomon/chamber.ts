@@ -168,7 +168,13 @@ const TABLET_CLICK_REACH = 4
 export interface ChamberHooks {
   has(requirement: SigilRequirement): boolean
   knows(knowledgeId: string): boolean
+  /** A place is seated behind this thing: it leads in. */
+  seat?(id: string): boolean
 }
+
+/** The things a chamber holds that a story may make lead elsewhere: every
+ *  one but the room's own passages (doors, gates, shutters, plates). */
+const THINGS: ReadonlySet<ChamberTargetKind | 'tablet'> = new Set(['tablet', 'chest', 'lever', 'lamp', 'sigil', 'alcove', 'artifact', 'resident'] as const)
 
 export type ChamberTargetKind =
   | 'exit' | 'entrance' | 'rising-light' | 'chest' | 'door' | 'gate' | 'shutter'
@@ -638,7 +644,7 @@ export class ChamberModel {
   constructor(definition: ChamberDefinition, hooks: Partial<ChamberHooks> = {}) {
     this.definition = definition
     this.built = buildChamber(definition)
-    this.#hooks = { has: hooks.has ?? (() => false), knows: hooks.knows ?? (() => false) }
+    this.#hooks = { has: hooks.has ?? (() => false), knows: hooks.knows ?? (() => false), seat: hooks.seat ?? (() => false) }
     this.#cols = this.built.cols
     this.#rows = this.built.rows
     this.explored = new Uint8Array(this.#cols * this.#rows)
@@ -741,6 +747,22 @@ export class ChamberModel {
     const greatChest = [...this.#chestsById.values()].find(c => c.items.some(item => item.kind === 'great-key'))
     if (!greatChest || !this.opened.has(greatChest.id)) return false
     return ![...this.#doorsById.values()].some(d => d.lock === 'great' && this.unlocked.has(d.id))
+  }
+
+  /** Whether this thing leads in. Being an entrance is a mark, never a kind
+   *  (jwize, 2026-09-22: "whatever you decide becomes an entrance becomes an
+   *  entrance"): any thing in the chamber — a tablet on the wall, a chest, a
+   *  lamp, a lever, an alcove, the artifact, a settling stone, a person —
+   *  leads in once the story seats a place behind it, and keeps its own verb. */
+  leadsIn(id: string): boolean {
+    const kind = this.#tabletsById.has(id) ? 'tablet' : this.#kindOf(id)
+    return !!kind && THINGS.has(kind) && this.present(id) && (this.#hooks.seat?.(id) ?? false)
+  }
+
+  /** A thing that leads in, pushed from whichever side you stand. */
+  #seatedThingAt(col: number, row: number, from: ChamberCell): { id: string; kind: 'entrance'; cell: ChamberCell; landing: ChamberCell } | null {
+    const feature = this.built.featureAt(col, row)
+    return feature && this.leadsIn(feature) ? { id: feature, kind: 'entrance', cell: { col, row }, landing: from } : null
   }
 
   #portalAt(col: number, row: number): { id: string; kind: 'exit' | 'entrance' | 'rising-light'; cell: ChamberCell; landing: ChamberCell } | null {
@@ -1018,7 +1040,7 @@ export class ChamberModel {
     const target = { col: cur.col + DIR_VECTOR[dir].col, row: cur.row + DIR_VECTOR[dir].row }
     if (!this.#inBounds(target.col, target.row)) { this.#pushKey = null; this.#refusedKey = null; return }
     const blockId = this.blockAt(target.col, target.row)
-    const portal = this.#portalAt(target.col, target.row)
+    const portal = this.#portalAt(target.col, target.row) ?? this.#seatedThingAt(target.col, target.row, cur)
     if (!blockId && !portal) { this.#pushKey = null; this.#refusedKey = null; return }
     const fullKey = portal ? `portal:${portal.id}:${dir}` : `block:${blockId}:${dir}`
     if (this.#pushKey !== fullKey) { this.#pushKey = fullKey; this.#pushElapsed = 0; this.#refusedKey = null }
@@ -1107,7 +1129,12 @@ export class ChamberModel {
 
   land(entrance: string): void {
     const target = this.#entrancesById.get(entrance)
-    if (!target) return
+    if (!target) {
+      // Back out of a thing that led in: you stand where you went in, and it
+      // does not take you again until you step away.
+      if (this.leadsIn(entrance)) { this.#disarmedPortal = entrance; this.#disarmedAt = { x: this.#x, y: this.#y } }
+      return
+    }
     this.#x = target.landing.col + 0.5; this.#y = target.landing.row + 0.5
     this.#facing = directionBetween(target, target.landing) ?? 'down'
     this.#disarmedPortal = target.id; this.#disarmedAt = { x: this.#x, y: this.#y }

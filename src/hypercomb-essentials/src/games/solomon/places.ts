@@ -11,6 +11,7 @@ import { CHAMBERS, GROUPS } from './chamber-places.js'
 import { SEVENFOLD_VALLEY, worldEncounters } from './rpg-overworld.js'
 import { STORY } from './story.js'
 import { GREENWOOD } from './worlds.js'
+import { ROOMS, squareEntrance } from './labyrinth.js'
 import type { WorldDefinition } from './rpg-overworld.js'
 
 export interface SeatLabel { readonly name: string; readonly subtitle: string; readonly levels: number }
@@ -41,12 +42,13 @@ export function worldPlace(world: WorldDefinition): PlaceDefinition {
 }
 
 /** One place, reached through three different shrine doors, each landing at
- *  a different arrival — `entrances: []` because nothing is hosted below a
- *  labyrinth room; a door leads to another room of the same place, never to
- *  a child place. */
+ *  a different arrival. A room's doors lead to other rooms of the same place;
+ *  its entrances are its SQUARES — any one of them, open air or a stone in
+ *  the wall, can have a place seated behind it. */
 export const LABYRINTH_PLACE: PlaceDefinition = {
   id: 'labyrinth', name: 'A labyrinth', subtitle: 'Sealed rooms below a shrine', kind: 'labyrinth',
-  entrances: [],
+  entrances: ROOMS.flatMap(room => Array.from({ length: room.level.cols * room.level.rows }, (_, index) =>
+    squareEntrance(room.id, { col: index % room.level.cols, row: Math.floor(index / room.level.cols) }))),
   arrivals: [
     { id: 'sunseed', name: 'Sunseed' },
     { id: 'tideglass', name: 'Tideglass' },
@@ -56,11 +58,17 @@ export const LABYRINTH_PLACE: PlaceDefinition = {
 
 /** A chamber's own map declares exactly one spawn point (`arrive()` always
  *  lands on `exits[0]`, and no seat in `STORY` ever names a non-default
- *  `arrive` for a chamber) — one arrival, uniformly, is the true shape. */
+ *  `arrive` for a chamber) — one arrival, uniformly, is the true shape. Its
+ *  entrances are its stairs and trapdoors, and every thing standing in it —
+ *  a tablet, a chest, a lamp, a lever, a stone, an alcove, the artifact, a
+ *  person — any of which a story may make lead elsewhere. */
 function chamberPlace(definition: (typeof CHAMBERS)[number]): PlaceDefinition {
   return {
     id: definition.id, name: definition.name, subtitle: definition.subtitle, kind: 'chamber',
-    entrances: definition.entrances.map(entrance => entrance.id),
+    entrances: [
+      ...definition.entrances, ...definition.tablets, ...definition.chests, ...definition.levers, ...definition.lamps,
+      ...definition.sigils, ...definition.alcoves, ...(definition.artifact ? [definition.artifact] : []), ...definition.residents,
+    ].map(thing => thing.id),
     arrivals: [{ id: 'default', name: definition.name }],
     group: definition.group, heart: definition.heart,
   }
