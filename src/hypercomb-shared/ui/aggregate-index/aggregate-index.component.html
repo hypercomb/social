@@ -1,6 +1,7 @@
 @if (open() && source(); as src) {
   <aside
     class="ai-panel"
+    [class.is-managing]="!!managingPage()"
     [attr.data-source]="src.id"
     hcDockInset="left"
     [hcDockedPanel]="'aggregate-' + src.id"
@@ -220,6 +221,7 @@
                  drop contract, the class only lights the row while a carry
                  is live. -->
             <li class="ai-row" [class.is-renaming]="renaming() === item.key"
+                [class.is-linked]="managingPage() && isLinked(item)"
                 [class.is-selected]="isSelected(item)"
                 [class.is-portal-drop]="portalDropView() && portalCarryActive()"
                 [attr.data-portal-drop]="portalDropView() ? item.key : null"
@@ -251,6 +253,18 @@
                 </form>
               } @else {
                 <div class="ai-actions">
+                  @if (portalDropView() && managingPage()) {
+                    <!-- THE PAIR: with References managing a page, each portal
+                         is a group that page can gather from — lit when it does. -->
+                    <button class="ai-action ai-action-link" type="button"
+                            [class.is-linked]="isLinked(item)"
+                            (click)="toggleLink(item, $event)"
+                            [attr.aria-pressed]="isLinked(item)"
+                            [attr.aria-label]="(isLinked(item) ? 'aggregate.unlink' : 'aggregate.link') | t: { name: item.label }"
+                            [title]="(isLinked(item) ? 'aggregate.unlink' : 'aggregate.link') | t: { name: item.label }">
+                      <span class="mat-sym">{{ isLinked(item) ? 'link' : 'add_link' }}</span>
+                    </button>
+                  }
                   @if (portalDropView()) {
                     <!-- Portals stay intentionally spare: + is the whole
                          reference act. A staged tile makes this pool its

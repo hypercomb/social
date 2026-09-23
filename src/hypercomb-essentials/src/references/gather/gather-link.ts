@@ -93,3 +93,28 @@ export const withTarget = (state: TargetState, group: string, pageKey: string, o
   else delete next[group]
   return next
 }
+
+/** What a page's OWN copy of a tile holds that the group's tile does not — in
+ *  words a participant reads: `picture`, `notes`, `tiles` (tiles inside), `marks`,
+ *  `other`. Empty = nothing would be lost by pointing at the group's instead
+ *  (identical, or the copy carries nothing of its own). A slot only the GROUP
+ *  has is no loss, so it is never listed. */
+export type OwnSlot = 'picture' | 'notes' | 'tiles' | 'marks' | 'other'
+
+const SLOT_WORD: Readonly<Record<string, OwnSlot>> = {
+  properties: 'picture', notes: 'notes', children: 'tiles', cells: 'tiles', layers: 'tiles', decorations: 'marks',
+}
+
+export const differingSlots = (
+  copy: Readonly<Record<string, unknown>> | null,
+  canon: Readonly<Record<string, unknown>> | null,
+): OwnSlot[] => {
+  const out = new Set<OwnSlot>()
+  for (const [slot, value] of Object.entries(copy ?? {})) {
+    if (slot === 'name') continue
+    if (value === undefined || value === null || (Array.isArray(value) && value.length === 0)) continue
+    if (JSON.stringify(value) === JSON.stringify((canon ?? {})[slot])) continue
+    out.add(SLOT_WORD[slot] ?? 'other')
+  }
+  return [...out]
+}

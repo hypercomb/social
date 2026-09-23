@@ -698,6 +698,24 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, branchColor, chevronMask * 0.125);
       }
 
+      // REFERENCE mark — always on. The portal ring below only wakes on hover,
+      // so a reference used to look exactly like an ordinary tile (a copy),
+      // and nobody could tell which one they had. Two interlocked links on a
+      // soft dark disc at the TOP of the tile — the mirror of the branch
+      // chevron at the bottom — say "this points somewhere else" at a glance.
+      if (vIsPortal > 0.5) {
+        vec2 lp = (local - vec2(0.0, -0.56 * u_radiusPx)) / u_radiusPx;
+        // tilt the pair -30 deg so it reads as a chain, not a pair of eyes
+        lp = vec2(0.8660254 * lp.x + 0.5 * lp.y, -0.5 * lp.x + 0.8660254 * lp.y);
+        float lpx = max(aa / u_radiusPx, 0.004);
+        float linkDisc = 1.0 - smoothstep(0.17, 0.17 + lpx * 2.0, length(lp));
+        color.rgb = mix(color.rgb, vec3(0.05, 0.07, 0.10), linkDisc * 0.55);
+        float linkA = abs(length((lp - vec2(-0.052, 0.0)) * vec2(1.0, 1.6)) - 0.072);
+        float linkB = abs(length((lp - vec2( 0.052, 0.0)) * vec2(1.0, 1.6)) - 0.072);
+        float linkStroke = 1.0 - smoothstep(0.015, 0.015 + lpx * 1.5, min(linkA, linkB));
+        color.rgb = mix(color.rgb, mix(u_accentColor, vec3(1.0), 0.4), linkStroke * 0.95);
+      }
+
       // divergence overlay: 1 = future-add (ghost), 2 = future-remove (marked).
       // 3 is NOT a divergence — it is the transient pheromone-preview carrier
       // flag, painted at the very end of this shader, so it is excluded here.

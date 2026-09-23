@@ -324,3 +324,40 @@ already in the group — it applies to what you add from then on. The record
 carries the group's ROUTE only; its identity is derived, so no 64-hex rides in
 the payload for a closure walk to mistake for bytes.
 
+
+### 9a. Seeing it, and managing it (BUILT 2026-09-23)
+
+A link nobody can see is a link nobody can trust, so every part of it shows:
+
+- **The breadcrumb says it in words.** `[team] ◆ ← people` on a linked page
+  (click → people); `[people] ◆ → team` on a group whose targets are on. The
+  earlier pills were icon-only — their words lived in a tooltip.
+- **Reference tiles wear a mark, always.** Two interlocked links at the top of
+  the tile (hex-sdf), the mirror of the branch chevron. The portal ring only
+  ever drew on hover, so a reference looked exactly like a copy.
+- **Every change toasts.** `/from`, `/feed`, a gathered make, a feed. Bare
+  `/from` / `/feed` say what is linked, nothing included. A refusal says WHY
+  (`GatherLinkService.link`), and a doorway named as the group is followed to
+  the group it points at.
+
+**The pair — `/references`.** Portals on the LEFT, References on the RIGHT, both
+about the page you stand on; they follow you and close together. The
+one-window-at-a-time rule (`window-rule.ts`) would park Portals the moment
+References opened, so Portals' session is a `companion` exactly while
+References is managing a page — the pheromone palette's exception, declared
+live. Portals rows carry a link toggle (lit on the linked group). References
+shows *Gathers from* (× unlinks), *Feeds* (target chips, add by name) and "Add
+N selected to …" for tiles selected on a group.
+
+**Review and gather — the page's OWN tiles.** Linking changes where NEW tiles
+go; tiles already on the page are asked about, never gathered silently (the
+link toast offers **Review**). References lists them against the group:
+
+| row | ticked at first | Gather does |
+|---|---|---|
+| in the group too, identical (or the copy holds nothing of its own) | yes | the group's tile takes its place as a reference |
+| in the group too, but the copy differs (says what: picture, notes, tiles inside, marks) | no | same — and the page's copy stays in that tile's history |
+| not in the group | no | the tile MOVES into the group (subtree re-homed, every sig shared) and a reference stays here |
+
+The GROUP's tile is the real one. Nothing is deleted: the replaced copy is the
+previous marker in its own bag.

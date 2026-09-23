@@ -574,6 +574,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Tile under the pointer, or null. Read by the breadcrumb — see the
    *  `tile:hover` subscription for why it has to be shown there. */
   readonly hoveredCell = computed(() => this.#hoveredCell())
+  /** THE LINK IN WORDS — the groups this page gathers from and the targets it
+   *  feeds (hypercomb-essentials/src/references/gather/gather-link.drone.ts). */
+  readonly gatherLinks = signal<{ from: readonly (readonly string[])[]; feeding: readonly (readonly string[])[] }>({ from: [], feeding: [] })
+  readonly gatherFeedingNames = computed(() => this.gatherLinks().feeding.map(page => page[page.length - 1] ?? '').join(', '))
   #hoveredCell = signal<string | null>(null)
   readonly addressHover = signal(false)
 
@@ -1473,6 +1477,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #clipboardUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
   #hoverCrumbUnsub: (() => void) | null = null
+  #gatherCrumbUnsub: (() => void) | null = null
   #layoutModeUnsub: (() => void) | null = null
   #beesUnsub: (() => void) | null = null
   #tagsUnsub: (() => void) | null = null
@@ -1681,6 +1686,19 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // empty hex and over chrome, which clears the crumb.
     this.#hoverCrumbUnsub = EffectBus.on<{ label?: string | null }>('tile:hover', (payload) => {
       this.#hoveredCell.set(payload?.label ?? null)
+    })
+
+    // Only the answer for the page actually shown is kept: a late answer for a
+    // page already left would write the wrong link beside the new page name.
+    this.#gatherCrumbUnsub = EffectBus.on<{
+      page?: readonly string[]; from?: readonly (readonly string[])[]; feeding?: readonly (readonly string[])[]
+    }>('gather:page-links', (payload) => {
+      const fold = (route: readonly string[]): string => route.map(s => String(s).trim().toLowerCase()).join('/')
+      if (fold(payload?.page ?? []) !== fold(this.navigation.segmentsRaw())) {
+        this.gatherLinks.set({ from: [], feeding: [] })
+        return
+      }
+      this.gatherLinks.set({ from: payload?.from ?? [], feeding: payload?.feeding ?? [] })
     })
 
     // Clipboard contents drive only the toolbar badge count now — the
@@ -2174,6 +2192,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#clipboardUnsub?.()
     this.#selectionUnsub?.()
     this.#hoverCrumbUnsub?.()
+    this.#gatherCrumbUnsub?.()
     this.#moveModeUnsub?.()
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()

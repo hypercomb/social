@@ -131,6 +131,9 @@ $actions-corner: 12rem;
   // Cool and unweighted against the branch crumb's warm 500: it says "this is
   // what you are ON", never "this is where you ARE".
   .hover-crumb { color: var(--hc-status-info); padding: 0; font-weight: 400; }
+  // The page's link to its group, in words — weighted like the branch it sits
+  // beside, cool like the hover crumb: a fact about where things go, not a place.
+  .gather-crumb { color: var(--hc-status-info); padding: 0; font-weight: 600; }
 
   .install-crumb {
     padding: 0;

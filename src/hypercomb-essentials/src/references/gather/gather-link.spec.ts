@@ -43,3 +43,16 @@ describe('target on/off state', () => {
     expect(readTargetState('{"g":["friends","friends",3,""],"h":"x"}')).toEqual({ g: ['friends'] })
   })
 })
+
+describe('what a page\'s own copy would lose', () => {
+  it('lists only what the COPY holds that the group\'s tile does not, in words', async () => {
+    const { differingSlots } = await import('./gather-link.js')
+    expect(differingSlots({ name: 'susan' }, { name: 'susan', notes: ['n'] })).toEqual([])
+    expect(differingSlots({ name: 'susan', notes: ['a'] }, { name: 'susan', notes: ['a'] })).toEqual([])
+    expect(differingSlots({ name: 'susan', notes: ['a'], properties: ['p'] }, { name: 'susan', notes: ['b'] }))
+      .toEqual(['notes', 'picture'])
+    expect(differingSlots({ name: 'susan', children: ['c'], decorations: ['d'], odd: ['x'] }, null))
+      .toEqual(['tiles', 'marks', 'other'])
+    expect(differingSlots({ name: 'susan', notes: [] }, { name: 'susan' })).toEqual([])
+  })
+})

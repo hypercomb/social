@@ -85,7 +85,15 @@ export class AggregateIndexComponent implements OnDestroy {
 
   /** Put away while the hive is covered; back on the same source, same filter,
    *  same origin — `close()` also drops a rename in progress, parking doesn't. */
-  readonly session = signalSession(this.open, undefined, { dismiss: () => this.dismiss(), close: () => this.close() })
+  // THE PAIR — while References manages a page, Portals is the source it links
+  // FROM, the way the pheromone palette is the paint: a companion, so the
+  // one-window-at-a-time rule (window-rule.ts) lets it stay beside References.
+  // Read live when the rule runs; an ordinary window the rest of the time.
+  readonly session = Object.defineProperty(
+    signalSession(this.open, undefined, { dismiss: () => this.dismiss(), close: () => this.close() }),
+    'companion',
+    { get: () => this.managingPage() !== null, enumerable: true },
+  )
   readonly items = signal<readonly AggregateItem[]>([])
   /** The ONE field. There is no create mode — see `creatable`. */
   readonly query = signal('')
@@ -362,6 +370,16 @@ export class AggregateIndexComponent implements OnDestroy {
       'portal-carry:drop', (p) => { void this.#onPortalCarryDrop(p) }))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-toggle', (p) => this.togglePanel(p?.id)))
     this.#cleanups.push(EffectBus.on('aggregate:view-close', () => this.close()))
+    // THE PAIR — References (right) managing a page makes every portal here a
+    // group that page can be linked to. The page comes from References; which
+    // group it gathers from comes from the link drone.
+    this.#cleanups.push(EffectBus.on<{ page?: readonly string[] | null }>('references:managing', (p) => {
+      this.managingPage.set(p?.page ? [...p.page] : null)
+    }))
+    this.#cleanups.push(EffectBus.on<{ page?: readonly string[]; from?: readonly (readonly string[])[] }>(
+      'gather:page-links', (p) => {
+        this.#linkedKeys.set(new Set((p?.from ?? []).map(route => route.join('/'))))
+      }))
     // The home pin can move from outside this window (the rail's Home menu, or
     // forgetting the pinned portal), and the lit row has to follow it.
     this.#cleanups.push(EffectBus.on('portals:recent-changed', () => this.#cdr.markForCheck()))
@@ -668,6 +686,42 @@ export class AggregateIndexComponent implements OnDestroy {
     try { await src.rename(item, next) } catch { /* fall through — close the field */ }
     this.renaming.set(null)
     await this.reload()
+  }
+
+  // ── linking (the Portals/References pair) ────────────────────────────────────
+
+  /** The page References is managing — null while the pair is not open. */
+  readonly managingPage = signal<readonly string[] | null>(null)
+  readonly #linkedKeys = signal<ReadonlySet<string>>(new Set())
+
+  isLinked(item: AggregateItem): boolean {
+    return this.#linkedKeys().has(item.segments.join('/'))
+  }
+
+  /** Link the managed page to this portal's group, or unlink it. The answer is
+   *  said in a toast either way — including WHY, when it cannot link. */
+  async toggleLink(item: AggregateItem, event: Event): Promise<void> {
+    event.stopPropagation()
+    const page = this.managingPage()
+    const link = ioc()?.get('@diamondcoreprocessor.com/GatherLinkService') as {
+      link?(page: readonly string[], group: readonly string[]): Promise<{ ok: boolean; reason?: string; group?: readonly string[] }>
+      detach?(page: readonly string[], group: readonly string[]): Promise<boolean>
+    } | undefined
+    if (!page || page.length === 0 || !link?.link || !link.detach) return
+    const pageName = page[page.length - 1]
+    if (this.isLinked(item)) {
+      await link.detach(page, item.segments)
+      EffectBus.emit('toast:show', {
+        type: 'success',
+        message: this.#t('gather.unlinked', { page: pageName, group: item.label }) ?? `"${pageName}" no longer gathers from ${item.label}`,
+      })
+      return
+    }
+    const outcome = await link.link(page, item.segments)
+    const groupName = outcome.group?.[outcome.group.length - 1] ?? item.label
+    EffectBus.emit('toast:show', outcome.ok
+      ? { type: 'success', message: this.#t('gather.linked', { page: pageName, group: groupName }) ?? `"${pageName}" now gathers from ${groupName}` }
+      : { type: 'warning', message: `"${pageName}" cannot gather from ${item.label}: ${outcome.reason ?? ''}` })
   }
 
   // ── carrying ────────────────────────────────────────────────────────────────

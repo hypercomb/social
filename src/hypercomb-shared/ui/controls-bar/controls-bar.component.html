@@ -145,6 +145,17 @@
       <span class="domain-crumb crumb-link" (click)="navigateTo(seg.target)"><span class="sep-crumb">◆</span>{{ seg.name }}</span>
     }
   }
+  <!-- THE LINK IN WORDS (references/gather): ← the group what you make here is
+       made in (click to go there); → the pages what you add here also reaches.
+       Absent while the page is linked to nothing. -->
+  @for (group of gatherLinks().from; track $index) {
+    <span class="sep-crumb">◆</span><span class="gather-crumb crumb-link" (click)="navigateTo([...group])"
+      [title]="'gather.from' | t: { groups: group[group.length - 1] }">← {{ group[group.length - 1] }}</span>
+  }
+  @if (gatherFeedingNames()) {
+    <span class="sep-crumb">◆</span><span class="gather-crumb"
+      [title]="'gather.feeding' | t: { pages: gatherFeedingNames() }">→ {{ gatherFeedingNames() }}</span>
+  }
   <!-- The tile under the pointer. Hovering swaps a tile's name for its action
        icons, so this is the only place the name still shows while you are on
        it. Trails the path because that is where you would land if you entered

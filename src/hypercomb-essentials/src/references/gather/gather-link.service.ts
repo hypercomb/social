@@ -21,7 +21,7 @@ import {
   moleculeAddress,
   type CanonicalReferenceService,
 } from '@hypercomb/core'
-import { childNamesOf, resolveLayerAt, type PlacementHistory } from '../../history/layer-placement.js'
+import { childNamesOf, flattenLayerTree, resolveLayerAt, type PlacementHistory } from '../../history/layer-placement.js'
 import { listDecorations, removeDecorationAndWait, writeDecoration } from '../../commands/decoration-manifest.js'
 import { ensureDecorationsIndexed, referenceTargetAt } from '../../commands/decoration-kind-index.js'
 import {
@@ -31,6 +31,7 @@ import {
   buildGathersPayload,
   buildPoolRecord,
   cleanRoute,
+  differingSlots,
   groupOfRecord,
   pageOfPoolRecord,
   readTargetState,
@@ -39,10 +40,33 @@ import {
   withTarget,
   type GatherTarget,
   type GathersPayload,
+  type OwnSlot,
   type TargetState,
 } from './gather-link.js'
 
 export const GATHER_LINK_SERVICE_KEY = '@diamondcoreprocessor.com/GatherLinkService'
+
+/** One tile a page holds of its OWN (not a reference), read against its group. */
+export type OwnTile = {
+  readonly name: string
+  /** The group already has a tile by this name. */
+  readonly inGroup: boolean
+  /** What the page's copy holds that the group's does not — empty = nothing is
+   *  lost by pointing at the group's instead. Only meaningful when `inGroup`. */
+  readonly differs: readonly OwnSlot[]
+}
+
+export type OwnReview = { readonly group: readonly string[]; readonly tiles: readonly OwnTile[] }
+
+type CommitterLike = {
+  importTree?(updates: { segments: readonly string[]; layer: { name?: string; [slot: string]: unknown } }[]): Promise<void>
+  commitChildrenDeltas?(segments: readonly string[], changes: { removes?: readonly { sig?: string; label?: string }[] }): Promise<string>
+  settled?(): Promise<void>
+}
+
+export type LinkOutcome =
+  | { readonly ok: true; readonly group: readonly string[] }
+  | { readonly ok: false; readonly reason: string }
 
 /** The Portals inventory — its rows are references to the groups themselves. */
 const PORTALS = 'sets'
@@ -78,17 +102,39 @@ export class GatherLinkService {
 
   /** `page` gathers from `group` from now on. True when it does (or already did). */
   async attach(page: readonly string[], group: readonly string[]): Promise<boolean> {
+    return (await this.link(page, group)).ok
+  }
+
+  /** `attach`, with the answer in words: the group actually linked (a doorway
+   *  named as the group is followed to where it points), or WHY not. A refusal
+   *  nobody can read is the same as silence (jwize, 2026-09-23: "says team can
+   *  not gather from people"). */
+  async link(page: readonly string[], group: readonly string[]): Promise<LinkOutcome> {
     const pageRoute = cleanRoute(page)
-    const groupRoute = cleanRoute(group)
-    if (pageRoute.length === 0 || groupRoute.length === 0 || sameRoute(pageRoute, groupRoute)) return false
-    // A doorway is not a holder, and a pointer is not a group: both ends must
-    // be the real tiles, never a reference standing in for one.
-    if (await this.#targetAt(pageRoute) !== null || await this.#targetAt(groupRoute) !== null) return false
+    let groupRoute = cleanRoute(group)
+    const pageName = pageRoute[pageRoute.length - 1] ?? ''
+    if (pageRoute.length === 0 || groupRoute.length === 0) return { ok: false, reason: 'there is nothing to link' }
+    // A doorway is not a holder: what lives "inside" it lives at its target.
+    const pageTarget = await this.#targetAt(pageRoute)
+    if (pageTarget !== null) {
+      return { ok: false, reason: `"${pageName}" is a reference to ${pageTarget.join('/') || 'the hive'} — link that page instead` }
+    }
+    // A pointer named as the group stands for the group it points at.
+    const groupTarget = await this.#targetAt(groupRoute)
+    if (groupTarget !== null && groupTarget.length > 0) groupRoute = [...groupTarget]
+    const groupName = groupRoute[groupRoute.length - 1] ?? ''
+    if (sameRoute(pageRoute, groupRoute)) return { ok: false, reason: `"${pageName}" cannot gather from itself` }
     const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
-    if (!history) return false
-    if (!await resolveLayerAt(history, lineage?.domain, pageRoute)) return false
-    if (!await resolveLayerAt(history, lineage?.domain, groupRoute)) return false
+    if (!history) return { ok: false, reason: 'the hive is still starting — try again in a moment' }
+    // A cold hive answers "no layer" for a page that is plainly there; say so
+    // as "not loaded", never as "does not exist".
+    if (!await resolveLayerAt(history, lineage?.domain, pageRoute)) {
+      return { ok: false, reason: `"${pageName}" has not loaded yet — try again in a moment` }
+    }
+    if (!await resolveLayerAt(history, lineage?.domain, groupRoute)) {
+      return { ok: false, reason: `"${groupName}" (${groupRoute.join('/')}) has not loaded yet — try again in a moment` }
+    }
 
     if (!(await this.groupsOf(pageRoute)).some(g => sameRoute(g, groupRoute))) {
       await writeDecoration({
@@ -100,7 +146,7 @@ export class GatherLinkService {
     }
     await this.#nominate(groupRoute, pageRoute)
     EffectBus.emit('gather:links-changed', { page: pageRoute, group: groupRoute })
-    return true
+    return { ok: true, group: groupRoute }
   }
 
   /** `page` stops gathering from `group`. True when a link was removed. */
@@ -169,6 +215,67 @@ export class GatherLinkService {
     return fed
   }
 
+  /** REVIEW — the tiles `page` holds of its own, read against the group it
+   *  gathers from: which the group already has (and what the page's copy would
+   *  lose by pointing at the group's instead), which it does not. Reads only;
+   *  null when the page is linked to nothing. */
+  async review(page: readonly string[]): Promise<OwnReview | null> {
+    const pageRoute = cleanRoute(page)
+    const group = (await this.groupsOf(pageRoute))[0]
+    const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    if (!group || !history) return null
+    const pageNames = await childNamesOf(history, await resolveLayerAt(history, lineage?.domain, pageRoute))
+    const groupNames = new Set(await childNamesOf(history, await resolveLayerAt(history, lineage?.domain, group)))
+    const tiles: OwnTile[] = []
+    for (const name of pageNames) {
+      // A reference is already what gathering makes; only the page's own count.
+      if (await this.#targetAt([...pageRoute, name]) !== null) continue
+      const inGroup = groupNames.has(name)
+      const differs = inGroup
+        ? differingSlots(
+          await resolveLayerAt(history, lineage?.domain, [...pageRoute, name]),
+          await resolveLayerAt(history, lineage?.domain, [...group, name]))
+        : []
+      tiles.push({ name, inGroup, differs })
+    }
+    return { group, tiles }
+  }
+
+  /** GATHER — for each named tile of the page's own: the group's tile takes its
+   *  place as a reference. One the group lacks MOVES there first (its whole
+   *  subtree re-homed; every sig shared, nothing copied). Nothing is deleted:
+   *  the page's own copy stays in that tile's history, one step back.
+   *  Returns the names gathered. */
+  async gatherOwn(page: readonly string[], names: readonly string[]): Promise<string[]> {
+    const pageRoute = cleanRoute(page)
+    const review = await this.review(pageRoute)
+    const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    const committer = get<CommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+    const refs = get<CanonicalReferenceService>(CANONICAL_REFERENCE_SERVICE_KEY)
+    if (!review || !history || !committer?.importTree || !committer.commitChildrenDeltas || !refs) return []
+    const wanted = new Set(names)
+    const gathered: string[] = []
+    for (const tile of review.tiles) {
+      if (!wanted.has(tile.name)) continue
+      if (!tile.inGroup) {
+        const copy = await resolveLayerAt(history, lineage?.domain, [...pageRoute, tile.name])
+        if (!copy) continue
+        await committer.importTree(await flattenLayerTree(history, copy, [...review.group, tile.name]))
+      }
+      // The page stops listing its own copy, then gathers the group's.
+      await committer.commitChildrenDeltas(pageRoute, { removes: [{ label: tile.name }] })
+      await committer.settled?.()
+      const placed = await refs.place({
+        name: tile.name, sourceSegments: [...review.group, tile.name], parentSegments: pageRoute,
+      }).catch(() => null)
+      if (placed) gathered.push(tile.name)
+    }
+    if (gathered.length) EffectBus.emit('gather:links-changed', { page: pageRoute, group: [...review.group] })
+    return gathered
+  }
+
   /** A typed name → a route: a tile on this page (followed through if it is a
    *  doorway), else one at the top of the hive, else a portal in Portals. */
   async resolveRoute(name: string, here: readonly string[]): Promise<string[] | null> {
@@ -187,8 +294,9 @@ export class GatherLinkService {
       const route = [...hereRoute, local]
       return [...(await this.#targetAt(route) ?? route)]
     }
+    // A doorway at the top is followed too: `people` there may be a portal.
     const top = await find([])
-    if (top) return [top]
+    if (top) return [...(await this.#targetAt([top]) ?? [top])]
     const portal = await find([PORTALS])
     if (portal) {
       const target = await this.#targetAt([PORTALS, portal])

@@ -32,11 +32,18 @@ type StoreLike = { putResource?(blob: Blob): Promise<string> }
 /** The page ↔ group link door (essentials references/gather/gather-link.service.ts). */
 type GatherLinkLike = {
   targetsOf?(group: readonly string[]): Promise<Array<{ segments: readonly string[]; on: boolean }>>
+  groupsOf?(page: readonly string[]): Promise<string[][]>
   setTarget?(group: readonly string[], page: readonly string[], on: boolean): Promise<void>
   attach?(page: readonly string[], group: readonly string[]): Promise<boolean>
+  link?(page: readonly string[], group: readonly string[]): Promise<{ ok: boolean; reason?: string }>
   resolveRoute?(name: string, here: readonly string[]): Promise<string[] | null>
   feed?(group: readonly string[], names: readonly string[]): Promise<string[][]>
+  review?(page: readonly string[]): Promise<OwnReview | null>
+  gatherOwn?(page: readonly string[], names: readonly string[]): Promise<string[]>
 }
+/** Mirrors essentials `OwnReview` (references/gather) — shared never imports a module. */
+type OwnTile = { name: string; inGroup: boolean; differs: readonly string[] }
+type OwnReview = { group: readonly string[]; tiles: readonly OwnTile[] }
 type TargetChip = { key: string; label: string; segments: readonly string[]; on: boolean }
 const ioc = (): { get(k: string): unknown } | undefined => (globalThis as { ioc?: { get(k: string): unknown } }).ioc
 const gatherLink = (): GatherLinkLike | undefined =>
@@ -61,7 +68,26 @@ export class ReferencesWindowComponent implements OnDestroy {
   readonly targets = signal<readonly TargetChip[]>([])
   readonly targetQuery = signal('')
   readonly targetMiss = signal(false)
+  /** Why the typed page could not be added — the words, not just "no". */
+  readonly targetReason = signal('')
   #targetGeneration = 0
+
+  /** MANAGE — the right half of the Portals/References pair (`/references`):
+   *  the page you stand on, the groups it gathers from, the targets it feeds.
+   *  Follows you as you navigate; null while the window composes or is shut. */
+  readonly managePage = signal<readonly string[] | null>(null)
+  readonly manageFrom = signal<readonly (readonly string[])[]>([])
+  /** Tiles selected on the managed page — what "Add to targets" sends. */
+  readonly manageSelected = signal<readonly string[]>([])
+  readonly feedingOn = computed(() => this.targets().filter(t => t.on))
+  readonly feedingNames = computed(() => this.feedingOn().map(t => t.label).join(', '))
+  /** REVIEW — the page's own tiles read against its group, and which are
+   *  ticked to gather. Ticked from the start only where nothing is lost. */
+  readonly review = signal<OwnReview | null>(null)
+  readonly ticked = signal<ReadonlySet<string>>(new Set())
+  readonly gathering = signal(false)
+  readonly reviewGroupName = computed(() => { const g = this.review()?.group; return g ? String(g[g.length - 1] ?? '') : '' })
+  readonly managePageName = computed(() => { const p = this.managePage(); return p ? String(p[p.length - 1] ?? '') : '' })
   readonly targetName = computed(() => safeCellName(this.name()))
   readonly nameTaken = computed(() => {
     const target = this.targetName()
@@ -75,9 +101,24 @@ export class ReferencesWindowComponent implements OnDestroy {
   constructor() {
     this.#cleanups.push(onSelection(({ selected }) => {
       const c = this.composition()
-      if (!c) return
+      if (!c) { if (this.managePage()) this.manageSelected.set([...selected]); return }
       this.selected.set(selected.map(label => ({ label, segments: [...c.portal.segments, label] })))
     }))
+    this.#cleanups.push(EffectBus.on('references:manage', () => this.#openManage()))
+    // The pair follows you: a new page means new links, new targets.
+    this.#cleanups.push(EffectBus.on<{ page?: readonly string[]; from?: readonly (readonly string[])[] }>(
+      'gather:page-links', (p) => {
+        const current = this.managePage()
+        if (!current || !p?.page || this.composition()) return
+        const moved = current.join('/') !== p.page.join('/')
+        this.manageFrom.set(p.from ?? [])
+        void this.#loadReview()
+        if (!moved) return
+        this.managePage.set([...p.page])
+        this.manageSelected.set([])
+        EffectBus.emit('references:managing', { page: [...p.page] })
+        void this.#loadTargets()
+      }))
     this.#cleanups.push(EffectBus.on<Composition>('references:compose', c => {
       if (!c?.portal) return
       this.composition.set(c)
@@ -91,7 +132,7 @@ export class ReferencesWindowComponent implements OnDestroy {
       this.group.set(null)
       this.visible.set(true)
       this.#emitDraft()
-      void this.#loadTargets(c)
+      void this.#loadTargets()
       if (!c.createTile) {
         const holder = [...c.parentSegments]
         void gatheredFrom(holder).then(segments => {
@@ -138,40 +179,139 @@ export class ReferencesWindowComponent implements OnDestroy {
     this.group.set(null)
     this.selected.set([])
     withSelectionService(s => s.clear())
-    void this.#loadTargets(this.composition()!)
+    void this.#loadTargets()
     this.beginSelection()
   }
 
   /** Switch one target: ON means what is saved here is also gathered there. */
+  /** The group whose targets are shown: the portal being composed from, or —
+   *  managing — the page itself (a group feeds the pages switched on here). */
+  #group(): readonly string[] | null {
+    return this.composition()?.portal.segments ?? this.managePage()
+  }
+
   async toggleTarget(target: TargetChip): Promise<void> {
-    const c = this.composition()
-    if (!c) return
-    await gatherLink()?.setTarget?.(c.portal.segments, target.segments, !target.on)
+    const group = this.#group()
+    if (!group) return
+    await gatherLink()?.setTarget?.(group, target.segments, !target.on)
     this.targets.update(list => list.map(t => t.key === target.key ? { ...t, on: !t.on } : t))
   }
 
   /** A typed page becomes a target of the group in hand — attached (it now
    *  gathers from the group) and switched on. */
   async addTarget(raw: string): Promise<void> {
-    const c = this.composition()
+    const group = this.#group()
     const link = gatherLink()
     const name = raw.trim()
-    if (!c || !name || !link?.resolveRoute || !link.attach) return
+    if (!group || !name || !link?.resolveRoute || !link.attach) return
     const here = (ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined)?.segmentsRaw?.() ?? []
     const page = await link.resolveRoute(name, here)
-    if (!page || !await link.attach(page, c.portal.segments)) { this.targetMiss.set(true); return }
-    await link.setTarget?.(c.portal.segments, page, true)
+    const outcome = page
+      ? (link.link ? await link.link(page, group) : { ok: await link.attach(page, group) })
+      : { ok: false }
+    if (!page || !outcome.ok) {
+      this.targetReason.set(('reason' in outcome && outcome.reason) ? String(outcome.reason) : '')
+      this.targetMiss.set(true)
+      return
+    }
+    await link.setTarget?.(group, page, true)
     this.targetQuery.set('')
     this.targetMiss.set(false)
-    await this.#loadTargets(c)
+    this.targetReason.set('')
+    await this.#loadTargets()
   }
 
-  async #loadTargets(c: Composition): Promise<void> {
+  /** Stop the managed page gathering from `group` — said in a toast. */
+  async unlinkGroup(group: readonly string[]): Promise<void> {
+    const page = this.managePage()
+    const link = gatherLink() as (GatherLinkLike & { detach?(p: readonly string[], g: readonly string[]): Promise<boolean> }) | undefined
+    if (!page || !link?.detach) return
+    await link.detach(page, group)
+    EffectBus.emit('toast:show', {
+      type: 'success',
+      message: `"${page[page.length - 1]}" no longer gathers from ${group[group.length - 1]}`,
+    })
+  }
+
+  /** Send the tiles selected here to every target that is on — the subset you
+   *  chose, never every page by itself. */
+  async feedSelected(): Promise<void> {
+    const page = this.managePage()
+    const names = this.manageSelected()
+    if (!page || names.length === 0) return
+    const fed = await gatherLink()?.feed?.(page, names).catch(() => [] as string[][]) ?? []
+    EffectBus.emit('toast:show', fed.length
+      ? { type: 'success', message: `${names.join(', ')} → ${fed.map(p => p[p.length - 1]).join(', ')}` }
+      : { type: 'info', message: 'Nothing new to add — the targets already have them' })
+    withSelectionService(s => s.clear())
+  }
+
+  #openManage(): void {
+    if (this.composition()) return
+    const here = [...((ioc()?.get('@hypercomb.social/Lineage') as { explorerSegments?(): readonly string[] } | undefined)?.explorerSegments?.() ?? [])]
+    if (here.length === 0) {
+      EffectBus.emit('toast:show', { type: 'info', message: 'Stand on a page first — the hive itself gathers from nothing' })
+      return
+    }
+    this.managePage.set(here)
+    this.manageSelected.set([])
+    this.targetQuery.set(''); this.targetMiss.set(false); this.targetReason.set('')
+    this.visible.set(true)
+    // The pair opens together: Portals on the left is where a group is picked.
+    // `managing` FIRST — it is what makes Portals a companion, and the
+    // one-window rule reads that the moment either window registers.
+    EffectBus.emit('references:managing', { page: here })
+    EffectBus.emit('aggregate:view-open', { id: 'collections' })
+    void gatherLink()?.groupsOf?.(here).then(from => { if (this.managePage() === here) this.manageFrom.set(from ?? []) })
+    void this.#loadTargets()
+    void this.#loadReview()
+  }
+
+  #reviewGeneration = 0
+  async #loadReview(): Promise<void> {
+    const generation = ++this.#reviewGeneration
+    const page = this.managePage()
+    const review = page ? await gatherLink()?.review?.(page).catch(() => null) ?? null : null
+    if (generation !== this.#reviewGeneration) return
+    this.review.set(review)
+    this.ticked.set(new Set((review?.tiles ?? []).filter(t => t.inGroup && t.differs.length === 0).map(t => t.name)))
+  }
+
+  toggleOwn(name: string): void {
+    this.ticked.update(set => {
+      const next = new Set(set)
+      if (next.has(name)) next.delete(name); else next.add(name)
+      return next
+    })
+  }
+
+  /** Gather what is ticked: the group's tile takes each one's place as a
+   *  reference; one the group lacks moves there first. Said in a toast. */
+  async gatherOwn(): Promise<void> {
+    const page = this.managePage()
+    const names = [...this.ticked()]
+    if (!page || names.length === 0 || this.gathering()) return
+    this.gathering.set(true)
+    try {
+      const done = await gatherLink()?.gatherOwn?.(page, names).catch(() => [] as string[]) ?? []
+      const group = this.reviewGroupName()
+      EffectBus.emit('toast:show', done.length
+        ? { type: 'success', message: `${done.join(', ')} → ${group} — "${page[page.length - 1]}" now shows ${done.length === 1 ? 'it' : 'them'} as references` }
+        : { type: 'warning', message: 'Nothing was gathered — try again in a moment' })
+    } finally {
+      this.gathering.set(false)
+      await this.#loadReview()
+    }
+  }
+
+  async #loadTargets(): Promise<void> {
     const generation = ++this.#targetGeneration
-    const found = await gatherLink()?.targetsOf?.(c.portal.segments).catch(() => []) ?? []
+    const group = this.#group()
+    if (!group) { this.targets.set([]); return }
+    const found = await gatherLink()?.targetsOf?.(group).catch(() => []) ?? []
     if (generation !== this.#targetGeneration) return
     // The page being composed is where things land anyway — not a target of itself.
-    const holder = c.parentSegments.join('/')
+    const holder = this.composition()?.parentSegments.join('/') ?? ''
     this.targets.set(found
       .filter(t => t.segments.join('/') !== holder)
       .map(t => ({ key: t.segments.join('/'), label: String(t.segments[t.segments.length - 1] ?? ''), segments: [...t.segments], on: t.on })))
@@ -263,6 +403,13 @@ export class ReferencesWindowComponent implements OnDestroy {
     this.#branchArrivalCleanup?.(); this.#branchArrivalCleanup = null
     this.visible.set(false); this.composition.set(null); this.name.set(''); this.selected.set([]); this.choosing.set(false)
     this.#targetGeneration++; this.targets.set([]); this.targetQuery.set(''); this.targetMiss.set(false)
+    if (this.managePage()) {
+      // The pair closes together, as it opened.
+      this.managePage.set(null); this.manageFrom.set([]); this.manageSelected.set([])
+      this.#reviewGeneration++; this.review.set(null); this.ticked.set(new Set())
+      EffectBus.emit('references:managing', { page: null })
+      EffectBus.emit('aggregate:view-close', {})
+    }
     withSelectionService(s => s.clear())
     EffectBus.emit('reference:draft-preview', null)
     ;(ioc()?.get('@diamondcoreprocessor.com/SelectModeDrone') as SelectModeLike | undefined)?.disarm?.()
