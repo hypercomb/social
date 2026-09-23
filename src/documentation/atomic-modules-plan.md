@@ -433,6 +433,17 @@ all 60 surfaces, both slots, zero breaks; the boot bees finished at +466 ms,
 Angular's first paint at +511 ms; 817 of 840 units linked; 579 dependencies,
 261 bees.
 
+**Found 2026-09-23: a word said before its bee registers.** With every word a
+bee, the census itself (`commands/slash-behaviour.drone.ts`, which also
+registers the utterance reader) registers seconds after the command line
+starts listening — 3.7 s into a boot on the web shell after batch 8, 2.6 s
+after the command line. A `module commit …` said over the bridge in that
+window was read as plain text and became a tile named after the whole line.
+The command line now treats a miss as final only once the loader has settled
+(`loader:bees-done`): a line whose first word nothing claims yet waits for
+it, then is decided as usual (`hypercomb-shared/ui/command-line/word-arrival.ts`;
+proved by `scripts/verify-boot-word.cjs` on the web shell at 4260).
+
 ## Atomize for the editor, optimize for the reader
 
 Decided by jwize, 2026-09-22: single responsibility everywhere lets the graph

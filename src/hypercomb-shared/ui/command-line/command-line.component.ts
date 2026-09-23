@@ -36,6 +36,7 @@ import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { isSelectOp } from './select-ops'
+import { leadWordOf, WordArrival } from './word-arrival'
 import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
 
 const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
@@ -2317,11 +2318,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // showing what is being said, and letting go spends it.
     this.#voiceSubmitUnsub = EffectBus.on<{ text: string }>('voice:submit', ({ text }) => {
       const spoken = text.toLowerCase()
+      const held = this.#heldLine
       this.#submitAsEnter(spoken)
       // Find stance keeps the line: a question with no answer yet is still
       // being answered, and a question that found nothing is worth reading
-      // back. Every other stance spends the line on release.
-      if (this.#stance() !== 'find') this.#setShellValue('', false)
+      // back. Every other stance spends the line on release — unless the line
+      // is now waiting for its word, and stays in view until it runs.
+      if (this.#stance() !== 'find' && this.#heldLine === held) this.#setShellValue('', false)
     })
 
     // A LINE HANDED IN FROM ANOTHER SURFACE — the phone's Add sheet — is
@@ -2367,6 +2370,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
 
       this.#setShellValue(text, false)
+
+      // A WORD STILL ON ITS WAY IS NOT AN UNKNOWN WORD. Right after a reload a
+      // bee may not have registered its word yet, and everything below reads
+      // the line without it — the gate included. So the line waits for its
+      // word, then is said again (word-arrival.ts).
+      if (this.#remoteLineWaits(text, settle)) return
 
       // CANONICAL SLASH STAYS ON THE PIPELINE IT ALREADY USES. The keyboard
       // consults the reader only when `#toRegister` CHANGED the line — that
@@ -2460,8 +2469,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // branches, so awaiting it would prove delivery and not completion.
       // Rather than mint a fake receipt it answers UNKNOWN — the same law the
       // pool reader is owed: never answer from anything but a positive,
-      // complete result.
-      void this.#preprocessTagsThenExecute(text)
+      // complete result. `true`: the gate has judged this line, so nothing
+      // past it may wait for a word the gate never saw.
+      void this.#preprocessTagsThenExecute(text, true)
       settle({
         kind: 'unknown',
         reason: prose
@@ -2838,6 +2848,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#voiceSubmitUnsub?.()
     this.#commandSubmitUnsub?.()
     this.#remoteSubmitUnsub?.()
+    this.#wordArrival.dispose()
     this.#voiceActiveUnsub?.()
     this.#pushToTalkUnsub?.()
     this.#micPressUnsub?.()
@@ -3182,10 +3193,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * an ambiguity or pathway choice was surfaced, a destructive reading armed
    * its second Enter, or the actions executed in word order.
    */
-  #commitUtterance(text: string): boolean {
+  #commitUtterance(text: string, waited = false): boolean {
     text = lowered(text)
     const reading = this.#utteranceReader()?.read(text, this.#utteranceResolutions())
     if (!reading) return false
+
+    // Read against the whole census, not one still filling: a line that leads
+    // with a word nothing claims YET waits for it, then is read again as typed.
+    const word = leadWordOf(text)
+    if (!waited && this.#wordArrival.mayStillArrive(word)) {
+      this.#holdForItsWord(word, () => { this.#commitUtterance(text, true) })
+      return true
+    }
 
     const ambiguousSpan = reading.spans.find(s => s.role === 'ambiguity')
     if (ambiguousSpan) {
@@ -3873,7 +3892,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     void this.#preprocessTagsThenExecute(line)
   }
 
-  async #preprocessTagsThenExecute(original: string): Promise<void> {
+  /** `waited`: the line has had its chance to wait for its word, or a door
+   *  has already judged it — it is decided now (word-arrival.ts). */
+  async #preprocessTagsThenExecute(original: string, waited = false): Promise<void> {
     // In capture mode any incoming submission (voice, mobile "go", etc.) must
     // still route to the configured commit effect rather than the normal parser.
     const capture = this.#captureMode()
@@ -3993,7 +4014,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // text ('providers'), and slicing ITS first character off minted
     // 'roviders', an unknown command, and a junk tile.
     if (v.startsWith('/')) {
-      void this.#executeSlashBehaviour(v)
+      void this.#executeSlashBehaviour(v, waited)
       return
     }
 
@@ -4304,10 +4325,70 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   // -------------------------------------------------
+  // a word still on its way (word-arrival.ts)
+  // -------------------------------------------------
+
+  /** Whether a word nothing claims yet may still be arriving — every word is
+   *  a bee, and for a moment after each reload bees are still loading. Built
+   *  with the line, so it hears the loader from the first wave. */
+  readonly #wordArrival = new WordArrival()
+
+  /** The one line a PERSON sent while its word was loading. A newer line takes
+   *  the slot, and the held line runs only if the bar still shows it when the
+   *  word arrives — typing over it, or Escape, lets it go. */
+  #heldLine: symbol | null = null
+
+  /** Hold a person's line until `word` may be decided, then `rerun` it. */
+  #holdForItsWord(word: string, rerun: () => void): void {
+    const held = Symbol(word)
+    const shown = this.value()
+    this.#heldLine = held
+    this.#sayItWaits(word)
+    void this.#wordArrival.arrival(word).then(ready => {
+      if (!ready || this.#heldLine !== held) return
+      this.#heldLine = null
+      if (this.value() === shown) rerun()
+    })
+  }
+
+  /**
+   * Hold a REMOTE line that leads with a word nothing claims yet, then say it
+   * again through the same door — so the admission gate judges the word's
+   * real census row, never a row missing only because its bee had not loaded.
+   * The caller is still answered exactly once: the second saying settles the
+   * first. False when the line need not wait.
+   */
+  #remoteLineWaits(text: string, settle: (outcome: RemoteSubmitOutcome) => void): boolean {
+    const word = leadWordOf(text)
+    // Prose is read by the utterance reader, so this door does not know the
+    // word until the reader is there too; a slash line asks the census alone.
+    const through = text.trimStart().startsWith('/') ? [] : ['@diamondcoreprocessor.com/UtteranceReader']
+    if (!this.#wordArrival.mayStillArrive(word, through)) return false
+    this.#sayItWaits(word)
+    void this.#wordArrival.arrival(word, through).then(ready => {
+      let heard = false
+      if (ready) {
+        EffectBus.emitTransient<RemoteSubmitRequest>(REMOTE_SUBMIT, {
+          text, accept: () => { heard = true }, complete: settle,
+        })
+      }
+      if (!heard) settle({ kind: 'unknown', reason: 'the command line closed before its word arrived' })
+    })
+    return true
+  }
+
+  #sayItWaits(word: string): void {
+    EffectBus.emit('activity:log', {
+      message: `nothing answers to "${word}" yet — the hive is still loading, so the line waits for it`,
+      icon: '⬡',
+    })
+  }
+
+  // -------------------------------------------------
   // slash behaviour execution
   // -------------------------------------------------
 
-  readonly #executeSlashBehaviour = async (line: string): Promise<void> => {
+  readonly #executeSlashBehaviour = async (line: string, waited = false): Promise<void> => {
     const raw = line.slice(1).trim()
     if (!raw) { this.clear(); return }
 
@@ -4321,6 +4402,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const args = delimIdx === -1 ? '' : raw.slice(delimIdx === parenIdx ? delimIdx : delimIdx + 1).trim()
 
     const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as any
+
+    // A WORD STILL ON ITS WAY IS NOT AN UNKNOWN WORD (word-arrival.ts): its bee
+    // may simply not have registered yet, and the door below would make a tile
+    // of it. The line waits and comes back here; a word nothing claims once
+    // the hive has loaded reaches that door exactly as before.
+    const word = commandName.toLowerCase()
+    if (!waited && this.#wordArrival.mayStillArrive(word)) {
+      this.#holdForItsWord(word, () => { void this.#executeSlashBehaviour(line, true) })
+      return
+    }
 
     // Unknown command. The old create-goto built-in minted the cell and
     // navigated into it, which is the second silent creation leak in this
