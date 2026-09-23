@@ -159,8 +159,8 @@ demand. Signatures make that safe — a variant that changes is a new
 signature, so the preloader's target moves with it and never warms a stale
 copy.
 
-The same lazy seam belongs on the tutor next: its bee still pulls 19 atoms at
-load.
+The tutor has the same lazy seam now (7251b17e1): its bee loads its shell
+and study games on first study, and boot fetches 10 game atoms, not 28.
 
 ### 5. Hive-side drafting follows the atoms
 `module read <sig>` on a dependency atom shows one file (the section IS the
@@ -487,6 +487,40 @@ atoms.
 
 Order of work: lazy loading first (step 4 — the bigger saving, and it
 defines the closures packs are cut from), then packs, then merged modules.
+
+**Measured 2026-09-23, after step 6.** Headless Chromium against the web
+shell at 4264, a fresh context per package (its own storage), one install
+timed end to end, then three warm reloads (means). Three packages the web
+content still held: before any atomization (21 Sept, 59 dependencies), games
+only (22 Sept, 148), every domain (23 Sept, 579). Harness:
+`measure-atoms.cjs` (resource-timing buffer raised before the page runs —
+the default 250 entries hides most module fetches).
+
+| | Before | Games only | Everything |
+|---|---|---|---|
+| Install: files fetched, time | 185, 2.8 s | 176, 2.2 s | 515, 4.5 s |
+| Dependencies loaded | 367 ms | 318 ms | 282 ms |
+| First paint | 436 ms | 374 ms | 440 ms |
+| Bees ready for the first render (`first preloader.find`) | 1291 ms | 1014 ms | 830 ms |
+| Modules fetched through the import map at boot | 11 | 21 | 414 |
+| Last module arrives | 1.23 s | 1.01 s | 2.28 s |
+| IoC keys, breaks | 433, 0 | 436, 0 | 454, 0 |
+
+What it says:
+- **Per-module cost does not hurt the paint or the first render.** First
+  paint is flat; the bees the first render needs are ready 460 ms SOONER,
+  because a bee is small now and its atoms load in parallel.
+- **It costs a longer tail.** Every bee still loads at boot, so their static
+  closures (414 atoms) keep arriving after the first render — about a second
+  longer than before. Only the games and the tutor have lazy seams.
+- **It costs the install.** 515 separate files instead of 185; locally about
+  9 ms a file, and over a real network each file is a request.
+
+So the two costs have two different answers. The install is what a transfer
+pack removes (one file carrying many atoms, each re-verified on arrival). The
+tail is what lazy seams remove (step 4c): a feature's atoms loading when the
+feature is used, not when its bee boots. Merged modules are not indicated by
+anything measured here.
 
 ## Non-goals
 - No new pool, no new `__x__` folder. Atoms live in `sign('dependencies')`
