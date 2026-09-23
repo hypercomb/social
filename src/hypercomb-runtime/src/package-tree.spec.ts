@@ -172,6 +172,21 @@ describe('the package tree', () => {
     )
     expect(waiting).toEqual(['p1', 't2', 't3'])
     expect(namespaceOf(new TextEncoder().encode('// @other/thing\nx'))).toBe('')
+
+    // A trunk that moved past the pick: the trunk carries `games/arkanoid`
+    // and `games/arkanoid/themes` as atoms the pick's older root never listed.
+    // The pick supplies `games`; the trunk supplies the atoms beneath it that
+    // the pick has no bundle for — instead of leaving a hole every bee that
+    // imports them would be refused over.
+    const atoms: Record<string, string> = { ...aliases, t4: 'games/arkanoid/themes' }
+    const readAtoms = async (sig: string) => atoms[sig] ?? null
+    const movedPast = await composeDependencies(
+      ['t1', 't2', 't3', 't4'],
+      [{ path: 'games', dependencies: ['p1', 'p3'] }],
+      ['games'],
+      readAtoms,
+    )
+    expect(movedPast).toEqual(['p1', 't2', 't3', 't4'])
   })
 
   it('names the namespaces a module imports that the selection does not run', async () => {

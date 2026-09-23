@@ -268,17 +268,25 @@ export const composeDependencies = async (
 ): Promise<string[]> => {
   const kept = new Set<string>()
   const waiting = new Set<string>()
+  const supplied = new Set<string>()
   for (const source of sources) {
     for (const sig of source.dependencies) {
       const ns = await readNamespace(sig)
       if (!ns || ownerOf(ns, applied) !== source.path) continue
+      supplied.add(ns)
       if (await mayRun(sig)) kept.add(sig)
       else waiting.add(ns)
     }
   }
+  // The trunk supplies what no pick does: everything outside the picks, a
+  // namespace whose picked bundle waits in the brood, and a namespace UNDER a
+  // pick's path that the pick's root never listed. That last one is a trunk
+  // that moved past the pick — `assistant` split into `assistant/…` atoms after
+  // the pick was taken — and dropping the trunk's atoms there left every bee
+  // that imports them refused as "nothing on the trunk carries".
   for (const sig of trunk) {
     const ns = await readNamespace(sig)
-    if (ownerOf(ns ?? '', applied) === '' || waiting.has(ns ?? '')) kept.add(sig)
+    if (ownerOf(ns ?? '', applied) === '' || waiting.has(ns ?? '') || !supplied.has(ns ?? '')) kept.add(sig)
   }
   return [...kept].sort()
 }
