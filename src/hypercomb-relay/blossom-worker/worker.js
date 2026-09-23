@@ -696,6 +696,82 @@ async function noteAssessors(env, pubkey, evt) {
   }
 }
 
+// ── the community's translations (documentation/community-translations.md)
+//
+// A TRANSLATOR names a catalog in their OWN signed index as `i18n:<locale>`;
+// a hive that lacks keys names its list as `i18n-missing:<locale>`. The index
+// write keeps one derived list per locale of who did each — never trusted on
+// its own: every listed index is read and re-verified when the locale is
+// served, and a key that was dropped is simply not shown. The locale's index
+// is answered for people at `/i18n/<locale>.json` and for machines at the
+// pool's own derived address `sign('i18n:<locale>')` — the one-file index
+// every published pool uses — so a hive computes where to look.
+const I18N_KEY_RE = /^i18n:([a-z]{2,3}(?:-[a-z0-9]{2,8})?)$/
+const I18N_MISSING_KEY_RE = /^i18n-missing:([a-z]{2,3}(?:-[a-z0-9]{2,8})?)$/
+const I18N_LOCALE_RE = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/
+const I18N_LISTED_MAX = 500
+const I18N_SHOWN = 64
+
+async function noteTranslators(env, pubkey, evt) {
+  let roots = {}
+  try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  const note = async (listKey, locale) => {
+    let listed = []
+    try { listed = JSON.parse((await env.HIVES.get(listKey)) ?? '[]') } catch { listed = [] }
+    if (!Array.isArray(listed)) listed = []
+    if (!listed.includes(pubkey)) await env.HIVES.put(listKey, JSON.stringify([...listed, pubkey].slice(-I18N_LISTED_MAX)))
+    let locales = []
+    try { locales = JSON.parse((await env.HIVES.get('i18n:locales')) ?? '[]') } catch { locales = [] }
+    if (!Array.isArray(locales)) locales = []
+    if (!locales.includes(locale)) await env.HIVES.put('i18n:locales', JSON.stringify([...locales, locale].slice(-I18N_LISTED_MAX)))
+  }
+  for (const key of Object.keys(roots)) {
+    const translator = I18N_KEY_RE.exec(key)?.[1]
+    if (translator) await note(`translators:${translator}`, translator)
+    const missing = I18N_MISSING_KEY_RE.exec(key)?.[1]
+    if (missing) await note(`missing:${missing}`, missing)
+  }
+}
+
+/** The locale a pool address stands for, when it is one this host has heard of. */
+async function localeAtAddress(env, sig) {
+  let locales = []
+  try { locales = JSON.parse((await env.HIVES?.get('i18n:locales')) ?? '[]') } catch { locales = [] }
+  for (const locale of Array.isArray(locales) ? locales : []) {
+    if (I18N_LOCALE_RE.test(String(locale)) && (await poolAddress(`i18n:${locale}`)) === sig) return locale
+  }
+  return null
+}
+
+async function serveTranslations(request, env, locale) {
+  if (!I18N_LOCALE_RE.test(String(locale || ''))) return text(404, 'not found')
+  const read = indexReader(env)
+  const labels = new Map()
+  for (const zone of Object.values(siteBindings(env))) for (const p of zone.publishers ?? []) if (p.label) labels.set(p.pubkey, p.label)
+  const listed = async (key) => {
+    let list = []
+    try { list = JSON.parse((await env.HIVES.get(key)) ?? '[]') } catch { list = [] }
+    return (Array.isArray(list) ? list : []).filter((pk) => SIG_RE.test(String(pk))).slice(-I18N_SHOWN)
+  }
+  const translators = []
+  for (const pubkey of await listed(`translators:${locale}`)) {
+    const index = await read(pubkey)
+    const sig = String(index?.roots?.[`i18n:${locale}`] || '').toLowerCase()
+    const record = await heapRecord(env, sig)
+    if (record?.kind !== 'i18n-catalog' || record.locale !== locale) continue
+    translators.push({ pubkey, label: labels.get(pubkey) || '', catalog: sig, at: Number(index.createdAt || 0) })
+  }
+  const missing = []
+  for (const pubkey of await listed(`missing:${locale}`)) {
+    const index = await read(pubkey)
+    const sig = String(index?.roots?.[`i18n-missing:${locale}`] || '').toLowerCase()
+    const record = await heapRecord(env, sig)
+    if (record?.kind !== 'i18n-missing' || record.locale !== locale) continue
+    missing.push({ pubkey, record: sig, keys: (Array.isArray(record.keys) ? record.keys : []).filter((k) => typeof k === 'string').slice(0, 2000), at: Number(index.createdAt || 0) })
+  }
+  return json(200, { meaning: `i18n:${locale}`, locale, members: translators.map((t) => t.catalog), translators, missing }, { 'Cache-Control': 'no-store' })
+}
+
 /** A small JSON record from the heap, or null. */
 async function heapRecord(env, sig) {
   if (!SIG_RE.test(String(sig || ''))) return null
@@ -1360,6 +1436,7 @@ async function putHive(request, env, pubkey) {
     }
   }
   await env.HIVES.put(pubkey, JSON.stringify(evt))
+  await noteTranslators(env, pubkey, evt)
   await noteAssessors(env, pubkey, evt)
   // NOTE: the message rides the X-Reason header (ByteString) — ASCII only.
   return text(stored ? 200 : 201, `hive index updated for ${pubkey.slice(0, 12)}...`)
@@ -1614,6 +1691,12 @@ export default {
         const heap = (dest === 'script' || dest === 'worker' || dest === 'sharedworker')
           ? await serveModule(request, env, sigMatch[2])
           : await serveBlob(request, env, sigMatch[2], named ? suffixType(pathname) : null)
+        // The community's translations, at the pool's own derived address —
+        // the one-file index a published-pool probe fetches.
+        if (heap.status === 404 && !isAlias && !named) {
+          const locale = await localeAtAddress(env, sigMatch[2])
+          if (locale) return serveTranslations(request, env, locale)
+        }
         // A front-door apex also serves the shim's OWN bytes (its pinned
         // bootstrap, its packages), which live with the card, not in the heap.
         if (heap.status === 404 && siteBindings(env)[requestUrl.hostname.toLowerCase()]?.frontDoor) {
@@ -1681,6 +1764,11 @@ export default {
       if (method === 'POST') return aiAsk(request, env)
       return text(405, 'method not allowed')
     }
+
+    // The community's translations for a locale, for people: who translated,
+    // who is missing what. Served on every host name, before any site logic.
+    const i18nMatch = pathname.match(/^\/i18n\/([a-z]{2,3}(?:-[a-z0-9]{2,8})?)\.json$/)
+    if (i18nMatch && (method === 'GET' || method === 'HEAD')) return serveTranslations(request, env, i18nMatch[1])
 
     // Hive pointer — the per-publisher path→head index (see putHive/getHive).
     const hiveMatch = pathname.match(/^\/hive\/([0-9a-f]{64})$/)

@@ -758,6 +758,51 @@ test('a try- door lists every signed assessment of its root, and the host AI ver
   assert.deepEqual(again.assessments, [])
 })
 
+// ── the community's translations: who translated, who is missing what ────
+test('writing an index that names i18n:<locale> lists its signer as a translator, and i18n-missing:<locale> as missing', async () => {
+  const HIVES = kvMap()
+  const env = { SITE_BINDINGS: '{}', HIVES }
+  const url = `https://content.hypercomb.com/hive/${assessor}`
+  const body = JSON.stringify(await indexBy(assessorKey, { 'i18n:ja': 'f'.repeat(64), 'i18n-missing:de': 'a'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
+  assert.equal(response.status, 201)
+  assert.deepEqual(JSON.parse(HIVES.values.get('translators:ja')), [assessor])
+  assert.deepEqual(JSON.parse(HIVES.values.get('missing:de')), [assessor])
+  assert.deepEqual(JSON.parse(HIVES.values.get('i18n:locales')).sort(), ['de', 'ja'])
+})
+
+test('a locale is listed from every verified index — at /i18n/<locale>.json and at the pool\'s own address', async () => {
+  const [catalog, missingRecord, stale] = ['c'.repeat(64), 'd'.repeat(64), 'e'.repeat(64)]
+  const HIVES = kvMap(new Map([
+    [pubkey, JSON.stringify(await signedIndex({ 'i18n:ja': catalog }))],
+    [assessor, JSON.stringify(await indexBy(assessorKey, { 'i18n-missing:ja': missingRecord, 'i18n:ja': stale }))],
+    ['translators:ja', JSON.stringify([pubkey, assessor, 'not-a-key'])],
+    ['missing:ja', JSON.stringify([assessor])],
+    ['i18n:locales', JSON.stringify(['ja'])],
+  ]))
+  const records = new Map([
+    [catalog, { kind: 'i18n-catalog', locale: 'ja', namespace: 'app', keys: { 'module.jevfollows': 'すべての規則に従う' }, at: 5 }],
+    [missingRecord, { kind: 'i18n-missing', locale: 'ja', keys: ['module.jevread', 7, 'module.focuson'], at: 6 }],
+    [stale, { kind: 'i18n-catalog', locale: 'de', keys: { x: 'y' } }],   // names ja in the index, but is a de catalog: not listed
+  ])
+  const env = {
+    SITE_BINDINGS: JSON.stringify({ 'hypercomb.com': { title: 'Hypercomb', lineage: 'hypercomb', publishers: [{ pubkey, label: 'Jaime', primary: true }] } }),
+    HIVES,
+    CONTENT: { get: async (k) => records.has(k) ? { arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(records.get(k))).buffer } : null, head: async () => null, list: async () => ({ objects: [], truncated: false }) },
+  }
+  const listed = await (await worker.fetch(new Request('https://content.hypercomb.com/i18n/ja.json'), env)).json()
+  assert.deepEqual(listed.meaning, 'i18n:ja')
+  assert.deepEqual(listed.members, [catalog])
+  assert.deepEqual(listed.translators.map((t) => [t.pubkey, t.label, t.catalog]), [[pubkey, 'Jaime', catalog]])
+  assert.deepEqual(listed.missing.map((m) => [m.pubkey, m.record, m.keys]), [[assessor, missingRecord, ['module.jevread', 'module.focuson']]])
+  // The pool's own derived address answers the same index — what a published-pool probe fetches.
+  const atAddress = await (await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256('i18n:ja')}`), env)).json()
+  assert.deepEqual(atAddress.members, [catalog])
+  // A locale nobody touched is an honest empty list, and a bad locale is not found.
+  assert.deepEqual((await (await worker.fetch(new Request('https://content.hypercomb.com/i18n/fr.json'), env)).json()).members, [])
+  assert.equal((await worker.fetch(new Request('https://content.hypercomb.com/i18n/Japanese.json'), env)).status, 404)
+})
+
 // ── the trials on a zone: every open try- door, from what the door serves ─
 test('a zone lists every open trial from what its door serves, newest first', async () => {
   const [older, newer, changeOld, changeNew, review] = ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64), 'e'.repeat(64), 'f'.repeat(64)]

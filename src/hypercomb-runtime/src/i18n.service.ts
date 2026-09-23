@@ -25,6 +25,10 @@ export class LocalizationService extends EventTarget implements I18nProvider {
   #overrides = new Map<string, Map<string, Record<string, string>>>()
   #locale: string
   #fallback = FALLBACK_LOCALE
+  // THE KEYS A LOCALE LACKED THIS SESSION: resolved through the fallback (or
+  // not at all) while the locale was not the fallback. `language missing`
+  // reads them; nothing here writes anywhere.
+  #missing = new Map<string, Set<string>>()
 
   constructor() {
     super()
@@ -70,6 +74,40 @@ export class LocalizationService extends EventTarget implements I18nProvider {
     }
 
     this.#emitChange()
+  }
+
+  /**
+   * HEAL, NEVER REPLACE (documentation/community-translations.md). A
+   * community catalog fills only the keys this locale lacks: a shipped
+   * string is never overwritten by a stranger's, and the override layer is
+   * not touched. Returns the keys it filled, so the word can say how much
+   * healed. Reading never mints; this only writes memory.
+   */
+  healTranslations(namespace: string, locale: string, catalog: Record<string, string>): string[] {
+    let localeMap = this.#catalogs.get(namespace)
+    if (!localeMap) {
+      localeMap = new Map()
+      this.#catalogs.set(namespace, localeMap)
+    }
+    let existing = localeMap.get(locale)
+    if (!existing) {
+      existing = {}
+      localeMap.set(locale, existing)
+    }
+    const filled: string[] = []
+    for (const [key, value] of Object.entries(catalog)) {
+      if (typeof value !== 'string' || existing[key] !== undefined) continue
+      existing[key] = value
+      filled.push(key)
+      this.#missing.get(locale)?.delete(key)
+    }
+    if (filled.length) this.#emitChange()
+    return filled
+  }
+
+  /** The keys this session resolved through the fallback for a locale, sorted. */
+  missingKeys(locale: string): string[] {
+    return [...(this.#missing.get(locale) ?? [])].sort()
   }
 
   registerOverrides(namespace: string, locale: string, catalog: Record<string, string>): void {
@@ -138,10 +176,15 @@ export class LocalizationService extends EventTarget implements I18nProvider {
     const localeMap = this.#catalogs.get(namespace)
     if (!localeMap) return undefined
 
-    // Try current locale first, then fallback
-    const template =
-      this.#lookup(localeMap, this.#locale, key, params) ??
-      this.#lookup(localeMap, this.#fallback, key, params)
+    // Try current locale first, then fallback — and remember what the
+    // locale itself could not answer, so the community can be told.
+    const own = this.#lookup(localeMap, this.#locale, key, params)
+    const template = own ?? this.#lookup(localeMap, this.#fallback, key, params)
+    if (own === undefined && this.#locale !== this.#fallback) {
+      let lacked = this.#missing.get(this.#locale)
+      if (!lacked) { lacked = new Set(); this.#missing.set(this.#locale, lacked) }
+      lacked.add(key)
+    }
 
     if (template === undefined) return undefined
     return params ? this.#interpolate(template, params) : template
