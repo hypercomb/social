@@ -289,6 +289,17 @@ checked in this order; first match wins. Built-ins (create) run only if no
 pluggable matches. Shift+Enter runs the same pluggable list with the real
 event so Shift-gated behaviours can match.
 
+**A word still loading is not an unknown word.** Every word is a bee, and for
+a moment after each reload bees are still registering. While they are, a line
+whose first word nothing claims YET — typed in command stance, `/word`, or
+said over the bridge — waits for that word (or for the loader to settle, at
+most 20 seconds) and is then decided exactly as if it had been said a moment
+later. A bridge line waits before the machine admission gate, so the gate
+judges the word's real behaviour. Plain text in tiles stance never waits, and
+a phrase no bee claims still makes a tile once loading has settled. A person's
+held line stays in the bar; editing it or pressing Escape lets it go.
+(`hypercomb-shared/ui/command-line/word-arrival.ts`)
+
 1. **GoParentBehavior** — `..` parent navigation (fastest escape hatch)
 2. **SlashBehaviourBehavior** — `/behaviour` slash dispatch
 3. **RemoveCellBehavior** — `~` prefix

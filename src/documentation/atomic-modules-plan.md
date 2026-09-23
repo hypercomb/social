@@ -305,6 +305,16 @@ its service. On the web shell: the boot lane ran between the dependencies
 the history warm-up ran; every baseline IoC key registered plus the two boot
 bees; zero breaks; 436 units linked; 252 atoms, 172 bees.
 
+**Found 2026-09-23: a word said before its bee registers.** With every word a
+bee, the census itself (`commands/slash-behaviour.drone.ts`) registers about
+1.9 s into a boot, a second after the command line starts listening. A
+`module commit …` said over the bridge in that window was read as plain text
+and became a tile named after the whole line. The command line now treats a
+miss as final only once the loader has settled (`loader:bees-done`): a line
+whose first word nothing claims yet waits for it, then is decided as usual
+(`hypercomb-shared/ui/command-line/word-arrival.ts`; proved by
+`scripts/verify-boot-word.cjs` on the web shell at 4260).
+
 Next: presentation, assistant, sharing, commands — each checked for boot
 services first (AxialService is read by the runtime; DecorationService,
 OverlapMetrics and VisualBeeRegistry by the command line; HostSync by the
