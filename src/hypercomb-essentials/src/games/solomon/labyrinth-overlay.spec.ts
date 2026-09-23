@@ -125,6 +125,13 @@ async function enterSunseed(): Promise<void> {
   await settle()
   frame()
 }
+/** The grove is walked into (an area has no marker): east along the valley floor, then north into its trees. */
+async function enterGrove(): Promise<void> {
+  walk('ArrowRight', 46)
+  walk('ArrowUp', 52)
+  await settle()
+  frame()
+}
 function stored(): Record<string, unknown> {
   return JSON.parse(localStorage.getItem(SAVE_SLOTS_KEY)!).slots[1].payload
 }
@@ -436,6 +443,104 @@ describe('saves v3 carry the labyrinth and the path across a reopen', () => {
     frame()
     expect(second.journey.room?.id).toBe(roomId('sunseed', 'porch'))
     expect(second.journey.kit.includes('stand')).toBe(true)
+    expect(crumbs()).toEqual(['The Sevenfold Valley', 'A labyrinth'])
+  })
+
+  it('reopens on the island with Mira met, the shrine filled and Dana where she stood', async () => {
+    const first = mount()
+    solveMira()
+    fillDawn()
+    walk('ArrowDown', 4)
+    const stoodAt = document.querySelector<HTMLElement>('.sol-rpg-player')!.style.left
+    first.unmount()
+    const island = () => (stored()['places'] as [string, Record<string, unknown>][]).find(([place]) => place === 'island')![1]
+    const before = island()
+    expect(before['met']).toEqual(['mira'])
+    expect(before['filledSockets']).toEqual(['dawn-shrine:0'])
+
+    const second = mount()
+    await settle()
+    frame()
+    // She stands where she stood, not at the island's start.
+    expect(document.querySelector<HTMLElement>('.sol-rpg-player')!.style.left).toBe(stoodAt)
+    // And a step, which saves the live island over the slot, keeps it all.
+    walk('ArrowDown', 1)
+    second.unmount()
+    const after = island()
+    expect(after['met']).toEqual(['mira'])
+    expect(after['filledSockets']).toEqual(['dawn-shrine:0'])
+    expect(after['player']).toEqual(before['player'])
+  })
+
+  it('comes out of a labyrinth with Escape and goes back in at the room she left, before and after a reopen', async () => {
+    const first = mount()
+    await enterSunseed()
+    first.engine!.arrive(first.journey.room!.relics[0])
+    frame()
+    closeGainIfOpen()
+    first.engine!.arrive(first.engine!.items.find(item => item.kind === 'key')!)
+    frame()
+    first.engine!.arrive(first.journey.room!.doors.find(door => door.id === 'deeper')!)
+    frame()
+    expect(first.journey.room?.id).toBe(roomId('sunseed', 'steps'))
+    const relics = [...first.journey.inventory.relicIds]
+    key('keydown', 'Escape')
+    for (let i = 0; i < 30; i++) frame()
+    expect(crumbs()).toEqual(['The Sevenfold Valley'])
+    enterDawnShrine()
+    await settle()
+    frame()
+    expect(first.journey.room?.id).toBe(roomId('sunseed', 'steps'))
+    expect([...first.journey.inventory.relicIds]).toEqual(relics)
+    key('keydown', 'Escape')
+    for (let i = 0; i < 30; i++) frame()
+    first.unmount()
+
+    const second = mount()
+    await settle()
+    frame()
+    enterDawnShrine()
+    await settle()
+    frame()
+    expect(second.journey.room?.id).toBe(roomId('sunseed', 'steps'))
+    expect([...second.journey.inventory.relicIds]).toEqual(relics)
+  })
+
+  it('reopens inside a world within the world, where she stood', async () => {
+    const first = mount()
+    await enterGrove()
+    expect(crumbs()).toEqual(['The Sevenfold Valley', 'The Greenwood'])
+    walk('ArrowRight', 6)
+    const stoodAt = document.querySelector<HTMLElement>('.sol-rpg-player')!.style.left
+    first.unmount()
+    const payload = stored()
+    expect((payload['path'] as { place: string }[]).map(step => step.place)).toEqual(['island', 'greenwood'])
+
+    mount()
+    await settle()
+    frame()
+    expect(crumbs()).toEqual(['The Sevenfold Valley', 'The Greenwood'])
+    expect(document.querySelector<HTMLElement>('.sol-rpg-player')!.style.left).toBe(stoodAt)
+  })
+
+  it('reopens in a labyrinth room deeper than the porch, in that room', async () => {
+    const first = mount()
+    await enterSunseed()
+    first.engine!.arrive(first.journey.room!.relics[0])
+    frame()
+    closeGainIfOpen()
+    first.engine!.arrive(first.engine!.items.find(item => item.kind === 'key')!)
+    frame()
+    first.engine!.arrive(first.journey.room!.doors.find(door => door.id === 'deeper')!)
+    frame()
+    expect(first.journey.room?.id).toBe(roomId('sunseed', 'steps'))
+    for (let i = 0; i < 10; i++) frame()
+    first.unmount()
+
+    const second = mount()
+    await settle()
+    frame()
+    expect(second.journey.room?.id).toBe(roomId('sunseed', 'steps'))
     expect(crumbs()).toEqual(['The Sevenfold Valley', 'A labyrinth'])
   })
 

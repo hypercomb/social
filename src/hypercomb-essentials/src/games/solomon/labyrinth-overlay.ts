@@ -911,7 +911,16 @@ export class SolomonLabyrinthOverlay {
       this.#carried = [...plan.carried]
       this.#extra = [...plan.extra]
       this.#readKnowledge(plan.knowledge)
-      for (const [place, facts] of plan.places) this.#dormant.set(place, facts)
+      // A place already standing (the island is built at mount, before the
+      // slot is read) takes its facts now; the rest wait in #dormant for the
+      // runtime that will be built for them. Parking a live place's facts
+      // there instead restored nothing: the island showed its start, and
+      // her first step saved that over the slot.
+      for (const [place, facts] of plan.places) {
+        const live = this.#runtimes.get(place)
+        if (live) live.restoreFacts(facts)
+        else this.#dormant.set(place, facts)
+      }
       this.#updateInventory()
 
       // Rule 2, the labyrinth's own share: hydrate whatever rooms its
