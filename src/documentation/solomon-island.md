@@ -262,6 +262,56 @@ The goal is for players to build their own shrines, with their own puzzle rooms,
 - `island-places.ts` draws shrines, the pyramid, cavern mouths, plots, caches and signposts in the same cartoon language.
 - People and entrances are real buttons on a layer that moves with the camera, so the map stays keyboard- and screen-reader-usable.
 
+## Worlds within worlds, caverns, fights and add-ons — BUILT (2026-09-22/23)
+
+Everything below rides the one primitive above: a place is a place, an
+entrance is a **mark** a seat puts on a thing — never a kind of thing.
+
+- **Worlds within worlds** (`worlds.ts`, `rpg-overworld.ts`). A world is a
+  `WorldDefinition`: its own generated island (`island.ts`, with an
+  `edge` of sea, wood or cliff), start, people, signs, caches, doors and
+  groves. The Greenwood sits behind the valley's dense grove; the Mossback
+  ridge sits behind the Greenwood's signpost (as a story add-on). Anything
+  in a world can lead in: a door, an area you walk into, a signpost you
+  push against. `registerWorld`/`sanitizeWorld` take a participant's.
+- **Twelve fought labyrinth rooms** (`labyrinth.ts`): hand-drawn on two
+  layers (art + finds), with keyed doors, buried finds behind bricks, and a
+  pinned twelve-room fought route. Every square of a room can be seated —
+  open air or a stone in the wall.
+- **Side-view caverns** (`side-cavern.ts`, `side-cavern-view.ts`): long
+  runs and deep shafts on the rooms' engine under a camera — the Root Run
+  east under the Mossback, the Burrow straight down — with bottomless pits
+  (`LevelDef.pits`), a mouth, a way deeper behind the cavern's key, and
+  ASCII plans (`drawCavern`) a participant can draw too.
+- **Overhead caverns like Warcraft** (`chamber-view.ts`, `cavern-paint.ts`):
+  a chamber bigger than its window scrolls under an eased camera, with
+  three-state fog (unknown / remembered / torch-lit), a minimap of what
+  the torch has shown, a `map:` grant that charts it whole, and ground
+  with moss, rubble and damp stone. The Undercroft, and the Sump below it.
+- **Things live down there** (`foes` on a `ChamberDefinition`): a PROWLER
+  (cave goblin) walks its route and hunts her on a clear line of sight,
+  loses her after a while, and sends her back to where she came in when it
+  catches her — the den resets, with a moment's grace. A FLITTER (bat)
+  flies in bursts, crosses water, is never crushed, and **never hunts: it
+  keeps its round, and its round is the danger** — a crossing is timed.
+  Beyond the torch only their eyes show.
+- **The wand lays a stone block on bare floor** and lifts it again. It
+  stops anything; laid on a goblin's square it crushes it; a bat is only
+  shooed. The stone stays where it fell — in a corridor that is a wall of
+  your own making, so lift it before going on.
+- **Story add-ons** (`story-addons.ts`, `story-tiles.ts`, the `story`
+  word in `games/story.queen.ts`): a participant's worlds, chambers and
+  caverns plus the seats that plug them in, as a tile under the game's
+  `stories` layer — read whole or refused whole, seated when the game
+  opens; `story plug <sig>`, `story unplug <id>` (hidden, never deleted),
+  `story plug <id>`, `story list`. Format and rules:
+  `documentation/solomon-story-addons.md`. The Sump's down-stair and the
+  Mossback's shut mine are the open invitations.
+- **Saves put her back where she stood**: a place already standing when the
+  slot is read takes its facts at restore (the island is built at mount).
+  Escape / right-click inside a place is "come back out" one level; leaving
+  a labyrinth resets its rooms, and re-entry lands at the last room.
+
 ## Files
 
 | File | Role |
@@ -274,7 +324,11 @@ The goal is for players to build their own shrines, with their own puzzle rooms,
 | `games/solomon/place-runtimes.ts` | `PlaceRuntime`/`RuntimeShell` and the three runtimes (island, labyrinth, chamber) |
 | `games/solomon/adventure-save.ts` | Save v3, migration from v1/v2 and the retired scroll-dungeon v1 |
 | `games/solomon/chamber.ts` | `ChamberModel` — the one engine behind every cavern, the interior chain, and the grove |
-| `games/solomon/chamber-places.ts` | The nine `ChamberDefinition`s and their `GROUPS` |
+| `games/solomon/chamber-places.ts` | The eleven `ChamberDefinition`s (the nine, the Undercroft, the Sump) and their `GROUPS` |
+| `games/solomon/worlds.ts` | `WorldDefinition`s beyond the valley (the Greenwood), `registerWorld`, `sanitizeWorld` |
+| `games/solomon/side-cavern.ts`, `side-cavern-view.ts` | Side-view caverns drawn from ASCII plans, and their camera view |
+| `games/solomon/story-addons.ts`, `story-tiles.ts`, `mossback.story.ts` | Story add-ons: reading, seating, the hidden pool, the worked example |
+| `games/story.queen.ts` | The `story` word — plug / unplug / list |
 | `games/solomon/chamber-view.ts` | The chamber DOM/canvas renderer |
 | `games/solomon/island.ts` | The generator: terrain kinds, stamps, rivers, towns, roads, regions |
 | `games/solomon/island-paint.ts` | Ground and above canvases, textures, atmosphere, wand effects |
@@ -325,6 +379,16 @@ The goal is for players to build their own shrines, with their own puzzle rooms,
 - `designer.spec.ts`, `adventure-save.spec.ts` — the stele/chest/barrier
   designer tools round-tripping through save and ASCII glyphs, and every
   save-migration and bounds rule including `revealed`/`found`.
+- `worlds.spec.ts`, `entrances.spec.ts`, `side-cavern.spec.ts` — a world
+  builds and its start walks; entrances are marks in every kind of place;
+  each cavern is fought through to its way deeper.
+- `chamber-foes.spec.ts`, `undercroft.spec.ts`, `the-sump.spec.ts`,
+  `undercroft-playthrough.spec.ts`, `the-sump-playthrough.spec.ts` — foes
+  on their own ground, the wand's stone, and both fought overhead places
+  driven the way they are played: winnable with the wand, not by luck.
+- `story-addons.spec.ts`, `story.queen.spec.ts` — a bundle read whole or
+  refused whole, seated, refused for a taken entrance or a place inside
+  itself; the word's plug / unplug / list.
 
 Run from `src/`: `npx vitest run hypercomb-essentials/src/games/solomon`.
 Full detail, controls, and the player-facing walkthrough of every mechanic
@@ -332,11 +396,12 @@ live in `hypercomb-essentials/src/games/solomon/ADVENTURE.md`.
 
 ## Next
 
-1. **Scrollers**: long side-on levels on the rooms' engine, with a camera.
+1. **What lies below**: the Sump's down-stair and the Mossback's old mine
+   are seated by nobody — the first add-ons' places, by anyone.
 2. **More at the epicentre**: puzzles, residents and caches around Saltmere
-   and the valley roads; a second or third area place beyond the grove.
-3. **Community shrines**: authoring each kind of room, signing a shrine,
-   seating it on a plot, finding it across hosts — and, ahead of that,
-   places as real Hypercomb layers with seats as pheromones/decorations.
+   and the valley roads.
+3. **Community shrines**: signing a shrine, seating it on a plot, finding
+   it across hosts — story add-ons already travel as tiles; shrines would
+   ride the same seats.
 4. **Mobile touch for weapon/spell cycling** (N/B) — Strike and Cast already
    have touch buttons; cycling stays keyboard-only for now.

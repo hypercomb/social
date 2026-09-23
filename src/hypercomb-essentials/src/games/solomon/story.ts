@@ -125,6 +125,7 @@ const PLACE_SLOTS: readonly StorySlot[] = [
   { id: 'root-run', name: 'The Root Run', look: 'place', fills: { done: 'root-run' }, attainment: 'place:root-run' },
   { id: 'the-burrow', name: 'The Burrow', look: 'place', fills: { done: 'the-burrow' }, attainment: 'place:the-burrow' },
   { id: 'undercroft', name: 'The Undercroft', look: 'place', fills: { done: 'undercroft' }, attainment: 'place:undercroft' },
+  { id: 'the-sump', name: 'The Sump', look: 'place', fills: { done: 'the-sump' }, attainment: 'place:the-sump' },
   { id: 'labyrinth', name: 'A labyrinth', look: 'place', fills: { done: 'labyrinth' }, attainment: 'place:labyrinth' },
   { id: 'grove-plot', name: 'Old Grove Plot', look: 'plot', fills: { done: 'island/found:grove-plot' }, attainment: 'plot:grove-plot' },
   { id: 'lakeside-plot', name: 'Lakeside Plot', look: 'plot', fills: { done: 'island/found:lakeside-plot' }, attainment: 'plot:lakeside-plot' },
