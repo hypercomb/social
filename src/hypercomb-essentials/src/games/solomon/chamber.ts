@@ -113,9 +113,12 @@ export interface ChamberFinale {
 /** (2) A2.3 — gains its own `landing`, the push side, symmetric with ChamberEntrance. */
 export interface ChamberRisingLight extends ChamberCell { readonly id: string; readonly landing: ChamberCell }
 /** Something living in the chamber. A PROWLER walks the floor and cannot
- *  cross water; a FLITTER flies, crossing water, and is never crushed. Each
- *  walks its route, leg by leg, until she comes in sight — then it hunts
- *  her, and gives her up again once it has lost her for a while. */
+ *  cross water; it walks its route, leg by leg, until she comes in sight —
+ *  then it hunts her, and gives her up again once it has lost her for a
+ *  while. A FLITTER flies, crossing water, and is never crushed — and never
+ *  hunts: it keeps its round, and its round is the danger. Nothing stops a
+ *  flyer over open water, so a flyer that hunted could not be answered;
+ *  one that keeps its round can be timed. */
 export type ChamberFoeKind = 'prowler' | 'flitter'
 export interface ChamberFoe { readonly id: string; readonly kind: ChamberFoeKind; readonly route: readonly ChamberCell[] }
 export interface ChamberFoeState {
@@ -777,10 +780,10 @@ export class ChamberModel {
     for (const foe of this.#foes) {
       if (!foe.alive) continue
       const dist = Math.hypot(this.#x - foe.x, this.#y - foe.y)
-      const sees = !grace && dist <= FOE_SIGHT && this.#clearLine(foe.x, foe.y, this.#x, this.#y)
+      const flitter = foe.def.kind === 'flitter'
+      const sees = !grace && !flitter && dist <= FOE_SIGHT && this.#clearLine(foe.x, foe.y, this.#x, this.#y)
       if (sees) { foe.hunting = true; foe.lost = 0 }
       else if (foe.hunting) { foe.lost += dt; if (foe.lost >= FOE_MEMORY) { foe.hunting = false; foe.lost = 0 } }
-      const flitter = foe.def.kind === 'flitter'
       let speed = foe.hunting ? (flitter ? FLITTER_SPEED : FOE_HUNT_SPEED) : (flitter ? FLITTER_SPEED * 0.6 : FOE_PATROL_SPEED)
       if (flitter) {
         foe.wing = (foe.wing + dt) % (FLITTER_FLIGHT + FLITTER_REST)

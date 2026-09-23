@@ -800,7 +800,7 @@ export const THE_SUMP: ChamberDefinition = {
     { id: 'goblin-heart', kind: 'prowler', route: [{ col: 14, row: 19 }, { col: 25, row: 19 }, { col: 25, row: 22 }, { col: 14, row: 22 }] },
   ],
   tablets: [
-    { id: 'sump-arch', col: 5, row: 1, title: 'The Sump', text: 'Where the Undercroft’s water goes. One causeway crosses the pool; the bats hunt what they see, and the wand’s stone will not lie on water. Run it.' },
+    { id: 'sump-arch', col: 5, row: 1, title: 'The Sump', text: 'Where the Undercroft’s water goes. One causeway crosses the pool. The bats keep their rounds over the water and cross it where they will; stone will not lie on water and a bat is never crushed — watch their rounds, and cross between them.' },
     { id: 'sump-heart', col: 12, row: 19, title: 'The Heart of the Sump', text: 'The pearl was left for whoever came through the warren with their torch still lit. The stair in the corner goes on down; whoever makes what lies below it will be the first to walk there.' },
   ],
   gates: [],
@@ -819,7 +819,7 @@ export const THE_SUMP: ChamberDefinition = {
     {
       id: 'wick', col: 8, row: 1, name: 'Wick', role: 'Lamplighter', color: '#7f9ac2',
       lines: [
-        'Down from the Undercroft with a torch still burning? Good. The pool has bats; they take what they see. Cross the causeway at a run.',
+        'Down from the Undercroft with a torch still burning? Good. The pool has bats. They keep their rounds and do not look for you — but a round that crosses the causeway crosses it. Wait for the gap, then go.',
         'Past the pool the goblins keep a warren of narrow ways. Lay a stone behind you and they lose you; lay one on one and it is done with.',
         'The key is at the warren’s dead end. The door under it is the heart of the Sump, and there is a pearl for whoever reaches it.',
       ],
