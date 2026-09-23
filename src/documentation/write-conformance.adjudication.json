@@ -41,7 +41,12 @@
    "verdict": "confirmed",
    "check": 7,
    "reason": "Still present at the current head: inside `resolveChildNames` the `allResolved` branch (642-669) schedules `await store.writeChildrenManifest!(parentLayerSig, (rich ?? thin))` (666) via requestIdleCallback off the paint, and `ManifestOptimizerDrone.enqueue` (manifest-optimizer.drone.ts:118, 'THE ONE DOOR') exists but show-cell never calls it (no `enqueue(` in the file). write-conformance.md records this as deliberately left for the session holding the file, and doctrine.spec.ts:407-417 still allowlists show-cell as a manifest writer — the deviation is real and open, not fixed.",
-   "area": "derived"
+   "area": "derived",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "resolveChildNames no longer writes: when every child resolved it calls ManifestOptimizerDrone.enqueue(parentLayerSig, content.children) — \"the paint does not write the cache; it says which parent needs one\" — and the optimize phase mints the manifest, enriched and budgeted, on the next idle pass. doctrine.spec.ts lists only store.ts and manifest-optimizer.drone.ts as writers of writeChildrenManifest."
+   }
   },
   {
    "file": "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts",
@@ -50,7 +55,12 @@
    "verdict": "confirmed",
    "check": 7,
    "reason": "`upgradeThinPack` (684-716) is invoked from the manifest-hit branch of `resolveChildNames` under `options?.mayUpgradePack` (591), calls `optimizerCtor.buildEntries` (706) — which mints renditions via `#visualFor` — and then `store.writeChildrenManifest!` (708) from an idle callback off the render path; `_packUpgradeTried` (678) and `rich.length !== childSigs.length` (707) keep it bounded and complete-or-absent, as the census said, but it is still a derived-cache write outside `optimize()`. The `enqueue` door that would replace it is unused here.",
-   "area": "derived"
+   "area": "derived",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "upgradeThinPack no longer builds or writes: it asks the optimizer whether the pack needs visuals (packNeedsVisuals), records one attempt per parent sig per session, and calls ManifestOptimizerDrone.enqueue(parentLayerSig, childSigs); the optimize phase re-mints the pack on the next idle pass. doctrine.spec.ts lists only store.ts and manifest-optimizer.drone.ts as writers of writeChildrenManifest."
+   }
   },
   {
    "file": "hypercomb-essentials/src/search/hive-search.service.ts",
@@ -944,7 +954,12 @@
    "verdict": "confirmed",
    "check": 7,
    "reason": "Still present: after the per-child resolution, `if (parentLayerSig && store?.writeChildrenManifest && allResolved)` idle-schedules `await store.writeChildrenManifest!(parentLayerSig, (rich ?? thin))`, optionally enriching via `ManifestOptimizerDrone.buildEntries` — a derived-cache mint from the render path, not from `optimize()`. `ManifestOptimizerDrone.enqueue(parentSig, childSigs)` now exists as 'THE ONE DOOR' but show-cell never calls it; write-conformance.md records this pair as deliberately left for the session holding the file, and the doctrine.spec.ts ratchet ('derived-cache manifests are written only by ...') still lists show-cell as a writer. Everything else about the write conforms (keyed by parent layer sig, complete-or-absent, never load-bearing).",
-   "area": "features"
+   "area": "features",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "resolveChildNames no longer writes: when every child resolved it calls ManifestOptimizerDrone.enqueue(parentLayerSig, content.children) — \"the paint does not write the cache; it says which parent needs one\" — and the optimize phase mints the manifest, enriched and budgeted, on the next idle pass. doctrine.spec.ts lists only store.ts and manifest-optimizer.drone.ts as writers of writeChildrenManifest."
+   }
   },
   {
    "file": "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts",
@@ -953,7 +968,12 @@
    "verdict": "confirmed",
    "check": 7,
    "reason": "Still present: `upgradeThinPack` (called from the manifest-hit branch when `options?.mayUpgradePack`) idle-schedules `optimizerCtor.buildEntries(childSigs, layers)` and then `store.writeChildrenManifest!(parentLayerSig, rich)` guarded by `rich.length !== childSigs.length` → return. Same failure as the site above: a second render-path writer of a record the optimize phase owns; the fix named in write-conformance.md (`optimizer.enqueue(parentLayerSig, childSigs)` and delete the build) has not landed. The one-attempt-per-session `_packUpgradeTried` set and the complete-or-absent guard are correct as far as they go.",
-   "area": "features"
+   "area": "features",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "upgradeThinPack no longer builds or writes: it asks the optimizer whether the pack needs visuals (packNeedsVisuals), records one attempt per parent sig per session, and calls ManifestOptimizerDrone.enqueue(parentLayerSig, childSigs); the optimize phase re-mints the pack on the next idle pass. doctrine.spec.ts lists only store.ts and manifest-optimizer.drone.ts as writers of writeChildrenManifest."
+   }
   },
   {
    "file": "hypercomb-essentials/src/editor/tile-properties.ts",
@@ -1190,7 +1210,12 @@
    "verdict": "confirmed",
    "check": 7,
    "reason": "Still live at show-cell.drone.ts:643-668: when `allResolved`, a `requestIdleCallback` closure calls `store.writeChildrenManifest!(parentLayerSig, rich ?? thin)` from the render path. The sanctioned door `ManifestOptimizerDrone.enqueue(parentSig, childSigs)` exists (manifest-optimizer.drone.ts:118, 'THE ONE DOOR … Nothing else writes a children manifest') and show-cell does not call it; it only borrows `optimizer.buildEntries`. doctrine.spec.ts:407-416 still allowlists show-cell as a writer, matching write-conformance.md's note that this waits on the session holding the file.",
-   "area": "store"
+   "area": "store",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "resolveChildNames no longer writes: when every child resolved it calls ManifestOptimizerDrone.enqueue(parentLayerSig, content.children) — \"the paint does not write the cache; it says which parent needs one\" — and the optimize phase mints the manifest, enriched and budgeted, on the next idle pass. doctrine.spec.ts lists only store.ts and manifest-optimizer.drone.ts as writers of writeChildrenManifest."
+   }
   },
   {
    "file": "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts",
@@ -1199,7 +1224,12 @@
    "verdict": "confirmed",
    "check": 7,
    "reason": "show-cell.drone.ts:684-716: on the read path (`mayUpgradePack` render pass), guarded by `_packUpgradeTried`, schedules an idle callback that calls `store.writeChildrenManifest!(parentLayerSig, rich)` at line 708 — a third minter of the optimizer-owned record. Unchanged since the census.",
-   "area": "store"
+   "area": "store",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "upgradeThinPack no longer builds or writes: it asks the optimizer whether the pack needs visuals (packNeedsVisuals), records one attempt per parent sig per session, and calls ManifestOptimizerDrone.enqueue(parentLayerSig, childSigs); the optimize phase re-mints the pack on the next idle pass. doctrine.spec.ts lists only store.ts and manifest-optimizer.drone.ts as writers of writeChildrenManifest."
+   }
   },
   {
    "file": "hypercomb-runtime/src/store.ts",

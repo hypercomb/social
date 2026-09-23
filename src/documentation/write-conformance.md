@@ -489,5 +489,14 @@ The five `fix-incomplete` verdicts of the adjudication were read again
   spelled; the interim path-derived address and the legacy path string are
   read fallbacks, nothing is rewritten, and at the root nothing is written.
 
-No `fix-incomplete` verdict remains. The `deviation → confirmed` sites are
-still the list to work from.
+- **check 7, the render-path manifest backfill in show-cell** (six confirmed
+  verdicts over the two sites) — fixed since: `resolveChildNames` and
+  `upgradeThinPack` only call `ManifestOptimizerDrone.enqueue`, and the
+  optimize phase mints the pack; the ratchet lists the store and the optimizer
+  as the only writers.
+
+No `fix-incomplete` verdict remains, and no check-7 site is open. What is
+left of the `deviation → confirmed` list is owner decisions (the five
+browser-storage side records; the eagerly opened bare-word pools) and dead
+code or drift (the layer-graph resolver, the unused layout-mode persister, the
+native-filesystem docstring).
