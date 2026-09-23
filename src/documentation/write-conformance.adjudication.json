@@ -18,7 +18,12 @@
    "verdict": "fix-incomplete",
    "check": 7,
    "reason": "The check-6 half is closed by the same reader fix (`computed:genome` seeded `index`, pool-kinds.ts:129, so the member is skipped whole), but the check-7 half write-conformance.md recorded is untouched: `#schedule` (153-168) arms its own `requestIdleCallback`/`setTimeout` off `content:wrote`, `history:marker-wrote` and `history:head-changed` (102-107) and runs `void this.refresh()` -> `#persist` -> `#writeDoc` -> `putPoolDoc`; there is no `optimize()` on this class, so the derived doc is minted from a private idle scheduler, not the processor's phase. Secondary: `invalidate()` runs synchronously inside the commit effect and `#enqueueSignature` writes `localStorage` there (336).",
-   "area": "derived"
+   "area": "derived",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "active-genome.service.ts now ARMS intent only (#schedule sets #passiveIntent) and mints the census from its `optimize()` hook, which the processor awaits after synchronize; the private requestIdleCallback scheduler is gone. The localStorage queue marker remains a one-item atomic note, persisted to the pool in the same phase."
+   }
   },
   {
    "file": "hypercomb-essentials/src/history/manifest-optimizer.drone.ts",
@@ -245,7 +250,12 @@
    "verdict": "fix-incomplete",
    "check": 2,
    "reason": "write-conformance.md records this as 'could not be located — no such file exists', but hypercomb-essentials/src/history/collapse-history.queen.ts exists and is unchanged: `for (const { signature: lineageSig } of await history.list())` iterates enumerateBags (which by its own comment has 'NO REGISTRY SKIP … label only, never a gate') and calls `archiveEntries(lineageSig, toDelete)` on every sig-named dir at the root, including pools and molecule addresses it holds no head for. Radius is smaller than the census said — other authors' markers live in sub-buckets that listLayers (`handle.kind !== 'file' → continue`) never reads, and archiveEntries refuses non-marker names — but the closure claim in the doc is wrong and nothing landed.",
-   "area": "commit"
+   "area": "commit",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "retired",
+    "reason": "/collapse-history was retired (history.service.ts names it \"the retired /collapse-history\"; the queen file is gone). No writer iterates every root directory into archiveEntries any more."
+   }
   },
   {
    "file": "hypercomb-essentials/src/history/history.service.ts",
@@ -1143,7 +1153,12 @@
    "verdict": "fix-incomplete",
    "check": 6,
    "reason": "The write is unchanged (store.ts:2256-2266: member named by the parent layer sig in the `manifests` pool, body inlining child layers) and the doc's reader-side fix IS present in `HistoryService.referencesOutside` (history.service.ts:4421 `if (!creditsNames) continue` skips a wipe-safe member's name AND bytes, gated by `poolKindOfAddress` → `poolCreditsMemberNames`, with `manifests` seeded `index`). But the collector the census actually cited, `packed-collect.ts:132-146`, still credits every pool member's leaf name (`if (isSigName(leaf)) reachable.add(...)`) and every sig in its bytes (`collectSignaturesIn`) with no pool-kind consultation at all (its only import is `isSigName`), so under the packed store (`PackedStoreHost.collect`, worker:639, behind the `hc:store:packed` flag) a manifest still pins the parent and every child layer permanently.",
-   "area": "store"
+   "area": "store",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "packed-collect.ts takes `wipeSafePools` and skips a wipe-safe pool WHOLE, name and bytes (packed-collect.spec.ts \"wipe-safe pools — a derived cache is not a reference\"); packed-bridge.ts passes `wipeSafePoolAddresses()` from the registry on every pack_collect. The manifests pool is seeded `index`, so a manifest no longer pins the parent or its children under the packed store."
+   }
   },
   {
    "file": "hypercomb-runtime/src/store.ts",
@@ -1152,7 +1167,12 @@
    "verdict": "fix-incomplete",
    "check": 6,
    "reason": "store.ts:1308-1316 still writes the webp under the SOURCE image's resource sig in the `visual-optimization` pool (seeded `index`, wipe-safe). `referencesOutside` now skips it (history.service.ts:4421), but `packed-collect.ts:138` credits the member NAME unconditionally (`if (isSigName(leaf)) reachable.add(leaf)`), so in the packed collector the original image is still uncollectable once its thumbnail exists — exactly the harm the census described. Same one-file gap as the manifests site.",
-   "area": "store"
+   "area": "store",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "Same fix as writeChildrenManifest: `visual-optimization` is seeded `index`, the packed collector skips it whole, so the original image is collectable once its thumbnail exists."
+   }
   },
   {
    "file": "hypercomb-runtime/src/store.ts",
@@ -1197,7 +1217,12 @@
    "verdict": "fix-incomplete",
    "check": 4,
    "reason": "The bespoke `'tutorial:planner:' + segments.join('/')` spelling is now read-fallback only (`legacyLocationKey`, line 64-65) and `writeTutorialRecord` refuses to write without a signer (line 104) — both real improvements, ratcheted in tutorial-provenance.spec.ts. But the new subKey `locationAddress` (line 70-78) is `history.sign({ explorerSegments })`, and `HistoryService.sign` (history.service.ts:695-720) is by its own comment 'purely path-derived' — `lineageKey(explorerSegments)` hashed — i.e. the path-keyed bag address that hypergraph-molecule-lineage.md:21-23 retires ('Depth is a route, never an address … no longer the identity of anything'). A NEW write is therefore still minting `sign(sha256(lineageKey(path)))` sub-buckets; a rename or move of the parent still strands the record. The census's proposed key (the parent layer sig, which `tutorialPlannerSig` already resolves via `resolveCurrentLayer`) was not taken.",
-   "area": "store"
+   "area": "store",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "tutorial-provenance.ts now keys the record by the WORD — `moleculeAddress(last segment)`, the molecule doctrine's identity — never a path hashed or spelled; the interim path-derived address and the legacy path string are read fallbacks; at the root (no word) nothing is written. tutorial-provenance.spec.ts ratchets it."
+   }
   },
   {
    "file": "hypercomb-shared/core/layer-graph-resolver.service.ts",
@@ -1579,5 +1604,6 @@
    "reason": "markerIndices filters with the anchored `/^[0-9]+$/` BEFORE `Number(name)` and then `Number.isSafeInteger(index) && index >= 0`, so a 64-hex member can never be read as an index; the function writes nothing. 'unclear' is the taxonomy having no slot for a read helper — the check-9 refutation stands.",
    "area": "shell"
   }
- ]
+ ],
+ "revisited": "2026-09-23"
 }

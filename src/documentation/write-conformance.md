@@ -472,3 +472,22 @@ static); `hypercomb-client` (Rust) and the conformance vectors unread;
 explorerSegments })` callers were sampled, not enumerated; and — the largest
 gap — **the adjudication phase never ran**, so nothing above has had a second
 reader.
+
+## Revisited 2026-09-23
+
+The five `fix-incomplete` verdicts of the adjudication were read again
+(`write-conformance.adjudication.json`, each carries a `revisited` entry):
+
+- **check 7, the active genome** — fixed since: the census is minted from the
+  service's `optimize()` hook; an invalidation only arms intent.
+- **check 2, /collapse-history** — retired: the word and its file are gone.
+- **check 6, children manifests and optimized visuals under the packed store**
+  — fixed since: the packed collector skips a wipe-safe pool whole, and the
+  bridge hands it the registry's wipe-safe addresses on every collection.
+- **check 4, the tutorial record** — fixed today: the sub-bucket is the WORD's
+  molecule address (`moleculeAddress(last segment)`), never a path hashed or
+  spelled; the interim path-derived address and the legacy path string are
+  read fallbacks, nothing is rewritten, and at the root nothing is written.
+
+No `fix-incomplete` verdict remains. The `deviation → confirmed` sites are
+still the list to work from.

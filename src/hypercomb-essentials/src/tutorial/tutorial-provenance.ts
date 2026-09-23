@@ -1,9 +1,12 @@
 // tutorial/tutorial-provenance.ts
 //
 // Scoped provenance pool for the bee tutorial — `sign('tutorial:artifacts')`.
-// One document per location (subKey bucket) recording the practice structure
-// the tour itself minted there: its rendered label, the parent segments, its
-// merkle sig at record time, and the cover resource sigs.
+// One document per WORD (subKey bucket = the molecule address of the tile the
+// practice structure was minted under) recording what the tour minted there:
+// its rendered label, the parent segments as a route, its merkle sig at
+// record time, and the cover resource sigs. The name is the identity and a
+// path is a route (hypergraph-molecule-lineage.md): the record follows the
+// word wherever it is routed, as a tile's notes do.
 //
 // Cleanup is provenance-gated, never name-matched: only a RECORDED planner
 // whose CURRENT child sig still equals the recorded sig may be GC'd. The
@@ -14,6 +17,7 @@
 // share the flat root namespace, so a bare-word meaning (e.g.
 // `weekly-planner-tutorial`) would collide with any tile slugged the same.
 
+import { moleculeAddress } from '@hypercomb/core'
 import { resolveCurrentLayer, type PlacementHistory } from '../history/layer-placement.js'
 
 const MEANING = 'tutorial:artifacts'
@@ -63,10 +67,21 @@ const store = (): StoreApi | undefined =>
 const legacyLocationKey = (segments: readonly string[]): string =>
   'tutorial:planner:' + segments.map(s => String(s).toLowerCase()).join('/')
 
-/** The sub-bucket is the location's own ADDRESS — the same signature the
- *  history bag for that location has, from the one canonical signer. Null
- *  when history is not up, in which case nothing is written. */
-const locationAddress = async (segments: readonly string[]): Promise<string | null> => {
+/** THE SUB-BUCKET IS THE WORD: the molecule address of the tile the practice
+ *  structure lives under — the last segment, canonical and folded, signed
+ *  (core moleculeAddress). Null at the root, where there is no word and
+ *  therefore nothing is written. */
+const wordAddress = async (segments: readonly string[]): Promise<string | null> => {
+  const word = segments.at(-1)
+  if (typeof word !== 'string' || !word.trim()) return null
+  try { return await moleculeAddress(word) } catch { return null }
+}
+
+/** The interim sub-bucket (2026-09-04 to 2026-09-23): the location's
+ *  PATH-DERIVED bag signature — a route hashed, which the molecule doctrine
+ *  retires as an identity (write-conformance check 4, the adjudication's
+ *  incomplete fix). READ-FALLBACK ONLY, like the path string before it. */
+const legacyPathAddress = async (segments: readonly string[]): Promise<string | null> => {
   const history = window.ioc.get<HistoryApi>('@diamondcoreprocessor.com/HistoryService')
   if (!history?.sign) return null
   try {
@@ -82,8 +97,9 @@ export const readTutorialRecord = async (
   if (!s) return null
   const pool = await s.getPool(MEANING)
   if (!pool) return null
-  const address = await locationAddress(segments)
+  const address = await wordAddress(segments)
   const bytes = (address ? await s.getPoolDoc(pool, address) : null)
+    ?? await (async () => { const interim = await legacyPathAddress(segments); return interim ? s.getPoolDoc(pool, interim) : null })()
     ?? await s.getPoolDoc(pool, legacyLocationKey(segments))
   if (!bytes) return null
   try {
@@ -99,8 +115,8 @@ export const writeTutorialRecord = async (record: TutorialArtifactRecord): Promi
   if (!s) return
   const pool = await s.getPool(MEANING)
   if (!pool) return
-  const address = await locationAddress(record.segments)
-  if (!address) return   // no signer, no address, no write — never a path
+  const address = await wordAddress(record.segments)
+  if (!address) return   // no word (the root), no address, no write — never a path
   const bytes = new TextEncoder().encode(JSON.stringify(record, null, 2))
   await s.putPoolDoc(pool, bytes.buffer as ArrayBuffer, address)
 }
