@@ -2798,11 +2798,24 @@ export class HistoryService {
   static readonly #signLayer = async (
     layer: LayerContent,
   ): Promise<{ sig: string; bytes: Uint8Array; layer: LayerContent }> => {
-    const withMeta = await HistoryService.#canonicalArtifactReferences(layer)
+    const withMeta = HistoryService.#distinctMarks(await HistoryService.#canonicalArtifactReferences(layer))
     const canonical = HistoryService.canonicalizeLayer(withMeta)
     const bytes = new TextEncoder().encode(JSON.stringify(canonical))
     const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
     return { sig, bytes, layer: canonical }
+  }
+
+  /** A mark worn twice is one mark. Healing re-mints a raw decoration record
+   *  as its canonical twin, so a raw sig appended beside the canonical one
+   *  already in the slot — which the committer's by-sig dedup cannot see as
+   *  the same mark — heals into a DUPLICATE. They only compare equal after
+   *  healing, so this is where the second copy goes. A layer that already
+   *  wears a double sheds it on its next ordinary commit; nothing is rewritten. */
+  static readonly #distinctMarks = (layer: LayerContent): LayerContent => {
+    const marks = (layer as Record<string, unknown>)['decorations']
+    if (!Array.isArray(marks)) return layer
+    const distinct = [...new Set(marks)]
+    return distinct.length === marks.length ? layer : { ...layer, decorations: distinct } as LayerContent
   }
 
   /** Pool-write layer bytes by sig (additive, content-addressed, dedup) with NO

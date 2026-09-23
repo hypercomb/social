@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { moleculeAddress } from '@hypercomb/core'
+import { EffectBus, moleculeAddress } from '@hypercomb/core'
 
 const services = vi.hoisted(() => new Map<string, unknown>())
 vi.hoisted(() => {
@@ -162,6 +162,24 @@ describe('CanonicalReferenceService', () => {
     })
     expect(await at(['sets', 'people'])).toEqual({ name: 'people', decorations: [expect.any(String)] })
     expect(committer.rootAppends).toEqual([])
+  })
+
+  it('announces its already-committed mark as a repaint, never a second write', async () => {
+    // The layer the door commits already wears the mark. Announced without
+    // `viaUpdate`, the committer appended it again — and because the layer
+    // holds the mark's healed (canonical) twin, its by-sig dedup missed and
+    // every reference wore its mark twice.
+    const emit = vi.spyOn(EffectBus, 'emit')
+    try {
+      await new CanonicalReferenceServiceImpl().place({
+        name: 'people', sourceSegments: ['nest', 'people'], parentSegments: ['project'],
+      })
+      const announced = emit.mock.calls.filter(([effect]) => effect === 'decorations:changed')
+      expect(announced).toHaveLength(1)
+      expect(announced[0][1]).toMatchObject({ segments: ['project', 'people'], op: 'append', viaUpdate: true })
+    } finally {
+      emit.mockRestore()
+    }
   })
 
   it('refuses the hive root, a missing target, and a reference to itself', async () => {

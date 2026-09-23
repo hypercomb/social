@@ -176,8 +176,12 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     const sourceChild = await childLayerOf(history, sourceParent, targetName)
     await this.#retainVariant(targetName, history, sourceLayer, sourceChild?.sig)
 
+    // The mark is already IN the committed layer — this only repaints the
+    // read models. Without `viaUpdate` the committer re-appended it; the
+    // layer holds the healed (canonical) twin of `decorationSig`, so its
+    // by-sig dedup missed and the reference wore the mark twice.
     EffectBus.emit('decorations:changed', {
-      segments: childSegments, op: 'append', sig: decorationSig,
+      segments: childSegments, op: 'append', sig: decorationSig, viaUpdate: true,
     })
     EffectBus.emit('cell:added', {
       cell: name, segments: [...parentSegments], viaUpdate: true, reference: true,
