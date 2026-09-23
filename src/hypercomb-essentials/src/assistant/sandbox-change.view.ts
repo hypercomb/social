@@ -241,8 +241,14 @@ export class SandboxChangeElement extends HTMLElement {
     // The change, file by file.
     body.appendChild(el('h3', 'hc-trial-section', t('module.panel.changed', 'What it changes')))
     if (!site.change) body.appendChild(el('p', 'hc-trial-quiet', t('module.panel.nochange', 'This trial published no change record.')))
-    else if (!reading.files.length && !reading.off.length) body.appendChild(el('p', 'hc-trial-quiet', t('module.panel.samecode', 'No source file changed.')))
+    else if (!reading.files.length && !reading.off.length && !reading.taken.length) body.appendChild(el('p', 'hc-trial-quiet', t('module.panel.samecode', 'No source file changed.')))
     for (const file of reading.files) body.appendChild(this.#file(file))
+    if (reading.taken.length) {
+      body.appendChild(el('h3', 'hc-trial-section', t('module.panel.takenfrom', 'What it takes from other builds')))
+      for (const taken of reading.taken) {
+        body.appendChild(el('p', 'hc-trial-off', t('module.panel.takenrow', '{path} — from {root}', { path: taken.path, root: taken.root.slice(0, 12) + '…' })))
+      }
+    }
     if (reading.off.length) {
       body.appendChild(el('h3', 'hc-trial-section', t('module.panel.off', 'What it turns off')))
       for (const path of reading.off) body.appendChild(el('p', 'hc-trial-off', path))

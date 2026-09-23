@@ -30,7 +30,7 @@ const put = async (text: string): Promise<string> => {
 const trialSite = async () => {
   const root = 'e'.repeat(64)
   const [before, after] = await Promise.all([put('export const zoom = 1;\n'), put('export const zoom = 2;\n')])
-  const change = await put(JSON.stringify({ kind: 'module-change', sandbox: 'try-zoom', root, off: ['games/pong'], at: 1_700_000_000_000, changes: [{ path: 'p', section: 'src/a.ts', from: 'x', to: 'y', before, after }] }))
+  const change = await put(JSON.stringify({ kind: 'module-change', sandbox: 'try-zoom', root, off: ['games/pong'], at: 1_700_000_000_000, changes: [{ path: 'p', section: 'src/a.ts', from: 'x', to: 'y', before, after }], taken: [{ path: 'notes', root: 'f'.repeat(64) }] }))
   const findings = await put('Looks fine.\nVERDICT: accept')
   const review = await put(JSON.stringify({ kind: 'module-review', verdict: 'accept', model: 'm', findings }))
   const note = await put('<img src=x onerror=alert(1)> raises zoom')
@@ -76,6 +76,9 @@ describe('the what-changed panel', () => {
     expect(panelText()).toContain('+1 −1')
     expect(panelText()).toContain('Looks fine.')
     expect(panelText()).toContain('games/pong')
+    // What the build folded in from other builds, and where each came from.
+    expect(panelText()).toContain('What it takes from other builds')
+    expect(panelText()).toContain('notes — from ffffffffffff…')
     expect(panelText()).toContain('1 of 2')
     // A note is somebody's words: drawn as text, never as markup.
     expect(element.querySelector('.hc-trial img')).toBeNull()

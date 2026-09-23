@@ -169,9 +169,24 @@ describe('reading a trial', () => {
     expect(reading.people).toEqual([{ pubkey: 'k1', verdict: 'accept', note: 'reads well', at: 5 }])
   })
 
+  it('names what a build folded in from other builds — in the record, the question and the reading', async () => {
+    const w = await world()
+    const taken = [{ path: 'games/pong', root: 'f'.repeat(64) }]
+    const change = await publishChange('h', 'try-zoom', 'r'.repeat(64), [{ path: 'preferences', section: 'src/preferences/settings.ts', from: w.from, to: w.to }], [], w.deps, taken)
+    if (!change.ok) throw new Error(change.error)
+    expect(change.record.taken).toEqual(taken)
+    expect(reviewQuestion('try-zoom', change.record.changes, [], taken)).toContain('games/pong (from ffffffffffff…)')
+    const reading = await readTrial({ sandbox: true, title: 'try-zoom', package: 'r'.repeat(64), pubkey: 'p', change: change.sig }, async sig => w.heap.get(sig) ?? null)
+    expect(reading.taken).toEqual(taken)
+    // A change with nothing folded in says nothing of it.
+    const plain = await publishChange('h', 'try-zoom', 'r'.repeat(64), [], ['notes'], w.deps)
+    if (!plain.ok) throw new Error(plain.error)
+    expect('taken' in plain.record).toBe(false)
+  })
+
   it('reads a trial with no change and no review as exactly that', async () => {
     const reading = await readTrial({ sandbox: true, title: 'try-zoom', package: 'e'.repeat(64), pubkey: 'p' }, async () => null)
-    expect(reading).toEqual({ files: [], off: [], at: null, review: null, people: [], missing: [] })
+    expect(reading).toEqual({ files: [], off: [], taken: [], at: null, review: null, people: [], missing: [] })
   })
 })
 

@@ -15,7 +15,9 @@
 //      `module changes` opens what it changes, file by file, with the host
 //      AI's reading and the tester's signed note, read by signature; the
 //      follower TAKES the trial at its path by hand — held in the brood, inert
-//      across a reload, and running only once accepted there with both warnings
+//      across a reload, and running only once accepted there with both warnings;
+//      then the follower COMMITS ITS OWN BUILD, and what it took is folded in —
+//      part of its package, no longer a pick, named in its published change
 //   4. `module promote` moves the live channel to the same root: the follower
 //      is told, replicates it from the host, and runs it
 //   5. a unit turned off and committed + promoted is unreachable for the
@@ -220,6 +222,31 @@ const announcedOn = page => page.evaluate(() => {
   check('nothing it brought is still held', (await heldFrom(fol.page, sandboxRoot)).length === 0)
   await fol.page.reload({ waitUntil: 'domcontentloaded' })
   check('once accepted by hand, the follower runs the trial it took', await proofOf(fol.page) === MARKER)
+
+  // ── 3f. A BUILD FOR EVERYBODY — the follower commits what it took ───────
+  // A word said before its bee has loaded is read as a tile's name: wait for it.
+  await H.waitFor(() => fol.page.evaluate(() => !!window.ioc?.get('@diamondcoreprocessor.com/ModuleQueenBee') || null), 60_000, 500)
+  // Its build is its own: the trial it took, plus a unit of its own turned off.
+  // (Folding the trial alone would rebuild the trial's root byte for byte —
+  // the same composition is the same signature, wherever it is made.)
+  const folOff = await fol.page.evaluate(async skip => {
+    const sel = await window.ioc.get('@hypercomb.social/Install').selection()
+    const leaf = sel.nodes.filter(node => !node.children.length && node.bees.length && !skip.some(path => node.path === path || node.path.startsWith(`${path}/`)))
+    return leaf.sort((a, b) => a.path.localeCompare(b.path))[0]?.path ?? null
+  }, [target.path, 'assistant', 'sharing', 'commands', 'keyboard'])
+  await fol.page.evaluate(path => { const install = window.ioc.get('@hypercomb.social/Install'); install.setOffUnits([...install.offUnits(), path]) }, folOff)
+  await H.watchToasts(fol.page)
+  await H.say(fol.page, `module commit ${CHANGE}-mine @${WRITE}`)
+  const folded = await H.toastsUntil(fol.page, /^Sandbox |not stamped|not published|nothing to commit/)
+  const folSel = await fol.page.evaluate(async path => {
+    const sel = await window.ioc.get('@hypercomb.social/Install').selection()
+    return { trunk: sel.trunk, picked: !!sel.picks[path], layer: sel.nodes.find(node => node.path === path)?.layerSig ?? null }
+  }, target.path)
+  check('the follower commits its own build, and what it took is folded in — part of its package, no longer a pick', !!folSel.trunk && folSel.trunk !== sandboxRoot && !folSel.picked && folSel.layer === pickTaken.layer && !(await selectionHas(fol.page, folOff)), `${folOff}: ${JSON.stringify(folded)}`)
+  const folKey = await fol.page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/NostrSigner').getPublicKeyHex())
+  const folChangeSig = await H.waitFor(async () => channelOf(await hostState(), folKey, `change:${SANDBOX}-mine`), 60_000, 1000)
+  const folRecord = folChangeSig ? JSON.parse(await fromHost(folChangeSig)) : null
+  check('its published change says whose change it carries', (folRecord?.taken ?? []).some(entry => entry.path === target.path && entry.root === sandboxRoot), JSON.stringify(folRecord?.taken))
 
   // ── 4. PROMOTE: the live channel moves to the same root ─────────────────
   await H.watchToasts(page)

@@ -120,13 +120,77 @@ describe('commitSelection', () => {
     expect((w.read(cells[0]!)['cells'] as string[])[0]).toBe(draft.layerSig)
   })
 
-  it('has nothing to commit without a draft or a turned-off path, and leaves a publisher\'s pick a pick', async () => {
+  it('has nothing to commit when nothing would change', async () => {
     const w = await world()
     expect(await commitSelection('essentials', w.deps)).toEqual({ ok: false, error: 'nothing to commit: no draft is picked and nothing is turned off' })
+    // A pick of the very layer the trunk already runs folds into nothing new.
     const foreign = await sigOf(encode(JSON.stringify({ name: 'root', cells: [], dependencies: [] })))
     w.heap.set(foreign, encode(JSON.stringify({ name: 'root', cells: [], dependencies: [] })))
     const picked = { ...w.deps, picks: () => ({ 'games/solomon': { layer: w.solomon, root: foreign, hides: false, at: 1 } }) }
-    expect(await commitSelection('essentials', picked)).toEqual({ ok: false, error: 'nothing to commit: no draft is picked and nothing is turned off' })
+    expect(await commitSelection('essentials', picked)).toEqual({ ok: false, error: 'nothing to commit: what runs here is already the package' })
+  })
+
+  // A BUILD FOR EVERYBODY: somebody else's change, taken at one path and
+  // accepted here, is folded into the commit with the bundles it brought.
+  const takenTrial = async (w: Awaited<ReturnType<typeof world>>) => {
+    const theirBee = 'var rooms = "theirs";'
+    const theirBeeSig = await sigOf(encode(theirBee))
+    const bundle = '// @hypercomb/essentials/games/solomon\nexport const rooms = 2;'
+    const bundleSig = await sigOf(encode(bundle))
+    const layer = await sigOf(encode(JSON.stringify({ name: 'solomon', cells: [], bees: [`${theirBeeSig}.js`], dependencies: [] })))
+    w.heap.set(layer, encode(JSON.stringify({ name: 'solomon', cells: [], bees: [`${theirBeeSig}.js`], dependencies: [] })))
+    const rootBody = JSON.stringify({ name: 'root', cells: [], dependencies: [`${bundleSig}.js`, 'e'.repeat(64)] })
+    const root = await sigOf(encode(rootBody))
+    w.heap.set(root, encode(rootBody))
+    const bundles = new Map([[bundleSig, encode(bundle)], ['d'.repeat(64), encode('// @hypercomb/essentials/notes\n')], ['e'.repeat(64), encode('// @hypercomb/essentials/notes\n')]])
+    let picks = { 'games/solomon': { layer, root, hides: false, at: 1, byHand: true } } as Record<string, { layer: string; root: string; hides: boolean; at: number; byHand?: boolean }>
+    const applied: Record<string, unknown>[] = []
+    const store = w.deps.store()!
+    return {
+      layer, root, theirBeeSig, bundleSig,
+      deps: (held: ReadonlySet<string> = new Set()): ModuleDraftDeps => ({
+        ...w.deps,
+        store: () => ({ ...store, getDependencyBytes: async (sig: string) => bundles.get(sig) ?? null }),
+        picks: () => picks,
+        apply: async (t, admitted, next) => { applied.push(next); picks = next as typeof picks; return w.deps.apply(t, admitted, next) },
+        mayRun: async sig => !held.has(sig),
+      }),
+      picksNow: () => picks,
+      applied,
+    }
+  }
+
+  it('folds a trial taken by hand into the commit at its path, with the bundles it brought', async () => {
+    const w = await world()
+    const t = await takenTrial(w)
+    const outcome = await commitSelection('everybody', t.deps())
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    expect(outcome).toMatchObject({ drafts: [], off: [], taken: [{ path: 'games/solomon', root: t.root }], held: [] })
+    const root = w.read(outcome.rootSig)
+    expect(w.read((root['cells'] as string[])[0]!)['cells']).toEqual([t.layer, w.arkanoid])
+    // The taken path's namespace bundle comes with it; the rest of the trunk's stay.
+    expect(root['dependencies']).toEqual([t.bundleSig, 'd'.repeat(64)].sort())
+    // The render hint follows the module the take replaced.
+    expect(root['criticalBees']).toEqual([`${t.theirBeeSig}.js`, `${w.arkanoidBee}.js`])
+    // Part of the trunk now: no longer a pick.
+    expect(t.picksNow()).toEqual({})
+  })
+
+  it('never folds code that still waits in the brood: it stays a pick, and the commit says so', async () => {
+    const w = await world()
+    const t = await takenTrial(w)
+    expect(await commitSelection('everybody', t.deps(new Set([t.theirBeeSig])))).toEqual({
+      ok: false, error: 'nothing to commit: what you took at games/solomon still waits in the brood — accept it there first',
+    })
+    // A held bundle holds it back as surely as a held module.
+    w.turnOff('notes')
+    const outcome = await commitSelection('everybody', t.deps(new Set([t.bundleSig])))
+    expect(outcome).toMatchObject({ ok: true, taken: [], held: ['games/solomon'], off: ['notes'] })
+    if (!outcome.ok) return
+    const root = w.read(outcome.rootSig)
+    expect(w.read((root['cells'] as string[])[0]!)['cells']).toEqual([w.solomon, w.arkanoid])
+    expect(Object.keys(t.picksNow())).toEqual(['games/solomon'])
   })
 
   it('refuses a turned-off path the package does not have, and publishes nothing when the selection does not compose', async () => {

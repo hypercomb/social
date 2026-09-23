@@ -367,8 +367,13 @@ export class ModuleQueenBee extends QueenBee {
     const name = sandboxName(words[0] ?? held[0]?.path.split('/').pop() ?? 'change')
     const committed = await drafts.commit(name)
     if (!committed.ok) { toast(committed.error, 'error'); return }
-    const what = [...committed.drafts, ...committed.off.map(path => `-${path}`)].join(', ')
+    // Folded picks, and those held back (core ModuleCommitOutcome `taken` / `held`).
+    const { taken = [], held: heldBack = [] } = committed as { taken?: readonly { path: string; root: string }[]; held?: readonly string[] }
+    const what = [...committed.drafts, ...taken.map(pick => `${pick.path} (taken)`), ...committed.off.map(path => `-${path}`)].join(', ')
     toast(t('module.committed', 'Committed {what}: package {root} is entry {index} of this host, and runs here on reload.', { what, root: committed.rootSig.slice(0, 12) + '…', index: committed.index }), 'success')
+    // A BUILD FOR EVERYBODY carries only code this hive accepted: what still
+    // waits in the brood stayed a pick, and is named so it is not forgotten.
+    if (heldBack.length) toast(t('module.heldback', 'Not folded in: {paths} still waits in the brood — accept it there, then commit again.', { paths: heldBack.join(', ') }), 'warning')
 
     // THE FILES FIRST, ALL OF THEM. The door installs the package from the
     // host alone, so the host must hold every file of it, not only the new
@@ -394,7 +399,7 @@ export class ModuleQueenBee extends QueenBee {
       // failure here leaves the sandbox open and says why.
       const deps = reviewDeps(drafts, sync)
       if (!deps) { toast(t('module.noreview', 'The review cannot run here: {reason}.', { reason: 'the host AI or the store is not loaded' }), 'warning'); return }
-      const change = await publishChange(host, name, committed.rootSig, committed.changes, committed.off, deps)
+      const change = await publishChange(host, name, committed.rootSig, committed.changes, committed.off, deps, taken)
       if (!change.ok) { toast(t('module.noreview', 'The review cannot run here: {reason}.', { reason: change.error }), 'warning'); return }
       await review(host, change.sig, change.record, deps, t, toast)
     } catch (error) {

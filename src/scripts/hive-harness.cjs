@@ -20,6 +20,17 @@ const waitFor = async (fn, timeoutMs = 20_000, stepMs = 400) => {
   while (Date.now() < until) { try { last = await fn(); if (last) return last } catch { /* poll */ } await sleep(stepMs) }
   return last
 }
+/** A page call that may land while the shell is reloading itself (a cold boot
+ *  reloads onto the package it just acquired): try again once it settles. */
+const settled = async (page, fn, tries = 5) => {
+  for (let attempt = 0; ; attempt++) {
+    try { return await fn() } catch (error) {
+      if (attempt >= tries || !/Execution context was destroyed|navigat/i.test(String(error))) throw error
+      await page.waitForLoadState('domcontentloaded').catch(() => {})
+      await sleep(1000)
+    }
+  }
+}
 const checker = () => {
   const results = []
   const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`) }
@@ -67,8 +78,8 @@ const openHive = async (browser, who, web) => {
   await page.goto(web, { waitUntil: 'domcontentloaded', timeout: 180_000 })
   await waitFor(() => installedOf(page), 180_000, 1000)
   const root = LOCAL_ROOT()
-  if (await installedOf(page) !== root) {
-    const taken = await page.evaluate(([sig, zone]) => window.ioc.get('@hypercomb.social/Install').acquire(sig, [zone]), [root, new URL(web).host])
+  if (await settled(page, () => installedOf(page)) !== root) {
+    const taken = await settled(page, () => page.evaluate(([sig, zone]) => window.ioc.get('@hypercomb.social/Install').acquire(sig, [zone]), [root, new URL(web).host]))
     if (!taken.ok) throw new Error(`${who} could not take this machine's build: ${taken.error}`)
     await page.reload({ waitUntil: 'domcontentloaded' })
   }
