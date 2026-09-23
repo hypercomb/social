@@ -52,9 +52,12 @@ export interface JevRow {
 /** WHAT JEV SEES OF A WRITE: the header line and the why — never the body.
  *  The header is the worker's own line, so the source boundary holds.
  *  A section body runs to hundreds of kilobytes and Jev's state to 24k, so
- *  the code is judged the way the draft door already judges it: by running.
- *  Jev judges whether replacing THAT section of THAT module is what was asked,
- *  overreaches nothing, was read first, and breaks no doctrine section. */
+ *  here Jev judges whether replacing THAT section of THAT module is what was
+ *  asked, overreaches nothing, was read first, and breaks no doctrine
+ *  section. The BODY is audited once it is written, before it can run: the
+ *  draft door holds anything that newly reaches something (core
+ *  code-reach.ts), and Jev reads the change itself (safety/brood-audit.ts
+ *  auditDraft), which may hold it too. */
 export const WRITE_REACH: JevReach = 'editing'
 /** A write's header, as the write fence accepts it (hypercomb-work-fence.ts). */
 const WRITE_HEADER = /^\/?(?:write\s+)?(?:[a-f0-9]{64}\s+src\/\S+|doctrine\s+\S.*)$/i

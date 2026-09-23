@@ -199,7 +199,13 @@ export interface ModuleDraftsProvider {
    *  module is a bee or a dependency atom (atomic-modules-plan.md, step 5);
    *  the running code changes on reload. */
   draft?(request: { readonly sig: string; readonly section: string; readonly body: string }):
-    Promise<{ readonly ok: true; readonly sig: string; readonly of: 'bee' | 'dependency'; readonly path: string } | { readonly ok: false; readonly error: string }>
+    Promise<{
+      readonly ok: true; readonly sig: string; readonly of: 'bee' | 'dependency'; readonly path: string
+      /** What the new section reaches that the old one did not (core
+       *  code-reach.ts). Non-empty means the draft is HELD in the brood: it
+       *  does not run until the participant accepts it. */
+      readonly reaches?: readonly string[]
+    } | { readonly ok: false; readonly error: string }>
   /** A TRANSFER PACK of these files (hypercomb-runtime transfer-pack.ts): one
    *  content-addressed file carrying every one of them, minted in memory and
    *  never written into the hive — a publish artifact, so a sandbox door can

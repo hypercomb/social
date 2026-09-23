@@ -120,6 +120,21 @@ describe('commitSelection', () => {
     expect((w.read(cells[0]!)['cells'] as string[])[0]).toBe(draft.layerSig)
   })
 
+  it('never folds a draft the audit held: it stays a pick until you accept it', async () => {
+    const w = await world()
+    const draft = await draftLabyrinth(w)
+    const held = { ...w.deps, mayRun: async (sig: string) => sig !== draft.beeSig }
+    expect(await commitSelection('essentials', held)).toEqual({
+      ok: false, error: 'nothing to commit: the code at games/solomon still waits in the brood — accept it there first',
+    })
+    // Beside a change that may run, it is named as held back and left out.
+    w.turnOff('notes')
+    const outcome = await commitSelection('essentials', held)
+    expect(outcome).toMatchObject({ ok: true, drafts: [], held: ['games/solomon'], off: ['notes'] })
+    if (!outcome.ok) return
+    expect(outcome.changes).toEqual([])
+  })
+
   it('has nothing to commit when nothing would change', async () => {
     const w = await world()
     expect(await commitSelection('essentials', w.deps)).toEqual({ ok: false, error: 'nothing to commit: no draft is picked and nothing is turned off' })
@@ -181,7 +196,7 @@ describe('commitSelection', () => {
     const w = await world()
     const t = await takenTrial(w)
     expect(await commitSelection('everybody', t.deps(new Set([t.theirBeeSig])))).toEqual({
-      ok: false, error: 'nothing to commit: what you took at games/solomon still waits in the brood — accept it there first',
+      ok: false, error: 'nothing to commit: the code at games/solomon still waits in the brood — accept it there first',
     })
     // A held bundle holds it back as surely as a held module.
     w.turnOff('notes')

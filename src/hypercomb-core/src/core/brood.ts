@@ -31,6 +31,7 @@
 
 import { registerPoolMeaning } from './pool-registry.js'
 import { admitArrival, broodRules, type ArrivalKind, type BroodVouch } from './brood-rules.js'
+import type { CodeReach } from './code-reach.js'
 
 export const BROOD_MEANING = 'brood:unverified'
 
@@ -72,6 +73,19 @@ export type BroodRuling = {
   readonly warnings: readonly string[]
 }
 
+/** WHY SOMETHING HELD IT WITHOUT A HAND (the draft audit): the scan saw the
+ *  code newly reach something (code-reach.ts), or a reader recommended
+ *  refusing it. A flag can only HOLD — `mayRunBee` refuses a flagged record
+ *  whatever the rules say — and nothing removes one; only a ruling, the hand,
+ *  decides past it. */
+export type BroodFlag = {
+  readonly at: number
+  /** 'scan' for code-reach.ts, else the reader ('jev', a model id). */
+  readonly by: string
+  readonly reason: string
+  readonly reaches?: readonly CodeReach[]
+}
+
 export type BroodRecord = {
   readonly sig: string
   readonly kind: 'bee'
@@ -83,6 +97,9 @@ export type BroodRecord = {
    *  them. Counted only when their key is one this participant follows. */
   readonly vouches: readonly BroodVouch[]
   readonly ruling?: BroodRuling
+  /** Holds placed by a scan or a reader. Any one keeps it from running until
+   *  a ruling says otherwise. */
+  readonly flags?: readonly BroodFlag[]
 }
 
 const SIG = /^[0-9a-f]{64}$/
@@ -162,7 +179,33 @@ export const mayRunBee = async (sig: string): Promise<boolean> => {
   const record = await broodRecord(sig)
   if (!record) return true
   if (record.ruling) return record.ruling.verdict === 'accepted'
+  if (record.flags?.length) return false
   return admitArrival(record.source.kind ?? 'stranger', await broodRules(), record.vouches) === 'run'
+}
+
+/**
+ * HOLD IT FOR A REASON — the draft audit's door. Records the code when the
+ * brood has never seen it (your own draft: `own`, which the rules would run)
+ * and adds a flag, which holds it whatever the rules say. It can only
+ * restrict: a ruling already made stands (your hand outranks every scan and
+ * reader), and no flag is ever removed. Unlike the other writers it THROWS
+ * when the record cannot be written, because a caller about to let code run
+ * must know the hold did not land.
+ */
+export const flagInBrood = async (
+  sig: string,
+  flag: Omit<BroodFlag, 'at'> & { readonly at?: number },
+  source: BroodSource = { kind: 'own' },
+  name?: string,
+): Promise<BroodRecord> => {
+  if (!SIG.test(sig)) throw new Error('a flag names the code by its 64-character signature')
+  const record = (await broodRecord(sig)) ?? {
+    sig, kind: 'bee' as const, arrived: Date.now(), source, audits: [], vouches: [],
+    ...(name ? { name } : {}),
+  }
+  const next: BroodRecord = { ...record, flags: [...(record.flags ?? []), { ...flag, at: flag.at ?? Date.now() }] }
+  await write(next)
+  return next
 }
 
 /** Everything the brood is holding, newest arrival first. The pool and what
