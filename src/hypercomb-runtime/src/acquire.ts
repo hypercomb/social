@@ -208,7 +208,9 @@ const cappedBytes = async (url: string, maxBytes: number, timeoutMs: number): Pr
 
 export const packedFetch = async (
   root: string,
-  wanted: readonly string[],
+  /** What the install needs, or null before the layers are known (a cold
+   *  hive): then the size test is skipped and every verified member is kept. */
+  wanted: readonly string[] | null,
   held: ReadonlySet<string>,
   origins: readonly string[],
   loose: (sig: string) => Promise<Uint8Array<ArrayBuffer> | null>,
@@ -216,8 +218,8 @@ export const packedFetch = async (
   let served = 0
   const plain = { fetch: loose, served: () => served }
   try {
-    const missing = new Set(wanted.filter(sig => !held.has(sig)))
-    if (missing.size < PACK_MIN_MISSING || missing.size * 2 < wanted.length) return plain
+    const missing = wanted ? new Set(wanted.filter(sig => !held.has(sig))) : null
+    if (missing && (missing.size < PACK_MIN_MISSING || missing.size * 2 < wanted!.length)) return plain
     const pool = await registerPoolMeaning(TRANSFER_PACKS_MEANING)
     for (const base of origins) {
       const pointer = await cappedBytes(`${base}/${pool}/${root}`, POINTER_MAX_BYTES, POINTER_TIMEOUT_MS)
@@ -230,11 +232,11 @@ export const packedFetch = async (
       if (!members) continue
       // Only what this install is missing is kept, and only after it hashes.
       const verified = new Map<string, Uint8Array<ArrayBuffer>>()
-      await Promise.all(members.filter(([sig]) => missing.has(sig)).map(async ([sig, bytes]) => {
+      await Promise.all(members.filter(([sig]) => !missing || missing.has(sig)).map(async ([sig, bytes]) => {
         if ((await SignatureService.sign(bytes.buffer)) === sig) verified.set(sig, bytes)
       }))
-      console.log(`[acquire] transfer pack ${packSig.slice(0, 12)}: ${verified.size} of ${missing.size} missing files carried`)
-      if (verified.size * 2 < missing.size) continue
+      console.log(`[acquire] transfer pack ${packSig.slice(0, 12)}: ${verified.size} ${missing ? `of ${missing.size} missing files` : 'files'} carried`)
+      if (missing ? verified.size * 2 < missing.size : !verified.size) continue
       return {
         fetch: async sig => {
           const hit = verified.get(sig)
@@ -574,9 +576,18 @@ export const installPackage = async (
   const beesUrlBase = `/opfs/${await registerPoolMeaning(BEES_MEANING)}`
   const depsUrlBase = `/opfs/${await registerPoolMeaning(DEPENDENCIES_MEANING)}`
 
+  // A HIVE THAT HOLDS ALMOST NOTHING — a sandbox door's first visit — takes
+  // the layers from the transfer pack too (packedFetch), so the whole install
+  // is a handful of requests. Everyone else walks the layers loose and asks
+  // for a pack only once the inventory says most of it is missing.
+  const heldModules = new Set([...await heldIn(store.dependencies), ...await heldIn(store.bees)])
+  const early = heldModules.size < PACK_MIN_MISSING
+    ? await packedFetch(pkg.packageSig, null, heldModules, origins, fetchFrom)
+    : null
+
   const layersIo = {
     read: readFrom([store.hypercombRoot], sig => [sig, `${sig}.json`]),
-    fetch: fetchFrom,
+    fetch: early?.fetch ?? fetchFrom,
     write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/${sig}`, 'application/json; charset=utf-8'),
   } satisfies ReplicationIo
 
@@ -610,8 +621,7 @@ export const installPackage = async (
   reportDivergence(pkg.zone, pkg, inventory)
 
   // A package mostly missing here comes as one transfer pack (packedFetch).
-  const heldModules = new Set([...await heldIn(store.dependencies), ...await heldIn(store.bees)])
-  const modules = await packedFetch(pkg.packageSig, [...inventory.dependencies, ...inventory.bees], heldModules, origins, fetchFrom)
+  const modules = early ?? await packedFetch(pkg.packageSig, [...inventory.dependencies, ...inventory.bees], heldModules, origins, fetchFrom)
 
   const results = await Promise.all([
     resolveInventory(pkg.packageSig, inventory.dependencies, {

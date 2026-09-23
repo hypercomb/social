@@ -672,6 +672,33 @@ test('a try- door hands every other path to the participant shell', async () => 
   } finally { globalThis.fetch = original }
 })
 
+// THE TRANSFER PACK (hypercomb-runtime transfer-pack.ts): `module commit`
+// stamps `pack:try-<change>` beside the sandbox, and the door answers the
+// transfer:packs member for the root it serves — for that root only.
+const transferPacksPool = async () => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('transfer:packs'))))
+
+test('a try- door answers its root\'s transfer pack from the publisher\'s pack key', async () => {
+  const [root, pack] = ['b'.repeat(64), 'c'.repeat(64)]
+  const env = await sandboxEnv({ 'install:try-fresh-rooms': root, 'pack:try-fresh-rooms': pack })
+  const packs = await transferPacksPool()
+  const pointer = await worker.fetch(new Request(`https://try-fresh-rooms.hypercomb.com/content/${packs}/${root}`), env)
+  assert.equal(pointer.status, 200)
+  assert.equal(await pointer.text(), pack)
+  assert.equal(pointer.headers.get('cache-control'), 'no-store')
+  // Another root is not this door's package, so it has no pack here.
+  const other = await worker.fetch(new Request(`https://try-fresh-rooms.hypercomb.com/content/${packs}/${'d'.repeat(64)}`), env)
+  assert.equal(other.status, 404)
+})
+
+test('a try- door with no pack key says so, and the visitor installs file by file', async () => {
+  const root = 'b'.repeat(64)
+  const env = await sandboxEnv({ 'install:try-fresh-rooms': root })
+  const packs = await transferPacksPool()
+  const pointer = await worker.fetch(new Request(`https://try-fresh-rooms.hypercomb.com/content/${packs}/${root}`), env)
+  assert.equal(pointer.status, 404)
+  assert.equal(await pointer.text(), 'no pack\n')
+})
+
 test('a try- door names the published change and the host AI review beside the sandbox', async () => {
   const [root, change, review] = ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64)]
   const env = await sandboxEnv({ 'install:try-fresh-rooms': root, 'change:try-fresh-rooms': change, 'review:try-fresh-rooms': review })

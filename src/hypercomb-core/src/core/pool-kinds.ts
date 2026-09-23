@@ -129,7 +129,10 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['computed:genome', 'index'],
   ['manifests', 'index'],
   // A package's transfer pack, keyed by its root (pool-registry.ts). Wipe-safe:
-  // a missing pack costs a slower install, never a wrong one.
+  // a missing pack costs a slower install, never a wrong one. Unlike its
+  // siblings it is SERVED by hosts — a build ships its members, and a sandbox
+  // door answers one from the publisher's signed `pack:<sandbox>` key — but it
+  // is never OFFERED as a published pool (published-pools.ts refuses `index`).
   ['transfer:packs', 'index'],
   ['molecule:index', 'index'],
   ['search:index', 'index'],

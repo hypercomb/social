@@ -155,6 +155,29 @@ const jevRead = async (host: string, changeSig: string, record: ModuleChangeReco
 }
 
 /** Ask the host's AI, publish its reading, and say the verdict. */
+/** THE TRANSFER PACK beside a sandbox (hypercomb-runtime transfer-pack.ts):
+ *  every file of the package in one content-addressed file, minted in memory
+ *  and never written into the hive, sent like any other file and named in
+ *  this hive's signed index as `pack:<sandbox>`. The door answers it to a
+ *  cold visitor, who installs in a handful of requests instead of hundreds.
+ *  A HINT: a pack that cannot be minted, sent or stamped costs a warning,
+ *  never the commit or the install stamp. */
+const publishPack = async (host: string, name: string, files: readonly string[], drafts: ModuleDraftsProvider, sync: HostSyncLike, t: Say, toast: Toast): Promise<void> => {
+  const noPack = (reason: string): void =>
+    toast(t('module.nopack', 'No transfer pack for {name}: {reason}. Its door installs file by file.', { name, reason }), 'warning')
+  try {
+    if (!drafts.pack || !sync.publishAtoms) return
+    const pack = await drafts.pack(files)
+    if (!pack) { noPack('a file of the package is not held here'); return }
+    const sent = await sync.publishAtoms(host, [pack.sig], async sig => (sig === pack.sig ? pack.bytes : null))
+    if (!sent.ok) { noPack(sent.error); return }
+    const stamped = await setHiveRoot(host, `pack:${name}`, pack.sig)
+    if (!stamped.ok) noPack(stamped.reason ?? 'the index refused it')
+  } catch (error) {
+    noPack(error instanceof Error ? error.message : 'it could not be sent')
+  }
+}
+
 const review = async (host: string, changeSig: string, record: ModuleChangeRecord, deps: ReviewDeps, t: Say, toast: Toast): Promise<void> => {
   toast(t('module.reviewing', "Asking {host}'s AI to review {name}…", { host, name: record.sandbox }))
   const read = await reviewChange(host, changeSig, record, deps)
@@ -458,6 +481,10 @@ export class ModuleQueenBee extends QueenBee {
       const door = sandboxDoorUrl(name, host)
       toast(t('module.sandboxed', 'Sandbox {name} is open at {door}. Promote it when you are happy with it.', { name, door }), 'success')
       EffectBus.emit('module:sandboxed', { name, door, root: committed.rootSig, host })
+
+      // The transfer pack, awaited before the stamps below: the index is
+      // rewritten whole on every stamp, so two writers at once would lose one.
+      await publishPack(host, name, committed.files, drafts, sync, t, toast)
 
       // THE CHANGE, PUBLIC, AND THE HOST'S READING OF IT. Never a gate: a
       // failure here leaves the sandbox open and says why.

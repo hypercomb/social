@@ -599,9 +599,44 @@ network emulation (523 files to fetch, 499 of them from the pack):
 On localhost the install is hashing and OPFS writes, so a pack changes
 nothing there; over a real network it halves the install or better. The dev
 server is HTTP/1.1, so a real HTTP/2 host narrows the loose column somewhat;
-the 3.7× smaller transfer does not change. Not yet: packs for commits made
-in the hive (`module commit` publishes loose atoms), and a pack for a slice
+the 3.7× smaller transfer does not change. Not yet: a pack for a slice
 smaller than a whole package.
+
+**The reader can never lose an install to a pack (562be4e46).** The first
+reader could: a throw inside it rejected the install, a pointer to a huge
+file or a gzip that inflates without end could take the tab, and the first
+pack that decoded was used even when it carried nothing needed. It is now
+wrapped whole (any failure → loose), downloads are capped in time and size,
+the unzip stops at 256 MB, and a pack covering less than half of what is
+missing is passed over for the next origin's.
+
+**Packs from `module commit` — BUILT 2026-09-23** (jwize: the door answers
+it, every commit, minted in memory). Only a sandbox door
+(`try-<change>.<zone>`) installs a committed package cold, and no host takes
+a pool member from a browser, so:
+- *Minting* (`module-drafts.ts` `packFiles`, core's optional
+  `ModuleDraftsProvider.pack`): every file of the committed package, read
+  and hashed, packed in memory — never written into the hive. Complete or
+  absent: one missing or mis-hashed file means no pack.
+- *Publishing* (`module.queen.ts` `publishPack`): after the install stamp,
+  the pack goes up through `publishAtoms` like any file, then
+  `pack:try-<change>` is stamped in the publisher's signed index — awaited
+  before the change, review and Jev stamps, because each stamp rewrites the
+  index whole. Any failure warns (`module.nopack`) and never touches the
+  commit or the install stamp.
+- *Serving* (blossom worker `serveSandbox`): the door reads `pack:<lineage>`
+  beside `install:`, `change:`, `review:` and `jev:`, and answers
+  `/content/<sign('transfer:packs')>/<root>` for the root it serves and no
+  other. Only the publisher's key moves it. Needs the worker deployed.
+- *Reading* (`installPackage`): a hive holding fewer than 32 modules — a
+  door's first visit — asks for the pack BEFORE the layer walk, so the
+  layers come from it too.
+
+Proven end to end on this machine (`verify-hive-publish.cjs` 60/60, then a
+fresh browser at the follower's door): the door answered the pointer, the
+install logged "transfer pack … 905 files carried", and installed the door's
+package in 6.5 s with 7 content requests instead of about 909 — which is
+what matters most on the Workers free plan's daily request cap.
 
 ## Non-goals
 - No new pool, no new `__x__` folder. Atoms live in `sign('dependencies')`

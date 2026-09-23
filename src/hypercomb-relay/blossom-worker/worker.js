@@ -609,9 +609,14 @@ async function serveFrontDoor(request, env) {
 //   /content/<sign('host:packages')>/          the pool, one member
 //   /content/<sign('host:packages')>/00000000  `<root>\n<label>`
 //   /content/<sig>                             the package's files, from the heap
+//   /content/<sign('transfer:packs')>/<root>   the package's transfer pack, if named
 //   /site.json                                 who published it, and what
 const SANDBOX_LABEL_RE = /^try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?$/
 const HOST_PACKAGES_MEANING = 'host:packages'
+// One member per package, named by its root and holding its transfer pack's
+// signature (hypercomb-runtime transfer-pack.ts). The door answers it from the
+// publisher's `pack:try-<change>`, so only the publisher's key can move it.
+const TRANSFER_PACKS_MEANING = 'transfer:packs'
 
 /** The approved publisher whose signed index names this sandbox, and its root. */
 async function sandboxRoot(env, site, selected, read = indexReader(env)) {
@@ -624,7 +629,7 @@ async function sandboxRoot(env, site, selected, read = indexReader(env)) {
     // Beside the sandbox, the change as a reader needs it and the host AI's
     // reading of it (essentials module-review.ts) — public, by signature.
     const beside = (key) => { const sig = String(index?.roots?.[key] || '').toLowerCase(); return SIG_RE.test(sig) ? sig : null }
-    return { root, pubkey: publisher.pubkey, label: publisher.label || '', publishedAt: index.createdAt, change: beside(`change:${site.lineage}`), review: beside(`review:${site.lineage}`), jev: beside(`jev:${site.lineage}`) }
+    return { root, pubkey: publisher.pubkey, label: publisher.label || '', publishedAt: index.createdAt, change: beside(`change:${site.lineage}`), review: beside(`review:${site.lineage}`), jev: beside(`jev:${site.lineage}`), pack: beside(`pack:${site.lineage}`) }
   }
   return null
 }
@@ -639,6 +644,12 @@ async function serveSandbox(request, env, site, zone) {
   if (url.pathname === `/content/${pool}/`) return new Response(body('00000000\n'), { status: 200, headers: plain })
   if (url.pathname === `/content/${pool}/00000000`) return new Response(body(`${found.root}\n${site.lineage}`), { status: 200, headers: plain })
   if (url.pathname.startsWith(`/content/${pool}/`)) return new Response(body('not a member\n'), { status: 404, headers: plain })
+  // THE TRANSFER PACK: a cold visitor asks for it by the root it is installing,
+  // so it is answered for the root this door serves and for no other name. A
+  // hint — a door with none says so, and the visitor installs file by file.
+  const packs = await poolAddress(TRANSFER_PACKS_MEANING)
+  if (url.pathname === `/content/${packs}/${found.root}` && found.pack) return new Response(body(found.pack), { status: 200, headers: plain })
+  if (url.pathname.startsWith(`/content/${packs}/`)) return new Response(body('no pack\n'), { status: 404, headers: plain })
   if (url.pathname === '/site.json') {
     return json(200, {
       sandbox: true, title: site.lineage, channel: `install:${site.lineage}`, package: found.root,

@@ -35,6 +35,7 @@ import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } fro
 import { composeDependencies, isOff, namespaceOf, ownerOf, readPicks, sigsOf, walkTree, within, type Picks, type TreeWalk } from './package-tree.js'
 import { readOffUnits, writeOffUnits } from './package-units.js'
 import type { ReplicationIo } from './replication-walker.js'
+import { encodeTransferPack, gzipBytes } from './transfer-pack.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 const STORE_KEY = '@hypercomb.social/Store'
@@ -567,6 +568,33 @@ const bytesOf = async (sig: string, deps: ModuleDraftDeps = liveDeps()): Promise
   return (await store?.getBeeBytes?.(sig).catch(() => null)) ?? (await store?.getDependencyBytes?.(sig).catch(() => null)) ?? null
 }
 
+/** A TRANSFER PACK of these files (transfer-pack.ts), minted in memory for a
+ *  publish and never written into the hive. Complete or absent: null when
+ *  any file is not held here or does not hash to its name, so a door never
+ *  serves a pack that silently lacks part of the package. */
+const PACK_READ_BATCH = 32
+
+export const packFiles = async (
+  files: readonly string[],
+  deps: ModuleDraftDeps = liveDeps(),
+): Promise<{ sig: string; bytes: Uint8Array } | null> => {
+  try {
+    const members: Array<[string, Uint8Array]> = []
+    for (let at = 0; at < files.length; at += PACK_READ_BATCH) {
+      const read = await Promise.all(files.slice(at, at + PACK_READ_BATCH).map(async sig => [sig, await bytesOf(sig, deps)] as const))
+      for (const [sig, bytes] of read) {
+        if (!bytes || (await SignatureService.sign(bytes.slice().buffer as ArrayBuffer)) !== sig) return null
+        members.push([sig, bytes])
+      }
+    }
+    if (!members.length) return null
+    const bytes = await gzipBytes(encodeTransferPack(members))
+    return { sig: await SignatureService.sign(bytes.buffer), bytes }
+  } catch {
+    return null
+  }
+}
+
 // THE PORT. Registered under the key core declares, so a queen that imports
 // core and nothing else can list, drop and commit drafts.
 const provider: ModuleDraftsProvider = {
@@ -582,6 +610,7 @@ const provider: ModuleDraftsProvider = {
     const outcome = await draftModule({ beeSig: sig, section, body })
     return outcome.ok ? { ok: true, sig: outcome.beeSig, of: outcome.of, path: outcome.path } : { ok: false, error: outcome.error }
   },
+  pack: files => packFiles(files),
 }
 try {
   ;(globalThis as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(MODULE_DRAFTS_IOC_KEY, provider)

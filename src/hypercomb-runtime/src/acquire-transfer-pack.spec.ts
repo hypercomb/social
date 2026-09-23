@@ -82,6 +82,15 @@ describe('packedFetch', () => {
     }
   })
 
+  it('keeps every verified member for a cold hive, before the layers are known', async () => {
+    const w = await world()
+    vi.stubGlobal('fetch', serve({ [`/${ROOT}`]: text(w.packSig), [`/${w.packSig}`]: w.pack }))
+    const packed = await packedFetch(ROOT, null, new Set(), [BASE], loose)
+    for (const [sig] of w.modules) expect(await packed.fetch(sig)).not.toBeNull()
+    expect(packed.served()).toBe(w.modules.length)
+    expect(loose).not.toHaveBeenCalled()
+  })
+
   it('passes over a pack for some other tree and takes the next origin\'s', async () => {
     const other = await world(40)
     const mine = await world(41)

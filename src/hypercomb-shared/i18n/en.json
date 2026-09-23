@@ -510,6 +510,7 @@
   "module.clashes": "changes a file {names} also changes — only one can be folded, or a merge drafted",
   "module.unpublished": "Committed here, but not published: {reason}. The install channel was not moved.",
   "module.published": "Published {sent} new files to {host} ({held} were already there).",
+  "module.nopack": "No transfer pack for {name}: {reason}. Its door installs file by file.",
   "slash.doctrine": "See, step back, drop or reseed the rules every model is sent",
   "doctrine.unavailable": "The doctrine is not available here.",
   "doctrine.changed": "{what} The doctrine has {count} sections; it applies from the next message.",

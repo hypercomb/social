@@ -196,4 +196,11 @@ export interface ModuleDraftsProvider {
    *  the running code changes on reload. */
   draft?(request: { readonly sig: string; readonly section: string; readonly body: string }):
     Promise<{ readonly ok: true; readonly sig: string; readonly of: 'bee' | 'dependency'; readonly path: string } | { readonly ok: false; readonly error: string }>
+  /** A TRANSFER PACK of these files (hypercomb-runtime transfer-pack.ts): one
+   *  content-addressed file carrying every one of them, minted in memory and
+   *  never written into the hive — a publish artifact, so a sandbox door can
+   *  install the package in a handful of requests. Complete or absent: null
+   *  when any file is not held here or does not hash to its name. Optional,
+   *  so a caller asks for it only where the runtime has it. */
+  pack?(files: readonly string[]): Promise<{ readonly sig: string; readonly bytes: Uint8Array } | null>
 }
