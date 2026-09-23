@@ -20,7 +20,7 @@
      applying a second shell-level visibility gate here can race its replay and
      hide a correctly kept rail while leaving the rail's gutter reserved. -->
 <hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()"></hc-controls-bar>
-<div class="update-status-dock">
+<div class="update-status-dock" data-hc-bottom-band>
   <hc-upgrade-indicator></hc-upgrade-indicator>
   <hc-sync-indicator></hc-sync-indicator>
 </div>

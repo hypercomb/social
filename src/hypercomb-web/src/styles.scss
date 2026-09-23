@@ -112,3 +112,15 @@ body.hc-view-website {
 @include suppress-canvas-under('.hc-view-website'); // website render mode
 @include suppress-canvas-under('.hc-view-covered'); // every full-surface view (isTransientMode)
 @include suppress-canvas-under('.viewer-open');     // youtube fullscreen viewer
+
+// ── an installed package from before 2026-09-11 ──────────────
+// Its empty-hive prompt stands at a flat `bottom: 28px` and reads no
+// reservation, so it lands on the update notice (and, on a phone, inside the
+// controls strip). This shell outlives the packages it runs, so it stands that
+// prompt where every newer one stands itself: on the bar's reservation, which
+// includes the update notice (the bar folds `[data-hc-bottom-band]` into it).
+// Keyed on the flat inline style, so a newer prompt keeps its own placement.
+#hc-collection-empty-prompt[style*='bottom: 28px'],
+#hc-collection-empty-prompt[style*='bottom:28px'] {
+  bottom: calc(max(var(--hc-controls-bottom, 0px), env(safe-area-inset-bottom, 0px)) + 16px) !important;
+}

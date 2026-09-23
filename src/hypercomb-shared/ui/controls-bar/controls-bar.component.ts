@@ -1047,6 +1047,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** The `.pill-stage` the observer is currently attached to, so a re-created
    *  element is re-observed instead of measured while detached. */
   #observedStage: HTMLElement | null = null
+  /** Shell surfaces standing directly on the bar (`data-hc-bottom-band`) — the
+   *  web shell's update notice. Observed so one appearing, growing or emptying
+   *  re-measures the band. */
+  #bandObserver: ResizeObserver | null = null
+  #observedBand: readonly HTMLElement[] = []
   // Pill stays anchored to the bottom of the viewport. We track the
   // distance from the top of the pill to the bottom of the viewport
   // (`fromBottom`) and recompute y on every window resize so the pill
@@ -1805,6 +1810,23 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  free-floating pill can be dragged anywhere, so reserving an edge for it
    *  would strand a permanent gap. Mobile's portrait strip owns no SIDE — it
    *  owns the bottom, and its landscape rail owns the left. */
+  /** The bottom-band members, re-resolved each measure (Angular re-renders)
+   *  and observed whenever the set changes. */
+  #bottomBand(): readonly HTMLElement[] {
+    const members = [...document.querySelectorAll<HTMLElement>('[data-hc-bottom-band]')]
+    const same = members.length === this.#observedBand.length && members.every((m, i) => m === this.#observedBand[i])
+    if (!same) {
+      this.#bandObserver?.disconnect()
+      this.#bandObserver = null
+      this.#observedBand = members
+      if (members.length && typeof ResizeObserver !== 'undefined') {
+        this.#bandObserver = new ResizeObserver(this.#measureControlsEdge)
+        for (const member of members) this.#bandObserver.observe(member)
+      }
+    }
+    return members
+  }
+
   readonly #measureControlsEdge = (): void => {
     // Re-resolve the stage EVERY time rather than trusting a cached reference.
     // Angular re-creates `.pill-stage` (dock/mobile class swaps, re-render), and
@@ -1884,6 +1906,25 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     }
     const root = document.documentElement
+    // WHAT STANDS DIRECTLY ON THE BAR stands on its real top edge — including
+    // the undocked desktop pill, which floats at the bottom centre but has
+    // never been part of `--hc-controls-bottom`.
+    let barBottom = bottom
+    if (stage && !side && !this.isMobile() && stage.offsetHeight > 0) {
+      barBottom = Math.max(0, window.innerHeight - stage.offsetTop)
+    }
+    root.style.setProperty('--hc-controls-bar-bottom', `${Math.round(barBottom)}px`)
+    // THE BOTTOM BAND. A surface standing on the bar is part of the bar while
+    // it shows, so everything that stands on the bar stands on it instead.
+    // Folded into the ONE published reservation, a package that reads
+    // `--hc-controls-bottom` — an old one included — clears it without knowing
+    // it exists. Without this the update notice sat under a package's
+    // empty-hive prompt (z 100000) and could never be seen or pressed
+    // (2026-09-22). Measured after `--hc-controls-bar-bottom` lands, which is
+    // what a member positions itself from.
+    for (const member of this.#bottomBand()) {
+      if (member.offsetHeight > 0) bottom = Math.max(bottom, window.innerHeight - member.getBoundingClientRect().top)
+    }
     root.style.setProperty('--hc-controls-left', `${Math.round(left)}px`)
     root.style.setProperty('--hc-controls-right', `${Math.round(right)}px`)
     root.style.setProperty('--hc-controls-bottom', `${Math.round(bottom)}px`)
@@ -2099,6 +2140,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#landscapeQuery?.removeEventListener('change', this.#landscapeHandler)
     this.#headerObserver?.disconnect()
     this.#controlsObserver?.disconnect()
+    this.#bandObserver?.disconnect()
     this.#tagFloatObserver?.disconnect()
     document.documentElement.style.removeProperty('--hc-tag-float-top')
     window.removeEventListener('resize', this.#measureControlsEdge)
@@ -2108,6 +2150,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     document.documentElement.style.setProperty('--hc-controls-left', '0px')
     document.documentElement.style.setProperty('--hc-controls-right', '0px')
     document.documentElement.style.setProperty('--hc-controls-bottom', '0px')
+    document.documentElement.style.removeProperty('--hc-controls-bar-bottom')
     document.documentElement.style.removeProperty('--hc-controls-left-top')
     document.documentElement.style.removeProperty('--hc-keyboard-inset')
     this.#edgeLine?.remove()

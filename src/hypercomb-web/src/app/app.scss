@@ -4,7 +4,15 @@
 .update-status-dock {
   position: fixed;
   left: 50%;
-  bottom: calc(2.8rem + var(--hc-safe-bottom, 0px));
+  // STANDS ON THE BAR, AND EVERYTHING ELSE STANDS ON IT. The dock sits on the
+  // controls bar's own top edge (`--hc-controls-bar-bottom`: the phone strip,
+  // the undocked pill; 0 while the bar is a side rail), and as a bottom-band
+  // member (`data-hc-bottom-band` in app.html) the bar folds its height into
+  // `--hc-controls-bottom` — so the empty-hive prompt, toasts and sheets, all
+  // of which stand on that, stand above the notice instead of over it. A flat
+  // 2.8rem put the pill under a package's empty-hive prompt (z 100000) on the
+  // desktop and across the phone strip (2026-09-22).
+  bottom: calc(max(var(--hc-controls-bar-bottom, 0px), var(--hc-safe-bottom, 0px)) + 0.6rem);
   z-index: 60010;
   display: flex;
   align-items: center;
