@@ -497,6 +497,7 @@ The five `fix-incomplete` verdicts of the adjudication were read again
 
 No `fix-incomplete` verdict remains, and no check-7 site is open. What is
 left of the `deviation → confirmed` list is owner decisions (the five
-browser-storage side records; the eagerly opened bare-word pools) and dead
-code or drift (the layer-graph resolver, the unused layout-mode persister, the
-native-filesystem docstring).
+browser-storage side records; the eagerly opened bare-word pools) and one
+drift (the native-filesystem docstring). The dead code is gone: the
+layer-graph resolver file no longer exists, and the unused layout-mode
+persister was deleted on 2026-09-23.

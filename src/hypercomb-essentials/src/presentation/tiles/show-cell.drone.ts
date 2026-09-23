@@ -8125,22 +8125,12 @@ export class ShowCellDrone extends Drone {
     }
   }
 
-  #layoutModeKey(locationKey: string): string {
-    return `hc:layout-mode:${locationKey}`
-  }
-
   #readLayoutMode(_locationKey: string): 'dense' | 'pinned' {
     // Pinned is the canonical default: each cell keeps its slot index
     // permanently (stored in its 0000 properties). The spiral/contiguous
     // fill runs only once — to assign an index to a brand-new cell that
     // has none yet. Removal leaves a gap, never shifts neighbours.
     return 'pinned'
-  }
-
-  #persistLayoutMode(mode: 'dense' | 'pinned'): void {
-    const lineage = this.resolve<any>('lineage')
-    const locationKey = String(lineage?.explorerLabel?.() ?? '/')
-    localStorage.setItem(this.#layoutModeKey(locationKey), mode)
   }
 
   // `navPass`: true when this pass is a layer CHANGE (navigation). During a

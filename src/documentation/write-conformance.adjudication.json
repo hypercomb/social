@@ -1011,7 +1011,12 @@
    "verdict": "confirmed",
    "check": 3,
    "reason": "Still present and still dead: `#persistLayoutMode` (show-cell.drone.ts ~8048) does `localStorage.setItem(this.#layoutModeKey(String(lineage?.explorerLabel?.() ?? '/')), mode)` — a raw human path as a storage-key segment — and `#readLayoutMode(_locationKey)` ignores its argument and returns 'pinned'. A grep of the file finds the definition at 8048 and no caller anywhere, so the blast radius is none; write-conformance.md lists it under 'None' with *Fix: delete*, not done. Classification stands, ranking (none) stands.",
-   "area": "features"
+   "area": "features",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "#persistLayoutMode and #layoutModeKey deleted (never called); #readLayoutMode stays and answers pinned, the canonical default."
+   }
   },
   {
    "file": "hypercomb-essentials/src/editor/viewport-store.ts",
@@ -1261,7 +1266,12 @@
    "verdict": "confirmed",
    "check": 1,
    "reason": "File still present: `resolve` fetches `${location}/${signature}` (fetchLayerJson, line 98-104), never hashes the text, and `writeCachedLayerJson` (line 78-90) writes it to `hypercombRoot/<signature>` with `create: true`. Still dead: nothing outside `.claude/worktrees` imports it, `hypercomb-shared/index.ts` does not export it, it calls a bare `get(...)` it never imports, and `import { Store } from './store'` resolves to the migration stub. write-conformance.md lists it under 'None' with fix 'delete the file' and no FIXED mark; radius none, deviation stands.",
-   "area": "store"
+   "area": "store",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "hypercomb-shared/core/layer-graph-resolver.service.ts no longer exists; only a historical comment in core/signature-predicate.ts names it."
+   }
   },
   {
    "file": "hypercomb-runtime/src/store.ts",
@@ -1379,7 +1389,12 @@
    "verdict": "confirmed",
    "check": 1,
    "reason": "`resolve()` fetches `${location}/${signature}` via fetchLayerJson, gets back `res.text()` with no hash and no content-type check, and on a cache miss hands it to writeCachedLayerJson which does `layersDir.getFileHandle(signature, { create: true })` on `store.hypercombRoot` — the name is the sig it asked for, not sha256 of the bytes. The class is still dead: a tree-wide grep finds no importer outside worktrees (only a comment in hypercomb-core/src/core/signature-predicate.ts:11 names it) and write-conformance.md leaves it under 'None' with 'Fix: delete the file' — not yet done.",
-   "area": "shell"
+   "area": "shell",
+   "revisited": {
+    "on": "2026-09-23",
+    "verdict": "fixed-since",
+    "reason": "hypercomb-shared/core/layer-graph-resolver.service.ts no longer exists; only a historical comment in core/signature-predicate.ts names it."
+   }
   },
   {
    "file": "hypercomb-shared/core/name-registry.ts",
