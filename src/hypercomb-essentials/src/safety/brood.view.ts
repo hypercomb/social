@@ -23,6 +23,11 @@
 // ShellSurfaceRegistry over IoC — never a tag in either app.html, never an
 // Angular class in the shared barrel. The tool-window recipe is restated in
 // plain CSS with the shared values.
+//
+// A DEPENDENCY: it exports the element and never registers it. The safety
+// domain's bee (brood.drone.ts) defines it and adds the surface — a view that
+// wired itself became a lazy atom nothing imported, and the brood stopped
+// opening (atomic-modules-plan.md, rule 1).
 
 import { broodRoster, broodRules, EffectBus, type BroodRecord, type BroodRules } from '@hypercomb/core'
 import { acceptByHand, auditLine, broodLabel, refuseByHand } from './brood-accept.js'
@@ -316,16 +321,4 @@ function ensureStyles(): void {
   document.head.appendChild(style)
 }
 
-// Contribute the surface the doctrine way: define the element, then add it to
-// the registry — never a tag in either app.html.
-;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void }) => void) => void } })
-  .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
-    if (!customElements.get(SURFACE)) customElements.define(SURFACE, BroodElement)
-    try {
-      registry.add({ name: SURFACE, owner: OWNER, element: SURFACE, order: 150 })
-    } catch {
-      // duplicate add (hot reload) — the mounted surface is already live
-    }
-  })
-
-export { BroodElement, SURFACE as BROOD_SURFACE, OPEN as BROOD_OPEN_EFFECT }
+export { BroodElement, SURFACE as BROOD_SURFACE, OWNER as BROOD_OWNER, OPEN as BROOD_OPEN_EFFECT }
