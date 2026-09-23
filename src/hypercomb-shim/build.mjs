@@ -26,13 +26,14 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const dist = resolve(here, 'dist')
+const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(here, 'dist'))
 const staticRoot = resolve(here, 'public')
 const essentialsDist = resolve(here, '..', 'hypercomb-essentials', 'dist')
 const sharedPublic = resolve(here, '..', 'shared-public')
 
-const withContent = !process.argv.includes('--no-content')
-const withAssets = process.argv.includes('--assets')
+const pure = process.argv.includes('--pure')
+const withContent = !pure && !process.argv.includes('--no-content')
+const withAssets = !pure && process.argv.includes('--assets')
 const minify = process.argv.includes('--minify')
 
 const SIG_NAME = /^[0-9a-f]{64}$/i
@@ -59,11 +60,34 @@ await mkdir(dist, { recursive: true })
 // ── the static root ──────────────────────────────────────────────────────────
 // index.html, the service worker (the signature resolver — the FETCHER), the
 // two module-map stubs, host config, icons, and the generated core/ + vendor/.
-if (!(await exists(resolve(staticRoot, 'vendor', 'pixi.runtime.js')))) {
+if (!pure && !(await exists(resolve(staticRoot, 'vendor', 'pixi.runtime.js')))) {
   throw new Error('[shim] public/vendor is missing — run `npm run build:vendor` first')
 }
 await cp(staticRoot, dist, { recursive: true })
 await cp(resolve(here, 'index.html'), resolve(dist, 'index.html'))
+if (pure) {
+  // A cold harness has no renderer. A package that needs Pixi may provide it;
+  // the installable seed must not carry one particular rendering library.
+  await rm(resolve(dist, 'vendor'), { recursive: true, force: true })
+  await rm(resolve(dist, 'pixi.js'), { force: true })
+  // Build the browser ABI directly from source. A clean checkout has no
+  // generated public/core/dist, and a pure build must not require the Pixi
+  // vendor step just to obtain core. The published ABI is ESM only.
+  const coreOut = resolve(dist, 'core', 'dist')
+  await mkdir(coreOut, { recursive: true })
+  for (const name of await readdir(coreOut)) {
+    await rm(resolve(coreOut, name), { force: true })
+  }
+  await build({
+    entryPoints: [resolve(here, '..', 'hypercomb-core', 'src', 'index.ts')],
+    outfile: resolve(coreOut, 'index.js'),
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: ['es2022'],
+    logLevel: 'warning',
+  })
+}
 
 // ── the content heap ─────────────────────────────────────────────────────────
 // Flat and sig-named: `<origin>/content/<sig>`. Straight from the module build
@@ -118,14 +142,16 @@ const localeDir = resolve(here, '..', 'hypercomb-shared', 'i18n')
 const localeIndex = {}
 let localeBytes = 0
 try {
-  for (const entry of await readdir(localeDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.json')) continue
-    const locale = entry.name.slice(0, -'.json'.length)
-    const bytes = await readFile(resolve(localeDir, entry.name))
-    const sig = createHash('sha256').update(bytes).digest('hex')
-    await writeFile(resolve(dist, sig), bytes)
-    localeIndex[locale] = sig
-    localeBytes += bytes.length
+  if (!pure) {
+    for (const entry of await readdir(localeDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue
+      const locale = entry.name.slice(0, -'.json'.length)
+      const bytes = await readFile(resolve(localeDir, entry.name))
+      const sig = createHash('sha256').update(bytes).digest('hex')
+      await writeFile(resolve(dist, sig), bytes)
+      localeIndex[locale] = sig
+      localeBytes += bytes.length
+    }
   }
 } catch {
   console.warn('[shim] no locale catalogs found — the host will publish none')
@@ -245,11 +271,11 @@ const result = await build({
   target: ['es2022'],
   // tsconfig paths (@hypercomb/*) resolve through here.
   tsconfig: resolve(here, 'tsconfig.json'),
-  sourcemap: true,
+  sourcemap: !pure,
   minify,
   logLevel: 'info',
   metafile: true,
-  define: { __HC_BARREL_ENTRIES__: String(barrelEntries) },
+  define: { __HC_BARREL_ENTRIES__: String(barrelEntries), __HC_PURE__: String(pure) },
   // Bees and their dependencies are fetched at runtime by signature, never
   // bundled. Anything that resolves to an /opfs or bare module specifier is
   // the runtime graph's problem, not the shim's.
@@ -271,6 +297,7 @@ if (angular.length) {
 } else {
   console.log('[shim] ✓ framework-free — no @angular in the bundle')
 }
+if (pure && angular.length) throw new Error('[shim] pure install includes Angular')
 const localesInBundle = inputs.filter(p => LOCALE_JSON.test(p))
 if (localesInBundle.length) {
   // 2.9 MB of catalogs in the entry bundle is the difference between a 180 kB
@@ -294,6 +321,9 @@ if (web.length) {
   for (const w of web.slice(0, 10)) console.log(`         ${w}`)
 } else {
   console.log('[shim] ✓ standalone — no hypercomb-web in the bundle')
+}
+if (pure && (shared.length || web.length)) {
+  throw new Error('[shim] pure install reached application source')
 }
 console.log(
   `[shim] origin ${mib(await dirBytes(dist))} total` +

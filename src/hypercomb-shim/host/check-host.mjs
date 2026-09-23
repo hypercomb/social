@@ -193,8 +193,8 @@ if (!contentOnly) {
     let index = {}
     try { index = await res.json() } catch { /* not JSON */ }
     const locales = Object.entries(index).filter(([, sig]) => SIG_RE.test(String(sig)))
-    record(locales.length > 0, 'publishes locales as content', `${locales.length} locale(s)`,
-      '/locales.json maps locale -> 64-hex signature')
+    record(locales.length > 0 ? true : null, 'publishes locales as content', `${locales.length} locale(s)`,
+      'optional for a cold harness; listed catalogs must map locale -> 64-hex signature')
     const [locale, sig] = locales[0] ?? []
     if (sig) {
       const bytes = await get(`/${sig}`).then(r => r.error || !r.ok ? null : r.arrayBuffer())

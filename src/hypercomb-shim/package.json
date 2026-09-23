@@ -17,6 +17,8 @@
   },
   "scripts": {
     "build": "node build.mjs",
+    "build:pure": "node build.mjs --pure",
+    "prepack": "node host/check-pure.mjs",
     "build:vendor": "node scripts/build-vendor.mjs",
     "start": "node host/serve.mjs dist 4270",
     "typecheck": "npx tsc -p tsconfig.json --noEmit",
@@ -24,11 +26,9 @@
     "host:deploy": "node host/deploy-cloudflare.mjs",
     "host:deploy:azure": "node host/deploy-azure.mjs"
   },
-  "dependencies": {
-    "@hypercomb/core": "file:../hypercomb-core",
-    "@hypercomb/runtime": "file:../hypercomb-runtime"
-  },
   "devDependencies": {
+    "@hypercomb/core": "file:../hypercomb-core",
+    "@hypercomb/runtime": "file:../hypercomb-runtime",
     "esbuild": "^0.27.0",
     "pixi.js": "^8.16.0",
     "typescript": "~5.9.3"

@@ -10,6 +10,8 @@
 
 import { Store } from '@hypercomb/runtime/store'
 
+declare const __HC_PURE__: boolean
+
 export type ResolvedImports = Record<string, string>
 
 /**
@@ -83,7 +85,9 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
   const aliasSource = new Map<string, string>()
   imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
-  imports['pixi.js'] = '/vendor/pixi.runtime.js'
+  if (typeof __HC_PURE__ !== 'boolean' || !__HC_PURE__) {
+    imports['pixi.js'] = '/vendor/pixi.runtime.js'
+  }
 
   const store = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
     '@hypercomb.social/Store',

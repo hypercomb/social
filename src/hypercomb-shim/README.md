@@ -15,9 +15,21 @@ because that is what it is: Phase 5 of
 [everything-is-a-beehavior](../documentation/everything-is-a-beehavior.md),
 stood up first so the lean shell could be grown into rather than arrived at.
 
-There is no `build` command in the published package. Building needs the
-monorepo — essentials' module output, the shared locale catalogs — and a host is
-not supposed to compile anything. It serves bytes that were signed elsewhere.
+The published package serves a prebuilt origin. Its build scripts are for the
+source checkout; an installed host does not need the monorepo or npm runtime
+dependencies. It serves bytes that were signed elsewhere.
+
+## Pure install
+
+`npm run build:pure` (or `npm run build:shim:pure` from `src/`) builds the cold harness: core, the signature fetcher,
+the runner and the pinned acquisition beehavior. It carries no application
+package, locale catalogs, or Pixi renderer. An empty `/content` and no
+`host:packages` pool are valid until a participant adopts a package.
+
+The package's `prepack` check refuses a build that includes application content
+or a renderer. A release therefore builds pure first, then packs the host.
+The existing `npm run build` remains the content-bearing host build for
+development and deployments that intentionally publish a package.
 
 ## What it is
 
