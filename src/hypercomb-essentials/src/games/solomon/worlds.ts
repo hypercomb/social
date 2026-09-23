@@ -64,7 +64,7 @@ export const GREENWOOD: WorldDefinition = {
       lines: [
         'West of Still Pond the trees stand so close they make a room. That is the old hollow.',
         'Up on the Mossback there is a cache the climbers left. Mind the rock — the hills take you, the crags do not.',
-        'The roots under the Mossback and the burrow by the western trees: something is dug in behind both, but nobody has made what is there yet.',
+        'Under the Mossback’s roots a cave runs east a long way. The burrow by the western trees goes straight down. Mind the gaps: some have no bottom.',
       ],
     },
   ] satisfies WorldResident[],
@@ -81,8 +81,8 @@ export const GREENWOOD: WorldDefinition = {
     { kind: 'sign', id: 'pond-sign', name: 'Signpost', subtitle: 'By Still Pond', x: 27.5, y: 28.5, text: 'Still Pond. The stream comes down from the Mossback; the old hollow is a little way west.' },
   ] satisfies WorldSign[],
   doors: [
-    { kind: 'door', id: 'root-cave', name: 'A cave under the roots', subtitle: 'In the Mossback’s roots', x: 55.5, y: 31.5, empty: 'A cold draught comes out between the roots, but the way in is not made yet.' },
-    { kind: 'door', id: 'burrow', name: 'A burrow', subtitle: 'Under the western trees', x: 12.5, y: 42.5, empty: 'Something has dug deep here. Whatever it dug toward, nobody has made it yet.' },
+    { kind: 'door', id: 'root-cave', name: 'A cave under the roots', subtitle: 'The Root Run, running east', x: 55.5, y: 31.5, empty: 'A cold draught comes out between the roots, but the way in is not made yet.' },
+    { kind: 'door', id: 'burrow', name: 'A burrow', subtitle: 'The Burrow, going down', x: 12.5, y: 42.5, empty: 'Something has dug deep here. Whatever it dug toward, nobody has made it yet.' },
   ] satisfies WorldDoor[],
   areas: [
     {

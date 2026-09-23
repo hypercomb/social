@@ -93,6 +93,10 @@ export interface LevelDef {
   theme?: string
   /** Room doors are traversed explicitly by the interconnected labyrinth. */
   interconnected?: boolean
+  /** A gap in the bottom row falls forever: whatever drops through it is
+   *  lost (a side-view cavern's pits). Off, the level's edge is stone all
+   *  round, as every room has always had. */
+  pits?: boolean
 }
 
 export type GameState = 'playing' | 'won' | 'dead' | 'gameover' | 'complete'
@@ -839,7 +843,10 @@ export class Engine {
   }
 
   tileAt(col: number, row: number): number {
-    if (!this.inBounds(col, row)) return WALL
+    if (!this.inBounds(col, row)) {
+      const below = this.level.pits && row >= this.rows && col >= 0 && col < this.cols
+      return below && this.grid[(this.rows - 1) * this.cols + col] === EMPTY ? EMPTY : WALL
+    }
     return this.grid[row * this.cols + col]
   }
 

@@ -26,6 +26,9 @@ export const STORY: readonly StorySeat[] = [
   { entrance: 'chandler-house/trapdoor',   place: 'chandler-cellar' },
   { entrance: 'island/valley-grove',       place: 'greenwood' },
   { entrance: 'greenwood/old-hollow',      place: 'hollow-grove' },
+  { entrance: 'greenwood/root-cave',       place: 'root-run' },
+  { entrance: 'root-run/deeper',           place: 'the-burrow' },
+  { entrance: 'greenwood/burrow',          place: 'the-burrow' },
   // Entrances are marks, never kinds: whatever a seat names leads in. These
   // five are examples of things that are not doors — a signpost, a tablet on
   // a cave wall, a stone in a room's wall, a patch of open air.
@@ -112,6 +115,8 @@ const PLACE_SLOTS: readonly StorySlot[] = [
   { id: 'chandler-cellar', name: 'Wenna’s Cellar', look: 'place', fills: { done: 'chandler-cellar' }, attainment: 'place:chandler-cellar' },
   { id: 'greenwood', name: 'The Greenwood', look: 'place', fills: { done: 'greenwood' }, attainment: 'place:greenwood' },
   { id: 'hollow-grove', name: 'The Hollow Grove', look: 'place', fills: { done: 'hollow-grove' }, attainment: 'place:hollow-grove' },
+  { id: 'root-run', name: 'The Root Run', look: 'place', fills: { done: 'root-run' }, attainment: 'place:root-run' },
+  { id: 'the-burrow', name: 'The Burrow', look: 'place', fills: { done: 'the-burrow' }, attainment: 'place:the-burrow' },
   { id: 'labyrinth', name: 'A labyrinth', look: 'place', fills: { done: 'labyrinth' }, attainment: 'place:labyrinth' },
   { id: 'grove-plot', name: 'Old Grove Plot', look: 'plot', fills: { done: 'island/found:grove-plot' }, attainment: 'plot:grove-plot' },
   { id: 'lakeside-plot', name: 'Lakeside Plot', look: 'plot', fills: { done: 'island/found:lakeside-plot' }, attainment: 'plot:lakeside-plot' },

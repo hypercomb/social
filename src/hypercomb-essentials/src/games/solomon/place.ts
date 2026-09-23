@@ -12,7 +12,7 @@
  *  STORY graph's abstract possibilities. Pure; no DOM, no storage, no import
  *  from anywhere else in `solomon/`. */
 
-export type PlaceKind = 'island' | 'labyrinth' | 'chamber'
+export type PlaceKind = 'island' | 'labyrinth' | 'chamber' | 'sideview'
 
 export interface PlaceArrival {
   readonly id: string

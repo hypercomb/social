@@ -25,6 +25,8 @@ import { PLACES, LABYRINTH_PLACE, placeName, seatLabel, crumbLabel, floorLabel, 
 import { CHAMBERS } from './chamber-places.js'
 import { WORLDS } from './worlds.js'
 import { worldMap } from './rpg-overworld.js'
+import { SIDE_CAVERNS, SideCavernRun } from './side-cavern.js'
+import { SideCavernRuntime } from './side-cavern-view.js'
 import { chamberInstruments, type ChamberInstruments, type ChamberSound } from './chamber-view.js'
 import { IslandRuntime, ChamberRuntime, LabyrinthRuntime, type PlaceRuntime, type RuntimeShell } from './place-runtimes.js'
 import { readAdventureSave, writeAdventureSave, type CarriedEntry } from './adventure-save.js'
@@ -206,8 +208,9 @@ export class SolomonLabyrinthOverlay {
     host.hidden = true
     this.#content!.append(host)
     let runtime: PlaceRuntime
-    const world = WORLDS.get(place)
+    const world = WORLDS.get(place), cavern = SIDE_CAVERNS.find(candidate => candidate.id === place)
     if (world) runtime = new IslandRuntime(host, this.#shell, world)
+    else if (cavern) runtime = new SideCavernRuntime(host, cavern, this.#shell)
     else if (place === LABYRINTH_PLACE.id) runtime = new LabyrinthRuntime(host, this.#shell, () => this.#tileSurface(), this.#loaded)
     else {
       const definition = CHAMBERS.find(chamber => chamber.id === place)
@@ -550,7 +553,12 @@ export class SolomonLabyrinthOverlay {
         if (!seat) return null
         // A world is shown whole, as a map, whether or not it was ever walked.
         const world = WORLDS.get(seat.place)
-        return world ? worldMap(world) : this.#runtimes.get(seat.place)?.seed() ?? null
+        if (world) return worldMap(world)
+        const live = this.#runtimes.get(seat.place)
+        if (live) return live.seed()
+        // A cavern never walked still shows its whole length.
+        const cavern = SIDE_CAVERNS.find(candidate => candidate.id === seat.place)
+        return cavern ? new SideCavernRun(cavern).seed() : null
       },
       found: (from, entrance) => { this.#found.add(entranceKey(from, entrance)); this.#dirty = true },
       openItems: () => this.#openItems(),

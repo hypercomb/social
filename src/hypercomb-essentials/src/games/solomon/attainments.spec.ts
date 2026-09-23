@@ -119,7 +119,7 @@ describe('ATTAINMENTS registry shape', () => {
     // import), so this check survives being run before that file lands.
     const places = new Set([
       'island', 'labyrinth', 'wet-steps', 'cistern', 'spring-heart',
-      'hall-of-hours', 'six-roads', 'accord-sanctum', 'chandler-house', 'chandler-cellar', 'hollow-grove', 'greenwood',
+      'hall-of-hours', 'six-roads', 'accord-sanctum', 'chandler-house', 'chandler-cellar', 'hollow-grove', 'greenwood', 'root-run', 'the-burrow',
     ])
     const chamberFeatures: Record<string, readonly string[]> = {
       'wet-steps': ['gate:cycle', 'door:hall-door'],

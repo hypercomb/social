@@ -11,7 +11,8 @@ import { CHAMBERS, GROUPS } from './chamber-places.js'
 import { SEVENFOLD_VALLEY, worldEncounters } from './rpg-overworld.js'
 import { STORY } from './story.js'
 import { GREENWOOD } from './worlds.js'
-import { ROOMS, squareEntrance } from './labyrinth.js'
+import { ROOMS, squareEntrance, squareName } from './labyrinth.js'
+import { SIDE_CAVERNS, type SideCavernDefinition } from './side-cavern.js'
 import type { WorldDefinition } from './rpg-overworld.js'
 
 export interface SeatLabel { readonly name: string; readonly subtitle: string; readonly levels: number }
@@ -38,6 +39,17 @@ export function worldPlace(world: WorldDefinition): PlaceDefinition {
     id: world.id, name: world.name, subtitle: world.subtitle, kind: 'island',
     entrances: worldEntrances(world),
     arrivals: [{ id: 'start', name: world.name }],
+  }
+}
+
+/** A side-view cavern: arrived at its mouth; its entrances are its way
+ *  deeper and every one of its squares. */
+function sideCavernPlace(cavern: SideCavernDefinition): PlaceDefinition {
+  const { cols, rows } = cavern.level
+  return {
+    id: cavern.id, name: cavern.name, subtitle: cavern.subtitle, kind: 'sideview',
+    entrances: [...(cavern.deeper ? ['deeper'] : []), ...Array.from({ length: cols * rows }, (_, index) => squareName(index % cols, Math.floor(index / cols)))],
+    arrivals: [{ id: 'mouth', name: cavern.name }],
   }
 }
 
@@ -81,6 +93,7 @@ export const PLACES: PlaceCatalog = new Map<string, PlaceDefinition>([
   [ISLAND_PLACE.id, ISLAND_PLACE],
   [LABYRINTH_PLACE.id, LABYRINTH_PLACE],
   [GREENWOOD.id, worldPlace(GREENWOOD)],
+  ...SIDE_CAVERNS.map((cavern): [string, PlaceDefinition] => [cavern.id, sideCavernPlace(cavern)]),
   ...CHAMBERS.map((definition): [string, PlaceDefinition] => [definition.id, chamberPlace(definition)]),
 ])
 
