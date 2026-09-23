@@ -172,7 +172,8 @@ console.log(
 // The barrel is the plan doc's scoreboard (42 entries → 0), so read it HERE,
 // at build time, and hand the number in. It tracks the barrel as it shrinks
 // and can never quietly disagree with it. A missing barrel counts 0 — which by
-// then is the true answer.
+// then is the true answer in the full monorepo build. Pure installs omit this
+// migration-only count entirely.
 //
 // REPORTING is not ENFORCEMENT: this printed 47, then 48, then 52 across three
 // sessions and nothing stopped it, because a number in build output is only
@@ -181,17 +182,19 @@ console.log(
 // fails the suite. This line stays as the human-facing half — it says how far
 // there is to go; the ratchet says which direction you are allowed to move.
 const barrelPath = resolve(here, '..', 'hypercomb-shared', 'ui', 'shell-surfaces', 'shell-surfaces.barrel.ts')
-let barrelEntries = 0
-try {
-  const barrel = await readFile(barrelPath, 'utf8')
-  // A template literal holding a real newline, and startsWith rather than a
-  // regex. A CRLF checkout leaves a trailing carriage return, which
-  // startsWith does not mind.
-  const NEWLINE = `
+let barrelEntries = pure ? -1 : 0
+if (!pure) {
+  try {
+    const barrel = await readFile(barrelPath, 'utf8')
+    // A template literal holding a real newline, and startsWith rather than a
+    // regex. A CRLF checkout leaves a trailing carriage return, which
+    // startsWith does not mind.
+    const NEWLINE = `
 `
-  barrelEntries = barrel.split(NEWLINE).filter(line => line.startsWith('import ')).length
-} catch {
-  console.warn('[shim] shell-surfaces barrel not found — reporting 0 unreachable surfaces')
+    barrelEntries = barrel.split(NEWLINE).filter(line => line.startsWith('import ')).length
+  } catch {
+    console.warn('[shim] shell-surfaces barrel not found — reporting 0 unreachable surfaces')
+  }
 }
 
 // ── the bootstrap bundle ─────────────────────────────────────────────────────
@@ -329,7 +332,9 @@ console.log(
   `[shim] origin ${mib(await dirBytes(dist))} total` +
   (withContent ? ` · content ${contentFiles} entries, ${mib(contentBytes)}` : ' · no content (cold host)'),
 )
-console.log(
-  `[shim] scoreboard — ${barrelEntries} barrel entries still Angular-shaped and unreachable from the shim` +
-  (barrelEntries === 0 ? ' (the barrel is empty — Phase 3 is done)' : ''),
-)
+if (!pure) {
+  console.log(
+    `[shim] scoreboard — ${barrelEntries} barrel entries still Angular-shaped and unreachable from the shim` +
+    (barrelEntries === 0 ? ' (the barrel is empty — Phase 3 is done)' : ''),
+  )
+}
