@@ -1901,6 +1901,28 @@ describe('the passive drain — as many conversations as it can reach', () => {
     expect(chatCalls(server)).toBe(3 + 4 * 4)
   })
 
+  it('a busy provider ends the pass and rests it: one conversation meets the 429, the rest are not asked, and the next pass waits', async () => {
+    const pool = new MockDir('threads')
+    const store = makeStore(pool)
+    const m = await loadFlows(store)
+    await seedSix(store, pool, m.thread)
+    visitFive(m)
+    const busy = () => ({ ok: false, status: 429, headers: { get: () => null }, json: async () => ({ error: 'busy' }), text: async () => 'busy' })
+    const server = localServer(busy)
+    await wake(m, server)
+
+    const before = Date.now()
+    const pass = await m.route.drainRouteFlows()
+    expect(pass.stopped).toBe('yield')
+    expect(pass.resumeAt).toBeGreaterThanOrEqual(before + m.route.ROUTE_FLOW_THROTTLE_MS)
+    expect(whoWasAsked(server), 'the 429 was met once; nobody after it was asked').toEqual(['RECENT'])
+
+    server.mockClear()
+    const again = await m.route.drainRouteFlows()
+    expect(again.stopped).toBe('yield')
+    expect(chatCalls(server), 'no passive call while the provider rests').toBe(0)
+  })
+
   it('stops at its call budget between conversations and picks up where it left off; a time budget stops it too', async () => {
     const pool = new MockDir('threads')
     const store = makeStore(pool)

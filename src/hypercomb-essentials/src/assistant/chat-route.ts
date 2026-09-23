@@ -737,7 +737,15 @@ interface FlowCoordination {
   lastPassModel: string
   /** convoId → when the participant last opened it here. The drain's queue. */
   readonly visited: Map<string, number>
+  /** Until when the provider is BUSY (rate-limited or overloaded). A passive
+   *  call that met a 429 sets it; no passive call starts before it passes. */
+  throttledUntil: number
 }
+
+/** How long a passive pass rests after the provider says it is busy, when the
+ *  vendor sends no Retry-After (or a shorter one). One 429 used to end
+ *  nothing: the pass moved to the next conversation and met the next 429. */
+export const ROUTE_FLOW_THROTTLE_MS = 5 * 60_000
 
 /** Where the visited queue lives between reloads; the newest 200 kept. */
 export const ROUTE_VISITED_KEY = 'hc:chat-route-visited'
@@ -769,9 +777,11 @@ const flowState = (): FlowCoordination => {
     plainLocalModels: new Set<string>(),
     lastPassModel: '',
     visited: readVisited(),
+    throttledUntil: 0,
   } satisfies FlowCoordination) as FlowCoordination
   // A live hot-reloaded tab may hold the preceding state shape.
   ;(state as FlowCoordination & { assimilating?: Set<string> }).assimilating ??= new Set<string>()
+  ;(state as FlowCoordination & { throttledUntil?: number }).throttledUntil ??= 0
   return state
 }
 
@@ -2668,8 +2678,20 @@ type OrganizeOutcome =
   | 'yielded'     // the participant's chat or an attended call took the lane
   | 'timeout'     // a call ran out of time — the pass stops
   | 'budget'      // the pass's call or time budget ran out
+  | 'throttled'   // the provider said it is busy (429 / overloaded) — the pass rests
 
-type CallOutcome = { readonly ok: true; readonly text: string } | { readonly ok: false; readonly why: 'gate' | 'yielded' | 'timeout' | 'fault' | 'budget' }
+type CallOutcome = { readonly ok: true; readonly text: string } | { readonly ok: false; readonly why: 'gate' | 'yielded' | 'timeout' | 'fault' | 'budget' | 'throttled' }
+
+/** A vendor answer that means "busy, not broken": rate-limited or overloaded.
+ *  Duck-typed on the dispatch error's fields — this module never imports the
+ *  class, so the check must not depend on identity. */
+const providerBusy = (error: unknown): { busy: boolean; retryAfterMs: number } => {
+  const e = error as { name?: unknown; status?: unknown; retryAfterMs?: unknown } | null
+  const status = typeof e?.status === 'number' ? e.status : undefined
+  const busy = e?.name === 'LlmDispatchError' && (status === 429 || (status !== undefined && status >= 500))
+  const retryAfterMs = typeof e?.retryAfterMs === 'number' && Number.isFinite(e.retryAfterMs) ? e.retryAfterMs : 0
+  return { busy, retryAfterMs }
+}
 
 interface OrganizeOptions {
   readonly attended: boolean
@@ -2755,6 +2777,9 @@ const flowCall = async (
   const stop = options.beforeCall?.()
   if (stop) return { ok: false, why: stop === 'budget' ? 'budget' : 'yielded' }
   if (!options.explicit && Date.now() < state.pausedUntil) return { ok: false, why: 'yielded' }
+  // A busy provider is not asked again by a passive call until its rest is
+  // over; a participant's own press still goes through.
+  if (!options.explicit && Date.now() < state.throttledUntil) return { ok: false, why: 'throttled' }
   const labeller = await awakeOrganizerLabeller(options.model)
   if (!labeller) return { ok: false, why: 'gate' }
   if (options.attended && options.claim && !options.claim.counted) {
@@ -2777,6 +2802,15 @@ const flowCall = async (
           if (attempt === 0 && refusesKnobs(error) && !state.plainLocalModels.has(labeller.model)) {
             state.plainLocalModels.add(labeller.model)
             continue
+          }
+          // BUSY, NOT BROKEN. The dispatch already retried once on the
+          // vendor's word; the pass must not carry the same 429 to every
+          // conversation in the queue. Rest for the vendor's Retry-After or
+          // the standing throttle, whichever is longer, and say so.
+          const { busy, retryAfterMs } = providerBusy(error)
+          if (busy) {
+            state.throttledUntil = Math.max(state.throttledUntil, Date.now() + Math.max(retryAfterMs, ROUTE_FLOW_THROTTLE_MS))
+            return { ok: false, why: 'throttled' }
           }
           return { ok: false, why: 'fault' }
         }
@@ -3443,10 +3477,14 @@ export const drainRouteFlows = async (options: RouteFlowDrainOptions = {}): Prom
     let calls = 0
     const yielded = (): RouteFlowDrain => ({
       organized, behind, stopped: 'yield', elapsedMs: elapsed(),
-      resumeAt: Date.now() < state.pausedUntil ? state.pausedUntil : Date.now() + ROUTE_FLOW_ATTENDED_RESUME_MS,
+      resumeAt: Math.max(
+        Date.now() < state.pausedUntil ? state.pausedUntil : Date.now() + ROUTE_FLOW_ATTENDED_RESUME_MS,
+        state.throttledUntil,
+      ),
     })
     const beforeCall = (): 'yield' | 'budget' | null => {
       if (Date.now() < state.pausedUntil || state.attendedWaiting > 0) return 'yield'
+      if (Date.now() < state.throttledUntil) return 'yield'
       if (calls >= callCap || elapsed() >= budgetMs) return 'budget'
       return null
     }
@@ -3465,7 +3503,7 @@ export const drainRouteFlows = async (options: RouteFlowDrainOptions = {}): Prom
       if (result.dueIn !== undefined) dueIn = Math.min(dueIn ?? Number.POSITIVE_INFINITY, result.dueIn)
       if (result.wrote) organized++
       if (result.outcome === 'busy') { behind++; continue }
-      if (result.outcome === 'yielded') return { ...yielded(), ...(dueIn !== undefined ? { dueIn } : {}) }
+      if (result.outcome === 'yielded' || result.outcome === 'throttled') return { ...yielded(), ...(dueIn !== undefined ? { dueIn } : {}) }
       if (result.outcome === 'gate') { stopped = 'gate'; break }
       if (result.outcome === 'timeout') { stopped = 'timeout'; break }
       if (result.outcome === 'budget') { stopped = 'budget'; behind++; break }
