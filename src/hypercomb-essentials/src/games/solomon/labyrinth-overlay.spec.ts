@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { type RoomDef } from './labyrinth.js'
+import { roomId, type RoomDef } from './labyrinth.js'
 import { SolomonLabyrinthOverlay } from './labyrinth-overlay.js'
 import { SAVE_SLOTS_KEY } from './save-slots.js'
 import { type LoadedTileRoom } from './tile-surface.js'
@@ -162,7 +162,7 @@ describe('the path shell', () => {
   it('solves Mira, fills the Dawn Shrine, and pushes into its labyrinth — deepening the path and hydrating native rooms', async () => {
     const overlay = mount()
     await enterSunseed()
-    expect(overlay.journey.room?.id).toBe('sunseed-porch')
+    expect(overlay.journey.room?.id).toBe(roomId('sunseed', 'porch'))
     expect(native.ensure).toHaveBeenCalledTimes(4)
     expect(crumbs()).toEqual(['The Sevenfold Valley', 'A labyrinth'])
     expect(document.querySelector('.sol-room-caption')?.textContent).toContain('Native The Sun Porch')
@@ -178,7 +178,7 @@ describe('the path shell', () => {
     enterDawnShrine()
     await settle()
     frame()
-    expect(overlay.journey.room?.id).toBe('sunseed-porch')
+    expect(overlay.journey.room?.id).toBe(roomId('sunseed', 'porch'))
   })
 
   it('shows the story’s next step on the place card, and moves it on as the story does', () => {
@@ -264,9 +264,18 @@ describe('the path shell', () => {
     overlay.engine!.arrive(overlay.journey.room!.relics[0])
     frame()
     closeGainIfOpen() // the touch-picked sigil piece is a reveal too (M2/A5.5) — the loop pauses under it
-    overlay.engine!.arrive(overlay.journey.room!.doors.find(door => door.id === 'deeper')!)
+    const deeper = overlay.journey.room!.doors.find(door => door.id === 'deeper')!
+    // The sigil is held, but the way on waits for the room's key: touching
+    // the door says so and stays a door.
+    overlay.engine!.arrive(deeper)
     frame()
-    expect(overlay.journey.room?.id).toBe('sunseed-steps')
+    expect(overlay.journey.room?.id).toBe(roomId('sunseed', 'porch'))
+    expect(overlay.journey.canPass(deeper)).toBe(false)
+    overlay.engine!.arrive(overlay.engine!.items.find(item => item.kind === 'key')!)
+    frame()
+    overlay.engine!.arrive(deeper)
+    frame()
+    expect(overlay.journey.room?.id).toBe(roomId('sunseed', 'steps'))
     menuTile('Island').click()
     frame()
     expect(crumbs()).toEqual(['The Sevenfold Valley'])
@@ -300,7 +309,7 @@ describe('combat skills reach the shell through the one GainScreen and ItemsTabl
     expect(overlay.journey.kit.includes('stand')).toBe(true)
     key('keydown', 'Escape')
     expect(document.querySelector<HTMLElement>('.sol-gain')?.hidden).toBe(true)
-    expect(overlay.journey.room?.id, 'Escape closed the card, not the room (M3)').toBe('sunseed-porch')
+    expect(overlay.journey.room?.id, 'Escape closed the card, not the room (M3)').toBe(roomId('sunseed', 'porch'))
   })
 
   it('reading an already-learned stele again prints its words to the status line instead of reopening the card', async () => {
@@ -357,10 +366,12 @@ describe('combat skills reach the shell through the one GainScreen and ItemsTabl
     overlay.engine!.arrive(overlay.journey.room!.relics[0])
     frame()
     closeGainIfOpen()
+    overlay.engine!.arrive(overlay.engine!.items.find(item => item.kind === 'key')!)
+    frame()
     overlay.engine!.arrive(overlay.journey.room!.doors.find(door => door.id === 'deeper')!)
     frame()
-    expect(overlay.journey.room?.id).toBe('sunseed-steps')
-    overlay.engine!.arrive({ col: 12, row: 8 }) // the chest that gives the Sickle of the Sun
+    expect(overlay.journey.room?.id).toBe(roomId('sunseed', 'steps'))
+    overlay.engine!.arrive({ col: 8, row: 2 }) // the chest that gives the Sickle of the Sun, on the high ledge
     frame()
     tap('e')
     expect(document.querySelector('.sol-gain-title')?.textContent).toBe('Sickle of the Sun')
@@ -410,7 +421,7 @@ describe('saves v3 carry the labyrinth and the path across a reopen', () => {
     const second = mount()
     await settle()
     frame()
-    expect(second.journey.room?.id).toBe('sunseed-porch')
+    expect(second.journey.room?.id).toBe(roomId('sunseed', 'porch'))
     expect(second.journey.kit.includes('stand')).toBe(true)
     expect(crumbs()).toEqual(['The Sevenfold Valley', 'A labyrinth'])
   })

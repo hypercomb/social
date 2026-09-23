@@ -128,6 +128,33 @@ export interface WorldArea {
 /** What a bubble beside a place holds: a line for a while, or a question with
  *  its choices until it is answered or walked away from. */
 interface WorldSpeech { key: string; until: number; text?: string; nodes?: () => Node[] }
+
+/** A WORLD: one small definition from which a whole walkable place is
+ *  derived — its ground (an `IslandDef`: towns, rivers, hills, woods), where
+ *  a traveller comes in, and everything standing on it. The Sevenfold
+ *  Valley is the first; a grove, a cave mouth, a painting or a found item
+ *  can open onto another, and that one's entrances onto more — worlds all
+ *  the way down, each small and dense rather than huge and empty (jwize,
+ *  2026-09-22). Plain data, nothing computed, so a world can be signed,
+ *  shared, and seated into an open entrance by a participant's own story. */
+export interface WorldDefinition {
+  /** The place id — /^[a-z0-9-]{1,64}$/. */
+  readonly id: string
+  readonly name: string
+  readonly subtitle: string
+  readonly island: IslandDef
+  /** Where a traveller stands on coming down into this world. */
+  readonly start: { readonly x: number; readonly y: number }
+  readonly shrines: readonly WorldShrine[]
+  readonly people: readonly WorldPerson[]
+  readonly dungeons: readonly WorldDungeon[]
+  readonly residents: readonly WorldResident[]
+  readonly plots: readonly WorldPlot[]
+  readonly caches: readonly WorldCache[]
+  readonly signs: readonly WorldSign[]
+  readonly doors: readonly WorldDoor[]
+  readonly areas: readonly WorldArea[]
+}
 export type ShrineState = 'missing' | 'ready' | 'open'
 /** What one cast of the wand changed; `seal` is true when a seal opened or closed with it. */
 export interface WandChange { col: number; row: number; terrain: IslandTerrain; seal: boolean }
@@ -174,7 +201,7 @@ const BRICK_GARDEN: IslandStamp = {
 }
 const gardenPoint = (col: number, row: number): { x: number; y: number } => ({ x: BRICK_GARDEN.col + col, y: BRICK_GARDEN.row + row })
 
-export const ISLAND_DEF: IslandDef = {
+export const ISLAND_DEF: IslandDef & { valley: NonNullable<IslandDef['valley']> } = {
   seed: 7,
   cols: 256,
   rows: 192,
@@ -216,9 +243,15 @@ export const ISLAND_DEF: IslandDef = {
   wilds: 'The Wilds',
 }
 
-let island: Island | null = null
-/** Built on first use, never at import: every hive loads this module and few open the game. */
-export function theIsland(): Island { return island ??= buildIsland(ISLAND_DEF) }
+const built = new Map<IslandDef, Island>()
+/** A world's ground, built on first use and kept — never at import: every
+ *  hive loads this module and few open the game. */
+export function islandOf(def: IslandDef): Island {
+  let island = built.get(def)
+  if (!island) built.set(def, island = buildIsland(def))
+  return island
+}
+export function theIsland(): Island { return islandOf(ISLAND_DEF) }
 
 export const WORLD_COLS = ISLAND_DEF.cols
 export const WORLD_ROWS = ISLAND_DEF.rows
@@ -482,6 +515,20 @@ export const WORLD_ENCOUNTERS: readonly WorldEncounter[] = [
   ...WORLD_SHRINES, ...WORLD_PEOPLE, ...WORLD_DUNGEONS, ...WORLD_RESIDENTS, ...WORLD_PLOTS, ...WORLD_CACHES, ...WORLD_SIGNS, ...WORLD_DOORS,
 ]
 
+/** The first world: the island everything starts on. */
+export const SEVENFOLD_VALLEY: WorldDefinition = {
+  id: 'island', name: 'The Sevenfold Valley', subtitle: 'A walking island of shrines, caves and roads',
+  island: ISLAND_DEF, start: WORLD_START,
+  shrines: WORLD_SHRINES, people: WORLD_PEOPLE, dungeons: WORLD_DUNGEONS, residents: WORLD_RESIDENTS,
+  plots: WORLD_PLOTS, caches: WORLD_CACHES, signs: WORLD_SIGNS, doors: WORLD_DOORS, areas: WORLD_AREAS,
+}
+
+/** Everything standing in a world, in one list, in the order the island
+ *  has always kept it. */
+export function worldEncounters(world: WorldDefinition): readonly WorldEncounter[] {
+  return [...world.shrines, ...world.people, ...world.dungeons, ...world.residents, ...world.plots, ...world.caches, ...world.signs, ...world.doors]
+}
+
 export function componentKey(component: ShrineComponent): string {
   return component.kind === 'triangle' ? `triangle:${component.point}` : component.kind
 }
@@ -495,7 +542,7 @@ export function worldTerrain(col: number, row: number): IslandTerrain {
 }
 
 export class RpgOverworld {
-  readonly player = { x: WORLD_START.x, y: WORLD_START.y, facing: 'down' as 'up' | 'down' | 'left' | 'right' }
+  readonly player: { x: number; y: number; facing: 'up' | 'down' | 'left' | 'right' }
   readonly filledSockets = new Set<string>()
   readonly journal = new Set<string>()
   readonly met = new Set<string>()
@@ -511,9 +558,23 @@ export class RpgOverworld {
   readonly #pressure = new Map<string, number>()
   readonly #disarmed = new Set<string>()
   readonly #disarmedAt = new Map<string, { x: number; y: number }>()
-  constructor(hooks: WorldHooks) { this.hooks = hooks }
+  readonly world: WorldDefinition
+  /** Everything standing in this world, in one list. */
+  readonly encounters: readonly WorldEncounter[]
+  constructor(hooks: WorldHooks, world: WorldDefinition = SEVENFOLD_VALLEY) {
+    this.hooks = hooks
+    this.world = world
+    this.encounters = worldEncounters(world)
+    this.player = { x: world.start.x, y: world.start.y, facing: 'down' }
+  }
 
-  get island(): Island { return theIsland() }
+  get island(): Island { return islandOf(this.world.island) }
+
+  /** Coming down into this world: stand where it starts, facing in. */
+  enterAtStart(): void {
+    Object.assign(this.player, { x: this.world.start.x, y: this.world.start.y, facing: 'down' as const })
+    this.#pressure.clear()
+  }
   regionAt(): string { return islandRegionAt(this.island, this.player.x, this.player.y) }
 
   /** A cell as it is now: the island as built, with the wand's changes on top. */
@@ -565,9 +626,9 @@ export class RpgOverworld {
    *  this entrance: a portal's own position, facing away from it; an area's
    *  nearest landing, facing the opposite way from its own approach facing. */
   land(entrance: string): void {
-    const place = WORLD_ENCOUNTERS.find(candidate => candidate.id === entrance)
+    const place = this.encounters.find(candidate => candidate.id === entrance)
     if (place) { Object.assign(this.player, { x: place.x, y: place.y, facing: 'down' as const }); this.#disarmPortal(entrance); return }
-    const area = WORLD_AREAS.find(candidate => candidate.id === entrance)
+    const area = this.world.areas.find(candidate => candidate.id === entrance)
     if (!area) return
     const landing = Object.values(area.landings).sort((a, b) =>
       Math.hypot(this.player.x - a.x, this.player.y - a.y) - Math.hypot(this.player.x - b.x, this.player.y - b.y))[0]!
@@ -625,7 +686,7 @@ export class RpgOverworld {
   /** Inventory is restored by the journey first. Only owned components can
    *  reappear in a shrine; a different slot replaces every local collection. */
   restoreState(raw: unknown): void {
-    Object.assign(this.player, { ...WORLD_START, facing: 'down' })
+    Object.assign(this.player, { ...this.world.start, facing: 'down' })
     this.met.clear(); this.solved.clear(); this.journal.clear(); this.filledSockets.clear()
     this.opened.clear(); this.#talks.clear(); this.#changed.clear()
     this.#pressure.clear(); this.#disarmed.clear(); this.#disarmedAt.clear()
@@ -634,7 +695,7 @@ export class RpgOverworld {
     const version = saved['version']
     if (version !== 1 && version !== 2) return
     const includes = (field: string, id: string): boolean => Array.isArray(saved[field]) && (saved[field] as unknown[]).includes(id)
-    for (const person of WORLD_PEOPLE) {
+    for (const person of this.world.people) {
       const solved = includes('solved', person.id) && (!person.reward || this.owns(person.reward))
       if (includes('met', person.id) || solved) {
         this.met.add(person.id)
@@ -642,7 +703,7 @@ export class RpgOverworld {
       }
       if (solved) this.solved.add(person.id)
     }
-    for (const shrine of WORLD_SHRINES) shrine.components.forEach((piece, index) => {
+    for (const shrine of this.world.shrines) shrine.components.forEach((piece, index) => {
       const key = `${shrine.id}:${index}`
       if (includes('filledSockets', key) && this.owns(piece)) {
         this.filledSockets.add(key)
@@ -655,7 +716,7 @@ export class RpgOverworld {
         : { kind: key as 'hexagon' | 'star' }
       if (includes('journal', key) && this.owns(piece)) this.journal.add(key)
     }
-    for (const cache of WORLD_CACHES) {
+    for (const cache of this.world.caches) {
       if (!includes('opened', cache.id)) continue
       this.opened.add(cache.id)
       this.journal.add(`cache:${cache.id}`)
@@ -727,11 +788,11 @@ export class RpgOverworld {
    *  point, if any — used both to refuse a step and to know what is being
    *  pushed against. */
   #blockedByPortal(x: number, y: number): string | null {
-    for (const place of WORLD_ENCOUNTERS) {
+    for (const place of this.encounters) {
       if (this.#isPortal(place) && Math.hypot(x - place.x, y - place.y) < PORTAL_RADIUS) return place.id
     }
     const col = Math.floor(x), row = Math.floor(y)
-    for (const area of WORLD_AREAS) if (area.cells.some(([c, r]) => c === col && r === row)) return area.id
+    for (const area of this.world.areas) if (area.cells.some(([c, r]) => c === col && r === row)) return area.id
     return null
   }
 
@@ -774,7 +835,7 @@ export class RpgOverworld {
     this.#pressure.delete(pushed)
     this.#disarmed.add(pushed)
     this.#disarmedAt.set(pushed, { x: this.player.x, y: this.player.y })
-    const area = WORLD_AREAS.find(candidate => candidate.id === pushed)
+    const area = this.world.areas.find(candidate => candidate.id === pushed)
     return area ? this.enterArea(area.id) : this.enter(pushed)
   }
 
@@ -785,11 +846,11 @@ export class RpgOverworld {
    *  never by pressing E; a portal (M9/M14) is never returned here — it is
    *  pushed or clicked, never E'd. */
   nearest(): WorldEncounter | undefined {
-    return WORLD_ENCOUNTERS.filter(place => place.kind !== 'sign' && !this.#isPortal(place) && this.near(place)).sort((a, b) =>
+    return this.encounters.filter(place => place.kind !== 'sign' && !this.#isPortal(place) && this.near(place)).sort((a, b) =>
       Math.hypot(this.player.x - a.x, this.player.y - a.y) - Math.hypot(this.player.x - b.x, this.player.y - b.y))[0]
   }
   interact(targetId?: string): WorldResult {
-    const encounter = targetId ? WORLD_ENCOUNTERS.find(place => place.id === targetId) : this.nearest()
+    const encounter = targetId ? this.encounters.find(place => place.id === targetId) : this.nearest()
     if (!encounter) return this.result(false, 'Explore the world. Walk close to a person, shrine or cavern and press E to interact.')
     // An explicit target (a click on a marker) treats a portal like a
     // completed push (M9); E-with-no-target never reaches one, since
@@ -814,11 +875,11 @@ export class RpgOverworld {
   cue(): { readonly id: string; readonly x: number; readonly y: number; readonly words: string; readonly action: 'act' | 'tag' } | null {
     const target = this.nearest()
     if (target) return { id: target.id, x: target.x, y: target.y, words: `${target.name} · E to ${this.#actVerb(target)}`, action: 'act' }
-    const portal = WORLD_ENCOUNTERS.filter(place => this.#isPortal(place) && this.near(place))
+    const portal = this.encounters.filter(place => this.#isPortal(place) && this.near(place))
       .sort((a, b) => this.#distance(a) - this.#distance(b))[0] as WorldShrine | WorldDungeon | WorldDoor | undefined
     if (portal) return { id: portal.id, x: portal.x, y: portal.y, words: `${portal.name} · ${portal.subtitle}`, action: 'tag' }
     let nearestLanding: { area: WorldArea; landing: WorldAreaLanding } | null = null, best = Infinity
-    for (const area of WORLD_AREAS) for (const landing of Object.values(area.landings)) {
+    for (const area of this.world.areas) for (const landing of Object.values(area.landings)) {
       const d = Math.hypot(this.player.x - landing.x, this.player.y - landing.y)
       if (d <= REACH && d < best) { best = d; nearestLanding = { area, landing } }
     }
@@ -833,7 +894,7 @@ export class RpgOverworld {
           : 'assemble'
   }
   answer(npcId: string, choiceIndex: number): WorldResult {
-    const person = WORLD_PEOPLE.find(npc => npc.id === npcId)
+    const person = this.world.people.find(npc => npc.id === npcId)
     if (!person || !this.near(person)) return this.result(false, 'Walk closer to speak with them.')
     this.met.add(person.id); this.journal.add(`person:${person.id}`)
     if (choiceIndex !== person.correct) return this.result(false, person.retry)
@@ -851,7 +912,7 @@ export class RpgOverworld {
   /** A resident's next line. Something newly true in the story is said
    *  first, once; then they cycle through everything they know by now. */
   talk(residentId: string): WorldResult {
-    const resident = WORLD_RESIDENTS.find(candidate => candidate.id === residentId)
+    const resident = this.world.residents.find(candidate => candidate.id === residentId)
     if (!resident || !this.near(resident)) return this.result(false, 'Walk closer to speak with them.')
     const later = (resident.later ?? []).map((line, index) => ({ line, key: `${resident.id}:${index}` }))
       .filter(({ line }) => this.hooks.holds?.(line.when) === true)
@@ -878,13 +939,13 @@ export class RpgOverworld {
   socketFilled(shrineId: string, index: number): boolean { return this.filledSockets.has(`${shrineId}:${index}`) }
   owns(component: ShrineComponent): boolean { return this.hooks.has(component) || this.hooks.has({ kind: 'star' }) }
   shrineStatus(shrineId: string): ShrineState {
-    const shrine = WORLD_SHRINES.find(place => place.id === shrineId)
+    const shrine = this.world.shrines.find(place => place.id === shrineId)
     if (!shrine) return 'missing'
     if (shrine.components.every((_, i) => this.socketFilled(shrineId, i))) return 'open'
     return shrine.components.every(piece => this.owns(piece)) ? 'ready' : 'missing'
   }
   fillSocket(shrineId: string, index: number): WorldResult {
-    const shrine = WORLD_SHRINES.find(place => place.id === shrineId)
+    const shrine = this.world.shrines.find(place => place.id === shrineId)
     if (!shrine || !this.near(shrine)) return this.result(false, 'Walk up to the shrine before placing a piece.')
     const component = shrine.components[index]
     if (!component) return this.result(false, 'That socket is not part of this shrine.')
@@ -900,7 +961,7 @@ export class RpgOverworld {
    *  or a house door — by its OWN entrance id, replacing the old shrine-only
    *  enter()/dungeon-only enterDungeon() split (M9). */
   enter(id: string): WorldResult {
-    const place = WORLD_ENCOUNTERS.find(candidate => candidate.id === id)
+    const place = this.encounters.find(candidate => candidate.id === id)
     if (!place || !this.#isPortal(place)) return this.result(false, 'There is nothing to enter here.')
     if (!this.near(place)) return this.result(false, `Walk closer to ${place.name} to enter.`)
     if (!this.hooks.seat(place.id)) return this.result(false, place.kind === 'door' ? place.empty : `${place.name} leads nowhere yet.`)
@@ -910,7 +971,7 @@ export class RpgOverworld {
   }
   /** The area-place counterpart of enter() — a Hollow-Grove-shaped push. */
   enterArea(id: string): WorldResult {
-    const area = WORLD_AREAS.find(candidate => candidate.id === id)
+    const area = this.world.areas.find(candidate => candidate.id === id)
     if (!area) return this.result(false, 'There is nothing to enter here.')
     const near = Object.values(area.landings).some(landing => Math.hypot(this.player.x - landing.x, this.player.y - landing.y) <= REACH)
     if (!near) return this.result(false, `Walk closer to ${area.name} to enter.`)
@@ -1054,7 +1115,7 @@ export class RpgOverworldView {
   #region = ''
   #pendingRegion = ''
   #pendingFor = 0
-  constructor(hooks: WorldHooks) { this.model = new RpgOverworld(hooks) }
+  constructor(hooks: WorldHooks, world: WorldDefinition = SEVENFOLD_VALLEY) { this.model = new RpgOverworld(hooks, world) }
   get isDialogOpen(): boolean { return this.#dialog !== null }
   exportState(): WorldSnapshot { return this.model.exportState() }
   restoreState(raw: unknown): void {
@@ -1120,7 +1181,7 @@ export class RpgOverworldView {
     const speech = element('div', 'sol-rpg-speech')
     speech.setAttribute('aria-live', 'polite')
     this.#speechLayer = speech
-    for (const place of WORLD_ENCOUNTERS) {
+    for (const place of this.model.encounters) {
       const marker = button('', () => this.interact(place.id), `sol-rpg-place sol-rpg-place-${place.kind}`)
       marker.setAttribute('aria-label', `${place.name}, ${placeDetail(place)}`)
       const walker = place.kind === 'person' || place.kind === 'resident'
@@ -1141,7 +1202,7 @@ export class RpgOverworldView {
         this.#bubbles.set(place.id, { place, bubble })
       }
     }
-    for (const area of WORLD_AREAS) {
+    for (const area of this.model.world.areas) {
       const marker = element('div', 'sol-rpg-area')
       marker.dataset['for'] = area.id
       marker.append(element('span', 'sol-rpg-area-label', area.name))
@@ -1241,11 +1302,11 @@ export class RpgOverworldView {
         drawWalker(this.#sprite, PLAYER_LOOK, player.facing, step)
       }
     }
-    for (const shrine of WORLD_SHRINES) {
+    for (const shrine of this.model.world.shrines) {
       const marker = this.#places.get(shrine.id)
       if (marker) marker.dataset['state'] = this.model.shrineStatus(shrine.id)
     }
-    for (const place of WORLD_ENCOUNTERS) {
+    for (const place of this.model.encounters) {
       const marker = this.#places.get(place.id)
       if (!marker) continue
       const close = Math.hypot(player.x - place.x, player.y - place.y) < 4
@@ -1291,12 +1352,12 @@ export class RpgOverworldView {
         this.#cue.classList.toggle('is-below', this.#camera.height > 0 && cue.y * tile - this.#camera.y < this.#camera.height * 0.42)
       }
     }
-    for (const area of WORLD_AREAS) this.#areaMarkers.get(area.id)?.classList.toggle('is-near', cue?.id === area.id)
+    for (const area of this.model.world.areas) this.#areaMarkers.get(area.id)?.classList.toggle('is-near', cue?.id === area.id)
   }
   /** Points the way to where the story's current step happens: an island
    *  encounter or area id, or null for nowhere in particular. */
   setGuide(id: string | null): void {
-    const target: WorldPlace | null = id ? WORLD_ENCOUNTERS.find(place => place.id === id) ?? WORLD_AREAS.find(area => area.id === id) ?? null : null
+    const target: WorldPlace | null = id ? this.model.encounters.find(place => place.id === id) ?? this.model.world.areas.find(area => area.id === id) ?? null : null
     if (target === this.#guide) return
     this.#guide = target
     this.#minimapKey = ''
@@ -1395,7 +1456,7 @@ export class RpgOverworldView {
   #layout(): void {
     const tile = this.#camera.tile
     this.#map?.style.setProperty('--sprite-scale', String(Math.round(tile / 36 * 100) / 100))
-    for (const place of WORLD_ENCOUNTERS) {
+    for (const place of this.model.encounters) {
       const marker = this.#places.get(place.id)
       if (!marker) continue
       marker.style.left = `${place.x * tile}px`
@@ -1405,7 +1466,7 @@ export class RpgOverworldView {
       bubble.style.left = `${place.x * tile}px`
       bubble.style.top = `${(place.y + FOOT) * tile}px`
     }
-    for (const area of WORLD_AREAS) {
+    for (const area of this.model.world.areas) {
       const marker = this.#areaMarkers.get(area.id)
       if (!marker) continue
       const cols = area.cells.map(([c]) => c), rows = area.cells.map(([, r]) => r)
@@ -1421,8 +1482,8 @@ export class RpgOverworldView {
     const camera = this.#camera
     if (!camera.width || !camera.height) return
     const { player } = this.model, tile = camera.tile
-    const targetX = clamp(player.x * tile - camera.width / 2, 0, Math.max(0, WORLD_COLS * tile - camera.width))
-    const targetY = clamp(player.y * tile - camera.height / 2, 0, Math.max(0, WORLD_ROWS * tile - camera.height))
+    const targetX = clamp(player.x * tile - camera.width / 2, 0, Math.max(0, this.model.island.cols * tile - camera.width))
+    const targetY = clamp(player.y * tile - camera.height / 2, 0, Math.max(0, this.model.island.rows * tile - camera.height))
     if (!this.#look.ready || dt <= 0) {
       this.#look.x = targetX; this.#look.y = targetY; this.#look.ready = true
     } else {
@@ -1441,7 +1502,7 @@ export class RpgOverworldView {
     }
     // Only places on or near the screen take part in the focus order.
     const margin = tile * 3
-    for (const place of WORLD_ENCOUNTERS) {
+    for (const place of this.model.encounters) {
       const marker = this.#places.get(place.id)
       if (!marker) continue
       const px = place.x * tile, py = place.y * tile
@@ -1464,13 +1525,13 @@ export class RpgOverworldView {
     ctx.strokeStyle = 'rgba(255, 244, 214, 0.85)'
     ctx.lineWidth = 1.5
     ctx.strokeRect(camera.x / camera.tile, camera.y / camera.tile, camera.width / camera.tile, camera.height / camera.tile)
-    for (const place of WORLD_ENCOUNTERS) {
+    for (const place of this.model.encounters) {
       const color = MINIMAP_DOT[place.kind]
       if (!color) continue
       ctx.fillStyle = color
       ctx.fillRect(place.x - 2, place.y - 2, 4, 4)
     }
-    for (const area of WORLD_AREAS) {
+    for (const area of this.model.world.areas) {
       ctx.fillStyle = AREA_MINIMAP_DOT
       ctx.fillRect(area.x - 2, area.y - 2, 4, 4)
     }
@@ -1705,7 +1766,7 @@ export class RpgOverworldView {
   private openJournal(): void {
     const body = this.dialog('Knowledge journal', 'PIECES REMEMBER WHAT YOU LEARN')
     body.append(element('p', '', 'Shrines recognize your permanent collection. Place each component at an entrance, then use its clue to recognize matching objects within the rooms.'))
-    for (const person of WORLD_PEOPLE) if (this.model.met.has(person.id)) {
+    for (const person of this.model.world.people) if (this.model.met.has(person.id)) {
       body.append(element('h3', '', `${person.name} · ${person.role}`), element('p', '', this.model.solved.has(person.id) ? person.insight : person.clue))
     }
     let known = 0
@@ -1714,7 +1775,7 @@ export class RpgOverworldView {
       if (!this.model.owns(requirement)) continue
       known++; body.append(element('h3', '', lore.title), element('p', '', lore.text))
     }
-    for (const cache of WORLD_CACHES) if (this.model.opened.has(cache.id)) {
+    for (const cache of this.model.world.caches) if (this.model.opened.has(cache.id)) {
       known++; body.append(element('h3', '', cache.name), element('p', '', cache.lore), element('p', 'sol-rpg-reply', `Found: ${cache.items.map(item => item.name).join(', ')}`))
     }
     if (!known && !this.model.met.size) body.append(element('p', 'sol-rpg-clue', 'Your first page is waiting. Talk to Mira beside the west path.'))

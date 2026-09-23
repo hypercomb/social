@@ -23,6 +23,7 @@ import { PlacePath, entranceKey, seatAt, seatsOf, splitEntranceKey, MAX_PATH_DEP
 import { ROOT_PLACE, STORY, STORY_BOARDS, type GuideStep } from './story.js'
 import { PLACES, LABYRINTH_PLACE, placeName, seatLabel, crumbLabel, floorLabel, groupOfPlace } from './places.js'
 import { CHAMBERS } from './chamber-places.js'
+import { WORLDS } from './worlds.js'
 import { chamberInstruments, type ChamberInstruments, type ChamberSound } from './chamber-view.js'
 import { IslandRuntime, ChamberRuntime, LabyrinthRuntime, type PlaceRuntime, type RuntimeShell } from './place-runtimes.js'
 import { readAdventureSave, writeAdventureSave, type CarriedEntry } from './adventure-save.js'
@@ -204,7 +205,8 @@ export class SolomonLabyrinthOverlay {
     host.hidden = true
     this.#content!.append(host)
     let runtime: PlaceRuntime
-    if (place === ROOT_PLACE) runtime = new IslandRuntime(host, this.#shell)
+    const world = WORLDS.get(place)
+    if (world) runtime = new IslandRuntime(host, this.#shell, world)
     else if (place === LABYRINTH_PLACE.id) runtime = new LabyrinthRuntime(host, this.#shell, () => this.#tileSurface(), this.#loaded)
     else {
       const definition = CHAMBERS.find(chamber => chamber.id === place)

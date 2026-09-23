@@ -42,9 +42,12 @@ describe('the guide: one next step at a time', () => {
     const mainLine = ['island/person:mira', 'island/socket:dawn-shrine:0', ...sockets('tide-shrine', 3), ...sockets('pyramid-shrine', 7), 'labyrinth/arrival:starbloom']
     expect(guideStep(makeFacts({ done: mainLine, has: STAR_HELD }))?.id).toBe('wayfarer')
     const everything = makeFacts({
-      done: [...mainLine, 'chandler-cellar', 'hollow-grove', 'island/cache:court-cache', 'island/cache:pond-cache', 'island/cache:nook-cache'],
+      done: [...mainLine, 'chandler-cellar', 'greenwood', 'hollow-grove', 'island/cache:court-cache', 'island/cache:pond-cache', 'island/cache:nook-cache'],
       has: STAR_HELD, knows: ['wayfarer-spring', 'highland-accord'],
     })
+    // Into the grove is into a whole wood; the old hollow is found inside it.
+    const inTheWood = makeFacts({ done: [...mainLine, 'chandler-cellar', 'greenwood'], has: STAR_HELD, knows: ['wayfarer-spring', 'highland-accord'] })
+    expect(guideStep(inTheWood)).toMatchObject({ id: 'hollow', target: 'old-hollow' })
     expect(guideStep(everything)?.id).toBe('plots')
     expect(guideStep(everything)?.target).toBeUndefined()
   })
@@ -116,7 +119,7 @@ describe('ATTAINMENTS registry shape', () => {
     // import), so this check survives being run before that file lands.
     const places = new Set([
       'island', 'labyrinth', 'wet-steps', 'cistern', 'spring-heart',
-      'hall-of-hours', 'six-roads', 'accord-sanctum', 'chandler-house', 'chandler-cellar', 'hollow-grove',
+      'hall-of-hours', 'six-roads', 'accord-sanctum', 'chandler-house', 'chandler-cellar', 'hollow-grove', 'greenwood',
     ])
     const chamberFeatures: Record<string, readonly string[]> = {
       'wet-steps': ['gate:cycle', 'door:hall-door'],

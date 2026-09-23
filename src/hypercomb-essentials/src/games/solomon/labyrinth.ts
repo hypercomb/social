@@ -2,6 +2,7 @@ import {
   BRICK, COMBAT_SKILLS, EMPTY, Engine, LIFE_FULL, MAX_AMMO, SCROLL_CAP, TILE, WALL,
   type Cell, type CombatSkillId, type EngineSnapshot, type LevelDef, type SpellKind, type WeaponKind,
 } from './engine.js'
+import { fromAscii } from './levels.js'
 
 // NES terrain is two bytes per row, twelve rows per room:
 // https://datacrystal.tcrf.net/wiki/Solomon%27s_Key/ROM_map
@@ -19,6 +20,8 @@ export interface RoomDoor extends Cell {
   targetRoomId: string
   targetDoorId: string
   requires?: SigilRequirement
+  /** Shut until this room's own key is taken — the way ON. The way back never waits on a key. */
+  keyed?: boolean
 }
 export interface RoomRelic extends Cell { id: string; kind: 'triangle' | 'hexagon' | 'star'; point?: number; lore?: string }
 export interface RoomGate extends Cell { requires: SigilRequirement }
@@ -77,7 +80,7 @@ function roomTopology(room: RoomDef): string {
     ? ['all', value.requirements.map(requirement)] : value.kind === 'triangle' ? ['triangle', value.point ?? null, value.count ?? null] : [value.kind]
   return JSON.stringify([
     room.id, room.labyrinthId, room.depth,
-    [...room.doors].sort((a, b) => a.id.localeCompare(b.id)).map(d => [d.id, d.col, d.row, d.targetRoomId, d.targetDoorId, requirement(d.requires)]),
+    [...room.doors].sort((a, b) => a.id.localeCompare(b.id)).map(d => [d.id, d.col, d.row, d.targetRoomId, d.targetDoorId, requirement(d.requires), d.keyed ?? false]),
     [...room.relics].sort((a, b) => a.id.localeCompare(b.id)).map(r => [r.id, r.col, r.row, r.kind, r.point ?? null]),
     [...room.gates].sort((a, b) => a.row - b.row || a.col - b.col).map(g => [g.col, g.row, requirement(g.requires)]),
   ])
@@ -94,122 +97,548 @@ export function describeRequirement(requirement?: SigilRequirement): string {
   return `${requirement.count ?? 1} triangle${(requirement.count ?? 1) === 1 ? '' : 's'}`
 }
 
+/** Remade rooms take a new id: a room is seeded into the hive ONCE and never
+ *  overwritten (tile-surface.ts), so only a new id reaches a hive that already
+ *  holds the first edition — whose layer stays exactly where it is. */
+const EDITION = 'ii'
+export function roomId(labyrinthId: string, suffix: string): string { return `${labyrinthId}-${suffix}-${EDITION}` }
+
 export const LABYRINTHS: LabyrinthDef[] = [
-  { id: 'sunseed', name: 'Sunseed Rooms', description: 'Find two more points and the central hexagon.', entryRoomId: 'sunseed-porch', requires: { kind: 'triangle', point: 0 }, goalRelicId: 'sunseed-center', color: '#efbd58' },
-  { id: 'tideglass', name: 'Tideglass Rooms', description: 'Find the remaining points to assemble your star.', entryRoomId: 'tideglass-porch', requires: { kind: 'all', requirements: [{ kind: 'hexagon' }, { kind: 'triangle', point: 1 }, { kind: 'triangle', point: 2 }] }, goalRelicId: 'tideglass-point-5', color: '#58c5c5' },
-  { id: 'starbloom', name: 'Pyramid of Accord', description: 'Open the star passages and reach the heart of the pyramid.', entryRoomId: 'starbloom-porch', requires: { kind: 'star' }, goalRelicId: 'starbloom-heart', color: '#b693ed' },
+  { id: 'sunseed', name: 'Sunseed Rooms', description: 'Find two more points and the central hexagon.', entryRoomId: roomId('sunseed', 'porch'), requires: { kind: 'triangle', point: 0 }, goalRelicId: 'sunseed-center', color: '#efbd58' },
+  { id: 'tideglass', name: 'Tideglass Rooms', description: 'Find the remaining points to assemble your star.', entryRoomId: roomId('tideglass', 'porch'), requires: { kind: 'all', requirements: [{ kind: 'hexagon' }, { kind: 'triangle', point: 1 }, { kind: 'triangle', point: 2 }] }, goalRelicId: 'tideglass-point-5', color: '#58c5c5' },
+  { id: 'starbloom', name: 'Pyramid of Accord', description: 'Open the star passages and reach the heart of the pyramid.', entryRoomId: roomId('starbloom', 'porch'), requires: { kind: 'star' }, goalRelicId: 'starbloom-heart', color: '#b693ed' },
 ]
 
-/** Authored compact chambers. Every coordinate describes exactly one native tile. */
-function chamber(labyrinthId: string, suffix: string, name: string, depth: number, layout: number): RoomDef {
-  const tiles: number[] = Array.from({ length: ROOM_COLS * ROOM_ROWS }, (_, i) => {
-    const col = i % ROOM_COLS, row = Math.floor(i / ROOM_COLS)
-    return col === 0 || col === ROOM_COLS - 1 || row === 0 || row === ROOM_ROWS - 1 ? WALL : EMPTY
-  })
-  const ledge = (col: number, row: number, length: number): void => {
-    for (let offset = 0; offset < length; offset++) tiles[row * ROOM_COLS + col + offset] = BRICK
+// ── the rooms ────────────────────────────────────────────────────────────
+//
+// Every room is drawn by hand, never stamped from one template (jwize,
+// 2026-09-22: "when you break bricks there's never anything behind them …
+// we have to make it more dynamic and exciting, fought out levels rather
+// than boring walkthroughs"). Each room has its own idea, a key the way on
+// waits for, foes that make you fight for it, and things buried in its
+// stone. A room is two layers laid cell for cell:
+//
+//   art   — terrain, foes and pickups in the `fromAscii` legend (levels.ts),
+//           plus the marks only a labyrinth room carries:
+//             < return   > deeper   ^ fold   ! home   ? loop      (doors)
+//             * the room's relic
+//             | a shrine gate — stone until its sigil is held
+//             : an empty square hiding a make-then-break find
+//   finds — what the room hides, in the same legend. A pickup over a brick
+//           is buried in it: break the brick. Over `.` it is a wand secret:
+//           cast into the empty square. Over `:` it is the classic Solomon
+//           find: the first cast walls it in, and breaking that brick pays.
+
+const DOOR_MARKS: Readonly<Record<string, string>> = { '<': 'return', '>': 'deeper', '^': 'fold', '!': 'home', '?': 'loop' }
+/** The way ON waits for the room's key; the way back never does. */
+const KEYED_DOORS: ReadonlySet<string> = new Set(['deeper', 'home'])
+const THEMES: Readonly<Record<string, string>> = { sunseed: 'sandstone', tideglass: 'verdant', starbloom: 'crystal' }
+
+type RoomSuffix = 'porch' | 'steps' | 'loft' | 'heart'
+interface RoomPlan {
+  readonly name: string
+  readonly depth: number
+  readonly art: readonly string[]
+  readonly finds?: readonly string[]
+  /** Barrier cells (drawn as `.`): stone until their skill is in the kit. */
+  readonly barriers?: readonly { readonly col: number; readonly row: number; readonly needs: CombatSkillId }[]
+  /** Starting sand; a full meter when absent. */
+  readonly life?: number
+}
+interface DrawnRoom {
+  readonly room: RoomDef
+  readonly doors: ReadonlyMap<string, Cell>
+  readonly relic: Cell | null
+  readonly gates: readonly Cell[]
+  readonly keyed: boolean
+}
+
+function drawRoom(labyrinthId: string, suffix: RoomSuffix, plan: RoomPlan): DrawnRoom {
+  const id = roomId(labyrinthId, suffix)
+  if (plan.art.length !== ROOM_ROWS || plan.art.some(line => line.length !== ROOM_COLS)) throw new Error(`${id} is not drawn ${ROOM_COLS}×${ROOM_ROWS}`)
+  const doors = new Map<string, Cell>(), gates: Cell[] = [], deep = new Set<number>()
+  const relics: Cell[] = []
+  const terrain = plan.art.map((line, row) => [...line].map((mark, col) => {
+    const door = DOOR_MARKS[mark]
+    if (door) { doors.set(door, { col, row }); return '.' }
+    if (mark === '*') { relics.push({ col, row }); return '.' }
+    if (mark === '|') { gates.push({ col, row }); return '#' }
+    if (mark === ':') { deep.add(row * ROOM_COLS + col); return '.' }
+    return mark
+  }).join(''))
+  const level = fromAscii(plan.name, terrain, { barriers: plan.barriers?.map(barrier => ({ ...barrier })) })
+  for (const find of plan.finds ? fromAscii(plan.name, [...plan.finds]).items : []) {
+    const at = find.row * ROOM_COLS + find.col
+    if (level.tiles[at] === WALL) throw new Error(`${id} buries a ${find.kind} in stone at ${find.col},${find.row}`)
+    if (level.tiles[at] === BRICK) level.items.push({ ...find, hidden: true })
+    else level.items.push({ ...find, hidden: true, secret: true, ...(deep.has(at) ? { deep: true } : {}) })
   }
-  // Two-tile rises are within Dana's jump; the wand can extend any shelf.
-  ledge(3, 9, 4)
-  ledge(6, 7, 4)
-  ledge(6, 5, 4)
-  if (layout % 2) { ledge(11, 9, 3); ledge(2, 6, 2) }
-  else { ledge(11, 7, 3); ledge(2, 3, 3) }
-  const theme = labyrinthId === 'sunseed' ? 'sandstone' : labyrinthId === 'tideglass' ? 'verdant' : 'crystal'
+  const door = doors.get('deeper') ?? doors.get('home') ?? level.player
   return {
-    id: `${labyrinthId}-${suffix}`, labyrinthId, depth,
-    level: {
-      name, cols: ROOM_COLS, rows: ROOM_ROWS, tiles, player: { col: 2, row: 10 }, door: { col: 14, row: 10 },
-      enemies: layout === 0 ? [] : [{ col: 12, row: 10, kind: layout === 3 ? 'gargoil' : 'goblin', dir: -1 }],
-      items: [{ col: 4, row: 8, kind: layout === 0 ? 'bell' : 'jar' }, { col: 8, row: 6, kind: 'jewel', value: 500 }],
-      mirrors: [], lifeStart: LIFE_FULL * 1.8, theme, interconnected: true,
+    room: {
+      id, labyrinthId, depth: plan.depth,
+      level: { ...level, door: { ...door }, lifeStart: plan.life ?? LIFE_FULL, theme: THEMES[labyrinthId], interconnected: true },
+      doors: [], relics: [], gates: [],
     },
-    doors: [], relics: [], gates: [],
+    doors, relic: relics[0] ?? null, gates, keyed: level.items.some(item => item.kind === 'key'),
   }
 }
 
-function join(a: RoomDef, aId: string, aCell: Cell, b: RoomDef, bId: string, bCell: Cell, requires?: SigilRequirement): void {
-  a.doors.push({ ...aCell, id: aId, targetRoomId: b.id, targetDoorId: bId, requires })
-  b.doors.push({ ...bCell, id: bId, targetRoomId: a.id, targetDoorId: aId, requires })
+function join(a: DrawnRoom, aId: string, b: DrawnRoom, bId: string, requires?: SigilRequirement): void {
+  const door = (from: DrawnRoom, id: string, to: DrawnRoom, toId: string): RoomDoor => {
+    const cell = from.doors.get(id)
+    if (!cell) throw new Error(`${from.room.id} has no ${id} door drawn`)
+    return { ...cell, id, targetRoomId: to.room.id, targetDoorId: toId, requires, ...(from.keyed && KEYED_DOORS.has(id) ? { keyed: true } : {}) }
+  }
+  a.room.doors.push(door(a, aId, b, bId))
+  b.room.doors.push(door(b, bId, a, aId))
 }
+
+/** What each labyrinth asks at its thresholds: on from the porch, in to the
+ *  heart (the loft's door and the fold alike), home from the heart, and the
+ *  porch's shrine gate. */
+const WAYS: Readonly<Record<string, { onward: SigilRequirement; inward: SigilRequirement; home: SigilRequirement; gate: SigilRequirement }>> = {
+  sunseed: { onward: { kind: 'triangle', point: 1 }, inward: { kind: 'triangle', point: 2 }, home: { kind: 'hexagon' }, gate: { kind: 'triangle', point: 1 } },
+  tideglass: { onward: { kind: 'triangle', point: 3 }, inward: { kind: 'triangle', point: 4 }, home: { kind: 'star' }, gate: { kind: 'hexagon' } },
+  starbloom: { onward: { kind: 'star' }, inward: { kind: 'star' }, home: { kind: 'star' }, gate: { kind: 'star' } },
+}
+
+const RELICS: Readonly<Record<string, Partial<Record<RoomSuffix, Omit<RoomRelic, 'col' | 'row'>>>>> = {
+  sunseed: {
+    porch: { id: 'sunseed-point-1', kind: 'triangle', point: 1, lore: 'The terrace kept this point. The steps above hold another.' },
+    steps: { id: 'sunseed-point-2', kind: 'triangle', point: 2, lore: 'The high fold returns through the garden. Its center opens Tideglass.' },
+    heart: { id: 'sunseed-center', kind: 'hexagon', lore: 'A star needs a heart. Join this center with your first three points at Tideglass.' },
+  },
+  tideglass: {
+    porch: { id: 'tideglass-point-3', kind: 'triangle', point: 3, lore: 'Moonlit glass carries the fourth point. Follow the steps upward.' },
+    steps: { id: 'tideglass-point-4', kind: 'triangle', point: 4, lore: 'The last point sleeps in the garden beyond the fold.' },
+    heart: { id: 'tideglass-point-5', kind: 'triangle', point: 5, lore: 'Six points around one heart: the Pyramid of Accord now hears your star.' },
+  },
+  starbloom: {
+    heart: { id: 'starbloom-heart', kind: 'star', lore: 'Every path has a way home. The pyramid is awake.' },
+  },
+}
+
+const ROOM_PLANS: Readonly<Record<string, Readonly<Record<RoomSuffix, RoomPlan>>>> = {
+  sunseed: {
+    // The terrace goblin guards the first point. Break the terrace from the
+    // step beneath it and the goblin walks into the gap to its ruin; climb
+    // through, and the high shelf's left end keeps the inscription's find.
+    porch: {
+      name: 'The Sun Porch', depth: 0,
+      art: [
+        '################',
+        '#.........#....#',
+        '#:........#....#',
+        '#BB.......#K...#',
+        '#..V......#BB..#',
+        '#..B......#....#',
+        '#.B...g..*#....#',
+        '#..BBBBBBB#..BB#',
+        '#.........#....#',
+        '#......BB.|....#',
+        '#?PA......|...>#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '................',
+        '.J..............',
+        '................',
+        '..............u.',
+        '................',
+        '..b.............',
+        '......f.........',
+      ],
+    },
+    // Two goblins hold the floor and the key is buried in their pedestal.
+    // They charge on sight: crush the first where it runs, break the pedestal,
+    // and the second comes for you through the gap. The point waits up the
+    // stair, and the fold runs from the high ledge to the garden.
+    steps: {
+      name: 'Amber Steps', depth: 1,
+      art: [
+        '################',
+        '#..............#',
+        '#.......S*....^#',
+        '#......BBBB.BBB#',
+        '#..............#',
+        '#.....B........#',
+        '#..............#',
+        '#....B.........#',
+        '#..............#',
+        '#...B..........#',
+        '#<P......g.B.g>#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '................',
+        '...........j....',
+        '................',
+        '................',
+        '................',
+        '................',
+        '.....b..........',
+        '................',
+        '....u...........',
+        '...........K....',
+      ],
+    },
+    // The key sits in a sealed brick well with a sparkball loose inside it.
+    // Open the wall, catch the ball in the gap, and break out the far side.
+    loft: {
+      name: 'The Turning Loft', depth: 2,
+      art: [
+        '################',
+        '#..............#',
+        '#...BBBBBB.....#',
+        '#...B....B.....#',
+        '#...B..k.B.....#',
+        '#...B....B.....#',
+        '#...B....B..E..#',
+        '#<P.B.K..B.BBBB#',
+        '#BBBBBBBBB.....#',
+        '#..............#',
+        '#......h......>#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '..............J.',
+        '......F.........',
+        '................',
+        '................',
+        '.........t......',
+        '................',
+        '................',
+        '..b.............',
+      ],
+    },
+    // A gargoil walks the tier and a ghost the high air. Climb to the tier's
+    // edge from below, and when the gargoil stops there to scan, conjure on
+    // it — its tomb is your stair. The key waits where it walked; the
+    // hexagon waits under the ghost.
+    heart: {
+      name: 'The Hexagon Garden', depth: 1,
+      art: [
+        '################',
+        '#...........:..#',
+        '#$......h......#',
+        '###...*........#',
+        '#^...BBBB......#',
+        '#BB............#',
+        '#..K.r.........#',
+        '#..BBBBBBB.....#',
+        '#.........B....#',
+        '#..........B...#',
+        '#<P...........!#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '............J...',
+        '................',
+        '................',
+        '.......t........',
+        '................',
+        '................',
+        '........j.......',
+        '................',
+        '...........b....',
+      ],
+      barriers: [{ col: 2, row: 2, needs: 'ember' }],
+    },
+  },
+  tideglass: {
+    // A ghost sweeps each floor of the hall, smashing any stone in its way —
+    // and whatever that stone held rolls out for you. Crush the low ghost as
+    // it hunts, take the point, climb to the upper hall and meet the other.
+    porch: {
+      name: 'Tideglass Landing', depth: 0,
+      art: [
+        '################',
+        '#..............#',
+        '#:.............#',
+        '#BBB...........#',
+        '#...B..........#',
+        '#.K...B..B...h.#',
+        '#BBBBBBBBBBB...#',
+        '#...........B..#',
+        '#..............#',
+        '#......*.....B.#',
+        '#?P....B...h..>#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '................',
+        '.J..............',
+        '..............F.',
+        '................',
+        '......J..b......',
+        '................',
+        '................',
+        '................',
+        '................',
+        '.......t........',
+      ],
+    },
+    // A turret in the west wall fires along the middle of the stair. Wait for
+    // a bolt to pass, step into the line, and wall it off behind you. The key
+    // is in the high ledge itself: break it and fall through with it.
+    steps: {
+      name: 'The Glass Steps', depth: 1,
+      art: [
+        '################',
+        '#..............#',
+        '#........Q..*.^#',
+        '#.......BBBBBBB#',
+        '#..............#',
+        '#......B.......#',
+        '#n.............#',
+        '#.....B........#',
+        '#..............#',
+        '#....B.........#',
+        '#<P.........g.>#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '................',
+        '...j............',
+        '........b..K..J.',
+        '................',
+        '................',
+        '................',
+        '................',
+        '................',
+        '.....u..........',
+      ],
+    },
+    // Two gargoils walk two tiers. Each stops to scan at its edge — crush
+    // each from below, and climb the tombs you leave.
+    loft: {
+      name: 'Moonlit Loft', depth: 2,
+      art: [
+        '################',
+        '#..............#',
+        '#.............>#',
+        '#..........BBBB#',
+        '#....K..r......#',
+        '#....BBBBB.....#',
+        '#.........B....#',
+        '#.......r......#',
+        '#.......BBBB...#',
+        '#...........BB.#',
+        '#<P...H........#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '.............J..',
+        '................',
+        '................',
+        '................',
+        '......b.........',
+        '................',
+        '................',
+        '.........F......',
+        '............t...',
+      ],
+    },
+    // Two goblins pace the garden's terrace between its bumpers. Break the
+    // terrace from the step below and both walk into the gap in turn — the
+    // key was in the stone you broke. Then the point, under the ghost.
+    heart: {
+      name: 'Six-Point Garden', depth: 1,
+      art: [
+        '################',
+        '#.......h......#',
+        '#......*.......#',
+        '#^.....BB......#',
+        '#BB............#',
+        '#........B...:.#',
+        '#.B.g.....g.B..#',
+        '#.BBBBBBBBBBB..#',
+        '#..............#',
+        '#.....BB.......#',
+        '#<P...........!#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '................',
+        '.............j..',
+        '................',
+        '................',
+        '.............F..',
+        '............b...',
+        '......K.........',
+        '................',
+        '.......t........',
+      ],
+    },
+  },
+  starbloom: {
+    // A goblin rushes you at the door; a dragon holds the tier above and
+    // turns wherever you go. Draw it to the edge from below and crush it.
+    // The key is nowhere to be seen: take the bell, and its fairy drifts to
+    // the square the wand must find.
+    porch: {
+      name: 'Starbloom Landing', depth: 0,
+      art: [
+        '################',
+        '#..............#',
+        '#..............#',
+        '#>:............#',
+        '#BBBBB.........#',
+        '#.....a........#',
+        '#...BBBBBBB....#',
+        '#..........BB..#',
+        '#..............#',
+        '#............B.#',
+        '#?P...b..g.....#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '................',
+        '................',
+        '..J.............',
+        '................',
+        '........K.......',
+        '.....t..........',
+        '...........f....',
+        '................',
+        '.............j..',
+      ],
+    },
+    // Two turrets cross the stair, one from each wall, and every bolt
+    // smashes the brick it meets. Step into each line behind a bolt and wall
+    // it off; the west turret digs the key out of the ledge for you.
+    steps: {
+      name: 'Violet Steps', depth: 1,
+      art: [
+        '################',
+        '#..............#',
+        '#...........^.>#',
+        '#..........BBBB#',
+        '#n.......B.....#',
+        '#.....BBBBB....#',
+        '#.............n#',
+        '#....B.........#',
+        '#..............#',
+        '#...B..........#',
+        '#<P.......g....#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '.............j..',
+        '................',
+        '................',
+        '.........K......',
+        '......u.........',
+        '................',
+        '................',
+        '................',
+        '....b...........',
+      ],
+    },
+    // Two goblins below; above, a ghost tunnels through the gallery's
+    // stones, and what it breaks open is yours — the key, and a life.
+    loft: {
+      name: 'The Folded Loft', depth: 2,
+      art: [
+        '################',
+        '#.:............#',
+        '#>.............#',
+        '#BBB...........#',
+        '#....B.BB.B..h.#',
+        '#BBBBBBBBBBB...#',
+        '#..............#',
+        '#...........B..#',
+        '#..............#',
+        '#............B.#',
+        '#<P.....g...g..#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '..J.............',
+        '................',
+        '................',
+        '.....F.K..+.....',
+        '................',
+        '................',
+        '................',
+        '................',
+        '.............b..',
+      ],
+    },
+    // The star lies in a sealed well with a sparkball loose inside; two
+    // goblins guard the floor. The key home is the classic find: an empty
+    // square by the door that the wand walls in and breaks open.
+    heart: {
+      name: 'The Starbloom Heart', depth: 1,
+      art: [
+        '################',
+        '#..........h...#',
+        '#.............$#',
+        '#......BBBBBB###',
+        '#......B....B..#',
+        '#^.....B.k..B..#',
+        '#BB....B.*..B..#',
+        '#...BBBBBBBBB..#',
+        '#..............#',
+        '#..B...........#',
+        '#<P...g...g..:!#',
+        '################',
+      ],
+      finds: [
+        '................',
+        '................',
+        '................',
+        '.........F......',
+        '................',
+        '................',
+        '................',
+        '.....t..........',
+        '................',
+        '...b............',
+        '.............K..',
+      ],
+      barriers: [{ col: 13, row: 2, needs: 'hold' }],
+    },
+  },
+}
+
 
 function buildRooms(): RoomDef[] {
   const all: RoomDef[] = []
-  for (const [index, labyrinth] of LABYRINTHS.entries()) {
-    const id = labyrinth.id
-    const rooms = [
-      chamber(id, 'porch', ['The Sun Porch', 'Tideglass Landing', 'Starbloom Landing'][index], 0, 0),
-      chamber(id, 'steps', ['Amber Steps', 'The Glass Steps', 'Violet Steps'][index], 1, 1),
-      chamber(id, 'loft', ['The Turning Loft', 'Moonlit Loft', 'The Folded Loft'][index], 2, 2),
-      chamber(id, 'heart', ['The Hexagon Garden', 'Six-Point Garden', 'The Starbloom Heart'][index], 1, 3),
-    ]
-    const [porch, steps, loft, heart] = rooms
-    const pointBase = index === 0 ? 1 : index * 3
-    join(porch, 'deeper', { col: 14, row: 10 }, steps, 'return', { col: 1, row: 10 }, index < 2 ? { kind: 'triangle', point: pointBase } : { kind: 'star' })
-    join(steps, 'deeper', { col: 14, row: 10 }, loft, 'return', { col: 1, row: 10 })
-    join(loft, 'deeper', { col: 14, row: 10 }, heart, 'return', { col: 1, row: 10 }, index === 0 ? { kind: 'triangle', point: 2 } : index === 1 ? { kind: 'triangle', point: 4 } : { kind: 'star' })
-    join(heart, 'home', { col: 14, row: 10 }, porch, 'loop', { col: 1, row: 10 }, index === 0 ? { kind: 'hexagon' } : { kind: 'star' })
+  for (const labyrinth of LABYRINTHS) {
+    const plans = ROOM_PLANS[labyrinth.id], ways = WAYS[labyrinth.id]
+    const drawn = {
+      porch: drawRoom(labyrinth.id, 'porch', plans.porch),
+      steps: drawRoom(labyrinth.id, 'steps', plans.steps),
+      loft: drawRoom(labyrinth.id, 'loft', plans.loft),
+      heart: drawRoom(labyrinth.id, 'heart', plans.heart),
+    }
+    const { porch, steps, loft, heart } = drawn
+    join(porch, 'deeper', steps, 'return', ways.onward)
+    join(steps, 'deeper', loft, 'return')
+    join(loft, 'deeper', heart, 'return', ways.inward)
+    join(heart, 'home', porch, 'loop', ways.home)
     // A second route cuts between depths: the maze is a graph, not a level list.
-    join(steps, 'fold', { col: 7, row: 4 }, heart, 'fold', { col: 7, row: 4 }, index === 0 ? { kind: 'triangle', point: 2 } : index === 1 ? { kind: 'triangle', point: 4 } : { kind: 'star' })
-    if (index === 0) {
-      porch.relics.push({ id: 'sunseed-point-1', kind: 'triangle', point: 1, col: 5, row: 8, lore: 'The amber shelves lead to another point above the steps.' })
-      steps.relics.push({ id: 'sunseed-point-2', kind: 'triangle', point: 2, col: 8, row: 6, lore: 'The high fold returns through the garden. Its center opens Tideglass.' })
-      loft.level.items.push({ col: 8, row: 4, kind: 'superjar' })
-      heart.relics.push({ id: 'sunseed-center', kind: 'hexagon', col: 12, row: 8, lore: 'A star needs a heart. Join this center with your first three points at Tideglass.' })
-    } else if (index === 1) {
-      porch.relics.push({ id: 'tideglass-point-3', kind: 'triangle', point: 3, col: 5, row: 8, lore: 'Moonlit glass carries the fourth point. Follow the steps upward.' })
-      steps.relics.push({ id: 'tideglass-point-4', kind: 'triangle', point: 4, col: 8, row: 6, lore: 'The last point sleeps in the garden beyond the fold.' })
-      heart.relics.push({ id: 'tideglass-point-5', kind: 'triangle', point: 5, col: 12, row: 8, lore: 'Six points around one heart: the Pyramid of Accord now hears your star.' })
-      loft.level.items.push({ col: 8, row: 4, kind: 'superjar' })
-    } else {
-      heart.relics.push({ id: 'starbloom-heart', kind: 'star', col: 12, row: 8, lore: 'Every path has a way home. The pyramid is awake.' })
-      loft.level.items.push({ col: 8, row: 4, kind: 'life' })
+    join(steps, 'fold', heart, 'fold', ways.inward)
+    for (const suffix of ['porch', 'steps', 'loft', 'heart'] as const) {
+      const room = drawn[suffix], relic = RELICS[labyrinth.id]?.[suffix]
+      if (!!relic !== !!room.relic) throw new Error(`${room.room.id} draws ${room.relic ? 'a relic nobody names' : `no square for ${relic?.id}`}`)
+      if (relic && room.relic) room.room.relics.push({ ...relic, ...room.relic })
+      for (const gate of room.gates) room.room.gates.push({ ...gate, requires: ways.gate })
+      all.push(room.room)
     }
-    // The Hush's own content (§6.11) — a genuinely separate placement pass:
-    // zero coordinate overlap with the relics/pickups above. Every stele/chest
-    // sits on the room's floor or an existing shelf the pinned playthrough
-    // never stands on for long enough to matter (steles/chests are E-gated
-    // only, never touch-triggered, so walking past one does nothing either
-    // way — §5.3). Both barriers use the 'heart' chamber's own west shelf
-    // (row 6, cols 2-3 — layout 3's own `ledge(2,6,2)`, present in every
-    // labyrinth's heart room), well clear of the pinned route's fold/return/
-    // home approaches, since neither `ember` nor `hold` is ever learned
-    // during that route (interact() is never called there beyond the Stand's
-    // own arming line, §7.12) and a barrier the route actually crossed would
-    // wall the walkthrough shut for the rest of its run.
-    if (index === 0) {
-      porch.level.items.push(
-        { col: 3, row: 10, kind: 'stele', gives: 'stand' },     // Stele of the Stand — one tile from spawn, no platforming
-        { col: 4, row: 2, kind: 'stele', gives: 'ward' },       // Sundial Stone — the porch's own highest shelf
-      )
-      steps.level.items.push({ col: 12, row: 8, kind: 'chest', gives: 'sickle' })   // Sickle of the Sun — above the goblin's beat
-      loft.level.items.push({ col: 3, row: 2, kind: 'stele', gives: 'ember' })      // Hearth Stone — the loft's upper shelf
-      heart.level.items.push({ col: 2, row: 5, kind: 'barrier', needs: 'ember' })   // sealed until Ember is learned in the loft
-      heart.level.tiles[5 * ROOM_COLS + 2] = WALL
-    } else if (index === 1) {
-      steps.level.items.push({ col: 12, row: 8, kind: 'chest', gives: 'sling' })    // Tideglass Sling — the right-side shelf
-      loft.level.items.push({ col: 3, row: 2, kind: 'stele', gives: 'hold' })       // Hourglass Stone — the loft's upper shelf
-      // tideglass-heart: no new content — the existing gargoil duel already
-      // proves Ward's reflect against a telegraphed shot (§6.11).
-    } else {
-      heart.level.items.push({ col: 2, row: 5, kind: 'barrier', needs: 'hold' })    // the gauntlet's one gated reward
-      heart.level.tiles[5 * ROOM_COLS + 2] = WALL
-    }
-    if (index < 2) {
-      // The scrolling expedition's inscription names this exact empty square:
-      // above the left end of the porch's highest shelf (col 2, row 3).
-      // Its first cast makes a stone; breaking the same stone reveals the cache.
-      porch.level.items.push({ col: 2, row: 2, kind: 'treasure', value: 5000, hidden: true, secret: true, deep: true })
-    }
-    // These linked square tiles visibly open as an ability is acquired.
-    const requirement: SigilRequirement = index === 0 ? { kind: 'triangle', point: 1 } : index === 1 ? { kind: 'hexagon' } : { kind: 'star' }
-    for (const row of [9, 10]) {
-      porch.gates.push({ col: 10, row, requires: requirement })
-      porch.level.tiles[row * ROOM_COLS + 10] = WALL
-    }
-    // Relics own their tile; ordinary pickups should not obscure the sigil.
-    for (const room of rooms) room.level.items = room.level.items.filter(item => !room.relics.some(relic => relic.col === item.col && relic.row === item.row))
-    all.push(...rooms)
   }
   return all
 }
@@ -534,12 +963,23 @@ export class LabyrinthJourney {
   get weapon(): WeaponKind | null { return this.engine?.weapon ?? this.#stats.weapon }
   get spell(): SpellKind | null { return this.engine?.spell ?? this.#stats.spell }
 
+  /** A door opens when its sigil is held and — for the way on — once this
+   *  room's own key is in hand. The key is the room's; a fresh visit asks again. */
+  canPass(door: RoomDoor): boolean {
+    return this.has(door.requires) && (!door.keyed || this.engine?.doorOpen === true)
+  }
+
+  /** Why a shut door is shut, in the words the room says it. */
+  lockMessage(door: RoomDoor): string {
+    return this.has(door.requires) ? 'This room’s key opens this door.' : `${describeRequirement(door.requires)} opens this passage.`
+  }
+
   useDoor(id?: string): DoorResult {
     if (!this.room || !this.engine || this.engine.state !== 'playing') return { kind: 'inactive', message: 'Enter a labyrinth to use its doors.' }
     const nearby = this.nearDoor()
     if (!nearby || (id !== undefined && nearby.id !== id)) return { kind: 'out-of-range', message: 'Stand beside a door, then press E.' }
     if (nearby.id === this.#arrivalDoor) return { kind: 'out-of-range', message: 'Step away from the arrival door before returning.' }
-    if (!this.has(nearby.requires)) return { kind: 'locked', message: `${describeRequirement(nearby.requires)} opens this passage.` }
+    if (!this.canPass(nearby)) return { kind: 'locked', message: this.lockMessage(nearby) }
     const target = this.rooms.get(nearby.targetRoomId)
     if (!target || !this.#enter(target.id, nearby.targetDoorId)) return { kind: 'inactive', message: 'This passage has no connected room.' }
     return { kind: 'travelled', message: target.level.name }

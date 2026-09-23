@@ -24,7 +24,8 @@ export const STORY: readonly StorySeat[] = [
   { entrance: 'six-roads/stairs-down',     place: 'accord-sanctum' },
   { entrance: 'island/chandler-door',      place: 'chandler-house' },
   { entrance: 'chandler-house/trapdoor',   place: 'chandler-cellar' },
-  { entrance: 'island/valley-grove',       place: 'hollow-grove' },
+  { entrance: 'island/valley-grove',       place: 'greenwood' },
+  { entrance: 'greenwood/old-hollow',      place: 'hollow-grove' },
 ]
 
 export type StorySlotLook = TreasureKind | 'triangle' | 'hexagon' | 'star' | 'socket' | 'place' | 'task' | 'plot' | 'memory'
@@ -101,6 +102,7 @@ const PLACE_SLOTS: readonly StorySlot[] = [
   { id: 'accord-sanctum', name: 'The Accord Sanctum', look: 'place', fills: { done: 'accord-sanctum' }, attainment: 'place:accord-sanctum' },
   { id: 'chandler-house', name: 'Wenna’s House', look: 'place', fills: { done: 'chandler-house' }, attainment: 'place:chandler-house' },
   { id: 'chandler-cellar', name: 'Wenna’s Cellar', look: 'place', fills: { done: 'chandler-cellar' }, attainment: 'place:chandler-cellar' },
+  { id: 'greenwood', name: 'The Greenwood', look: 'place', fills: { done: 'greenwood' }, attainment: 'place:greenwood' },
   { id: 'hollow-grove', name: 'The Hollow Grove', look: 'place', fills: { done: 'hollow-grove' }, attainment: 'place:hollow-grove' },
   { id: 'labyrinth', name: 'A labyrinth', look: 'place', fills: { done: 'labyrinth' }, attainment: 'place:labyrinth' },
   { id: 'grove-plot', name: 'Old Grove Plot', look: 'plot', fills: { done: 'island/found:grove-plot' }, attainment: 'plot:grove-plot' },
@@ -174,8 +176,10 @@ export const STORY_GUIDE: readonly GuideStep[] = [
     when: PYRAMID_HEART, done: { knows: 'highland-accord' } },
   { id: 'wenna', text: 'Knock at Wenna’s door in Saltmere, south of the valley, and find her cellar.', target: 'chandler-door',
     when: PYRAMID_HEART, done: { done: 'chandler-cellar' } },
-  { id: 'grove', text: 'Push your way into the dense grove in the heart of the valley.', target: 'valley-grove',
-    when: PYRAMID_HEART, done: { done: 'hollow-grove' } },
+  { id: 'grove', text: 'Push your way into the dense grove in the heart of the valley. A whole wood waits inside.', target: 'valley-grove',
+    when: PYRAMID_HEART, done: { done: 'greenwood' } },
+  { id: 'hollow', text: 'Find the old hollow in the Greenwood, west of Still Pond.', target: 'old-hollow',
+    when: { done: 'greenwood' }, done: { done: 'hollow-grove' } },
   { id: 'garden', text: 'Open the three coffers hidden in the Brick Garden with your wand.', target: 'hollis',
     when: PYRAMID_HEART, done: { all: [{ done: 'island/cache:court-cache' }, { done: 'island/cache:pond-cache' }, { done: 'island/cache:nook-cache' }] } },
   { id: 'plots', text: 'Every place is found. The empty plots are waiting for shrines other travellers will build.', done: { any: [] } },

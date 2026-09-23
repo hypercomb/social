@@ -10,6 +10,8 @@ import type { GroupRecord } from './chamber-places.js'
 import { CHAMBERS, GROUPS } from './chamber-places.js'
 import { WORLD_AREAS, WORLD_DOORS, WORLD_DUNGEONS, WORLD_PLOTS, WORLD_SHRINES } from './rpg-overworld.js'
 import { STORY } from './story.js'
+import { GREENWOOD } from './worlds.js'
+import type { WorldDefinition } from './rpg-overworld.js'
 
 export interface SeatLabel { readonly name: string; readonly subtitle: string; readonly levels: number }
 
@@ -22,6 +24,16 @@ export const ISLAND_PLACE: PlaceDefinition = {
   id: 'island', name: 'The Sevenfold Valley', subtitle: 'A walking island of shrines, caves and roads', kind: 'island',
   entrances: [...WORLD_SHRINES, ...WORLD_DUNGEONS, ...WORLD_DOORS, ...WORLD_AREAS, ...WORLD_PLOTS].map(p => p.id),
   arrivals: [{ id: 'valley', name: 'The Sevenfold Valley' }],
+}
+
+/** A world below the island is walked like the island: its entrances are
+ *  every portal, grove and plot it holds, and one arrival — where it starts. */
+export function worldPlace(world: WorldDefinition): PlaceDefinition {
+  return {
+    id: world.id, name: world.name, subtitle: world.subtitle, kind: 'island',
+    entrances: [...world.shrines, ...world.dungeons, ...world.doors, ...world.areas, ...world.plots].map(p => p.id),
+    arrivals: [{ id: 'start', name: world.name }],
+  }
 }
 
 /** One place, reached through three different shrine doors, each landing at
@@ -56,6 +68,7 @@ function chamberPlace(definition: (typeof CHAMBERS)[number]): PlaceDefinition {
 export const PLACES: PlaceCatalog = new Map<string, PlaceDefinition>([
   [ISLAND_PLACE.id, ISLAND_PLACE],
   [LABYRINTH_PLACE.id, LABYRINTH_PLACE],
+  [GREENWOOD.id, worldPlace(GREENWOOD)],
   ...CHAMBERS.map((definition): [string, PlaceDefinition] => [definition.id, chamberPlace(definition)]),
 ])
 

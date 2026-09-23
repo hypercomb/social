@@ -3,10 +3,11 @@ import { isWalkableTerrain } from './island.js'
 import {
   ISLAND_DEF, RpgOverworld, RpgOverworldView, WORLD_AREAS, WORLD_CACHES, WORLD_DOORS, WORLD_DUNGEONS, WORLD_ENCOUNTERS, WORLD_PEOPLE, WORLD_PLOTS,
   WORLD_PUSH_DELAY, WORLD_RESIDENTS, WORLD_SHRINES, WORLD_SIGNS, WORLD_COLS, WORLD_ROWS, WORLD_START,
-  componentKey, shrinePolygon, valleyPoint, worldTerrain,
+  componentKey, shrinePolygon, valleyPoint, worldEncounters, worldTerrain,
   type ShrineComponent, type WorldHooks, type WorldRelic,
 } from './rpg-overworld.js'
 import { STORY_GUIDE } from './story.js'
+import { WORLDS } from './worlds.js'
 import type { StoryWhen } from './story-when.js'
 
 /** Built cells the wand can open: a cracked brick, a rune spring, a seal whose plates are reachable. */
@@ -58,8 +59,9 @@ describe('people say more as the story moves, and the guide points at real place
     expect(new RpgOverworld(run.hooks).personLine(mira)).toBe(mira.insight)
   })
 
-  it('every guide step with a target names an island encounter or area', () => {
-    const ids = new Set([...WORLD_ENCOUNTERS.map(place => place.id), ...WORLD_AREAS.map(area => area.id)])
+  it('every guide step with a target names an encounter or area in one of the worlds', () => {
+    const ids = new Set([...WORLDS.values()].flatMap(world => [...worldEncounters(world).map(place => place.id), ...world.areas.map(area => area.id)]))
+    expect(new Set([...WORLD_ENCOUNTERS.map(place => place.id), ...WORLD_AREAS.map(area => area.id)]).size).toBeGreaterThan(0)
     for (const step of STORY_GUIDE) if (step.target) expect(ids.has(step.target), step.id).toBe(true)
   })
 })

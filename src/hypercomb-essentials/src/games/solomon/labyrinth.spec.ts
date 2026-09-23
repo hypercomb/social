@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BRICK, EMPTY, Engine, TILE, WALL, type LevelDef } from './engine.js'
-import { LABYRINTHS, LabyrinthJourney, ROOM_COLS, ROOM_ROWS, ROOMS, type RoomDef, type RoomRelic } from './labyrinth.js'
+import { LABYRINTHS, LabyrinthJourney, ROOM_COLS, ROOM_ROWS, ROOMS, roomId, type RoomDef, type RoomRelic } from './labyrinth.js'
 
 function start(): LabyrinthJourney {
   const journey = new LabyrinthJourney()
@@ -15,10 +15,17 @@ function collect(journey: LabyrinthJourney, relic: RoomRelic): void {
   expect(journey.collected(relic.id)).toBe(true)
 }
 
+/** An open square in every room, well away from its doors. */
+const AWAY = { col: 7, row: 1 }
+
+/** Walk the door graph. A keyed door's key is the room's own business, and
+ *  the physical playthrough fights for every one; here the key is simply in
+ *  hand. */
 function travel(journey: LabyrinthJourney, id: string): void {
-  journey.engine!.arrive({ col: 5, row: 2 })
+  journey.engine!.arrive(AWAY)
   journey.update(0) // leave the arrival door before deliberately returning
   const door = journey.room!.doors.find(candidate => candidate.id === id)!
+  if (door.keyed) journey.engine!.doorOpen = true
   journey.engine!.arrive(door)
   expect(journey.useDoor(id).kind).toBe('travelled')
 }
@@ -58,6 +65,25 @@ describe('the interconnected Solomon labyrinth', () => {
     }
   })
 
+  it('draws every room its own way: a key the way on waits for, foes to fight, and finds buried both in stone and in the air', () => {
+    expect(ROOMS).toHaveLength(12)
+    expect(new Set(ROOMS.map(room => room.level.tiles.join(''))).size).toBe(ROOMS.length)
+    for (const room of ROOMS) {
+      const { level } = room, at = (col: number, row: number): number => level.tiles[row * level.cols + col]
+      expect(level.items.filter(item => item.kind === 'key'), room.id).toHaveLength(1)
+      const onward = room.doors.filter(door => door.id === 'deeper' || door.id === 'home')
+      expect(onward.length, room.id).toBeGreaterThan(0)
+      for (const door of onward) expect(door.keyed, `${room.id} ${door.id}`).toBe(true)
+      for (const door of room.doors.filter(door => door.id !== 'deeper' && door.id !== 'home')) expect(door.keyed, `${room.id} ${door.id}`).toBeUndefined()
+      expect(level.enemies.length + level.mirrors.length, room.id).toBeGreaterThan(0)
+      const buried = level.items.filter(item => item.hidden)
+      expect(buried.length, room.id).toBeGreaterThanOrEqual(3)
+      // In a brick: break it. In the air: the wand finds it (or walls it in first).
+      expect(buried.some(item => !item.secret && at(item.col, item.row) === BRICK), room.id).toBe(true)
+      expect(buried.some(item => item.secret && at(item.col, item.row) === EMPTY), room.id).toBe(true)
+    }
+  })
+
   it('counts the door she is set down beside as her arrival door, so a spawn, a retry or a respawn never passes straight through it', () => {
     const journey = start()
     journey.grantRelic({ id: 'test-hexagon', kind: 'hexagon' })
@@ -67,9 +93,9 @@ describe('the interconnected Solomon labyrinth', () => {
     journey.update(0)
     expect(journey.arrivalDoor).toBe('loop')
     travel(journey, 'loop')
-    expect(journey.room!.id).toBe('sunseed-heart')
+    expect(journey.room!.id).toBe(roomId('sunseed', 'heart'))
     expect(journey.arrivalDoor).toBe('home')
-    journey.engine!.arrive({ col: 5, row: 2 })
+    journey.engine!.arrive(AWAY)
     journey.update(0)
     expect(journey.arrivalDoor).toBeNull()
     // A retry sets her down at the start, beside the door to the loft.
@@ -77,11 +103,11 @@ describe('the interconnected Solomon labyrinth', () => {
     expect(journey.arrivalDoor).toBe('return')
     // So does a death.
     travel(journey, 'home')
-    expect(journey.room!.id).toBe('sunseed-porch')
+    expect(journey.room!.id).toBe(roomId('sunseed', 'porch'))
     collect(journey, journey.room!.relics[0]!)
     travel(journey, 'deeper')
-    expect(journey.room!.id).toBe('sunseed-steps')
-    journey.engine!.arrive({ col: 5, row: 2 })
+    expect(journey.room!.id).toBe(roomId('sunseed', 'steps'))
+    journey.engine!.arrive(AWAY)
     journey.update(0)
     expect(journey.arrivalDoor).toBeNull()
     const foe = journey.room!.level.enemies[0]!
@@ -138,9 +164,17 @@ describe('the interconnected Solomon labyrinth', () => {
     expect(journey.engine!.state).toBe('playing')
     expect(journey.useDoor().kind).toBe('locked')
     journey.grantRelic({ id: 'test-point-1', kind: 'triangle', point: 1 })
+    // The sigil is held; the way on still waits for the room's own key.
+    expect(journey.useDoor()).toEqual({ kind: 'locked', message: 'This room’s key opens this door.' })
+    const key = journey.engine!.items.find(item => item.kind === 'key')!
+    journey.engine!.arrive(key)
+    journey.update(0)
+    expect(journey.engine!.doorOpen).toBe(true)
+    journey.engine!.arrive(door)
+    journey.update(0)
     expect(journey.useDoor().kind).toBe('travelled')
     expect(journey.useDoor('return').kind).toBe('out-of-range')
-    expect(journey.room!.id).toBe('sunseed-steps')
+    expect(journey.room!.id).toBe(roomId('sunseed', 'steps'))
   })
 
   it('starts every room fresh on return — blocks, enemies and items reset — while stats and relics follow the player', () => {
@@ -157,7 +191,7 @@ describe('the interconnected Solomon labyrinth', () => {
     steps.score = 4500
     travel(journey, 'return')
     // The room she left is forgotten the moment she leaves it.
-    expect(journey.engines.has('sunseed-steps')).toBe(false)
+    expect(journey.engines.has(roomId('sunseed', 'steps'))).toBe(false)
     expect(journey.engine!.lives).toBe(2)
     expect(journey.engine!.ammo).toEqual([true, false])
     expect(journey.engine!.score).toBe(4500)
@@ -175,12 +209,12 @@ describe('the interconnected Solomon labyrinth', () => {
     expect(again.items[0].taken).toBe(false)
     expect(again.score).toBe(5000)
     expect(again.lives).toBe(2)
-    expect([...journey.engines.keys()]).toEqual(['sunseed-steps'])
+    expect([...journey.engines.keys()]).toEqual([roomId('sunseed', 'steps')])
     // Going up to the island and back in lands in the same room, fresh: the
     // shell re-enters the labyrinth without ever calling leave().
     again.setTile(4, 2, BRICK)
     expect(journey.enterLabyrinth('sunseed')).toBe(true)
-    expect(journey.room!.id).toBe('sunseed-steps')
+    expect(journey.room!.id).toBe(roomId('sunseed', 'steps'))
     expect(journey.engine).not.toBe(again)
     expect(journey.engine!.tileAt(4, 2)).toBe(EMPTY)
     expect(journey.engine!.lives).toBe(2)
@@ -229,6 +263,8 @@ describe('the interconnected Solomon labyrinth', () => {
 
   it('retains single-room automatic exits and resets casting position on a depth arrival', () => {
     const engine = new Engine({ ...ROOMS[0].level, interconnected: false })
+    engine.arrive(engine.items.find(item => item.kind === 'key')!)
+    engine.update(0)
     engine.arrive(engine.level.door)
     engine.update(0)
     expect(engine.state).toBe('won')
@@ -283,23 +319,26 @@ describe('the interconnected Solomon labyrinth', () => {
   })
 
   it('pays off the expedition clue by making then breaking stone above the highest left porch shelf', () => {
-    for (const id of ['sunseed-porch', 'tideglass-porch']) {
+    for (const id of [roomId('sunseed', 'porch'), roomId('tideglass', 'porch')]) {
       const room = ROOMS.find(candidate => candidate.id === id)!
       const engine = new Engine(room.level)
       const secret = engine.items.find(item => item.secret && item.deep)!
-      expect({ col: secret.col, row: secret.row }).toEqual({ col: 2, row: 2 })
-      expect(engine.tileAt(secret.col, secret.row + 1)).toBe(BRICK)
+      // Over the left end of the room's highest left shelf, as the crystals say.
+      const shelf = { col: secret.col, row: secret.row + 1 }
+      expect(engine.tileAt(shelf.col, shelf.row)).toBe(BRICK)
+      expect(engine.tileAt(shelf.col - 1, shelf.row)).not.toBe(BRICK)
+      for (let row = 1; row < shelf.row; row++) for (let col = 1; col < ROOM_COLS / 2; col++) expect(engine.tileAt(col, row)).not.toBe(BRICK)
       expect(engine.tileAt(secret.col, secret.row)).toBe(EMPTY)
-      engine.arrive({ col: 3, row: 2 }, -1)
-      expect(engine.targetCell()).toEqual({ col: 2, row: 2 })
+      engine.arrive({ col: secret.col + 1, row: secret.row }, -1)
+      expect(engine.targetCell()).toEqual({ col: secret.col, row: secret.row })
       expect(engine.cast()).toBe('conjure')
-      expect(engine.tileAt(2, 2)).toBe(BRICK)
+      expect(engine.tileAt(secret.col, secret.row)).toBe(BRICK)
       expect(secret.hidden).toBe(true)
       expect(engine.cast()).toBe('dispel')
-      expect(engine.tileAt(2, 2)).toBe(EMPTY)
+      expect(engine.tileAt(secret.col, secret.row)).toBe(EMPTY)
       expect(secret.hidden).toBe(false)
       expect(engine.secretFlash).toBe(1)
-      engine.arrive({ col: 2, row: 2 })
+      engine.arrive({ col: secret.col, row: secret.row })
       engine.update(0)
       expect(secret.taken).toBe(true)
       expect(engine.score).toBe(5000)

@@ -250,7 +250,7 @@ export class LabyrinthRoomView {
       const relic = room.relics.find(r => r.col === cell.col && r.row === cell.row && !this.journey.collected(r.id))
       const gate = room.gates?.find(g => g.col === cell.col && g.row === cell.row)
       const terrain = cell.code === WALL ? 'wall' : cell.code === BRICK ? 'brick' : cell.code === CRACKED ? 'cracked' : 'air'
-      const locked = !!door && !this.journey.has(door.requires)
+      const locked = !!door && !this.journey.canPass(door)
       const gateLocked = !!gate && !this.journey.has(gate.requires)
       const variant = (cell.col * 7 + cell.row * 13) % ROOM_TILE_VARIANTS
       const description = `${terrain}|${door?.id ?? ''}|${locked}|${door ? this.journey.visited.has(door.targetRoomId) : ''}|${relic?.id ?? ''}|${gateLocked}|${this.#tilePx}|${variant}`
@@ -294,7 +294,7 @@ export class LabyrinthRoomView {
         passage.dataset['door'] = door.id
         passage.dataset['shape'] = doorShape(door.targetRoomId)
         passage.style.setProperty('--door-h', String(doorHue(door.targetRoomId)))
-        label = `Door to ${target?.level.name ?? 'a chamber'}, depth ${target?.depth ?? room.depth}${locked ? ` — needs ${describeRequirement(door.requires)}` : known ? ' — you have been there' : ''}`
+        label = `Door to ${target?.level.name ?? 'a chamber'}, depth ${target?.depth ?? room.depth}${locked ? ` — needs ${this.journey.has(door.requires) ? 'this room’s key' : describeRequirement(door.requires)}` : known ? ' — you have been there' : ''}`
         passage.title = label
         passage.setAttribute('aria-label', label)
         if (target) passage.append(this.#seed(target))
@@ -325,7 +325,7 @@ export class LabyrinthRoomView {
     const doorTarget = door ? this.journey.rooms.get(door.targetRoomId) : undefined
     const text = engine.state === 'gameover' ? 'Try again with R. Your knowledge and collected pieces stay with you.'
       : door && door.id === this.journey.arrivalDoor ? 'Step away from this door, and back into it, to return.'
-      : door ? (this.journey.has(door.requires) ? `A door to ${doorTarget?.level.name ?? 'another chamber'} — walk through.` : `This door needs ${describeRequirement(door.requires)}.`)
+      : door ? (this.journey.canPass(door) ? `A door to ${doorTarget?.level.name ?? 'another chamber'} — walk through.` : this.journey.lockMessage(door))
       : 'Arrows / WASD move · Space jump · Z conjure / dispel · X fire · walk into a door to pass through · M world'
     const gear = [engine.weapon, engine.spell].filter((skill): skill is NonNullable<typeof skill> => !!skill).map(skill => SKILL_NAMES[skill]).join(' / ')
     const stats = `Lives ${engine.lives} · Score ${engine.score.toLocaleString()} · Fire ${engine.ammo.length}${gear ? ` · ${gear}` : ''}`

@@ -4,18 +4,18 @@ import {
   ISLAND_PLACE, LABYRINTH_PLACE, LEGACY_DUNGEON_ARTIFACT, LEGACY_DUNGEON_INDEX, LEGACY_KNOWLEDGE_GROUPS, PLACES,
   authoredItemName, crumbLabel, floorLabel, groupEntry, groupFloors, groupOfPlace, knowledgeGroup, placeName, seatLabel,
 } from './places.js'
-import { entranceKey, splitEntranceKey, validateStory, type PlaceStep } from './place.js'
+import { entranceKey, routeTo, splitEntranceKey, validateStory, type PlaceStep } from './place.js'
 import { ATTAINMENTS } from './attainments.js'
 import { storyRefs } from './story-when.js'
 import { COMBAT_SKILLS } from './engine.js'
 
 describe('STORY', () => {
-  it('has exactly the twelve seats the spec pins, in order', () => {
+  it('has exactly the thirteen seats the spec pins, in order', () => {
     expect(STORY.map(seat => seat.entrance)).toEqual([
       'island/dawn-shrine', 'island/tide-shrine', 'island/pyramid-shrine',
       'island/wayfarer-cavern', 'wet-steps/stairs-down', 'cistern/stairs-down',
       'island/highland-cavern', 'hall-of-hours/stairs-down', 'six-roads/stairs-down',
-      'island/chandler-door', 'chandler-house/trapdoor', 'island/valley-grove',
+      'island/chandler-door', 'chandler-house/trapdoor', 'island/valley-grove', 'greenwood/old-hollow',
     ])
   })
 
@@ -24,9 +24,10 @@ describe('STORY', () => {
     expect(shrines.map(seat => seat.arrive)).toEqual(['sunseed', 'tideglass', 'starbloom'])
   })
 
-  it('the Hollow Grove is seated exactly once, off the island, with no arrive override', () => {
-    const grove = STORY.find(seat => seat.place === 'hollow-grove')
-    expect(grove).toEqual({ entrance: 'island/valley-grove', place: 'hollow-grove' })
+  it('the valley grove opens onto a whole world, and the Hollow Grove is one room inside it', () => {
+    expect(STORY.filter(seat => seat.place === 'greenwood')).toEqual([{ entrance: 'island/valley-grove', place: 'greenwood' }])
+    expect(STORY.filter(seat => seat.place === 'hollow-grove')).toEqual([{ entrance: 'greenwood/old-hollow', place: 'hollow-grove' }])
+    expect(routeTo(STORY, PLACES, ROOT_PLACE, 'hollow-grove')?.map(step => step.place)).toEqual(['island', 'greenwood', 'hollow-grove'])
   })
 
   it('validates clean against PLACES, rooted at ROOT_PLACE', () => {
@@ -46,7 +47,7 @@ describe('STORY', () => {
 describe('PLACES', () => {
   it('opens with island, then labyrinth, then every chamber in CHAMBERS\' own order', () => {
     expect([...PLACES.keys()]).toEqual([
-      'island', 'labyrinth',
+      'island', 'labyrinth', 'greenwood',
       'wet-steps', 'cistern', 'spring-heart', 'hall-of-hours', 'six-roads', 'accord-sanctum',
       'chandler-house', 'chandler-cellar', 'hollow-grove',
     ])

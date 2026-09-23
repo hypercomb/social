@@ -12,10 +12,10 @@
 // from here today.
 
 import { BRICK, CRACKED, SIM_DT, SKILL_NAMES, WALL, type CombatSkillId, type Engine } from './engine.js'
-import { ROOMS, describeRequirement, type LabyrinthJourney, type RoomDef } from './labyrinth.js'
+import { ROOMS, type LabyrinthJourney, type RoomDef } from './labyrinth.js'
 import { LabyrinthRoomView, doorHue } from './labyrinth-view.js'
 import type { SolomonTileSurface, LoadedTileRoom } from './tile-surface.js'
-import { RpgOverworldView, type WorldGainRequest } from './rpg-overworld.js'
+import { RpgOverworldView, SEVENFOLD_VALLEY, type WorldDefinition, type WorldGainRequest } from './rpg-overworld.js'
 import type { MoveInput, ChamberDefinition } from './chamber.js'
 import { ChamberView, type ChamberGainRequest, type ChamberInstruments, type ChamberSound } from './chamber-view.js'
 import type { StorySeat, PlaceSeed } from './place.js'
@@ -168,13 +168,15 @@ function worldGainRequest(request: WorldGainRequest): GainRequest {
 
 // ── island ──────────────────────────────────────────────────────────────
 
+/** A world walked on foot — the island, or any world inside it. */
 export class IslandRuntime implements PlaceRuntime {
-  readonly place = 'island'
+  readonly place: string
   readonly host: HTMLElement
   readonly view: RpgOverworldView
   readonly #shell: RuntimeShell
 
-  constructor(host: HTMLElement, shell: RuntimeShell) {
+  constructor(host: HTMLElement, shell: RuntimeShell, world: WorldDefinition = SEVENFOLD_VALLEY) {
+    this.place = world.id
     this.host = host
     this.#shell = shell
     this.view = new RpgOverworldView({
@@ -188,13 +190,18 @@ export class IslandRuntime implements PlaceRuntime {
       found: id => shell.found(this.place, id),
       seatSeed: id => shell.seatSeed(this.place, id),
       holds: when => storyHolds(when, shell.facts()),
-    })
+    }, world)
     this.view.mount(host)
   }
 
   prepare(_seat: StorySeat, _cancelled: () => boolean): true { return true }
   canResume(): boolean { return true }
-  show(_arrival: RuntimeArrival): void { this.host.hidden = false }
+  /** Coming down into a world, you stand where it starts; coming back up,
+   *  you stand where you went in. */
+  show(arrival: RuntimeArrival): void {
+    if (arrival.from === 'above') this.view.model.enterAtStart()
+    this.host.hidden = false
+  }
   hide(): void { this.host.hidden = true }
   update(dt: number, input: MoveInput): void { this.view.update(dt, input) }
   interact(): void { this.view.interact() }
@@ -506,10 +513,10 @@ export class LabyrinthRuntime implements PlaceRuntime {
     const door = this.#journey.nearDoor()
     if (!door) { this.#lockedSaid = ''; return }
     if (door.id === this.#journey.arrivalDoor) return
-    if (!this.#journey.has(door.requires)) {
+    if (!this.#journey.canPass(door)) {
       if (this.#lockedSaid !== door.id) {
         this.#lockedSaid = door.id
-        this.#shell.message(`${describeRequirement(door.requires)} opens this door.`)
+        this.#shell.message(this.#journey.lockMessage(door))
         this.#shell.sound('door-locked')
       }
       return

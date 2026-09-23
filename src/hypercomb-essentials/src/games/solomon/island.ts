@@ -46,12 +46,20 @@ export const STAMP_LEGEND: Readonly<Record<string, IslandTerrain>> = {
   '.': 'grass', 's': 'sand', '#': 'path', 'P': 'plaza', 'T': 'tree', '~': 'water', 'h': 'hill', 'A': 'rock',
   'W': 'brick', 'B': 'crack', 'r': 'rune', 'm': 'spring', 'S': 'seal',
 }
+/** What rings a world. An island stands in the sea; a world entered from
+ *  inside another — a grove, a cave, a painting — is closed by old trees or
+ *  by cliffs, so its edge is land you cannot cross rather than water. */
+export type IslandEdge = 'sea' | 'wood' | 'cliff'
 export interface IslandDef {
   seed: number
   cols: number
   rows: number
-  /** The hand-authored starting valley; its local (0, 0) sits at this cell. */
-  valley: { col: number; row: number; name: string }
+  /** The sea when absent. */
+  edge?: IslandEdge
+  /** The hand-authored starting valley; its local (0, 0) sits at this cell.
+   *  Only the first island has one — a world inside a world starts from its
+   *  own towns and clearings. */
+  valley?: { col: number; row: number; name: string }
   /** The mountain range: the land rises toward this line. */
   spine: { name: string; points: readonly IslandPoint[] }
   forests: readonly IslandCircle[]
@@ -121,7 +129,7 @@ export function islandTerrainAt(island: Island, col: number, row: number): Islan
 
 export function islandRegionAt(island: Island, x: number, y: number): string {
   const { valley, regions, spine, wilds } = island.def
-  if (x >= valley.col && x < valley.col + VALLEY_COLS && y >= valley.row && y < valley.row + VALLEY_ROWS) return valley.name
+  if (valley && x >= valley.col && x < valley.col + VALLEY_COLS && y >= valley.row && y < valley.row + VALLEY_ROWS) return valley.name
   for (const stamp of island.def.stamps) {
     if (x >= stamp.col && x < stamp.col + stampWidth(stamp) && y >= stamp.row && y < stamp.row + stamp.map.length) return stamp.name
   }
@@ -141,6 +149,7 @@ export function islandHash(x: number, y: number, salt: number): number {
 
 export function buildIsland(def: IslandDef): Island {
   const { cols, rows, seed, valley } = def
+  const rim: IslandTerrain | null = def.edge === 'wood' ? 'tree' : def.edge === 'cliff' ? 'rock' : null
   const grid = new Uint8Array(cols * rows)
   // Settled ground — the valley and its margin, towns, clearings — is flat
   // and dry, and rivers pass around the people living on it.
@@ -158,7 +167,10 @@ export function buildIsland(def: IslandDef): Island {
     const index = y * cols + x
     const nx = (x + 0.5) / cols * 2 - 1, ny = (y + 0.5) / rows * 2 - 1
     const distance = Math.hypot(nx, ny) * (1 + (fbm(x * 0.03, y * 0.03, seed + 7) - 0.5) * 0.9)
-    const land = 1 - smoothstep(0.62, 0.95, distance)
+    const coast = 1 - smoothstep(0.62, 0.95, distance)
+    // A walled world keeps its ground dry to the edge; the edge itself is
+    // decided below, after the ground is classified.
+    const land = rim ? 1 : coast
     let height = land * (0.42 + (fbm(x * 0.045, y * 0.045, seed) - 0.5) * 0.3) - (1 - land) * 0.1
     const hollows = fbm(x * 0.02, y * 0.02, seed + 3, 3)
     if (hollows < 0.36) height -= (0.36 - hollows) * 1.6 * land
@@ -168,7 +180,7 @@ export function buildIsland(def: IslandDef): Island {
       const t = Math.hypot(x - lake.x, y - lake.y) / lake.r
       if (t < 1.6) height = Math.min(height, 0.2 + Math.max(0, t - 1) * 0.25)
     }
-    let settled = x >= valley.col - 3 && x < valley.col + VALLEY_COLS + 3 && y >= valley.row - 3 && y < valley.row + VALLEY_ROWS + 3
+    let settled = !!valley && x >= valley.col - 3 && x < valley.col + VALLEY_COLS + 3 && y >= valley.row - 3 && y < valley.row + VALLEY_ROWS + 3
     for (const { stamp, width, height } of places) {
       if (x >= stamp.col - 3 && x < stamp.col + width + 3 && y >= stamp.row - 3 && y < stamp.row + height + 3) settled = true
     }
@@ -178,16 +190,17 @@ export function buildIsland(def: IslandDef): Island {
       else if (d <= place.r + 3) height = Math.max(height, 0.31)
     }
     if (settled) { height = Math.min(Math.max(height, 0.36), 0.55); settledGround[index] = 1 }
-    if (x < 2 || y < 2 || x >= cols - 2 || y >= rows - 2) height = Math.min(height, 0.1)
+    const border = x < 2 || y < 2 || x >= cols - 2 || y >= rows - 2
+    if (border && !rim) height = Math.min(height, 0.1)
     let moisture = fbm(x * 0.035, y * 0.035, seed + 5)
     for (const forest of def.forests) {
       const t = Math.hypot(x - forest.x, y - forest.y) / forest.r
       if (t < 1) moisture += 0.2 * (1 - t * t)
     }
-    grid[index] = CODE[classify(height, moisture, islandHash(x, y, seed + 9), settled)]
+    grid[index] = CODE[rim && (border || (!settled && coast < 0.5)) ? rim : classify(height, moisture, islandHash(x, y, seed + 9), settled)]
   }
   for (const river of def.rivers) carveRiver(grid, settledGround, cols, rows, river, seed)
-  for (let row = 0; row < VALLEY_ROWS; row++) for (let col = 0; col < VALLEY_COLS; col++) {
+  if (valley) for (let row = 0; row < VALLEY_ROWS; row++) for (let col = 0; col < VALLEY_COLS; col++) {
     grid[(valley.row + row) * cols + valley.col + col] = CODE[valleyTerrain(col, row)]
   }
   const stampOf = new Int16Array(cols * rows).fill(-1)
@@ -285,11 +298,11 @@ const CHEAPEST_STEP = 0.35
 
 function carveRoads(def: IslandDef, grid: Uint8Array, stampOf: Int16Array): void {
   const { cols, rows, valley } = def
-  const anchors = new Map<string, IslandPoint>([
+  const anchors = new Map<string, IslandPoint>(valley ? [
     ['valley-east', { x: valley.col + VALLEY_COLS, y: valley.row + VALLEY_EXITS.east.row }],
     ['valley-south', { x: valley.col + VALLEY_EXITS.south.col, y: valley.row + VALLEY_ROWS }],
     ['valley-north', { x: valley.col + VALLEY_EXITS.north.col, y: valley.row - 1 }],
-  ])
+  ] : [])
   for (const town of def.towns) anchors.set(town.id, { x: Math.round(town.x), y: Math.round(town.y) })
   for (const clearing of def.clearings) anchors.set(clearing.id, { x: Math.round(clearing.x), y: Math.round(clearing.y) })
   for (const stamp of def.stamps) {
@@ -305,7 +318,7 @@ function carveRoads(def: IslandDef, grid: Uint8Array, stampOf: Int16Array): void
     const x = index % cols, y = (index - x) / cols
     // Hand-made places keep their own paths; roads meet them at their gates.
     if (stampOf[index]! >= 0) return Infinity
-    if (x >= valley.col && x < valley.col + VALLEY_COLS && y >= valley.row && y < valley.row + VALLEY_ROWS) return Infinity
+    if (valley && x >= valley.col && x < valley.col + VALLEY_COLS && y >= valley.row && y < valley.row + VALLEY_ROWS) return Infinity
     return ROAD_COST[ISLAND_TERRAINS[grid[index]] ?? 'deep'] + islandHash(x, y, def.seed + 17) * 0.3
   }
   for (const [from, to] of def.roads) {
