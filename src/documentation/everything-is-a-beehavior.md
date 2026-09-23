@@ -75,6 +75,20 @@ gesture. History, source review, and branch management can arrive as
 beehaviors. A missing directory is reported as missing, not replaced by a
 package revision list pretending to be hives.
 
+**The zone's front page is its gallery.** The root domain welcomes visitors and
+shows the applications whose hive doors are currently published there. Each
+gallery entry opens its door and offers a simple **Turn on** choice. That
+choice sends the publisher key, hive path, and byte hosts back to the visitor's
+own domain; only that domain records the person's choice. It appears there as
+an offered, shaded hive. Turning it on does not fold tiles or run its code:
+the visitor takes cells as they walk, and admits code separately. Only hives
+turned on by that person are checked for later signed-head changes and shown
+as **Update available** at home. That notice can return them to the hosting
+gallery to inspect the changed offering before taking it. A newly published
+application elsewhere in the gallery is never an update notification in a
+hive that has not turned it on. The current cold Shim links to hive doors;
+the gallery handoff and per-offer update gate are still to be wired.
+
 An upgrade is another signed hive/package revision, first tried at a
 `try-<change>.<zone>` door on its own origin. A model can propose the change
 from within a hive; the publisher commits it to that trial, where people and
