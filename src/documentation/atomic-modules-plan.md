@@ -645,8 +645,8 @@ what matters most on the Workers free plan's daily request cap.
 - No hive-side vocabulary decided here.
 
 ## Risks
-- **Every dependency loads twice today.** The DependencyLoader imports each dependency through a blob URL while other modules reach it through the import map's `/opfs/…` URL, so each module is instantiated twice. Atoms keep that count (it was two before: namespace bundle + the copy inlined in the bee) but make it visible per file. Fix in step 4: let atoms load only through the import map.
-- **Boot fetches ~100 game modules eagerly** because the loader imports every dependency at boot. Measure in step 4.
+- ~~**Every dependency loads twice.**~~ Resolved in step 4: atoms and barrels carry the `lazy` marker, the DependencyLoader skips them, and they load once, through the import map.
+- ~~**Boot fetches ~100 game modules eagerly.**~~ Resolved in steps 4 and 4b: zero game dependencies load eagerly, and a game's atoms arrive when it opens.
 - **Cycles** (step 3) — the one place inlining did real work for us.
 - **Module-scope side effects in dependencies that are NOT registration**
   (a `const x = ioc.get(...)` at top level) now run once and at import
