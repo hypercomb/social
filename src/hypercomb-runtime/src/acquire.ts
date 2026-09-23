@@ -164,10 +164,49 @@ export const fetchAcross = (origins: readonly string[]) => {
  *  changes a handful of files does not — a whole pack for a few files would
  *  move more than it saves. Every member is hashed against its own name as it
  *  is unpacked, and the walker hashes it again at admission; a member that
- *  fails, and anything the pack does not carry, is fetched loose. */
+ *  fails, and anything the pack does not carry, is fetched loose.
+ *
+ *  A HINT, SO IT CAN NEVER COST AN INSTALL. Every failure here — a throw, a
+ *  host that hangs, bytes that are not a pack, a pack that inflates without
+ *  end, a pack for some other tree — ends in loose fetching. Downloads are
+ *  capped in time and size, the unzip is capped in size, and a pack that
+ *  covers less than half of what is missing is passed over for the next
+ *  origin's. */
 const PACK_MIN_MISSING = 32
+const POINTER_MAX_BYTES = 1024
+const POINTER_TIMEOUT_MS = 5_000
+const PACK_MAX_BYTES = 64 * 1024 * 1024
+const PACK_TIMEOUT_MS = 60_000
+const PACK_MAX_UNPACKED = 256 * 1024 * 1024
 
-const packedFetch = async (
+/** One GET with a deadline and a size cap; null for anything but bytes. */
+const cappedBytes = async (url: string, maxBytes: number, timeoutMs: number): Promise<Uint8Array<ArrayBuffer> | null> => {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+    if (!res.ok || !res.body) return null
+    // The SPA fallback answers any path with a page; sig-addressed bytes are never html.
+    if ((res.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return null
+    if (Number(res.headers.get('content-length') ?? 0) > maxBytes) return null
+    const reader = res.body.getReader()
+    const chunks: Uint8Array[] = []
+    let total = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > maxBytes) { await reader.cancel(); return null }
+      chunks.push(value)
+    }
+    const out = new Uint8Array(total)
+    let at = 0
+    for (const chunk of chunks) { out.set(chunk, at); at += chunk.byteLength }
+    return out
+  } catch {
+    return null
+  }
+}
+
+export const packedFetch = async (
   root: string,
   wanted: readonly string[],
   held: ReadonlySet<string>,
@@ -176,37 +215,39 @@ const packedFetch = async (
 ): Promise<{ fetch: (sig: string) => Promise<Uint8Array<ArrayBuffer> | null>; served: () => number }> => {
   let served = 0
   const plain = { fetch: loose, served: () => served }
-  const missing = wanted.filter(sig => !held.has(sig)).length
-  if (missing < PACK_MIN_MISSING || missing * 2 < wanted.length) return plain
-  const bytesAt = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
-    const probed = await probeBytes(url)
-    return typeof probed === 'string' ? null : probed
-  }
-  const pool = await registerPoolMeaning(TRANSFER_PACKS_MEANING)
-  for (const base of origins) {
-    const pointer = await bytesAt(`${base}/${pool}/${root}`)
-    const packSig = pointer ? new TextDecoder().decode(pointer).trim() : ''
-    if (!SIG_RE.test(packSig)) continue
-    const packed = await bytesAt(`${base}/${packSig}`)
-    if (!packed || (await SignatureService.sign(packed.buffer)) !== packSig) continue
-    let members: Array<[string, Uint8Array<ArrayBuffer>]> | null
-    try { members = decodeTransferPack(await gunzipBytes(packed)) } catch { members = null }
-    if (!members) continue
-    const verified = new Map<string, Uint8Array<ArrayBuffer>>()
-    await Promise.all(members.map(async ([sig, bytes]) => {
-      if ((await SignatureService.sign(bytes.buffer)) === sig) verified.set(sig, bytes)
-    }))
-    console.log(`[acquire] transfer pack ${packSig.slice(0, 12)}: ${verified.size} of ${members.length} members verified for ${missing} missing files`)
-    return {
-      fetch: async sig => {
-        const hit = verified.get(sig)
-        if (!hit) return loose(sig)
-        verified.delete(sig)
-        served++
-        return hit
-      },
-      served: () => served,
+  try {
+    const missing = new Set(wanted.filter(sig => !held.has(sig)))
+    if (missing.size < PACK_MIN_MISSING || missing.size * 2 < wanted.length) return plain
+    const pool = await registerPoolMeaning(TRANSFER_PACKS_MEANING)
+    for (const base of origins) {
+      const pointer = await cappedBytes(`${base}/${pool}/${root}`, POINTER_MAX_BYTES, POINTER_TIMEOUT_MS)
+      const packSig = pointer ? new TextDecoder().decode(pointer).trim() : ''
+      if (!SIG_RE.test(packSig)) continue
+      const packed = await cappedBytes(`${base}/${packSig}`, PACK_MAX_BYTES, PACK_TIMEOUT_MS)
+      if (!packed || (await SignatureService.sign(packed.buffer)) !== packSig) continue
+      let members: Array<[string, Uint8Array<ArrayBuffer>]> | null
+      try { members = decodeTransferPack(await gunzipBytes(packed, PACK_MAX_UNPACKED)) } catch { members = null }
+      if (!members) continue
+      // Only what this install is missing is kept, and only after it hashes.
+      const verified = new Map<string, Uint8Array<ArrayBuffer>>()
+      await Promise.all(members.filter(([sig]) => missing.has(sig)).map(async ([sig, bytes]) => {
+        if ((await SignatureService.sign(bytes.buffer)) === sig) verified.set(sig, bytes)
+      }))
+      console.log(`[acquire] transfer pack ${packSig.slice(0, 12)}: ${verified.size} of ${missing.size} missing files carried`)
+      if (verified.size * 2 < missing.size) continue
+      return {
+        fetch: async sig => {
+          const hit = verified.get(sig)
+          if (!hit) return loose(sig)
+          verified.delete(sig)
+          served++
+          return hit
+        },
+        served: () => served,
+      }
     }
+  } catch (error) {
+    console.warn('[acquire] transfer pack skipped — installing file by file:', error)
   }
   return plain
 }

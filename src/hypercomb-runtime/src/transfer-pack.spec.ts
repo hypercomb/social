@@ -29,6 +29,13 @@ describe('transfer pack', () => {
     expect([...one]).toEqual([...two])
   })
 
+  it('stops unpacking at its limit — a small file that inflates without end cannot take a tab', async () => {
+    const bomb = await gzipBytes(new Uint8Array(4 * 1024 * 1024))
+    expect(bomb.byteLength).toBeLessThan(64 * 1024)
+    await expect(gunzipBytes(bomb, 1024 * 1024)).rejects.toThrow(/unpacks past/)
+    expect((await gunzipBytes(bomb)).byteLength).toBe(4 * 1024 * 1024)
+  })
+
   it('refuses bytes that are not a pack, or a pack cut short', () => {
     expect(decodeTransferPack(bytes('hello'))).toBeNull()
     expect(decodeTransferPack(bytes('not-a-pack 1\n[]\n'))).toBeNull()

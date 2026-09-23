@@ -58,11 +58,36 @@ export const decodeTransferPack = (bytes: Uint8Array): Array<[string, Uint8Array
   return members
 }
 
-const streamOf = (bytes: Uint8Array): ReadableStream<BufferSource> => new Blob([bytes as Uint8Array<ArrayBuffer>]).stream()
+/** A byte stream the platform's (de)compression streams accept. A Response
+ *  body rather than Blob.stream(): jsdom's Blob has no stream(). */
+const streamOf = (bytes: Uint8Array): ReadableStream<BufferSource> => new Response(bytes as Uint8Array<ArrayBuffer>).body!
 
 /** gzip and back, with the platform's own streams — the browser's and Node's
  *  alike. Sig-named files travel uncompressed; a pack of JavaScript does not. */
 export const gzipBytes = async (bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>> =>
   new Uint8Array(await new Response(streamOf(bytes).pipeThrough(new CompressionStream('gzip'))).arrayBuffer())
-export const gunzipBytes = async (bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>> =>
-  new Uint8Array(await new Response(streamOf(bytes).pipeThrough(new DecompressionStream('gzip'))).arrayBuffer())
+
+/** Unzip, refusing to grow past `limit` bytes: a pack names its own size, and
+ *  a few kilobytes that inflate without end must not take a tab with them. */
+export const gunzipBytes = async (bytes: Uint8Array, limit = Number.POSITIVE_INFINITY): Promise<Uint8Array<ArrayBuffer>> => {
+  const reader = streamOf(bytes).pipeThrough(new DecompressionStream('gzip')).getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > limit) {
+      await reader.cancel()
+      throw new Error(`unpacks past ${limit} bytes`)
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let at = 0
+  for (const chunk of chunks) {
+    out.set(chunk, at)
+    at += chunk.byteLength
+  }
+  return out
+}
