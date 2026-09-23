@@ -50,7 +50,7 @@ A trial is taken into your own hive at one path whoever opened it — but what i
 ## As built (2026-09-22)
 
 - **Words** (`assistant/module.queen.ts`): `module commit [<change>] [@<host>]` commits what runs here, uploads the WHOLE package (the host skips what it holds — a HEAD per file), and stamps `install:try-<change>` only; `module promote <change> [<channel>]` moves the live channel (default `essentials`) to the sandbox's root with no upload; `module withdraw <change>` removes the sandbox key (`hive-pointer.ts` `clearHiveRoot`). All three are refused to a model. The toast names the door.
-- **The door** (worker `serveSandbox`): `try-<label>.<zone>` answers `/content/<sign('host:packages')>/` with one member naming the approved publisher's `install:try-<label>` root, serves the package's files from the heap, describes itself at `/site.json` (`sandbox, package, pubkey, channel`), and proxies everything else to the participant shell (`SANDBOX_SHELL_ORIGIN`). No stamp → "nothing here".
+- **The door** (worker `serveSandbox`): `try-<label>.<zone>` answers `/content/<sign('host:packages')>/` with one member naming the approved publisher's `install:try-<label>` root, serves the package's files from the heap, describes itself at `/site.json` (`sandbox, package, pubkey, channel`), answers `/content/<sign('transfer:packs')>/<root>` with the TRANSFER PACK `module commit` sent beside it (`pack:try-<label>` in the publisher's signed index — every file of the package in one content-addressed file, so a cold visitor installs in a handful of requests; a hint, never load-bearing: no pack, and the install goes file by file), and proxies everything else to the participant shell (`SANDBOX_SHELL_ORIGIN`). No stamp → "nothing here".
 - **The boot** (web `ensure-install.ts` `sandboxDoor`): on a `try-` origin the cold boot takes its package from the door alone — never another host, so a sandbox can never silently run the live package.
 - **Loopback**: any `*.localhost` is loopback in the runtime, the upload and the signed index, so a door is proven at `try-<change>.localhost:<port>` and writes go to `content.localhost:<port>`, the zone's content face, as in production.
 - **Back-to-back writes**: the signed index stamps whole seconds and the host refuses a same-age index as a rollback; every write now names the index it replaces and is stamped at least one second after it (`putHiveManifest` `replaces`).
@@ -67,7 +67,7 @@ A trial is taken into your own hive at one path whoever opened it — but what i
 
 ## Before it runs on hypercomb.com (jwize's acts)
 
-- Set `SANDBOX_SHELL_ORIGIN` on the worker to the deployed participant shell (hypercomb.io is the natural choice) and deploy the worker.
+- ~~Set `SANDBOX_SHELL_ORIGIN` and deploy the worker~~ — done 2026-09-23: `https://hypercomb.io`, deployed worker-only (`wrangler deploy --config wrangler.pluginthematrix.toml`, no asset uploaded).
 - A door opens only for a publisher the zone approves (`SITE_BINDINGS` / `SITE_OPERATORS`). Letting the community open doors means granting keys, or a separate rule for `try-` names — a decision, not a detail.
 
 ## The communal build (thought through, not built)
