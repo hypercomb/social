@@ -31,6 +31,24 @@ describe('holdArrivals', () => {
     await forgetInBrood(own)
   })
 
+  it('lets a stranger\'s held code run once a publisher you follow brings the same bytes — never over your ruling', async () => {
+    const taken = sig('6')
+    const refused = sig('7')
+    // A trial taken by hand: held as a stranger's.
+    expect(await holdArrivals([taken, refused], 'stranger', { how: 'picked revision of games' })).toEqual([taken, refused])
+    const { refuseInBrood } = await import('./brood.js')
+    await refuseInBrood(refused)
+    // The followed publisher promotes it: the same bytes arrive as theirs.
+    expect(await holdArrivals([taken, refused], 'followed', { zone: 'friends.example' })).toEqual([refused])
+    expect(await mayRunBee(taken)).toBe(true)
+    expect((await broodRecord(taken))?.source).toMatchObject({ kind: 'followed', zone: 'friends.example', how: 'picked revision of games' })
+    // A stranger bringing it again never moves it back down.
+    await holdArrivals([taken], 'stranger')
+    expect((await broodRecord(taken))?.source.kind).toBe('followed')
+    await forgetInBrood(taken)
+    await forgetInBrood(refused)
+  })
+
   it('does not re-hold what a hand already accepted', async () => {
     const accepted = sig('4')
     await setBroodRules({ followed: 'hold' })

@@ -118,6 +118,7 @@ ONE of
 | **genesis** | no package ever activated here, no module is loaded, and the offer is from the ONE seed in `DEFAULT_HOST_ZONES` | the bootstrap trust the chain already rests on, spent once, before there is data to protect |
 | **attested** | a publisher the participant FOLLOWS has signed a sentinel naming it | authority (rule 3 above), enforced at the act |
 | **floor** | the shell found the live package below its floor (see below), no attester is loaded, and the offer is from the ONE seed | genesis again: the installed package can vouch for nothing and can never move itself |
+| **hand** | a PICK — one revision at one path — the participant made by hand from a root no other door admits (a community trial, `module take`; decided 2026-09-22), and the index was not forged | nothing it brings runs: every bee and dependency bundle the trunk does not already run is HELD in the brood as a stranger's until the participant accepts it with the two warnings (core/brood.ts); the root is never recorded as trusted, so the next pick from it asks again; an install never asks this door |
 
 Everything else is refused by name, and the refusal says what to do instead.
 **Fail closed**: no attester loaded means no foreign package, never a free

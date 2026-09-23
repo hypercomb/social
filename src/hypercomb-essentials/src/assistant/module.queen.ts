@@ -275,7 +275,7 @@ export class ModuleQueenBee extends QueenBee {
       if (!outcome.taken.length) return
       const took = { paths: outcome.taken.join(', '), name, held: outcome.held }
       if (outcome.held) {
-        toast(t('module.tookheld', 'Took {paths} from {name}. Its new code waits in the brood ({held} held): accept it there, and it runs after a reload.', took), 'success')
+        toast(t('module.tookheld', 'Took {paths} from {name}. Its new code is held ({held}) and does not run until you accept it: brood list shows it, brood accept 1 lets it run, then reload.', took), 'success')
         EffectBus.emit('brood:open', { at: Date.now() })
       } else {
         toast(t('module.took', 'Took {paths} from {name} — reload to run it.', took), 'success')

@@ -472,7 +472,7 @@
   "module.taken": "{path}: taken by hand from {root}",
   "module.takewhat": "Say which path to take from {name}, like: module take {change} preferences.",
   "module.nottaken": "{path} was not taken: {reason}",
-  "module.tookheld": "Took {paths} from {name}. Its new code waits in the brood ({held} held): accept it there, and it runs after a reload.",
+  "module.tookheld": "Took {paths} from {name}. Its new code is held ({held}) and does not run until you accept it: brood list shows it, brood accept 1 lets it run, then reload.",
   "module.took": "Took {paths} from {name} — reload to run it.",
   "module.takenlive": "Accepted: what you took from a trial is composed in, and runs after a reload.",
   "module.notcomposed": "Accepted, but what you took could not be composed in yet — reload, or say module take again.",
