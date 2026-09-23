@@ -75,6 +75,30 @@ describe('createLanding', () => {
     expect(landing).toEqual({ base: ['people'], parts: ['ana'], gather: null })
   })
 
+  it('makes a tile on a LINKED page in its group even when nothing there is a reference yet', async () => {
+    const linked: LandingReader = {
+      ...hive({ family: [], people: ['susan'] }, {}),
+      groupOf: async page => page.join('/') === 'family' ? ['people'] : null,
+    }
+    const landing = await createLanding(['family'], ['ana'], linked)
+    expect(landing.base).toEqual(['people'])
+    expect(landing.gather).toEqual({ name: 'ana', sourceSegments: ['people', 'ana'], parentSegments: ['family'] })
+  })
+
+  it('lets the link outrank the guess', async () => {
+    // friends' references all point into people, but the page is linked to colleagues.
+    const linked: LandingReader = { ...people, groupOf: async page => page.join('/') === 'friends' ? ['colleagues'] : null }
+    const landing = await createLanding(['friends'], ['ana'], linked)
+    expect(landing.base).toEqual(['colleagues'])
+    expect(landing.gather?.sourceSegments).toEqual(['colleagues', 'ana'])
+  })
+
+  it('still walks an existing name before asking the link', async () => {
+    const linked: LandingReader = { ...people, groupOf: async () => ['colleagues'] }
+    expect(await createLanding(['friends'], ['susan', 'phone'], linked))
+      .toEqual({ base: ['people', 'susan'], parts: ['phone'], gather: null })
+  })
+
   it('skips references to top-level tiles when deriving the group', async () => {
     // Portal rows point at roots: there is no group above a root.
     const sets = hive({ sets: ['people', 'places'] }, { 'sets/people': ['people'], 'sets/places': ['places'] })

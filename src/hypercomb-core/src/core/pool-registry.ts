@@ -244,6 +244,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // says is that tile's own molecule. The old address stays a READ-ONLY
   // fallback; nothing is deleted there. Data never heals.
   'canonical:variants',
+  // PAGES ATTACHED TO A GROUP — one sub-bucket per group molecule, each file
+  // nominating a page that gathers from it (essentials/references/gather/
+  // gather-link.service.ts). A nomination only counts while the page still
+  // wears its `gathers` mark; detaching removes the mark, never the file.
+  'gathers:pages',
   // THE FORWARD-ONLY MARKER CEILING per lineage — one bucket named by the
   // location sig, holding the highest marker name that lineage has ever
   // retired (essentials/history/history.service.ts). It exists because

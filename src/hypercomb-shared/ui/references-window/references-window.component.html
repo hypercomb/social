@@ -24,6 +24,19 @@
         @for (item of selected(); track item.label) { <button type="button" (click)="remove(item)">{{ item.label }} ×</button> }
         @if (selected().length === 0) { <span>{{ 'references.items-empty' | t }}</span> }
       </div>
+      <label>{{ 'references.targets' | t: { name: draft.portal.label } }}</label>
+      @if (targets().length > 0) {
+        <div class="ref-types">
+          @for (target of targets(); track target.key) {
+            <button type="button" class="ref-feed" [class.is-on]="target.on" [attr.aria-pressed]="target.on" (click)="toggleTarget(target)">{{ target.label }}</button>
+          }
+        </div>
+      }
+      <input class="ref-name" type="text" autocomplete="off" [value]="targetQuery()" [placeholder]="'references.add-target' | t"
+        [attr.aria-label]="'references.add-target' | t"
+        (input)="targetQuery.set($any($event.target).value); targetMiss.set(false)"
+        (keydown.enter)="$event.preventDefault(); addTarget(targetQuery())" />
+      @if (targetMiss()) { <p class="ref-error">{{ 'references.target-miss' | t: { name: targetQuery() } }}</p> }
       <p class="ref-hint">{{ 'references.picker-hint' | t }}</p>
       @if (!choosing()) {
         <button type="button" class="ref-save" (click)="beginSelection()">{{ 'references.choose-items' | t }}</button>

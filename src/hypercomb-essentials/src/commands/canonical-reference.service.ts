@@ -37,6 +37,10 @@ import {
 import { ensureDecorationsIndexed, referenceTargetAt } from './decoration-kind-index.js'
 import { createLanding, type CreateLanding } from './create-landing.js'
 
+/** The link service's IoC key — resolved at call time, so the reference door
+ *  and the link door never import each other. */
+const GATHER_LINK_SERVICE_KEY = '@diamondcoreprocessor.com/GatherLinkService'
+
 /** Colon-scoped: a tile name can never produce it. */
 const CANONICAL_VARIANTS_MEANING = 'canonical:variants'
 
@@ -203,6 +207,10 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
         return referenceTargetAt(segments)
       },
       childNames: async page => childNamesOf(history, await resolveLayerAt(history, lineage?.domain, page)),
+      groupOf: async page => {
+        const link = get<{ groupsOf?(p: readonly string[]): Promise<string[][]> }>(GATHER_LINK_SERVICE_KEY)
+        return (await link?.groupsOf?.(page).catch(() => []))?.[0] ?? null
+      },
     })
   }
 }

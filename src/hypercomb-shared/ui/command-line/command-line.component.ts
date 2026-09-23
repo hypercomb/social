@@ -4270,6 +4270,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       })
     }
 
+    // Made ON a group, what you made is also gathered into the group's targets
+    // that are switched on — the subset you chose, never every page by itself
+    // (hypercomb-essentials/src/references/gather/gather-link.ts).
+    if (!moved && made.length > 0) {
+      const link = (window as unknown as { ioc: { get(key: string): unknown } }).ioc.get(
+        '@diamondcoreprocessor.com/GatherLinkService',
+      ) as { feed?: (group: readonly string[], names: readonly string[]) => Promise<string[][]> } | undefined
+      const fed = await link?.feed?.(baseSegments, [made[0]]).catch(() => [] as string[][]) ?? []
+      if (fed.length > 0) {
+        EffectBus.emit('activity:log', {
+          message: this.#utteranceText('activity.fed', 'also gathered into {pages}')
+            .replace('{pages}', fed.map(page => page[page.length - 1]).join(', ')),
+          icon: 'alt_route',
+        })
+      }
+    }
+
     this.requestSynchronize()
 
     if (navigateAfterCreate) {

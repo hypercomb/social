@@ -208,7 +208,7 @@ chosen people are enrolled in it as well as shown by it. In the near path
 reads `sign('associates')` and the children are the members, recomputed, never
 committed.
 
-**The way back to the group — never a field on the holder.** You will want to
+**The way back to the group — derived, and now also LINKED (see §9).** You will want to
 add more people from `people` to `associates` later, and to add a person to
 `people` so they are there to be chosen. Both are the gestures above, again:
 drop the `people` portal on `associates` (GATHER appends to what is there), and
@@ -222,7 +222,11 @@ children's routes, ties to the first seen) and shows "Already gathered from
 {group}" with one door, "Choose more from {group}", which makes the group the
 picker's source and lands the choices under the same holder. Nothing is
 written; the line is absent while the holder gathers nothing, and while the
-group is the very portal in hand.
+group is the very portal in hand. **Reversed in part 2026-09-22 (§9):** the
+derivation stays as the fallback, but a page can now wear an explicit link.
+The objection above was to a back-pointer rewritten whenever MEMBERS change;
+the link is written once, when the page is attached, and never again until it
+is detached — the holder's signature moves with the link, not with its members.
 
 **Making a tile on a holder makes a member (BUILT 2026-09-22).** Typing
 `bob` on `friends` used to mint a `bob` only `friends` knew about. Now the
@@ -288,3 +292,35 @@ The designer's arrival signal is a patch over a race in the memo. Fix the memo:
   miss; the fence guarantees the miss.
 - With the on-tile gesture the holder is already mounted, so no ghost, no
   arrival wait — the same fence covers it.
+
+## 9. The link, made explicit — targets you switch on
+
+The derived group (§7) could fail without anyone seeing: a page with few
+references, or none yet, had no group at all, and nothing on screen said which
+group a page belonged to. The link is now a mark the page WEARS
+(`references/gather/`, kind `gathers`, payload `{ groupSegments }`), one per
+group, and the same link read from the group's side is a **target**.
+
+| Where you stand | What you do | What happens |
+|---|---|---|
+| a page (`friends`) | `/from people` | `friends` wears `gathers: people`; a "from people" pill shows (click → people) |
+| that page | make `bob` | `bob` is made in `people` and gathered here — the link outranks the guess |
+| the group (`people`) | `/feed friends` | `friends` is attached if it was not, and switched ON |
+| the group | make `sam` | `sam` is made in `people`, and also gathered into every target that is ON — never into all of them by itself |
+| the References window, source = `people` | click a chip / type a page + Enter | the chip switches on/off; a typed page is attached and switched on. No list until one exists |
+| the References window | Done | the chosen members land on the holder AND every ON target |
+
+**What is stored where.** The link is truth on the page's layer (it travels
+with the page). The group's list needs no list of its own: attaching drops a
+nomination into the `gathers:pages` pool under the group's MOLECULE
+(`sign(name)`, so `people` anywhere is one group), and a nomination counts only
+while the page still wears the mark — detaching removes the mark, never the file.
+On/off is the participant's own working state (`hc:gather-targets`, sticky,
+local); it decides where YOUR next additions go and changes nobody's view.
+
+**What it does not do.** Adding on `friends` does not reach `family`, even when
+both gather from `people`. Switching a target on never back-fills what is
+already in the group — it applies to what you add from then on. The record
+carries the group's ROUTE only; its identity is derived, so no 64-hex rides in
+the payload for a closure walk to mistake for bytes.
+

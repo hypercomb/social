@@ -17,9 +17,12 @@
 //    the holder gathers it as a reference — one `bob`, reachable from both,
 //    never a second `bob` only `friends` knows about.
 //
-// The group is DERIVED — the most common parent of the routes the holder's
-// references already carry (reference-designer.md §7, the same vote the
-// references window shows as "Already gathered from"). Nothing is stored.
+// The group is the page's own LINK when it wears one (`gathers`, attached with
+// `/from <group>` — references/gather/gather-link.ts): the explicit answer, and the first one
+// asked. A page with no link falls back to the GUESS — the most common parent
+// of the routes its references already carry, when references outnumber its
+// ordinary tiles (the same vote the references window shows as "Already
+// gathered from").
 
 export type CreateLanding = {
   /** The page the first of `parts` is made on. */
@@ -41,6 +44,9 @@ export type LandingReader = {
   targetAt(segments: readonly string[]): Promise<readonly string[] | null>
   /** The names of the tiles listed on `page`. */
   childNames(page: readonly string[]): Promise<readonly string[]>
+  /** The group `page` is explicitly linked to (its first `gathers` mark), or
+   *  null when it wears none. Optional: absent = the guess alone. */
+  groupOf?(page: readonly string[]): Promise<readonly string[] | null>
 }
 
 export async function createLanding(
@@ -68,6 +74,16 @@ export async function createLanding(
   if (names.includes(first)) {
     const target = rest.length > 0 ? await read.targetAt([...route, first]) : null
     return target ? { base: target, parts: rest, gather: null } : plain
+  }
+
+  // THE LINK, when the page wears one, is the answer — no counting.
+  const linked = await read.groupOf?.(route) ?? null
+  if (linked && linked.length > 0 && linked.join('/') !== route.join('/')) {
+    return {
+      base: linked,
+      parts,
+      gather: { name: first, sourceSegments: [...linked, first], parentSegments: route },
+    }
   }
 
   let references = 0

@@ -29,7 +29,18 @@ type LayerCommitterLike = {
   }>): Promise<void>
 }
 type StoreLike = { putResource?(blob: Blob): Promise<string> }
+/** The page ↔ group link door (essentials references/gather/gather-link.service.ts). */
+type GatherLinkLike = {
+  targetsOf?(group: readonly string[]): Promise<Array<{ segments: readonly string[]; on: boolean }>>
+  setTarget?(group: readonly string[], page: readonly string[], on: boolean): Promise<void>
+  attach?(page: readonly string[], group: readonly string[]): Promise<boolean>
+  resolveRoute?(name: string, here: readonly string[]): Promise<string[] | null>
+  feed?(group: readonly string[], names: readonly string[]): Promise<string[][]>
+}
+type TargetChip = { key: string; label: string; segments: readonly string[]; on: boolean }
 const ioc = (): { get(k: string): unknown } | undefined => (globalThis as { ioc?: { get(k: string): unknown } }).ioc
+const gatherLink = (): GatherLinkLike | undefined =>
+  ioc()?.get('@diamondcoreprocessor.com/GatherLinkService') as GatherLinkLike | undefined
 
 @Component({ selector: 'hc-references-window', standalone: true,
   imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
@@ -45,6 +56,12 @@ export class ReferencesWindowComponent implements OnDestroy {
    *  `gatheredFrom`), shown as the way back to choose more. Null while there is
    *  nothing gathered yet or the holder is being minted. */
   readonly group = signal<{ label: string; segments: readonly string[] } | null>(null)
+  /** The pages the group in hand feeds — ON ones also gather what is saved.
+   *  Empty until a page is attached: no list until there is something in it. */
+  readonly targets = signal<readonly TargetChip[]>([])
+  readonly targetQuery = signal('')
+  readonly targetMiss = signal(false)
+  #targetGeneration = 0
   readonly targetName = computed(() => safeCellName(this.name()))
   readonly nameTaken = computed(() => {
     const target = this.targetName()
@@ -74,6 +91,7 @@ export class ReferencesWindowComponent implements OnDestroy {
       this.group.set(null)
       this.visible.set(true)
       this.#emitDraft()
+      void this.#loadTargets(c)
       if (!c.createTile) {
         const holder = [...c.parentSegments]
         void gatheredFrom(holder).then(segments => {
@@ -120,7 +138,43 @@ export class ReferencesWindowComponent implements OnDestroy {
     this.group.set(null)
     this.selected.set([])
     withSelectionService(s => s.clear())
+    void this.#loadTargets(this.composition()!)
     this.beginSelection()
+  }
+
+  /** Switch one target: ON means what is saved here is also gathered there. */
+  async toggleTarget(target: TargetChip): Promise<void> {
+    const c = this.composition()
+    if (!c) return
+    await gatherLink()?.setTarget?.(c.portal.segments, target.segments, !target.on)
+    this.targets.update(list => list.map(t => t.key === target.key ? { ...t, on: !t.on } : t))
+  }
+
+  /** A typed page becomes a target of the group in hand — attached (it now
+   *  gathers from the group) and switched on. */
+  async addTarget(raw: string): Promise<void> {
+    const c = this.composition()
+    const link = gatherLink()
+    const name = raw.trim()
+    if (!c || !name || !link?.resolveRoute || !link.attach) return
+    const here = (ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined)?.segmentsRaw?.() ?? []
+    const page = await link.resolveRoute(name, here)
+    if (!page || !await link.attach(page, c.portal.segments)) { this.targetMiss.set(true); return }
+    await link.setTarget?.(c.portal.segments, page, true)
+    this.targetQuery.set('')
+    this.targetMiss.set(false)
+    await this.#loadTargets(c)
+  }
+
+  async #loadTargets(c: Composition): Promise<void> {
+    const generation = ++this.#targetGeneration
+    const found = await gatherLink()?.targetsOf?.(c.portal.segments).catch(() => []) ?? []
+    if (generation !== this.#targetGeneration) return
+    // The page being composed is where things land anyway — not a target of itself.
+    const holder = c.parentSegments.join('/')
+    this.targets.set(found
+      .filter(t => t.segments.join('/') !== holder)
+      .map(t => ({ key: t.segments.join('/'), label: String(t.segments[t.segments.length - 1] ?? ''), segments: [...t.segments], on: t.on })))
   }
 
   beginSelection(): void {
@@ -194,6 +248,8 @@ export class ReferencesWindowComponent implements OnDestroy {
         }])
       }
       for (const entry of chosen) await dropReferenceTile({ key: entry.label, label: entry.label, segments: entry.segments }, parent)
+      // …and into every target of the group that is switched on.
+      await gatherLink()?.feed?.(c.portal.segments, chosen.map(entry => entry.label)).catch(() => [])
       await new hypercomb().act()
       this.finish(parent)
     } catch { /* keep the complete composition available for retry */ }
@@ -206,6 +262,7 @@ export class ReferencesWindowComponent implements OnDestroy {
     this.#selectionArrivalCleanup?.(); this.#selectionArrivalCleanup = null
     this.#branchArrivalCleanup?.(); this.#branchArrivalCleanup = null
     this.visible.set(false); this.composition.set(null); this.name.set(''); this.selected.set([]); this.choosing.set(false)
+    this.#targetGeneration++; this.targets.set([]); this.targetQuery.set(''); this.targetMiss.set(false)
     withSelectionService(s => s.clear())
     EffectBus.emit('reference:draft-preview', null)
     ;(ioc()?.get('@diamondcoreprocessor.com/SelectModeDrone') as SelectModeLike | undefined)?.disarm?.()
