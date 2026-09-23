@@ -18,6 +18,7 @@
 
 import { spawnSync } from 'child_process'
 import { createHash } from 'node:crypto'
+import { builtinModules } from 'node:module'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
@@ -62,6 +63,41 @@ const EXCLUDED_DOMAINS: string[] = ['revolucionstyle.com']
 const NAMESPACE_SEGMENTS_MAX = 3
 const PACKAGE_SPECIFIER = '@hypercomb/essentials'
 const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
+
+/** VENDOR ATOMS (atomic-modules-plan.md, "find the overlap before creating
+ *  redundancy"). An npm package that two or more source files import is built
+ *  ONCE, as its own dependency named by the package itself (`// nostr-tools`,
+ *  a bare specifier the way `pixi.js` is), and every other unit leaves it
+ *  external. Inlined, each importer carried its own copy: five atoms carried
+ *  nostr-tools and its @noble crypto at about 200 KB each. A package only one
+ *  file imports stays inlined — there is nothing to share. */
+const VENDOR_PACKAGES: readonly string[] = (() => {
+  const importers = new Map<string, Set<string>>()
+  const visit = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name)
+      if (statSync(full).isDirectory()) {
+        if (!['node_modules', 'dist'].includes(name) && !EXCLUDED_DOMAINS.includes(name)) visit(full)
+        continue
+      }
+      if (!/\.ts$/.test(name) || /\.(spec|test|d)\.ts$|selftest\.ts$/.test(name)) continue
+      const code = readFileSync(full, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1')
+      for (const m of code.matchAll(/(?:^|[;\n])\s*(?:import|export)\s[^'"]*?from\s*'([^'./][^']*)'|\bimport\(\s*'([^'./][^']*)'\s*\)/g)) {
+        const spec = m[1] ?? m[2]
+        const pkg = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]
+        if (pkg.startsWith('@hypercomb/') || PLATFORM_EXTERNALS.includes(pkg) || pkg.startsWith('node:') || builtinModules.includes(pkg)) continue
+        const files = importers.get(pkg) ?? new Set<string>()
+        files.add(full)
+        importers.set(pkg, files)
+      }
+    }
+  }
+  visit(SRC_ROOT)
+  return [...importers].filter(([, files]) => files.size > 1).map(([pkg]) => pkg).sort()
+})()
+
+/** What every bee, atom and namespace bundle leaves to the import map. */
+const UNIT_EXTERNALS = [...PLATFORM_EXTERNALS, ...VENDOR_PACKAGES]
 
 // Bee artifacts that must evaluate before the first visible hive frame can
 // settle. Constructor-registered services such as Settings, AxialService and
@@ -534,8 +570,9 @@ const ATOMIZED_ROOTS: readonly string[] =
 /** THE BUILD'S SHAPE, folded into every unit's input signature. Which domains
  *  are atomized decides what a unit inlines and what it reaches by specifier —
  *  without touching a single source file — so a unit's cache must miss when
- *  the list moves, and so must the whole-build early exit. */
-const BUILD_SHAPE = `atomized:${[...ATOMIZED_ROOTS].sort().join(',')}`
+ *  the list moves, and so must the whole-build early exit. The vendor
+ *  packages decide the same thing for npm code, so they are folded in too. */
+const BUILD_SHAPE = `atomized:${[...ATOMIZED_ROOTS].sort().join(',')}|vendor:${VENDOR_PACKAGES.join(',')}`
 
 const isAtomizedRelPath = (relPath: string): boolean =>
   ATOMIZED_ROOTS.some(root => relPath === root || relPath.startsWith(`${root}/`))
@@ -846,7 +883,7 @@ const buildNamespaceDependency = async (
   const entrySource = exportLines.length ? exportLines.join('\n') + '\n' : 'export {};\n'
 
   const externals = [
-    ...PLATFORM_EXTERNALS,
+    ...UNIT_EXTERNALS,
     ...allNamespaceSpecifiers.filter(s => s !== namespaceSpecifier),
   ]
 
@@ -1120,7 +1157,7 @@ const main = async (): Promise<void> => {
   // --- ATOMS: one sig-named dependency per non-bee file under an atomized
   // root. Keyed like a bee on everything it really inlined (files outside the
   // atomized roots are still inlined until their domain is atomized too).
-  const atomExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers, ...atomSpecifierSet]
+  const atomExternals = [...UNIT_EXTERNALS, ...allSpecifiers, ...atomSpecifierSet]
   const atomAliasBySig = new Map<string, string>()
   let atomHits = 0
   let atomMisses = 0
@@ -1162,6 +1199,29 @@ const main = async (): Promise<void> => {
     throw new Error(`import cycle among atoms — break it before it can load in a dead zone:\n  ${cycles.map(c => c.join(' ↔ ')).join('\n  ')}`)
   }
   console.log(`[build-module] atoms: ${atomHits} cached, ${atomMisses} built across ${ATOMIZED_ROOTS.join(', ')}`)
+
+  // --- VENDOR ATOMS: each shared npm package, bundled once (VENDOR_PACKAGES).
+  // The whole package (`export *`): a dynamic or namespace import reaches any
+  // export, and one copy costs less than the smallest two.
+  for (const pkg of VENDOR_PACKAGES) {
+    const r = await build({
+      stdin: { contents: `export * from '${pkg}';\n`, resolveDir: PROJECT_ROOT, sourcefile: `virtual:vendor:${pkg}`, loader: 'ts' },
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      write: false,
+      target: TARGET,
+      sourcemap: false,
+      external: UNIT_EXTERNALS.filter(external => external !== pkg),
+    })
+    const text = r.outputFiles?.[0]?.text
+    if (!text) throw new Error(`no output: vendor ${pkg}`)
+    const bytes = textToBytes(`// ${pkg}\n${LAZY_MARKER_LINE}\n${text}`)
+    const sig = await SignatureService.sign(toArrayBuffer(bytes))
+    dependencyBytes.set(sig, bytes)
+    atomAliasBySig.set(sig, pkg)
+  }
+  if (VENDOR_PACKAGES.length) console.log(`[build-module] vendor atoms: ${VENDOR_PACKAGES.join(', ')}`)
 
   const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
   const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
@@ -1219,7 +1279,7 @@ const main = async (): Promise<void> => {
   )
   /** `*.boot.drone.ts` — the boot lane's bees, named in the root. */
   const bootBees: string[] = []
-  const beeExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
+  const beeExternals = [...UNIT_EXTERNALS, ...allSpecifiers]
   let beeCacheHits = 0
   let beeCacheMisses = 0
 

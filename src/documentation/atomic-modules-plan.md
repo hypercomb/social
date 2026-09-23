@@ -522,6 +522,22 @@ tail is what lazy seams remove (step 4c): a feature's atoms loading when the
 feature is used, not when its bee boots. Merged modules are not indicated by
 anything measured here.
 
+**Found and fixed: npm code copied five times — vendor atoms.** Five atoms
+(`nostr-signer`, `head-claim-signer`, `hive-pointer`, `pheromone-deposits`,
+`vocabulary-signer`) each inlined `nostr-tools` and its `@noble` crypto, about
+200 KB apiece — a quarter of what a boot loaded. The build now finds every npm
+package two or more source files import (`VENDOR_PACKAGES`), builds it ONCE as
+a dependency named by the package itself (`// nostr-tools`, a bare specifier
+the way `pixi.js` is), and leaves it external everywhere else; the set is
+folded into `BUILD_SHAPE` so every unit rebuilds when it changes. Atoms a boot
+reaches: 3.93 MB → 3.17 MB. The update that shipped it fetched 16 files. On
+the web shell the import map serves `nostr-tools` from the dependencies pool,
+a sign-and-verify round trip passes, every key registered, zero breaks.
+
+The tail did NOT move (last module about 2.4 s, as before): it is set by the
+NUMBER of modules and their import chains, not their bytes. That settles the
+order — lazy seams next; a transfer pack would not shorten it either.
+
 ## Non-goals
 - No new pool, no new `__x__` folder. Atoms live in `sign('dependencies')`
   as today.
