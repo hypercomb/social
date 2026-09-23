@@ -23,7 +23,9 @@ vi.hoisted(() => {
 })
 
 import { installTileEditorStyles, TILE_EDITOR_SURFACE } from './tile-editor.styles.js'
-import './tile-editor.view.js'
+// The editor's bee adds the view to the shell and registers its IoC face
+// (atomic-modules-plan.md); the view module itself registers nothing.
+import './tile-editor.drone.js'
 
 describe('tile editor view — joining the shell', () => {
   it('contributes a framework-free element through the shell surface registry', () => {

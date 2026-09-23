@@ -259,8 +259,30 @@ runner registers. On the web shell every baseline IoC key registered, plus the
 new keyboard bee — and two sequence words (`frame`, `pattern`) that never
 registered before now do. 330 units linked; 185 atoms, 160 bees.
 
-Next, by size: tutorial, navigation, editor, history, presentation,
-assistant, sharing, commands. (`revolucionstyle.com` is outside the build.)
+**Batch 3 — BUILT and browser-verified 2026-09-22:** tutorial, editor. The
+lesson registry and the four courses (each course is now a list the tutorial
+bee registers, in order), the tutor slot, the tile editor's two services, its
+IoC face and its shell surface all register from their bees. The tutorial
+overlay is created by the shell's surface host, so it ANNOUNCES itself on
+connect (`onOverlayMounted`) and its bee registers it. The properties slot is
+declared by show-cell, since the first paint reads tile properties. 443 of 443
+IoC keys; 44 lessons; 374 units linked; 214 atoms, 164 bees.
+
+**Found: BOOT SERVICES — not atomized yet.** Some services are read before
+ANY bee loads, so no owner bee can register them in time:
+- `@HistoryService` — the runtime initializer reads it in phase 1, before bees
+  load in phase 2, and skips the post-paint neighbourhood warm-up for the
+  whole session if it is missing.
+- InputGate, ModeRegistry, InputModeStack — shell chrome binds to them as it
+  is constructed (the controls bar builds a signal over InputGate).
+
+An atomized domain loads its atoms lazily, so a boot service there must be
+registered by something that runs before the shell and the runtime read it.
+navigation and history hold these and wait on that decision; presentation,
+sharing, assistant and commands must be checked for them too.
+
+Next: navigation, history (boot services), then presentation, assistant,
+sharing, commands. (`revolucionstyle.com` is outside the build.)
 
 ## Atomize for the editor, optimize for the reader
 

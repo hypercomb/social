@@ -20,9 +20,8 @@ vi.hoisted(() => {
 })
 
 import { EffectBus } from '@hypercomb/core'
-import './tile-editor.service.js'
-import './image-editor.service.js'
-import './tile-editor.view.js'
+// The editor's bee wires its services and its view (atomic-modules-plan.md).
+import './tile-editor.drone.js'
 import type { TileEditorService } from './tile-editor.service.js'
 
 const service = (): TileEditorService =>

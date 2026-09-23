@@ -16,6 +16,9 @@ vi.hoisted(() => {
   ;(window as unknown as { ioc: unknown }).ioc = {
     get: (key: string) => services.get(key),
     register: (key: string, value: unknown) => services.set(key, value),
+    // The bee adds its view to the shell's surface registry when it is ready;
+    // this spec never mounts the view.
+    whenReady: () => {},
   }
 })
 
