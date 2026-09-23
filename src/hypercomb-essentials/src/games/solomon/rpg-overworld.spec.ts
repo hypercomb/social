@@ -6,7 +6,7 @@ import {
   componentKey, shrinePolygon, valleyPoint, worldEncounters, worldTerrain,
   type ShrineComponent, type WorldHooks, type WorldRelic,
 } from './rpg-overworld.js'
-import { STORY_GUIDE } from './story.js'
+import { STORY, STORY_GUIDE } from './story.js'
 import { WORLDS } from './worlds.js'
 import type { StoryWhen } from './story-when.js'
 
@@ -19,10 +19,14 @@ function at(id: string): { x: number; y: number } {
   return { x: place.x, y: place.y }
 }
 
+const ISLAND_SEATS = new Set(STORY.filter(seat => seat.entrance.startsWith('island/')).map(seat => seat.entrance.slice('island/'.length)))
+
 function journey(initial: ShrineComponent[] = []) {
   const inventory = new Set(initial.map(componentKey))
   const grantRelic = vi.fn((relic: WorldRelic) => { inventory.add(componentKey(relic)); return true })
-  const seat = vi.fn(() => true)
+  // The real story's seats: an island thing leads somewhere only when a
+  // place is seated behind it.
+  const seat = vi.fn((id: string) => ISLAND_SEATS.has(id))
   const onEntrance = vi.fn()
   const gain = vi.fn()
   const found = vi.fn()

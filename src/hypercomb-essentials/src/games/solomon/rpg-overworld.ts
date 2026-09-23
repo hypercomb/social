@@ -523,6 +523,21 @@ export const SEVENFOLD_VALLEY: WorldDefinition = {
   plots: WORLD_PLOTS, caches: WORLD_CACHES, signs: WORLD_SIGNS, doors: WORLD_DOORS, areas: WORLD_AREAS,
 }
 
+/** A world's whole ground, shrunk to a small map — what you see when you look
+ *  into the thing that leads there, before you go in. */
+export function worldMap(world: WorldDefinition, largest = 48): { readonly cols: number; readonly rows: number; readonly rgb: Uint8ClampedArray } {
+  const island = islandOf(world.island)
+  const step = Math.max(1, Math.ceil(Math.max(island.cols, island.rows) / largest))
+  const cols = Math.ceil(island.cols / step), rows = Math.ceil(island.rows / step)
+  const rgb = new Uint8ClampedArray(cols * rows * 3)
+  for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
+    const [r, g, b] = terrainColor(islandTerrainAt(island, col * step + (step >> 1), row * step + (step >> 1)))
+    const at = (row * cols + col) * 3
+    rgb[at] = r; rgb[at + 1] = g; rgb[at + 2] = b
+  }
+  return { cols, rows, rgb }
+}
+
 /** Everything standing in a world, in one list, in the order the island
  *  has always kept it. */
 export function worldEncounters(world: WorldDefinition): readonly WorldEncounter[] {
@@ -776,12 +791,35 @@ export class RpgOverworld {
     return null
   }
 
-  /** True kind of thing you push, not walk over (M9/M14): every dungeon
-   *  mouth and door, and a shrine only once it is open — a not-yet-open
-   *  shrine stays an E-target for filling its sockets. */
-  #isPortal(place: WorldEncounter): boolean {
+  /** A doorway is only ever passed through (M9/M14): every cave mouth and
+   *  door, and a shrine once it is open — a not-yet-open shrine stays an
+   *  E-target for filling its sockets. */
+  #isDoorway(place: WorldEncounter): boolean {
     if (place.kind === 'dungeon' || place.kind === 'door') return true
     return place.kind === 'shrine' && this.shrineStatus(place.id) === 'open'
+  }
+
+  /** What leads in. Being an entrance is a mark, never a kind (jwize,
+   *  2026-09-22: "whatever you decide becomes an entrance becomes an
+   *  entrance" — a picture on a wall you look into and then walk into, the
+   *  side of a cliff, a whole mountain). A doorway always leads in, even
+   *  before anything is made behind it (it says so); ANY other thing leads in
+   *  the moment a story seats a place behind it, and keeps its own verb. A
+   *  shrine keeps its own gate: it opens when its sockets are full, whatever
+   *  is seated below it. */
+  #leadsIn(place: WorldEncounter): boolean {
+    if (place.kind === 'shrine') return this.#isDoorway(place)
+    return this.#isDoorway(place) || this.hooks.seat(place.id)
+  }
+
+  /** E has something of its own to do here: talk, open, look, assemble. */
+  #actsOn(place: WorldEncounter): boolean {
+    return place.kind === 'person' || place.kind === 'resident' || place.kind === 'cache' || place.kind === 'plot'
+      || (place.kind === 'shrine' && !this.#isDoorway(place))
+  }
+
+  #tagline(place: WorldEncounter): string {
+    return place.kind === 'person' || place.kind === 'resident' ? place.role : place.subtitle
   }
 
   /** The portal (or area) whose physical obstruction covers this exact
@@ -789,7 +827,7 @@ export class RpgOverworld {
    *  pushed against. */
   #blockedByPortal(x: number, y: number): string | null {
     for (const place of this.encounters) {
-      if (this.#isPortal(place) && Math.hypot(x - place.x, y - place.y) < PORTAL_RADIUS) return place.id
+      if (this.#leadsIn(place) && Math.hypot(x - place.x, y - place.y) < PORTAL_RADIUS) return place.id
     }
     const col = Math.floor(x), row = Math.floor(y)
     for (const area of this.world.areas) if (area.cells.some(([c, r]) => c === col && r === row)) return area.id
@@ -843,10 +881,10 @@ export class RpgOverworld {
     return Math.hypot(this.player.x - encounter.x, this.player.y - encounter.y) <= (REACH_OF[encounter.kind] ?? REACH)
   }
   /** The closest place E acts on. Signs are read by walking up to them,
-   *  never by pressing E; a portal (M9/M14) is never returned here — it is
-   *  pushed or clicked, never E'd. */
+   *  never by pressing E; a doorway (M9/M14) is never returned here — it is
+   *  pushed or clicked, never E'd. A thing that also leads in keeps its verb. */
   nearest(): WorldEncounter | undefined {
-    return this.encounters.filter(place => place.kind !== 'sign' && !this.#isPortal(place) && this.near(place)).sort((a, b) =>
+    return this.encounters.filter(place => this.#actsOn(place) && this.near(place)).sort((a, b) =>
       Math.hypot(this.player.x - a.x, this.player.y - a.y) - Math.hypot(this.player.x - b.x, this.player.y - b.y))[0]
   }
   interact(targetId?: string): WorldResult {
@@ -855,7 +893,7 @@ export class RpgOverworld {
     // An explicit target (a click on a marker) treats a portal like a
     // completed push (M9); E-with-no-target never reaches one, since
     // nearest() already excludes every portal kind.
-    if (targetId !== undefined && this.#isPortal(encounter)) return this.enter(encounter.id)
+    if (targetId !== undefined && this.#leadsIn(encounter) && !this.#actsOn(encounter)) return this.enter(encounter.id)
     if (!this.near(encounter)) return this.result(false, `Walk closer to ${encounter.name} to interact.`)
     if (encounter.kind === 'person') {
       this.met.add(encounter.id)
@@ -872,18 +910,21 @@ export class RpgOverworld {
   }
   /** The bubble beside whatever E would act on or push through right now
    *  (M9): an act cue names its verb, a tag cue only names the destination. */
-  cue(): { readonly id: string; readonly x: number; readonly y: number; readonly words: string; readonly action: 'act' | 'tag' } | null {
+  cue(): { readonly id: string; readonly x: number; readonly y: number; readonly words: string; readonly action: 'act' | 'tag'; readonly leadsIn: boolean } | null {
     const target = this.nearest()
-    if (target) return { id: target.id, x: target.x, y: target.y, words: `${target.name} · E to ${this.#actVerb(target)}`, action: 'act' }
-    const portal = this.encounters.filter(place => this.#isPortal(place) && this.near(place))
-      .sort((a, b) => this.#distance(a) - this.#distance(b))[0] as WorldShrine | WorldDungeon | WorldDoor | undefined
-    if (portal) return { id: portal.id, x: portal.x, y: portal.y, words: `${portal.name} · ${portal.subtitle}`, action: 'tag' }
+    if (target) {
+      const leadsIn = this.#leadsIn(target)
+      return { id: target.id, x: target.x, y: target.y, words: `${target.name} · E to ${this.#actVerb(target)}${leadsIn ? ' · or walk in' : ''}`, action: 'act', leadsIn }
+    }
+    const portal = this.encounters.filter(place => this.#leadsIn(place) && this.near(place))
+      .sort((a, b) => this.#distance(a) - this.#distance(b))[0]
+    if (portal) return { id: portal.id, x: portal.x, y: portal.y, words: `${portal.name} · ${this.#tagline(portal)}`, action: 'tag', leadsIn: true }
     let nearestLanding: { area: WorldArea; landing: WorldAreaLanding } | null = null, best = Infinity
     for (const area of this.world.areas) for (const landing of Object.values(area.landings)) {
       const d = Math.hypot(this.player.x - landing.x, this.player.y - landing.y)
       if (d <= REACH && d < best) { best = d; nearestLanding = { area, landing } }
     }
-    if (nearestLanding) return { id: nearestLanding.area.id, x: nearestLanding.landing.x, y: nearestLanding.landing.y, words: `${nearestLanding.area.name} · ${nearestLanding.area.subtitle}`, action: 'tag' }
+    if (nearestLanding) return { id: nearestLanding.area.id, x: nearestLanding.landing.x, y: nearestLanding.landing.y, words: `${nearestLanding.area.name} · ${nearestLanding.area.subtitle}`, action: 'tag', leadsIn: true }
     return null
   }
   #distance(place: WorldPlace): number { return Math.hypot(this.player.x - place.x, this.player.y - place.y) }
@@ -962,7 +1003,7 @@ export class RpgOverworld {
    *  enter()/dungeon-only enterDungeon() split (M9). */
   enter(id: string): WorldResult {
     const place = this.encounters.find(candidate => candidate.id === id)
-    if (!place || !this.#isPortal(place)) return this.result(false, 'There is nothing to enter here.')
+    if (!place || !this.#leadsIn(place)) return this.result(false, 'There is nothing to enter here.')
     if (!this.near(place)) return this.result(false, `Walk closer to ${place.name} to enter.`)
     if (!this.hooks.seat(place.id)) return this.result(false, place.kind === 'door' ? place.empty : `${place.name} leads nowhere yet.`)
     this.hooks.found?.(place.id)
@@ -1081,6 +1122,8 @@ export class RpgOverworldView {
   /** The one beside-the-target cue bubble (M9), replacing the old bottom
    *  `.sol-rpg-world-prompt` line — it moves to whatever `model.cue()` names. */
   #cue: HTMLDivElement | null = null
+  /** What the cue bubble shows now, so it is rebuilt only when that changes. */
+  #cueShown = ''
   /** A fixed status echo for transient, non-targeted results — a wand cast,
    *  "Entering X.", an unseated portal's empty line — kept separate from the
    *  cue so a message never fights a nearby target's own bubble for space. */
@@ -1340,12 +1383,19 @@ export class RpgOverworldView {
       // A bubble near the top of the view opens downward, so it stays on screen.
       bubble.classList.toggle('is-below', this.#camera.height > 0 && place.y * tile - this.#camera.y < this.#camera.height * 0.42)
     }
-    if (this.#status) this.#status.textContent = this.#notice || 'Walk the valley. Mira, by the west path, has your first clue.'
+    if (this.#status) this.#status.textContent = this.#notice
+      || (this.model.world === SEVENFOLD_VALLEY ? 'Walk the valley. Mira, by the west path, has your first clue.' : `Walk ${this.model.world.name}.`)
     const cue = this.model.cue()
     if (this.#cue) {
       this.#cue.hidden = !cue
       if (cue) {
-        if (this.#cue.textContent !== cue.words) this.#cue.textContent = cue.words
+        const shown = `${cue.id}|${cue.words}|${cue.leadsIn}`
+        if (this.#cueShown !== shown) {
+          this.#cueShown = shown
+          this.#cue.replaceChildren(document.createTextNode(cue.words))
+          const inside = cue.leadsIn ? this.#insideMap(cue.id) : null
+          if (inside) this.#cue.append(inside)
+        }
         this.#cue.dataset['action'] = cue.action
         this.#cue.style.left = `${cue.x * tile}px`
         this.#cue.style.top = `${(cue.y + FOOT) * tile}px`
@@ -1353,6 +1403,30 @@ export class RpgOverworldView {
       }
     }
     for (const area of this.model.world.areas) this.#areaMarkers.get(area.id)?.classList.toggle('is-near', cue?.id === area.id)
+  }
+
+  /** Look into a thing that leads somewhere and see a map of where: the
+   *  place seated behind it, one pixel per square, before you walk in. */
+  #insideMap(entrance: string): HTMLCanvasElement | null {
+    const seed = this.model.hooks.seatSeed?.(entrance) as { cols?: unknown; rows?: unknown; rgb?: unknown } | null | undefined
+    if (!seed || typeof seed.cols !== 'number' || typeof seed.rows !== 'number' || !(seed.rgb instanceof Uint8ClampedArray)) return null
+    const { cols, rows, rgb } = seed as { cols: number; rows: number; rgb: Uint8ClampedArray }
+    if (cols < 1 || rows < 1 || rgb.length < cols * rows * 3) return null
+    const canvas = element('canvas', 'sol-rpg-inside')
+    canvas.width = cols
+    canvas.height = rows
+    canvas.setAttribute('aria-hidden', 'true')
+    const context = canvasContext(canvas)
+    if (!context) return null
+    const image = context.createImageData(cols, rows)
+    for (let cell = 0; cell < cols * rows; cell++) {
+      image.data[cell * 4] = rgb[cell * 3]!
+      image.data[cell * 4 + 1] = rgb[cell * 3 + 1]!
+      image.data[cell * 4 + 2] = rgb[cell * 3 + 2]!
+      image.data[cell * 4 + 3] = 255
+    }
+    context.putImageData(image, 0, 0)
+    return canvas
   }
   /** Points the way to where the story's current step happens: an island
    *  encounter or area id, or null for nowhere in particular. */
@@ -1806,6 +1880,7 @@ const WORLD_STYLE = `
 .sol-rpg-world .sol-rpg-status{flex-shrink:0;max-width:100%;min-height:30px;padding:8px 6px 3px;line-height:1.5;font-size:12px;text-align:center;color:#f0dbb4}
 .sol-rpg-cue{position:absolute;left:0;top:0;transform:translate(-50%,calc(-100% - 40px * var(--sprite-scale)));width:max-content;max-width:220px;padding:5px 10px;border-radius:10px;background:rgba(14,22,26,.86);border:1px solid rgba(255,240,200,.3);color:#fff4d6;font-size:11.5px;font-weight:600;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.35);pointer-events:none}
 .sol-rpg-cue[data-action=tag]{font-weight:500;color:#d9e6df;border-style:dashed}
+.sol-rpg-inside{display:block;margin:6px auto 1px;width:112px;height:auto;image-rendering:pixelated;border-radius:5px;border:1px solid rgba(255,240,200,.28);box-shadow:inset 0 0 0 1px rgba(0,0,0,.35)}
 .sol-rpg-cue.is-below{transform:translate(-50%,calc(10px * var(--sprite-scale)))}
 .sol-rpg-guide-mark{position:absolute;z-index:5;left:0;top:0;width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:13px solid #ffd76a;transform:translate(-50%,calc(-100% - 58px * var(--sprite-scale)));filter:drop-shadow(0 2px 2px #0009);pointer-events:none;animation:sol-rpg-guide-bob 1.1s ease-in-out infinite}
 @keyframes sol-rpg-guide-bob{0%,100%{translate:0 0}50%{translate:0 -5px}}

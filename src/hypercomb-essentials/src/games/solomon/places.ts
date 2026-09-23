@@ -8,30 +8,34 @@ import type { PlaceCatalog, PlaceDefinition, PlaceStep, StorySeat } from './plac
 import { levelsBelow, seatAt } from './place.js'
 import type { GroupRecord } from './chamber-places.js'
 import { CHAMBERS, GROUPS } from './chamber-places.js'
-import { WORLD_AREAS, WORLD_DOORS, WORLD_DUNGEONS, WORLD_PLOTS, WORLD_SHRINES } from './rpg-overworld.js'
+import { SEVENFOLD_VALLEY, worldEncounters } from './rpg-overworld.js'
 import { STORY } from './story.js'
 import { GREENWOOD } from './worlds.js'
 import type { WorldDefinition } from './rpg-overworld.js'
 
 export interface SeatLabel { readonly name: string; readonly subtitle: string; readonly levels: number }
 
+/** Every thing standing in a world, and every grove or crag in it, can
+ *  have a place seated behind it — what becomes an entrance is decided by
+ *  the story, never by what kind of thing it is (jwize, 2026-09-22). */
+function worldEntrances(world: WorldDefinition): string[] {
+  return [...worldEncounters(world), ...world.areas].map(place => place.id)
+}
+
 /** The island: never seated (it is `ROOT_PLACE`), so `arrivals` is never
- *  actually read at runtime — one default entry keeps the type honest. Its
- *  entrances are every island encounter that can host a place below it:
- *  the three shrines, the two cave mouths, the one house door, the one
- *  area, and the four still-empty plots. */
+ *  actually read at runtime — one default entry keeps the type honest. */
 export const ISLAND_PLACE: PlaceDefinition = {
   id: 'island', name: 'The Sevenfold Valley', subtitle: 'A walking island of shrines, caves and roads', kind: 'island',
-  entrances: [...WORLD_SHRINES, ...WORLD_DUNGEONS, ...WORLD_DOORS, ...WORLD_AREAS, ...WORLD_PLOTS].map(p => p.id),
+  entrances: worldEntrances(SEVENFOLD_VALLEY),
   arrivals: [{ id: 'valley', name: 'The Sevenfold Valley' }],
 }
 
-/** A world below the island is walked like the island: its entrances are
- *  every portal, grove and plot it holds, and one arrival — where it starts. */
+/** A world below the island is walked like the island, with one arrival —
+ *  where it starts. */
 export function worldPlace(world: WorldDefinition): PlaceDefinition {
   return {
     id: world.id, name: world.name, subtitle: world.subtitle, kind: 'island',
-    entrances: [...world.shrines, ...world.dungeons, ...world.doors, ...world.areas, ...world.plots].map(p => p.id),
+    entrances: worldEntrances(world),
     arrivals: [{ id: 'start', name: world.name }],
   }
 }

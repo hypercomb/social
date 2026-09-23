@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isWalkableTerrain, islandTerrainAt, type Island } from './island.js'
-import { ISLAND_DEF, RpgOverworld, SEVENFOLD_VALLEY, islandOf, theIsland, worldEncounters, type WorldDefinition, type WorldHooks } from './rpg-overworld.js'
+import { ISLAND_DEF, RpgOverworld, SEVENFOLD_VALLEY, islandOf, theIsland, worldEncounters, worldMap, type WorldDefinition, type WorldHooks } from './rpg-overworld.js'
 import { GREENWOOD, WORLDS, registerWorld, sanitizeWorld } from './worlds.js'
 import { PLACES } from './places.js'
 import { STORY, ROOT_PLACE } from './story.js'
@@ -56,7 +56,7 @@ describe('worlds inside worlds', () => {
 
   it('seats the Greenwood behind the valley grove and the one-room Hollow Grove inside it, and the story still validates', () => {
     expect(validateStory(STORY, PLACES, ROOT_PLACE)).toEqual([])
-    expect(PLACES.get('greenwood')).toMatchObject({ kind: 'island', entrances: ['root-cave', 'burrow', 'old-hollow'] })
+    expect(PLACES.get('greenwood')).toMatchObject({ kind: 'island', entrances: ['moss', 'tamsin', 'climbers-cache', 'grove-gate-sign', 'pond-sign', 'root-cave', 'burrow', 'old-hollow'] })
     expect(routeTo(STORY, PLACES, ROOT_PLACE, 'hollow-grove')?.map(step => step.via)).toEqual([null, 'island/valley-grove', 'greenwood/old-hollow'])
     expect(WORLDS.get('island')).toBe(SEVENFOLD_VALLEY)
     expect(WORLDS.get('greenwood')).toBe(GREENWOOD)
@@ -78,6 +78,55 @@ describe('worlds inside worlds', () => {
     // Coming down into it again starts over at its start.
     model.enterAtStart()
     expect(model.player).toMatchObject({ x: GREENWOOD.start.x, y: GREENWOOD.start.y, facing: 'down' })
+  })
+
+  it('makes anything an entrance the moment a story seats a place behind it — and a thing with its own verb keeps it', () => {
+    // Any thing in a world may be seated; the story decides, not the kind.
+    expect(validateStory([...STORY, { entrance: 'greenwood/pond-sign', place: 'wet-steps' }, { entrance: 'greenwood/moss', place: 'cistern' }], PLACES, ROOT_PLACE)).toEqual([])
+    const seated = new Set(['pond-sign', 'moss'])
+    const entered: string[] = []
+    const model = new RpgOverworld({ ...hooks, seat: id => seated.has(id), onEntrance: id => entered.push(id) }, GREENWOOD)
+    const push = (id: string, dx: number, dy: number): void => {
+      const place = worldEncounters(GREENWOOD).find(candidate => candidate.id === id)!
+      Object.assign(model.player, { x: place.x - dx, y: place.y - dy })
+      for (let i = 0; i < 40 && entered.length === 0; i++) model.update(1 / 30, { right: dx > 0, left: dx < 0, down: dy > 0, up: dy < 0 })
+    }
+    // The picture by the pond: stand before it, see where it leads, walk in.
+    const sign = GREENWOOD.signs.find(candidate => candidate.id === 'pond-sign')!
+    Object.assign(model.player, { x: sign.x, y: sign.y + 0.9 })
+    expect(model.cue()).toMatchObject({ id: 'pond-sign', action: 'tag', leadsIn: true })
+    push('pond-sign', 0, 0.9)
+    expect(entered).toEqual(['pond-sign'])
+    // Moss still talks when E is pressed, and walking into him goes in.
+    entered.length = 0
+    const moss = GREENWOOD.residents.find(resident => resident.id === 'moss')!
+    Object.assign(model.player, { x: moss.x, y: moss.y + 0.9 })
+    expect(model.cue()).toMatchObject({ id: 'moss', action: 'act', leadsIn: true })
+    expect(model.cue()!.words).toContain('or walk in')
+    expect(model.interact().encounter?.id).toBe('moss')
+    push('moss', 0, 0.9)
+    expect(entered).toEqual(['moss'])
+    // Nothing seated behind it, the other sign is only a sign: walked past, never entered.
+    entered.length = 0
+    const gateSign = GREENWOOD.signs.find(candidate => candidate.id === 'grove-gate-sign')!
+    expect(model.enter(gateSign.id).ok).toBe(false)
+  })
+
+  it('keeps a shrine’s own gate: seated or not, it opens only when its sockets are full', () => {
+    const entered: string[] = []
+    const model = new RpgOverworld({ ...hooks, seat: () => true, onEntrance: id => entered.push(id) })
+    const shrine = SEVENFOLD_VALLEY.shrines[0]!
+    Object.assign(model.player, { x: shrine.x, y: shrine.y + 0.9 })
+    expect(model.enter(shrine.id).ok).toBe(false)
+    expect(entered).toEqual([])
+  })
+
+  it('shows a whole world as a small map, walked or not', () => {
+    const map = worldMap(GREENWOOD)
+    expect(map.cols).toBe(36)
+    expect(map.rows).toBe(28)
+    expect(map.rgb.length).toBe(36 * 28 * 3)
+    expect(new Set(Array.from({ length: 36 * 28 }, (_, cell) => map.rgb.slice(cell * 3, cell * 3 + 3).join(','))).size).toBeGreaterThan(4)
   })
 
   it('reads a participant world back from plain data, and refuses a malformed or unwalkable one', () => {

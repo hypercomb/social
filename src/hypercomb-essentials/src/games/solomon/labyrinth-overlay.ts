@@ -24,6 +24,7 @@ import { ROOT_PLACE, STORY, STORY_BOARDS, type GuideStep } from './story.js'
 import { PLACES, LABYRINTH_PLACE, placeName, seatLabel, crumbLabel, floorLabel, groupOfPlace } from './places.js'
 import { CHAMBERS } from './chamber-places.js'
 import { WORLDS } from './worlds.js'
+import { worldMap } from './rpg-overworld.js'
 import { chamberInstruments, type ChamberInstruments, type ChamberSound } from './chamber-view.js'
 import { IslandRuntime, ChamberRuntime, LabyrinthRuntime, type PlaceRuntime, type RuntimeShell } from './place-runtimes.js'
 import { readAdventureSave, writeAdventureSave, type CarriedEntry } from './adventure-save.js'
@@ -546,7 +547,10 @@ export class SolomonLabyrinthOverlay {
       gain: request => this.#showGain(request),
       seatSeed: (from, entrance) => {
         const seat = seatAt(STORY, entranceKey(from, entrance))
-        return seat ? this.#runtimes.get(seat.place)?.seed() ?? null : null
+        if (!seat) return null
+        // A world is shown whole, as a map, whether or not it was ever walked.
+        const world = WORLDS.get(seat.place)
+        return world ? worldMap(world) : this.#runtimes.get(seat.place)?.seed() ?? null
       },
       found: (from, entrance) => { this.#found.add(entranceKey(from, entrance)); this.#dirty = true },
       openItems: () => this.#openItems(),
