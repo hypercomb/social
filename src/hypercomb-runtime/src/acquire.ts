@@ -124,7 +124,7 @@ export const originAmong = (zones: readonly string[]): boolean => {
 // sig-addressed bytes belong (the SPA fallback), is a definite "not here" and
 // lays an egg (core/eggs.ts); a network error or any other status is the host
 // being unreachable and records nothing.
-const probeBytes = async (url: string): Promise<EggProbe<Uint8Array<ArrayBuffer>>> => {
+const probeBytes = async (url: string, onThrow?: () => void): Promise<EggProbe<Uint8Array<ArrayBuffer>>> => {
   try {
     // Default cache mode, NOT 'no-store': every URL through here is
     // sig-addressed immutable content, so the HTTP cache is free bandwidth.
@@ -137,13 +137,27 @@ const probeBytes = async (url: string): Promise<EggProbe<Uint8Array<ArrayBuffer>
     // pointless hash of a 404 page.
     if ((res.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return 'absent'
     return new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>
-  } catch { return 'unreachable' }
+  } catch { onThrow?.(); return 'unreachable' }
 }
 
-/** Fetch a signature from the first of `origins` that holds it, never asking
- *  again a host that already said it does not (core/eggs.ts). */
-const fetchAcross = (origins: readonly string[]) => (sig: string): Promise<Uint8Array<ArrayBuffer> | null> =>
-  askUntried(sig, origins, base => probeBytes(`${base}/${sig}`))
+/**
+ * Fetch a signature from the first of `origins` that holds it, never asking
+ * again a host that already said it does not (core/eggs.ts).
+ *
+ * A base whose fetch THROWS is not answering this client at all — the network
+ * is down, or the answer carried no CORS header (the Azure apex's 404 page
+ * does not, so every miss there is a thrown TypeError, not a 404). Asking it
+ * again for the next atom can only throw again, so it goes silent for the
+ * rest of THIS walk. Nothing durable is recorded: a thrown fetch says nothing
+ * about the bytes, and the next walk asks the base afresh. A 5xx or other
+ * status stays a per-atom 'unreachable' — that host did answer.
+ */
+export const fetchAcross = (origins: readonly string[]) => {
+  const silent = new Set<string>()
+  return (sig: string): Promise<Uint8Array<ArrayBuffer> | null> =>
+    askUntried(sig, origins.filter(base => !silent.has(base)), base =>
+      probeBytes(`${base}/${sig}`, () => silent.add(base)))
+}
 
 /** THE TRANSFER PACK, when it pays (transfer-pack.ts). A package mostly
  *  missing here arrives as one pack instead of file by file; an update that
