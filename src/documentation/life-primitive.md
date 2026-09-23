@@ -7,6 +7,12 @@ lightbox and tile-property surfaces. This document existed only as those
 citations until 2026-09-04; the write-conformance census found the
 foundational rule of the codebase was code-only with a dangling reference.
 
+**It is doctrine** (2026-09-23): "The primitive" and "Rules" below are
+sections of the hive's seed doctrine (`anatomy-context-need.md` §2a), so every
+model is told them and Jev judges every proposed change against each — a clear
+break is refused, a doubtful one waits for the participant. The standard
+guides; the participant decides.
+
 ## The primitive
 
 Every artifact reference is the signature of a **meta envelope**. The envelope

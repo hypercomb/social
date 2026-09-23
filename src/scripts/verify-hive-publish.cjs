@@ -101,6 +101,7 @@ const announcedOn = page => page.evaluate(() => {
   const judged = run.jevCalls.find(c => c.rows.some(r => r.startsWith('write:')))
   check('Jev judged the write as a write row, with the header as the model wrote it', !!judged && judged.rows.some(r => r.includes(`${target.bee} ${target.section}`)))
   check('Jev was asked toward, beyond, grounded and every doctrine section', !!judged && ['write_toward', 'write_beyond', 'write_grounded'].every(k => judged.questions.includes(k)) && judged.questions.filter(k => /^write_rule\d+$/.test(k)).length >= 3)
+  check('Jev judged the write against the Life Primitive — its shape and its rules', !!judged && ['### The Life Primitive', '### The Life Primitive — its rules'].every(rule => judged.rules.includes(rule)), JSON.stringify(judged?.rules))
   check('the write ran through Execution as an edit', run.decided.some(d => d.kind === 'editing' && /^write /.test(d.lines[0])), JSON.stringify(run.decided))
   check('the draft is picked at the module\'s path', !!run.drafted && run.drafted[0].path === target.path)
 
@@ -147,6 +148,10 @@ const announcedOn = page => page.evaluate(() => {
   const testerRuns = await H.waitFor(() => H.installedOf(tester), 180_000, 1000)
   check('the tester\'s hive at the door installed exactly the sandbox package', testerRuns === sandboxRoot, String(testerRuns).slice(0, 12))
   check('the tester runs the code the model wrote', await proofOf(tester) === MARKER)
+  // The tester's words run through the module word's bee: a word said before
+  // that bee loads is read as a tile's name, so wait for it.
+  await H.waitFor(() => tester.evaluate(() => (!!window.ioc?.get('@diamondcoreprocessor.com/ModuleQueenBee')
+    && !!window.ioc?.get('@diamondcoreprocessor.com/HostSyncService')?.publishAtoms) || null), 60_000, 500)
 
   // ── 3b. ANYONE ASSESSES IT, UNDER THEIR OWN KEY ─────────────────────────
   const told = await H.waitFor(() => tester.evaluate(() => {

@@ -96,15 +96,15 @@ type InstallLike = Parameters<typeof takeDepsFrom>[0] & {
 type Say = (key: string, fallback: string, params?: Record<string, string | number>) => string
 type Toast = (message: string, type?: string) => void
 
-/** What the review reads and writes, from this hive's store and the host. */
+/** What the review reads and writes, from this hive's store and the host.
+ *  The host's AI is looked up only when a review asks it: its bee may load
+ *  after this word's, and an assessment or a published change never needs it. */
 const reviewDeps = (drafts: ModuleDraftsProvider, sync: HostSyncLike): ReviewDeps | null => {
   const store = window.ioc?.get?.(STORE_KEY) as StoreLike | undefined
-  const ai = window.ioc?.get?.(HOST_AI_KEY) as HostAiLike | undefined
   const putResource = store?.putResource?.bind(store)
   const getResource = store?.getResource?.bind(store)
-  const askWhole = ai?.askWhole?.bind(ai)
   const publishAtoms = sync.publishAtoms?.bind(sync)
-  if (!putResource || !getResource || !askWhole || !publishAtoms) return null
+  if (!putResource || !getResource || !publishAtoms) return null
   const bytesOf = async (sig: string): Promise<Uint8Array | null> => {
     const held = await drafts.bytesOf(sig).catch(() => null)
     if (held) return held
@@ -119,7 +119,10 @@ const reviewDeps = (drafts: ModuleDraftsProvider, sync: HostSyncLike): ReviewDep
       const done = await publishAtoms(host, sigs, bytesOf)
       return done.ok ? { ok: true } : { ok: false, error: done.error }
     },
-    ask: (host, question, context) => askWhole(host, question, context),
+    ask: async (host, question, context) => {
+      const ai = window.ioc?.get?.(HOST_AI_KEY) as HostAiLike | undefined
+      return ai?.askWhole ? ai.askWhole(host, question, context) : { ok: false, error: 'the host AI service is not loaded yet' }
+    },
     stamp: (host, key, sig) => setHiveRoot(host, key, sig),
     now: Date.now,
   }
