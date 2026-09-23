@@ -581,12 +581,6 @@ function ensureStyles(): void {
 
 // Contribute the surface the doctrine way: define the element, then add it to
 // the registry — never a tag in either app.html.
-;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void }) => void) => void } })
-  .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
-    if (!customElements.get(SURFACE)) customElements.define(SURFACE, VocabularyElement)
-    try {
-      registry.add({ name: SURFACE, owner: OWNER, element: SURFACE, order: 140 })
-    } catch {
-      // duplicate add (hot reload) — the mounted surface is already live
-    }
-  })
+// molecule/vocabulary.queen.ts defines this element and adds it to the shell's surface registry
+// (atomic-modules-plan.md): a dependency registers nothing.
+export { SURFACE as VOCABULARY_SURFACE, OWNER as VOCABULARY_VIEW_KEY }

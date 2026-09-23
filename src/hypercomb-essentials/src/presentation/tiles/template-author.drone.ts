@@ -84,6 +84,7 @@ import type { VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 import {
   TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE, TEMPLATE_SELECTED, TEMPLATE_STATE, TEMPLATE_VIEW_STATE,
 } from './template-author-effects.js'
+import { LayoutTargetsElement, LAYOUT_TARGETS_SURFACE, LAYOUT_TARGETS_VIEW_KEY } from './layout-targets.view.js'
 export {
   TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE, TEMPLATE_SELECTED, TEMPLATE_STATE, TEMPLATE_VIEW_STATE,
 } from './template-author-effects.js'
@@ -1114,6 +1115,18 @@ export function levelsOf(root: LayoutNode): LevelState[] {
   walk(root, [])
   return out
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): the view is a dependency; this bee
+// defines its element and adds it to the shell's surface registry — never a
+// tag in either app.html.
+window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
+  if (!customElements.get(LAYOUT_TARGETS_SURFACE)) customElements.define(LAYOUT_TARGETS_SURFACE, LayoutTargetsElement)
+  try {
+    registry.add({ name: LAYOUT_TARGETS_SURFACE, owner: LAYOUT_TARGETS_VIEW_KEY, element: LAYOUT_TARGETS_SURFACE, order: 138 })
+  } catch {
+    // duplicate add (hot reload) — the mounted surface is already live
+  }
+})
 
 const _templateAuthor = new TemplateAuthorDrone()
 window.ioc.register('@TemplateAuthorDrone', _templateAuthor)

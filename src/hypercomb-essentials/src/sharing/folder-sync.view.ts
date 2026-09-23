@@ -263,4 +263,5 @@ export class FolderSyncView extends EventTarget {
 }
 
 const _folderSyncView = new FolderSyncView()
-;(window as any).ioc?.register?.('@diamondcoreprocessor.com/FolderSyncView', _folderSyncView)
+// folder-sync.queen.ts registers this (atomic-modules-plan.md).
+export { _folderSyncView as folderSyncView }

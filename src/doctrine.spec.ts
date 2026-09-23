@@ -1485,7 +1485,9 @@ describe('doctrine ratchets', () => {
   // Every spelling the side-effect barrel generator (scripts/prepare.ts) knows,
   // plus optional chaining (`ioc?.register`, `whenReady?.<T>(`), type
   // arguments holding `=>`, and an unindented module-scope `x.register(…)`.
-  const SELF_REGISTRATION = /\bioc\s*\??\.\s*register\s*(?:\?\.)?\s*(?:<[^>]*>)?\s*\(|registerShellSurface\s*\(|\bwhenReady\s*(?:\?\.)?\s*(?:<[\s\S]{0,200}?>)?\s*(?:\?\.)?\s*\([\s\S]{0,400}?\.register\s*(?:\?\.)?\s*\(|^register\s*(?:<[^>]*>)?\s*\(|^[\w$.]+\.register\s*\(/m
+  // A whenReady that ADDS (a shell surface into its registry) is registration
+  // too, and so is a module-scope call-result registration (`hostIoc()?.register?.(`).
+  const SELF_REGISTRATION = /\bioc\s*\??\.\s*register\s*(?:\?\.)?\s*(?:<[^>]*>)?\s*\(|registerShellSurface\s*\(|\bwhenReady\s*(?:\?\.)?\s*(?:<[\s\S]{0,200}?>)?\s*(?:\?\.)?\s*\([\s\S]{0,400}?\.(?:register|add)\s*(?:\?\.)?\s*\(|^register\s*(?:<[^>]*>)?\s*\(|^[\w$.]+(?:\(\))?\s*\??\.\s*register\s*(?:\?\.)?\s*\(/m
   const registersItself = (file: string): boolean => SELF_REGISTRATION.test(stripComments(readFileSync(file, 'utf8')))
   const inAtomizedRoot = (file: string): boolean => {
     const rel = relative(join(ROOT, 'hypercomb-essentials/src'), file).replace(/\\/g, '/')
@@ -1634,31 +1636,6 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/revolucionstyle.com/journal/journal.service.ts',
       'hypercomb-essentials/src/revolucionstyle.com/lounge/lounge.queen.ts',
       'hypercomb-essentials/src/revolucionstyle.com/wheel/flavor-wheel.service.ts',
-      'hypercomb-essentials/src/sharing/adopt-queue.service.ts',
-      'hypercomb-essentials/src/sharing/discover.queen.ts',
-      'hypercomb-essentials/src/sharing/feedback-host.queen.ts',
-      'hypercomb-essentials/src/sharing/folder-sync.queen.ts',
-      'hypercomb-essentials/src/sharing/folder-sync.service.ts',
-      'hypercomb-essentials/src/sharing/folder-sync.view.ts',
-      'hypercomb-essentials/src/sharing/host-sync.service.ts',
-      'hypercomb-essentials/src/sharing/hosts.queen.ts',
-      'hypercomb-essentials/src/sharing/images.queen.ts',
-      'hypercomb-essentials/src/sharing/invite.queen.ts',
-      'hypercomb-essentials/src/sharing/mesh-block.queen.ts',
-      'hypercomb-essentials/src/sharing/mesh-clear.queen.ts',
-      'hypercomb-essentials/src/sharing/nostr-signer.ts',
-      'hypercomb-essentials/src/sharing/offers.queen.ts',
-      'hypercomb-essentials/src/sharing/package-attestation.ts',
-      'hypercomb-essentials/src/sharing/passive-replication-queue.ts',
-      'hypercomb-essentials/src/sharing/publish.queen.ts',
-      'hypercomb-essentials/src/sharing/repush.queen.ts',
-      'hypercomb-essentials/src/sharing/spotlight-scroll.input.ts',
-      'hypercomb-essentials/src/sharing/spotlight.service.ts',
-      'hypercomb-essentials/src/sharing/swarm-filter.service.ts',
-      'hypercomb-essentials/src/sharing/swarm-join.queen.ts',
-      'hypercomb-essentials/src/sharing/swarm-mode.queen.ts',
-      'hypercomb-essentials/src/sharing/update-scout.service.ts',
-      'hypercomb-essentials/src/sharing/use-live-relay.queen.ts',
     ], 'dependency self-registration')
   })
 

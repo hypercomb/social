@@ -57,6 +57,13 @@ const freshEnv = (): void => {
   vi.resetModules()
 }
 
+/** What the shipped shell does at boot: the sharing boot bee registers the
+ *  signer, unconditionally (atomic-modules-plan.md). */
+const wireSigner = async (): Promise<void> => {
+  const { NostrSigner } = await import('./nostr-signer.js')
+  ;(globalThis as unknown as { ioc: { register(k: string, v: unknown): void } }).ioc.register('@diamondcoreprocessor.com/NostrSigner', new NostrSigner())
+}
+
 const loadBinding = async (): Promise<typeof import('./head-claim-signer.js')> =>
   await import('./head-claim-signer.js')
 
@@ -65,7 +72,7 @@ describe('THE MINT PATH NOW RUNS THE READER\'S SHAPE GATE (was: the writer was w
   beforeEach(async () => {
     freshEnv()
     ;(globalThis as Record<string, unknown>)['NOSTR_SECRET_KEY'] = SECRET_A
-    await import('./nostr-signer.js')
+    await wireSigner()
   })
 
   it('(FIXED) the same claim NO reader can parse is now refused at the mint (seq 0 with a prev)', async () => {
@@ -139,7 +146,7 @@ describe('A NIP-07 DENIAL NO LONGER MINTS AN IDENTITY (was: unconsented, and wed
       signEvent: async (evt: Record<string, unknown>) =>
         finalizeEvent(evt as never, hexToBytes(SECRET_EXT) as never),
     }
-    await import('./nostr-signer.js')
+    await wireSigner()
     const mod = await loadBinding()
 
     expect(localStorage.getItem(SECRET_STORAGE)).toBeNull()
@@ -170,7 +177,7 @@ describe('A NIP-07 DENIAL NO LONGER MINTS AN IDENTITY (was: unconsented, and wed
       getPublicKey: async () => pubkeyOf(SECRET_EXT),
       signEvent: async () => { throw new Error('user rejected the request') },
     }
-    await import('./nostr-signer.js')
+    await wireSigner()
     const mod = await loadBinding()
 
     expect(await mod.readerPubkey()).toBe(pubkeyOf(SECRET_EXT))
@@ -188,7 +195,7 @@ describe("verifyEvent's memo is real, and the self-verify no longer relies on it
   beforeEach(async () => {
     freshEnv()
     ;(globalThis as Record<string, unknown>)['NOSTR_SECRET_KEY'] = SECRET_A
-    await import('./nostr-signer.js')
+    await wireSigner()
   })
 
   it('nostr-tools stamps a symbol on every finalized event, so verifyEvent answers from cache', async () => {
@@ -260,9 +267,9 @@ describe("verifyEvent's memo is real, and the self-verify no longer relies on it
 describe("OPEN — the 'no signer' branch is still unreachable in the shipped shell", () => {
   beforeEach(() => { freshEnv() })
 
-  it('OPEN (minor): importing nostr-signer registers unconditionally, so readerPubkey still mints', async () => {
-    // DELIBERATELY LEFT REPRODUCING. `nostr-signer.ts` ends in a bare
-    // `window.ioc.register(...)` at module scope, so `signer()` never returns
+  it('OPEN (minor): the sharing boot bee registers the signer unconditionally, so readerPubkey still mints', async () => {
+    // DELIBERATELY LEFT REPRODUCING. The sharing boot bee registers the signer
+    // at boot in every shell (atomic-modules-plan.md), so `signer()` never returns
     // undefined and one call to `readerPubkey()` from anywhere hands a
     // read-only visitor a persistent identity. The NIP-07 half of this is
     // FIXED above (an extension that refuses now mints nothing); what remains
@@ -276,12 +283,12 @@ describe("OPEN — the 'no signer' branch is still unreachable in the shipped sh
     // owed, and `cachedPubkey()` — the read-safe accessor — is asserted honest
     // below so the SAFE door keeps working.
     void 0;
-    // This is exactly what the app does: `nostr-signer.ts` ends in a bare
-    // `window.ioc.register(...)` at module scope. There is no shell in which the
+    // This is exactly what the app does: the sharing boot bee registers the
+    // signer in the boot lane of every shell. There is no shell in which the
     // key is absent, so the documented read-path safety — "reads must treat a
     // null cache as I own no bucket" — rests entirely on nobody ever calling
     // `readerPubkey()`, with no ratchet to keep it that way.
-    await import('./nostr-signer.js')
+    await wireSigner()
     const mod = await loadBinding()
 
     expect(mod.cachedPubkey()).toBeNull() // the read-safe accessor is honest

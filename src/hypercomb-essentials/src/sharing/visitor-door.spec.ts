@@ -28,6 +28,8 @@ const CAPTURE = readFileSync(join(here, '..', '..', '..', 'hypercomb-shared', 'c
 const WORKER = readFileSync(join(here, 'meeting-invite.worker.ts'), 'utf8')
 const VISIT = readFileSync(join(here, 'hive-visit.drone.ts'), 'utf8')
 const DOOR = readFileSync(join(here, 'visitor-door.view.ts'), 'utf8')
+// The hive-visit bee defines the door element and adds its surface (atomic-modules-plan.md).
+const VISIT_BEE = readFileSync(join(here, 'hive-visit.drone.ts'), 'utf8')
 
 const K = 'e'.repeat(64)
 
@@ -153,7 +155,7 @@ describe('what arrives is an offer, at the route the reader came from', () => {
 
 describe('the door on somebody else’s site', () => {
   it('is a drone element surface — the visitor build has no Angular surfaces at all', () => {
-    expect(DOOR).toMatch(/registry\.add\(\{ name: SURFACE, owner: OWNER, element: SURFACE/)
+    expect(VISIT_BEE).toMatch(/registry\.add\(\{ name: VISITOR_DOOR_SURFACE, owner: VISITOR_DOOR_VIEW_KEY, element: VISITOR_DOOR_SURFACE/)
     expect(DOOR).not.toMatch(/@Component|registerShellSurface/)
   })
 

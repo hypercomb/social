@@ -46,6 +46,7 @@ import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { isPublishedVisitorShell } from './behavior-enablement.js'
 import type { StaticOffer } from './static-peers.js'
+import { VisitorDoorElement, VISITOR_DOOR_SURFACE, VISITOR_DOOR_VIEW_KEY } from './visitor-door.view.js'
 
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
@@ -257,6 +258,18 @@ export class HiveVisitDrone extends Drone {
     })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): the view is a dependency; this bee
+// defines its element and adds it to the shell's surface registry — never a
+// tag in either app.html.
+window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
+  if (!customElements.get(VISITOR_DOOR_SURFACE)) customElements.define(VISITOR_DOOR_SURFACE, VisitorDoorElement)
+  try {
+    registry.add({ name: VISITOR_DOOR_SURFACE, owner: VISITOR_DOOR_VIEW_KEY, element: VISITOR_DOOR_SURFACE, order: 143 })
+  } catch {
+    // duplicate add (hot reload) — the mounted surface is already live
+  }
+})
 
 const _hiveVisit = new HiveVisitDrone()
 ;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(

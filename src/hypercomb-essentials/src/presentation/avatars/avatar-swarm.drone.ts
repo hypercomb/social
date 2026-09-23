@@ -11,6 +11,8 @@ import { bakeBeeAtlas, type BeeAtlas } from './bee-ab-atlas.js'
 import { noise2D } from '../grid/simplex-noise.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../grid/hex-geometry.js'
+// Ctrl+Shift+B toggles the bees; the toggle listens from load (atomic-modules-plan.md).
+import '../../navigation/bee-toggle.js'
 
 /** Either swarm shader — both expose the same time/scale surface so the drone
  *  can render textured AB (preferred) or fall back to the procedural SDF. */

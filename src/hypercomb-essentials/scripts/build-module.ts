@@ -305,7 +305,7 @@ const isKeysFile = (f: string): boolean => {
 
 /** Module-scope registration — the same spellings the doctrine ratchet reads. */
 const SELF_REGISTRATION =
-  /\bioc\s*\??\.\s*register\s*(?:\?\.)?\s*(?:<[^>]*>)?\s*\(|registerShellSurface\s*\(|\bwhenReady\s*(?:\?\.)?\s*(?:<[\s\S]{0,200}?>)?\s*(?:\?\.)?\s*\([\s\S]{0,400}?\.register\s*(?:\?\.)?\s*\(|^register\s*(?:<[^>]*>)?\s*\(|^[\w$.]+\.register\s*\(/m
+  /\bioc\s*\??\.\s*register\s*(?:\?\.)?\s*(?:<[^>]*>)?\s*\(|registerShellSurface\s*\(|\bwhenReady\s*(?:\?\.)?\s*(?:<[\s\S]{0,200}?>)?\s*(?:\?\.)?\s*\([\s\S]{0,400}?\.(?:register|add)\s*(?:\?\.)?\s*\(|^register\s*(?:<[^>]*>)?\s*\(|^[\w$.]+(?:\(\))?\s*\??\.\s*register\s*(?:\?\.)?\s*\(/m
 
 const registersItself = (f: string): boolean => {
   const code = readFileSync(f, 'utf8')

@@ -1970,12 +1970,11 @@ export class HostSyncService extends EventTarget {
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
 }
 
-const _hostSync = new HostSyncService()
-window.ioc.register('@diamondcoreprocessor.com/HostSyncService', _hostSync)
-// RUNTIME CONTRACT KEY — @hypercomb/runtime names no essentials namespace and
-// resolves this as '@HostSyncService'. Store's read-triggered staging (the
-// author's push half) goes through that key; without the alias it is inert.
-window.ioc.register('@HostSyncService', _hostSync)
+/** The one host sync. sharing.boot.drone.ts registers it — under its IoC key
+ *  and the runtime contract key `@HostSyncService` the store stages through —
+ *  in the boot lane (atomic-modules-plan.md): a dependency registers nothing. */
+export const hostSyncService = new HostSyncService()
+const _hostSync = hostSyncService
 
 // On boot, drain anything left from a prior session — only if the operator
 // has explicitly opted in. Visitors with no host configured (or who haven't

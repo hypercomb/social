@@ -37,7 +37,8 @@ import {
   PUBLICATIONS_KIND, PUBLICATIONS_VIEW,
   type PublicationsPayload,
 } from '../../commands/publications-view.queen.js'
-import { DISCOVER_EFFECT, type DiscoverPayload } from '../../sharing/discover.queen.js'
+import { DISCOVER_EFFECT } from '../../sharing/discover-effects.js'
+import type { DiscoverPayload } from '../../sharing/discover.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }

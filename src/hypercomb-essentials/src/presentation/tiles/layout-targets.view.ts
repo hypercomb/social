@@ -1002,12 +1002,6 @@ function ensureStyles(): void {
 // Contribute the surface the doctrine way: define the element, then add it to
 // the registry — never a tag in either app.html, and never an Angular class in
 // the shared barrel.
-;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void }) => void) => void } })
-  .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
-    if (!customElements.get(SURFACE)) customElements.define(SURFACE, LayoutTargetsElement)
-    try {
-      registry.add({ name: SURFACE, owner: OWNER, element: SURFACE, order: 138 })
-    } catch {
-      // duplicate add (hot reload) — the mounted surface is already live
-    }
-  })
+// presentation/tiles/template-author.drone.ts defines this element and adds it to the shell's surface registry
+// (atomic-modules-plan.md): a dependency registers nothing.
+export { SURFACE as LAYOUT_TARGETS_SURFACE, OWNER as LAYOUT_TARGETS_VIEW_KEY }

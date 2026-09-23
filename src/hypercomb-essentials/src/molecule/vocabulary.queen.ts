@@ -28,6 +28,7 @@
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
 import { VOCABULARY_OPEN } from './vocabulary-words.js'
+import { VocabularyElement, VOCABULARY_SURFACE, VOCABULARY_VIEW_KEY } from './vocabulary.view.js'
 
 /** The two verbs, in the order the window shows them. Read by `slashComplete`
  *  AND by `execute`, so autocomplete and the aim can never disagree. */
@@ -59,6 +60,18 @@ export class VocabularyQueenBee extends QueenBee {
     EffectBus.emit(VOCABULARY_OPEN, { intent: readIntent(args), at: Date.now() })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): the view is a dependency; this bee
+// defines its element and adds it to the shell's surface registry — never a
+// tag in either app.html.
+window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
+  if (!customElements.get(VOCABULARY_SURFACE)) customElements.define(VOCABULARY_SURFACE, VocabularyElement)
+  try {
+    registry.add({ name: VOCABULARY_SURFACE, owner: VOCABULARY_VIEW_KEY, element: VOCABULARY_SURFACE, order: 140 })
+  } catch {
+    // duplicate add (hot reload) — the mounted surface is already live
+  }
+})
 
 const _vocabulary = new VocabularyQueenBee()
 ;(window as unknown as { ioc?: { register?: (k: string, v: unknown) => void } })

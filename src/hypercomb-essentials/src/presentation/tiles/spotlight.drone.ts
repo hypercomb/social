@@ -23,6 +23,8 @@ import { Application, Container, Graphics } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial } from '../../navigation/hex-detector.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
+import { spotlightService } from '../../sharing/spotlight.service.js'
+import { spotlightScrollInput } from '../../sharing/spotlight-scroll.input.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
 
@@ -253,6 +255,11 @@ export class SpotlightDrone extends Drone {
       : { x: Math.sqrt(3) * this.#geo.spacing * (q + r / 2), y: this.#geo.spacing * 1.5 * r }
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// its owner bee registers it.
+window.ioc.register('@diamondcoreprocessor.com/SpotlightService', spotlightService)
+window.ioc.register('@diamondcoreprocessor.com/SpotlightScrollInput', spotlightScrollInput)
 
 const _spotlight = new SpotlightDrone()
 window.ioc.register('@diamondcoreprocessor.com/SpotlightDrone', _spotlight)

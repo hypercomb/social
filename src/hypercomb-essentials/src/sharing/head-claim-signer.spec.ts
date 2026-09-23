@@ -37,7 +37,9 @@ const installSigner = async (secret: string): Promise<void> => {
   }
   ;(globalThis as Record<string, unknown>)['NOSTR_SECRET_KEY'] = secret
   vi.resetModules()
-  await import('./nostr-signer.js')
+  // The sharing boot bee registers the signer (atomic-modules-plan.md).
+  const { NostrSigner } = await import('./nostr-signer.js')
+  registry.set('@diamondcoreprocessor.com/NostrSigner', new NostrSigner())
 }
 
 const loadBinding = async (): Promise<typeof import('./head-claim-signer.js')> =>

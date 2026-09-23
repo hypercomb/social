@@ -18,9 +18,7 @@
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { fetchPublicationCards } from './publications-ledger.js'
 
-/** Effect the publications view listens for. `at` guards the bus's
- *  last-value replay: only a fresh gesture may take the view over. */
-export const DISCOVER_EFFECT = 'publications:discover'
+import { DISCOVER_EFFECT } from './discover-effects.js'
 
 export interface DiscoverPayload {
   readonly origin: string

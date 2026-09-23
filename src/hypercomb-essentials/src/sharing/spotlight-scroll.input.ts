@@ -60,10 +60,8 @@ export class SpotlightScrollInput {
 }
 
 const _spotlightScroll = new SpotlightScrollInput()
-;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(
-  '@diamondcoreprocessor.com/SpotlightScrollInput',
-  _spotlightScroll,
-)
+// presentation/tiles/spotlight.drone.ts registers this (atomic-modules-plan.md).
+export { _spotlightScroll as spotlightScrollInput }
 
 // Auto-attach on module load — no canvas / zoom plumbing needed
 // because the wheel listener is window-level and self-gates on alt.

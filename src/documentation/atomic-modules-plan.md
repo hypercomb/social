@@ -327,10 +327,43 @@ On the web shell every baseline key registered, plus the template-author bee,
 which never registered before; zero breaks; 559 units linked; 350 atoms,
 175 bees.
 
-Next: assistant, sharing, commands — each checked for boot services first
+**Batch 6 — BUILT and browser-verified 2026-09-22:** sharing. A third boot
+bee, `sharing/sharing.boot.drone.ts`, registers the Nostr signer and the host
+sync (and its runtime contract key `@HostSyncService`, which the store stages
+reads through); it also loads the retired-push collector, which ran at boot
+before. Services that start work when they load (the passive replication
+queue, the update scout, spotlight and its scroll input, HostSync's drain)
+keep that code and EXPORT their instance; the owner bee imports and registers
+it, so the work starts when its owner loads. Owners: swarm-adopt (adopt
+queue), content-broker (passive replication), hosts (update scout, package
+attestation, the host directory's face and surface), swarm (filter), the
+folder-sync word (its service and view), the offers word (its surface),
+hive-visit (the visitor door's surface), spotlight (spotlight + scroll). Out
+of bees into atoms: `peer-models-lending.ts`, `discover-effects.ts`.
+
+**Found and fixed: UNREACHABLE ATOMS.** An atom that does something when it
+loads — adds a shell surface, subscribes, declares a pool kind — used to run
+because its namespace bundle loaded at boot. As a lazy atom it runs only if a
+bee reaches it. Five views added their own shell surface (two vocabulary
+views, the targets window, the visitor door, the host directory) and nothing
+reached them, so in the web shell those windows were gone — in batches 2 and
+5 as well as this one — and the IoC-key comparison could not see it, because a
+surface is not an IoC key. Their bees now add their surfaces; the bee toggle
+is loaded by the avatar swarm; the vocabulary ledger's pool kind loads with
+the views that import it. The self-registration pattern now also catches a
+`whenReady` that ADDS and a module-scope `name()?.register?.(`. Two checks
+join the recipe:
+- every atom with module-scope effects must be reachable from a bee or an
+  eager bundle (barrels never count);
+- the web-shell comparison covers shell surfaces as well as IoC keys.
+
+On the web shell: every baseline key registered (the host directory's face
+back), all 60 shell surfaces registered and the checked ones mounted, zero
+breaks; 643 units linked; 402 atoms, 190 bees.
+
+Next: assistant, commands — each checked for boot services first
 (DecorationService, OverlapMetrics and VisualBeeRegistry are read by the
-command line; HostSync by the store). (`revolucionstyle.com` is outside the
-build.)
+command line). (`revolucionstyle.com` is outside the build.)
 
 ## Atomize for the editor, optimize for the reader
 

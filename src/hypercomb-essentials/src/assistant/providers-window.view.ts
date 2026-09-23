@@ -28,7 +28,7 @@
 // shape as skills-window.view.
 
 import { EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
-import { isLendingModels } from '../sharing/peer-models.drone.js'
+import { isLendingModels } from '../sharing/peer-models-lending.js'
 import { llmActivation } from './llm-activation.js'
 import { JEV_MODEL } from './jev-decision.js'
 import { jevDecision } from './jev-decision.service.js'

@@ -48,6 +48,7 @@ import { compileProviderSpec, parseProviderSpec } from '../assistant/providers/p
 import type {
   LlmCallResult, LlmProviderDescriptor, LlmRequest,
 } from '../assistant/providers/llm-provider.types.js'
+import { PEER_OFFER_STORAGE_KEY, isLendingModels, setLendingModels } from './peer-models-lending.js'
 
 /** Keep in sync with SwarmDrone.configureKinds() or the relay filters them. */
 export const PEER_MODEL_OFFER_KIND = 30215
@@ -60,8 +61,6 @@ const SIGSTORE_KEY = '@hypercomb/SignatureStore'
 const ROOM_KEY = '@hypercomb.social/RoomStore'
 const SECRET_KEY = '@hypercomb.social/SecretStore'
 
-/** Device-local: is this participant lending their machine? Off by default. */
-export const PEER_OFFER_STORAGE_KEY = 'hc:llm:peer-offer'
 
 /** How long an offer stands before it must be renewed. Short: this is a
  *  liveness claim, and a stale one sends requests to a closed laptop. */
@@ -109,19 +108,6 @@ type OfferPayload = {
   models?: OfferedModel[]
 }
 
-const readFlag = (key: string): boolean => {
-  try { return /^(1|true|yes|on)$/i.test(String(globalThis.localStorage?.getItem(key) ?? '')) }
-  catch { return false }
-}
-
-/** Is this participant lending their machine to the swarm? */
-export const isLendingModels = (): boolean => readFlag(PEER_OFFER_STORAGE_KEY)
-
-/** Turn lending on or off. The offer stops being renewed either way. */
-export const setLendingModels = (on: boolean): void => {
-  try { globalThis.localStorage?.setItem(PEER_OFFER_STORAGE_KEY, on ? 'true' : 'false') } catch { /* session */ }
-  EffectBus.emit('peer-models:lending', { lending: on })
-}
 
 export class PeerModelsDrone extends Drone {
 

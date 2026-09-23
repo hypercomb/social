@@ -96,10 +96,8 @@ export class SwarmFilterService extends EventTarget {
 }
 
 const _swarmFilter = new SwarmFilterService()
-;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(
-  '@diamondcoreprocessor.com/SwarmFilterService',
-  _swarmFilter,
-)
+// swarm.drone.ts registers this (atomic-modules-plan.md).
+export { _swarmFilter as swarmFilterService }
 
 /** The live selection, for the swarm drone's source-side filter — a
  *  direct module read keeps the hot path free of IoC lookups. */
