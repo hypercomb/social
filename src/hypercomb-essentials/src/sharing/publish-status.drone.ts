@@ -40,7 +40,7 @@ import { publishVerdict, type PublishIndexState, type PublishRowState } from './
 // there is one writer of `community:hosts` and this drone is not it.
 import { hostZone, hostsOfBranch, listCommunityHosts, setBranchHosts } from './community-hosts.js'
 import { lineageKey } from '../history/lineage-key.js'
-import { readPublicBranches } from '../presentation/tiles/tile-actions.drone.js'
+import { readPublicBranches } from '../presentation/tiles/tile-public.js'
 import {
   collidingPaths,
   highWaterIndexStamp,

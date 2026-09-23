@@ -37,7 +37,7 @@ import {
 import { fetchHiveIndex, nip98Header, putHiveManifest } from './hive-pointer.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { hostsOfBranch } from './community-hosts.js'
-import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-actions.drone.js'
+import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-public.js'
 import { knownRoots, listPublishRecords, writePublishRecord, type PublishRecord } from './publish-heads.js'
 import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.js'
 import { readGlobalOnKinds } from './behavior-enablement.js'

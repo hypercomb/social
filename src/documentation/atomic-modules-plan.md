@@ -305,10 +305,32 @@ its service. On the web shell: the boot lane ran between the dependencies
 the history warm-up ran; every baseline IoC key registered plus the two boot
 bees; zero breaks; 436 units linked; 252 atoms, 172 bees.
 
-Next: presentation, assistant, sharing, commands — each checked for boot
-services first (AxialService is read by the runtime; DecorationService,
-OverlapMetrics and VisualBeeRegistry by the command line; HostSync by the
-store). (`revolucionstyle.com` is outside the build.)
+**Batch 5 — BUILT and browser-verified 2026-09-22:** presentation. The
+render-critical bees own what the first paint reads: pixi-host adds
+AxialService (the runtime's render-critical readiness list names it);
+show-cell adds the index nurse, the center-slot tracker, the tile-source
+registry and the two render factories; background.drone the background
+themes and the canvas background. The agent bee owns its avatar registry.
+Three screensaver/hide/organism words became bees.
+
+**A bee is never imported for a value — so shared exports leave the bee.**
+The build now enforces it inside atomized domains (an import landing on a
+bee is an empty module, and a named value import fails the build — it caught
+the organism word importing its bee's effect names). Four new atoms:
+`tile-public.ts` (the hide list, per-tile public flag and branch-public list,
+out of tile-actions.drone), `tile-action-icons.ts` (the icon placement math),
+`tree-view-target.ts` (the tree view's name and the `/tree` target parser),
+`template-author-effects.ts` and `organism-effects.ts` (effect names). Types
+stay where they are: a type import vanishes at build.
+
+On the web shell every baseline key registered, plus the template-author bee,
+which never registered before; zero breaks; 559 units linked; 350 atoms,
+175 bees.
+
+Next: assistant, sharing, commands — each checked for boot services first
+(DecorationService, OverlapMetrics and VisualBeeRegistry are read by the
+command line; HostSync by the store). (`revolucionstyle.com` is outside the
+build.)
 
 ## Atomize for the editor, optimize for the reader
 

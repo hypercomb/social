@@ -19,7 +19,7 @@ import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sig
 import { mintBuildRecord } from '../history/builds-slot.js'
 import { putSummary, listSummaryRuns, type FeedbackSummaryRecord } from './feedback-summaries.js'
 import { compactBreaks, listBreaks, updateIssue } from './breaks.js'
-import { readPublicBranches } from '../presentation/tiles/tile-actions.drone.js'
+import { readPublicBranches } from '../presentation/tiles/tile-public.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
 import { bridgeMaySetRootKey, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 

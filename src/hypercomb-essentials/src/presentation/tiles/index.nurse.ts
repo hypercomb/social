@@ -32,5 +32,4 @@ export class IndexNurse extends NurseBee<number> {
   }
 }
 
-const _indexNurse = new IndexNurse()
-;(window as any).ioc?.register?.(_indexNurse.iocKey, _indexNurse)
+// presentation/tiles/show-cell.drone.ts — the first paint reads it registers this (atomic-modules-plan.md): a dependency registers nothing.

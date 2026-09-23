@@ -22,7 +22,7 @@ import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { setTileStacks, type StackVariant } from './tile-stack.js'
 import { participantVariantVisual } from './participant-variant.js'
-import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
+import { hideStorageKey, isCellPublic } from './tile-public.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
 import { lineageKey } from '../../history/lineage-key.js'
@@ -30,6 +30,11 @@ import type { HistoryCursorService, CursorState } from '../../history/history-cu
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
 import { LayoutService } from '../../move/layout.service.js'
 import { SubstrateService } from '../../substrate/substrate.service.js'
+import { HexLabelAtlasFactory } from '../grid/hex-label.atlas.js'
+import { HexSdfTextureShaderFactory } from '../grid/hex-sdf.shader.js'
+import { CenterSlotTracker } from '../grid/center-slot-tracker.js'
+import { TILE_SOURCE_REGISTRY_KEY, TileSourceRegistry } from './tile-source-registry.js'
+import { IndexNurse } from './index.nurse.js'
 
 // Render-path diagnostics are opt-in (localStorage 'hc:diag' = '1').
 // resolveChildNames runs on every non-memoized pass; the per-pass info
@@ -11702,6 +11707,14 @@ export class ShowCellDrone extends Drone {
 // the services it needs for the first paint, so they exist before it.
 window.ioc.register('@diamondcoreprocessor.com/LayoutService', new LayoutService())
 window.ioc.register('@diamondcoreprocessor.com/SubstrateService', new SubstrateService())
+window.ioc.register('@diamondcoreprocessor.com/HexLabelAtlasFactory', new HexLabelAtlasFactory())
+window.ioc.register('@diamondcoreprocessor.com/HexSdfTextureShaderFactory', new HexSdfTextureShaderFactory())
+window.ioc.register('@diamondcoreprocessor.com/CenterSlotTracker', new CenterSlotTracker())
+window.ioc.register(TILE_SOURCE_REGISTRY_KEY, new TileSourceRegistry())
+{
+  const indexNurse = new IndexNurse()
+  window.ioc.register(indexNurse.iocKey, indexNurse)
+}
 window.ioc.whenReady('@diamondcoreprocessor.com/LayerSlotRegistry', (slots: { register(slot: { slot: string; triggers: readonly string[] }): void }) => {
   try { slots.register(TILE_PROPERTIES_SLOT_DECLARATION) } catch (err) {
     // Idempotent re-registration with the same name + payload is safe; only a

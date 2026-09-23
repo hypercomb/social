@@ -65,7 +65,7 @@ import {
   EffectBus, I18N_IOC_KEY, attachDockedPanel, isPhoneViewport,
   type DockedPanel, type I18nProvider,
 } from '@hypercomb/core'
-import { TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE } from './template-author.drone.js'
+import { TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE } from './template-author-effects.js'
 import type { HoleState, TargetsState } from './template-author.drone.js'
 
 const SURFACE = 'hc-layout-targets'

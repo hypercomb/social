@@ -532,5 +532,4 @@ export class BackgroundThemeService extends EventTarget {
   }
 }
 
-const _backgroundThemes = new BackgroundThemeService()
-;(window as any).ioc?.register?.('@diamondcoreprocessor.com/BackgroundThemes', _backgroundThemes)
+// presentation/background/background.drone.ts — the first paint reads it registers this (atomic-modules-plan.md): a dependency registers nothing.

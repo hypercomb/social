@@ -1626,5 +1626,4 @@ export class CanvasBackgroundService extends EventTarget {
   }
 }
 
-const _canvasBackground = new CanvasBackgroundService()
-;(window as any).ioc?.register?.('@diamondcoreprocessor.com/CanvasBackground', _canvasBackground)
+// presentation/background/background.drone.ts — the first paint reads it registers this (atomic-modules-plan.md): a dependency registers nothing.

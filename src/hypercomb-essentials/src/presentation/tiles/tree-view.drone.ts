@@ -39,7 +39,7 @@ import {
   VIEW_SPAWN_EFFECT, HEXAGONS, sameSegments, spawnForView, viewReturnTarget, type ViewSpawn,
 } from './view-spawn.js'
 
-export const TREE_VIEW = 'tree'
+import { TREE_VIEW } from './tree-view-target.js'
 
 /** House palette — steel on ink, matching the other full-viewport views.
  *  A dark canvas is deliberate: the limb hues are the information here, and
@@ -83,7 +83,6 @@ const FIT_FLOOR = 0.45
 /** …nor blows a two-tile branch up to fill the screen. */
 const FIT_CEILING = 1.15
 
-const SIG = /^[0-9a-f]{64}$/
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
 type NavigationShape = { goRaw(segments: readonly string[]): void }
@@ -1846,16 +1845,6 @@ export class TreeViewDrone extends Drone {
   }
 }
 
-/** Parse a `/tree` argument into a root. Accepts a raw signature, a lineage
- *  path, or nothing (the current location). Names registered by `/branch`
- *  are resolved by the queen, which owns the registry. */
-export function parseTreeTarget(raw: string): TreeRoot | null {
-  const value = String(raw ?? '').trim()
-  if (!value) return null
-  if (SIG.test(value.toLowerCase())) return { sig: value.toLowerCase() }
-  const segments = value.split('/').map(s => s.trim()).filter(Boolean)
-  return { segments }
-}
 
 const _treeView = new TreeViewDrone()
 window.ioc.register('@diamondcoreprocessor.com/TreeViewDrone', _treeView)

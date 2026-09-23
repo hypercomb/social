@@ -52,7 +52,7 @@ import { conversationModel, listRailConversations, tileConvoId } from '../../ass
 import { callModel, configuredProviders } from '../../assistant/llm-dispatch.js'
 import { chooseProvider } from '../../assistant/model-policy.js'
 import { restingBees, restingConvoId } from './resting-bees.js'
-import { avatarKeyOf, type AgentAvatarRegistry } from './agent-avatar.js'
+import { AgentAvatarRegistry, avatarKeyOf } from './agent-avatar.js'
 import { BEE_PERSONALITY_CHANGED, personaFor, personalityKey, type BeePersona } from './bee-personality.js'
 import { cacheBanter, cachedBanter } from './bee-banter-cache.js'
 import { loreBeats, topicAt } from './bee-hive-lore.js'
@@ -1911,6 +1911,9 @@ export class AgentBeeDrone extends Drone {
     if (this.#layer && this.#world) this.#world.removeChild(this.#layer)
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing.
+window.ioc.register('@diamondcoreprocessor.com/AgentAvatarRegistry', new AgentAvatarRegistry())
 
 const _agentBees = new AgentBeeDrone()
 window.ioc.register('@diamondcoreprocessor.com/AgentBeeDrone', _agentBees)

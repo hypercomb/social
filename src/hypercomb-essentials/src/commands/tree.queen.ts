@@ -20,7 +20,7 @@
 // is a way of naming one.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { parseTreeTarget, TREE_VIEW } from '../presentation/tiles/tree-view.drone.js'
+import { parseTreeTarget, TREE_VIEW } from '../presentation/tiles/tree-view-target.js'
 import type { TreeRoot } from '../presentation/tiles/tree-walk.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
 
