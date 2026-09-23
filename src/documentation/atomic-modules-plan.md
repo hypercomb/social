@@ -198,6 +198,47 @@ and stays that way — the rule is one behaviour per FEATURE, not per
 directory tree; what changes there is only that its services stop
 registering themselves.
 
+**Decided by jwize, 2026-09-22:**
+- **A queen that registers itself is a bee.** A word is a behaviour the hive
+  registers. In an atomized domain the build classifies a self-registering
+  `*.queen.ts` as its own bee. A queen its feature's bee registers (the game
+  queens) stays a dependency. A queen becomes a bee only when its domain is
+  atomized: as a lone bee in a namespace-bundle domain it would carry private
+  copies of its sibling files.
+- **Every other registering file gets an owner bee.** A service, view, input
+  or small registry stops registering itself; the bee of its feature
+  registers it once, and every other bee keeps resolving it by IoC key.
+- **Domain by domain**, smallest first, each committed on its own.
+
+**The recipe for one domain:**
+1. Its self-registering queens become bees (automatic once it is listed).
+2. Every other registration moves into the domain's owner bee.
+3. Exports another file imports from a queen move into a dependency atom
+   (a bee cannot be imported; the build stubs it and a named import fails).
+4. The domain joins `hypercomb-essentials/atomized-roots.json` — the one list
+   the build and the ratchets both read.
+5. `npm run build:essentials`; zero dangling imports; zero link failures in
+   Node through the alias map; the domain's tests and the doctrine suite.
+6. On a web shell of its own origin: install the new build, reload, and
+   compare every registered IoC key with a baseline taken before — nothing
+   missing, nothing new.
+7. Commit.
+
+**The build keys every unit on the atomized list** (`BUILD_SHAPE`). Listing
+a domain changes what OTHER units inline without touching their source, so
+without it their caches hit and ship the old inlined copies — caught on the
+first batch, when only 6 of 140 bees rebuilt.
+
+**Batch 1 — BUILT and browser-verified 2026-09-22:** notes, concealment,
+website, widgets, references, recording, meeting, format, document, search,
+computation. Three queens became bees; the search service, both computation
+services and the document slot moved under their bees. 436 of 436 IoC keys
+registered after the swap; 169 units linked. Next, by size: selection,
+clipboard, contact, quickmenu, files, comfy, workflow, substrate, move,
+preferences, pheromones, link, molecule, sequence, safety, keyboard,
+tutorial, navigation, editor, history, presentation, assistant, sharing,
+commands. (`revolucionstyle.com` is outside the build.)
+
 ## Atomize for the editor, optimize for the reader
 
 Decided by jwize, 2026-09-22: single responsibility everywhere lets the graph

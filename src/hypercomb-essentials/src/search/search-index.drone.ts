@@ -26,7 +26,7 @@
 //   - mints no truth: no layers, no markers, no lineage writes
 
 import { Drone } from '@hypercomb/core'
-import type { HiveSearchService } from './hive-search.service.js'
+import { HiveSearchService } from './hive-search.service.js'
 
 /** Manifest reads per idle pass, for the committed spine. A pass that runs
  *  out stops cleanly and the next one picks up — every branch it did finish
@@ -104,4 +104,7 @@ export class SearchIndexDrone extends Drone {
   }
 }
 
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// the feature's one behaviour registers it.
+window.ioc.register('@diamondcoreprocessor.com/HiveSearchService', new HiveSearchService())
 window.ioc.register('@diamondcoreprocessor.com/SearchIndexDrone', new SearchIndexDrone())

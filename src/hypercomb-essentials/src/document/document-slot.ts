@@ -51,10 +51,8 @@
 // Registered PASSIVE (`triggers: []`): committed directly through
 // `bag-set`, so no trigger event drives its commit. Registration declares
 // the slot so the preloader warms it and history diff sees it as
-// first-class. Module-load-order independent via `whenReady`; kept alive
-// against tree-shaking by the view's import of `DOCUMENT_SLOT`.
-
-import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
+// first-class. document-view.drone.ts registers it — a dependency registers
+// nothing (atomic-modules-plan.md).
 
 /**
  * Slot name on the layer JSON. Constant so writers and the view share one
@@ -62,12 +60,5 @@ import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
  */
 export const DOCUMENT_SLOT = 'document'
 
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<LayerSlotRegistry>(
-  '@diamondcoreprocessor.com/LayerSlotRegistry',
-  (slotRegistry) => {
-    slotRegistry.register({
-      slot: DOCUMENT_SLOT,
-      triggers: [],
-    })
-  },
-)
+/** The slot as the LayerSlotRegistry declares it: passive, no triggers. */
+export const DOCUMENT_SLOT_DECLARATION = { slot: DOCUMENT_SLOT, triggers: [] as string[] }

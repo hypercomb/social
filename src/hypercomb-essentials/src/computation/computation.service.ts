@@ -271,5 +271,4 @@ export class ComputationService {
   }
 }
 
-const _computationService = new ComputationService()
-;(window as any).ioc.register('@diamondcoreprocessor.com/ComputationService', _computationService)
+// computation.drone.ts registers this service (atomic-modules-plan.md).

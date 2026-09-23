@@ -6,8 +6,8 @@ import {
   ComputationReceiptCanonical,
 } from '@hypercomb/core'
 
-import type { ComputationService } from './computation.service.js'
-import type { ComputationRoutingService } from './computation-routing.service.js'
+import { ComputationService } from './computation.service.js'
+import { ComputationRoutingService } from './computation-routing.service.js'
 
 type ComputationRequest = {
   inputSignature: string
@@ -211,6 +211,11 @@ export class ComputationDrone extends Drone {
     })
   }
 }
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// the feature's one behaviour registers it.
+window.ioc.register('@diamondcoreprocessor.com/ComputationService', new ComputationService())
+window.ioc.register('@diamondcoreprocessor.com/ComputationRoutingService', new ComputationRoutingService())
 
 const _computationDrone = new ComputationDrone()
 ;(window as any).ioc.register('@diamondcoreprocessor.com/ComputationDrone', _computationDrone)

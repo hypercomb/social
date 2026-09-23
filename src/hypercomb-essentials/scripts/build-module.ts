@@ -172,6 +172,8 @@ interface BeeDepCacheEntry {
 // so every v8 bee/namespace that inlined a game file must rebuild.
 interface BuildCache {
   version: 10
+  /** BUILD_SHAPE when this cache was written. */
+  shape?: string
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   namespaces: Record<string, UnitCache>
@@ -301,8 +303,26 @@ const isKeysFile = (f: string): boolean => {
   return base === 'essentials-keys.ts' || base === 'essentials-keys.js'
 }
 
+/** Module-scope registration — the same spellings the doctrine ratchet reads. */
+const SELF_REGISTRATION =
+  /\bioc\s*\??\.\s*register\s*(?:\?\.)?\s*(?:<[^>]*>)?\s*\(|registerShellSurface\s*\(|\bwhenReady\s*(?:\?\.)?\s*(?:<[\s\S]{0,200}?>)?\s*(?:\?\.)?\s*\([\s\S]{0,400}?\.register\s*(?:\?\.)?\s*\(|^register\s*(?:<[^>]*>)?\s*\(|^[\w$.]+\.register\s*\(/m
+
+const registersItself = (f: string): boolean => {
+  const code = readFileSync(f, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:'"`])\/\/.*$/gm, '$1')
+  return SELF_REGISTRATION.test(code)
+}
+
+/** A bee is a behaviour the hive registers: every drone and worker, and —
+ *  under an atomized root — every queen that registers ITSELF, because a word
+ *  is a behaviour too (jwize, 2026-09-22). A queen its feature's bee registers
+ *  (the game queens) stays a dependency of that bee. Outside the atomized
+ *  roots a queen still rides its namespace bundle, where its sibling files
+ *  are shared; as a lone bee it would carry private copies of them. */
 const isBee = (f: string): boolean =>
   f.endsWith('.drone.ts') || f.endsWith('.drone.js') || f.endsWith('.worker.ts') || f.endsWith('.worker.js')
+  || (/\.queen\.[tj]s$/.test(f) && isAtomizedRelPath(relPosix(SRC_ROOT, f)) && registersItself(f))
 
 const isEntry = (f: string): boolean =>
   f.endsWith('.entry.ts') || f.endsWith('.entry.js')
@@ -507,7 +527,15 @@ const specifierFromNamespaceRelDir = (namespaceRelDir: string): string =>
 // `export *` lines, so a consumer of `@hypercomb/essentials/games/solomon`
 // keeps working unchanged. Atoms nest: an atom imports atoms the same way.
 
-const ATOMIZED_ROOTS: readonly string[] = ['games']
+/** The one list of atomized domains, shared with the doctrine ratchets. */
+const ATOMIZED_ROOTS: readonly string[] =
+  (JSON.parse(readFileSync(join(PROJECT_ROOT, 'atomized-roots.json'), 'utf8')) as { roots: string[] }).roots
+
+/** THE BUILD'S SHAPE, folded into every unit's input signature. Which domains
+ *  are atomized decides what a unit inlines and what it reaches by specifier —
+ *  without touching a single source file — so a unit's cache must miss when
+ *  the list moves, and so must the whole-build early exit. */
+const BUILD_SHAPE = `atomized:${[...ATOMIZED_ROOTS].sort().join(',')}`
 
 const isAtomizedRelPath = (relPath: string): boolean =>
   ATOMIZED_ROOTS.some(root => relPath === root || relPath.startsWith(`${root}/`))
@@ -955,7 +983,7 @@ const main = async (): Promise<void> => {
     }
     return false
   }
-  let anyMtimeChanged = !cache
+  let anyMtimeChanged = !cache || cache.shape !== BUILD_SHAPE
   if (cache && !anyMtimeChanged) {
     for (const ns of allNs) {
       const cachedUnit = cache.namespaces[ns]
@@ -1050,7 +1078,7 @@ const main = async (): Promise<void> => {
     let { leaves, inputSig } = await resolveUnitInputs(
       [...new Set([...members.map(m => m.entry), ...recordedNs])],
       cache?.namespaces[ns]?.files,
-      entrySource
+      `${entrySource}|${BUILD_SHAPE}`
     )
 
     const cachedUnit = cache?.namespaces[ns]
@@ -1073,7 +1101,7 @@ const main = async (): Promise<void> => {
       writeFileSync(join(OUTPUT_CACHE_DIR, `${built.sig}.js`), built.bytes)
       // Re-key on what was really bundled, so the NEXT run sees a change in
       // any inlined module rather than only in the member entries.
-      ;({ leaves, inputSig } = await resolveUnitInputs([...new Set([...members.map(m => m.entry), ...built.inputs])], cachedUnit?.files, entrySource))
+      ;({ leaves, inputSig } = await resolveUnitInputs([...new Set([...members.map(m => m.entry), ...built.inputs])], cachedUnit?.files, `${entrySource}|${BUILD_SHAPE}`))
       newNamespaces[ns] = { files: leaves, inputSig, outputSig: built.sig }
       allUnitSigs.push(inputSig)
       cacheMisses++
@@ -1096,7 +1124,7 @@ const main = async (): Promise<void> => {
       ? Object.keys(cachedUnit.files).filter(f => { try { return statSync(f).isFile() } catch { return false } })
       : []
     const inputPaths = recorded.includes(src.entry) ? recorded : [src.entry, ...recorded]
-    let { leaves, inputSig } = await resolveUnitInputs(inputPaths, cachedUnit?.files, specifier)
+    let { leaves, inputSig } = await resolveUnitInputs(inputPaths, cachedUnit?.files, `${specifier}|${BUILD_SHAPE}`)
     const cachedFile = cachedUnit ? join(OUTPUT_CACHE_DIR, `${cachedUnit.outputSig}.js`) : null
 
     let bytes: Uint8Array
@@ -1113,7 +1141,7 @@ const main = async (): Promise<void> => {
       sig = await SignatureService.sign(toArrayBuffer(bytes))
       imports = built.imports
       writeFileSync(join(OUTPUT_CACHE_DIR, `${sig}.js`), bytes)
-      ;({ leaves, inputSig } = await resolveUnitInputs(built.inputs, cachedUnit?.files, specifier))
+      ;({ leaves, inputSig } = await resolveUnitInputs(built.inputs, cachedUnit?.files, `${specifier}|${BUILD_SHAPE}`))
       atomMisses++
     }
     newAtoms[src.relPath] = { files: leaves, inputSig, outputSig: sig, imports }
@@ -1199,7 +1227,7 @@ const main = async (): Promise<void> => {
       : []
     const inputPaths = recorded.includes(src.entry) ? recorded : [src.entry, ...recorded]
 
-    let { leaves, inputSig } = await resolveUnitInputs(inputPaths, cachedUnit?.files)
+    let { leaves, inputSig } = await resolveUnitInputs(inputPaths, cachedUnit?.files, BUILD_SHAPE)
 
     const cachedFile = cachedUnit ? join(OUTPUT_CACHE_DIR, `${cachedUnit.outputSig}.js`) : null
 
@@ -1218,7 +1246,7 @@ const main = async (): Promise<void> => {
       writeFileSync(join(OUTPUT_CACHE_DIR, `${sig}.js`), bytes)
       // Re-key on what was really bundled, so the NEXT run sees a change in
       // any inlined module rather than only in this file.
-      ;({ leaves, inputSig } = await resolveUnitInputs(built.inputs, cachedUnit?.files))
+      ;({ leaves, inputSig } = await resolveUnitInputs(built.inputs, cachedUnit?.files, BUILD_SHAPE))
       newBees[src.relPath] = { files: leaves, inputSig, outputSig: sig }
       beeCacheMisses++
     }
@@ -1566,6 +1594,7 @@ const main = async (): Promise<void> => {
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
     version: 10,
+    shape: BUILD_SHAPE,
     rootHash,
     rootLayerSig,
     namespaces: newNamespaces,

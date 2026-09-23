@@ -26,7 +26,8 @@
 
 import { Drone } from '@hypercomb/core'
 import type { BackGesture } from '../navigation/back-gesture.service.js'
-import { DOCUMENT_SLOT } from './document-slot.js'
+import { DOCUMENT_SLOT, DOCUMENT_SLOT_DECLARATION } from './document-slot.js'
+import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { SAVE_DEBOUNCE_MS, newestBodySig, shouldCommitBody } from './document-edit.js'
 
 const DOCUMENT_VIEW = 'document'
@@ -382,6 +383,10 @@ export class DocumentViewDrone extends Drone {
 
 const _documentView = new DocumentViewDrone()
 window.ioc.register('@diamondcoreprocessor.com/DocumentViewDrone', _documentView)
+
+// THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;
+// the feature's one behaviour registers it.
+window.ioc.whenReady<LayerSlotRegistry>('@diamondcoreprocessor.com/LayerSlotRegistry', slots => slots.register(DOCUMENT_SLOT_DECLARATION))
 
 // The toggle that makes this point-and-click: a cell carrying a document
 // shows the view button, no command typed. Registered at module load beside

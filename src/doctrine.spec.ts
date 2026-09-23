@@ -1478,18 +1478,36 @@ describe('doctrine ratchets', () => {
       'a namespace-free IoC key resolved but never registered — the lookup silently answers undefined forever',
     )
   })
+  // ── ATOMIC MODULES (documentation/atomic-modules-plan.md) ─────────────────
+  // The atomized domains — the one list scripts/build-module.ts reads too.
+  const ATOMIZED_ROOTS: readonly string[] =
+    (JSON.parse(readFileSync(join(ROOT, 'hypercomb-essentials/atomized-roots.json'), 'utf8')) as { roots: string[] }).roots
+  // Every spelling the side-effect barrel generator (scripts/prepare.ts) knows,
+  // plus optional chaining (`ioc?.register`, `whenReady?.<T>(`), type
+  // arguments holding `=>`, and an unindented module-scope `x.register(…)`.
+  const SELF_REGISTRATION = /\bioc\s*\??\.\s*register\s*(?:\?\.)?\s*(?:<[^>]*>)?\s*\(|registerShellSurface\s*\(|\bwhenReady\s*(?:\?\.)?\s*(?:<[\s\S]{0,200}?>)?\s*(?:\?\.)?\s*\([\s\S]{0,400}?\.register\s*(?:\?\.)?\s*\(|^register\s*(?:<[^>]*>)?\s*\(|^[\w$.]+\.register\s*\(/m
+  const registersItself = (file: string): boolean => SELF_REGISTRATION.test(stripComments(readFileSync(file, 'utf8')))
+  const inAtomizedRoot = (file: string): boolean => {
+    const rel = relative(join(ROOT, 'hypercomb-essentials/src'), file).replace(/\\/g, '/')
+    return ATOMIZED_ROOTS.some(root => rel === root || rel.startsWith(`${root}/`))
+  }
+  /** A behaviour the hive registers — the build's own rule (build-module.ts
+   *  isBee): drones and workers, and in an atomized domain every queen that
+   *  registers itself, because a word is a behaviour too. */
+  const isBehaviour = (file: string): boolean =>
+    /\.(drone|worker)\.ts$/.test(file) || (/\.queen\.ts$/.test(file) && inAtomizedRoot(file) && registersItself(file))
+
   it('one behaviour per feature — a game directory holds exactly one drone', () => {
     // documentation/atomic-modules-plan.md: a feature is ONE behaviour the
     // hive registers plus any number of dependency atoms it never registers.
     // Games are the production line; the rule widens to every feature dir as
     // each domain is atomized. Nesting is fine — a dependency may hold
     // dependencies — but a bee never holds another bee.
-    const isBee = (name: string): boolean => /\.(drone|worker)\.ts$/.test(name)
     const over: string[] = []
     const visit = (dir: string): void => {
       let entries: ReturnType<typeof readdirSync<{ withFileTypes: true }>>
       try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
-      const bees = entries.filter(e => e.isFile() && isSource(e.name) && isBee(e.name)).map(e => e.name)
+      const bees = entries.filter(e => e.isFile() && isSource(e.name) && isBehaviour(join(dir, e.name))).map(e => e.name)
       if (bees.length > 1) over.push(`${relative(ROOT, dir).replace(/\\/g, '/')}: ${bees.join(', ')}`)
       for (const e of entries) if (e.isDirectory() && !SKIP_DIRS.has(e.name)) visit(join(dir, e.name))
     }
@@ -1502,15 +1520,10 @@ describe('doctrine ratchets', () => {
     // wires a registry through whenReady, behaves as a behaviour without
     // being one, so the hive's behaviour count lies. The bee wires; the
     // dependency exports. Games paid first (queens + the neon-grid theme).
-    const isBee = (name: string): boolean => /\.(drone|worker)\.ts$/.test(name)
-    // Every spelling the side-effect barrel generator (scripts/prepare.ts) knows,
-    // plus optional chaining (`ioc?.register`, `whenReady?.<T>(`), type
-    // arguments holding `=>`, and an unindented module-scope `x.register(…)`.
-    const pattern = /\bioc\s*\??\.\s*register\s*(?:\?\.)?\s*(?:<[^>]*>)?\s*\(|registerShellSurface\s*\(|\bwhenReady\s*(?:\?\.)?\s*(?:<[\s\S]{0,200}?>)?\s*(?:\?\.)?\s*\([\s\S]{0,400}?\.register\s*(?:\?\.)?\s*\(|^register\s*(?:<[^>]*>)?\s*\(|^[\w$.]+\.register\s*\(/m
     const actual: string[] = []
     for (const file of walk(join(ROOT, 'hypercomb-essentials/src'))) {
-      if (isBee(file)) continue
-      if (pattern.test(stripComments(readFileSync(file, 'utf8')))) actual.push(relative(ROOT, file).replace(/\\/g, '/'))
+      if (isBehaviour(file)) continue
+      if (registersItself(file)) actual.push(relative(ROOT, file).replace(/\\/g, '/'))
     }
     assertRatchet(actual.sort(), [
       'hypercomb-essentials/src/assistant/agent-panel.view.ts',
@@ -1620,12 +1633,9 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/commands/visual-bee-registry.ts',
       'hypercomb-essentials/src/commands/website-slot.ts',
       'hypercomb-essentials/src/commands/website.queen.ts',
-      'hypercomb-essentials/src/computation/computation-routing.service.ts',
-      'hypercomb-essentials/src/computation/computation.service.ts',
       'hypercomb-essentials/src/contact/contact-card.ts',
       'hypercomb-essentials/src/contact/contact.queen.ts',
       'hypercomb-essentials/src/contact/contact.service.ts',
-      'hypercomb-essentials/src/document/document-slot.ts',
       'hypercomb-essentials/src/editor/image-editor.service.ts',
       'hypercomb-essentials/src/editor/tile-editor.service.ts',
       'hypercomb-essentials/src/editor/tile-editor.view.ts',
@@ -1633,7 +1643,6 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/files/dropbox.queen.ts',
       'hypercomb-essentials/src/files/dropbox.service.ts',
       'hypercomb-essentials/src/files/files.queen.ts',
-      'hypercomb-essentials/src/format/format.queen.ts',
       'hypercomb-essentials/src/history/active-genome.service.ts',
       'hypercomb-essentials/src/history/builds-slot.ts',
       'hypercomb-essentials/src/history/consolidate-history.queen.ts',
@@ -1651,7 +1660,6 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/keyboard/keymap.service.ts',
       'hypercomb-essentials/src/link/photo.view.ts',
       'hypercomb-essentials/src/link/youtube-metadata-queue.ts',
-      'hypercomb-essentials/src/meeting/meeting.queen.ts',
       'hypercomb-essentials/src/molecule/molecule-index.service.ts',
       'hypercomb-essentials/src/molecule/vocabulary-find.queen.ts',
       'hypercomb-essentials/src/molecule/vocabulary.queen.ts',
@@ -1691,14 +1699,12 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/quickmenu/quick-menu-registry.service.ts',
       'hypercomb-essentials/src/quickmenu/quick-menu.input.ts',
       'hypercomb-essentials/src/quickmenu/quickmenu.queen.ts',
-      'hypercomb-essentials/src/recording/recording.queen.ts',
       'hypercomb-essentials/src/revolucionstyle.com/cigar/cigar-catalog.service.ts',
       'hypercomb-essentials/src/revolucionstyle.com/discovery/discovery.service.ts',
       'hypercomb-essentials/src/revolucionstyle.com/journal/journal.service.ts',
       'hypercomb-essentials/src/revolucionstyle.com/lounge/lounge.queen.ts',
       'hypercomb-essentials/src/revolucionstyle.com/wheel/flavor-wheel.service.ts',
       'hypercomb-essentials/src/safety/link-safety.service.ts',
-      'hypercomb-essentials/src/search/hive-search.service.ts',
       'hypercomb-essentials/src/selection/select.queen.ts',
       'hypercomb-essentials/src/selection/selection.service.ts',
       'hypercomb-essentials/src/sequence/frame.queen.ts',

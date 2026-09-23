@@ -1,0 +1,17 @@
+{
+  "about": "The domains of hypercomb-essentials/src built as atomic modules (documentation/atomic-modules-plan.md). Read by scripts/build-module.ts and the doctrine ratchets, so the two never disagree. Step 6 adds one domain at a time.",
+  "roots": [
+    "games",
+    "notes",
+    "concealment",
+    "website",
+    "widgets",
+    "references",
+    "recording",
+    "meeting",
+    "format",
+    "document",
+    "search",
+    "computation"
+  ]
+}

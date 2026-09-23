@@ -277,4 +277,4 @@ export class HiveSearchService {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/HiveSearchService', new HiveSearchService())
+// search-index.drone.ts registers this service (atomic-modules-plan.md).

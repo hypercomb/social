@@ -76,8 +76,4 @@ export class ComputationRoutingService {
   }
 }
 
-const _computationRoutingService = new ComputationRoutingService()
-;(window as any).ioc.register(
-  '@diamondcoreprocessor.com/ComputationRoutingService',
-  _computationRoutingService
-)
+// computation.drone.ts registers this service (atomic-modules-plan.md).
