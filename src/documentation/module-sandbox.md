@@ -105,6 +105,13 @@ jwize: "your peer hosts become your sandbox and you can scan the signed files by
 - **The fold.** Refuse beats unclear beats accept, and every reader that spoke must accept; anything unread, undeclared, drifting or without a record is unclear. The record is kept in your own hive; `module take` then takes only the root that was read (a door naming a new root is refused until you audit again), and what the take holds wears the audit in the brood — a reading, never a ruling: only the hand lets it run.
 - **Proof**: specs (`module-audit.spec.ts`, `module.queen.spec.ts`, the reader's verdict and JEV's boundary in `brood-audit.spec.ts`, `modulesOfWalk` in `package-tree.spec.ts`) and `verify-hive-publish.cjs` 73/73 — the follower audits the trial from home with its own model before it takes it (accept, 1 of 1 sections read, declared, no drift, nothing in the bees pool), and what its take holds wears the audit.
 
+## Whose word counts (2026-09-24)
+
+jwize: "Are we overcomplicating?" — "remember the primitive is all that matters". What keeps a reader safe is the primitive and four things around it: bytes that hash to their name, the brood holding a stranger's code until the hand accepts it, the reader's own audit, and the door's isolation. Everything else is a signal, and a signal is only as good as whose it is:
+
+- **The publisher's readings are its word.** The host AI review and Jev's reading beside a trial are records the publisher stamps in its own index. The panel, `module trials`, `module assess` and the door say so ("its publisher says the host's AI read …"), and Jev's pass no longer weighs them: its "take" is the people who count welcoming a trial.
+- **Assessments count from the people who count:** this hive's own key and the publisher it follows (`hc:install-follow`, the key the runtime calls `followed`) — `module-review.ts` `countedAssessors`. Anyone else's is listed and numbered, never counted, so a flood of fresh keys changes nothing: no worker machinery.
+
 ## Before it runs on hypercomb.com (jwize's acts)
 
 - ~~Set `SANDBOX_SHELL_ORIGIN` and deploy the worker~~ — done 2026-09-23: `https://hypercomb.io`, deployed worker-only (`wrangler deploy --config wrangler.pluginthematrix.toml`, no asset uploaded).

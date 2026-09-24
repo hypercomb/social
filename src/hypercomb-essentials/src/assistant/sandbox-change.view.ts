@@ -25,7 +25,7 @@
 
 import { EffectBus, I18N_IOC_KEY, isSandboxDoor, type I18nProvider } from '@hypercomb/core'
 import type { DiffRow } from './line-diff.js'
-import { doorReader, isSandboxSite, readTrial, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
+import { countedAssessors, doorReader, isSandboxSite, readTrial, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
 
 export const SANDBOX_CHANGE_SURFACE = 'hc-sandbox-change'
 export const SANDBOX_CHANGE_OWNER = '@diamondcoreprocessor.com/SandboxChangeView'
@@ -63,6 +63,8 @@ export class SandboxChangeElement extends HTMLElement {
   #shown: SandboxChangePayload | null = null
   #reading: TrialReading | null = null
   #trials: readonly SandboxTrial[] = []
+  /** Whose assessments count here (countedAssessors): this hive's key and the publisher it follows. */
+  #counted: ReadonlySet<string> = countedAssessors()
   #turn = 0
   /** What taking each path came to, while this trial is shown. */
   #taking = new Map<string, { text: string; held: boolean }>()
@@ -102,6 +104,9 @@ export class SandboxChangeElement extends HTMLElement {
       fetch(`${zoneOf(payload.door, payload.name)}/trials.json`, { cache: 'no-store' })
         .then(res => res.ok ? res.json() : null).then(trialsOf).catch(() => [] as SandboxTrial[]),
     ])
+    if (turn !== this.#turn) return
+    const signer = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/NostrSigner') as { getPublicKeyHex?(): Promise<string | null> } | undefined
+    this.#counted = countedAssessors(await signer?.getPublicKeyHex?.().catch(() => null))
     if (turn !== this.#turn) return
     this.#reading = reading
     this.#trials = trials
@@ -224,8 +229,9 @@ export class SandboxChangeElement extends HTMLElement {
       return body
     }
 
-    // The host's AI.
-    body.appendChild(el('h3', 'hc-trial-section', t('module.panel.ai', "The host's AI")))
+    // The host's AI — as the PUBLISHER recorded it: the review is a record in
+    // the publisher's own index, so it is shown as its word.
+    body.appendChild(el('h3', 'hc-trial-section', t('module.panel.aiby', "The host's AI — as its publisher recorded it")))
     if (reading.review) {
       body.appendChild(el('p', `hc-trial-verdict is-${reading.review.verdict}`, `${reading.review.verdict}${reading.review.model ? ` · ${reading.review.model}` : ''}`))
       if (reading.review.findings) body.appendChild(el('pre', 'hc-trial-findings', reading.review.findings))
@@ -234,7 +240,7 @@ export class SandboxChangeElement extends HTMLElement {
     }
 
     // Jev: the diff against the doctrine, rule by rule.
-    body.appendChild(el('h3', 'hc-trial-section', t('module.panel.jev', 'Jev — the doctrine, rule by rule')))
+    body.appendChild(el('h3', 'hc-trial-section', t('module.panel.jevby', 'Jev — the doctrine, rule by rule, as its publisher recorded it')))
     if (reading.jev) {
       body.appendChild(el('p', `hc-trial-verdict is-${reading.jev.verdict}`, `${reading.jev.verdict}${reading.jev.model ? ` · ${reading.jev.model}` : ''}`))
       for (const file of reading.jev.files) {
@@ -247,14 +253,16 @@ export class SandboxChangeElement extends HTMLElement {
     }
 
     // People.
-    const tally = tallyAssessments(site)
-    body.appendChild(el('h3', 'hc-trial-section', t('module.panel.people', 'People — {accept} accept · {refuse} refuse · {unclear} unclear', tally)))
+    // Only the people who count are counted; everyone else is listed, marked.
+    const tally = tallyAssessments(site, this.#counted)
+    body.appendChild(el('h3', 'hc-trial-section', t('module.panel.peoplecount', 'People who count — {accept} accept · {refuse} refuse · {unclear} unclear · {others} not counted', tally)))
     if (!reading.people.length) {
       body.appendChild(el('p', 'hc-trial-quiet', t('module.panel.nobody', 'No one has assessed it yet. Assess it from your own hive: module assess {change} accept|refuse <note>.', { change: shown.name.replace(/^try-/, '') })))
     }
     for (const person of reading.people) {
       const row = el('p', 'hc-trial-person')
       row.append(el('span', `hc-trial-verdict is-${person.verdict}`, person.verdict), ' ', el('span', 'hc-trial-key', person.pubkey.slice(0, 12) + '…'), ' ', el('span', 'hc-trial-note', person.note))
+      if (!this.#counted.has(person.pubkey.toLowerCase())) row.append(' ', el('span', 'hc-trial-quiet', t('module.panel.uncounted', '(not counted)')))
       body.appendChild(row)
     }
 

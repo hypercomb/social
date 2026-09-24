@@ -330,10 +330,32 @@ export const isSandboxSite = (value: unknown): value is SandboxSite => {
   return !!site && site.sandbox === true && typeof site.title === 'string' && SIG_RE.test(String(site.package ?? ''))
 }
 
-/** How the people who assessed a sandbox read it, counted. */
-export const tallyAssessments = (site: Pick<SandboxSite, 'assessments'>): Record<ReviewVerdict, number> => {
-  const tally: Record<ReviewVerdict, number> = { accept: 0, refuse: 0, unclear: 0 }
-  for (const assessment of site.assessments ?? []) tally[VERDICTS.includes(assessment.verdict) ? assessment.verdict : 'unclear']++
+/**
+ * WHOSE WORD COUNTS: yours, and the publisher whose packages you follow
+ * (`hc:install-follow` — the key the runtime calls `followed`). Anyone else's
+ * assessment is shown and never counted: a fresh key costs nothing, so a
+ * stranger's word is only as good as your own reading of the code.
+ */
+export const countedAssessors = (own?: string | null): ReadonlySet<string> => {
+  const keys = new Set<string>()
+  const ownKey = String(own ?? '').toLowerCase()
+  if (SIG_RE.test(ownKey)) keys.add(ownKey)
+  try {
+    const followed = String((JSON.parse(localStorage.getItem('hc:install-follow') ?? 'null') as { pubkey?: unknown } | null)?.pubkey ?? '').toLowerCase()
+    if (SIG_RE.test(followed)) keys.add(followed)
+  } catch { /* 'off', or never set: nobody else */ }
+  return keys
+}
+
+/** How the people who assessed a sandbox read it: the ones `counted` names
+ *  by verdict, everyone else only as a number (all of them, when no set is
+ *  given). */
+export const tallyAssessments = (site: Pick<SandboxSite, 'assessments'>, counted?: ReadonlySet<string>): Record<ReviewVerdict | 'others', number> => {
+  const tally: Record<ReviewVerdict | 'others', number> = { accept: 0, refuse: 0, unclear: 0, others: 0 }
+  for (const assessment of site.assessments ?? []) {
+    if (counted && !counted.has(String(assessment.pubkey).toLowerCase())) { tally.others++; continue }
+    tally[VERDICTS.includes(assessment.verdict) ? assessment.verdict : 'unclear']++
+  }
   return tally
 }
 
@@ -636,9 +658,17 @@ export const trialAdoption = (trials: readonly Pick<SandboxTrial, 'name' | 'pack
 }
 
 /** What is known about a trial, in plain words. People's notes are their
- *  words: data for Jev to weigh, never instructions. */
-export const trialEvidence = (trial: SandboxTrial, read: Pick<TrialReading, 'people' | 'jev'> | null, takenBy: readonly string[], clashes: readonly string[]): string => {
-  const people = read?.people ?? []
+ *  words: data for Jev to weigh, never instructions. Only the people
+ *  `counted` names are counted (countedAssessors); the host's AI and Jev
+ *  readings are records the PUBLISHER stamps in its own index, so they are
+ *  told as its word and never as a verdict. */
+export const trialEvidence = (
+  trial: SandboxTrial, read: Pick<TrialReading, 'people' | 'jev'> | null, takenBy: readonly string[], clashes: readonly string[],
+  counted: ReadonlySet<string> | null = null,
+): string => {
+  const everyone = read?.people ?? []
+  const people = counted ? everyone.filter(person => counted.has(person.pubkey.toLowerCase())) : everyone
+  const others = everyone.length - people.length
   const tally: Record<ReviewVerdict, number> = { accept: 0, refuse: 0, unclear: 0 }
   for (const person of people) tally[person.verdict]++
   const notes = people.filter(person => person.note.trim()).slice(0, NOTES_TOLD)
@@ -651,8 +681,8 @@ export const trialEvidence = (trial: SandboxTrial, read: Pick<TrialReading, 'peo
   ].filter(Boolean).join('; ')
   return [
     `${trial.name} by ${trial.publisher || trial.pubkey.slice(0, 12) + '…'}${trial.at ? `, ${new Date(trial.at).toISOString().slice(0, 10)}` : ''}: ${what}.`,
-    `The host's AI says ${trial.reviewVerdict ?? 'nothing yet'}. Jev says ${read?.jev ? `${read.jev.verdict}${worst ? ` (closest to breaking "${worst.rule}", ${Math.round(worst.breaks * 100)}%)` : ''}` : 'nothing yet'}.`,
-    `People: ${tally.accept} accept, ${tally.refuse} refuse, ${tally.unclear} unclear.${notes.length ? ` Notes: ${notes.join('; ')}.` : ''}`,
+    `The publisher's own records, which nobody checked, say its host's AI read ${trial.reviewVerdict ?? 'nothing yet'} and its Jev read ${read?.jev ? `${read.jev.verdict}${worst ? ` (closest to breaking "${worst.rule}", ${Math.round(worst.breaks * 100)}%)` : ''}` : 'nothing yet'} — the publisher's word, not evidence.`,
+    `People who count: ${tally.accept} accept, ${tally.refuse} refuse, ${tally.unclear} unclear.${others ? ` ${others} others assessed it and are not counted.` : ''}${notes.length ? ` Notes: ${notes.join('; ')}.` : ''}`,
     takenBy.length ? `Taken into ${takenBy.join(', ')}.` : '',
     clashes.length ? `Changes a file that ${clashes.join(', ')} also changes.` : '',
   ].filter(Boolean).join('\n')
@@ -663,6 +693,8 @@ export interface PassDeps extends Pick<ReviewDeps, 'put' | 'publish' | 'stamp' |
   readonly site: (trial: SandboxTrial) => Promise<SandboxSite | null>
   /** A reader of signatures from a trial's door. */
   readonly reader: (door: string) => (sig: string) => Promise<string | null>
+  /** Whose assessments count (countedAssessors); everyone, when absent. */
+  readonly counted?: ReadonlySet<string>
 }
 
 /** Gather every trial's evidence, ask Jev to weigh the table, publish the pass. */
@@ -676,7 +708,7 @@ export const jevPassZone = async (
   const evidence = await Promise.all(trials.map(async trial => {
     const site = await deps.site(trial)
     const read = site ? await readTrial(site, deps.reader(trial.door)) : null
-    return trialEvidence(trial, read, takenBy.get(trial.name) ?? [], clashes.get(trial.name) ?? [])
+    return trialEvidence(trial, read, takenBy.get(trial.name) ?? [], clashes.get(trial.name) ?? [], deps.counted ?? null)
   }))
   let weighed: JevPassResult
   try { weighed = await jev({ zone, trials: trials.map((trial, i) => ({ name: trial.name, evidence: evidence[i]! })) }) } catch (error) {

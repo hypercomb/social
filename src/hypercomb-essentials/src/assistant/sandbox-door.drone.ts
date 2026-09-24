@@ -68,12 +68,14 @@ export class SandboxDoorDrone extends Drone {
     const change = name.replace(/^try-/, '')
     EffectBus.emit('toast:show', {
       type: 'info',
-      message: t('module.door',
-        "You are in sandbox {name}, by {publisher} — not promoted yet. The host's AI says {review}; people say {accept} accept, {refuse} refuse, {unclear} unclear. See what it changes: module changes {change}. Assess it from your own hive: module assess {change} accept|refuse <note>.",
+      // A door follows nobody, so nothing is counted here: the count of who
+      // assessed it, and whose word counts is decided in the reader's own hive.
+      message: t('module.doorby',
+        "You are in sandbox {name}, by {publisher} — not promoted yet. Its publisher says the host's AI read {review}; {count} people have assessed it. See what it changes: module changes {change}. Audit and assess it from your own hive: module audit {change}, module assess {change} accept|refuse <note>.",
         {
           name, change, publisher: site.publisher || site.pubkey.slice(0, 12) + '…',
           review: site.reviewVerdict ?? t('module.unreviewed', 'nothing yet', {}),
-          accept: tally.accept, refuse: tally.refuse, unclear: tally.unclear,
+          count: tally.others + tally.accept + tally.refuse + tally.unclear,
         }),
     })
   }

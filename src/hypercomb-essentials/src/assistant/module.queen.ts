@@ -88,7 +88,7 @@
 import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, isSandboxDoor, sandboxDoorOf, type I18nProvider, type InstallProvider, type ModuleDraftsProvider } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
 import { JEV_IOC_KEY, jevDoctrineSections, type JevReadingInput, type JevReadingResult, type JevPassInput, type JevPassResult } from './jev-decision.js'
-import { assessSandbox, changedPaths, doorReader, isSandboxSite, jevReadTrial, publishChange, readChange, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
+import { assessSandbox, changedPaths, countedAssessors, doorReader, isSandboxSite, jevReadTrial, publishChange, readChange, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
 import { INSTALL_CHANNEL_PREFIX, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 // A type only: the audit itself is loaded when the word is said.
 import type { ModuleAuditRecord } from './module-audit.js'
@@ -285,6 +285,12 @@ const keptAudit = async (store: StoreLike | undefined, sig: string | undefined):
     const record = blob ? JSON.parse(await blob.text()) as ModuleAuditRecord : null
     return record?.kind === 'module-audit' ? record : null
   } catch { return null }
+}
+
+/** Whose assessments count in this hive: its own key, and the publisher it follows. */
+const counted = async (): Promise<ReadonlySet<string>> => {
+  const signer = window.ioc?.get?.('@diamondcoreprocessor.com/NostrSigner') as { getPublicKeyHex?(): Promise<string | null> } | undefined
+  return countedAssessors(await signer?.getPublicKeyHex?.().catch(() => null))
 }
 
 /** The trials a zone lists, or why it lists none. */
@@ -512,13 +518,13 @@ export class ModuleQueenBee extends QueenBee {
       const deps = sync ? reviewDeps(drafts, sync) : null
       if (!deps) { toast(t('module.unweighed', 'Jev did not weigh {zone}: {reason}.', { zone, reason: 'the store is not loaded' }), 'warning'); return }
       toast(t('module.weighing', 'Asking Jev to weigh the {count} open trials on {zone}…', { count: listed.trials.length, zone }))
-      const passed = await jevPassZone(host, new URL(zone).host, listed.trials, input => jev.pass!(input), { ...deps, site: trial => sandboxSite(trial.name, host), reader: doorReader })
+      const passed = await jevPassZone(host, new URL(zone).host, listed.trials, input => jev.pass!(input), { ...deps, site: trial => sandboxSite(trial.name, host), reader: doorReader, counted: await counted() })
       if (!passed.ok) { toast(t('module.unweighed', 'Jev did not weigh {zone}: {reason}.', { zone, reason: passed.error }), 'warning'); return }
       const { record } = passed
       // Each trial's standing first, the sum last.
       for (const trial of record.trials.slice(0, TRIALS_TOLD)) {
-        const why = trial.standing === 'take' ? t('module.standtake', 'within the rules, and nobody refused it')
-          : trial.standing === 'discuss' ? t('module.standdiscuss', 'somebody refused it — read their note')
+        const why = trial.standing === 'take' ? t('module.standwelcomed', 'the people who count accepted it, and none of them refused it')
+          : trial.standing === 'discuss' ? t('module.standrefused', 'somebody who counts refused it — read their note')
           : t('module.standwait', 'not read yet, or unsure')
         const more = [
           trial.takenBy.length ? t('module.takenby', 'taken into {names}', { names: trial.takenBy.join(', ') }) : '',
@@ -546,7 +552,7 @@ export class ModuleQueenBee extends QueenBee {
           trial.sections.join(', '),
           trial.off.length ? t('module.turnsoff', 'turns off {paths}', { paths: trial.off.join(', ') }) : '',
         ].filter(Boolean).join('; ') || t('module.samecode', 'no source changes')
-        toast(t('module.trial', "{name} by {publisher}, {when}: {what}. The host's AI says {review}. {door}", {
+        toast(t('module.trialby', "{name} by {publisher}, {when}: {what}. Its publisher says the host's AI read {review}. {door}", {
           name: trial.name, publisher: trial.publisher || trial.pubkey.slice(0, 12) + '…',
           when: trial.at ? new Date(trial.at).toLocaleString() : t('module.undated', 'undated'),
           what, review: trial.reviewVerdict ?? t('module.unreviewed', 'nothing yet'), door: trial.door,
@@ -563,9 +569,9 @@ export class ModuleQueenBee extends QueenBee {
       if (!site) { toast(t('module.nosite', 'No sandbox {name} answers at {door}.', { name, door: sandboxDoorUrl(name, host) }), 'warning'); return }
       const verdict = (VERDICTS as readonly string[]).includes(words[1] ?? '') ? words[1] as ReviewVerdict : null
       if (!verdict) {
-        const tally = tallyAssessments(site)
-        toast(t('module.assessments', "{name}: the host's AI says {review}; people say {accept} accept, {refuse} refuse, {unclear} unclear.", {
-          name, review: site.reviewVerdict ?? t('module.unreviewed', 'nothing yet'), accept: tally.accept, refuse: tally.refuse, unclear: tally.unclear,
+        const tally = tallyAssessments(site, await counted())
+        toast(t('module.assessedby', "{name}: the people who count say {accept} accept, {refuse} refuse, {unclear} unclear; {others} others assessed it and are not counted. Its publisher says the host's AI read {review}.", {
+          name, review: site.reviewVerdict ?? t('module.unreviewed', 'nothing yet'), accept: tally.accept, refuse: tally.refuse, unclear: tally.unclear, others: tally.others,
         }))
         return
       }

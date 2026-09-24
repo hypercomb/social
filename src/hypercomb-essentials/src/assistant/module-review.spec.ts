@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { assessSandbox, changedPaths, diffText, isSandboxSite, jevReadTrial, publishChange, readChange, readTrial, recordChange, reviewChange, reviewContext, reviewQuestion, sectionText, takeTrial, tallyAssessments, trialsOf, verdictOf, type ReviewDeps, type TakeDeps, jevPassZone, trialAdoption, trialClashes, trialEvidence, type SandboxTrial, openChangeHops, openHop, putHop } from './module-review.js'
+import { assessSandbox, changedPaths, countedAssessors, diffText, isSandboxSite, jevReadTrial, publishChange, readChange, readTrial, recordChange, reviewChange, reviewContext, reviewQuestion, sectionText, takeTrial, tallyAssessments, trialsOf, verdictOf, type ReviewDeps, type TakeDeps, jevPassZone, trialAdoption, trialClashes, trialEvidence, type SandboxTrial, openChangeHops, openHop, putHop } from './module-review.js'
 import { diffLines } from './line-diff.js'
 
 const BEFORE = ['// src/preferences/settings.ts', 'export const zoom = 1;', '// src/preferences/other.ts', 'export {};'].join('\n')
@@ -110,8 +110,22 @@ describe('public assessments', () => {
     expect(isSandboxSite({ sandbox: true, title: 'try-zoom', package: 'a'.repeat(64), pubkey: 'p' })).toBe(true)
     expect(isSandboxSite({ title: 'a site', package: 'a'.repeat(64) })).toBe(false)
     const assessments = ['accept', 'refuse', 'accept', 'odd'].map((verdict, i) => ({ pubkey: String(i), record: 'r', verdict: verdict as never, at: 0 }))
-    expect(tallyAssessments({ assessments })).toEqual({ accept: 2, refuse: 1, unclear: 1 })
-    expect(tallyAssessments({})).toEqual({ accept: 0, refuse: 0, unclear: 0 })
+    expect(tallyAssessments({ assessments })).toEqual({ accept: 2, refuse: 1, unclear: 1, others: 0 })
+    expect(tallyAssessments({})).toEqual({ accept: 0, refuse: 0, unclear: 0, others: 0 })
+  })
+
+  it('counts only the people who count: this hive and the publisher it follows — a fresh key is shown, never counted', () => {
+    const own = 'a'.repeat(64), followed = 'b'.repeat(64), stranger = 'c'.repeat(64)
+    localStorage.setItem('hc:install-follow', JSON.stringify({ pubkey: followed, hosts: [], channel: 'essentials' }))
+    try {
+      const counted = countedAssessors(own)
+      expect([...counted].sort()).toEqual([own, followed])
+      const assessments = [[own, 'accept'], [followed, 'refuse'], ...Array.from({ length: 40 }, () => [stranger, 'accept'])]
+        .map(([pubkey, verdict]) => ({ pubkey: pubkey!, record: 'r', verdict: verdict as never, at: 0 }))
+      expect(tallyAssessments({ assessments }, counted)).toEqual({ accept: 1, refuse: 1, unclear: 0, others: 40 })
+      localStorage.setItem('hc:install-follow', 'off')
+      expect([...countedAssessors(null)]).toEqual([])
+    } finally { localStorage.removeItem('hc:install-follow') }
   })
 })
 
@@ -298,12 +312,15 @@ describe('Jev weighs a zone', () => {
     const text = trialEvidence(trial('try-a', { reviewVerdict: 'accept', off: ['games/pong'] }), read, ['try-c'], ['try-b'])
     expect(text).toBe([
       'try-a by Jaime, 2023-11-14: changes src/preferences/settings.ts; turns off games/pong.',
-      'The host\'s AI says accept. Jev says follows (closest to breaking "The core rule", 2%).',
-      'People: 0 accept, 1 refuse, 0 unclear. Notes: refuse — "raises zoom without asking".',
+      'The publisher\'s own records, which nobody checked, say its host\'s AI read accept and its Jev read follows (closest to breaking "The core rule", 2%) — the publisher\'s word, not evidence.',
+      'People who count: 0 accept, 1 refuse, 0 unclear. Notes: refuse — "raises zoom without asking".',
       'Taken into try-c.',
       'Changes a file that try-b also changes.',
     ].join('\n'))
-    expect(trialEvidence(trial('try-d', { sections: [] }), null, [], [])).toContain('no source changes.\nThe host\'s AI says nothing yet. Jev says nothing yet.\nPeople: 0 accept, 0 refuse, 0 unclear.')
+    expect(trialEvidence(trial('try-d', { sections: [] }), null, [], [])).toContain('no source changes.\nThe publisher\'s own records, which nobody checked, say its host\'s AI read nothing yet and its Jev read nothing yet — the publisher\'s word, not evidence.\nPeople who count: 0 accept, 0 refuse, 0 unclear.')
+    // A stranger's refusal is shown as a number, never counted.
+    const counted = new Set(['y'])
+    expect(trialEvidence(trial('try-a'), read, [], [], counted)).toContain('People who count: 0 accept, 0 refuse, 0 unclear. 1 others assessed it and are not counted.')
   })
 
   it('weighs every open trial from its door, publishes the pass, and stamps pass:<zone>', async () => {

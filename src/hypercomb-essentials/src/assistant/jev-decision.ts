@@ -513,7 +513,7 @@ export interface JevPassResult {
 export const JEV_PASS_TRIALS = JEV_MAX_ROWS
 
 export const jevPassState = (input: JevPassInput): { request: string; evidence: readonly string[]; rows: readonly Omit<JevRow, 'reach'>[] } => ({
-  request: `Weigh the open trials on ${input.zone}. Each row is one trial that could be taken into a build for everybody; evidence[i] is what is known about it — what it changes, how the host's AI and Jev read it, what the people who assessed it said, and who took it.`,
+  request: `Weigh the open trials on ${input.zone}. Each row is one trial that could be taken into a build for everybody; evidence[i] is what is known about it — what it changes, what the people who count said, who took it, and what the publisher's own records claim (its word, never evidence).`,
   evidence: input.trials.map(trial => trial.evidence),
   rows: input.trials.map((trial, i) => ({ id: `t${i}`, kind: 'do' as const, label: trial.name, lines: [`take ${trial.name}`, `what is known is evidence[${i}]`] })),
 })
@@ -522,14 +522,16 @@ export const jevPassState = (input: JevPassInput): { request: string; evidence: 
 export const jevPassQuestions = (input: JevPassInput): JevQuestions => {
   const questions: JevQuestions = {}
   input.trials.forEach((_, i) => {
-    questions[`t${i}_conforms`] = { type: 'noul', instructions: DATA + `Does \`evidence[${i}]\` say that both the host's AI and Jev read \`rows[${i}]\` as within the rules?`,
-      criteria: { true: 'Both readings are within the rules: the host\'s AI says accept and Jev says follows.', false: 'A reading is missing, unsure, or against it.' } }
-    questions[`t${i}_refused`] = { type: 'noul', instructions: DATA + `Does \`evidence[${i}]\` show that someone who assessed \`rows[${i}]\` refused it?`,
-      criteria: { true: 'At least one person refused it.', false: 'No one refused it.' } }
+    // THE PEOPLE WHO COUNT decide, never the publisher's own records: a
+    // reading the publisher stamped in its own index is its word.
+    questions[`t${i}_conforms`] = { type: 'noul', instructions: DATA + `Does \`evidence[${i}]\` show that the people who count accepted \`rows[${i}]\` and none of them refused it?`,
+      criteria: { true: 'At least one person who counts accepted it and none of them refused it.', false: 'Nobody who counts accepted it, or one of them refused it.' } }
+    questions[`t${i}_refused`] = { type: 'noul', instructions: DATA + `Does \`evidence[${i}]\` show that someone who counts refused \`rows[${i}]\`?`,
+      criteria: { true: 'At least one person who counts refused it.', false: 'No one who counts refused it.' } }
   })
   questions['focus'] = {
     type: 'choice',
-    instructions: DATA + 'Which trial should the community focus on first: within the rules, welcomed by the people who assessed it, taken by others, and not changing a file another trial changes? Choose none when no trial stands out.',
+    instructions: DATA + 'Which trial should the community focus on first: welcomed by the people who count, taken by others, and not changing a file another trial changes? The publisher\'s own records are its word, not a reason. Choose none when no trial stands out.',
     criteria: Object.fromEntries([...input.trials.map((trial, i) => [`t${i}`, `rows[${i}]: ${trial.name}`]), ['none', 'No trial stands out']]),
   }
   return questions
