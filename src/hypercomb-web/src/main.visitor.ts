@@ -65,11 +65,11 @@ installReadonlyNetwork()
 // participant shell, but every filesystem operation lands in session memory.
 const { EffectBus } = await import('@hypercomb/core')
 
-// ── the loading dot owns the screen until the SITE is on it ────────────────
+// ── the loading cover owns the screen until the SITE is on it ──────────────
 // `.site-loading` starts inside <app-root>, which Angular REPLACES at
 // bootstrap (~1.4s) — a beat before the published view mounts (~3s). That gap
 // showed the hive's own visuals (background rings, the empty prompt) between
-// the dot and the page. Re-parent the loader to <body> so it survives
+// the cover and the page. Re-parent the loader to <body> so it survives
 // bootstrap, and take it down only when the deployed experience is up:
 //   • pinned view (view:arrival names a view) → when the body is COVERED by
 //     the takeover surface (body.hc-view-covered — the same signal that
@@ -90,7 +90,7 @@ const removeSiteLoader = (): void => {
   // EffectBus REPLAYS the last value SYNCHRONOUSLY inside .on(), so a
   // `const off = EffectBus.on(..., () => off())` pattern dies in the TDZ
   // when the replay fires the handler before the const exists — the exact
-  // silent death that left the dot up until the failsafe. Guard with a
+  // silent death that left the cover up until the failsafe. Guard with a
   // flag; unsubscribe on the next tick, when the binding is real.
   let arrivalSeen = false
   let offArrival: (() => void) | undefined
@@ -121,7 +121,7 @@ const removeSiteLoader = (): void => {
     onVerdict(String(p?.view ?? ''))
   })
   // Failsafe: a boot that never reaches a verdict (engine error, unreachable
-  // index) must not strand the visitor behind an eternal dot.
+  // index) must not strand the visitor behind an eternal cover.
   setTimeout(removeSiteLoader, 25_000)
 }
 

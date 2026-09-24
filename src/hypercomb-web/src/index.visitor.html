@@ -41,10 +41,10 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <style>
       html,body{margin:0;width:100%;height:100%;background:#08090c}
-      .site-loading{position:fixed;inset:0;display:grid;place-items:center;background:#08090c}
-      .site-loading::after{content:"";width:10px;height:10px;border-radius:50%;background:#f6d109;box-shadow:0 0 24px #f6d109;animation:site-pulse 1.3s ease-in-out infinite}
-      @keyframes site-pulse{50%{opacity:.35;transform:scale(.72)}}
-      @media(prefers-reduced-motion:reduce){.site-loading::after{animation:none}}
+      /* A plain cover, no animation: a published site opens straight onto
+         itself. The cover only hides the engine's own visuals (rings, the
+         empty prompt) until the site is up — main.visitor.ts fades it. */
+      .site-loading{position:fixed;inset:0;background:#08090c}
     </style>
   </head>
   <body>
