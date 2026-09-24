@@ -9,11 +9,16 @@
 // view reorganises without scrambling the order the participant built.
 //
 // The cycle is:
-//   [ Rectangle, Flowers, …every set saved via /sequence, Initial ]
-// `Initial` is an in-memory, per-location snapshot taken when the participant
-// first enters the cycle. It lets the cycle return to the exact layout that
-// was on screen before arranging; an outside reorder or a membership change
-// drops that snapshot, so it never becomes a stale second source of truth.
+//   [ Rectangle, Flowers, …every set saved via /sequence, …the layout ring ]
+// THE LAYOUT RING. Every press first saves the layout on screen — unless
+// that layout is one this cycle itself produced (those regenerate on
+// demand) — so arranging never costs the participant what they had. The
+// ring is per location, newest first, capped at RING_SIZE, and outlives a
+// refresh (participant-local, like the active pointer). Cycling onward
+// reaches each earlier layout in turn; restoring one puts every tile back
+// in the slot it held, and any tile added since fills the free slots in
+// its current order. A drag, an add or a remove no longer throws the way
+// back away — that is exactly when it is needed.
 // The phone's rails are deliberately NOT an arrangement at all any more: they
 // are a PROJECTION of the layer's order owned by RailProjectionDrone
 // (documentation/mobile-rails-projection.md), never a commit, so nothing
@@ -76,7 +81,10 @@ type StoreLike = { putResource(blob: Blob): Promise<string> }
 type I18nLike = { t: (k: string, p?: Record<string, string | number>) => string }
 
 const ACTIVE_KEY = 'hc:arrange-active'
-const INITIAL_CYCLE_ID = 'initial'
+const RING_KEY = 'hc:arrange-ring'
+const RING_ID_PREFIX = 'ring:'
+/** Earlier layouts kept per location. */
+const RING_SIZE = 8
 
 /** How long the arrange gate will wait for a targeted pass to settle. */
 const PAINT_SETTLE_TIMEOUT = 3000
@@ -85,10 +93,10 @@ const PAINT_SETTLE_TIMEOUT = 3000
 type CycleEntry =
   | { kind: 'builtin'; id: string; label: string; labelKey: string }
   | { kind: 'saved'; id: string; label: string; labelKey: string }
-  | { kind: 'initial'; id: string; label: string; labelKey: string; placement: Map<string, number> }
+  | { kind: 'ring'; id: string; label: string; labelKey: string; position: number; placement: Map<string, number> }
 
-/** The arrangement that existed immediately before this location's cycle. */
-type InitialArrangement = Map<string, number>
+/** One saved layout: tile label → spiral slot. */
+type Placement = Map<string, number>
 
 export class SequenceCycleDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -103,7 +111,6 @@ export class SequenceCycleDrone extends Drone {
   }
   protected override listens = [
     'render:tiles-target', 'render:cell-count', 'keymap:invoke', 'sequence:select', 'sequence:edit',
-    'cell:reorder', 'cell:added', 'cell:removed',
   ]
   protected override emits = [
     'arrange:preview', 'cell:reorder', 'toast:show',
@@ -129,9 +136,9 @@ export class SequenceCycleDrone extends Drone {
   #fitTimer: ReturnType<typeof setTimeout> | null = null
   #commitTail: Promise<void> = Promise.resolve()
   readonly #commitRevision = new Map<string, number>()
-  // Deliberately session-only. The original is a way out of an active cycle,
-  // not a durable arrangement to replay after a refresh.
-  readonly #initialArrangements = new Map<string, InitialArrangement>()
+  // Fingerprints of every layout this cycle has put on screen, per location.
+  // A layout in here is regenerable, so it never takes a slot in the ring.
+  readonly #produced = new Map<string, Set<string>>()
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -165,16 +172,6 @@ export class SequenceCycleDrone extends Drone {
       )
       void editor?.openEditor?.((name || 'default').trim() || 'default', segments)
     })
-
-    // A direct move, a layout application, or a changed tile set means the
-    // remembered starting point is no longer the current participant's
-    // layout. Our own cache-invalidation notification is explicitly marked
-    // so cycling itself does not erase the way back to Initial.
-    this.onEffect<{ source?: string }>('cell:reorder', ({ source }) => {
-      if (source !== 'sequence-cycle') this.#forgetInitialArrangements()
-    })
-    this.onEffect('cell:added', () => this.#forgetInitialArrangements())
-    this.onEffect('cell:removed', () => this.#forgetInitialArrangements())
   }
 
   // ── cycle ───────────────────────────────────────────────────────────
@@ -260,8 +257,8 @@ export class SequenceCycleDrone extends Drone {
         .filter(Boolean)
 
       const locationKey = segments.join('/')
-      const initial = this.#initialFor(locationKey, current)
-      const cycle = this.#buildCycle(initial)
+      const ring = this.#remember(locationKey, current)
+      const cycle = this.#buildCycle(ring)
       if (cycle.length === 0) return
       const active = this.#readActive(locationKey)
       const requestedIdx = requestedId
@@ -277,11 +274,12 @@ export class SequenceCycleDrone extends Drone {
       if (!indexes || indexes.length === 0) return
 
       // Built-ins and saved sets intentionally preserve the *current* tile
-      // order. Initial instead restores each label to its captured slot,
+      // order. A ring entry instead restores each label to its captured slot,
       // which is what makes it a genuine return rather than another pack.
-      const placement = entry.kind === 'initial'
-        ? new Map(entry.placement)
+      const placement = entry.kind === 'ring'
+        ? restorePlacement(entry.placement, orderedNames)
         : applyToExisting(orderedNames, indexes)
+      this.#noteProduced(locationKey, placement)
       const revision = (this.#commitRevision.get(locationKey) ?? 0) + 1
       this.#commitRevision.set(locationKey, revision)
 
@@ -334,8 +332,8 @@ export class SequenceCycleDrone extends Drone {
     }, 80)
   }
 
-  /** Built-ins first, then saved sets, then the captured starting layout. */
-  #buildCycle = (initial: InitialArrangement): CycleEntry[] => {
+  /** Built-ins first, then saved sets, then the ring, newest first. */
+  #buildCycle = (ring: readonly Placement[]): CycleEntry[] => {
     const entries: CycleEntry[] = BUILTIN_ARRANGEMENTS.map((b) => ({
       kind: 'builtin' as const,
       id: b.id,
@@ -346,12 +344,15 @@ export class SequenceCycleDrone extends Drone {
     for (const name of svc?.list() ?? []) {
       entries.push({ kind: 'saved', id: name, label: name, labelKey: '' })
     }
-    entries.push({
-      kind: 'initial',
-      id: INITIAL_CYCLE_ID,
-      label: 'Initial',
-      labelKey: 'arrange.initial',
-      placement: new Map(initial),
+    ring.forEach((placement, i) => {
+      entries.push({
+        kind: 'ring',
+        id: RING_ID_PREFIX + i,
+        label: `Earlier layout ${i + 1}`,
+        labelKey: 'arrange.earlier',
+        position: i + 1,
+        placement: new Map(placement),
+      })
     })
     return entries
   }
@@ -363,7 +364,7 @@ export class SequenceCycleDrone extends Drone {
     count: number,
     coordToIndex: Map<string, number>,
   ): number[] | null => {
-    if (entry.kind === 'initial') return [...entry.placement.values()]
+    if (entry.kind === 'ring') return [...entry.placement.values()]
     if (entry.kind === 'builtin') {
       const builtin = BUILTIN_ARRANGEMENTS.find((b) => b.id === entry.id)
       return builtin ? builtin.generate(count, coordToIndex) : null
@@ -459,9 +460,9 @@ export class SequenceCycleDrone extends Drone {
       const existing = await listSequenceTargetHere(segments)
       for (const e of existing) removeSequenceTarget(e.sig, segments)
 
-      // The original arrangement is not a reusable pattern. Returning to it
-      // must also stop new tiles from inheriting the last generated/saved one.
-      if (entry.kind === 'initial') return
+      // An earlier layout is not a reusable pattern. Returning to it must
+      // also stop new tiles from inheriting the last generated/saved one.
+      if (entry.kind === 'ring') return
 
       if (entry.kind === 'saved') {
         const svc = this.resolve<SequenceServiceLike>('sequences')
@@ -502,27 +503,56 @@ export class SequenceCycleDrone extends Drone {
     }
   }
 
-  /** Capture once. A map preserves the exact label → sparse-slot pairing. */
-  #initialFor = (locationKey: string, current: ReadonlyMap<string, number>): InitialArrangement => {
-    const existing = this.#initialArrangements.get(locationKey)
-    if (existing) return existing
-    const initial = new Map(current)
-    this.#initialArrangements.set(locationKey, initial)
-    return initial
+  // ── layout ring (participant-local, per location) ───────────────────
+
+  /** Save the layout on screen into this location's ring, unless this cycle
+   *  produced it or the ring already holds it. Returns the ring, newest
+   *  first. A map preserves the exact label → sparse-slot pairing. */
+  #remember = (locationKey: string, current: ReadonlyMap<string, number>): Placement[] => {
+    const ring = this.#readRing(locationKey)
+    const print = fingerprint(current)
+    if (this.#produced.get(locationKey)?.has(print)) return ring
+    if (ring.some((saved) => fingerprint(saved) === print)) return ring
+    const next = [new Map(current), ...ring].slice(0, RING_SIZE)
+    this.#writeRing(locationKey, next)
+    return next
   }
 
-  #forgetInitialArrangements = (): void => {
-    this.#initialArrangements.clear()
+  #noteProduced = (locationKey: string, placement: ReadonlyMap<string, number>): void => {
+    let prints = this.#produced.get(locationKey)
+    if (!prints) this.#produced.set(locationKey, prints = new Set())
+    prints.add(fingerprint(placement))
+  }
+
+  #readRing = (locationKey: string): Placement[] => {
+    try {
+      const all = JSON.parse(localStorage.getItem(RING_KEY) ?? '{}') as Record<string, Record<string, number>[]>
+      const ring = all?.[locationKey]
+      return Array.isArray(ring) ? ring.map((saved) => new Map(Object.entries(saved))) : []
+    } catch {
+      return []
+    }
+  }
+
+  #writeRing = (locationKey: string, ring: readonly Placement[]): void => {
+    try {
+      const all = JSON.parse(localStorage.getItem(RING_KEY) ?? '{}') as Record<string, Record<string, number>[]>
+      all[locationKey] = ring.map((saved) => Object.fromEntries(saved))
+      localStorage.setItem(RING_KEY, JSON.stringify(all))
+    } catch {
+      /* ignore quota / disabled storage */
+    }
   }
 
   // ── feedback ────────────────────────────────────────────────────────
 
   #toast = (entry: CycleEntry): void => {
     const i18n = window.ioc.get<I18nLike>('@hypercomb.social/I18n')
+    const params = entry.kind === 'ring' ? { n: entry.position } : undefined
     const name =
       entry.labelKey && i18n?.t
         ? (() => {
-            const t = i18n.t(entry.labelKey)
+            const t = i18n.t(entry.labelKey, params)
             return t && t !== entry.labelKey ? t : entry.label
           })()
         : entry.label
@@ -530,6 +560,35 @@ export class SequenceCycleDrone extends Drone {
     const message = prefix && prefix !== 'arrange.toast' ? prefix : `Arranged: ${name}`
     this.emitEffect('toast:show', { type: 'tip', message })
   }
+}
+
+/** Order-independent identity of a layout. */
+const fingerprint = (placement: ReadonlyMap<string, number>): string =>
+  [...placement].map(([label, index]) => `${index}:${label}`).sort().join('\u0000')
+
+/** Put every tile the saved layout knows back in its slot; tiles added since
+ *  take the lowest free slots in their current order; tiles removed since
+ *  are simply absent. */
+export const restorePlacement = (
+  saved: ReadonlyMap<string, number>,
+  orderedNames: readonly string[],
+): Map<string, number> => {
+  const placement = new Map<string, number>()
+  const taken = new Set<number>()
+  for (const name of orderedNames) {
+    const index = saved.get(name)
+    if (index === undefined || taken.has(index)) continue
+    placement.set(name, index)
+    taken.add(index)
+  }
+  let free = 0
+  for (const name of orderedNames) {
+    if (placement.has(name)) continue
+    while (taken.has(free)) free++
+    placement.set(name, free)
+    taken.add(free)
+  }
+  return placement
 }
 
 // THE BEE WIRES (atomic-modules-plan.md): a dependency registers nothing;

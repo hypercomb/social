@@ -1455,6 +1455,7 @@
   "arrange.lanes.other": "{count} lanes",
   "arrange.rectangle": "Rectangle",
   "arrange.flower": "Flowers",
+  "arrange.earlier": "Earlier layout {n}",
   "arrange.toast": "Arranged: {name}",
   "dcp.title": "Installer",
   "dcp.install": "Add source",
