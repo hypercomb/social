@@ -237,8 +237,10 @@ const announcedOn = page => page.evaluate(() => {
   check('the assessor\'s note is one typed hop too, under the assessor\'s own key', oneHop(noteHop) && noteHop.relation === 'note', JSON.stringify(noteHop))
   await H.watchToasts(page)
   await H.say(page, `module assess ${CHANGE} @${WRITE}`)
-  const tally = await H.toastsUntil(page, /people say/)
-  check('the publisher reads how people assessed it, from its own hive', (tally ?? []).some(m => /AI says accept/.test(m) && /1 refuse/.test(m)), JSON.stringify(tally))
+  const tally = await H.toastsUntil(page, /people who count/)
+  // WHOSE WORD COUNTS: the follower is a stranger to the publisher, so its
+  // refusal is listed, never counted; the host AI's reading is the publisher's word.
+  check('the publisher reads how people assessed it, from its own hive — a stranger listed, not counted', (tally ?? []).some(m => /host's AI read accept/.test(m) && /0 refuse/.test(m) && /1 others/.test(m)), JSON.stringify(tally))
 
   // ── 3c. THE ZONE LISTS ITS TRIALS — anyone finds this one there ─────────
   const trial = (await trialsOnZone()).find(t => t.name === SANDBOX)
@@ -246,7 +248,7 @@ const announcedOn = page => page.evaluate(() => {
   check('the listing says what the trial changes, when, and how the host AI read it', !!trial && trial.sections.includes(target.section) && Number.isFinite(trial.at) && trial.reviewVerdict === 'accept' && trial.change === changeSig)
   await H.watchToasts(tester)
   await H.say(tester, `module trials @${WRITE}`)
-  const found = await H.toastsUntil(tester, /AI says|No trials|did not list/)
+  const found = await H.toastsUntil(tester, /AI read|No trials|did not list/)
   check('anyone finds the trials with a word — from inside another trial, too', (found ?? []).some(m => m.startsWith(`${SANDBOX} by publisher`) && m.includes(target.section) && m.includes(DOOR)), JSON.stringify(found))
 
   // ── 3d. ONE DIFFERENCE AT A TIME — what the trial changes ───────────────
@@ -362,9 +364,9 @@ const announcedOn = page => page.evaluate(() => {
   const passSig = await H.waitFor(async () => channelOf(await hostState(), pubkey, `pass:${HOST}`), 30_000, 1000)
   const pass = passSig ? JSON.parse(await fromHost(passSig)) : null
   const standingOf = name => pass?.trials?.find(t => t.name === name) ?? null
-  check('Jev weighs every open trial on the zone — the readings and people\'s assessments — and the pass is published under the publisher\'s key', pass?.kind === 'jev-pass' && pass.zone === HOST && standingOf(SANDBOX)?.standing === 'discuss' && standingOf(`${SANDBOX}-mine`)?.standing === 'take', JSON.stringify(weighed))
+  check('Jev weighs every open trial on the zone — the readings and people\'s assessments — and the pass is published under the publisher\'s key', pass?.kind === 'jev-pass' && pass.zone === HOST && standingOf(SANDBOX)?.standing === 'take' && standingOf(`${SANDBOX}-mine`)?.standing === 'take', JSON.stringify(weighed))
   check('the pass names adoption: whose package another trial took, from the signed change records', standingOf(SANDBOX)?.takenBy?.includes(`${SANDBOX}-mine`) === true && standingOf(`${SANDBOX}-mine`)?.takenBy?.length === 0, JSON.stringify(pass?.trials?.map(t => [t.name, t.takenBy])))
-  check('the pass says where to focus first, and the words say where each trial stands', pass?.focus === `${SANDBOX}-mine` && (weighed ?? []).some(m => m.includes(`Focus first on ${SANDBOX}-mine`)) && (weighed ?? []).some(m => m.startsWith(`${SANDBOX}: discuss`)) && (weighed ?? []).some(m => m.startsWith(`${SANDBOX}-mine: take`) && m.includes('nobody refused')), JSON.stringify(weighed))
+  check('the pass says where to focus first, and the words say where each trial stands', pass?.focus === `${SANDBOX}-mine` && (weighed ?? []).some(m => m.includes(`Focus first on ${SANDBOX}-mine`)) && (weighed ?? []).some(m => m.startsWith(`${SANDBOX}: take`) && m.includes('none of them refused')) && (weighed ?? []).some(m => m.startsWith(`${SANDBOX}-mine: take`) && m.includes('none of them refused')), JSON.stringify(weighed))
 
   // ── 4. PROMOTE: its own site first, then the live channel ─────────────────
   // jwize 2026-09-24: "try.yoursub.domain.com then when deployed will be on
