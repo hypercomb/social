@@ -44,6 +44,15 @@ The alternation is recursive closure: any referenced feature can become the
 root of another tree, and no feature needs a terminal schema of its own.
 Images and other atomic bytes still terminate a hop.
 
+A creation also needs a name that survives a changed payload. Its pool of
+meaning contains a member naming a stable hashed location. The location's
+latest valid head selects the current meta envelope; earlier heads and the
+bytes they name remain available. A view, theme, menu, command, and site use
+that same relationship. A runtime registry is a fast projection of selected
+heads, not another authority. Public offering is a publisher-signed choice
+of locations; local activation is the participant's separate choice. Neither
+choice follows automatically from possessing the bytes.
+
 ## Where the molecule model meets it
 
 `hypergraph-molecule-lineage.md` names three atom shapes:
@@ -180,6 +189,24 @@ from shared — it can, and shared already does). A ratchet
 5. **`root` means the grammar word and nothing else.** Reserved until the
    molecule's envelope writers land.
 6. **The child roster lives in core.** Ask `CHILD_SLOTS`; never restate it.
+7. **A location chooses the current head.** Hash the actionable name and read
+   its latest valid head. A package label, runtime map, or index field cannot
+   silently substitute another head. The live numbered-marker convention and
+   the future per-author succession claims are separate formats during the
+   forward migration.
+8. **Pools discover locations.** A meaning pool names stable locations, not a
+   changing revision list. Existing signed bytes remain readable by name
+   after their location advances or their public listing is withdrawn.
+9. **Publication and activation are explicit layers.** A publisher chooses
+   what a host lists and signs that choice. A visitor chooses what runs or
+   appears in their own hive. Turning it off advances local state without
+   erasing the accepted revision.
+10. **Carry the selected closure.** Verify each signature-named referenced
+    byte before using it, and fetch only the selected creation's required
+    references. A source build or whole package is not the deployment unit.
+11. **One gesture when possible.** The tile's on/off control commits the
+    participant's choice through this mechanism. Menus and settings read the
+    resulting pool heads; they do not keep independent creation catalogs.
 
 Related: `hypergraph-molecule-lineage.md` (the naming layer),
 `address-syntax.md` (the seven rules), `signature-system.md` (the expansion
