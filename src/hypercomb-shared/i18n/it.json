@@ -1034,6 +1034,7 @@
   "presence.filter-toggle": "Mostra solo ciò che condivide questo partecipante",
   "presence.set-name": "imposta il tuo nome",
   "presence.name-placeholder": "il tuo nome",
+  "presence.uploading": "caricamento {done} di {total}",
   "webgl.required": "La grafica hardware è disattivata",
   "webgl.howto": "Hypercomb disegna le tessere con WebGL, che questo browser sta bloccando. Safari: disattiva la modalità blocco per questo sito (Impostazioni → Privacy e Sicurezza). Chrome: attiva \"Usa accelerazione grafica quando disponibile\" (Impostazioni → Sistema) e riavvia. Poi ricarica questa pagina.",
   "sync.synchronizing": "sincronizzazione in corso…",
@@ -1580,8 +1581,6 @@
   "move.rewound.message": "Non è possibile spostare mentre si sta navigando nel passato — torna al più recente (Ripristina) per modificare.",
   "copy.rewound.title": "Visualizzazione cronologia",
   "copy.rewound.message": "Non è possibile copiare mentre si sta navigando nel passato — torna al più recente (Ripristina) per modificare.",
-  "swarm.availability-hold.title": "Caricamento prima della condivisione",
-  "swarm.availability-hold.message": "Le tessere condivise si annunciano quando il loro contenuto è confermato sul tuo host — i caricamenti sono in corso.",
   "controls.stage-private": "privato — clicca per scegliere cosa condividere",
   "controls.stage-world": "scegli cosa condividere — clicca per impostare host e segreto",
   "controls.stage-host": "imposta host, posizione e segreto — clicca per tornare a privato",
@@ -2583,5 +2582,7 @@
   "chat.route.summary.by": "Organizzato da {model}, fino al messaggio {count}",
   "chat.route.summary.cardBy": "Questo riepilogo da {model}",
   "mesh-modal.needs-location": "serve un luogo per unirsi",
-  "mesh-modal.needs-secret": "serve un segreto per unirsi"
+  "mesh-modal.needs-secret": "serve un segreto per unirsi",
+  "swarm.needs-host.title": "Condivisione da qui finché sei nello sciame",
+  "swarm.needs-host.message": "Le tue tessere raggiungono gli altri finché resti. Per tenerle raggiungibili dopo che esci, imposta un host nel pannello host o digita /use-live-relay."
 }

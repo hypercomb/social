@@ -1034,6 +1034,7 @@
   "presence.filter-toggle": "只显示该参与者的内容",
   "presence.set-name": "设置名称",
   "presence.name-placeholder": "您的名称",
+  "presence.uploading": "上传中 {done} / {total}",
   "webgl.required": "硬件图形加速已关闭",
   "webgl.howto": "Hypercomb 使用 WebGL 绘制磁贴，但此浏览器正在阻止它。Safari：关闭此站点的锁定模式（设置 → 隐私与安全）。Chrome：开启「可用时使用图形加速」（设置 → 系统）并重新启动。然后刷新此页面。",
   "sync.synchronizing": "同步中…",
@@ -1580,8 +1581,6 @@
   "move.rewound.message": "回溯时无法移动 — 返回到最新状态（恢复）后再编辑。",
   "copy.rewound.title": "正在查看历史",
   "copy.rewound.message": "回溯时无法复制 — 返回到最新状态（恢复）后再编辑。",
-  "swarm.availability-hold.title": "分享前正在上传",
-  "swarm.availability-hold.message": "共享磁贴会在其内容在你的主机上确认后才发布 — 上传正在进行中。",
   "controls.stage-private": "私密 — 点击选择要分享的内容",
   "controls.stage-world": "选择要分享的内容 — 点击设置主机和密钥",
   "controls.stage-host": "设置主机、位置和密钥 — 点击返回私密模式",
@@ -2583,5 +2582,7 @@
   "chat.route.summary.by": "由 {model} 整理，截至消息 {count}",
   "chat.route.summary.cardBy": "此摘要由 {model} 撰写",
   "mesh-modal.needs-location": "加入需要一个位置",
-  "mesh-modal.needs-secret": "加入需要一个密钥"
+  "mesh-modal.needs-secret": "加入需要一个密钥",
+  "swarm.needs-host.title": "在蜂群中时从这里共享",
+  "swarm.needs-host.message": "只要你在，其他人就能收到你的方块。要在离开后仍可访问，请在主机面板中设置主机或输入 /use-live-relay。"
 }

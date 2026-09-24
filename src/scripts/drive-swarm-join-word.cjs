@@ -21,10 +21,6 @@ const H = require('./drive-swarm-connectivity.cjs')
 
 const zone = { room: `joinword-${Date.now().toString(36)}`, secret: 'secret-' + Math.random().toString(36).slice(2, 10), relay: H.RELAY, seed: {
   'hc:swarm:sticky': '1',
-  // The AVAILABILITY GATE holds public tiles whose closure has no host
-  // receipts. This run has no host, and it is testing the WORD, not the gate
-  // — the sanctioned bypass is the same one /use-live-relay sets.
-  'hc:swarm:ungated': '1',
 } }
 
 async function boot(label) {

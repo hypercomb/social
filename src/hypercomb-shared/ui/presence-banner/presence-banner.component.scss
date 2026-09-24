@@ -178,6 +178,24 @@
   pointer-events: none;
 }
 
+// The upload behind a share — a thin fill under the words, the
+// fraction from the drain's own count. Role colour only: the strip
+// names no colour of its own.
+.presence-upload {
+  position: relative;
+  overflow: hidden;
+  font-style: normal;
+
+  .presence-upload-bar {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 2px;
+    width: calc(var(--upload-fraction, 0) * 100%);
+    background: var(--hc-window-ink-loud);
+    transition: width 200ms ease-out;
+  }
+}
+
 // ── participant panel ─────────────────────────────────
 .participant-panel {
   margin-top: 0.4rem;

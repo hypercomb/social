@@ -1034,6 +1034,7 @@
   "presence.filter-toggle": "Mostrar solo lo de este participante",
   "presence.set-name": "establecer tu nombre",
   "presence.name-placeholder": "tu nombre",
+  "presence.uploading": "subiendo {done} de {total}",
   "webgl.required": "Los gráficos por hardware están desactivados",
   "webgl.howto": "Hypercomb dibuja sus mosaicos con WebGL, que este navegador está bloqueando. Safari: desactiva el Modo de Aislamiento para este sitio (Ajustes → Privacidad y Seguridad). Chrome: activa \"Usar aceleración gráfica cuando esté disponible\" (Configuración → Sistema) y reinicia. Luego recarga esta página.",
   "sync.synchronizing": "sincronizando…",
@@ -1580,8 +1581,6 @@
   "move.rewound.message": "No se puede mover mientras se navega atrás — vuelve a lo último (Restaurar) para editar.",
   "copy.rewound.title": "Viendo historial",
   "copy.rewound.message": "No se puede copiar mientras se navega atrás — vuelve a lo último (Restaurar) para editar.",
-  "swarm.availability-hold.title": "Subiendo antes de compartir",
-  "swarm.availability-hold.message": "Los mosaicos compartidos se anuncian cuando su contenido está confirmado en tu anfitrión — las subidas están en curso.",
   "controls.stage-private": "privado — haz clic para elegir qué compartirías",
   "controls.stage-world": "elige qué estás compartiendo — haz clic para establecer host y secreto",
   "controls.stage-host": "establece host, ubicación y secreto — haz clic para volver a privado",
@@ -2583,5 +2582,7 @@
   "chat.route.summary.by": "Organizado por {model}, hasta el mensaje {count}",
   "chat.route.summary.cardBy": "Este resumen, por {model}",
   "mesh-modal.needs-location": "se necesita una ubicación para unirse",
-  "mesh-modal.needs-secret": "se necesita un secreto para unirse"
+  "mesh-modal.needs-secret": "se necesita un secreto para unirse",
+  "swarm.needs-host.title": "Compartiendo desde aquí mientras estás en el enjambre",
+  "swarm.needs-host.message": "Tus fichas llegan a los demás mientras te quedes. Para que sigan accesibles cuando salgas, define un host en el panel de hosts o escribe /use-live-relay."
 }

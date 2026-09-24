@@ -152,6 +152,13 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
    *  (SwarmFilterService owns the truth; empty = everyone shows). */
   readonly #selected = signal<ReadonlySet<string>>(new Set())
 
+  /** The host upload behind a share, while it runs: `done` of `total`
+   *  entries of the current drain pass (host-sync `host-sync:progress`).
+   *  Painted so a participant sees their tiles going up rather than
+   *  wondering — the swarm never waits on it. Null when nothing is
+   *  uploading. */
+  readonly upload = signal<{ done: number; total: number } | null>(null)
+
   readonly visible = computed(() => this.#seen() && this.#public())
   readonly alone = computed(() => this.#alone())
   readonly peerCount = computed(() => this.#peers().length)
@@ -277,6 +284,13 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       // (the service reconciles departures on peers-changed itself).
       EffectBus.on<{ participants?: readonly string[] }>('swarm:filter', (p) => {
         this.#selected.set(new Set((p?.participants ?? []).map(String)))
+      }),
+
+      // The upload behind a share — one tick per queued entry; the last
+      // tick (done === total) clears the line.
+      EffectBus.on<{ done?: number; total?: number }>('host-sync:progress', (p) => {
+        const done = Number(p?.done ?? 0), total = Number(p?.total ?? 0)
+        this.upload.set(total > 0 && done < total ? { done, total } : null)
       }),
     )
 

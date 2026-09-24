@@ -1034,6 +1034,7 @@
   "presence.filter-toggle": "N'afficher que ce participant",
   "presence.set-name": "définir votre nom",
   "presence.name-placeholder": "votre nom",
+  "presence.uploading": "envoi {done} sur {total}",
   "webgl.required": "L'accélération graphique matérielle est désactivée",
   "webgl.howto": "Hypercomb dessine ses tuiles avec WebGL, que ce navigateur bloque. Safari : désactivez le mode Isolement pour ce site (Réglages → Confidentialité et sécurité). Chrome : activez « Utiliser l'accélération graphique lorsqu'elle est disponible » (Paramètres → Système) et relancez. Puis rechargez cette page.",
   "sync.synchronizing": "synchronisation…",
@@ -1580,8 +1581,6 @@
   "move.rewound.message": "Impossible de déplacer en mode rembobiné — revenez au plus récent (Restaurer) pour éditer.",
   "copy.rewound.title": "Visualisation de l'historique",
   "copy.rewound.message": "Impossible de copier en mode rembobiné — revenez au plus récent (Restaurer) pour éditer.",
-  "swarm.availability-hold.title": "Téléversement avant partage",
-  "swarm.availability-hold.message": "Les tuiles partagées s'annoncent une fois leur contenu confirmé sur votre hôte — les téléversements sont en cours.",
   "controls.stage-private": "privé — cliquez pour choisir ce que vous partageriez",
   "controls.stage-world": "choisissez ce que vous partagez — cliquez pour définir hôte et secret",
   "controls.stage-host": "définissez hôte, emplacement et secret — cliquez pour revenir en privé",
@@ -2583,5 +2582,7 @@
   "chat.route.summary.by": "Organisé par {model}, jusqu'au message {count}",
   "chat.route.summary.cardBy": "Ce résumé par {model}",
   "mesh-modal.needs-location": "un lieu est nécessaire pour rejoindre",
-  "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre"
+  "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre",
+  "swarm.needs-host.title": "Partagé d'ici tant que vous êtes dans l'essaim",
+  "swarm.needs-host.message": "Vos tuiles atteignent les autres tant que vous restez. Pour qu’elles restent accessibles après votre départ, définissez un hôte dans le panneau des hôtes ou tapez /use-live-relay."
 }

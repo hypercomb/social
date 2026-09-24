@@ -881,7 +881,15 @@ export class HostSyncService extends EventTarget {
         const entries = await this.#listQueue()
         if (entries.length === 0) break
         let progressed = false
+        // Live progress for the surfaces that paint an upload (the presence
+        // strip): one tick per entry, the pass total as the denominator.
+        // Reports only — nothing waits on it.
+        let done = 0
+        const total = entries.length
+        EffectBus.emit('host-sync:progress', { done, total })
         for (const entry of entries) {
+          done++
+          EffectBus.emit('host-sync:progress', { done, total })
           // Applicable targets for THIS sig: a public-only target requires
           // the `.public` marker — skip silently without it (the doctrine
           // gate; the marker may arrive later via markPublic).

@@ -1034,6 +1034,7 @@
   "presence.filter-toggle": "عرض محتوى هذا المشارك فقط",
   "presence.set-name": "تعيين اسمك",
   "presence.name-placeholder": "اسمك",
+  "presence.uploading": "جارٍ الرفع {done} من {total}",
   "webgl.required": "تسريع الرسومات معطّل",
   "webgl.howto": "يرسم Hypercomb بلاطاته باستخدام WebGL، وهذا المتصفح يحظره. Safari: أوقف وضع القفل لهذا الموقع (الإعدادات → الخصوصية والأمان). Chrome: فعّل \"استخدام تسريع الرسومات عند التوفر\" (الإعدادات → النظام) وأعد التشغيل. ثم أعد تحميل هذه الصفحة.",
   "sync.synchronizing": "جاري المزامنة…",
@@ -1580,8 +1581,6 @@
   "move.rewound.message": "لا يمكن النقل أثناء التمرير في السجلّ — عُد إلى الأحدث (استعادة) للتعديل.",
   "copy.rewound.title": "عرض السجلّ",
   "copy.rewound.message": "لا يمكن النسخ أثناء التمرير في السجلّ — عُد إلى الأحدث (استعادة) للتعديل.",
-  "swarm.availability-hold.title": "جارٍ الرفع قبل المشاركة",
-  "swarm.availability-hold.message": "تُعلَن البلاطات المُشارَكة بعد تأكيد محتواها على مضيفك — عمليات الرفع جارية.",
   "controls.stage-private": "خاص — انقر لاختيار ما تريد مشاركته",
   "controls.stage-world": "اختر ما تشاركه — انقر لتعيين المضيف والسر",
   "controls.stage-host": "عيّن المضيف والموقع والسر — انقر للعودة إلى الوضع الخاص",
@@ -2583,5 +2582,7 @@
   "chat.route.summary.by": "نظّمه {model} حتى الرسالة {count}",
   "chat.route.summary.cardBy": "هذا الملخص من {model}",
   "mesh-modal.needs-location": "يلزم موقع للانضمام",
-  "mesh-modal.needs-secret": "يلزم مفتاح سري للانضمام"
+  "mesh-modal.needs-secret": "يلزم مفتاح سري للانضمام",
+  "swarm.needs-host.title": "المشاركة من هنا ما دمت في السرب",
+  "swarm.needs-host.message": "تصل بلاطاتك إلى الآخرين ما دمت هنا. لإبقائها متاحة بعد مغادرتك، عيّن مضيفًا في لوحة المضيفين أو اكتب /use-live-relay."
 }

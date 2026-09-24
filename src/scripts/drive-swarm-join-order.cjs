@@ -63,7 +63,7 @@ async function join(c) {
 }
 
 /** The same keymap command the swarm control emits — a TOGGLE, so this is
- *  how a client leaves. (joinSwarm is the same emit plus the ungated flag.) */
+ *  how a client leaves. (joinSwarm is the same emit.) */
 async function togglePublic(page) {
   return H.evalSafe(() => page.evaluate(() => {
     const bee = window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')

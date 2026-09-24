@@ -26,10 +26,8 @@
 //      preserving a stale room here.
 //   3. public — the same guarded mesh.togglePublic gesture the keymap uses
 //      (only when not already public; never toggles OFF).
-//   4. the availability gate — 'hc:swarm:ungated'='1' for now: Jaime's
-//      "reliable and simple" ruling. The gate's share doctrine returns once
-//      the host drain confirms receipts dependably; until then a silent
-//      hold that offers 0 tiles is the worse failure.
+//   4. (retired) the availability gate — the swarm has none now: the sharer
+//      serves what they announce while present, so nothing is held back.
 //
 // Sharing CONTENT stays a deliberate act (world mode / in-zone creates are
 // auto-public) — this command makes the PARTICIPANT work, it does not
@@ -43,7 +41,6 @@ const FLAG_KEY = 'hc:nostrmesh:use-live-relay'
 const RELAYS_KEY = 'hc:nostrmesh:relays'
 const NETWORK_KEY = 'hc:nostrmesh:network'
 const PUBLIC_KEY = 'hc:mesh-public'
-const UNGATED_KEY = 'hc:swarm:ungated'
 const DEFAULT_ZONE = 'hive'
 
 interface ZoneStore { value: string; set: (v: string) => void }
@@ -132,9 +129,6 @@ export class UseLiveRelayQueenBee {
     }
     if (roomStore.value !== room) roomStore.set(room)
     if (secretStore.value !== secret) secretStore.set(secret)
-
-    // 3. The availability gate — reliability ruling (see header).
-    localStorage.setItem(UNGATED_KEY, '1')
 
     // 3b. A BYTE TARGET — the pictures half. The wire carries signatures,
     // never image bytes: a visitor fetches each picture from a host, so a

@@ -1034,6 +1034,7 @@
   "presence.filter-toggle": "Nur Inhalte dieses Teilnehmers zeigen",
   "presence.set-name": "Namen festlegen",
   "presence.name-placeholder": "Ihr Name",
+  "presence.uploading": "lädt hoch {done} von {total}",
   "webgl.required": "Hardware-Grafikbeschleunigung ist deaktiviert",
   "webgl.howto": "Hypercomb zeichnet seine Kacheln mit WebGL, das dieser Browser blockiert. Safari: Lockdown-Modus für diese Seite deaktivieren (Einstellungen → Datenschutz & Sicherheit). Chrome: „Grafikbeschleunigung verwenden, wenn verfügbar“ aktivieren (Einstellungen → System) und neu starten. Dann diese Seite neu laden.",
   "sync.synchronizing": "synchronisiere…",
@@ -1580,8 +1581,6 @@
   "move.rewound.message": "Beim Zurückblättern kann nicht verschoben werden — zum Bearbeiten zum neuesten Stand zurückkehren (Wiederherstellen).",
   "copy.rewound.title": "Verlaufsansicht",
   "copy.rewound.message": "Beim Zurückblättern kann nicht kopiert werden — zum Bearbeiten zum neuesten Stand zurückkehren (Wiederherstellen).",
-  "swarm.availability-hold.title": "Hochladen vor dem Teilen",
-  "swarm.availability-hold.message": "Geteilte Kacheln melden sich, sobald ihr Inhalt auf Ihrem Host bestätigt ist — Uploads laufen.",
   "controls.stage-private": "privat — klicken, um auszuwählen, was Sie teilen würden",
   "controls.stage-world": "wählen Sie, was Sie teilen — klicken, um Host und Geheimnis festzulegen",
   "controls.stage-host": "Host, Standort und Geheimnis festlegen — klicken, um zu privat zurückzukehren",
@@ -2583,5 +2582,7 @@
   "chat.route.summary.by": "Geordnet von {model}, bis Nachricht {count}",
   "chat.route.summary.cardBy": "Diese Zusammenfassung von {model}",
   "mesh-modal.needs-location": "zum Beitreten wird ein Ort benötigt",
-  "mesh-modal.needs-secret": "zum Beitreten wird ein Geheimnis benötigt"
+  "mesh-modal.needs-secret": "zum Beitreten wird ein Geheimnis benötigt",
+  "swarm.needs-host.title": "Geteilt von hier, solange du im Schwarm bist",
+  "swarm.needs-host.message": "Deine Kacheln erreichen die anderen, solange du bleibst. Damit sie auch nach dem Verlassen erreichbar bleiben, setze einen Host im Host-Panel oder tippe /use-live-relay."
 }

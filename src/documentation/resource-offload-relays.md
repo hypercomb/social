@@ -113,24 +113,28 @@ already the pattern), not faster.
 4. Community mirroring: adopters who hold bytes announce as peer sources —
    free replication with integrity guaranteed by the primitive.
 
-## Availability gate (share doctrine — BUILT)
+## Availability gate (publishing — BUILT; the swarm has none)
 
-"To share something in a swarm it already has to be available." Receipts
-are the proof surface; the gate is their read side (all in
-`host-sync.service.ts` + `swarm.drone.ts` + `invite.queen.ts`):
+"To publish something it already has to be available." Receipts are the
+proof surface; the gate is their read side (`host-sync.service.ts` +
+`publish-branch.ts` + `invite.queen.ts`):
 
 - `HostSyncService.isClosureAvailable(sig, kind, closure)` — a closure is
   available once EVERY sig in it (markPublic's exact traversal, read-only)
   holds a confirmed read-back receipt on at least one enabled host.
   Confirmed closures memoize permanently (bytes immutable, receipts
   accrue); misses re-check only when a new receipt bumps the epoch.
-- Both announce surfaces (the kind-30200 publish walk AND the personal
-  subscribe channel) HOLD BACK public children whose closure isn't
-  available — and retract previously-announced slots — whenever a durable
-  host is configured. With no host configured, mesh-only live sharing
-  stays ungated (dev/test: two browsers over a relay, sharer online).
-  `host:receipt` re-triggers the walk so held content announces the
-  moment it turns durable.
+- **The swarm does not gate on it (2026-09-24).** A participant standing in
+  the swarm IS the host of what they announce — layers answer over the
+  broker, pictures over the resource subscription — so both announce
+  surfaces (the publish walk AND the personal subscribe channel) announce
+  every public child at once. The gate used to hold back every tile whose
+  closure had no host receipt, and a hive with no host configured (the
+  default) had none, so it announced nothing and the swarm read as dead.
+  Uploads still stage (`markPublic`) so the tiles outlive the sharer's
+  session; the drain reports `host-sync:progress { done, total }` and the
+  presence strip paints "uploading N of M" while it runs. Joining with no
+  host says so once per session and never holds.
 - `/invite` refuses without hosting ("sharing requires hosting") and
   waits for the bundle's receipt (`ensureReceipt`) before declaring the
   link live.

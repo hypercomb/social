@@ -1119,6 +1119,7 @@
   "presence.filter-toggle": "この参加者のタイルだけを表示",
   "presence.set-name": "名前を設定",
   "presence.name-placeholder": "あなたの名前",
+  "presence.uploading": "アップロード中 {done} / {total}",
   "webgl.required": "ハードウェアグラフィックスが無効です",
   "webgl.howto": "HypercombはタイルをWebGLで描画しますが、このブラウザでブロックされています。Safari：このサイトのロックダウンモードをオフにしてください（設定 → プライバシーとセキュリティ）。Chrome：「グラフィック アクセラレーションが使用可能な場合は使用する」（設定 → システム）をオンにして再起動してください。その後このページを再読み込みしてください。",
   "sync.synchronizing": "同期中…",
@@ -2076,8 +2077,6 @@
   "move.rewound.message": "巻き戻し中は移動できません — 最新の状態（復元）に戻してから編集してください。",
   "copy.rewound.title": "履歴を表示中",
   "copy.rewound.message": "巻き戻し中はコピーできません — 最新の状態（復元）に戻してから編集してください。",
-  "swarm.availability-hold.title": "共有前にアップロード中",
-  "swarm.availability-hold.message": "共有タイルはホストでコンテンツが確認されるとアナウンスされます — アップロードが進行中です。",
   "slash.tutorial": "ビーイングと巡るはじめてのツアー",
   "tutorial.chip.welcome": "ようこそ",
   "tutorial.chip.go-in": "入る",
@@ -2640,5 +2639,7 @@
   "aliases.refused-not-a-name": "名前は一語で：英数字とハイフンのみ",
   "aliases.refused-is-the-command": "それはすでに正式名です",
   "aliases.refused-is-another-command": "別のビヘイビアがその名前に応答します",
-  "aliases.refused-taken": "その名前は別のビヘイビアに付けています"
+  "aliases.refused-taken": "その名前は別のビヘイビアに付けています",
+  "swarm.needs-host.title": "スワーム参加中はここから共有中",
+  "swarm.needs-host.message": "滞在している間、あなたのタイルは他の参加者に届きます。退出後も届くようにするには、ホストパネルでホストを設定するか /use-live-relay と入力してください。"
 }

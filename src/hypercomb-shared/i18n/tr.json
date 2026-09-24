@@ -1034,6 +1034,7 @@
   "presence.filter-toggle": "Yalnızca bu katılımcının içeriğini göster",
   "presence.set-name": "adınızı belirleyin",
   "presence.name-placeholder": "adınız",
+  "presence.uploading": "yükleniyor {done} / {total}",
   "webgl.required": "Donanım grafikleri kapalı",
   "webgl.howto": "Hypercomb döşemelerini WebGL ile çizer, bu tarayıcı bunu engelliyor. Safari: bu site için Kilit Modunu kapatın (Ayarlar → Gizlilik ve Güvenlik). Chrome: ”Kullanılabilir olduğunda grafik hızlandırmayı kullan”  seçeneğini açın (Ayarlar → Sistem) ve yeniden başlatın. Sonra bu sayfayı yeniden yükleyin.",
   "sync.synchronizing": "senkronize ediliyor…",
@@ -1580,8 +1581,6 @@
   "move.rewound.message": "Geçmişe sarılmışken taşınamaz — düzenlemek için en son duruma dönün (Geri yükle).",
   "copy.rewound.title": "Geçmiş görüntüleniyor",
   "copy.rewound.message": "Geçmişe sarılmışken kopyalanamaz — düzenlemek için en son duruma dönün (Geri yükle).",
-  "swarm.availability-hold.title": "Paylaşmadan önce yükleniyor",
-  "swarm.availability-hold.message": "Paylaşılan döşemeler, içerikleri host'unuzda doğrulanınca duyurulur — yüklemeler sürüyor.",
   "controls.stage-private": "özel — paylaşmak istediklerini seçmek için tıkla",
   "controls.stage-world": "neleri paylaştığını seç — host ve gizli anahtarı ayarlamak için tıkla",
   "controls.stage-host": "host, konum ve gizli anahtarı ayarla — özele dönmek için tıkla",
@@ -2583,5 +2582,7 @@
   "chat.route.summary.by": "{model} modeli düzenledi, {count} numaralı mesaja kadar",
   "chat.route.summary.cardBy": "Bu özet: {model} modeli",
   "mesh-modal.needs-location": "katılmak için bir konum gerekli",
-  "mesh-modal.needs-secret": "katılmak için bir parola gerekli"
+  "mesh-modal.needs-secret": "katılmak için bir parola gerekli",
+  "swarm.needs-host.title": "Sürüde olduğun sürece buradan paylaşılıyor",
+  "swarm.needs-host.message": "Kaldığın sürece karoların diğerlerine ulaşır. Ayrıldıktan sonra da erişilebilir kalmaları için host panelinden bir host ayarla ya da /use-live-relay yaz."
 }

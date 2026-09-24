@@ -1034,6 +1034,7 @@
   "presence.filter-toggle": "Tampilkan hanya milik peserta ini",
   "presence.set-name": "atur nama Anda",
   "presence.name-placeholder": "nama Anda",
+  "presence.uploading": "mengunggah {done} dari {total}",
   "webgl.required": "Akselerasi grafis perangkat keras dinonaktifkan",
   "webgl.howto": "Hypercomb menggambar ubinnya dengan WebGL, yang diblokir oleh browser ini. Safari: nonaktifkan Mode Penguncian untuk situs ini (Pengaturan → Privasi & Keamanan). Chrome: aktifkan ”Gunakan akselerasi grafis jika tersedia” (Pengaturan → Sistem) dan luncurkan ulang. Kemudian muat ulang halaman ini.",
   "sync.synchronizing": "menyinkronkan…",
@@ -1580,8 +1581,6 @@
   "move.rewound.message": "Tidak bisa memindahkan saat menelusuri riwayat — kembali ke yang terbaru (Pulihkan) untuk mengedit.",
   "copy.rewound.title": "Melihat riwayat",
   "copy.rewound.message": "Tidak bisa menyalin saat menelusuri riwayat — kembali ke yang terbaru (Pulihkan) untuk mengedit.",
-  "swarm.availability-hold.title": "Mengunggah sebelum dibagikan",
-  "swarm.availability-hold.message": "Ubin yang dibagikan diumumkan setelah kontennya terkonfirmasi di host Anda — unggahan sedang berlangsung.",
   "controls.stage-private": "privat — klik untuk memilih apa yang ingin Anda bagikan",
   "controls.stage-world": "pilih apa yang Anda bagikan — klik untuk mengatur host & rahasia",
   "controls.stage-host": "atur host, lokasi & rahasia — klik untuk kembali ke privat",
@@ -2583,5 +2582,7 @@
   "chat.route.summary.by": "Ditata oleh {model}, hingga pesan {count}",
   "chat.route.summary.cardBy": "Ringkasan ini oleh {model}",
   "mesh-modal.needs-location": "perlu lokasi untuk bergabung",
-  "mesh-modal.needs-secret": "perlu kunci rahasia untuk bergabung"
+  "mesh-modal.needs-secret": "perlu kunci rahasia untuk bergabung",
+  "swarm.needs-host.title": "Berbagi dari sini selama kamu di dalam kawanan",
+  "swarm.needs-host.message": "Ubinmu sampai ke yang lain selama kamu tetap di sini. Agar tetap terjangkau setelah kamu pergi, atur host di panel host atau ketik /use-live-relay."
 }

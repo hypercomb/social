@@ -51,6 +51,13 @@
       <span class="presence-caption">{{ 'presence.alone' | t }}</span>
     }
 
+    @if (upload(); as u) {
+      <span class="presence-caption presence-upload" role="status" aria-live="polite">
+        <span class="presence-upload-bar" [style.--upload-fraction]="u.done / u.total"></span>
+        {{ 'presence.uploading' | t: { done: u.done, total: u.total } }}
+      </span>
+    }
+
     @if (expanded() && !alone()) {
       <div class="participant-panel" role="dialog" [attr.aria-label]="'presence.panel-label' | t">
         <ul class="participant-list">

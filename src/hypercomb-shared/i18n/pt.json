@@ -1034,6 +1034,7 @@
   "presence.filter-toggle": "Mostrar apenas o que este participante compartilha",
   "presence.set-name": "definir seu nome",
   "presence.name-placeholder": "seu nome",
+  "presence.uploading": "enviando {done} de {total}",
   "webgl.required": "A aceleração gráfica está desativada",
   "webgl.howto": "Hypercomb desenha seus blocos com WebGL, que este navegador está bloqueando. Safari: desative o Modo de Bloqueio para este site (Ajustes → Privacidade e Segurança). Chrome: ative \"Usar aceleração gráfica quando disponível\" (Configurações → Sistema) e reinicie. Depois recarregue esta página.",
   "sync.synchronizing": "sincronizando…",
@@ -1580,8 +1581,6 @@
   "move.rewound.message": "Não é possível mover enquanto está no passado — volte ao mais recente (Restaurar) para editar.",
   "copy.rewound.title": "Visualizando histórico",
   "copy.rewound.message": "Não é possível copiar enquanto está no passado — volte ao mais recente (Restaurar) para editar.",
-  "swarm.availability-hold.title": "Enviando antes de compartilhar",
-  "swarm.availability-hold.message": "Blocos compartilhados são anunciados quando seu conteúdo é confirmado no seu host — os envios estão em andamento.",
   "controls.stage-private": "privado — clique para escolher o que compartilharia",
   "controls.stage-world": "escolha o que está compartilhando — clique para definir host e segredo",
   "controls.stage-host": "defina host, localização e segredo — clique para voltar ao privado",
@@ -2583,5 +2582,7 @@
   "chat.route.summary.by": "Organizado por {model}, até a mensagem {count}",
   "chat.route.summary.cardBy": "Este resumo por {model}",
   "mesh-modal.needs-location": "é necessário um local para entrar",
-  "mesh-modal.needs-secret": "é necessário um segredo para entrar"
+  "mesh-modal.needs-secret": "é necessário um segredo para entrar",
+  "swarm.needs-host.title": "Compartilhando daqui enquanto você está no enxame",
+  "swarm.needs-host.message": "Seus blocos chegam aos outros enquanto você ficar. Para mantê-los acessíveis depois de sair, defina um host no painel de hosts ou digite /use-live-relay."
 }
