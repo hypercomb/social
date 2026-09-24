@@ -198,6 +198,8 @@ view's code loaded, opening nothing, so the first open is warm.
 | Arkanoid | 281 ms | 285 ms | 10 → 0 |
 | Tutor | 253 ms | 260 ms | 18 → 0 |
 
+Both 4× arms ran while a second harness run (an earlier job left going) drove its own throttled browser against the same server, so the absolute times are inflated; the load was the same for off and on, and a third off-arm run from that job (Solomon warm 1278 ms) sits in the same range, so the comparison stands. Re-measure absolute 4× times alone before quoting them.
+
 THE HONEST VERDICT: the code warm does what it says — nothing is fetched at the open — and it does NOT make the open faster on an installed hive, even at 4×: open time is mounting and rendering, and fetching plus evaluating these seams is a small part of it. What does make an open fast is the tile walk that was already there (a tiles-warm open beats a cold one: Arkanoid 281 vs 566 ms, tutor 253 vs 518 ms at 4×). The code warm is kept because it is correct, detached and cheap, and it is where a seam that is heavy or not yet local (increment 2 makes Solomon's 42 atoms across 9 import levels; a door's first visit) would pay — measure that before claiming it.
 
 ### 5. Hive-side drafting follows the atoms
