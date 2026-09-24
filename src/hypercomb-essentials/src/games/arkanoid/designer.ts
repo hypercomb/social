@@ -8,14 +8,16 @@
 import { EDIT_COLS, EDIT_ROWS, emptyLevel, type ArkanoidLevel } from './levels.js'
 
 // Tool char is the level tile code: '1'..'4' = brick hit-points (and colour),
-// '.' = empty. The engine reads the same chars (see Engine.#build).
-export type Tool = 'erase' | '1' | '2' | '3' | '4'
+// '#' = an unbreakable ice barrier, '.' = empty. The engine reads the same
+// chars (see Engine.#build). Chip colours are the board's own tile colours.
+export type Tool = 'erase' | '1' | '2' | '3' | '4' | '#'
 
 export const TOOLS: { tool: Tool; label: string; color: string }[] = [
-  { tool: '1', label: '1', color: '#5ad1c4' },
-  { tool: '2', label: '2', color: '#5aa9ff' },
-  { tool: '3', label: '3', color: '#b98cff' },
-  { tool: '4', label: '◆', color: '#ffd76a' },
+  { tool: '1', label: '1', color: '#4DE3FF' },
+  { tool: '2', label: '2', color: '#FFD93B' },
+  { tool: '3', label: '3', color: '#FF5C96' },
+  { tool: '4', label: '◆', color: '#A488FF' },
+  { tool: '#', label: '▣', color: '#DCE8F8' },
   { tool: 'erase', label: '⌫', color: '#7a8198' },
 ]
 
@@ -27,7 +29,7 @@ function toGrid(rows: readonly string[]): string[] {
     let line = ''
     for (let c = 0; c < EDIT_COLS; c++) {
       const ch = src[c] ?? '.'
-      line += (ch === '1' || ch === '2' || ch === '3' || ch === '4' || ch === '*') ? (ch === '*' ? '4' : ch) : '.'
+      line += (ch === '1' || ch === '2' || ch === '3' || ch === '4' || ch === '#') ? ch : ch === '*' ? '4' : '.'
     }
     out.push(line)
   }

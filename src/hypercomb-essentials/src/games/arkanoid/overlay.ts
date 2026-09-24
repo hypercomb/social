@@ -18,7 +18,7 @@
 // releases the lock; ending the game or opening the designer releases it too.
 
 import { Engine, W, H, BRICK_W, BRICK_H, BRICK_TOP, BRICK_X0, POWER_META, POWER_ORDER, DIFFICULTY, type Brick } from './engine.js'
-import { Renderer, brickColor } from './renderer.js'
+import { Renderer, brickColor, brickShade, UNBREAKABLE_SPARKS } from './renderer.js'
 import { LEVELS, cloneLevel, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, type ArkanoidLevel } from './levels.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
 import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
@@ -134,6 +134,7 @@ export class ArkanoidOverlay {
   #prevScore = 0
   #prevLives = 3
   #brickAlive: boolean[] = []            // snapshot of which bricks were alive last frame
+  #brickHits: number[] = []              // snapshot of each brick's hit count last frame (a hit that does not kill still sparks)
   #intro: { t: number; title: string; sub: string } | null = null
 
   // Pointer Lock: while locked the cursor is hidden + captured by the canvas and
@@ -326,6 +327,7 @@ export class ArkanoidOverlay {
       ['White ball = life', 'The white ball is your life; coloured balls are ammo. Lose the white one and you lose a life.'],
       ['The hunter', 'Dawdle too long and a hunter chases your white ball; a hit whacks your ball away fast (no instant loss). 3 hits — from the ball, ammo, lasers, or a rocket — destroy it.'],
       ['Sparkle bricks', 'Every 5 hits you land on the hunter, a sparkling brick appears and blooms into a big one. Five hits shatter it into shards — one hides a multiplier.'],
+      ['Ice barriers', 'The frosted white plates never break — nothing you fire dents them, and a level clears without them. Play your angles off them.'],
       ['Controls', '← → or mouse to move · Space / left-click to launch — or HOLD to charge a Laser fireball and release to fire · right-click to fire the missile · R restart · Esc to close.'],
     ]
     for (const [t, d] of basics) {
@@ -457,30 +459,48 @@ export class ArkanoidOverlay {
   // a per-frame brick snapshot diff drives break sparks, and score/lives deltas
   // drive shake + a death burst — all read AFTER engine.update().
 
-  /** Remember which bricks are alive going into this frame's update. */
+  /** Remember which bricks are alive, and how many hits each has taken, going
+   *  into this frame's update. */
   #snapshotBricks(e: Engine): void {
-    const arr = this.#brickAlive
-    arr.length = e.bricks.length
-    for (let i = 0; i < e.bricks.length; i++) arr[i] = e.bricks[i].alive
+    const alive = this.#brickAlive, hits = this.#brickHits
+    alive.length = hits.length = e.bricks.length
+    for (let i = 0; i < e.bricks.length; i++) { alive[i] = e.bricks[i].alive; hits[i] = e.bricks[i].hits ?? 0 }
   }
 
-  /** Any brick that went alive→dead since the snapshot bursts sparks at its
-   *  centre, tinted to its colour. A rocket wiping a cluster naturally fires many
-   *  bursts at once → a big shower + cumulative shake, no special-casing. */
+  /** Any brick that went alive→dead since the snapshot BREAKS: a shower of
+   *  white-hot sparks plus a slower fall of heavy shards in the tile's own
+   *  colour and its darker pair, so the burst is the tile coming apart, not a
+   *  generic firework. A brick that took a hit and stood CHIPS: a few flakes of
+   *  its colour fall off the impact. A barrier that was struck RINGS: cold
+   *  white-blue glints scatter off it and nothing falls, because nothing came
+   *  off. A rocket wiping a cluster naturally fires many bursts at once → a big
+   *  shower + cumulative shake, no special-casing. */
   #diffBricks(e: Engine): void {
-    const arr = this.#brickAlive
+    const alive = this.#brickAlive, hits = this.#brickHits
     let broke = 0
-    const n = Math.min(arr.length, e.bricks.length)
+    const n = Math.min(alive.length, e.bricks.length)
     for (let i = 0; i < n; i++) {
       const b: Brick = e.bricks[i]
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2
       // `covered` bricks were silently consumed under a blooming mega, NOT hit by
       // the player — no sparks / shake for those.
-      if (arr[i] && !b.alive && !b.covered) {
+      if (alive[i] && !b.alive && !b.covered) {
         broke++
-        this.#field.burst(b.x + b.w / 2, b.y + b.h / 2, {
-          count: 14, speed: 130, size: 2.3, life: 0.5, gravity: 340, drag: 1.7,
+        this.#field.burst(cx, cy, {
+          count: 14, speed: 140, size: 2.2, life: 0.45, gravity: 300, drag: 1.7,
           color: [brickColor(b.max), ...ARCADE.spark],
         })
+        this.#field.burst(cx, cy, {
+          count: 7, speed: 85, size: 3.4, life: 0.62, gravity: 460, drag: 1.2,
+          color: [brickColor(b.max), brickColor(b.max), brickShade(b.max)],
+        })
+        continue
+      }
+      if (!b.alive || (b.hits ?? 0) <= hits[i]) continue
+      if (b.unbreakable) {
+        this.#field.burst(cx, cy, { count: 8, speed: 125, size: 1.6, life: 0.28, gravity: 60, drag: 2.2, color: [...UNBREAKABLE_SPARKS] })
+      } else {
+        this.#field.burst(cx, cy, { count: 5, speed: 90, size: 1.9, life: 0.36, gravity: 380, drag: 1.6, color: [brickColor(b.max), brickColor(b.max), '#ffffff'] })
       }
     }
     if (broke > 0) { this.#shaker.add(0.16 + Math.min(0.5, (broke - 1) * 0.07)); this.#renderer?.spike(0.35 + Math.min(0.9, broke * 0.18)) }   // the whole keep flares on the break
@@ -510,6 +530,7 @@ export class ArkanoidOverlay {
     this.#prevScore = e.score
     this.#prevLives = e.lives
     this.#brickAlive = e.bricks.map(b => b.alive)
+    this.#brickHits = e.bricks.map(b => b.hits ?? 0)
     this.#shaker = new Shaker()
     this.#field.clear()
   }
