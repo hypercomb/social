@@ -202,6 +202,28 @@ Both 4× arms ran while a second harness run (an earlier job left going) drove i
 
 THE HONEST VERDICT: the code warm does what it says — nothing is fetched at the open — and it does NOT make the open faster on an installed hive, even at 4×: open time is mounting and rendering, and fetching plus evaluating these seams is a small part of it. What does make an open fast is the tile walk that was already there (a tiles-warm open beats a cold one: Arkanoid 281 vs 566 ms, tutor 253 vs 518 ms at 4×). The code warm is kept because it is correct, detached and cheap, and it is where a seam that is heavy or not yet local (increment 2 makes Solomon's 42 atoms across 9 import levels; a door's first visit) would pay — measure that before claiming it.
 
+**Increment 2 — adopt the proper load (step 1 BUILT 2026-09-23).** The walk
+warms what a face reaches; code that boot reaches only because something
+imports it statically, and that is needed only when a word runs or a view
+opens, belongs behind a seam. An audit of the build found 15 such edits
+worth about 1.1 MB of the 7.0 MB boot (game view → the story word → Solomon
+being the largest). Each is measured and kept only if it pays.
+- *Step 1: the story word.* `games/story.queen.ts` loads Solomon's places,
+  levels, add-ons and tiles with one cached `import()` when the word runs
+  (arguments checked first; a failed load says so); only `solomon/place.js`
+  stays static, because `refuse` answers synchronously.
+
+| Web shell, 1× | Before | After |
+|---|---|---|
+| Boot modules / KB at `/plain` | 441 / 3,811 | **418 / 3,243** (−23, −568 KB) |
+| Bees ready at `/plain` (median of 2) | 870 ms | 745 ms |
+| Solomon's seam | 19 atoms, 4 levels | 42 atoms, 9 levels |
+| Solomon cold open | 208–238 ms (earlier runs) | 225 ms |
+| Solomon warm open (face within reach) | — | 256 ms, 0 atoms fetched |
+
+The boot bytes left exactly as predicted, boot timing held or improved, and
+the game's first open pays nothing measurable for carrying its own code.
+
 ### 5. Hive-side drafting follows the atoms
 `module read <sig>` on a dependency atom shows one file (the section IS the
 file now). `module draft` on it mints a new atom sig, the draft layer swaps

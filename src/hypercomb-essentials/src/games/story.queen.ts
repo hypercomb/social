@@ -7,13 +7,29 @@
 // never deleted — and `story plug <id>` takes it back. `story list` says
 // what the game holds.
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { loadCreations } from './solomon/levels.js'
 import { seatAt, splitEntranceKey } from './solomon/place.js'
-import { PLACES } from './solomon/places.js'
-import { STORY } from './solomon/story.js'
-import { installStory, readStoryBundle, STORY_BUNDLE_BYTES, STORY_SEEDS } from './solomon/story-addons.js'
-import { pluggedStories, readStoryTiles, replugStory, storySig, storyTileNamed, unplugStory } from './solomon/story-tiles.js'
-import { createSolomonTileSurface } from './solomon/tile-surface.js'
+
+// SOLOMON'S CODE ARRIVES WITH THE WORD, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"): the story's places, levels, add-ons and tiles are
+// needed only when the word runs, so they load then, once — and a tile whose
+// face is the game warms them before that (the tile walk). Only the entrance
+// key stays static: `refuse` answers synchronously.
+type Solomon = typeof import('./solomon/levels.js') & typeof import('./solomon/places.js') & typeof import('./solomon/story.js')
+  & typeof import('./solomon/story-addons.js') & typeof import('./solomon/story-tiles.js') & typeof import('./solomon/tile-surface.js')
+let solomon: Promise<Solomon> | null = null
+const loadSolomon = (): Promise<Solomon> => solomon ??= Promise.all([
+  import('./solomon/levels.js'), import('./solomon/places.js'), import('./solomon/story.js'),
+  import('./solomon/story-addons.js'), import('./solomon/story-tiles.js'), import('./solomon/tile-surface.js'),
+]).then(parts => Object.assign({}, ...parts) as Solomon).catch(error => { solomon = null; throw error })
+
+/** Solomon's code for a word, or a line the participant sees when it cannot
+ *  load — every other failure of this word already speaks through `say`. */
+const solomonOrSay = async (): Promise<Solomon | null> => {
+  try { return await loadSolomon() } catch (error) {
+    say(`Could not load Solomon’s Key: ${error instanceof Error ? error.message : String(error)}`)
+    return null
+  }
+}
 
 const ICON = 'auto_stories'
 const SIGNATURE = /^[0-9a-f]{64}$/i
@@ -79,6 +95,9 @@ export class StoryQueenBee extends QueenBee {
   /** Seats every plugged story tile the game holds, as its opening would;
    *  an add-on already seated this session keeps its first reading. */
   async #seatKnown(): Promise<void> {
+    const code = await solomonOrSay()
+    if (!code) return
+    const { installStory, readStoryBundle, STORY_SEEDS, pluggedStories, createSolomonTileSurface } = code
     let raws: unknown[]
     try { raws = await pluggedStories(createSolomonTileSurface(), STORY_SEEDS) } catch { return }
     for (const raw of raws) {
@@ -91,6 +110,9 @@ export class StoryQueenBee extends QueenBee {
    *  a labyrinth of its own, seated behind the entrance — one act, no JSON. */
   async #room(creation: string, entrance: string): Promise<void> {
     if (!CREATION.test(creation)) { say('story room takes a saved room’s id from the Designer (its first eight characters or more) and the entrance to seat it behind, like mossback/old-mine.'); return }
+    const code = await solomonOrSay()
+    if (!code) return
+    const { loadCreations, PLACES, STORY, readStoryBundle, STORY_SEEDS, replugStory, storySig, createSolomonTileSurface } = code
     const found = loadCreations().filter(candidate => candidate.id.startsWith(creation.toLowerCase()))
     if (!found.length) { say(`No saved room starts with ${creation} — the Designer’s saved rooms are what this seats.`); return }
     if (found.length > 1) { say(`${found.length} saved rooms start with ${creation}; give more of the id.`); return }
@@ -127,6 +149,9 @@ export class StoryQueenBee extends QueenBee {
    *  story is not seated until it is plugged again. */
   async #unplug(id: string): Promise<void> {
     if (!ID.test(id)) { say('story unplug takes the id of an add-on — story list names them.'); return }
+    const code = await solomonOrSay()
+    if (!code) return
+    const { unplugStory, createSolomonTileSurface } = code
     let result: Awaited<ReturnType<typeof unplugStory>>
     try { result = await unplugStory(createSolomonTileSurface(), id) } catch (error) {
       say(`Could not read the story tiles: ${error instanceof Error ? error.message : String(error)}`)
@@ -141,8 +166,11 @@ export class StoryQueenBee extends QueenBee {
    *  becomes the tile the game reads. `story plug <id>` takes a put-away
    *  add-on back. */
   async #plug(sig: string): Promise<void> {
+    if (!SIGNATURE.test(sig) && !ID.test(sig)) { say('story plug takes the signature of a JSON bundle — 64 hex characters — or the id of a put-away add-on.'); return }
+    const code = await solomonOrSay()
+    if (!code) return
+    const { readStoryBundle, STORY_BUNDLE_BYTES, STORY_SEEDS, replugStory, storySig, storyTileNamed, createSolomonTileSurface } = code
     if (!SIGNATURE.test(sig)) {
-      if (!ID.test(sig)) { say('story plug takes the signature of a JSON bundle — 64 hex characters — or the id of a put-away add-on.'); return }
       let tile: Awaited<ReturnType<typeof storyTileNamed>>
       try { tile = await storyTileNamed(createSolomonTileSurface(), sig) } catch (error) {
         say(`Could not read the story tiles: ${error instanceof Error ? error.message : String(error)}`)
@@ -175,6 +203,9 @@ export class StoryQueenBee extends QueenBee {
   }
 
   async #list(): Promise<void> {
+    const code = await solomonOrSay()
+    if (!code) return
+    const { readStoryBundle, readStoryTiles, createSolomonTileSurface } = code
     let tiles: Awaited<ReturnType<typeof readStoryTiles>>
     try { tiles = await readStoryTiles(createSolomonTileSurface()) } catch (error) {
       say(`Could not read the story tiles: ${error instanceof Error ? error.message : String(error)}`)
