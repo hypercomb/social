@@ -291,8 +291,8 @@ const _runInitializeRuntime = async (
   const historyService = get('@HistoryService') as {
     preloadAllBags?: () => Promise<void>
     preloadFromRoot?: (rootSig: string) => Promise<void>
-    preloadNeighbourhood?: (locationSig: string, maxDepth?: number, segments?: readonly string[]) => Promise<void>
-    preloadAncestors?: (segments: readonly string[], depth?: number) => Promise<void>
+    preloadNeighbourhood?: (locationSig: string, maxDepth?: number, segments?: readonly string[], levelsAway?: number) => Promise<void>
+    preloadAncestors?: (segments: readonly string[], depth?: number, gen?: number) => Promise<void>
     preloadGeneration?: () => number
     sign?: (l: { explorerSegments: () => readonly string[] }) => Promise<string>
     latestMarkerSigFor?: (lineageSig: string, name: string) => Promise<string>
@@ -382,8 +382,13 @@ const _runInitializeRuntime = async (
     })
     const warmCurrent = (): void => {
       void (async () => {
+        // The direction as it stands NOW, before the forward warm: the way
+        // back and the declared destinations below are warmed only while it
+        // still holds.
+        let gen = 0
         try {
           await awaitSettledPaint()
+          gen = historyService.preloadGeneration?.() ?? 0
           const sig = await lineage.currentSig()
           // Hand the PATH over, not only its signature: a sig cannot be
           // un-hashed, so without it the warm can only assume it is standing at
@@ -398,7 +403,9 @@ const _runInitializeRuntime = async (
           // ancestors too, nearest first, one level each (a layer's pack
           // carries every sibling's visual, so one level IS the whole page
           // back-navigation paints).
-          if (segs.length) await historyService.preloadAncestors?.(segs)
+          if (segs.length && (historyService.preloadGeneration?.() ?? gen) === gen) {
+            await historyService.preloadAncestors?.(segs, undefined, gen)
+          }
         } catch { /* non-fatal: a cold render is correct, just slower */ }
         try {
           // Rank declared destinations by local usage so the participant's
@@ -414,7 +421,6 @@ const _runInitializeRuntime = async (
           // just entered. Capture the generation and stop the whole sweep the
           // moment it moves — the new location's own warm re-declares what is
           // still worth warming.
-          const gen = historyService.preloadGeneration?.() ?? 0
           let warmed = 0
           for (const psig of proximate) {
             if ((historyService.preloadGeneration?.() ?? gen) !== gen) {
@@ -431,7 +437,8 @@ const _runInitializeRuntime = async (
             }
             warmedProximity.add(psig)
             warmed++
-            await historyService.preloadNeighbourhood!(psig)
+            // One click away: its own face is within reach, its children's are not.
+            await historyService.preloadNeighbourhood!(psig, undefined, undefined, 1)
           }
         } catch { /* non-fatal: a cold render is correct, just slower */ }
       })()

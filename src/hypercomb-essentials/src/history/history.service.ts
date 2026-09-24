@@ -7,11 +7,16 @@ import { parseHeadIndex, buildFlushIndex } from './head-index.js'
 import { chooseSealChildHandle } from './seal-preference.js'
 import { listMarkerMetaRecords, readMarkerMetaRecord, writeMarkerMetaRecord, type MarkerMetaStore } from './marker-meta.js'
 import {
+  PRELOAD_CODE_DEPTH,
+  faceDepthFor,
+  facesOf,
   mergePreloadStamp,
   preloadPassCompleted,
   preloadStampSatisfies,
+  readCodeDepth,
   remainingAncestorPreloadDepth,
   takePreloadBreadthSlice,
+  type FaceOwner,
   type PreloadDepthStamp,
 } from './preload-policy.js'
 
@@ -112,8 +117,15 @@ export const EMPTY_LAYER_CONTENT: Readonly<LayerContent> = Object.freeze({ name:
  *  content signatures (slots + nested image) without a host round-trip. */
 type StoreContentWarm = {
   getResourceLocal?: (sig: string) => Promise<Blob | null>
+  /** Local only, following a meta envelope to its payload — a face's
+   *  decoration record is read this way, never fetched from a host. */
+  getResourceResolvedLocal?: (sig: string) => Promise<Blob | null>
   collectSignatures?: (value: unknown, out?: Set<string>) => Set<string>
 }
+
+/** A tile within the code radius, as the walk already read it: its face warms
+ *  after the pass (HistoryService #warmFaceTail). */
+type FaceCandidate = { readonly layer: LayerContent; readonly segments: readonly string[]; readonly score: number }
 
 /** Root's display name. Used when the layer has no path segments. */
 export const ROOT_NAME = '/'
@@ -3246,7 +3258,9 @@ export class HistoryService {
           const rootLineageSig = await this.sign({ explorerSegments: () => [] })
           const rootHeadSig = await this.latestMarkerSigFor(rootLineageSig, '/')
           if (rootHeadSig) {
-            await this.preloadFromRoot(rootHeadSig)
+            // Tiles only: this walk is not where the participant stands, so
+            // no face here is within their reach.
+            await this.preloadFromRoot(rootHeadSig, undefined, [], -1)
           } else {
             console.log('[preload] preloadFromRoot skipped: no root head sig')
           }
@@ -3286,6 +3300,106 @@ export class HistoryService {
   static readonly #PRELOAD_MAX_DEPTH = 3
   // Cap total tiles per pass so a pathological neighbourhood cannot run away.
   static readonly #PRELOAD_NODE_BUDGET = 512
+  // How far from the participant tile faces warm their code — see
+  // preload-policy.ts. A browser may ask for 0 (off), 1 or 2 through
+  // `hc:preload:code-depth`, read once; a plain input, so whatever decides
+  // it later (a measurement, Jev) sets a number, not code.
+  static readonly #PRELOAD_CODE_DEPTH = ((): number => {
+    try { return readCodeDepth(globalThis.localStorage?.getItem('hc:preload:code-depth')) } catch { return PRELOAD_CODE_DEPTH }
+  })()
+  // Faces dealt with this session, by view and payload: a view's code is
+  // loaded once and stays, and a face its view declined (a dormant game, a
+  // hidden face) is not asked again. A warm that FAILED is forgotten, so a
+  // later pass retries it.
+  readonly #warmedFaces = new Set<string>()
+  // At most this many tiles' faces per pass, nearest and most used first.
+  static readonly #FACE_BUDGET = 64
+  #beesDone = false
+  #beesSeen: Promise<void> | null = null
+
+  /**
+   * THE FACES OF A PASS, WARMED AFTER ITS TILES. For each tile within the code
+   * radius, read what it wears — its first-class slots, and its decoration
+   * records through the store's local read (never fetched from a host; like
+   * every local read it may queue the record for this hive's own host sync) —
+   * and ask each view
+   * that owns a face to load its code (`prefetch` on its registry
+   * descriptor). One face per idle slot, the direction re-checked before each,
+   * so a participant who moved on is never loaded for. Answers whether every
+   * face within reach was dealt with: false when the participant moved, the
+   * views were not registered yet, a warm failed, or the budget cut it short —
+   * and then nothing is stamped, so the next pass tries again.
+   */
+  readonly #warmFaceTail = async (candidates: readonly FaceCandidate[], gen: number, rootSig: string): Promise<boolean> => {
+    const startMs = performance.now()
+    let warmed = 0
+    // One line per tail, like the pass's own summary (quiet in production).
+    const said = (outcome: string, answer: boolean): boolean => {
+      console.log(`[preload] code warm: ${warmed} face${warmed === 1 ? '' : 's'} from ${rootSig.slice(0, 12)} in ${Math.round(performance.now() - startMs)}ms (${outcome})`)
+      return answer
+    }
+    const settled = await this.#whenBeesSettled()
+    if (this.#preloadGeneration !== gen) return said('SUPERSEDED by navigation', false)
+    const owners = (get<{ all(): readonly FaceOwner[] }>('@diamondcoreprocessor.com/VisualBeeRegistry')?.all() ?? [])
+      .filter(owner => owner.prefetch)
+    if (!owners.length) return said(settled ? 'done: no view warms faces' : 'INCOMPLETE: views not registered yet', settled)
+    const store = get<StoreContentWarm>('@hypercomb.social/Store')
+    let done = candidates.length <= HistoryService.#FACE_BUDGET
+    for (const candidate of [...candidates].sort((a, b) => b.score - a.score).slice(0, HistoryService.#FACE_BUDGET)) {
+      if (this.#preloadGeneration !== gen) return said('SUPERSEDED by navigation', false)
+      // What the tile wears NOW: its own head, not the layer its parent
+      // recorded — that sig goes stale the moment the tile commits (a face
+      // marked on it is exactly such a commit). Local reads, like the render's.
+      let layer: LayerContent = candidate.layer
+      try {
+        const head = await this.currentLayerAt(await this.sign({ explorerSegments: () => candidate.segments }))
+        if (head) layer = head
+      } catch { /* the walked layer stands */ }
+      if (this.#preloadGeneration !== gen) return said('SUPERSEDED by navigation', false)
+      const records: { kind?: unknown; payload?: unknown }[] = []
+      const decorations = (layer as { decorations?: unknown }).decorations
+      for (const decoration of Array.isArray(decorations) ? decorations.map(String).filter(s => HistoryService.#SIG_RE.test(s)) : []) {
+        try {
+          const blob = await store?.getResourceResolvedLocal?.(decoration)
+          if (blob && blob.size <= 32_768) records.push(JSON.parse(await blob.text()) as { kind?: unknown; payload?: unknown })
+        } catch { /* not a record */ }
+      }
+      for (const face of facesOf(layer as unknown as Record<string, unknown>, records, owners)) {
+        if (this.#warmedFaces.has(face.key)) continue
+        await new Promise<void>(resolve => {
+          const ric = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback
+          if (typeof ric === 'function') ric(() => resolve(), { timeout: 500 })
+          else setTimeout(resolve, 200)
+        })
+        // The direction changed: this face is no longer on the path.
+        if (this.#preloadGeneration !== gen) return said('SUPERSEDED by navigation', false)
+        this.#warmedFaces.add(face.key)
+        try {
+          if (await face.owner.prefetch!({ payload: face.payload, segments: candidate.segments }) !== false) warmed++
+        } catch {
+          this.#warmedFaces.delete(face.key)
+          done = false
+        }
+      }
+    }
+    return this.#preloadGeneration !== gen
+      ? said('SUPERSEDED by navigation', false)
+      : said(done ? 'done' : 'INCOMPLETE', done)
+  }
+
+  /** The views that own faces register in the background lane after first
+   *  paint; the tail waits for them, up to a bound. True when they did settle.
+   *  `on`, not `once`: the effect replays when it already fired. */
+  readonly #whenBeesSettled = (): Promise<boolean> => {
+    if (this.#beesDone) return Promise.resolve(true)
+    this.#beesSeen ??= new Promise<void>(resolve => {
+      EffectBus.on('loader:bees-done', () => { this.#beesDone = true; resolve() })
+    })
+    return Promise.race([
+      this.#beesSeen.then(() => true),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 10_000)),
+    ])
+  }
   public readonly preloadFromRoot = async (
     rootSig: string,
     maxDepth: number = HistoryService.#PRELOAD_MAX_DEPTH,
@@ -3299,6 +3413,13 @@ export class HistoryService {
     // path pass it; the sig-only callers (proximity roots) keep the old
     // behaviour.
     rootSegments: readonly string[] = [],
+    // How deep tile FACES warm their code in this pass (preload-policy.ts
+    // faceDepthFor): a tile at a depth up to this wears one more child, its
+    // face, and warming it loads that view's lazy code. -1: tiles only.
+    faceDepth: number = faceDepthFor(HistoryService.#PRELOAD_CODE_DEPTH),
+    // Told, after the pass returns, whether every face within reach was dealt
+    // with — the faces warm as a tail nobody waits on (#warmFaceTail).
+    onFacesDone?: (done: boolean) => void,
   ): Promise<boolean> => {
     if (!HistoryService.#SIG_RE.test(rootSig)) return false
     const startMs = performance.now()
@@ -3360,6 +3481,9 @@ export class HistoryService {
     const startSegments = rootSegments.map(s => String(s ?? '').trim()).filter(Boolean)
     const frontier: WarmNode[] = [{ sig: rootSig, depth: 0, score: scoreOf(rootSig, 0, 0), parentSegments: startSegments }]
     const CONCURRENCY = 12
+    // The tiles within the code radius, with what the walk already read of
+    // them — their faces warm AFTER the pass (#warmFaceTail).
+    const faces: FaceCandidate[] = []
 
     while (frontier.length && walked < HistoryService.#PRELOAD_NODE_BUDGET && this.#preloadGeneration === gen) {
       const slice = takePreloadBreadthSlice(frontier, CONCURRENCY)
@@ -3453,6 +3577,9 @@ export class HistoryService {
               incomplete = true
             }
           }
+          // ITS FACE is one more child when it is within the code radius:
+          // warming it loads the code opening this tile's view needs.
+          if (node.depth <= faceDepth) faces.push({ layer, segments: ownSegments, score: node.score })
           // Enqueue children weighted by usage, bounded by depth.
           if (node.depth + 1 < maxDepth) {
             const children = Array.isArray(layer.children) ? layer.children : []
@@ -3498,6 +3625,14 @@ export class HistoryService {
       `(breadth-first): ${walked} tiles warmed from ${rootSig.slice(0, 12)} ` +
       `(${cacheHits} already cached) in ${elapsed}ms. depths: ${depthSummary}`
     )
+    // THE FACES, AFTER THE TILES — and not awaited by whoever asked for the
+    // tiles: the way back and the proximity warm never wait on code. The tail
+    // still stops the moment the participant moves; it answers whether every
+    // face within reach was dealt with, so a caller can stamp that apart.
+    const facesDone = faceDepth < 0 || !faces.length
+      ? Promise.resolve(true)
+      : this.#preloadGeneration === gen ? this.#warmFaceTail(faces, gen, rootSig) : Promise.resolve(false)
+    if (onFacesDone) void facesDone.then(onFacesDone, () => onFacesDone(false))
     return complete
   }
 
@@ -3670,6 +3805,7 @@ export class HistoryService {
   public readonly divertPreloadTo = (segments: readonly string[]): void => {
     const path = segments.map(s => String(s ?? '').trim()).filter(Boolean)
     this.#preloadGeneration++
+    const gen = this.#preloadGeneration
     this.#divertExemptUntil = performance.now() + HistoryService.#DIVERT_EXEMPT_MS
     void (async () => {
       try {
@@ -3678,8 +3814,10 @@ export class HistoryService {
         await this.preloadNeighbourhood(locationSig, HistoryService.#PRELOAD_MAX_DEPTH, path)
         // FORWARD FIRST, THEN THE WAY BACK. Where they are going outranks
         // everything; the moment it is warm, warm the route home too — the
-        // participant is one gesture from taking it.
-        await this.preloadAncestors(path)
+        // participant is one gesture from taking it — unless they already
+        // went somewhere else.
+        if (this.#preloadGeneration !== gen) return
+        await this.preloadAncestors(path, undefined, gen)
       } catch { /* opportunistic — a cold render is correct, just slower */ }
     })()
   }
@@ -3705,9 +3843,11 @@ export class HistoryService {
   public readonly preloadAncestors = async (
     segments: readonly string[],
     depth: number = HistoryService.#PRELOAD_MAX_DEPTH,
+    /** The generation the caller read BEFORE its forward warm: a way back
+     *  from somewhere the participant already left is not warmed. */
+    gen: number = this.#preloadGeneration,
   ): Promise<void> => {
     const path = segments.map(s => String(s ?? '').trim()).filter(Boolean)
-    const gen = this.#preloadGeneration
     for (let up = 1; up <= depth && path.length - up >= 0; up++) {
       // The participant moved on — the way back from a location they have
       // left is no longer the way back. Preloading never outranks live
@@ -3723,6 +3863,9 @@ export class HistoryService {
           locationSig,
           remainingAncestorPreloadDepth(depth, up),
           ancestor,
+          // Faces spend the code radius going up too: the way back warms
+          // only what is still within reach.
+          up,
         )
       } catch { /* opportunistic — a cold render is correct, just slower */ }
     }
@@ -3735,7 +3878,12 @@ export class HistoryService {
      *  `preloadFromRoot`'s `rootSegments`. A sig cannot be un-hashed, so
      *  without this the walk can only assume the hive root. */
     segments: readonly string[] = [],
+    /** How far this location is from where the participant stands: 0 here,
+     *  1 an ancestor or a declared one-click destination. Faces spend it —
+     *  preload-policy.ts faceDepthFor. */
+    levelsAway = 0,
   ): Promise<void> => {
+    const faceDepth = faceDepthFor(HistoryService.#PRELOAD_CODE_DEPTH, levelsAway)
     if (!HistoryService.#SIG_RE.test(locationSig)) return
     // Resolve (warming if needed) this location's head layer sig the SAME way
     // currentLayerAt does — #latestSigByLineage is the per-lineage head map.
@@ -3745,7 +3893,9 @@ export class HistoryService {
       headSig = this.#latestSigByLineage.get(locationSig)
     }
     if (!headSig) return
-    if (preloadStampSatisfies(this.#warmedDepthByHead.get(headSig), maxDepth, this.#treeEpoch)) return
+    // A pass that warmed fewer faces never answers for a deeper face request —
+    // a shallow ancestor pass must not silence the current location's code.
+    if (preloadStampSatisfies(this.#warmedDepthByHead.get(headSig), maxDepth, this.#treeEpoch, faceDepth)) return
 
     const genAtStart = this.#preloadGeneration
     const epochAtStart = this.#treeEpoch
@@ -3753,15 +3903,26 @@ export class HistoryService {
     if (existing && existing.generation === genAtStart && existing.epoch === epochAtStart) {
       await existing.promise
       if (this.#preloadGeneration !== genAtStart) return
-      if (preloadStampSatisfies(this.#warmedDepthByHead.get(headSig), maxDepth, epochAtStart)) return
+      if (preloadStampSatisfies(this.#warmedDepthByHead.get(headSig), maxDepth, epochAtStart, faceDepth)) return
     }
 
     const run = (async (): Promise<void> => {
-      const complete = await this.preloadFromRoot(headSig, maxDepth, segments)
+      // The faces finish after this pass returns; they earn their part of the
+      // stamp only when the tiles did too and nothing moved in between.
+      let tilesComplete = false
+      const complete = await this.preloadFromRoot(headSig, maxDepth, segments, faceDepth, facesDone => {
+        if (facesDone && tilesComplete && faceDepth >= 0 && this.#preloadGeneration === genAtStart && this.#treeEpoch === epochAtStart) {
+          this.#warmedDepthByHead.set(
+            headSig,
+            mergePreloadStamp(this.#warmedDepthByHead.get(headSig), maxDepth, epochAtStart, faceDepth),
+          )
+        }
+      })
       // Scheduled, capped, incomplete, superseded, or invalidated work never
       // earns a completion stamp. Its useful prefix remains cached, but a
       // later/deeper request is still allowed to finish the radius.
       if (complete && this.#preloadGeneration === genAtStart && this.#treeEpoch === epochAtStart) {
+        tilesComplete = true
         this.#warmedDepthByHead.set(
           headSig,
           mergePreloadStamp(this.#warmedDepthByHead.get(headSig), maxDepth, epochAtStart),

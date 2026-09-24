@@ -156,6 +156,11 @@ window.ioc.register('@diamondcoreprocessor.com/TutorQueenBee', _tutor)
       descriptionKey: 'view.tutor.description',
       queenKey: '@diamondcoreprocessor.com/TutorQueenBee',
       adoptable: true,
+      // A tile within reach that carries a deck warms the study shell.
+      prefetch: async ({ segments }) => {
+        const tutor = window.ioc.get<{ prefetch?(segments: readonly string[]): Promise<boolean> }>('@diamondcoreprocessor.com/TutorViewDrone')
+        return tutor?.prefetch ? tutor.prefetch(segments) : false
+      },
       pheromones: ['platform:desktop'],
     })
   },

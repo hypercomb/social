@@ -24,12 +24,12 @@ import { Drone, EffectBus } from '@hypercomb/core'
 import { isFeatureHidden } from '../sharing/feature-hidden.js'
 import type { BackGesture } from '../navigation/back-gesture.service.js'
 import type { VisualBeeRegistry } from '../commands/visual-bee-registry.js'
-import { ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn } from '../sharing/behavior-enablement.js'
+import { ENABLEMENT_CHANGED, isBehaviorDormant, readGlobalOnKinds, seedCohortOn } from '../sharing/behavior-enablement.js'
 import { onEnablementChanged } from './game-enablement.js'
 import { GameQueenBee } from './game.queen.js'
 import { StoryQueenBee } from './story.queen.js'
 import {
-  GAME_PLAY_KIND, GAME_VIEW, gamePlayAt, isPlayable, playableGame,
+  GAME_PLAY_KIND, GAME_VIEW, gamePlayAt, isPlayable, playableGame, prefetchGameFace,
   type GamePlayPayload, type PlayableGame,
 } from './game-play.js'
 
@@ -316,6 +316,12 @@ window.ioc.register('@diamondcoreprocessor.com/StoryQueenBee', _story)
     // tile is the fuller gesture, and the cell's `view:default` mark makes
     // that walk the way in.
     opensOnTileClick: true,
+    // A tile within reach whose face is a game warms that game's code, so
+    // walking into it (or pressing its icon) opens warm — unless the face is
+    // hidden or switched off there, where the open would refuse it too.
+    prefetch: async face => isBehaviorDormant(GAME_PLAY_KIND, face.segments) || await isFeatureHidden(face.segments, GAME_PLAY_KIND)
+      ? false
+      : prefetchGameFace(face),
     // DELIBERATELY NOT `replacesTileRender`. The game is the cell's face
     // once you are AT it — but on the parent's grid the cell must stay a
     // hexagon you can see and press, because that hexagon is the door.

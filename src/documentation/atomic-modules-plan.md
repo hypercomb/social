@@ -162,6 +162,36 @@ copy.
 The tutor has the same lazy seam now (7251b17e1): its bee loads its shell
 and study games on first study, and boot fetches 10 game atoms, not 28.
 
+**4c BUILT 2026-09-23 — the preloader IS the tile walk** (jwize: "our
+preloader should be the same as we already have for tiles for every
+hierarchy and when the children are dependent it needs to expand when that
+gets in range of the depth … we can preload any and everything"). No second
+preloader: `HistoryService.preloadFromRoot` — breadth-first from where the
+participant stands, usage-ordered, cancelled by the navigation generation —
+now treats a tile's FACE as one more child. A tile within the code radius
+that wears a view with a lazy seam (a game record, a tutor deck) has that
+view's code loaded, opening nothing, so the first open is warm.
+- *Within reach only.* Code radius 1 by default: the tile you stand on and
+  the tiles you see. Going up to an ancestor spends it, a declared one-click
+  destination counts as one away, the root walk warms none. A browser may
+  ask for 0 (off), 1 or 2 through `hc:preload:code-depth` — a plain input,
+  so a measurement (or Jev, later) sets a number, not code.
+- *After the tiles, and nobody waits on it.* Faces warm as a tail once the
+  pass's tiles are done; the way back and the proximity warm never queue
+  behind code. The tail re-checks the generation before each face, one face
+  per idle slot; a face it could not deal with (views not registered yet, a
+  failed load) leaves its part of the stamp unset, so the next pass retries.
+- *Each view warms itself.* One optional `prefetch` on the view's registry
+  descriptor (the game view → `prefetchGameFace` → the game bee's
+  `LazyOverlay.prefetch`; the tutor → its study shell); hidden or dormant
+  faces are skipped as their open would refuse them. The walk names no
+  feature.
+- *A face is read at the tile's own head,* never the layer its parent
+  recorded: that sig goes stale the moment the tile commits, and marking a
+  face on it is exactly such a commit (the first live run found this).
+
+*Measured* (web shell on 4264, a fixture with game and tutor faces at depth 3, the same package with the code radius 0 vs 1): at `/lab/arcade` the tail warms 3 faces in about 1.2 s after the tiles, and every warm open then fetches **0** seam atoms (19 Solomon, 10 Arkanoid, 18 tutor before). Open time on localhost at 1× barely moves (Solomon ~260 ms either way — its open is mounting and rendering, not fetching: installed modules come from the service worker in 2–3 ms each); the full 1×/4× A/B follows in its own commit.
+
 ### 5. Hive-side drafting follows the atoms
 `module read <sig>` on a dependency atom shows one file (the section IS the
 file now). `module draft` on it mints a new atom sig, the draft layer swaps

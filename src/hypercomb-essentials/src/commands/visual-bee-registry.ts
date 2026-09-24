@@ -328,6 +328,18 @@ export type VisualBeeDescriptor = {
   readonly queenKey?: string
 
   /**
+   * LOAD THIS VIEW'S CODE FOR A FACE, OPENING NOTHING. The tile walk
+   * (history.service.ts preloadFromRoot) calls it for a tile within reach that
+   * wears this view — a non-empty `slot`, or a decoration of its kind (the
+   * record's payload rides along) — so the first open is already warm. Use the
+   * SAME `import()` the open uses, so the open finds it loaded. Resolve
+   * `false` when there is nothing to warm for that face (a dormant game);
+   * never log, write, mount or fetch from a host. Optional: a view without it
+   * simply opens cold.
+   */
+  readonly prefetch?: (face: { readonly payload?: unknown; readonly segments: readonly string[] }) => Promise<boolean | void>
+
+  /**
    * Whether the view surfaces as an adoption opt-in icon. Defaults to
    * true. Set false for visual bees whose output should never transfer
    * via tile adoption (e.g. views that depend on local-only state).

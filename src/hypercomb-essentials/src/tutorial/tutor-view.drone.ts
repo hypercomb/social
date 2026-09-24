@@ -19,6 +19,7 @@ import { Drone } from '@hypercomb/core'
 import { TUTOR_SLOT, TUTOR_SLOT_DECLARATION } from './tutor-slot.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { isFeatureHidden } from '../sharing/feature-hidden.js'
+import { isBehaviorDormant } from '../sharing/behavior-enablement.js'
 import type { TutorShell } from '../games/tutor/shell.js'
 import { TUTOR_GAME_REGISTRY_IOC_KEY, tutorGameRegistry } from '../games/tutor/game-registry.js'
 import type { StudyItem } from '../games/tutor/deck.types.js'
@@ -259,6 +260,15 @@ export class TutorViewDrone extends Drone {
       throw error
     })
     return this.#shellClass
+  }
+
+  /** LOAD THE STUDY SHELL FOR A FACE, opening nothing: the tile walk warms a
+   *  tile within reach that carries a deck (tutor.queen.ts descriptor). A deck
+   *  hidden or switched off there is not warmed — the open would refuse it. */
+  public async prefetch(segments: readonly string[] = []): Promise<boolean> {
+    if (isBehaviorDormant(TUTOR_DECK_KIND, segments) || await isFeatureHidden(segments, TUTOR_DECK_KIND)) return false
+    await this.#loadShell()
+    return true
   }
 
   #teardown(): void {

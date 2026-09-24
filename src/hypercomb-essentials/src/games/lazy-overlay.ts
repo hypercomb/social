@@ -11,9 +11,10 @@
 //             message, the game view's watch) sees the answer it always did.
 //   close     unmounts, or cancels a load still in flight: a game closed
 //             before it arrived never mounts.
-//   prefetch  loads the code without opening anything. The seam for a
-//             preloader that knows where the participant is and what is
-//             near them — nothing calls it yet.
+//   prefetch  loads the code without opening anything. The tile walk
+//             calls it (history.service.ts preloadFromRoot → the game view's
+//             descriptor → game-play.ts prefetchGameFace) for a tile within
+//             reach whose face is this game, so its first open is warm.
 //
 // A dependency: it registers nothing; the bee that owns the game wires it.
 

@@ -62,6 +62,8 @@ export interface PlayableGame {
   open?: () => void
   close?: () => void
   isActive?: () => boolean
+  /** Load the game's code, opening nothing (games/lazy-overlay.ts). */
+  prefetch?: () => Promise<void>
 }
 
 /** Whether a payload actually names a game. A record with no `gameId` is not
@@ -122,4 +124,16 @@ export function playableGame(gameId: string): PlayableGame | undefined {
 export function isPlayable(payload: GamePlayPayload | null): boolean {
   if (!payload || !isGamePlayRecord(payload)) return false
   return !!playableGame(payload.gameId) && !isGameDormant(payload.gameId)
+}
+
+/** THE GAME FACE, WARMED: the tile walk found a tile whose face is this game
+ *  (a `game` record), so its code is loaded now and the open finds it ready.
+ *  A game that cannot be played here — dormant, or no bee carries it — is
+ *  never warmed. */
+export async function prefetchGameFace({ payload }: { readonly payload?: unknown }): Promise<boolean> {
+  if (!isPlayable(payload as GamePlayPayload | null)) return false
+  const game = playableGame((payload as GamePlayPayload).gameId)
+  if (!game?.prefetch) return false
+  await game.prefetch()
+  return true
 }
