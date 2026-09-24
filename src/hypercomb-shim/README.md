@@ -15,9 +15,24 @@ because that is what it is: Phase 5 of
 [everything-is-a-beehavior](../documentation/everything-is-a-beehavior.md),
 stood up first so the lean shell could be grown into rather than arrived at.
 
-There is no `build` command in the published package. Building needs the
-monorepo — essentials' module output, the shared locale catalogs — and a host is
-not supposed to compile anything. It serves bytes that were signed elsewhere.
+The published package serves a prebuilt origin. Its build scripts are for the
+source checkout; an installed host does not need the monorepo or npm runtime
+dependencies. It serves bytes that were signed elsewhere.
+
+## Pure install
+
+`npm run build:pure` (or `npm run build:shim:pure` from `src/`) builds the cold harness: core, the signature fetcher,
+the runner and one pinned ESM host-management beehavior. Its UI appears before
+any adopted beehavior loads. It shows the selected package, lets a participant
+add or remove hosts, browse their offers, and replicate a package by signature.
+It carries no application
+package, locale catalogs, or Pixi renderer. An empty `/content` and no
+`host:packages` pool are valid until a participant adopts a package.
+
+The package's `prepack` check refuses a build that includes application content
+or a renderer. A release therefore builds pure first, then packs the host.
+The existing `npm run build` remains the content-bearing host build for
+development and deployments that intentionally publish a package.
 
 ## What it is
 
@@ -28,7 +43,8 @@ did not have to be invented, only unfused from Angular.
 
 ```
 ioc.web  →  packed-store gate  →  SW control  →  import map
-         →  DependencyLoader   →  initializeRuntime  →  mountSurfaces
+         →  verified ESM host UI  →  DependencyLoader  →  initializeRuntime
+         →  mountSurfaces  →  first pulse
 ```
 
 No Angular, no Vite, no `ng` builder — one `esbuild` call. If the boot needs a
@@ -105,10 +121,22 @@ SPA-fallback page can only ever cost a 404.
 > `hypercomb-web/public/hypercomb.worker.js`, which stays frozen for the live
 > deploy. Do not resync them — the shim is the survivor.
 
-## Add a domain. That is the whole interaction.
+## One screen for hosts and packages
 
-A cold node shows one card: a field, and the domains you carry. Add one, and
-its packages appear; click one, and it is yours.
+This describes the current diagnostic console. The intended visitor entrance
+is a zone's active hive doors, then one hive's hexagon page and its explicit
+adoption action. The `host:packages` pool remains the code transport inventory;
+its labels and revisions are not hives. See
+[everything-is-a-beehavior.md](../documentation/everything-is-a-beehavior.md).
+
+A cold node shows one card: its selected revision, the hosts it carries and
+each host's latest offered revision, and a field for a known package signature.
+Older publication history is opened on request and grouped by publication
+label. A label such as `essentials` names a publication series; a package
+branch is a path inside the signed root and is picked by a later beehavior.
+The card remains reachable at `/hosts` after imported views take over. The in-hive
+command line, like every other view, arrives as a beehavior; the `host/` scripts
+in this repository are device setup and deployment tools.
 
 ```
 add a domain  →  <domain>/manifest.json  →  seal the record

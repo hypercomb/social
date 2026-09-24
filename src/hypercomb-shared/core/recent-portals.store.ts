@@ -9,7 +9,7 @@
 //
 // ── home is MARKED, never inferred ────────────────────────────────────
 //
-// Home is the lineage you MARKED with Ctrl/⌘+click on the global Home icon. It does
+// Home is the lineage you MARKED from Portals or Ctrl/⌘+click on Home. It does
 // not follow where you walk. Walking is how you look around, and a home that
 // moved every time you looked at something was a home you could lose by
 // accident — you dip into one thing and home is no longer what you meant.

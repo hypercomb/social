@@ -91,6 +91,19 @@ appended in ship order. **The max index is the head**, the same rule a lineage
 sigbag already uses. No counter to sort by, no `previous` to chase, no
 catalogue to corrupt: an interrupted ship costs one entry, never the list.
 
+For the host console, call that max-index entry the **latest offered revision**.
+The optional second line is a **publication label** used to group history, not
+a branch inside the package tree. A package **branch** is a named layer path
+that can be picked independently. The local installed-root stamp is the
+**selected revision here**. None of these host or local marks establishes a
+publisher-authorized **current release**; that comes from the signed head.
+Show one latest offer per host by default and fetch older publication entries
+only when someone opens history. Keep the pool index on each display row as a
+cursor for older pages; it has no effect on admission or execution.
+The host pool lists root revisions. Branch adoption uses the package tree's
+path and layer signature after a root is available; it does not reinterpret
+the publication label as a tree path.
+
 And a head signature is all a client needs, because everything else derives
 from it — the table above, plus the import-map bag, which is each dependency's
 own first line paired with its file name.
@@ -143,7 +156,7 @@ wire rather than reading what the wire already was.
 **Measured.** Live directory branch, local relay over the real content dir:
 `GET /<pool>/` → 200, `text/plain`, `no-store`, 180 entries, `index.html`
 excluded. Client end to end: head in 4 requests / 43 ms; five newest rows —
-signature, branch mark and date — in 8 requests / 9 ms; paging by `before`
+signature, publication label and date — in 8 requests / 9 ms; paging by `before`
 works. Against the deployed `jwize.com` the branch 404s until its relay
 restarts, and the probe fallback carries it in the meantime.
 

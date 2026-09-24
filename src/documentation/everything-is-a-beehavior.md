@@ -45,6 +45,108 @@ same mechanics (flat sig files + a pin naming the roots):
 - **Packages** — code: bees, dependencies, a manifest. Imported into the
   OPFS pools and registered in IoC through the roster.
 
+**Names at the first door.** A *host* serves signature-named bytes. A *package*
+is a root layer and the closed set of files it names. A *revision* is one exact
+root signature. A host's `host:packages` pool appends those signatures; its
+optional *publication label* (for example `essentials`) groups entries for
+people but is not package identity or authority. The newest pool entry is the
+*latest offered revision*, not necessarily the publisher's current release.
+Only a publisher's signed head can make that claim. A *branch* is a named path
+inside the package tree, such as `navigation/pan`; it has its own layer
+signature and may be picked independently. A publication label and a package
+branch must never be shown as the same thing.
+
+**The visible hierarchy is the hive hierarchy.** A domain is a zone that can
+open several doors. Each active door (usually a subdomain) presents one
+published hive, identified by its publisher and signed head. Its hexagons are
+the hive's named cells and branches; code and views are beehaviors carried by
+those branches. The package pool is a transport and diagnostic inventory, not
+the visitor's directory of creations. Its publication labels must not become
+top-level hive names. A zone's directory may point to its active doors, but
+each door's signed coordinates and content must be checked when visited.
+
+The cold ESM door lets a person carry a zone, see the hive doors that zone
+currently opens, and visit one. The hive's hexagon page offers adoption of the
+published hive subset or a chosen published cell/branch into the visitor's own hive.
+Replication copies and verifies the selected closure; adoption is an explicit
+local fold. The cold door needs
+only discovery, exact-signature verification, and a route to the adoption
+gesture. History, source review, and branch management can arrive as
+beehaviors. A missing directory is reported as missing, not replaced by a
+package revision list pretending to be hives.
+
+**One variable root, simple host.** Keep the host's small welcome page and
+show its active offerings plainly. A domain or subdomain is a stable door
+bound to a publisher and hive path. The publisher's signed index chooses the
+root signature currently shown at that door, so the root can change without
+changing the address or the install protocol. If the operator wants that
+address to focus on another hive path, change its binding instead. The same
+published hive may answer at several doors. No domain per revision and no new
+catalog are required. A richer gallery can later be a beehavior over the same
+door coordinates. The page can query its own origin's browser-local properties;
+the participant's hive on another origin answers only after the handoff back
+to that local instance.
+
+The participant's **Home** is a separate local choice: pin any portal in the
+Portals window and `/` shows that portal's existing route. Unpinning shows the
+hive root again. Neither action moves or deletes tiles, so no save-and-clear
+copy is needed. Publishing a route to a domain remains an explicit choice;
+the private Home pin never silently changes a public door. Clearing a public
+route withdraws its signed head while previously served signature files remain
+servable to people who know their names.
+
+**Carrying a domain and hosting an offering are distinct acts.** Adding a
+domain records a place to discover its offerings and may bring their public
+directory into the local view. Choosing
+to host one of its offerings replicates that published root's verified closure
+and the dependencies chosen for it to this host. The same signed bytes can
+then be served here by signature. Opening `name.our-zone` as a live hive also
+needs a route and a binding to the original publisher and hive path, plus the
+publisher's signed door choice when one is present. The mirror does not become
+the publisher and cannot choose a new head for them. A subdomain is the stable
+door into a signed head, not itself a sigbag; the head and its content may
+change while the address stays put. The small host view may show the current
+root of each offering, filter by source domain, and search the subdomain it
+serves here. Revision browsing remains a separate action.
+Today adding a domain records the source only; automatic mirror and subdomain
+binding are still work to build.
+
+Each gallery entry opens its door for inspection and offers a simple **Turn on**
+choice. The handshake runs in one direction: the host offers a signed hive;
+the participant visits and chooses it; the participant's local instance
+receives its publisher key, hive path, signed head, and byte hosts, then pulls,
+verifies, and installs the selected application and chosen dependencies.
+Only that local instance records what is on and runs the chosen beehaviors.
+Unchosen hive cells remain outside the local hive until taken.
+
+Only applications turned on by that person are checked for later signed-head
+changes. At home, **Update available** names the affected application and
+opens its page on the hosting site to inspect and take that revision. The
+update path needs no host package list. A list of installed applications and
+their exact revisions is available when the person chooses to browse it. A
+newly published application elsewhere in the gallery is never an update
+notification at home. The current cold Shim links to hive doors; the gallery
+handoff and per-application update gate are still to be wired. The global
+package update scout currently watches one install channel; it must not stand
+in for per-application interest.
+
+An upgrade is another signed hive/package revision, first tried at a
+`try-<change>.<zone>` door on its own origin. A model can propose the change
+from within a hive; the publisher commits it to that trial, where people and
+models can inspect the signed source and running result. Inspection fetches
+bytes from the door by signature and verifies them for display; it does not
+pick a branch, install a package, or run that code in the reader's hive. The
+review shows the exact root, changed paths, before/after files, and any files
+that could not be read. Community assessments and AI readings name that exact
+root and remain evidence, not automatic authority. Only after this scrutiny
+may a person choose to take a selected branch into their hive, where new code
+is held pending a separate activation decision. Visiting the trial runs its
+package at the trial's isolated origin, never at the reader's hive origin.
+Promoting it to a live door remains an explicit publisher act. The zone
+may advertise trials, but a trial is never the zone's live head merely because
+it is newest. The command line and every richer view arrive as beehaviors;
+the cold door stays small enough to run before any adopted code.
+
 "Deploy" = mint the artifact (sign the bytes), place them at any origin,
 move the pin. "Import" = resolve the pin, pull the sigs, verify, adopt.
 The same artifact can be served by a domain, handed peer-to-peer over the
@@ -94,8 +196,13 @@ property that makes "from everywhere" safe to want.
 
 **Walking through the door: publish → adopt → hypercomb.io.** The published
 files are a *subset of your hive* — exactly the tiles you marked public and
-nothing else; publishing is per-tile consent. That subset then becomes the
-source of its own adoption: visitors adopt from the artifact, never from
+nothing else; publishing is per-tile consent. The publisher also chooses which
+dependencies to put on a host. Once a signature-addressed file is there,
+anyone who knows its signature may request and verify it; a signature is an
+address, not a secret or a second permission check. Thus unpublished hive
+content must not be placed in the public heap merely because its name is hard
+to guess. The published subset becomes the source of its own adoption:
+visitors adopt from the artifact, never from
 your live client. And the walk-in IS the onboarding: an "add to hypercomb"
 gesture on any domain hands off to hypercomb.io with that hive staged — you
 arrive, you accept the adopt, and you have it. An instant introduction to

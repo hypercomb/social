@@ -9,16 +9,15 @@
 // every other panel in the system arrives as a behaviour, through the very
 // package this card replicates.
 //
-// It appears only when nothing is held. A hive that already holds a package
-// boots straight past it and never sees it — but on an origin that publishes
-// for others to take, "nothing held" is every first visit, so this card is
-// also that origin's website and has to read like one.
+// It appears before adopted code loads. A hive that already holds a package
+// lets its surface take over after the first pulse; the card remains available
+// at /hosts and /@hypercomb. On an empty origin it is also the website.
 //
 // Framework-free by necessity, not taste. This runs BEFORE any bee exists, so
 // there is nothing to render with but the DOM.
 
 import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
-import { installPackage, type HostPackage } from './replicate'
+import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
 import { askHostPackages } from '@hypercomb/runtime/host-packages'
 import { frontDoorOf, readPublicDoors, readWelcome, showsDeployedNodes, type FrontDoor, type Welcome, type WelcomeDoor, type WelcomeLink } from './welcome'
 
@@ -112,9 +111,19 @@ li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; bo
 .label b { display: block; font-weight: 500; color: #eaf2f8; }
 .label span { color: #7d8f9e; font-size: .85em; font-variant-numeric: tabular-nums; }
 .muted { padding: .55rem .75rem; margin: 0; color: #7d8f9e; border-top: 1px solid rgba(126,182,214,.12); }
+.history { padding: .65rem .75rem; border-top: 1px solid rgba(126,182,214,.12); }
+.history summary { cursor: pointer; color: #b9cbd8; }
+.history > div { padding-top: .75rem; }
+.history > div > details { margin-bottom: .55rem; border: 1px solid rgba(126,182,214,.16); border-radius: 5px; }
+.history > div > details > summary { padding: .45rem .6rem; }
+.history > div > details > ul { border-top: 1px solid rgba(126,182,214,.12); }
+.history > div > button { margin-top: .5rem; }
 .status { min-height: 1.4em; margin: 1rem 0 0; color: #8fa3b4; }
 .status[data-tone="bad"] { color: #d98b8b; }
 .status[data-tone="good"] { color: #8fbf9f; }
+.revision { margin: 0; padding: .7rem .8rem; border: 1px solid rgba(126,182,214,.20); border-radius: 6px; }
+.revision code { display: block; color: #eaf2f8; overflow-wrap: anywhere; font-size: .83em; }
+.revision span { display: block; margin-top: .35rem; color: #8fa3b4; }
 
 /* the footer — where the platform explains itself, on every host */
 footer {
@@ -173,6 +182,7 @@ class HostPanelElement extends HTMLElement {
     // The front door is read once per card, not once per render: adding a
     // domain must not re-ask the origin for a file that cannot have changed.
     if (this.#welcome === undefined) this.#welcome = await readWelcome()
+    if (!this.isConnected) return
     // Named as the zone it is — `localhost:4270` on a machine, the hostname
     // everywhere else — so the title and the box below it agree.
     const staged = frontDoorOf(this.#welcome, this.#self || location.hostname, location.origin, showsDeployedNodes())
@@ -183,9 +193,11 @@ class HostPanelElement extends HTMLElement {
     const door: FrontDoor = staged.doors.length > 0
       ? staged
       : { ...staged, doors: await readPublicDoors(location.hostname) }
+    if (!this.isConnected) return
     // The tab is named for the place, not for the shell that drew it.
     document.title = door.title
     const zones = (await listHostZones()).filter(zone => zone !== this.#self)
+    if (!this.isConnected) return
     this.#root.replaceChildren()
 
     const style = document.createElement('style')
@@ -197,8 +209,10 @@ class HostPanelElement extends HTMLElement {
     panel.className = 'panel'
 
     panel.append(...this.#frontDoor(door))
-    if (this.#self) panel.append(this.#published())
+    panel.append(this.#current())
     panel.append(this.#carried(zones))
+    panel.append(this.#bySignature())
+    if (this.#self) panel.append(this.#published())
     if (door.footer.length > 0) panel.append(this.#footer(door.footer))
 
     card.append(panel)
@@ -286,6 +300,54 @@ class HostPanelElement extends HTMLElement {
     return anchor
   }
 
+  /** The revision this hive selected. The first screen can show it without
+   *  loading any package code or trusting a host's mutable listing. */
+  #current(): HTMLElement {
+    const section = document.createElement('section')
+    const heading = document.createElement('h2')
+    heading.className = 'lbl'
+    heading.textContent = 'Selected revision here'
+    const revision = document.createElement('p')
+    revision.className = 'revision'
+    const sig = installedPackageSig()
+    if (sig) {
+      const code = document.createElement('code')
+      code.textContent = sig
+      const note = document.createElement('span')
+      note.textContent = 'Selected revision. Replicate another package below to switch, or replicate this one again to repair missing files.'
+      revision.append(code, note)
+    } else {
+      revision.textContent = 'No package revision selected. Choose a host offer below or enter a known signature.'
+    }
+    section.append(heading, revision)
+    return section
+  }
+
+  /** A known signature can be replicated even when no host lists it. The
+   *  same authority and byte-verification gates handle listed and pasted roots. */
+  #bySignature(): HTMLElement {
+    const section = document.createElement('section')
+    const heading = document.createElement('h2')
+    heading.className = 'lbl'
+    heading.textContent = 'Replicate a package by signature'
+    const form = document.createElement('form')
+    const input = document.createElement('input')
+    input.placeholder = '64-character package signature'
+    input.spellcheck = false
+    input.autocapitalize = 'off'
+    input.setAttribute('aria-label', 'Package signature')
+    const take = document.createElement('button')
+    take.type = 'submit'
+    take.textContent = 'Replicate'
+    form.append(input, take)
+    form.addEventListener('submit', event => {
+      event.preventDefault()
+      void this.#installSignature(input.value, take)
+    })
+    section.append(heading, form)
+    return section
+  }
+
   /** What THIS origin publishes — the presentation of a host is what it
    *  holds, so it is on the page before anyone types anything. */
   #published(): HTMLElement {
@@ -305,10 +367,10 @@ class HostPanelElement extends HTMLElement {
     const section = document.createElement('section')
     const heading = document.createElement('h2')
     heading.className = 'lbl'
-    heading.textContent = 'Add a domain'
+    heading.textContent = 'Hosts'
     const lede = document.createElement('p')
     lede.className = 'lede'
-    lede.textContent = 'Carry another host and what it publishes appears here. Replication fetches the whole closure of a signature, and every byte is verified against its own name before it is admitted.'
+    lede.textContent = 'Add a host to see its latest offer. Open its publication history only when you need an older revision.'
 
     const form = document.createElement('form')
     const input = document.createElement('input')
@@ -395,7 +457,7 @@ class HostPanelElement extends HTMLElement {
   }
 
   async #ask(zone: string): Promise<Answer> {
-    try { return await askHostPackages(zone) } catch { return { packages: [], answered: false } }
+    try { return await askHostPackages(zone, { limit: 1 }) } catch { return { packages: [], answered: false } }
   }
 
   /** "Publishes nothing" and "did not answer" are different facts, and only
@@ -412,30 +474,87 @@ class HostPanelElement extends HTMLElement {
       body.append(none)
       return
     }
+    const latest = document.createElement('p')
+    latest.className = 'lbl'
+    latest.textContent = 'Latest offered revision'
     const list = document.createElement('ul')
-    for (const pkg of packages) list.append(this.#packageRow(pkg))
-    body.append(list)
+    list.append(this.#packageRow(packages[0]!))
+
+    const history = document.createElement('details')
+    history.className = 'history'
+    const summary = document.createElement('summary')
+    summary.textContent = 'Browse publication history'
+    const contents = document.createElement('div')
+    history.append(summary, contents)
+    let loaded = false
+    history.addEventListener('toggle', () => {
+      if (!history.open || loaded) return
+      loaded = true
+      void this.#loadHistory(packages[0]!.zone, contents, [])
+    })
+    body.append(latest, list, history)
   }
 
-  #packageRow(pkg: HostPackage): HTMLElement {
+  async #loadHistory(zone: string, into: HTMLElement, held: HostPackage[]): Promise<void> {
+    const before = held.at(-1)?.poolIndex
+    into.textContent = 'Loading revisions…'
+    let page: HostPackage[]
+    try { page = (await askHostPackages(zone, { limit: 25, ...(before !== undefined ? { before } : {}) })).packages }
+    catch {
+      into.textContent = 'Could not read publication history.'
+      return
+    }
+    if (!into.isConnected) return
+    const rows = [...held, ...page]
+    into.replaceChildren()
+    const groups = new Map<string, HostPackage[]>()
+    for (const row of rows) {
+      const name = row.label || 'Unlabeled'
+      const group = groups.get(name) ?? []
+      group.push(row)
+      groups.set(name, group)
+    }
+    for (const [name, revisions] of groups) {
+      const group = document.createElement('details')
+      const title = document.createElement('summary')
+      title.textContent = name
+      const list = document.createElement('ul')
+      for (const revision of revisions) list.append(this.#packageRow(revision, true))
+      group.append(title, list)
+      into.append(group)
+    }
+    if (page.length === 25 && rows.at(-1)?.poolIndex !== 0) {
+      const more = document.createElement('button')
+      more.type = 'button'
+      more.textContent = 'Load older revisions'
+      more.addEventListener('click', () => { void this.#loadHistory(zone, into, rows) })
+      into.append(more)
+    }
+  }
+
+  #packageRow(pkg: HostPackage, revision = false): HTMLElement {
     const row = document.createElement('li')
 
     const label = document.createElement('div')
     label.className = 'label'
     const title = document.createElement('b')
-    title.textContent = pkg.label
+    title.textContent = revision ? `Revision ${pkg.packageSig.slice(0, 12)}…` : pkg.label
     const detail = document.createElement('span')
     const atoms = pkg.bees.length + pkg.dependencies.length + pkg.layers.length
-    detail.textContent = atoms > 0
-      ? `${pkg.packageSig.slice(0, 12)}… · ${atoms} atoms · ` +
+    detail.textContent = revision
+      ? (pkg.at ? pkg.at.slice(0, 10) : pkg.packageSig)
+      : atoms > 0
+      ? `Revision ${pkg.packageSig.slice(0, 12)}… · ${atoms} atoms · ` +
         `${pkg.bees.length} bees, ${pkg.dependencies.length} deps, ${pkg.layers.length} layers`
-      : `${pkg.packageSig.slice(0, 12)}…${pkg.at ? ` · ${pkg.at.slice(0, 10)}` : ''}`
+      : `Revision ${pkg.packageSig.slice(0, 12)}…${pkg.at ? ` · ${pkg.at.slice(0, 10)}` : ''}`
+    detail.title = pkg.packageSig
     label.append(title, detail)
 
     const take = document.createElement('button')
     take.type = 'button'
-    take.textContent = 'Replicate'
-    take.addEventListener('click', () => { void this.#install(pkg, take) })
+    const action = pkg.packageSig === installedPackageSig() ? 'Repair' : 'Replicate'
+    take.textContent = action
+    take.addEventListener('click', () => { void this.#replicate(pkg.packageSig, take, () => installPackage(pkg)) })
 
     row.append(label, take)
     return row
@@ -459,18 +578,42 @@ class HostPanelElement extends HTMLElement {
     this.#say(`Removed ${zone}.`)
   }
 
-  async #install(pkg: HostPackage, button: HTMLButtonElement): Promise<void> {
+  async #installSignature(raw: string, button: HTMLButtonElement): Promise<void> {
+    if (this.#busy) return
+    const sig = raw.trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(sig)) {
+      this.#say('Enter a 64-character package signature.', 'bad')
+      return
+    }
+    const zones = [...new Set([this.#self, ...await listHostZones()].filter(Boolean))]
+    if (zones.length === 0) {
+      this.#say('Add a domain that holds this package first.', 'bad')
+      return
+    }
+    await this.#replicate(sig, button, () => acquire(sig, zones))
+  }
+
+  async #replicate(sig: string, button: HTMLButtonElement, run: () => Promise<InstallOutcome>): Promise<void> {
     if (this.#busy) return
     this.#busy = true
     for (const other of this.#root.querySelectorAll('button')) other.disabled = true
+    const action = button.textContent ?? 'Replicate'
     button.textContent = 'Replicating…'
-    this.#say(`Replicating ${pkg.packageSig.slice(0, 12)}… from ${pkg.zone}.`)
+    this.#say(`Replicating ${sig.slice(0, 12)}…`)
 
-    const outcome = await installPackage(pkg)
+    let outcome: InstallOutcome
+    try { outcome = await run() }
+    catch (error) {
+      this.#busy = false
+      for (const other of this.#root.querySelectorAll('button')) other.disabled = false
+      button.textContent = action
+      this.#say(error instanceof Error ? error.message : 'Replication failed.', 'bad')
+      return
+    }
     if (!outcome.ok) {
       this.#busy = false
       for (const other of this.#root.querySelectorAll('button')) other.disabled = false
-      button.textContent = 'Replicate'
+      button.textContent = action
       this.#say(outcome.error ?? 'Replication failed.', 'bad')
       console.warn('[shim] replication incomplete', outcome)
       return
@@ -496,4 +639,10 @@ export const showHostPanel = (): void => {
   if (!customElements.get(TAG)) customElements.define(TAG, HostPanelElement)
   if (document.querySelector(TAG)) return
   document.body.append(document.createElement(TAG))
+}
+
+/** A loaded package has supplied its own surface. Keep the host manager
+ * available through /hosts and /@hypercomb, but let that surface take over. */
+export const hideHostPanel = (): void => {
+  document.querySelector(TAG)?.remove()
 }

@@ -266,6 +266,14 @@
                     </button>
                   }
                   @if (portalDropView()) {
+                    <button class="ai-action ai-action-home" type="button"
+                            [class.is-home]="isHome(item)"
+                            (click)="toggleHome(item, $event)"
+                            [attr.aria-pressed]="isHome(item)"
+                            [attr.aria-label]="(isHome(item) ? 'aggregate.home.unpin' : 'aggregate.home.pin') | t: { name: item.label }"
+                            [title]="(isHome(item) ? 'aggregate.home.unpin' : 'aggregate.home.pin') | t: { name: item.label }">
+                      <span class="mat-sym">{{ isHome(item) ? 'home_pin' : 'home' }}</span>
+                    </button>
                     <!-- Portals stay intentionally spare: + is the whole
                          reference act. A staged tile makes this pool its
                          target; otherwise the pool itself is picked up. -->

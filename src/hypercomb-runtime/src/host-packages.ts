@@ -109,6 +109,9 @@ export type HostPackage = {
   /** The base the pool actually answered on — atoms hang off this one. */
   base: string
   packageSig: string
+  /** Append-only host pool position. Browsers use it to request older pages;
+   * it has no authority over the package root or what may run. */
+  poolIndex?: number
   label: string
   at: string
   generation: number | null
@@ -155,13 +158,14 @@ const poolReader = (base: string, pool: string) =>
     } catch { return null }
   }
 
-const rowFrom = (zone: string, base: string, fetched: Fetched | null): HostPackage | null => {
+const rowFrom = (zone: string, base: string, fetched: Fetched | null, poolIndex?: number): HostPackage | null => {
   const member = parseMember(fetched?.text ?? null)
   if (!member) return null
   return {
     zone,
     base,
     packageSig: member.packageSig,
+    poolIndex,
     label: member.label || member.packageSig.slice(0, 12),
     at: fetched?.at ?? '',
     generation: null,
@@ -249,7 +253,7 @@ const findPool = async (zone: string): Promise<FoundPool | null> => (await probe
 export const headPackage = async (zone: string): Promise<HostPackage | null> => {
   const found = await findPool(zone)
   if (!found) return null
-  return rowFrom(zone, found.base, await found.read(found.head))
+  return rowFrom(zone, found.base, await found.read(found.head), found.head)
 }
 
 /** How many rows a picker asks for before someone scrolls. Each is one
@@ -265,7 +269,7 @@ const BROWSE_PAGE = 25
  * caller that scrolls (the index below which to keep going).
  *
  * The three things a row needs now come from three places that cannot
- * disagree with each other: the signature and its branch mark from the
+ * disagree with each other: the signature and its publication label from the
  * member's own bytes, the date from the transport, and the counts from
  * nowhere — a count was only ever decoration, and admission derives the real
  * inventory anyway.
@@ -305,7 +309,7 @@ const rowsFrom = async (
   const available = found.indices ?? Array.from({ length: found.head + 1 }, (_, i) => i)
   const indices = available.filter(i => i <= ceiling).sort((a, b) => b - a).slice(0, limit)
 
-  const rows = await Promise.all(indices.map(async i => rowFrom(zone, found.base, await found.read(i))))
+  const rows = await Promise.all(indices.map(async i => rowFrom(zone, found.base, await found.read(i), i)))
   return rows.filter((row): row is HostPackage => row !== null)
 }
 

@@ -119,9 +119,9 @@ const SIG_RE = /^[a-f0-9]{64}$/
  * reader that wants nothing else stops there, and always could, whatever a
  * later ship decides to write underneath.
  *
- * Line two, when present, is the MARK the package wears: the branch it was
- * shipped from. It is not identity and it cannot decide what installs; it is
- * what lets a picker say `main` and `development` instead of showing a
+ * Line two, when present, is the PUBLICATION LABEL the package wears. It is
+ * not a branch in the package tree, not identity, and cannot decide what
+ * installs; it lets a picker say `essentials` or `development` instead of a
  * hundred and seventy-nine indistinguishable signatures. Keeping it HERE,
  * with the member, is the whole difference from a manifest: nothing lists
  * everything, so there is no catalogue to keep in agreement and an interrupted
@@ -132,7 +132,7 @@ const SIG_RE = /^[a-f0-9]{64}$/
  */
 export type PoolMember = {
   packageSig: string
-  /** The branch mark, or '' for an entry that wears none. */
+  /** The publication label, or '' for an entry that wears none. */
   label: string
 }
 

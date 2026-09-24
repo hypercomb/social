@@ -8,6 +8,16 @@ jwize: "The idea of making a module — then we should go and debug it on a sub 
 
 A module change is never published straight to the live channel. It goes to a **sandbox** first:
 
+**Review before admission.** Visiting a trial and reading its source are
+remote reads from that trial's door. The reader verifies each file against its
+signature and sees missing files as missing. Neither action puts the trial's
+code into the reader's hive. The trial may run on its own isolated origin so
+its behavior can be observed. Its source diff, host AI reading, Jev reading,
+and people's signed assessments are presented against the same exact package
+root. These readings inform a person's choice; none silently takes or enables
+code. `module take` is the first admission into that person's hive and holds
+new code for a separate activation choice.
+
 1. **Draft** — a model writes a module section; it runs here as a draft (built).
 2. **Commit to a sandbox** — `module commit` uploads the new files to the host (built) and stamps a SANDBOX channel, `install:<change>`, in the publisher's signed index. The live channel (`install:essentials`) does not move.
 3. **Debug at a subdomain** — `<change>.<zone>` on one of our hosts boots the hive with the package that channel names. Its own origin is its own storage, so nothing it does touches anyone's hive: the origin IS the sandbox.

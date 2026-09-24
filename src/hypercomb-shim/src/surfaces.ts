@@ -49,8 +49,8 @@ export interface SurfaceReport {
   /** Names of the Angular-shaped registrations that reached the registry. */
   angularNames: string[]
   /** Surfaces that exist but can never reach the shim: shared's Angular
-   *  panels, listed in the shell-surfaces barrel. This is the number that
-   *  measures Phase 2/3, and it may only go down. */
+   *  panels, listed in the shell-surfaces barrel. -1 in a pure install, which
+   *  does not ship the migration inventory. */
   unreachable: number
 }
 
@@ -66,9 +66,11 @@ export const scoreboardLine = (report: SurfaceReport): string => {
   const parts = [`${report.mounted} element-shaped mounted`]
   if (report.angular > 0) parts.push(`${report.angular} Angular-shaped skipped`)
   parts.push(
-    report.unreachable === 0
-      ? 'the shell-surfaces barrel is empty — nothing is out of reach'
-      : `${report.unreachable} barrel entries still Angular-shaped, unreachable from the shim`,
+    report.unreachable < 0
+      ? 'Angular migration inventory is not part of this build'
+      : report.unreachable === 0
+        ? 'the shell-surfaces barrel is empty — nothing is out of reach'
+        : `${report.unreachable} barrel entries still Angular-shaped, unreachable from the shim`,
   )
   return `[shim] surfaces — ${parts.join(' · ')}`
 }

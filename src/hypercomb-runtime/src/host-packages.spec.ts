@@ -148,6 +148,7 @@ describe('listHostPackages — the browse surface', () => {
     const rows = await listHostPackages('host.example')
 
     expect(rows.map(r => r.packageSig)).toEqual([SIG_A, SIG_B])   // head first
+    expect(rows.map(r => r.poolIndex)).toEqual([1, 0])            // older pages have an exact cursor
     expect(rows[0]!.bees).toEqual([])                             // no inventory travels
   })
 
@@ -164,6 +165,7 @@ describe('listHostPackages — the browse surface', () => {
     const page = await listHostPackages('host.example', { before: 1 })
 
     expect(page.map(r => r.packageSig)).toEqual([SIG_A])   // index 0 only
+    expect(page[0]?.poolIndex).toBe(0)
   })
 
   it('answers empty for a domain that publishes no pool at all', async () => {

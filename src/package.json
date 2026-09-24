@@ -35,6 +35,7 @@
     "build:all": "npm run build:core && npm run build:sdk && npm run build:cli && npm run build:essentials && npm run build:web && npm run build:dev && npm run build:avatars && npm run build:meadowverse",
     "build:web": "npm --prefix hypercomb-web run build",
     "build:shim": "npm --prefix hypercomb-shim run build:vendor && npm --prefix hypercomb-shim run build",
+    "build:shim:pure": "npm --prefix hypercomb-shim run build:pure",
     "start:shim": "npm --prefix hypercomb-shim run start",
     "build:dev": "npm --prefix hypercomb-dev run build",
     "build:avatars": "npm --prefix hypercomb-avatars run build",

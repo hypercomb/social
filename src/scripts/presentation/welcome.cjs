@@ -40,6 +40,7 @@ const compose = (doors) => ({
   links: [
     { label: 'Watch the tour', href: '/tour/', note: '≈ 19 minutes · narrated, with captions' },
     { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the main app — start a hive of your own' },
+    { label: 'Minimal host', href: '/hosts', note: 'manage domains and replicate signed packages' },
     { label: 'Downloads', href: '/downloads/', note: 'desktop app · Windows, macOS, Linux' },
     { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker · No YouTube Shorts' },
   ],
