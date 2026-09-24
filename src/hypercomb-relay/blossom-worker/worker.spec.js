@@ -707,6 +707,32 @@ test('a try- door names the published change and the host AI review beside the s
   assert.equal(site.review, review)
 })
 
+// PROMOTED: `try-<change>.<zone>` becomes `<change>.<zone>` (jwize 2026-09-24).
+// `module promote <change>` stamps the trial's root as `install:<change>`, and
+// the published site answers its package pool and pack from that key.
+test('a promoted site runs the package its try- door ran', async () => {
+  const [root, pack] = ['b'.repeat(64), 'c'.repeat(64)]
+  const { env, assetRequests } = await fixture(await signedIndex({ 'fresh-rooms': head, 'install:fresh-rooms': root, 'pack:fresh-rooms': pack }))
+  const pool = await hostPackagesPool()
+  const member = await worker.fetch(new Request(`https://fresh-rooms.pluginthematrix.com/content/${pool}/00000000`), env)
+  assert.equal(member.status, 200)
+  assert.equal(await member.text(), `${root}\nfresh-rooms`)
+  const packs = await transferPacksPool()
+  assert.equal(await (await worker.fetch(new Request(`https://fresh-rooms.pluginthematrix.com/content/${packs}/${root}`), env)).text(), pack)
+  assert.deepEqual(assetRequests, [])
+})
+
+test('a site with no promoted package runs the engine\'s own, and an unpublished one opens nothing', async () => {
+  const pool = await hostPackagesPool()
+  const plain = await fixture(await signedIndex({ 'fresh-rooms': head }))
+  await worker.fetch(new Request(`https://fresh-rooms.pluginthematrix.com/content/${pool}/00000000`), plain.env)
+  assert.deepEqual(plain.assetRequests, [`/content/${pool}/00000000`])
+  // A package alone is not a site: its hive must be published there.
+  const bare = await fixture(await signedIndex({ 'install:fresh-rooms': 'b'.repeat(64) }))
+  const response = await worker.fetch(new Request(`https://fresh-rooms.pluginthematrix.com/content/${pool}/00000000`), bare.env)
+  assert.equal(response.status, 404)
+})
+
 // ── public assessments: anyone assesses a sandbox under their own key ─────
 const assessorKey = Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 2 : 0)
 const assessor = hex(schnorr.getPublicKey(assessorKey))

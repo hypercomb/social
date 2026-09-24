@@ -434,6 +434,8 @@
   "module.notlive": "{channel} is a sandbox, not a live channel.",
   "module.nosandbox": "You have no sandbox {name} on {host}.",
   "module.promoted": "Promoted {name}: {channel} now names {root}. Followers are told on their next boot.",
+  "module.promotedsite": "Promoted {name}: {url} now runs it.",
+  "module.promotedunpublished": "Promoted {name}: {url} runs it once its hive is published there.",
   "module.withdrawn": "Withdrew {name}: its door is closed, and its files stay on the host.",
   "module.sandboxed": "Sandbox {name} is open at {door}. Promote it when you are happy with it.",
   "module.reviewing": "Asking {host}'s AI to review {name}…",

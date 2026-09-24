@@ -27,8 +27,10 @@
 //      part of its package, no longer a pick, named in its published change;
 //      then Jev WEIGHS every open trial on the zone — readings, assessments,
 //      adoption — and publishes where each stands and where to focus first
-//   4. `module promote` moves the live channel to the same root: the follower
-//      is told, replicates it from the host, and runs it
+//   4. `module promote <change>` puts the trial live on its own site
+//      (install:<change>, its pack beside it); `module promote <change>
+//      essentials` moves the live channel to the same root: the follower is
+//      told, replicates it from the host, and runs it
 //   5. a unit turned off and committed + promoted is unreachable for the
 //      follower, and every earlier file is still on the host
 //   6. `module withdraw` closes the door and takes it off the zone's list;
@@ -364,9 +366,16 @@ const announcedOn = page => page.evaluate(() => {
   check('the pass names adoption: whose package another trial took, from the signed change records', standingOf(SANDBOX)?.takenBy?.includes(`${SANDBOX}-mine`) === true && standingOf(`${SANDBOX}-mine`)?.takenBy?.length === 0, JSON.stringify(pass?.trials?.map(t => [t.name, t.takenBy])))
   check('the pass says where to focus first, and the words say where each trial stands', pass?.focus === `${SANDBOX}-mine` && (weighed ?? []).some(m => m.includes(`Focus first on ${SANDBOX}-mine`)) && (weighed ?? []).some(m => m.startsWith(`${SANDBOX}: discuss`)) && (weighed ?? []).some(m => m.startsWith(`${SANDBOX}-mine: take`) && m.includes('nobody refused')), JSON.stringify(weighed))
 
-  // ── 4. PROMOTE: the live channel moves to the same root ─────────────────
+  // ── 4. PROMOTE: its own site first, then the live channel ─────────────────
+  // jwize 2026-09-24: "try.yoursub.domain.com then when deployed will be on
+  // yoursub.domain.com" — with no channel named, the site the trial is named for.
   await H.watchToasts(page)
   await H.say(page, `module promote ${CHANGE} @${WRITE}`)
+  const siteToasts = await H.toastsUntil(page, /^Promoted |not stamped|no sandbox/)
+  const promotedState = await hostState()
+  check('promote with no channel puts the trial on its own site: install:<change> names the sandbox root, its pack beside it, and the live channel does not move', channelOf(promotedState, pubkey, `install:${CHANGE}`) === sandboxRoot && channelOf(promotedState, pubkey, `pack:${CHANGE}`) === channelOf(promotedState, pubkey, `pack:${SANDBOX}`) && channelOf(promotedState, pubkey, 'install:essentials') !== sandboxRoot, JSON.stringify(siteToasts))
+  await H.watchToasts(page)
+  await H.say(page, `module promote ${CHANGE} essentials @${WRITE}`)
   console.log('   toasts:', JSON.stringify(await H.toastsUntil(page, /^Promoted |not stamped|no sandbox/)))
   check('promote moved install:essentials to the sandbox root, uploading nothing', channelOf(await hostState(), pubkey, 'install:essentials') === sandboxRoot)
   await fol.page.reload({ waitUntil: 'domcontentloaded' })
@@ -388,7 +397,7 @@ const announcedOn = page => page.evaluate(() => {
   await H.say(page, `module commit ${CHANGE}-off @${WRITE}`)
   await H.toastsUntil(page, /^Sandbox |not stamped|not published/)
   await H.watchToasts(page)
-  await H.say(page, `module promote ${CHANGE}-off @${WRITE}`)
+  await H.say(page, `module promote ${CHANGE}-off essentials @${WRITE}`)
   await H.toastsUntil(page, /^Promoted |not stamped|no sandbox/)
   const offRoot = await pub.installed()
   const state2 = await hostState()

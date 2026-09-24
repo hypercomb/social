@@ -19,9 +19,12 @@
 //                          a full hive anyone can open, run, read and draft on
 //                          (documentation/module-sandbox.md).
 //   module promote <change> [<channel>] [@<host>]
-//                          the live channel (default `essentials`) moves to the
-//                          sandbox's root — the same signature, no rebuild, no
-//                          upload. Followers are told on their next boot.
+//                          the trial goes live where it was named: with no
+//                          channel, <change>.<zone> runs what try-<change>.<zone>
+//                          ran (install:<change>, its pack beside it); with one
+//                          (`essentials`), that channel moves and followers are
+//                          told on their next boot. The same signature, no
+//                          rebuild, no upload.
 //   module withdraw <change> [@<host>]
 //                          the sandbox pointer is removed: its door answers
 //                          "nothing here", and every file stays on the host.
@@ -99,7 +102,6 @@ type HostSyncLike = {
     Promise<{ ok: true; sent: number; held: number } | { ok: false; error: string }>
 }
 
-const LIVE_CHANNEL = 'essentials'
 /** Where sandbox doors open when publishing to the public host (decided 2026-09-22). */
 export const SANDBOX_ZONE = 'hypercomb.com'
 export const SANDBOX_PREFIX = 'try-'
@@ -313,7 +315,8 @@ export class ModuleQueenBee extends QueenBee {
   override examples = [
     { input: '/module', result: 'Lists the drafts picked over the installed package' },
     { input: '/module commit fresh-rooms', result: 'Publishes what runs here to try-fresh-rooms.hypercomb.com, not to followers' },
-    { input: '/module promote fresh-rooms', result: 'The live channel moves to the sandbox — followers are told' },
+    { input: '/module promote fresh-rooms', result: 'fresh-rooms.hypercomb.com runs what try-fresh-rooms ran' },
+    { input: '/module promote fresh-rooms essentials', result: 'The live channel moves to the sandbox — followers are told' },
   ]
   override machine = {
     forms: 'list | drop <path>',
@@ -381,14 +384,31 @@ export class ModuleQueenBee extends QueenBee {
 
     if (word === 'promote') {
       const name = sandboxName(words[0] ?? '')
-      const live = CHANNEL_RE.test(words[1] ?? '') ? words[1]! : LIVE_CHANNEL
       if (!name) { toast(t('module.which', 'Say which sandbox, like: module promote fresh-rooms.'), 'warning'); return }
+      // WHERE IT GOES LIVE (jwize 2026-09-24): "try.yoursub.domain.com then
+      // when deployed will be on yoursub.domain.com". With no channel named,
+      // the trial's own site — `try-<change>.<zone>` becomes `<change>.<zone>`;
+      // a named channel (`essentials`) is the package followers take.
+      const site = name.slice(SANDBOX_PREFIX.length)
+      const live = CHANNEL_RE.test(words[1] ?? '') ? words[1]! : site
       if (live.startsWith(SANDBOX_PREFIX)) { toast(t('module.notlive', '{channel} is a sandbox, not a live channel.', { channel: live }), 'warning'); return }
       const root = await ownHiveRoot(host, `${INSTALL_CHANNEL_PREFIX}${name}`).catch(() => null)
       if (!root) { toast(t('module.nosandbox', 'You have no sandbox {name} on {host}.', { name, host }), 'warning'); return }
       const stamped = await setHiveRoot(host, `${INSTALL_CHANNEL_PREFIX}${live}`, root).catch(error => ({ ok: false, reason: error instanceof Error ? error.message : 'refused' }))
       if (!stamped.ok) { toast(t('module.unstamped', 'The install channel was not stamped: {reason}', { reason: stamped.reason ?? 'refused' }), 'warning'); return }
-      toast(t('module.promoted', 'Promoted {name}: {channel} now names {root}. Followers are told on their next boot.', { name, channel: `${INSTALL_CHANNEL_PREFIX}${live}`, root: root.slice(0, 12) + '…' }), 'success')
+      if (live !== site) {
+        toast(t('module.promoted', 'Promoted {name}: {channel} now names {root}. Followers are told on their next boot.', { name, channel: `${INSTALL_CHANNEL_PREFIX}${live}`, root: root.slice(0, 12) + '…' }), 'success')
+        return
+      }
+      // The site's transfer pack goes with it — a hint, as at the door.
+      const pack = await ownHiveRoot(host, `pack:${name}`).catch(() => null)
+      if (pack) await setHiveRoot(host, `pack:${site}`, pack).catch(() => null)
+      // A package alone opens no site: the site's hive must be published there.
+      const published = await ownHiveRoot(host, site).catch(() => null)
+      const url = sandboxDoorUrl(site, host)
+      toast(published
+        ? t('module.promotedsite', 'Promoted {name}: {url} now runs it.', { name, url })
+        : t('module.promotedunpublished', 'Promoted {name}: {url} runs it once its hive is published there.', { name, url }), 'success')
       return
     }
 

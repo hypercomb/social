@@ -634,22 +634,49 @@ async function sandboxRoot(env, site, selected, read = indexReader(env)) {
   return null
 }
 
-async function serveSandbox(request, env, site, zone) {
-  const url = new URL(request.url)
-  const found = await sandboxRoot(env, site, String(url.searchParams.get('publisher') || '').toLowerCase())
-  if (!found) return nothingHere(url.hostname, zone)
+/** THE ONE PACKAGE A HOST NAME RUNS, answered as its `host:packages` pool
+ *  (one member: the root and its name) and its transfer pack. A door answers
+ *  it from `install:try-<change>`; a promoted site from `install:<site>`.
+ *  Any other path is not this answer's (null). */
+async function answerPackage(request, url, found, lineage) {
   const pool = await poolAddress(HOST_PACKAGES_MEANING)
   const plain = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
   const body = (value) => (request.method === 'HEAD' ? null : value)
   if (url.pathname === `/content/${pool}/`) return new Response(body('00000000\n'), { status: 200, headers: plain })
-  if (url.pathname === `/content/${pool}/00000000`) return new Response(body(`${found.root}\n${site.lineage}`), { status: 200, headers: plain })
+  if (url.pathname === `/content/${pool}/00000000`) return new Response(body(`${found.root}\n${lineage}`), { status: 200, headers: plain })
   if (url.pathname.startsWith(`/content/${pool}/`)) return new Response(body('not a member\n'), { status: 404, headers: plain })
   // THE TRANSFER PACK: a cold visitor asks for it by the root it is installing,
-  // so it is answered for the root this door serves and for no other name. A
-  // hint — a door with none says so, and the visitor installs file by file.
+  // so it is answered for the root this name serves and for no other. A hint —
+  // a name with none says so, and the visitor installs file by file.
   const packs = await poolAddress(TRANSFER_PACKS_MEANING)
   if (url.pathname === `/content/${packs}/${found.root}` && found.pack) return new Response(body(found.pack), { status: 200, headers: plain })
   if (url.pathname.startsWith(`/content/${packs}/`)) return new Response(body('no pack\n'), { status: 404, headers: plain })
+  return null
+}
+
+/** WHAT A PROMOTED SITE RUNS (jwize 2026-09-24: "try.yoursub.domain.com then
+ *  when deployed will be on yoursub.domain.com"). `module promote <change>`
+ *  stamps the trial's root as `install:<change>` in the publisher's signed
+ *  index, so `<change>.<zone>` runs the package `try-<change>.<zone>` ran —
+ *  the same signature, moved by one pointer. Read from the publisher the
+ *  site's hive is read from; none stamped ⇒ the visitor engine's own package. */
+async function sitePackage(env, site, read = indexReader(env)) {
+  const publisher = site.publishers?.find(p => p.primary) || site.publishers?.[0]
+  if (!publisher) return null
+  const index = await read(publisher.pubkey)
+  const sig = (key) => { const value = String(index?.roots?.[key] || '').toLowerCase(); return SIG_RE.test(value) ? value : null }
+  const root = sig(`install:${site.lineage}`)
+  return root ? { root, pack: sig(`pack:${site.lineage}`) } : null
+}
+
+async function serveSandbox(request, env, site, zone) {
+  const url = new URL(request.url)
+  const found = await sandboxRoot(env, site, String(url.searchParams.get('publisher') || '').toLowerCase())
+  if (!found) return nothingHere(url.hostname, zone)
+  const answered = await answerPackage(request, url, found, site.lineage)
+  if (answered) return answered
+  const plain = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
+  const body = (value) => (request.method === 'HEAD' ? null : value)
   if (url.pathname === '/site.json') {
     return json(200, {
       sandbox: true, title: site.lineage, channel: `install:${site.lineage}`, package: found.root,
@@ -1809,6 +1836,13 @@ export default {
       // Until then, and again after a withdrawal, an honest 404 page.
       if (!(await anyPublishedRoot(env, site, indexReader(env), requestUrl.hostname))) {
         return nothingHere(requestUrl.hostname, implicit ? siteZone : null)
+      }
+      // A promoted trial: the site runs its publisher's package, not the
+      // engine's own.
+      if (pathname.startsWith('/content/')) {
+        const promoted = await sitePackage(env, site)
+        const answered = promoted && await answerPackage(request, requestUrl, promoted, site.lineage)
+        if (answered) return answered
       }
       // Everything under /content/ is a FILE the build shipped — the package
       // pool above all — and is never held and never a page.
