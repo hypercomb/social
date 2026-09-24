@@ -337,9 +337,12 @@ export class PublishPanelComponent implements OnDestroy {
       // Walking to another tile re-aims the pane. A selection made by hand
       // survives repeated renders of the SAME page, so a refresh mid-edit does
       // not yank the subject out from under the address being typed.
-      if (nextCurrent && (nextCurrent !== this.currentKey() || (!this.visible() && p.open))) {
-        EffectBus.emit('publish:inspect', { key: nextCurrent })
-      }
+      // Decided here, SENT LAST: the drone may answer an inspect with a
+      // render synchronously (a row with no live head), and that render
+      // re-enters this handler. Asking before the key and the visibility were
+      // recorded made every re-entry look like a new subject — an endless
+      // inspect/render loop that overflowed the stack and killed publishing.
+      const inspect = !!nextCurrent && (nextCurrent !== this.currentKey() || (!this.visible() && p.open === true))
       this.currentKey.set(nextCurrent)
       this.index.set(this.#normIndex(p.index))
       this.indexCreatedAt.set(Number(p.indexCreatedAt ?? 0) || 0)
@@ -376,6 +379,7 @@ export class PublishPanelComponent implements OnDestroy {
       // No sibling is closed here — the lane decides what fits on an edge and
       // parks whatever it displaces.
       this.visible.set(!!p.open)
+      if (inspect) EffectBus.emit('publish:inspect', { key: nextCurrent })
     }))
   }
 
