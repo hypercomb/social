@@ -983,3 +983,33 @@ test('a door is told only the reads it may make, and its reads still answer', as
   assert.equal(read.status, 200)
   assert.equal((await read.json()).pubkey, assessor)
 })
+
+// ── the host AI answers the people this host admitted ─────────────────────
+// WHOSE WORD COUNTS: with AI_WRITERS empty, a key minted a moment ago is not
+// admitted just by signing — the zone's bound publishers are.
+test('the host AI answers its bound publishers, and a stranger\'s key is refused', async () => {
+  const grants = new Map()
+  const env = {
+    SITE_BINDINGS: JSON.stringify(ONE_ZONE),
+    ANTHROPIC_API_KEY: 'test',
+    CONTENT: { get: async () => null, head: async () => null },
+    GRANTS: { get: async (key) => grants.get(key) ?? null, put: async (key, value) => { grants.set(key, value) } },
+  }
+  const url = 'https://content.pluginthematrix.com/ai/ask'
+  const ask = async (key) => worker.fetch(new Request(url, {
+    method: 'POST', headers: { authorization: await nip98(url, 'POST', key), 'content-type': 'application/json' },
+    body: JSON.stringify({ question: 'what is here?', stream: false }),
+  }), env)
+  const upstream = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (target) => { upstream.push(String(target)); return new Response(JSON.stringify({ content: [{ type: 'text', text: 'tiles' }] }), { headers: { 'content-type': 'application/json' } }) }
+  try {
+    const stranger = await ask(assessorKey)
+    assert.equal(stranger.status, 429)
+    assert.match(await stranger.text(), /own publishers only/)
+    assert.deepEqual(upstream, [])
+    const own = await ask(sk)
+    assert.notEqual(own.status, 429)
+    assert.deepEqual(upstream, ['https://api.anthropic.com/v1/messages'])
+  } finally { globalThis.fetch = original }
+})

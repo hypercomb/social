@@ -1099,10 +1099,9 @@ written for a different purpose.
 - **Conformance coverage.** The 11-point check predates the directory branch
   and never requests `/<poolSig>/` — a host can pass 11/11 while publishing no
   pool at all.
-- **`host-ai.md`'s open route.** With `AI_WRITERS` empty the host worker's
-  `POST /ai/ask` accepts **any valid Nostr signer**, bounded only by a
-  per-pubkey daily token *estimate* — "an anti-abuse ceiling, not billing." The
-  operator pays. Nothing has been exercised against the real API.
+- ~~**`host-ai.md`'s open route.**~~ Closed 2026-09-24: with `AI_WRITERS` empty
+  the host worker's `POST /ai/ask` admits only the zones' operators and bound
+  publishers, each under the daily token estimate; any other signer is refused.
 - **A cost nobody has priced.** `findPool` walks all four bases per zone and
   runs a *full* probe for each base that returns no listing, so one dead or
   non-host zone costs up to 4 directory GETs plus 4 probe walks — and `findPool`

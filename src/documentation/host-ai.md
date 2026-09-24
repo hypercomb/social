@@ -47,10 +47,14 @@ already carry, so identity is one concept across the whole host surface.
 
 - `AI_WRITERS` set (comma-separated pubkeys) → **allowlist**; nobody else.
   This is the right setting for a personal host.
-- `AI_WRITERS` empty → open to any valid signer, throttled by a per-pubkey
-  per-day token estimate in `GRANTS` KV (`ai:<pubkey>:<yyyymmdd>`, expires in
-  two days). An anti-abuse ceiling, not billing — same doctrine as the byte
-  quota.
+- `AI_WRITERS` empty → **the people this host already admitted**: every zone
+  operator (`SITE_OPERATORS`) and every publisher bound to a site on it (the
+  wrangler var and the operators' signed records). A key costs nothing to mint,
+  so a per-key meter alone bounds nobody (whose word counts,
+  `module-sandbox.md`). Each admitted key is still throttled by a per-day token
+  estimate in `GRANTS` KV (`ai:<pubkey>:<yyyymmdd>`, expires in two days) — an
+  anti-abuse ceiling, not billing. Anyone else is refused (429): ask from a host
+  that binds your key, or run your own.
 
 ### Context is signatures, never inline bytes
 

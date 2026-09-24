@@ -1538,6 +1538,13 @@ async function aiAdmit(env, pubkey, estimate) {
       ? { ok: true, meter: null }
       : { ok: false, reason: 'this key is not on the AI writers list — ask the operator' }
   }
+  // WHOSE WORD COUNTS (module-sandbox.md): a key costs nothing to mint, so a
+  // per-key meter bounds nobody. With no list, the host AI answers the people
+  // this host already admitted — its zones' operators and bound publishers,
+  // the keys whose trials it reviews — and the meter stays their ceiling.
+  if (!(await aiAdmitted(env)).has(pubkey)) {
+    return { ok: false, reason: 'this host answers its own publishers only — ask from a host that binds your key' }
+  }
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   const key = `ai:${pubkey}:${day}`
   let used = 0
@@ -1546,6 +1553,17 @@ async function aiAdmit(env, pubkey, estimate) {
     return { ok: false, reason: 'daily AI allowance used up for this key — try again tomorrow' }
   }
   return { ok: true, meter: { key, used, estimate } }
+}
+
+/** Every key this host admitted: each zone's operator and every publisher
+ *  bound to a site on it (the wrangler var and the operators' signed records). */
+async function aiAdmitted(env) {
+  const scoped = await bindingsEnv(env)
+  const keys = new Set(siteOperators(env).map(([, pubkey]) => pubkey))
+  for (const site of Object.values(siteBindings(scoped))) {
+    for (const publisher of site?.publishers ?? []) keys.add(String(publisher?.pubkey || '').toLowerCase())
+  }
+  return keys
 }
 
 async function aiConsume(env, meter) {

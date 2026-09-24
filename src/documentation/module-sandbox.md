@@ -93,7 +93,7 @@ jwize: "your peer hosts become your sandbox and you can scan the signed files by
 
 **Doors live on your own host domains (jwize, 2026-09-24):** "we don't need a dedicated domain we use our host domains for testing. we can use any subdomain we like but naturally try.yoursub.domain.com then when deployed will be on yoursub.domain.com". There is no door-only domain and no Public Suffix List entry: a door is a subdomain of the host domain its publisher already uses, named for the site it becomes. What that accepts: a door is same-site with every site on its zone (origins still differ, so storage stays its own), and on the shared worker it takes `/core/*` and its service worker from the deployed visitor assets, so the visitor assets go out with every hypercomb.io deploy.
 
-**Still open (need jwize):** **`AI_WRITERS`** is empty, so any signer can spend the host AI (lock it to bound publishers if no participant-hosted AI relies on it).
+**The host AI answers the people the host admitted (2026-09-24).** With `AI_WRITERS` empty the worker's `/ai/ask` admits only the zones' operators and bound publishers — the keys whose trials it reviews — each under the daily token ceiling; a freshly minted key is refused. An explicit `AI_WRITERS` list still overrides (`host-ai.md`).
 
 ## Audit a trial from your own hive (built 2026-09-23)
 
