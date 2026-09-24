@@ -233,12 +233,28 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   //
   // Participants are untouched: their deps come from `/opfs/<poolSig>`,
   // served by our own service worker, which sets the type itself.
+  //
+  // The bytes come from the STORE first: the install just admitted every
+  // dependency there, sha256-verified, so fetching all of them a second time
+  // (~585 requests on every visit) only repeated work already done. The host
+  // is asked only for a dependency the store does not hold.
   if (readonlyVisitor && aliasSource.size > 0) {
+    const stored = async (sig: string): Promise<string | null> => {
+      for (const dir of depDirs) {
+        for (const name of [`${sig}.js`, sig]) {
+          try { return await (await (await dir.getFileHandle(name, { create: false })).getFile()).text() } catch { /* next */ }
+        }
+      }
+      return null
+    }
     await Promise.all([...aliasSource].map(async ([alias, sig]) => {
       try {
-        const res = await fetch(`${dependencyBasePath}/${sig}`)
-        if (!res.ok) return // leave the URL form; the loader reports the failure
-        const source = await res.text()
+        let source = await stored(sig)
+        if (source === null) {
+          const res = await fetch(`${dependencyBasePath}/${sig}`)
+          if (!res.ok) return // leave the URL form; the loader reports the failure
+          source = await res.text()
+        }
         imports[alias] = URL.createObjectURL(
           new Blob([source], { type: 'text/javascript' }),
         )

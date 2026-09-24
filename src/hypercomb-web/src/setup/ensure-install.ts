@@ -15,7 +15,7 @@ import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { isVisitorSession } from './visitor-session'
 // Cold-boot acquisition. Same implementation the shim uses and the same one
 // behind window.hypercomb.acquire — there is one acquisition, not three.
-import { acquire, applySelection, deriveInventory, headPackage, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
+import { acquire, applySelection, deriveInventory, headPackage, listHostPackages, packedFetch, reportDivergence } from '@hypercomb/runtime/acquire'
 import { readPicks } from '@hypercomb/runtime/package-tree'
 import { readOffUnits } from '@hypercomb/runtime/package-units'
 import { deriveBeeDeps } from '@hypercomb/runtime/bee-deps'
@@ -684,7 +684,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // Delivery-format bridge: new builds emit FLAT sig-named files at the
   // content root; content deployed before that stays old-layout. Flat URL
   // first, legacy typed URL shape second.
-  const fetchFirst = (urlsFor: (sig: string) => string[]) =>
+  const fetchLoose = (urlsFor: (sig: string) => string[]) =>
     async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
       for (const url of urlsFor(sig)) {
         const bytes = await fetchBytes(url)
@@ -724,6 +724,28 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
 
   const beesUrlBase = `/opfs/${await Store.poolSignature(Store.BEES_MEANING)}`
   const depsUrlBase = `/opfs/${await Store.poolSignature(Store.DEPENDENCIES_MEANING)}`
+
+  // ONE REQUEST, NOT FIFTEEN HUNDRED. A store that holds almost no modules —
+  // every published-site visit (the visitor keeps nothing), every cold
+  // participant install — takes the whole package from its transfer pack
+  // (acquire.ts packedFetch), exactly as a host install does. Every member is
+  // hashed against its own name before it is kept, the walker hashes it again
+  // at admission, and anything the pack does not carry — or no pack at all —
+  // falls through to the loose fetch below. A hint; never load-bearing.
+  let heldModules = 0
+  for (const dir of [store.dependencies, store.bees]) {
+    if (!dir) continue
+    try { for await (const _entry of dir.entries()) { if (++heldModules >= 32) break } } catch { /* unreadable — count what we have */ }
+    if (heldModules >= 32) break
+  }
+  const packed = heldModules < 32
+    ? await packedFetch(bundled.packageSig, null, new Set(), ['/content'], async () => null)
+    : null
+  const fetchFirst = (urlsFor: (sig: string) => string[]) => {
+    const loose = fetchLoose(urlsFor)
+    return async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> =>
+      (packed ? await packed.fetch(sig) : null) ?? loose(sig)
+  }
 
   // DERIVE THE INVENTORY FROM THE SEALED ROOT (documentation/host-packages-pool.md).
   // `bundled.layers` / `.bees` / `.dependencies` are what /content/manifest.json

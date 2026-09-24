@@ -361,8 +361,12 @@ async function main() {
       console.log(`${TAG} copying modules to the content targets...`)
       run(tsxRun('./scripts/copy-content.ts'), essentialsDir)
 
-      // A published build no signer names is never offered; CI has no signer to ask.
-      if (!process.env.CI) run(tsxRun('./scripts/stamp-install-channel.ts'), essentialsDir, true)
+      // NO STAMP HERE. A build is not a revision (hypercomb-essentials/scripts/
+      // publish.ts): only `npm run publish:revision` moves `install:<name>`.
+      // Stamping from a build offered EVERY follower whatever the checkout held
+      // — a task branch, another session's uncommitted edits — the moment a
+      // hive was attached to sign it (2026-09-24: a visitor build moved
+      // install:essentials to an unpublished task-branch package).
     } else {
       console.log(`${TAG} essentials modules — up to date`)
     }

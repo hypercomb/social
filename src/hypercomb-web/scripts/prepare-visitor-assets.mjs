@@ -91,6 +91,23 @@ for (const listing of ['index.html', 'listing.txt']) {
   await writeFile(join(poolDir, listing), '00000000\n', 'utf8')
 }
 
+// THE TRANSFER PACK. Every file of the package in ONE content-addressed file
+// (hypercomb-runtime/src/transfer-pack.ts), so a visitor — who keeps nothing
+// between visits — installs in one request instead of ~1,500. Without it every
+// published site paid ~5–10s of file-by-file fetching on EVERY load. A hint:
+// a build that minted no pack still ships, and the visitor installs loose.
+const packsPool = createHash('sha256').update('transfer:packs').digest('hex')
+const packPointer = await readFile(join(sourceContent, packsPool, currentSig), 'utf8').catch(() => '')
+const packSig = packPointer.trim().toLowerCase()
+if (SIG_RE.test(packSig) && await stat(join(sourceContent, packSig)).then(() => true, () => false)) {
+  await mkdir(join(outputContent, packsPool), { recursive: true })
+  await writeFile(join(outputContent, packsPool, currentSig), packSig, 'utf8')
+  await cp(join(sourceContent, packSig), join(outputContent, packSig))
+  console.log(`[visitor-assets] transfer pack ${packSig.slice(0, 12)}… shipped`)
+} else {
+  console.warn(`[visitor-assets] no transfer pack for ${currentSig.slice(0, 12)}… — visitors will install file by file`)
+}
+
 let bytes = 0
 const addSize = async (path) => {
   const held = await stat(path)
