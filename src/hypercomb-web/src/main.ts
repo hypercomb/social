@@ -199,7 +199,10 @@ const appendImportMap = (json: string): void => {
 
 const attachImportMap = async (): Promise<void> => {
   const imports = await resolveImportMap()
-  const json = JSON.stringify({ imports })
+  // Root-served modules carry their signatures as integrity (resolve-import-map).
+  const integrity = (globalThis as { __hypercombImportIntegrity?: Record<string, string> }).__hypercombImportIntegrity
+  const map = integrity ? { imports, integrity } : { imports }
+  const json = JSON.stringify(map)
 
   // Already applied by index.html before the module graph loaded — done.
   if ((window as any).__hcImportMapApplied === json) return
@@ -208,7 +211,7 @@ const attachImportMap = async (): Promise<void> => {
 
   // Late append: correct on browsers that merge late maps, ignored (with a
   // console warning) on those that don't — hence the reload guard below.
-  appendImportMap(JSON.stringify({ imports }, null, 2))
+  appendImportMap(JSON.stringify(map, null, 2))
 
   // No dependency aliases resolved (nothing installed yet) → no bare specifier
   // gets resolved this session; the next boot picks the cache up early.

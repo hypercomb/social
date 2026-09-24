@@ -767,15 +767,25 @@ export class Store extends EventTarget {
 
       let mod: Record<string, unknown> | null = null
 
+      // A published site whose host serves modules at the root imports the
+      // bee from `/<sig>`: a stable URL the browser caches, compiled code
+      // included, and checks against the signature (import-map integrity,
+      // resolve-import-map.ts). A failed load falls through to the blob.
+      if ((globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ === true && /^[a-f0-9]{64}$/.test(signature)) {
+        mod = await tryImport(`/${signature}`)
+      }
+
       // Import directly from the verified buffer via blob URL.
       // This bypasses the service worker entirely — no /opfs/ round-trip,
       // no cache seeding, no dependency on SW controlling the page.
-      const blob = new Blob([buffer], { type: 'application/javascript' })
-      const blobUrl = URL.createObjectURL(blob)
-      try {
-        mod = await tryImport(blobUrl)
-      } finally {
-        URL.revokeObjectURL(blobUrl)
+      if (!mod) {
+        const blob = new Blob([buffer], { type: 'application/javascript' })
+        const blobUrl = URL.createObjectURL(blob)
+        try {
+          mod = await tryImport(blobUrl)
+        } finally {
+          URL.revokeObjectURL(blobUrl)
+        }
       }
 
       if (!mod || typeof mod !== 'object') return null

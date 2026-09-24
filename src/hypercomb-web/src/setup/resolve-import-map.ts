@@ -6,6 +6,28 @@ import { CORE_RUNTIME_URL } from '@hypercomb/runtime/core-surface'
 
 export type ResolvedImports = Record<string, string>
 
+/** Does this origin answer `/<sig>` as a JavaScript module? Asked of the
+ *  browser itself (modulepreload: fetched and type-checked, never run). */
+const probeRootModule = (sig: string): Promise<boolean> => new Promise(resolve => {
+  try {
+    const link = document.createElement('link')
+    const timer = setTimeout(() => { link.remove(); resolve(false) }, 5_000)
+    const done = (ok: boolean) => () => { clearTimeout(timer); link.remove(); resolve(ok) }
+    link.rel = 'modulepreload'
+    link.onload = done(true)
+    link.onerror = done(false)
+    link.href = `/${sig}?probe`
+    document.head.appendChild(link)
+  } catch { resolve(false) }
+})
+
+/** SRI form of a signature: the signature IS the module's sha256, in hex. */
+const integrityOf = (sig: string): string => {
+  let bin = ''
+  for (let i = 0; i < 64; i += 2) bin += String.fromCharCode(parseInt(sig.slice(i, i + 2), 16))
+  return `sha256-${btoa(bin)}`
+}
+
 /**
  * Build the runtime importmap by opening exactly one bag.
  *
@@ -238,6 +260,44 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   // dependency there, sha256-verified, so fetching all of them a second time
   // (~585 requests on every visit) only repeated work already done. The host
   // is asked only for a dependency the store does not hold.
+  // A HOST THAT SERVES MODULES AT THE ROOT. Everything is `/<sig>`: every alias maps to
+  // the root URL, and so does every bee (Store.getBee reads the flag below).
+  // The browser then keeps the bytes in its HTTP cache (immutable) and the
+  // COMPILED code in its code cache across visits — a blob URL is new every
+  // visit, so it could keep neither. The signature gate stays, run by the
+  // browser: each URL carries its sha256 as import-map integrity, and a
+  // module whose bytes do not match is refused before it runs.
+  //
+  // Nothing declares it — no descriptor field, no side format. The browser
+  // is asked: a `modulepreload` fetches a module under real module rules
+  // (a JavaScript type is required) and never runs it. Any host that answers
+  // — the worker, the desktop host on any OS, `hypercomb serve`, a tunnel —
+  // passes; a plain static host that types extensionless files as bytes
+  // fails, and keeps the verified blob path below. The probe URL carries a
+  // query so a failed probe never sits in the module map under the real URL.
+  const rootServesModules = readonlyVisitor && aliasSource.size > 0
+    ? await probeRootModule(aliasSource.values().next().value as string)
+    : false
+  if (rootServesModules) {
+    const integrity: Record<string, string> = {}
+    for (const [alias, sig] of aliasSource) {
+      imports[alias] = `/${sig}`
+      integrity[`/${sig}`] = integrityOf(sig)
+    }
+    for (const dir of [store.bees, store.legacyBees]) {
+      if (!dir) continue
+      try {
+        for await (const [name] of dir.entries()) {
+          const sig = name.replace(/.js$/i, '')
+          if (/^[a-f0-9]{64}$/.test(sig)) integrity[`/${sig}`] = integrityOf(sig)
+        }
+      } catch { /* an unreadable pool adds no integrity — its bees take the blob path */ }
+    }
+    ;(globalThis as { __hypercombImportIntegrity?: Record<string, string> }).__hypercombImportIntegrity = integrity
+    ;(globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ = true
+    return imports
+  }
+
   if (readonlyVisitor && aliasSource.size > 0) {
     const stored = async (sig: string): Promise<string | null> => {
       for (const dir of depDirs) {
