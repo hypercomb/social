@@ -104,7 +104,10 @@
           <p>Windows, macOS, and Linux downloads will appear here after tested release artifacts are ready.</p>
         </div>
         <div class="platform-list" role="list" aria-label="Desktop release status">
-          <div class="platform" role="listitem">
+          <!-- Filled from the host's `hypercomb:windows` pool by script.js
+               (documentation/windows-installer-pool.md). With no pool to read,
+               the row stays exactly as written here. -->
+          <div class="platform" role="listitem" data-installer-pool="hypercomb:windows" data-installer-hosts="https://jwize.com">
             <span class="platform-name"><i class="windows-icon" aria-hidden="true"></i>Windows</span>
             <span class="status">Not released</span>
             <small>Intended formats: MSI · setup executable</small>

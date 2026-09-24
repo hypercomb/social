@@ -291,6 +291,11 @@ button, summary { font: inherit; }
 .windows-icon::before { content: ""; width: 8px; height: 8px; background: var(--sage); box-shadow: 10px 0 var(--sage),0 10px var(--sage),10px 10px var(--sage); }
 .status { color: var(--clay-dark); font: 12px var(--mono); }
 .platform small { grid-column: 1 / -1; margin: -14px 0 8px 34px; color: var(--quiet); font-size: 13px; }
+.platform .get { min-height: 44px; padding: 8px 14px; border: 1px solid var(--clay); border-radius: 4px; background: var(--clay-dark); color: var(--surface); font: 600 14px var(--sans); cursor: pointer; }
+.platform .get:hover { background: var(--clay); }
+.platform .get:disabled { opacity: .7; cursor: progress; }
+.platform .installer-note { grid-column: 1 / -1; margin: 0 0 10px 34px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.platform .installer-note .checksum { margin-top: 8px; }
 
 .available { margin-top: 70px; }
 .available-head {
