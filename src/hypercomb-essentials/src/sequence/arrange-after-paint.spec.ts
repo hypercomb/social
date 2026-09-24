@@ -91,13 +91,27 @@ describe('arrange waits for the tiles to come into view', () => {
     expect(arranged).toHaveLength(1)
   })
 
-  it('closes again when the next page starts painting', async () => {
-    EffectBus.emit('render:tiles-target', { locationKey: 'here', renderPassId: 13 })
-    EffectBus.emit('render:cell-count', cellCount({ settled: true, renderPassId: 13 }))
+  it('stays open through a re-render of the same page (arranging is never one-shot)', async () => {
+    EffectBus.emit('render:tiles-target', { locationKey: 'here', renderPassId: 20 })
+    EffectBus.emit('render:cell-count', cellCount({ settled: true, renderPassId: 20 }))
     await press()
     expect(arranged).toHaveLength(1)
 
-    EffectBus.emit('render:tiles-target', { locationKey: 'there', renderPassId: 14 })
+    // The arrange's own commit re-renders this page; that pass may end
+    // without publishing a snapshot at all.
+    EffectBus.emit('render:tiles-target', { locationKey: 'here', renderPassId: 21 })
+    await press()
+    await press()
+    expect(arranged).toHaveLength(3)
+  })
+
+  it('closes again when the next page starts painting', async () => {
+    EffectBus.emit('render:tiles-target', { locationKey: 'here', renderPassId: 22 })
+    EffectBus.emit('render:cell-count', cellCount({ settled: true, renderPassId: 22 }))
+    await press()
+    expect(arranged).toHaveLength(1)
+
+    EffectBus.emit('render:tiles-target', { locationKey: 'there', renderPassId: 23 })
     await press()
     expect(arranged).toHaveLength(1)
   })

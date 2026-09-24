@@ -122,15 +122,21 @@ export class SequenceCycleDrone extends Drone {
   #cellCoords: Axial[] = []
 
   #busy = false
-  // The tile pass the renderer has TARGETED, and the newest one known to have
-  // finished painting. Tiles arrive in batches, so while the first is ahead of
-  // the second the snapshot below holds only the tiles that have come into
-  // view so far — see #cycle's gate. Two counters rather than one flag because
-  // every effect here replays its last value on subscribe, in whatever order
-  // the handlers are registered; comparing two monotonic numbers converges to
-  // the same answer either way round, where a flag would strand itself armed.
-  #targetedPass = 0
-  #paintedPass = 0
+  // WHAT THE SNAPSHOT ABOVE IS. Tiles arrive in batches, so the snapshot can
+  // hold only the tiles that have come into view so far — see #cycle's gate.
+  // The gate asks two things, each answered by the newest message alone, so
+  // the answer is the same whatever order the replayed effects land in:
+  //   · is the snapshot a whole set? (its batch was not an intermediate one)
+  //   · is it of the page being painted? (the newest targeted location)
+  // A re-render of the SAME page — the arrange's own commit, an image, a
+  // decoration — must not close it: the tiles on screen are still the whole
+  // set. Gating on "newest targeted pass has painted" did close it there, and
+  // since some passes end without publishing a final snapshot, arranging went
+  // dead after the first press.
+  #snapshotLocation: string | null = null
+  #snapshotWhole = false
+  #snapshotPass = 0
+  #targetLocation: string | null = null
   #paintWatchdog: ReturnType<typeof setTimeout> | null = null
   #effectsRegistered = false
   #fitTimer: ReturnType<typeof setTimeout> | null = null
@@ -144,17 +150,18 @@ export class SequenceCycleDrone extends Drone {
     if (this.#effectsRegistered) return
     this.#effectsRegistered = true
 
-    // A pass has been targeted: from here until its final snapshot lands, the
-    // tiles are still coming into view.
-    this.onEffect<{ renderPassId?: number }>('render:tiles-target', (payload) => {
-      this.#targetedPass = Math.max(this.#targetedPass, Number(payload?.renderPassId ?? 0))
-      if (this.#tilesComingIntoView()) this.#armPaintWatchdog()
+    // A pass has been targeted. Only a DIFFERENT page means the tiles are
+    // still coming into view.
+    this.onEffect<{ locationKey?: string }>('render:tiles-target', (payload) => {
+      const wasOpen = !this.#tilesComingIntoView()
+      this.#targetLocation = typeof payload?.locationKey === 'string' ? payload.locationKey : null
+      this.#settleGate(wasOpen)
     })
 
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
       this.#cellLabels = payload.labels ?? []
       this.#cellCoords = payload.coords ?? []
-      this.#notePaintSettled(payload)
+      this.#noteSnapshot(payload)
     })
 
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
@@ -176,23 +183,35 @@ export class SequenceCycleDrone extends Drone {
 
   // ── cycle ───────────────────────────────────────────────────────────
 
-  /** True while the newest targeted pass is still painting. */
-  #tilesComingIntoView = (): boolean => this.#targetedPass > this.#paintedPass
+  /** True while the snapshot is partial, or is of a page other than the one
+   *  being painted. */
+  #tilesComingIntoView = (): boolean =>
+    !this.#snapshotWhole
+    || (this.#targetLocation !== null && this.#targetLocation !== this.#snapshotLocation)
 
-  /** Mark a pass painted. Three shapes arrive on this effect and they mean
-   *  different things:
+  /** Three shapes arrive on this effect and they mean different things:
    *    `settled: true`  — the pass's FINAL batch; every tile is on screen.
    *    `settled: false` — an intermediate batch; more tiles are still coming.
    *    no `settled` key — an in-place touch-up published long after the pass
    *                       painted (an image landing, a shade flip), which is
    *                       itself proof that its pass finished.
-   *  Only the middle one leaves the gate closed. */
-  #notePaintSettled = (payload: CellCountPayload): void => {
-    if (payload?.settled === false) return
+   *  Only the middle one leaves the snapshot partial. A replayed snapshot
+   *  from an older pass never overrides a newer one. */
+  #noteSnapshot = (payload: CellCountPayload): void => {
     const pass = Number(payload?.renderPassId ?? 0)
-    if (pass <= this.#paintedPass) return
-    this.#paintedPass = pass
+    if (pass < this.#snapshotPass) return
+    const wasOpen = !this.#tilesComingIntoView()
+    this.#snapshotPass = pass
+    this.#snapshotWhole = payload?.settled !== false
+    this.#snapshotLocation = typeof payload?.locationKey === 'string' ? payload.locationKey : null
+    this.#settleGate(wasOpen)
+  }
+
+  /** Arm the watchdog when the gate closes, clear it when it opens. Armed
+   *  once per closing — a stream of re-targets must not keep postponing it. */
+  #settleGate = (wasOpen: boolean): void => {
     if (!this.#tilesComingIntoView()) this.#clearPaintWatchdog()
+    else if (wasOpen || this.#paintWatchdog === null) this.#armPaintWatchdog()
   }
 
   /** A pass that never publishes a final snapshot must not disable arranging
@@ -206,7 +225,8 @@ export class SequenceCycleDrone extends Drone {
       this.#paintWatchdog = null
       if (!this.#tilesComingIntoView()) return
       console.warn('[sequence-cycle] tile pass never settled — releasing the arrange gate')
-      this.#paintedPass = this.#targetedPass
+      this.#snapshotWhole = true
+      this.#snapshotLocation = this.#targetLocation
     }, PAINT_SETTLE_TIMEOUT)
   }
 
