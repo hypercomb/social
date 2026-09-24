@@ -95,6 +95,22 @@ the private Home pin never silently changes a public door. Clearing a public
 route withdraws its signed head while previously served signature files remain
 servable to people who know their names.
 
+**Carrying a domain and hosting an offering are distinct acts.** Adding a
+domain records a place to discover its offerings and may bring their public
+directory into the local view. Choosing
+to host one of its offerings replicates that published root's verified closure
+and the dependencies chosen for it to this host. The same signed bytes can
+then be served here by signature. Opening `name.our-zone` as a live hive also
+needs a route and a binding to the original publisher and hive path, plus the
+publisher's signed door choice when one is present. The mirror does not become
+the publisher and cannot choose a new head for them. A subdomain is the stable
+door into a signed head, not itself a sigbag; the head and its content may
+change while the address stays put. The small host view may show the current
+root of each offering, filter by source domain, and search the subdomain it
+serves here. Revision browsing remains a separate action.
+Today adding a domain records the source only; automatic mirror and subdomain
+binding are still work to build.
+
 Each gallery entry opens its door for inspection and offers a simple **Turn on**
 choice. The handshake runs in one direction: the host offers a signed hive;
 the participant visits and chooses it; the participant's local instance
