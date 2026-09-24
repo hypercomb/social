@@ -53,12 +53,7 @@ import {
   isSignature,
 } from '../editor/tile-properties.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
-import { showWebsiteListPanel } from './website-instances.js'
 import { ensureWebsiteBoundAt } from './website-binding.js'
-// `/website save` / `/website load` — portable .zip export/import of a branch,
-// folded in from the former standalone /website-save and /website-load commands
-// so they no longer crowd the /website autocomplete.
-import { exportBranch, importArchive } from './website-archive.queen.js'
 // `/website here` writes a build-intent marker as a decoration on the
 // current cell, and toggles it off on re-run. The named imports also anchor
 // the decoration-manifest module (slot registration) against tree-shaking.
@@ -95,6 +90,26 @@ const SIG_REGEX = /^[a-f0-9]{64}$/
 const toast = (type: 'info' | 'success' | 'warning' | 'tip', title: string, message: string): void => {
   try { EffectBus.emit('toast:show', { type, title, message }) } catch { /* noop */ }
 }
+
+// `/website save` / `/website load` — portable .zip export/import of a branch,
+// folded in from the former standalone /website-save and /website-load commands
+// so they no longer crowd the /website autocomplete — and `/website list`'s
+// queue panel. THEY ARRIVE WITH THE WORD, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"): each is one cached import(), cleared on failure,
+// and a failed load says so.
+type Archive = typeof import('./website-archive.queen.js')
+type Instances = typeof import('./website-instances.js')
+let archive: Promise<Archive> | null = null
+let instances: Promise<Instances> | null = null
+const loadArchive = (): Promise<Archive> =>
+  archive ??= import('./website-archive.queen.js').catch(error => { archive = null; throw error })
+const loadInstances = (): Promise<Instances> =>
+  instances ??= import('./website-instances.js').catch(error => { instances = null; throw error })
+const reasonOf = (error: unknown): string => error instanceof Error ? error.message : String(error)
+/** Whether the press that ran the word still counts as one — a file chooser
+ *  opens only while it does. Undefined where the browser does not say. */
+const pressActive = (): boolean | undefined =>
+  (globalThis.navigator as { userActivation?: { isActive?: boolean } } | undefined)?.userActivation?.isActive
 
 type HierarchyNode = {
   path: readonly string[]
@@ -384,8 +399,7 @@ export class WebsiteQueenBee extends QueenBee {
     // `/website save` / `/website load` — portable .zip export/import of the
     // current branch (Payload Bundle protocol). Delegated to the archive
     // module; folded in from the old standalone /website-save & /website-load.
-    if (trimmed === 'save') return void exportBranch()
-    if (trimmed === 'load') return void importArchive()
+    if (trimmed === 'save' || trimmed === 'load') return void this.#archive(trimmed)
 
     // Global view apply. /website with no arg, or with one of the mode
     // keywords, flips the SINGLE GLOBAL render surface (ViewModeService).
@@ -558,7 +572,29 @@ export class WebsiteQueenBee extends QueenBee {
    *  (carrying a `visual:website:pending` decoration), each clearable via its
    *  × button and navigable by clicking its path. */
   #list(): void {
-    void showWebsiteListPanel()
+    void loadInstances().then(
+      code => code.showWebsiteListPanel(),
+      error => toast('warning', 'website', `could not open the gen queue: ${reasonOf(error)}`),
+    )
+  }
+
+  /** `/website save` / `/website load`, from the archive module — loaded now. */
+  async #archive(verb: 'save' | 'load'): Promise<void> {
+    const pressed = pressActive()
+    let code: Archive
+    try { code = await loadArchive() } catch (error) {
+      toast('warning', 'website', `could not load the website archive: ${reasonOf(error)}`)
+      return
+    }
+    if (verb === 'save') return code.exportBranch()
+    // THE PICKER NEEDS THE PRESS. A file chooser opens only while the press
+    // that ran the word still counts; a first load slow enough to outlive it
+    // would leave a picker that silently never opens, so it says so instead.
+    if (pressed === true && pressActive() === false) {
+      toast('info', 'website', 'the archive reader is ready — run /website load again to pick the .zip')
+      return
+    }
+    return code.importArchive()
   }
 }
 

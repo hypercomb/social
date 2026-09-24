@@ -11,8 +11,6 @@ vi.hoisted(() => {
   ;(window as unknown as { ioc: unknown }).ioc = {
     get: (key: string) => services.get(key),
     register: (key: string, value: unknown) => services.set(key, value),
-    // The element defines itself when the shell's registry is ready; it is
-    // mounted by hand below.
     whenReady: (key: string, callback: (value: unknown) => void) => {
       if (key === '@hypercomb.social/ShellSurfaceRegistry') callback({ add: () => {}, all: () => [] })
     },
@@ -20,9 +18,15 @@ vi.hoisted(() => {
 })
 
 import { EffectBus } from '@hypercomb/core'
-// The editor's bee wires its services and its view (atomic-modules-plan.md).
+// The editor's bee wires its services (atomic-modules-plan.md). Its view
+// arrives with the first edit (tile-editor.lazy.spec.ts), so this spec defines
+// the element and takes the view's own IoC face by hand, and mounts it below.
 import './tile-editor.drone.js'
+import { TileEditorElement, tileEditorViewFacade } from './tile-editor.view.js'
 import type { TileEditorService } from './tile-editor.service.js'
+
+if (!customElements.get('hc-tile-editor')) customElements.define('hc-tile-editor', TileEditorElement)
+services.set('@diamondcoreprocessor.com/TileEditorView', tileEditorViewFacade)
 
 const service = (): TileEditorService =>
   services.get('@diamondcoreprocessor.com/TileEditorService') as TileEditorService

@@ -35,7 +35,9 @@ describe('tile editor view — joining the shell', () => {
       element: 'hc-tile-editor',
       order: 220,
     }])
-    expect(customElements.get(TILE_EDITOR_SURFACE)).toBeDefined()
+    // The element is defined by the first edit, not at boot
+    // (tile-editor.lazy.spec.ts).
+    expect(customElements.get(TILE_EDITOR_SURFACE)).toBeUndefined()
   })
 
   it('answers the Escape cascade through its IoC face even before it mounts', () => {

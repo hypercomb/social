@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { llmKeyStore } from '@hypercomb/core'
+import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { JEV_MODEL } from './jev-decision.js'
 
 const services = new Map<string, unknown>()
@@ -22,9 +22,12 @@ const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => {
 beforeAll(async () => {
   localStorage.clear()
   vi.stubGlobal('fetch', fetcher)
-  await import('./llm.drone.js')   // the llm bee registers the console and the roster (atomic-modules-plan.md)
+  await import('./llm.drone.js')   // the llm bee registers the roster (atomic-modules-plan.md)
   llmKeyStore.set('openrouter', `sk-or-v1-${'a1'.repeat(32)}`)
-  ;(services.get('@diamondcoreprocessor.com/ProvidersWindowView') as { open(): void }).open()
+  // The console arrives with its first open: the words' door loads it, and
+  // the bus's replay of that press opens it.
+  EffectBus.emit('providers:open', {})
+  await vi.waitFor(() => expect(document.querySelector('.hc-providers')).not.toBeNull(), { timeout: 10_000 })
   buttons('.hc-providers-tab').find(b => b.textContent?.startsWith('API'))!.click()
 })
 afterAll(() => vi.unstubAllGlobals())

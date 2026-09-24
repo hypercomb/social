@@ -84,7 +84,6 @@ import type { VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 import {
   TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE, TEMPLATE_SELECTED, TEMPLATE_STATE, TEMPLATE_VIEW_STATE,
 } from './template-author-effects.js'
-import { LayoutTargetsElement, LAYOUT_TARGETS_SURFACE, LAYOUT_TARGETS_VIEW_KEY } from './layout-targets.view.js'
 export {
   TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE, TEMPLATE_SELECTED, TEMPLATE_STATE, TEMPLATE_VIEW_STATE,
 } from './template-author-effects.js'
@@ -1116,13 +1115,59 @@ export function levelsOf(root: LayoutNode): LevelState[] {
   return out
 }
 
+// THE TARGETS WINDOW ARRIVES WITH THE ASK, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"). The surface registry takes only a tag, so the tag
+// goes in at boot and the element is defined from one cached import() the
+// first time `targets:open` asks for it; the element already in the page
+// upgrades in place and its own subscription replays the ask. The tag and
+// owner are spelled here: importing even a const from the view would keep it
+// static.
+const TARGETS_SURFACE = 'hc-layout-targets'
+const TARGETS_OWNER = '@diamondcoreprocessor.com/LayoutTargetsView'
+/** The window's own stamp window — an ask older than this is a replay. */
+const TARGETS_STAMP_MS = 10_000
+
+type TargetsAsk = { open?: boolean; at?: number }
+let targetsView: Promise<void> | null = null
+/** The latest ask while the view loads. The designer closing withdraws it. */
+let targetsAsk: TargetsAsk | null = null
+
+const defineTargets = (): Promise<void> => targetsView ??= import('./layout-targets.view.js')
+  .then(m => { if (!customElements.get(TARGETS_SURFACE)) customElements.define(TARGETS_SURFACE, m.LayoutTargetsElement) })
+  .catch(error => { targetsView = null; throw error })
+
+const askTargets = (ask: TargetsAsk | undefined): void => {
+  if (customElements.get(TARGETS_SURFACE) || Math.abs(Date.now() - (ask?.at ?? 0)) > TARGETS_STAMP_MS) return
+  targetsAsk = ask ?? null
+  if (ask?.open !== true) return
+  void defineTargets().then(() => {
+    const last = targetsAsk
+    targetsAsk = null
+    // A SLOW FIRST LOAD. The upgrade replayed the ask, but the window drops
+    // one older than its stamp window as a replay; this one was a hand, so it
+    // is asked again, freshly stamped. Opening twice is a no-op.
+    if (last?.open === true && Date.now() - (last.at ?? 0) > TARGETS_STAMP_MS) {
+      EffectBus.emit(TARGETS_OPEN, { open: true, at: Date.now() })
+    }
+  }, error => {
+    targetsAsk = null
+    EffectBus.emit('toast:show', {
+      type: 'warning',
+      message: `Could not open the targets window: ${error instanceof Error ? error.message : String(error)}`,
+    })
+  })
+}
+
 // THE BEE WIRES (atomic-modules-plan.md): the view is a dependency; this bee
-// defines its element and adds it to the shell's surface registry — never a
-// tag in either app.html.
+// adds its tag to the shell's surface registry — never a tag in either
+// app.html — and defines the element when it is first asked for.
 window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
-  if (!customElements.get(LAYOUT_TARGETS_SURFACE)) customElements.define(LAYOUT_TARGETS_SURFACE, LayoutTargetsElement)
+  EffectBus.on<TargetsAsk>(TARGETS_OPEN, askTargets)
+  // Closing the designer closes the targets window with it, so an ask still
+  // loading when the designer goes is withdrawn rather than opened late.
+  EffectBus.on<{ open?: boolean }>(TEMPLATE_VIEW_STATE, state => { if (state?.open === false) targetsAsk = null })
   try {
-    registry.add({ name: LAYOUT_TARGETS_SURFACE, owner: LAYOUT_TARGETS_VIEW_KEY, element: LAYOUT_TARGETS_SURFACE, order: 138 })
+    registry.add({ name: TARGETS_SURFACE, owner: TARGETS_OWNER, element: TARGETS_SURFACE, order: 138 })
   } catch {
     // duplicate add (hot reload) — the mounted surface is already live
   }

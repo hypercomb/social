@@ -35,7 +35,6 @@
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import { AgentRegistry, type Agent } from './agent-registry.service.js'
-import { AgentPanelView } from './agent-panel.view.js'
 import { agentTilesRailFactory } from './agent-tiles-rail.js'
 import { drainBlurbs } from './chat-blurb.js'
 import { drainRouteFlows } from './chat-route.js'
@@ -747,8 +746,49 @@ export class OrchestratorDrone extends Drone {
 // shows it and the rail factory the shell's windows ask for. The registry
 // first — the panel reads it when it is made.
 window.ioc.register('@diamondcoreprocessor.com/AgentRegistry', new AgentRegistry())
-window.ioc.register('@diamondcoreprocessor.com/AgentPanelView', new AgentPanelView())
 window.ioc.register('@diamondcoreprocessor.com/AgentTilesRailFactory', agentTilesRailFactory)
+
+// THE PANEL ARRIVES WITH ITS FIRST OPEN, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"): nothing needs its code until a bee is pressed, so
+// it loads then, once. It subscribes as it is made and the bus replays the
+// last `agent:close` — an old one, which finds nothing open — then the last
+// `agent:open`. A close heard AFTER the newest open while it loaded is said
+// once more once it is made, so a press closed again while it loaded stays
+// closed, and an open after that close stays open. The key is spelled here:
+// importing even a constant from the view would keep it on boot.
+const AGENT_PANEL_KEY = '@diamondcoreprocessor.com/AgentPanelView'
+let agentPanel: Promise<void> | null = null
+let agentPanelBuilt = false
+/** While it loads: the close heard after the newest open, if there was one. */
+let agentPanelClose: { payload: unknown } | null = null
+
+EffectBus.on('agent:open', () => {
+  if (agentPanelBuilt) return
+  agentPanelClose = null
+  agentPanel ??= import('./agent-panel.view.js').then(({ AgentPanelView }) => {
+    // BUILT ONCE, even when making it throws: it subscribes before its replay
+    // opens it, so a second one would answer every later press twice.
+    agentPanelBuilt = true
+    const close = agentPanelClose
+    agentPanelClose = null
+    try {
+      window.ioc.register(AGENT_PANEL_KEY, new AgentPanelView())
+    } catch (error) {
+      console.error('[orchestrator] the agent panel could not be made', error)
+      return
+    }
+    if (close) EffectBus.emit('agent:close', close.payload)
+  }, (error: unknown) => {
+    // A failed load says so, and the next press tries again.
+    agentPanel = null
+    agentPanelClose = null
+    EffectBus.emit('activity:log', { message: `Could not load the agent panel: ${error instanceof Error ? error.message : String(error)}` })
+  })
+})
+EffectBus.on('agent:close', payload => {
+  if (agentPanelBuilt || !agentPanel) return
+  agentPanelClose = { payload }
+})
 
 const _orchestrator = new OrchestratorDrone()
 window.ioc.register('@diamondcoreprocessor.com/OrchestratorDrone', _orchestrator)

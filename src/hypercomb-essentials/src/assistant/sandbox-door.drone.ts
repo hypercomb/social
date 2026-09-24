@@ -12,8 +12,9 @@
 //
 // It is also the bee that WIRES this feature's surface: the what-changed
 // panel (sandbox-change.view.ts), which `module changes <change>` opens over
-// any hive. The view only exports its element; defining it and adding it to
-// the ShellSurfaceRegistry is this bee's act.
+// any hive. The view only exports its element; adding its tag to the
+// ShellSurfaceRegistry, and defining it when a request first asks for it, is
+// this bee's act.
 //
 // And it finishes a TAKE (`module take`): a trial picked by hand waits in the
 // brood, and a bundle held there is not composed. When a hand accepts code in
@@ -22,7 +23,16 @@
 
 import { Drone, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, sandboxDoorOf, type I18nProvider } from '@hypercomb/core'
 import { isSandboxSite, tallyAssessments } from './module-review.js'
-import { SANDBOX_CHANGE_OWNER, SANDBOX_CHANGE_SURFACE, SandboxChangeElement } from './sandbox-change.view.js'
+import type { SandboxChangePayload } from './sandbox-change.view.js'
+
+// THE PANEL'S NAMES, spelled here: importing even a constant from the view
+// would keep it on the boot path. sandbox-change.view.ts spells the same, and
+// sandbox-door.spec.ts holds the two together.
+const SANDBOX_CHANGE_SURFACE = 'hc-sandbox-change'
+const SANDBOX_CHANGE_OWNER = '@diamondcoreprocessor.com/SandboxChangeView'
+const SANDBOX_CHANGE_EFFECT = 'module:changes'
+/** The panel takes no request older than this (its own replay guard). */
+const CHANGES_STAMP_MS = 4_000
 
 export class SandboxDoorDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -31,8 +41,8 @@ export class SandboxDoorDrone extends Drone {
   public override description =
     'On a sandbox door (try-<change>.<zone>), says once whose change this hive runs, how the host AI read it, and how people assessed it.'
 
-  protected override listens: string[] = ['brood:ruled']
-  protected override emits: string[] = ['module:door', 'toast:show']
+  protected override listens: string[] = ['brood:ruled', SANDBOX_CHANGE_EFFECT]
+  protected override emits: string[] = ['module:door', 'toast:show', SANDBOX_CHANGE_EFFECT]
 
   #done = false
 
@@ -74,13 +84,39 @@ window.ioc.register('@diamondcoreprocessor.com/SandboxDoorDrone', _door)
 
 ;(window as { ioc?: { whenReady?: (k: string, cb: (v: { add(s: unknown): void }) => void) => void } })
   .ioc?.whenReady?.('@hypercomb.social/ShellSurfaceRegistry', registry => {
-    if (!customElements.get(SANDBOX_CHANGE_SURFACE)) customElements.define(SANDBOX_CHANGE_SURFACE, SandboxChangeElement)
     try {
       registry.add({ name: SANDBOX_CHANGE_SURFACE, owner: SANDBOX_CHANGE_OWNER, element: SANDBOX_CHANGE_SURFACE, order: 152 })
     } catch {
       // duplicate add (hot reload) — the mounted surface is already live
     }
   })
+
+// THE PANEL ARRIVES WITH ITS FIRST REQUEST, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"): the surface registers only its tag, the shell makes
+// the element from it, and `module changes` defines it here — the element
+// already in the page upgrades in place, subscribes, and takes the request
+// from the bus's replay. A request the load outlived (the panel refuses one
+// older than its stamp window) is said once more, freshly stamped.
+let changePanel: Promise<void> | null = null
+/** The newest request heard while the panel loads. */
+let changeAsked: SandboxChangePayload | null = null
+
+EffectBus.on<SandboxChangePayload>(SANDBOX_CHANGE_EFFECT, payload => {
+  if (customElements.get(SANDBOX_CHANGE_SURFACE)) return
+  if (!payload || Math.abs(Date.now() - (payload.at ?? 0)) > CHANGES_STAMP_MS) return
+  changeAsked = payload
+  changePanel ??= import('./sandbox-change.view.js').then(({ SandboxChangeElement }) => {
+    if (!customElements.get(SANDBOX_CHANGE_SURFACE)) customElements.define(SANDBOX_CHANGE_SURFACE, SandboxChangeElement)
+    const asked = changeAsked
+    changeAsked = null
+    if (asked && Math.abs(Date.now() - asked.at) > CHANGES_STAMP_MS) EffectBus.emit(SANDBOX_CHANGE_EFFECT, { ...asked, at: Date.now() })
+  }).catch((error: unknown) => {
+    // A failed load says so, and the next request tries again.
+    changePanel = null
+    changeAsked = null
+    EffectBus.emit('activity:log', { message: `Could not load the trial's changes panel: ${error instanceof Error ? error.message : String(error)}` })
+  })
+})
 
 /** A ruling older than this is a replay, not a hand. */
 const RULED_STAMP_MS = 4_000

@@ -224,6 +224,35 @@ being the largest). Each is measured and kept only if it pays.
 The boot bytes left exactly as predicted, boot timing held or improved, and
 the game's first open pays nothing measurable for carrying its own code.
 
+- *Step 2: fourteen windows and words (BUILT 2026-09-24).* Each bee keeps
+  its trigger and loads its view with one cached `import()` when it fires:
+  the providers console, agent panel, skills window, trial changes panel,
+  tile editor, tutorial overlay, link-drop card, brood panel, hosts
+  directory, offers, vocabulary find, vocabulary, the website word's archive
+  and list, and layout targets. A view the shell mounts by tag is registered
+  at boot by its tag alone and DEFINED on its first open; the element already
+  in the page upgrades in place and the bus replays the open. What the build
+  audit's second review caught, and each bee now handles: a first load slower
+  than an open's stamp window re-sends the open with a fresh stamp; an IoC key
+  that ignores a second register gets a forwarding face, never a stub then a
+  swap; a burst of offers keeps every notice; a link drop never awaits the
+  card; replayed closes subscribe before the open, so an old close cannot put
+  down the panel a press just opened; a failed load says so and can be tried
+  again.
+
+| Built package, from its layers | Before | After |
+|---|---|---|
+| Boot modules (262 bees + their static atoms) | 681 | **656** (−25) |
+| Boot bytes | 6,307 KB | **5,801 KB** (−506 KB, −8.0%) |
+
+Built from development alone in a clean worktree, both arms. Live on the web
+shell (`inc2-views-live.cjs`, 25/25): none of the moved code is loaded after
+boot, and every window opens on its word or effect (the agent panel is
+covered by its spec: a fresh hive has no agent to open). Still ahead, each
+needing a split first: `nostr-tools` (231 KB, all five importers or none),
+the agent tiles rail, prune, the tutorial lessons, keyword suggestions, the
+image editor.
+
 ### 5. Hive-side drafting follows the atoms
 `module read <sig>` on a dependency atom shows one file (the section IS the
 file now). `module draft` on it mints a new atom sig, the draft layer swaps

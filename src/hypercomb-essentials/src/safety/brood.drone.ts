@@ -3,9 +3,9 @@
 // THE BROOD'S BEE (atomic-modules-plan.md, rule 1: one behaviour per feature;
 // registration is the bee's act). The brood's surface — every held automaton,
 // with Read · Accept · Refuse — is a dependency atom (brood.view.ts) that only
-// exports. This bee defines its element and adds it to the ShellSurfaceRegistry,
-// so `brood:open` — from the `brood` word, or a trial taken by hand whose code
-// is waiting — always has a panel to open.
+// exports. This bee adds its element to the ShellSurfaceRegistry and defines
+// it, so `brood:open` — from the `brood` word, or a trial taken by hand whose
+// code is waiting — always has a panel to open.
 //
 // THE DRAFT AUDIT'S READER. When a draft lands (runtime module-drafts.ts
 // announces `module:drafted`), this bee has the change read
@@ -16,12 +16,28 @@
 
 import { broodRecord, Drone, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { DraftLanded } from './brood-audit.js'
-import { BROOD_OWNER, BROOD_SURFACE, BroodElement } from './brood.view.js'
 
 /** A draft announced longer ago than this is not read on replay. */
 const FRESH_MS = 60_000
 /** A ruling older than this is a replay, not a hand. */
 const RULED_MS = 4_000
+
+// THE PANEL ARRIVES WITH THE FIRST OPEN, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"): the view loads once, when `brood:open` first comes
+// by hand, and the element the shell's surface host already made upgrades in
+// place. This bee then opens it itself — the element's own replay of the open
+// drops a stamp older than four seconds, and a slow first load can outlive
+// that. The tag and owner are written out: importing even a constant from the
+// view would keep it on the boot path.
+const BROOD_SURFACE = 'hc-brood'
+const BROOD_OWNER = '@diamondcoreprocessor.com/BroodView'
+const BROOD_OPEN = 'brood:open'
+/** An open older than this is a replay, not a hand (the view's own window). */
+const OPEN_MS = 4_000
+type BroodView = typeof import('./brood.view.js')
+let viewLoad: Promise<BroodView> | null = null
+const loadView = (): Promise<BroodView> =>
+  viewLoad ??= import('./brood.view.js').catch(error => { viewLoad = null; throw error })
 
 export class BroodDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -29,7 +45,7 @@ export class BroodDrone extends Drone {
   public override description =
     'The brood: puts its surface in the shell, where held code is read, accepted or refused, and reads every draft before it runs.'
 
-  protected override listens = ['module:drafted', 'brood:ruled']
+  protected override listens = ['module:drafted', 'brood:ruled', BROOD_OPEN]
 
   protected override sense = (): boolean => false
 
@@ -37,6 +53,10 @@ export class BroodDrone extends Drone {
 
   constructor() {
     super()
+    this.onEffect<{ at?: number }>(BROOD_OPEN, open => {
+      if (Math.abs(Date.now() - (open?.at ?? 0)) > OPEN_MS) return
+      void this.#open()
+    })
     this.onEffect<DraftLanded & { at?: number }>('module:drafted', draft => {
       if (!draft?.sig || Math.abs(Date.now() - (draft.at ?? 0)) > FRESH_MS) return
       void this.#read(draft)
@@ -49,6 +69,21 @@ export class BroodDrone extends Drone {
       if (ruled?.verdict !== 'accepted' || !ruled.sig || Math.abs(Date.now() - (ruled.at ?? 0)) > RULED_MS) return
       void this.#recompose(ruled.sig)
     })
+  }
+
+  /** Define the panel's element on the first open, then open it — unless it
+   *  has already opened itself from the effect. A panel that cannot load says
+   *  so, and the next open tries again. */
+  async #open(): Promise<void> {
+    let view: BroodView
+    try { view = await loadView() } catch (error) {
+      const reason = error instanceof Error ? error.message : 'it did not load'
+      this.#say(this.#t('brood.notloaded', 'The brood could not open: {reason}.', { reason }), 'warning')
+      return
+    }
+    if (!customElements.get(BROOD_SURFACE)) customElements.define(BROOD_SURFACE, view.BroodElement)
+    const element = document.querySelector(BROOD_SURFACE) as { open?(): void; open$?: boolean } | null
+    if (element && !element.open$) element.open?.()
   }
 
   async #recompose(sig: string): Promise<void> {
@@ -97,8 +132,8 @@ export class BroodDrone extends Drone {
   }
 }
 
+// Added at boot, defined by the first open (#open).
 window.ioc.whenReady<{ add(surface: unknown): void }>('@hypercomb.social/ShellSurfaceRegistry', registry => {
-  if (!customElements.get(BROOD_SURFACE)) customElements.define(BROOD_SURFACE, BroodElement)
   try {
     registry.add({ name: BROOD_SURFACE, owner: BROOD_OWNER, element: BROOD_SURFACE, order: 150 })
   } catch {

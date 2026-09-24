@@ -7,8 +7,37 @@ import { parseHexColour } from './hex-capture.js'
 import { editorSurface } from './editor-surface.js'
 import { TileEditorService } from './tile-editor.service.js'
 import { ImageEditorService } from './image-editor.service.js'
-import { TILE_EDITOR_VIEW_KEY, TileEditorElement, tileEditorViewFacade } from './tile-editor.view.js'
-import { TILE_EDITOR_SURFACE } from './tile-editor.styles.js'
+
+// THE PANEL ARRIVES WITH THE FIRST EDIT, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"): the view, its styles, the crop stage and the tile
+// look load once, when a tile is first opened, and the element the shell's
+// surface host already made upgrades in place — it reads the session from the
+// service as it connects. The tag and the view's IoC key are written out here:
+// importing even a constant from the view would keep it on the boot path.
+const TILE_EDITOR_SURFACE = 'hc-tile-editor'
+const TILE_EDITOR_VIEW_KEY = '@diamondcoreprocessor.com/TileEditorView'
+type TileEditorView = typeof import('./tile-editor.view.js')
+let viewLoad: Promise<TileEditorView> | null = null
+let view: TileEditorView | null = null
+/** Whether this bee presents the editor: null until the shell's registry
+ *  answers, false on an older shell that still carries the Angular editor. */
+let presents: boolean | null = null
+
+/** Define the element once the view is here AND the shell has left the editor
+ *  to this bee — guarded, so a second load never defines it twice. */
+const defineView = (): void => {
+  if (presents && view && !customElements.get(TILE_EDITOR_SURFACE)) customElements.define(TILE_EDITOR_SURFACE, view.TileEditorElement)
+}
+const loadView = (): Promise<TileEditorView> => viewLoad ??= import('./tile-editor.view.js')
+  .then(module => { view = module; defineView(); return module })
+  .catch(error => { viewLoad = null; throw error })
+
+/** The view's IoC face before the view is here. The IoC map keeps the first
+ *  object registered under a key, so this one FORWARDS for good: until the
+ *  first edit nothing is mounted, and there is nothing to unwind. */
+const viewFacade = {
+  dismissInner(): boolean { return view?.tileEditorViewFacade.dismissInner() ?? false },
+}
 
 // SVG markup for the pencil "edit" icon. Owned by this drone so that
 // when the editor is toggled off in DCP the icon never reaches the
@@ -117,6 +146,8 @@ export class TileEditorDrone {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
+    // The panel loads beside the reads below; nothing opens until it is here.
+    const viewReady = this.#viewReady()
 
     // A tile opened while another is being edited (a drop, a paste, the phone
     // bar's camera, a click on another tile): keep that draft before this one
@@ -196,7 +227,9 @@ export class TileEditorDrone {
 
     // 3. open — the picture model first, so the view mounts onto the right
     //    orientation, then the session, then the tile's own picture with the
-    //    framings it was saved at.
+    //    framings it was saved at. A panel that could not load opens nothing:
+    //    an editing session with no panel would lock the hive behind it.
+    if (!(await viewReady)) return
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
     imageEditor?.reset?.(hiveOrientation())
     service.open(targetCell, properties, largeBlob, target.segments, editorSurface())
@@ -205,6 +238,21 @@ export class TileEditorDrone {
         point: (properties as any).large,
         flat: (properties as any).flat?.large,
       })
+    }
+  }
+
+  /** True once the panel can present the session — at once on an older shell,
+   *  whose Angular editor needs nothing loaded. A panel that did not load says
+   *  so, and the next edit tries again. */
+  async #viewReady(): Promise<boolean> {
+    if (presents === false) return true
+    try {
+      await loadView()
+      return true
+    } catch (error) {
+      console.warn('[tile-editor] the editor did not load', error)
+      EffectBus.emit('toast:show', { type: 'warning', message: t('editor.load-failed', 'The tile editor could not load — try again.') })
+      return false
     }
   }
 
@@ -375,14 +423,15 @@ export class TileEditorDrone {
 // its owner bee registers it.
 window.ioc.register('@diamondcoreprocessor.com/TileEditorService', new TileEditorService())
 window.ioc.register('@diamondcoreprocessor.com/ImageEditorService', new ImageEditorService())
-window.ioc.register(TILE_EDITOR_VIEW_KEY, tileEditorViewFacade)
-// The view's surface: defined here and added to the registry — never a tag in
-// either app.html, never an Angular class.
+window.ioc.register(TILE_EDITOR_VIEW_KEY, viewFacade)
+// The view's surface: added to the registry here — never a tag in either
+// app.html, never an Angular class — and defined by the first edit.
 window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void; all?(): { name: string; component?: unknown }[] }) => {
   // An older shell still carrying the Angular editor keeps it: two
   // presenters for one session would fight over the same picture.
-  if (registry.all?.().some(surface => surface.name === TILE_EDITOR_SURFACE && surface.component)) return
-  if (!customElements.get(TILE_EDITOR_SURFACE)) customElements.define(TILE_EDITOR_SURFACE, TileEditorElement)
+  presents = !registry.all?.().some(surface => surface.name === TILE_EDITOR_SURFACE && surface.component)
+  if (!presents) return
+  defineView() // an edit that came before the registry has the view already
   try {
     registry.add({ name: TILE_EDITOR_SURFACE, owner: TILE_EDITOR_VIEW_KEY, element: TILE_EDITOR_SURFACE, order: 220 })
   } catch {

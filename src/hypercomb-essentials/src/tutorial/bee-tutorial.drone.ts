@@ -26,7 +26,7 @@ import { readTutorialRecord, writeTutorialRecord, clearTutorialRecord, tutorialP
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../presentation/grid/hex-geometry.js'
 import { storeImageResources, type ImageResources } from '../editor/arm-resource.js'
-import { BeeTutorialOverlayElement, OVERLAY_SURFACE_NAME, onOverlayMounted, type SayResult } from './tutorial-overlay.view.js'
+import type { BeeTutorialOverlayElement, SayResult } from './tutorial-overlay.view.js'
 import {
   tutorialLessons, courseMeaning, courseSignature,
   type TutorialLesson, type TutorialLevel,
@@ -47,6 +47,18 @@ type NavigationApi = { goRaw(segments: readonly string[]): void; segmentsRaw?():
 type SelectionApi = { add(label: string): void; clear(): void; count: number }
 
 const OVERLAY_KEY = '@diamondcoreprocessor.com/BeeTutorialOverlay'
+
+// THE OVERLAY ARRIVES WITH THE FIRST TOUR, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"): the bee, its bubble and its flight load once, when
+// a tour starts. The element the shell's surface host already made upgrades in
+// place and announces itself, and this bee registers it. The tag is written out
+// here: importing even a constant from the view would keep it on the boot path.
+const OVERLAY_SURFACE = 'hc-bee-tutorial'
+let overlayLoad: Promise<void> | null = null
+const loadOverlay = (): Promise<void> => overlayLoad ??= import('./tutorial-overlay.view.js').then(view => {
+  if (!customElements.get(OVERLAY_SURFACE)) customElements.define(OVERLAY_SURFACE, view.BeeTutorialOverlayElement)
+  view.onOverlayMounted(overlay => { if (!window.ioc.get(OVERLAY_KEY)) window.ioc.register(OVERLAY_KEY, overlay) })
+}).catch(error => { overlayLoad = null; throw error })
 
 class TutorialAborted extends Error {
   constructor() { super('tutorial aborted') }
@@ -78,7 +90,7 @@ export class BeeTutorialDrone extends Drone {
   ]
   protected override emits = [
     'search:prefill', 'command-line:remote-submit', 'cell:attach-resource',
-    'keymap:invoke', 'mobile:input-visible', 'tile:action',
+    'keymap:invoke', 'mobile:input-visible', 'tile:action', 'toast:show',
     // What is in the air, and what finished — the two facts a roster needs to
     // offer a Stop and a Continue (see the tutorials window).
     'tutorial:flying', 'tutorial:flown',
@@ -157,20 +169,33 @@ export class BeeTutorialDrone extends Drone {
 
   async #run(request: TutorialRequest): Promise<void> {
     if (this.#running) return
-    const overlay = await this.#awaitOverlay()
-    if (!overlay) {
-      console.warn('[tutorial] overlay surface unavailable — is the shell-surfaces host mounted?')
-      return
-    }
-
-    const { level, lessons } = this.#resolveLessons(request)
-    if (lessons.length === 0) {
-      console.warn('[tutorial] no lessons available for', request)
-      return
-    }
-
+    // HELD FROM THE FIRST AWAIT. The overlay may still be loading, and a second
+    // start in that gap would drive one overlay from two courses; a stop in it
+    // means the tour never starts.
     this.#running = true
     this.#cancelled = false
+    const overlay = await this.#awaitOverlay()
+    if (!overlay || this.#cancelled) {
+      if (!overlay) console.warn('[tutorial] overlay surface unavailable — is the shell-surfaces host mounted?')
+      this.#running = false
+      return
+    }
+
+    // A LESSON THAT THROWS COSTS ONE START. Any module can register a lesson,
+    // and its requires() runs here; the guard is released so the next start runs.
+    let resolved: { level: TutorialLevel; lessons: TutorialLesson[] }
+    try { resolved = this.#resolveLessons(request) } catch (error) {
+      console.warn('[tutorial] lessons unavailable', error)
+      this.#running = false
+      return
+    }
+    const { level, lessons } = resolved
+    if (lessons.length === 0) {
+      console.warn('[tutorial] no lessons available for', request)
+      this.#running = false
+      return
+    }
+
     this.#coverSigs = []
     this.#level = level
     // WHAT IS IN THE AIR, SAID OUT LOUD. A tour used to be invisible to every
@@ -206,9 +231,18 @@ export class BeeTutorialDrone extends Drone {
     }
   }
 
-  #awaitOverlay(): Promise<BeeTutorialOverlayElement | undefined> {
+  async #awaitOverlay(): Promise<BeeTutorialOverlayElement | undefined> {
     const now = this.#overlay()
-    if (now) return Promise.resolve(now)
+    if (now) return now
+    // The load first: the three seconds below wait for the MOUNT, never the
+    // fetch. A load that fails says so, and the next start tries again.
+    try { await loadOverlay() } catch (error) {
+      console.warn('[tutorial] the overlay did not load', error)
+      this.emitEffect('toast:show', { type: 'warning', message: this.#t('tutorial.load-failed', 'The tour could not load — try again.') })
+      return undefined
+    }
+    const mounted = this.#overlay()
+    if (mounted) return mounted
     return new Promise(resolve => {
       const timer = setTimeout(() => resolve(this.#overlay()), 3000)
       window.ioc.whenReady?.(OVERLAY_KEY, (el: BeeTutorialOverlayElement) => {
@@ -873,17 +907,16 @@ export class BeeTutorialDrone extends Drone {
 window.ioc.register('@diamondcoreprocessor.com/TutorialLessonRegistry', tutorialLessons)
 for (const lesson of [...STARTER_LESSONS, ...BEGINNER_LESSONS, ...INTERMEDIATE_LESSONS, ...EXPERT_LESSONS]) tutorialLessons.register(lesson)
 
-// The overlay: defined here, added to the shell's surface registry — never a
-// tag in either app.html — and registered once the surface host mounts it.
-if (!customElements.get(OVERLAY_SURFACE_NAME)) customElements.define(OVERLAY_SURFACE_NAME, BeeTutorialOverlayElement)
+// The overlay: added to the shell's surface registry here — never a tag in
+// either app.html — then defined by the first tour, and registered once the
+// element it upgrades announces itself (loadOverlay).
 window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
   try {
-    registry.add({ name: OVERLAY_SURFACE_NAME, owner: '@diamondcoreprocessor.com/BeeTutorialDrone', element: OVERLAY_SURFACE_NAME, order: 900 })
+    registry.add({ name: OVERLAY_SURFACE, owner: '@diamondcoreprocessor.com/BeeTutorialDrone', element: OVERLAY_SURFACE, order: 900 })
   } catch {
     // duplicate add (hot reload) — the mounted surface is already live
   }
 })
-onOverlayMounted(overlay => { if (!window.ioc.get(OVERLAY_KEY)) window.ioc.register(OVERLAY_KEY, overlay) })
 
 const _beeTutorial = new BeeTutorialDrone()
 window.ioc.register('@diamondcoreprocessor.com/BeeTutorialDrone', _beeTutorial)

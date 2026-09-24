@@ -22,7 +22,6 @@ import { compactBreaks, listBreaks, updateIssue } from './breaks.js'
 import { readPublicBranches } from '../presentation/tiles/tile-public.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
 import { bridgeMaySetRootKey, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
-import { SkillsWindowView } from './skills-window.view.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -2258,7 +2257,40 @@ const bytesToBase64 = (bytes: Uint8Array): string => {
 // its "use" lands a request on the bridge, which imports that one skill.
 type SlashRegistrar = { addProvider?: (provider: unknown) => void }
 
-window.ioc.register('@diamondcoreprocessor.com/SkillsWindowView', new SkillsWindowView())
+// THE WINDOW ARRIVES WITH ITS FIRST OPEN, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"): nothing needs its code until `/skills` asks, so it
+// loads then, once. The view subscribes to `skills:open` as it is made and the
+// bus replays the press that loaded it, so the first press opens it like every
+// later one. The key is spelled here: importing even a constant from the view
+// would keep it on boot.
+const SKILLS_WINDOW_KEY = '@diamondcoreprocessor.com/SkillsWindowView'
+let skillsWindow: Promise<void> | null = null
+let skillsBuilt = false
+/** Presses heard while the window loads. The replay plays only the last, and
+ *  every press toggles — so an even count ends closed. */
+let skillsPresses = 0
+
+EffectBus.on('skills:open', () => {
+  if (skillsBuilt) return
+  skillsPresses++
+  skillsWindow ??= import('./skills-window.view.js').then(({ SkillsWindowView }) => {
+    // BUILT ONCE, even when making it throws: it subscribes before its replay
+    // opens it, so a second one would answer every later press twice.
+    skillsBuilt = true
+    try {
+      const view = new SkillsWindowView()
+      window.ioc.register(SKILLS_WINDOW_KEY, view)
+      if (skillsPresses % 2 === 0) view.close()
+    } catch (error) {
+      console.error('[claude-bridge] the skills window could not be made', error)
+    }
+  }, (error: unknown) => {
+    // A failed load says so, and the next press tries again.
+    skillsWindow = null
+    skillsPresses = 0
+    EffectBus.emit('activity:log', { message: `Could not load the skills window: ${error instanceof Error ? error.message : String(error)}` })
+  })
+})
 
 window.ioc.whenReady?.('@diamondcoreprocessor.com/SlashBehaviourDrone', (drone: SlashRegistrar) => {
   drone.addProvider?.({

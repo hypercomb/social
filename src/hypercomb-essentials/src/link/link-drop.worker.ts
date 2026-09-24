@@ -8,7 +8,6 @@ import { fetchImageBlob, isImageUrl } from './photo.js'
 import { normalizeLink } from './normalize.js'
 import { defaultNameForLink } from './link-name.js'
 import { byDeadline, CARD_DEADLINE_MS, PICTURE_DEADLINE_MS, SAFETY_DEADLINE_MS } from './deadline.js'
-import { verifyLinkDropCard } from './link-drop-card.view.js'
 import type { TileEditorService } from '../editor/tile-editor.service.js'
 import type { ImageEditorService } from '../editor/image-editor.service.js'
 import { LinkSafetyService, type SafetyVerdict } from '../safety/link-safety.service.js'
@@ -31,6 +30,14 @@ import {
 } from '../editor/tile-properties.js'
 
 const NO_OPEN_GRAPH: YouTubeOpenGraph = { title: null, thumbnailUrl: null }
+
+// THE CARD ARRIVES WITH THE FIRST DROP, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"). It only reports, so the drop never waits for it:
+// a card that cannot load costs the card, never the drop.
+type LinkDropCardView = typeof import('./link-drop-card.view.js')
+let cardLoad: Promise<LinkDropCardView> | null = null
+const loadCard = (): Promise<LinkDropCardView> =>
+  cardLoad ??= import('./link-drop-card.view.js').catch(error => { cardLoad = null; throw error })
 
 type TileOverlay = {
   labelAtClient(clientX: number, clientY: number): string | null
@@ -239,15 +246,19 @@ export class LinkDropWorker extends Worker {
         : NO_OPEN_GRAPH
 
       // Show what the drop actually READ, right where the participant is
-      // looking. Reporting only — the gesture carries on behind it.
-      verifyLinkDropCard({
+      // looking. Reporting only — the gesture carries on behind it, and never
+      // waits for the card's own code to arrive.
+      const card = {
         url,
         title: openGraph.title,
         imageUrl: openGraph.thumbnailUrl,
         destination: destination.kind === 'tile'
-          ? { kind: 'tile', label: destination.label }
-          : { kind: 'create' },
-      })
+          ? { kind: 'tile' as const, label: destination.label }
+          : { kind: 'create' as const },
+      }
+      void loadCard()
+        .then(view => view.verifyLinkDropCard(card))
+        .catch(error => console.warn('[link-drop] the card did not show:', error))
 
       // A drop on an existing tile is a complete edit gesture: persist the
       // link immediately. Requiring an unrelated editor Save left the field

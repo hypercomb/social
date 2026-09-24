@@ -23,6 +23,11 @@ vi.hoisted(() => {
 })
 
 vi.mock('./format-painter.view.js', () => ({}))
+// The bee loads its view before a session opens; this spec never mounts it.
+vi.mock('./tile-editor.view.js', () => ({
+  TileEditorElement: class extends HTMLElement {},
+  tileEditorViewFacade: { dismissInner: () => false },
+}))
 vi.mock('./tile-properties.js', () => ({
   TILE_PROPERTIES_FILE: '0000',
   readTilePropertiesAt: tileProperties.read,

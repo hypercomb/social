@@ -39,9 +39,38 @@ import {
 import { updateScout } from './update-scout.service.js'
 import { ATTESTATION_IOC_KEY } from '@hypercomb/core'
 import { packageAttestation } from './package-attestation.js'
-import { HOST_DIRECTORY_SURFACE, HOST_DIRECTORY_VIEW_KEY, HostDirectoryElement, hostDirectoryFacade } from './host-directory.view.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
+
+// THE DIRECTORY ARRIVES WITH ITS OPEN, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"). The view is 60 KB nothing needs until the window
+// is asked for, so its surface registers by TAG at boot — the shell's host
+// makes it with createElement — and the element is defined from one cached
+// import() when the window is asked for. The element already in the page
+// then upgrades in place, subscribes, and the bus replays what it missed:
+// `hosts:render` is state (open or not), never a stamp, so a slow first load
+// cannot outlive the ask. The tag and the key are spelled here because
+// importing even a const from the view would keep it on the boot path.
+const HOST_DIRECTORY_SURFACE = 'hc-host-directory'
+const HOST_DIRECTORY_VIEW_KEY = '@diamondcoreprocessor.com/HostDirectoryView'
+/** Where the directory was when a change restarted the app. The view reads
+ *  and clears it; this bee only asks whether it is there, and loads. */
+const REOPEN_KEY = 'hc:hosts:reopen'
+
+type HostDirectoryView = typeof import('./host-directory.view.js')
+let directory: Promise<HostDirectoryView> | null = null
+/** The view once it is here, for the IoC face to forward to. */
+let directoryView: HostDirectoryView | null = null
+const loadDirectory = (): Promise<HostDirectoryView> => directory ??= import('./host-directory.view.js').then(view => {
+  const { HostDirectoryElement } = view
+  if (!customElements.get(HOST_DIRECTORY_SURFACE)) customElements.define(HOST_DIRECTORY_SURFACE, HostDirectoryElement)
+  directoryView = view
+  return view
+}).catch(error => { directory = null; throw error })
+
+const reopening = (): boolean => {
+  try { return !!sessionStorage.getItem(REOPEN_KEY) } catch { return false }
+}
 
 /**
  * THE HOST A COLD CLIENT ALREADY KNOWS.
@@ -86,7 +115,7 @@ export class HostsDrone extends Drone {
     'The hosts you carry, as their own surface: the `community:hosts` pool read as a list, with add and remove. The data set the publish picker offers and the shim reads by pool address on a cold boot.'
 
   protected override listens: string[] = [
-    'hosts:view-toggle', 'hosts:open', 'hosts:close', 'hosts:refresh', 'hosts:add', 'hosts:remove',
+    'hosts:view-toggle', 'hosts:open', 'hosts:close', 'hosts:refresh', 'hosts:add', 'hosts:remove', 'packages:open',
   ]
   protected override emits: string[] = ['hosts:render', 'activity:log']
 
@@ -109,7 +138,7 @@ export class HostsDrone extends Drone {
       // closed read alike, which is exactly what the participant means.
       this.#open = !isWindowShowing('hosts-panel')
       this.#emit()
-      if (this.#open) void this.#read()
+      if (this.#open) { this.#loadView(); void this.#read() }
     })
 
     // Cross-surface navigation is an OPEN, never a toggle. A docked panel can
@@ -118,8 +147,21 @@ export class HostsDrone extends Drone {
     this.onEffect('hosts:open', () => {
       this.#open = true
       this.#emit()
+      this.#loadView()
       void this.#read()
     })
+
+    // THE UPDATE DOOR. `packages:open` (the shell's pill, /upgrade, every
+    // "packages on this host" door) is answered by the view, which scopes its
+    // list and asks for `hosts:open`; it loads with the door, and the bus
+    // replays the door to it. This listener stays for good: the shell's floor
+    // asks the bus whether anything answers the door (package-floor.ts), and a
+    // package whose door goes unanswered is moved as too old to update itself.
+    this.onEffect('packages:open', () => this.#loadView())
+
+    // Back where a change restarted the app from: the view reopens itself
+    // from the note it left, once its code is here to read it.
+    if (reopening()) this.#loadView()
 
     this.onEffect('hosts:close', () => {
       if (!this.#open) return
@@ -175,6 +217,20 @@ export class HostsDrone extends Drone {
     try {
       window.ioc?.whenReady?.(STORE_KEY, () => { void this.#read() })
     } catch { /* no ioc yet — the eager read and the panel's open still cover it */ }
+  }
+
+  /** Fetch the directory's code once; the replayed `hosts:render` shows it.
+   *  A failed load says so and reads as closed, and the next ask tries again. */
+  #loadView(): void {
+    const starting = !directory
+    const loading = loadDirectory()
+    if (!starting) return
+    loading.catch(error => {
+      this.emitEffect('activity:log', { message: `Could not load the host directory: ${error instanceof Error ? error.message : String(error)}` })
+      if (!this.#open) return
+      this.#open = false
+      this.#emit()
+    })
   }
 
   async #read(): Promise<void> {
@@ -240,13 +296,16 @@ export class HostsDrone extends Drone {
 window.ioc.register('@diamondcoreprocessor.com/UpdateScoutService', updateScout)
 window.ioc.register(ATTESTATION_IOC_KEY, packageAttestation)
 
-// The host directory's IoC face and surface (atomic-modules-plan.md).
-window.ioc.register(HOST_DIRECTORY_VIEW_KEY, hostDirectoryFacade)
+// The host directory's IoC face (atomic-modules-plan.md), registered ONCE and
+// forwarding: a key keeps its first value, so a stand-in swapped for the real
+// face after the load would answer "closed" for good.
+window.ioc.register(HOST_DIRECTORY_VIEW_KEY, {
+  get open(): boolean { return directoryView?.hostDirectoryFacade.open ?? false },
+})
 // THE BEE WIRES (atomic-modules-plan.md): the view is a dependency; this bee
-// defines its element and adds it to the shell's surface registry — never a
-// tag in either app.html.
+// adds its tag to the shell's surface registry — never a tag in either
+// app.html — and defines the element when the window is first asked for.
 window.ioc.whenReady('@hypercomb.social/ShellSurfaceRegistry', (registry: { add(s: unknown): void }) => {
-  if (!customElements.get(HOST_DIRECTORY_SURFACE)) customElements.define(HOST_DIRECTORY_SURFACE, HostDirectoryElement)
   try {
     registry.add({ name: HOST_DIRECTORY_SURFACE, owner: HOST_DIRECTORY_VIEW_KEY, element: HOST_DIRECTORY_SURFACE, order: 144 })
   } catch {

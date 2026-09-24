@@ -127,6 +127,37 @@ export class AgentPanelView extends EventTarget {
 
   constructor() {
     super()
+    // Joining a swarm takes LOCAL agents out of sight (agent-bee.drone.ts):
+    // their bees fade out, so a report left open would be a report on an
+    // agent with nothing behind it — and, once closed, no bee left to reopen
+    // it from. An agent that belongs to the swarm is a different matter: its
+    // bee keeps flying, so its panel stays up.
+    //
+    // Subscribed BEFORE `agent:open`: the panel is made on its first open
+    // (orchestrator.drone.ts) and the bus replays both, so a swarm joined long
+    // before must not put down the panel that very press just opened.
+    EffectBus.on<{ public?: boolean }>('mesh:public-changed', payload => {
+      if (payload?.public !== true || !this.#panel) return
+      const agent = this.#subject()
+      if ((agent?.origin ?? 'local') === 'local') this.close()
+    })
+    // Closed from outside — pressing a perched bee a second time puts its
+    // panel down the same way its × would.
+    //
+    // `#returnTo` counts as well: stepping out of the orchestrator's gathered
+    // view into one agent's log is a TRIP, and putting the view down ends the
+    // trip. Left open, that log would still be offering "‹ Back to the
+    // orchestrator" after the orchestrator had unperched and its view had
+    // cleared — a way back to somewhere that is no longer there.
+    //
+    // Subscribed BEFORE `agent:open` too: the replayed close is an OLD one (a
+    // press before a failed load, say) and finds nothing open. A close heard
+    // after the open while the panel loaded is said again once it is made
+    // (orchestrator.drone.ts).
+    EffectBus.on<{ id?: string }>('agent:close', payload => {
+      const id = String(payload?.id ?? '')
+      if (id && (this.#id === id || this.#returnTo === id)) this.close()
+    })
     EffectBus.on<{ id?: string; from?: string }>('agent:open', payload => {
       const id = String(payload?.id ?? '')
       if (!id) return
@@ -155,28 +186,6 @@ export class AgentPanelView extends EventTarget {
     // Turning into a phone (`/mobile on`, a rotate) puts an open panel down.
     EffectBus.on<{ active?: boolean }>(MOBILE_MODE_EFFECT, payload => {
       if (payload?.active === true && this.#panel) this.close()
-    })
-    // Closed from outside — pressing a perched bee a second time puts its
-    // panel down the same way its × would.
-    //
-    // `#returnTo` counts as well: stepping out of the orchestrator's gathered
-    // view into one agent's log is a TRIP, and putting the view down ends the
-    // trip. Left open, that log would still be offering "‹ Back to the
-    // orchestrator" after the orchestrator had unperched and its view had
-    // cleared — a way back to somewhere that is no longer there.
-    EffectBus.on<{ id?: string }>('agent:close', payload => {
-      const id = String(payload?.id ?? '')
-      if (id && (this.#id === id || this.#returnTo === id)) this.close()
-    })
-    // Joining a swarm takes LOCAL agents out of sight (agent-bee.drone.ts):
-    // their bees fade out, so a report left open would be a report on an
-    // agent with nothing behind it — and, once closed, no bee left to reopen
-    // it from. An agent that belongs to the swarm is a different matter: its
-    // bee keeps flying, so its panel stays up.
-    EffectBus.on<{ public?: boolean }>('mesh:public-changed', payload => {
-      if (payload?.public !== true || !this.#panel) return
-      const agent = this.#subject()
-      if ((agent?.origin ?? 'local') === 'local') this.close()
     })
     // The report is live. Findings clear on their own when work recovers, and
     // the orchestrator's running commentary lands on its own clock — neither

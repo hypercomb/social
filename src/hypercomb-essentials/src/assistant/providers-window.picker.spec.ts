@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { EffectBus } from '@hypercomb/core'
 
 // Drives the REAL providers console in the test DOM through the flow Jaime
 // asked for: search a brand, then its models; each pick lands as one line
@@ -44,12 +45,14 @@ let choice: { chosen(id: string): string | undefined; saved(id: string): readonl
 
 beforeAll(async () => {
   localStorage.clear()
-  await import('./llm.drone.js')   // the llm bee registers the console and the roster (atomic-modules-plan.md)
+  await import('./llm.drone.js')   // the llm bee registers the roster (atomic-modules-plan.md)
   choice = (await import('./llm-model-choice.js')).llmModelChoice
   // Wide stages for the flow tests; the cap has its own test below.
   ;(await import('./providers/openrouter-stages.js')).openRouterStages.set({ fast: 1, balanced: 5, deep: 20 })
-  const view = services.get('@diamondcoreprocessor.com/ProvidersWindowView') as { open(): void }
-  view.open()
+  // The console arrives with its first open: the words' door loads it, and
+  // the bus's replay of that press opens it.
+  EffectBus.emit('providers:open', {})
+  await vi.waitFor(() => expect($('.hc-providers')).not.toBeNull(), { timeout: 10_000 })
   $$<HTMLElement>('.hc-providers-tab').find(t => t.textContent?.startsWith('API'))?.click()
 })
 

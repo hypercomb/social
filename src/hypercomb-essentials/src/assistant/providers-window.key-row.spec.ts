@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, it } from 'vitest'
-import { llmKeyStore } from '@hypercomb/core'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { EffectBus, llmKeyStore } from '@hypercomb/core'
 
 // Renders the REAL providers console in the test DOM — no build, no running
 // app — to prove the key line folds into the key icon once a key is saved,
@@ -27,9 +27,11 @@ const button = (scope: string, text: string): HTMLButtonElement =>
 
 beforeAll(async () => {
   localStorage.clear()
-  await import('./llm.drone.js')   // the llm bee registers the console and the roster (atomic-modules-plan.md)
-  const view = services.get('@diamondcoreprocessor.com/ProvidersWindowView') as { open(): void }
-  view.open()
+  await import('./llm.drone.js')   // the llm bee registers the roster (atomic-modules-plan.md)
+  // The console arrives with its first open: the words' door loads it, and
+  // the bus's replay of that press opens it.
+  EffectBus.emit('providers:open', {})
+  await vi.waitFor(() => expect($('.hc-providers')).not.toBeNull(), { timeout: 10_000 })
   ;[...document.querySelectorAll<HTMLElement>('.hc-providers-tab')].find(t => t.textContent?.startsWith('API'))?.click()
   openRouterOpen()
 })

@@ -42,6 +42,8 @@ describe('/offers — the handle', () => {
     expect(emitted).toHaveLength(1)
     expect(emitted[0]?.effect).toBe(OFFERS_OPEN)
     expect(Object.keys(emitted[0]?.payload as object)).toEqual(['at'])
+    // The word brought the window's code with it (atomic-modules-plan.md).
+    expect(customElements.get('hc-offers')).toBe(OffersElement)
   })
 
   it('carries NO machine grammar and NO alias', () => {
@@ -55,7 +57,10 @@ describe('/offers — the handle', () => {
     const src = readFileSync(join(process.cwd(), 'hypercomb-essentials', 'src', 'sharing', 'offers.queen.ts'), 'utf8')
     const code = src.split(/\r?\n/).filter(line => !line.trimStart().startsWith('//')).join('\n')
     expect(code.includes('placeOffers')).toBe(false)
-    expect(code.includes('published-pools')).toBe(false)
+    // It may NAME the probe's word ('published-pools:offered'); it never imports it.
+    // Any specifier ending in the module — `from`, `import()` or a bare side-effect
+    // import — fails; the effect word does not, since a colon follows it, not a quote.
+    expect(code).not.toMatch(/['"][^'"]*published-pools(?:\.js)?['"]/)
   })
 })
 
@@ -99,8 +104,10 @@ describe('the window', () => {
     return { io, log }
   }
 
+  // A subclass: /offers above already defined OffersElement as `hc-offers`,
+  // and one constructor may carry only one tag.
   const mount = (offers: PublishedOffer[]) => {
-    if (!customElements.get('hc-offers-test')) customElements.define('hc-offers-test', OffersElement)
+    if (!customElements.get('hc-offers-test')) customElements.define('hc-offers-test', class extends OffersElement {})
     const el = document.createElement('hc-offers-test') as OffersElement
     const fake = fakeIo(offers)
     el.io = fake.io

@@ -97,13 +97,17 @@ async function main() {
 
   // Straight at the console's own door. The header toggle rides an EffectBus
   // hop and the console re-homes itself across a few frames; asking the view
-  // directly measures the layout, not the plumbing.
+  // directly measures the layout, not the plumbing. The console is made on its
+  // first open (llm.drone.ts), so until then the words' own door makes it and
+  // the bus's replay of that press opens it.
   // A boot-time reload can destroy the context mid-call, so ask again.
   for (let i = 0; i < 5; i++) {
     try {
       await page.waitForSelector('hc-chat-window .chat-inputrow', { timeout: 30000 })
       await page.evaluate(() => {
-        window.ioc?.get('@diamondcoreprocessor.com/ProvidersWindowView')?.open?.()
+        const view = window.ioc?.get('@diamondcoreprocessor.com/ProvidersWindowView')
+        if (view?.open) view.open()
+        else window.__hypercombEffectBus?.emit('providers:open', {})
       })
       break
     } catch (err) {

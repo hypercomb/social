@@ -4,7 +4,7 @@
 // registry, the roster that ships, the stores every model call reads
 // (activation, model choice, removal, hive access, policy), the router, the
 // host's AI and the Providers console are its dependencies; this bee is the
-// one that registers them.
+// one that registers them — the console when it is first opened.
 //
 // publishService for the keys that used it: a bee can load before the dev
 // shell installs its own `window.ioc` map, and publishService keeps offering
@@ -20,7 +20,6 @@ import { LLM_HIVE_ACCESS_IOC_KEY, llmHiveAccess } from './llm-hive-access.js'
 import { LLM_ROUTER_IOC_KEY, llmRouter } from './llm-dispatch.js'
 import { llmPolicy } from './model-policy.js'
 import { HOST_AI_IOC_KEY, HostAiService } from './host-ai.service.js'
-import { ProvidersWindowView } from './providers-window.view.js'
 
 export class LlmDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -44,7 +43,40 @@ window.ioc.register(HOST_AI_IOC_KEY, new HostAiService())
 // ── the Providers console, and the words that open it ───────────────────────
 type SlashRegistrar = { addProvider?: (provider: unknown) => void }
 
-window.ioc.register('@diamondcoreprocessor.com/ProvidersWindowView', new ProvidersWindowView())
+// THE CONSOLE ARRIVES WITH ITS FIRST OPEN, not at boot (atomic-modules-plan.md,
+// "adopt the proper load"): nothing needs its code until `/providers` or the
+// AI key light asks, so it loads then, once. The view subscribes to
+// `providers:open` as it is made and the bus replays the press that loaded
+// it, so the first press opens it like every later one. The key is spelled
+// here: importing even a constant from the view would keep it on boot.
+const PROVIDERS_WINDOW_KEY = '@diamondcoreprocessor.com/ProvidersWindowView'
+let providersWindow: Promise<void> | null = null
+let providersBuilt = false
+/** Presses heard while the console loads. The replay plays only the last,
+ *  and every press toggles — so an even count ends closed. */
+let providersPresses = 0
+
+EffectBus.on('providers:open', () => {
+  if (providersBuilt) return
+  providersPresses++
+  providersWindow ??= import('./providers-window.view.js').then(({ ProvidersWindowView }) => {
+    // BUILT ONCE, even when making it throws: it subscribes before its replay
+    // opens it, so a second one would answer every later press twice.
+    providersBuilt = true
+    try {
+      const view = new ProvidersWindowView()
+      window.ioc.register(PROVIDERS_WINDOW_KEY, view)
+      if (providersPresses % 2 === 0) view.close()
+    } catch (error) {
+      console.error('[llm] the Providers console could not be made', error)
+    }
+  }, (error: unknown) => {
+    // A failed load says so, and the next press tries again.
+    providersWindow = null
+    providersPresses = 0
+    EffectBus.emit('activity:log', { message: `Could not load the Providers console: ${error instanceof Error ? error.message : String(error)}` })
+  })
+})
 
 window.ioc.whenReady?.('@diamondcoreprocessor.com/SlashBehaviourDrone', (drone: SlashRegistrar) => {
   drone.addProvider?.({
