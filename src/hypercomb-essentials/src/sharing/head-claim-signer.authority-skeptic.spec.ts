@@ -24,7 +24,7 @@
 // here first. AS-E4 is left OPEN on purpose and says why.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { finalizeEvent, getPublicKey, verifyEvent } from 'nostr-tools'
+import { finalizeEvent, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 
 import { acceptHeadClaim, headClaimPreimage, parseHeadClaimPreimage } from '@hypercomb/core'
 

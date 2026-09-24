@@ -66,11 +66,11 @@ const PACKAGE_SPECIFIER = '@hypercomb/essentials'
 const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 
 /** VENDOR ATOMS (atomic-modules-plan.md, "find the overlap before creating
- *  redundancy"). An npm package that two or more source files import is built
- *  ONCE, as its own dependency named by the package itself (`// nostr-tools`,
+ *  redundancy"). An npm specifier that two or more source files import is built
+ *  ONCE, as its own dependency named by that specifier (`// nostr-tools/pure`,
  *  a bare specifier the way `pixi.js` is), and every other unit leaves it
  *  external. Inlined, each importer carried its own copy: five atoms carried
- *  nostr-tools and its @noble crypto at about 200 KB each. A package only one
+ *  nostr-tools and its @noble crypto at about 200 KB each. A specifier only one
  *  file imports stays inlined — there is nothing to share. */
 const VENDOR_PACKAGES: readonly string[] = (() => {
   const importers = new Map<string, Set<string>>()
@@ -87,9 +87,12 @@ const VENDOR_PACKAGES: readonly string[] = (() => {
         const spec = m[1] ?? m[2]
         const pkg = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]
         if (pkg.startsWith('@hypercomb/') || PLATFORM_EXTERNALS.includes(pkg) || pkg.startsWith('node:') || builtinModules.includes(pkg)) continue
-        const files = importers.get(pkg) ?? new Set<string>()
+        // Keyed by the SPECIFIER, not the package: `nostr-tools/pure` is its
+        // own atom (62 KB) and never the whole index (225 KB), and the import
+        // map must carry exactly the name the bundles leave external.
+        const files = importers.get(spec) ?? new Set<string>()
         files.add(full)
-        importers.set(pkg, files)
+        importers.set(spec, files)
       }
     }
   }

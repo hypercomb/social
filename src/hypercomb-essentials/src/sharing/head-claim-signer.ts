@@ -30,7 +30,7 @@
 
 import { get, headClaimPreimage, parseHeadClaimPreimage } from '@hypercomb/core'
 import type { HeadClaimVerifier, OfferedHeadClaim } from '@hypercomb/core'
-import { verifyEvent } from 'nostr-tools'
+import { verifyEvent } from 'nostr-tools/pure'
 
 // A head claim is a nostr event, and 30000-39999 is NIP-01's
 // PARAMETERIZED-REPLACEABLE range: a relay keeps exactly ONE event per

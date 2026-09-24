@@ -15,7 +15,7 @@
 // HostSyncService uses for byte PUTs.
 
 import { get } from '@hypercomb/core'
-import { verifyEvent } from 'nostr-tools'
+import { verifyEvent } from 'nostr-tools/pure'
 import { HIVE_INDEX_EVENT_KIND, HIVE_LINK_VERSION } from './hive-link.js'
 
 interface SignerLike {

@@ -30,7 +30,7 @@ import {
   type OfferedVocabularyClaim,
   type VocabularyClaimVerifier,
 } from '@hypercomb/core'
-import { verifyEvent } from 'nostr-tools'
+import { verifyEvent } from 'nostr-tools/pure'
 import { readerPubkey } from '../sharing/head-claim-signer.js'
 import { nostrSigner, type NostrSignerLike } from './vocabulary-signer.deps.js'
 

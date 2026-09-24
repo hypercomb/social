@@ -6,7 +6,7 @@
 // minted into localStorage by running this suite.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getPublicKey } from 'nostr-tools'
+import { getPublicKey } from 'nostr-tools/pure'
 
 import { acceptHeadClaim, headClaimPreimage } from '@hypercomb/core'
 

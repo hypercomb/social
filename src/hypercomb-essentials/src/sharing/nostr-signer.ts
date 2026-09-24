@@ -1,5 +1,5 @@
 // nostr/nostr-signer.ts
-import { finalizeEvent, getPublicKey } from 'nostr-tools'
+import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }
 

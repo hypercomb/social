@@ -72,7 +72,7 @@
 // network enumeration.
 
 import { EffectBus, MARKER_NAME, SIGNATURE_NAME, SignatureService, get, markerName } from '@hypercomb/core'
-import { verifyEvent } from 'nostr-tools'
+import { verifyEvent } from 'nostr-tools/pure'
 import { normalizeTags } from '../notes/note-tree.js'
 import { readerPubkey } from '../sharing/head-claim-signer.js'
 
