@@ -190,7 +190,15 @@ view's code loaded, opening nothing, so the first open is warm.
   recorded: that sig goes stale the moment the tile commits, and marking a
   face on it is exactly such a commit (the first live run found this).
 
-*Measured* (web shell on 4264, a fixture with game and tutor faces at depth 3, the same package with the code radius 0 vs 1): at `/lab/arcade` the tail warms 3 faces in about 1.2 s after the tiles, and every warm open then fetches **0** seam atoms (19 Solomon, 10 Arkanoid, 18 tutor before). Open time on localhost at 1× barely moves (Solomon ~260 ms either way — its open is mounting and rendering, not fetching: installed modules come from the service worker in 2–3 ms each); the full 1×/4× A/B follows in its own commit.
+*Measured* (web shell on 4264, a fixture with game and tutor faces at depth 3, the same package with the code radius 0 vs 1): at `/lab/arcade` the tail warms 3 faces in about 1.2 s after the tiles, and every warm open then fetches **0** seam atoms (19 Solomon, 10 Arkanoid, 18 tutor before). Open time on localhost at 1× barely moves (Solomon ~260 ms either way — its open is mounting and rendering, not fetching: installed modules come from the service worker in 2–3 ms each).
+
+| At 4× CPU, medians of 2 | Code warm off | Code warm on | Seam atoms on the warm open |
+|---|---|---|---|
+| Solomon | 1169 ms | 1232 ms | 19 → 0 |
+| Arkanoid | 281 ms | 285 ms | 10 → 0 |
+| Tutor | 253 ms | 260 ms | 18 → 0 |
+
+THE HONEST VERDICT: the code warm does what it says — nothing is fetched at the open — and it does NOT make the open faster on an installed hive, even at 4×: open time is mounting and rendering, and fetching plus evaluating these seams is a small part of it. What does make an open fast is the tile walk that was already there (a tiles-warm open beats a cold one: Arkanoid 281 vs 566 ms, tutor 253 vs 518 ms at 4×). The code warm is kept because it is correct, detached and cheap, and it is where a seam that is heavy or not yet local (increment 2 makes Solomon's 42 atoms across 9 import levels; a door's first visit) would pay — measure that before claiming it.
 
 ### 5. Hive-side drafting follows the atoms
 `module read <sig>` on a dependency atom shows one file (the section IS the
