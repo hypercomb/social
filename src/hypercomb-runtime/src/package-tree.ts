@@ -255,6 +255,34 @@ export const enabledBees = (walk: Pick<TreeWalk, 'nodes' | 'rootBees'>, off: Rea
   return [...kept].sort()
 }
 
+/**
+ * THE CODE A TREE NAMES, BY WHERE IT SITS — from its layers alone, for a
+ * trial audit to set against what runs here (essentials module-audit.ts):
+ * every bee at the path of the layer that declares it (`''` for the root's
+ * own), and each dependency bundle with the alias `aliasOf` reads for it —
+ * `''` when its bytes are not held. Nothing here fetches a module. `runs`,
+ * when given, keeps only what may run: WHAT RUNS HERE never counts code the
+ * brood holds, or an audit would skip it and read other code against it.
+ */
+export const modulesOfWalk = async (
+  walk: Pick<TreeWalk, 'nodes' | 'rootBees'>,
+  dependencies: readonly string[],
+  aliasOf: (sig: string) => Promise<string>,
+  runs: (sig: string) => Promise<boolean> = async () => true,
+): Promise<{ bees: { sig: string; path: string }[]; dependencies: { sig: string; alias: string }[] }> => {
+  const kept = async <T extends { sig: string }>(modules: T[]): Promise<T[]> => {
+    const may = await Promise.all(modules.map(module => runs(module.sig).catch(() => false)))
+    return modules.filter((_, index) => may[index])
+  }
+  return {
+    bees: await kept([
+      ...walk.rootBees.map(sig => ({ sig, path: '' })),
+      ...walk.nodes.flatMap(node => node.bees.map(sig => ({ sig, path: node.path }))),
+    ]),
+    dependencies: await kept(await Promise.all([...new Set(dependencies)].map(async sig => ({ sig, alias: await aliasOf(sig).catch(() => '') })))),
+  }
+}
+
 /** The namespace path a dependency's alias names, from its first line:
  *  `// @hypercomb/essentials/presentation/tiles` → `presentation/tiles`.
  *  `''` when it names none. */

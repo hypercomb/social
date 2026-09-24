@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
 import {
-  PICKS_KEY, changedBeneath, composeDependencies, enabledBees, missingNamespaces, movedPaths, namespaceOf,
+  PICKS_KEY, changedBeneath, composeDependencies, enabledBees, missingNamespaces, modulesOfWalk, movedPaths, namespaceOf,
   orderRevisions, ownerOf, readPicks, releasedByTakeAll, walkTree, withAncestors, writePicks, type PackagePick,
 } from './package-tree'
 import type { ReplicationIo } from './replication-walker'
@@ -120,6 +120,52 @@ describe('the package tree', () => {
     // A downgrade that does NOT hide leaves the configured parts beneath it on.
     const kept = await walkTree(t.root, w.io, { ...picks, 'games/arkanoid': pick(older.arkanoid, older.root, false) })
     expect(kept.applied).toEqual(['games/arkanoid', 'games/arkanoid/themes'])
+  })
+
+  it('names a tree\'s code by where it sits, from its layers alone — a module is never fetched to name it', async () => {
+    const w = world()
+    const t = await trunk(w)
+    const rootBee = await w.blob('// bee root')
+    const root = await w.layer('root', [t.games, t.notes], [rootBee])
+    const walk = await walkTree(root, w.io)
+    const held = await w.blob('// @hypercomb/essentials/games\nexport const lib = 1')
+    const away = 'c'.repeat(64)
+    const asked: string[] = []
+    const modules = await modulesOfWalk(walk, [held, away, held], async sig => {
+      asked.push(sig)
+      return sig === held ? '@hypercomb/essentials/games' : ''
+    })
+    expect(modules.bees).toEqual([
+      { sig: rootBee, path: '' },
+      { sig: t.bees['games'], path: 'games' },
+      { sig: t.bees['ark1'], path: 'games/arkanoid' },
+      { sig: t.bees['themes'], path: 'games/arkanoid/themes' },
+      { sig: t.bees['bubble'], path: 'games/bubble' },
+      { sig: t.bees['notes'], path: 'notes' },
+    ])
+    // Each bundle once, with the alias its held bytes carry, '' when not held.
+    expect(modules.dependencies).toEqual([{ sig: held, alias: '@hypercomb/essentials/games' }, { sig: away, alias: '' }])
+    expect(asked).toEqual([held, away])
+    // The walk itself asked the origin for layers only — never for a module.
+    expect([...w.heap.keys()]).not.toContain(t.bees['games'])
+  })
+
+  it('WHAT RUNS HERE leaves out code the brood holds — a trial taken by hand runs nothing until it is accepted', async () => {
+    const w = world()
+    const t = await trunk(w)
+    const root = await w.layer('root', [t.games, t.notes])
+    const walk = await walkTree(root, w.io)
+    const bundle = await w.blob('// @hypercomb/essentials/games\nexport const lib = 1')
+    const waiting = await w.blob('// @hypercomb/essentials/games\nexport const lib = 2')
+    // The picked bee and the picked bundle wait in the brood.
+    const held = new Set([t.bees['ark1']!, waiting])
+    const modules = await modulesOfWalk(walk, [bundle, waiting], async () => '@hypercomb/essentials/games', async sig => !held.has(sig))
+    expect(modules.bees.map(bee => bee.sig)).not.toContain(t.bees['ark1'])
+    expect(modules.bees.map(bee => bee.path)).toContain('games/bubble')
+    expect(modules.dependencies.map(dep => dep.sig)).toEqual([bundle])
+    // A brood that cannot be asked runs nothing: never counted as running.
+    const unknown = await modulesOfWalk(walk, [bundle], async () => '', async () => { throw new Error('no brood') })
+    expect(unknown).toEqual({ bees: [], dependencies: [] })
   })
 
   it('a tree with a layer that cannot be read is never complete', async () => {

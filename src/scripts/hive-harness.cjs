@@ -220,7 +220,55 @@ const draftThroughChat = async (page, target, newBody) => {
   }
 }
 
+/**
+ * A SCRIPTED READER for a hive that audits: the worker answers every audit
+ * reading with `reading(content)` (its findings, ending in the verdict line)
+ * and Jev scores it as the draft's Jev does — the first row, no rule broken.
+ * Returns the audit readings the worker was shown.
+ */
+const scriptReader = async (page, reading) => {
+  const shown = []
+  const sse = text => [
+    { choices: [{ delta: { content: text } }] },
+    { choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 20 } },
+  ].map(f => `data: ${JSON.stringify(f)}\n\n`).join('') + 'data: [DONE]\n\n'
+  await page.route('https://openrouter.ai/**', route => {
+    const url = route.request().url()
+    const headers = { 'access-control-allow-origin': '*', 'content-type': 'application/json' }
+    const body = JSON.parse(route.request().postData() || '{}')
+    if (url.includes('/api/alpha/decisions')) {
+      const answers = {}
+      for (const [key, q] of Object.entries(body.questions ?? {})) {
+        if (q.type === 'choice') { answers[key] = { type: 'choice', choice: Object.keys(q.criteria ?? {})[0], confidence: 0.95 }; continue }
+        answers[key] = { type: 'noul', noul: /_(beyond|known)$|_rule\d+$/.test(key) || key === 'single' ? 0.02 : 0.97 }
+      }
+      return route.fulfill({ status: 200, headers, body: JSON.stringify({ model: 'typesafe/jev-fake', answers, usage: { input_tokens: 300, output_tokens: 0, cost: 0.00001 } }) })
+    }
+    if (url.includes('/chat/completions')) {
+      const system = (body.messages ?? []).filter(m => m.role === 'system').map(m => String(m.content ?? '')).join('\n')
+      const content = String(body.messages?.[body.messages.length - 1]?.content ?? '')
+      const auditing = /You are auditing a CHANGE that somebody else published/.test(system)
+      if (auditing) shown.push(content)
+      const text = auditing ? reading(content) : '{"nodes":[]}'
+      return body.stream
+        ? route.fulfill({ status: 200, headers: { ...headers, 'content-type': 'text/event-stream' }, body: sse(text) })
+        : route.fulfill({ status: 200, headers, body: JSON.stringify({ model: WORKER, choices: [{ message: { role: 'assistant', content: text }, finish_reason: 'stop' }] }) })
+    }
+    if (url.includes('/endpoints')) return route.fulfill({ status: 200, headers, body: JSON.stringify({ data: { id: JEV, endpoints: [] } }) })
+    return route.fulfill({ status: 200, headers, body: JSON.stringify({ data: [] }) })
+  })
+  await page.evaluate(([jev, worker]) => {
+    const ioc = window.ioc
+    ioc.get('@hypercomb.social/LlmModelChoice').add('openrouter', worker, true)
+    ioc.get('@hypercomb.social/LlmModelChoice').add('openrouter', jev, false)
+    const activation = ioc.get('@diamondcoreprocessor.com/LlmActivationStore')
+    activation.setEnabled('openrouter', true)
+    activation.setEnabled(`openrouter:${jev}`, true)
+  }, [JEV, WORKER])
+  return shown
+}
+
 module.exports = {
   JEV, WORKER, LOCAL_ROOT, sleep, waitFor, checker, freshContext, logPage, installedOf, openHive,
-  say, watchToasts, toasts, toastsUntil, smallestModule, draftThroughChat,
+  say, watchToasts, toasts, toastsUntil, smallestModule, draftThroughChat, scriptReader,
 }

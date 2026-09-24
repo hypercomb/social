@@ -58,6 +58,18 @@
 //                          a reload. `module drop <path>` gives the path back.
 //                          Only the participant says it: a model never brings
 //                          somebody else's code into a hive.
+//   module audit <change> [@<host>]
+//                          YOUR MODEL READS THE TRIAL, FROM YOUR OWN HIVE: every
+//                          module it brings that does not run here, fetched by
+//                          signature from your hosts, its host, or its door —
+//                          the door last (bytes that hash to their name, in
+//                          memory — never written, never run), set against what
+//                          it replaces here section by section, and checked
+//                          against the publisher's change record. The audit is
+//                          kept in your hive (module-audit.ts), and `module
+//                          take` then takes only the root it read; saying it
+//                          again reads on past the budget. Only the
+//                          participant says it: it spends their model.
 //
 // Every commit also publishes THE CHANGE — each drafted source file before and
 // after — as change:try-<change>, and the host's AI's reading of it as
@@ -68,16 +80,18 @@
 //
 // A SANDBOX DOOR WRITES NOTHING. At `try-<change>.<zone>` the package running
 // is the publisher's, so every word that writes or spends — commit, promote,
-// withdraw, review, assess, focus, take — refuses there and asks to be said
+// withdraw, review, assess, focus, take, audit — refuses there and asks to be said
 // from your own hive; the reading words (list, trials, changes) still answer.
 // Only a courtesy: this file is itself the publisher's code at their door,
 // and the host's gate is the real guard.
 
-import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, isSandboxDoor, sandboxDoorOf, type I18nProvider, type ModuleDraftsProvider } from '@hypercomb/core'
+import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, isSandboxDoor, sandboxDoorOf, type I18nProvider, type InstallProvider, type ModuleDraftsProvider } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
 import { JEV_IOC_KEY, jevDoctrineSections, type JevReadingInput, type JevReadingResult, type JevPassInput, type JevPassResult } from './jev-decision.js'
 import { assessSandbox, changedPaths, doorReader, isSandboxSite, jevReadTrial, publishChange, readChange, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
 import { INSTALL_CHANNEL_PREFIX, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+// A type only: the audit itself is loaded when the word is said.
+import type { ModuleAuditRecord } from './module-audit.js'
 
 /** The host backup service's participant-triggered upload (sharing/host-sync.service.ts). */
 type HostSyncLike = {
@@ -94,6 +108,9 @@ const PATH_RE = /^[a-z0-9][a-z0-9._-]{0,63}(?:\/[a-z0-9][a-z0-9._-]{0,63})*$/i
 const PUBLISHING = new Set(['commit', 'promote', 'withdraw', 'review', 'assess', 'focus'])
 /** How many trials `module trials` says one by one; the rest are counted. */
 const TRIALS_TOLD = 6
+/** A list a toast can carry: the first few by name, the rest counted. */
+const toastList = (items: readonly string[]): string =>
+  items.length > TRIALS_TOLD ? `${items.slice(0, TRIALS_TOLD).join(', ')} and ${items.length - TRIALS_TOLD} more` : items.join(', ')
 const STORE_KEY = '@hypercomb.social/Store'
 const HOST_AI_KEY = '@diamondcoreprocessor.com/HostAi'
 const ANATOMY_KEY = '@hypercomb.social/Anatomy'
@@ -110,7 +127,7 @@ type HostAiLike = {
 }
 type JevLike = { enabled?(): boolean; readyForHive?(): boolean; reading?(input: JevReadingInput): Promise<JevReadingResult>; pass?(input: JevPassInput): Promise<JevPassResult> }
 /** The install provider, as far as these words need it (core InstallProvider). */
-type InstallLike = Parameters<typeof takeDepsFrom>[0] & {
+type InstallLike = Parameters<typeof takeDepsFrom>[0] & Pick<InstallProvider, 'modulesOf'> & {
   selection?(): Promise<{ picks: Record<string, { root: string; byHand?: boolean }> }>
 }
 type Say = (key: string, fallback: string, params?: Record<string, string | number>) => string
@@ -228,12 +245,47 @@ export const sandboxZoneUrl = (host: string): string => {
   const bare = host.replace(/^https?:\/\//, '').replace(/\/+$/, '')
   const publicHost = PUBLIC_CONTENT_HOSTS.includes(bare) || !bare
   const zone = publicHost ? SANDBOX_ZONE : bare.replace(/^content\./, '')
-  const loopback = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(zone)
-  return `${loopback ? 'http' : 'https'}://${zone}`
+  return hostOrigin(zone)
+}
+
+/** A host as an origin: loopback speaks http, everything else https. */
+const hostOrigin = (host: string): string => {
+  const bare = host.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  const loopback = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(bare)
+  return `${loopback ? 'http' : 'https'}://${bare}`
 }
 
 /** Where a sandbox is opened: its door on the sandbox zone, or on the host it was published to. */
 export const sandboxDoorUrl = (name: string, host: string): string => sandboxZoneUrl(host).replace('://', `://${name}.`)
+
+/** THE ROOT EACH SANDBOX WAS LAST AUDITED AT, in this browser, and the audit
+ *  kept for it. `module take` takes only the root that was read — a door can
+ *  name a new root the moment after an audit — and the next audit of the
+ *  same sandbox carries every unit this one read. */
+const AUDITED_KEY = 'hc:module-audited'
+type Audited = { readonly root: string; readonly record?: string }
+const auditedAt = (sandbox: string): Audited | null => {
+  try {
+    const kept = (JSON.parse(localStorage.getItem(AUDITED_KEY) ?? '{}') as Record<string, Audited>)[sandbox]
+    return kept && typeof kept.root === 'string' ? kept : null
+  } catch { return null }
+}
+const rememberAudit = (sandbox: string, audited: Audited): void => {
+  try {
+    const all = JSON.parse(localStorage.getItem(AUDITED_KEY) ?? '{}') as Record<string, Audited>
+    localStorage.setItem(AUDITED_KEY, JSON.stringify({ ...all, [sandbox]: audited }))
+  } catch { /* the next take is simply not bound */ }
+}
+const short = (sig: string): string => `${sig.slice(0, 12)}…`
+/** The audit record kept at a signature in this hive, or null. */
+const keptAudit = async (store: StoreLike | undefined, sig: string | undefined): Promise<ModuleAuditRecord | null> => {
+  if (!sig) return null
+  try {
+    const blob = (await store?.getResourceLocal?.(sig)) ?? (await store?.getResource?.(sig))
+    const record = blob ? JSON.parse(await blob.text()) as ModuleAuditRecord : null
+    return record?.kind === 'module-audit' ? record : null
+  } catch { return null }
+}
 
 /** The trials a zone lists, or why it lists none. */
 const zoneTrials = async (zone: string): Promise<{ ok: true; trials: SandboxTrial[] } | { ok: false; reason: string }> => {
@@ -251,7 +303,7 @@ export class ModuleQueenBee extends QueenBee {
   readonly command = 'module'
   override description = 'See, drop, try in public, or promote what runs here'
   override descriptionKey = 'slash.module'
-  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>', 'assess <change> [accept|refuse|unclear <note>]', 'trials [@<host>]', 'changes <change>', 'take <change> [<path>]', 'focus [@<host>]']
+  override options = ['list', 'drop <path>', 'commit [<change>] [@<host>]', 'promote <change> [<channel>]', 'withdraw <change>', 'review <change>', 'assess <change> [accept|refuse|unclear <note>]', 'trials [@<host>]', 'changes <change>', 'take <change> [<path>]', 'focus [@<host>]', 'audit <change> [@<host>]']
   override examples = [
     { input: '/module', result: 'Lists the drafts picked over the installed package' },
     { input: '/module commit fresh-rooms', result: 'Publishes what runs here to try-fresh-rooms.hypercomb.com, not to followers' },
@@ -267,13 +319,14 @@ export class ModuleQueenBee extends QueenBee {
       const [word = 'list'] = args.trim().split(/\s+/)
       if (PUBLISHING.has(word)) return `/module ${word} publishes; only the participant says it`
       if (word === 'take') return '/module take brings somebody else\'s code into this hive; only the participant says it'
+      if (word === 'audit') return '/module audit spends the participant\'s model; only the participant says it'
       return ['list', 'drop'].includes(word) ? undefined : '/module takes list or drop <path>'
     },
   }
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess ', 'trials', 'changes ', 'take ', 'focus'].filter(word => word.startsWith(typed) && word.trim() !== typed)
+    return ['list', 'drop ', 'commit ', 'promote ', 'withdraw ', 'review ', 'assess ', 'trials', 'changes ', 'take ', 'focus', 'audit '].filter(word => word.startsWith(typed) && word.trim() !== typed)
   }
 
   protected async execute(args: string): Promise<void> {
@@ -287,7 +340,7 @@ export class ModuleQueenBee extends QueenBee {
     if (!drafts) { toast(t('module.unavailable', 'Module drafts are not available here: nothing is installed to draft onto.'), 'warning'); return }
 
     const [word = 'list', ...rest] = args.trim().split(/\s+/).filter(Boolean)
-    if (isSandboxDoor() && (PUBLISHING.has(word) || word === 'take')) {
+    if (isSandboxDoor() && (PUBLISHING.has(word) || word === 'take' || word === 'audit')) {
       toast(t('module.atdoor', 'A sandbox door writes nothing — say {word} from your own hive.', { word: `module ${word}` }), 'warning')
       return
     }
@@ -311,7 +364,7 @@ export class ModuleQueenBee extends QueenBee {
       toast(t('module.dropped', 'Dropped the draft at {path} — reload to run the package as it was.', { path }), 'success')
       return
     }
-    if (!PUBLISHING.has(word) && !['trials', 'changes', 'take'].includes(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change>, trials, changes <change>, take <change> [<path>] or focus.'), 'warning'); return }
+    if (!PUBLISHING.has(word) && !['trials', 'changes', 'take', 'audit'].includes(word)) { toast(t('module.usage', '/module takes list, drop <path>, commit [<change>], promote <change>, withdraw <change>, review <change>, assess <change>, trials, changes <change>, take <change> [<path>], focus or audit <change>.'), 'warning'); return }
 
     // [@<host>] publishes to a host of your own (a machine running
     // hypercomb-serve, a relay) instead of the public one; the other words are
@@ -340,6 +393,15 @@ export class ModuleQueenBee extends QueenBee {
       if (!install?.pick || !install.revisionsOf) { toast(t('module.unavailable', 'Module drafts are not available here: nothing is installed to draft onto.'), 'warning'); return }
       const site = await sandboxSite(name, host)
       if (!site) { toast(t('module.nosite', 'No sandbox {name} answers at {door}.', { name, door: sandboxDoorUrl(name, host) }), 'warning'); return }
+      // TAKE WHAT WAS AUDITED. A door that names a new root after the audit
+      // read the old one would have this take code nobody read.
+      const audited = auditedAt(name)
+      if (audited && audited.root !== site.package) {
+        toast(t('module.auditstale', '{name} now names {now}, not the {root} you audited: say module audit {change} again before you take it.', {
+          name, now: short(site.package), root: short(audited.root), change: name.replace(/^try-/, ''),
+        }), 'warning')
+        return
+      }
       const door = atDoorOf(name) ? location.origin : sandboxDoorUrl(name, host)
       const named = PATH_RE.test(words[1] ?? '') ? [words[1]!] : null
       const paths = named ?? (site.change ? changedPaths(await readChange(site.change, { get: doorReader(door) })) : [])
@@ -347,6 +409,10 @@ export class ModuleQueenBee extends QueenBee {
       const outcome = await takeTrial(site.package, paths, [new URL(door).host], takeDepsFrom(install))
       for (const refused of outcome.refused) toast(t('module.nottaken', '{path} was not taken: {reason}', { path: refused.path, reason: refused.error }), 'warning')
       if (!outcome.taken.length) return
+      // AN AUDIT SAID BEFORE THE TAKE is worn by what the take now holds, so
+      // the brood shows the reading instead of calling the code unread.
+      const kept = outcome.held ? await keptAudit(window.ioc?.get?.(STORE_KEY) as StoreLike | undefined, audited?.record) : null
+      if (kept?.root === site.package) await (await import('./module-audit.js')).wearAudit(kept).catch(() => undefined)
       const took = { paths: outcome.taken.join(', '), name, held: outcome.held }
       if (outcome.held) {
         toast(t('module.tookheld', 'Took {paths} from {name}. Its new code is held ({held}) and does not run until you accept it: brood list shows it, brood accept 1 lets it run, then reload.', took), 'success')
@@ -366,6 +432,72 @@ export class ModuleQueenBee extends QueenBee {
       const door = atDoorOf(name) ? location.origin : sandboxDoorUrl(name, host)
       // The what-changed panel (sandbox-change.view.ts) opens on this; `at` guards the replay.
       EffectBus.emit('module:changes', { name, door, site, at: Date.now() })
+      return
+    }
+
+    if (word === 'audit') {
+      const name = sandboxName(words[0] ?? '')
+      if (!name) { toast(t('module.which', 'Say which sandbox, like: module audit fresh-rooms.'), 'warning'); return }
+      const install = window.ioc?.get?.(INSTALL_IOC_KEY) as InstallLike | undefined
+      const store = window.ioc?.get?.(STORE_KEY) as StoreLike | undefined
+      const putResource = store?.putResource?.bind(store)
+      if (!install?.modulesOf || !putResource) { toast(t('module.unaudited', 'The audit did not run: {reason}.', { reason: 'this shell cannot list a package\'s modules' }), 'warning'); return }
+      // Loaded when asked: it brings the model dispatch with it.
+      const audit = await import('./module-audit.js')
+      const nomodel = (): void => toast(t('module.nomodel', 'No model is set up to audit {name} with — open /providers to choose one.', { name }), 'warning')
+      if (!audit.auditModel()) { nomodel(); return }
+      const site = await sandboxSite(name, host)
+      if (!site) { toast(t('module.nosite', 'No sandbox {name} answers at {door}.', { name, door: sandboxDoorUrl(name, host) }), 'warning'); return }
+      // BY SIGNATURE from the public hosts, the host it was published to, and
+      // the door LAST: whichever serves bytes that hash to the name. The door
+      // sees an audit only for what nobody else serves, and never first.
+      const door = sandboxDoorUrl(name, host)
+      const deps = {
+        modules: (root: string | null) => install.modulesOf!(root, root ? [host, new URL(door).host] : []),
+        bytes: audit.signedBytes([...PUBLIC_CONTENT_HOSTS.map(hostOrigin), hostOrigin(host), door]),
+        held: (sig: string) => drafts.bytesOf(sig),
+        put: (text: string, type: string) => putResource(new Blob([text], { type }), { emit: false }),
+        now: Date.now,
+      }
+      const planned = await audit.planAudit({ sandbox: name, root: site.package, change: site.change ?? null }, deps)
+      if (!planned.ok) { toast(t('module.unaudited', 'The audit did not run: {reason}.', { reason: planned.error }), 'warning'); return }
+      const { plan } = planned
+      if (!plan.modules.length) {
+        rememberAudit(name, { root: site.package })
+        toast(t('module.auditnone', '{name} runs only code you already run.', { name }), 'success')
+        return
+      }
+      // THE READER IS CHOSEN ONCE, for the largest unit the plan will send,
+      // and named here: the model the participant is told of is the one that
+      // reads every unit.
+      const reader = audit.auditModel(plan)
+      if (!reader) { nomodel(); return }
+      const previous = await keptAudit(store, auditedAt(name)?.record)
+      toast(t('module.auditing', 'Auditing {name} with {model}: {count} modules new to your hive, read by signature. Nothing runs.', { name, model: reader.name, count: plan.modules.length }))
+      const done = await audit.runAudit(plan, deps, {
+        providerId: reader.id,
+        previous,
+        onRead: line => EffectBus.emit('activity:log', {
+          icon: '⚖',
+          message: t('module.auditunit', '{where} · {section}{part}: {verdict} — {summary}', {
+            where: line.where, section: line.section, verdict: line.verdict, summary: line.summary,
+            part: line.parts > 1 ? t('module.auditpart', ' (part {part} of {parts})', { part: line.part, parts: line.parts }) : '',
+          }),
+        }),
+      })
+      if (!done.ok) { toast(t('module.unaudited', 'The audit did not run: {reason}.', { reason: done.error }), 'warning'); return }
+      const { record } = done
+      rememberAudit(name, { root: site.package, record: done.sig })
+      if (record.unrecorded) toast(t('module.unrecorded', 'Nothing {name} brings was checked against a change record: {reason}.', { name, reason: record.unrecorded }), 'warning')
+      if (record.undeclared.length) toast(t('module.undeclared', 'The change record of {name} does not declare {count} of the modules it brings: {modules}.', {
+        name, count: record.undeclared.length,
+        modules: toastList(record.modules.filter(module => module.declared === false).map(module => module.where || short(module.sig))),
+      }), 'warning')
+      if (record.drift.length) toast(t('module.drift', 'The change record of {name} does not match its code at {sections}.', { name, sections: toastList(record.drift.map(drift => drift.section)) }), 'warning')
+      if (record.stopped) toast(t('module.auditstopped', 'The readings stopped early: {reason}.', { reason: record.stopped }), 'warning')
+      if (record.unread.length) toast(t('module.auditunread', 'Not read: {sections}.', { sections: toastList(record.unread) }), 'warning')
+      toast(t('module.audited', 'Your model says {verdict} of {root} ({read} of {total} sections read). Kept in your hive; module take takes only this root.', { verdict: record.verdict, root: short(site.package), read: record.read, total: record.total }), record.verdict === 'accept' ? 'success' : 'warning')
+      EffectBus.emit('module:audited', { name, host, verdict: record.verdict, record: done.sig, root: site.package })
       return
     }
 

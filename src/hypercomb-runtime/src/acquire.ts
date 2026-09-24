@@ -70,7 +70,7 @@ import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, ord
 // over it, minus the paths they turned off (package-tree.ts).
 import { changedUnits, dependencyUnits, packageUnits, readOffUnits, writeOffUnits } from './package-units.js'
 import {
-  composeDependencies, enabledBees, isPath, layerAt, missingNamespaces, movedPaths, namespaceOf, orderRevisions,
+  composeDependencies, enabledBees, isPath, layerAt, missingNamespaces, modulesOfWalk, movedPaths, namespaceOf, orderRevisions,
   readPicks, releasedByTakeAll, sigsOf, walkTree, withAncestors, within, writePicks, type Picks, type RevisionSource,
 } from './package-tree.js'
 
@@ -1199,6 +1199,31 @@ const installProvider: InstallProvider = {
   nodesOf: async (root, zones) => {
     const io = await layersIoFor(zones)
     return io ? (await walkTree(root, io)).nodes : []
+  },
+  // WHAT RUNS HERE is what MAY run: the trunk with its picks, read from held
+  // layers only, kept to the bees the activation record loads (a path turned
+  // off loads nothing) and the bundles it composed — and of those, only what
+  // the brood lets run. A trial taken by hand waits in the brood until it is
+  // accepted; counted as running, an audit would skip it unread and read the
+  // next trial against it. Any other root is its own tree, its layers fetched
+  // as a revision listing fetches them; its modules are named, never fetched:
+  // a bundle not held here has no alias.
+  modulesOf: async (root, zones) => {
+    const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
+    const trunk = root ?? installedPackageSig()
+    const io = store && trunk ? await layersIoFor(root ? zones : []) : null
+    if (!store || !trunk || !io) return null
+    const walk = root ? await walkTree(root, io) : await walkTree(trunk, { ...io, fetch: async () => null }, readPicks())
+    if (!walk.complete) return null
+    const readHeld = readFrom([store.dependencies], sig => [`${sig}.js`, sig])
+    const alias = async (sig: string): Promise<string> => aliasOf(await readHeld(sig))
+    if (root) return { root, ...(await modulesOfWalk(walk, walk.rootDependencies, alias)) }
+    let record: { bees?: unknown; dependencies?: unknown } = {}
+    try { record = JSON.parse(localStorage.getItem(INSTALL_MANIFEST_KEY) ?? '{}') as typeof record } catch { record = {} }
+    const loads = new Set(Array.isArray(record.bees) ? sigsOf(record.bees) : enabledBees(walk, readOffUnits()))
+    const running = sigsOf(record.dependencies)
+    const modules = await modulesOfWalk(walk, running.length ? running : walk.rootDependencies, alias, sig => mayRunBee(sig))
+    return { root: trunk, bees: modules.bees.filter(bee => loads.has(bee.sig)), dependencies: modules.dependencies }
   },
   headOf: async (zone) => (await headPackage(zone))?.packageSig ?? null,
   movedUnits: async (installedRoot, nextRoot, zones) => {

@@ -18,6 +18,9 @@
 //      the zone lists every open trial, and anyone finds this one there;
 //      `module changes` opens what it changes, file by file, with the host
 //      AI's reading and the tester's signed note, read by signature; the
+//      follower AUDITS it from its own hive — its own model reads what the
+//      trial brings, by signature, against what it runs, checked against the
+//      change record, kept at home, nothing written to the bees pool; the
 //      follower TAKES the trial at its path by hand — held in the brood, inert
 //      across a reload, and running only once accepted there with both warnings;
 //      then the follower COMMITS ITS OWN BUILD, and what it took is folded in —
@@ -260,6 +263,36 @@ const announcedOn = page => page.evaluate(() => {
   await H.sleep(8000)
   check('the follower is not told of a sandbox', (await announcedOn(fol.page)) !== sandboxRoot)
 
+  // ── 3d'. AUDIT IT FROM YOUR OWN HIVE — your model, by signature ─────────
+  // The follower's own model reads what the trial brings that it does not
+  // run: fetched by signature, held in memory, set against what runs here.
+  const newBee = drafted?.to
+  const readings = await H.scriptReader(fol.page, content => /__hivePublishProof/.test(content)
+    ? 'It adds one line that sets globalThis.__hivePublishProof to a string. It reads no keys or storage and sends nothing.\nRECOMMENDS: accept'
+    : 'Nothing of the kind.\nRECOMMENDS: accept')
+  await H.watchToasts(fol.page)
+  await H.say(fol.page, `module audit ${CHANGE} @${WRITE}`)
+  const audited = await H.toastsUntil(fol.page, /^Your model says |The audit did not run|runs only code you already run|No model is set up/, 180_000)
+  console.log('   audit toasts:', JSON.stringify(audited))
+  check('the follower audits the trial from its own hive: its model read what the trial brings', (audited ?? []).some(m => m.startsWith(`Your model says accept of ${sandboxRoot.slice(0, 12)}`) && m.includes('(1 of 1 sections read)')), JSON.stringify(audited))
+  check('its model was shown the drafted section against what runs here, fenced as data', readings.length === 1 && readings[0].includes(`section="${target.section}"`)
+    && /<code-after[^>]*>[\s\S]*__hivePublishProof[\s\S]*<\/code-after>/.test(readings[0]) && /<code-before[^>]*signature="[0-9a-f]{64}"/.test(readings[0]), `${readings.length} readings`)
+  const kept = await fol.page.evaluate(async ([sandbox, bee]) => {
+    const audited = JSON.parse(localStorage.getItem('hc:module-audited') ?? '{}')[sandbox] ?? null
+    const store = window.ioc.get('@hypercomb.social/Store')
+    const blob = audited?.record ? await (store.getResourceLocal ?? store.getResource).call(store, audited.record) : null
+    const record = blob ? JSON.parse(await blob.text()) : null
+    // The bees pool and its legacy drain, read locally (Store.getBeeBytes never fetches).
+    const pooled = !!(await store.getBeeBytes(bee))
+    return {
+      audited, pooled,
+      record: record && { kind: record.kind, root: record.root, verdict: record.verdict, sigs: record.modules?.map(m => m.sig), declared: record.modules?.map(m => m.declared), drift: record.drift?.length, undeclared: record.undeclared?.length },
+    }
+  }, [SANDBOX, newBee])
+  check('the audit is kept in the follower\'s own hive, and binds what a take may take', kept.audited?.root === sandboxRoot && kept.record?.kind === 'module-audit' && kept.record.root === sandboxRoot && kept.record.verdict === 'accept', JSON.stringify(kept.record))
+  check('the change record declares what the trial brings, and its text is the code\'s', JSON.stringify(kept.record?.sigs) === JSON.stringify([newBee]) && kept.record?.declared?.[0] === true && kept.record.drift === 0 && kept.record.undeclared === 0, JSON.stringify(kept.record))
+  check('nothing it read was written into the bees pool, and nothing of it runs', kept.pooled === false && await H.installedOf(fol.page) === LOCAL_ROOT && await fol.page.evaluate(() => globalThis.__hivePublishProof ?? null) === null)
+
   // ── 3e. YOUR OWN BUILD — anyone takes a trial at one path, held ─────────
   await H.watchToasts(fol.page)
   await H.say(fol.page, `module take ${CHANGE} @${WRITE}`)
@@ -268,6 +301,11 @@ const announcedOn = page => page.evaluate(() => {
   check('the follower takes the trial at the path its change touched, by hand', pickTaken?.root === sandboxRoot && pickTaken?.byHand === true && (took ?? []).some(m => m.startsWith(`Took ${target.path} from ${SANDBOX}`)), JSON.stringify(took))
   const heldHere = await heldFrom(fol.page, sandboxRoot)
   check('what it brought waits in the brood as a stranger\'s code — only what is new', heldHere.length >= 1 && heldHere.length < 10, `${heldHere.length} held`)
+  const worn = await fol.page.evaluate(async sigs => {
+    const core = await import('@hypercomb/core')
+    return Promise.all(sigs.map(async sig => (await core.broodRecord(sig))?.audits?.map(audit => audit.summary) ?? []))
+  }, heldHere)
+  check('what the take holds wears the audit said before it — the brood does not call it unread', worn.some(list => list.some(summary => summary.startsWith(`module audit of ${SANDBOX}: accept`))), JSON.stringify(worn))
   await fol.page.reload({ waitUntil: 'domcontentloaded' })
   await H.waitFor(() => fol.page.evaluate(() => !!window.ioc?.get('@diamondcoreprocessor.com/ModuleQueenBee')), 120_000, 1000)
   await H.sleep(6000)

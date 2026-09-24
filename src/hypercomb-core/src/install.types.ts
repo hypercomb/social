@@ -70,6 +70,19 @@ export interface InstallRevision {
   sources: InstallRevisionSource[]
 }
 
+/** The code one tree runs, by where it sits (InstallProvider.modulesOf). */
+export interface InstallModules {
+  /** The root it was read from — the trunk, when it is what runs here. */
+  root: string
+  /** Every bee, at the package path of the layer that declares it (`''` for
+   *  the root's own). A bee two layers declare is listed at each. */
+  bees: { sig: string; path: string }[]
+  /** Every dependency bundle, with its first-line alias
+   *  (`@hypercomb/essentials/presentation/tiles`) when its bytes are held
+   *  here, `''` when they are not. */
+  dependencies: { sig: string; alias: string }[]
+}
+
 export interface InstallOutcomeInfo {
   ok: boolean
   fetched: number
@@ -87,6 +100,13 @@ export interface InstallProvider {
   unitsOf(root: string, zones: readonly string[]): Promise<InstallUnit[]>
   /** Every package in one root's tree, at every depth. */
   nodesOf(root: string, zones: readonly string[]): Promise<InstallNode[]>
+  /** THE CODE A TREE RUNS, read from layers alone — no module is fetched or
+   *  written (a trial audit's delta, essentials module-audit.ts). `null` asks
+   *  what runs HERE: the trunk with its picks, and the bundles the activation
+   *  record composed — only what MAY run, never a path turned off or code the
+   *  brood holds. Null when the tree cannot be walked whole. Optional: a
+   *  shell from before it answers nothing. */
+  modulesOf?(root: string | null, zones: readonly string[]): Promise<InstallModules | null>
   /** The signature a domain publishes as its head, or null. */
   headOf(zone: string): Promise<string | null>
   /** The units a newer root moves, by name — through their own layers or
