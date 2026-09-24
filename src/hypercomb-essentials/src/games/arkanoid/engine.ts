@@ -70,7 +70,12 @@ export interface Brick {
   mult?: number                           // a points-multiplier tile (×1/×2/×3, or the hidden rare ×5)
   hidden?: boolean                        // a mult tile that looks like a normal brick until broken (the rare ×5)
   gold?: boolean                          // the LAST brick standing — the level's finale beacon (set by #markFinalBrick, purely a marker)
+  unbreakable?: boolean                   // the '#' barrier: nothing dents it, it never counts toward the clear, the ball plays angles off it
+  flash?: number                          // seconds of hit flash left (BRICK_FLASH at the hit → 0) — set on EVERY hit, barrier included
+  hits?: number                           // total hits taken (the overlay diffs it per frame for hit sparks — a barrier's hp never moves)
 }
+/** How long a brick's hit flash lasts. */
+export const BRICK_FLASH = 0.22
 export interface Ball { x: number; y: number; vx: number; vy: number; r: number; stuck: boolean; wobble: number; primary: boolean; color: string; pierced?: Set<Brick> }
 export interface Capsule { x: number; y: number; kind: PowerKind; delay?: number; dir?: number }   // delay = hover seconds before it starts falling
 /** A Street-Fighter-style fireball launched by the charge cannon. Stats are
@@ -664,6 +669,7 @@ export class Engine {
       for (let c = 0; c < COLS; c++) {
         const ch = row[c] ?? '.'
         if (ch === '.' || ch === ' ') continue
+        if (ch === '#') { this.bricks.push({ x: BRICK_X0 + c * BRICK_W, y: BRICK_TOP + r * BRICK_H, w: BRICK_W, h: BRICK_H, hp: 1, max: 1, alive: true, col: c, row: r, unbreakable: true }); continue }
         const hp = ch === '*' ? 4 : Math.max(1, parseInt(ch, 10) || 1)
         this.bricks.push({ x: BRICK_X0 + c * BRICK_W, y: BRICK_TOP + r * BRICK_H, w: BRICK_W, h: BRICK_H, hp, max: hp, alive: true, col: c, row: r })
       }
@@ -681,7 +687,7 @@ export class Engine {
   /** Tag three random tiles as ×1/×2/×3 score-multiplier tiles, and ~every fifth
    *  board hide a rare ×5 inside an ordinary-looking brick (revealed only when broken). */
   #placeMultTiles(): void {
-    const pool = this.bricks.filter(b => b.alive && !b.mega && !b.seed)
+    const pool = this.bricks.filter(b => b.alive && !b.mega && !b.seed && !b.unbreakable)
     const pick = (): Brick | null => {
       if (!pool.length) return null
       return pool.splice(Math.floor(Math.random() * pool.length), 1)[0]   // distinct each time
@@ -848,7 +854,7 @@ export class Engine {
    *  really "the last brick". */
   #markFinalBrick(): void {
     if (this.#finaleFired || this.bricksLeft !== 1) return
-    const last = this.bricks.find(b => b.alive && !b.seed && !b.mega)
+    const last = this.bricks.find(b => b.alive && !b.seed && !b.mega && !b.unbreakable)
     if (last) last.gold = true
   }
 
@@ -878,9 +884,11 @@ export class Engine {
   /** True while the finale is playing (renderer/overlay cue). */
   get finale(): boolean { return this.finaleTimer > 0 }
 
-  /** Tick seed bloom timers; a ripe seed blooms into a mega brick. */
+  /** Tick seed bloom timers (a ripe seed blooms into a mega brick) and let
+   *  every hit flash decay. */
   #stepBricks(dt: number): void {
     for (const b of this.bricks) {
+      if (b.flash) b.flash = Math.max(0, b.flash - dt)
       if (b.seed && b.alive && b.bloom !== undefined) {
         b.bloom -= dt
         if (b.bloom <= 0) this.#bloomSeed(b)
@@ -901,7 +909,7 @@ export class Engine {
   #createMega(c0: number, r0: number): Brick {
     const cols = MEGA_COLS, rows = MEGA_ROWS
     for (const b of this.bricks) {
-      if (!b.alive || b.mega) continue
+      if (!b.alive || b.mega || b.unbreakable) continue   // a barrier is never consumed — it shows through the gold
       if (b.col !== undefined && b.row !== undefined
         && b.col >= c0 && b.col < c0 + cols && b.row >= r0 && b.row < r0 + rows) {
         b.alive = false
@@ -939,8 +947,10 @@ export class Engine {
     const c0 = mega.col ?? 0, r0 = mega.row ?? 0
     const cc = mega.megaCols ?? MEGA_COLS, rr = mega.megaRows ?? MEGA_ROWS
     const shards: Brick[] = []
+    const barrier = new Set(this.bricks.filter(b => b.alive && b.unbreakable).map(b => `${b.col},${b.row}`))
     for (let r = r0; r < r0 + rr; r++) {
       for (let c = c0; c < c0 + cc; c++) {
+        if (barrier.has(`${c},${r}`)) continue           // a barrier under the gold keeps its cell
         shards.push({ x: BRICK_X0 + c * BRICK_W, y: BRICK_TOP + r * BRICK_H, w: BRICK_W, h: BRICK_H, hp: 1, max: 1, alive: true, col: c, row: r, drop: this.#randomPower() })
       }
     }
@@ -1037,9 +1047,10 @@ export class Engine {
     this.#pointerX = null
   }
 
+  /** Bricks still to clear. Barriers never count — a level is won around them. */
   get bricksLeft(): number {
     let n = 0
-    for (const b of this.bricks) if (b.alive) n++
+    for (const b of this.bricks) if (b.alive && !b.unbreakable) n++
     return n
   }
 
@@ -1441,7 +1452,7 @@ export class Engine {
       case 'orbit': {
         e.t = (e.t ?? 0) + dt
         e.cd = (e.cd ?? 0) - dt
-        if (e.cd <= 0) { const live = this.bricks.filter(b => b.alive && !b.seed); const pick = live.length ? live[Math.floor(Math.random() * live.length)] : null; if (pick) { e.ax = pick.x + pick.w / 2; e.ay = pick.y + pick.h / 2 } e.cd = 5 }
+        if (e.cd <= 0) { const live = this.bricks.filter(b => b.alive && !b.seed && !b.unbreakable); const pick = live.length ? live[Math.floor(Math.random() * live.length)] : null; if (pick) { e.ax = pick.x + pick.w / 2; e.ay = pick.y + pick.h / 2 } e.cd = 5 }
         e.x = (e.ax ?? e.x) + Math.cos(e.t * 2) * 14
         e.y = (e.ay ?? e.y) + Math.sin(e.t * 2) * 14
         break
@@ -1932,6 +1943,7 @@ export class Engine {
         if (!brick.alive) continue
         const cx = clamp(b.x, brick.x, brick.x + brick.w), cy = clamp(b.y, brick.y, brick.y + brick.h)
         if ((b.x - cx) ** 2 + (b.y - cy) ** 2 > b.r * b.r) continue
+        if (brick.unbreakable) { this.#deflect(b, b.x - cx, b.y - cy); this.#damage(brick, 1); return }   // a barrier is a wall even to a piercing ball
         if (b.pierced?.has(brick)) continue                 // already damaged on this pass
         ;(b.pierced ??= new Set()).add(brick)
         this.#damage(brick, 1)                              // one damage, no bounce, keep going
@@ -1944,18 +1956,24 @@ export class Engine {
       const cy = clamp(b.y, brick.y, brick.y + brick.h)
       const dx = b.x - cx, dy = b.y - cy
       if (dx * dx + dy * dy > b.r * b.r) continue          // no overlap
-      const overlapX = b.r - Math.abs(dx)
-      const overlapY = b.r - Math.abs(dy)
-      if (overlapX < overlapY) {
-        b.vx = dx >= 0 ? Math.abs(b.vx) : -Math.abs(b.vx)
-        b.x += dx >= 0 ? overlapX : -overlapX
-      } else {
-        b.vy = dy >= 0 ? Math.abs(b.vy) : -Math.abs(b.vy)
-        b.y += dy >= 0 ? overlapY : -overlapY
-      }
+      this.#deflect(b, dx, dy)
       // The white pinball ball does only a quarter of a normal hit (bouncy chaos, not a board-melter).
       this.#damage(brick, this.pinball && b.primary ? PINBALL_DAMAGE : 1)
       return                                               // one brick per sub-step
+    }
+  }
+
+  /** Bounce a ball off the brick face it overlaps least, and push it clear.
+   *  (dx,dy) is the ball centre relative to the nearest point on the brick. */
+  #deflect(b: Ball, dx: number, dy: number): void {
+    const overlapX = b.r - Math.abs(dx)
+    const overlapY = b.r - Math.abs(dy)
+    if (overlapX < overlapY) {
+      b.vx = dx >= 0 ? Math.abs(b.vx) : -Math.abs(b.vx)
+      b.x += dx >= 0 ? overlapX : -overlapX
+    } else {
+      b.vy = dy >= 0 ? Math.abs(b.vy) : -Math.abs(b.vy)
+      b.y += dy >= 0 ? overlapY : -overlapY
     }
   }
 
@@ -1977,6 +1995,9 @@ export class Engine {
   }
 
   #damage(brick: Brick, dmg = 1): void {
+    brick.flash = BRICK_FLASH                         // the blow lands visibly whatever comes of it
+    brick.hits = (brick.hits ?? 0) + 1
+    if (brick.unbreakable) return                     // a barrier: it rings, nothing gives — no score, no crack, no burst
     if (brick.seed) return                            // a sparkle seed is invincible until it blooms
     if (this.burstTimer > 0) brick.hp = Math.min(brick.hp, dmg)   // burst: one touch destroys any brick (even the quarter-damage pinball hit)
     brick.hp -= dmg
@@ -2563,7 +2584,7 @@ export class Engine {
   #toggleTurret(): void {
     const lit = this.bricks.find(b => b.turret && b.alive)
     if (lit) { lit.turret = false; return }                      // morph back to a tile
-    const cands = this.bricks.filter(b => b.alive && !b.turret && !b.mega && !b.seed && !b.covered)
+    const cands = this.bricks.filter(b => b.alive && !b.turret && !b.mega && !b.seed && !b.covered && !b.unbreakable)
     if (!cands.length) return
     cands[Math.floor(Math.random() * cands.length)].turret = true
     this.#turretFireCd = TURRET_FIRE_INTERVAL * 0.5              // first shot comes a touch sooner

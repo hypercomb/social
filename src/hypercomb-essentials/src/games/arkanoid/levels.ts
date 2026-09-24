@@ -2,7 +2,9 @@
 //
 // Built-in brick layouts. Each level is an array of rows; every row is up to
 // COLS (11) characters. Chars: '.' / ' ' = empty, '1'..'4' = brick hit-points
-// (also picks its colour), '*' = a tough 4-hp brick. Engine.#build reads these.
+// (also picks its colour), '*' = a tough 4-hp brick, '#' = an unbreakable ice
+// barrier (never counts toward the clear — place it so it shields nothing
+// completely, or the level cannot be won). Engine.#build reads these.
 
 export interface ArkanoidLevel {
   readonly name: string
@@ -21,13 +23,13 @@ export const LEVELS: readonly ArkanoidLevel[] = [
   {
     name: "Greek Cross",
     rows: [
-      '....111....',
+      '...#111#...',
       '....111....',
       '11111111111',
       '11121121111',
       '11111111111',
       '....111....',
-      '....111....',
+      '...#111#...',
     ],
   },
   {
@@ -88,7 +90,7 @@ export const LEVELS: readonly ArkanoidLevel[] = [
       '...11211...',
       '..1111111..',
       '.111111111.',
-      '11111111111',
+      '#111111111#',
     ],
   },
   {

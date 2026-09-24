@@ -566,5 +566,47 @@ console.log('\nF. fuzz — 90s at quadruple, all powers live')
   console.log(`      (${liveFrames} live frames, ${revivals} board revivals, peak ${maxSeen} balls, score ${e.score})`)
 }
 
+// ─────────────────────────────────────────────────────────────
+console.log('\nH. the ice barrier — it rings, it never gives, the level clears around it')
+{
+  // Two barriers flank one 2-hp brick. The whole board is then: 1 brick to clear.
+  const e = new Engine(['#2#'])
+  const barrier = e.bricks.find(b => b.unbreakable)!
+  const brick = e.bricks.find(b => !b.unbreakable)!
+  check('the # char builds an unbreakable brick', !!barrier && e.bricks.filter(b => b.unbreakable).length === 2)
+  check('barriers never count toward the clear', e.bricksLeft === 1, `${e.bricksLeft}`)
+  // Drive the white ball straight up into the barrier from just beneath it.
+  const ball = e.balls.find(b => b.primary)!
+  ball.stuck = false; e.aiming = false
+  ball.x = barrier.x + barrier.w / 2; ball.y = barrier.y + barrier.h + ball.r + 1; ball.vx = 0; ball.vy = -260
+  const hpBefore = barrier.hp
+  let bounced = false
+  for (let i = 0; i < 60; i++) { e.update(DT); if (ball.vy > 0) { bounced = true; break } }
+  check('the ball bounces off the barrier', bounced, `vy ${ball.vy.toFixed(1)}`)
+  check('the barrier took no damage', barrier.alive && barrier.hp === hpBefore, `hp ${barrier.hp}`)
+  check('the hit was counted and it flashed', (barrier.hits ?? 0) === 1 && (barrier.flash ?? 0) > 0, `hits ${barrier.hits} flash ${barrier.flash}`)
+  const flashAtHit = barrier.flash ?? 0
+  for (let i = 0; i < 12; i++) e.update(DT)
+  check('the flash decays', (barrier.flash ?? 0) < flashAtHit, `${barrier.flash}`)
+  check('a hit on a barrier scores nothing', e.score === 0, `${e.score}`)
+  // Now the same hit on the real brick: it chips, flashes, and is counted.
+  ball.x = brick.x + brick.w / 2; ball.y = brick.y + brick.h + ball.r + 1; ball.vx = 0; ball.vy = -260
+  for (let i = 0; i < 60; i++) { e.update(DT); if (ball.vy > 0) break }
+  check('the 2-hp brick loses one hit and stands', brick.alive && brick.hp === 1, `hp ${brick.hp}`)
+  check('…and it flashed + counted the hit', (brick.hits ?? 0) === 1 && (brick.flash ?? 0) > 0)
+  // Pierce: the white ball phases through tiles — but a barrier is still a wall.
+  e.pierceTimer = 5
+  ball.x = barrier.x + barrier.w / 2; ball.y = barrier.y + barrier.h + ball.r + 1; ball.vx = 0; ball.vy = -260
+  bounced = false
+  for (let i = 0; i < 60; i++) { e.update(DT); if (ball.vy > 0) { bounced = true; break } }
+  check('a piercing ball still bounces off a barrier', bounced && barrier.alive, `vy ${ball.vy.toFixed(1)}`)
+  e.pierceTimer = 0
+  // Kill the one real brick: the level is won with both barriers standing.
+  brick.alive = false
+  for (let i = 0; i < 240 * 6 && e.state === 'playing'; i++) e.update(DT)
+  check('the level is won around the barriers', e.state === 'won', `state ${e.state}`)
+  check('both barriers still stand after the win', e.bricks.filter(b => b.unbreakable && b.alive).length === 2)
+}
+
 console.log(failures === 0 ? '\nAll arkanoid amp checks passed.' : `\n${failures} FAILURE(S).`)
 process.exit(failures === 0 ? 0 : 1)

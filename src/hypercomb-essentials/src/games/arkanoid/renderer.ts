@@ -6,7 +6,7 @@
 
 import {
   type Engine, type Brick, type Ball, type Capsule, type Fireball, type TurretShot, type Rocket, type Explosion, type Enemy, type Tnt, type Bumper, type PinballProp, type Alien, type ExtraLife, type Pacman, type ComboPop, type Pickup,
-  POWER_META, W, H, BRICK_W, BRICK_H, BRICK_TOP, BRICK_X0, GUN_AIM_MIN, GUN_AIM_MAX, GUN_DIAG_SPREAD,
+  POWER_META, W, H, COLS, BRICK_W, BRICK_H, BRICK_TOP, BRICK_X0, BRICK_FLASH, GUN_AIM_MIN, GUN_AIM_MAX, GUN_DIAG_SPREAD,
   ROCKET_RADIUS, EXPLOSION_DUR, ENEMY_R, ALIEN_W, ALIEN_H, ALIEN_Y,
   FLIP_LEN, FLIP_PIVOT_DX, FLIP_Y_OFF, FLIP_REST, FLIP_UP,
   FROG_HOP_PERIOD, FROG_AIR_FRAC, BEE_WIGGLE_HZ, SCUTTLE_PERIOD, GHOST_BOB_PERIOD, CHICK_BOB_PERIOD,
@@ -81,10 +81,14 @@ const ENEMY_LOOKS: EnemyLook[] = [
   { aura: '160,160,210',top: '#c0c0e0', mid: '#7070b8', bot: '#3a3a6e', eye: '#c0a8ff', accent: '#e0e0ff', dark: '#3a3a6e', spikes: 12 }, // steel
 ]
 
-// Damage palette: a near-dead brick darkens toward this muted charred grey-brown
-// (it is desaturated + darkened, NOT just faded), so wear reads at a glance while
-// the shape stays solid.
-const BRICK_CHARRED = { r: 58, g: 50, b: 46 }
+// Damage palette: a hit brick FROSTS — the body washes toward this pale tint of
+// itself (lighter + desaturated, never darker), so wear reads at a glance and a
+// damaged wall gets brighter, not muddier.
+const WHITE = { r: 255, g: 255, b: 255 }
+const FROST = { r: 226, g: 232, b: 242 }
+// The unbreakable barrier: frosted ice. Near-white body, a cool glow, a pale
+// blue rim, and a muted blue for its glyph. Comma-separated channels feed rgba().
+const ICE = { top: '#FFFFFF', mid: '#EBF2FC', bot: '#CFDCEF', glow: '191,227,255', rim: '157,184,220', glyph: '127,152,191' }
 
 // ? scramble: every ball flickers through these vivid hues (re-rolled a few times a
 // second, distinct per ball) so the hero loses its white and you must follow it by eye.
@@ -103,6 +107,16 @@ const OSC_STACK_PALETTE = ['#5fe0c0', '#5fe08a', '#ffe24a', '#ffb03a', '#ff7043'
 export function brickColor(max: number): string {
   return max >= 4 ? TOUGH_COLOR : (BRICK_COLORS[max] ?? '#46b6f0')
 }
+
+/** The page's darker pair of that colour — the foot line on the board, and the
+ *  heavy shard tint in a break burst. */
+export function brickShade(max: number): string {
+  const c = brickColor(max)
+  return BRICK_SHADE[c.toUpperCase()] ?? c
+}
+
+/** The ice barrier's spark tints, for the overlay's ring-off-steel burst. */
+export const UNBREAKABLE_SPARKS: readonly string[] = ['#ffffff', '#dff0ff', '#a9d4ff']
 
 /** Parse a '#rrggbb' string into rgb components (renderer-local, tiny). */
 function hexRgb(hex: string): { r: number; g: number; b: number } {
@@ -131,6 +145,27 @@ function rngFrom(seed: number): () => number {
   return () => { s = (s * 48271) % 2147483647; return s / 2147483647 }
 }
 
+/** One crack of the WALL FIELD: a polyline in world units. depth 0 = a main
+ *  fissure, 1 = a branch, 2 = a twig — deeper cracks show at higher damage. */
+interface Poly { pts: [number, number][]; depth: number }
+/** A piece of the wall field clipped to one brick's plate. */
+interface Seg { x0: number; y0: number; x1: number; y1: number; depth: number }
+
+/** Liang–Barsky: the part of segment (x0,y0)→(x1,y1) inside the rect, or null. */
+function clipSeg(x0: number, y0: number, x1: number, y1: number, rx: number, ry: number, rw: number, rh: number): [number, number, number, number] | null {
+  const dx = x1 - x0, dy = y1 - y0
+  let t0 = 0, t1 = 1
+  const edges: [number, number][] = [[-dx, x0 - rx], [dx, rx + rw - x0], [-dy, y0 - ry], [dy, ry + rh - y0]]
+  for (const [p, q] of edges) {
+    if (p === 0) { if (q < 0) return null; continue }
+    const t = q / p
+    if (p < 0) { if (t > t1) return null; if (t > t0) t0 = t }
+    else { if (t < t0) return null; if (t < t1) t1 = t }
+  }
+  if (t1 - t0 < 1e-4) return null
+  return [x0 + dx * t0, y0 + dy * t0, x0 + dx * t1, y0 + dy * t1]
+}
+
 // Per-kind look for the 20 pinball props: colour + draw shape + optional glyph.
 const PROP_STYLE: Record<string, { c: string; shape: string; label?: string }> = {
   jet: { c: '#ff7043', shape: 'disc', label: 'J' }, pop: { c: '#5b9bff', shape: 'disc' }, mushroom: { c: '#5fe08a', shape: 'disc' },
@@ -145,6 +180,14 @@ const PROP_STYLE: Record<string, { c: string; shape: string; label?: string }> =
 export class Renderer {
   #ctx: CanvasRenderingContext2D
   constructor(ctx: CanvasRenderingContext2D) { this.#ctx = ctx }
+
+  // ── the wall field: one fracture design for the whole wall ──
+  // Built once per level (keyed by level + row count) and clipped to every
+  // cell's plate up front, so a frame only strokes the pieces that damaged
+  // bricks reveal. Pure derivation of the seed — never a source of truth.
+  #wallKey = ''
+  #wallPolys: Poly[] = []
+  #wallCells = new Map<number, Seg[]>()
 
   // ── orchestration spine: one candlelight clock the whole keep breathes on ──
   #pulseV = 0.6            // last computed candlelight value (0..1), recomputed atop draw()
@@ -195,7 +238,7 @@ export class Renderer {
     } else {
       this.#ctx.fillStyle = '#06040c'; this.#ctx.fillRect(0, 0, W, H)   // no theme registered → plain backdrop
     }
-    this.#bricks(engine.bricks, time)
+    this.#bricks(engine.bricks, engine.levelIndex, time)
     this.#bumpers(engine.bumpers, time)
     if (engine.pinballProps.length) this.#pinballProps(engine.pinballProps, time)
     this.#turretShots(engine.turretShots, time)
@@ -244,6 +287,7 @@ export class Renderer {
       for (let c = 0; c < line.length; c++) {
         const ch = line[c]
         if (ch === '.' || ch === ' ') continue
+        if (ch === '#') { this.#drawUnbreakable(BRICK_X0 + c * BRICK_W, BRICK_TOP + r * BRICK_H, BRICK_W, BRICK_H, 0, 0); continue }
         // In the editor '4' and '*' ARE distinguishable (unlike at runtime, where
         // both collapse to max 4): amber for a plain 4-hp brick, gold for the
         // tough '*'. Drawn fresh (wear = 1) through the same painter as play.
@@ -269,32 +313,168 @@ export class Renderer {
     ctx.fillText('paint bricks · ▶ Test to play', W / 2, H - 44)
   }
 
-  #bricks(bricks: readonly Brick[], time: number): void {
+  #bricks(bricks: readonly Brick[], levelIndex: number, time: number): void {
     const ctx = this.#ctx
+    this.#ensureWallField(bricks, levelIndex)
+    let barriers = false
     for (const b of bricks) {
       if (!b.alive) continue
+      if (b.unbreakable) { barriers = true; continue }      // painted last, over everything — a mega may bloom around one
+      const flash = b.flash ?? 0
       if (b.mega) {
-        // The big sparkling brick: gold body via the shared painter (which now
-        // streams lightning-fork cracks as it takes hits) plus a twinkle. No hit
-        // counter — the spreading cracks read the damage.
-        this.#drawBrick(b.x, b.y, b.w, b.h, FINALE_GOLD, b.hp / b.max)
+        // The big sparkling brick: gold body via the shared painter (which
+        // reveals the wall field as it takes hits) plus a twinkle. No hit
+        // counter — the spreading cracks read the damage. A mega spans cells,
+        // so its piece of the field is clipped on the fly (there is one).
+        const plate = this.#plate(b.x, b.y, b.w, b.h)
+        this.#drawBrick(b.x, b.y, b.w, b.h, FINALE_GOLD, b.hp / b.max, flash, this.#clipField(plate.rx, plate.ry, plate.rw, plate.rh))
         this.#sparkle(b, time, 6)
         continue
       }
-      if (b.gold) { this.#finalBrick(b, time); continue }   // the LAST brick — the finale beacon
+      const segs = b.col !== undefined && b.row !== undefined ? this.#wallCells.get(b.row * COLS + b.col) : undefined
+      if (b.gold) { this.#finalBrick(b, time, segs); continue }   // the LAST brick — the finale beacon
       const baseHex = b.max >= 4 ? TOUGH_COLOR : (BRICK_COLORS[b.max] ?? '#46b6f0')
-      this.#drawBrick(b.x, b.y, b.w, b.h, baseHex, b.hp / b.max)
+      this.#drawBrick(b.x, b.y, b.w, b.h, baseHex, b.hp / b.max, flash, segs)
       if (b.seed) this.#sparkle(b, time, 2)        // a seed about to bloom into a mega
       if (b.turret) this.#turretTile(b, time)      // pinball: a bumper lit this tile into a turret
       if (b.mult && !b.hidden) this.#multBadge(b, time)   // a ×1/×2/×3 score-multiplier tile
     }
+    if (barriers) for (const b of bricks) if (b.alive && b.unbreakable) this.#drawUnbreakable(b.x, b.y, b.w, b.h, b.flash ?? 0, time)
     ctx.globalAlpha = 1
+  }
+
+  /** (Re)build the wall field when the level changes. Keyed by level index +
+   *  the wall's row count, so a restart of the same level cracks the same way
+   *  and a designer test gets its own design. */
+  #ensureWallField(bricks: readonly Brick[], levelIndex: number): void {
+    let rows = 0
+    for (const b of bricks) if (b.row !== undefined) rows = Math.max(rows, b.row + (b.megaRows ?? 1))
+    const key = `${levelIndex}:${rows}`
+    if (key === this.#wallKey) return
+    this.#wallKey = key
+    this.#wallPolys = this.#buildWallField(rows, ((levelIndex + 1) * 2654435761 ^ rows * 40503) | 0)
+    this.#wallCells.clear()
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const p = this.#plate(BRICK_X0 + c * BRICK_W, BRICK_TOP + r * BRICK_H, BRICK_W, BRICK_H)
+        const segs = this.#clipField(p.rx, p.ry, p.rw, p.rh)
+        if (segs.length) this.#wallCells.set(r * COLS + c, segs)
+      }
+    }
+  }
+
+  /** THE WALL FIELD — one fracture design drawn over the whole wall, the way
+   *  a real wall cracks: long fissures run down through many bricks, branch,
+   *  and cross the mortar, and each brick shows only the piece that runs
+   *  through it. Bricks that have taken hits reveal their piece, so damage
+   *  next to damage lines up across the gutters into one continuous crack.
+   *  SYMMETRIC: generated on the left half and mirrored across the wall's
+   *  centre axis — a fissure that reaches the axis ends on it and its twin
+   *  carries on from the same point. ORIGINAL per level: everything comes
+   *  from the seed. Every cell is guaranteed a piece — any cell no fissure
+   *  crossed gets a vein grown from the nearest crack, so the very first hit
+   *  on any brick has something to show. */
+  #buildWallField(rows: number, seed: number): Poly[] {
+    const polys: Poly[] = []
+    if (rows <= 0) return polys
+    const rnd = rngFrom(seed)
+    const x0 = BRICK_X0, x1 = BRICK_X0 + COLS * BRICK_W, y0 = BRICK_TOP, y1 = BRICK_TOP + rows * BRICK_H
+    const mid = (x0 + x1) / 2, wallH = y1 - y0
+    /** Walk one crack from (sx,sy) along `ang` for about `len`, jagging as it
+     *  goes; it ends at a wall, the floor, the ceiling, or the centre axis. */
+    const walk = (sx: number, sy: number, ang: number, len: number, depth: number, buds: number, jag: number): void => {
+      const pts: [number, number][] = [[sx, sy]]
+      let x = sx, y = sy, a = ang, gone = 0
+      while (gone < len) {
+        const step = 6 + rnd() * 6
+        a += (rnd() - 0.5) * jag
+        let nx = x + Math.cos(a) * step, ny = y + Math.sin(a) * step
+        gone += step
+        let stop = false
+        if (nx <= x0 + 1) { nx = x0 + 1; stop = true }
+        if (nx >= mid) { ny = y + (ny - y) * ((mid - x) / Math.max(1e-6, nx - x)); nx = mid; stop = true }   // end ON the axis
+        if (ny >= y1 - 1) { ny = y1 - 1; stop = true }
+        if (ny <= y0 + 1) { ny = y0 + 1; stop = true }
+        x = nx; y = ny
+        pts.push([x, y])
+        if (stop) break
+        if (depth < 2 && buds > 0 && rnd() < 0.18) {          // a branch buds off, leaning to one side
+          buds--
+          walk(x, y, a + (rnd() < 0.5 ? 1 : -1) * (0.7 + rnd() * 0.8), len * 0.38, depth + 1, depth === 0 ? 1 : 0, jag)
+        }
+      }
+      if (pts.length >= 2) polys.push({ pts, depth })
+    }
+    // Main fissures: most fall from the ceiling, some come in off the left wall.
+    const mains = 3 + Math.round(rows * 0.5)
+    for (let i = 0; i < mains; i++) {
+      const fromTop = rnd() < 0.7
+      const sx = fromTop ? x0 + (i + rnd()) / mains * (mid - x0) : x0
+      const sy = fromTop ? y0 : y0 + rnd() * wallH
+      const ang = fromTop ? Math.PI / 2 + (rnd() - 0.5) * 1.3 : (rnd() - 0.5) * 1.1
+      walk(sx, sy, ang, wallH * (0.7 + rnd() * 0.8), 0, 3, 0.9)
+    }
+    // Coverage: every cell of the left half (the centre column included) must
+    // be crossed. Grow a vein from the nearest crack point through any that is
+    // not, so the network stays one connected design.
+    const covered = (c: number, r: number): boolean => {
+      const p = this.#plate(BRICK_X0 + c * BRICK_W, BRICK_TOP + r * BRICK_H, BRICK_W, BRICK_H)
+      for (const poly of polys) for (let i = 1; i < poly.pts.length; i++) {
+        const [ax, ay] = poly.pts[i - 1], [bx, by] = poly.pts[i]
+        if (clipSeg(ax, ay, bx, by, p.rx, p.ry, p.rw, p.rh)) return true
+      }
+      return false
+    }
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c <= Math.floor(COLS / 2); c++) {
+        if (covered(c, r)) continue
+        const cx = BRICK_X0 + (c + 0.5) * BRICK_W, cy = BRICK_TOP + (r + 0.5) * BRICK_H
+        let best: [number, number] = [x0, y0], bestD = Infinity
+        for (const poly of polys) for (const p of poly.pts) {
+          const d = (p[0] - cx) ** 2 + (p[1] - cy) ** 2
+          if (d < bestD) { bestD = d; best = p }
+        }
+        // A vein: from that point through the cell's centre and a little
+        // beyond, lightly jagged — built directly so it cannot miss the cell.
+        const a = Math.atan2(cy - best[1], cx - best[0])
+        const pts: [number, number][] = [best]
+        for (let i = 1; i <= 3; i++) {
+          const t = i / 3, j = i < 3 ? 5 : 0
+          pts.push([best[0] + (cx - best[0]) * t + (rnd() - 0.5) * j, best[1] + (cy - best[1]) * t + (rnd() - 0.5) * j])
+        }
+        pts.push([
+          Math.max(x0 + 1, Math.min(mid, cx + Math.cos(a) * BRICK_W * 0.5)),
+          Math.max(y0 + 1, Math.min(y1 - 1, cy + Math.sin(a) * BRICK_H * 0.9)),
+        ])
+        polys.push({ pts, depth: 1 })
+      }
+    }
+    // Mirror the half across the axis: the twin of every crack.
+    const half = polys.length
+    for (let i = 0; i < half; i++) {
+      const p = polys[i]
+      polys.push({ pts: p.pts.map(([x, y]) => [2 * mid - x, y] as [number, number]), depth: p.depth })
+    }
+    return polys
+  }
+
+  /** The wall field's pieces inside one plate. */
+  #clipField(rx: number, ry: number, rw: number, rh: number): Seg[] {
+    const out: Seg[] = []
+    for (const poly of this.#wallPolys) {
+      for (let i = 1; i < poly.pts.length; i++) {
+        const [ax, ay] = poly.pts[i - 1], [bx, by] = poly.pts[i]
+        const c = clipSeg(ax, ay, bx, by, rx, ry, rw, rh)
+        if (c) out.push({ x0: c[0], y0: c[1], x1: c[2], y1: c[3], depth: poly.depth })
+      }
+    }
+    return out
   }
 
   /** The LAST brick standing — the level's finale beacon. A gold body under a
    *  breathing halo + sparkle, so the final hit of a level reads as a prize worth
    *  chasing instead of one more tile. Deterministic in time (no Math.random). */
-  #finalBrick(b: Brick, time: number): void {
+  #finalBrick(b: Brick, time: number, segs?: Seg[]): void {
     const ctx = this.#ctx
     const cx = b.x + b.w / 2, cy = b.y + b.h / 2
     const pulse = 0.5 + 0.5 * Math.sin(time * 6)
@@ -307,7 +487,7 @@ export class Renderer {
     ctx.fillStyle = halo
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill()
     ctx.restore()
-    this.#drawBrick(b.x, b.y, b.w, b.h, FINALE_GOLD, b.hp / b.max)
+    this.#drawBrick(b.x, b.y, b.w, b.h, FINALE_GOLD, b.hp / b.max, b.flash ?? 0, segs)
     this.#sparkle(b, time, 4)
   }
 
@@ -461,108 +641,221 @@ export class Renderer {
     ctx.restore()
   }
 
-  /** Paint one brick — THE ARRIVAL PAGE'S TILE. A rounded plate carrying one
-   *  two-stop vertical gradient, separated from its neighbours by the page's
-   *  own gutter. The painter used to stack a shine edge, an ink contour, a cel
-   *  band, a gloss sweep and a specular hotspot onto every tile; beside the
-   *  page's clean wall that read as busy, so all of it is gone.
+  /** Paint one brick — THE ARRIVAL PAGE'S TILE as a lit glass plate. The page's
+   *  colour IS the body, top-lit toward white and never darker than itself; a
+   *  soft bloom of the same colour sits just outside the rim; a crisp light
+   *  edge runs along the crown and a faint inner rim lights the whole plate;
+   *  the page's darker pair colour survives only as the one-line foot. No
+   *  bevel, no chrome, no gloss stack — bright, flat-lit, glassy.
    *
-   *  `wear` is hp/max (1 = fresh, →0 = nearly dead). Damage still shows —
-   *  BOTH gradient stops darken toward charred and the fracture network grows
-   *  — because that is information the player plays on, not decoration. */
-  #drawBrick(x: number, y: number, w: number, h: number, baseHex: string, wear: number): void {
+   *  `wear` is hp/max (1 = fresh, →0 = nearly dead). Damage shows as FROST,
+   *  not soot: the body washes toward a pale tint of itself and the brick
+   *  reveals its piece of the WALL FIELD (`segs`, see #buildWallField), more
+   *  of it with every hit. That is information the player plays on, and it
+   *  gets BRIGHTER with every hit, never muddier. `flash` is the seconds left
+   *  of the hit flash (BRICK_FLASH → 0). */
+  #drawBrick(x: number, y: number, w: number, h: number, baseHex: string, wear: number, flash = 0, segs?: Seg[]): void {
     const ctx = this.#ctx
-    const freshTop = hexRgb(baseHex)
-    // The page pairs each colour with its own hand-picked bottom stop; a hue
-    // the page never named (a theme's own colour) derives one instead.
+    const base = hexRgb(baseHex)
+    // The page pairs each colour with its own darker stop; a hue the page never
+    // named (a theme's own colour) derives one. It is the foot line only.
     const pairHex = BRICK_SHADE[baseHex.toUpperCase()]
-    const freshBottom = pairHex ? hexRgb(pairHex) : darken(freshTop, 0.62)
+    const foot = pairHex ? hexRgb(pairHex) : darken(base, 0.7)
     // 0 = full damage, 1 = fresh. Squaring keeps the first hit subtle and the
     // last hit dramatic.
     const dmg = 1 - Math.max(0, Math.min(1, wear))
     const toward = dmg * dmg
-    const top = mix(freshTop, BRICK_CHARRED, toward * 0.82)
-    const bottom = mix(freshBottom, BRICK_CHARRED, toward * 0.82)
-    // Half the gutter on each side, so the PITCH stays wall-to-wall while the
-    // tiles keep the page's air between them.
-    const gapX = Math.min(BRICK_GAP_X, w * 0.18), gapY = Math.min(BRICK_GAP_Y, h * 0.24)
-    const rx = x + gapX / 2, ry = y + gapY / 2, rw = w - gapX, rh = h - gapY
+    const top = mix(mix(base, WHITE, 0.26), FROST, toward * 0.5)
+    const bottom = mix(base, FROST, toward * 0.5)
+    const { rx, ry, rw, rh } = this.#plate(x, y, w, h)
 
     ctx.globalAlpha = 1
+    // bloom: the tile's own colour, soft, just outside the rim
+    ctx.fillStyle = `rgba(${base.r},${base.g},${base.b},${0.22 - 0.1 * toward})`
+    this.#roundRect(rx - 1.5, ry - 1.5, rw + 3, rh + 3, 4); ctx.fill()
+    // body
     this.#roundRect(rx, ry, rw, rh, 3)
     const g = ctx.createLinearGradient(rx, ry, rx, ry + rh)
     g.addColorStop(0, rgbStr(top.r, top.g, top.b))
     g.addColorStop(1, rgbStr(bottom.r, bottom.g, bottom.b))
     ctx.fillStyle = g
     ctx.fill()
-
-    // Branching fracture network that grows as the brick disintegrates.
-    this.#cracks(rx, ry, rw, rh, dmg)
+    this.#glass(rx, ry, rw, rh, `rgba(${foot.r},${foot.g},${foot.b},0.85)`)
+    // This brick's piece of the wall-wide fracture, revealed by its damage.
+    if (segs) this.#fractures(rx, ry, rw, rh, dmg, segs)
+    if (flash > 0) this.#hitFlash(rx, ry, rw, rh, flash / BRICK_FLASH, '255,255,255')
   }
 
-  /** Organic, branching fracture cracks that accumulate as damage rises
-   *  (dmg = 1 - wear). Each crack's shape is seeded per brick+index so existing
-   *  cracks stay put and only NEW ones appear on each hit (no flicker / reshuffle);
-   *  every crack is drawn as a dark fissure with a 1px lit edge so it reads as an
-   *  engraved groove rather than a flat scribble. */
-  #cracks(rx: number, ry: number, rw: number, rh: number, dmg: number): void {
-    if (dmg <= 0.05 || rw < 6 || rh < 6) return
+  /** The plate inside a cell: half the page's gutter on each side, so the PITCH
+   *  stays wall-to-wall while the tiles keep the page's air between them. */
+  #plate(x: number, y: number, w: number, h: number): { rx: number; ry: number; rw: number; rh: number } {
+    const gapX = Math.min(BRICK_GAP_X, w * 0.18), gapY = Math.min(BRICK_GAP_Y, h * 0.24)
+    return { rx: x + gapX / 2, ry: y + gapY / 2, rw: w - gapX, rh: h - gapY }
+  }
+
+  /** The glass finish: a faint lit inner rim around the whole plate, a crisp
+   *  light edge along the crown, and a one-line foot in the given colour. */
+  #glass(rx: number, ry: number, rw: number, rh: number, footStyle: string): void {
     const ctx = this.#ctx
-    const cx = rx + rw / 2, cy = ry + rh / 2
-    const base = ((Math.floor(rx) * 374761393) ^ (Math.floor(ry) * 668265263)) | 0
-    const nCracks = Math.max(1, Math.min(5, Math.round(dmg * 4)))
-    const span = Math.min(rw, rh)
+    ctx.lineWidth = 1
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)'
+    this.#roundRect(rx + 1, ry + 1, rw - 2, rh - 2, 2.5); ctx.stroke()
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+    ctx.beginPath(); ctx.moveTo(rx + 3, ry + 1); ctx.lineTo(rx + rw - 3, ry + 1); ctx.stroke()
+    ctx.strokeStyle = footStyle
+    ctx.beginPath(); ctx.moveTo(rx + 3, ry + rh - 1); ctx.lineTo(rx + rw - 3, ry + rh - 1); ctx.stroke()
+  }
+
+  /** The hit flash: a white-out of the plate that decays with the square of
+   *  the remaining flash, plus a shock ring that expands off the rim as the
+   *  flash fades. `f` is 1 at the hit → 0. Additive, so it reads on any hue. */
+  #hitFlash(rx: number, ry: number, rw: number, rh: number, f: number, rgb: string): void {
+    const ctx = this.#ctx
+    const k = f * f
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.fillStyle = `rgba(${rgb},${0.55 * k})`
+    this.#roundRect(rx, ry, rw, rh, 3); ctx.fill()
+    const grow = (1 - f) * 7
+    ctx.strokeStyle = `rgba(${rgb},${0.6 * f})`; ctx.lineWidth = 1.5
+    this.#roundRect(rx - grow, ry - grow, rw + 2 * grow, rh + 2 * grow, 3 + grow); ctx.stroke()
+    ctx.restore()
+  }
+
+  /** Reveal this brick's piece of the wall field. Damage (dmg = 1 - hp/max)
+   *  decides how much of the design shows: the main fissures on the first
+   *  hit, branches from 0.4, twigs from 0.65 — and at 0.65 the rim chips
+   *  wherever a crack leaves the plate, so a crack crossing a gutter bites a
+   *  notch out of both bricks it joins. Each crack is an engraved fissure:
+   *  a soft white glow, a dark ink core, and a lit edge offset down-right —
+   *  the dark line carries the design across a bright wall, the light keeps
+   *  it from ever reading as soot. Widths and alphas match brick to brick, so
+   *  a crack that crosses the gutter stays one crack. */
+  #fractures(rx: number, ry: number, rw: number, rh: number, dmg: number, segs: Seg[]): void {
+    if (dmg <= 0.02 || !segs.length) return
+    const ctx = this.#ctx
+    // Stages are RELATIVE to the shallowest crack through this brick, so a
+    // brick only a branch crosses still shows it on the first hit.
+    let minDepth = 2
+    for (const s of segs) if (s.depth < minDepth) minDepth = s.depth
+    const maxDepth = minDepth + (dmg >= 0.65 ? 2 : dmg >= 0.4 ? 1 : 0)
     ctx.save()
     ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-    for (let i = 0; i < nCracks; i++) {
-      const rnd = rngFrom(base + i * 1013904223 + 1)        // stable per crack (shape fixed across hits)
-      const ang = rnd() * Math.PI * 2
-      const len = span * (0.6 + 0.9 * rnd())
-      this.#crackBranch(cx, cy, ang, len, 2, rnd, dmg, rx, ry, rw, rh)   // depth 2 → a lightning fork tree
+    const pass = (lw: number, style: string, dx: number, dy: number): void => {
+      for (let depth = minDepth; depth <= maxDepth; depth++) {
+        const k = depth === 0 ? 1 : depth === 1 ? 0.75 : 0.55
+        ctx.lineWidth = lw * k
+        ctx.strokeStyle = style
+        ctx.beginPath()
+        for (const s of segs) if (s.depth === depth) { ctx.moveTo(s.x0 + dx, s.y0 + dy); ctx.lineTo(s.x1 + dx, s.y1 + dy) }
+        ctx.stroke()
+      }
+    }
+    pass(2.8 + 1.6 * dmg, `rgba(255,255,255,${0.14 + 0.16 * dmg})`, 0, 0)     // glow
+    pass(1.0 + 0.8 * dmg, `rgba(18,14,40,${0.55 + 0.35 * dmg})`, 0, 0)        // ink core
+    pass(0.7, `rgba(255,255,255,${0.3 + 0.35 * dmg})`, 0.6, 0.6)               // lit edge
+    if (dmg >= 0.65) {
+      const onRim = (x: number, y: number): boolean => x <= rx + 0.8 || x >= rx + rw - 0.8 || y <= ry + 0.8 || y >= ry + rh - 0.8
+      for (const s of segs) {
+        if (s.depth > 1) continue
+        if (onRim(s.x0, s.y0)) this.#chip([s.x0, s.y0], rx, ry, rw, rh, dmg)
+        if (onRim(s.x1, s.y1)) this.#chip([s.x1, s.y1], rx, ry, rw, rh, dmg)
+      }
     }
     ctx.restore()
   }
 
-  /** One lightning-shaped crack bolt that recursively forks — "streams out like a
-   *  branch". The whole tree depends only on the seeded `rnd`, so a crack stays
-   *  put across hits and only its darkness/width grows with damage. */
-  #crackBranch(sx: number, sy: number, ang: number, len: number, depth: number,
-               rnd: () => number, dmg: number, rx: number, ry: number, rw: number, rh: number): void {
-    const segs = 2 + Math.floor(rnd() * 2)
-    const pts: [number, number][] = [[sx, sy]]
-    let px = sx, py = sy, a = ang
-    const step = len / segs
-    for (let s = 0; s < segs; s++) {
-      a += (rnd() - 0.5) * 1.15                              // sharp jag → reads as lightning
-      px = Math.max(rx + 1, Math.min(rx + rw - 1, px + Math.cos(a) * step))
-      py = Math.max(ry + 1, Math.min(ry + rh - 1, py + Math.sin(a) * step))
-      pts.push([px, py])
+  /** A chip out of the rim where a crack reaches it: a small dark wedge that
+   *  shows the board through the plate, its two broken edges lit. Only where
+   *  the ray actually touches an edge — a crack that dies inside the plate
+   *  leaves the rim whole. */
+  #chip(end: [number, number], rx: number, ry: number, rw: number, rh: number, dmg: number): void {
+    const [ex, ey] = end
+    const atL = ex <= rx + 1.6, atR = ex >= rx + rw - 1.6, atT = ey <= ry + 1.6, atB = ey >= ry + rh - 1.6
+    if (!atL && !atR && !atT && !atB) return
+    const ctx = this.#ctx
+    const size = 1.2 + 1.6 * dmg
+    let a: [number, number], tip: [number, number], b: [number, number]
+    if (atL || atR) {
+      const x0 = atL ? rx - 0.5 : rx + rw + 0.5, dir = atL ? 1 : -1
+      a = [x0, ey - size]; tip = [x0 + dir * size * 0.9, ey]; b = [x0, ey + size]
+    } else {
+      const y0 = atT ? ry - 0.5 : ry + rh + 0.5, dir = atT ? 1 : -1
+      a = [ex - size, y0]; tip = [ex, y0 + dir * size * 0.9]; b = [ex + size, y0]
     }
-    this.#strokeCrack(pts, dmg)
-    if (depth <= 0) return
-    const forks = depth >= 2 ? 2 : 1
-    for (let f = 0; f < forks; f++) {
-      const p = pts[1 + Math.floor(rnd() * (pts.length - 1))] ?? pts[pts.length - 1]
-      const ba = a + (f === 0 ? 1 : -1) * (0.5 + rnd() * 0.7)
-      this.#crackBranch(p[0], p[1], ba, len * 0.58, depth - 1, rnd, dmg * 0.9, rx, ry, rw, rh)
-    }
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(tip[0], tip[1]); ctx.lineTo(b[0], b[1]); ctx.closePath()
+    ctx.fillStyle = 'rgba(8,9,12,0.9)'; ctx.fill()
+    ctx.strokeStyle = `rgba(255,255,255,${0.45 + 0.3 * dmg})`; ctx.lineWidth = 0.8
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(tip[0], tip[1]); ctx.lineTo(b[0], b[1]); ctx.stroke()
   }
 
-  /** Stroke a crack polyline as an engraved groove: a lit far-wall highlight
-   *  offset down-right, then the dark fissure on top. */
-  #strokeCrack(pts: [number, number][], dmg: number): void {
-    if (pts.length < 2) return
+  /** The UNBREAKABLE brick — a frosted ICE barrier. A near-white plate under a
+   *  cool glow, with a crisp white inner line and a pale blue rim, a pastel
+   *  holographic sheen drifting across it, and one of two seeded finishes: a
+   *  fine 45° frost hatch, or a minimal outline diamond set in the centre —
+   *  so a run of barriers reads as one material, not one stamp. Nothing
+   *  dents it, so it never wears a crack: a hit RINGS — a glint races across
+   *  the face, the plate whites out, a shock ring leaves the rim — and the
+   *  barrier is exactly as it was. */
+  #drawUnbreakable(x: number, y: number, w: number, h: number, flash: number, time: number): void {
     const ctx = this.#ctx
-    const lw = 0.7 + dmg * 1.1
-    ctx.lineWidth = lw
-    ctx.strokeStyle = `rgba(255,255,255,${0.10 + 0.14 * dmg})`
-    ctx.beginPath(); ctx.moveTo(pts[0][0] + 0.7, pts[0][1] + 0.7)
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] + 0.7, pts[i][1] + 0.7)
-    ctx.stroke()
-    ctx.strokeStyle = `rgba(6,4,10,${0.5 + 0.4 * dmg})`
-    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1])
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1])
-    ctx.stroke()
+    const { rx, ry, rw, rh } = this.#plate(x, y, w, h)
+    const rnd = rngFrom(((Math.floor(rx) * 374761393) ^ (Math.floor(ry) * 668265263)) | 0)
+    const hatched = rnd() < 0.5
+    const phase = rnd()
+    const cx = rx + rw / 2, cy = ry + rh / 2
+
+    ctx.globalAlpha = 1
+    // cool glow, a touch wider than a colour tile's bloom — the barrier is lit from within
+    ctx.fillStyle = `rgba(${ICE.glow},0.24)`
+    this.#roundRect(rx - 2, ry - 2, rw + 4, rh + 4, 4.5); ctx.fill()
+    // body
+    this.#roundRect(rx, ry, rw, rh, 3)
+    const g = ctx.createLinearGradient(rx, ry, rx, ry + rh)
+    g.addColorStop(0, ICE.top); g.addColorStop(0.55, ICE.mid); g.addColorStop(1, ICE.bot)
+    ctx.fillStyle = g; ctx.fill()
+    ctx.save()
+    this.#roundRect(rx, ry, rw, rh, 3); ctx.clip()
+    if (hatched) {
+      // a fine 45° frost hatch, its phase seeded so neighbours never line up
+      ctx.strokeStyle = 'rgba(90,120,170,0.12)'; ctx.lineWidth = 1.6
+      ctx.beginPath()
+      for (let sx = rx - rh + phase * 6; sx < rx + rw + rh; sx += 6) { ctx.moveTo(sx, ry + rh); ctx.lineTo(sx + rh, ry) }
+      ctx.stroke()
+    } else {
+      // a minimal outline diamond, bead at its heart
+      const r = Math.min(rh * 0.32, 3.8)
+      ctx.strokeStyle = `rgba(${ICE.glyph},0.75)`; ctx.lineWidth = 1.1; ctx.lineJoin = 'round'
+      ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r * 1.25, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r * 1.25, cy); ctx.closePath(); ctx.stroke()
+      ctx.fillStyle = `rgba(${ICE.glyph},0.75)`
+      ctx.beginPath(); ctx.arc(cx, cy, 0.9, 0, Math.PI * 2); ctx.fill()
+    }
+    // the holographic sheen: a pastel band, cyan to pink, drifting across the face
+    const sweep = (time * 0.1 + phase) % 1
+    const sx0 = rx - rw * 0.5 + sweep * rw * 2
+    const holo = ctx.createLinearGradient(sx0 - rw * 0.4, ry, sx0 + rw * 0.4, ry + rh)
+    holo.addColorStop(0, 'rgba(120,220,255,0)'); holo.addColorStop(0.35, 'rgba(120,220,255,0.16)')
+    holo.addColorStop(0.65, 'rgba(255,170,220,0.16)'); holo.addColorStop(1, 'rgba(255,170,220,0)')
+    ctx.fillStyle = holo; ctx.fillRect(rx, ry, rw, rh)
+    ctx.restore()
+    // the crisp lines: a white inner line, a pale blue rim
+    ctx.lineWidth = 1
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+    this.#roundRect(rx + 1, ry + 1, rw - 2, rh - 2, 2.5); ctx.stroke()
+    ctx.strokeStyle = `rgba(${ICE.rim},0.8)`
+    this.#roundRect(rx, ry, rw, rh, 3); ctx.stroke()
+    if (flash > 0) {
+      const f = flash / BRICK_FLASH
+      ctx.save()                                              // the ring: a glint racing across the face
+      this.#roundRect(rx, ry, rw, rh, 3); ctx.clip()
+      ctx.globalCompositeOperation = 'lighter'
+      const gx = rx - 6 + (1 - f) * (rw + 12)
+      const glint = ctx.createLinearGradient(gx - 5, ry, gx + 5, ry + rh)
+      glint.addColorStop(0, 'rgba(160,215,255,0)'); glint.addColorStop(0.5, `rgba(160,215,255,${0.9 * f})`); glint.addColorStop(1, 'rgba(160,215,255,0)')
+      ctx.fillStyle = glint; ctx.fillRect(rx, ry, rw, rh)
+      ctx.restore()
+      this.#hitFlash(rx, ry, rw, rh, f, '170,215,255')
+    }
   }
 
   // The rotating gun: a dashed 120° arc above the bat (the fan the aim can
