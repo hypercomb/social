@@ -25,6 +25,7 @@ import {
   type BroodRecord, type I18nProvider,
 } from '@hypercomb/core'
 import { acceptByHand, auditLine, broodLabel, refuseByHand } from '../safety/brood-accept.js'
+import { riskLine, riskOf } from '../safety/brood-risk.js'
 
 export const BROOD_OPEN = 'brood:open'
 
@@ -37,17 +38,18 @@ export class BroodQueenBee extends QueenBee {
   override description =
     'Automatons this hive is holding but will not run — read them, accept one by hand, or set what gets held'
   override descriptionKey = 'slash.brood'
-  override options = ['list', 'read <n>', 'accept <n>', 'refuse <n>', 'rules', 'test mine', 'trust <n>']
+  override options = ['list', 'scan', 'read <n>', 'accept <n>', 'refuse <n>', 'rules', 'test mine', 'trust <n>']
   override examples = [
     { input: '/brood', result: 'Opens what this hive is holding' },
     { input: '/brood read 1', result: 'Has a reader go through that code and records what it found' },
+    { input: '/brood scan', result: 'Scans everything held for what it reaches, reads what nobody has read, and gives each a risk level' },
     { input: '/brood accept 1', result: 'Two warnings, then that automaton may run' },
     { input: '/brood test mine', result: 'Holds your own code too, until you have read it' },
   ]
 
   public override slashComplete(args: string): readonly string[] {
     const q = String(args ?? '').trim().toLowerCase()
-    const base = ['list', 'read', 'accept', 'refuse', 'rules', 'test mine', 'test off', 'trust']
+    const base = ['list', 'scan', 'read', 'accept', 'refuse', 'rules', 'test mine', 'test off', 'trust']
     return base.filter(option => !q || option.startsWith(q))
   }
 
@@ -62,6 +64,8 @@ export class BroodQueenBee extends QueenBee {
         return
       case 'list':
         return this.#list()
+      case 'scan':
+        return this.#scan()
       case 'read':
       case 'audit':
         return this.#read(remainder)
@@ -109,12 +113,29 @@ export class BroodQueenBee extends QueenBee {
         : 'held'
       const vouches = record.vouches.filter(vouch => vouch.verdict === 'accepted').length
       EffectBus.emit('activity:log', {
-        message: `${row + 1}. ${broodLabel(record)} — ${state}${vouches ? `, ${vouches} vouching` : ''}`,
+        message: `${row + 1}. ${broodLabel(record)} — ${state}${vouches ? `, ${vouches} vouching` : ''} · ${riskLine(riskOf(record))}`,
         icon: runs[row] ? '◆' : '○',
       })
     })
     const held = runs.filter(run => !run).length
     this.#say(`${held} held of ${roster.length} — see the activity log, then: brood read 1`)
+  }
+
+  /** SCAN THE BROOD: what every held automaton reaches, a reading of what
+   *  nobody has read (a few per pass — each spends the participant's model),
+   *  and the risk level that makes of each. Said only when asked. */
+  async #scan(): Promise<void> {
+    this.#say('Scanning the brood…')
+    try {
+      const { scanBrood } = await import('../safety/brood-audit.js')
+      const outcome = await scanBrood()
+      const roster = (await broodRoster()).filter(record => !record.ruling)
+      const levels = { high: 0, medium: 0, low: 0, unread: 0 }
+      for (const record of roster) levels[riskOf(record).level]++
+      this.#say(`Scanned ${outcome.scanned}, read ${outcome.read}${outcome.failed ? ` (${outcome.failed} could not be read)` : ''}${outcome.unread ? ` — ${outcome.unread} still unread: brood scan again` : ''}. Held: ${levels.high} high, ${levels.medium} medium, ${levels.low} low, ${levels.unread} unread. brood list names them.`, levels.high ? 'error' : 'info')
+    } catch (error) {
+      this.#say(`The scan stopped: ${error instanceof Error ? error.message : String(error)}`, 'error')
+    }
   }
 
   async #read(key: string): Promise<void> {

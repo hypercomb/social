@@ -36,7 +36,7 @@
 // recommends refusing it holds it (core flagInBrood). A reader can only ever
 // hold: a draft the scan held stays held whatever this pass says.
 
-import { attachAudit, broodRecord, flagInBrood, mayRunBee, reachPhrase, sectionOf, type BroodAudit, type BroodRecord, type CodeReach } from '@hypercomb/core'
+import { attachAudit, broodRecord, broodRoster, flagInBrood, mayRunBee, reachesOf, reachPhrase, sectionOf, type BroodAudit, type BroodRecord, type CodeReach } from '@hypercomb/core'
 import { callModel, resolveProvider } from '../assistant/llm-dispatch.js'
 import { JEV_IOC_KEY, JEV_MAX_STATE_CHARS, type JevResult } from '../assistant/jev-decision.js'
 
@@ -363,4 +363,63 @@ export const auditDraft = async (draft: DraftLanded, options: BroodAuditOptions 
     by: reading.refused === 'jev' ? 'jev' : reading.by,
     reader: reading.jev ? 'JEV' : reading.by,
   }
+}
+
+// ── THE WHOLE BROOD, SCANNED AND READ — `brood scan` ────────────────────────
+//
+// jwize, 2026-09-23: "we should be able to do llm scans and JEV scans on the
+// brood and then give a risk level or code review". Asked for, never on a
+// timer: the scan is instant; each reading spends the participant's model, so
+// a pass reads at most a few and says how many are left.
+
+/** Your own draft: the draft door already scanned what it NEWLY reaches
+ *  against the code it replaced, which is the question that matters for it. */
+const isOwnDraft = (record: BroodRecord): boolean =>
+  record.source.kind === 'own' && /^a draft of /.test(record.source.how ?? '')
+
+/** Record what held code reaches (core code-reach.ts), once per signature.
+ *  Null when there is nothing to scan: never held, already scanned, your own
+ *  draft, or no bytes here. */
+export const scanHeld = async (sig: string): Promise<BroodRecord | null> => {
+  const record = await broodRecord(sig)
+  if (!record || isOwnDraft(record) || record.audits.some(audit => audit.by === 'scan')) return null
+  const bytes = await moduleBytes(ioc()?.get?.<StoreLike>(STORE_KEY), sig)
+  if (!bytes?.length) return null
+  const reaches = reachesOf(decodeSource(bytes))
+  return await attachAudit(sig, {
+    by: 'scan',
+    summary: reaches.length ? `it reaches ${reachPhrase(reaches)}` : 'it reaches nothing the scan looks for',
+    reaches,
+  })
+}
+
+export type BroodScanOutcome = {
+  readonly scanned: number
+  readonly read: number
+  /** Held code still unread after this pass — the next pass reads it. */
+  readonly unread: number
+  readonly failed: number
+}
+
+/** Scan everything held that was never scanned, then have the participant's
+ *  model (and JEV, where it may) read held code nobody has read — at most
+ *  `maxReads` of it, newest first. Accepted or refused code is left alone:
+ *  a ruling is the hand's, and reading it again changes nothing. */
+export const scanBrood = async (options: { readonly maxReads?: number; readonly signal?: AbortSignal } = {}): Promise<BroodScanOutcome> => {
+  const held = (await broodRoster()).filter(record => !record.ruling)
+  let scanned = 0
+  for (const record of held) if (await scanHeld(record.sig).catch(() => null)) scanned++
+  const unreadOf = async (): Promise<BroodRecord[]> =>
+    (await broodRoster()).filter(record => !record.ruling && !record.audits.some(audit => audit.by !== 'scan'))
+  const maxReads = Math.max(0, options.maxReads ?? 5)
+  let read = 0
+  let failed = 0
+  for (const record of (await unreadOf()).slice(0, maxReads)) {
+    if (options.signal?.aborted) break
+    try {
+      await auditHeldBee(record.sig, options.signal ? { signal: options.signal } : {})
+      read++
+    } catch { failed++ }
+  }
+  return { scanned, read, unread: (await unreadOf()).length, failed }
 }

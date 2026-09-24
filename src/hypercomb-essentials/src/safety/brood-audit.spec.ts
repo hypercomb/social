@@ -10,7 +10,7 @@ vi.mock('../assistant/llm-dispatch.js', () => ({
   resolveProvider: (call: unknown) => resolveProvider(call),
 }))
 
-const { auditDraft, auditHeldBee, AUDIT_SYSTEM, DRAFT_AUDIT_SYSTEM } = await import('./brood-audit.js')
+const { auditDraft, auditHeldBee, scanBrood, scanHeld, AUDIT_SYSTEM, DRAFT_AUDIT_SYSTEM } = await import('./brood-audit.js')
 
 type Ioc = { get: (key: string) => unknown }
 
@@ -212,3 +212,37 @@ describe('reading a draft before it runs — the draft audit', () => {
 
 beforeEach(() => { if (!(globalThis as { ioc?: Ioc }).ioc) hive() })
 hive()
+
+describe('the whole brood, scanned and read — brood scan', () => {
+  beforeEach(() => {
+    callModel.mockReset()
+    callModel.mockResolvedValue({ text: 'Harmless.\nRECOMMENDS: accept', model: 'test-model' })
+  })
+
+  it('records what held code reaches, once, and leaves your own drafts to the draft door', async () => {
+    hive({ code: 'const k = localStorage.getItem("x"); eval(k)', jev: { ready: () => false, evaluate: vi.fn() } })
+    // A fresh signature per case: the brood cache lives for the file.
+    const held = 'c1'.padEnd(64, '1')
+    await holdInBrood(held, { zone: 'stranger.example' })
+    const scanned = await scanHeld(held)
+    expect(scanned?.audits.at(-1)).toMatchObject({ by: 'scan', reaches: ['storage', 'eval'] })
+    expect(await scanHeld(held)).toBeNull()
+    const draft = 'c2'.padEnd(64, '2')
+    await holdInBrood(draft, { kind: 'own', how: 'a draft of src/x.ts at x' })
+    expect(await scanHeld(draft)).toBeNull()
+  })
+
+  it('scans what was never scanned and reads what nobody read, a few per pass, never a ruled one', async () => {
+    hive({ code: 'export const bee = 1', jev: { ready: () => false, evaluate: vi.fn() } })
+    const ids = ['d1', 'd2', 'd3'].map(p => p.padEnd(64, p[1]!))
+    for (const id of ids) await holdInBrood(id, { zone: 'stranger.example' })
+    await acceptIntoHive(ids[2]!, ['not-safe', 'audit-is-not-approval'])
+    const first = await scanBrood({ maxReads: 1 })
+    expect(first.read).toBe(1)
+    expect(first.unread).toBeGreaterThanOrEqual(1)
+    const again = await scanBrood({ maxReads: 5 })
+    expect(again.scanned).toBe(0)
+    expect((await broodRecord(ids[2]!))?.audits).toEqual([])
+    for (const id of ids.slice(0, 2)) expect((await broodRecord(id))?.audits.some(a => a.by === 'test-model')).toBe(true)
+  })
+})

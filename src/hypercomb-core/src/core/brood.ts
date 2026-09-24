@@ -64,6 +64,8 @@ export type BroodAudit = {
   readonly scores?: Readonly<Record<string, number>>
   /** The reader's own recommendation. Still not an acceptance. */
   readonly recommends?: 'accept' | 'refuse' | 'unclear'
+  /** What the code reaches, when the reader was the scan (code-reach.ts). */
+  readonly reaches?: readonly CodeReach[]
 }
 
 export type BroodRuling = {

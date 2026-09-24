@@ -31,6 +31,7 @@
 
 import { broodRoster, broodRules, EffectBus, type BroodRecord, type BroodRules } from '@hypercomb/core'
 import { acceptByHand, auditLine, broodLabel, refuseByHand } from './brood-accept.js'
+import { riskLine, riskOf } from './brood-risk.js'
 
 const SURFACE = 'hc-brood'
 const STYLE_ID = 'hc-brood-styles'
@@ -74,6 +75,8 @@ class BroodElement extends HTMLElement {
   #roster: readonly BroodRecord[] = []
   #rules: BroodRules | null = null
   #busy = ''
+  // Reviews opened on a row, by signature: the reader's full findings.
+  readonly #reports = new Map<string, string>()
 
   connectedCallback(): void {
     ensureStyles()
@@ -192,10 +195,25 @@ class BroodElement extends HTMLElement {
     from.textContent = whereFrom(record)
     row.appendChild(from)
 
+    const risk = riskOf(record)
+    const level = document.createElement('div')
+    level.className = `hc-brood-risk is-${risk.level}`
+    level.textContent = riskLine(risk)
+    row.appendChild(level)
+
     const said = document.createElement('div')
     said.className = 'hc-brood-said'
     said.textContent = auditLine(record)
     row.appendChild(said)
+
+    // THE CODE REVIEW: the last reader's full findings, kept as a resource.
+    const report = this.#reports.get(record.sig)
+    if (report !== undefined) {
+      const text = document.createElement('pre')
+      text.className = 'hc-brood-report'
+      text.textContent = report
+      row.appendChild(text)
+    }
 
     const state = document.createElement('div')
     state.className = `hc-brood-state${accepted ? ' is-accepted' : ''}`
@@ -208,6 +226,16 @@ class BroodElement extends HTMLElement {
       const { auditHeldBee } = await import('./brood-audit.js')
       await auditHeldBee(record.sig)
     }))
+    const reportSig = [...record.audits].reverse().find(audit => audit.reportSig)?.reportSig
+    if (reportSig) {
+      acts.appendChild(this.#act(report === undefined ? 'Review' : 'Hide review', record, async () => {
+        if (this.#reports.has(record.sig)) { this.#reports.delete(record.sig); return }
+        const store = (globalThis as { ioc?: { get?: <T>(key: string) => T | undefined } }).ioc
+          ?.get?.<{ getResource?: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+        const blob = await store?.getResource?.(reportSig).catch(() => null)
+        this.#reports.set(record.sig, blob ? await blob.text() : 'The review is not in this hive.')
+      }))
+    }
     if (!accepted && !runsByRule(record, this.#rules ?? { own: 'run', followed: 'run', stranger: 'hold', vouchesNeeded: 0, vouchesAdmitStrangers: false })) {
       acts.appendChild(this.#act('Accept', record, async () => { await acceptByHand(record) }, true))
     }
@@ -309,6 +337,12 @@ function ensureStyles(): void {
     .hc-brood-name { font-size: 1.02em; color: rgba(${ACCENT}, 0.95); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hc-brood-from { font-size: 0.85em; color: rgba(${STEEL}, 0.9); }
     .hc-brood-said { margin-top: 0.25rem; font-size: 0.88em; color: rgba(238, 244, 248, 0.82); }
+    .hc-brood-risk { margin-top: 0.2rem; font-size: 0.88em; }
+    .hc-brood-risk.is-high { color: rgba(${ALARM}, 0.95); }
+    .hc-brood-risk.is-medium { color: rgba(${ACCENT}, 0.95); }
+    .hc-brood-risk.is-low { color: rgba(${STEEL}, 0.95); }
+    .hc-brood-risk.is-unread { color: rgba(238, 244, 248, 0.6); }
+    .hc-brood-report { margin: 0.3rem 0 0; max-height: 16rem; overflow: auto; white-space: pre-wrap; font-size: 0.82em; color: rgba(238, 244, 248, 0.8); }
     .hc-brood-state { margin-top: 0.2rem; font-size: 0.85em; color: rgba(${ALARM}, 0.92); }
     .hc-brood-state.is-accepted { color: rgba(${ACCENT}, 0.92); }
 
