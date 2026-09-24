@@ -16,6 +16,16 @@ not an untangling.
 This is a living document. Chip an item, check its box, remove its ratchet
 line.
 
+**The primitive** is the one rule underneath these experiences: a creation is
+signatured content, its typed meta envelope places it in a named relation,
+and successive heads at its stable hashed location change what that place
+means. A publisher's signature authorizes public offerings; a content hash
+verifies the bytes at each head. The
+hypergraph grows when those incidences compose; no creation kind gets a
+separate catalog or update rule. "Living" describes the result, not a second
+mechanism. The current code's departures from this rule are tracked in
+[the primitive conformance audit](primitive-conformance-audit.md).
+
 ---
 
 ## The end state: the shim, defined
@@ -95,12 +105,21 @@ the private Home pin never silently changes a public door. Clearing a public
 route withdraws its signed head while previously served signature files remain
 servable to people who know their names.
 
-**Carrying a domain and hosting an offering are distinct acts.** Adding a
-domain records a place to discover its offerings and may bring their public
-directory into the local view. Choosing
-to host one of its offerings replicates that published root's verified closure
-and the dependencies chosen for it to this host. The same signed bytes can
-then be served here by signature. Opening `name.our-zone` as a live hive also
+**Discovering a domain and turning on one of its offerings are distinct.**
+Adding a domain for browsing records a place to look. Clicking that domain
+visits its root portal with the participant's return address. **Turn on** on
+one or more deployment tiles stages references on the visited page; **Return
+to my hive** brings those references back. The local host verifies that they
+are current members of the visited domain's signed offering pool and appends
+pending layers at their own hashed locations. The domain row shows an update
+icon until the participant opens it and clicks **Turn on here** for each tile.
+Only that local click replicates the required signed closure and activates the
+local route. The participant's
+local host records its publisher, hive path, source endpoints, and signed
+deployment root. It fetches and verifies the root and the references needed
+to describe that subdomain. Further bytes resolve by signature when that
+subdomain uses them. The same signed bytes can then be served here by
+signature. Opening `name.our-zone` as a live hive also
 needs a route and a binding to the original publisher and hive path, plus the
 publisher's signed door choice when one is present. The mirror does not become
 the publisher and cannot choose a new head for them. A subdomain is the stable
@@ -108,27 +127,106 @@ door into a signed head, not itself a sigbag; the head and its content may
 change while the address stays put. The small host view may show the current
 root of each offering, filter by source domain, and search the subdomain it
 serves here. Revision browsing remains a separate action.
-Today adding a domain records the source only; automatic mirror and subdomain
-binding are still work to build.
+The cold Shim reads a domain's public offering pool and the serving host's
+current location bags. It can fall back to a subdomain's bag for an older
+parent-domain portal that has no bag of its own. A stale or mismatched bag is
+never replaced by that fallback. The pure native profile can resolve an
+activated route from the same hive; a live installed native round trip still
+needs proof.
 
-Each gallery entry opens its door for inspection and offers a simple **Turn on**
-choice. The handshake runs in one direction: the host offers a signed hive;
-the participant visits and chooses it; the participant's local instance
-receives its publisher key, hive path, signed head, and byte hosts, then pulls,
-verifies, and installs the selected application and chosen dependencies.
-Only that local instance records what is on and runs the chosen beehaviors.
-Unchosen hive cells remain outside the local hive until taken.
+**The root portal discovers offerings through a pool of meaning.** A host
+publishes `host:offerings` at `sign('host:offerings')`. Its active members name
+one actionable host location each: title, public route, publisher identity,
+hive path, and `sign(hostname)`. A revision does not rename that pool member.
+The host name's hashed location bag holds its `00000000...` markers; the
+highest marker points to the current deployment payload, and the earlier
+markers remain available for revision browsing. The route is a place to
+visit; the payload names the reference graph to inspect and replicate.
+Source files are separately addressable dependencies for review and revision.
+A local host pulls only the references the selected subdomain reaches and
+resolves their bytes as needed. The source build and its whole source tree are
+not the install unit. The portal reads the pool from each carried domain, shows one card per
+active implementation, and filters those cards by domain.
+It must not infer applications from `host:packages` labels such as
+`essentials`, or use a separate publication JSON endpoint as its catalog.
+`host:packages` remains transport inventory for code. The publisher's signed
+payload and the replicated bytes remain the authority; a host's pool cannot
+silently turn anything on in a visitor's hive.
 
-Only applications turned on by that person are checked for later signed-head
-changes. At home, **Update available** names the affected application and
-opens its page on the hosting site to inspect and take that revision. The
-update path needs no host package list. A list of installed applications and
-their exact revisions is available when the person chooses to browse it. A
-newly published application elsewhere in the gallery is never an update
-notification at home. The current cold Shim links to hive doors; the gallery
-handoff and per-application update gate are still to be wired. The global
-package update scout currently watches one install channel; it must not stand
-in for per-application interest.
+The same gesture works at every host: visit an offering and click to turn it
+on or off in one's own hive. The return handoff verifies the signed root and
+records the choice locally. On means the local hive runs it and the local host
+serves its chosen route. A wildcard
+route may derive the local door from the offering's name; route conflicts
+need a visible choice, not a silent overwrite. The content worker projects
+active, signed, routed site roots into stable location entries in the offering
+pool and serves the hostname bag's revision markers. It also projects selected
+data-only text themes declared in the signed index. The gallery reader
+requires each bag and refuses a missing or mismatched head. Static hosts can
+stage the same wire. Publication of arbitrary beehaviors and the local DCP
+toggle remain to be built; the native mirror route is wired but needs a live
+installed visit. Until then, package
+revisions are not a substitute gallery. Turning a subdomain on must resolve
+and verify its required executable bytes before they run. Other referenced
+content may arrive on demand. A local host can serve bytes it holds and can
+fetch a missing referenced byte from its recorded endpoints, verifying its
+signature before serving it.
+
+**One click, one current head.** Where possible, a tile should turn an
+offering or beehavior on or off with one clear click. A state change
+appends a marker naming a signatured layer or meta head at the meaning's
+stable hashed location bag; the latest valid head there is the authority for
+what is on now. Earlier heads and their bytes remain addressable for
+inspection even when they are absent from the active pool. The shipped
+numbered markers and planned signed succession claims must be read as their
+own formats during the forward migration.
+
+The cold Shim retains `installPackage` as an acquisition API. The visible
+deployment details show only active local site tiles and known signed
+revisions. A gallery selection remains pending until the local completion
+click verifies a bounded, typed closure and writes its on layer.
+
+Every creation is a beehavior, including a site, view, tool, command, or theme.
+Publishing decorates its public meaning pool with a signed member that names
+the creation's stable location. Other people can discover that member, borrow
+its referenced bytes, revise it in their own hive, and share their revision.
+The interface reads those pools; it is not a catalog baked into the harness.
+
+Publishing one tile is one payload act: seal the selected implementation and
+only its required dependencies, send those signature-named bytes to the chosen
+host, and read them back. Once the closure is complete, advance that
+implementation's head in the publisher-signed hive index and open its chosen
+domain route. The host projects the currently open, verified heads into its
+`host:offerings` pool; the root domain renders those members as tiles. A new
+revision changes one tile's payload head, not the harness build. Withdrawing
+the signed head removes the tile from the active pool view while earlier
+location markers and the bytes they point to remain available wherever the
+host carries that history. The offering pool is for finding locations, not
+for retaining revisions or creating a second authority.
+
+The root portal uses the same square creation tiles as a hive: **one tile per
+publisher and hive path**, even when several domains serve that creation.
+Its tile shows the title and current payload; the available domain routes sit
+beside it as visitable endpoints, not duplicate creations. Domain filters and
+a compact list are alternate ways to look at that same set. Opening a tile
+shows the running implementation and a read-only inspector for its signed
+payload, dependency list, and source tree when those sources are published.
+The inspector may show a diff or community/AI assessments, but none of those
+views activates code.
+
+Turning an offering on also follows its publisher and hive path for
+updates; no second subscription step is required. A changed signed head
+lights **Updates available** on one's own domain, but does not fetch or run
+the new revision. The notice opens the target's tiles. Clicking a chosen
+revision after inspection updates the local signed root and resolves only
+what that subdomain needs; it keeps that subdomain's existing on/off choice.
+Unclicked revisions do nothing.
+Stopping update notices is a separate local preference. The same controls
+and rules apply at every host. A newly published creation elsewhere is not an
+update to one already added. The cold Shim now marks a tile **Update available**
+only when that publisher and hive path were previously added and the signed
+head changes. Its global update scout still watches one install channel and
+cannot stand in for a background per-creation notification.
 
 An upgrade is another signed hive/package revision, first tried at a
 `try-<change>.<zone>` door on its own origin. A model can propose the change
