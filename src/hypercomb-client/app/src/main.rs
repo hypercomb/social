@@ -305,6 +305,110 @@ fn diagnostic_log_path(log: State<'_, DiagnosticLog>) -> String {
     log.0.display().to_string()
 }
 
+// ---------------------------------------------------------------------------
+// title bar — on Windows the window draws its ONE top row itself
+// ---------------------------------------------------------------------------
+//
+// The Windows window is full screen and undecorated: no caption, no menu row,
+// no taskbar. What remains is a single row of our own, a separate webview
+// above the shell's: the name on the left is the Hive menu, minimize / full
+// screen / close on the right. macOS and Linux keep their platform chrome.
+//
+// These commands answer only the title bar's own webview. Adopted content
+// runs in the shell's webview, and it has no business closing the window.
+
+/// The title bar row's height, in logical pixels.
+#[cfg(windows)]
+const TITLEBAR_HEIGHT: f64 = 32.0;
+#[cfg(windows)]
+const TITLEBAR_PAGE: &str = "hc-titlebar.html";
+#[cfg(windows)]
+const TITLEBAR_HTML: &str = include_str!("titlebar.html");
+
+/// The Hive submenu, held for the title bar to pop up — Windows has no menu row.
+struct TitlebarMenu(tauri::menu::Submenu<tauri::Wry>);
+
+fn titlebar_window(webview: &tauri::Webview) -> Option<tauri::Window> {
+    (webview.label() == "titlebar").then(|| webview.window())
+}
+
+#[tauri::command]
+fn titlebar_menu(webview: tauri::Webview, x: f64, y: f64) {
+    let Some(window) = titlebar_window(&webview) else { return };
+    if let Some(menu) = webview.try_state::<TitlebarMenu>() {
+        let _ = window.popup_menu_at(&menu.0, tauri::LogicalPosition::new(x, y));
+    }
+}
+
+#[tauri::command]
+fn titlebar_state(webview: tauri::Webview) -> bool {
+    titlebar_window(&webview)
+        .and_then(|window| window.is_fullscreen().ok())
+        .unwrap_or(false)
+}
+
+/// Toggles full screen and answers the state it left the window in.
+#[tauri::command]
+fn titlebar_fullscreen(webview: tauri::Webview) -> bool {
+    let Some(window) = titlebar_window(&webview) else { return false };
+    let next = !window.is_fullscreen().unwrap_or(false);
+    let _ = window.set_fullscreen(next);
+    // The resize this causes can arrive before the window reports its new
+    // state, so the tiling is settled here once the state is known.
+    #[cfg(windows)]
+    lay_out_titlebar(&window);
+    window.is_fullscreen().unwrap_or(next)
+}
+
+#[tauri::command]
+fn titlebar_minimize(webview: tauri::Webview) {
+    if let Some(window) = titlebar_window(&webview) {
+        let _ = window.minimize();
+    }
+}
+
+#[tauri::command]
+fn titlebar_close(webview: tauri::Webview) {
+    if let Some(window) = titlebar_window(&webview) {
+        let _ = window.close();
+    }
+}
+
+/// The row is the caption: pressing on it moves the window. Full screen has
+/// nowhere to move to.
+#[tauri::command]
+fn titlebar_drag(webview: tauri::Webview) {
+    if let Some(window) = titlebar_window(&webview) {
+        if !window.is_fullscreen().unwrap_or(false) {
+            let _ = window.start_dragging();
+        }
+    }
+}
+
+/// Keeps the two webviews tiling the window: the row on top, the shell below.
+#[cfg(windows)]
+fn lay_out_titlebar(window: &tauri::Window) {
+    // An undecorated window's inner size leaves out its invisible resize
+    // border. Full screen has no border, and the inner size would leave a
+    // strip of desktop showing along the right and bottom edges.
+    let size = if window.is_fullscreen().unwrap_or(false) {
+        window.outer_size()
+    } else {
+        window.inner_size()
+    };
+    let (Ok(size), Ok(scale)) = (size, window.scale_factor()) else { return };
+    let size = size.to_logical::<f64>(scale);
+    let bar = TITLEBAR_HEIGHT.min(size.height);
+    if let Some(titlebar) = window.get_webview("titlebar") {
+        let _ = titlebar.set_position(tauri::LogicalPosition::new(0.0, 0.0));
+        let _ = titlebar.set_size(tauri::LogicalSize::new(size.width, bar));
+    }
+    if let Some(shell) = window.get_webview("main") {
+        let _ = shell.set_position(tauri::LogicalPosition::new(0.0, bar));
+        let _ = shell.set_size(tauri::LogicalSize::new(size.width, size.height - bar));
+    }
+}
+
 /// Installed before any page script runs, so it catches failures during
 /// bootstrap — including blocked resources, which are the ones a native shell
 /// hits first.
@@ -740,6 +844,7 @@ fn main() {
             } else {
                 format!("Hypercomb - {instance}")
             };
+            #[cfg(not(windows))]
             tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                 .title(title)
                 .inner_size(1280.0, 800.0)
@@ -748,6 +853,65 @@ fn main() {
                 .initialization_script(format!("window.__HC_INSTANCE = '{instance}';"))
                 .initialization_script(RENDERER_DIAGNOSTICS)
                 .build()?;
+
+            // Windows: full screen, undecorated, and ONE top row of our own
+            // (see "title bar" above). Two webviews tile the window, so the
+            // shell's viewport is exactly the area under the row.
+            #[cfg(windows)]
+            {
+                use tauri::{LogicalPosition, LogicalSize, WebviewBuilder, WebviewUrl};
+
+                let window = tauri::window::WindowBuilder::new(app, "main")
+                    .title(&title)
+                    .inner_size(1280.0, 800.0)
+                    .min_inner_size(640.0, 480.0)
+                    .theme(Some(tauri::Theme::Dark))
+                    .decorations(false)
+                    .fullscreen(true)
+                    .build()?;
+                let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
+
+                // Served from the app's own origin so it may invoke; the bytes
+                // come from the binary, not from the baked frontend.
+                let titlebar = WebviewBuilder::new("titlebar", WebviewUrl::App(TITLEBAR_PAGE.into()))
+                    .initialization_script(format!("window.__HC_TITLE = {};", serde_json::to_string(&title)?))
+                    .on_web_resource_request(|request, response| {
+                        if request.uri().path().trim_start_matches('/') == TITLEBAR_PAGE {
+                            *response.status_mut() = tauri::http::StatusCode::OK;
+                            response.headers_mut().insert(
+                                tauri::http::header::CONTENT_TYPE,
+                                tauri::http::HeaderValue::from_static("text/html; charset=utf-8"),
+                            );
+                            *response.body_mut() = std::borrow::Cow::Borrowed(TITLEBAR_HTML.as_bytes());
+                        }
+                    });
+                let shell = WebviewBuilder::new("main", WebviewUrl::default())
+                    .initialization_script(format!("window.__HC_INSTANCE = '{instance}';"))
+                    .initialization_script(RENDERER_DIAGNOSTICS);
+
+                let bar = TITLEBAR_HEIGHT.min(size.height);
+                window.add_child(titlebar, LogicalPosition::new(0.0, 0.0), LogicalSize::new(size.width, bar))?;
+                window.add_child(
+                    shell,
+                    LogicalPosition::new(0.0, bar),
+                    LogicalSize::new(size.width, size.height - bar),
+                )?;
+
+                let tiled = window.clone();
+                window.on_window_event(move |event| {
+                    if matches!(
+                        event,
+                        tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
+                    ) {
+                        lay_out_titlebar(&tiled);
+                    }
+                });
+                // Asked for on the builder, full screen does not survive the
+                // webviews being attached; asked for now, it holds, and the
+                // resize it causes re-tiles the two webviews.
+                window.set_fullscreen(true)?;
+                lay_out_titlebar(&window);
+            }
 
             // ── Hive menu: backup and restore ─────────────────────────────
             //
@@ -802,17 +966,22 @@ fn main() {
                 // bites — the Edit menu, which is what makes Cmd+C/V/X/A work
                 // inside a WKWebView. A menu built from scratch would leave the
                 // hive unable to copy text. So macOS starts from the platform
-                // default and APPENDS; Windows, where none of that applies and
-                // a menu bar is chrome we would rather not spend, keeps the
-                // single Hive menu it already had.
-                let menu = if cfg!(target_os = "macos") {
-                    let menu = Menu::default(app.handle())?;
-                    menu.append(&hive)?;
-                    menu
+                // default and APPENDS. Linux keeps the single Hive menu bar.
+                // Windows has no menu row at all: the title bar's name pops
+                // the same submenu, so every item, handler and native picker
+                // below is shared.
+                if cfg!(windows) {
+                    app.manage(TitlebarMenu(hive.clone()));
                 } else {
-                    MenuBuilder::new(app).item(&hive).build()?
-                };
-                app.set_menu(menu)?;
+                    let menu = if cfg!(target_os = "macos") {
+                        let menu = Menu::default(app.handle())?;
+                        menu.append(&hive)?;
+                        menu
+                    } else {
+                        MenuBuilder::new(app).item(&hive).build()?
+                    };
+                    app.set_menu(menu)?;
+                }
 
                 // ── The backup that happens without being asked ────────────
                 //
@@ -1060,8 +1229,8 @@ fn main() {
                             // holds the pre-restore head in memory and would go
                             // on painting it until the next launch.
                             if changed {
-                                if let Some(window) = app.get_webview_window("main") {
-                                    let _ = window.reload();
+                                if let Some(shell) = app.get_webview("main") {
+                                    let _ = shell.reload();
                                 }
                             }
                             return;
@@ -1221,6 +1390,12 @@ fn main() {
             renderer_log,
             diagnostic_log_path,
             open_external,
+            titlebar_menu,
+            titlebar_state,
+            titlebar_fullscreen,
+            titlebar_minimize,
+            titlebar_close,
+            titlebar_drag,
         ])
         .run(tauri::generate_context!())
         .expect("running the Hypercomb window");

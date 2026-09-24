@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hypercomb</title>
+<!--
+  The window's ONE top row on Windows (hypercomb-client/app/src/main.rs,
+  "title bar"). The window is full screen and undecorated, so this row is the
+  only chrome there is: the name on the left IS the menu, the three window
+  controls sit on the right where Windows puts them.
+
+  Its own webview, above the shell's — the shell's viewport is simply the
+  area below this row, so nothing in the web shell has to know it exists.
+-->
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #15181d; color: #c9d1d9;
+    font: 12px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    user-select: none; -webkit-user-select: none; cursor: default;
+  }
+  body { display: flex; align-items: stretch; }
+  button {
+    all: unset; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+  }
+  button:focus-visible { outline: 1px solid #7eb6d6; outline-offset: -2px; }
+  #menu { gap: .45rem; padding: 0 .75rem 0 .65rem; }
+  #menu:hover, #menu.open { background: rgba(255, 255, 255, .08); }
+  #menu svg { width: 14px; height: 14px; }
+  #drag { flex: 1; }
+  .control {
+    width: 46px;
+    font: 10px/1 "Segoe Fluent Icons", "Segoe MDL2 Assets";
+  }
+  .control:hover { background: rgba(255, 255, 255, .08); }
+  .control:active { background: rgba(255, 255, 255, .05); }
+  #close:hover { background: #c42b1c; color: #fff; }
+  #close:active { background: #b22a1b; color: #fff; }
+</style>
+</head>
+<body>
+<button id="menu" aria-haspopup="menu" title="Hypercomb menu">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12,2 21,7 21,17 12,22 3,17 3,7" fill="none" stroke="#e0a526" stroke-width="2.2" stroke-linejoin="round"/></svg>
+  <span id="title">Hypercomb</span>
+</button>
+<div id="drag"></div>
+<button class="control" id="minimize" aria-label="Minimize" title="Minimize">&#xE921;</button>
+<button class="control" id="full" aria-label="Exit full screen" title="Exit full screen">&#xE73F;</button>
+<button class="control" id="close" aria-label="Close" title="Close">&#xE8BB;</button>
+<script>
+  const invoke = (command, args) => window.__TAURI__.core.invoke(command, args)
+  const menu = document.getElementById('menu')
+  const full = document.getElementById('full')
+
+  if (window.__HC_TITLE) {
+    document.getElementById('title').textContent = window.__HC_TITLE
+    document.title = window.__HC_TITLE
+  }
+
+  const paint = on => {
+    const label = on ? 'Exit full screen' : 'Full screen'
+    full.textContent = on ? '' : ''
+    full.setAttribute('aria-label', label)
+    full.title = label
+  }
+  const sync = () => invoke('titlebar_state').then(paint, () => {})
+  const toggle = () => invoke('titlebar_fullscreen').then(paint, () => {})
+
+  // The native menu is modal: the invoke settles when it closes.
+  menu.addEventListener('click', () => {
+    const box = menu.getBoundingClientRect()
+    menu.classList.add('open')
+    invoke('titlebar_menu', { x: box.left, y: box.bottom })
+      .finally(() => menu.classList.remove('open'))
+  })
+  document.getElementById('minimize').addEventListener('click', () => invoke('titlebar_minimize'))
+  full.addEventListener('click', toggle)
+  document.getElementById('close').addEventListener('click', () => invoke('titlebar_close'))
+
+  document.getElementById('drag').addEventListener('mousedown', event => {
+    if (event.button !== 0) return
+    if (event.detail === 2) toggle()
+    else invoke('titlebar_drag')
+  })
+
+  // Win+Up, Win+Down and friends change the state without this row.
+  window.addEventListener('resize', sync)
+  sync()
+</script>
+</body>
+</html>
