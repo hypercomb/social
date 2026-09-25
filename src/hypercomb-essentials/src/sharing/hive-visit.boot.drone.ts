@@ -169,7 +169,7 @@ export class HiveVisitDrone extends Drone {
     // door said where its reader was standing, go THERE: inside the offer, at
     // the route they came from. Still shaded, still taken one tile at a time
     // — landing somewhere is not holding it.
-    this.#ioc()?.get<NavLike>(NAV_KEY)?.go(name && at.length ? [name, ...at] : [])
+    ;(await serviceOf<NavLike>(NAV_KEY, 5_000))?.go(name && at.length ? [name, ...at] : [])
     const i18n = this.#i18n()
     this.emitEffect('activity:log', {
       message: i18n?.t('offer.arrived', { name })
