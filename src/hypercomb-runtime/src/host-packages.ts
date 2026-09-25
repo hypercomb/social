@@ -91,9 +91,18 @@ const settleBase = (zone: string, base: string): void => {
   try { globalThis.localStorage?.setItem(BASE_MEMO_KEY + zone, base) } catch { /* memory memo still holds */ }
 }
 
+/** Zones that answered and publish nothing, remembered for this session only.
+ *  The host directory asks every zone on every open, and each ask of a zone
+ *  with no pool is a row of 404s the browser logs and no code can silence.
+ *  Nothing in the app writes a host's pool — publishing is a separate act —
+ *  so a reload is when a new publish is looked for again. A zone that did not
+ *  ANSWER is never remembered: that is a network fact, and it is asked again. */
+const publishesNothing = new Set<string>()
+
 /** Test seam: forget every settled base. */
 export const _resetSettledBases = (): void => {
   answeredBase.clear()
+  publishesNothing.clear()
   try {
     const store = globalThis.localStorage
     if (!store) return
@@ -204,7 +213,15 @@ type FoundPool = {
  *  different facts, and only the second is about reachability. */
 type PoolProbe = { pool: FoundPool | null; answered: boolean }
 
+/** How a host that SPEAKS the directory branch says it holds no pool at this
+ *  address: the cloud worker's `servePoolListing` and the live relay's
+ *  directory branch (blossom-worker/worker.js, relay.js). That 404 is final —
+ *  the host listed the address and it is empty — unlike a door with no
+ *  directory branch, whose 404 says nothing about the pool. */
+const NO_POOL_ANSWER = /^(no pool at this address|pool not held)\s*$/
+
 const probePool = async (zone: string): Promise<PoolProbe> => {
+  if (publishesNothing.has(zone)) return { pool: null, answered: true }
   const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
   let answered = false
   // The settled base first, then every other — a hint only here: the probe
@@ -220,7 +237,15 @@ const probePool = async (zone: string): Promise<PoolProbe> => {
     try {
       const res = await fetch(`${base}/${pool}/`, { cache: 'no-store' })
       answered = true   // any status is an answer; a thrown fetch is not
-      listing = res.ok ? parsePoolListing(await res.text()) : null
+      if (res.ok) listing = parsePoolListing(await res.text())
+      else if (res.status === 404 && NO_POOL_ANSWER.test(await res.text())) {
+        // A zone's faces are one store (hostBases), so the host that said
+        // "nothing here" speaks for every base: stop walking, skip the index
+        // probe, and ask this base first next time.
+        settleBase(zone, base)
+        publishesNothing.add(zone)
+        return { pool: null, answered: true }
+      }
     } catch { listing = null }
 
     if (listing) {
@@ -238,6 +263,7 @@ const probePool = async (zone: string): Promise<PoolProbe> => {
       return { pool: { base, read, head, indices: null }, answered: true }
     }
   }
+  if (answered) publishesNothing.add(zone)
   return { pool: null, answered }
 }
 
