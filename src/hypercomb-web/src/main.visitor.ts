@@ -9,6 +9,9 @@ interface SiteDescriptor {
   pubkey?: string
   segments?: string[]
   title?: string
+  /** The publisher's arrival plan (signed index `plan:<lineage>`): a record
+   *  naming the bees this branch's arrival needs, by IoC key. */
+  plan?: string
 }
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -59,6 +62,31 @@ const applySiteIcon = (icon: string): void => {
 
 installMemoryFilesystem()
 installReadonlyNetwork()
+
+// ── what this site is, read FIRST ──────────────────────────────────────────
+// The descriptor names the publication and, when its publisher planned one,
+// the ARRIVAL: the bees this branch's first view needs (hypercomb-runtime
+// arrival-plan.ts). The runtime's first bee load reads the plan, so both
+// reads start here, before the boot graph, and run beside it — a plan that
+// is slow or absent simply means the whole package loads, as always.
+const descriptorUrl = new URL('/site.json', location.origin)
+{
+  const selectedPublisher = new URLSearchParams(location.search).get('publisher')
+  if (selectedPublisher) descriptorUrl.searchParams.set('publisher', selectedPublisher)
+}
+const siteRead: Promise<SiteDescriptor | null> = fetch(descriptorUrl, { cache: 'no-store' })
+  .then(response => response.ok ? response.json() as Promise<SiteDescriptor> : null)
+  .catch(() => null)
+;(globalThis as { __hcArrival?: Promise<string[] | null> }).__hcArrival = siteRead.then(async site => {
+  const plan = String(site?.plan ?? '').toLowerCase()
+  if (!SIG_RE.test(plan)) return null
+  // Served by the door that served this code: its host hashed the bytes on
+  // upload, and nothing here stores them — read, never re-hashed.
+  const response = await fetch(`/content/${plan}`)
+  if (!response.ok) return null
+  const record = await response.json() as { arrive?: unknown }
+  return Array.isArray(record?.arrive) ? record.arrive.map(name => String(name ?? '')) : null
+}).catch(() => null)
 
 // The standard boot graph is deliberately imported only after the OPFS gate
 // above is installed. It loads the same verified core and render path as the
@@ -136,14 +164,26 @@ const waitForIoc = async (key: string, timeoutMs = 30_000): Promise<boolean> => 
   return false
 }
 
+// ── the approach: leaving the page for the hive wakes the rest ─────────────
+// A planned arrival loads only what its page needs; everything else is
+// passive. The moment the visitor steps off the page into the hexagons (the
+// takeover surface lifts), the runtime wakes it — the renderers first.
+{
+  let wasCovered = false
+  const watch = new MutationObserver(() => {
+    const covered = document.body.classList.contains('hc-view-covered')
+    if (covered) { wasCovered = true; return }
+    if (!wasCovered) return
+    watch.disconnect()
+    EffectBus.emit('loader:activate', { reason: 'hive' })
+  })
+  watch.observe(document.body, { attributes: true, attributeFilter: ['class'] })
+}
+
 window.addEventListener('hypercomb:runtime-ready', () => {
   void (async () => {
-    const descriptorUrl = new URL('/site.json', location.origin)
-    const selectedPublisher = new URLSearchParams(location.search).get('publisher')
-    if (selectedPublisher) descriptorUrl.searchParams.set('publisher', selectedPublisher)
-    const response = await fetch(descriptorUrl, { cache: 'no-store' })
-    if (!response.ok) throw new Error(`site descriptor unavailable (${response.status})`)
-    const site = await response.json() as SiteDescriptor
+    const site = await siteRead
+    if (!site) throw new Error('site descriptor unavailable')
     const pubkey = String(site.pubkey ?? '').toLowerCase()
     const head = String(site.head ?? '').toLowerCase()
     const segments = (site.segments ?? String(site.lineage ?? '').split('/'))

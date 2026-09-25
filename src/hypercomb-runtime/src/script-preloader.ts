@@ -6,6 +6,7 @@
 import { Bee, type BeeResolver, EffectBus, mayRunBee } from '@hypercomb/core'
 import { Store } from './store'
 import { installedPackageSig } from './installed-package.js'
+import { arrivalNames, beeClassesOfDocs, resolveArrival, type BeeClass } from './arrival-plan.js'
 import {
   learnedCriticalBeeSigs,
   parseLearnedCriticalBeeSigs,
@@ -203,6 +204,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
             dependencies: ScriptPreloader.#EMPTY_SIGS,
             resources: ScriptPreloader.#EMPTY_SIGS,
             criticalBees: ScriptPreloader.#EMPTY_SIGS,
+            classes: new Map<string, BeeClass>(),
           }
       // WHAT LOADS is the activation record's bee list — acquire.ts writes
       // every bee the root names minus the units the participant turned off
@@ -233,10 +235,18 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       // transport free for reads someone is actually waiting on.
       if (walked.resources.length) this.#preheatAtIdle(walked.resources)
 
+      // THE ARRIVAL (arrival-plan.ts): a published branch that names what
+      // its arrival needs loads that and nothing more; the rest of the
+      // package stays passive until the visitor approaches it.
+      if (layerRoots.length) await this.#decideArrival(walked)
+      const passive = this.#passive
+
       const tBees = performance.now()
       let deferredBeeLoads: DeferredBeeLoads | null = null
       if (walked.bees.length) {
-        deferredBeeLoads = await this.#loadBeesPrioritized(walked.bees, walked.criticalBees)
+        deferredBeeLoads = passive
+          ? await this.#loadArrival(walked.bees.filter(sig => !passive.has(sig)))
+          : await this.#loadBeesPrioritized(walked.bees, walked.criticalBees)
       }
       const beesMs = performance.now() - tBees
 
@@ -298,6 +308,84 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     try { return await this.#finding } finally { this.#finding = null }
   }
 
+  // -------------------------------------------------
+  // the arrival — passive by default, ready at a moment's notice
+  // -------------------------------------------------
+
+  /** Bees the arrival left asleep. Null: no plan — every bee loads as always. */
+  #passive: Set<string> | null = null
+  #arrivalDecided = false
+  #arrivalCritical: readonly string[] = ScriptPreloader.#EMPTY_SIGS
+
+  #decideArrival = async (walked: { bees: readonly string[]; criticalBees: readonly string[]; classes: ReadonlyMap<string, BeeClass> }): Promise<void> => {
+    if (this.#arrivalDecided) return
+    this.#arrivalDecided = true
+    const names = await arrivalNames()
+    if (!names) return
+    const { bees, missing } = resolveArrival(names, walked.classes, new Set(walked.bees))
+    if (missing.length) console.warn(`[script-preloader] arrival plan names what this package does not carry: ${missing.join(', ')}`)
+    if (!bees.size) return
+    this.#passive = new Set(walked.bees.filter(sig => !bees.has(sig) && !this.#beeCache.has(sig)))
+    this.#arrivalCritical = walked.criticalBees
+    console.log(`[script-preloader] arrival: ${bees.size} bees now, ${this.#passive.size} passive until approached`)
+    // Late-value replay: an approach that happened before this line still
+    // wakes them.
+    EffectBus.on('loader:activate', () => { this.#activatePassive() })
+    this.#warmPassiveAtIdle()
+  }
+
+  /** Load exactly the arrival's bees, together, and hand them to the
+   *  background finisher — which pulses them and says `loader:bees-done`
+   *  for this arrival, so nothing downstream waits on the whole package. */
+  #loadArrival = async (sigs: readonly string[]): Promise<DeferredBeeLoads | null> => {
+    const pending = sigs.filter(sig => this.#isSignature(sig) && !this.#beeCache.has(sig))
+    if (!pending.length) return null
+    const loads = pending.map(sig => this.#loadBeeBySignature(sig))
+    await Promise.allSettled(loads)
+    return { pending, loads }
+  }
+
+  /** The visitor approached the rest (it left the page for the hive, or a
+   *  bee asked): wake every passive bee — the renderers first, so the hive
+   *  paints while the others arrive. They join the next cycle. */
+  #activatePassive = (): void => {
+    const passive = this.#passive
+    if (!passive?.size) return
+    this.#passive = new Set()
+    const pending = [...passive].filter(sig => !this.#beeCache.has(sig))
+    if (!pending.length) return
+    console.log(`[script-preloader] approached: waking ${pending.length} passive bees`)
+    const first = pending.filter(sig => this.#arrivalCritical.includes(sig))
+    const rest = pending.filter(sig => !this.#arrivalCritical.includes(sig))
+    void (async () => {
+      const firstLoads = first.map(sig => this.#loadBeeBySignature(sig))
+      await Promise.allSettled(firstLoads)
+      this.#finishBeeLoadsInBackground(pending, [...firstLoads, ...rest.map(sig => this.#loadBeeBySignature(sig))])
+    })()
+  }
+
+  /** READY AT A MOMENT'S NOTICE: the passive bees' bytes (and their
+   *  dependencies') come into the HTTP cache while the main thread idles —
+   *  fetched, never compiled, never run. Only where modules have a stable URL
+   *  to warm (root-served, resolve-import-map.ts). */
+  #warmPassiveAtIdle = (): void => {
+    if ((globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ !== true) return
+    const beeDeps = ((globalThis as { __hypercombBeeDeps?: Record<string, string[]> }).__hypercombBeeDeps) ?? {}
+    const queue = [...new Set([...(this.#passive ?? [])].flatMap(sig => [sig, ...(beeDeps[sig] ?? [])]))]
+    const whenIdle: (run: () => void) => void =
+      typeof (globalThis as any).requestIdleCallback === 'function'
+        ? run => (globalThis as any).requestIdleCallback(() => run(), { timeout: 5000 })
+        : run => { setTimeout(run, ScriptPreloader.#PREHEAT_FALLBACK_MS) }
+    const pump = (): void => {
+      if (!this.#passive?.size) return
+      const batch = queue.splice(0, 6)
+      if (!batch.length) return
+      void Promise.allSettled(batch.map(sig => fetch(`/${sig}`, { priority: 'low' } as RequestInit)))
+        .then(() => { if (queue.length) whenIdle(pump) })
+    }
+    setTimeout(() => whenIdle(pump), 2000)
+  }
+
   /** Resources already queued for preheat — the walk repeats across finds,
    *  and re-reading what a previous pass already warmed is pure waste. */
   readonly #preheated = new Set<string>()
@@ -344,12 +432,14 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     resources: string[]
     children: string[]
     criticalBees?: unknown
+    classes: Array<[string, BeeClass]>
   }>()
 
   #walkLayers = async (
     roots: string[]
-  ): Promise<{ bees: string[]; dependencies: string[]; resources: string[]; criticalBees: string[] }> => {
+  ): Promise<{ bees: string[]; dependencies: string[]; resources: string[]; criticalBees: string[]; classes: Map<string, BeeClass> }> => {
     const visited = new Set<string>()
+    const classes = new Map<string, BeeClass>()
     const bees = new Set<string>()
     const dependencies = new Set<string>()
     const resources = new Set<string>()
@@ -391,6 +481,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
             resources: ((layer['resources'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
             children: ((childRefs as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
             criticalBees: layer['criticalBees'],
+            classes: beeClassesOfDocs(layer['docs']),
           }
           this.#layerCache.set(clean, parsed)
         } catch (err) {
@@ -403,6 +494,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       for (const b of parsed.bees) bees.add(b)
       for (const d of parsed.dependencies) dependencies.add(d)
       for (const r of parsed.resources) resources.add(r)
+      for (const [name, cls] of parsed.classes) if (!classes.has(name)) classes.set(name, cls)
       // Startup intent is accepted only from the package root. Child-layer
       // fields are ordinary unknown metadata, so they can never influence
       // scheduling even if an older/custom publisher happens to use the name.
@@ -426,6 +518,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       dependencies: [...dependencies].filter(Boolean),
       resources: [...resources].filter(Boolean),
       criticalBees: criticalBees ?? [],
+      classes,
     }
   }
 

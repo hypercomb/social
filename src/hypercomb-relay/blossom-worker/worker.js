@@ -358,11 +358,15 @@ async function publishedRoot(env, publisher, lineage, read = indexReader(env), h
   const head = String(index?.roots?.[lineage] || '').toLowerCase()
   if (!SIG_RE.test(head)) return null
   if (!opensOn(index, lineage, host)) return null
+  // THE ARRIVAL PLAN, beside the root under the same signature: the bees
+  // this branch's first view needs (hypercomb-runtime arrival-plan.ts).
+  const plan = String(index?.roots?.[`plan:${lineage}`] || '').toLowerCase()
   return {
     head,
     pubkey: publisher.pubkey,
     label: publisher.label || publisher.pubkey.slice(0, 12) + '…',
     publishedAt: index.createdAt,
+    ...(SIG_RE.test(plan) ? { plan } : {}),
   }
 }
 
@@ -384,6 +388,7 @@ async function serveSiteDescriptor(request, env, site) {
     segments: site.lineage.split('/'),
     hosts: [new URL(request.url).host],
     publishedAt: publication.publishedAt,
+    ...(publication.plan ? { plan: publication.plan } : {}),
   }, { 'Cache-Control': 'no-store' })
 }
 
