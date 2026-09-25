@@ -51,6 +51,11 @@ type StoreLike = { putOptimization?: (blob: Blob) => Promise<string> }
 type LineageLike = { explorerSegments?: () => readonly string[]; domain?: unknown }
 
 export class ExpandDrone extends Drone {
+  /** THE EFFECTS THAT WAKE THIS BEE, and until one arrives it does nothing:
+   *  it may stay unloaded until one is emitted, and the bus replays that
+   *  emission to it (essentials scripts/passive-queen.ts effectSleeper). */
+  readonly wakesOn: readonly string[] = ['expand:layer']
+
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'assistant'
   override description = 'asks Claude Haiku (over the bridge) to grow the current layer with new tiles that extend its subject'

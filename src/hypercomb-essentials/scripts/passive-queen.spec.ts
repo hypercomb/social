@@ -2,7 +2,7 @@
 // but make her ready to answer her word.
 
 import { describe, expect, it } from 'vitest'
-import { passiveQueen, viewSleeper } from './passive-queen'
+import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen'
 
 const queen = (body = ''): string => `
 import { QueenBee } from '@hypercomb/core'
@@ -63,5 +63,30 @@ describe('view sleeper', () => {
     expect(viewSleeper('a/slides-view.drone.ts', viewDrone(''), new Map())).toMatchObject({ sleeps: false })
     const named = new Map([['b/x.queen.ts', "get('@diamondcoreprocessor.com/SlidesViewDrone')"]])
     expect(viewSleeper('a/slides-view.drone.ts', viewDrone(), named)).toMatchObject({ sleeps: false, why: 'key named by b/x.queen.ts' })
+  })
+})
+
+const effectDrone = (extra = ''): string => `
+export class ExpandDrone extends Drone {
+  readonly wakesOn: readonly string[] = ['expand:layer']
+  protected override heartbeat = async () => { this.onEffect('expand:layer', () => {}) ${extra} }
+}
+window.ioc.register('@diamondcoreprocessor.com/ExpandDrone', new ExpandDrone())
+`
+
+describe('effect sleeper', () => {
+  it('sleeps until the effects it declares', () => {
+    expect(effectSleeper('a/expand.drone.ts', effectDrone(), new Map())).toEqual({ sleeps: true, wakesOn: ['expand:layer'] })
+  })
+
+  it('stays awake when it subscribes to more than it declares, or to the DOM', () => {
+    expect(effectSleeper('a/expand.drone.ts', effectDrone("this.onEffect('render:host-ready', () => {})"), new Map())).toMatchObject({ sleeps: false, why: 'subscribes to undeclared render:host-ready' })
+    expect(effectSleeper('a/expand.drone.ts', effectDrone("window.addEventListener('keydown', () => {})"), new Map())).toMatchObject({ sleeps: false, why: 'listens to the DOM' })
+    expect(effectSleeper('a/expand.drone.ts', effectDrone('this.onEffect(SOME_EFFECT, () => {})'), new Map())).toMatchObject({ sleeps: false })
+  })
+
+  it('stays awake when its effect is sent without replay', () => {
+    const others = new Map([['b/x.ts', "EffectBus.emitTransient('expand:layer', {})"]])
+    expect(effectSleeper('a/expand.drone.ts', effectDrone(), others)).toMatchObject({ sleeps: false })
   })
 })

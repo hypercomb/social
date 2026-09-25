@@ -330,11 +330,43 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   readonly #viewSleeping = new Map<string, { renders: readonly string[]; className: string }>()
   #viewWakeBound = false
 
-  /** Every bee asleep, queens and views — what no load may start. */
-  #asleep = (): ReadonlySet<string> => new Set([...this.#sleeping.keys(), ...this.#viewSleeping.keys()])
+  /** BEES ASLEEP UNTIL AN EFFECT (essentials passive-queen.ts
+   *  effectSleeper): a bee that declares the effects that wake it loads when
+   *  the first one is emitted; the bus replays that emission to it. */
+  readonly #effectSleeping = new Map<string, { wakesOn: readonly string[]; className: string }>()
+  readonly #effectWatched = new Set<string>()
+
+  /** Every bee asleep, queens, views and effect sleepers — what no load may start. */
+  #asleep = (): ReadonlySet<string> => new Set([...this.#sleeping.keys(), ...this.#viewSleeping.keys(), ...this.#effectSleeping.keys()])
+
+  /** Wake every bee asleep for `effect`, then run one cycle. */
+  #wakeOnEffect = async (effect: string): Promise<void> => {
+    const sigs = [...this.#effectSleeping].filter(([, entry]) => entry.wakesOn.includes(effect)).map(([sig]) => sig)
+    if (!sigs.length) return
+    for (const sig of sigs) {
+      this.#effectSleeping.delete(sig)
+      this.#woken.add(sig)
+    }
+    await Promise.allSettled(sigs.map(sig => this.#loadBeeBySignature(sig)))
+    await new hypercomb().act('')
+  }
 
   #noteSleepers = (walked: { bees: readonly string[]; classes: ReadonlyMap<string, BeeClass> }): void => {
     const inPackage = new Set(walked.bees)
+    let effectSleepers = 0
+    for (const [className, cls] of walked.classes) {
+      if (!cls.passive || cls.command || cls.renders?.length || !cls.wakesOn?.length || !inPackage.has(cls.sig)) continue
+      if (this.#beeCache.has(cls.sig) || this.#woken.has(cls.sig) || this.#effectSleeping.has(cls.sig) || this.#arrivalBees.has(cls.sig)) continue
+      this.#effectSleeping.set(cls.sig, { wakesOn: cls.wakesOn, className })
+      effectSleepers++
+      for (const effect of cls.wakesOn) {
+        if (this.#effectWatched.has(effect)) continue
+        this.#effectWatched.add(effect)
+        // Replayed on subscribe: an effect already sent still wakes its bee.
+        EffectBus.on(effect, () => { void this.#wakeOnEffect(effect) })
+      }
+    }
+    if (effectSleepers) console.log(`[script-preloader] ${effectSleepers} bees asleep until their effect`)
     for (const [className, cls] of walked.classes) {
       if (!cls.passive || cls.command || !cls.renders?.length || !inPackage.has(cls.sig)) continue
       if (this.#beeCache.has(cls.sig) || this.#woken.has(cls.sig) || this.#viewSleeping.has(cls.sig) || this.#arrivalBees.has(cls.sig)) continue
