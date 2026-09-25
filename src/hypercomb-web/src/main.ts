@@ -211,7 +211,10 @@ const attachImportMap = async (): Promise<void> => {
 
   // Late append: correct on browsers that merge late maps, ignored (with a
   // console warning) on those that don't — hence the reload guard below.
-  appendImportMap(JSON.stringify(map, null, 2))
+  // The core entry is already live — index.html maps it before any module
+  // runs (one core) — so the late map leaves it out rather than restate it.
+  const { ['@hypercomb/core']: _core, ...lateImports } = imports
+  appendImportMap(JSON.stringify(integrity ? { imports: lateImports, integrity } : { imports: lateImports }, null, 2))
 
   // No dependency aliases resolved (nothing installed yet) → no bare specifier
   // gets resolved this session; the next boot picks the cache up early.

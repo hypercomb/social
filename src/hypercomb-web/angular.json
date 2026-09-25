@@ -24,6 +24,7 @@
             "allowedCommonJsDependencies": [
               "@hypercomb/runtime/ioc.web"
             ],
+            "externalDependencies": ["@hypercomb/core"],
             "assets": [
               {
                 "glob": "**/*",

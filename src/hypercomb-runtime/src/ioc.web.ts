@@ -26,6 +26,18 @@ if (!window.ioc) {
         if (value !== existing && typeof (value as any)?.markDisposed === 'function') {
           try { (value as any).markDisposed() } catch { /* best-effort ghost cleanup */ }
         }
+        // EVERY SERVICE IS ONE INSTANCE (jwize 2026-09-25: "they should all be
+        // singletons so if other libraries use them they get reused"). A
+        // DIFFERENT second instance means the module that made it ran twice —
+        // two cores, a copy inlined into a bundle — and anything holding the
+        // loser talks to state nobody else sees. Keep the first, say so once.
+        if (value !== existing) {
+          const seen = ((window as any).__hcSecondInstances ??= []) as string[]
+          if (!seen.includes(key)) {
+            seen.push(key)
+            console.warn(`[ioc] a second instance of ${key} was offered and refused — its module ran twice`)
+          }
+        }
         return
       }
 
