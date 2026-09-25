@@ -114,7 +114,10 @@ export const passiveQueen = (
   /** Every other source file of the package, by path. */
   others: ReadonlyMap<string, string>,
 ): PassiveVerdict => {
-  if (!/\.queen\.ts$/.test(file)) return { passive: false, why: 'not a queen module' }
+  // A queen is what DECLARES the one word it answers — never what its file is
+  // called. A module that also pulses does work every cycle, so it stays awake.
+  if (!/readonly\s+command\s*=\s*['"][^'"]+['"]/.test(source)) return { passive: false, why: 'declares no word' }
+  if (/^\s*(?:(?:public|protected|override|async)\s+)*(?:heartbeat|sense)\s*\(/m.test(source)) return { passive: false, why: 'pulses' }
   const keys = [...source.matchAll(LITERAL_REGISTER)].map(match => match[1]!)
   if (keys.length !== 1) return { passive: false, why: `registers ${keys.length} literal keys` }
   const side = SIDE_EFFECT.exec(source)

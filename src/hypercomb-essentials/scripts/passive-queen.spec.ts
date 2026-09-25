@@ -40,10 +40,17 @@ describe('passive queen', () => {
     expect(passiveQueen('a/layout.queen.ts', queen(), others)).toMatchObject({ passive: true })
   })
 
-  it('stays awake when she registers anything else, or is not a queen module', () => {
+  it('stays awake when she registers anything else, declares no word, or pulses', () => {
     const two = queen() + "window.ioc.register('@diamondcoreprocessor.com/LayoutService', {})"
     expect(passiveQueen('a/layout.queen.ts', two, new Map())).toMatchObject({ passive: false })
-    expect(passiveQueen('a/layout.drone.ts', queen(), new Map())).toMatchObject({ passive: false })
+    const wordless = queen().replace("readonly command = 'layout'", '')
+    expect(passiveQueen('a/layout.queen.ts', wordless, new Map())).toMatchObject({ passive: false, why: 'declares no word' })
+    const pulsing = queen('').replace('protected execute', 'protected heartbeat(): void {}\n  protected execute')
+    expect(passiveQueen('a/layout.queen.ts', pulsing, new Map())).toMatchObject({ passive: false, why: 'pulses' })
+  })
+
+  it('is judged by her declaration, never her file name', () => {
+    expect(passiveQueen('a/layout.drone.ts', queen(), new Map())).toMatchObject({ passive: true })
   })
 })
 
