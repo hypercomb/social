@@ -94,9 +94,10 @@ export const LOCAL_PROVIDER: LlmProviderDescriptor = {
   // byte what it was, and no other vendor's body ever carries them.
   toRequest: request => {
     const http = openAiRequest(`${localLlmHost()}/v1/chat/completions`, request, () => ({}))
-    if (request.thinking !== false && !request.jsonSchema && request.temperature === undefined) return http
+    if (request.thinking !== false && !request.effort && !request.jsonSchema && request.temperature === undefined) return http
     const body = JSON.parse(String(http.init.body)) as Record<string, unknown>
     if (request.thinking === false) body['reasoning_effort'] = 'none'
+    else if (request.effort) body['reasoning_effort'] = { fast: 'low', balanced: 'medium', deep: 'high' }[request.effort]
     if (request.jsonSchema) body['response_format'] = { type: 'json_schema', json_schema: { name: 'answer', schema: request.jsonSchema } }
     if (request.temperature !== undefined) body['temperature'] = request.temperature
     return { url: http.url, init: { ...http.init, body: JSON.stringify(body) } }

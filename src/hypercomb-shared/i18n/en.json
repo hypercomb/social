@@ -223,6 +223,8 @@
   "providers.creditsUnlimited": "Additional credits: unlimited",
   "providers.credits": "Credits",
   "providers.batchOnly": "Batch API only · unavailable for live chat",
+  "providers.useInChat": "Use in chat",
+  "providers.useInChatHint": "This model answers the open conversation from its next message.",
   "providers.activeChosen": "active · answers next",
   "providers.decisions": "Decisions",
   "providers.decisionOnly": "Decisions · evaluates directions and actions",

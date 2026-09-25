@@ -27,6 +27,9 @@ import { JEV_MODEL } from '../jev-decision.js'
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 
+/** OpenRouter's reasoning effort words for the three weights. */
+const REASONING_EFFORT = { fast: 'low', balanced: 'medium', deep: 'high' } as const
+
 export const OPENROUTER_PROVIDER: LlmProviderDescriptor = {
   id: 'openrouter',
   label: 'OpenRouter',
@@ -64,9 +67,12 @@ export const OPENROUTER_PROVIDER: LlmProviderDescriptor = {
       throw new Error('Jev is a decision service; use the Decisions API, not chat completions')
     }
     const provider = providerBlock(openRouterRouting.get(), request.model)
+    // The weight of the message as the model's reasoning effort, when the
+    // participant fixed the model (llm-provider.types.ts `effort`).
+    const reasoning = request.effort ? { reasoning: { effort: REASONING_EFFORT[request.effort] } } : {}
     return openAiRequest(ENDPOINT, request, undefined, {
       cacheableSystem: true,
-      ...(provider ? { extraBody: { provider } } : {}),
+      ...(provider || request.effort ? { extraBody: { ...(provider ? { provider } : {}), ...reasoning } } : {}),
     })
   },
   fromResponse: openAiResponse,

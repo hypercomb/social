@@ -45,6 +45,7 @@ import type {
   LlmFunctionTool,
   LlmProviderDescriptor,
   LlmRequest,
+  LlmTier,
   LlmToolCall,
 } from './providers/llm-provider.types.js'
 
@@ -87,6 +88,8 @@ export type LlmCall = {
   readonly cacheSystem?: boolean
   /** false = answer without a reasoning pass. Honoured by the local provider only. */
   readonly thinking?: false
+  /** Reasoning effort for a model the participant fixed; see LlmRequest.effort. */
+  readonly effort?: LlmTier
   /** Constrain the answer to this JSON Schema. Honoured by the local provider only. */
   readonly jsonSchema?: Readonly<Record<string, unknown>>
   /** Sampling temperature. Honoured by the local provider only. */
@@ -98,6 +101,11 @@ export type LlmCall = {
    *  another of them before any output — never to a provider the participant
    *  has not let read the hive. */
   readonly fallbackWithin?: string
+  /** PROVIDERS THAT GAVE UP. A model that handed the question off
+   *  (`hypercomb-handoff`) is not asked again this turn; the policy ranks
+   *  the rest as it always does. Ignored for an explicit provider or model —
+   *  naming one is the participant's word. */
+  readonly avoid?: readonly string[]
   /** Optional, non-persistent lifecycle hook for one routed provider attempt. */
   readonly observeAttempt?: (event: LlmAttemptEvent) => void
 }
@@ -338,6 +346,7 @@ export const buildRequest = (
     // Passed through only when set, so a request that names none of them is
     // the same object it always was. Only the local adapter reads them.
     ...(call.thinking === false ? { thinking: false as const } : {}),
+    ...(call.effort ? { effort: call.effort } : {}),
     ...(call.jsonSchema ? { jsonSchema: call.jsonSchema } : {}),
     ...(call.temperature !== undefined ? { temperature: call.temperature } : {}),
     stream: options.stream === true,
@@ -660,10 +669,14 @@ const isTransient = (error: unknown): boolean => {
  * silently change vendor; automatic choices may fall through their policy-
  * ranked alternatives. */
 export const routeCandidates = (
-  call: Pick<LlmCall, 'providerId' | 'model' | 'preferModel' | 'need' | 'fallbackWithin'>,
+  call: Pick<LlmCall, 'providerId' | 'model' | 'preferModel' | 'need' | 'fallbackWithin' | 'avoid'>,
 ): LlmProviderDescriptor[] => {
   const explicit = !!call.providerId || !!call.model
   let candidates = explicit ? [resolveProvider(call)] : rankProviders(call.need ?? {})
+  if (!explicit && call.avoid?.length) {
+    const avoid = new Set(call.avoid.map(id => id.toLowerCase()))
+    candidates = candidates.filter(provider => !avoid.has(provider.id.toLowerCase()))
+  }
   if (!explicit && call.fallbackWithin) {
     const owner = call.fallbackWithin.toLowerCase()
     candidates = candidates.filter(provider => credentialOwner(provider).toLowerCase() === owner)
@@ -860,7 +873,7 @@ export const llmRouter = {
    *  only counted while its server is answering — an explicit choice still
    *  reaches `routeCandidates`, so naming a stopped server attempts the call
    *  and gets the honest error rather than being quietly unavailable. */
-  ready: (call: Pick<LlmCall, 'providerId' | 'model' | 'preferModel' | 'need'> = {}): boolean => {
+  ready: (call: Pick<LlmCall, 'providerId' | 'model' | 'preferModel' | 'need' | 'avoid'> = {}): boolean => {
     try { return routeCandidates(call).some(provider => localModelServerUp(provider)) } catch { return false }
   },
   /** Why the silence, when there is one thing worth saying about it. A token,

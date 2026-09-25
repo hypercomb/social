@@ -233,6 +233,8 @@
   "providers.creditsUnlimited": "额外额度：无限",
   "providers.credits": "额度",
   "providers.batchOnly": "仅限批量 API · 不可用于实时聊天",
+  "providers.useInChat": "在聊天中使用",
+  "providers.useInChatHint": "此模型将从下一条消息开始回答当前对话。",
   "providers.activeChosen": "已启用 · 下一个回答",
   "providers.decisions": "决策",
   "providers.decisionOnly": "决策 · 评估方向和操作",

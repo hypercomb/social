@@ -493,6 +493,23 @@ describe('streamRoutedModel', () => {
 // body must stay byte for byte what it was, and a local call that sets none of
 // them must too.
 
+describe('a provider that handed the turn off', () => {
+  it('is not asked again, and a named model is never overruled', async () => {
+    registry.register(descriptor('first', 'gave up'))
+    registry.register(descriptor('second', 'took it'))
+    const first = llmRouter.ready({ avoid: ['second'] })
+    expect(first).toBe(true)
+    const chunks: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({ messages: [{ role: 'user', content: 'hi' }], avoid: ['first'] })) chunks.push(chunk)
+    expect(chunks.every(chunk => chunk.providerId === 'second')).toBe(true)
+    expect(chunks.map(chunk => chunk.text).join('')).toBe('took it')
+    const named: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({ messages: [{ role: 'user', content: 'hi' }], providerId: 'first', avoid: ['first'] })) named.push(chunk)
+    expect(named.map(chunk => chunk.text).join('')).toBe('gave up')
+    expect(llmRouter.ready({ avoid: ['first', 'second'] })).toBe(false)
+  })
+})
+
 describe('the flow knobs reach the local body only', () => {
   const SCHEMA = { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }
   const base = {

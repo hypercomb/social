@@ -233,6 +233,8 @@
   "providers.creditsUnlimited": "Kredit tambahan: tanpa batas",
   "providers.credits": "Kredit",
   "providers.batchOnly": "Hanya API batch · tidak tersedia untuk obrolan langsung",
+  "providers.useInChat": "Gunakan di obrolan",
+  "providers.useInChatHint": "Model ini menjawab percakapan yang terbuka mulai dari pesan berikutnya.",
   "providers.activeChosen": "aktif · menjawab berikutnya",
   "providers.decisions": "Keputusan",
   "providers.decisionOnly": "Keputusan · menilai arah dan tindakan",

@@ -233,6 +233,8 @@
   "providers.creditsUnlimited": "추가 크레딧: 무제한",
   "providers.credits": "크레딧",
   "providers.batchOnly": "배치 API 전용 · 실시간 채팅에서는 사용할 수 없음",
+  "providers.useInChat": "채팅에서 사용",
+  "providers.useInChatHint": "이 모델이 다음 메시지부터 열린 대화에 답합니다.",
   "providers.activeChosen": "활성 · 다음에 응답",
   "providers.decisions": "결정",
   "providers.decisionOnly": "결정 · 방향과 동작을 평가",

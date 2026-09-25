@@ -233,6 +233,8 @@
   "providers.creditsUnlimited": "Zusätzliches Guthaben: unbegrenzt",
   "providers.credits": "Guthaben",
   "providers.batchOnly": "Nur Batch-API · nicht für Live-Chat verfügbar",
+  "providers.useInChat": "Im Chat verwenden",
+  "providers.useInChatHint": "Dieses Modell antwortet ab der nächsten Nachricht in der offenen Unterhaltung.",
   "providers.activeChosen": "aktiv · antwortet als Nächstes",
   "providers.decisions": "Entscheidungen",
   "providers.decisionOnly": "Entscheidungen · bewertet Richtungen und Aktionen",

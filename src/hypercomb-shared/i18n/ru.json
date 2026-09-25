@@ -233,6 +233,8 @@
   "providers.creditsUnlimited": "Дополнительные кредиты: без ограничений",
   "providers.credits": "Кредиты",
   "providers.batchOnly": "Только пакетный API · недоступно для живого чата",
+  "providers.useInChat": "Использовать в чате",
+  "providers.useInChatHint": "Эта модель отвечает в открытом разговоре начиная со следующего сообщения.",
   "providers.activeChosen": "активен · ответит следующим",
   "providers.decisions": "Решения",
   "providers.decisionOnly": "Решения · оценивает направления и действия",

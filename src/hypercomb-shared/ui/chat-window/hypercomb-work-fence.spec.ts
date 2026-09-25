@@ -43,6 +43,16 @@ describe('the work fence', () => {
     expect(parseWriteBlock([`${sig} src/a.ts`])).toHaveProperty('error')
   })
 
+  it('a hand-off fence gives the turn up with its reason, over any work in the reply', () => {
+    const reply = 'I can try.\n\n```hypercomb-handoff\nneeds to read and refactor twelve modules at once\n```\n```hypercomb-read\nread here\n```'
+    const work = splitWork(reply)
+    expect(work.handoff).toBe('needs to read and refactor twelve modules at once')
+    expect(work.request).toBeUndefined()
+    expect(work.prose).toBe('I can try.')
+    expect(splitWork('```hypercomb-handoff\n```').handoff).toBe('no reason given')
+    expect(workInstruction({ canRead: false, canChange: false, readsPerBlock: 1, readsRunFreely: false, vocabulary: '' })).toContain('hypercomb-handoff')
+  })
+
   it('leaves an ordinary code block alone', () => {
     const text = 'Here:\n```ts\nconst a = 1\n```'
     expect(splitWork(text)).toEqual({ prose: text })

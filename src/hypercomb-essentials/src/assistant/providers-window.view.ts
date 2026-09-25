@@ -1194,6 +1194,7 @@ export class ProvidersWindowView extends EventTarget {
       test.addEventListener('click', () => { void this.#test(provider) })
       actions.appendChild(test)
     }
+    if (provider.id !== 'openrouter' && !provider.decisionOnly) actions.appendChild(this.#useHere(llmModelChoice.chosen(provider.id) ?? provider.defaultModel))
     // REMOVE — only what the participant ADDED (a pasted or discovered spec,
     // provider-spec.ts). OpenRouter is a configurator, and the local model and
     // every other built-in are part of the shell: none of them is removable.
@@ -1712,6 +1713,23 @@ export class ProvidersWindowView extends EventTarget {
    * provider. It uses the OpenRouter key; the key is managed on that row.
    * Opened: its id and price, then Use · Test · Hosts · Remove as words.
    */
+  /** USE IN CHAT (jwize, 2026-09-24): this model takes the open conversation
+   *  from its next message — the same act as typing its word. Jev still
+   *  weighs every message; with the model fixed, the weight becomes its
+   *  reasoning effort instead of a change of model. */
+  #useHere(model: string): HTMLElement {
+    const use = document.createElement('button')
+    use.type = 'button'
+    use.className = 'hc-provider-link'
+    use.textContent = this.#t('providers.useInChat', 'Use in chat')
+    use.title = this.#t('providers.useInChatHint', 'This model answers the open conversation from its next message.')
+    use.addEventListener('click', () => {
+      EffectBus.emit('chat:open', { model })
+      this.close()
+    })
+    return use
+  }
+
   #modelRow(provider: LlmProviderDescriptor, modelId: string): HTMLElement {
     const entry = cachedOpenRouterCatalog()?.find(e => e.id === modelId)
     // Its own provider (openrouter-instances.ts). "active" means what it means
@@ -1755,6 +1773,7 @@ export class ProvidersWindowView extends EventTarget {
     if (instance?.decisionOnly) {
       line.appendChild(document.createTextNode(this.#t('providers.decisionOnly', 'Decisions · evaluates directions and actions')))
     }
+    if (instance && !instance.decisionOnly && !isOpenRouterBatchModel(modelId)) line.appendChild(this.#useHere(modelId))
     // The same word on every model row: on and usable, or not.
     if (instance) {
       const state = document.createElement('span')

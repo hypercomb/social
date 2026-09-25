@@ -237,6 +237,8 @@
   "providers.creditsUnlimited": "追加クレジット：無制限",
   "providers.credits": "クレジット",
   "providers.batchOnly": "バッチ API のみ · ライブチャットでは使用できません",
+  "providers.useInChat": "チャットで使う",
+  "providers.useInChatHint": "このモデルが次のメッセージから開いている会話に答えます。",
   "providers.activeChosen": "有効 · 次に回答",
   "providers.decisions": "判断",
   "providers.decisionOnly": "判断 · 方向と操作を評価",

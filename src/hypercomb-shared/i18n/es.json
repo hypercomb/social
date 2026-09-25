@@ -233,6 +233,8 @@
   "providers.creditsUnlimited": "Créditos adicionales: ilimitados",
   "providers.credits": "Créditos",
   "providers.batchOnly": "Solo API por lotes · no disponible para el chat en vivo",
+  "providers.useInChat": "Usar en el chat",
+  "providers.useInChatHint": "Este modelo responde la conversación abierta a partir del próximo mensaje.",
   "providers.activeChosen": "activo · responde a continuación",
   "providers.decisions": "Decisiones",
   "providers.decisionOnly": "Decisiones · evalúa direcciones y acciones",

@@ -688,6 +688,7 @@ const materializeTurns = async (
       text: await resolveText(r, store),
       ...(r.contentSig ? { contentSig: r.contentSig } : {}),
       ...(r.sig ? { sig: r.sig } : {}),
+      ...(r.asks === true ? { asks: true as const } : {}),
       ...(typeof r.prompt === 'string' && SIG64.test(r.prompt) ? { prompt: r.prompt } : {}),
       ...(attempts.length ? { attempts } : {}),
     }

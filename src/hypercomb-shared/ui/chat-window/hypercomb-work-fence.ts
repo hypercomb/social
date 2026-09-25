@@ -27,6 +27,14 @@ export const TABLE_FENCE_LANG = 'hypercomb-table'
 export const WRITE_FENCE_LANG = 'hypercomb-write'
 
 /** Rounds one participant message may take before the model must answer. */
+/** HANDING OFF. A model that cannot do the work says so in this fence, one
+ *  line, and the turn goes to another model instead of an apology
+ *  (jwize, 2026-09-24: "have one of the subscriptions take care of that").
+ *  The provider that wrote it is not asked again this turn. */
+export const HANDOFF_FENCE_LANG = 'hypercomb-handoff'
+/** How many times one turn may change hands before it stops. */
+export const MAX_HANDOFFS = 2
+
 export const MAX_WORK_ROUNDS = 10
 
 export type WorkKind = 'read' | 'do' | 'table' | 'write'
@@ -44,10 +52,14 @@ export type SplitWork = {
   readonly request?: WorkRequest
   /** A do block rode alongside a read block and was not run. */
   readonly heldDo?: true
+  /** The model gave the work up, with its reason. Wins over any request. */
+  readonly handoff?: string
 }
 
+type BlockKind = WorkKind | 'handoff'
+
 type Block = {
-  readonly kind: WorkKind
+  readonly kind: BlockKind
   readonly open: number
   /** Index of the closing fence line, or `lines.length` when never closed. */
   readonly end: number
@@ -68,7 +80,7 @@ type Block = {
  * unlabeled block containing ordinary slash-looking examples.
  */
 const markedBody = (info: string, body: readonly string[]):
-  { readonly kind: WorkKind; readonly body: readonly string[] } | null => {
+  { readonly kind: BlockKind; readonly body: readonly string[] } | null => {
   if (kindOf(info)) return null
   const first = body.findIndex(line => line.trim().length > 0)
   if (first < 0) return null
@@ -83,8 +95,9 @@ const markedBody = (info: string, body: readonly string[]):
 const looksLikeTable = (body: readonly string[]): boolean =>
   /^\{\s*"rows"\s*:/.test(body.map(line => line.trim()).filter(Boolean).join(''))
 
-const kindOf = (info: string): WorkKind | null => {
+const kindOf = (info: string): BlockKind | null => {
   const word = info.trim().split(/\s+/)[0] ?? ''
+  if (word === HANDOFF_FENCE_LANG) return 'handoff'
   if (word === READ_FENCE_LANG) return 'read'
   if (word === DO_FENCE_LANG) return 'do'
   if (word === TABLE_FENCE_LANG) return 'table'
@@ -160,6 +173,8 @@ export const splitWork = (text: string): SplitWork => {
     for (let at = block.open; at <= Math.min(block.end, lines.length - 1); at++) removed.add(at)
   }
   const prose = lines.filter((_, at) => !removed.has(at)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  const handoff = blocks.find(block => block.kind === 'handoff')
+  if (handoff) return { prose, handoff: handoff.body.map(line => line.trim()).filter(Boolean).join(' ').slice(0, 300) || 'no reason given' }
   const linesOf = (kind: WorkKind): string[] => blocks
     .filter(block => block.kind === kind)
     .flatMap(block => block.body)
@@ -341,10 +356,11 @@ export type WorkPowers = {
 /** How to work in rounds, in words every model can follow. */
 export const workInstruction = (powers: WorkPowers): string => {
   if (!powers.canRead && !powers.canChange) {
-    return 'WORKING ON THE HIVE. You cannot read or change the hive in this conversation. Answer from the transcript, and say what you would need to see.'
+    return `WORKING ON THE HIVE. You cannot read or change the hive in this conversation. Answer from the transcript, and say what you would need to see.\n\n${HANDOFF_INSTRUCTION}`
   }
   const parts = [
     'WORKING ON THE HIVE. You work in rounds and keep going until the participant\'s request is done. When you need to read the hive or change it, end your reply with ONE fenced block and stop there. The result comes back to you as the next message; continue from it. When the work is done, answer in prose with no block.',
+    HANDOFF_INSTRUCTION,
   ]
   if (powers.canRead) {
     parts.push([
@@ -392,6 +408,9 @@ const REQUEST_ECHO_MAX = 500
 
 /** Every message back ends by carrying the request, so a long exchange never
  *  loses what it is for. */
+/** Taught to every model, whatever its powers: giving up is a fence, never an apology. */
+export const HANDOFF_INSTRUCTION = 'HANDING OFF. If the request is beyond what you can do — it needs abilities, knowledge or a length of reasoning you do not have — do not apologise or answer partially. Reply with ONLY a fenced block whose info string is `' + HANDOFF_FENCE_LANG + '`, holding one line saying what the work needs. A more capable model takes the question with this same transcript.'
+
 const carry = (request: string): string => {
   const text = String(request ?? '').trim()
   const cut = text.length > REQUEST_ECHO_MAX ? `${text.slice(0, REQUEST_ECHO_MAX)}…` : text

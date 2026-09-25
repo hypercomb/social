@@ -233,6 +233,8 @@
   "providers.creditsUnlimited": "Ek kredi: sınırsız",
   "providers.credits": "Kredi",
   "providers.batchOnly": "Yalnızca toplu API · canlı sohbette kullanılamaz",
+  "providers.useInChat": "Sohbette kullan",
+  "providers.useInChatHint": "Bu model, açık konuşmayı bir sonraki mesajdan itibaren yanıtlar.",
   "providers.activeChosen": "etkin · sıradaki yanıt",
   "providers.decisions": "Kararlar",
   "providers.decisionOnly": "Kararlar · yönleri ve eylemleri değerlendirir",

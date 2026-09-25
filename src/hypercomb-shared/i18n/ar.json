@@ -233,6 +233,8 @@
   "providers.creditsUnlimited": "رصيد إضافي: غير محدود",
   "providers.credits": "الرصيد",
   "providers.batchOnly": "واجهة الدُفعات فقط · غير متاحة للدردشة المباشرة",
+  "providers.useInChat": "استخدام في الدردشة",
+  "providers.useInChatHint": "يجيب هذا النموذج على المحادثة المفتوحة بدءًا من الرسالة التالية.",
   "providers.activeChosen": "نشط · يجيب تاليًا",
   "providers.decisions": "قرارات",
   "providers.decisionOnly": "قرارات · يقيّم الاتجاهات والإجراءات",

@@ -155,6 +155,11 @@ export type LlmRequest = {
   readonly cacheSystem?: boolean
   /** false = ask a model that can think to answer without a reasoning pass. Honoured by the local provider only. */
   readonly thinking?: false
+  /** HOW HARD TO THINK, when the model is fixed and the weight still moves:
+   *  the participant chose the model for the conversation, and Jev's weight
+   *  for each message becomes this model's reasoning effort instead of a
+   *  change of model. Honoured by OpenRouter and the local server. */
+  readonly effort?: LlmTier
   /** Constrain the answer to this JSON Schema. Honoured by the local provider only. */
   readonly jsonSchema?: Readonly<Record<string, unknown>>
   /** Sampling temperature. Honoured by the local provider only. */

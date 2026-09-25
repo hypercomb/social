@@ -160,6 +160,7 @@ import {
   identityInstruction,
   isWorkRefusal,
   lastRoundMessage,
+  MAX_HANDOFFS,
   MAX_WORK_ROUNDS,
   readResultMessage,
   readSkippedMessage,
@@ -184,6 +185,8 @@ type ChatTurn = {
   /** The model that wrote an assistant turn, when the thread recorded it —
    *  so a later model is told the reply was not its own. */
   readonly model?: string
+  /** A reply that ended in a question nobody has answered yet. */
+  readonly asks?: true
   /** The turn's manifest signature — its file name in the bucket. Present
    *  on a turn read back from disk, absent on one this window appended in
    *  memory and has not re-read yet. It is the ONLY join between a drawn
@@ -1057,7 +1060,7 @@ type LlmMessageLike =
   | { readonly role: 'tool'; readonly content: string; readonly toolCallId: string }
 
 type LlmRouterLike = {
-  ready?(call?: { providerId?: string; model?: string; preferModel?: string; need?: { tier?: string; streaming?: boolean; minContext?: number } }): boolean
+  ready?(call?: { providerId?: string; model?: string; preferModel?: string; need?: { tier?: string; streaming?: boolean; minContext?: number }; avoid?: readonly string[] }): boolean
   providerIdForModel?(model: string): string | undefined
   /** Published model capacity, when the provider catalog knows it. */
   contextLengthForModel?(model: string): number | undefined
@@ -1086,6 +1089,10 @@ type LlmRouterLike = {
     cacheSystem?: boolean
     /** Fall back automatically, but only among providers using this owner's key. */
     fallbackWithin?: string
+    /** Providers that handed this turn off; not asked again. */
+    avoid?: readonly string[]
+    /** The message's weight as reasoning effort, for a model the participant fixed. */
+    effort?: 'fast' | 'balanced' | 'deep'
     /** Settled provider attempts, without prompts or credentials. */
     observeAttempt?: (event: LlmAttemptEventLike) => void
   }): AsyncGenerator<RoutedChunkLike>
@@ -5964,14 +5971,25 @@ export class ChatWindowComponent implements OnDestroy {
     // preferred only while the weight is the same — so the mediator chooses
     // again the moment the work gets heavier or lighter.
     const previousTier = this.#answeredTier.get(convoId)
-    const need = { tier: effortInThread(message, previousTier), streaming: true, minContext: contextNeedFor(transcriptChars, message) }
     const namedModel = this.modelExplicit() ? this.model() || undefined : undefined
     // …and only on the provider that gave it. The name a vendor reports back
     // is not always a name another provider knows: a remembered OpenRouter
     // model handed to the local server came back "invalid model name".
     const lastModel = this.model()
-    const preferFor = (tier: MessageEffort): string | undefined => !this.modelExplicit() && previousTier === tier && !!lastModel
-      && router?.providerIdForModel?.(lastModel) === this.#answeredProvider.get(convoId)
+    const lastModelHere = !!lastModel && router?.providerIdForModel?.(lastModel) === this.#answeredProvider.get(convoId)
+    // THE ASKER GETS THE ANSWER (jwize, 2026-09-24). When the newest reply
+    // ended in a question, this message is its answer, and it goes back to
+    // the model that asked whatever its weight — another model would be
+    // handed an answer to a question it never asked. Naming a model still
+    // wins; the in-memory thread already holds this message, so the reply
+    // is the turn before it.
+    const askerHolds = !namedModel && lastModelHere && !!previousTier
+      && this.turns().at(-2)?.role === 'assistant' && this.turns().at(-2)?.asks === true
+    const need = {
+      tier: askerHolds && previousTier ? previousTier : effortInThread(message, previousTier),
+      streaming: true, minContext: contextNeedFor(transcriptChars, message),
+    }
+    const preferFor = (tier: MessageEffort): string | undefined => !this.modelExplicit() && previousTier === tier && lastModelHere
       ? lastModel
       : undefined
     const preferModel = preferFor(need.tier)
@@ -6158,6 +6176,9 @@ export class ChatWindowComponent implements OnDestroy {
       let pinnedEndpoint = pinned ? router.providerMachineEndpoint?.(pinned) : undefined
       let continuationModel = namedModel
       let system = systemFor(firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(need))
+      // WHO GAVE THE TURN UP: not asked again, and the next round is routed
+      // afresh at the deep tier, with the same transcript.
+      const avoid: string[] = []
       // The weight the worker is routed at; the front door may change it.
       let routeNeed = need
       const snapshotIds: string[] = []
@@ -6663,14 +6684,17 @@ export class ChatWindowComponent implements OnDestroy {
           jevTurn = false
           turnPath = door.down ? 'down' : 'aside'
         }
-        if (!namedModel) {
+        // With a model named, the weight still moves — it becomes that model's
+        // reasoning effort, never a change of model (buildRequest keeps the
+        // named model whatever the tier).
+        if (!askerHolds) {
           const tier = effortFromJev(need.tier, door, previousTier)
           const moved = { ...need, tier }
           if (tier !== need.tier && router.ready?.({ ...(pinned ? { providerId: pinned } : {}), need: moved }) !== false) routeNeed = moved
         }
         turnWeight = routeNeed.tier
         if (door.aside || routeNeed !== need) {
-          system = systemFor(policyForNeed?.designate?.(routeNeed)?.model ?? firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(routeNeed))
+          system = systemFor(namedModel ?? policyForNeed?.designate?.(routeNeed)?.model ?? firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(routeNeed))
         }
       }
 
@@ -6691,6 +6715,8 @@ export class ChatWindowComponent implements OnDestroy {
           preferModel: rounds === 0 ? preferFor(routeNeed.tier) : undefined,
           need: routeNeed,
           ...(rounds === 0 && !pinned && fallbackWithin ? { fallbackWithin } : {}),
+          ...(avoid.length ? { avoid } : {}),
+          ...(namedModel ? { effort: routeNeed.tier } : {}),
           cacheSystem: true,
           observeAttempt,
           messages,
@@ -6742,6 +6768,29 @@ export class ChatWindowComponent implements OnDestroy {
         writeTurnMeta(roundProviderId, roundModel)
 
         const work = splitWork(roundText)
+        // HANDED OFF (hypercomb-work-fence.ts HANDOFF_FENCE_LANG): the model
+        // said the work is beyond it. Its reply is dropped, it is not asked
+        // again, and the same messages go to the next model the policy ranks
+        // at the deep tier — a model named by the participant is their word
+        // and is not overruled. Twice at most; then the turn says so.
+        if (work.handoff && !namedModel) {
+          const gaveUp = roundLabel || roundModel || roundProviderId
+          avoid.push(roundProviderId)
+          routeNeed = { ...routeNeed, tier: 'deep' }
+          const another = avoid.length <= MAX_HANDOFFS && router.ready?.({ need: routeNeed, avoid }) === true
+          wrote = true
+          yield `${lead}*${gaveUp} handed this off: ${work.handoff}*`
+          if (!another) {
+            yield `\n\nNo other model switched on can take it. Name one, or switch one on in the providers console.`
+            return ''
+          }
+          pinned = undefined
+          pinnedEndpoint = undefined
+          continuationModel = undefined
+          system = systemFor(policyForNeed?.designate?.(routeNeed)?.model, undefined, router.designatedProviderId?.(routeNeed))
+          EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `handed off by ${gaveUp}; routing again` })
+          continue
+        }
         if (!work.request || lastRound) {
           if (jevTurn && work.prose) {
             wrote = true

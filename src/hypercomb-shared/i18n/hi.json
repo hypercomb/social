@@ -233,6 +233,8 @@
   "providers.creditsUnlimited": "अतिरिक्त क्रेडिट: असीमित",
   "providers.credits": "क्रेडिट",
   "providers.batchOnly": "केवल बैच API · लाइव चैट के लिए उपलब्ध नहीं",
+  "providers.useInChat": "चैट में उपयोग करें",
+  "providers.useInChatHint": "यह मॉडल अगले संदेश से खुली बातचीत का उत्तर देता है।",
   "providers.activeChosen": "सक्रिय · आगे उत्तर देगा",
   "providers.decisions": "निर्णय",
   "providers.decisionOnly": "निर्णय · दिशाओं और क्रियाओं का मूल्यांकन",
