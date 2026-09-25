@@ -1,4 +1,4 @@
-// sharing/content-broker.drone.ts
+// sharing/content-broker.boot.drone.ts
 //
 // Content-addressed fetch with two transports:
 //   1. HTTP-direct (preferred) — fetch from operator domains' HTTP
@@ -1479,7 +1479,7 @@ export class ContentBrokerDrone extends Drone {
    * `quiet` keeps that interactive event lane untouched for background
    * materialization jobs that report their own aggregate progress.
    */
-  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; deepResources?: boolean; maxResources?: number; silent?: boolean; quiet?: boolean; mirror?: MirrorSink } = {}): Promise<{ layers: number; leaves: number; failed: number; truncated: number; mirrored: number; alreadyMirrored: number; mirrorFailed: number; unresolved: UnresolvedRef[] }> => {
+  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; deepResources?: boolean; maxResources?: number; silent?: boolean; quiet?: boolean; mirror?: MirrorSink; maxDepth?: number } = {}): Promise<{ layers: number; leaves: number; failed: number; truncated: number; mirrored: number; alreadyMirrored: number; mirrorFailed: number; unresolved: UnresolvedRef[] }> => {
     const root = String(rootSig ?? '').toLowerCase().trim()
     const stats = { layers: 0, leaves: 0, failed: 0, truncated: 0, mirrored: 0, alreadyMirrored: 0, mirrorFailed: 0, unresolved: [] as UnresolvedRef[] }
     if (!SIG_RE.test(root)) return stats
@@ -1504,7 +1504,14 @@ export class ContentBrokerDrone extends Drone {
     const asSigs = (v: unknown): string[] =>
       Array.isArray(v) ? v.map(x => String(x).toLowerCase().trim()).filter(s => SIG_RE.test(s)) : []
 
-    const walkLayer = async (sig: string): Promise<void> => {
+    // DEPTH. `maxDepth` stops the descent that many TILE levels below the
+    // root (0 = the root alone). A META ENVELOPE is an edge, not a level: it
+    // is stepped through at the depth of the tile that holds it. A layer past
+    // the limit is neither fetched nor marked visited, so a later full walk
+    // over the same visited set would still reach it.
+    const maxDepth = typeof opts.maxDepth === 'number' && opts.maxDepth >= 0 ? opts.maxDepth : Infinity
+
+    const walkLayer = async (sig: string, depth = 0): Promise<void> => {
       if (visited.has(sig)) return
       visited.add(sig)
       const started = Date.now()
@@ -1573,7 +1580,9 @@ export class ContentBrokerDrone extends Drone {
       // bytes are content-addressed and verified, and every stat is a
       // counter. The cap keeps a wide tree from opening hundreds of
       // sockets at once.
-      await inBatches(children, ADOPT_WALK_CONCURRENCY, walkLayer)
+      const next = envelope ? depth : depth + 1
+      if (next > maxDepth) return
+      await inBatches(children, ADOPT_WALK_CONCURRENCY, child => walkLayer(child, next))
     }
 
     await walkLayer(root)

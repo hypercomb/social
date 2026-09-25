@@ -286,7 +286,7 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/history/history.service.ts',
       'hypercomb-essentials/src/move/layout.queen.ts',
       'hypercomb-essentials/src/move/layout.service.ts',
-      'hypercomb-essentials/src/sharing/content-broker.drone.ts',
+      'hypercomb-essentials/src/sharing/content-broker.boot.drone.ts',
       'hypercomb-essentials/src/sharing/feedback-channel.drone.ts',
       'hypercomb-essentials/src/sharing/host-sync.service.ts',
       'hypercomb-essentials/src/sharing/retired-push-pool.ts',

@@ -30,14 +30,14 @@ const registrations = new Map<string, unknown>()
   whenReady: () => void 0,
 }
 
-let ContentBrokerDrone: typeof import('./content-broker.drone.js').ContentBrokerDrone
+let ContentBrokerDrone: typeof import('./content-broker.boot.drone.js').ContentBrokerDrone
 
 const sig = (seed: string): string => seed.repeat(64).slice(0, 64)
 const PEER_A = sig('a')
 const PEER_B = sig('b')
 
 beforeAll(async () => {
-  ;({ ContentBrokerDrone } = await import('./content-broker.drone.js'))
+  ;({ ContentBrokerDrone } = await import('./content-broker.boot.drone.js'))
 })
 
 afterEach(() => {

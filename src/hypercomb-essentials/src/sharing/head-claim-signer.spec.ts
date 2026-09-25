@@ -158,7 +158,7 @@ describe('head-claim-signer — sign then accept', () => {
     // participant published REPLACED all of their previous ones ACROSS EVERY
     // MOLECULE — a legitimate head for molecule B silently deleting the head
     // for molecule A. This repo's own convention says so out loud
-    // (content-broker.drone.ts: "Parameterized-replaceable: ['d', sig] makes
+    // (content-broker.boot.drone.ts: "Parameterized-replaceable: ['d', sig] makes
     // the relay store").
     const mod = await loadBinding()
     const a = await mod.signHeadClaim(ROOT, HEAD, null, 0)

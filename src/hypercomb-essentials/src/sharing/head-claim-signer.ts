@@ -38,7 +38,7 @@ import { verifyEvent } from 'nostr-tools/pure'
 // in this range without a `d` tag means every head claim a participant
 // publishes REPLACES all of their previous ones ACROSS EVERY MOLECULE — a
 // legitimate head for molecule B silently deleting the head for molecule A.
-// This repo's own convention is explicit about it (`content-broker.drone.ts`:
+// This repo's own convention is explicit about it (`content-broker.boot.drone.ts`:
 // "Parameterized-replaceable: ['d', sig] makes the relay store", and
 // `client-presence.drone.ts` does the same), so the molecule address is the
 // `d` tag and nothing else can be.

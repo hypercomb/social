@@ -82,7 +82,7 @@ interface HistoryLike {
 }
 
 interface BrokerLike {
-  adopt: (rootSig: string, opts?: { layersOnly?: boolean; silent?: boolean }) => Promise<{ layers: number; leaves: number; failed: number }>
+  adopt: (rootSig: string, opts?: { layersOnly?: boolean; silent?: boolean; quiet?: boolean; maxDepth?: number }) => Promise<{ layers: number; leaves: number; failed: number }>
   noteDomainsForSig?: (sig: string, domains: string[]) => void
 }
 
@@ -202,9 +202,22 @@ export class HiveVisitDrone extends Drone {
     // private mode, no relay flag needed), then localize the layer closure.
     // Bytes in the pool are content-addressed cache, not adoption.
     broker.noteDomainsForSig?.(head, bundle.hosts)
-    console.log('[hive-visit] localizing closure from', bundle.hosts.join(','), 'head', head.slice(0, 12))
-    const stats = await broker.adopt(head, { layersOnly: true, silent: true })
-    console.log('[hive-visit] closure localized', JSON.stringify(stats))
+    // THE FIRST PAINT NEEDS THE TOP OF THE TREE, NOT ALL OF IT. The root and
+    // its direct children are what the arrival shows (the pinned page, or the
+    // first ring of tiles and their names); every deeper layer is a page the
+    // visitor has not asked for yet. Walking the whole closure first cost a
+    // published site ~4 s of round trips (revolucion: ~315 layers, 3.0 → 6.9 s
+    // measured 2026-09-25) before anything could paint. The rest streams in
+    // behind the paint over the same verified fetch, and a layer the visitor
+    // reaches before it lands is fetched on demand like any other miss.
+    console.log('[hive-visit] localizing the top of the closure from', bundle.hosts.join(','), 'head', head.slice(0, 12))
+    const stats = await broker.adopt(head, { layersOnly: true, silent: true, maxDepth: 1 })
+    console.log('[hive-visit] top localized', JSON.stringify(stats))
+    const rest = (): void => {
+      void broker.adopt(head, { layersOnly: true, silent: true, quiet: true })
+        .then(all => console.log('[hive-visit] closure localized', JSON.stringify(all)))
+        .catch(() => { /* on-demand fetches still cover any layer it missed */ })
+    }
     const root = await history.getLayerBySig(head)
     if (!root) {
       this.#toast('error', i18n?.t('preview.banner.title') ?? 'Hive preview',
@@ -268,6 +281,8 @@ export class HiveVisitDrone extends Drone {
       hosts: bundle.hosts,
       tiles: stats.layers,
     })
+    // Only now: the arrival's own fetches go first.
+    rest()
   }
 }
 
