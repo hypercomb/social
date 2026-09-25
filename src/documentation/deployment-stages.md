@@ -1,0 +1,232 @@
+# Deployment stages are molecules — CONVENTIONS (2026-09-25)
+
+**Status:** doctrine direction from the owner; conventions defined by the
+agent at the owner's invitation, then reviewed against the code and the
+molecule doctrine by a 90-agent panel (37 findings folded in). Section 6
+holds the items only the owner decides. Nothing here is built yet except the
+two rulings it rests on.
+
+**The rulings (jwize, 2026-09-25):**
+- "You shouldn't be allowed to share if you're not a host. People can still
+  watch a swarm and bring stuff in, they just can't host their content. That
+  gives everybody the personal responsibility of making sure the content is
+  available when they join a swarm if they want to share."
+- "Joining a swarm is just publishing a branch… If there are updates you can
+  send them at that time. Then the lock button becomes the publish/join
+  swarm button."
+- "Hypergraph layers can be part of the lifecycle… a hypergraph molecule can
+  become first stage of deployment and then another stage or another stage
+  or however you wanna organize it."
+
+**Built already (63cb9b515):** the host is the truth — the drain asks a host
+before it sends (`host-sync.service.ts`), and the availability gate stands on
+both swarm announce surfaces with no escape hatch (`swarm.drone.ts`).
+
+## 1. The idea in one paragraph
+
+A **stage is a word**, and a word is a molecule: its address is `sign(word)`
+([hypergraph-molecule-lineage.md](hypergraph-molecule-lineage.md)). An
+author's stage list is their **succession** in that molecule — the one head
+their bucket `sign(stage)/<pubkey>/` holds — and a creation is **at** the
+stage when an envelope over it is a member of that list. Advancing a creation
+mints the author's next succession with the member added; leaving mints the
+next one without it. Every prior list is one `prev` back and no byte is ever
+deleted. A stranger reads the list from the publisher's SIGNED record, pinned
+to the key they asked for, and that record is served by a host or it is not —
+which is what *sharing requires hosting* means: your stage lists exist where
+your host serves them. Watching is reading the records of the hosts you
+reach; that needs no host of your own.
+
+## 2. The stages
+
+Three stages, each bound in code to one existing act. `hosted` is NOT a
+stage: it is the requirement every stage checks (receipts for the closure on
+the hosts the list is served from, `isClosureAvailable`), read from the host
+at the gesture, never asserted by a claim.
+
+| stage (word) | role in code | what entering requires | the gesture and its word |
+|---|---|---|---|
+| `shared` | OFFERED — announced to the participants of a zone, who can adopt it | the closure hosted; a zone to stand in | `join` / `leave` — the lock button |
+| `published` | INDEXED — a link a stranger can open: the publisher's signed index names this head, and the link bundle is receipted | the closure hosted; an index door answered; the wipe guard satisfied | `publish` / unpublish — the Publish panel row |
+| `live` | OPENED — a domain's signed door opens on this head: the visitor site | `published`; a host mark on the branch; the door signed | the Publish panel's per-domain switch (`setBranchDoors`) |
+
+The stages form a DAG, not a line: `published` needs `hosted`, not `shared`.
+A creation is usually at several stages at once and each list keeps it. "There
+are updates" is the divergence between the head a stage list names for a
+location and the location's local head; the next gesture sends them.
+
+Modules keep their own two acts (`trial` → `promoted`,
+[module-sandbox.md](module-sandbox.md)); they are candidates for the same
+shape once a second lifecycle actually exists, and are NOT rewritten by this
+pass.
+
+## 3. The rules
+
+**R1 — The words are protocol until a second lifecycle exists.** Each stage's
+requirement is code (receipts, the index round trip, the door signature), so
+the three words are bound to their three roles in code and are not a data
+vocabulary yet. A community that wants other words needs a mapping from words
+to roles; that mapping is the lifecycle molecule, deferred to the day a second
+lifecycle is real.
+
+**R2 — Membership is an envelope in the author's stage succession.** The
+bucket `sign(stage)/<pubkey>/` holds ONE head claim
+(`hypercomb-core/src/core/head-claim.ts`: six-line preimage — tag, molecule,
+key, head, prev, seq; the claim declares no location) naming the author's
+succession atom `{succession:1, signer, prev, members:[envelopeSig…]}` — the
+shape `facet-succession.ts` already writes. Each member is a life-primitive
+envelope over one creation, `{meta:1, layer:<head>, root:<creation word>}`.
+The stage pool is declared kind `succession` (`declarePoolKind`) where its
+address is derived. A repeated advance to a head the newest list already
+names mints nothing (`changed:false`). `seq` never goes backward: the mint
+ledger the facet writer keeps (`facet:minted`) is kept for stages too.
+
+**R3 — One signed write, two pointers, never two facts.** A stranger never
+lists a directory. The publisher's signed record — the hive index
+`/hive/<pubkey>` (kind 30564) today; the attested head map when
+`publish-branch.ts` moves onto it per the lineage doc's migration table —
+carries, in the SAME signed PUT, a pointer per stage: the root key
+`stage:<word>` whose value is the author's stage succession sig, beside the
+per-branch `roots` and `doors` legacy readers keep using. The local replica
+writes the same atom under `sign(stage)/<pubkey>/`. Same act, same
+signature, same atom: the pointers cannot disagree, and there is no
+reconciler. `published-pools.ts` (one shared file per origin, colon meanings
+only) is NOT the carrier: a shared per-origin file is last-writer-wins across
+tenants and holds no bucket key to verify against.
+
+**R4 — Advance is a forward commit; leaving is an unlink, never a forget.**
+Entering appends a member; leaving mints the next succession without it
+(precedent: `withdrawVocabulary` declares nothing;
+[life-primitive.md](life-primitive.md) notes). The prior list is one `prev`
+back and the creation's bytes stay readable by signature. Nothing is deleted
+by any stage transition; `unpublishBranch` keeps its existing meaning (the
+index key is withdrawn, the bytes remain).
+
+**R5 — A claim is the author's signed word; a reader verifies it, and
+re-checks availability against the host.** Every stage claim a reader keeps
+passes `acceptHeadClaim` for the address the reader asked for, and the
+succession's `signer` is checked by `headClaimAuthors`; a hash check alone
+would accept a misplaced claim (the remote-write hole). A host attests
+nothing. Whether the closure is served is asked of the host at read time
+(HEAD, `probeServed`), never inferred from a claim. Requirements are checked
+at the gesture: the gesture waits (the upload, the index round trip) or
+refuses with one sentence naming what is missing; a stage is entered whole
+or not at all.
+
+**R6 — Stage is derived from the records that hold it, never written on the
+creation.** No mark, decoration or field on the creation says its stage; any
+write there would move its head and make every stage list stale. "Which
+stage is this at" is read from the author's stage successions and the index.
+If a listing cache is wanted it is keyed by the sigs of those successions —
+the inputs that change — and lives in a derived-cache pool, never
+load-bearing ([optimize-phase.md](optimize-phase.md)); the control never
+gates on it.
+
+**R7 — One control, two directions, no new words.** The lock button is
+`join` (advance the public branches you stand among to `shared`, which is
+the branch publish of §4) and, once in the swarm, `leave`. `publish`,
+unpublish and the per-domain door switches stay in the Publish panel, one
+row per creation, where they already are. No behaviour word is added:
+`open`, `close` and `withdraw` are sub-words of existing behaviours and the
+command line runs every behaviour word on a line. The panel shows each
+row's stages (R6).
+
+**R8 — The meeting point is the creation's location among the members of
+`shared`.** A swarm for a creation meets where that creation's location
+appears in `shared` lists unioned across the hosts the reader asks;
+liveness (who is here now) rides the relay as today — a meeting point, never
+a store. Two different things are both called "zone" elsewhere; here: a
+**domain** is where a branch publishes (`host:<domain>` marks, doors); a
+**zone** is room + secret — tenancy: whose hosts you ask and which relay
+room you stand in. The relay slot's composition (`composeSigForSegments`)
+is unchanged by this document. Claims are global; a zone scopes readers, not
+claims.
+
+**R9 — Data never heals: today's records stay read sources.** `.public`
+markers and `hc:public-branches` remain the participant's local intent and
+the announce filter's input; receipts remain the `hosted` evidence; the
+index `roots` and `doors` remain what every shipped reader resolves. The
+stage pointers are ADDED to the same signed write (R3). Readers that learn
+the pointers prefer them for listing and keep resolving heads and doors as
+they do today; nothing is removed.
+
+**R10 — Visitors resolve door → head through the signed index for the
+pinned pubkey**, exactly as `hive-visit.boot.drone.ts` does now. `live` is a
+listing for discovery ("what this publisher opened"), never the resolver: a
+claim carries no domain, and a domain's many-author `sign('live')` names no
+key.
+
+**R11 — Stage words are ordinary words under the collision rule, and that
+has a consequence to accept.** `sign('published')` is the molecule of every
+tile named `published`; an author's tile of that name and their published
+list are the SAME succession in the same bucket. Under this document that is
+literal: your `published` molecule IS the place in your hive that lists what
+you published. It is put to the owner in §6.2. Colon meanings stay reserved
+for system pools; the pointer key `stage:<word>` in the index is a pointer's
+name, not a molecule address.
+
+## 4. What changes in the code, in order
+
+1. **`publishBranch` mints the `published` list** beside the index PUT:
+   after the ledger record and before confirm; the member's envelope names
+   the head the index names; the succession and its envelopes go wherever
+   the sealed closure went (`answering`, via `markPublic` as resources) and
+   hold a receipt before `confirmed`; the `stage:published` pointer rides the
+   same signed `putHiveManifest`. A refused signature returns `ok:true` with
+   `claim:'refused'`, never a failed publish. `setBranchDoors` does the same
+   for `live`. (`signHeadClaim`, `head-claim-signer.ts`.)
+2. **`join` = the branch publish, per public branch root.** On the join
+   gesture only — never from the heartbeat, a re-walk or `host:receipt` —
+   the swarm drone runs, for each public-branch root the walk at the current
+   location announces (never a single public tile, never a whole-branch
+   `markPublic`), the `hosted` requirement (`markPublic` + the drain, which
+   asks the host first) and mints the `shared` list; then it announces
+   through the availability gate exactly as now. The announce filter keeps
+   reading `.public` markers; the claim is written, not read, in this step.
+   A branch not available within the publish deadline gets no member and
+   the toast names it; join never flips the flag back. The boot replay of
+   `mesh:public-changed` (web `app.ts:299`, dev `app.ts:286`) mints nothing:
+   remember the previous flag, as `mesh-adapter.drone.ts` reads it.
+   Participants who joined before this ships get lists on their next
+   explicit join. At the root, the root itself has nothing to advance; its
+   public branches do.
+3. **`hosted` has one definition for both paths:** receipts on the host set
+   the list is served from — the branch's host marks, else the standing
+   targets — read through `isClosureAvailable`.
+4. **The control reads the stage of the branch you stand in** through an
+   essentials service on IoC (`mesh-header` has only a boolean today), and
+   keeps a single-press `leave`. The world-review step stays until the
+   public subset is shown before the first join.
+5. **The Publish panel reads the lists:** rows = creations with any stage
+   membership; columns = the head each stage names vs the local head.
+6. **Hosts derive nothing new.** A static host serves the index and the
+   atoms; a relay keeps the kind-30565 claim per `(pubkey, molecule)` d-tag.
+   No worker change is required for steps 1–5.
+
+Each step is a forward commit with read-fallback and ships behind proof on
+4250 (`scripts/drive-swarm-connectivity.cjs`, `scripts/drive-swarm-join-word.cjs`).
+
+## 5. Known costs, stated plainly
+
+- One more signed atom per advance (a succession plus one envelope), on
+  every host that carries the closure. A repeated advance to the same head
+  mints nothing.
+- The relay keeps one head claim per `(pubkey, molecule)`: a participant's
+  stage claim and a tile of the same name from the same key share it (R11).
+- "Current stage" is a read across an author's successions plus the index; a
+  cold listing of many creations wants the R6 cache, and cold paths must
+  answer identically without it.
+
+## 6. The items only the owner decides
+
+1. **The words.** `shared`, `published`, `live` are proposed, bound to the
+   three roles OFFERED, INDEXED, OPENED. They are protocol until a second
+   lifecycle exists (R1).
+2. **The collision, accepted or not.** Under R11 an author's tile named
+   `published` IS their published list. Accept that (it is the molecule
+   doctrine, literally), or give stage lists a system spelling
+   (`stage:published`) — which stops a stage from being a molecule a
+   participant can name.
+3. **Zone required or optional.** A swarm needs room + secret today. Under
+   R8 the zone is tenancy and could default to the community commons, so
+   `join` on a hosted branch needs no selector. Say which.
