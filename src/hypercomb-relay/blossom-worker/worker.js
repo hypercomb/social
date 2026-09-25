@@ -1916,7 +1916,12 @@ export default {
       // Everything under /content/ is a FILE the build shipped — the package
       // pool above all — and is never held and never a page.
       if (pathname.startsWith('/content/')) return serveVisitorAsset(request, env, { spa: false })
-      return serveVisitorAsset(request, env, { landing: primaryPublication?.landing || '' })
+      // OFF until the landing shows what a VISITOR lands on. The first live
+      // capture (2026-09-25) was the publisher's authoring view — his theme,
+      // his hexagon grid — flashed over a site whose visitors land on a
+      // website page: worse than a plain cover. PAINT_LANDING=1 opts in.
+      const paint = env.PAINT_LANDING === '1' ? primaryPublication?.landing || '' : ''
+      return serveVisitorAsset(request, env, { landing: paint })
     }
 
     // A zone subdomain that could not even become an implicit site (nested

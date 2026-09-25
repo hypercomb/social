@@ -111,9 +111,19 @@ test('site.json carries the signed landing of the branch', async () => {
   assert.equal('landing' in withoutLanding, false)
 })
 
+test('painting is OFF by default — a signed landing leaves the cover plain until PAINT_LANDING=1', async () => {
+  const event = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_000, undefined, { revolucion: landing })
+  const { env } = await fixture(event)
+  const shell = '<!doctype html><html><head><title>x</title></head><body><app-root><div class="site-loading" role="status"></div></app-root></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  assert.equal(html, shell)
+})
+
 test('the visitor page paints a landing picture into its cover and share image', async () => {
   const event = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_000, undefined, { revolucion: landing })
   const { env } = await fixture(event)
+  env.PAINT_LANDING = '1'
   const shell = '<!doctype html><html><head><title>x</title></head><body><app-root><div class="site-loading" role="status"></div></app-root></body></html>'
   env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html', 'content-length': String(shell.length) } })
   const painted = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
@@ -132,6 +142,7 @@ test('a page landing is framed inside the cover, sandboxed, never painted', asyn
   const pageLanding = 'e'.repeat(64) + '/landing.html'
   const event = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_000, undefined, { revolucion: pageLanding })
   const { env } = await fixture(event)
+  env.PAINT_LANDING = '1'
   const shell = '<!doctype html><html><head><title>x</title></head><body><app-root><div class="site-loading" role="status"></div></app-root></body></html>'
   env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
   const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
