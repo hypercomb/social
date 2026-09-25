@@ -19,7 +19,6 @@ const HEAD = 'a'.repeat(64)
 const OTHER_HEAD = 'b'.repeat(64)
 const PUBKEY = 'c'.repeat(64)
 const BUNDLE = 'd'.repeat(64)
-const LANDING_SIG = 'e'.repeat(64)
 
 let indexRead: HiveIndexResult
 let putCalls: Record<string, string>[]
@@ -34,11 +33,6 @@ const currentIndex = (): HiveIndexResult => {
     : indexRead
 }
 
-let landingCalls: Record<string, string>[]
-let previousLandingCalls: Record<string, string>[]
-let onScreen = false
-let captured: { blob: Blob; name: 'landing.webp' | 'landing.html' } | null = null
-
 vi.mock('./hive-pointer.js', () => ({
   nip98Header: async () => 'Nostr test',
   fetchHiveIndex: async (): Promise<HiveIndexResult> => currentIndex(),
@@ -46,22 +40,10 @@ vi.mock('./hive-pointer.js', () => ({
     const read = currentIndex()
     return read.ok ? read.manifest : null
   },
-  putHiveManifest: async (_host: string, roots: Record<string, string>, _doors?: unknown,
-    _replaces?: number, landing?: Record<string, string>, previousLanding?: Record<string, string>): Promise<PutHiveResult> => {
+  putHiveManifest: async (_host: string, roots: Record<string, string>): Promise<PutHiveResult> => {
     putCalls.push(roots)
-    landingCalls.push(landing ?? {})
-    previousLandingCalls.push(previousLanding ?? {})
     return { ok: true, pubkey: PUBKEY, createdAt: 1_700_000_000 }
   },
-}))
-
-// The landing itself is DOM/canvas work jsdom cannot exercise meaningfully
-// (see landing-capture.ts); these tests are about publishBranch's OWN
-// contract — take it when on screen, ship it, name it in the index write —
-// not about what the capture draws.
-vi.mock('./landing-capture.js', () => ({
-  isOnScreen: () => onScreen,
-  captureLanding: async () => captured,
 }))
 
 // The ledger writes into OPFS; with no Store registered its pool resolves to
@@ -69,9 +51,7 @@ vi.mock('./landing-capture.js', () => ({
 ;(window as unknown as { ioc: unknown }).ioc = {
   register: () => void 0,
   get: (key: string): unknown => {
-    if (key === '@hypercomb.social/Store') {
-      return { putResource: async (blob: Blob) => blob.type === 'image/webp' ? LANDING_SIG : BUNDLE }
-    }
+    if (key === '@hypercomb.social/Store') return { putResource: async () => BUNDLE }
     if (key === '@diamondcoreprocessor.com/HistoryService') {
       return { sealSubtree: async () => HEAD }
     }
@@ -100,10 +80,6 @@ const { lineageKey } = await import('../history/lineage-key.js')
 
 beforeEach(() => {
   putCalls = []
-  landingCalls = []
-  previousLandingCalls = []
-  onScreen = false
-  captured = null
   localStorage.clear()
 })
 
@@ -252,58 +228,5 @@ describe('unpublish', () => {
     const result = await unpublishBranch(['notes'])
     expect(result).toEqual({ ok: true, removed: false })
     expect(putCalls).toHaveLength(0)
-  })
-})
-
-describe('the landing', () => {
-  it('does nothing when the branch being published is not the location on screen', async () => {
-    onScreen = false
-    captured = { blob: new Blob(['x'], { type: 'image/webp' }), name: 'landing.webp' }
-    const result = await publishBranch(['notes'])
-    expect(result.ok).toBe(true)
-    expect(landingCalls).toEqual([{}])
-  })
-
-  it('ships the picture and names it in the index write, keyed to the branch', async () => {
-    onScreen = true
-    captured = { blob: new Blob(['x'], { type: 'image/webp' }), name: 'landing.webp' }
-    const result = await publishBranch(['notes'])
-    expect(result.ok).toBe(true)
-    expect(landingCalls).toEqual([{ [lineageKey(['notes'])]: `${LANDING_SIG}/landing.webp` }])
-  })
-
-  it('carries the branch as a takeover page under landing.html when one is mounted', async () => {
-    onScreen = true
-    captured = { blob: new Blob(['<html></html>'], { type: 'text/html' }), name: 'landing.html' }
-    const result = await publishBranch(['notes'])
-    expect(result.ok).toBe(true)
-    expect(landingCalls).toEqual([{ [lineageKey(['notes'])]: `${BUNDLE}/landing.html` }])
-  })
-
-  it('is a no-op — never a gate — when the capture yields nothing', async () => {
-    onScreen = true
-    captured = null
-    const result = await publishBranch(['notes'])
-    expect(result.ok).toBe(true)
-    expect(landingCalls).toEqual([{}])
-  })
-
-  it('carries a PREVIOUS landing through a publish that does not retake it', async () => {
-    const otherKey = lineageKey(['recipes'])
-    indexRead = {
-      ok: true,
-      manifest: {
-        roots: { [otherKey]: OTHER_HEAD }, createdAt: 1_699_000_000, pubkey: PUBKEY,
-        landing: { [otherKey]: `${LANDING_SIG}/landing.webp` },
-      },
-    }
-    onScreen = false
-    const result = await publishBranch(['notes'])
-    expect(result.ok).toBe(true)
-    // Nothing was captured for THIS write, but the previous manifest's
-    // landing is handed to hive-pointer.ts as the baseline it merges
-    // over — never dropped just because this publish did not retake it.
-    expect(landingCalls).toEqual([{}])
-    expect(previousLandingCalls).toEqual([{ [otherKey]: `${LANDING_SIG}/landing.webp` }])
   })
 })
