@@ -473,7 +473,7 @@ export class PublishPanelComponent implements OnDestroy {
    *  one visit (`?arrival=`). The site says in a corner what it came to —
    *  hypercomb-web setup/arrival-trial.ts. Nothing is published. */
   testArrival(row: PublishRow): void {
-    const names = this.draftOf(row.key, this.planClasses(row).join(' ')).split(/[s,]+/).filter(Boolean)
+    const names = this.draftOf(row.key, this.planClasses(row).join(' ')).split(/[\s,]+/).filter(Boolean)
     const zone = row.zones.find(z => this.doorOn(row, z)) ?? row.zones[0]
     if (!names.length || !zone) return
     const url = `${this.addressUrl(row, zone)}/?arrival=${encodeURIComponent(names.join(','))}`
