@@ -3,6 +3,7 @@
 // Left-aligned breadcrumb bar at bottom of viewport — mirrors the tag float
 // on the right side. Shows available intellisense options as small crumbs.
 
+@use '../toolwindow' as tw;
 @use '../breakpoints' as *;
 
 :host {
@@ -21,9 +22,7 @@
   align-items: center;
   gap: 0.25rem;
   max-width: 18rem;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
+  overflow: hidden;
 
   font-family: var(--hc-mono);
   pointer-events: auto;
@@ -31,14 +30,12 @@
 }
 
 .hint-crumb {
-  flex: 0 0 auto;
-  min-height: 1.75rem;
-  font-size: 0.72rem;
+  font-size: 0.5rem;
   white-space: nowrap;
-  padding: 0.18rem 0.5rem;
-  border: 1px solid var(--hc-window-line-firm);
-  border-radius: var(--hc-radius-control);
-  background: rgba(var(--hc-panel-pane), 0.95);
+  padding: 0.05rem 0.45rem;
+  border: 0.5px solid rgba(200, 200, 200, 0.3);
+  border-radius: 1px;
+  background: none;
   color: var(--hc-window-ink-quiet);
   cursor: pointer;
   font-family: inherit;
@@ -46,10 +43,8 @@
 
   &:hover {
     color: var(--hc-window-ink-plain);
-    border-color: var(--md-primary);
-    background: rgb(var(--hc-panel-pane));
+    border-color: rgba(200, 200, 200, 0.6);
   }
-  &:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 1px; }
 }
 
 .hint-dot {
@@ -63,13 +58,13 @@
 
 .hint-matched {
   color: var(--hc-window-ink-plain);
-  border-color: var(--hc-window-line-firm);
+  border-color: rgba(200, 200, 200, 0.5);
 }
 
 .hint-chosen {
-  color: var(--md-on-primary-c);
-  border-color: var(--md-primary);
-  background: var(--md-primary-container);
+  color: tw.ink(rgba(77, 166, 255, 0.9));
+  border-color: rgba(77, 166, 255, 0.5);
+  background: rgba(77, 166, 255, 0.06);
 }
 
 // ── responsive ───────────────────────────────────────────
@@ -81,14 +76,13 @@
   }
   .hint-crumb {
     font-size: 0.8rem;
-    min-height: 44px;
-    padding: 0.25rem 0.55rem;
+    padding: 0.08rem 0.55rem;
   }
 }
 
 @include tablet-only {
   .hint-crumb {
-    font-size: 0.72rem;
+    font-size: 0.7rem;
   }
 }
 
@@ -103,7 +97,7 @@
     max-width: 36rem;
   }
   .hint-crumb {
-    font-size: 0.72rem;
+    font-size: 0.56rem;
   }
 }
 

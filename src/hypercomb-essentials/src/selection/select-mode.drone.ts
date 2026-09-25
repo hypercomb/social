@@ -63,7 +63,7 @@ const VIEW_MODE_KEY = '@hypercomb.social/ViewMode'
 /** The ring that opens over a picked set. Registered in QuickMenuRegistry. */
 export const SELECTION_MENU = 'selection'
 
-const STEEL = 'var(--md-primary)'
+const STEEL = 'rgba(126,182,214,0.92)'
 /** Thumb-target floor — the same one the fullscreen tile view uses. */
 const TAP = '2.9rem'
 /** Above the reparented Pixi CANVAS, which is the thing that actually has to
@@ -323,8 +323,8 @@ export class SelectModeDrone extends Drone {
       // (the old 6.2rem was a guess, and wrong the moment the bar grew).
       'bottom:calc(max(var(--hc-controls-bottom, 0px), env(safe-area-inset-bottom,0px)) + var(--hc-mobile-row-lift, 0px) + 0.6rem);' +
       'display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.5rem;' +
-      'border-radius:var(--hc-radius-floating, 4px);background:rgba(var(--hc-panel-pane),0.94);backdrop-filter:blur(10px);' +
-      'border:1px solid var(--hc-window-line-firm);box-shadow:0 10px 30px rgba(var(--hc-panel-shadow),0.45);' +
+      'border-radius:var(--hc-radius-floating, 4px);background:rgba(12,17,24,0.92);backdrop-filter:blur(10px);' +
+      'border:1px solid rgba(126,182,214,0.35);box-shadow:0 10px 30px rgba(0,0,0,0.45);' +
       'font-family:inherit;pointer-events:auto;max-width:94vw;'
 
     // The primary slot carries the whole idle→armed→picked story: it is the
@@ -406,7 +406,7 @@ export class SelectModeDrone extends Drone {
     frame.style.cssText =
       `position:fixed;inset:0;z-index:${PILL_Z - 1};pointer-events:none;` +
       `border:2px solid ${STEEL};` +
-      'box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--md-primary) 25%,transparent), inset 0 0 34px color-mix(in srgb,var(--md-primary) 13%,transparent);'
+      'box-shadow:inset 0 0 0 1px rgba(126,182,214,0.25), inset 0 0 34px rgba(126,182,214,0.13);'
     document.body.appendChild(frame)
     this.#frame = frame
   }
@@ -434,8 +434,8 @@ export class SelectModeDrone extends Drone {
       // phone width and the pill grows to nearly double height — a fat slab
       // over the canvas instead of a thin bar above the controls.
       'display:inline-flex;align-items:center;gap:0.45rem;white-space:nowrap;font:inherit;font-size:0.92rem;font-weight:600;' +
-      `background:${accent ? STEEL : 'transparent'};color:${accent ? 'var(--md-on-primary)' : 'var(--hc-window-ink-loud)'};` +
-      `border:1px solid ${accent ? 'transparent' : 'var(--hc-window-line-firm)'};` +
+      `background:${accent ? STEEL : 'transparent'};color:${accent ? '#04121b' : 'rgba(232,240,246,0.9)'};` +
+      `border:1px solid ${accent ? 'transparent' : 'rgba(255,255,255,0.14)'};` +
       `opacity:${inert ? 0.55 : 1};`
     const glyphEl = btn.querySelector('[data-role="glyph"]') as HTMLElement | null
     const textEl = btn.querySelector('[data-role="text"]') as HTMLElement | null

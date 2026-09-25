@@ -14,8 +14,6 @@
 // SCSS variables through the toolwindow partial.
 @include shape.ladder-root;
 
-html { color-scheme: var(--md-color-scheme); }
-
 html,
 body {
   margin: 0;

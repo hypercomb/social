@@ -103,7 +103,7 @@ const CHROME_CORNER_RIGHT = 'calc(3.5rem + env(safe-area-inset-right, 0px))'
 /** Raw-DOM review-gate card. Out-of-Angular, opaque full-viewport backdrop:
  *  shown over a FOREIGN, unverified page INSTEAD of mounting it, so nothing of
  *  the page renders, runs, or fetches until the participant reviews and enables
- *  it. Shared theme roles, no external CSS.
+ *  it. Cold steel chrome, no external CSS.
  *
  *  Z-INDEX (100001) is deliberately BELOW the shell's right-docked features /
  *  review panel (z 100002) — the "Review & enable" button hands off to that
@@ -117,8 +117,8 @@ const CHROME_CORNER_RIGHT = 'calc(3.5rem + env(safe-area-inset-right, 0px))'
 const REVIEW_GATE_CSS = [
   'position:fixed', 'inset:0', 'z-index:100001',
   'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center', 'gap:1rem',
-  'background:var(--md-surface)', 'color:var(--md-on-surface)', 'padding:2rem', 'text-align:center',
-  'font-family:var(--hc-font,system-ui,sans-serif)',
+  'background:#0c1118', 'color:#cfe2ee', 'padding:2rem', 'text-align:center',
+  "font-family:system-ui,-apple-system,'Segoe UI',sans-serif",
 ].join(';')
 
 export class SiteViewDrone extends Drone {
@@ -1065,16 +1065,16 @@ export class SiteViewDrone extends Drone {
       card.style.cssText = REVIEW_GATE_CSS
       const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
       const title = document.createElement('div')
-      title.style.cssText = 'font-size:1.25rem;font-weight:600;color:var(--md-on-surface-strong)'
+      title.style.cssText = 'font-size:1.25rem;font-weight:600;color:#eaf3f9'
       title.textContent = i18n?.t('review-gate.title') ?? 'Feature not enabled'
       const body = document.createElement('div')
-      body.style.cssText = 'max-width:34rem;line-height:1.5;color:var(--md-on-surface-var)'
+      body.style.cssText = 'max-width:34rem;line-height:1.5;opacity:.85'
       body.textContent = i18n?.t('review-gate.body') ?? 'This page comes from another participant and has not been reviewed. Review its code, then enable it — nothing runs until you do.'
       const review = document.createElement('button')
       review.type = 'button'
       review.className = 'hc-review-btn'
       review.textContent = i18n?.t('review-gate.action') ?? 'Review & enable'
-      review.style.cssText = 'margin-top:.5rem;padding:.6rem 1.2rem;border:1px solid var(--md-primary);border-radius:var(--hc-radius-control,2px);background:var(--md-primary-container);color:var(--md-on-primary-c);cursor:pointer;font-size:.95rem'
+      review.style.cssText = 'margin-top:.5rem;padding:.6rem 1.2rem;border:1px solid rgba(126,182,214,.6);border-radius:var(--hc-radius-control, 2px);background:rgba(126,182,214,.16);color:#eaf3f9;cursor:pointer;font-size:.95rem'
       card.append(title, body, review)
       document.body.appendChild(card)
       this.#reviewOverlay = card

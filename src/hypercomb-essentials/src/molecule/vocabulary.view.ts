@@ -69,8 +69,8 @@ const SURFACE = 'hc-vocabulary'
 const STYLE_ID = 'hc-vocabulary-style'
 const OWNER = '@diamondcoreprocessor.com/VocabularyView'
 
+const STEEL = '126, 182, 214'
 const ACCENT = '201, 162, 39'
-const ACCENT_DEEP = '107, 86, 21'
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
@@ -489,102 +489,92 @@ function ensureStyles(): void {
        shared stylesheet, so the recipe is restated with the SHARED values. */
     ${SURFACE} { display: contents; }
     .hc-vocab {
-      --acc: ${ACCENT};
-      --hc-window-accent: rgb(var(--acc));
-      --hc-window-wash: rgba(var(--acc), 0.10);
-      --hc-window-edge: rgba(var(--acc), 0.28);
-      --hc-window-edge-firm: rgba(var(--acc), 0.62);
       position: fixed;
       top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
       right: var(--hc-controls-right, 0px); bottom: 0;
       width: 360px; min-width: 260px; max-width: calc(100vw - 1.5rem);
       box-sizing: border-box; display: flex; flex-direction: column;
       z-index: 100002;
-      background: rgba(var(--hc-panel-pane), 0.975);
+      background: rgba(13, 15, 21, 0.975);
       backdrop-filter: blur(14px) saturate(1.04);
       -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border: 0; border-left: 1px solid var(--hc-window-edge-firm); border-radius: 0;
-      box-shadow: -14px 0 44px rgba(var(--hc-panel-shadow), 0.46);
-      color: var(--hc-panel-text);
+      border: 0; border-left: 1px solid rgba(${STEEL}, 0.38); border-radius: 0;
+      box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46);
+      color: #eef2f5;
       font-family: var(--hc-mono, system-ui);
       font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
       line-height: 1.45; overflow: hidden; outline: none;
     }
-    :root[data-hc-theme-mood="light"] .hc-vocab { --acc: ${ACCENT_DEEP}; }
-    @media (prefers-color-scheme: light) {
-      :root:not([data-theme]) .hc-vocab { --acc: ${ACCENT_DEEP}; }
-    }
     .hc-vocab-head {
       flex: 0 0 auto; box-sizing: border-box; display: flex; align-items: center;
       gap: 0.5rem; height: 2.875rem; min-height: 2.875rem; padding: 0 0.75rem;
-      background: linear-gradient(180deg, rgba(var(--hc-panel-sheen), 0.018), rgba(var(--hc-panel-sheen), 0.006));
-      border-bottom: 1px solid var(--hc-window-edge);
+      background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.006));
+      border-bottom: 1px solid rgba(${STEEL}, 0.25);
     }
     .hc-vocab-title {
       flex: 1; font-weight: 600; font-size: 0.9em; letter-spacing: 0.06em;
-      text-transform: uppercase; color: var(--hc-window-accent);
+      text-transform: uppercase; color: rgba(${ACCENT}, 0.95);
     }
     .hc-vocab-close {
       margin-left: auto; display: inline-grid; place-items: center;
       width: 1.75rem; height: 1.75rem; padding: 0;
       background: none; border: 0; border-radius: var(--hc-radius-control, 2px);
-      color: var(--hc-window-ink-quiet); font: inherit; font-size: 1.125rem;
+      color: rgba(238, 244, 248, 0.62); font: inherit; font-size: 1.125rem;
       line-height: 1; cursor: pointer;
     }
-    .hc-vocab-close:hover { color: var(--hc-window-ink-loud); background-color: var(--hc-window-tint-strong); }
-    .hc-vocab-close:focus-visible { outline: 1px solid var(--hc-window-accent); outline-offset: 1px; }
+    .hc-vocab-close:hover { color: #fff; background-color: rgba(255,255,255,0.075); }
 
     .hc-vocab-body {
       flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
       padding: 0.7rem 0.75rem 1.2rem;
     }
     .hc-vocab-body > p { margin: 0 0 0.5rem; line-height: 1.55; }
-    .hc-vocab-count { font-size: 1.02em; color: var(--hc-window-accent); }
-    .hc-vocab-quiet { color: var(--hc-window-ink-quiet); font-size: 0.85em; }
+    .hc-vocab-count { font-size: 1.02em; color: rgba(${ACCENT}, 0.95); }
+    .hc-vocab-quiet { color: rgba(238, 244, 248, 0.5); font-size: 0.85em; }
     /* PARTIALITY IS FULL WEIGHT. A surface that hides it is not honest. */
     .hc-vocab-partial {
       padding: 0.45rem 0.55rem; font-size: 0.88em;
-      border: 1px solid var(--hc-window-edge-firm); border-radius: var(--hc-radius-card, 3px);
-      background: var(--hc-window-wash); color: var(--hc-window-ink-plain);
+      border: 1px solid rgba(${ACCENT}, 0.55); border-radius: 2px;
+      background: rgba(${ACCENT}, 0.08); color: rgba(238, 244, 248, 0.92);
     }
-    .hc-vocab-whole { font-size: 0.85em; color: var(--hc-window-ink-plain); }
+    .hc-vocab-whole { font-size: 0.85em; color: rgba(${STEEL}, 0.85); }
     /* "The index is not running" is its own state, never an empty list. */
     .hc-vocab-unknown {
       padding: 0.45rem 0.55rem; font-size: 0.9em;
-      border: 1px dashed var(--hc-window-line-firm); border-radius: var(--hc-radius-card, 3px);
-      color: var(--hc-window-ink-plain);
+      border: 1px dashed rgba(${STEEL}, 0.6); border-radius: 2px;
+      color: rgba(238, 244, 248, 0.92);
     }
     .hc-vocab-words {
       margin: 0.3rem 0 0.6rem; padding: 0.35rem 0.5rem; list-style: none;
       max-height: 40vh; overflow-y: auto;
-      border: 1px solid var(--hc-window-line); border-radius: var(--hc-radius-card, 3px);
-      background: var(--hc-window-tint); font-size: 0.88em;
+      border: 1px solid rgba(${STEEL}, 0.2); border-radius: 2px;
+      background: rgba(255, 255, 255, 0.02); font-size: 0.88em;
     }
     .hc-vocab-word { padding: 0.05rem 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .hc-vocab-word.is-nameless { color: var(--hc-window-ink-quiet); font-style: italic; }
-    .hc-vocab-last { font-size: 0.88em; color: var(--hc-window-accent); }
-    .hc-vocab-never { font-size: 0.88em; color: var(--hc-window-ink-plain); }
+    .hc-vocab-word.is-nameless { color: rgba(238, 244, 248, 0.45); font-style: italic; }
+    .hc-vocab-last { font-size: 0.88em; color: rgba(${STEEL}, 0.95); }
+    .hc-vocab-never { font-size: 0.88em; color: rgba(238, 244, 248, 0.8); }
 
     .hc-vocab-acts { display: flex; gap: 0.35rem; margin: 0.8rem 0 0.5rem; }
     .hc-vocab-do {
       flex: 1 1 0; padding: 0.4rem 0.5rem;
-      background: var(--hc-window-tint);
-      border: 1px solid var(--hc-window-line-firm); border-radius: var(--hc-radius-control, 2px);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
       color: inherit; font: inherit; font-size: 0.85em; letter-spacing: 0.05em;
       cursor: pointer;
     }
-    .hc-vocab-do:hover:not(:disabled) { border-color: var(--hc-window-accent); background: var(--hc-window-wash); }
+    .hc-vocab-do:hover:not(:disabled) { border-color: rgba(${ACCENT}, 0.8); }
     .hc-vocab-do:disabled { opacity: 0.45; cursor: default; }
-    .hc-vocab-do.is-aimed { border-color: var(--hc-window-accent); }
-    .hc-vocab-warn { font-size: 0.82em; color: var(--hc-window-ink-quiet); }
-    .hc-vocab-aim { font-size: 0.85em; color: var(--hc-window-accent); }
+    .hc-vocab-do.is-aimed { border-color: rgba(${ACCENT}, 0.95); }
+    .hc-vocab-warn { font-size: 0.82em; color: rgba(238, 244, 248, 0.62); }
+    .hc-vocab-aim { font-size: 0.85em; color: rgba(${ACCENT}, 0.92); }
     .hc-vocab-said {
       margin-top: 0.6rem; padding: 0.45rem 0.55rem; font-size: 0.88em;
-      border: 1px solid var(--hc-window-line-firm); border-radius: var(--hc-radius-card, 3px);
+      border: 1px solid rgba(${STEEL}, 0.3); border-radius: 2px;
     }
-    .hc-vocab-said.is-ok { border-color: var(--hc-window-edge-firm); }
-    .hc-vocab-said.is-quiet { color: var(--hc-window-ink-quiet); }
-    .hc-vocab-said.is-bad { border-color: var(--hc-status-alert); }
+    .hc-vocab-said.is-ok { border-color: rgba(${ACCENT}, 0.7); }
+    .hc-vocab-said.is-quiet { color: rgba(238, 244, 248, 0.62); }
+    .hc-vocab-said.is-bad { border-color: rgba(214, 126, 126, 0.75); }
   `
   document.head.appendChild(style)
 }

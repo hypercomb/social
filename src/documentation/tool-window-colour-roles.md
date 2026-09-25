@@ -60,24 +60,6 @@ two always applies and neither can misfire.
 **Watch for this anywhere a component stylesheet tries to read `<html>` or
 `<body>` state.** A `@media` query is safe; a selector is not.
 
-ThemeService reads the active theme's `--md-is-light` value and stamps
-`data-hc-theme-mood="light|dark"` on `<html>`. Accent deepening selects that
-mood, so a theme registered by a community module gets the same contrast as
-a built-in theme. The shell pre-paint scripts set the initial mood before the
-service starts. `system` uses the OS colour scheme and a media query.
-
-## Across the whole host
-
-The `--md-*` surface, ink, action, outline, shape and elevation roles in
-`hypercomb-shared/styles/_material-tokens.scss` dress both full shells.
-The pure host compiles that same sheet to `theme.css` at build time. Its front
-door and gallery use the roles even before any package runs. Runtime themes
-can provide new values for those roles without replacing the host UI.
-
-Views that render their own CSS should inherit these roles too. A signed
-creation may intentionally define its own palette; that palette belongs to
-its payload and changes only through a new signed revision.
-
 ## The vocabulary
 
 ### Ink — weight

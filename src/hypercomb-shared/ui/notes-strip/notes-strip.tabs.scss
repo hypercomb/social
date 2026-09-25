@@ -131,7 +131,7 @@
   justify-content: center;
   background: transparent;
   border: 1px solid transparent;
-  color: var(--hc-window-ink-plain);
+  color: var(--hc-window-ink-quiet);
   border-radius: var(--hc-radius-floating);
   cursor: pointer;
   padding: 0;
@@ -144,12 +144,8 @@
     border-color: rgba($steel, 0.4);
   }
 
-  &.ghost { color: var(--hc-window-ink-plain); }
+  &.ghost { color: var(--hc-window-ink-quiet); }
 }
-
-// The shared header mixin gives closes the decorative faint rung. This close
-// is a text glyph, so keep it at the readable control rung.
-.cv2-dragbar > .cv2-mini-btn.cv2-close { color: var(--hc-window-ink-plain); }
 
 // Labeled exit pill — sits in the dragbar when see-all mode is on.
 // Tonal-accent so it reads as the meaningful "out" of the current
@@ -177,3 +173,4 @@
 }
 
 .cv2-toolbar-spacer { flex: 1; }
+

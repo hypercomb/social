@@ -21,7 +21,6 @@ import { inflate } from '../history/inflate.js'
 
 const STYLE_ID = 'hc-skills-styles'
 const STEEL = '126, 182, 214'
-const STEEL_DEEP = '39, 93, 124'
 const WIDTH_KEY = 'hc:skills-window-width'
 const MIN_WIDTH = 320
 const ROOT = ['behaviors', 'assistant', 'skills'] as const
@@ -314,54 +313,44 @@ export class SkillsWindowView extends EventTarget {
     const style = document.createElement('style')
     style.id = STYLE_ID
     style.textContent = `
-.hc-skills{--acc:${STEEL};--hc-window-accent:rgb(var(--acc));
-  --hc-window-wash:rgba(var(--acc),0.10);--hc-window-edge:rgba(var(--acc),0.28);
-  --hc-window-edge-firm:rgba(var(--acc),0.62);
-  position:fixed;z-index:99999;display:flex;flex-direction:column;gap:0.55rem;
+.hc-skills{position:fixed;z-index:99999;display:flex;flex-direction:column;gap:0.55rem;
   right:calc(var(--hc-controls-right, 0px) + 1rem);bottom:1rem;width:min(24rem,calc(100vw - 2rem));
   max-height:min(34rem,75vh);padding:0.75rem 0.85rem;box-sizing:border-box;
-  background:rgba(var(--hc-panel-pane),0.98);color:var(--hc-panel-text);
-  border:1px solid var(--hc-window-edge-firm);border-radius:var(--hc-radius-floating, 4px);
-  box-shadow:0 18px 54px rgba(var(--hc-panel-shadow),0.55);
-  font-family:var(--hc-mono,system-ui);}
-:root[data-hc-theme-mood="light"] .hc-skills{--acc:${STEEL_DEEP};}
-@media (prefers-color-scheme: light){:root:not([data-theme]) .hc-skills{--acc:${STEEL_DEEP};}}
+  background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:var(--hc-radius-floating, 4px);}
 .hc-skills-resize{position:absolute;z-index:1;inset:0 auto 0 -0.35rem;width:0.7rem;cursor:ew-resize;}
 .hc-skills-resize::after{content:"";position:absolute;top:42%;bottom:42%;left:0.25rem;
-  border-left:1px solid var(--hc-window-edge-firm);}
-.hc-skills-head{display:flex;align-items:center;gap:0.5rem;flex:0 0 auto;
-  min-height:2.875rem;padding:0 0.25rem;border-bottom:1px solid var(--hc-window-edge);}
+  border-left:1px solid rgba(${STEEL},0.42);}
+.hc-skills-head{display:flex;align-items:center;gap:0.5rem;flex:0 0 auto;}
 .hc-skills-title{flex:1 1 auto;font-family:var(--hc-mono,monospace);font-size:0.76rem;font-weight:600;
-  letter-spacing:0.1em;text-transform:uppercase;color:var(--hc-window-accent);}
-.hc-skills-close{width:2rem;height:2rem;border:none;background:none;color:var(--hc-window-ink-quiet);
+  letter-spacing:0.1em;text-transform:uppercase;color:rgba(${STEEL},0.95);}
+.hc-skills-close{width:2rem;height:2rem;border:none;background:none;color:rgba(245,245,245,0.4);
   font-size:1.3rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
-.hc-skills-close:hover{color:var(--hc-window-ink-loud);background:var(--hc-window-tint-strong);}
-.hc-skills-close:focus-visible{outline:1px solid var(--hc-window-accent);outline-offset:1px;}
+.hc-skills-close:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
 .hc-skills-search{flex:0 0 auto;box-sizing:border-box;padding:0.45rem 0.6rem;font:inherit;font-size:16px;
-  color:var(--hc-window-ink-loud);background:var(--hc-window-tint);border:1px solid var(--hc-window-line-firm);
+  color:whitesmoke;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);
   border-radius:var(--hc-radius-control, 2px);outline:none;}
-.hc-skills-search:focus{border-color:var(--hc-window-accent);}
+.hc-skills-search:focus{border-color:rgba(${STEEL},0.55);}
 .hc-skills-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem;
-  font-size:0.85rem;color:var(--hc-window-ink-plain);}
+  font-size:0.85rem;color:rgba(238,244,250,0.9);}
 .hc-skills-group{display:flex;flex-direction:column;gap:0.2rem;margin-left:0.15rem;}
 .hc-skills-group .hc-skills-group{margin-left:0.9rem;}
 .hc-skills-grouphead{border:0;background:none;text-align:left;font:inherit;font-size:0.78rem;
-  letter-spacing:0.06em;text-transform:uppercase;color:var(--hc-window-accent);cursor:pointer;
-  padding:0.25rem 0.2rem;border-radius:var(--hc-radius-control,2px);}
-.hc-skills-grouphead:hover{background:var(--hc-window-wash);}
+  letter-spacing:0.06em;text-transform:uppercase;color:rgba(${STEEL},0.75);cursor:pointer;
+  padding:0.25rem 0.2rem;border-radius:4px;}
+.hc-skills-grouphead:hover{background:rgba(255,255,255,0.055);}
 .hc-skills-skill{margin-left:0.9rem;}
 .hc-skills-row{display:flex;align-items:center;gap:0.4rem;}
 .hc-skills-name{flex:1 1 auto;min-width:0;border:0;background:none;text-align:left;font:inherit;
-  color:var(--hc-window-ink-plain);cursor:pointer;padding:0.18rem 0.2rem;border-radius:var(--hc-radius-control,2px);
+  color:rgba(238,244,250,0.88);cursor:pointer;padding:0.18rem 0.2rem;border-radius:4px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-skills-name:hover{background:var(--hc-window-tint-strong);}
-.hc-skills-use,.hc-skills-go{flex:0 0 auto;border:1px solid var(--hc-window-edge-firm);background:none;
-  color:var(--hc-window-accent);font:inherit;font-size:0.68rem;letter-spacing:0.06em;text-transform:uppercase;
-  padding:0.08rem 0.45rem;border-radius:var(--hc-radius-pill,999px);cursor:pointer;}
-.hc-skills-use:hover,.hc-skills-go:hover{background:var(--hc-window-wash);}
+.hc-skills-name:hover{background:rgba(255,255,255,0.055);}
+.hc-skills-use,.hc-skills-go{flex:0 0 auto;border:1px solid rgba(${STEEL},0.35);background:none;
+  color:rgba(${STEEL},0.85);font:inherit;font-size:0.68rem;letter-spacing:0.06em;text-transform:uppercase;
+  padding:0.08rem 0.45rem;border-radius:999px;cursor:pointer;}
+.hc-skills-use:hover,.hc-skills-go:hover{background:rgba(${STEEL},0.16);}
 .hc-skills-note{margin:0.15rem 0 0.35rem 0.4rem;padding-left:0.5rem;font-size:0.78rem;line-height:1.45;
-  color:var(--hc-window-ink-quiet);white-space:pre-wrap;word-break:break-word;
-  border-left:1px solid var(--hc-window-edge);}
+  color:rgba(216,230,238,0.62);white-space:pre-wrap;word-break:break-word;
+  border-left:1px solid rgba(${STEEL},0.25);}
 `
     document.head.appendChild(style)
   }

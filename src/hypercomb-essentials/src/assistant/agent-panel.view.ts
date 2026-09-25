@@ -1317,7 +1317,7 @@ export class AgentPanelView extends EventTarget {
 /* Bright looks take the identity DEEP (ui/_panel-identity.scss, deepen()):
    the same hue, down under 0.12 luminance so it reads on cream. A global
    sheet, so the plain selector is enough — no :host-context needed. */
-:root[data-hc-theme-mood="light"] .hc-agent{--acc:${STEEL_DEEP};}
+:is([data-theme="light"],[data-theme="honey"],[data-theme="bloom"],[data-theme="sherbet"]) .hc-agent{--acc:${STEEL_DEEP};}
 @media (prefers-color-scheme: light){:root:not([data-theme]) .hc-agent{--acc:${STEEL_DEEP};}}
 .hc-agent.fullscreen{inset:0;width:auto!important;max-width:none;height:auto;max-height:none;
   border-radius:0;border:none;box-shadow:none;}

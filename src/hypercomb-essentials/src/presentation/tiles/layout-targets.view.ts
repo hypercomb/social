@@ -770,7 +770,7 @@ function ensureStyles(): void {
       font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
       line-height: 1.45; overflow: hidden; outline: none;
     }
-    :root[data-hc-theme-mood="light"] .hc-targets { --acc: ${STEEL_DEEP}; }
+    :is([data-theme="light"],[data-theme="honey"],[data-theme="bloom"],[data-theme="sherbet"]) .hc-targets { --acc: ${STEEL_DEEP}; }
     @media (prefers-color-scheme: light) { :root:not([data-theme]) .hc-targets { --acc: ${STEEL_DEEP}; } }
 
     /* The shared header BAND — the same 2.875rem every docked window uses, so

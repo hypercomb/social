@@ -36,7 +36,6 @@ const DOLPHIN_CHROME_CSS = `
  * visual is CSS-driven, so the first paint is the final paint — no JS
  * required for layout, color, or typography. */
 :root {
-  --md-color-scheme: light;
   /* Surface system (LIGHT default — per /instructions/styles doctrine).
    * Fresh sites default to light; dark is the explicit override below. */
   --md-surface:           #f7f8fa;
@@ -106,7 +105,6 @@ const DOLPHIN_CHROME_CSS = `
 }
 
 [data-theme="dark"] {
-  --md-color-scheme: dark;
   --md-surface:           #0d151e;
   --md-surface-dim:       #080f16;
   --md-surface-bright:    #1b2836;
@@ -144,7 +142,6 @@ const DOLPHIN_CHROME_CSS = `
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --md-color-scheme: dark;
     --md-surface:           #0d151e;
     --md-surface-dim:       #080f16;
     --md-surface-bright:    #1b2836;
@@ -194,7 +191,6 @@ html, body { min-height: 100%; }
 html {
   background: var(--md-surface);
   color: var(--md-on-surface);
-  color-scheme: var(--md-color-scheme);
   font-family: var(--md-font-body);
   -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   transition: background-color var(--md-dur-medium) var(--md-easing-standard),

@@ -188,7 +188,7 @@ $accent: #7eb6d6;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: color-mix(in srgb, rgba(226, 196, 140, 0.92), rgb(var(--hc-panel-ink)) calc(var(--hc-deepen) * 1.25));
+  color: tw.ink(rgba(226, 196, 140, 0.92));
   font-family: var(--hc-mono, monospace);
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -332,7 +332,7 @@ $accent: #7eb6d6;
   font-family: var(--hc-mono, monospace);
 }
 
-.chat-box-hint { color: var(--hc-window-ink-quiet); }
+.chat-box-hint { opacity: 0.75; }
 
 // The × is a real button now — it drops the reference from the request while
 // the square it sits on is a drag handle for sending it back to the
@@ -748,7 +748,7 @@ $accent: #7eb6d6;
 }
 
 .chat-step-hint {
-  font-size: 0.78em;
+  font-size: 0.7em;
   color: tw.ink(rgba(224, 180, 92, 0.88));
 }
 
