@@ -162,6 +162,61 @@ Open findings not fixed here (legacy side unless noted):
   object, after which `publishBranch` refuses with `index-unsafe`.
 - `folder-sync-drain.spec.ts` flakes under full-suite load on both sides.
 
+## Work that belongs to both the minimal host and the legacy app
+
+These are one protocol or one engine with a host half and a legacy half; a
+split must keep them together or give them a shared home.
+
+- **Transfer progress.** `onHeld` in `hypercomb-runtime/src/acquire.ts` and
+  `hypercomb-core/src/install.types.ts` is engine; only the legacy host
+  directory draws it (`host-directory.view.ts`). The host panel copies an
+  offering through its own `replicateSiteClosure` (`shim/bootstrap/offerings.ts`)
+  and shows only "Verifying N of M", so the host has no per-offering
+  progress yet and there are two transfer paths.
+- **Signed offerings.** The host reads `host:offerings`; the legacy app
+  writes them (`hive-pointer.ts` signed-content pass-through,
+  `publish-branch.ts`, `text-theme-offering.ts` and its `sharing.boot` port)
+  and reads them (`static-peers*`, host directory creations). The relay
+  projects them (`worker.js`, `replicate.js`).
+- **Location layers.** `core/location-marker.ts` and
+  `core/canonical-layer.ts` serve the host (`location-layer.ts`,
+  `meaning-creations.ts`) and legacy history (`history.service.ts`).
+- **Text themes.** Registry in `core/panels/panel-groups.ts`, pool in
+  `runtime/text-theme-pool.ts`; the host refreshes it, the legacy docked
+  panel picks and shares.
+- **Pool registry.** `core/pool-registry.ts` names host and legacy pools.
+- **Return to hive.** `hypercomb-web/src/main.visitor.ts` sends a visitor
+  back to the host panel's pending review.
+- **Theme tokens.** The shim's `theme.css` is built from the shared
+  `_material-tokens.scss`; the mood attribute is set by both shells.
+- **Rides in the host bundle but only the legacy app uses it:**
+  `runtime/quick-menu-pool.ts` (3.3 KB, via `initializeRuntime`).
+
+## Work missed by earlier merges
+
+`development` was restarted at root `076c59e8` (2026-09-23), so older
+branches share no history with it and were compared by content.
+
+- `origin/development` `1423a0c2` (quiet host discovery) is not on this
+  branch. It touches `host-packages.ts` (in the pure bundle), `worker.js`
+  and `relay.js`; it merges cleanly.
+- `claude/relaxed-bardeen-oxiczw` `f5f696c6`: a command word said while its
+  bee is still loading waits instead of becoming a tile
+  (`command-line/word-arrival.ts`, spec, `scripts/verify-boot-word.cjs`,
+  command-line component). Absent from `development` in any form. Its
+  timing notes (`737f8616`, `atomic-modules-plan.md`) are also absent.
+- `fix/swarm-images-atomic-branch-adopt` `487655a7` (2026-09-15): adopt a
+  peer branch whole or refuse it past `MAX_BRANCH_ADOPT_TILES`, plus swarm
+  image fixes in `show-cell.drone.ts`. Not in `development`.
+- `task/exposure-launch` `aa30165a`, `c0012ba9`: launch kit, `SUPPORT.md`,
+  support page copy. Never merged.
+- The owner's local `development` has three unpushed commits (`0ec3c2d15`,
+  `f08144fc`, `18bfea47`) that this branch is based on, so
+  `origin/development` still paints the landing picture.
+- Checked and not missing: the hosts panel and packages window (replaced by
+  the host directory), vendor atoms, boot module tail, Jev decisions (in
+  `development`, later rewritten), `side-effects.ts` (regenerates unchanged).
+
 ## Behaviour changes to confirm before integration
 
 The snapshot changes door semantics relative to `development`, independent
