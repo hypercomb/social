@@ -758,12 +758,13 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // deciding which modules the preloader would run. Same derivation the shim
   // and window.hypercomb.acquire use; there is one acquisition, not three.
   // A VISITOR'S STORE IS BORN EMPTY: every published-site boot starts a new
-  // memory filesystem, so asking it for each of ~900 atoms first only throws
-  // ~3,600 not-found errors (the largest single cost of a cold visit,
-  // measured 2026-09-25). It goes straight to the fetch.
+  // memory filesystem, so asking it for each of ~850 modules first only
+  // throws ~3,400 not-found errors (the largest single cost of a cold visit,
+  // measured 2026-09-25); the module sets go straight to the fetch. Layers
+  // keep their read — the inventory is derived by reading them back.
   const nothingHeld = async (): Promise<null> => null
   const layersIo = {
-    read: readonlyVisitor ? nothingHeld : readFrom([store.hypercombRoot, store.legacyHive, store.legacyHypercombIo, store.layers], sig => [sig, `${sig}.json`]),
+    read: readFrom([store.hypercombRoot, store.legacyHive, store.legacyHypercombIo, store.layers], sig => [sig, `${sig}.json`]),
     fetch: fetchFirst(sig => [`/content/${sig}`, `/content/__layers__/${sig}.json`]),
     write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/__layers__/${sig}.json`, 'application/json; charset=utf-8'),
   } satisfies ReplicationIo
