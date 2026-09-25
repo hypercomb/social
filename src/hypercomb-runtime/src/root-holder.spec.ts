@@ -18,7 +18,8 @@ describe('rootHolder', () => {
       return url === `https://content.example.com/${sig}` ? root : null
     })
     expect(row).toMatchObject({ zone: 'content.example.com', base: 'https://content.example.com', packageSig: sig })
-    expect(asked).toEqual([`https://content.example.com/content/${sig}`, `https://content.example.com/${sig}`])
+    // The flat base is asked first, and the walk stops where the root is.
+    expect(asked).toEqual([`https://content.example.com/${sig}`])
   })
 
   it('is no holder when every base answers with something else — a page, or nothing', async () => {
