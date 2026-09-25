@@ -60,7 +60,8 @@ export const startArrivalTrial = (bus: BusLike, names: readonly string[]): void 
     'position:fixed', 'left:12px', 'bottom:12px', 'z-index:2147483647',
     'max-width:min(360px, calc(100vw - 24px))', 'box-sizing:border-box',
     'font:12px/1.45 system-ui, sans-serif',
-    'color:var(--hc-panel-text, #eef0f4)', 'background:var(--hc-panel-bg, rgba(14, 16, 22, 0.92))',
+    // It sits over someone's page, whatever its theme: its own contrast.
+    'color:#eef0f4', 'background:rgba(14, 16, 22, 0.94)',
     'border:1px solid rgba(255, 255, 255, 0.18)', 'border-radius:4px', 'padding:8px 28px 8px 10px',
   ].join(';')
   const body = document.createElement('div')
