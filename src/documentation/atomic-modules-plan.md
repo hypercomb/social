@@ -373,7 +373,10 @@ navigation and history hold these and wait on that decision; presentation,
 sharing, assistant and commands must be checked for them too.
 
 **THE BOOT LANE — decided by jwize 2026-09-22, BUILT.** A boot service is
-registered by its domain's BOOT BEE: a drone named `*.boot.drone.ts`. The
+registered by its domain's BOOT BEE: a drone that declares
+`readonly lane = 'boot'` (2026-09-25: the declaration decides, never the
+file name; the `*.boot.drone.ts` names stay as naming only, and
+render-critical bees declare `lane = 'first-paint'` the same way). The
 build names boot bees in the package root (`bootBees`, root only, like
 `criticalBees`, checked by the closure pass), and every shell calls
 `ScriptPreloader.loadBootBees()` right after the dependencies load — before

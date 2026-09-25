@@ -124,6 +124,8 @@ function isReadOnlySession(): boolean {
 export class HiveVisitDrone extends Drone {
 
   readonly namespace = 'diamondcoreprocessor.com'
+  /** The boot lane: named in the root, loaded before the bee wave. */
+  readonly lane = 'boot'
   override genotype = 'sharing'
 
   public override description =

@@ -16,6 +16,8 @@ import './retired-push-pool.js'
 
 export class SharingBootDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  /** The boot lane: named in the root, loaded before the bee wave. */
+  readonly lane = 'boot'
 
   public override description =
     'Sharing at boot: registers the Nostr signer and the host sync (and its runtime contract key).'
