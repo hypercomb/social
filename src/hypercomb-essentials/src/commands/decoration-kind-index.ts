@@ -1316,12 +1316,19 @@ async function hydrateLabel(
     }
     const decorations = layer.decorations
     if (!Array.isArray(decorations)) return false
-    for (const decorationSig of decorations) {
-      if (typeof decorationSig !== 'string' || !/^[0-9a-f]{64}$/.test(decorationSig)) continue
-      const record = await fetchDecorationRecord(decorationSig)
-      if (!record) continue
-      indexRecord(segments, decorationSig, record)
-    }
+    // FETCH TOGETHER, INDEX IN ORDER. Each record was awaited before the next
+    // was asked for, so a cold cell paid one round trip per decoration — two,
+    // since each is a meta envelope and then its record. A published site's
+    // root wears a dozen or more, and its visitor stared at the cover for
+    // ~2.3 s of serial fetches while the arrival waited on this walk
+    // (revolucion, 2026-09-25). The reads are content-addressed and
+    // side-effect free; only `indexRecord` order is meaningful, and it is kept.
+    const sigs = decorations.filter((sig): sig is string => typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig))
+    const records = await Promise.all(sigs.map(sig => fetchDecorationRecord(sig)))
+    sigs.forEach((sig, i) => {
+      const record = records[i]
+      if (record) indexRecord(segments, sig, record)
+    })
     // A launcher tile discovered on this walk: nudge show-cell to rebuild its
     // geometry so the tile's silhouette — or its clustered ISLAND (help
     // group/role) — appears (the walk runs after first
