@@ -17,9 +17,12 @@ hypercomb-store.workspace = true
 # over the content webview (see `titlebar` in main.rs).
 tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-deep-link = { version = "2", optional = true }
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 
 [features]
 # Enabled by `tauri dev`/`tauri build`; keeps the custom protocol available.
 custom-protocol = ["tauri/custom-protocol"]
+minimal-deep-link = ["dep:tauri-plugin-deep-link", "dep:tauri-plugin-single-instance"]

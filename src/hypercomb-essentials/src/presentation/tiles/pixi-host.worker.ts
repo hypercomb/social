@@ -97,18 +97,18 @@ export class PixiHostWorker extends Worker {
     note.style.cssText =
       'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;'
       + 'justify-content:center;gap:0.6rem;padding:2rem;text-align:center;'
-      + 'pointer-events:auto;background:#0a0a0a;color:rgba(245,245,245,0.85);'
+      + 'pointer-events:auto;background:var(--md-surface);color:var(--md-on-surface);'
       + 'font-family:var(--hc-font, system-ui, sans-serif);'
     const h = document.createElement('div')
     h.style.cssText = 'font-size:1.1rem;font-weight:600;'
     h.textContent = title
     const p = document.createElement('div')
-    p.style.cssText = 'max-width:34rem;font-size:0.85rem;line-height:1.6;color:rgba(245,245,245,0.6);'
+    p.style.cssText = 'max-width:34rem;font-size:0.85rem;line-height:1.6;color:var(--md-on-surface-var);'
     p.textContent = body
     note.append(h, p)
     if (diag) {
       const d = document.createElement('div')
-      d.style.cssText = 'font:0.65rem ui-monospace,monospace;color:rgba(245,245,245,0.3);'
+      d.style.cssText = 'font:0.65rem var(--hc-mono,ui-monospace,monospace);color:var(--md-on-surface-faint);'
       d.textContent = diag
       note.append(d)
     }

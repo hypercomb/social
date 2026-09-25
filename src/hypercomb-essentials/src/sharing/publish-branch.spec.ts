@@ -22,6 +22,7 @@ const BUNDLE = 'd'.repeat(64)
 
 let indexRead: HiveIndexResult
 let putCalls: Record<string, string>[]
+let preservedCalls: (Record<string, unknown> | undefined)[]
 
 /** The host behaves: once something has been PUT, reads return it. This is
  *  what lets the confirmation round trip terminate — and it means the success
@@ -40,8 +41,10 @@ vi.mock('./hive-pointer.js', () => ({
     const read = currentIndex()
     return read.ok ? read.manifest : null
   },
-  putHiveManifest: async (_host: string, roots: Record<string, string>): Promise<PutHiveResult> => {
+  putHiveManifest: async (_host: string, roots: Record<string, string>, _doors: unknown,
+    _replaces: number, previousContent?: Record<string, unknown>): Promise<PutHiveResult> => {
     putCalls.push(roots)
+    preservedCalls.push(previousContent)
     return { ok: true, pubkey: PUBKEY, createdAt: 1_700_000_000 }
   },
 }))
@@ -75,11 +78,12 @@ vi.mock('./hive-pointer.js', () => ({
   },
 }
 
-const { publishBranch, unpublishBranch } = await import('./publish-branch.js')
+const { publishBranch, setBranchDoors, unpublishBranch } = await import('./publish-branch.js')
 const { lineageKey } = await import('../history/lineage-key.js')
 
 beforeEach(() => {
   putCalls = []
+  preservedCalls = []
   localStorage.clear()
 })
 
@@ -131,6 +135,19 @@ describe('where the bytes go', () => {
 })
 
 describe('publish index wipe guard', () => {
+
+  it('keeps optional signed offering declarations when a branch is published', async () => {
+    const signedContent = {
+      v: 1, roots: { recipes: OTHER_HEAD },
+      offerings: { theme: { location: 'f'.repeat(64) } },
+    }
+    indexRead = { ok: true, manifest: {
+      roots: signedContent.roots, createdAt: 1_699_000_000, pubkey: PUBKEY,
+      offerings: signedContent.offerings, signedContent,
+    } }
+    expect((await publishBranch(['notes'])).ok).toBe(true)
+    expect(preservedCalls).toEqual([signedContent])
+  })
 
   it('REFUSES to write when no node answers — it stops before sealing, and nothing is PUT', async () => {
     // Every node unreachable is not an index we could not read; it is a
@@ -198,6 +215,19 @@ describe('publish index wipe guard', () => {
 
 describe('unpublish', () => {
 
+  it('keeps optional signed offering declarations when a branch is withdrawn', async () => {
+    const signedContent = {
+      v: 1, roots: { notes: HEAD, recipes: OTHER_HEAD },
+      offerings: { theme: { location: 'f'.repeat(64) } },
+    }
+    indexRead = { ok: true, manifest: {
+      roots: signedContent.roots, createdAt: 1_699_000_000, pubkey: PUBKEY,
+      offerings: signedContent.offerings, signedContent,
+    } }
+    expect((await unpublishBranch(['notes'])).ok).toBe(true)
+    expect(preservedCalls).toEqual([signedContent])
+  })
+
   it('removes only the named key and keeps the rest', async () => {
     const keep = lineageKey(['recipes'])
     const drop = lineageKey(['notes'])
@@ -228,5 +258,21 @@ describe('unpublish', () => {
     const result = await unpublishBranch(['notes'])
     expect(result).toEqual({ ok: true, removed: false })
     expect(putCalls).toHaveLength(0)
+  })
+})
+
+describe('domain doors', () => {
+  it('keeps optional signed offering declarations when a door changes', async () => {
+    const signedContent = {
+      v: 1, roots: { notes: HEAD }, doors: { notes: ['old.example.com'] },
+      offerings: { theme: { location: 'f'.repeat(64) } },
+    }
+    indexRead = { ok: true, manifest: {
+      roots: signedContent.roots, doors: signedContent.doors,
+      createdAt: 1_699_000_000, pubkey: PUBKEY,
+      offerings: signedContent.offerings, signedContent,
+    } }
+    expect((await setBranchDoors(['notes'], ['new.example.com'])).ok).toBe(true)
+    expect(preservedCalls).toEqual([signedContent])
   })
 })

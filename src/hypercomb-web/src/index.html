@@ -76,17 +76,20 @@
       })();
     </script>
 
-    <!-- Theme pre-paint: reflect the stored theme onto <html> before first
-         paint so there's no flash. ThemeService (@hypercomb.social/Theme) owns
-         it thereafter. Boots dark when no preference is stored; 'system' clears
-         the attribute and follows prefers-color-scheme. -->
+    <!-- Theme pre-paint: reflect the stored theme and its panel mood before
+         first paint. ThemeService owns both attributes thereafter. -->
     <script>
       (function () {
         try {
           var t = localStorage.getItem('hc:theme');
           var el = document.documentElement;
-          if (t === 'system') el.removeAttribute('data-theme');
-          else el.setAttribute('data-theme', t || 'honey');
+          if (t === 'system') {
+            el.removeAttribute('data-theme');
+            el.removeAttribute('data-hc-theme-mood');
+          } else {
+            el.setAttribute('data-theme', t || 'honey');
+            el.setAttribute('data-hc-theme-mood', t === 'dark' ? 'dark' : 'light');
+          }
         } catch (e) {}
       })();
     </script>

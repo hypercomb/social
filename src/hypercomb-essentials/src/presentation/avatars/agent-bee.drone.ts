@@ -1806,8 +1806,8 @@ export class AgentBeeDrone extends Drone {
     const resting = this.#isResting(id)
     // WHERE, FIRST AND BRIGHTEST. Hovering a bee asks "what is this, on what?"
     // — and the tile is the half you cannot get from the bee's own colours.
-    // It is the only white thing in the tooltip; everything else recedes to
-    // steel, which is what stops three short lines reading as a paragraph.
+    // It carries the strongest ink weight; the other lines recede without
+    // losing contrast when the participant changes theme.
     const tile = agent.targets[0] ?? ''
     who.textContent = tile || 'the hive'
     const model = agent.kind === 'model'
@@ -1815,7 +1815,7 @@ export class AgentBeeDrone extends Drone {
       : `${agent.kind} · ${agent.behavior}`
     const badge = document.createElement('span')
     badge.textContent = model
-    badge.style.cssText = 'margin-left:0.4rem;font-weight:400;color:rgba(126,182,214,0.75);'
+    badge.style.cssText = 'margin-left:0.4rem;font-weight:400;color:var(--md-primary);'
     who.appendChild(badge)
 
     // The middle line is the STATE. A resting bee has no state to report, so
@@ -1857,8 +1857,8 @@ export class AgentBeeDrone extends Drone {
     tip.style.cssText =
       'position:fixed;z-index:99998;pointer-events:none;display:none;max-width:20rem;' +
       'padding:0.4rem 0.6rem;border-radius:var(--hc-radius-floating, 4px);' +
-      'font-size:0.74rem;line-height:1.4;background:rgba(6,9,14,0.95);' +
-      'border:1px solid rgba(126,182,214,0.3);box-shadow:0 6px 18px rgba(0,0,0,0.45);'
+      'font-size:0.74rem;line-height:1.4;background:rgba(var(--hc-panel-pane),0.97);' +
+      'border:1px solid var(--hc-window-line-firm);box-shadow:0 6px 18px rgba(var(--hc-panel-shadow),0.45);'
     // Three lines, each clipped on its own. One string would put the tile and
     // the destination behind the same ellipsis as a long activity report —
     // which is most of the time, and they are the two halves worth reading.
@@ -1867,9 +1867,9 @@ export class AgentBeeDrone extends Drone {
       el.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' + css
       return el
     }
-    const who = line('font-size:0.8rem;font-weight:600;color:rgba(246,250,255,0.98);')
-    const what = line('color:rgba(216,230,238,0.62);')
-    const where = line('font-size:0.7rem;color:rgba(126,182,214,0.62);margin-top:0.1rem;')
+    const who = line('font-size:0.8rem;font-weight:600;color:var(--hc-window-ink-loud);')
+    const what = line('color:var(--hc-window-ink-quiet);')
+    const where = line('font-size:0.7rem;color:var(--md-primary);margin-top:0.1rem;')
     tip.append(who, what, where)
     document.body.appendChild(tip)
     this.#tooltip = tip

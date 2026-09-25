@@ -258,33 +258,35 @@ function injectStyles(): void {
 
 const CSS = `
 .wl-overlay{position:fixed;inset:0;z-index:2147482000;display:flex;align-items:flex-start;
-  justify-content:center;padding-top:9vh;background:rgba(6,8,14,.55);backdrop-filter:blur(3px);
-  font-family:'Segoe UI',system-ui,sans-serif;animation:wl-in .14s ease both}
+  justify-content:center;padding-top:9vh;background:rgba(var(--hc-panel-shadow),.55);backdrop-filter:blur(3px);
+  font-family:var(--hc-font,system-ui,sans-serif);animation:wl-in .14s ease both}
 @keyframes wl-in{from{opacity:0}to{opacity:1}}
 .wl-panel{width:min(560px,92vw);max-height:74vh;display:flex;flex-direction:column;
-  background:rgba(14,18,26,.92);border:1px solid rgba(126,182,214,.32);border-radius:var(--hc-radius-floating, 4px);
-  box-shadow:0 18px 60px rgba(0,0,0,.55);overflow:hidden}
+  background:rgba(var(--hc-panel-pane),.98);color:var(--hc-window-ink-loud);
+  border:1px solid var(--hc-window-line-firm);border-radius:var(--hc-radius-floating,4px);
+  box-shadow:0 18px 60px rgba(var(--hc-panel-shadow),.45);overflow:hidden}
 .wl-header{display:flex;align-items:center;gap:.6rem;padding:.7rem .9rem;
-  border-bottom:1px solid rgba(126,182,214,.22)}
-.wl-title{font-size:.92rem;font-weight:600;letter-spacing:.02em;color:#dfe7ff;flex:1}
+  border-bottom:1px solid var(--hc-window-line)}
+.wl-title{font-size:.92rem;font-weight:600;letter-spacing:.02em;color:var(--hc-window-ink-loud);flex:1}
 .wl-close{width:1.8rem;height:1.8rem;border-radius:50%;border:none;cursor:pointer;
-  background:transparent;color:rgba(126,182,214,.7);font-size:.9rem}
-.wl-close:hover{background:rgba(126,182,214,.16);color:#fff}
+  background:transparent;color:var(--hc-window-ink-quiet);font-size:.9rem}
+.wl-close:hover{background:var(--hc-window-tint-strong);color:var(--hc-window-ink-loud)}
 .wl-list{overflow:auto;padding:.4rem;display:flex;flex-direction:column;gap:.2rem}
-.wl-empty{padding:1.4rem .8rem;text-align:center;color:#8b93b4;font-size:.85rem}
+.wl-empty{padding:1.4rem .8rem;text-align:center;color:var(--hc-window-ink-quiet);font-size:.85rem}
 .wl-row{display:flex;align-items:center;gap:.4rem;padding:.1rem;border-radius:var(--hc-radius-control, 2px);
   transition:background .12s ease,opacity .12s ease}
-.wl-row:hover{background:rgba(126,182,214,.08)}
+.wl-row:hover{background:var(--hc-window-tint)}
 .wl-row.wl-removing{opacity:.4}
 .wl-path{flex:1;display:flex;align-items:center;gap:.45rem;min-width:0;text-align:left;
-  background:transparent;border:none;cursor:pointer;color:#cdd6f4;font-size:.85rem;
-  padding:.45rem .5rem;border-radius:var(--hc-radius-control, 2px);font-family:ui-monospace,'Cascadia Code',monospace}
-.wl-path:hover{color:#fff}
+  background:transparent;border:none;cursor:pointer;color:var(--hc-window-ink-plain);font-size:.85rem;
+  padding:.45rem .5rem;border-radius:var(--hc-radius-control,2px);font-family:var(--hc-mono,ui-monospace,monospace)}
+.wl-path:hover{color:var(--hc-window-ink-loud)}
 .wl-path span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wl-glyph{color:rgba(126,182,214,.65);font-size:.7rem;flex-shrink:0}
+.wl-glyph{color:var(--md-primary);font-size:.7rem;flex-shrink:0}
 .wl-x{flex-shrink:0;width:1.9rem;height:1.9rem;border-radius:var(--hc-radius-control, 2px);border:none;cursor:pointer;
-  background:transparent;color:rgba(255,120,120,.65);font-size:.85rem;
+  background:transparent;color:var(--hc-status-alert);font-size:.85rem;
   transition:background .12s ease,color .12s ease}
-.wl-x:hover{background:rgba(255,80,80,.18);color:#ff9a9a}
+.wl-x:hover{background:color-mix(in srgb,var(--hc-status-alert) 12%,transparent);color:var(--hc-status-alert)}
 .wl-x:disabled{opacity:.4;cursor:default}
+.wl-panel button:focus-visible{outline:2px solid var(--md-primary);outline-offset:2px}
 `

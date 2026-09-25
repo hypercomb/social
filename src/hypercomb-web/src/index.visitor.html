@@ -44,7 +44,10 @@
       /* A plain cover, no animation: a published site opens straight onto
          itself. The cover only hides the engine's own visuals (rings, the
          empty prompt) until the site is up — main.visitor.ts fades it. */
-      .site-loading{position:fixed;inset:0;background:#08090c}
+      .site-loading{position:fixed;inset:0;background:#08090c center/cover no-repeat}
+      /* The door paints the branch's LANDING PICTURE into the cover's
+         background (worker paintLanding): the site is on screen at parse
+         time and the engine hydrates behind it. */
     </style>
   </head>
   <body>

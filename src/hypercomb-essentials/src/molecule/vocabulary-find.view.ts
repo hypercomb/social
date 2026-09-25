@@ -88,8 +88,8 @@ const SURFACE = 'hc-vocabulary-find'
 const STYLE_ID = 'hc-vocabulary-find-style'
 const OWNER = '@diamondcoreprocessor.com/VocabularyFindView'
 
-const STEEL = '126, 182, 214'
 const ACCENT = '201, 162, 39'
+const ACCENT_DEEP = '107, 86, 21'
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
@@ -657,77 +657,86 @@ function ensureStyles(): void {
   style.textContent = `
     ${SURFACE} { display: contents; }
     .hc-find {
+      --acc: ${ACCENT};
+      --hc-window-accent: rgb(var(--acc));
+      --hc-window-wash: rgba(var(--acc), 0.10);
+      --hc-window-edge: rgba(var(--acc), 0.28);
+      --hc-window-edge-firm: rgba(var(--acc), 0.62);
       position: fixed;
       top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
       right: var(--hc-controls-right, 0px); bottom: 0;
       width: 400px; min-width: 280px; max-width: calc(100vw - 1.5rem);
       box-sizing: border-box; display: flex; flex-direction: column;
       z-index: 100002;
-      background: rgba(13, 15, 21, 0.975);
+      background: rgba(var(--hc-panel-pane), 0.975);
       backdrop-filter: blur(14px) saturate(1.04);
       -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border: 0; border-left: 1px solid rgba(${STEEL}, 0.38); border-radius: 0;
-      box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46);
-      color: #eef2f5;
+      border: 0; border-left: 1px solid var(--hc-window-edge-firm); border-radius: 0;
+      box-shadow: -14px 0 44px rgba(var(--hc-panel-shadow), 0.46);
+      color: var(--hc-panel-text);
       font-family: var(--hc-mono, system-ui);
       font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
       line-height: 1.45; overflow: hidden; outline: none;
     }
+    :root[data-hc-theme-mood="light"] .hc-find { --acc: ${ACCENT_DEEP}; }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme]) .hc-find { --acc: ${ACCENT_DEEP}; }
+    }
     .hc-find-head {
       flex: 0 0 auto; box-sizing: border-box; display: flex; align-items: center;
       gap: 0.4rem; min-height: 2.875rem; padding: 0.4rem 0.75rem; flex-wrap: wrap;
-      background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.006));
-      border-bottom: 1px solid rgba(${STEEL}, 0.25);
+      background: linear-gradient(180deg, rgba(var(--hc-panel-sheen),0.018), rgba(var(--hc-panel-sheen),0.006));
+      border-bottom: 1px solid var(--hc-window-edge);
     }
     .hc-find-title {
       flex: 1 0 100%; font-weight: 600; font-size: 0.9em; letter-spacing: 0.06em;
-      text-transform: uppercase; color: rgba(${ACCENT}, 0.95);
+      text-transform: uppercase; color: var(--hc-window-accent);
     }
     .hc-find-input {
       flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 0.3rem 0.4rem;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
+      background: var(--hc-window-tint);
+      border: 1px solid var(--hc-window-line-firm); border-radius: var(--hc-radius-control, 2px);
       color: inherit; font: inherit; font-size: 0.95em;
     }
-    .hc-find-input:focus-visible { outline: 1px solid rgba(${ACCENT}, 0.8); outline-offset: -1px; }
+    .hc-find-input:focus-visible { outline: 2px solid var(--hc-window-accent); outline-offset: -1px; }
     .hc-find-do {
       flex: 0 0 auto; padding: 0.3rem 0.7rem;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
+      background: var(--hc-window-tint);
+      border: 1px solid var(--hc-window-line-firm); border-radius: var(--hc-radius-control, 2px);
       color: inherit; font: inherit; font-size: 0.85em; cursor: pointer;
     }
-    .hc-find-do:hover { border-color: rgba(${ACCENT}, 0.8); }
+    .hc-find-do:hover { border-color: var(--hc-window-accent); }
     .hc-find-takes {
       display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.4rem;
       margin-top: 0.4rem;
     }
     .hc-find-takes-head {
       font-size: 0.72em; letter-spacing: 0.06em; text-transform: uppercase;
-      color: rgba(${STEEL}, 0.75);
+      color: var(--hc-window-ink-quiet);
     }
     .hc-find-take {
       padding: 0.2rem 0.5rem;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
+      background: var(--hc-window-tint);
+      border: 1px solid var(--hc-window-line-firm); border-radius: var(--hc-radius-control, 2px);
       color: inherit; font: inherit; font-size: 0.78em; cursor: pointer;
     }
-    .hc-find-take:hover { border-color: rgba(${ACCENT}, 0.8); }
-    .hc-find-take:focus-visible { outline: 1px solid rgba(${ACCENT}, 0.8); outline-offset: 1px; }
+    .hc-find-take:hover { border-color: var(--hc-window-accent); }
+    .hc-find-take:focus-visible { outline: 2px solid var(--hc-window-accent); outline-offset: 1px; }
     /* ON IS A STATE, NOT A PRESSED BUTTON — and never a fade: this window may
        not use opacity to say anything, because a dimmed row is how an unknown
        gets read as an absence. */
     .hc-find-take.is-on {
-      border-color: rgba(${ACCENT}, 0.85);
-      background: rgba(${ACCENT}, 0.16);
+      border-color: var(--hc-window-accent);
+      background: var(--hc-window-wash);
     }
     .hc-find-close {
       flex: 0 0 auto; display: inline-grid; place-items: center;
       width: 1.75rem; height: 1.75rem; padding: 0;
       background: none; border: 0; border-radius: var(--hc-radius-control, 2px);
-      color: rgba(238, 244, 248, 0.62); font: inherit; font-size: 1.125rem;
+      color: var(--hc-window-ink-quiet); font: inherit; font-size: 1.125rem;
       line-height: 1; cursor: pointer;
     }
-    .hc-find-close:hover { color: #fff; background-color: rgba(255,255,255,0.075); }
+    .hc-find-close:hover { color: var(--hc-window-ink-loud); background-color: var(--hc-window-tint-strong); }
 
     .hc-find-body {
       flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
@@ -735,38 +744,38 @@ function ensureStyles(): void {
     }
     .hc-find-body > p { margin: 0 0 0.5rem; line-height: 1.55; }
     .hc-find-address {
-      font-size: 0.78em; color: rgba(238, 244, 248, 0.45);
+      font-size: 0.78em; color: var(--hc-window-ink-quiet);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .hc-find-quiet { color: rgba(238, 244, 248, 0.5); font-size: 0.85em; }
+    .hc-find-quiet { color: var(--hc-window-ink-quiet); font-size: 0.85em; }
     .hc-find-local {
       padding: 0.45rem 0.55rem; font-size: 0.92em;
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: 2px;
+      border: 1px solid var(--hc-window-line-firm); border-radius: var(--hc-radius-card, 2px);
     }
-    .hc-find-local.is-held { border-color: rgba(${ACCENT}, 0.8); }
+    .hc-find-local.is-held { border-color: var(--hc-window-accent); }
     /* AN UNKNOWN IS NEVER FADED AND NEVER COLLAPSED. Full weight, dashed edge
        — the shape says "a state of the evidence", the opacity says nothing. */
     .hc-find-local.is-unknown, .hc-find-unknown {
-      border: 1px dashed rgba(${STEEL}, 0.65); border-radius: 2px;
-      padding: 0.45rem 0.55rem; color: rgba(238, 244, 248, 0.95);
+      border: 1px dashed var(--hc-window-line-firm); border-radius: var(--hc-radius-card, 2px);
+      padding: 0.45rem 0.55rem; color: var(--hc-window-ink-plain);
     }
     .hc-find-count, .hc-find-tally {
       font-size: 0.78em; letter-spacing: 0.08em; text-transform: uppercase;
-      color: rgba(238, 244, 248, 0.55);
+      color: var(--hc-window-ink-quiet);
     }
-    .hc-find-tally { color: rgba(${ACCENT}, 0.85); font-variant-numeric: tabular-nums; }
+    .hc-find-tally { color: var(--hc-window-accent); font-variant-numeric: tabular-nums; }
 
     .hc-find-row {
       margin: 0 0 0.55rem; padding: 0.4rem 0.5rem;
-      border: 1px solid rgba(${STEEL}, 0.22); border-radius: 2px;
-      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--hc-window-line); border-radius: var(--hc-radius-card, 2px);
+      background: var(--hc-window-tint);
     }
     /* Same weight as a declared row, deliberately. Only the LEFT EDGE differs,
        and it is a shape (dashed) rather than a dimming. */
-    .hc-find-row.is-unknown { border-left: 3px dashed rgba(${STEEL}, 0.8); }
-    .hc-find-row.is-declared { border-left: 3px solid rgba(${ACCENT}, 0.9); }
-    .hc-find-row.is-absent { border-left: 3px solid rgba(${STEEL}, 0.9); }
-    .hc-find-row.is-asking { border-left: 3px dotted rgba(${STEEL}, 0.6); }
+    .hc-find-row.is-unknown { border-left: 3px dashed var(--hc-window-line-firm); }
+    .hc-find-row.is-declared { border-left: 3px solid var(--hc-window-accent); }
+    .hc-find-row.is-absent { border-left: 3px solid var(--hc-window-line-firm); }
+    .hc-find-row.is-asking { border-left: 3px dotted var(--hc-window-line-firm); }
 
     .hc-find-verdict {
       display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem;
@@ -775,9 +784,9 @@ function ensureStyles(): void {
     .hc-find-mark { font-weight: 600; letter-spacing: 0.08em; }
     .hc-find-key {
       font-family: var(--hc-mono, ui-monospace), monospace;
-      color: rgba(238, 244, 248, 0.55);
+      color: var(--hc-window-ink-quiet);
     }
-    .hc-find-why { flex: 1 0 100%; color: rgba(238, 244, 248, 0.8); font-size: 0.95em; }
+    .hc-find-why { flex: 1 0 100%; color: var(--hc-window-ink-plain); font-size: 0.95em; }
 
     /* The doors, in the shell's two-column list shape. */
     .hc-find-doors {
@@ -788,15 +797,15 @@ function ensureStyles(): void {
     .hc-find-door { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
     .hc-find-door > :first-child {
       font-family: var(--hc-mono, ui-monospace), monospace;
-      color: rgba(238, 244, 248, 0.7);
+      color: var(--hc-window-ink-plain);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .hc-find-door > :last-child { color: rgba(238, 244, 248, 0.55); }
+    .hc-find-door > :last-child { color: var(--hc-window-ink-quiet); }
 
     .hc-find-footer {
       margin-top: 0.6rem; padding-top: 0.5rem; font-size: 0.88em;
-      border-top: 1px solid rgba(${STEEL}, 0.25);
-      color: rgba(238, 244, 248, 0.9);
+      border-top: 1px solid var(--hc-window-line);
+      color: var(--hc-window-ink-loud);
     }
   `
   document.head.appendChild(style)

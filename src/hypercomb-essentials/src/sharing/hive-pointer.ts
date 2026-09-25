@@ -30,11 +30,21 @@ export interface HiveManifest {
   createdAt: number
   /** Publisher pubkey the signature verified against. */
   pubkey: string
-  /** lineageKey → the root domains that branch OPENS on. A key with no entry
-   *  opens on every domain (the shape every index had before doors). The
-   *  host serves a branch's page only on a domain listed here — this map,
-   *  signed with the roots, is the per-domain on/off switch. */
+  /** lineageKey → the root domains that branch opens on. The host serves a
+   *  branch only on a listed domain; an absent entry grants no door. This
+   *  map, signed with the roots, is the per-domain on/off switch. */
   doors?: Record<string, string[]>
+  /** lineageKey → the branch's LANDING (see landing-capture.ts): a heap
+   *  address `<sig>` or `<sig>/<name>` — a picture (`landing.webp`) or the
+   *  page itself (`landing.html`) — that the door paints inside its loading
+   *  cover before any module loads. Absent = a plain cover. */
+  landing?: Record<string, string>
+  /** Optional public declarations. Values are held as signed data here; the
+   *  offering reader decides their meaning when that protocol is defined. */
+  offerings?: Record<string, unknown>
+  /** The verified event's complete content. A roots/doors rewrite must carry
+   *  fields it does not interpret, or one ordinary publish erases them. */
+  signedContent?: Record<string, unknown>
 }
 
 /** Why an index read produced no manifest. `fetchHiveManifest` collapses all
@@ -97,10 +107,12 @@ export async function fetchHiveIndex(host: string, pubkey: string): Promise<Hive
   try { if (!verifyEvent(evt as never)) return { ok: false, reason: 'forged' } }
   catch { return { ok: false, reason: 'forged' } }
 
-  let content: Record<string, unknown>
-  try { content = JSON.parse(String(evt['content'] ?? '')) as Record<string, unknown> }
+  let content: unknown
+  try { content = JSON.parse(String(evt['content'] ?? '')) as unknown }
   catch { return { ok: false, reason: 'malformed' } }
-  const rawRoots = content?.['roots']
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return { ok: false, reason: 'malformed' }
+  const signedContent = content as Record<string, unknown>
+  const rawRoots = signedContent['roots']
   if (!rawRoots || typeof rawRoots !== 'object' || Array.isArray(rawRoots)) return { ok: false, reason: 'malformed' }
   const roots: Record<string, string> = {}
   for (const [k, v] of Object.entries(rawRoots as Record<string, unknown>)) {
@@ -108,11 +120,22 @@ export async function fetchHiveIndex(host: string, pubkey: string): Promise<Hive
     if (!k.trim() || !SIG_RE.test(sig)) return { ok: false, reason: 'malformed' }
     roots[k] = sig
   }
-  return { ok: true, manifest: { roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key, doors: readDoors(content?.['doors'], roots) } }
+  const rawOfferings = signedContent['offerings']
+  if (rawOfferings !== undefined && (!rawOfferings || typeof rawOfferings !== 'object' || Array.isArray(rawOfferings))) {
+    return { ok: false, reason: 'malformed' }
+  }
+  return { ok: true, manifest: {
+    roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key,
+    doors: readDoors(signedContent['doors'], roots),
+    ...(Object.keys(readLanding(signedContent['landing'], roots)).length ? { landing: readLanding(signedContent['landing'], roots) } : {}),
+    ...(rawOfferings !== undefined ? { offerings: rawOfferings as Record<string, unknown> } : {}),
+    signedContent,
+  } }
 }
 
-/** The signed doors map, leniently: a malformed entry drops that entry (the
- *  branch then opens everywhere, the pre-doors reading), never the index. */
+/** The signed doors map, leniently: a malformed entry drops that entry, so
+ *  the host has no usable door claim for that branch. It does not discard
+ *  the whole index. */
 function readDoors(raw: unknown, roots: Record<string, string>): Record<string, string[]> {
   const doors: Record<string, string[]> = {}
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return doors
@@ -121,6 +144,22 @@ function readDoors(raw: unknown, roots: Record<string, string>): Record<string, 
     doors[k] = [...new Set(v.map(z => String(z ?? '').trim().toLowerCase()).filter(Boolean))]
   }
   return doors
+}
+
+/** A landing address: the sig, optionally with the one-segment name that
+ *  declares its presentation type (`<sig>/landing.html`). */
+const LANDING_RE = /^[0-9a-f]{64}(?:\/[A-Za-z0-9._-]+)?$/
+
+/** The signed landing map, leniently: an entry for a branch the roots do
+ *  not name, or one that is not a heap address, is dropped — never the index. */
+function readLanding(raw: unknown, roots: Record<string, string>): Record<string, string> {
+  const landing: Record<string, string> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return landing
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const address = String(v ?? '').trim().toLowerCase()
+    if (k in roots && LANDING_RE.test(address)) landing[k] = address
+  }
+  return landing
 }
 
 /** Fetch + verify one host's copy of the publisher's hive index. Returns
@@ -172,17 +211,31 @@ export async function putHiveManifest(
    *  whole seconds, so two writes in one second — a sandbox stamped and
    *  promoted back to back — must still move forward. */
   replaces = 0,
+  /** Verified signed content from the index being replaced. Uninterpreted
+   *  fields (including optional offerings) survive this roots/doors edit. */
+  previousContent?: Record<string, unknown>,
+  /** Landing pictures THIS write adds or replaces (lineageKey → sig). The
+   *  previous index's entries ride through; an entry for a root the write
+   *  drops goes with it. */
+  landing: Record<string, string> = {},
 ): Promise<PutHiveResult> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
   if (!signer?.signEvent) return { ok: false, pubkey: '', createdAt: 0, reason: 'no signer' }
 
   let signed: Record<string, unknown>
   try {
+    const content: Record<string, unknown> = { ...previousContent, v: HIVE_LINK_VERSION, roots }
+    const nextDoors = signedDoors(roots, doors).doors
+    if (nextDoors) content['doors'] = nextDoors
+    else delete content['doors']
+    const nextLanding = readLanding({ ...readLanding(previousContent?.['landing'], roots), ...landing }, roots)
+    if (Object.keys(nextLanding).length > 0) content['landing'] = nextLanding
+    else delete content['landing']
     signed = await signer.signEvent({
       kind: HIVE_INDEX_EVENT_KIND,
       created_at: Math.max(Math.floor(Date.now() / 1000), Math.floor(Number(replaces) || 0) + 1),
       tags: [],
-      content: JSON.stringify({ v: HIVE_LINK_VERSION, roots, ...signedDoors(roots, doors) }),
+      content: JSON.stringify(content),
     })
   } catch { return { ok: false, pubkey: '', createdAt: 0, reason: 'signing failed' } }
   const pubkey = String(signed?.['pubkey'] ?? '').toLowerCase()
@@ -277,7 +330,8 @@ export async function setHiveRoot(host: string, key: string, sig: string, deps: 
     return { ok: true, key: cleanKey, sig: cleanSig, host, pubkey, createdAt: read.ok ? read.manifest.createdAt : 0, reason: 'unchanged' }
   }
 
-  const put = await putManifest(host, { ...existing, [cleanKey]: cleanSig }, doors, read.ok ? read.manifest.createdAt : 0)
+  const put = await putManifest(host, { ...existing, [cleanKey]: cleanSig }, doors,
+    read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined)
   if (!put.ok) return refuse(put.reason ?? 'index write failed')
   return { ok: true, key: cleanKey, sig: cleanSig, host, pubkey: put.pubkey, createdAt: put.createdAt }
 }
@@ -301,7 +355,8 @@ export async function clearHiveRoot(host: string, key: string, deps: SetHiveRoot
   const existing = read.ok ? read.manifest.roots : {}
   if (!(cleanKey in existing)) return { ok: true, key: cleanKey, sig: '', host, pubkey, createdAt: read.ok ? read.manifest.createdAt : 0, reason: 'unchanged' }
   const { [cleanKey]: gone, ...rest } = existing
-  const put = await putManifest(host, rest, read.ok ? read.manifest.doors ?? {} : {}, read.ok ? read.manifest.createdAt : 0)
+  const put = await putManifest(host, rest, read.ok ? read.manifest.doors ?? {} : {},
+    read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined)
   if (!put.ok) return refuse(put.reason ?? 'index write failed')
   return { ok: true, key: cleanKey, sig: String(gone), host, pubkey: put.pubkey, createdAt: put.createdAt }
 }

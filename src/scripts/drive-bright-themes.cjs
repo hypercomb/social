@@ -239,8 +239,10 @@ async function main() {
     check('so the backdrop is bright too — on a DARK-OS machine',
       s.palette === 'honey', `resolvedPalette=${s.palette}`)
 
-    check('/theme offers system and the three looks beside light and dark',
-      ['system', 'light', 'dark', 'honey', 'bloom', 'sherbet'].every(t => s.offered.includes(t)),
+    // ThemeService lists value-sets; the /theme queen adds the 'system' meta
+    // option separately, because it follows the OS rather than owning tokens.
+    check('ThemeService exposes all five built-in palettes',
+      ['light', 'dark', 'honey', 'bloom', 'sherbet'].every(t => s.offered.includes(t)),
       s.offered.join(', '))
 
     // ── 3. ONE LOOK DRESSES THE WHOLE APP ─────────────────────────────

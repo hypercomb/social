@@ -80,10 +80,12 @@ import {
   type GroupAttrs, type GroupMember, STEEL, TEXT_SIZES,
   CODE_FONTS, DEFAULT_CODE_FONT, codeFont,
   READ_FONTS, DEFAULT_READ_FONT, readFont,
+  textThemes, textTheme, createTextTheme, canCreateTextTheme, textThemeChanges,
+  type TextTheme,
   members, normalizeGroup, publishAttrs, readGroupAttrs, readMembership, writeMembership,
   readPairing, writePairing, readTextScale, writeTextScale,
   readCodeFont, writeCodeFont, readLigatures, writeLigatures,
-  readReadFont, writeReadFont,
+  readReadFont, writeReadFont, readChosenTextTheme, writeChosenTextTheme,
 } from './panel-groups.js'
 
 // The EDITOR — how a settings popover is drawn from declared rows, and the one
@@ -114,6 +116,18 @@ import { holdWindow, type WindowSession } from './window-session.js'
 import { holdToolWindow } from './window-rule.js'
 import { setPopoverDismisser } from './tool-windows.js'
 
+type TextThemeOfferResult =
+  | { ok: true; state: 'off' | 'current' | 'outdated' | 'pending' }
+  | { ok: false; reason: string }
+type TextThemeOfferController = {
+  defaultHost: () => string
+  status: (theme: TextTheme, host: string) => Promise<TextThemeOfferResult>
+  set: (theme: TextTheme, host: string, on: boolean) => Promise<TextThemeOfferResult>
+}
+const getTextThemeOfferController = (): TextThemeOfferController | null =>
+  ((window as { ioc?: { get?: (key: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/TextThemeOffering')
+    ?? null) as TextThemeOfferController | null
+
 const t = (key: string, fallback: string, params?: Record<string, unknown>): string => {
   const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/I18n') as
     { t(k: string, p?: Record<string, unknown>): string } | undefined
@@ -126,6 +140,9 @@ const t = (key: string, fallback: string, params?: Record<string, unknown>): str
 /** Every mounted docked panel — the chrome-side view of `members`, used to
  *  repaint gears and popovers when grouping changes anywhere. */
 const live = new Set<DockedPanel>()
+textThemeChanges.addEventListener('change', () => {
+  for (const panel of live) panel.refreshTextThemeChoices()
+})
 
 /** Shut whichever settings popover is open, if any. Exported for the shell-wide
  *  Escape owner (tool-windows.ts), which unwinds the INNERMOST thing first: a
@@ -346,6 +363,16 @@ export class DockedPanel implements GroupMember, LaneMember {
    *  inherits :root's --hc-read" contract as the code face. */
   #readFace: string | undefined = undefined
 
+  /** Local preference for a creation identity; its bytes live in the pool. */
+  #selectedTextTheme: string | undefined = undefined
+  #newTextThemeName = ''
+  #textThemeMessage = ''
+  #textThemeOfferHost = ''
+  #textThemeOfferMessage = ''
+  #textThemeOfferBusy = false
+  #textThemeOfferCheck = 0
+  #textThemeOfferState: { key: string; head: string; host: string; result: TextThemeOfferResult } | null = null
+
   /** Ligatures on the chosen face. Off unless asked for; see readLigatures. */
   #ligatures = false
   #width = 0
@@ -385,6 +412,7 @@ export class DockedPanel implements GroupMember, LaneMember {
     const faces = {
       ...(this.#font !== undefined ? { font: this.#font } : {}),
       ...(this.#readFace !== undefined ? { read: this.#readFace } : {}),
+      ...(this.#selectedTextTheme !== undefined ? { theme: this.#selectedTextTheme } : {}),
       ligatures: this.#ligatures,
     }
     if (this.ownsSize) return { width: this.#width, text, ...faces }
@@ -482,6 +510,7 @@ export class DockedPanel implements GroupMember, LaneMember {
     // undefined so :root's default reaches it untouched.
     this.#font = ('font' in groupAttrs) ? groupAttrs.font : readCodeFont(this.id)
     this.#readFace = ('read' in groupAttrs) ? groupAttrs.read : readReadFont(this.id)
+    this.#selectedTextTheme = ('theme' in groupAttrs) ? groupAttrs.theme : readChosenTextTheme(this.id)
     this.#ligatures = ('ligatures' in groupAttrs)
       ? groupAttrs.ligatures === true
       : readLigatures(this.id)
@@ -975,6 +1004,7 @@ export class DockedPanel implements GroupMember, LaneMember {
     pop.tabIndex = -1
     pop.setAttribute('aria-modal', 'false')
     pop.focus()
+    void this.#refreshTextThemeOfferState()
   }
 
   #closePopover(): void {
@@ -1072,8 +1102,30 @@ export class DockedPanel implements GroupMember, LaneMember {
     // Offered only by a window that declares a reading surface: elsewhere the
     // control could not change what you are looking at, and a dead control is
     // worse than none (the ligature switch's own rule).
-    if (this.hasReadingSurface) {
-      const prose = this.#readFace ?? DEFAULT_READ_FONT
+    {
+      const selected = textThemes().find(theme => theme.key === this.#selectedTextTheme)
+      const currentRead = this.#readFace ?? DEFAULT_READ_FONT
+      const currentCode = this.#font ?? DEFAULT_CODE_FONT
+      const preset = selected
+        ? (selected.read === currentRead && selected.code === currentCode ? selected.key : '')
+        : textTheme(this.#readFace, this.#font)
+      shared.push({
+        kind: 'specimen', key: 'text-theme',
+        label: this.#t('panel.text-theme.label', 'Text theme'),
+        value: preset,
+        sample: 'Aa Gg 123',
+        options: textThemes().map(theme => ({
+          value: theme.key,
+          label: this.#t(`panel.text-theme.${theme.key}`, theme.label),
+          family: readFont(theme.read)?.stack ?? 'var(--hc-read)',
+        })),
+        hint: preset
+          ? this.#t('panel.text-theme.hint', 'A paired reading and code face. Fine tune either below.')
+          : this.#t('panel.text-theme.custom', 'Choose a theme or fine tune the fonts below.'),
+        pick: (value) => { this.#setTextTheme(value) },
+      })
+      if (this.hasReadingSurface) {
+        const prose = this.#readFace ?? DEFAULT_READ_FONT
       shared.push({
         kind: 'specimen', key: 'read-font',
         label: this.#t('panel.read-font.label', 'Reading font'),
@@ -1090,6 +1142,7 @@ export class DockedPanel implements GroupMember, LaneMember {
         hint: this.#t('panel.read-font.hint', 'Normal text — answers and notes — reads in this face.'),
         pick: (value) => { this.#setRead(value) },
       })
+      }
     }
 
     // The face code is READ in. Offered here rather than in the chat window's
@@ -1188,6 +1241,62 @@ export class DockedPanel implements GroupMember, LaneMember {
     // everything above it, and the fold is about how OFTEN it is asked, not
     // about who it applies to.
     zones.push({ key: 'code', title: this.#t('panel.code-font.label', 'Code font'), fold: true, rows: code })
+    zones.push({
+      key: 'create-text-theme', title: this.#t('panel.text-theme.create', 'Create text theme'), fold: true,
+      rows: [{
+        kind: 'text', key: 'text-theme-name', label: this.#t('panel.text-theme.name', 'Name'),
+        value: this.#newTextThemeName, placeholder: this.#t('panel.text-theme.name-example', 'e.g. Studio'),
+        commit: value => { this.#newTextThemeName = value.trim() },
+      }, {
+        kind: 'action', key: 'text-theme-save', label: this.#t('panel.text-theme.save', 'Save current pairing'),
+        hint: this.#textThemeMessage || (canCreateTextTheme()
+          ? this.#t('panel.text-theme.share-hint', 'Creates a revisioned theme in your hive.')
+          : this.#t('panel.text-theme.loading', 'Theme storage is loading.')),
+        run: () => { void this.#saveTextTheme() },
+      }],
+    })
+    if (getTextThemeOfferController()) {
+      const theme = textThemes().find(item => item.key === this.#selectedTextTheme)
+      const host = this.#offerHost()
+      const state = this.#textThemeOfferState?.key === theme?.key
+        && this.#textThemeOfferState?.head === theme?.head
+        && this.#textThemeOfferState?.host === host ? this.#textThemeOfferState.result : null
+      const rows: SettingRow[] = [{
+        kind: 'text', key: 'text-theme-offer-host',
+        label: this.#t('panel.text-theme.offer-host', 'Domain'), value: host,
+        placeholder: 'jwize.com',
+        hint: !theme?.head || !theme.location
+          ? this.#t('panel.text-theme.offer-select-hint', 'Choose a saved theme above to share.')
+          : this.#t('panel.text-theme.offer-host-hint', 'Choose a domain served by your public host.'),
+        commit: value => { this.#setTextThemeOfferHost(value) },
+      }]
+      if (theme?.head && theme.location && (!state || !state.ok)) {
+        rows.push({ kind: 'action', key: 'text-theme-offer-check',
+          label: this.#t('panel.text-theme.offer-check', 'Check public status'),
+          hint: this.#textThemeOfferMessage || (state && !state.ok ? state.reason : ''),
+          run: () => { void this.#refreshTextThemeOfferState() } })
+      } else if (theme?.head && theme.location && state?.ok) {
+        rows.push({ kind: 'switch', key: 'text-theme-offer',
+          label: this.#t('panel.text-theme.offer', 'Offer this theme'),
+          checked: state.state !== 'off',
+          hint: this.#textThemeOfferMessage || (this.#textThemeOfferBusy
+            ? this.#t('panel.text-theme.offer-working', 'Updating the public host…')
+            : state.state === 'outdated'
+              ? this.#t('panel.text-theme.offer-outdated', 'An older revision is offered. Update it below.')
+              : state.state === 'pending'
+                ? this.#t('panel.text-theme.offer-pending', 'Signed, but the host has not served this revision yet.')
+                : this.#t('panel.text-theme.offer-hint', 'Off removes this listing while keeping its signed bytes.')),
+          toggle: on => { void this.#setTextThemeOffer(on) },
+        })
+        if (state.state === 'outdated' || state.state === 'pending') rows.push({
+          kind: 'action', key: 'text-theme-offer-update',
+          label: this.#t('panel.text-theme.offer-update', 'Publish current revision'),
+          run: () => { void this.#setTextThemeOffer(true) },
+        })
+      }
+      zones.push({ key: 'share-text-theme', title: this.#t('panel.text-theme.share', 'Share text theme'),
+        fold: true, rows })
+    }
     if (own.length) zones.push({ key: 'window', title: this.#t('panel.settings.zone.window', 'This window'), rows: own })
 
     return { eyebrow: this.#t('panel.settings.eyebrow', 'Settings'), title: this.#label(), zones }
@@ -1240,6 +1349,105 @@ export class DockedPanel implements GroupMember, LaneMember {
     this.#refreshPopover()
   }
 
+  /** A preset is one change to the same two persisted face choices. Publishing
+   *  once keeps grouped windows from briefly showing half of the pairing. */
+  #setTextTheme(key: string): void {
+    const theme = textThemes().find(item => item.key === key)
+    if (!theme || (theme.key === this.#selectedTextTheme
+      && theme.read === this.#readFace && theme.code === this.#font)) return
+    this.#readFace = theme.read
+    this.#font = theme.code
+    this.#selectedTextTheme = theme.key
+    writeChosenTextTheme(this.id, theme.key)
+    writeReadFont(this.id, theme.read)
+    writeCodeFont(this.id, theme.code)
+    if (!codeFont(theme.code)?.ligatures && this.#ligatures) {
+      this.#ligatures = false
+      writeLigatures(this.id, false)
+    }
+    this.#applyFont()
+    if (this.#group) publishAttrs(this)
+    this.#refreshPopover()
+    void this.#refreshTextThemeOfferState()
+  }
+
+  async #saveTextTheme(): Promise<void> {
+    const label = this.#newTextThemeName.trim()
+    if (!label) {
+      this.#textThemeMessage = this.#t('panel.text-theme.need-name', 'Enter a name first.')
+      this.#refreshPopover()
+      return
+    }
+    const source = textThemes().find(theme => theme.key === this.#selectedTextTheme)?.head
+    try {
+      const created = await createTextTheme({ label, read: this.#readFace ?? DEFAULT_READ_FONT,
+        code: this.#font ?? DEFAULT_CODE_FONT, source })
+      if (!created) throw new Error('Theme store unavailable')
+      this.#selectedTextTheme = created.key
+      writeChosenTextTheme(this.id, created.key)
+      this.#newTextThemeName = ''
+      this.#textThemeMessage = this.#t('panel.text-theme.saved', 'Saved in your hive.')
+      if (this.#group) publishAttrs(this)
+    } catch {
+      this.#textThemeMessage = this.#t('panel.text-theme.failed', 'Could not save this theme.')
+    }
+    this.#refreshPopover()
+    void this.#refreshTextThemeOfferState()
+  }
+
+  #offerHost(): string {
+    if (this.#textThemeOfferHost) return this.#textThemeOfferHost
+    try { this.#textThemeOfferHost = localStorage.getItem('hc:text-theme-offer-host') ?? '' }
+    catch { /* a session without storage can still choose a host */ }
+    return this.#textThemeOfferHost || getTextThemeOfferController()?.defaultHost() || ''
+  }
+
+  #setTextThemeOfferHost(value: string): void {
+    this.#textThemeOfferHost = value.trim().toLowerCase()
+    try { localStorage.setItem('hc:text-theme-offer-host', this.#textThemeOfferHost) } catch { /* session only */ }
+    this.#textThemeOfferMessage = ''
+    void this.#refreshTextThemeOfferState()
+  }
+
+  async #refreshTextThemeOfferState(): Promise<void> {
+    const controller = getTextThemeOfferController()
+    const theme = textThemes().find(item => item.key === this.#selectedTextTheme)
+    const host = this.#offerHost()
+    const check = ++this.#textThemeOfferCheck
+    this.#textThemeOfferState = null
+    this.#refreshPopover()
+    if (!controller || !theme?.head || !theme.location || !host) return
+    let result: TextThemeOfferResult
+    try { result = await controller.status(theme, host) }
+    catch { result = { ok: false, reason: 'Could not check the public host.' } }
+    if (check !== this.#textThemeOfferCheck) return
+    this.#textThemeOfferState = { key: theme.key, head: theme.head, host, result }
+    this.#refreshPopover()
+  }
+
+  async #setTextThemeOffer(on: boolean): Promise<void> {
+    if (this.#textThemeOfferBusy) return
+    const controller = getTextThemeOfferController()
+    const theme = textThemes().find(item => item.key === this.#selectedTextTheme)
+    const host = this.#offerHost()
+    if (!controller || !theme?.head || !theme.location) return
+    this.#textThemeOfferBusy = true
+    this.#textThemeOfferMessage = ''
+    this.#refreshPopover()
+    try {
+      const result = await controller.set(theme, host, on)
+      this.#textThemeOfferMessage = result.ok
+        ? this.#t(on ? 'panel.text-theme.offered' : 'panel.text-theme.withdrawn',
+          on ? `Offered on ${host}.` : `Withdrawn from ${host}.`, { host })
+        : result.reason
+    } catch {
+      this.#textThemeOfferMessage = this.#t('panel.text-theme.offer-failed', 'Could not update this offer.')
+    } finally {
+      this.#textThemeOfferBusy = false
+      await this.#refreshTextThemeOfferState()
+    }
+  }
+
   /** Pick the face prose reads in — the same shape as `#setFont`, because it
    *  is the same setting asked about the window's other surface. */
   #setRead(next: string): void {
@@ -1285,6 +1493,12 @@ export class DockedPanel implements GroupMember, LaneMember {
     restoreFocus(body, snap)
   }
 
+  /** A pool head can arrive while the settings menu is open. */
+  refreshTextThemeChoices(): void {
+    this.#refreshPopover()
+    if (this.#popover) void this.#refreshTextThemeOfferState()
+  }
+
   // ── group membership ───────────────────────────────────────────────
   /** Join a group (or leave, with `''`). Text that a group already stands for
    *  hands this window its attributes; text nobody has used yet is DEFINED from
@@ -1321,17 +1535,21 @@ export class DockedPanel implements GroupMember, LaneMember {
     // The faces travel with the size — a group is a settings SET, and a mate
     // that took the group's text size but kept its own typefaces would make
     // that a half-truth.
-    if ('font' in attrs || 'ligatures' in attrs || 'read' in attrs) {
+    if ('font' in attrs || 'ligatures' in attrs || 'read' in attrs || 'theme' in attrs) {
       const font = ('font' in attrs) ? attrs.font : this.#font
       const read = ('read' in attrs) ? attrs.read : this.#readFace
       const ligatures = ('ligatures' in attrs) ? attrs.ligatures === true : this.#ligatures
-      if (font !== this.#font || read !== this.#readFace || ligatures !== this.#ligatures) {
+      const theme = ('theme' in attrs) ? attrs.theme : this.#selectedTextTheme
+      if (font !== this.#font || read !== this.#readFace || ligatures !== this.#ligatures
+        || theme !== this.#selectedTextTheme) {
         this.#font = font
         this.#readFace = read
         this.#ligatures = ligatures
+        this.#selectedTextTheme = theme
         writeCodeFont(this.id, font)
         writeReadFont(this.id, read)
         writeLigatures(this.id, ligatures)
+        writeChosenTextTheme(this.id, theme)
         this.#applyFont()
         this.#refreshPopover()
       }

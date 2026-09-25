@@ -13,6 +13,44 @@ interface SiteDescriptor {
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
+/** The portal supplies its own origin when it opens a creation. The visitor
+ *  shows one return action; the home host reads the target's signed offering
+ *  pool and verifies the payload before recording it. */
+const offerHome = (pubkey: string, lineage: string): void => {
+  const raw = new URLSearchParams(location.search).get('home')
+  if (!raw) return
+  let home: URL
+  let native = false
+  try {
+    home = new URL(raw)
+    native = home.href === 'hypercomb://offering/'
+    const loopback = home.hostname === 'localhost' || home.hostname.endsWith('.localhost')
+    if ((!native && home.protocol !== 'https:' && !(loopback && home.protocol === 'http:'))
+      || home.pathname !== '/' || home.search || home.hash || home.username || home.password) return
+  } catch { return }
+  const handoff = native ? new URL(home) : new URL('/hosts', home)
+  handoff.searchParams.set('add', `${location.origin}/`)
+  handoff.searchParams.set('publisher', pubkey)
+  handoff.searchParams.set('lineage', lineage)
+  const source = new URLSearchParams(location.search).get('source')
+  if (source) handoff.searchParams.set('source', source)
+  const action = document.createElement('a')
+  action.href = handoff.href
+  action.textContent = native ? 'Review in my hive' : 'Turn on or off in my hive'
+  action.title = native ? 'Open the local hive to review this creation'
+    : `Return to ${home.host} to verify and switch this creation`
+  action.setAttribute('aria-label', native ? 'Review this creation in my local hive'
+    : `Turn this creation on or off at ${home.host}`)
+  Object.assign(action.style, {
+    position: 'fixed', right: '1rem', bottom: '1rem', zIndex: '2147483000',
+    padding: '.7rem 1rem', borderRadius: 'var(--hc-radius-card, 3px)',
+    color: 'var(--md-on-primary)', background: 'var(--md-primary)',
+    boxShadow: 'var(--md-elev-3)',
+    font: '600 14px system-ui, sans-serif', textDecoration: 'none',
+  })
+  document.body.append(action)
+}
+
 // ── the tab mark ───────────────────────────────────────────────────────────
 // index.visitor.html already carries the Hypercomb hexagon, so every
 // published door has a mark by default. A site that brings its OWN says so
@@ -152,6 +190,7 @@ window.addEventListener('hypercomb:runtime-ready', () => {
     if (!SIG_RE.test(pubkey) || !SIG_RE.test(head) || segments.length === 0 || hosts.length === 0) {
       throw new Error('site descriptor is incomplete')
     }
+    offerHome(pubkey, String(site.lineage ?? ''))
     if (site.title) document.title = site.title
     if (site.icon) applySiteIcon(String(site.icon))
     if (!(await waitForIoc('@diamondcoreprocessor.com/HiveVisitDrone'))) {

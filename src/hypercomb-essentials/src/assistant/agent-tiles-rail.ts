@@ -285,7 +285,7 @@ const RAIL_CSS = `
   border-bottom:1px solid rgba(${STEEL},0.18);}
 .hc-rail-hive .hc-rail-name{font-family:var(--hc-mono,monospace);font-size:0.78rem;
   font-weight:600;letter-spacing:0.14em;text-transform:uppercase;
-  color:color-mix(in srgb, rgba(${AMBER},0.92), rgb(var(--hc-panel-ink, 43, 30, 6)) var(--hc-deepen, 0%));}
+  color:color-mix(in srgb, rgba(${AMBER},0.92), rgb(var(--hc-panel-ink, 43, 30, 6)) calc(var(--hc-deepen, 0%) * 1.25));}
 .hc-rail-hive .hc-rail-main{padding-top:0.5rem;padding-bottom:0.5rem;}
 .hc-rail-hive .hc-rail-row:hover{background:rgba(${AMBER},0.08);}
 /* The hive carries NO current rule of its own. It used to — an amber ring at

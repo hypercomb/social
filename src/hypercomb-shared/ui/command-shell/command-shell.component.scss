@@ -782,6 +782,11 @@ $bp-phone-max: 599px;
   &:hover .indicator-x {
     opacity: 1;
   }
+
+  &:focus-visible {
+    outline: 2px solid var(--md-primary);
+    outline-offset: 2px;
+  }
 }
 
 .indicator-icon {
@@ -915,11 +920,16 @@ $bp-phone-max: 599px;
   text-align: left;
   cursor: pointer;
 
-  &:hover,
+  &:hover {
+    color: var(--hc-window-ink-loud);
+    background: var(--hc-window-tint);
+    text-decoration: underline;
+  }
   &:focus-visible {
     color: var(--hc-window-ink-loud);
-    text-decoration: underline;
-    outline: none;
+    background: var(--hc-window-tint);
+    outline: 2px solid var(--md-primary);
+    outline-offset: -2px;
   }
 }
 

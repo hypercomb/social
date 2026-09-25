@@ -6,8 +6,8 @@
 //
 //   • OFFERS are what you asked to see (`community:offer` from a plate on the
 //     community page; `community:withdraw` to stop). ONE document in the
-//     `community:offers` pool — participant state, so a pool, never
-//     localStorage.
+//     `community:offers` pool — a legacy peer-preview list. It does not
+//     activate a local hostname; host activation uses the route location bag.
 //   • A TILE SOURCE in the render registry, beside the swarm's: at your top
 //     level each offer is one `peer` tile; inside one, the publisher's
 //     children at that route. The renderer shades a peer tile it does not
@@ -16,18 +16,18 @@
 //   • The closure is LOCALIZED once per head (broker, layers only) so the
 //     walk reads bytes that are already content-addressed cache, and the
 //     hosts are noted per sig so images stream from them on demand.
-//   • The publisher's head is re-read from their signed index once per
-//     session — a stale offer catches up to what they have published since.
+//   • Discovery reads the domain's signed `host:offerings` location pool.
+//     Accepted heads stay pinned; a newer revision waits for a deliberate act.
 //
 // Sync lookups (`peerEntriesAt`, `isOffered`) answer from the last render's
 // resolution, exactly the trick show-cell's own caches play: the render
 // calls the source before any click can land on what it painted.
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, readHostOfferings, type HostOffering } from '@hypercomb/core'
+import { verifyEvent } from 'nostr-tools/pure'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
-import { fetchPublicationCards, type PublicationCard } from './publications-ledger.js'
 import {
-  childEntriesOf, entryFor, layerAtRoute, offerFromCard, offersFromLegacyFollows, readThrough,
+  childEntriesOf, entryFor, layerAtRoute, offerFromHostOffering, offersFromLegacyFollows, readThrough,
   type StaticOffer, type StaticPeerEntry, type StaticPeersIo,
 } from './static-peers.js'
 import { STATIC_FOLLOWS_KEY } from './hive-link.js'
@@ -85,8 +85,9 @@ export interface HostCreationRow {
 export interface HostCreationsRender {
   readonly zone: string
   readonly rows: readonly HostCreationRow[]
-  /** Did the domain's ledger answer at all? "Publishes nothing" and "did not
-   *  answer" are different facts, and only the second is about reachability. */
+  /** True when the signed offering pool returned at least one verified row.
+   *  Empty and unreachable both read as unavailable until the reader reports
+   *  a separate reachability result. */
   readonly answered: boolean
 }
 
@@ -123,7 +124,7 @@ export class StaticPeersDrone extends Drone {
    *  document, so a withdrawn legacy offer does not come back next boot). */
   #legacyRead = false
   #unregister: (() => void) | null = null
-  /** Heads re-read from the index this session, and closures localized. */
+  /** Legacy headless follows resolved once, and accepted closures localized. */
   #refreshed = new Set<string>()
   #localized = new Set<string>()
   /** Last resolution per location key — what the sync lookups answer from. */
@@ -132,7 +133,7 @@ export class StaticPeersDrone extends Drone {
    *  divergence scan even when what stands there is unchanged. */
   #lastKey: string | null = null
 
-  /** zone → what its ledger last answered. Absent = never asked. Kept for
+  /** zone → what its offering pool last resolved. Absent = never asked. Kept for
    *  the session: a domain's list of creations is not what changes while you
    *  are reading it, and re-asking on every look would spend a request to
    *  redraw the same rows. */
@@ -259,17 +260,17 @@ export class StaticPeersDrone extends Drone {
   }
 
   /** A plate becomes a row: the switch's state, and the offer it sends. */
-  #rowsFrom = (cards: readonly PublicationCard[]): HostCreationRow[] =>
+  #rowsFrom = (cards: readonly HostOffering[], zone: string): HostCreationRow[] =>
     cards.map(card => {
-      const offer = offerFromCard(card)
-      const name = offer?.name ?? (card.lineage.split('/').filter(Boolean).pop() ?? card.title)
+      const offer = offerFromHostOffering(card, zone)
+      const name = offer.name
       return {
         name,
         title: card.title || name,
         lineage: card.lineage,
-        host: card.host,
-        url: card.url,
-        publisherLabel: card.publisherLabel,
+        host: new URL(card.route).host,
+        url: card.route,
+        publisherLabel: card.pubkey.slice(0, 12),
         offered: this.#offers.has(name),
         offer,
       }
@@ -290,15 +291,15 @@ export class StaticPeersDrone extends Drone {
     if (!zone) return
     if (this.#creations.has(zone)) { this.#renderCreations(zone); return }
 
-    // The domain's OWN ledger, verbatim: no same-origin preference and no
-    // canonical fallback, so a domain that does not answer reads as itself
-    // and never as somebody else's list wearing its name.
-    let cards: Awaited<ReturnType<typeof fetchPublicationCards>> = null
-    try { cards = await fetchPublicationCards({}, `https://${zone}`) } catch { cards = null }
+    // The domain's public meaning pool names stable hosted locations. The
+    // shared reader verifies member bytes, latest markers and signed indexes.
+    // This is discovery only; local hosting needs a visible target route.
+    let cards: HostOffering[] = []
+    try { cards = await readHostOfferings(zone, index => verifyEvent(index as never)) } catch { cards = [] }
     this.#creations.set(zone, {
       zone,
-      rows: cards ? this.#rowsFrom(cards) : [],
-      answered: cards !== null,
+      rows: this.#rowsFrom(cards, zone),
+      answered: cards.length > 0,
     })
     this.#renderCreations(zone)
   }
@@ -431,15 +432,15 @@ export class StaticPeersDrone extends Drone {
     return { ...entry, name: offer.name }
   }
 
-  /** Head current, closure local — once per session per offer. */
+  /** The accepted head remains pinned. A newer signed index is a revision to
+   *  inspect and choose, never an implicit upgrade during rendering. */
   #ready = async (offer: StaticOffer): Promise<void> => {
-    if (!this.#refreshed.has(offer.name)) {
+    if (!SIG_RE.test(offer.head) && !this.#refreshed.has(offer.name)) {
       this.#refreshed.add(offer.name)
       const manifest = await fetchHiveManifestFromAny(offer.hosts, offer.pubkey).catch(() => null)
       const head = String(manifest?.roots[offer.lineageKey] ?? '').toLowerCase()
-      if (SIG_RE.test(head) && head !== offer.head) {
+      if (SIG_RE.test(head)) {
         this.#offers.set(offer.name, { ...offer, head })
-        void this.#save()
         offer = this.#offers.get(offer.name)!
       }
     }

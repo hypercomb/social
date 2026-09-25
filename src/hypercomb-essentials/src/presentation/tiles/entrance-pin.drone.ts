@@ -228,8 +228,8 @@ export class EntrancePinDrone extends Drone {
       'width:1.9rem', 'height:1.9rem', 'margin-left:-0.95rem', 'margin-top:-0.95rem',
       'display:flex', 'align-items:center', 'justify-content:center',
       'border-radius:var(--hc-radius-floating, 4px)',
-      'background:rgba(12,28,46,.85)', 'border:1px solid rgba(126,182,214,.55)',
-      'color:#eaf5fb', "font-family:'Material Symbols Outlined'", 'font-size:1.3rem', 'line-height:1',
+      'background:rgba(var(--hc-panel-pane),.94)', 'border:1px solid var(--hc-window-line-firm)',
+      'color:var(--md-primary)', "font-family:'Material Symbols Outlined'", 'font-size:1.3rem', 'line-height:1',
     ].join(';')
     ghost.textContent = glyph
     document.body.appendChild(ghost)

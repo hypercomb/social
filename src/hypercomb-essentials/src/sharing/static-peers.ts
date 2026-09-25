@@ -22,7 +22,7 @@
 // touches the store, the broker or the network comes in through `io`, so the
 // walk is testable with maps.
 
-import { isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
+import { isMetaEnvelope, metaPayloadOf, type HostOffering } from '@hypercomb/core'
 import type { PublicationCard } from './publications-ledger.js'
 import { recoverableTileImageSig } from '../editor/tile-properties.js'
 
@@ -77,6 +77,21 @@ export const offerFromCard = (card: PublicationCard): StaticOffer | null => {
   const hosts = card.hosts.map(d => d.host.toLowerCase()).filter(Boolean)
   if (hosts.length === 0) return null
   return { name, pubkey, hosts, lineageKey: card.lineage, segments, head }
+}
+
+/** Adapt the shared signed-pool discovery result to the existing shaded peer
+ *  preview. This does not install or serve the creation on a local route. */
+export const offerFromHostOffering = (offering: HostOffering, sourceHost: string): StaticOffer => {
+  const segments = offering.lineage.split('/').map(s => s.trim()).filter(Boolean)
+  const routeHost = new URL(offering.route).host.toLowerCase()
+  return {
+    name: segments.at(-1) ?? routeHost.split('.')[0] ?? routeHost,
+    pubkey: offering.pubkey,
+    hosts: [...new Set([routeHost, sourceHost.toLowerCase()].filter(Boolean))],
+    lineageKey: offering.lineage,
+    segments,
+    head: offering.head,
+  }
 }
 
 /** One of the publisher's tiles, as the wand and the renderer want it: the

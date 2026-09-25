@@ -39,8 +39,8 @@ const SURFACE = 'hc-offers'
 const STYLE_ID = 'hc-offers-style'
 const OWNER = '@diamondcoreprocessor.com/OffersView'
 
-const STEEL = '126, 182, 214'
 const ACCENT = '201, 162, 39'
+const ACCENT_DEEP = '107, 86, 21'
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
@@ -317,77 +317,87 @@ function ensureStyles(): void {
        with the SHARED values, since a module cannot @use the stylesheet. */
     ${SURFACE} { display: contents; }
     .hc-offers {
+      --acc: ${ACCENT};
+      --hc-window-accent: rgb(var(--acc));
+      --hc-window-wash: rgba(var(--acc), 0.10);
+      --hc-window-edge: rgba(var(--acc), 0.28);
+      --hc-window-edge-firm: rgba(var(--acc), 0.62);
       position: fixed;
       top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
       right: var(--hc-controls-right, 0px); bottom: 0;
       width: 360px; min-width: 260px; max-width: calc(100vw - 1.5rem);
       box-sizing: border-box; display: flex; flex-direction: column;
       z-index: 100002;
-      background: rgba(13, 15, 21, 0.975);
+      background: rgba(var(--hc-panel-pane), 0.975);
       backdrop-filter: blur(14px) saturate(1.04);
       -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border: 0; border-left: 1px solid rgba(${STEEL}, 0.38); border-radius: 0;
-      box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46);
-      color: #eef2f5;
+      border: 0; border-left: 1px solid var(--hc-window-edge-firm); border-radius: 0;
+      box-shadow: -14px 0 44px rgba(var(--hc-panel-shadow), 0.46);
+      color: var(--hc-panel-text);
       font-family: var(--hc-mono, system-ui);
       font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
       line-height: 1.45; overflow: hidden; outline: none;
     }
+    :root[data-hc-theme-mood="light"] .hc-offers { --acc: ${ACCENT_DEEP}; }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme]) .hc-offers { --acc: ${ACCENT_DEEP}; }
+    }
     .hc-offers-head {
       flex: 0 0 auto; box-sizing: border-box; display: flex; align-items: center;
       gap: 0.5rem; height: 2.875rem; min-height: 2.875rem; padding: 0 0.75rem;
-      background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.006));
-      border-bottom: 1px solid rgba(${STEEL}, 0.25);
+      background: linear-gradient(180deg, rgba(var(--hc-panel-sheen), 0.018), rgba(var(--hc-panel-sheen), 0.006));
+      border-bottom: 1px solid var(--hc-window-edge);
     }
     .hc-offers-title {
       flex: 1; font-weight: 600; font-size: 0.9em; letter-spacing: 0.06em;
-      text-transform: uppercase; color: rgba(${ACCENT}, 0.95);
+      text-transform: uppercase; color: var(--hc-window-accent);
     }
     .hc-offers-close {
       margin-left: auto; display: inline-grid; place-items: center;
       width: 1.75rem; height: 1.75rem; padding: 0;
       background: none; border: 0; border-radius: var(--hc-radius-control, 2px);
-      color: rgba(238, 244, 248, 0.62); font: inherit; font-size: 1.125rem;
+      color: var(--hc-window-ink-quiet); font: inherit; font-size: 1.125rem;
       line-height: 1; cursor: pointer;
     }
-    .hc-offers-close:hover { color: #fff; background-color: rgba(255,255,255,0.075); }
+    .hc-offers-close:hover { color: var(--hc-window-ink-loud); background-color: var(--hc-window-tint-strong); }
+    .hc-offers-close:focus-visible { outline: 1px solid var(--hc-window-accent); outline-offset: 1px; }
     .hc-offers-body {
       flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
       padding: 0.7rem 0.75rem 1.2rem;
     }
     .hc-offers-body > p { margin: 0 0 0.5rem; line-height: 1.55; }
-    .hc-offers-quiet { color: rgba(238, 244, 248, 0.5); font-size: 0.85em; }
-    .hc-offers-held { font-size: 0.88em; color: rgba(238, 244, 248, 0.8); }
+    .hc-offers-quiet { color: var(--hc-window-ink-quiet); font-size: 0.85em; }
+    .hc-offers-held { font-size: 0.88em; color: var(--hc-window-ink-plain); }
     .hc-offers-group {
       margin: 0.6rem 0; padding: 0.5rem 0.55rem;
-      border: 1px solid rgba(${STEEL}, 0.2); border-radius: var(--hc-radius-card, 3px);
-      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--hc-window-line); border-radius: var(--hc-radius-card, 3px);
+      background: var(--hc-window-tint);
     }
     .hc-offers-origin {
       margin: 0; font-size: 0.95em; font-weight: 600; letter-spacing: 0.03em;
-      color: rgba(${ACCENT}, 0.95); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--hc-window-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .hc-offers-meaning { margin: 0.1rem 0 0.35rem; font-size: 0.82em; color: rgba(${STEEL}, 0.9); }
+    .hc-offers-meaning { margin: 0.1rem 0 0.35rem; font-size: 0.82em; color: var(--hc-window-ink-quiet); }
     .hc-offers-list { margin: 0 0 0.5rem; padding: 0; list-style: none; max-height: 30vh; overflow-y: auto; font-size: 0.88em; }
     .hc-offers-row { padding: 0.05rem 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hc-offers-acts { display: flex; gap: 0.35rem; }
     .hc-offers-do {
       flex: 1 1 0; padding: 0.35rem 0.5rem;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
+      background: var(--hc-window-tint);
+      border: 1px solid var(--hc-window-line-firm); border-radius: var(--hc-radius-control, 2px);
       color: inherit; font: inherit; font-size: 0.85em; letter-spacing: 0.05em;
       cursor: pointer;
     }
-    .hc-offers-do:hover:not(:disabled) { border-color: rgba(${ACCENT}, 0.8); }
+    .hc-offers-do:hover:not(:disabled) { border-color: var(--hc-window-accent); background: var(--hc-window-wash); }
     .hc-offers-do:disabled { opacity: 0.45; cursor: default; }
-    .hc-offers-do.is-place { border-color: rgba(${ACCENT}, 0.6); }
+    .hc-offers-do.is-place { border-color: var(--hc-window-edge-firm); }
     .hc-offers-said {
       margin-top: 0.6rem; padding: 0.45rem 0.55rem; font-size: 0.88em;
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: 2px;
+      border: 1px solid var(--hc-window-line-firm); border-radius: var(--hc-radius-card, 3px);
     }
-    .hc-offers-said.is-ok { border-color: rgba(${ACCENT}, 0.7); }
-    .hc-offers-said.is-quiet { color: rgba(238, 244, 248, 0.62); }
-    .hc-offers-said.is-bad { border-color: rgba(214, 126, 126, 0.75); }
+    .hc-offers-said.is-ok { border-color: var(--hc-window-edge-firm); }
+    .hc-offers-said.is-quiet { color: var(--hc-window-ink-quiet); }
+    .hc-offers-said.is-bad { border-color: var(--hc-status-alert); }
   `
   document.head.appendChild(style)
 }

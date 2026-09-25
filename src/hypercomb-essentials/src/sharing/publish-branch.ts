@@ -41,6 +41,7 @@ import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-publ
 import { knownRoots, listPublishRecords, writePublishRecord, type PublishRecord } from './publish-heads.js'
 import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.js'
 import { readGlobalOnKinds } from './behavior-enablement.js'
+import { captureLanding, isOnScreen } from './landing-capture.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
@@ -259,6 +260,26 @@ export async function publishBranch(
     catch { /* the stamp is a courtesy to the reader, never a gate */ }
   }
 
+  // 2b. THE LANDING PICTURE. The branch is on screen right now — take its
+  //     picture before anything moves, so the door can paint the site inside
+  //     its cover while the engine loads (landing-capture.ts). Its bytes go
+  //     public with the closure below; a picture that cannot be taken (a
+  //     takeover view, another location on screen) leaves the index's entry
+  //     as it was. Best-effort: never a gate on the publish.
+  const landing: Record<string, string> = {}
+  if (isOnScreen(segs)) {
+    try {
+      const taken = await captureLanding()
+      if (taken) {
+        const landingSig = await store.putResource(taken.blob)
+        if (SIG_RE.test(landingSig)) {
+          await hostSync.markPublic(landingSig, 'resource')
+          landing[lineageKey(segs)] = `${landingSig}/${taken.name}`
+        }
+      }
+    } catch { /* the cover stays plain */ }
+  }
+
   // 3. A merkle-coherent root from LIVE heads, else fail loud — never
   //    publish a lossy seal, and never auto-heal on the way (see step 6).
   report({ phase: 'sealing' })
@@ -329,7 +350,8 @@ export async function publishBranch(
   if (marked.length > 0) doors[key] = marked
 
   const roots = { ...existing, [key]: sealed }
-  const put = await putHiveManifest(indexHost, roots, doors)
+  const put = await putHiveManifest(indexHost, roots, doors,
+    read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined, landing)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason, sealed }
 
   // 7. The stable bearer link: segments + pubkey + hosts (+ the sealed head
@@ -457,7 +479,8 @@ export async function unpublishBranch(
   const doors = { ...(read.manifest.doors ?? {}) }
   delete doors[key]
 
-  const put = await putHiveManifest(indexHost, roots, doors)
+  const put = await putHiveManifest(indexHost, roots, doors,
+    read.manifest.createdAt, read.manifest.signedContent)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
 
   // Local mark follows the index, so the two cannot disagree afterwards.
@@ -496,7 +519,8 @@ export async function setBranchDoors(
   if (!(key in read.manifest.roots)) return { ok: false, failure: 'no-branch', reason: 'not published yet' }
 
   const doors = { ...(read.manifest.doors ?? {}), [key]: wanted }
-  const put = await putHiveManifest(indexHost, read.manifest.roots, doors)
+  const put = await putHiveManifest(indexHost, read.manifest.roots, doors,
+    read.manifest.createdAt, read.manifest.signedContent)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
   return { ok: true }
 }
