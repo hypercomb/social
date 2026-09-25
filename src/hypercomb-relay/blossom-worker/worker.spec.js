@@ -149,6 +149,16 @@ test('site.json carries the arrival plan the publisher signed beside the root', 
   assert.equal('plan' in plain, false)
 })
 
+test('site.json carries the publisher\'s participant-only features, signed under their key', async () => {
+  const quiet = 'e'.repeat(64)
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head, 'pool:features:participant': quiet }))
+  const descriptor = await (await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)).json()
+  assert.equal(descriptor.quiet, quiet)
+  const { env: none } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head }))
+  const plain = await (await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), none)).json()
+  assert.equal('quiet' in plain, false)
+})
+
 test('publications.json exposes the verified Core host registry', async () => {
   const { env } = await fixture()
   const response = await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)
