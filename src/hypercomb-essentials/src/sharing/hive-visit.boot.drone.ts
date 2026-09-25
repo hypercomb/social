@@ -54,6 +54,15 @@ const NAV_KEY = '@hypercomb.social/Navigation'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
+/** A service once it registers, or undefined after `ms`. */
+const serviceOf = <T>(key: string, ms = 30_000): Promise<T | undefined> => new Promise(resolve => {
+  const ioc = (window as { ioc?: { get?: <V>(k: string) => V | undefined; whenReady?: <V>(k: string, cb: (v: V) => void) => void } }).ioc
+  const now = ioc?.get?.<T>(key)
+  if (now) { resolve(now); return }
+  const timer = setTimeout(() => resolve(undefined), ms)
+  ioc?.whenReady?.<T>(key, value => { clearTimeout(timer); resolve(value) })
+})
+
 /** The route a door carried, read off the SAME payload the bundle came in —
  *  `at` is never part of the bundle (it would change its signature and mean
  *  the same link landed everyone in the same place), so it is validated here
@@ -173,9 +182,12 @@ export class HiveVisitDrone extends Drone {
 
   #previewForVisitor = async (bundle: HiveLinkBundle): Promise<void> => {
     const i18n = this.#i18n()
-    const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
-    const broker = this.#ioc()?.get<BrokerLike>(BROKER_KEY)
-    const nav = this.#ioc()?.get<NavLike>(NAV_KEY)
+    // A boot bee arrives before the bees it drives: take each service as it
+    // registers, never assume it is already here (a silent return here left
+    // the cover up for good).
+    const [history, broker, nav] = await Promise.all([
+      serviceOf<HistoryLike>(HISTORY_KEY), serviceOf<BrokerLike>(BROKER_KEY), serviceOf<NavLike>(NAV_KEY),
+    ])
     if (!history?.seedPreviewHead || !broker?.adopt || !nav) {
       console.warn('[hive-visit] cannot open: missing services', {
         history: !!history?.seedPreviewHead, broker: !!broker?.adopt, nav: !!nav,
