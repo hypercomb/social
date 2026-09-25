@@ -148,7 +148,11 @@ function packageLayerReferences(bytes) {
   const layers = signatures(record.cells, true)
   const bees = signatures(record.bees)
   const dependencies = signatures(record.dependencies)
-  return layers && bees && dependencies ? { layers, bees, dependencies } : null
+  // Optional: fonts and pictures a layer renders with. Layers written before
+  // it carry none.
+  if (record.resources !== undefined && !Array.isArray(record.resources)) return null
+  const resources = signatures(record.resources ?? [])
+  return layers && bees && dependencies && resources ? { layers, bees, dependencies, resources } : null
 }
 
 /** Resolve one signature closure through an injected atom store. */
@@ -200,7 +204,8 @@ export async function resolveSignatureClosure(root, io, options = {}) {
 }
 
 /** Resolve a package by its signed structure: child layers through `cells`,
- * then the bees and dependencies those layers declare as exact leaf atoms.
+ * then the bees, dependencies and resources those layers declare as exact
+ * leaf atoms.
  * This is the Node twin of runtime's `deriveInventory`; unlike generic
  * replication it never mines unrelated signature-looking text. */
 export async function resolvePackageClosure(root, io, options = {}) {
@@ -218,11 +223,12 @@ export async function resolvePackageClosure(root, io, options = {}) {
       if (leafSignatures.has(child)) invalidLayers.add(signature)
       layerSignatures.add(child)
     }
-    for (const leaf of [...references.bees, ...references.dependencies]) {
+    const leaves = [...references.bees, ...references.dependencies, ...references.resources]
+    for (const leaf of leaves) {
       if (layerSignatures.has(leaf)) invalidLayers.add(signature)
       leafSignatures.add(leaf)
     }
-    return [...new Set([...references.layers, ...references.bees, ...references.dependencies])]
+    return [...new Set([...references.layers, ...leaves])]
   }
 
   const result = await resolveSignatureClosure(root, io, { ...options, children })

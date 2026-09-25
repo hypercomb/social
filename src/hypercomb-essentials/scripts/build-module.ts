@@ -25,6 +25,7 @@ import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
 import { build, type Plugin } from 'esbuild'
+import { PACKAGE_FONTS } from '../src/presentation/fonts/package-fonts.js'
 
 // -------------------------------------------------
 // esm globals
@@ -778,6 +779,31 @@ const newBeeDepCache: Record<string, BeeDepCacheEntry> = {}
 let layerCacheHits = 0
 let layerCacheMisses = 0
 
+/** THE PACKAGE'S OWN FACES (presentation/fonts/package-fonts.ts): read from
+ *  the shells' canonical font files, signed here, and named by the root layer
+ *  as `resources` — each entry the file's signature plus the descriptors a
+ *  page needs to declare it — so an install holds them like any other atom
+ *  and fonts.boot.drone.ts reads them from signed data, never from source.
+ *  Set by main() before the layers. */
+const PACKAGE_FONTS_DIR = resolve(PROJECT_ROOT, '..', 'hypercomb-shim', 'public', 'fonts')
+type RootResource = { sig: string; kind: 'font'; family: string; style: string; weight: string; display: string; unicodeRange?: string }
+let rootResources: RootResource[] = []
+const readPackageFonts = (): { bytes: Map<string, Uint8Array>; resources: RootResource[] } => {
+  const bytes = new Map<string, Uint8Array>()
+  const resources: RootResource[] = []
+  for (const font of PACKAGE_FONTS) {
+    const file = new Uint8Array(readFileSync(join(PACKAGE_FONTS_DIR, font.file)))
+    const sig = createHash('sha256').update(file).digest('hex')
+    bytes.set(sig, file)
+    resources.push({
+      sig, kind: 'font', family: font.family, style: font.style, weight: font.weight, display: font.display,
+      ...(font.unicodeRange ? { unicodeRange: font.unicodeRange } : {}),
+    })
+  }
+  resources.sort((a, b) => a.sig.localeCompare(b.sig))
+  return { bytes, resources }
+}
+
 const buildLayersFromTree = async (
   node: DirNode,
   resourcesByDir: Map<string, { bees: string[]; deps: string[] }>,
@@ -803,6 +829,7 @@ const buildLayersFromTree = async (
   const depSigs = node.rel ? [] : rootDependencies
   const criticalBeeSigs = node.rel ? [] : uniqSorted([...rootCriticalBees])
   const bootBeeSigs = node.rel ? [] : uniqSorted([...rootBootBees])
+  const resources = node.rel ? [] : rootResources
   const docsKey = docsByDir.has(node.rel) ? JSON.stringify(docsByDir.get(node.rel)) : ''
   let folderDocSig = ''
   if (node.rel) {
@@ -820,7 +847,7 @@ const buildLayersFromTree = async (
   // cache happily returns the OLD JSON under the OLD sig.
   const shapeDescriptor = node.rel
     ? 'cells:name:bees:dependencies'
-    : 'cells:name:bees:dependencies:criticalBees:bootBees'
+    : 'cells:name:bees:dependencies:criticalBees:bootBees:resources'
 
   const layerInputParts = [
     shapeDescriptor,
@@ -830,6 +857,7 @@ const buildLayersFromTree = async (
     layers.join(':'),
     criticalBeeSigs.join(':'),
     bootBeeSigs.join(':'),
+    JSON.stringify(resources),
     docsKey,
     folderDocSig,
   ]
@@ -872,6 +900,10 @@ const buildLayersFromTree = async (
   // service the runtime or the shell reads before any other bee loads. Named
   // only when there are some, so a package without them is byte-identical.
   if (!node.rel && bootBeeSigs.length) layer.bootBees = bootBeeSigs
+  // RESOURCES: the fonts (and later pictures) the package renders with, as
+  // exact leaf atoms, each `{ sig, kind, … }`. Optional, so an older
+  // installer ignores them and a package without any is byte-identical.
+  if (!node.rel && resources.length) layer.resources = resources
   if (docs) layer.docs = docs
 
   const { sig, json } = await signJson(layer)
@@ -1478,6 +1510,8 @@ const main = async (): Promise<void> => {
     docsByDir.set(dir, dirDocs)
   }
 
+  const { bytes: packageFontBytes, resources: packageFontResources } = readPackageFonts()
+  rootResources = packageFontResources
   const tree = readDirTree(SRC_ROOT, '')
   const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, criticalBees, uniqSorted(bootBees), docsByDir, cache?.layerCache)
   // The root node (`node.rel === ''`) always builds a layer — the null
@@ -1501,6 +1535,7 @@ const main = async (): Promise<void> => {
   for (const [sig, json] of layers) writeSigFile(DIST_ROOT, sig, json)
   for (const [sig, bytes] of dependencyBytes) writeSigFile(DIST_ROOT, sig, bytes)
   for (const [sig, bytes] of resourceBytes) writeSigFile(DIST_ROOT, sig, bytes)
+  for (const [sig, bytes] of packageFontBytes) writeSigFile(DIST_ROOT, sig, bytes)
 
   // Sigbag emission. A bag is a directory named by its content sig; entries
   // are zero-padded index files (0000, 0001, …) whose contents carry the
@@ -1604,6 +1639,7 @@ const main = async (): Promise<void> => {
     const onDiskLayers = new Set(layers.keys())
     const onDiskBees = new Set(resourceBytes.keys())
     const onDiskDeps = new Set(dependencyBytes.keys())
+    const onDiskResources = new Set(packageFontBytes.keys())
     const inManifestLayers = new Set(packageEntry.layers)
     const inManifestBees = new Set(packageEntry.bees)
     const inManifestDeps = new Set(packageEntry.dependencies)
@@ -1617,7 +1653,7 @@ const main = async (): Promise<void> => {
     if (!inManifestLayers.has(rootLayerSig)) errors.push(`root layer ${rootLayerSig.slice(0, 12)} missing from manifest.layers`)
 
     for (const [sig, json] of layers) {
-      let parsed: { name?: string; cells?: unknown[]; bees?: unknown[]; dependencies?: unknown[]; criticalBees?: unknown[]; bootBees?: unknown[] }
+      let parsed: { name?: string; cells?: unknown[]; bees?: unknown[]; dependencies?: unknown[]; resources?: unknown[]; criticalBees?: unknown[]; bootBees?: unknown[] }
       try { parsed = JSON.parse(json) } catch { errors.push(`layer ${sig.slice(0, 12)} is not valid JSON`); continue }
       const tag = `layer "${parsed.name ?? '?'}" (${sig.slice(0, 12)})`
       for (const child of (Array.isArray(parsed.cells) ? parsed.cells : [])) {
@@ -1634,6 +1670,11 @@ const main = async (): Promise<void> => {
         const d = bare(depRef)
         if (!onDiskDeps.has(d)) errors.push(`${tag} → dependency ${d.slice(0, 12)} not on disk`)
         else if (!inManifestDeps.has(d)) errors.push(`${tag} → dependency ${d.slice(0, 12)} missing from manifest.dependencies`)
+      }
+      for (const resourceRef of (Array.isArray(parsed.resources) ? parsed.resources : [])
+        .map(entry => bare(entry && typeof entry === 'object' ? (entry as { sig?: unknown }).sig : entry))) {
+        if (!isSig(resourceRef)) errors.push(`${tag} has a resource with an invalid signature: ${resourceRef}`)
+        else if (!onDiskResources.has(resourceRef)) errors.push(`${tag} → resource ${resourceRef.slice(0, 12)} not on disk`)
       }
       if (sig === rootLayerSig) {
         const emittedCritical = Array.isArray(parsed.criticalBees) ? parsed.criticalBees.map(bare) : []

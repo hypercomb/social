@@ -72,10 +72,30 @@ test('package replication walks declared structure and ignores unrelated signatu
   assert.equal(destination.has(missingButUnrelated), false)
 })
 
+test('package replication carries the resources a layer declares, and older layers without them', async () => {
+  const font = Buffer.from([0x77, 0x4f, 0x46, 0x32, 0, 1, 2, 3])
+  const fontSig = sig(font)
+  const older = Buffer.from(JSON.stringify({ name: 'older', cells: [], bees: [], dependencies: [] }))
+  const olderSig = sig(older)
+  const root = Buffer.from(JSON.stringify({ name: 'root', cells: [olderSig], bees: [], dependencies: [], resources: [fontSig] }))
+  const rootSig = sig(root)
+  const source = new Map([[rootSig, root], [olderSig, older], [fontSig, font]])
+  const destination = new Map()
+  const result = await resolvePackageClosure(rootSig, {
+    fetch: async signature => source.get(signature) ?? null,
+    read: async signature => destination.get(signature) ?? null,
+    write: async (signature, bytes) => { destination.set(signature, bytes) },
+  })
+  assert.deepEqual(new Set(result.held), new Set([rootSig, olderSig, fontSig]))
+  assert.deepEqual(result.refused, [])
+  assert.deepEqual(destination.get(fontSig), font)
+})
+
 test('package replication refuses an opaque or malformed root as a package', async () => {
   for (const bytes of [
     Buffer.from('not a layer'),
     Buffer.from(JSON.stringify({ name: 'root', cells: [], bees: [] })),
+    Buffer.from(JSON.stringify({ name: 'root', cells: [], bees: [], dependencies: [], resources: 'not a list' })),
   ]) {
     const root = sig(bytes)
     const result = await resolvePackageClosure(root, {

@@ -33,7 +33,7 @@ const world = (): World => {
 
 /** A layer record in the shape the build emits: child layers in `cells`,
  *  bees and dependencies carrying the writer's `.js` suffix. */
-const layer = (record: { cells?: string[]; bees?: string[]; dependencies?: string[]; criticalBees?: string[] }): Uint8Array<ArrayBuffer> =>
+const layer = (record: { cells?: string[]; bees?: string[]; dependencies?: string[]; resources?: string[]; criticalBees?: string[] }): Uint8Array<ArrayBuffer> =>
   encode(JSON.stringify({ name: 'layer', cells: [], bees: [], dependencies: [], ...record }))
 
 /** Publish an atom at the origin under its real signature. */
@@ -60,6 +60,21 @@ describe('inventory derivation', () => {
     expect(new Set(inventory.layers)).toEqual(new Set([root, child]))
     expect(inventory.bees).toEqual([beeA, beeB].sort())
     expect(inventory.dependencies).toEqual([dep])
+  })
+
+  it('reads the resources a layer declares as leaves, and none from a layer that predates them', async () => {
+    const w = world()
+    const font = await publish(w, new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1, 2, 3]) as Uint8Array<ArrayBuffer>)
+    const older = await publish(w, layer({}))
+    const root = await publish(w, layer({ cells: [older], resources: [font] }))
+
+    const { inventory, result } = await deriveInventory(root, w.io)
+
+    expect(isComplete(result)).toBe(true)
+    expect(inventory.resources).toEqual([font])
+    // A leaf, like a bee: the layer walk does not fetch it.
+    expect(inventory.layers).not.toContain(font)
+    expect(w.heap.has(font)).toBe(false)
   })
 
   it('cannot be widened by an atom the tree does not name', async () => {

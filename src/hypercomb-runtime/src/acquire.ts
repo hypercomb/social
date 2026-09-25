@@ -341,12 +341,16 @@ const merge = (root: string, parts: ReplicationResult[]): ReplicationResult =>
     limited: acc.limited || r.limited,
   }), { root, total: 0, present: 0, fetched: 0, held: [], holes: [], refused: [], limited: false })
 
-/** The three sets an install resolves — layers, bees, dependencies. Derived
- *  from the sealed root every time; never taken from what a host asserted. */
+/** The sets an install resolves — layers, bees, dependencies, and the
+ *  resources (fonts, pictures) a layer declares it renders with. Derived from
+ *  the sealed root every time; never taken from what a host asserted.
+ *  `resources` is optional: layers written before it carry none, and an
+ *  installer that predates it simply leaves them to be fetched on first use. */
 export type PackageInventory = {
   layers: string[]
   bees: string[]
   dependencies: string[]
+  resources?: string[]
 }
 
 /** Records name atoms with the suffix the WRITER used (`<sig>.js` inside a
@@ -356,9 +360,9 @@ const bare = (value: unknown): string =>
   String(value ?? '').trim().toLowerCase().replace(/\.(?:js|json)$/, '')
 
 /** A layer names its child layers in `cells` — that, and only that, is the
- *  frontier of the layer walk. The `bees` and `dependencies` a layer declares
- *  are INVENTORY, not frontier: they are leaves here and resolve into their
- *  own pools afterwards. A record that will not parse is a leaf too. */
+ *  frontier of the layer walk. The `bees`, `dependencies` and `resources` a
+ *  layer declares are INVENTORY, not frontier: they are leaves here and
+ *  resolve afterwards. A record that will not parse is a leaf too. */
 const childLayers = (bytes: Uint8Array<ArrayBuffer>): string[] => {
   try {
     const record = JSON.parse(new TextDecoder().decode(bytes)) as { cells?: unknown[] }
@@ -391,11 +395,12 @@ export const deriveInventory = async (
   const result = await resolveSignatureClosure(rootSig, io, { children: childLayers, trusted: options.trusted === true })
   const bees = new Set<string>()
   const dependencies = new Set<string>()
+  const resources = new Set<string>()
 
   for (const sig of result.held) {
     const bytes = await io.read(sig)
     if (!bytes) continue
-    let record: { bees?: unknown[]; dependencies?: unknown[] }
+    let record: { bees?: unknown[]; dependencies?: unknown[]; resources?: unknown[] }
     try { record = JSON.parse(new TextDecoder().decode(bytes)) as typeof record } catch { continue }
     for (const bee of record?.bees ?? []) {
       const value = bare(typeof bee === 'string' ? bee : (bee as { sig?: unknown })?.sig)
@@ -405,6 +410,10 @@ export const deriveInventory = async (
       const value = bare(typeof dep === 'string' ? dep : (dep as { sig?: unknown })?.sig)
       if (SIG_RE.test(value)) dependencies.add(value)
     }
+    for (const resource of Array.isArray(record?.resources) ? record.resources : []) {
+      const value = bare(typeof resource === 'string' ? resource : (resource as { sig?: unknown })?.sig)
+      if (SIG_RE.test(value)) resources.add(value)
+    }
   }
 
   return {
@@ -412,6 +421,7 @@ export const deriveInventory = async (
       layers: [...result.held],
       bees: [...bees].sort(),
       dependencies: [...dependencies].sort(),
+      resources: [...resources].sort(),
     },
     result,
   }
@@ -661,6 +671,13 @@ export const installPackage = async (
       read: readFrom([store.bees], sig => [`${sig}.js`, sig]),
       fetch: modules.fetch,
       write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
+    } satisfies ReplicationIo, opts.onHeld)),
+    // Resources land in the flat root beside the layers, where the Store
+    // (getResource) and the service worker (/@resource/<sig>) both read them.
+    resolveInventory(pkg.packageSig, inventory.resources ?? [], telling({
+      read: readFrom([store.hypercombRoot], sig => [sig]),
+      fetch: fetchFrom,
+      write: writeTo(store.hypercombRoot, sig => sig, sig => `/@resource/${sig}`, 'application/octet-stream'),
     } satisfies ReplicationIo, opts.onHeld)),
   ])
 

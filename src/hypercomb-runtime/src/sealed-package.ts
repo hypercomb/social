@@ -7,6 +7,7 @@ export type SealedInstallPackage = {
   layers: string[]
   bees: string[]
   dependencies: string[]
+  resources?: string[]
   beeDeps?: Record<string, string[]>
   label?: string
   at?: string
@@ -48,6 +49,7 @@ export const validateSealedPackage = (
   checkSet('layers', pkg.layers ?? [])
   checkSet('bees', pkg.bees ?? [])
   checkSet('dependencies', pkg.dependencies ?? [])
+  checkSet('resources', pkg.resources ?? [])
 
   for (const [bee, required] of Object.entries(pkg.beeDeps ?? {})) {
     if (!bees.has(bee)) errors.push(`beeDeps names an undeclared bee: ${bee}`)
