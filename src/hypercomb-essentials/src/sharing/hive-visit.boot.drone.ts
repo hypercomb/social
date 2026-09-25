@@ -54,6 +54,27 @@ const NAV_KEY = '@hypercomb.social/Navigation'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
+/** Resolves once the preloader has settled every bee in the package
+ *  (`loader:bees-done`, which replays to a late subscriber), or after `ms`.
+ *  The arrival's verdict and the view it opens are decided by bees — the
+ *  view registry, the site view, a game's face — so arriving before they are
+ *  here raced them: a published game sometimes never opened (measured
+ *  2026-09-25, arkanoid, 3 of 4 cold loads). The flag + deferred unsubscribe
+ *  survive the synchronous replay firing inside `.on()`. */
+const beesSettled = (ms: number): Promise<void> => new Promise(resolve => {
+  let done = false
+  let off: (() => void) | undefined
+  const finish = (): void => {
+    if (done) return
+    done = true
+    clearTimeout(timer)
+    setTimeout(() => off?.(), 0)
+    resolve()
+  }
+  const timer = setTimeout(finish, ms)
+  off = EffectBus.on('loader:bees-done', finish)
+})
+
 /** A service once it registers, or undefined after `ms`. */
 const serviceOf = <T>(key: string, ms = 30_000): Promise<T | undefined> => new Promise(resolve => {
   const ioc = (window as { ioc?: { get?: <V>(k: string) => V | undefined; whenReady?: <V>(k: string, cb: (v: V) => void) => void } }).ioc
@@ -210,8 +231,15 @@ export class HiveVisitDrone extends Drone {
     // measured 2026-09-25) before anything could paint. The rest streams in
     // behind the paint over the same verified fetch, and a layer the visitor
     // reaches before it lands is fetched on demand like any other miss.
+    //
+    // The walk runs WHILE the package's bees finish loading (the broker is a
+    // boot bee now, so the walk no longer waits behind them), and the arrival
+    // waits for both.
     console.log('[hive-visit] localizing the top of the closure from', bundle.hosts.join(','), 'head', head.slice(0, 12))
-    const stats = await broker.adopt(head, { layersOnly: true, silent: true, maxDepth: 1 })
+    const [stats] = await Promise.all([
+      broker.adopt(head, { layersOnly: true, silent: true, maxDepth: 1 }),
+      beesSettled(15_000),
+    ])
     console.log('[hive-visit] top localized', JSON.stringify(stats))
     const rest = (): void => {
       void broker.adopt(head, { layersOnly: true, silent: true, quiet: true })

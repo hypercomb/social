@@ -42,16 +42,6 @@ type DeferredBeeLoads = {
   loads: readonly Promise<Bee | null>[]
 }
 
-/** True when this page is a published site being READ, not a hive being
- *  kept (main.visitor.ts stamps the flag before it imports the participant
- *  boot graph — see hypercomb-web/src/setup/visitor-session.ts, whose own
- *  answer this mirrors). Read directly rather than imported: this package
- *  sits BELOW the web shell in the dependency order, so it cannot import
- *  from it, and the one thing worth asking here is cheap enough to repeat. */
-const isReadOnlyVisitor = (): boolean => {
-  try { return (window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true } catch { return false }
-}
-
 export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   // SHA-256 of canonical JSON: [] → 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
@@ -338,43 +328,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   static readonly #PREHEAT_BATCH = 4
   static readonly #PREHEAT_FALLBACK_MS = 1500
 
-  /** VISITOR-ONLY background bee load: the same signatures as the
-   *  participant path load, just not all in the one wave that lands right
-   *  when the critical bees settle — the exact moment a visitor's cover is
-   *  coming down and the eval thread is what first paint needs. Each
-   *  signature still resolves through the ordinary cached loader
-   *  (`#loadBeeBySignature`), so a bee already in flight or cached is a
-   *  no-op here; this only changes when its OWN import starts. A short
-   *  fallback delay (not `#PREHEAT_FALLBACK_MS` — bytes already on the
-   *  page, no network to wait on) is enough to yield past pending paint
-   *  work when `requestIdleCallback` is unavailable. */
-  #loadBeesAtIdle = (sigs: readonly string[]): Promise<Bee | null>[] => {
-    const whenIdle: (run: () => void) => void =
-      typeof (globalThis as any).requestIdleCallback === 'function'
-        ? run => (globalThis as any).requestIdleCallback(() => run())
-        : run => { setTimeout(run, ScriptPreloader.#BACKGROUND_FALLBACK_MS) }
-
-    const entries = sigs.map(sig => {
-      let resolve!: (bee: Bee | null) => void
-      const promise = new Promise<Bee | null>(r => { resolve = r })
-      return { sig, resolve, promise }
-    })
-    const queue = [...entries]
-    const pump = (): void => {
-      const batch = queue.splice(0, ScriptPreloader.#BACKGROUND_BATCH)
-      if (!batch.length) return
-      for (const entry of batch) {
-        void this.#loadBeeBySignature(entry.sig).then(entry.resolve, () => entry.resolve(null))
-      }
-      if (queue.length) whenIdle(pump)
-    }
-    whenIdle(pump)
-    return entries.map(entry => entry.promise)
-  }
-
-  static readonly #BACKGROUND_BATCH = 8
-  static readonly #BACKGROUND_FALLBACK_MS = 50
-
   // -------------------------------------------------
   // layer walk — layers are the source of truth
   // -------------------------------------------------
@@ -582,17 +535,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         console.log(fastMsg)
         try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${fastMsg}`) } catch {}
 
-        // A VISITOR reads someone else's finished creation with the eval
-        // thread it needs for first paint — on a slow device the ~250
-        // background bees firing in one synchronous wave right here is
-        // exactly what a participant's own hive never has to compete with
-        // (measured: ×4 CPU cold loads stayed 12–15s while every network
-        // lever landed; documentation/read-only-deployment.md "The
-        // landing"). A participant's hive is unchanged: same bees, same
-        // signatures, same activation record, only WHEN they evaluate moves.
-        const restLoads = isReadOnlyVisitor()
-          ? this.#loadBeesAtIdle(restPending)
-          : restPending.map(sig => this.#loadBeeBySignature(sig))
+        const restLoads = restPending.map(sig => this.#loadBeeBySignature(sig))
         return { pending, loads: [...criticalLoads, ...restLoads] }
       }
 

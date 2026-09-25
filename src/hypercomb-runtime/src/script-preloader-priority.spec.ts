@@ -15,7 +15,7 @@ describe('ScriptPreloader critical-bee integration', () => {
   it('checks readiness before backgrounding the remaining bees', () => {
     const status = PRELOADER.indexOf('const status = renderCriticalStatus(window.ioc)')
     const ready = PRELOADER.indexOf('if (status.ready)', status)
-    const background = PRELOADER.indexOf('const restLoads = isReadOnlyVisitor()', ready)
+    const background = PRELOADER.indexOf('const restLoads = restPending.map', ready)
 
     expect(status).toBeGreaterThan(-1)
     expect(ready).toBeGreaterThan(status)
@@ -25,10 +25,6 @@ describe('ScriptPreloader critical-bee integration', () => {
     expect(PRELOADER).not.toContain('#RENDER_CRITICAL_KEYS')
   })
 
-  it('only a read-only visitor gets the idle-batched background wave — a participant hive is unchanged', () => {
-    expect(PRELOADER).toContain(': restPending.map(sig => this.#loadBeeBySignature(sig))')
-    expect(PRELOADER).toContain('#loadBeesAtIdle = (sigs: readonly string[]): Promise<Bee | null>[] => {')
-  })
 
   it('keeps learned hints package-bound and all-or-nothing', () => {
     expect(PRELOADER).toContain('parseLearnedCriticalBeeSigs(raw, packageSig, enabled) ?? []')
