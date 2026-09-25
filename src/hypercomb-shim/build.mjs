@@ -67,7 +67,32 @@ if (!pure && !(await exists(resolve(staticRoot, 'vendor', 'pixi.runtime.js')))) 
   throw new Error('[shim] public/vendor is missing — run `npm run build:vendor` first')
 }
 await cp(staticRoot, dist, { recursive: true })
-await cp(resolve(here, 'index.html'), resolve(dist, 'index.html'))
+// ONE CORE. The pure main.js resolves `@hypercomb/core` through the import
+// map, the same runtime file the bootstrap and every adopted bee load, instead
+// of carrying its own copy. Core's modules register into `window.ioc` as they
+// evaluate, and as an import of main.js core now evaluates BEFORE main.js's
+// body, so the ioc install runs first: inlined as a classic script that the
+// parser executes before any module script. It is not a new file, so no host's
+// route list changes.
+let indexHtml = await readFile(resolve(here, 'index.html'), 'utf8')
+if (pure) {
+  const ioc = await build({
+    entryPoints: [resolve(here, '..', 'hypercomb-runtime', 'src', 'ioc.web.ts')],
+    bundle: true,
+    format: 'iife',
+    platform: 'browser',
+    target: ['es2022'],
+    minify: true,
+    write: false,
+    logLevel: 'warning',
+  })
+  const code = ioc.outputFiles[0].text.trim()
+  if (code.includes('</script')) throw new Error('[shim] inlined ioc would close its own script tag')
+  const marker = '<!-- hc:ioc -->'
+  if (!indexHtml.includes(marker)) throw new Error('[shim] index.html has no ' + marker + ' marker')
+  indexHtml = indexHtml.replace(marker, `<script>${code}</script>`)
+}
+await writeFile(resolve(dist, 'index.html'), indexHtml, 'utf8')
 // The cold front door reads the same theme values as the full shells. Compile
 // only their shared token sheet; Sass is a build tool and ships no runtime code.
 const themeCss = compile(resolve(here, '..', 'hypercomb-shared', 'styles', '_material-tokens.scss'), {
@@ -292,7 +317,7 @@ const result = await build({
   // Bees and their dependencies are fetched at runtime by signature, never
   // bundled. Anything that resolves to an /opfs or bare module specifier is
   // the runtime graph's problem, not the shim's.
-  external: ['/opfs/*'],
+  external: ['/opfs/*', ...(pure ? ['@hypercomb/core'] : [])],
 })
 
 // The scoreboard that matters: if @angular shows up in the shim's own bundle,
@@ -311,6 +336,9 @@ if (angular.length) {
   console.log('[shim] ✓ framework-free — no @angular in the bundle')
 }
 if (pure && angular.length) throw new Error('[shim] pure install includes Angular')
+if (pure && inputs.some(p => p.includes('hypercomb-core/src/'))) {
+  throw new Error('[shim] pure main.js carries its own copy of core — it must load the runtime through the import map')
+}
 const localesInBundle = inputs.filter(p => LOCALE_JSON.test(p))
 if (localesInBundle.length) {
   // 2.9 MB of catalogs in the entry bundle is the difference between a 180 kB

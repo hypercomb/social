@@ -16,10 +16,14 @@
     <script>
       (function () {
         try {
-          var raw = localStorage.getItem('hc:importmap');
-          if (!raw) return;
-          var parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed.imports !== 'object' || !parsed.imports) return;
+          // `@hypercomb/core` never moves, so it is declared even on the
+          // coldest boot: the pure main.js imports it through this map.
+          var CORE = '/hypercomb-core.runtime.js';
+          var raw = null, parsed = null;
+          try { raw = localStorage.getItem('hc:importmap'); parsed = raw && JSON.parse(raw); } catch (e) {}
+          if (!parsed || typeof parsed.imports !== 'object' || !parsed.imports) { parsed = { imports: {} }; raw = null; }
+          if (!parsed.imports['@hypercomb/core']) { parsed.imports['@hypercomb/core'] = CORE; raw = null; }
+          if (!raw) raw = JSON.stringify(parsed);
           var s = document.createElement('script');
           s.type = 'importmap';
           s.textContent = raw;
@@ -28,6 +32,10 @@
         } catch (e) {}
       })();
     </script>
+
+    <!-- The pure build inlines the ioc install here (build.mjs): window.ioc
+         must exist before core, an import of main.js, evaluates. -->
+    <!-- hc:ioc -->
 
     <!-- Theme pre-paint, before the adopted ThemeService takes over. -->
     <script>

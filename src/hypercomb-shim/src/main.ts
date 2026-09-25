@@ -46,7 +46,10 @@
 
 // ioc.web FIRST — it installs window.ioc, and every module below registers
 // into it at module scope. Importing it late means those registrations land
-// on an ioc that does not exist yet.
+// on an ioc that does not exist yet. In the pure build `@hypercomb/core` is
+// an import of this module, so core evaluates before this line; the build
+// therefore also inlines ioc.web into index.html, and this import is a no-op
+// there (it installs only when window.ioc is absent).
 import '@hypercomb/runtime/ioc.web'
 // NO TOOL WINDOWS HERE, and that is not an omission. `@hypercomb.social/
 // ToolWindows` is the docked-panel escape rung, and a host has no docked
