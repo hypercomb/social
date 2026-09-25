@@ -6,7 +6,7 @@
 import { Bee, type BeeResolver, EffectBus, hypercomb, mayRunBee } from '@hypercomb/core'
 import { Store } from './store'
 import { installedPackageSig } from './installed-package.js'
-import { arrivalNames, beeClassesOfDocs, resolveArrival, type BeeClass } from './arrival-plan.js'
+import { arrivalNames, beeClassesOfDocs, quietFeatureNames, resolveArrival, type BeeClass } from './arrival-plan.js'
 import { activeInstallIndex } from './install-index.js'
 import {
   learnedCriticalBeeSigs,
@@ -217,6 +217,13 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         const keep = new Set([...enabled, ...walked.criticalBees])
         walked = { ...walked, bees: walked.bees.filter(sig => keep.has(sig)) }
       }
+      // FEATURES FOR PARTICIPANTS ONLY: a read-only reader never loads a bee
+      // under a layer its publisher's `features:participant` pool names —
+      // not at arrival, not on the approach. Decided once.
+      if (layerRoots.length && (globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) {
+        const quiet = await this.#quietBees(layerRoots)
+        if (quiet.size) walked = { ...walked, bees: walked.bees.filter(sig => !quiet.has(sig)) }
+      }
       const walkMs = performance.now() - tWalk
 
       // Cache warming, AT IDLE AND IN SMALL BATCHES.
@@ -373,6 +380,29 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       vm.addEventListener?.('change', enter)
       enter()
     })
+  }
+
+  #quiet: Set<string> | null = null
+
+  /** Every bee under a layer whose name the quiet list carries, sub-layers
+   *  included — read from the walk's own layer cache. */
+  #quietBees = async (roots: readonly string[]): Promise<Set<string>> => {
+    if (this.#quiet) return this.#quiet
+    const names = await quietFeatureNames()
+    const quiet = new Set<string>()
+    const seen = new Set<string>()
+    const visit = (sig: string, inside: boolean): void => {
+      const layer = this.#layerCache.get(this.#stripExt(sig))
+      if (!layer || seen.has(sig)) return
+      seen.add(sig)
+      const within = inside || names.has(layer.name)
+      if (within) for (const bee of layer.bees) quiet.add(bee)
+      for (const child of layer.children) visit(child, within)
+    }
+    if (names.size) for (const root of roots) visit(this.#stripExt(root), false)
+    if (quiet.size) console.log(`[script-preloader] ${quiet.size} participant-only bees never load for this reader (${[...names].join(', ')})`)
+    this.#quiet = quiet
+    return quiet
   }
 
   // -------------------------------------------------
@@ -605,6 +635,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     dependencies: string[]
     resources: string[]
     children: string[]
+    name: string
     criticalBees?: unknown
     classes: Array<[string, BeeClass]>
   }>()
@@ -654,6 +685,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
             dependencies: ((layer['dependencies'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
             resources: ((layer['resources'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
             children: ((childRefs as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
+            name: String(layer['name'] ?? ''),
             criticalBees: layer['criticalBees'],
             classes: beeClassesOfDocs(layer['docs']),
           }

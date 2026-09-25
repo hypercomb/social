@@ -12,6 +12,9 @@ interface SiteDescriptor {
   /** The publisher's arrival plan (signed index `plan:<lineage>`): a record
    *  naming the bees this branch's arrival needs, by IoC key. */
   plan?: string
+  /** The publisher's participant-only features (signed index
+   *  `pool:features:participant`): a snapshot record naming them. */
+  quiet?: string
 }
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -124,6 +127,18 @@ const siteRead: Promise<SiteDescriptor | null> = fetch(descriptorUrl, { cache: '
   if (!response.ok) return null
   const record = await response.json() as { arrive?: unknown }
   return Array.isArray(record?.arrive) ? record.arrive.map(name => String(name ?? '')) : null
+}).catch(() => null)
+// FEATURES FOR PARTICIPANTS ONLY: the snapshot of the publisher's
+// `features:participant` pool (signed index `pool:features:participant`,
+// essentials sharing/participant-features.ts). A read-only reader never loads
+// what it names (hypercomb-runtime script-preloader.ts #quietBees).
+;(globalThis as { __hcQuietFeatures?: Promise<string[] | null> }).__hcQuietFeatures = siteRead.then(async site => {
+  const quiet = String(site?.quiet ?? '').toLowerCase()
+  if (!SIG_RE.test(quiet)) return null
+  const response = await fetch(`/content/${quiet}`)
+  if (!response.ok) return null
+  const record = await response.json() as { features?: unknown }
+  return Array.isArray(record?.features) ? record.features.map(name => String(name ?? '')) : null
 }).catch(() => null)
 
 // The standard boot graph is deliberately imported only after the OPFS gate

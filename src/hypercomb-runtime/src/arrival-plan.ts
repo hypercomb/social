@@ -114,3 +114,20 @@ export const arrivalNames = async (ms = 4000): Promise<string[] | null> => {
   const names = value.map(v => String(v ?? '').trim()).filter(Boolean)
   return names.length ? names : null
 }
+
+/** FEATURES FOR PARTICIPANTS ONLY (essentials sharing/participant-features.ts):
+ *  the names in the `features:participant` pool of the publisher whose site
+ *  this is, as the shell read them from the snapshot the publisher's signed
+ *  index names (`pool:features:participant`). A read-only reader never loads
+ *  a bee under a layer so named. Absent, slow or empty: nothing is quiet. */
+export const quietFeatureNames = async (ms = 4000): Promise<Set<string>> => {
+  const pending = (globalThis as { __hcQuietFeatures?: Promise<unknown> | unknown }).__hcQuietFeatures
+  if (pending === undefined || pending === null) return new Set()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const value = await Promise.race([
+    Promise.resolve(pending).catch(() => null),
+    new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms) }),
+  ])
+  clearTimeout(timer)
+  return new Set(Array.isArray(value) ? value.map(v => String(v ?? '').trim()).filter(Boolean) : [])
+}
