@@ -215,6 +215,8 @@ interface BuildCache {
   version: 10
   /** BUILD_SHAPE when this cache was written. */
   shape?: string
+  /** DOCS_SHAPE when this cache was written: how layer docs are derived. */
+  docsShape?: string
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   namespaces: Record<string, UnitCache>
@@ -225,6 +227,12 @@ interface BuildCache {
   docCache?: Record<string, DocCacheEntry>
   beeDepCache?: Record<string, BeeDepCacheEntry>
 }
+
+/** How the layer docs are derived. The docs ride inside the layers, so a
+ *  change here must reach them even when no source file moved — the "nothing
+ *  changed" early exit asks this too. Bump it with any change to what a doc
+ *  carries. queen-passive:1 = queens carry `passive` (passive-queen.ts). */
+const DOCS_SHAPE = 'queen-passive:1'
 
 const CACHE_FILE = join(PROJECT_ROOT, '.build-cache.json')
 const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
@@ -1085,7 +1093,7 @@ const main = async (): Promise<void> => {
   }
 
   // --- Early exit: nothing changed at all ---
-  if (!anyMtimeChanged && cache) {
+  if (!anyMtimeChanged && cache && cache.docsShape === DOCS_SHAPE) {
     const manifestFile = join(DIST_ROOT, MANIFEST_FILE)
 
     // Verify output still exists (not wiped externally)
@@ -1726,6 +1734,7 @@ const main = async (): Promise<void> => {
   saveCache({
     version: 10,
     shape: BUILD_SHAPE,
+    docsShape: DOCS_SHAPE,
     rootHash,
     rootLayerSig,
     namespaces: newNamespaces,
