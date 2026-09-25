@@ -47,6 +47,7 @@ import { EffectBus } from '@hypercomb/core'
 import { checkRemoteHiveFormat } from './hive-format.js'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import { installRootOf, PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { takeIfAllowed } from './upgrade-allow.js'
 // LOAD-BEARING IMPORT. The hive FORMAT check has no registration of its own —
 // it reaches the app by riding this module, which side-effects.ts already
 // imports. Removing it would make the format warning go silent with no error.
@@ -160,6 +161,9 @@ export class UpdateScoutService {
 
     const emit = deps.emit ?? (payload => EffectBus.emit('update:available', payload))
     emit({ available: true, newCount: 0, newBees: [], packageSig: sig, previous: null, label: '', source: 'channel' })
+    // ALLOW, NEVER FORCE: only a participant who said `upgrade allow` has the
+    // followed channel taken here; everyone else keeps the notice + button.
+    if (!('emit' in deps)) void takeIfAllowed(sig, follow.hosts)
     return sig
   }
 }
