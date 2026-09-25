@@ -537,8 +537,8 @@ async function servePublications(request, env) {
 // window and every cross-host word search open THIS door and nothing else. A
 // live relay answers by readdir; here the heap is R2, so the pool's members
 // are the objects under the prefix `<sig>/`, and the listing is their names —
-// one per line, text/plain, no-store, because a pool GROWS. An address with
-// nothing under it is an honest 404 (a host with no packages yet), never the
+// one per line, text/plain, no-store, because a pool GROWS. A public pool with
+// nothing under it is an EMPTY listing (a host with no packages yet), never the
 // SPA fallback: a 307 to / or a page of HTML at a pool's address is the one
 // answer that makes a live host read as "does not answer".
 // Only these pools are LISTED in public — the same list the relay keeps
@@ -568,13 +568,14 @@ async function servePoolListing(request, env, sig) {
       cursor = page.truncated ? page.cursor : undefined
     } while (cursor)
   }
-  if (names.length === 0) {
-    return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
-      status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
-    })
-  }
+  // A PUBLIC POOL WITH NOTHING IN IT IS AN EMPTY LISTING, not a 404. Every
+  // client derives these addresses and asks every door it follows, so a door
+  // that publishes nothing is asked all the time — and a browser prints every
+  // 404 to the console whatever the page does with it. An empty set is the
+  // true answer and a quiet one (hypercomb.io, Update all, 2026-09-25).
   names.sort()
-  return new Response(request.method === 'HEAD' ? null : names.join('\n') + '\n', { status: 200, headers })
+  const listing = names.length ? names.join('\n') + '\n' : ''
+  return new Response(request.method === 'HEAD' ? null : listing, { status: 200, headers })
 }
 
 /** The shim host card, fetched from its static origin and answered as this

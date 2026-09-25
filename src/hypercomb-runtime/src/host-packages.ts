@@ -27,7 +27,7 @@
 // It reads nothing but public URLs and writes nothing anywhere.
 
 import { HOST_IOC_KEY, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
-import { HOST_PACKAGES_MEANING, headIndex, markerIndices, parseMember, parsePoolListing, poolEntryName } from './host-pool.js'
+import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from './host-pool.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -38,35 +38,40 @@ const isLoopback = (zone: string): boolean =>
   /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(zone)
 
 /**
- * Every URL base worth asking, in order.
+ * The URL bases a zone answers on under its OWN name, in order.
  *
  * Loopback hosts speak http; everything else https. A published site serves
  * the heap FLAT at its root, while a shell origin serves it under `/content`
- * — both are tried, and the pool probe settles which. `content.<zone>` is
- * the relay/write face that a wildcard zone gets for free, so it is asked too.
+ * — both are asked, flat first, because a door that publishes nothing answers
+ * its flat pool address with an empty listing and the walk stops there.
  */
-const allHostBases = (zone: string): string[] => {
+const ownBases = (zone: string): string[] => {
   const scheme = isLoopback(zone) ? 'http' : 'https'
-  // A zone that IS the content face already needs no second one: prefixing it
-  // again asks for `content.content.<zone>`, which resolves nowhere and costs
-  // every caller a DNS failure per atom. Seen in the wild against
-  // content.pluginthematrix.com (2026-09-20).
-  const faces = /^content\./i.test(zone)
-    ? [`${scheme}://${zone}`]
-    : [`${scheme}://${zone}`, `${scheme}://content.${zone}`]
-  return faces.flatMap(base => [`${base}/content`, base])
+  return [`${scheme}://${zone}`, `${scheme}://${zone}/content`]
 }
+
+/**
+ * `content.<zone>` — the relay face, asked ONLY when the zone's own name does
+ * not answer at all. On every zone the edge worker serves, the apex and the
+ * content face are the same worker over the same heap, so asking both doubled
+ * every request and every 404 (hypercomb.io, Update all, 2026-09-25). A zone
+ * whose apex is deliberately unrouted (jwize.com) still reaches its heap here.
+ * A zone that IS the content face needs no second one.
+ */
+const contentFaceBases = (zone: string): string[] =>
+  /^content\./i.test(zone) || isLoopback(zone) ? [] : ownBases(`content.${zone}`)
+
+const allHostBases = (zone: string): string[] => [...ownBases(zone), ...contentFaceBases(zone)]
 
 /**
  * The bases ATOMS are fetched from. Once the pool probe has settled which base
  * a zone answers on, that is the only one — a zone's faces are one store, and
- * asking the other three for every atom turned each miss into four requests
- * (one of them a CORS error against the apex's 404 page). Before the probe
- * settles, every base is a candidate.
+ * asking the others for every atom turned each miss into several requests.
+ * Before the probe settles, the zone's own name.
  */
 export const hostBases = (zone: string): string[] => {
   const settled = settledBase(zone)
-  return settled ? [settled] : allHostBases(zone)
+  return settled ? [settled] : ownBases(zone)
 }
 
 /** Where a zone's pool last answered, remembered across sessions so the next
@@ -91,15 +96,57 @@ const settleBase = (zone: string, base: string): void => {
   try { globalThis.localStorage?.setItem(BASE_MEMO_KEY + zone, base) } catch { /* memory memo still holds */ }
 }
 
-/** Test seam: forget every settled base. */
+/**
+ * A ZONE THAT PUBLISHES NOTHING, remembered for a while.
+ *
+ * Asking such a zone is the loudest thing discovery did: every base answered
+ * a 404 (hosts not yet redeployed still do), and a browser prints each one to
+ * the console whatever the code does with it — nothing in page script can hide a failed request, only
+ * not make it. Update all asks every followed zone twice (who holds the root,
+ * then what each head is), so one zone that is a site and not a host printed
+ * a screen of red on every press (seen on hypercomb.io, 2026-09-25).
+ *
+ * Only an ANSWERED absence is remembered: every base replied and none held
+ * the pool. A zone that did not answer is a network fact, not this one, and
+ * is asked again next time. The memo is short, so a zone that starts
+ * publishing is found within minutes, and a pool found anywhere clears it.
+ */
+const absentUntil = new Map<string, number>()
+const ABSENT_MEMO_KEY = 'hc:host-absent:'
+const ABSENT_FOR_MS = 15 * 60_000
+
+const knownAbsent = (zone: string): boolean => {
+  const now = Date.now()
+  let until = absentUntil.get(zone)
+  if (until === undefined) {
+    try { until = Number(globalThis.localStorage?.getItem(ABSENT_MEMO_KEY + zone) ?? 0) || 0 } catch { until = 0 }
+    absentUntil.set(zone, until)
+  }
+  return until > now
+}
+
+const markAbsent = (zone: string): void => {
+  const until = Date.now() + ABSENT_FOR_MS
+  absentUntil.set(zone, until)
+  try { globalThis.localStorage?.setItem(ABSENT_MEMO_KEY + zone, String(until)) } catch { /* memory memo still holds */ }
+}
+
+const clearAbsent = (zone: string): void => {
+  absentUntil.delete(zone)
+  try { globalThis.localStorage?.removeItem(ABSENT_MEMO_KEY + zone) } catch { /* nothing held */ }
+}
+
+/** Test seam: forget every settled base and every remembered absence. */
 export const _resetSettledBases = (): void => {
   answeredBase.clear()
+  absentUntil.clear()
+  inFlight.clear()
   try {
     const store = globalThis.localStorage
     if (!store) return
     for (let i = store.length - 1; i >= 0; i--) {
       const key = store.key(i)
-      if (key?.startsWith(BASE_MEMO_KEY)) store.removeItem(key)
+      if (key?.startsWith(BASE_MEMO_KEY) || key?.startsWith(ABSENT_MEMO_KEY)) store.removeItem(key)
     }
   } catch { /* nothing to forget */ }
 }
@@ -179,10 +226,8 @@ type FoundPool = {
   base: string
   read: ReturnType<typeof poolReader>
   head: number
-  /** Every index the host actually holds, when it could tell us in one
-   *  request. Null from the probe path, which can find the head and nothing
-   *  else. */
-  indices: number[] | null
+  /** Every index the host holds, from its listing. */
+  indices: number[]
 }
 
 /**
@@ -192,52 +237,73 @@ type FoundPool = {
  * every entry name, so it serves browsing and booting alike. `no-store`,
  * because the members are immutable but the membership is not.
  *
- * A host whose relay predates the directory branch falls through to probing
- * indices. That path is the drain window: eighteen requests where the listing
- * costs one, and it can only find the head — never enumerate. Which is
- * precisely why a browse list needed a document for as long as probing was the
- * only mechanism.
+ * The listing is the only mechanism. Probing entries one index at a time was
+ * the drain window for relays that predated the directory branch; every host
+ * shape answers the listing now, and the probe only ever added a 404 per base
+ * for every zone that publishes nothing.
  */
 /** What the probe learned: the pool, and — separately — whether any door
- *  ANSWERED at all. "Publishes nothing here" (an honest 404 at the derived
- *  address) and "does not answer" (no HTTP response from any base) are
+ *  ANSWERED at all. "Publishes nothing here" (an empty listing, or a 404, at
+ *  the derived address) and "does not answer" (no HTTP response from any base) are
  *  different facts, and only the second is about reachability. */
 type PoolProbe = { pool: FoundPool | null; answered: boolean }
 
-const probePool = async (zone: string): Promise<PoolProbe> => {
+/** One probe per zone at a time. Update all asks every zone from several
+ *  places at once; they share the answer instead of each walking the bases. */
+const inFlight = new Map<string, Promise<PoolProbe>>()
+
+const probePool = (zone: string): Promise<PoolProbe> => {
+  if (knownAbsent(zone)) return Promise.resolve({ pool: null, answered: true })
+  const running = inFlight.get(zone)
+  if (running) return running
+  const probe = walkBases(zone).finally(() => inFlight.delete(zone))
+  inFlight.set(zone, probe)
+  return probe
+}
+
+const walkBases = async (zone: string): Promise<PoolProbe> => {
   const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
-  let answered = false
-  // The settled base first, then every other — a hint only here: the probe
-  // is what settles it, so it must keep looking when the memo is stale.
   const remembered = settledBase(zone)
-  const bases = allHostBases(zone)
-  const ordered = remembered && bases.includes(remembered) ? [remembered, ...bases.filter(base => base !== remembered)] : bases
 
-  for (const base of ordered) {
-    const read = poolReader(base, pool)
-
-    let listing: string[] | null = null
-    try {
-      const res = await fetch(`${base}/${pool}/`, { cache: 'no-store' })
+  /** Ask a list of bases in order. `found` is the pool; `none` is a door that
+   *  said so outright (an empty listing); `answered` is whether any door gave
+   *  an HTTP response at all. */
+  const ask = async (bases: string[]): Promise<{ found: FoundPool | null; none: boolean; answered: boolean }> => {
+    let answered = false
+    for (const base of bases) {
+      let res: Response
+      try { res = await fetch(`${base}/${pool}/`, { cache: 'no-store' }) } catch { continue }
       answered = true   // any status is an answer; a thrown fetch is not
-      listing = res.ok ? parsePoolListing(await res.text()) : null
-    } catch { listing = null }
-
-    if (listing) {
+      // Every host shape that holds a pool answers its directory — the relay
+      // by readdir, the edge worker by prefix, a static ship by the listing
+      // it writes as index.html. A 404 or a page here is simply not this
+      // base; the next is asked.
+      const listing = res.ok ? parsePoolListing(await res.text()) : null
+      if (!listing) continue
       const indices = markerIndices(listing)
-      if (indices.length) {
-        settleBase(zone, base)
-        return { pool: { base, read, head: indices[indices.length - 1]!, indices }, answered }
-      }
-      continue   // the host holds this pool and it is empty — not a miss to retry elsewhere
-    }
-
-    const head = await headIndex(async i => (await read(i)) !== null)
-    if (head >= 0) {
+      if (!indices.length) return { found: null, none: true, answered }
       settleBase(zone, base)
-      return { pool: { base, read, head, indices: null }, answered: true }
+      return { found: { base, read: poolReader(base, pool), head: indices[indices.length - 1]!, indices }, none: false, answered }
     }
+    return { found: null, none: false, answered }
   }
+
+  // The settled base first — a hint only: the probe is what settles it, so
+  // it must keep looking when the memo is stale.
+  const own = ownBases(zone)
+  const first = await ask(remembered ? [remembered, ...own.filter(base => base !== remembered)] : own)
+  let outcome = first
+  if (!first.found && !first.none && !first.answered) {
+    const face = contentFaceBases(zone).filter(base => base !== remembered)
+    if (face.length) outcome = await ask(face)
+  }
+
+  if (outcome.found) {
+    clearAbsent(zone)
+    return { pool: outcome.found, answered: true }
+  }
+  const answered = first.answered || outcome.answered
+  if (answered) markAbsent(zone)
   return { pool: null, answered }
 }
 
@@ -304,10 +370,7 @@ const rowsFrom = async (
   const ceiling = options.before !== undefined ? options.before - 1 : found.head
   if (ceiling < 0) return []
 
-  // The listing knows exactly which indices exist; the probe path can only
-  // assume they run contiguously to the head, which append-only makes true.
-  const available = found.indices ?? Array.from({ length: found.head + 1 }, (_, i) => i)
-  const indices = available.filter(i => i <= ceiling).sort((a, b) => b - a).slice(0, limit)
+  const indices = found.indices.filter(i => i <= ceiling).sort((a, b) => b - a).slice(0, limit)
 
   const rows = await Promise.all(indices.map(async i => rowFrom(zone, found.base, await found.read(i), i)))
   return rows.filter((row): row is HostPackage => row !== null)

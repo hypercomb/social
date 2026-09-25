@@ -84,7 +84,9 @@ So `host:packages` takes the same living-primitive shape as `community:hosts`:
 There is no document. A client works out WHERE to ask the same way it works
 out every other pool address — `sign('host:packages')` — so nothing is
 published saying where to look, and there is no filename two parties had to
-agree on. A host that holds nothing answers 404.
+agree on. A host that holds nothing answers an **empty listing** — `200`, no
+body — not a 404: every follower derives the address and asks it, and a
+browser prints every 404 to the console whatever the page does with it.
 
 The pool holds **one package signature per entry**, at an 8-digit index,
 appended in ship order. **The max index is the head**, the same rule a lineage
@@ -119,7 +121,7 @@ measurement then disproved: a bag entry is `@alias
 in the dependency's own bytes. Nothing survived the check. The document was
 withdrawn from the live host the same day.
 
-### The directory branch, and the probe behind it
+### The directory branch
 
 HTTP cannot list a directory *by default*, which is not the same as cannot.
 `pools-across-hosts.md` settles the shape and this chip now follows it:
@@ -138,9 +140,19 @@ entry names, nothing that could decide what installs.
 retires the manifest: a browse list needs to enumerate, and enumeration is
 exactly what a probe cannot do.
 
-Behind it, for a host whose relay predates the branch, the probe stays: double
-until it misses, then bisect, `~2·log2(n)`. That is the drain window — 18
-requests where a listing costs one, and it can only ever find the head.
+The listing is the only mechanism. For a while a probe stood behind it for
+hosts whose relay predated the branch — double until it misses, then bisect,
+`~2·log2(n)` — and it was **retired (2026-09-25)**: every host shape answers the
+listing, and all the probe still did was add a 404 for entry `00000000` at every
+base of every zone that publishes nothing.
+
+**Where a client asks.** The zone's own name, flat then `/content`
+(`https://<zone>/<pool>/`, `https://<zone>/content/<pool>/`). `content.<zone>`
+is asked only when the zone's own name gives no HTTP answer at all: on every
+zone the edge worker serves, the apex and the content face are one worker over
+one heap, so asking both only doubled the requests. A zone that answered with
+no pool is remembered as publishing nothing for fifteen minutes, and probes of
+one zone that overlap share a single walk.
 
 **A CORRECTION, kept because the wrong turn is instructive.** This section
 first argued *against* a directory branch on the grounds that a host which has
@@ -157,8 +169,9 @@ wire rather than reading what the wire already was.
 `GET /<pool>/` → 200, `text/plain`, `no-store`, 180 entries, `index.html`
 excluded. Client end to end: head in 4 requests / 43 ms; five newest rows —
 signature, publication label and date — in 8 requests / 9 ms; paging by `before`
-works. Against the deployed `jwize.com` the branch 404s until its relay
-restarts, and the probe fallback carries it in the meantime.
+works. (At the time, the deployed `jwize.com` relay answered the branch with a
+404 until it restarted; the probe fallback that carried it is gone, so a relay
+that still cannot list is not discovered.)
 
 ## `beeDeps` is published by nobody
 

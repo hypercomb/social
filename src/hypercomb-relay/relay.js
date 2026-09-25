@@ -884,7 +884,12 @@ function tryServeContent(req, res) {
       // the directory describing itself so a bucket with no readdir can answer
       // the same URL. It is not a member, on either host shape.
       names = readdirSync(dir).filter(n => n !== 'index.html' && !n.startsWith('.')).sort()
-    } catch { respondText(res, 404, 'pool not held'); return true }
+    } catch {
+      // A PUBLIC pool this relay holds nothing under is an EMPTY listing, not
+      // a 404: every follower derives the address and asks it, and a browser
+      // prints every 404 to the console. The empty set is the true answer.
+      names = []
+    }
     const body = Buffer.from(names.join('\n'), 'utf8')
     res.writeHead(200, {
       'Content-Type': 'text/plain; charset=utf-8',

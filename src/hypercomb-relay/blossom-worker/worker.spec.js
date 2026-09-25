@@ -344,9 +344,12 @@ test('a site may declare its own icon, and only a same-origin one', async () => 
 test('a pool address on a site door answers the directory branch, never the SPA fallback', async () => {
   const pool = await sha256Hex('host:packages')
   const { env, assetRequests } = await fixture()
-  // nothing under the prefix: an honest 404, text, no-store, cross-origin readable
+  // nothing under the prefix: an empty listing — 200, so a door that publishes
+  // nothing prints no 404 in every follower's console — text, no-store,
+  // cross-origin readable
   const empty = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${pool}/`), env)
-  assert.equal(empty.status, 404)
+  assert.equal(empty.status, 200)
+  assert.equal(await empty.text(), '')
   assert.match(empty.headers.get('content-type'), /text\/plain/)
   assert.equal(empty.headers.get('cache-control'), 'no-store')
   assert.equal(empty.headers.get('access-control-allow-origin'), '*')
