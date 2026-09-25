@@ -18,6 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { attachDockedPanel, DockedPanel } from './docked-panel.js'
 import { laneOccupants, resetLanes } from './dock-lanes.js'
+import { registerTextTheme, setTextThemeWriter } from './panel-groups.js'
 
 /** A tool window as the DOM has one: a header with a close button, and a body.
  *  The header matters — the gear is placed relative to it, and a window with no
@@ -51,6 +52,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  setTextThemeWriter(null)
   for (const panel of attached.splice(0)) panel.dispose()
   document.body.innerHTML = ''
 })
@@ -116,6 +118,115 @@ describe('the width it opens at', () => {
     const el = makePanel()
     attach(el, { id: 'clamped', minWidth: 280, maxWidth: 680, defaultWidth: 360 })
     expect(el.style.width).toBe('680px')
+  })
+})
+
+describe('text themes', () => {
+  it('applies a reading and code pairing through the shared settings gear', () => {
+    const el = makePanel()
+    const panel = attach(el, { id: 'reading-panel', hasReadingSurface: true })
+    ;(el.querySelector('[data-hc-panel-settings]') as HTMLButtonElement).click()
+
+    const editorial = el.querySelector('[data-hc-row="text-theme:editorial"]') as HTMLButtonElement
+    expect(editorial).toBeTruthy()
+    editorial.click()
+
+    expect(el.style.getPropertyValue('--hc-read')).toContain('Georgia')
+    expect(el.style.getPropertyValue('--hc-code')).toContain('IBM Plex Mono')
+    expect(localStorage.getItem('hc:panel-read:reading-panel')).toBe('serif')
+    expect(localStorage.getItem('hc:panel-font:reading-panel')).toBe('plex')
+    expect(el.querySelector('[data-hc-row="text-theme:editorial"]')?.getAttribute('aria-pressed')).toBe('true')
+
+    panel.dispose()
+    const reopened = makePanel()
+    attach(reopened, { id: 'reading-panel', hasReadingSurface: true })
+    ;(reopened.querySelector('[data-hc-panel-settings]') as HTMLButtonElement).click()
+    expect(reopened.querySelector('[data-hc-row="text-theme:editorial"]')?.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('shows a discovered theme in an open menu and saves a borrowed pairing', async () => {
+    const el = makePanel()
+    attach(el, { id: 'theme-creation', hasReadingSurface: true })
+    ;(el.querySelector('[data-hc-panel-settings]') as HTMLButtonElement).click()
+    const discovered = { key: 'community-studio', label: 'Studio', read: 'serif', code: 'jetbrains',
+      head: 'a'.repeat(64) }
+    registerTextTheme(discovered)
+    const option = el.querySelector('[data-hc-row="text-theme:community-studio"]') as HTMLButtonElement
+    expect(option?.textContent).toContain('Studio')
+    option.click()
+    expect(el.style.getPropertyValue('--hc-code')).toContain('JetBrains Mono')
+
+    const saved: unknown[] = []
+    setTextThemeWriter(async draft => {
+      saved.push(draft)
+      return { key: 'new-studio', label: draft.label, read: draft.read, code: draft.code }
+    })
+    const name = el.querySelector('[data-hc-row="text-theme-name"]') as HTMLInputElement
+    name.value = 'My Studio'
+    name.dispatchEvent(new Event('change', { bubbles: true }))
+    ;(el.querySelector('[data-hc-row="text-theme-save"]') as HTMLButtonElement).click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(saved).toEqual([{ label: 'My Studio', read: 'serif', code: 'jetbrains', source: 'a'.repeat(64) }])
+    expect(localStorage.getItem('hc:panel-theme:theme-creation')).toBe('new-studio')
+  })
+
+  it('shows a changed head without applying its new face until clicked', () => {
+    const key = 'community-revision'
+    registerTextTheme({ key, label: 'Revision', read: 'hive', code: 'plex', head: 'b'.repeat(64) })
+    const el = makePanel()
+    attach(el, { id: 'revision-panel', hasReadingSurface: true })
+    ;(el.querySelector('[data-hc-panel-settings]') as HTMLButtonElement).click()
+    ;(el.querySelector(`[data-hc-row="text-theme:${key}"]`) as HTMLButtonElement).click()
+    expect(el.style.getPropertyValue('--hc-code')).toContain('IBM Plex Mono')
+
+    registerTextTheme({ key, label: 'Revision', read: 'hive', code: 'jetbrains', head: 'c'.repeat(64) })
+    expect(el.style.getPropertyValue('--hc-code')).toContain('IBM Plex Mono')
+    const changed = el.querySelector(`[data-hc-row="text-theme:${key}"]`) as HTMLButtonElement
+    expect(changed.getAttribute('aria-pressed')).toBe('false')
+    changed.click()
+    expect(el.style.getPropertyValue('--hc-code')).toContain('JetBrains Mono')
+  })
+
+  it('offers a selected held theme only when its share switch is pressed', async () => {
+    const shell = window as Window & { ioc?: { get: (key: string) => unknown } }
+    const original = shell.ioc
+    let state: 'off' | 'current' = 'off'
+    const calls: { key: string; host: string; on: boolean }[] = []
+    shell.ioc = { get: key => key === '@diamondcoreprocessor.com/TextThemeOffering'
+      ? {
+        defaultHost: () => 'jwize.com',
+        status: async () => ({ ok: true, state }),
+        set: async (theme: { key: string }, host: string, on: boolean) => {
+          calls.push({ key: theme.key, host, on })
+          state = on ? 'current' : 'off'
+          return { ok: true, state }
+        },
+      } : original?.get(key) }
+    try {
+      registerTextTheme({ key: 'share-studio', label: 'Studio', read: 'serif', code: 'plex',
+        location: 'a'.repeat(64), head: 'b'.repeat(64) })
+      const el = makePanel()
+      attach(el, { id: 'offer-panel', hasReadingSurface: true })
+      ;(el.querySelector('[data-hc-panel-settings]') as HTMLButtonElement).click()
+      ;(el.querySelector('[data-hc-row="text-theme:share-studio"]') as HTMLButtonElement).click()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(calls).toEqual([])
+      const host = el.querySelector('[data-hc-row="text-theme-offer-host"]') as HTMLInputElement
+      expect(host.value).toBe('jwize.com')
+      host.value = 'art.example'
+      host.dispatchEvent(new Event('change', { bubbles: true }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const switchOn = el.querySelector('[data-hc-row="text-theme-offer"]') as HTMLInputElement
+      expect(switchOn.checked).toBe(false)
+      switchOn.click()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(calls).toEqual([{ key: 'share-studio', host: 'art.example', on: true }])
+      const switchOff = el.querySelector('[data-hc-row="text-theme-offer"]') as HTMLInputElement
+      expect(switchOff.checked).toBe(true)
+      switchOff.click()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(calls.at(-1)).toEqual({ key: 'share-studio', host: 'art.example', on: false })
+    } finally { shell.ioc = original }
   })
 })
 

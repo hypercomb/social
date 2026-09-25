@@ -650,6 +650,383 @@ fn instance_name() -> String {
     "default".to_string()
 }
 
+// A browser can ask the native window to REVIEW an offering. The URL never
+// changes the hive: the local shim must verify the signed offer and wait for a
+// click inside the native window before it writes the usual activation layer.
+#[derive(Clone, serde::Serialize)]
+struct SingleOfferingReview {
+    add: String,
+    publisher: String,
+    lineage: String,
+    source: Option<String>,
+}
+
+#[cfg(feature = "minimal-deep-link")]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectedOffering {
+    add: String,
+    publisher: String,
+    lineage: String,
+    head: String,
+}
+
+#[cfg(feature = "minimal-deep-link")]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectedCreation {
+    kind: String,
+    publisher: String,
+    meaning: String,
+    key: String,
+    location: String,
+    head: String,
+}
+
+#[cfg(feature = "minimal-deep-link")]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+enum SelectedChoice {
+    Site(SelectedOffering),
+    Creation(SelectedCreation),
+}
+
+#[cfg(feature = "minimal-deep-link")]
+#[derive(Clone, serde::Serialize)]
+struct BatchOfferingReview {
+    select: Vec<SelectedChoice>,
+    source: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(untagged)]
+enum OfferingReview {
+    #[cfg_attr(not(feature = "minimal-deep-link"), allow(dead_code))]
+    Single(SingleOfferingReview),
+    #[cfg(feature = "minimal-deep-link")]
+    Batch(BatchOfferingReview),
+}
+
+#[cfg(feature = "minimal-deep-link")]
+#[derive(Default)]
+struct PendingOfferingReview(std::sync::Mutex<Option<OfferingReview>>);
+
+#[cfg(feature = "minimal-deep-link")]
+fn parse_offering_review(raw: &str) -> Option<OfferingReview> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    if raw.len() > 16384 {
+        return None;
+    }
+    let url = tauri::Url::parse(raw).ok()?;
+    if url.scheme() != "hypercomb"
+        || url.host_str() != Some("offering")
+        || url.path() != "/"
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
+    }
+    let mut fields = BTreeMap::new();
+    for (key, value) in url.query_pairs() {
+        if !matches!(key.as_ref(), "add" | "publisher" | "lineage" | "head" | "select" | "source")
+            || fields
+                .insert(key.into_owned(), value.into_owned())
+                .is_some()
+        {
+            return None;
+        }
+    }
+    fn signed_hex(value: &str) -> bool {
+        value.len() == 64
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    }
+
+    fn safe_lineage(value: &str) -> bool {
+        !value.is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)
+    }
+
+    fn route_origin(value: &str) -> Option<String> {
+        let route = tauri::Url::parse(value).ok()?;
+        let host = route.host_str()?;
+        let loopback = host == "localhost" || host.ends_with(".localhost");
+        if !(route.scheme() == "https" || (route.scheme() == "http" && loopback))
+            || route.path() != "/"
+            || route.query().is_some()
+            || route.fragment().is_some()
+            || !route.username().is_empty()
+            || route.password().is_some()
+        {
+            return None;
+        }
+        Some(route.into())
+    }
+
+    fn source_host(value: &str) -> Option<String> {
+        if value.is_empty() || value.len() > 260 {
+            return None;
+        }
+        let parsed = tauri::Url::parse(&format!("https://{value}/")).ok()?;
+        let host = parsed.host_str()?;
+        let authority = match parsed.port() {
+            Some(port) => format!("{host}:{port}"),
+            None => host.to_string(),
+        };
+        if authority != value
+            || parsed.path() != "/"
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || host.parse::<std::net::IpAddr>().is_ok()
+            || !(host == "localhost" || host.ends_with(".localhost") || host.contains('.'))
+        {
+            return None;
+        }
+        Some(authority)
+    }
+
+    if let Some(encoded) = fields.remove("select") {
+        if !fields.contains_key("source") || !fields.keys().all(|key| key == "source")
+            || encoded.len() > 16384
+        {
+            return None;
+        }
+        let source = source_host(&fields.remove("source")?)?;
+        let mut select: Vec<SelectedChoice> = serde_json::from_str(&encoded).ok()?;
+        if select.is_empty() || select.len() > 24 {
+            return None;
+        }
+        let mut seen = BTreeSet::new();
+        for tile in &mut select {
+            match tile {
+                SelectedChoice::Site(site) => {
+                    site.add = route_origin(&site.add)?;
+                    if !signed_hex(&site.publisher)
+                        || !signed_hex(&site.head)
+                        || !safe_lineage(&site.lineage)
+                        || !seen.insert(format!("site:{}:{}", site.publisher, site.lineage))
+                    {
+                        return None;
+                    }
+                }
+                SelectedChoice::Creation(creation) => {
+                    if creation.kind != "creation"
+                        || !signed_hex(&creation.publisher)
+                        || !signed_hex(&creation.head)
+                        || !signed_hex(&creation.location)
+                        || creation.meaning.len() > 128
+                        || !creation.meaning.split_once(':').is_some_and(|(a, b)| {
+                            !a.is_empty() && !b.is_empty()
+                                && a.bytes().chain(b.bytes()).all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+                        })
+                        || !safe_lineage(&creation.key)
+                        || !seen.insert(format!("creation:{}:{}:{}", creation.publisher, creation.meaning, creation.key))
+                    {
+                        return None;
+                    }
+                }
+            }
+        }
+        return Some(OfferingReview::Batch(BatchOfferingReview { select, source }));
+    }
+
+    if fields.contains_key("head") {
+        return None;
+    }
+    let add = route_origin(&fields.remove("add")?)?;
+    let publisher = fields.remove("publisher")?;
+    let lineage = fields.remove("lineage")?;
+    if !signed_hex(&publisher) || !safe_lineage(&lineage) {
+        return None;
+    }
+    let source = fields.remove("source").filter(|value| !value.is_empty());
+    let source = match source {
+        Some(value) => Some(source_host(&value)?),
+        None => None,
+    };
+    Some(OfferingReview::Single(SingleOfferingReview {
+        add,
+        publisher,
+        lineage,
+        source,
+    }))
+}
+
+#[cfg(all(test, feature = "minimal-deep-link"))]
+mod offering_review_tests {
+    use super::{parse_offering_review, OfferingReview, SelectedChoice};
+
+    fn link(route: &str, source: &str) -> String {
+        let mut url = tauri::Url::parse("hypercomb://offering/").unwrap();
+        url.query_pairs_mut()
+            .append_pair("add", route)
+            .append_pair("publisher", &"a".repeat(64))
+            .append_pair("lineage", "task/example")
+            .append_pair("source", source);
+        url.to_string()
+    }
+
+    #[test]
+    fn accepts_reviewable_origin_and_independent_source() {
+        let review = parse_offering_review(&link("https://tile.jwize.com/", "jwize.com")).unwrap();
+        let OfferingReview::Single(review) = review else { panic!("expected single review") };
+        assert_eq!(review.add, "https://tile.jwize.com/");
+        assert_eq!(review.source.as_deref(), Some("jwize.com"));
+        // A root can carry an independently published creation. The local
+        // shim checks its signed offering pool before accepting the review.
+        assert!(parse_offering_review(&link("https://tile.jwize.com/", "hypercomb.com")).is_some());
+        assert!(
+            parse_offering_review(&link("http://tile.localhost:4851/", "localhost:4851")).is_some()
+        );
+    }
+
+    #[test]
+    fn rejects_downgrade_redirects_and_malformed_source() {
+        for (route, source) in [
+            ("http://tile.jwize.com/", "jwize.com"),
+            ("https://tile.jwize.com/other", "jwize.com"),
+            (
+                "https://tile.jwize.com/?next=https://evil.test",
+                "jwize.com",
+            ),
+            ("https://tile.jwize.com/", "evil.test/path"),
+            ("https://tile.jwize.com/", "nonsiteroot"),
+            ("https://tile.jwize.com/", "user@evil.test"),
+        ] {
+            assert!(parse_offering_review(&link(route, source)).is_none());
+        }
+        let duplicate = format!(
+            "{}&add=https%3A%2F%2Fevil.test%2F",
+            link("https://tile.jwize.com/", "jwize.com")
+        );
+        assert!(parse_offering_review(&duplicate).is_none());
+        assert!(parse_offering_review(
+            &link("https://tile.jwize.com/", "jwize.com")
+                .replace("hypercomb://offering/", "hypercomb://other/")
+        )
+        .is_none());
+    }
+
+    fn batch_link(select: serde_json::Value, source: &str) -> String {
+        let mut url = tauri::Url::parse("hypercomb://offering/").unwrap();
+        url.query_pairs_mut()
+            .append_pair("select", &select.to_string())
+            .append_pair("source", source);
+        url.to_string()
+    }
+
+    fn selection(add: &str) -> serde_json::Value {
+        serde_json::json!({
+            "add": add,
+            "publisher": "a".repeat(64),
+            "lineage": "task/example",
+            "head": "b".repeat(64),
+        })
+    }
+
+    #[test]
+    fn accepts_bounded_batch_from_a_root() {
+        let mut second = selection("https://creation.other.org/");
+        second["lineage"] = serde_json::json!("task/other");
+        let link = batch_link(serde_json::json!([
+            selection("https://tile.jwize.com/"),
+            second
+        ]), "hypercomb.com");
+        let review = parse_offering_review(&link).unwrap();
+        let OfferingReview::Batch(review) = review else { panic!("expected batch review") };
+        assert_eq!(review.source, "hypercomb.com");
+        assert_eq!(review.select.len(), 2);
+        let SelectedChoice::Site(first) = &review.select[0] else { panic!("expected site") };
+        let SelectedChoice::Site(second) = &review.select[1] else { panic!("expected site") };
+        assert_eq!(first.add, "https://tile.jwize.com/");
+        assert_eq!(second.head, "b".repeat(64));
+        assert!(parse_offering_review(&batch_link(serde_json::json!([selection("http://tile.localhost:4851/")]), "localhost:4851")).is_some());
+    }
+
+    #[test]
+    fn accepts_mixed_site_and_creation_choices() {
+        let creation = serde_json::json!({
+            "kind": "creation", "publisher": "a".repeat(64),
+            "meaning": "themes:text", "key": "editorial",
+            "location": "c".repeat(64), "head": "d".repeat(64)
+        });
+        let review = parse_offering_review(&batch_link(serde_json::json!([
+            selection("https://tile.jwize.com/"), creation.clone()
+        ]), "jwize.com")).unwrap();
+        let OfferingReview::Batch(review) = review else { panic!("expected batch") };
+        assert!(matches!(&review.select[1], SelectedChoice::Creation(row) if row.key == "editorial"));
+        assert!(parse_offering_review(&batch_link(serde_json::json!([creation.clone(), creation]), "jwize.com")).is_none());
+        let mut malformed = serde_json::json!({
+            "kind": "creation", "publisher": "a".repeat(64),
+            "meaning": "themes:text", "key": "editorial",
+            "location": "not-signed", "head": "d".repeat(64)
+        });
+        assert!(parse_offering_review(&batch_link(serde_json::json!([malformed]), "jwize.com")).is_none());
+        malformed["location"] = serde_json::json!("c".repeat(64));
+        malformed["meaning"] = serde_json::json!("invalid");
+        assert!(parse_offering_review(&batch_link(serde_json::json!([malformed]), "jwize.com")).is_none());
+    }
+
+    #[test]
+    fn rejects_oversized_duplicate_and_unsigned_batch_items() {
+        assert!(parse_offering_review(&batch_link(serde_json::json!([]), "hypercomb.com")).is_none());
+        assert!(parse_offering_review(&batch_link(serde_json::Value::Array(vec![selection("https://tile.jwize.com/"); 25]), "hypercomb.com")).is_none());
+        assert!(parse_offering_review(&batch_link(serde_json::json!([
+            selection("https://tile.jwize.com/"), selection("https://tile.jwize.com/")
+        ]), "hypercomb.com")).is_none());
+        let mut bad = selection("https://tile.jwize.com/");
+        bad["head"] = serde_json::json!("not-a-head");
+        assert!(parse_offering_review(&batch_link(serde_json::json!([bad]), "hypercomb.com")).is_none());
+        let with_legacy_field = format!("{}&add=https%3A%2F%2Fother.test%2F", batch_link(serde_json::json!([selection("https://tile.jwize.com/")]), "hypercomb.com"));
+        assert!(parse_offering_review(&with_legacy_field).is_none());
+    }
+}
+
+#[cfg(feature = "minimal-deep-link")]
+fn queue_offering_review(app: &tauri::AppHandle, raw: &str) {
+    use tauri::Emitter;
+
+    let Some(review) = parse_offering_review(raw) else {
+        return;
+    };
+    let Some(pending) = app.try_state::<PendingOfferingReview>() else {
+        return;
+    };
+    if let Ok(mut slot) = pending.0.lock() {
+        *slot = Some(review);
+    } else {
+        return;
+    }
+    let _ = app.emit("hypercomb:offering-review", ());
+    if let Some(window) = app.get_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[tauri::command]
+fn take_offering_review(app: tauri::AppHandle) -> Option<OfferingReview> {
+    #[cfg(feature = "minimal-deep-link")]
+    {
+        return app
+            .try_state::<PendingOfferingReview>()?
+            .0
+            .lock()
+            .ok()?
+            .take();
+    }
+    #[cfg(not(feature = "minimal-deep-link"))]
+    {
+        let _ = app;
+        None
+    }
+}
+
 // ---------------------------------------------------------------------------
 // hosting — the hive, served to other machines
 //
@@ -710,27 +1087,26 @@ struct Hosting(std::sync::Mutex<Option<hypercomb_serve::Serving>>);
 /// server on the same machine, must not turn "serve" into a dead end.
 const HOST_PORTS: std::ops::RangeInclusive<u16> = 4270..=4279;
 
-/// The shell a visitor's browser boots: a built `hypercomb-shim/dist`.
+/// The shell a visitor's browser boots: the pure `hypercomb-shim/dist`.
 ///
 /// Bundled as a resource rather than assembled here, because it is not ours to
 /// improvise: `/pin` names a bootstrap bundle whose bytes must hash to it, and
 /// the shim build is what mints that pair.
 fn host_shell(app: &tauri::AppHandle) -> Option<PathBuf> {
+    // In development, the native renderer and the host use the same shim
+    // build. A previously staged resource must not serve an older shell.
+    if cfg!(debug_assertions) {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../hypercomb-shim/dist");
+        if repo.join("index.html").is_file() && repo.join("pin").is_file() {
+            return Some(repo);
+        }
+    }
     if let Ok(path) = app
         .path()
         .resolve("host-shell", tauri::path::BaseDirectory::Resource)
     {
         if path.join("index.html").is_file() && path.join("pin").is_file() {
             return Some(path);
-        }
-    }
-    // Development only: serve the repo's own shim build, so `tauri dev` can
-    // host without a staging step. Never compiled into a release binary — a
-    // shipped app must not depend on a path from the machine that built it.
-    if cfg!(debug_assertions) {
-        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../hypercomb-shim/dist");
-        if repo.join("index.html").is_file() {
-            return Some(repo);
         }
     }
     None
@@ -741,9 +1117,9 @@ fn start_hosting(app: &tauri::AppHandle) -> std::result::Result<String, String> 
     let Some(shell) = host_shell(app) else {
         return Err(
             "This build has no host shell.\n\n\
-             Serving needs a built hypercomb-shim (its index.html, /pin and the packages a \
-             first-time visitor boots from), staged into the app as `host-shell`. Build one with \
-             `npm run build:shim`, then `node hypercomb-client/scripts/stage-host-shell.mjs`."
+             Serving needs the pure Hypercomb host shell (index.html and /pin) \
+             bundled as `host-shell`. Build this installer with \
+             `tauri build --config tauri.minimal.conf.json`."
                 .to_string(),
         );
     };
@@ -802,7 +1178,19 @@ fn stop_hosting(app: &tauri::AppHandle) -> bool {
 
 fn main() {
     let instance = instance_name();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "minimal-deep-link")]
+    let builder = builder
+        // On Windows and Linux the OS starts a new process for a custom URL.
+        // Let the existing pure window receive it, before any other plugin.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init());
+    builder
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             // The hive lives beside the app's own data, not in a browser
@@ -825,6 +1213,8 @@ fn main() {
             // the app and dies with it — a host that outlived its window would
             // keep publishing a hive nobody is looking at.
             app.manage(Hosting::default());
+            #[cfg(feature = "minimal-deep-link")]
+            app.manage(PendingOfferingReview::default());
 
             // Truncated per launch, so a log always describes ONE run rather
             // than an accumulating pile that hides which failure was current.
@@ -911,6 +1301,27 @@ fn main() {
                 // resize it causes re-tiles the two webviews.
                 window.set_fullscreen(true)?;
                 lay_out_titlebar(&window);
+            }
+
+            #[cfg(feature = "minimal-deep-link")]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+
+                // The installed bundle owns this scheme. Development builds
+                // register it explicitly so a browser click reaches this app.
+                #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+                app.deep_link().register_all()?;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        queue_offering_review(&handle, url.as_str());
+                    }
+                });
+                if let Some(urls) = app.deep_link().get_current()? {
+                    for url in urls {
+                        queue_offering_review(app.handle(), url.as_str());
+                    }
+                }
             }
 
             // ── Hive menu: backup and restore ─────────────────────────────
@@ -1390,6 +1801,7 @@ fn main() {
             renderer_log,
             diagnostic_log_path,
             open_external,
+            take_offering_review,
             titlebar_menu,
             titlebar_state,
             titlebar_fullscreen,

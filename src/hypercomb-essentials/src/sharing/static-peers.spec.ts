@@ -9,7 +9,8 @@
 import { describe, expect, it } from 'vitest'
 import { mintMetaEnvelope } from '@hypercomb/core'
 import {
-  childEntriesOf, entryFor, layerAtRoute, offerFromCard, offersFromLegacyFollows, readThrough,
+  childEntriesOf, entryFor, layerAtRoute, offerFromCard, offerFromHostOffering,
+  offersFromLegacyFollows, readThrough,
   type StaticPeersIo,
 } from './static-peers.js'
 import type { PublicationCard } from './publications-ledger.js'
@@ -47,6 +48,20 @@ describe('offerFromCard', () => {
   it('refuses a plate with no verified head or key', () => {
     expect(offerFromCard(card({ head: '' }))).toBeNull()
     expect(offerFromCard(card({ pubkey: 'nope' }))).toBeNull()
+  })
+})
+
+describe('signed host offering adaptation', () => {
+  it('keeps the verified head and implementation door for a shaded peer preview', () => {
+    const offer = offerFromHostOffering({
+      kind: 'host:offering', title: 'Camel', route: 'https://camel.jwize.com/',
+      lineage: 'animals/camel', pubkey: sig('e'), head: sig('a'), index: {}, doors: ['jwize.com'],
+      location: sig('f'),
+    }, 'jwize.com')
+    expect(offer).toEqual({
+      name: 'camel', pubkey: sig('e'), hosts: ['camel.jwize.com', 'jwize.com'],
+      lineageKey: 'animals/camel', segments: ['animals', 'camel'], head: sig('a'),
+    })
   })
 })
 

@@ -37,7 +37,7 @@
  *  `read` is a READ_FONTS key — the face PROSE renders in, the second half of
  *  a window's typography. Same rules as `font`: key not stack, absent means
  *  inherit :root's --hc-read. */
-export type GroupAttrs = { width?: number; text?: number; font?: string; ligatures?: boolean; read?: string }
+export type GroupAttrs = { width?: number; text?: number; font?: string; ligatures?: boolean; read?: string; theme?: string }
 
 /** The text sizes a window (or a group) can be set to. AUTO — `null` — is the
  *  old behaviour: the content scales with the window's width. The rest hold it
@@ -145,9 +145,86 @@ export const DEFAULT_READ_FONT = 'hive'
 export const readFont = (key: string | undefined): ReadFont | undefined =>
   READ_FONTS.find(f => f.key === key)
 
+/** Seed creations. Runtime mirrors these into the same meaning pool as every
+ * participant-created text theme; this in-memory copy covers the first paint. */
+export const TEXT_THEME_SEEDS = [
+  { key: 'clear', label: 'Clear', read: 'hive', code: 'plex' },
+  { key: 'editorial', label: 'Editorial', read: 'serif', code: 'plex' },
+  { key: 'technical', label: 'Technical', read: 'system', code: 'jetbrains' },
+] as const
+
+export interface TextTheme {
+  /** Stable creation identity, independent of a revision's content signature. */
+  key: string
+  label: string
+  read: string
+  code: string
+  /** The hashed location whose highest marker is the current revision. */
+  location?: string
+  /** Signature of the current meta envelope, when read from the hive. */
+  head?: string
+}
+
+const textThemesByKey = new Map<string, TextTheme>(TEXT_THEME_SEEDS.map(theme => [theme.key, { ...theme }]))
+export const textThemeChanges = new EventTarget()
+
+/** The registry is a read cache of pool heads, never the authority for them. */
+export const textThemes = (): readonly TextTheme[] => [...textThemesByKey.values()]
+
+export const registerTextTheme = (theme: TextTheme): boolean => {
+  if (!theme.key || !theme.label.trim() || !readFont(theme.read) || !codeFont(theme.code)) return false
+  const normalized = { ...theme, label: theme.label.trim().slice(0, 80) }
+  const old = textThemesByKey.get(theme.key)
+  if (old && JSON.stringify(old) === JSON.stringify(normalized)) return true
+  textThemesByKey.set(theme.key, normalized)
+  textThemeChanges.dispatchEvent(new Event('change'))
+  return true
+}
+
+/** Replace the live cache from verified pool heads, including removals after
+ * an off layer. The pool remains the authority for which themes are active. */
+export const replaceTextThemes = (themes: readonly TextTheme[]): void => {
+  const next = new Map<string, TextTheme>()
+  for (const theme of themes) {
+    if (!theme.key || !theme.label.trim() || !readFont(theme.read) || !codeFont(theme.code)) continue
+    next.set(theme.key, { ...theme, label: theme.label.trim().slice(0, 80) })
+  }
+  if (JSON.stringify([...next]) === JSON.stringify([...textThemesByKey])) return
+  textThemesByKey.clear()
+  for (const [key, theme] of next) textThemesByKey.set(key, theme)
+  textThemeChanges.dispatchEvent(new Event('change'))
+}
+
+/** Runtime supplies the writer after Store is ready. Core chrome stays pure. */
+export type TextThemeDraft = { label: string; read: string; code: string; source?: string }
+let textThemeWriter: ((draft: TextThemeDraft) => Promise<TextTheme | null>) | null = null
+export const setTextThemeWriter = (writer: typeof textThemeWriter): void => { textThemeWriter = writer }
+export const canCreateTextTheme = (): boolean => textThemeWriter !== null
+export const createTextTheme = async (draft: TextThemeDraft): Promise<TextTheme | null> =>
+  textThemeWriter ? textThemeWriter(draft) : null
+
+export const textTheme = (read: string | undefined, code: string | undefined): string =>
+  textThemes().find(theme => theme.read === (read ?? DEFAULT_READ_FONT)
+    && theme.code === (code ?? DEFAULT_CODE_FONT))?.key ?? ''
+
 export const fontKey = (window: string): string => `hc:panel-font:${window}`
 export const ligaturesKey = (window: string): string => `hc:panel-ligatures:${window}`
 export const readFontKey = (window: string): string => `hc:panel-read:${window}`
+export const chosenTextThemeKey = (window: string): string => `hc:panel-theme:${window}`
+
+/** The chosen creation's identity is a local preference. Its look is read
+ *  from signatured pool content when selected; this key stores no theme data. */
+export const readChosenTextTheme = (window: string): string | undefined => {
+  try { return localStorage.getItem(chosenTextThemeKey(window)) || undefined }
+  catch { return undefined }
+}
+
+export const writeChosenTextTheme = (window: string, key: string | undefined): void => {
+  try {
+    if (key) localStorage.setItem(chosenTextThemeKey(window), key)
+    else localStorage.removeItem(chosenTextThemeKey(window))
+  } catch { /* ignore */ }
+}
 
 /** This window's chosen reading face, or `undefined` for "never chose". */
 export const readReadFont = (window: string): string | undefined => {

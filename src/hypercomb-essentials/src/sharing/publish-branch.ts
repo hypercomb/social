@@ -329,7 +329,8 @@ export async function publishBranch(
   if (marked.length > 0) doors[key] = marked
 
   const roots = { ...existing, [key]: sealed }
-  const put = await putHiveManifest(indexHost, roots, doors)
+  const put = await putHiveManifest(indexHost, roots, doors,
+    read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason, sealed }
 
   // 7. The stable bearer link: segments + pubkey + hosts (+ the sealed head
@@ -457,7 +458,8 @@ export async function unpublishBranch(
   const doors = { ...(read.manifest.doors ?? {}) }
   delete doors[key]
 
-  const put = await putHiveManifest(indexHost, roots, doors)
+  const put = await putHiveManifest(indexHost, roots, doors,
+    read.manifest.createdAt, read.manifest.signedContent)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
 
   // Local mark follows the index, so the two cannot disagree afterwards.
@@ -496,7 +498,8 @@ export async function setBranchDoors(
   if (!(key in read.manifest.roots)) return { ok: false, failure: 'no-branch', reason: 'not published yet' }
 
   const doors = { ...(read.manifest.doors ?? {}), [key]: wanted }
-  const put = await putHiveManifest(indexHost, read.manifest.roots, doors)
+  const put = await putHiveManifest(indexHost, read.manifest.roots, doors,
+    read.manifest.createdAt, read.manifest.signedContent)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
   return { ok: true }
 }

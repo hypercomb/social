@@ -6,7 +6,12 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist'))
-const required = ['index.html', 'main.js', 'hypercomb.worker.js', 'hypercomb-core.runtime.js']
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const metadata = JSON.parse(await readFile(resolve(packageRoot, 'package.json'), 'utf8'))
+if (Object.keys(metadata.dependencies || {}).length) {
+  throw new Error('pure host: the installed npm package must have no runtime dependencies')
+}
+const required = ['index.html', 'theme.css', 'main.js', 'hypercomb.worker.js', 'hypercomb-core.runtime.js']
 for (const name of required) await stat(resolve(dist, name))
 
 const pin = (await readFile(resolve(dist, 'pin'), 'utf8')).trim()

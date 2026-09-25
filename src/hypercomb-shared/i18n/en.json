@@ -3190,7 +3190,7 @@
   "hosts.visit-tip": "Open {host} in a new tab — try what it serves on its own domain, against its own storage",
   "hosts.probing": "asking…",
   "hosts.creations.title": "Creations on {host}",
-  "hosts.creations.note": "What people made on this domain. Showing one adds a shaded tile to your hive. Serving it on your domain requires choosing a local route.",
+  "hosts.creations.note": "What people made on this domain. Showing one adds a shaded tile to your hive. Serving it from a domain of your own requires choosing a local route.",
   "hosts.creations.show": "show",
   "hosts.creations.shown": "shown",
   "hosts.creations.show-title": "Show {name} in your hive — it stands shaded until you walk into it",

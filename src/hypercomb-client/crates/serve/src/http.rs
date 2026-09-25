@@ -64,6 +64,9 @@ impl Reply {
 pub struct Request {
     pub method: String,
     pub target: String,
+    /// The authority the client addressed, as sent on the wire. The router
+    /// validates it before deriving any location from it.
+    pub host: Option<String>,
     pub keep_alive: bool,
 }
 
@@ -91,6 +94,7 @@ pub fn read_request(reader: &mut BufReader<&TcpStream>) -> io::Result<Option<Req
     // override either way.
     let mut keep_alive = !version.starts_with("HTTP/1.0");
     let mut has_body = false;
+    let mut host = None;
 
     loop {
         line.clear();
@@ -109,6 +113,13 @@ pub fn read_request(reader: &mut BufReader<&TcpStream>) -> io::Result<Option<Req
         let value = value.trim();
         if name.eq_ignore_ascii_case("connection") {
             keep_alive = !value.eq_ignore_ascii_case("close");
+        } else if name.eq_ignore_ascii_case("host") {
+            // More than one Host header is ambiguous. Treat the authority as
+            // unusable rather than letting the last header choose a hive.
+            if host.is_some() {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "multiple Host headers"));
+            }
+            host = Some(value.to_string());
         } else if name.eq_ignore_ascii_case("content-length") {
             has_body = value.trim() != "0";
         } else if name.eq_ignore_ascii_case("transfer-encoding") {
@@ -122,7 +133,7 @@ pub fn read_request(reader: &mut BufReader<&TcpStream>) -> io::Result<Option<Req
         keep_alive = false;
     }
 
-    Ok(Some(Request { method, target, keep_alive }))
+    Ok(Some(Request { method, target, host, keep_alive }))
 }
 
 fn status_text(status: u16) -> &'static str {

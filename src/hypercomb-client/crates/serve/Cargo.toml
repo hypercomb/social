@@ -8,8 +8,9 @@ license.workspace = true
 
 [dependencies]
 hypercomb-host.workspace = true
+hypercomb-protocol.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-hypercomb-protocol.workspace = true
 hypercomb-store.workspace = true
 tempfile.workspace = true

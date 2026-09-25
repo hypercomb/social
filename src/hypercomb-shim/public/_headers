@@ -3,7 +3,7 @@
 # differently:
 #
 #   /<sig>, /content/<sig>  — content-addressed. The name IS the hash, so the
-#                             bytes behind it can never change. Immutable.
+#                             bytes behind it never change.
 #   /vendor, /core          — built, replaced under a fixed name. Cache, but
 #                             keep a revalidation path.
 #   the worker + env.js     — the only code channel left. A stale service
@@ -26,11 +26,9 @@
   Referrer-Policy: no-referrer
   Access-Control-Allow-Origin: *
 
-/content/*
-  Cache-Control: public, max-age=31536000, immutable
-
-# These two addresses are mutable indexes into the immutable heap. Keep the
-# narrower rules after /content/* so Pages-style hosts do not freeze them.
+# Mutable indexes must never inherit an immutable /content/* rule. Pages
+# combines overlapping _headers entries, so a broad immutable rule can freeze
+# a manifest even when a narrower no-store rule follows it.
 /content/manifest.json
   Cache-Control: no-cache, no-store, must-revalidate
 /content/44150aa24d2f2a1c1b544530e2f7e177cde71130f882f37984d0cdba16bf2363/*

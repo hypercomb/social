@@ -1,5 +1,5 @@
 // core/history.service.ts
-import { CHILD_SLOTS, EffectBus, MARKER_CEILING, SignatureService, SignatureStore, USAGE_IOC_KEY, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, homeMoleculeKey, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, rootMoleculeAddress, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, MARKER_CEILING, SignatureService, SignatureStore, USAGE_IOC_KEY, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, homeMoleculeKey, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, rootMoleculeAddress, writeLayerMarker, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -1094,11 +1094,7 @@ export class HistoryService {
         // Null = past the 8-digit ceiling. Refuse rather than pad-and-hope:
         // a nine-digit name is written but invisible to every reader.
         if (!seedMarkerName) throw new Error('[history] seed marker is past the marker ceiling')
-        const seedHandle = await bag.getFileHandle(seedMarkerName, { create: true })
-        const seedRecord: MarkerRecord = { layer: seeded }
-        const seedBytes = new TextEncoder().encode(JSON.stringify(seedRecord))
-        const seedWritable = await seedHandle.createWritable()
-        try { await seedWritable.write(seedBytes.buffer as ArrayBuffer) } finally { await seedWritable.close() }
+        const { bytes: seedBytes } = await writeLayerMarker(bag, seeded, seedMarkerName)
         EffectBus.emit('history:marker-wrote', {
           lineageSig: locationSig,
           markerName: seedMarkerName,
@@ -1142,11 +1138,7 @@ export class HistoryService {
       ? markerNameOf(knownList.reduce((max, e) => Math.max(max, Number(e.filename) || 0), 0) + 1)
       : await this.#nextMarkerName(bag, locationSig)
     if (!markerName) throw new Error(`[history] lineage ${locationSig.slice(0, 8)}… is at the marker ceiling; refusing to mint an out-of-range name`)
-    const markerHandle = await bag.getFileHandle(markerName, { create: true })
-    const markerRecord: MarkerRecord = { layer: layerSig }
-    const markerBytes = new TextEncoder().encode(JSON.stringify(markerRecord))
-    const markerWritable = await markerHandle.createWritable()
-    try { await markerWritable.write(markerBytes.buffer as ArrayBuffer) } finally { await markerWritable.close() }
+    const { bytes: markerBytes } = await writeLayerMarker(bag, layerSig, markerName)
     EffectBus.emit('history:marker-wrote', {
       lineageSig: locationSig,
       markerName,
@@ -1235,11 +1227,18 @@ export class HistoryService {
 
     // Write the 00000000 marker as a POINTER RECORD pointing at the
     // empty layer's sig.
-    const handle = await bag.getFileHandle('00000000', { create: true })
-    const markerRecord: MarkerRecord = { layer: sig }
-    const markerBytes = new TextEncoder().encode(JSON.stringify(markerRecord))
-    const writable = await handle.createWritable()
-    try { await writable.write(markerBytes.buffer as ArrayBuffer) } finally { await writable.close() }
+    // Two first reads of a new bag can both pass the existence check above
+    // while the sign/store awaits run. writeLayerMarker refuses to replace a
+    // marker; the empty layer is determined by the name, so a racer that got
+    // here first wrote these same bytes and there is nothing left to do.
+    let markerBytes: Uint8Array
+    try { ({ bytes: markerBytes } = await writeLayerMarker(bag, sig, '00000000')) }
+    catch (error) {
+      let raced = true
+      try { await bag.getFileHandle('00000000', { create: false }) } catch { raced = false }
+      if (!raced) throw error
+      return
+    }
     if (locationSig) {
       EffectBus.emit('history:marker-wrote', {
         lineageSig: locationSig,

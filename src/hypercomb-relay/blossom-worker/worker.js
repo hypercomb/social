@@ -172,10 +172,8 @@ function resolveSite(env, hostname) {
 }
 
 async function anyPublishedRoot(env, site, read = indexReader(env), host = '') {
-  for (const publisher of site.publishers ?? []) {
-    if (await publishedRoot(env, publisher, site.lineage, read, host)) return true
-  }
-  return false
+  const publisher = site.publishers?.find(p => p.primary) || site.publishers?.[0]
+  return !!publisher && !!await publishedRoot(env, publisher, site.lineage, read, host)
 }
 
 // The icon files the shells link and browsers probe unasked. A closed list:
@@ -215,9 +213,10 @@ async function verifiedIndex(env, pubkey) {
   if (!(await verifyEventSig(evt))) return null
   let content
   try { content = JSON.parse(evt.content) } catch { return null }
-  if (!content?.roots || typeof content.roots !== 'object') return null
+  if (!content?.roots || typeof content.roots !== 'object' || Array.isArray(content.roots)
+    || !validOfferingDeclarations(content.offerings)) return null
   const doors = content.doors && typeof content.doors === 'object' && !Array.isArray(content.doors) ? content.doors : {}
-  return { roots: content.roots, doors, createdAt: Number(evt.created_at || 0) }
+  return { roots: content.roots, doors, offerings: content.offerings ?? {}, createdAt: Number(evt.created_at || 0) }
 }
 
 /** One request's index reads, memoized by pubkey. The ledger asks the same
@@ -338,14 +337,11 @@ async function bindingsEnv(env, read = indexReader(env)) {
   return view
 }
 
-/** Does the signed doors map open this lineage on this host? A lineage with
- *  no doors entry opens everywhere (every index before doors existed); one
- *  with an entry opens only on a host at or under a listed domain. This is
- *  the per-domain on/off switch — signed with the roots, so only the
- *  publisher can flip it. */
+/** A signed index opens only the domains explicitly listed for a lineage.
+ *  Older events without a doors entry require a fresh publication. */
 function opensOn(index, lineage, host) {
   const listed = index?.doors?.[lineage]
-  if (!host || !Array.isArray(listed)) return true
+  if (!host || !Array.isArray(listed)) return false
   const h = String(host).toLowerCase()
   return listed.some((z) => {
     const zone = String(z || '').toLowerCase()
@@ -354,10 +350,20 @@ function opensOn(index, lineage, host) {
 }
 
 async function publishedRoot(env, publisher, lineage, read = indexReader(env), host = '') {
+  if (host) {
+    const site = resolveSite(env, host).site
+    const selected = site?.publishers?.find(p => p.primary) || site?.publishers?.[0]
+    if (!site || site.lineage !== lineage || selected?.pubkey !== publisher.pubkey) return null
+  }
   const index = await read(publisher.pubkey)
   const head = String(index?.roots?.[lineage] || '').toLowerCase()
   if (!SIG_RE.test(head)) return null
   if (!opensOn(index, lineage, host)) return null
+  // A published route is a location, not a mutable signature alias. The
+  // signed index authorizes the route; its hostname bag names the current
+  // revision. A disagreement is a closed door until the publisher repairs it.
+  if (host && !siteBinding(env, host)?.frontDoor
+    && await currentRouteHead(env, host, head) !== head) return null
   // THE ARRIVAL PLAN, beside the root under the same signature: the bees
   // this branch's first view needs (hypercomb-runtime arrival-plan.ts).
   const plan = String(index?.roots?.[`plan:${lineage}`] || '').toLowerCase()
@@ -372,9 +378,10 @@ async function publishedRoot(env, publisher, lineage, read = indexReader(env), h
 
 async function serveSiteDescriptor(request, env, site) {
   const selected = String(new URL(request.url).searchParams.get('publisher') || '').toLowerCase()
-  const allowed = selected
-    ? site.publishers.find((p) => p.pubkey === selected)
-    : site.publishers.find((p) => p.primary) || site.publishers[0]
+  const allowed = site.publishers.find((p) => p.primary) || site.publishers[0]
+  if (selected && selected !== allowed?.pubkey) {
+    return json(404, { error: 'this publisher does not own the route location' }, { 'Cache-Control': 'no-store' })
+  }
   if (!allowed) return json(404, { error: 'no approved publisher is configured for this domain' }, { 'Cache-Control': 'no-store' })
   const publication = await publishedRoot(env, allowed, site.lineage, indexReader(env), new URL(request.url).hostname)
   if (!publication) return json(404, { error: 'the approved publisher has not published this lineage yet' }, { 'Cache-Control': 'no-store' })
@@ -515,7 +522,8 @@ async function servePublications(request, env) {
   // The names publishing brought to life. An explicit binding already claimed
   // its lineage above; the first zone to name an implicit one keeps it.
   for (const zone of wildcardZones(bindings)) {
-    for (const publisher of bindings[zone].publishers) {
+    const publisher = bindings[zone].publishers.find(p => p.primary) || bindings[zone].publishers[0]
+    if (publisher) {
       const index = await read(publisher.pubkey)
       if (!index) continue
       for (const [lineage, sig] of Object.entries(index.roots)) {
@@ -550,7 +558,391 @@ async function servePublications(request, env) {
 // (hypercomb-relay/replicate.js PUBLIC_POOL_MEANINGS). Every other address is
 // "no pool at this address", so a derivable one (a word's pool, a path's
 // history bag) never enumerates what a publisher switched off.
-const PUBLIC_POOL_MEANINGS = ['host:packages', 'community:hosts', 'community:offers']
+const HOST_OFFERINGS_MEANING = 'host:offerings'
+const PUBLIC_POOL_MEANINGS = ['host:packages', HOST_OFFERINGS_MEANING, 'community:hosts', 'community:offers']
+const ROUTE_MARKER_RE = /^\d{8}$/
+const PUBLIC_LEAF_MEANINGS = new Set(['themes:text'])
+
+/** An optional signed public switch, keyed by a creation's stable location.
+ *  The ordinary meaning pool stays private: only these selected locations
+ *  enter the public host:offerings projection. */
+function validOfferingDeclarations(raw) {
+  if (raw === undefined) return true
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  return Object.entries(raw).every(([location, offer]) =>
+    SIG_RE.test(location) && offer && typeof offer === 'object' && !Array.isArray(offer)
+    && typeof offer.meaning === 'string' && offer.meaning.includes(':') && offer.meaning.length <= 160
+    && typeof offer.key === 'string' && offer.key.length > 0 && offer.key.length <= 256
+    && SIG_RE.test(String(offer.head || ''))
+    && typeof offer.title === 'string' && offer.title.trim().length > 0 && offer.title.length <= 120
+    && typeof offer.host === 'string' && offer.host.length <= 253
+    && offer.host.includes('.') && offer.host.split('.').every(label => DNS_LABEL_RE.test(label)))
+}
+
+async function creationLocationMatches(location, offer) {
+  return await poolAddress(`${offer.meaning}:${offer.key}`) === location
+}
+
+/** A shared bucket must not merge two hosts' equal meaning:key locations.
+ *  The URL stays /content/<location>/ on each host; only R2 keys are scoped. */
+async function creationBagLocation(host, location) {
+  return `locations/${await poolAddress(host.toLowerCase())}/${location}`
+}
+
+/** Verify the immediate typed closure before an offering is advertised.
+ *  Further references inside arbitrary beehaviors still belong to the
+ *  publisher's closure stage; a text theme's layer has no such references. */
+async function heldCreationBytes(env, sig, maxBytes = 1_048_576) {
+  const object = await env.CONTENT?.get?.(sig)
+  if (!object || Number(object.size ?? 0) > maxBytes) return null
+  const bytes = new Uint8Array(await object.arrayBuffer())
+  return bytes.byteLength <= maxBytes && await sha256Hex(bytes) === sig ? bytes : null
+}
+
+async function hasCreationHead(env, offer) {
+  if (!PUBLIC_LEAF_MEANINGS.has(offer.meaning)) return false
+  const metaBytes = await heldCreationBytes(env, offer.head, 65_536)
+  if (!metaBytes) return false
+  let meta
+  try { meta = JSON.parse(new TextDecoder().decode(metaBytes)) } catch { return false }
+  if (!meta || typeof meta !== 'object' || meta.meta !== 1
+    || meta.relation !== offer.meaning || !SIG_RE.test(String(meta.layer || ''))
+    || ['layer', 'resource', 'dependency', 'bee'].filter(key => meta[key] !== undefined).length !== 1) return false
+  const layerBytes = await heldCreationBytes(env, meta.layer)
+  if (!layerBytes) return false
+  let layer
+  try { layer = JSON.parse(new TextDecoder().decode(layerBytes)) } catch { return false }
+  // This first public leaf has no executable reference closure. `source` is
+  // only provenance and may name an older revision without being installed.
+  return !!layer && typeof layer === 'object' && !Array.isArray(layer)
+    && layer.name === 'text-theme'
+    && typeof layer.label === 'string' && layer.label.trim().length > 0 && layer.label.length <= 80
+    && typeof layer.read === 'string' && layer.read.length > 0
+    && typeof layer.code === 'string' && layer.code.length > 0
+    && (layer.source === undefined || SIG_RE.test(String(layer.source)))
+    && Object.keys(layer).every(key => ['name', 'label', 'read', 'code', 'source'].includes(key))
+}
+
+function creationMember(pubkey, location, offer) {
+  return { kind: 'host:creation', meaning: offer.meaning, key: offer.key,
+    location, pubkey, title: offer.title, host: offer.host }
+}
+
+async function retainCreationMember(env, pubkey, location, offer) {
+  if (!env.CONTENT?.put || !env.CONTENT?.get) return false
+  const bytes = new TextEncoder().encode(JSON.stringify(creationMember(pubkey, location, offer)))
+  const name = await sha256Hex(bytes)
+  const key = `${await poolAddress(HOST_OFFERINGS_MEANING)}/${name}`
+  const existing = await env.CONTENT.get(key)
+  if (existing) return await sha256Hex(new Uint8Array(await existing.arrayBuffer())) === name
+  const written = await env.CONTENT.put(key, bytes, {
+    onlyIf: new Headers({ 'If-None-Match': '*' }),
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+  })
+  if (written !== null) return true
+  const raced = await env.CONTENT.get(key)
+  return !!raced && await sha256Hex(new Uint8Array(await raced.arrayBuffer())) === name
+}
+
+/** One location per DNS name. Only a served, signed route may enumerate it;
+ *  the ordinary pool route intentionally never lists arbitrary location bags. */
+async function routeLocation(env, host) {
+  return `${await poolAddress(host.toLowerCase())}/`
+}
+
+async function locationMarkers(env, location) {
+  if (!env.CONTENT?.list) return null
+  const prefix = `${location}/`
+  const names = []
+  let cursor
+  do {
+    const page = await env.CONTENT.list({ prefix, cursor, limit: 1000 })
+    for (const object of page.objects ?? []) {
+      const name = String(object.key ?? '').slice(prefix.length)
+      if (ROUTE_MARKER_RE.test(name)) names.push(name)
+    }
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+  return [...new Set(names)].sort()
+}
+
+async function routeMarkers(env, host) {
+  return locationMarkers(env, await poolAddress(host.toLowerCase()))
+}
+
+async function locationMarkerHead(env, location, name) {
+  if (!ROUTE_MARKER_RE.test(name) || !env.CONTENT?.get) return null
+  const object = await env.CONTENT.get(`${location}/${name}`)
+  if (!object || Number(object.size ?? 0) > 65_536) return null
+  const bytes = await object.arrayBuffer()
+  if (bytes.byteLength > 65_536) return null
+  try {
+    const layer = JSON.parse(new TextDecoder().decode(bytes))?.layer
+    return SIG_RE.test(String(layer)) ? String(layer) : null
+  } catch { return null }
+}
+
+async function routeMarkerHead(env, host, name) {
+  return locationMarkerHead(env, await poolAddress(host.toLowerCase()), name)
+}
+
+async function putLocationMarker(env, location, name, head) {
+  if (!env.CONTENT?.put || !env.CONTENT?.head || !ROUTE_MARKER_RE.test(name) || !SIG_RE.test(head)) return false
+  const key = `${location}/${name}`
+  // A numbered member is immutable. The conditional R2 put closes the race
+  // between two writers that both saw the next number free. There is no
+  // transaction with the signed-index KV; reads verify both authorities.
+  if (await env.CONTENT.head(key)) return false
+  const written = await env.CONTENT.put(key, new TextEncoder().encode(JSON.stringify({ layer: head })), {
+    onlyIf: new Headers({ 'If-None-Match': '*' }),
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+  })
+  return written !== null
+}
+
+async function putRouteMarker(env, host, name, head) {
+  return putLocationMarker(env, await poolAddress(host.toLowerCase()), name, head)
+}
+
+/** Existing published routes get one absence-only migration marker. Once a
+ *  bag exists, a GET never advances it from the index or repairs a mismatch. */
+async function currentRouteHead(env, host, signedHead) {
+  const markers = await routeMarkers(env, host)
+  if (!markers) return null
+  if (markers.length === 0) {
+    if (!SIG_RE.test(String(signedHead))) return null
+    if (await putRouteMarker(env, host, '00000000', signedHead)) return signedHead
+    // Another first reader may have seeded the same marker. Re-read it;
+    // never use this branch to append a changed index head.
+    const seeded = await routeMarkers(env, host)
+    return seeded?.length ? routeMarkerHead(env, host, seeded.at(-1)) : null
+  }
+  return routeMarkerHead(env, host, markers.at(-1))
+}
+
+/** Called only after a publisher-authenticated, signed index update. */
+async function advanceRouteHead(env, host, head) {
+  return advanceLocationHead(env, await poolAddress(host.toLowerCase()), head)
+}
+
+async function advanceLocationHead(env, location, head) {
+  const markers = await locationMarkers(env, location)
+  if (!markers) return false
+  const latest = markers.at(-1)
+  if (latest && await locationMarkerHead(env, location, latest) === head) return true
+  const next = latest ? Number(latest) + 1 : 0
+  if (!Number.isSafeInteger(next) || next > 99_999_999) return false
+  return putLocationMarker(env, location, String(next).padStart(8, '0'), head)
+}
+
+/** A direct bag read is scoped to this route and still gated by its signed
+ *  publisher. A caller cannot enumerate private pools by guessing a hash. */
+async function serveRouteLocation(request, env, site, member) {
+  const host = new URL(request.url).hostname.toLowerCase()
+  const read = indexReader(env)
+  const approved = site.publishers.find(p => p.primary) || site.publishers[0]
+  if (!approved || !await publishedRoot(env, approved, site.lineage, read, host)) {
+    return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store', ...CORS } })
+  }
+  const names = await routeMarkers(env, host)
+  if (!names?.length) return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store', ...CORS } })
+  if (member) {
+    if (!names.includes(member)) return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store', ...CORS } })
+    const object = await env.CONTENT.get(`${await routeLocation(env, host)}${member}`)
+    if (!object || !await routeMarkerHead(env, host, member)) {
+      return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store', ...CORS } })
+    }
+    return new Response(request.method === 'HEAD' ? null : object.body, {
+      status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'public, max-age=31536000, immutable', ...CORS },
+    })
+  }
+  return new Response(request.method === 'HEAD' ? null : names.join('\n') + '\n', {
+    status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS },
+  })
+}
+
+function selectedHostPublisher(env, host) {
+  const site = siteBindings(env)[host]
+  return site?.publishers?.find(p => p.primary) || site?.publishers?.[0] || null
+}
+
+async function activeCreation(env, host, location, read) {
+  const publisher = selectedHostPublisher(env, host)
+  if (!publisher) return null
+  const index = await read(publisher.pubkey)
+  const offer = index?.offerings?.[location]
+  if (!offer || offer.host !== host || !PUBLIC_LEAF_MEANINGS.has(offer.meaning)
+    || !await creationLocationMatches(location, offer)) return null
+  const bag = await creationBagLocation(host, location)
+  const markers = await locationMarkers(env, bag)
+  if (!markers?.length || await locationMarkerHead(env, bag, markers.at(-1)) !== offer.head) return null
+  if (!await hasCreationHead(env, offer)) return null
+  return { offer, publisher, markers, bag }
+}
+
+/** A declared creation alone opens its location bag on the selected host.
+ *  Withdrawn declarations stop enumeration; named immutable bytes remain on
+ *  the flat heap. Unknown hashes continue to their normal route. */
+async function serveCreationLocation(request, env, host, location, member) {
+  const publisher = selectedHostPublisher(env, host)
+  if (!publisher) return null
+  const read = indexReader(env)
+  const index = await read(publisher.pubkey)
+  if (!index?.offerings?.[location] || index.offerings[location].host !== host) return null
+  const headers = { 'Cache-Control': 'no-store', ...CORS }
+  const current = await activeCreation(env, host, location, read)
+  if (!current) return new Response(null, { status: 404, headers })
+  if (member) {
+    if (!current.markers.includes(member)) return new Response(null, { status: 404, headers })
+    const object = await env.CONTENT.get(`${current.bag}/${member}`)
+    if (!object || !await locationMarkerHead(env, current.bag, member)) return new Response(null, { status: 404, headers })
+    return new Response(request.method === 'HEAD' ? null : object.body, {
+      status: 200, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'public, max-age=31536000, immutable' },
+    })
+  }
+  return new Response(request.method === 'HEAD' ? null : current.markers.join('\n') + '\n', {
+    status: 200, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' },
+  })
+}
+
+/** The public pool discovers open locations in this domain. The location's
+ *  sigbag is the revision history; offering members are not root history. */
+async function offeredMembers(request, env) {
+  const url = new URL(request.url)
+  const host = url.hostname.toLowerCase()
+  const scoped = await bindingsEnv(env)
+  const bindings = siteBindings(scoped)
+  const read = indexReader(scoped)
+  const zones = wildcardZones(bindings)
+  const portal = bindings[host]?.frontDoor === true || zones.includes(host)
+  const offered = new Map()
+  const add = async (door, site) => {
+    if (site.frontDoor) return
+    const publisher = site.publishers?.find(p => p.primary) || site.publishers?.[0]
+    if (publisher) {
+      // Membership names a stable location. Its signed route authorization
+      // can be projected without walking every location bag; the member's
+      // reader and the route itself verify the bag's current marker.
+      const index = await read(publisher.pubkey)
+      if (!SIG_RE.test(String(index?.roots?.[site.lineage] || '').toLowerCase())
+        || !opensOn(index, site.lineage, door)) return
+      const key = `${publisher.pubkey}:${site.lineage}:${door}`
+      if (!offered.has(key)) offered.set(key, {
+        kind: 'host:offering', title: site.title, route: `${url.protocol}//${door}/`,
+        lineage: site.lineage, pubkey: publisher.pubkey,
+        location: await poolAddress(door),
+      })
+    }
+  }
+  for (const [door, site] of Object.entries(bindings)) {
+    if (!site.routed || (portal ? !withinZone(door, host) : door !== host)) continue
+    await add(door, site)
+  }
+  if (portal && zones.includes(host)) {
+    for (const publisher of bindings[host]?.publishers ?? []) {
+      const index = await read(publisher.pubkey)
+      if (!index) continue
+      for (const [lineage, head] of Object.entries(index.roots)) {
+        if (lineage === bindings[host].lineage) continue
+        if (!DNS_LABEL_RE.test(lineage) || !SIG_RE.test(String(head || '').toLowerCase())) continue
+        const door = `${lineage}.${host}`
+        const resolved = resolveSite(scoped, door)
+        if (resolved.implicit && resolved.site?.lineage === lineage) await add(door, resolved.site)
+      }
+    }
+  } else if (!bindings[host]) {
+    const resolved = resolveSite(scoped, host)
+    if (resolved.implicit && resolved.site) await add(host, resolved.site)
+  }
+  const publisher = selectedHostPublisher(scoped, host)
+  if (publisher) {
+    const index = await read(publisher.pubkey)
+    for (const [location, offer] of Object.entries(index?.offerings ?? {})) {
+      if (offer.host !== host || !await activeCreation(scoped, host, location, read)) continue
+      offered.set(`creation:${publisher.pubkey}:${location}`, creationMember(publisher.pubkey, location, offer))
+    }
+  }
+  const encoder = new TextEncoder()
+  const members = []
+  for (const record of offered.values()) {
+    const bytes = encoder.encode(JSON.stringify(record))
+    const name = await sha256Hex(bytes)
+    members.push({ name, bytes })
+  }
+  return members.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** The signed index may publish many kinds of roots. Only route names the
+ *  operator actually serves, with this key selected as publisher, get a
+ *  location marker. Private and package pools never pass this route test. */
+async function routeHeadsForIndex(env, pubkey, evt) {
+  const scoped = await bindingsEnv(env)
+  const bindings = siteBindings(scoped)
+  const zones = wildcardZones(bindings)
+  const index = JSON.parse(evt.content)
+  const found = new Map()
+  for (const [host, site] of Object.entries(bindings)) {
+    if (!site.routed || site.frontDoor) continue
+    const selected = site.publishers.find(p => p.primary) || site.publishers[0]
+    const head = String(index.roots[site.lineage] || '').toLowerCase()
+    if (selected?.pubkey === pubkey && SIG_RE.test(head) && opensOn(index, site.lineage, host)) {
+      found.set(host, head)
+    }
+  }
+  for (const zone of zones) {
+    const selected = bindings[zone].publishers.find(p => p.primary) || bindings[zone].publishers[0]
+    if (selected?.pubkey !== pubkey) continue
+    for (const [lineage, rawHead] of Object.entries(index.roots)) {
+      if (!DNS_LABEL_RE.test(lineage) || lineage === 'content') continue
+      const head = String(rawHead || '').toLowerCase()
+      const host = `${lineage}.${zone}`
+      const resolved = resolveSite(scoped, host)
+      if (SIG_RE.test(head) && resolved.implicit && resolved.site?.lineage === lineage
+        && opensOn(index, lineage, host)) found.set(host, head)
+    }
+  }
+  return found
+}
+
+async function advancePublishedLocations(env, pubkey, evt) {
+  for (const [host, head] of await routeHeadsForIndex(env, pubkey, evt)) {
+    if (!await advanceRouteHead(env, host, head)) return false
+  }
+  const scoped = await bindingsEnv(env)
+  const { offerings = {} } = JSON.parse(evt.content)
+  for (const [location, offer] of Object.entries(offerings)) {
+    if (selectedHostPublisher(scoped, offer.host)?.pubkey !== pubkey) continue
+    if (!PUBLIC_LEAF_MEANINGS.has(offer.meaning)) continue
+    if (!await hasCreationHead(env, offer)
+      || !await retainCreationMember(env, pubkey, location, offer)
+      || !await advanceLocationHead(env, await creationBagLocation(offer.host, location), offer.head)) return false
+  }
+  return true
+}
+
+async function serveOfferingsPool(request, env, member) {
+  const headers = { 'Cache-Control': member ? 'public, max-age=31536000, immutable' : 'no-store', ...CORS }
+  if (member) {
+    let found = null
+    if (env.CONTENT?.get) {
+      const held = await env.CONTENT.get(`${await poolAddress(HOST_OFFERINGS_MEANING)}/${member}`)
+      if (held) {
+        const bytes = new Uint8Array(await held.arrayBuffer())
+        if (await sha256Hex(bytes) === member) found = { name: member, bytes }
+      }
+    }
+    if (!found) found = (await offeredMembers(request, env)).find(row => row.name === member)
+    return found
+      ? new Response(request.method === 'HEAD' ? null : found.bytes, { status: 200, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' } })
+      : new Response(null, { status: 404, headers })
+  }
+  const members = await offeredMembers(request, env)
+  return members.length
+    ? new Response(request.method === 'HEAD' ? null : members.map(row => row.name).join('\n') + '\n', { status: 200, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' } })
+    : new Response(null, { status: 404, headers })
+}
 
 async function servePoolListing(request, env, sig) {
   const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
@@ -596,6 +988,14 @@ async function serveFrontDoor(request, env) {
   const headers = new Headers(upstream.headers)
   headers.set('Access-Control-Allow-Origin', '*')
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
+}
+
+// Some byte mirrors also welcome people. This is a read-side shell on the
+// same hostname, not a SITE_BINDINGS entry: the mirror's signed PUT, hive and
+// content routes must keep working exactly as before.
+function servesHostDoor(env, hostname) {
+  return String(env.HOST_DOOR_HOSTS || '').split(/[\s,]+/)
+    .some(host => host && host.toLowerCase() === hostname.toLowerCase())
 }
 
 // ── the sandbox door ─────────────────────────────────────────────────────
@@ -1317,6 +1717,16 @@ async function forgetSigs(request, env) {
   if (sigs.length > FORGET_MAX) return text(413, `at most ${FORGET_MAX} sigs per call`)
   const index = await verifiedIndex(env, auth.pubkey)
   const heads = new Set(Object.values(index?.roots ?? {}).map((s) => String(s).toLowerCase()))
+  for (const offer of Object.values(index?.offerings ?? {})) {
+    heads.add(offer.head)
+    const metaBytes = await heldCreationBytes(env, offer.head, 65_536)
+    if (metaBytes) {
+      try {
+        const meta = JSON.parse(new TextDecoder().decode(metaBytes))
+        if (SIG_RE.test(String(meta?.layer || ''))) heads.add(meta.layer)
+      } catch { /* A malformed head cannot name a protected layer. */ }
+    }
+  }
   const removed = []
   const kept = {}
   for (const sig of sigs) {
@@ -1439,6 +1849,14 @@ function validHiveEventContent(evt) {
     if (typeof key !== 'string' || !key.trim()) return false
     if (!SIG_RE.test(String(sig || ''))) return false
   }
+  return validOfferingDeclarations(parsed.offerings)
+}
+
+async function validOfferingLocations(evt) {
+  const { offerings = {} } = JSON.parse(evt.content)
+  for (const [location, offer] of Object.entries(offerings)) {
+    if (!await creationLocationMatches(location, offer)) return false
+  }
   return true
 }
 
@@ -1459,11 +1877,16 @@ async function putHive(request, env, pubkey) {
   if (String(evt?.pubkey || '').toLowerCase() !== pubkey) return text(403, 'index event pubkey does not match the hive being written')
   if (!(await verifyEventSig(evt))) return text(401, 'invalid index event signature')
   if (!validHiveEventContent(evt)) return text(400, 'index content is not {"v","roots":{lineageKey: sig}}')
+  if (!await validOfferingLocations(evt)) return text(400, 'offering location is not the hash of its meaning and key')
 
   let stored = null
   try { stored = JSON.parse((await env.HIVES.get(pubkey)) ?? 'null') } catch { stored = null }
   if (stored) {
-    if (String(stored.id || '') === String(evt.id || '')) return text(200, 'index already current')
+    if (String(stored.id || '') === String(evt.id || '')) {
+      return await advancePublishedLocations(env, pubkey, evt)
+        ? text(200, 'index already current')
+        : text(503, 'signed index is held but a route location is not current; retry this index')
+    }
     if (Number(evt.created_at || 0) <= Number(stored.created_at || 0)) {
       return text(409, 'a newer (or same-age) index is already held - refusing rollback')
     }
@@ -1471,6 +1894,9 @@ async function putHive(request, env, pubkey) {
   await env.HIVES.put(pubkey, JSON.stringify(evt))
   await noteTranslators(env, pubkey, evt)
   await noteAssessors(env, pubkey, evt)
+  if (!await advancePublishedLocations(env, pubkey, evt)) {
+    return text(503, 'signed index is held but a route location is not current; retry this index')
+  }
   // NOTE: the message rides the X-Reason header (ByteString) — ASCII only.
   return text(stored ? 200 : 201, `hive index updated for ${pubkey.slice(0, 12)}...`)
 }
@@ -1714,6 +2140,41 @@ export default {
       return text(403, 'a sandbox door runs no worker from the heap')
     }
 
+    // The only exposed location bag is this DNS door's own hashed name. Its
+    // newest numbered marker is the head, but the publisher's signed index
+    // must still authorize that exact route and agree with the marker.
+    const routeBagPath = pathname.match(/^\/(?:content\/)?([0-9a-f]{64})\/(?:([0-9]{8}))?$/)
+    if (routeBagPath && routeBagPath[1] === await poolAddress(requestUrl.hostname.toLowerCase())) {
+      if (method !== 'GET' && method !== 'HEAD') return text(405, 'method not allowed')
+      const routed = await route()
+      if (!routed.site || routed.site.frontDoor) return new Response(null, { status: 404, headers: CORS })
+      return serveRouteLocation(request, routed.env, routed.site, routeBagPath[2])
+    }
+
+    if (routeBagPath && pathname.startsWith('/content/')
+      && !((await Promise.all(PUBLIC_POOL_MEANINGS.map(poolAddress))).includes(routeBagPath[1]))
+      && (method === 'GET' || method === 'HEAD')) {
+      const location = routeBagPath[1]
+      const scoped = await bindingsEnv(env)
+      const creation = await serveCreationLocation(request, scoped, requestUrl.hostname.toLowerCase(),
+        location, routeBagPath[2])
+      if (creation) return creation
+      // An undeclared R2 bag is private even if the static visitor also has
+      // files under /content/. With no R2 bag, the established asset path may
+      // still answer a shipped directory such as the package pool.
+      if ((await locationMarkers(env, await creationBagLocation(requestUrl.hostname.toLowerCase(), location)))?.length) {
+        return new Response(null, { status: 404, headers: CORS })
+      }
+    }
+
+    // A host's offering pool is its live, domain-scoped projection of signed
+    // hive heads. The pool address and its members are the entire catalog.
+    const offeringPath = pathname.match(/^\/(?:content\/)?([0-9a-f]{64})\/([0-9a-f]{64})?$/)
+    if (offeringPath && offeringPath[1] === await poolAddress(HOST_OFFERINGS_MEANING)) {
+      if (method === 'GET' || method === 'HEAD') return serveOfferingsPool(request, env, offeringPath[2])
+      return text(405, 'method not allowed')
+    }
+
     // Flat sig endpoint — the canonical read: https://<host>/<sig>.
     // Lowercase 64-hex only; this bucket is flat from birth (no legacy
     // typed-dir layout ever lands here, so no fallback probing).
@@ -1750,7 +2211,8 @@ export default {
         }
         // A front-door apex also serves the shim's OWN bytes (its pinned
         // bootstrap, its packages), which live with the card, not in the heap.
-        if (heap.status === 404 && siteBindings(env)[requestUrl.hostname.toLowerCase()]?.frontDoor) {
+        if (heap.status === 404 && (siteBindings(env)[requestUrl.hostname.toLowerCase()]?.frontDoor
+          || servesHostDoor(env, requestUrl.hostname))) {
           return serveFrontDoor(request, env)
         }
         return heap
@@ -1879,6 +2341,10 @@ export default {
     // banner. content.<zone> is exempt above — it IS the relay face.
     if (!site && siteZone && requestUrl.hostname !== `content.${siteZone}` && (method === 'GET' || method === 'HEAD')) {
       return nothingHere(requestUrl.hostname, siteZone)
+    }
+
+    if ((method === 'GET' || method === 'HEAD') && servesHostDoor(env, requestUrl.hostname)) {
+      return serveFrontDoor(request, env)
     }
 
     // Bare / names the endpoint (relay.js landing instinct, one line).

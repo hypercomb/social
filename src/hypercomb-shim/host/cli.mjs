@@ -8,11 +8,9 @@
 //   npx @hypercomb/host check <url>           verify any origin against the contract
 //
 // WHAT THIS PACKAGE SHIPS is a built `dist/` — a complete, servable origin: the
-// shell, the service worker, the pinned bootstrap bundle, the locale catalogs,
-// and whatever content the build included. There is deliberately no `build`
-// command: building needs the monorepo (essentials' module output, the shared
-// i18n catalogs), and a host is not supposed to compile anything. It serves
-// bytes that were signed elsewhere.
+// shell, the service worker, and the pinned bootstrap bundle. It carries no
+// application package or locale catalog. There is deliberately no `build`
+// command in the installed package: it serves bytes built for the platform.
 //
 // CREDENTIALS ARE NEVER HANDLED HERE. `deploy` shells out to wrangler, which
 // reads CLOUDFLARE_API_TOKEN from the environment or an existing login. Setting
@@ -37,9 +35,8 @@ const usage = `
                         [--domain <host>] [--branch <branch>]
   hypercomb-host check <url>               verify an origin against the host contract
 
-A host is a directory of static files — no server-side execution, no container,
-no origin to patch. Every byte it serves is content-addressed and verified by
-the reader, which is what makes a dumb host safe and a clever one unnecessary.
+A cold host serves the pure shell. Creations and revisions arrive through
+signed content and meaning pools; they are not bundled into this package.
 
 Deploy authenticates through wrangler: \`npx wrangler login\`, or set
 CLOUDFLARE_API_TOKEN. This tool never asks for, prints, or stores a token.
@@ -64,7 +61,7 @@ const requireDist = async () => {
     await access(resolve(dist, 'pin'))
   } catch {
     console.error(`[host] no built origin at ${dist}`)
-    console.error('[host] a published @hypercomb/host ships one; in the monorepo run `npm run build:shim`.')
+    console.error('[host] a published @hypercomb/host ships one; in the monorepo run `npm run build:shim:pure`.')
     process.exit(1)
   }
 }

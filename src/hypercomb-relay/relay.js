@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // hypercomb-relay — minimal Nostr relay AND HTTP content host for private swarm meetings
-// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--max-event-size 65536] [--content-dir ./content] [--writers hex1,hex2] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources]
+// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--max-event-size 65536] [--content-dir ./content] [--shell-dir ./host-shell] [--writers hex1,hex2] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources]
 //
 // env fallbacks (used when the matching --flag is absent):
 //   PORT             → port to listen on (Azure App Service injects this)
@@ -18,7 +18,7 @@
 
 import { createServer } from 'node:http'
 import { randomBytes, createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
@@ -50,6 +50,9 @@ function parseArgs(argv) {
     // dist/, rsync from elsewhere, manual copy). The relay serves only
     // files inside this dir — directory traversal is blocked.
     contentDir: envContentDir || resolve(__dirname, 'content'),
+    // Optional framework-free host shell. The relay's writable content heap
+    // remains separate; the shell is a deployable, read-only payload.
+    shellDir: String(process.env.HOST_SHELL_DIR ?? '').trim() || null,
     // Allowed-writer pubkeys for HTTP PUT (content backup). When unset
     // here, falls back to --pubkeys after parse; empty => writes disabled.
     // Each PUT carries a NIP-98 signed event whose pubkey must be in this set.
@@ -112,6 +115,7 @@ function parseArgs(argv) {
     else if (a === '--pubkeys' && next) { args.pubkeys = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
     else if (a === '--max-event-size' && next) { args.maxEventSize = Number(next); i++ }
     else if (a === '--content-dir' && next) { args.contentDir = resolve(next); i++ }
+    else if (a === '--shell-dir' && next) { args.shellDir = resolve(next); i++ }
     else if (a === '--writers' && next) { args.writers = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
     else if (a === '--max-body-bytes' && next) { args.maxBodyBytes = Number(next); i++ }
     else if (a === '--replication-origins' && next) { args.replicationOrigins = next.split(',').map(normalizeOrigin).filter(Boolean); i++ }
@@ -151,6 +155,9 @@ function normalizePubkey(raw) {
 }
 
 const cfg = parseArgs(process.argv)
+if (cfg.shellDir && (!existsSync(join(cfg.shellDir, 'index.html')) || !existsSync(join(cfg.shellDir, 'pin')))) {
+  throw new Error(`--shell-dir must contain index.html and pin: ${cfg.shellDir}`)
+}
 
 // Allowed-writer pubkeys for HTTP PUT. Defaults to the relay's event-auth
 // whitelist (--pubkeys) when --writers is absent. Empty set => writes are
@@ -860,6 +867,9 @@ function tryServeContent(req, res) {
   let urlPath
   try { urlPath = decodeURIComponent((req.url || '').split('?')[0]) } catch { return false }
   if (!urlPath || urlPath === '/') return false
+  // The pure host uses /content/<address>; older relay clients use /<address>.
+  // Both names read the same heap and the same public pool membership.
+  if (urlPath.startsWith('/content/')) urlPath = urlPath.slice('/content'.length)
   // Receipt documents contain private, capability-like signatures. They are
   // reachable only through authenticated /receipts, never through the legacy
   // generic content-directory fallback below.
@@ -922,7 +932,13 @@ function tryServeContent(req, res) {
     // / treat it as an egg. No immutable cache on the 404 — the sig may
     // arrive later.
     const hit = resolveFlatSig(sigMatch[1])
-    if (!hit) { respondText(res, 404, 'sig not held'); return true }
+    if (!hit) {
+      // The framework-free bootstrap is signature-named too, but it belongs
+      // to the shell payload rather than the writable participant heap.
+      if (cfg.shellDir && existsSync(join(cfg.shellDir, sigMatch[1]))) return false
+      respondText(res, 404, 'sig not held')
+      return true
+    }
     resolved = hit.path
     contentType = hit.contentType
   } else {
@@ -1320,17 +1336,56 @@ function tryWriteContent(req, res) {
 
 // ── landing page (slim storage-host identity announcement) ───────────────────
 //
-// Under the full-split model the relay is a STORAGE + MESH host only. It
-// serves `/<sig>` content and the WSS relay endpoint. It DOES NOT serve
-// the installer SPA — that's the canonical project origin's job. A bare
-// GET / hits this small landing page so a casual visitor knows what they
-// landed on and where to find the actual installer.
+// Without --shell-dir the relay is a storage + mesh host only. It serves
+// `/<sig>` content and WSS. A bare GET / uses this small landing page; with
+// --shell-dir the framework-free host shell takes that place. The relay does
+// not serve the separate platform installer.
 //
 // Why HTML instead of a plain text liveness message: the URL is in the
 // participant's browser, not a curl pipe. Telling them "open the canonical
 // installer at <link>" with the host's domain visible defends against
 // "I forgot which host I'm at" / typosquatting / phishing. It's a 1KB
 // HTML response, no scripts, no external resources.
+
+function tryServeShell(req, res) {
+  if (!cfg.shellDir || (req.method !== 'GET' && req.method !== 'HEAD')) return false
+  let urlPath
+  try { urlPath = decodeURIComponent((req.url || '').split('?')[0]) } catch { return false }
+  const root = resolve(cfg.shellDir)
+  const target = resolve(root, '.' + (urlPath === '/' ? '/index.html' : urlPath))
+  if (target !== root && !target.startsWith(root + sep)) {
+    respondText(res, 403, 'outside shell root')
+    return true
+  }
+  let held = false
+  try { held = statSync(target).isFile() } catch { /* no static asset */ }
+
+  // A missing address is absence, never the shell's HTML. Markers inside a
+  // signed location have the same rule even though the marker is not hashed.
+  const isAddress = urlPath.split('/').filter(Boolean).some(segment => /^[0-9a-f]{64}$/.test(segment))
+  if (!held && (isAddress || urlPath.startsWith('/content/'))) {
+    respondText(res, 404, 'not held')
+    return true
+  }
+  const file = held ? target : join(root, 'index.html')
+  const name = file.split(/[\\/]/).pop() || ''
+  const signed = /^[0-9a-f]{64}$/.test(name)
+  const mutable = urlPath === '/pin' || name === 'main.js' || name === 'env.js' || name === 'hypercomb.worker.js'
+  const headers = {
+    'Content-Type': held ? getContentType(file) : 'text/html; charset=utf-8',
+    'Content-Length': String(statSync(file).size),
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': signed ? 'public, max-age=31536000, immutable' : mutable ? 'no-cache, no-store, must-revalidate' : 'public, max-age=0, must-revalidate',
+    'Permissions-Policy': PERMISSIONS_POLICY,
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+  }
+  if (signed) headers.ETag = `"${name}"`
+  res.writeHead(200, headers)
+  if (req.method === 'HEAD') res.end()
+  else createReadStream(file).on('error', () => res.destroy()).pipe(res)
+  return true
+}
 
 const CANONICAL_INSTALLER_URL = 'https://diamondcoreprocessor.com'
 
@@ -1449,6 +1504,9 @@ const server = createServer((req, res) => {
   // Write side: PUT content into the sig pool (gated). Returns true if handled.
   if (tryWriteContent(req, res)) return
 
+  // The shell is a read-only payload beside the live content and mesh routes.
+  if (tryServeShell(req, res)) return
+
   // Landing page: bare GET / shows a small "this is a storage host, go to
   // the canonical installer" page. Returns true if handled (any GET on `/`
   // or `/index.html`). Falls through for other paths to the 404 below.
@@ -1528,5 +1586,7 @@ server.listen(cfg.port, () => {
   if (cfg.allowPrivateSources) console.log('replication sources: PRIVATE ADDRESSES ALLOWED (--allow-private-sources — dev only, NEVER use on a public host)')
   // Banner: slim storage-host announcement (no SPA — full-split model).
   // Visitors hitting `/` see the landing page → linked to canonical installer.
-  console.log(`role: storage + mesh (slim host — installer code is canonical at ${CANONICAL_INSTALLER_URL})`)
+  console.log(cfg.shellDir
+    ? `role: storage + mesh + pure host shell (${cfg.shellDir})`
+    : `role: storage + mesh (installer code is canonical at ${CANONICAL_INSTALLER_URL})`)
 })
