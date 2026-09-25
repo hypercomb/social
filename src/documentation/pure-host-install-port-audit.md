@@ -1,7 +1,7 @@
 # Pure host install → development: port audit
 
 2026-09-25. Branch `task/pure-host-install-port`: `task/pure-host-install-rebased`
-(through `e0071249`) with `origin/development` (`d35537cc`) merged in, plus the
+(through `a041d3da`) with `origin/development` (`d35537cc`) merged in, plus the
 fixes below. Companion to `minimal-host-claude-handoff.md`, which records the
 Minimal Build session's own snapshot review; this file records what that review
 did not cover and why this branch exists.
@@ -83,6 +83,22 @@ window:
   turned on (singly or in "Turn on all") shows the bar. The total grows as
   layers name what they use, so the bar can step back; it never claims an end
   it has not seen. Text-theme creations are two files and get none.
+
+This closes the gap the handoff's "Work that belongs to both" section names
+under **Transfer progress**: the host panel now draws per-offering progress.
+It still copies an offering through its own `replicateSiteClosure`, so there
+are still two transfer paths; they now report progress the same way.
+
+## Missed work outside this branch
+
+The handoff's "Work missed by earlier merges" lists branches that never
+reached `development` and are not part of the pure host work. They are kept
+out of this branch deliberately, one change per merge:
+
+- the command-line word-arrival fix, now on `task/command-word-arrival`
+  (based on current `development`);
+- atomic branch adopt and swarm image fixes (`fix/swarm-images-atomic-branch-adopt`);
+- the launch kit and support copy (`task/exposure-launch`).
 
 ## Still open (not changed here)
 
