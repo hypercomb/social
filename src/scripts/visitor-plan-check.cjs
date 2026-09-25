@@ -35,17 +35,23 @@ const label = new URL(url).hostname.split('.')[0] + (plan ? '-plan' : '-full')
   const errors = []
   page.on('console', m => {
     const text = m.text()
-    if (/\[script-preloader\] (arrival|approached|find:)|arrival plan/.test(text)) logs.push(text.slice(0, 200))
+    if (/\[script-preloader\] (arrival|approached|find:|.*participant-only)|arrival plan/.test(text)) logs.push(text.slice(0, 200))
     if (m.type() === 'error') errors.push(text.slice(0, 160))
   })
   page.on('pageerror', e => errors.push(`pageerror ${String(e.message).slice(0, 160)}`))
   if (trialKeys) {
     await page.route(`**/content/${plan}`, route => route.fulfill({ status: 200, contentType: 'application/json', body: trialBody }))
   }
-  if (plan) {
+  // QUIET="assistant,editor" injects a participant-only snapshot (as a
+  // publisher's `features publish` would) and names it in /site.json.
+  const quietNames = (process.env.QUIET || '').split(',').map(s => s.trim()).filter(Boolean)
+  const quietBody = quietNames.length ? JSON.stringify({ features: [...new Set(quietNames)].sort() }) : ''
+  const quiet = quietBody ? require('crypto').createHash('sha256').update(quietBody).digest('hex') : ''
+  if (quiet) await page.route(`**/content/${quiet}`, route => route.fulfill({ status: 200, contentType: 'application/json', body: quietBody }))
+  if (plan || quiet) {
     await page.route('**/site.json*', async route => {
       const response = await route.fetch()
-      const body = { ...(await response.json()), plan }
+      const body = { ...(await response.json()), ...(plan ? { plan } : {}), ...(quiet ? { quiet } : {}) }
       await route.fulfill({ response, json: body })
     })
   }
