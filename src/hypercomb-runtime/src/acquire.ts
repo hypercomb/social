@@ -211,7 +211,7 @@ const cappedBytes = async (url: string, maxBytes: number, timeoutMs: number): Pr
 export const packedFetch = async (
   root: string,
   /** What the install needs, or null before the layers are known (a cold
-   *  hive): then the size test is skipped and every verified member is kept. */
+   *  hive): then the size test is skipped and every carried member is kept. */
   wanted: readonly string[] | null,
   held: ReadonlySet<string>,
   origins: readonly string[],
@@ -228,22 +228,28 @@ export const packedFetch = async (
       const packSig = pointer ? new TextDecoder().decode(pointer).trim() : ''
       if (!SIG_RE.test(packSig)) continue
       const packed = await cappedBytes(`${base}/${packSig}`, PACK_MAX_BYTES, PACK_TIMEOUT_MS)
-      if (!packed || (await SignatureService.sign(packed.buffer)) !== packSig) continue
+      if (!packed) continue
       let members: Array<[string, Uint8Array<ArrayBuffer>]> | null
       try { members = decodeTransferPack(await gunzipBytes(packed, PACK_MAX_UNPACKED)) } catch { members = null }
       if (!members) continue
-      // Only what this install is missing is kept, and only after it hashes.
-      const verified = new Map<string, Uint8Array<ArrayBuffer>>()
-      await Promise.all(members.filter(([sig]) => !missing || missing.has(sig)).map(async ([sig, bytes]) => {
-        if ((await SignatureService.sign(bytes.buffer)) === sig) verified.set(sig, bytes)
-      }))
-      console.log(`[acquire] transfer pack ${packSig.slice(0, 12)}: ${verified.size} ${missing ? `of ${missing.size} missing files` : 'files'} carried`)
-      if (missing ? verified.size * 2 < missing.size : !verified.size) continue
+      // NEVER HASH ON FETCH (jwize, 2026-09-25: "only upon storage, and thus
+      // after not needed"). The pack is a delivery; each member is hashed
+      // once, by the walker, at the moment it is admitted to a store that
+      // keeps it — or not at all where nothing is kept (a visitor's memory
+      // heap, fed by the host that already hashed it on upload). Hashing the
+      // pack and every member here as well cost a cold visit 0.8 s (3.2 s at
+      // 4x CPU) before anything ran.
+      const carried = new Map<string, Uint8Array<ArrayBuffer>>()
+      for (const [sig, bytes] of members) {
+        if (!missing || missing.has(sig)) carried.set(sig, bytes)
+      }
+      console.log(`[acquire] transfer pack ${packSig.slice(0, 12)}: ${carried.size} ${missing ? `of ${missing.size} missing files` : 'files'} carried`)
+      if (missing ? carried.size * 2 < missing.size : !carried.size) continue
       return {
         fetch: async sig => {
-          const hit = verified.get(sig)
+          const hit = carried.get(sig)
           if (!hit) return loose(sig)
-          verified.delete(sig)
+          carried.delete(sig)
           served++
           return hit
         },
@@ -366,8 +372,10 @@ const childLayers = (bytes: Uint8Array<ArrayBuffer>): string[] => {
 export const deriveInventory = async (
   rootSig: string,
   io: ReplicationIo,
+  /** See ReplicationOptions.trusted — a read-only visitor's own door only. */
+  options: { trusted?: boolean } = {},
 ): Promise<{ inventory: PackageInventory; result: ReplicationResult }> => {
-  const result = await resolveSignatureClosure(rootSig, io, { children: childLayers })
+  const result = await resolveSignatureClosure(rootSig, io, { children: childLayers, trusted: options.trusted === true })
   const bees = new Set<string>()
   const dependencies = new Set<string>()
 

@@ -3,11 +3,17 @@
 // The shell-embedded replication client (documentation/install-by-replication.md,
 // migration step 1). Browser-side twin of the relay's replicate.js: given
 // identity — one root signature, or an exact inventory of signatures — resolve
-// the atoms into the local heap through an injected io. Every fetched atom is
-// verified against its name before write; present atoms are reused; a repeated
-// call is an idempotent delta repair. Complete-or-absent: callers gate on
-// `holes.length === 0` and runtime never verifies again (admission is the
-// trust boundary).
+// the atoms into the local heap through an injected io. Complete-or-absent:
+// callers gate on `holes.length === 0`; a repeated call is an idempotent delta
+// repair.
+//
+// HASH ONCE, AT THE FIRST STORE — MECHANICAL, SET IN STONE (jwize,
+// 2026-09-25). A signature IS the sha256 taken when bytes are first stored, so
+// a store that keeps bytes checks each atom exactly once, as it is admitted,
+// and never again: a held atom is reused unhashed, and nothing on a fetch path
+// hashes. A store that keeps nothing (a read-only visitor's memory heap, fed by
+// the host that hashed every byte on upload) has no store moment, so it passes
+// `trusted` and does not hash at all.
 //
 // SQUEAKY CLEAN RULE: this module knows nothing about pools, kinds, `.js`
 // suffixes, legacy `__x__` dirs, or URL shapes. All placement, naming, and
@@ -50,6 +56,12 @@ export type ReplicationOptions = {
    *  layer's declared `cells`, say) is walked without the protocol learning
    *  anything about that shape. Same dialect, narrower frontier. */
   children?: (bytes: Uint8Array<ArrayBuffer>) => string[]
+  /** Skip the admission hash. For a store that KEEPS NOTHING (a read-only
+   *  visitor's memory heap) fed by the door that served this code: the host
+   *  hashed every byte when it was uploaded, and nothing here is stored, so
+   *  there is no storage moment to hash at. Never set it for a store that
+   *  persists, or for bytes from a second origin. */
+  trusted?: boolean
 }
 
 export const isComplete = (result: ReplicationResult): boolean =>
@@ -73,15 +85,21 @@ const resolveOne = async (
   signature: string,
   io: ReplicationIo,
   result: ReplicationResult,
+  trusted = false,
 ): Promise<Uint8Array<ArrayBuffer> | null> => {
+  // A HELD copy is never hashed again: it was hashed once, when it was
+  // stored, and that is the only time (jwize, 2026-09-25: "only upon
+  // storage, and thus after not needed"). Writes are whole-file commits, so a
+  // held atom is complete or absent.
   let bytes = await io.read(signature)
-  if (bytes && !(await verify(bytes, signature))) bytes = null
   if (bytes) {
     result.present++
   } else {
     bytes = await io.fetch(signature)
     if (!bytes) { result.holes.push(signature); return null }
-    if (!(await verify(bytes, signature))) { result.refused.push(signature); return null }
+    // THE ONE HASH: at admission to the store — unless the store keeps
+    // nothing and the bytes come from the door that served this code.
+    if (!trusted && !(await verify(bytes, signature))) { result.refused.push(signature); return null }
     await io.write(signature, bytes)
     result.fetched++
   }
@@ -110,7 +128,7 @@ export const resolveSignatureClosure = async (
     const frontier = queue.splice(0, Math.min(concurrency, room)).filter(sig => SIGNATURE_RE.test(sig))
     result.total += frontier.length
     await Promise.all(frontier.map(async (signature) => {
-      const bytes = await resolveOne(signature, io, result)
+      const bytes = await resolveOne(signature, io, result, options.trusted === true)
       if (!bytes) return
       for (const child of childrenOf(bytes)) {
         if (seen.has(child)) continue
@@ -138,7 +156,7 @@ export const resolveInventory = async (
   const result: ReplicationResult = { root, total: unique.length, present: 0, fetched: 0, held: [], holes: [], refused: [], limited: false }
 
   for (let i = 0; i < unique.length; i += concurrency) {
-    await Promise.all(unique.slice(i, i + concurrency).map(signature => resolveOne(signature, io, result)))
+    await Promise.all(unique.slice(i, i + concurrency).map(signature => resolveOne(signature, io, result, options.trusted === true)))
   }
   return result
 }

@@ -763,7 +763,13 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/__layers__/${sig}.json`, 'application/json; charset=utf-8'),
   } satisfies ReplicationIo
 
-  const { inventory, result: layersResult } = await deriveInventory(bundled.packageSig, layersIo)
+  // A VISITOR KEEPS NOTHING: its heap is memory and dies with the tab, and
+  // these bytes come from the door that served this page, whose host hashed
+  // every one on upload. There is no store moment here, so nothing is hashed
+  // (replication-walker.ts, "hash once, at the first store"). A participant's
+  // hive keeps what it admits, so it hashes each atom as it is stored.
+  const trusted = readonlyVisitor
+  const { inventory, result: layersResult } = await deriveInventory(bundled.packageSig, layersIo, { trusted })
 
   // SEALED RECORD (install-by-replication step 3), now checked against the
   // DERIVED sets: root declared in its own layer set, every sig well-formed,
@@ -779,20 +785,19 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
 
   // One call per derived set. `resolveInventory` is the EXACT-inventory
   // shape: no mining, no recursion — the closure that named these signatures
-  // IS the inventory identity. Every byte is sha256-verified against its name
-  // before admission, a present-and-correct file is reused, and a repeat call
-  // is an idempotent delta repair.
+  // IS the inventory identity. A hive hashes each byte once, as it stores it;
+  // a held file is reused unhashed; a repeat call is an idempotent delta repair.
   const [depsResult, beesResult] = await Promise.all([
     resolveInventory(bundled.packageSig, inventory.dependencies, {
       read: readFrom([store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig]),
       fetch: fetchFirst(sig => [`/content/${sig}`, `/content/__dependencies__/${sig}.js`]),
       write: writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8'),
-    } satisfies ReplicationIo),
+    } satisfies ReplicationIo, { trusted }),
     resolveInventory(bundled.packageSig, inventory.bees, {
       read: readFrom([store.bees, store.legacyBees], sig => [`${sig}.js`, sig]),
       fetch: fetchFirst(sig => [`/content/${sig}`, `/content/__bees__/${sig}.js`]),
       write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
-    } satisfies ReplicationIo),
+    } satisfies ReplicationIo, { trusted }),
   ])
 
   // CAN THIS SHELL RUN IT? (core-surface.ts). The admitted modules name what

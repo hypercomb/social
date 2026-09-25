@@ -100,17 +100,38 @@ describe('replication walker', () => {
     expect(isComplete(result)).toBe(false)
   })
 
-  it('re-verifies local reads: a corrupted heap entry is refetched, not trusted', async () => {
+  // HASH ONCE, AT THE FIRST STORE (jwize 2026-09-25): what the heap holds was
+  // hashed when it was stored, so it is reused as held — never hashed again,
+  // never refetched. (This replaces "re-verifies local reads", which paid a
+  // hash per held atom on every walk.)
+  it('never re-hashes a held atom: what the heap holds is reused as held', async () => {
     const w = world()
     const leaf = encode('true bytes')
     const sig = await sigOf(leaf)
+    const held = encode('whatever the store admitted')
     w.origin.set(sig, leaf)
-    w.heap.set(sig, encode('rotted bytes'))   // heap lies
+    w.heap.set(sig, held)
 
     const result = await resolveInventory(sig, [sig], w.io)
-    expect(result.fetched).toBe(1)
-    expect(result.present).toBe(0)
-    expect(w.heap.get(sig)).toEqual(leaf)
+    expect(result.present).toBe(1)
+    expect(result.fetched).toBe(0)
+    expect(w.heap.get(sig)).toEqual(held)
+  })
+
+  it('trusted admits unhashed — for a store that keeps nothing, fed by the door that served the code', async () => {
+    const w = world()
+    const leaf = encode('bytes the host hashed on upload')
+    const sig = await sigOf(leaf)
+    const served = encode('served as named')
+    w.origin.set(sig, served)
+
+    const plain = await resolveInventory(sig, [sig], w.io)
+    expect(plain.refused).toEqual([sig])           // a keeping store hashes at admission
+
+    const trusted = await resolveInventory(sig, [sig], w.io, { trusted: true })
+    expect(trusted.refused).toEqual([])            // a keeping-nothing store does not
+    expect(trusted.fetched).toBe(1)
+    expect(w.heap.get(sig)).toEqual(served)
   })
 
   it('honours the limit and reports the walk as limited', async () => {
