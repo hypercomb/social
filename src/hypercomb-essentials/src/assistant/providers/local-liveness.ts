@@ -114,12 +114,28 @@ const pinnedWatch = ((globalThis as Record<symbol, unknown>)[LIVENESS_WATCH] ??=
   watching: false,
   asked: new Set<string>(),
   lastWalk: 0,
-}) as { watching: boolean; readonly asked: Set<string>; lastWalk: number }
+  silent: new Map<string, number>(),
+}) as {
+  watching: boolean
+  readonly asked: Set<string>
+  lastWalk: number
+  /** Consecutive UNATTENDED probes that found each provider asleep. */
+  readonly silent: Map<string, number>
+}
 
 /** A server found asleep is asked again unattended this rarely. Every knock on
  *  a closed port is a red line nobody can silence; whoever starts the server
  *  presses Check again (never gated) or waits one long beat. */
 const ASLEEP_RECHECK_MS = 5 * 60_000
+
+/** ...AND NOT FOREVER. A server that stays asleep through this many unattended
+ *  rechecks in a row is stood down: the page stops knocking until someone
+ *  asks again (a press, a call, a host edit), and the device forgets that a
+ *  server ever answered here, so the next page load is quiet too. Without
+ *  this a machine where Ollama ran ONCE was knocked on every five minutes,
+ *  every page, for the rest of its life — a red line that "never goes away"
+ *  about a process the participant stopped on purpose. */
+const ASLEEP_GIVE_UP = 2
 
 // ── which providers this file speaks for ──────────────────────────────────
 
@@ -230,7 +246,11 @@ const permissionPending = (): boolean =>
 // knock only when there is a reason to: a server has answered on this device
 // before, the participant typed its address, or they asked this session —
 // pressed Check again, opened the console, made a call. Asking is never
-// gated. Switching the provider off in the console stops the knocking.
+// gated. Switching the provider off in the console stops the knocking, and
+// so does the server itself, by staying asleep: after `ASLEEP_GIVE_UP`
+// unattended rechecks in a row find nothing, the page stands down and the
+// device forgets it ever answered (see `standDown`). An unattended recheck
+// also knocks on ONE door — only a press walks the sibling spellings.
 
 const answeredKey = (provider: LlmProviderDescriptor): string => `hc:llm:${provider.id}:answered`
 
@@ -245,6 +265,16 @@ const worthKnocking = (provider: LlmProviderDescriptor): boolean =>
   && (askedThisSession.has(provider.id)
     || answeredHere(provider)
     || (provider.id === LOCAL_PROVIDER.id && hasExplicitLocalHost()))
+
+/** The unattended knocking has exhausted its reasons: nobody is asking any
+ *  more, and this is no longer a device where a server answers. */
+const standDown = (provider: LlmProviderDescriptor): void => {
+  askedThisSession.delete(provider.id)
+  try { globalThis.localStorage?.removeItem(answeredKey(provider)) } catch { /* session-only */ }
+}
+
+const stoodDown = (provider: LlmProviderDescriptor): boolean =>
+  (pinnedWatch.silent.get(provider.id) ?? 0) >= ASLEEP_GIVE_UP
 
 // ── the probe ─────────────────────────────────────────────────────────────
 
@@ -333,9 +363,21 @@ export const localServerReport = (provider: LlmProviderDescriptor): LocalServerR
     : UNKNOWN(host)
 }
 
-const remember = (provider: LlmProviderDescriptor, report: LocalServerReport): LocalServerReport => {
+const remember = (
+  provider: LlmProviderDescriptor,
+  report: LocalServerReport,
+  attended: boolean,
+): LocalServerReport => {
   const before = reports.get(provider.id)
   reports.set(provider.id, report)
+  // The silence count is about UNATTENDED knocks only: a press that finds the
+  // server asleep is the participant looking, not the page nagging.
+  if (report.state !== 'asleep') pinnedWatch.silent.delete(provider.id)
+  else if (!attended) {
+    const silent = (pinnedWatch.silent.get(provider.id) ?? 0) + 1
+    pinnedWatch.silent.set(provider.id, silent)
+    if (silent >= ASLEEP_GIVE_UP) standDown(provider)
+  }
   const moved = !before
     || before.state !== report.state
     || before.host !== report.host
@@ -377,12 +419,17 @@ const WALK_EVERY_MS = 5 * 60_000
 const findTheServer = async (
   provider: LlmProviderDescriptor,
   primary: string,
+  attended: boolean,
 ): Promise<LocalServerReport> => {
   const first = await probeLocalServer(primary)
   // Anything but silence is an answer about THIS address, and the participant
   // is looking at this address: do not go wandering.
   if (first.state !== 'asleep') return first
   // (a pending permission already returned above: it is not `asleep`)
+  // ONLY A PRESS WALKS. The spelling that answered is remembered on the device
+  // (`rememberLocalLlmHost`), so an unattended recheck already knocks on the
+  // right door; walking the other two as well merely triples the red lines.
+  if (!attended) return first
   const alternates = alternatesFor(provider, primary)
   if (!alternates.length || Date.now() - pinnedWatch.lastWalk < WALK_EVERY_MS) return first
   pinnedWatch.lastWalk = Date.now()
@@ -398,15 +445,21 @@ const findTheServer = async (
  * Probe now (or join the probe already running). Callers that merely want a
  * fresh-enough answer should use `refreshLocalServer`.
  */
-export const checkLocalServer = async (provider: LlmProviderDescriptor): Promise<LocalServerReport> => {
+export const checkLocalServer = (provider: LlmProviderDescriptor): Promise<LocalServerReport> =>
+  probeNow(provider, true)
+
+const probeNow = (provider: LlmProviderDescriptor, attended: boolean): Promise<LocalServerReport> => {
   const host = machineLocalEndpoint(provider)
-  if (!host) return UNKNOWN('')
-  askedThisSession.add(provider.id)
+  if (!host) return Promise.resolve(UNKNOWN(''))
+  if (attended) {
+    askedThisSession.add(provider.id)
+    pinnedWatch.silent.delete(provider.id)
+  }
   const running = inFlight.get(provider.id)
   if (running) return running
-  const probe = findTheServer(provider, host)
-    .then(report => remember(provider, report))
-    .catch(() => remember(provider, { state: 'asleep', host, models: [], checkedAt: Date.now() }))
+  const probe = findTheServer(provider, host, attended)
+    .then(report => remember(provider, report, attended))
+    .catch(() => remember(provider, { state: 'asleep', host, models: [], checkedAt: Date.now() }, attended))
     .finally(() => { inFlight.delete(provider.id) })
   inFlight.set(provider.id, probe)
   return probe
@@ -420,12 +473,13 @@ export const refreshLocalServer = (provider: LlmProviderDescriptor): void => {
   // While the BROWSER is the blocker, an automatic probe only hangs. The
   // sweep has already written the honest state; the next press does the rest.
   if (permissionPending()) return
-  // Unattended, so only where someone has reason to look (see "who asked").
-  if (!worthKnocking(provider)) return
+  // Unattended, so only where someone has reason to look (see "who asked"),
+  // and not once the server has slept through the rechecks it was owed.
+  if (stoodDown(provider) || !worthKnocking(provider)) return
   const cached = localServerReport(provider)
   const staleAfter = cached.state === 'asleep' ? ASLEEP_RECHECK_MS : STALE_MS
   if (cached.state !== 'unknown' && Date.now() - cached.checkedAt < staleAfter) return
-  void checkLocalServer(provider)
+  void probeNow(provider, false)
 }
 
 /**
@@ -542,7 +596,7 @@ const sweep = (): void => {
     for (const provider of llmProviderRegistry().all()) {
       const host = machineLocalEndpoint(provider)
       if (!host || reports.get(provider.id)?.state === 'needs-permission') continue
-      remember(provider, { state: 'needs-permission', host, models: [], checkedAt: Date.now() })
+      remember(provider, { state: 'needs-permission', host, models: [], checkedAt: Date.now() }, false)
     }
     return
   }
@@ -571,6 +625,7 @@ export const startLocalLivenessWatch = (): void => {
 export const recheckLocalServers = (): void => {
   reports.clear()
   askedThisSession.clear()
+  pinnedWatch.silent.clear()
   pinnedWatch.lastWalk = 0
   if (permissionPending()) { sweep(); return }
   for (const provider of llmProviderRegistry().all()) {

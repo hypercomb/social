@@ -3,6 +3,7 @@
 import { environment } from '@hypercomb/shared/environments/environment'
 import { Store } from '@hypercomb/runtime/store'
 import { CORE_RUNTIME_URL } from '@hypercomb/runtime/core-surface'
+import { activeInstallIndex } from '@hypercomb/runtime/install-index'
 
 export type ResolvedImports = Record<string, string>
 
@@ -123,6 +124,38 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const dependencyBasePath = readonlyVisitor
     ? '/content'
     : `/opfs/${await Store.poolSignature(Store.DEPENDENCIES_MEANING)}`
+
+  // A VISITOR INSTALLED FROM THE INDEX (install-index.ts) holds no modules:
+  // the map comes from the index, every URL the door's root, every URL its
+  // own sha256 as integrity. A door that cannot serve modules at the root
+  // gets the blob path below, fed from the door rather than the store.
+  const index = readonlyVisitor ? activeInstallIndex() : null
+  if (index) {
+    for (const [sig, alias] of Object.entries(index.aliases)) if (!imports[alias]) aliasSource.set(alias, sig)
+    ;(globalThis as any).__hypercombAliasMap = aliasSource
+    if (aliasSource.size && await probeRootModule(aliasSource.values().next().value as string)) {
+      const integrity: Record<string, string> = {}
+      for (const [alias, sig] of aliasSource) {
+        imports[alias] = `/${sig}`
+        integrity[`/${sig}`] = integrityOf(sig)
+      }
+      for (const sig of index.bees) integrity[`/${sig}`] = integrityOf(sig)
+      ;(globalThis as { __hypercombImportIntegrity?: Record<string, string> }).__hypercombImportIntegrity = integrity
+      ;(globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ = true
+      return imports
+    }
+    await Promise.all([...aliasSource].map(async ([alias, sig]) => {
+      try {
+        const res = await fetch(`${dependencyBasePath}/${sig}`)
+        imports[alias] = res.ok
+          ? URL.createObjectURL(new Blob([await res.text()], { type: 'text/javascript' }))
+          : `${dependencyBasePath}/${sig}`
+      } catch {
+        imports[alias] = `${dependencyBasePath}/${sig}`
+      }
+    }))
+    return imports
+  }
 
   // Pool first, legacy drain dir second — union, not either/or.
   const depDirs = [store.dependencies, store.legacyDependencies]

@@ -9,7 +9,9 @@ describe('ScriptPreloader critical-bee integration', () => {
     expect(PRELOADER).toContain('const activeRoot = installedPackageSig()')
     expect(PRELOADER).toContain('if (activeRoot && clean === activeRoot) rootCriticalBees = parsed.criticalBees')
     expect(PRELOADER).toContain('validateCriticalBeeHints(rootCriticalBees, enabledBees)')
-    expect(PRELOADER).toContain('await this.#loadBeesPrioritized(walked.bees, walked.criticalBees)')
+    // Sleeping queens (passive-queen.ts) are left out of the load; the hints
+    // still come from the walked, signed root.
+    expect(PRELOADER).toContain('await this.#loadBeesPrioritized(walked.bees.filter(sig => !sleeping.has(sig)), walked.criticalBees)')
   })
 
   it('checks readiness before backgrounding the remaining bees', () => {

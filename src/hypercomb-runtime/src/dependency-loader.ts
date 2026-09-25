@@ -2,6 +2,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { Store } from './store'
+import { activeInstallIndex } from './install-index.js'
 
 /** Line 2 of an atom or atomized barrel, written by the essentials build
  *  (`LAZY_MARKER_LINE` in build-module.ts). */
@@ -186,6 +187,9 @@ export class DependencyLoader extends EventTarget {
     // (documentation/atomic-modules-plan.md, step 4). It loads once, on
     // demand, when a bee imports its specifier.
     if (bytes && isLazyDependency(bytes)) return 'lazy'
+    // A visitor installed from the index holds no dependency bytes; the index
+    // says which are atoms (install-index.ts).
+    if (!bytes && activeInstallIndex()?.lazy.includes(pureSig)) return 'lazy'
     console.log(`[dependency-loader] importing ${alias} (${pureSig})`)
     if (bytes) {
       const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer

@@ -60,19 +60,32 @@
          the next boot, before the module graph starts. main.ts compares what
          landed here against a fresh OPFS resolve and reloads once if the cache
          was stale. -->
+    <!-- ONE CORE. The shell no longer compiles @hypercomb/core into its own
+         bundle (angular.json externalDependencies): it imports the very module
+         every bee imports, so each service core makes exists once. The map
+         therefore ALWAYS carries the core entry, cache or no cache, and it is
+         written as ONE map — a browser that takes only the first map must not
+         lose the cached one to it. -->
     <script>
       (function () {
+        var CORE = { '@hypercomb/core': '/hypercomb-core.runtime.js' };
+        var raw = null;
+        var map = { imports: CORE };
         try {
-          var raw = localStorage.getItem('hc:importmap');
-          if (!raw) return;
-          var parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed.imports !== 'object' || !parsed.imports) return;
-          var s = document.createElement('script');
-          s.type = 'importmap';
-          s.textContent = raw;
-          document.head.appendChild(s);
-          window.__hcImportMapApplied = raw;
-        } catch (e) {}
+          raw = localStorage.getItem('hc:importmap');
+          var parsed = raw ? JSON.parse(raw) : null;
+          if (parsed && typeof parsed.imports === 'object' && parsed.imports) {
+            parsed.imports['@hypercomb/core'] = CORE['@hypercomb/core'];
+            map = parsed;
+          } else {
+            raw = null;
+          }
+        } catch (e) { raw = null; }
+        var s = document.createElement('script');
+        s.type = 'importmap';
+        s.textContent = JSON.stringify(map);
+        document.head.appendChild(s);
+        if (raw) window.__hcImportMapApplied = raw;
       })();
     </script>
 

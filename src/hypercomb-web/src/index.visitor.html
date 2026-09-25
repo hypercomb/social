@@ -16,6 +16,10 @@
     <script>
       try { localStorage.removeItem('hc:importmap'); } catch (error) {}
     </script>
+    <!-- ONE CORE: the shell imports the same @hypercomb/core module every bee
+         imports (angular.json externalDependencies), mapped before any module
+         script so both the polyfills and main resolve it. -->
+    <script type="importmap">{ "imports": { "@hypercomb/core": "/hypercomb-core.runtime.js" } }</script>
 
     <meta
       name="viewport"

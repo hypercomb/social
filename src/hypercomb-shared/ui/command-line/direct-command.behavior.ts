@@ -48,7 +48,7 @@ export class DirectCommandBehavior implements CommandLineBehavior {
     const spaceIndex = trimmed.indexOf(' ')
     const commandName = spaceIndex === -1 ? trimmed : trimmed.slice(0, spaceIndex)
 
-    return this.#findQueen(commandName) !== null
+    return this.#findQueen(commandName) !== null || this.#asleep(commandName)
   }
 
   async execute(input: string): Promise<void> {
@@ -57,13 +57,32 @@ export class DirectCommandBehavior implements CommandLineBehavior {
     const commandName = spaceIndex === -1 ? trimmed : trimmed.slice(0, spaceIndex)
     const args = spaceIndex === -1 ? '' : trimmed.slice(spaceIndex + 1).trim()
 
-    const queen = this.#findQueen(commandName)
+    const queen = await this.#wakeQueen(commandName)
     if (!queen) {
       console.warn(`[direct] Unknown command: ${commandName}`)
       return
     }
 
     await queen.invoke(args)
+  }
+
+  // A QUEEN MAY BE ASLEEP (script-preloader.ts #sleeping): her word is known
+  // from the package's docs before her module is loaded. The word still
+  // claims the line; running it wakes her first.
+  #preloader(): { sleepingWords?: () => Array<{ command: string }>; wakeWord?: (word: string) => Promise<unknown> } | undefined {
+    return get('@hypercomb.social/ScriptPreloader') as any
+  }
+
+  #asleep(word: string): boolean {
+    const wanted = word.toLowerCase()
+    return !!this.#preloader()?.sleepingWords?.().some(entry => entry.command === wanted)
+  }
+
+  async #wakeQueen(word: string): Promise<any | null> {
+    const found = this.#findQueen(word)
+    if (found || !this.#asleep(word)) return found
+    await this.#preloader()?.wakeWord?.(word)
+    return this.#findQueen(word)
   }
 
   #findQueen(commandName: string): any | null {

@@ -138,6 +138,17 @@ test('a signed landing field is inert — site.json omits it and the visitor pag
   assert.equal(html, shell)
 })
 
+test('site.json carries the arrival plan the publisher signed beside the root', async () => {
+  const plan = 'c'.repeat(64)
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head, 'plan:revolucion': plan, 'plan:other': 'd'.repeat(64) }))
+  const descriptor = await (await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)).json()
+  assert.equal(descriptor.plan, plan)
+  // Not a signature — no plan; the whole package loads, as always.
+  const { env: garbled } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head, 'plan:revolucion': 'not-a-sig' }))
+  const plain = await (await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), garbled)).json()
+  assert.equal('plan' in plain, false)
+})
+
 test('publications.json exposes the verified Core host registry', async () => {
   const { env } = await fixture()
   const response = await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)

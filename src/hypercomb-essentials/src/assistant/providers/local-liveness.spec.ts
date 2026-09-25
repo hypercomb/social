@@ -361,4 +361,63 @@ describe('a server nobody has run here', () => {
     expect(fetchMock).toHaveBeenCalled()
     await checkLocalServer(provider)
   })
+
+  it('stands down once the server slept through two unattended rechecks — and forgets the device', async () => {
+    store.set('hc:llm:my-machine:answered', '1')
+    const provider = localDescriptor()
+    registry.register(provider)
+    const fetchMock = refused()
+    vi.stubGlobal('fetch', fetchMock)
+    let now = 1_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const settled = async (calls: number) => {
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls))
+      await vi.waitFor(() => expect(localServerReport(provider).checkedAt).toBe(now))
+    }
+
+    // First knock of the page: the device remembers a server.
+    localModelServerUp(provider)
+    await settled(2)
+
+    // Too soon to ask again.
+    now += 60_000
+    localModelServerUp(provider)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    // One long beat later: the recheck it was owed, and the last one.
+    now += 5 * 60_000
+    localModelServerUp(provider)
+    await settled(4)
+    expect(store.has('hc:llm:my-machine:answered')).toBe(false)
+
+    // From here the page is quiet, however often the roster is read.
+    now += 5 * 60_000
+    localModelServerUp(provider)
+    now += 5 * 60_000
+    localModelServerUp(provider)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+
+    // A press is never gated, and it re-opens the unattended watch.
+    expect((await checkLocalServer(provider)).state).toBe('asleep')
+    expect(fetchMock).toHaveBeenCalledTimes(6)
+    now += 5 * 60_000
+    localModelServerUp(provider)
+    await settled(8)
+  })
+
+  it('knocks on one door unattended; only a press walks the sibling spellings', async () => {
+    store.set('hc:llm:local:answered', '1')
+    registry.register(LOCAL_PROVIDER)
+    const fetchMock = refused()
+    vi.stubGlobal('fetch', fetchMock)
+    const primary = localLlmHost()
+
+    localModelServerUp(LOCAL_PROVIDER)
+    await vi.waitFor(() => expect(localServerReport(LOCAL_PROVIDER).state).toBe('asleep'))
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([`${primary}/v1/models`, primary])
+
+    await checkLocalServer(LOCAL_PROVIDER)
+    const doors = new Set(fetchMock.mock.calls.map(([url]) => new URL(String(url)).host))
+    expect(doors.size).toBe(3)
+  })
 })

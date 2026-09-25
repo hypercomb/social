@@ -28,6 +28,12 @@ export class SlashBehaviourDrone extends EventTarget {
     this.#providers.sort((a, b) => b.priority - a.priority)
   }
 
+  /** A stand-in leaves when the one it stood in for arrives (a sleeping
+   *  queen's provider, replaced by her own when she wakes). */
+  removeProvider(provider: SlashBehaviourProvider): void {
+    this.#providers = this.#providers.filter(held => held !== provider)
+  }
+
   /**
    * PARTICIPANT-GIVEN names for a behaviour — the other half of the "one
    * name in code" doctrine. Queens carry theirs on the instance already
@@ -1068,10 +1074,61 @@ const dottedToSpaced = (queen: any, args: string): string => {
   return walked.join(' ')
 }
 
+// ── queens asleep until their word ──────────────────────────────────────
+//
+// The runtime leaves a queen unloaded when loading her would only ready her
+// word (hypercomb-runtime script-preloader.ts, essentials
+// scripts/passive-queen.ts). Her word and description come from the
+// package's docs, so she is listed and offered like any other; using her —
+// running the word or completing past it — wakes her, and her own provider
+// replaces the stand-in the moment she registers.
+
+const sleepers = new Map<string, SlashBehaviourProvider>()
+
+const wakeQueenFor = async (command: string): Promise<any | null> => {
+  const preloader = get('@hypercomb.social/ScriptPreloader') as { wakeWord?: (word: string) => Promise<unknown> } | undefined
+  await preloader?.wakeWord?.(command)
+  for (const key of window.ioc.list()) {
+    const value = window.ioc.get(key)
+    if (isQueen(value) && value.command === command) return value
+  }
+  return null
+}
+
+const wrapSleeper = (entry: { command: string; description: string }): SlashBehaviourProvider => ({
+  name: `asleep-${entry.command}`,
+  priority: 50,
+  behaviours: [{ name: entry.command, description: entry.description, aliases: [] }],
+  async execute(_behaviourName: string, args: string): Promise<void> {
+    const queen = await wakeQueenFor(entry.command)
+    if (queen) await queen.invoke(dottedToSpaced(queen, args))
+  },
+  complete: (_behaviourName: string, _args: string) => {
+    void wakeQueenFor(entry.command)
+    return []
+  },
+} as SlashBehaviourProvider)
+
+EffectBus.on<{ words?: Array<{ command?: string; description?: string }> }>('loader:sleeping', (payload) => {
+  for (const entry of payload?.words ?? []) {
+    const command = String(entry?.command ?? '')
+    if (!command || sleepers.has(command) || autoWrappedCommands.has(command) || alreadyDeclared(command)) continue
+    const provider = wrapSleeper({ command, description: String(entry?.description ?? command) })
+    sleepers.set(command, provider)
+    _slashBehaviours.addProvider(provider)
+  }
+})
+
 const considerQueen = (value: unknown): void => {
   if (!isQueen(value)) return
   if ((value as any).slashSkipAutoWrap === true) return
   if (autoWrappedCommands.has(value.command)) return
+  // She woke: her own provider takes the stand-in's place.
+  const standIn = sleepers.get(value.command)
+  if (standIn) {
+    _slashBehaviours.removeProvider(standIn)
+    sleepers.delete(value.command)
+  }
   if (alreadyDeclared(value.command)) return
   autoWrappedCommands.add(value.command)
   deriveCommandRoot(value)

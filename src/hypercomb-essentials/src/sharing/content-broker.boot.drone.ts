@@ -890,6 +890,15 @@ export class ContentBrokerDrone extends Drone {
     return `/@resource/${sig}`
   }
 
+  /** The door this read-only page was served from — the one host whose bytes
+   *  a visitor takes as named (see the fetch loop). */
+  #ownDoorOfVisitor = (host: string): boolean => {
+    try {
+      if ((globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ !== true) return false
+      return String(host).toLowerCase() === location.host.toLowerCase()
+    } catch { return false }
+  }
+
   // Verify bytes hash to the claimed sig. Defense against any host
   // (canonical or not) serving incorrect bytes for a given URL.
   #verifyBytes = async (bytes: Uint8Array, expectedSig: string): Promise<boolean> => {
@@ -1081,7 +1090,12 @@ export class ContentBrokerDrone extends Drone {
           this.#hostPathShape.set(host, tryPath === flatPath ? 'flat' : 'legacy')
           const buf = await res.arrayBuffer()
           const bytes = new Uint8Array(buf)
-          if (!await this.#verifyBytes(bytes, sig)) {
+          // A READ-ONLY VISITOR READING ITS OWN DOOR hashes nothing (jwize
+          // 2026-09-25: "why do we verify, if we are running on their domain"
+          // · "never hash on fetch"): the door that served this code hashed
+          // every byte when it was uploaded, and a visitor keeps nothing, so
+          // there is no store moment to hash at. Any other host is checked.
+          if (!this.#ownDoorOfVisitor(host) && !await this.#verifyBytes(bytes, sig)) {
             this.#mintOutcome(host, 'mismatch')
             continue
           }
