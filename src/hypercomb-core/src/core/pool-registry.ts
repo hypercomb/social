@@ -100,6 +100,20 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'system:overrides',
   'system:threads',
   'system:translations',
+  // THE FEATURES ONLY A PARTICIPANT USES (essentials
+  // sharing/participant-features.ts): members are artifacts named by their
+  // own content, each naming a feature by its layer name. `features publish`
+  // snapshots the pool into the signed index (`pool:features:participant`);
+  // a read-only reader of this key's sites never loads what it names. TRUTH
+  // POOL — the participant's choice, extendable by any module; never minted
+  // from the optimize phase.
+  'features:participant',
+  // THE INSTALL INDEX (hypercomb-runtime install-index.ts): one record per
+  // PACKAGE, the member named by the package signature — aliases, atoms,
+  // bee claims and core names derived from the package where the door is
+  // built, so a visitor unpacks nothing. DERIVED-CACHE POOL: recomputable
+  // from the package, never load-bearing, complete or absent.
+  'install:index',
   // The participant's saved screen backdrops, sorted into the world they
   // suit — one content-addressed doc { light: [sigs], dark: [sigs] } written
   // by CanvasBackgroundService (presentation/background). The sigs point at
