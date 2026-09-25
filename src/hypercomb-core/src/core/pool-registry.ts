@@ -318,8 +318,8 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Discoverable text-theme creations. Members name stable hashed locations;
   // the location's current signed layer is read when a settings menu opens.
   'themes:text',
-  // Quick-menu creations use the same member -> location -> current head path.
-  // The in-memory registry only keeps the gesture ready on the first frame.
+  // Reserved: quick-menu creations (a legacy-app feature kept off the host
+  // branch). A hive that already wrote the pool must not have it pruned.
   'menus:quick',
   // The changes repository — one append-only record per act that touched a
   // group of tiles (see assistant/changes.ts). Colon-scoped so it can never

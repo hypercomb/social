@@ -119,9 +119,7 @@ export class ThemeService extends EventTarget implements ThemeProvider {
   // without a repaint on every idempotent call.
   reassert(): boolean {
     const want = this.#theme === SYSTEM ? null : this.#theme
-    const mood = this.#theme === SYSTEM ? null : this.mood(this.#theme) || null
-    if (document.documentElement.getAttribute('data-theme') === want &&
-        document.documentElement.getAttribute('data-hc-theme-mood') === mood) return false
+    if (document.documentElement.getAttribute('data-theme') === want) return false
     this.#apply(this.#theme)
     EffectBus.emit('theme:changed', { theme: this.#theme })
     this.dispatchEvent(new CustomEvent('change'))
@@ -132,7 +130,6 @@ export class ThemeService extends EventTarget implements ThemeProvider {
     this.#registered.set(name, { ...tokens })
     this.#renderRegistry()
     this.#tokenCache.clear()
-    if (this.#theme === name) this.#apply(name)
     this.dispatchEvent(new CustomEvent('change'))
   }
 
@@ -255,14 +252,6 @@ export class ThemeService extends EventTarget implements ThemeProvider {
     const root = document.documentElement
     if (name === SYSTEM) root.removeAttribute('data-theme')
     else root.setAttribute('data-theme', name)
-
-    // The panel identity is the same hue in every look, but its brightness
-    // follows the current palette. A token-derived attribute lets Angular
-    // component styles and framework-free views share one selector without a
-    // compiled list of theme names. System mode remains under its media query.
-    const mood = name === SYSTEM ? '' : this.mood(name)
-    if (mood) root.setAttribute('data-hc-theme-mood', mood)
-    else root.removeAttribute('data-hc-theme-mood')
   }
 
   // Rebuild the managed <style> from the registered theme maps. One element,

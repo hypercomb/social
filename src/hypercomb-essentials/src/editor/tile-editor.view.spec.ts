@@ -66,7 +66,7 @@ describe('tile editor view — stylesheet contracts', () => {
   })
 
   it('takes its identity deep under a bright look, and honours reduced motion', () => {
-    expect(css).toMatch(/\[data-hc-theme-mood="light"\][^{]*\.te-panel\{--acc:116, 81, 39;\}/)
+    expect(css).toMatch(/\[data-theme="light"\][^{]*\.te-panel\{--acc:116, 81, 39;\}/)
     expect(css).toContain('@media (prefers-reduced-motion: reduce)')
   })
 })

@@ -14,8 +14,6 @@
 // SCSS variables through the toolwindow partial.
 @include shape.ladder-root;
 
-html { color-scheme: var(--md-color-scheme); }
-
 html,
 body {
     margin: 0;
@@ -92,3 +90,4 @@ body.hc-view-website {
 @include suppress-canvas-under('.hc-view-website'); // website render mode
 @include suppress-canvas-under('.hc-view-covered'); // every full-surface view (isTransientMode)
 @include suppress-canvas-under('.viewer-open');     // youtube fullscreen viewer
+

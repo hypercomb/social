@@ -19,9 +19,11 @@
 // no network on the path — so the shipped menus are declared here and are
 // resolved from memory, always.
 //
-// Hive-authored menus arrive through the menus:quick meaning pool. This map is
-// only the gesture's hot cache: adoption writes a signed pool head first, then
-// swaps the complete definition into memory. A menu is never half-built.
+// Hive-authored menus are still the goal and are additive: `adopt()` takes a
+// definition assembled from a collection's tiles + direction pheromones and
+// REPLACES a cached entry by name. That resolution happens off the gesture
+// path, in the background, and the previously cached definition keeps
+// answering until the replacement is complete. A menu is never half-built.
 //
 // IoC key: @diamondcoreprocessor.com/QuickMenuRegistry
 
@@ -168,7 +170,6 @@ const SELECTION: QuickMenuDefinition = {
 
 export class QuickMenuRegistry extends EventTarget {
   #definitions = new Map<string, QuickMenuDefinition>()
-  #writer: ((definition: QuickMenuDefinition) => Promise<QuickMenuDefinition | null>) | null = null
 
   constructor() {
     super()
@@ -185,19 +186,10 @@ export class QuickMenuRegistry extends EventTarget {
     this.dispatchEvent(new CustomEvent('change', { detail: { name: definition.name } }))
   }
 
-  /** Runtime supplies the pool writer after Store is ready. */
-  setWriter = (writer: ((definition: QuickMenuDefinition) => Promise<QuickMenuDefinition | null>) | null): void => {
-    this.#writer = writer
-  }
-
-  /** A participant's adopted menu becomes active only after its signed
-   *  creation has been written and read back through the meaning pool. */
-  adopt = async (definition: QuickMenuDefinition): Promise<boolean> => {
-    const saved = await this.#writer?.(definition)
-    if (!saved) return false
-    this.register(saved)
-    return true
-  }
+  /** Replace a menu with a hive-authored version. Identical to register();
+   *  named separately because the caller's intent is different and the
+   *  distinction matters when reading the boot log. */
+  adopt = (definition: QuickMenuDefinition): void => this.register(definition)
 
   byName = (name: string): QuickMenuDefinition | undefined => this.#definitions.get(name)
 
@@ -216,10 +208,7 @@ export class QuickMenuRegistry extends EventTarget {
    *  that summons into an unrecognised surface still gets a usable ring
    *  rather than an empty one. */
   forContext = (context = this.activeContext()): QuickMenuDefinition => {
-    // Later adopted definitions can claim a surface that a shipped menu also
-    // claims. The pool head still supplies the definition; cache order only
-    // resolves which claim gets the gesture.
-    for (const definition of [...this.#definitions.values()].reverse()) {
+    for (const definition of this.#definitions.values()) {
       if (definition.contexts.includes(context) && context !== ANY_CONTEXT) return definition
     }
     for (const definition of this.#definitions.values()) {

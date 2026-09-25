@@ -69,7 +69,7 @@ ${S} .te-panel{
   font-size:calc(1rem * var(--hc-panel-scale,1));
   outline:none;
 }
-:root[data-hc-theme-mood="light"] ${S} .te-panel{--acc:${EDITOR_ACCENT_DEEP};}
+:is([data-theme="light"],[data-theme="honey"],[data-theme="bloom"],[data-theme="sherbet"]) ${S} .te-panel{--acc:${EDITOR_ACCENT_DEEP};}
 @media (prefers-color-scheme: light){:root:not([data-theme]) ${S} .te-panel{--acc:${EDITOR_ACCENT_DEEP};}}
 
 /* Docked beside the hive. The docked-panel primitive writes the width and the

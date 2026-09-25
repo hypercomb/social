@@ -21,6 +21,8 @@
 // Framework-free — the directive that owns the gear is imperative chrome, and
 // nothing here should need Angular to render a popover.
 
+import { STEEL } from './panel-groups.js'
+
 /** One setting. The four shapes cover everything the windows have asked for so
  *  far; a fifth shape is added HERE and every window can use it at once. */
 export type SettingRow =
@@ -87,14 +89,13 @@ export interface FocusSnapshot { key: string; start: number | null; end: number 
  *  reaches EVERY tool window, so a literal here is a contrast bug in every
  *  panel at the same time — the dim `#6e8290` measured 3.9:1 on a honey pane
  *  in all eleven of them. `--hc-window-ink-*` is the panel ink at the weight
- *  this theme says that weight costs. Each role has a dark fallback because
- *  this primitive can render before a shell has installed its theme. */
+ *  this theme says that weight costs. */
 const SETTINGS_CSS = `
-[data-hc-panel-settings] { color: var(--hc-gear, var(--hc-window-ink-quiet, #93a8b6)); opacity: 1; pointer-events: auto; }
+[data-hc-panel-settings] { color: var(--hc-gear, var(--hc-window-ink-quiet)); opacity: 1; pointer-events: auto; }
 [data-hc-panel-settings]:hover,
 [data-hc-panel-settings]:focus-visible,
-[data-hc-panel-settings][aria-expanded='true'] { color: var(--hc-window-ink-loud, #eaf5fb); background-color: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.09)) !important; }
-[data-hc-panel-settings]:focus-visible { outline: 2px solid var(--md-primary, #7eb6d6); outline-offset: 1px; }
+[data-hc-panel-settings][aria-expanded='true'] { color: var(--hc-window-ink-loud); background-color: rgba(${STEEL}, 0.09) !important; }
+[data-hc-panel-settings]:focus-visible { outline: 1px solid rgba(${STEEL}, 0.72); outline-offset: 1px; }
 /* Touch: widen the target into space the header ALREADY reserves for it (the
    close button's margin is one gear slot), so nothing moves a pixel and the
    glyph stays the same size — only the hit area grows, to a full-height band.
@@ -108,46 +109,45 @@ const SETTINGS_CSS = `
   width: min(272px, calc(100% - 20px));
   box-sizing: border-box;
   padding: 0;
-  background: rgba(var(--hc-panel-pane, 11, 16, 21), 0.985);
-  border: 1px solid var(--hc-window-line-firm, rgba(126, 182, 214, 0.26));
-  border-radius: var(--hc-radius-floating, var(--md-shape-xs, 4px));
-  box-shadow: 0 10px 28px rgba(var(--hc-panel-shadow, 0, 0, 0), 0.35);
-  font: 400 12px/1.45 var(--hc-font, system-ui, sans-serif);
-  color: var(--hc-window-ink-plain, #c8d6de);
+  background: rgba(11, 16, 21, 0.985);
+  border: 1px solid rgba(${STEEL}, 0.3);
+  border-radius: var(--hc-radius-floating, 4px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  font: 400 11.5px/1.45 system-ui, sans-serif;
+  color: #c8d6de;
   -webkit-font-smoothing: antialiased;
 }
 .hc-settings-head {
   display: flex; align-items: baseline; gap: 0.5rem;
   padding: 0.55rem 0.75rem 0.5rem;
-  border-bottom: 1px solid var(--hc-window-line, rgba(126, 182, 214, 0.16));
+  border-bottom: 1px solid rgba(${STEEL}, 0.16);
 }
 .hc-settings-eyebrow {
-  font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--hc-window-ink-quiet, #93a8b6);
+  font-size: 9.5px; letter-spacing: 0.09em; text-transform: uppercase; color: #6f8492;
 }
 .hc-settings-name {
-  margin-left: auto; font-size: 11px; color: var(--hc-window-ink-loud, #eaf5fb); text-transform: capitalize;
+  margin-left: auto; font-size: 11px; color: #cfe3ef; text-transform: capitalize;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%;
 }
 .hc-settings-zone { padding: 0.6rem 0.75rem 0.65rem; }
-.hc-settings-zone + .hc-settings-zone { border-top: 1px solid var(--hc-window-line, rgba(126, 182, 214, 0.16)); }
+.hc-settings-zone + .hc-settings-zone { border-top: 1px solid rgba(${STEEL}, 0.16); }
 .hc-settings-zone-title {
-  font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--hc-window-ink-quiet, #93a8b6);
+  font-size: 9.5px; letter-spacing: 0.09em; text-transform: uppercase; color: #6f8492;
   margin: 0 0 0.5rem;
 }
 .hc-settings-row + .hc-settings-row { margin-top: 0.65rem; }
-.hc-settings-label { display: block; font-size: 11px; color: var(--hc-window-ink-plain, #c8d6de); margin-bottom: 0.35rem; }
-.hc-settings-hint { margin-top: 0.4rem; font-size: 11px; line-height: 1.4; color: var(--hc-window-ink-quiet, #93a8b6); }
+.hc-settings-label { display: block; font-size: 10.5px; color: #93a8b6; margin-bottom: 0.35rem; }
+.hc-settings-hint { margin-top: 0.4rem; font-size: 10.5px; line-height: 1.4; color: #728896; }
 
 .hc-settings input.hc-settings-field {
   width: 100%; box-sizing: border-box; height: 26px; padding: 0 0.45rem;
-  font: inherit; color: var(--hc-window-ink-loud, #eaf5fb);
-  background: var(--hc-window-tint, rgba(255, 255, 255, 0.045));
-  border: 1px solid var(--hc-window-line-firm, rgba(126, 182, 214, 0.26)); border-radius: var(--md-shape-xs, 4px);
+  font: inherit; color: #dcecf5;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(${STEEL}, 0.26); border-radius: 4px;
   outline: none;
 }
-.hc-settings input.hc-settings-field:focus { border-color: var(--md-primary, #7eb6d6); background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.09)); }
-.hc-settings input.hc-settings-field:focus-visible { outline: 2px solid var(--md-primary, #7eb6d6); outline-offset: 1px; }
-.hc-settings input.hc-settings-field::placeholder { color: var(--hc-window-ink-quiet, #93a8b6); }
+.hc-settings input.hc-settings-field:focus { border-color: rgba(${STEEL}, 0.6); background: rgba(255, 255, 255, 0.055); }
+.hc-settings input.hc-settings-field::placeholder { color: #5d7280; }
 
 /* A list of names, each set in the face it names — no boxes, no sample lines,
    nothing standing between the names. The face is the answer and the name is
@@ -156,8 +156,8 @@ const SETTINGS_CSS = `
 .hc-settings-specimens > button {
   display: flex; align-items: center; gap: 0.45rem;
   width: 100%; text-align: left; min-height: 22px; padding: 2px 5px;
-  background: none; border: 0; border-radius: var(--md-shape-xs, 4px);
-  font-size: 12px; line-height: 1.35; color: var(--hc-window-ink-plain, #c8d6de); cursor: pointer;
+  background: none; border: 0; border-radius: 3px;
+  font-size: 12px; line-height: 1.35; color: #93a8b6; cursor: pointer;
   /* The name is drawn with the window's own ligature setting, so a preview can
      never promise a shape the code block will not draw. */
   font-variant-ligatures: var(--hc-code-ligatures, none);
@@ -171,10 +171,9 @@ const SETTINGS_CSS = `
   content: ''; flex: 0 0 auto; width: 5px; height: 5px; border-radius: 999px;
   background: transparent; transition: background 0.12s ease;
 }
-.hc-settings-specimens > button:hover { background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.09)); color: var(--hc-window-ink-loud, #eaf5fb); }
-.hc-settings-specimens > button[aria-pressed='true'] { color: var(--hc-window-ink-loud, #eaf5fb); }
-.hc-settings-specimens > button[aria-pressed='true']::before { background: var(--hc-window-ink-loud, #eaf5fb); }
-.hc-settings-specimens > button:focus-visible { outline: 2px solid var(--md-primary, #7eb6d6); outline-offset: -2px; }
+.hc-settings-specimens > button:hover { background: rgba(255, 255, 255, 0.05); color: #dcecf5; }
+.hc-settings-specimens > button[aria-pressed='true'] { color: #eaf5fb; }
+.hc-settings-specimens > button[aria-pressed='true']::before { background: #cfe3ef; }
 .hc-settings-specimen-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The row's own head: its name on the left, its close-up on the right. The
@@ -192,9 +191,9 @@ const SETTINGS_CSS = `
    the code block will not draw is worse than no preview. */
 .hc-settings-loupe {
   margin-left: auto; flex: 0 1 auto; min-width: 0;
-  padding: 2px 7px 3px; border-radius: var(--md-shape-xs, 4px);
-  background: var(--hc-window-tint, rgba(255, 255, 255, 0.045)); border: 1px solid var(--hc-window-line, rgba(126, 182, 214, 0.16));
-  font-size: 17px; line-height: 1.25; color: var(--hc-window-ink-loud, #eaf5fb);
+  padding: 2px 7px 3px; border-radius: 3px;
+  background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(${STEEL}, 0.22);
+  font-size: 17px; line-height: 1.25; color: #eaf5fb;
   font-variant-ligatures: var(--hc-code-ligatures, none);
   white-space: nowrap; overflow: hidden; text-overflow: clip;
 }
@@ -205,11 +204,11 @@ const SETTINGS_CSS = `
 .hc-settings-zone[data-hc-fold] > summary {
   display: flex; align-items: center; gap: 0.4rem;
   list-style: none; cursor: pointer; margin: 0; padding: 1px 0;
-  color: var(--hc-window-ink-quiet, #93a8b6); transition: color 0.12s ease;
+  color: #6f8492; transition: color 0.12s ease;
 }
 .hc-settings-zone[data-hc-fold] > summary::-webkit-details-marker { display: none; }
-.hc-settings-zone[data-hc-fold] > summary:hover { color: var(--hc-window-ink-loud, #eaf5fb); }
-.hc-settings-zone[data-hc-fold] > summary:focus-visible { outline: 2px solid var(--md-primary, #7eb6d6); outline-offset: 2px; }
+.hc-settings-zone[data-hc-fold] > summary:hover { color: #cfe3ef; }
+.hc-settings-zone[data-hc-fold] > summary:focus-visible { outline: 1px solid rgba(${STEEL}, 0.72); outline-offset: 2px; }
 .hc-settings-zone[data-hc-fold] > summary > .hc-settings-zone-title { margin: 0; color: inherit; }
 .hc-settings-zone[data-hc-fold] > summary::after {
   content: ''; flex: 0 0 auto;
@@ -224,48 +223,45 @@ const SETTINGS_CSS = `
    which a row of separate buttons never does. */
 .hc-settings-seg {
   display: flex; width: 100%; overflow: hidden;
-  border: 1px solid var(--hc-window-line-firm, rgba(126, 182, 214, 0.26)); border-radius: var(--md-shape-xs, 4px);
+  border: 1px solid rgba(${STEEL}, 0.26); border-radius: 4px;
 }
 .hc-settings-seg > button {
   flex: 1 1 0; min-width: 0; height: 26px; padding: 0 0.2rem;
-  font: inherit; font-size: 10.5px; color: var(--hc-window-ink-plain, #c8d6de);
-  background: transparent; border: 0; border-left: 1px solid var(--hc-window-line, rgba(126, 182, 214, 0.16));
+  font: inherit; font-size: 10.5px; color: #a9bcc9;
+  background: transparent; border: 0; border-left: 1px solid rgba(${STEEL}, 0.2);
   cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: background 0.12s ease, color 0.12s ease;
 }
 .hc-settings-seg > button:first-child { border-left: 0; }
-.hc-settings-seg > button:hover { background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.09)); color: var(--hc-window-ink-loud, #eaf5fb); }
-.hc-settings-seg > button[aria-pressed='true'] { background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.09)); color: var(--hc-window-ink-loud, #eaf5fb); }
-.hc-settings-seg > button:focus-visible { outline: 2px solid var(--md-primary, #7eb6d6); outline-offset: -2px; }
+.hc-settings-seg > button:hover { background: rgba(255, 255, 255, 0.05); color: #dcecf5; }
+.hc-settings-seg > button[aria-pressed='true'] { background: rgba(${STEEL}, 0.2); color: #eaf5fb; }
 
 .hc-settings-switchrow {
   display: flex; align-items: center; gap: 0.6rem; cursor: pointer;
-  font-size: 11px; color: var(--hc-window-ink-plain, #c8d6de);
+  font-size: 11px; color: #c8d6de;
 }
 .hc-settings-switchrow > span:first-child { flex: 1 1 auto; }
 .hc-settings-switch {
   flex: 0 0 auto; position: relative; width: 26px; height: 14px; border-radius: 999px;
-  background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.09)); border: 1px solid var(--hc-window-line-firm, rgba(126, 182, 214, 0.26));
+  background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(${STEEL}, 0.26);
   transition: background 0.14s ease, border-color 0.14s ease;
 }
 .hc-settings-switch::after {
   content: ''; position: absolute; top: 2px; left: 2px; width: 8px; height: 8px;
-  border-radius: 999px; background: var(--hc-window-ink-quiet, #93a8b6); transition: transform 0.14s ease, background 0.14s ease;
+  border-radius: 999px; background: #7f95a3; transition: transform 0.14s ease, background 0.14s ease;
 }
-.hc-settings-switchrow[aria-checked='true'] .hc-settings-switch { background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.09)); border-color: var(--md-primary, #7eb6d6); }
-.hc-settings-switchrow[aria-checked='true'] .hc-settings-switch::after { transform: translateX(12px); background: var(--md-primary, #7eb6d6); }
-.hc-settings-switchrow:focus-within { outline: 2px solid var(--md-primary, #7eb6d6); outline-offset: 2px; }
+.hc-settings-switchrow[aria-checked='true'] .hc-settings-switch { background: rgba(${STEEL}, 0.3); border-color: rgba(${STEEL}, 0.55); }
+.hc-settings-switchrow[aria-checked='true'] .hc-settings-switch::after { transform: translateX(12px); background: #dcecf5; }
 
 .hc-settings button.hc-settings-action {
   width: 100%; height: 26px; padding: 0 0.5rem;
-  font: inherit; font-size: 11px; color: var(--hc-window-ink-plain, #c8d6de); cursor: pointer;
-  background: var(--hc-window-tint, rgba(255, 255, 255, 0.045));
-  border: 1px solid var(--hc-window-line-firm, rgba(126, 182, 214, 0.26)); border-radius: var(--md-shape-xs, 4px);
+  font: inherit; font-size: 11px; color: #c8d6de; cursor: pointer;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(${STEEL}, 0.26); border-radius: 4px;
   transition: background 0.12s ease, color 0.12s ease;
 }
-.hc-settings button.hc-settings-action:hover { background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.09)); color: var(--hc-window-ink-loud, #eaf5fb); }
-.hc-settings button.hc-settings-action[data-on='true'] { background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.09)); border-color: var(--md-primary, #7eb6d6); color: var(--hc-window-ink-loud, #eaf5fb); }
-.hc-settings button.hc-settings-action:focus-visible { outline: 2px solid var(--md-primary, #7eb6d6); outline-offset: 2px; }
+.hc-settings button.hc-settings-action:hover { background: rgba(255, 255, 255, 0.06); color: #dcecf5; }
+.hc-settings button.hc-settings-action[data-on='true'] { background: rgba(${STEEL}, 0.18); border-color: rgba(${STEEL}, 0.5); color: #eaf5fb; }
 `
 
 let cssInstalled = false

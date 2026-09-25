@@ -1,359 +1,11 @@
 [
   {
-    "theme": "light",
-    "window": "portals",
-    "present": true,
-    "runs": 8,
-    "fails": 0,
-    "worst": 4.88,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "notes",
-    "present": true,
-    "runs": 9,
-    "fails": 0,
-    "worst": 5.71,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "behaviors",
-    "present": true,
-    "runs": 101,
-    "fails": 0,
-    "worst": 4.88,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "files",
-    "present": true,
-    "runs": 5,
-    "fails": 0,
-    "worst": 4.88,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "tags",
-    "present": true,
-    "runs": 10,
-    "fails": 0,
-    "worst": 4.88,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "history",
-    "present": true,
-    "runs": 11,
-    "fails": 0,
-    "worst": 4.88,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "clipboard",
-    "present": true,
-    "runs": 5,
-    "fails": 0,
-    "worst": 4.88,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "sequence",
-    "present": true,
-    "runs": 15,
-    "fails": 0,
-    "worst": 4.88,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "workflow",
-    "present": true,
-    "runs": 7,
-    "fails": 0,
-    "worst": 4.88,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "rewind",
-    "present": true,
-    "runs": 4,
-    "fails": 0,
-    "worst": 4.86,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "chat",
-    "present": true,
-    "runs": 34,
-    "fails": 0,
-    "worst": 4.88,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "feedback",
-    "present": false
-  },
-  {
-    "theme": "light",
-    "window": "notesview",
-    "present": false
-  },
-  {
-    "theme": "light",
-    "window": "context",
-    "present": false
-  },
-  {
-    "theme": "light",
-    "window": "publish",
-    "present": false
-  },
-  {
-    "theme": "light",
-    "window": "references",
-    "present": false
-  },
-  {
-    "theme": "light",
-    "window": "providers",
-    "present": true,
-    "runs": 13,
-    "fails": 0,
-    "worst": 5.71,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "skills",
-    "present": true,
-    "runs": 3,
-    "fails": 0,
-    "worst": 5.94,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "vocabulary",
-    "present": true,
-    "runs": 11,
-    "fails": 0,
-    "worst": 5.94,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "offers",
-    "present": false
-  },
-  {
-    "theme": "light",
-    "window": "tile-editor",
-    "present": true,
-    "runs": 29,
-    "fails": 0,
-    "worst": 5.8,
-    "failing": []
-  },
-  {
-    "theme": "light",
-    "window": "action",
-    "present": true,
-    "runs": 14,
-    "fails": 0,
-    "worst": 5.94,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "portals",
-    "present": true,
-    "runs": 8,
-    "fails": 0,
-    "worst": 4.52,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "notes",
-    "present": true,
-    "runs": 7,
-    "fails": 0,
-    "worst": 5.95,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "behaviors",
-    "present": true,
-    "runs": 101,
-    "fails": 0,
-    "worst": 4.52,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "files",
-    "present": true,
-    "runs": 5,
-    "fails": 0,
-    "worst": 4.52,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "tags",
-    "present": true,
-    "runs": 10,
-    "fails": 0,
-    "worst": 4.52,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "history",
-    "present": true,
-    "runs": 11,
-    "fails": 0,
-    "worst": 4.52,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "clipboard",
-    "present": true,
-    "runs": 5,
-    "fails": 0,
-    "worst": 4.52,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "sequence",
-    "present": true,
-    "runs": 15,
-    "fails": 0,
-    "worst": 4.52,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "workflow",
-    "present": true,
-    "runs": 7,
-    "fails": 0,
-    "worst": 4.52,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "rewind",
-    "present": true,
-    "runs": 4,
-    "fails": 0,
-    "worst": 4.51,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "chat",
-    "present": true,
-    "runs": 34,
-    "fails": 0,
-    "worst": 4.52,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "feedback",
-    "present": false
-  },
-  {
-    "theme": "dark",
-    "window": "notesview",
-    "present": false
-  },
-  {
-    "theme": "dark",
-    "window": "context",
-    "present": false
-  },
-  {
-    "theme": "dark",
-    "window": "publish",
-    "present": false
-  },
-  {
-    "theme": "dark",
-    "window": "references",
-    "present": false
-  },
-  {
-    "theme": "dark",
-    "window": "providers",
-    "present": true,
-    "runs": 13,
-    "fails": 0,
-    "worst": 5.95,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "skills",
-    "present": true,
-    "runs": 3,
-    "fails": 0,
-    "worst": 6.2,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "vocabulary",
-    "present": true,
-    "runs": 11,
-    "fails": 0,
-    "worst": 6.2,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "offers",
-    "present": false
-  },
-  {
-    "theme": "dark",
-    "window": "tile-editor",
-    "present": true,
-    "runs": 29,
-    "fails": 0,
-    "worst": 6.16,
-    "failing": []
-  },
-  {
-    "theme": "dark",
-    "window": "action",
-    "present": true,
-    "runs": 14,
-    "fails": 0,
-    "worst": 6.2,
-    "failing": []
-  },
-  {
     "theme": "honey",
     "window": "portals",
     "present": true,
     "runs": 8,
     "fails": 0,
-    "worst": 4.91,
+    "worst": 4.61,
     "failing": []
   },
   {
@@ -362,16 +14,16 @@
     "present": true,
     "runs": 9,
     "fails": 0,
-    "worst": 5.75,
+    "worst": 5.87,
     "failing": []
   },
   {
     "theme": "honey",
     "window": "behaviors",
     "present": true,
-    "runs": 101,
+    "runs": 96,
     "fails": 0,
-    "worst": 4.91,
+    "worst": 4.61,
     "failing": []
   },
   {
@@ -380,16 +32,16 @@
     "present": true,
     "runs": 5,
     "fails": 0,
-    "worst": 4.91,
+    "worst": 4.61,
     "failing": []
   },
   {
     "theme": "honey",
     "window": "tags",
     "present": true,
-    "runs": 10,
+    "runs": 8,
     "fails": 0,
-    "worst": 4.91,
+    "worst": 4.61,
     "failing": []
   },
   {
@@ -398,7 +50,7 @@
     "present": true,
     "runs": 11,
     "fails": 0,
-    "worst": 4.91,
+    "worst": 4.61,
     "failing": []
   },
   {
@@ -407,7 +59,7 @@
     "present": true,
     "runs": 5,
     "fails": 0,
-    "worst": 4.91,
+    "worst": 4.61,
     "failing": []
   },
   {
@@ -416,7 +68,7 @@
     "present": true,
     "runs": 15,
     "fails": 0,
-    "worst": 4.91,
+    "worst": 4.61,
     "failing": []
   },
   {
@@ -425,7 +77,7 @@
     "present": true,
     "runs": 7,
     "fails": 0,
-    "worst": 4.88,
+    "worst": 4.61,
     "failing": []
   },
   {
@@ -434,22 +86,26 @@
     "present": true,
     "runs": 4,
     "fails": 0,
-    "worst": 4.9,
+    "worst": 4.59,
     "failing": []
   },
   {
     "theme": "honey",
     "window": "chat",
     "present": true,
-    "runs": 34,
+    "runs": 32,
     "fails": 0,
-    "worst": 4.91,
+    "worst": 4.61,
     "failing": []
   },
   {
     "theme": "honey",
     "window": "feedback",
-    "present": false
+    "present": true,
+    "runs": 10,
+    "fails": 0,
+    "worst": 4.61,
+    "failing": []
   },
   {
     "theme": "honey",
@@ -472,228 +128,132 @@
     "present": false
   },
   {
-    "theme": "honey",
-    "window": "providers",
-    "present": true,
-    "runs": 13,
-    "fails": 0,
-    "worst": 5.75,
-    "failing": []
-  },
-  {
-    "theme": "honey",
-    "window": "skills",
-    "present": true,
-    "runs": 3,
-    "fails": 0,
-    "worst": 5.98,
-    "failing": []
-  },
-  {
-    "theme": "honey",
-    "window": "vocabulary",
-    "present": true,
-    "runs": 11,
-    "fails": 0,
-    "worst": 5.98,
-    "failing": []
-  },
-  {
-    "theme": "honey",
-    "window": "offers",
-    "present": false
-  },
-  {
-    "theme": "honey",
-    "window": "tile-editor",
-    "present": true,
-    "runs": 29,
-    "fails": 0,
-    "worst": 5.89,
-    "failing": []
-  },
-  {
-    "theme": "honey",
-    "window": "action",
-    "present": true,
-    "runs": 14,
-    "fails": 0,
-    "worst": 5.98,
-    "failing": []
-  },
-  {
-    "theme": "bloom",
+    "theme": "light",
     "window": "portals",
     "present": true,
     "runs": 8,
     "fails": 0,
-    "worst": 4.71,
+    "worst": 4.6,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "notes",
     "present": true,
     "runs": 7,
     "fails": 0,
-    "worst": 5.48,
+    "worst": 5.86,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "behaviors",
     "present": true,
-    "runs": 101,
+    "runs": 96,
     "fails": 0,
-    "worst": 4.71,
+    "worst": 4.6,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "files",
     "present": true,
     "runs": 5,
     "fails": 0,
-    "worst": 4.71,
+    "worst": 4.6,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "tags",
     "present": true,
-    "runs": 10,
+    "runs": 8,
     "fails": 0,
-    "worst": 4.71,
+    "worst": 4.6,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "history",
     "present": true,
     "runs": 11,
     "fails": 0,
-    "worst": 4.71,
+    "worst": 4.6,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "clipboard",
     "present": true,
     "runs": 5,
     "fails": 0,
-    "worst": 4.71,
+    "worst": 4.6,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "sequence",
     "present": true,
     "runs": 15,
     "fails": 0,
-    "worst": 4.71,
+    "worst": 4.6,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "workflow",
     "present": true,
     "runs": 7,
     "fails": 0,
-    "worst": 4.71,
+    "worst": 4.6,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "rewind",
     "present": true,
     "runs": 4,
     "fails": 0,
-    "worst": 4.7,
+    "worst": 4.58,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "chat",
     "present": true,
-    "runs": 34,
+    "runs": 32,
     "fails": 0,
-    "worst": 4.71,
+    "worst": 4.6,
     "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "feedback",
-    "present": false
+    "present": true,
+    "runs": 10,
+    "fails": 0,
+    "worst": 4.6,
+    "failing": []
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "notesview",
     "present": false
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "context",
     "present": false
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "publish",
     "present": false
   },
   {
-    "theme": "bloom",
+    "theme": "light",
     "window": "references",
     "present": false
-  },
-  {
-    "theme": "bloom",
-    "window": "providers",
-    "present": true,
-    "runs": 13,
-    "fails": 0,
-    "worst": 5.48,
-    "failing": []
-  },
-  {
-    "theme": "bloom",
-    "window": "skills",
-    "present": true,
-    "runs": 3,
-    "fails": 0,
-    "worst": 5.7,
-    "failing": []
-  },
-  {
-    "theme": "bloom",
-    "window": "vocabulary",
-    "present": true,
-    "runs": 11,
-    "fails": 0,
-    "worst": 5.7,
-    "failing": []
-  },
-  {
-    "theme": "bloom",
-    "window": "offers",
-    "present": false
-  },
-  {
-    "theme": "bloom",
-    "window": "tile-editor",
-    "present": true,
-    "runs": 29,
-    "fails": 0,
-    "worst": 5.61,
-    "failing": []
-  },
-  {
-    "theme": "bloom",
-    "window": "action",
-    "present": true,
-    "runs": 14,
-    "fails": 0,
-    "worst": 5.7,
-    "failing": []
   },
   {
     "theme": "sherbet",
@@ -701,7 +261,7 @@
     "present": true,
     "runs": 8,
     "fails": 0,
-    "worst": 5.31,
+    "worst": 4.97,
     "failing": []
   },
   {
@@ -709,512 +269,246 @@
     "window": "notes",
     "present": true,
     "runs": 7,
-    "fails": 0,
-    "worst": 6.28,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "behaviors",
-    "present": true,
-    "runs": 101,
-    "fails": 0,
-    "worst": 5.31,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "files",
-    "present": true,
-    "runs": 5,
-    "fails": 0,
-    "worst": 5.31,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "tags",
-    "present": true,
-    "runs": 10,
-    "fails": 0,
-    "worst": 5.31,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "history",
-    "present": true,
-    "runs": 11,
-    "fails": 0,
-    "worst": 5.31,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "clipboard",
-    "present": true,
-    "runs": 5,
-    "fails": 0,
-    "worst": 5.31,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "sequence",
-    "present": true,
-    "runs": 15,
-    "fails": 0,
-    "worst": 5.31,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "workflow",
-    "present": true,
-    "runs": 7,
-    "fails": 0,
-    "worst": 4.91,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "rewind",
-    "present": true,
-    "runs": 4,
-    "fails": 0,
-    "worst": 5.3,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "chat",
-    "present": true,
-    "runs": 34,
-    "fails": 0,
-    "worst": 5.31,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "feedback",
-    "present": false
-  },
-  {
-    "theme": "sherbet",
-    "window": "notesview",
-    "present": false
-  },
-  {
-    "theme": "sherbet",
-    "window": "context",
-    "present": false
-  },
-  {
-    "theme": "sherbet",
-    "window": "publish",
-    "present": false
-  },
-  {
-    "theme": "sherbet",
-    "window": "references",
-    "present": false
-  },
-  {
-    "theme": "sherbet",
-    "window": "providers",
-    "present": true,
-    "runs": 13,
-    "fails": 0,
-    "worst": 6.28,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "skills",
-    "present": true,
-    "runs": 3,
-    "fails": 0,
-    "worst": 6.54,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "vocabulary",
-    "present": true,
-    "runs": 11,
-    "fails": 0,
-    "worst": 6.54,
-    "failing": []
-  },
-  {
-    "theme": "sherbet",
-    "window": "offers",
-    "present": false
-  },
-  {
-    "theme": "sherbet",
-    "window": "tile-editor",
-    "present": true,
-    "runs": 29,
     "fails": 0,
     "worst": 6.41,
     "failing": []
   },
   {
     "theme": "sherbet",
-    "window": "action",
-    "present": true,
-    "runs": 14,
-    "fails": 0,
-    "worst": 6.47,
-    "failing": []
-  },
-  {
-    "theme": "system-light",
-    "window": "portals",
-    "present": true,
-    "runs": 8,
-    "fails": 0,
-    "worst": 4.88,
-    "failing": []
-  },
-  {
-    "theme": "system-light",
-    "window": "notes",
-    "present": true,
-    "runs": 7,
-    "fails": 0,
-    "worst": 5.71,
-    "failing": []
-  },
-  {
-    "theme": "system-light",
     "window": "behaviors",
     "present": true,
-    "runs": 101,
+    "runs": 96,
     "fails": 0,
-    "worst": 4.88,
+    "worst": 4.97,
     "failing": []
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "files",
     "present": true,
     "runs": 5,
     "fails": 0,
-    "worst": 4.88,
+    "worst": 4.97,
     "failing": []
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "tags",
     "present": true,
-    "runs": 10,
+    "runs": 8,
     "fails": 0,
-    "worst": 4.88,
+    "worst": 4.97,
     "failing": []
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "history",
     "present": true,
     "runs": 11,
     "fails": 0,
-    "worst": 4.88,
+    "worst": 4.97,
     "failing": []
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "clipboard",
     "present": true,
     "runs": 5,
     "fails": 0,
-    "worst": 4.88,
+    "worst": 4.97,
     "failing": []
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "sequence",
     "present": true,
     "runs": 15,
     "fails": 0,
-    "worst": 4.88,
+    "worst": 4.97,
     "failing": []
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "workflow",
     "present": true,
     "runs": 7,
     "fails": 0,
-    "worst": 4.88,
+    "worst": 4.91,
     "failing": []
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "rewind",
     "present": true,
     "runs": 4,
     "fails": 0,
-    "worst": 4.86,
+    "worst": 4.94,
     "failing": []
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "chat",
     "present": true,
-    "runs": 34,
+    "runs": 32,
     "fails": 0,
-    "worst": 4.88,
+    "worst": 4.97,
     "failing": []
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "feedback",
-    "present": false
+    "present": true,
+    "runs": 10,
+    "fails": 0,
+    "worst": 4.97,
+    "failing": []
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "notesview",
     "present": false
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "context",
     "present": false
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "publish",
     "present": false
   },
   {
-    "theme": "system-light",
+    "theme": "sherbet",
     "window": "references",
     "present": false
   },
   {
-    "theme": "system-light",
-    "window": "providers",
-    "present": true,
-    "runs": 13,
-    "fails": 0,
-    "worst": 5.71,
-    "failing": []
-  },
-  {
-    "theme": "system-light",
-    "window": "skills",
-    "present": true,
-    "runs": 3,
-    "fails": 0,
-    "worst": 5.94,
-    "failing": []
-  },
-  {
-    "theme": "system-light",
-    "window": "vocabulary",
-    "present": true,
-    "runs": 11,
-    "fails": 0,
-    "worst": 5.94,
-    "failing": []
-  },
-  {
-    "theme": "system-light",
-    "window": "offers",
-    "present": false
-  },
-  {
-    "theme": "system-light",
-    "window": "tile-editor",
-    "present": true,
-    "runs": 29,
-    "fails": 0,
-    "worst": 5.8,
-    "failing": []
-  },
-  {
-    "theme": "system-light",
-    "window": "action",
-    "present": true,
-    "runs": 14,
-    "fails": 0,
-    "worst": 5.94,
-    "failing": []
-  },
-  {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "portals",
     "present": true,
     "runs": 8,
     "fails": 0,
-    "worst": 4.52,
+    "worst": 6.62,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "notes",
     "present": true,
     "runs": 7,
     "fails": 0,
-    "worst": 5.95,
+    "worst": 6.54,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "behaviors",
     "present": true,
-    "runs": 101,
+    "runs": 96,
     "fails": 0,
-    "worst": 4.52,
+    "worst": 6.44,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "files",
     "present": true,
     "runs": 5,
     "fails": 0,
-    "worst": 4.52,
+    "worst": 6.62,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "tags",
     "present": true,
-    "runs": 10,
+    "runs": 8,
     "fails": 0,
-    "worst": 4.52,
+    "worst": 5.96,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "history",
     "present": true,
     "runs": 11,
     "fails": 0,
-    "worst": 4.52,
+    "worst": 6.06,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "clipboard",
     "present": true,
     "runs": 5,
     "fails": 0,
-    "worst": 4.52,
+    "worst": 6.62,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "sequence",
     "present": true,
     "runs": 15,
     "fails": 0,
-    "worst": 4.52,
+    "worst": 6.39,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "workflow",
     "present": true,
     "runs": 7,
     "fails": 0,
-    "worst": 4.52,
+    "worst": 6.54,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "rewind",
     "present": true,
     "runs": 4,
     "fails": 0,
-    "worst": 4.51,
+    "worst": 6.61,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "chat",
     "present": true,
-    "runs": 34,
+    "runs": 32,
     "fails": 0,
-    "worst": 4.52,
+    "worst": 6.34,
     "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "feedback",
-    "present": false
+    "present": true,
+    "runs": 10,
+    "fails": 0,
+    "worst": 6.33,
+    "failing": []
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "notesview",
     "present": false
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "context",
     "present": false
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "publish",
     "present": false
   },
   {
-    "theme": "system-dark",
+    "theme": "dark",
     "window": "references",
     "present": false
-  },
-  {
-    "theme": "system-dark",
-    "window": "providers",
-    "present": true,
-    "runs": 13,
-    "fails": 0,
-    "worst": 5.95,
-    "failing": []
-  },
-  {
-    "theme": "system-dark",
-    "window": "skills",
-    "present": true,
-    "runs": 3,
-    "fails": 0,
-    "worst": 6.2,
-    "failing": []
-  },
-  {
-    "theme": "system-dark",
-    "window": "vocabulary",
-    "present": true,
-    "runs": 11,
-    "fails": 0,
-    "worst": 6.2,
-    "failing": []
-  },
-  {
-    "theme": "system-dark",
-    "window": "offers",
-    "present": false
-  },
-  {
-    "theme": "system-dark",
-    "window": "tile-editor",
-    "present": true,
-    "runs": 29,
-    "fails": 0,
-    "worst": 6.16,
-    "failing": []
-  },
-  {
-    "theme": "system-dark",
-    "window": "action",
-    "present": true,
-    "runs": 14,
-    "fails": 0,
-    "worst": 6.2,
-    "failing": []
   }
 ]

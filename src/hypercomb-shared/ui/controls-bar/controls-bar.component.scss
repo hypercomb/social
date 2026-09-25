@@ -2004,11 +2004,11 @@ $actions-corner: 12rem;
   transition: opacity 90ms ease;
 
   &.show { opacity: 1; }
-  &.beside-right { border-left: 0; border-radius: 0 var(--hc-radius-card) var(--hc-radius-card) 0; }
-  &.beside-left  { border-right: 0; border-radius: var(--hc-radius-card) 0 0 var(--hc-radius-card); }
+  &.beside-right { border-left: 0; border-radius: 0 3px 3px 0; }
+  &.beside-left  { border-right: 0; border-radius: 3px 0 0 3px; }
   &.above {
     padding: 0.15rem 0.45rem;
-    border-radius: var(--hc-radius-card);
+    border-radius: 3px;
     transform: translateX(-50%);
   }
 }

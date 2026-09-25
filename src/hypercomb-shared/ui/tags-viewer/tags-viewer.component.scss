@@ -338,7 +338,7 @@ $mint: #6fbf94;
   text-underline-offset: 0.2em;
   cursor: pointer;
 
-  &:hover { color: var(--hc-status-alert); }
+  &:hover { color: #e06b6b; }
 }
 
 // ── the bouquet in hand ───────────────────────────────────
@@ -1019,7 +1019,7 @@ $mint: #6fbf94;
   transition: opacity 0.12s ease, color 0.12s ease;
 
   .tags-row:hover & { opacity: 1; }
-  &:hover { color: var(--hc-status-alert); }
+  &:hover { color: #e06b6b; }
 
   // armed: the tick stays visible without a hover — it is the commit control
   // for whatever is staged, so it must never be hidden.

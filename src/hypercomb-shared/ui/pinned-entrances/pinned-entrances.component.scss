@@ -1,6 +1,6 @@
 // hypercomb-shared/ui/pinned-entrances/pinned-entrances.component.scss
 //
-// Same theme-aware icon language as the group launchers — normal small
+// Same cold, quiet icon language as the group launchers — normal small
 // glyphs, never launcher tiles. The drop slot is a bare dashed circle that
 // appears only while an entrance drag is in flight.
 //
@@ -11,6 +11,7 @@
 // marks it as its own group, the same tick the shell uses between the
 // behaviour toggles and the standing tools.
 
+@use '../toolwindow' as tw;
 :host { display: inline-flex; align-items: center; }
 
 .pinned-entrances {
@@ -18,7 +19,7 @@
   align-items: center;
   gap: var(--hc-rail-gap, 0.3rem);
 
-  // Group tick — same rule color and proportions as the shell's
+  // Group tick — identical steel + proportions to the shell's
   // `.rail-divider`, so the whole header reads as one rail of groups.
   &::before {
     content: '';
@@ -26,7 +27,7 @@
     height: 1.15em;
     margin: 0 calc(var(--hc-rail-gap, 0.3rem) * 0.5);
     border-radius: 1px;
-    background: rgba(var(--hc-chrome-rule), 0.35);
+    background: rgba(126, 182, 214, 0.35);
   }
 }
 
@@ -39,9 +40,10 @@
   padding: 0;
   background: none;
   border: none;
-  // Circle + shared chrome ink weights like the shell's `.rail-btn`.
+  // Circle + steel tone + the rail's resting/hover alphas — the shell's
+  // `.rail-btn`, restated here because the two live in separate components.
   border-radius: 50%;
-  color: var(--hc-chrome-ink-quiet);
+  color: tw.ink(rgba(126, 182, 214, 0.42));
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, opacity 150ms ease;
 
@@ -51,9 +53,9 @@
     line-height: 1;
   }
 
-  &:hover { color: var(--hc-chrome-ink-loud); background: rgba(var(--hc-chrome-ink), 0.08); }
+  &:hover { color: tw.ink(rgba(126, 182, 214, 0.85)); background: rgba(126, 182, 214, 0.1); }
   &:active { transform: scale(0.94); }
-  &:focus-visible { outline: 2px solid rgb(var(--hc-chrome-accent)); outline-offset: 2px; }
+  &:focus-visible { outline: 1px solid rgba(126, 182, 214, 0.6); outline-offset: 2px; }
 
   // Being dragged: dim in place (the pointer is the drag feedback);
   // once outside the bar, fade further — "let go here removes it".
@@ -64,15 +66,15 @@
   // says "this click goes somewhere else". Only the hovered one lights, so
   // the rail never turns into a row of shouting icons.
   &.ctrl-armed:hover {
-    color: rgb(var(--hc-chrome-accent));
-    background: rgba(var(--hc-chrome-accent), 0.16);
+    color: var(--hc-accent, rgba(120, 210, 255, 0.95));
+    background: rgba(120, 210, 255, 0.16);
   }
 
   // Standing on the group page this pin opened — lit like any on-state
-  // switch, and a click goes back. Same theme accent, full strength.
+  // switch, and a click goes back. Same steel family, full strength.
   &.at-aggregate {
-    color: rgb(var(--hc-chrome-accent));
-    background: rgba(var(--hc-chrome-accent), 0.16);
+    color: tw.ink(rgba(126, 182, 214, 0.95));
+    background: rgba(126, 182, 214, 0.16);
   }
 }
 
@@ -82,6 +84,6 @@
   width: var(--hc-rail-btn, 1.6rem);
   height: var(--hc-rail-btn, 1.6rem);
   border-radius: 50%;
-  border: 1px dashed rgba(var(--hc-chrome-accent), 0.55);
-  background: rgba(var(--hc-chrome-accent), 0.08);
+  border: 1px dashed rgba(126, 182, 214, 0.55);
+  background: rgba(126, 182, 214, 0.08);
 }

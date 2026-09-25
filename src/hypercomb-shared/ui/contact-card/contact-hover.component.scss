@@ -1,4 +1,5 @@
 @use '../toolwindow' as tw;
+@use '../panel-identity' as identity;
 // hypercomb-shared/ui/contact-card/contact-hover.component.scss
 //
 // Floating, draggable contact-details panel. Parks wherever the user drops
@@ -8,6 +9,15 @@
 $accent: #a8ffd8;
 
 
+// The identity as a triple — a bright theme takes the same hue deep.
+// These panels do not come through `tw.panel()`, so they say it here.
+:host {
+  @include identity.accent($accent);
+  // This hand-built floating surface does not take tw.floating-panel(), so it
+  // must publish the accent roles its title and organisation label consume.
+  @include tw.window-roles;
+}
+
 :host {
   position: fixed;
   inset: 0;
@@ -16,21 +26,25 @@ $accent: #a8ffd8;
 }
 
 .contact-hover-panel {
-  @include tw.floating-panel($accent);
   pointer-events: auto;
   position: absolute;
-  box-sizing: border-box;
-  width: min(360px, calc(100vw - 1rem));
+  width: 360px;
   max-height: calc(100vh - 2rem);
-  max-height: calc(100dvh - 2rem);
   display: flex;
   flex-direction: column;
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border: 1px solid rgba(var(--acc), 0.45);
+  border-radius: var(--hc-radius-floating);
+  box-shadow: 0 16px 50px rgba(var(--hc-panel-shadow), 0.55), 0 0 0 1px rgba(var(--acc), 0.06) inset;
+  font-family: var(--hc-mono, system-ui);
+  color: var(--hc-window-ink-loud);
   overflow: hidden;
 }
 
 .contact-hover-panel.pinned {
-  // Locked open until closed — a firmer edge says this is parked.
-  border-color: var(--hc-window-edge-firm);
+  // Locked open until closed — a slightly firmer accent says "this is parked".
+  border-color: rgba(var(--acc), 0.7);
+  box-shadow: 0 16px 50px rgba(var(--hc-panel-shadow), 0.6), 0 0 0 1px rgba(var(--acc), 0.18) inset;
 }
 
 .contact-hover-header {
@@ -38,7 +52,7 @@ $accent: #a8ffd8;
   align-items: center;
   gap: 0.45rem;
   padding: 0.6rem 0.8rem;
-  border-bottom: 1px solid var(--hc-window-edge);
+  border-bottom: 1px solid rgba(var(--acc), 0.22);
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -53,20 +67,16 @@ $accent: #a8ffd8;
 .contact-hover-close {
   flex: 0 0 auto;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--hc-radius-control);
+  border: none;
   color: var(--hc-window-ink-quiet);
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
-  width: 1.75rem;
-  height: 1.75rem;
-  padding: 0;
+  padding: 0 0.15rem;
   margin-left: 0.1rem;
-  transition: color 150ms ease, background 150ms ease;
+  transition: color 150ms ease;
 
-  &:hover { color: var(--hc-window-accent); background: var(--hc-window-wash); }
-  &:focus-visible { outline: 2px solid var(--hc-window-accent); outline-offset: 1px; }
+  &:hover { color: tw.ink(#ffc8c8); }
 }
 
 .contact-drag-grip {
@@ -102,10 +112,10 @@ $accent: #a8ffd8;
 }
 
 .contact-card {
-  border: 1px solid var(--hc-window-line);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.08);
   border-radius: var(--hc-radius-card);
   padding: 0.6rem 0.7rem;
-  background: var(--hc-window-tint);
+  background: rgba(var(--hc-panel-ink), 0.02);
 }
 
 .contact-card-head {
@@ -142,13 +152,11 @@ $accent: #a8ffd8;
   }
 
   a {
-    color: var(--hc-window-accent);
-    text-decoration: underline;
-    text-underline-offset: 0.12em;
+    color: rgb(var(--acc));
+    text-decoration: none;
     overflow-wrap: anywhere;
 
-    &:hover { text-decoration-thickness: 2px; }
-    &:focus-visible { outline: 2px solid var(--hc-window-accent); outline-offset: 2px; }
+    &:hover { text-decoration: underline; }
   }
 }
 
@@ -182,18 +190,17 @@ $accent: #a8ffd8;
   font-family: inherit;
   font-size: 0.72rem;
   cursor: pointer;
-  border-radius: var(--hc-radius-control);
+  border-radius: 4px;
   transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
-  &:focus-visible { outline: 2px solid var(--hc-window-accent); outline-offset: 2px; }
 
   &.primary {
     flex: 1;
     padding: 0.32rem 0.5rem;
-    background: var(--hc-window-wash);
-    border: 1px solid var(--hc-window-edge-firm);
-    color: var(--hc-window-accent);
+    background: rgba(var(--acc), 0.14);
+    border: 1px solid rgba(var(--acc), 0.5);
+    color: rgb(var(--acc));
 
-    &:hover { background: var(--hc-window-wash-strong); color: var(--hc-window-ink-loud); border-color: var(--hc-window-accent); }
+    &:hover { background: rgba(var(--acc), 0.26); color: var(--hc-panel-text); border-color: rgb(var(--acc)); }
   }
 
   &.ghost {
@@ -204,13 +211,6 @@ $accent: #a8ffd8;
     line-height: 1;
     padding: 0 0.3rem;
 
-    &:hover { color: var(--hc-status-alert); background: var(--hc-window-tint-strong); }
+    &:hover { color: tw.ink(#ffc8c8); }
   }
-}
-
-@media (max-width: 599px), (max-height: 449px) {
-  .contact-hover-close,
-  .contact-mini { min-block-size: 44px; }
-  .contact-hover-close,
-  .contact-mini.ghost { min-inline-size: 44px; }
 }

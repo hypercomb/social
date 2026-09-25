@@ -81,10 +81,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--md-surface-dim) 92%, transparent);
+  background: rgba(8, 8, 12, 0.92);
   backdrop-filter: blur(8px);
   font-family: var(--hc-font, system-ui, sans-serif);
-  color: var(--md-on-surface);
+  color: rgba(255, 255, 255, 0.92);
 
   // One line: title left, Start right. Crisp — hairline border, flat
   // surface, no decoration beyond what the type carries.
@@ -96,10 +96,10 @@
     max-width: 23rem;
     width: calc(100vw - 3rem);
     padding: 0.9rem 0.9rem 0.9rem 1.4rem;
-    background: rgb(var(--hc-panel-pane));
-    border: 1px solid var(--hc-window-line-firm);
-    border-radius: var(--hc-radius-card, 3px);
-    box-shadow: var(--md-elev-4);
+    background: rgba(16, 16, 21, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
   }
 
   h2 {
@@ -107,7 +107,7 @@
     font-size: 1.05rem;
     font-weight: 500;
     letter-spacing: 0.04em;
-    color: var(--md-on-surface-strong);
+    color: rgba(255, 255, 255, 0.92);
     white-space: nowrap;
   }
 
@@ -117,7 +117,7 @@
     margin: 0;
     font-size: 0.8rem;
     line-height: 1.55;
-    color: var(--md-on-surface-var);
+    color: rgba(255, 255, 255, 0.6);
   }
 
   /* Live install phase under "Starting…". Deliberately quiet — it is
@@ -127,7 +127,7 @@
     font-size: 0.7rem;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
-    color: var(--md-on-surface-faint);
+    color: rgba(255, 255, 255, 0.45);
   }
 
   .install-cta {
@@ -138,17 +138,14 @@
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--md-on-primary);
-    background: var(--md-primary);
+    color: #0a0a0a;
+    background: rgba(255, 255, 255, 0.92);
     border: none;
-    border-radius: var(--hc-radius-control, 2px);
+    border-radius: 2px;
     cursor: pointer;
     transition: background 0.15s ease;
 
-    &:hover:not(:disabled) {
-      background: color-mix(in srgb, var(--md-primary) 86%, var(--md-on-surface));
-    }
-    &:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+    &:hover:not(:disabled) { background: #fff; }
     &:disabled { opacity: 0.55; cursor: default; }
   }
 }

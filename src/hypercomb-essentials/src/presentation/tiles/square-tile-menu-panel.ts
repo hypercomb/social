@@ -97,36 +97,37 @@ function actionButton(action: BriefAffordance, onClose: () => void): HTMLButtonE
 
 export const SQUARE_TILE_MENU_CSS = `
 .hc-square-tile-view .wv-menu{position:absolute;top:0;z-index:5;display:flex;flex-direction:column;
- box-sizing:border-box;min-width:0;padding:6px;background:var(--md-surface-c-lowest);border:1px solid var(--md-outline);
- box-shadow:var(--md-elev-3);overflow:hidden;color:var(--md-on-surface);text-align:left;cursor:default}
+ box-sizing:border-box;min-width:0;padding:6px;background:#fffdf7;border:1px solid #b8933f;
+ box-shadow:0 2px 3px rgba(58,42,28,.1),0 18px 34px -14px rgba(58,42,28,.35);
+ overflow:hidden;color:#3a2a1c;text-align:left;cursor:default}
 .hc-square-tile-view .wv-menu *{box-sizing:border-box}
 .hc-square-tile-view .wv-menu .wv-menu-head{display:flex;align-items:center;gap:4px;flex:none;min-width:0;padding:0 0 4px 3px}
 .hc-square-tile-view .wv-menu .wv-menu-title{flex:1;min-width:0;margin:0;overflow:hidden;text-overflow:ellipsis;
- white-space:nowrap;font:italic 700 .84rem/1.2 Georgia,'Times New Roman',serif;color:var(--md-on-surface-strong)}
+ white-space:nowrap;font:italic 700 .84rem/1.2 Georgia,'Times New Roman',serif;color:#3a2a1c}
 .hc-square-tile-view .wv-menu button{font-family:Georgia,'Times New Roman',serif;cursor:pointer}
 .hc-square-tile-view .wv-menu .wv-menu-close{display:flex;align-items:center;justify-content:center;flex:0 0 28px;
- width:28px;height:28px;padding:0;border:0;border-radius:3px;background:none;color:var(--md-on-surface-var);font-size:1.25rem;line-height:1}
+ width:28px;height:28px;padding:0;border:0;border-radius:3px;background:none;color:#7a6444;font-size:1.25rem;line-height:1}
 .hc-square-tile-view .wv-menu .wv-menu-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;
- scrollbar-width:thin;scrollbar-color:var(--md-outline) transparent;padding:2px}
+ scrollbar-width:thin;scrollbar-color:rgba(184,147,63,.55) transparent;padding:2px}
 .hc-square-tile-view .wv-menu .wv-menu-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,4rem),1fr));gap:3px}
 .hc-square-tile-view .wv-menu .wv-menu-action{display:flex;flex-direction:column;align-items:center;justify-content:center;
  gap:4px;min-width:0;min-height:46px;padding:6px 3px;background:none;border:1px solid transparent;border-radius:3px;
- color:var(--md-on-surface);transition:background .14s ease,color .14s ease}
+ color:#5c4630;transition:background .14s ease,color .14s ease}
 .hc-square-tile-view .wv-menu .wv-menu-icon{display:flex;align-items:center;justify-content:center;flex:none;width:19px;height:19px}
 .hc-square-tile-view .wv-menu .wv-menu-icon svg{display:block;width:100%;height:100%}
 .hc-square-tile-view .wv-menu .wv-menu-action-label{max-width:100%;font:600 .64rem/1.2 Georgia,'Times New Roman',serif;
  overflow-wrap:anywhere;text-align:center}
-.hc-square-tile-view .wv-menu .wv-menu-danger{margin-top:6px;padding-top:6px;border-top:1px solid var(--md-outline-variant)}
-.hc-square-tile-view .wv-menu .wv-menu-action[data-danger]{color:var(--hc-status-alert)}
+.hc-square-tile-view .wv-menu .wv-menu-danger{margin-top:6px;padding-top:6px;border-top:1px solid rgba(141,74,47,.22)}
+.hc-square-tile-view .wv-menu .wv-menu-action[data-danger]{color:#8d4a2f}
 .hc-square-tile-view .wv-menu .wv-menu-action:disabled{opacity:.4;cursor:default}
 .hc-square-tile-view .wv-menu .wv-menu-action:hover:not(:disabled),
-.hc-square-tile-view .wv-menu .wv-menu-close:hover{background:var(--hc-window-tint-strong);color:var(--md-on-surface-strong)}
-.hc-square-tile-view .wv-menu .wv-menu-action[data-danger]:hover:not(:disabled){background:color-mix(in srgb,var(--hc-status-alert) 10%,transparent);color:var(--hc-status-alert)}
-.hc-square-tile-view .wv-menu button:focus-visible{outline:2px solid var(--md-primary);outline-offset:-2px}
+.hc-square-tile-view .wv-menu .wv-menu-close:hover{background:rgba(184,147,63,.14);color:#3a2a1c}
+.hc-square-tile-view .wv-menu .wv-menu-action[data-danger]:hover:not(:disabled){background:rgba(141,74,47,.1);color:#813b24}
+.hc-square-tile-view .wv-menu button:focus-visible{outline:2px solid #8a6a1a;outline-offset:-2px}
 .hc-square-tile-view .wv-menu .wv-menu-details{flex:none;width:100%;min-height:29px;margin-top:4px;padding:5px;
- border:0;border-top:1px solid var(--md-outline);border-radius:0;background:none;color:var(--md-primary);
+ border:0;border-top:1px solid rgba(184,147,63,.35);border-radius:0;background:none;color:#785919;
  font:600 .68rem/1.2 Georgia,'Times New Roman',serif;letter-spacing:.08em}
-.hc-square-tile-view .wv-menu .wv-menu-details:hover{background:var(--hc-window-tint-strong)}
-.hc-square-tile-view .wv-menu .wv-menu-empty{margin:5px 2px;color:var(--md-on-surface-var);font:italic .74rem/1.4 Georgia,serif}
+.hc-square-tile-view .wv-menu .wv-menu-details:hover{background:rgba(184,147,63,.14)}
+.hc-square-tile-view .wv-menu .wv-menu-empty{margin:5px 2px;color:#8a7657;font:italic .74rem/1.4 Georgia,serif}
 @media(prefers-reduced-motion:reduce){.hc-square-tile-view .wv-menu .wv-menu-action{transition:none}}
 `

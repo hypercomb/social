@@ -189,50 +189,60 @@ split must keep them together or give them a shared home.
   back to the host panel's pending review.
 - **Theme tokens.** The shim's `theme.css` is built from the shared
   `_material-tokens.scss`; the mood attribute is set by both shells.
-- **Rides in the host bundle but only the legacy app uses it:**
-  `runtime/quick-menu-pool.ts` (3.3 KB, via `initializeRuntime`).
+- The quick-menu pool rode in the host bundle (3.3 KB) though only the
+  legacy app used it; it moved off this branch (see Split).
 
 ## Work missed by earlier merges
 
-`development` was restarted at root `076c59e8` (2026-09-23), so older
-branches share no history with it and were compared by content.
+Compared only across `development`, `main`, `task/pure-host-install` and
+this branch; other branches are out of scope.
 
-- `origin/development` `1423a0c2` (quiet host discovery) is not on this
-  branch. It touches `host-packages.ts` (in the pure bundle), `worker.js`
-  and `relay.js`; it merges cleanly.
-- `claude/relaxed-bardeen-oxiczw` `f5f696c6`: a command word said while its
-  bee is still loading waits instead of becoming a tile
-  (`command-line/word-arrival.ts`, spec, `scripts/verify-boot-word.cjs`,
-  command-line component). Absent from `development` in any form. Its
-  timing notes (`737f8616`, `atomic-modules-plan.md`) are also absent.
-- `fix/swarm-images-atomic-branch-adopt` `487655a7` (2026-09-15): adopt a
-  peer branch whole or refuse it past `MAX_BRANCH_ADOPT_TILES`, plus swarm
-  image fixes in `show-cell.drone.ts`. Not in `development`.
-- `task/exposure-launch` `aa30165a`, `c0012ba9`: launch kit, `SUPPORT.md`,
-  support page copy. Never merged.
+- `origin/development` `1423a0c2` (quiet host discovery) was missing here;
+  merged in `a041d3da`. It also fixed the runtime `host-packages` and
+  `root-holder` specs that failed on the base.
+- `main` is fully contained in `development`.
 - The owner's local `development` has three unpushed commits (`0ec3c2d15`,
   `f08144fc`, `18bfea47`) that this branch is based on, so
-  `origin/development` still paints the landing picture.
-- Checked and not missing: the hosts panel and packages window (replaced by
-  the host directory), vendor atoms, boot module tail, Jev decisions (in
-  `development`, later rewritten), `side-effects.ts` (regenerates unchanged).
+  `origin/development` still paints the landing picture until they are
+  pushed.
+- `task/pure-host-install` itself is only on the owner's machine; its
+  audit is `saved-pure-host-branch-audit.md`. Every file that audit lists
+  as changed on the task branch is changed here, except the landing files
+  removed on purpose, and `side-effects.ts`, which regenerates unchanged.
 
-## Behaviour changes to confirm before integration
+## Split (2026-09-25)
 
-The snapshot changes door semantics relative to `development`, independent
-of the landing: `opensOn` now closes a branch with no `doors` entry (it was
-open everywhere), and `publishedRoot` serves a host only for its site's
-primary publisher and only when the route's location bag agrees with the
-signed head. These are deliberate hardening for signed offerings, but they
-will close existing published sites whose indexes predate doors, and
-`publishBranch` writes a doors entry only when the branch has host marks, so
-an ordinary publish with none produces a site that 404s everywhere. Non-primary
-publishers also lose `site.json?publisher=` and their ledger heads.
+Rule: a change stays on this branch only if it is a host primitive
+(location layers, signed creations, one marker protocol, replication) or
+shared engine the hive also uses. Legacy-app features built beside it moved
+to `task/legacy-ui-from-snapshot`, stacked on this branch (commit
+`b0ac43a5` here, reverted there): the tool-window colour-role migration,
+essentials view and settings restyles, and the quick-menu pool.
+`menus:quick` stays reserved in the pool registry.
 
-The broad snapshot also carries legacy theme, tool window, sharing, and
-presentation changes alongside the minimal host. Review its net diff against
-current `development` before integration so newer performance and visitor
-changes are not silently reversed. Keep the original saved branch as recovery.
+Kept as shared: `onHeld` transfer progress and the host directory that
+draws it; text themes as the one worked example of a signed creation.
+Next generalization: the host's "turn on a creation" step accepts only
+`themes:text`. Making it any meaning needs the pool registry to learn a
+meaning at runtime first, or a root walk may prune the new pool.
+
+## Doors: explicit, signed, per domain (decided 2026-09-25)
+
+A branch is a website only on the domains its signed index lists
+(`opensOn`), and a route is a location with append-only revisions
+(`currentRouteHead`): a stale index cannot roll it back. This is the
+layering primitive applied to routes, so it stays. Consequences:
+
+- A publish with no host marks is published (its share link works; a
+  visitor reads the signed index directly) but is not a website until the
+  publisher opens a door. The public content host is a byte store, not the
+  branch's domain, so no door is implied for it.
+- Deploy prerequisite: indexes signed before doors existed open nowhere on
+  this worker. Republish those branches with their host marks first.
+- Only the site's selected publisher serves a routed host, and its route
+  marker advances only on that publisher's signed index PUT.
+- `publishedRoot(…, host = '')` now always returns null. No caller omits
+  the host today; do not add one.
 
 ## Next proof and release work
 

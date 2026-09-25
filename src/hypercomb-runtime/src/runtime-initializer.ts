@@ -18,7 +18,6 @@ import './install-monitor'
 // depends on nothing above it.
 import { Store } from './store'
 import { initializeTextThemePool } from './text-theme-pool'
-import { initializeQuickMenuPool, type QuickMenuCache } from './quick-menu-pool'
 
 // Note: the legacy layer-tree materializers (materializeInstalledLayers,
 // materializeStructure) and their helpers (readLayerNode, applyLayerToDir)
@@ -176,18 +175,12 @@ const _runInitializeRuntime = async (
   const store = get('@hypercomb.social/Store') as Store | undefined
   await store?.initialize?.()
   ;(window as any).__hcBoot?.('store.initialize done')
-  // Settings and gesture menus read local creations from meaning pools. Load
-  // them after first paint; the in-memory shipped defaults answer until then.
+  // Settings read local text-theme creations from their meaning pool. Load
+  // it after first paint; the in-memory shipped defaults answer until then.
   if (store) {
     const load = (): void => {
       void initializeTextThemePool(store).catch(err =>
         console.warn('[text-themes] could not read the pool', err))
-      if (store.opfsAvailable) {
-        window.ioc.whenReady<QuickMenuCache>('@diamondcoreprocessor.com/QuickMenuRegistry', registry => {
-          void initializeQuickMenuPool(store, registry).catch(err =>
-            console.warn('[quick-menus] could not read the pool', err))
-        })
-      }
     }
     const idle = (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback
     if (idle) idle(load, { timeout: 3000 })
