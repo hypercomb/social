@@ -25,6 +25,43 @@ const LITERAL_REGISTER = /register\(\s*['"](@[^'"]+)['"]/g
 
 export type PassiveVerdict = { passive: true; key: string } | { passive: false; why: string }
 
+/** Named by key, or imported, by any module other than a namespace barrel
+ *  (a barrel's `export *` of a bee is dropped when it is built). */
+const reachedFromElsewhere = (file: string, keys: readonly string[], others: ReadonlyMap<string, string>): string | null => {
+  const base = (file.split(/[\\/]/).pop() ?? '').replace(/\.ts$/, '')
+  const imported = new RegExp(`from\\s+['"][^'"]*/${base.replace(/\./g, '\\.')}(?:\\.js)?['"]`)
+  for (const [path, text] of others) {
+    if (path === file) continue
+    for (const key of keys) if (text.includes(key)) return `key named by ${path}`
+    if (!/(^|\/)index\.ts$/.test(path) && imported.test(text)) return `imported by ${path}`
+  }
+  return null
+}
+
+export type ViewSleepVerdict = { sleeps: true; renders: string[] } | { sleeps: false; why: string }
+
+/**
+ * MAY THIS VIEW SLEEP? A bee that DECLARES the views it renders
+ * (`readonly renders = ['slides', …]`) claims it acts nowhere else, so it may
+ * stay unloaded until the view mode enters one of them or `view:open-for-tile`
+ * names one. The declaration is the author's reviewed claim; the build only
+ * adds that nothing else may reach for it by key or import.
+ */
+export const viewSleeper = (
+  file: string,
+  source: string,
+  others: ReadonlyMap<string, string>,
+): ViewSleepVerdict => {
+  const declared = /readonly\s+renders\s*(?::[^=]+)?=\s*\[([^\]]*)\]/.exec(source)
+  if (!declared) return { sleeps: false, why: 'declares no renders' }
+  const renders = [...declared[1]!.matchAll(/['"]([^'"]+)['"]/g)].map(match => match[1]!)
+  if (!renders.length) return { sleeps: false, why: 'renders nothing' }
+  const keys = [...source.matchAll(LITERAL_REGISTER)].map(match => match[1]!)
+  const reached = reachedFromElsewhere(file, keys, others)
+  if (reached) return { sleeps: false, why: reached }
+  return { sleeps: true, renders }
+}
+
 export const passiveQueen = (
   file: string,
   source: string,
@@ -38,16 +75,9 @@ export const passiveQueen = (
   if (side) return { passive: false, why: `acts on load (${side[0]})` }
   if (/listens\s*=\s*\[\s*['"]/.test(source)) return { passive: false, why: 'listens to effects' }
   const key = keys[0]!
-  // Imported by another module, she loads with it whatever the word says.
-  const base = (file.split(/[\\/]/).pop() ?? '').replace(/\.ts$/, '')
-  const imported = new RegExp(`from\\s+['"][^'"]*/${base.replace(/\./g, '\\.')}(?:\\.js)?['"]`)
-  for (const [path, text] of others) {
-    if (path === file) continue
-    if (text.includes(key)) return { passive: false, why: `key named by ${path}` }
-    // A namespace barrel's `export *` of a bee is dropped when the barrel is
-    // built (it re-exports atoms only), so it never loads her.
-    const barrel = /(^|\/)index\.ts$/.test(path)
-    if (!barrel && imported.test(text)) return { passive: false, why: `imported by ${path}` }
-  }
+  // Named or imported by another module, she loads with it whatever the word
+  // says.
+  const reached = reachedFromElsewhere(file, [key], others)
+  if (reached) return { passive: false, why: reached }
   return { passive: true, key }
 }

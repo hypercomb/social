@@ -22,6 +22,8 @@ export type BeeClass = {
   readonly command?: string
   readonly description?: string
   readonly passive?: boolean
+  /** The views a sleeping renderer answers: it wakes when one is entered. */
+  readonly renders?: readonly string[]
 }
 
 /** `@domain.com/ClassName` → `ClassName`; a bare class name stays itself. */
@@ -52,6 +54,9 @@ export const beeClassesOfDocs = (docs: unknown): Array<[string, BeeClass]> => {
       ...(typeof command === 'string' && command ? { command } : {}),
       ...(typeof description === 'string' && description ? { description } : {}),
       ...((doc as { passive?: unknown }).passive === true ? { passive: true } : {}),
+      ...(Array.isArray((doc as { renders?: unknown }).renders)
+        ? { renders: ((doc as { renders: unknown[] }).renders).map(String).filter(Boolean) }
+        : {}),
     }])
   }
   return out

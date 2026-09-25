@@ -41,6 +41,11 @@ type Item = DocumentViewItem
 type Role = 'question' | 'answer' | 'decision' | 'risk' | 'evidence' | 'context'
 
 export class ViewLibraryDrone extends Drone {
+  /** THE VIEWS THIS BEE RENDERS, and nowhere else does it act: it may sleep
+   *  until the view mode enters one of them, or `view:open-for-tile` names
+   *  one (essentials scripts/passive-queen.ts, runtime script-preloader.ts). */
+  readonly renders: readonly string[] = ['evidence-atlas', 'knowledge-studio']
+
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
   override description = 'Evidence Atlas and Knowledge Studio document projections.'

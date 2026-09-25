@@ -2,7 +2,7 @@
 // but make her ready to answer her word.
 
 import { describe, expect, it } from 'vitest'
-import { passiveQueen } from './passive-queen'
+import { passiveQueen, viewSleeper } from './passive-queen'
 
 const queen = (body = ''): string => `
 import { QueenBee } from '@hypercomb/core'
@@ -44,5 +44,24 @@ describe('passive queen', () => {
     const two = queen() + "window.ioc.register('@diamondcoreprocessor.com/LayoutService', {})"
     expect(passiveQueen('a/layout.queen.ts', two, new Map())).toMatchObject({ passive: false })
     expect(passiveQueen('a/layout.drone.ts', queen(), new Map())).toMatchObject({ passive: false })
+  })
+})
+
+const viewDrone = (renders = "readonly renders: readonly string[] = ['slides', 'lightbox']"): string => `
+export class SlidesViewDrone extends Drone {
+  ${renders}
+}
+window.ioc.register('@diamondcoreprocessor.com/SlidesViewDrone', new SlidesViewDrone())
+`
+
+describe('view sleeper', () => {
+  it('sleeps on the views it declares it renders', () => {
+    expect(viewSleeper('a/slides-view.drone.ts', viewDrone(), new Map())).toEqual({ sleeps: true, renders: ['slides', 'lightbox'] })
+  })
+
+  it('stays awake without a declaration, or when something else reaches for it', () => {
+    expect(viewSleeper('a/slides-view.drone.ts', viewDrone(''), new Map())).toMatchObject({ sleeps: false })
+    const named = new Map([['b/x.queen.ts', "get('@diamondcoreprocessor.com/SlidesViewDrone')"]])
+    expect(viewSleeper('a/slides-view.drone.ts', viewDrone(), named)).toMatchObject({ sleeps: false, why: 'key named by b/x.queen.ts' })
   })
 })

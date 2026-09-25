@@ -61,6 +61,11 @@ type MountState = {
 }
 
 export class DocumentViewDrone extends Drone {
+  /** THE VIEWS THIS BEE RENDERS, and nowhere else does it act: it may sleep
+   *  until the view mode enters one of them, or `view:open-for-tile` names
+   *  one (essentials scripts/passive-queen.ts, runtime script-preloader.ts). */
+  readonly renders: readonly string[] = ['document']
+
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
   override description =

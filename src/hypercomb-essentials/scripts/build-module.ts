@@ -20,7 +20,7 @@ import { spawnSync } from 'child_process'
 import { createHash } from 'node:crypto'
 import { builtinModules } from 'node:module'
 import { TRANSFER_PACKS_MEANING, encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.js'
-import { passiveQueen } from './passive-queen.js'
+import { passiveQueen, viewSleeper } from './passive-queen.js'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
@@ -232,7 +232,7 @@ interface BuildCache {
  *  change here must reach them even when no source file moved — the "nothing
  *  changed" early exit asks this too. Bump it with any change to what a doc
  *  carries. queen-passive:1 = queens carry `passive` (passive-queen.ts). */
-const DOCS_SHAPE = 'queen-passive:1'
+const DOCS_SHAPE = 'queen-passive:1|renders:1'
 
 const CACHE_FILE = join(PROJECT_ROOT, '.build-cache.json')
 const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
@@ -416,6 +416,8 @@ interface BeeDocEntry {
    *  used (passive-queen.ts). Decided fresh every build — it depends on the
    *  other sources, not only her own, so it never rides the doc cache. */
   passive?: boolean
+  /** The views a sleeping renderer answers (passive-queen.ts viewSleeper). */
+  renders?: string[]
 }
 
 /** Every source file of the package, for rules that ask what OTHER files say
@@ -1384,6 +1386,10 @@ const main = async (): Promise<void> => {
       const rel = relative(SRC_ROOT, src.entry).replace(/\\/g, '/')
       const verdict = passiveQueen(rel, allPackageSources().get(rel) ?? readFileSync(src.entry, 'utf8'), allPackageSources())
       beeDoc = { ...beeDoc, passive: verdict.passive }
+    } else if (beeDoc) {
+      const rel = relative(SRC_ROOT, src.entry).replace(/\\/g, '/')
+      const verdict = viewSleeper(rel, allPackageSources().get(rel) ?? readFileSync(src.entry, 'utf8'), allPackageSources())
+      if (verdict.sleeps) beeDoc = { ...beeDoc, passive: true, renders: verdict.renders }
     }
 
     if (beeDoc) {

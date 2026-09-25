@@ -243,6 +243,11 @@ type MountState = {
 }
 
 export class SlidesViewDrone extends Drone {
+  /** THE VIEWS THIS BEE RENDERS, and nowhere else does it act: it may sleep
+   *  until the view mode enters one of them, or `view:open-for-tile` names
+   *  one (essentials scripts/passive-queen.ts, runtime script-preloader.ts). */
+  readonly renders: readonly string[] = ['slides', 'lightbox', 'scroller']
+
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
   override description =

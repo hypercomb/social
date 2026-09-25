@@ -242,7 +242,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       if (layerRoots.length) await this.#decideArrival(walked)
       if (layerRoots.length) this.#noteSleepers(walked)
       const passive = this.#passive
-      const sleeping = this.#sleeping
+      const sleeping = this.#asleep()
 
       const tBees = performance.now()
       let deferredBeeLoads: DeferredBeeLoads | null = null
@@ -323,8 +323,36 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   readonly #sleeping = new Map<string, { command: string; description: string; className: string }>()
   readonly #woken = new Set<string>()
 
+  /** VIEWS ASLEEP UNTIL THEY ARE ENTERED (essentials passive-queen.ts
+   *  viewSleeper): a renderer that declares the views it renders, and acts
+   *  nowhere else, loads when the view mode enters one of them or
+   *  `view:open-for-tile` names one — then one cycle runs. */
+  readonly #viewSleeping = new Map<string, { renders: readonly string[]; className: string }>()
+  #viewWakeBound = false
+
+  /** Every bee asleep, queens and views — what no load may start. */
+  #asleep = (): ReadonlySet<string> => new Set([...this.#sleeping.keys(), ...this.#viewSleeping.keys()])
+
   #noteSleepers = (walked: { bees: readonly string[]; classes: ReadonlyMap<string, BeeClass> }): void => {
     const inPackage = new Set(walked.bees)
+    for (const [className, cls] of walked.classes) {
+      if (!cls.passive || cls.command || !cls.renders?.length || !inPackage.has(cls.sig)) continue
+      if (this.#beeCache.has(cls.sig) || this.#woken.has(cls.sig) || this.#viewSleeping.has(cls.sig) || this.#arrivalBees.has(cls.sig)) continue
+      this.#viewSleeping.set(cls.sig, { renders: cls.renders, className })
+    }
+    if (this.#viewSleeping.size && !this.#viewWakeBound) {
+      this.#viewWakeBound = true
+      console.log(`[script-preloader] ${this.#viewSleeping.size} views asleep until entered`)
+      // Replayed on subscribe: a view opened before this line still wakes.
+      EffectBus.on<{ view?: string }>('view:open-for-tile', payload => { void this.wakeView(String(payload?.view ?? '')) })
+      const ioc = window.ioc as { whenReady?: (key: string, cb: (value: unknown) => void) => void }
+      ioc.whenReady?.('@hypercomb.social/ViewMode', (value) => {
+        const vm = value as EventTarget & { mode?: string }
+        const enter = (): void => { void this.wakeView(String(vm.mode ?? '')) }
+        vm.addEventListener?.('change', enter)
+        enter()
+      })
+    }
     let added = false
     for (const [className, cls] of walked.classes) {
       if (!cls.passive || !cls.command || !inPackage.has(cls.sig)) continue
@@ -340,6 +368,21 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   /** The words of the queens still asleep, for the command line's lists. */
   public sleepingWords = (): Array<{ command: string; description: string; className: string }> =>
     [...this.#sleeping.values()].map(entry => ({ ...entry }))
+
+  /** Wake every renderer asleep for `view`, then run one cycle so each
+   *  meets the mode it was woken into. */
+  public wakeView = async (view: string): Promise<void> => {
+    const wanted = String(view ?? '').trim()
+    if (!wanted) return
+    const sigs = [...this.#viewSleeping].filter(([, entry]) => entry.renders.includes(wanted)).map(([sig]) => sig)
+    if (!sigs.length) return
+    for (const sig of sigs) {
+      this.#viewSleeping.delete(sig)
+      this.#woken.add(sig)
+    }
+    await Promise.allSettled(sigs.map(sig => this.#loadBeeBySignature(sig)))
+    await new hypercomb().act('')
+  }
 
   /** Wake the queen who answers `word`; null when none is asleep for it. */
   public wakeWord = async (word: string): Promise<Bee | null> => {
@@ -399,7 +442,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     this.#passive = new Set()
     // A queen asleep until her word stays asleep: stepping into the hive is
     // not asking for her.
-    const pending = [...passive].filter(sig => !this.#beeCache.has(sig) && !this.#sleeping.has(sig))
+    const asleep = this.#asleep()
+    const pending = [...passive].filter(sig => !this.#beeCache.has(sig) && !asleep.has(sig))
     if (!pending.length) return
     console.log(`[script-preloader] approached: waking ${pending.length} passive bees`)
     const first = pending.filter(sig => this.#arrivalCritical.includes(sig))
