@@ -59,9 +59,13 @@ themselves; everything else is resolved.
   baked in by the build (no signature lives in source): the host bundle and
   the core library. For each it tries this device, then this origin, then the
   default hosts (hypercomb.com, jwize.com), refuses bytes that do not hash to
-  the signature, and keeps what it verified. Warm boots read both from the
-  device in parallel. It then declares the page's one import map and runs the
-  host. `/pin` still names the host bundle for tools.
+  the signature, and keeps what it verified: in OPFS, and in the service
+  worker's `hypercomb-sig-v1` cache. Warm boots import both from `/@sig/<sig>`,
+  which the worker answers from that cache, so nothing is read or hashed
+  before the host starts and the browser reuses its compiled code. The cached
+  copy is re-hashed after the fact; a damaged one is evicted, and a boot it
+  broke reloads once from verified bytes. The kernel then declares the page's
+  one import map and runs the host. `/pin` still names the host bundle.
 - `hypercomb-core.runtime.js` is the processor (`hypercomb-core/src/processor.ts`):
   `act()` and its optimize pass, bee/drone/queen/worker, IoC, the effect bus
   and signing. It is the core a host cannot run without.
@@ -78,7 +82,7 @@ The host bundle is always minified and carries no copy of core; the build
 inlines the ioc install ahead of every script so core's module-scope
 registrations find `window.ioc`. It ships only the faces the host renders
 (Inter and upright Source Serif 4); icon and italic faces belong to the
-packages that render them. On 2026-09-25: kernel 2.3 kB, processor 4.1 kB,
+packages that render them. On 2026-09-25: kernel 3.1 kB, processor 4.1 kB,
 resolved by signature: host bundle 230 kB, core library 142 kB. A local
 completion click verifies and holds the selected branch's typed child, executable, and
 resource closure before adding an on/off layer at the local route. A selected

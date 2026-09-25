@@ -26,6 +26,13 @@ const OPFS_PREFIX = '/opfs/'
 // `<root>/<sig>` (legacy content dirs as read fallback). Any content-type
 // — resolved from blob mime sniff / extension fallback.
 const SITE_RESOURCE_PREFIX = '/@resource/'
+// The kernel's verified atoms (host bundle, core library): /@sig/<sig>,
+// answered straight from this cache. The kernel admits bytes only after they
+// hash to their name. A CacheStorage response keeps V8's code cache, which a
+// response built from OPFS bytes would not, so warm boots skip recompiling.
+// The name is shared with src/kernel.ts.
+const SIG_PREFIX = '/@sig/'
+const SIG_CACHE = 'hypercomb-sig-v1'
 
 // Pools of meaning: install-cache dirs at the OPFS root named by
 // sign(<meaning>) — sha256 of the UTF-8 bytes of the meaning string.
@@ -74,7 +81,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then(names => Promise.all(
-        names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n))
+        names.filter(n => n !== CACHE_NAME && n !== SIG_CACHE).map(n => caches.delete(n))
       ))
       .then(() => loadDomains())
       .then(domains => { if (domains.length) KNOWN_DOMAINS = domains })
@@ -141,7 +148,22 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(handleSiteResourceRequest(event.request))
     return
   }
+
+  if (url.pathname.startsWith(SIG_PREFIX)) {
+    event.respondWith(handleSigRequest(event.request, url.pathname))
+    return
+  }
 })
+
+// The kernel maps an atom here only after seeing it in SIG_CACHE; a miss is
+// a plain 404 (never the SPA fallback), and the kernel falls back to bytes.
+async function handleSigRequest(request, pathname) {
+  try {
+    const hit = await (await caches.open(SIG_CACHE)).match(pathname)
+    if (hit) return toHeadIfNeeded(request, hit)
+  } catch {}
+  return new Response('', { status: 404 })
+}
 
 /* ----------------------------------------
  * dev handler (NO rewrite)
