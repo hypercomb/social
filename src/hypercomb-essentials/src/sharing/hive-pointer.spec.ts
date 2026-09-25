@@ -160,12 +160,12 @@ describe('two writes in one second', () => {
   })
 })
 
-describe('fetchHiveIndex landing pictures', () => {
-  it('reads the landing map leniently — a branch the roots do not name or a non-signature is dropped', async () => {
+describe('fetchHiveIndex signed content', () => {
+  it('reads offerings and keeps the whole signed content, but surfaces no landing picture', async () => {
     const secret = new Uint8Array(32).fill(9)
     const pubkey = getPublicKey(secret)
-    const content = { v: 1, roots: { arkanoid: OTHER, notes: SIG },
-      landing: { arkanoid: SIG.toUpperCase() + '/landing.html', gone: SIG, notes: 'nope' } }
+    const content = { v: 1, roots: { arkanoid: OTHER }, offerings: { theme: { location: SIG } },
+      landing: { arkanoid: SIG + '/landing.html' } }
     const event = finalizeEvent({ kind: 30564, created_at: 1700000000, tags: [],
       content: JSON.stringify(content) }, secret)
     const fetchBefore = globalThis.fetch
@@ -173,13 +173,16 @@ describe('fetchHiveIndex landing pictures', () => {
     try {
       const read = await fetchHiveIndex(HOST, pubkey)
       expect(read.ok).toBe(true)
-      if (read.ok) expect(read.manifest.landing).toEqual({ arkanoid: SIG + '/landing.html' })
+      if (!read.ok) return
+      expect(read.manifest.offerings).toEqual(content.offerings)
+      expect(read.manifest.signedContent).toEqual(content)
+      expect('landing' in read.manifest).toBe(false)
     } finally { globalThis.fetch = fetchBefore }
   })
 })
 
 describe('putHiveManifest signed content', () => {
-  it('carries the previous landing pictures, takes new ones, and drops the picture of a root it drops', async () => {
+  it('drops a landing picture an older index still carries', async () => {
     const shell = globalThis as unknown as { ioc?: { get: (key: string) => unknown } }
     const original = shell.ioc
     const signEvent = vi.fn(async (event: { kind: number; created_at: number; tags: string[][]; content: string }) =>
@@ -190,13 +193,11 @@ describe('putHiveManifest signed content', () => {
       : original?.get(key) }
     globalThis.fetch = vi.fn(async () => new Response('', { status: 200 })) as typeof fetch
     try {
-      const previous = { v: 2, roots: { arkanoid: OTHER, gone: SIG }, landing: { arkanoid: OTHER, gone: SIG } }
-      const result = await putHiveManifest(HOST, { arkanoid: OTHER, notes: SIG }, {}, 1600000000, previous, { notes: SIG })
+      const previous = { v: 2, roots: { arkanoid: OTHER }, landing: { arkanoid: SIG + '/landing.webp' } }
+      const result = await putHiveManifest(HOST, { arkanoid: OTHER }, {}, 1600000000, previous)
       expect(result.ok).toBe(true)
       const signed = signEvent.mock.calls.find(([event]) => event.kind === 30564)?.[0]
-      expect(JSON.parse(signed!.content)).toEqual({
-        v: HIVE_LINK_VERSION, roots: { arkanoid: OTHER, notes: SIG }, landing: { arkanoid: OTHER, notes: SIG },
-      })
+      expect(JSON.parse(signed!.content)).toEqual({ v: HIVE_LINK_VERSION, roots: { arkanoid: OTHER } })
     } finally {
       shell.ioc = original
       globalThis.fetch = fetchBefore

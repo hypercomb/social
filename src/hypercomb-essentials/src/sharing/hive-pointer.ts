@@ -34,11 +34,6 @@ export interface HiveManifest {
    *  branch only on a listed domain; an absent entry grants no door. This
    *  map, signed with the roots, is the per-domain on/off switch. */
   doors?: Record<string, string[]>
-  /** lineageKey → the branch's LANDING (see landing-capture.ts): a heap
-   *  address `<sig>` or `<sig>/<name>` — a picture (`landing.webp`) or the
-   *  page itself (`landing.html`) — that the door paints inside its loading
-   *  cover before any module loads. Absent = a plain cover. */
-  landing?: Record<string, string>
   /** Optional public declarations. Values are held as signed data here; the
    *  offering reader decides their meaning when that protocol is defined. */
   offerings?: Record<string, unknown>
@@ -127,7 +122,6 @@ export async function fetchHiveIndex(host: string, pubkey: string): Promise<Hive
   return { ok: true, manifest: {
     roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key,
     doors: readDoors(signedContent['doors'], roots),
-    ...(Object.keys(readLanding(signedContent['landing'], roots)).length ? { landing: readLanding(signedContent['landing'], roots) } : {}),
     ...(rawOfferings !== undefined ? { offerings: rawOfferings as Record<string, unknown> } : {}),
     signedContent,
   } }
@@ -144,22 +138,6 @@ function readDoors(raw: unknown, roots: Record<string, string>): Record<string, 
     doors[k] = [...new Set(v.map(z => String(z ?? '').trim().toLowerCase()).filter(Boolean))]
   }
   return doors
-}
-
-/** A landing address: the sig, optionally with the one-segment name that
- *  declares its presentation type (`<sig>/landing.html`). */
-const LANDING_RE = /^[0-9a-f]{64}(?:\/[A-Za-z0-9._-]+)?$/
-
-/** The signed landing map, leniently: an entry for a branch the roots do
- *  not name, or one that is not a heap address, is dropped — never the index. */
-function readLanding(raw: unknown, roots: Record<string, string>): Record<string, string> {
-  const landing: Record<string, string> = {}
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return landing
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    const address = String(v ?? '').trim().toLowerCase()
-    if (k in roots && LANDING_RE.test(address)) landing[k] = address
-  }
-  return landing
 }
 
 /** Fetch + verify one host's copy of the publisher's hive index. Returns
@@ -214,10 +192,6 @@ export async function putHiveManifest(
   /** Verified signed content from the index being replaced. Uninterpreted
    *  fields (including optional offerings) survive this roots/doors edit. */
   previousContent?: Record<string, unknown>,
-  /** Landing pictures THIS write adds or replaces (lineageKey → sig). The
-   *  previous index's entries ride through; an entry for a root the write
-   *  drops goes with it. */
-  landing: Record<string, string> = {},
 ): Promise<PutHiveResult> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
   if (!signer?.signEvent) return { ok: false, pubkey: '', createdAt: 0, reason: 'no signer' }
@@ -228,9 +202,9 @@ export async function putHiveManifest(
     const nextDoors = signedDoors(roots, doors).doors
     if (nextDoors) content['doors'] = nextDoors
     else delete content['doors']
-    const nextLanding = readLanding({ ...readLanding(previousContent?.['landing'], roots), ...landing }, roots)
-    if (Object.keys(nextLanding).length > 0) content['landing'] = nextLanding
-    else delete content['landing']
+    // The retired landing picture (0ec3c2d15): an index signed with one
+    // carries it inertly until this, its next write, drops it.
+    delete content['landing']
     signed = await signer.signEvent({
       kind: HIVE_INDEX_EVENT_KIND,
       created_at: Math.max(Math.floor(Date.now() / 1000), Math.floor(Number(replaces) || 0) + 1),

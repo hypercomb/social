@@ -34,9 +34,6 @@
 import { schnorr } from '@noble/curves/secp256k1'
 
 const SIG_RE = /^[0-9a-f]{64}$/
-// A landing address (landing-capture.ts): the sig, or the sig plus the one
-// name that declares its presentation type on the heap.
-const LANDING_RE = /^[0-9a-f]{64}(?:\/[A-Za-z0-9._-]+)?$/
 // A hostname LABEL, per DNS. A lineage is only a name the wildcard can bring to
 // life if it is one of these: `install:essentials` is a perfectly good creation
 // and not a hostname, and the ledger must never advertise an address DNS refuses
@@ -219,8 +216,7 @@ async function verifiedIndex(env, pubkey) {
   if (!content?.roots || typeof content.roots !== 'object' || Array.isArray(content.roots)
     || !validOfferingDeclarations(content.offerings)) return null
   const doors = content.doors && typeof content.doors === 'object' && !Array.isArray(content.doors) ? content.doors : {}
-  const landing = content.landing && typeof content.landing === 'object' && !Array.isArray(content.landing) ? content.landing : {}
-  return { roots: content.roots, doors, landing, offerings: content.offerings ?? {}, createdAt: Number(evt.created_at || 0) }
+  return { roots: content.roots, doors, offerings: content.offerings ?? {}, createdAt: Number(evt.created_at || 0) }
 }
 
 /** One request's index reads, memoized by pubkey. The ledger asks the same
@@ -368,16 +364,11 @@ async function publishedRoot(env, publisher, lineage, read = indexReader(env), h
   // revision. A disagreement is a closed door until the publisher repairs it.
   if (host && !siteBinding(env, host)?.frontDoor
     && await currentRouteHead(env, host, head) !== head) return null
-  // The branch's landing picture, signed beside its head: the door paints it
-  // inside the loading cover so a visitor sees the site before the engine
-  // exists. Only a signature is ever carried — the bytes are heap reads.
-  const landing = String(index.landing?.[lineage] || '').toLowerCase()
   return {
     head,
     pubkey: publisher.pubkey,
     label: publisher.label || publisher.pubkey.slice(0, 12) + '…',
     publishedAt: index.createdAt,
-    ...(LANDING_RE.test(landing) ? { landing } : {}),
   }
 }
 
@@ -400,7 +391,6 @@ async function serveSiteDescriptor(request, env, site) {
     segments: site.lineage.split('/'),
     hosts: [new URL(request.url).host],
     publishedAt: publication.publishedAt,
-    ...(publication.landing ? { landing: publication.landing } : {}),
   }, { 'Cache-Control': 'no-store' })
 }
 
@@ -1331,38 +1321,7 @@ async function serveSandboxShell(request, env, zone) {
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
 }
 
-/** The visitor page with the branch's landing inside its loading cover
- *  (index.visitor.html `.site-loading`). The cover is what a visitor looks
- *  at while the engine installs; with the landing in it the site is on screen
- *  at HTML-parse time. A picture (`landing.webp`) is painted as the cover's
- *  background and offered as the share image; a page (`landing.html`) is
- *  framed inside the cover, sandboxed — the heap already serves it under a
- *  `sandbox` policy, so nothing in it runs. A page without the cover div is
- *  returned as is. */
-function paintLanding(html, host, landing) {
-  const address = '/' + landing + (landing.includes('/') ? '' : '/landing.webp')
-  const marker = 'class="site-loading"'
-  const cover = html.indexOf(marker)
-  if (cover < 0) return html
-  if (address.endsWith('.html')) {
-    const close = html.indexOf('</div>', cover)
-    if (close < 0) return html
-    return html.slice(0, close)
-      + `<iframe class="site-landing" src="${address}" sandbox="" title="" aria-hidden="true" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>`
-      + html.slice(close)
-  }
-  const painted = html.slice(0, cover)
-    + `${marker} style="background-image:url(${address})"`
-    + html.slice(cover + marker.length)
-  const head = painted.indexOf('</head>')
-  if (head < 0) return painted
-  return painted.slice(0, head)
-    + `<link rel="preload" as="image" href="${address}">`
-    + `<meta property="og:image" content="https://${host}${address}">`
-    + painted.slice(head)
-}
-
-async function serveVisitorAsset(request, env, { spa = true, landing = '' } = {}) {
+async function serveVisitorAsset(request, env, { spa = true } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   let response = await env.ASSETS.fetch(request)
   // Under /content/ a miss is a miss. The engine walks its package pool by
@@ -1374,13 +1333,6 @@ async function serveVisitorAsset(request, env, { spa = true, landing = '' } = {}
     const url = new URL(request.url)
     url.pathname = '/index.html'
     response = await env.ASSETS.fetch(new Request(url, request))
-  }
-  if (landing && LANDING_RE.test(landing) && response.status === 200
-    && String(response.headers.get('content-type') || '').includes('text/html')) {
-    const painted = paintLanding(await response.text(), new URL(request.url).host, landing)
-    const h = new Headers(response.headers)
-    h.delete('content-length')
-    response = new Response(request.method === 'HEAD' ? null : painted, { status: 200, headers: h })
   }
   const headers = new Headers(response.headers)
   headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'")
@@ -2362,9 +2314,7 @@ export default {
       // A door — named or wildcard — is a website only while an approved
       // publisher's signed index carries its lineage (the open mark, above).
       // Until then, and again after a withdrawal, an honest 404 page.
-      const publisher = site.publishers?.find(p => p.primary) || site.publishers?.[0]
-      const publication = publisher && await publishedRoot(env, publisher, site.lineage, indexReader(env), requestUrl.hostname)
-      if (!publication) {
+      if (!(await anyPublishedRoot(env, site, indexReader(env), requestUrl.hostname))) {
         return nothingHere(requestUrl.hostname, implicit ? siteZone : null)
       }
       // A promoted trial: the site runs its publisher's package, not the
@@ -2377,7 +2327,7 @@ export default {
       // Everything under /content/ is a FILE the build shipped — the package
       // pool above all — and is never held and never a page.
       if (pathname.startsWith('/content/')) return serveVisitorAsset(request, env, { spa: false })
-      return serveVisitorAsset(request, env, { landing: publication.landing || '' })
+      return serveVisitorAsset(request, env)
     }
 
     // A zone subdomain that could not even become an implicit site (nested

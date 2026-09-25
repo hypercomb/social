@@ -83,17 +83,44 @@ complete Angular/essentials build, Tauri installer matrix, live native round
 trip, visual browser audit, and controlled-domain deployment have not been
 verified on this rebased branch.
 
-## First issue to resolve
+## Landing picture removal (resolved 2026-09-25)
 
-`development` commit `0ec3c2d15` explicitly removed the landing picture. The
-broad saved snapshot auto-merged after that commit and **reintroduced**
-`sharing/landing-capture.ts`, capture in `publish-branch.ts`, landing fields in
-`hive-pointer.ts`, relay painting in `blossom-worker/worker.js`, related tests,
-and cover CSS in `hypercomb-web/src/index.visitor.html`. This is a semantic
-regression despite a clean textual rebase and passing worker tests. Remove the
-landing picture behavior and its tests while preserving the new signed
-offerings, unknown signed index fields, and hashed location behavior. Compare
-with `git show 0ec3c2d15` and current `development` before editing.
+`development` commit `0ec3c2d15` removed the landing picture; the broad saved
+snapshot had reintroduced it. It is removed again on this branch by
+re-applying that commit and keeping the snapshot's newer work where the two
+touched the same lines:
+
+- `landing-capture.ts`, publish step 2b, `SiteViewDrone.mountedPageSig`, the
+  worker's `paintLanding` / `site.json` field, the cover CSS hook and the doc
+  section are gone.
+- `hive-pointer.ts` keeps the signed-content pass-through (`offerings` and
+  unknown fields survive a roots/doors rewrite) but explicitly drops a
+  `landing` field an older index still carries, so it does not ride forward
+  forever through the pass-through.
+- The door check in `worker.js` is back to `anyPublishedRoot`, as on
+  `development`; the snapshot had narrowed it to the primary publisher while
+  wiring the landing through. `publishedRoot` itself still enforces the
+  snapshot's primary-publisher and route-head checks.
+- Regression guards: `hive-pointer.spec.ts` asserts a read surfaces no
+  `landing` and a write drops it; `worker.spec.js` asserts a signed `landing`
+  field is inert in `site.json` and the visitor page.
+
+Verified after the change: worker 63/63 (three landing tests retired, one
+guard added), hive-pointer + publish-branch 32/32, the eight Shim/core/runtime
+files 41/41, Shim typecheck clean, essentials typecheck shows only the four
+known errors, pure build 2.0 MiB with `check-pure` passing, and the served
+cold host 13 passed / 0 failed. In a Linux container with npm 10.9, `npm ci`
+at `src/` refuses the lock (`@noble/hashes@2.4.0` missing) on `development`
+too; `npm install --no-save` was used there instead.
+
+## Behaviour changes to confirm before integration
+
+The snapshot changes door semantics relative to `development`, independent
+of the landing: `opensOn` now closes a branch with no `doors` entry (it was
+open everywhere), and `publishedRoot` serves a host only for its site's
+primary publisher and only when the route's location bag agrees with the
+signed head. These are deliberate hardening for signed offerings, but they
+will close existing published sites whose indexes predate doors.
 
 The broad snapshot also carries legacy theme, tool window, sharing, and
 presentation changes alongside the minimal host. Review its net diff against
@@ -102,8 +129,8 @@ changes are not silently reversed. Keep the original saved branch as recovery.
 
 ## Next proof and release work
 
-1. Reconcile the landing removal and review the broad snapshot; run the
-   relevant worker, publisher, and visitor tests. Keep changes on this task
+1. Review the rest of the broad snapshot against `development`; run the
+   relevant publisher and visitor tests. Keep changes on this task
    branch or a successor task branch. Repository policy reserves direct
    `development` commits, merges, rebases, and pushes for the owner.
 2. Exercise the whole two-host browser journey with an actual signed offering:
