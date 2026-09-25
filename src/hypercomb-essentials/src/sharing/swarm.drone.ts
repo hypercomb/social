@@ -1062,6 +1062,10 @@ export class SwarmDrone extends Drone {
       clearTimeout(this.#pubkeyRetryTimer)
       this.#pubkeyRetryTimer = null
     }
+    if (this.#reassertTimer) {
+      clearTimeout(this.#reassertTimer)
+      this.#reassertTimer = null
+    }
     for (const sub of this.#resourceSubs.values()) {
       try { sub.close() } catch { /* ignore */ }
     }
@@ -4291,10 +4295,16 @@ const payload: SwarmLayerPayload = myLabel
     if (Number(evt.event?.kind) !== SWARM_LIFECYCLE_KIND) return
     const pubkey = String(evt.event?.pubkey ?? '').trim().toLowerCase()
     if (!pubkey) return
-    if (this.#myPubkey && pubkey === this.#myPubkey) return  // our own echo
 
     const payload = evt.payload
     const left = !!(payload && typeof payload === 'object' && (payload as { left?: unknown }).left === true)
+
+    if (this.#myPubkey && pubkey === this.#myPubkey) {
+      // A tombstone under OUR key that we are still here to read is not ours
+      // to honour — see #reassertAfterStaleTombstone.
+      if (left && evt.sig === this.#lifecycleSig) this.#reassertAfterStaleTombstone(Number(evt.event?.created_at ?? 0))
+      return  // our own echo
+    }
 
     if (left) {
       // Tombstone — drop everything this participant contributed, at every
@@ -4326,6 +4336,33 @@ const payload: SwarmLayerPayload = myLabel
       else return  // a replayed beacon older than the tombstone — still gone
     }
     this.#participantAliveMs.set(pubkey, Date.now())
+  }
+
+  // A tombstone for OUR pubkey on the live zone channel, as new as our last
+  // beacon, means members have just dropped us while we're still here. The
+  // usual source is a refresh: the old tab's socket dies without a graceful
+  // leave, and the relay's last-will fires once it reaps that socket (up to a
+  // ping cycle later) with created_at = now — NEWER than the fresh beacon and
+  // layers this session already sent. Every member then evicts us and drops
+  // everything older than the tombstone, and our dedupe memos keep us quiet
+  // for another refresh window: minutes of invisibility. Reassert at once,
+  // one second past the tombstone so members see a strictly newer return.
+  // Private mode stays silent — #syncForCurrentLineage owns that gate.
+  #reassertTimer: ReturnType<typeof setTimeout> | null = null
+  #reassertAfterStaleTombstone = (tombstoneSec: number): void => {
+    if (!this.#lastBeaconMs) return  // never beaconed this zone — nothing to reassert
+    if (tombstoneSec > 0 && tombstoneSec < Math.floor(this.#lastBeaconMs / 1000)) return  // older than our beacon — already superseded
+    if (this.#reassertTimer) return
+    const atMs = (Math.max(tombstoneSec, Math.floor(Date.now() / 1000)) + 1) * 1000
+    this.#reassertTimer = setTimeout(() => {
+      this.#reassertTimer = null
+      slog('[swarm] reasserting after stale tombstone under our pubkey', { tombstoneSec })
+      this.#lastBeaconMs = 0
+      this.#lastPublishedBySig.clear()
+      this.#lastPublishTimeMsBySig.clear()
+      void this.#syncForCurrentLineage()
+      void this.#refreshVisitedPages()
+    }, Math.max(0, atMs - Date.now()) + 50)
   }
 
   /** Start following a participant's NAVIGATION — your view literally
