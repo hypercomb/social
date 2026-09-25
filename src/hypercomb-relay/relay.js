@@ -533,6 +533,12 @@ function trackLifecycle(client, evt) {
   const key = info.x + '\0' + info.d
   if (info.left) { client.lifecycle.delete(key); return }
   client.lifecycle.set(key, { x: info.x, d: info.d, pubkey: info.pubkey })
+  // The participant is alive on THIS connection, so any will another
+  // connection still holds for the same slot is stale — a refreshed tab
+  // whose old socket hasn't been reaped yet. Left armed, it fires up to a
+  // ping cycle later with created_at = now, newer than the returner's
+  // fresh beacon and layers, and every member drops them as departed.
+  for (const other of clients) if (other !== client) other.lifecycle?.delete(key)
 }
 
 function computeEventId(evt) {
@@ -628,15 +634,17 @@ function handleMessage(client, raw) {
     catch { send(client.ws, ['OK', evt.id, false, 'invalid: verification error']); return }
 
     const verdict = insertEvent(evt)
+    // Arm/disarm this connection's last-will from lifecycle beacons so we
+    // can tombstone it server-side if the socket dies without a graceful
+    // {left} (tab crash / kill — see fireWills). A duplicate counts too: the
+    // same beacon from a NEW connection (a refresh inside the same second)
+    // still says the participant lives here now.
+    if (Number(evt.kind) === LIFECYCLE_KIND) trackLifecycle(client, evt)
     if (verdict === 'duplicate') { send(client.ws, ['OK', evt.id, true, 'duplicate: already have this event']); return }
     send(client.ws, ['OK', evt.id, true, ''])
     // A stale replaceable is accepted (the publisher did nothing wrong) but
     // not fanned out: subscribers already hold the newer slot.
     if (verdict !== 'stale') broadcast(evt, client.ws)
-    // Arm/disarm this connection's last-will from lifecycle beacons so we
-    // can tombstone it server-side if the socket dies without a graceful
-    // {left} (tab crash / kill — see fireWills).
-    if (Number(evt.kind) === LIFECYCLE_KIND) trackLifecycle(client, evt)
     return
   }
 

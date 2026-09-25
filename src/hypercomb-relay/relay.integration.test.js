@@ -344,3 +344,68 @@ test('replication destinations are screened, and a redirect is never followed', 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('a refreshed participant is not tombstoned by the last-will of their old socket', { timeout: 20_000 }, async () => {
+  const { WebSocket } = await import('ws')
+  const port = await freePort()
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-will-'))
+  const child = spawn(process.execPath, ['relay.js', '--port', String(port), '--memory', '--content-dir', dir], { cwd: import.meta.dirname, stdio: 'ignore' })
+  const sockets = []
+  const open = () => new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+    sockets.push(ws)
+    ws.once('open', () => resolve(ws))
+    ws.once('error', reject)
+  })
+  const zone = 'a'.repeat(64)
+  const beacon = (ws, secret) => new Promise(resolve => {
+    const evt = finalizeEvent({ kind: 30206, created_at: Math.floor(Date.now() / 1000), tags: [['x', zone], ['d', getPublicKey(secret)]], content: JSON.stringify({ alive: true }) }, secret)
+    const onMessage = raw => { const msg = JSON.parse(String(raw)); if (msg[0] === 'OK' && msg[1] === evt.id) { ws.off('message', onMessage); resolve() } }
+    ws.on('message', onMessage)
+    ws.send(JSON.stringify(['EVENT', evt]))
+  })
+  // Everything the watcher hears on the zone channel, live.
+  const tombstonesFor = async () => {
+    const watcher = await open()
+    const heard = []
+    watcher.on('message', raw => {
+      const msg = JSON.parse(String(raw))
+      if (msg[0] === 'EVENT' && JSON.parse(msg[2].content).left === true) heard.push(msg[2].pubkey)
+    })
+    await new Promise(resolve => {
+      watcher.on('message', raw => { if (JSON.parse(String(raw))[0] === 'EOSE') resolve() })
+      watcher.send(JSON.stringify(['REQ', 'zone', { '#x': [zone] }]))
+    })
+    return heard
+  }
+  const closeAndSettle = async ws => { ws.terminate(); await new Promise(resolve => setTimeout(resolve, 300)) }
+  try {
+    await waitForRelay(`http://127.0.0.1:${port}`)
+    const heard = await tombstonesFor()
+
+    // Control: a lone socket dying fires its will.
+    const crashed = generateSecretKey()
+    const lone = await open()
+    await beacon(lone, crashed)
+    await closeAndSettle(lone)
+    assert.deepEqual(heard, [getPublicKey(crashed)])
+
+    // A refresh: the new tab beacons before the old socket is reaped.
+    heard.length = 0
+    const returner = generateSecretKey()
+    const oldTab = await open()
+    await beacon(oldTab, returner)
+    const newTab = await open()
+    await beacon(newTab, returner)
+    await closeAndSettle(oldTab)
+    assert.deepEqual(heard, [])
+
+    // The new tab's own will stays armed.
+    await closeAndSettle(newTab)
+    assert.deepEqual(heard, [getPublicKey(returner)])
+  } finally {
+    for (const ws of sockets) try { ws.terminate() } catch {}
+    child.kill()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
