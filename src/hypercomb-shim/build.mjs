@@ -113,6 +113,11 @@ if (pure) {
   const marker = '<!-- hc:ioc -->'
   if (!indexHtml.includes(marker)) throw new Error('[shim] index.html has no ' + marker + ' marker')
   indexHtml = indexHtml.replace(marker, `<script>${code}</script>`)
+  // main.js is the kernel: a classic script, so it runs before any module
+  // loads and what it starts can still declare the import map.
+  const moduleTag = '<script type="module" src="./main.js"></script>'
+  if (!indexHtml.includes(moduleTag)) throw new Error('[shim] index.html does not load ./main.js as expected')
+  indexHtml = indexHtml.replace(moduleTag, '<script src="./main.js"></script>')
 }
 await writeFile(resolve(dist, 'index.html'), indexHtml, 'utf8')
 // The cold front door reads the same theme values as the full shells. Compile
@@ -264,6 +269,9 @@ if (!pure) {
 // `@hypercomb/core` stays EXTERNAL. Bundling it would mint a second copy of
 // the runtime the shim already loaded; the import map resolves the bare
 // specifier to the one true runtime instead.
+// THE KERNEL BUILD (--pure) has no second pin: the host console travels inside
+// the one host bundle the kernel runs (see the kernel section below).
+if (!pure) {
 const bootstrapBuild = await build({
   entryPoints: [resolve(here, 'src/bootstrap/index.ts')],
   outfile: resolve(dist, 'bootstrap.tmp.js'),
@@ -305,6 +313,7 @@ const bootstrapBuild = await build({
     `${bootstrapInputs.length} modules · pinned at /pin`,
   )
 }
+}
 
 // ── the runner ───────────────────────────────────────────────────────────────
 // The shipped catalogs are unreachable at RUNTIME in the shim — main.ts always
@@ -321,9 +330,12 @@ const stubLocales = {
   },
 }
 
+// In the kernel build this is the HOST BUNDLE: written under its signature,
+// never served as main.js. main.js is then the kernel (below).
+const mainFile = pure ? 'host.tmp.js' : 'main.js'
 const result = await build({
   entryPoints: [resolve(here, 'src/main.ts')],
-  outfile: resolve(dist, 'main.js'),
+  outfile: resolve(dist, mainFile),
   plugins: [stubLocales],
   bundle: true,
   format: 'esm',
@@ -335,7 +347,7 @@ const result = await build({
   minify,
   logLevel: 'info',
   metafile: true,
-  define: { __HC_BARREL_ENTRIES__: String(barrelEntries), __HC_PURE__: String(pure) },
+  define: { __HC_BARREL_ENTRIES__: String(barrelEntries), __HC_PURE__: String(pure), __HC_KERNEL__: String(pure) },
   // Bees and their dependencies are fetched at runtime by signature, never
   // bundled. Anything that resolves to an /opfs or bare module specifier is
   // the runtime graph's problem, not the shim's.
@@ -344,13 +356,13 @@ const result = await build({
 
 // The scoreboard that matters: if @angular shows up in the shim's own bundle,
 // the shim is not framework-free and the build should say so loudly.
-const mainOut = Object.keys(result.metafile.outputs).find(k => k.endsWith('main.js'))
+const mainOut = Object.keys(result.metafile.outputs).find(k => k.endsWith(mainFile))
 const inputs = Object.keys(result.metafile.outputs[mainOut].inputs)
 const angular = inputs.filter(p => p.includes('node_modules/@angular'))
 const web = inputs.filter(p => p.includes('hypercomb-web'))
-const bytes = (await stat(resolve(dist, 'main.js'))).size
+const bytes = (await stat(resolve(dist, mainFile))).size
 
-console.log(`\n[shim] main.js ${(bytes / 1024).toFixed(0)} kB · ${inputs.length} modules`)
+console.log(`\n[shim] ${pure ? 'host bundle' : 'main.js'} ${(bytes / 1024).toFixed(0)} kB · ${inputs.length} modules`)
 if (angular.length) {
   console.log(`[shim] ⚠ ${angular.length} @angular module(s) reached the shim bundle:`)
   for (const a of angular.slice(0, 10)) console.log(`         ${a}`)
@@ -387,6 +399,33 @@ if (web.length) {
 }
 if (pure && (shared.length || web.length)) {
   throw new Error('[shim] pure install reached application source')
+}
+
+// ── the kernel ───────────────────────────────────────────────────────────────
+// The host bundle is content: written under its own signature (and named by
+// /pin for tools that look). main.js is the KERNEL — a classic script that
+// knows that one signature, baked in here so no signature lives in source,
+// finds the bytes (this device, this origin, the default hosts), verifies and
+// runs them.
+if (pure) {
+  const hostBytes = await readFile(resolve(dist, mainFile))
+  const hostSig = createHash('sha256').update(hostBytes).digest('hex')
+  await writeFile(resolve(dist, hostSig), hostBytes)
+  await writeFile(resolve(dist, 'pin'), hostSig + '\n', 'utf8')
+  await rm(resolve(dist, mainFile), { force: true })
+  await build({
+    entryPoints: [resolve(here, 'src/kernel.ts')],
+    outfile: resolve(dist, 'main.js'),
+    bundle: true,
+    format: 'iife',
+    platform: 'browser',
+    target: ['es2022'],
+    minify: true,
+    logLevel: 'warning',
+    define: { __HC_HOST_SIG__: JSON.stringify(hostSig) },
+  })
+  const kernelBytes = (await stat(resolve(dist, 'main.js'))).size
+  console.log(`[shim] kernel main.js ${(kernelBytes / 1024).toFixed(1)} kB · runs host ${hostSig.slice(0, 12)}… (${(hostBytes.length / 1024).toFixed(0)} kB)`)
 }
 console.log(
   `[shim] origin ${mib(await dirBytes(dist))} total` +

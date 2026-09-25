@@ -57,7 +57,12 @@ const COMMUNITY_HOSTS_POOL = 'community:hosts'
  * client contacts this domain on its first run, and that should stay a fact
  * someone decided rather than one that accumulated.
  */
-export const DEFAULT_HOST_ZONES: readonly string[] = ['jwize.com']
+//
+// jwize, 2026-09-25: hypercomb.com joins jwize.com. It is the repository the
+// minimal install resolves everything else from — packages and their
+// decorations (fonts, locales, UI) by signature — so the GitHub install can
+// stay a loader and nothing more.
+export const DEFAULT_HOST_ZONES: readonly string[] = ['jwize.com', 'hypercomb.com']
 
 export const hostZone = (raw: unknown): string => {
   const text = String(raw ?? '').trim().toLowerCase()

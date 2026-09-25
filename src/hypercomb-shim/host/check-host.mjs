@@ -53,9 +53,12 @@ if (index.error || !index.ok) {
     'the origin must serve the shim build (index.html + main.js) at /')
 } else {
   const html = await index.text()
+  // A module entry (the content-bearing shell) or the kernel: a classic
+  // main.js that runs the bundle /pin names (the pure build).
   const hasModule = /<script\b(?=[^>]*\btype=["']module["'])(?=[^>]*\bsrc=["'][^"']+\.js(?:[?#][^"']*)?["'])[^>]*>/i.test(html)
-  record(hasModule, 'serves the shell', `${html.length} bytes of HTML at /`,
-    'index.html must load a JavaScript module entry point — deploy the complete built shell, not a placeholder')
+  const hasKernel = /<script\b(?![^>]*\btype=)(?=[^>]*\bsrc=["']\.?\/?main\.js["'])[^>]*>/i.test(html)
+  record(hasModule || hasKernel, 'serves the shell', `${html.length} bytes of HTML at /${hasKernel ? ' (kernel)' : ''}`,
+    'index.html must load the shell entry point — deploy the complete built shell, not a placeholder')
 }
 
 // ── 2. the pin ───────────────────────────────────────────────────────────────

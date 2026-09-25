@@ -52,15 +52,23 @@ No `publications.json` catalog is read.
 The pure build carries no application package, locale catalog, Pixi renderer,
 or Angular. An empty `/content` and no `host:offerings` pool are valid.
 
-It is always minified, core runtime included, and it carries core once:
+**The install is a kernel.** `main.js` is `src/kernel.ts`: a 1.4 kB classic
+script that knows one signature, baked in by the build (no signature lives in
+source). It finds those bytes on this device, then this origin, then the
+default hosts (hypercomb.com, jwize.com), refuses any that do not hash to the
+signature, keeps them, and runs them. What it runs is the signed host bundle:
+the engine and the host console, one module. `/pin` still names it for tools.
+`check-pure` fails if the kernel grows past 4 kB.
+
+The host bundle is always minified, core runtime included, and it carries core once:
 `main.js` imports `@hypercomb/core` through the import map (declared by
 `index.html` on every boot), the same runtime file the bootstrap and adopted
 bees load, and the build inlines the ioc install ahead of every module script
 so core's module-scope registrations find `window.ioc`. It ships only the
 faces the host renders (Inter and upright Source Serif 4); icon and italic
 faces belong to the packages that render them. `check-pure` refuses a build
-that breaks any of this. On 2026-09-25: `main.js` 84 kB (26 kB gzip), pinned
-bootstrap 142 kB, core runtime 149 kB, origin 0.9 MiB. A local
+that breaks any of this. On 2026-09-25: kernel 1.4 kB, host bundle 230 kB, core
+runtime 149 kB, origin 0.9 MiB. A local
 completion click verifies and holds the selected branch's typed child, executable, and
 resource closure before adding an on/off layer at the local route. A selected
 public text theme keeps the publisher's exact meta head in

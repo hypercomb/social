@@ -30,6 +30,10 @@ if (Object.keys(locales).length !== 0) throw new Error('pure host: bundled local
 const core = await readdir(resolve(dist, 'core', 'dist'))
 if (core.length !== 1 || core[0] !== 'index.js') throw new Error('pure host: core runtime must be ESM only')
 if (names.includes('main.js.map')) throw new Error('pure host: source map belongs to the source checkout')
+// THE KERNEL stays a one-pager: it knows one signature, verifies, and runs it.
+// Anything more belongs in the signed host bundle, not in the install.
+const kernelBytes = (await stat(resolve(dist, 'main.js'))).size
+if (kernelBytes > 4096) throw new Error(`pure host: the kernel grew to ${kernelBytes} bytes — keep main.js to the signature loader`)
 const fontsCss = await readFile(resolve(dist, 'fonts', 'fonts.css'), 'utf8')
 // The host renders Inter and upright Source Serif 4; icon and italic faces
 // belong to the packages that render them.

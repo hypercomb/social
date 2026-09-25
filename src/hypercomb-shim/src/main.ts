@@ -119,6 +119,11 @@ import { IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './import-map'
 // bundle is fetched by signature at boot and verified before it runs, so
 // nothing below imports it and the type is the only thing that crosses.
 import { loadBootstrap, type BootstrapHandle } from './bootstrap-loader'
+// THE KERNEL BUILD (build.mjs --pure) runs this whole file as ONE bundle the
+// kernel fetched by its baked signature, so the host console travels inside
+// it instead of behind a second pin. Elsewhere the loader above fetches it.
+import { boot as bootHostConsole } from './bootstrap/index'
+declare const __HC_KERNEL__: boolean
 // Locales resolve by signature from the host, never from this bundle.
 import { signatureCatalogs } from './locales'
 
@@ -205,7 +210,9 @@ const boot = async (): Promise<void> => {
   // the preloader goes looking.
   let acquisition: BootstrapHandle | null = null
   try {
-    acquisition = await loadBootstrap({ reason: 'cold' })
+    acquisition = typeof __HC_KERNEL__ === 'boolean' && __HC_KERNEL__
+      ? { ...bootHostConsole({ reason: 'cold' }), pin: 'kernel' }
+      : await loadBootstrap({ reason: 'cold' })
   } catch (error) {
     console.error('[shim] bootstrap failed to load', error)
   }
