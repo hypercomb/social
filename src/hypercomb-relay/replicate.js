@@ -12,6 +12,7 @@ import { Agent as HttpAgent, request as httpRequest } from 'node:http'
 import { Agent as HttpsAgent, request as httpsRequest } from 'node:https'
 import { join } from 'node:path'
 import { classifyBlockedAddress, guardedLookup } from './address-guard.js'
+import { HOST_LISTING_FLOOR } from './host-listing.js'
 
 export const SIGNATURE_RE = /^[a-f0-9]{64}$/
 export const DEFAULT_REPLICATION_LIMIT = 20_000
@@ -39,10 +40,11 @@ export const HOST_PACKAGES_POOL = sha256(Buffer.from('host:packages', 'utf8'))
 // a way to enumerate what a publisher switched off. Bytes by signature stay
 // open (holding the signature IS the permission); only DISCOVERY is gated.
 // A host's packages are public because it is a host; the community pools are
-// the directory hosts publish to each other. `hypercomb:windows` is the
-// desktop installer, offered to anyone (documentation/windows-installer-pool.md).
-export const PUBLIC_POOL_MEANINGS = Object.freeze(['host:packages', 'host:offerings', 'community:hosts', 'community:offers', 'hypercomb:windows'])
-export const PUBLIC_POOL_ADDRESSES = new Set(PUBLIC_POOL_MEANINGS.map(m => sha256(Buffer.from(m, 'utf8'))))
+// the directory hosts publish to each other. That floor is the host contract
+// (host-listing.js); any other pool, such as the desktop installer's
+// `hypercomb:windows`, is listed only while the operator's signed index
+// declares it (relay.js listedPool).
+export const PUBLIC_POOL_ADDRESSES = new Set(HOST_LISTING_FLOOR.map(m => sha256(Buffer.from(m, 'utf8'))))
 const PACKAGE_ENTRY_RE = /^[0-9]{8}$/
 const packageEntryName = index => String(index).padStart(8, '0')
 

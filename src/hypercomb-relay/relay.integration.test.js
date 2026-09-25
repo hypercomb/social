@@ -409,3 +409,41 @@ test('a refreshed participant is not tombstoned by the last-will of their old so
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test("a pool past the floor is listed only while the operator's signed index declares it", { timeout: 30_000 }, async () => {
+  const port = await freePort()
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-listing-'))
+  const windows = sha(Buffer.from('hypercomb:windows', 'utf8'))
+  const member = 'e'.repeat(64)
+  mkdirSync(join(dir, windows))
+  writeFileSync(join(dir, windows, member), '{}')
+  const operator = generateSecretKey()
+  const stranger = generateSecretKey()
+  const child = spawn(process.execPath, ['relay.js', '--port', String(port), '--memory', '--content-dir', dir, '--writers', getPublicKey(operator)], { cwd: import.meta.dirname, stdio: 'ignore' })
+  const base = `http://127.0.0.1:${port}`
+  const declare = async (secret, listed) => {
+    const url = `${base}/hive/${getPublicKey(secret)}`
+    const evt = finalizeEvent({ kind: 30564, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ roots: {}, listed }) }, secret)
+    const body = Buffer.from(JSON.stringify(evt))
+    const put = await fetch(url, { method: 'PUT', body, headers: { Authorization: auth(secret, url, 'PUT', body), 'Content-Type': 'application/json' } })
+    assert.equal(put.status, 200)
+  }
+  try {
+    await waitForRelay(base)
+    assert.equal((await fetch(`${base}/${windows}/`)).status, 404)
+    assert.equal((await fetch(`${base}/${windows}/${member}`)).status, 404)
+    // Anyone may sign their own index; only the operator's word lists a pool.
+    await declare(stranger, ['hypercomb:windows'])
+    assert.equal((await fetch(`${base}/${windows}/`)).status, 404)
+    await declare(operator, ['hypercomb:windows'])
+    const listing = await fetch(`${base}/${windows}/`)
+    assert.equal(listing.status, 200)
+    assert.equal((await listing.text()).trim(), member)
+    assert.equal((await fetch(`${base}/${windows}/${member}`)).status, 200)
+    // The floor never needs a declaration.
+    assert.equal((await fetch(`${base}/${HOST_PACKAGES_POOL}/`)).status, 200)
+  } finally {
+    child.kill()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

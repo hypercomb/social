@@ -920,8 +920,8 @@ function contentStore(objects) {
   }
 }
 
-async function operated({ roots, objects, bindings = {}, operators }) {
-  const event = await signedIndex(roots)
+async function operated({ roots, objects, bindings = {}, operators, extra }) {
+  const event = await signedIndex(roots, undefined, undefined, undefined, extra)
   const hiveReads = []
   return {
     hiveReads,
@@ -991,11 +991,44 @@ test('a record speaks for its own zone only, and a publisher it drops is gone on
   assert.deepEqual(sites.find((s) => s.lineage === 'revolucion').publishers, [])
 })
 
-test('the pool listing never reads an index for bindings, even on an operated zone', async () => {
+test('the floor pool listing never reads an index, even on an operated zone', async () => {
   const { env, hiveReads } = await operated({ roots: BOUND_ROOTS, objects: { [VECTOR.recordSig]: VECTOR.record } })
-  const response = await worker.fetch(new Request('https://pluginthematrix.com/' + 'c'.repeat(64) + '/'), env)
-  assert.equal(response.status, 404)
+  const response = await worker.fetch(new Request('https://pluginthematrix.com/' + await sha256('host:packages') + '/'), env)
+  assert.equal(response.status, 200)
   assert.deepEqual(hiveReads, [])
+})
+
+test('an undeclared pool is not listed, and repeated probes do not re-read the index', async () => {
+  const { env, hiveReads } = await operated({ roots: BOUND_ROOTS, objects: { [VECTOR.recordSig]: VECTOR.record } })
+  const probe = () => worker.fetch(new Request('https://pluginthematrix.com/' + 'c'.repeat(64) + '/'), env)
+  assert.equal((await probe()).status, 404)
+  const reads = hiveReads.length
+  assert.ok(reads <= 1)
+  assert.equal((await probe()).status, 404)
+  assert.equal(hiveReads.length, reads)
+})
+
+test("a pool is listed only while an operator's signed index declares it", async () => {
+  const windows = await sha256('hypercomb:windows')
+  const member = 'd'.repeat(64)
+  const objects = { [VECTOR.recordSig]: VECTOR.record }
+  const listingOf = async (env, sig) => {
+    await env.CONTENT.put(windows + '/' + member, '{}')
+    return worker.fetch(new Request('https://pluginthematrix.com/' + sig + '/'), env)
+  }
+
+  const declared = await operated({ roots: BOUND_ROOTS, objects, extra: { listed: ['hypercomb:windows', 'bare', 42] } })
+  const listed = await listingOf(declared.env, windows)
+  assert.equal(listed.status, 200)
+  assert.equal(await listed.text(), member + '\n')
+  // A bare word is never declarable: it would address a molecule pool.
+  assert.equal((await listingOf(declared.env, await sha256('bare'))).status, 404)
+
+  const silent = await operated({ roots: BOUND_ROOTS, objects })
+  assert.equal((await listingOf(silent.env, windows)).status, 404)
+
+  const stranger = await operated({ roots: BOUND_ROOTS, objects, extra: { listed: ['hypercomb:windows'] }, operators: { [VECTOR.zone]: 'b'.repeat(64) } })
+  assert.equal((await listingOf(stranger.env, windows)).status, 404)
 })
 
 // ── the sandbox door (documentation/module-sandbox.md) ────────────────────

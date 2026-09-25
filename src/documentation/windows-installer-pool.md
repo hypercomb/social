@@ -55,9 +55,11 @@ every visitor as the Windows app.
 ## Reading it
 
 A host lists the pool at `/<sign('hypercomb:windows')>/`: the relay answers
-from `readdir` because the meaning is in `PUBLIC_POOL_MEANINGS`
-(`hypercomb-relay/replicate.js`), and a static host serves the `index.html` the
-publish wrote. The downloads page (`documentation/hypercomb.com`) names the
+from `readdir` once its operator's signed index declares the meaning, which
+the operator says once from their own hive with `hosts list hypercomb:windows
+@<host>` (`hypercomb-relay/host-listing.js`: the four floor pools are the host
+contract, and everything else is the publisher's signed word). A static host
+serves the `index.html` the publish wrote. The downloads page (`documentation/hypercomb.com`) names the
 meaning and its hosts on the Windows row (`data-installer-pool`,
 `data-installer-hosts`), reads the head, verifies the record, and on click
 fetches each part, checks it against its signature, reassembles the file,

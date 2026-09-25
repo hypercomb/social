@@ -32,6 +32,7 @@
 // (schnorr verify — wrangler bundles it).
 
 import { schnorr } from '@noble/curves/secp256k1'
+import { HOST_LISTING_FLOOR, listedMeanings } from '../host-listing.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 // A hostname LABEL, per DNS. A lineage is only a name the wildcard can bring to
@@ -216,7 +217,7 @@ async function verifiedIndex(env, pubkey) {
   if (!content?.roots || typeof content.roots !== 'object' || Array.isArray(content.roots)
     || !validOfferingDeclarations(content.offerings)) return null
   const doors = content.doors && typeof content.doors === 'object' && !Array.isArray(content.doors) ? content.doors : {}
-  return { roots: content.roots, doors, offerings: content.offerings ?? {}, createdAt: Number(evt.created_at || 0) }
+  return { roots: content.roots, doors, offerings: content.offerings ?? {}, listed: listedMeanings(content), createdAt: Number(evt.created_at || 0) }
 }
 
 /** One request's index reads, memoized by pubkey. The ledger asks the same
@@ -560,12 +561,41 @@ async function servePublications(request, env) {
 // nothing under it is an EMPTY listing (a host with no packages yet), never the
 // SPA fallback: a 307 to / or a page of HTML at a pool's address is the one
 // answer that makes a live host read as "does not answer".
-// Only these pools are LISTED in public — the same list the relay keeps
-// (hypercomb-relay/replicate.js PUBLIC_POOL_MEANINGS). Every other address is
-// "no pool at this address", so a derivable one (a word's pool, a path's
-// history bag) never enumerates what a publisher switched off.
+// Only LISTED pools answer in public: the host contract's floor, plus any
+// meaning a site operator's signed index declares in `listed`
+// (hypercomb-relay/host-listing.js — the relay reads the same file). Every
+// other address is "no pool at this address", so a derivable one (a word's
+// pool, a path's history bag) never enumerates what a publisher switched off.
 const HOST_OFFERINGS_MEANING = 'host:offerings'
-const PUBLIC_POOL_MEANINGS = ['host:packages', HOST_OFFERINGS_MEANING, 'community:hosts', 'community:offers']
+
+/** How long one isolate trusts the operators' declared listing. Every word is
+ *  a cross-host search address, so undeclared probes are common; they must
+ *  not each cost an index read and a signature check (the free plan's caps). */
+const LISTING_TTL_MS = 60_000
+const declaredListings = new WeakMap()
+
+/** The addresses the operators' signed indexes (SITE_OPERATORS) declare,
+ *  read at most once per isolate per LISTING_TTL_MS. */
+async function declaredListing(env, read) {
+  const holder = env.HIVES ?? env
+  const held = declaredListings.get(holder)
+  if (held && Date.now() - held.at < LISTING_TTL_MS) return held.addresses
+  const addresses = new Set()
+  for (const pubkey of new Set(siteOperators(env).map(([, pubkey]) => pubkey))) {
+    const index = await read(pubkey)
+    for (const meaning of index?.listed ?? []) addresses.add(await poolAddress(meaning))
+  }
+  declaredListings.set(holder, { at: Date.now(), addresses })
+  return addresses
+}
+
+/** Is this pool listed here? The floor answers without an index read — the
+ *  addresses every follower asks stay on the hot path; anything else is
+ *  listed only while an operator's signed index declares it. */
+async function listedPool(env, sig, read = indexReader(env)) {
+  if ((await Promise.all(HOST_LISTING_FLOOR.map(poolAddress))).includes(sig)) return true
+  return (await declaredListing(env, read)).has(sig)
+}
 const ROUTE_MARKER_RE = /^\d{8}$/
 const PUBLIC_LEAF_MEANINGS = new Set(['themes:text'])
 
@@ -952,8 +982,7 @@ async function serveOfferingsPool(request, env, member) {
 
 async function servePoolListing(request, env, sig) {
   const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
-  const publicPools = await Promise.all(PUBLIC_POOL_MEANINGS.map(poolAddress))
-  if (!publicPools.includes(sig)) {
+  if (!await listedPool(env, sig)) {
     return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
       status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
     })
@@ -2158,7 +2187,7 @@ export default {
     }
 
     if (routeBagPath && pathname.startsWith('/content/')
-      && !((await Promise.all(PUBLIC_POOL_MEANINGS.map(poolAddress))).includes(routeBagPath[1]))
+      && !(await listedPool(env, routeBagPath[1]))
       && (method === 'GET' || method === 'HEAD')) {
       const location = routeBagPath[1]
       const scoped = await bindingsEnv(env)

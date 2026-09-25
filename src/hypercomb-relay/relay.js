@@ -28,6 +28,7 @@ import { verifyNip98 } from './http-auth.js'
 import { blockedSourcesReason } from './address-guard.js'
 import { contentDirectoryIO, HOST_PACKAGES_POOL, PUBLIC_POOL_ADDRESSES, parseReplicationRequest, publishReplicatedPackage, resolvePackageClosure, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
 import { ReceiptIndex } from './receipt-index.js'
+import { listedMeanings } from './host-listing.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -846,6 +847,22 @@ function tryServeHiveIndex(req, res) {
   return true
 }
 
+/** Is this pool LISTED here? The floor always is (replicate.js
+ *  PUBLIC_POOL_ADDRESSES); any other meaning only while an operator's signed
+ *  index declares it in `listed` (host-listing.js). The floor answers without
+ *  reading an index, so the addresses every follower asks cost nothing. */
+function listedPool(sig) {
+  if (PUBLIC_POOL_ADDRESSES.has(sig)) return true
+  for (const pubkey of writers) {
+    const row = newestEvent(pubkey, HIVE_INDEX_KIND)
+    if (!row) continue
+    let content
+    try { content = JSON.parse(row.content) } catch { continue }
+    if (listedMeanings(content).some(m => sha256Hex(Buffer.from(m, 'utf8')) === sig)) return true
+  }
+  return false
+}
+
 function tryServeContent(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') return false
 
@@ -890,10 +907,10 @@ function tryServeContent(req, res) {
   // host's ship can write byte-identical bytes at the same address.
   const dirMatch = urlPath.match(/^\/([0-9a-f]{64})\/$/)
   if (dirMatch) {
-    // Only a PUBLIC pool is listed (replicate.js PUBLIC_POOL_ADDRESSES). Any
-    // other directory, such as a history bag or a molecule pool, answers "not
-    // held", the exact answer an absent pool gets, so the 404 reveals nothing.
-    if (!PUBLIC_POOL_ADDRESSES.has(dirMatch[1])) { respondText(res, 404, 'pool not held'); return true }
+    // Only a LISTED pool is listed (listedPool). Any other directory, such as
+    // a history bag or a molecule pool, answers "not held", the exact answer
+    // an absent pool gets, so the 404 reveals nothing.
+    if (!listedPool(dirMatch[1])) { respondText(res, 404, 'pool not held'); return true }
     const dir = join(resolve(cfg.contentDir), dirMatch[1])
     let names
     try {
@@ -951,7 +968,7 @@ function tryServeContent(req, res) {
     // does not exist: the listing is gated above, and a guessable member name
     // must not be a second way in.
     const memberMatch = urlPath.match(/^\/([0-9a-f]{64})\/[^/]+$/)
-    if (memberMatch && !PUBLIC_POOL_ADDRESSES.has(memberMatch[1])) {
+    if (memberMatch && !listedPool(memberMatch[1])) {
       let isDir = false
       try { isDir = statSync(join(resolve(cfg.contentDir), memberMatch[1])).isDirectory() } catch { /* absent */ }
       if (isDir) return false

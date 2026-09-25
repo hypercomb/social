@@ -14,7 +14,7 @@
 // authenticates the HTTP write with a NIP-98 header — the same envelope
 // HostSyncService uses for byte PUTs.
 
-import { get } from '@hypercomb/core'
+import { get, poolKindOfMeaning } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { HIVE_INDEX_EVENT_KIND, HIVE_LINK_VERSION } from './hive-link.js'
 
@@ -334,6 +334,50 @@ export async function clearHiveRoot(host: string, key: string, deps: SetHiveRoot
   if (!put.ok) return refuse(put.reason ?? 'index write failed')
   return { ok: true, key: cleanKey, sig: String(gone), host, pubkey: put.pubkey, createdAt: put.createdAt }
 }
+
+/** The pool meanings the participant's signed index asks `host` to LIST past
+ *  the host contract's floor (hypercomb-relay/host-listing.js). A host reads
+ *  only its operators' indexes; anyone else's `listed` is inert there. */
+export const listedOf = (content: Record<string, unknown> | undefined): string[] =>
+  Array.isArray(content?.['listed'])
+    ? [...new Set((content['listed'] as unknown[]).filter((m): m is string => typeof m === 'string'))]
+    : []
+
+export type SetHostListingResult =
+  | { ok: true; listed: string[]; reason?: 'unchanged' }
+  | { ok: false; reason: string }
+
+/** Add (`on`) or withdraw one meaning in the participant's OWN index on `host`.
+ *  Same safety as setHiveRoot: only a verified read or a 404 is a baseline,
+ *  and every other field of the index is carried through untouched. */
+export async function setHostListing(host: string, meaning: string, on: boolean, deps: SetHiveRootDeps = {}): Promise<SetHostListingResult> {
+  const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
+  const putManifest = deps.putManifest ?? putHiveManifest
+  const publicKey = deps.publicKey ?? (() => get<SignerLike>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
+  const clean = meaning.trim()
+  // A colon meaning can never address a history bag or a word's molecule pool.
+  if (!clean.includes(':') || /\s/.test(clean) || clean.length > 160) return { ok: false, reason: 'a listed pool is a colon meaning, such as hypercomb:windows' }
+  const facts = poolKindOfMeaning(clean)
+  if (on && facts && !facts.replicates) return { ok: false, reason: `${clean} is declared ${facts.kind}, which never travels` }
+  const pubkey = String((await publicKey().catch(() => null)) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return { ok: false, reason: 'no signer' }
+  const read = await fetchIndex(host, pubkey)
+  if (!read.ok && !(read.reason === 'http' && read.status === 404)) return { ok: false, reason: `index-unsafe: ${read.reason}` }
+  const previous = read.ok ? read.manifest.signedContent : undefined
+  const listed = listedOf(previous)
+  if (listed.includes(clean) === on) return { ok: true, listed, reason: 'unchanged' }
+  const next = on ? [...listed, clean] : listed.filter(m => m !== clean)
+  if (next.length > MAX_LISTED) return { ok: false, reason: `a host lists at most ${MAX_LISTED} declared pools` }
+  const content: Record<string, unknown> = { ...previous, listed: next }
+  if (!next.length) delete content['listed']
+  const put = await putManifest(host, read.ok ? read.manifest.roots : {}, read.ok ? read.manifest.doors ?? {} : {},
+    read.ok ? read.manifest.createdAt : 0, content)
+  if (!put.ok) return { ok: false, reason: put.reason ?? 'index write failed' }
+  return { ok: true, listed: next }
+}
+
+/** The cap a host applies (hypercomb-relay/host-listing.js MAX_LISTED). */
+const MAX_LISTED = 32
 
 /** A root the participant's OWN index names on `host`, verified, or null. */
 export async function ownHiveRoot(host: string, key: string, deps: Pick<SetHiveRootDeps, 'fetchIndex' | 'publicKey'> = {}): Promise<string | null> {
