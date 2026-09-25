@@ -194,28 +194,21 @@ split must keep them together or give them a shared home.
 
 ## Work missed by earlier merges
 
-`development` was restarted at root `076c59e8` (2026-09-23), so older
-branches share no history with it and were compared by content.
+Compared only across `development`, `main`, `task/pure-host-install` and
+this branch; other branches are out of scope.
 
-- `origin/development` `1423a0c2` (quiet host discovery) is not on this
-  branch. It touches `host-packages.ts` (in the pure bundle), `worker.js`
-  and `relay.js`; it merges cleanly.
-- `claude/relaxed-bardeen-oxiczw` `f5f696c6`: a command word said while its
-  bee is still loading waits instead of becoming a tile
-  (`command-line/word-arrival.ts`, spec, `scripts/verify-boot-word.cjs`,
-  command-line component). Absent from `development` in any form. Its
-  timing notes (`737f8616`, `atomic-modules-plan.md`) are also absent.
-- `fix/swarm-images-atomic-branch-adopt` `487655a7` (2026-09-15): adopt a
-  peer branch whole or refuse it past `MAX_BRANCH_ADOPT_TILES`, plus swarm
-  image fixes in `show-cell.drone.ts`. Not in `development`.
-- `task/exposure-launch` `aa30165a`, `c0012ba9`: launch kit, `SUPPORT.md`,
-  support page copy. Never merged.
+- `origin/development` `1423a0c2` (quiet host discovery) was missing here;
+  merged in `a041d3da`. It also fixed the runtime `host-packages` and
+  `root-holder` specs that failed on the base.
+- `main` is fully contained in `development`.
 - The owner's local `development` has three unpushed commits (`0ec3c2d15`,
   `f08144fc`, `18bfea47`) that this branch is based on, so
-  `origin/development` still paints the landing picture.
-- Checked and not missing: the hosts panel and packages window (replaced by
-  the host directory), vendor atoms, boot module tail, Jev decisions (in
-  `development`, later rewritten), `side-effects.ts` (regenerates unchanged).
+  `origin/development` still paints the landing picture until they are
+  pushed.
+- `task/pure-host-install` itself is only on the owner's machine; its
+  audit is `saved-pure-host-branch-audit.md`. Every file that audit lists
+  as changed on the task branch is changed here, except the landing files
+  removed on purpose, and `side-effects.ts`, which regenerates unchanged.
 
 ## Behaviour changes to confirm before integration
 
