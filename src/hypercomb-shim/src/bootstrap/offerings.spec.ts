@@ -431,7 +431,13 @@ describe('one-click activation', () => {
     expect(await addOffering(offered, 'garden.localhost')).toBe(false)
     expect(buckets.has(await sha('host:adoptions'))).toBe(false)
     omitDependency = false
-    expect(await addOffering(offered, 'garden.localhost')).toBe(true)
+    const steps: { done: number; total: number }[] = []
+    expect(await addOffering(offered, 'garden.localhost', undefined, step => steps.push(step))).toBe(true)
+    // The walk says how far it is as it goes: the root alone first, then a
+    // total that grows as layers name what they use, ending with all held.
+    expect(steps[0]).toEqual({ done: 0, total: 1 })
+    expect(steps.at(-1)!.done).toBe(steps.at(-1)!.total)
+    expect(steps.at(-1)!.total).toBeGreaterThanOrEqual(4)
     expect(layers.has(childSig)).toBe(true)
     expect(bees.has(beeSig)).toBe(true)
     expect(dependencies.has(dependencySig)).toBe(true)

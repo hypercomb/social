@@ -16,6 +16,8 @@
 
 import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
 import { hostRouteName } from '@hypercomb/runtime/host-activation'
+import { askHostPackages } from '@hypercomb/runtime/host-packages'
+import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
 import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
@@ -23,7 +25,7 @@ import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferi
   rememberPublicCreationCandidate,
   turnOffOffering, turnOffPublicCreation,
   type ActiveOffering, type ActivePublicCreation, type Adoption, type Offering, type PublicCreation,
-  type PendingSelection } from './offerings'
+  type PendingSelection, type ReplicationProgress } from './offerings'
 
 const STYLE = `
 :host { all: initial }
@@ -206,6 +208,35 @@ li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; bo
 .deployment details { margin-top: .6rem; }
 .deployment summary { cursor: pointer; }
 
+/* package replication — what this hive runs, and where to take another from */
+.packages .revision { display: grid; gap: .25rem; margin: 0 0 1rem; color: var(--md-on-surface-var); font-size: .84rem; }
+.packages .revision code { overflow-wrap: anywhere; color: var(--md-on-surface-strong); font-size: .78rem; }
+.host { margin: 0 0 .9rem; border: 1px solid var(--md-outline-variant); border-radius: .85rem; background: var(--md-surface-c-low); overflow: hidden; }
+.host > header { display: flex; align-items: center; gap: .6rem; padding: .6rem .9rem; }
+.host .zone { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--md-on-surface-strong); font-weight: 600; }
+.host .tag { color: var(--md-on-surface-faint); font-size: .75rem; }
+.host .body { padding: 0 .9rem .8rem; }
+.host .body > .lbl { margin: .2rem 0 .4rem; }
+.host li { flex-wrap: wrap; padding: .55rem 0; }
+.host .label { display: grid; flex: 1; min-width: 0; }
+.host .label b { color: var(--md-on-surface-strong); font-weight: 600; }
+.host .label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--md-on-surface-var); font-size: .78rem; }
+.muted { margin: .2rem 0; color: var(--md-on-surface-faint); font-size: .82rem; }
+.history { margin-top: .4rem; }
+.history summary, .more-hosts > summary { cursor: pointer; color: var(--md-on-surface-var); font-size: .82rem; }
+.history details { margin: .3rem 0 0 .6rem; }
+.more-hosts { margin-top: .4rem; }
+.more-hosts > div { margin-top: .8rem; }
+.more-hosts form { margin: .6rem 0 0; }
+/* a replication moving: the bar under the row, the count under the bar */
+.replication { flex-basis: 100%; margin: .45rem 0 0; }
+.replication-track { display: block; position: relative; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--md-primary) 14%, transparent); }
+.replication-fill { display: block; width: 0; height: 100%; background: var(--md-primary); transition: width .2s ease-out; }
+.replication.indeterminate .replication-fill { width: 30%; animation: replication-slide 1.2s ease-in-out infinite; }
+.replication.done .replication-fill { background: var(--hc-status-ok); }
+.replication-count { display: block; margin-top: .3rem; color: var(--md-on-surface-var); font-size: .75rem; font-variant-numeric: tabular-nums; }
+@keyframes replication-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+
 /* the footer — where the platform explains itself, on every host */
 footer {
   display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1.1rem;
@@ -231,6 +262,7 @@ footer a:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; }
+  .replication.indeterminate .replication-fill { width: 100%; opacity: .45; animation: none; }
 }
 `
 
@@ -281,6 +313,48 @@ const emptyTile = (number: string, title: string, message: string): HTMLElement 
   tile.append(art, copy)
   return tile
 }
+
+/** A module is named `<sig>.js` in one record and `<sig>` in another. */
+const bareSig = (sig: string): string => sig.trim().toLowerCase().replace(/\.(?:js|json)$/, '')
+
+/** One replication moving, as a bar and a count. With no known total the bar
+ *  says only that files are arriving; it never claims an end it cannot see. */
+const replicationMeter = (label: string): { element: HTMLElement; paint(done: number, total: number): void } => {
+  const element = document.createElement('div')
+  element.className = 'replication indeterminate'
+  element.setAttribute('role', 'progressbar')
+  element.setAttribute('aria-label', label)
+  element.setAttribute('aria-valuemin', '0')
+  const track = document.createElement('span')
+  track.className = 'replication-track'
+  const fill = document.createElement('span')
+  fill.className = 'replication-fill'
+  track.append(fill)
+  const count = document.createElement('span')
+  count.className = 'replication-count'
+  count.textContent = 'Starting…'
+  element.append(track, count)
+  const paint = (done: number, total: number): void => {
+    const known = total > 0
+    const shown = known ? Math.min(done, total) : done
+    element.classList.toggle('indeterminate', !known)
+    element.classList.toggle('done', known && shown >= total)
+    if (known) {
+      element.setAttribute('aria-valuemax', String(total))
+      element.setAttribute('aria-valuenow', String(shown))
+      fill.style.width = `${Math.round(100 * shown / total)}%`
+      count.textContent = `${shown} of ${total} files held`
+    } else {
+      element.removeAttribute('aria-valuemax')
+      element.removeAttribute('aria-valuenow')
+      fill.style.width = ''
+      count.textContent = `${done} file${done === 1 ? '' : 's'} held`
+    }
+  }
+  return { element, paint }
+}
+
+type Answer = { packages: HostPackage[]; answered: boolean }
 
 const matchesDomain = (host: string, domain: string): boolean =>
   host === domain || host.endsWith(`.${domain}`)
@@ -397,6 +471,9 @@ class HostPanelElement extends HTMLElement {
   #galleryReaders = 0
   #galleryRefresh: (() => void) | null = null
   #expandedTiles = new Set<string>()
+  /** The tile each pending review was drawn in, so its bar lands on it. */
+  #reviewTiles = new Map<PendingReview, HTMLElement>()
+  #selfAnswer: Promise<Answer> | undefined = undefined
   #refreshOnReturn = (): void => {
     if (!this.isConnected || document.visibilityState === 'hidden') return
     for (const zone of new Set([...(this.#galleryPins ?? []), ...this.#gallerySearchZones])) {
@@ -477,6 +554,7 @@ class HostPanelElement extends HTMLElement {
     if (this.#reviews?.length) panel.append(this.#reviewSection(this.#reviews))
     panel.append(this.#gallery(rootZones([this.#self, ...zones])))
     panel.append(...doorLinks)
+    panel.append(this.#packages(zones))
     const technical = document.createElement('details')
     technical.className = 'technical'
     const summary = document.createElement('summary')
@@ -529,6 +607,7 @@ class HostPanelElement extends HTMLElement {
   }
 
   #reviewSection(reviews: PendingReview[]): HTMLElement {
+    this.#reviewTiles.clear()
     const section = document.createElement('section')
     section.className = 'review'
     const heading = document.createElement('h2')
@@ -576,6 +655,7 @@ class HostPanelElement extends HTMLElement {
       action.addEventListener('click', () => { void this.#completePending(review, action) })
       actions.append(visit, action)
       tile.append(title, revision, proof, actions)
+      this.#reviewTiles.set(review, tile)
       section.append(tile)
     }
     if (available.length > 1) {
@@ -625,7 +705,7 @@ class HostPanelElement extends HTMLElement {
     this.#busy = true
     button.disabled = true
     button.textContent = review.offer ? 'Verifying revision…' : 'Dismissing changed tile…'
-    const ok = await this.#commitPending(review, true)
+    const ok = await this.#commitPending(review, true, this.#meterFor(review))
     if (!ok) {
       this.#busy = false
       button.disabled = false
@@ -639,7 +719,8 @@ class HostPanelElement extends HTMLElement {
   }
 
   /** Every action re-reads the signed current head before holding its closure. */
-  async #commitPending(review: PendingReview, dismissChanged: boolean): Promise<boolean> {
+  async #commitPending(review: PendingReview, dismissChanged: boolean,
+    onProgress?: (progress: ReplicationProgress) => void): Promise<boolean> {
     if (!review.offer) return dismissChanged
       && await clearPendingSelection(review.selection).catch(() => false)
     let ok = review.alreadyOn
@@ -656,7 +737,7 @@ class HostPanelElement extends HTMLElement {
       const current = offered.find(row => row.route === selected.route
         && row.pubkey === selected.pubkey && row.lineage === selected.lineage
         && row.head === selected.head)
-      ok = !!current && await addOffering(current, review.localRoute, selected.source).catch(() => false)
+      ok = !!current && await addOffering(current, review.localRoute, selected.source, onProgress).catch(() => false)
     }
     return ok && await clearPendingSelection(review.selection).catch(() => false)
   }
@@ -675,7 +756,7 @@ class HostPanelElement extends HTMLElement {
     let completed = 0
     for (const [index, review] of reviews.entries()) {
       button.textContent = `Verifying ${index + 1} of ${reviews.length}…`
-      if (await this.#commitPending(review, false)) completed++
+      if (await this.#commitPending(review, false, this.#meterFor(review))) completed++
     }
     await this.#refreshPendingReview(reviews[0]!.selection.source)
     this.#busy = false
@@ -683,6 +764,17 @@ class HostPanelElement extends HTMLElement {
       ? `${completed} selected revisions are on in this hive.`
       : `${completed} of ${reviews.length} revisions are on. The others remain selected for review.`,
     completed === reviews.length ? 'good' : 'bad')
+  }
+
+  /** A bar on the review's own tile, fed by the closure walk. Only an offering
+   *  carries a closure; a text theme is two files and needs none. */
+  #meterFor(review: PendingReview): ((progress: ReplicationProgress) => void) | undefined {
+    const tile = this.#reviewTiles.get(review)
+    if (!tile || !review.offer || review.alreadyOn || 'kind' in review.selection) return undefined
+    tile.querySelector('.replication')?.remove()
+    const meter = replicationMeter(`Replicating ${review.offer.title}`)
+    tile.append(meter.element)
+    return ({ done, total }) => meter.paint(done, total)
   }
 
   #linkChip(link: WelcomeLink, lead: boolean): HTMLElement {
@@ -1427,6 +1519,301 @@ class HostPanelElement extends HTMLElement {
       into.append(tile)
     }
   }
+
+  /** THE PACKAGE THIS HIVE RUNS, and where to take another from. Not tiles:
+   *  a package is transport inventory, not a creation. It is still the one
+   *  act that turns a cold origin into a working hive, so the card keeps it —
+   *  the selected revision, what this host offers, the hosts you carry, and a
+   *  known signature — each with a bar while its files arrive. */
+  #packages(zones: string[]): HTMLElement {
+    const section = document.createElement('section')
+    section.className = 'packages'
+    const heading = document.createElement('h2')
+    heading.className = 'lbl'
+    heading.textContent = 'Package replication'
+
+    const revision = document.createElement('p')
+    revision.className = 'revision'
+    const sig = installedPackageSig()
+    if (sig) {
+      const code = document.createElement('code')
+      code.textContent = sig
+      const note = document.createElement('span')
+      note.textContent = 'Selected revision. Replicate another package to switch, or this one again to repair missing files.'
+      revision.append(code, note)
+    } else {
+      revision.textContent = 'No package revision selected. Choose a host offer or enter a known signature.'
+    }
+    section.append(heading, revision)
+
+    if (this.#self) {
+      const box = this.#hostBox(this.#self, true)
+      this.#selfAnswer ??= this.#ask(this.#self)
+      void this.#fill(box, this.#selfAnswer, 'Nothing published here yet.')
+      section.append(box)
+    }
+
+    // The other hosts are asked only when opened: the gallery already asks
+    // them for creations, and a packages pool is a second read per domain.
+    const more = document.createElement('details')
+    more.className = 'more-hosts'
+    const summary = document.createElement('summary')
+    summary.textContent = zones.length
+      ? `Packages on ${zones.length} other host${zones.length === 1 ? '' : 's'}, or by signature`
+      : 'Replicate a package by signature'
+    more.append(summary)
+    more.addEventListener('toggle', () => {
+      if (!more.open || more.childElementCount > 1) return
+      const contents = document.createElement('div')
+      for (const zone of zones) {
+        const box = this.#hostBox(zone, false)
+        void this.#fill(box, this.#ask(zone), 'Nothing published here.')
+        contents.append(box)
+      }
+      contents.append(this.#bySignature())
+      more.append(contents)
+    })
+
+    const status = document.createElement('p')
+    status.className = 'status package-status'
+    status.setAttribute('role', 'status')
+    section.append(more, status)
+    return section
+  }
+
+  #sayPackages(message: string, tone: 'neutral' | 'good' | 'bad' = 'neutral'): void {
+    const status = this.#root.querySelector('.package-status')
+    if (!status) return
+    status.textContent = message
+    status.setAttribute('data-tone', tone)
+  }
+
+  /** A known signature can be replicated even when no host lists it. The
+   *  same authority and byte-verification gates handle listed and pasted roots. */
+  #bySignature(): HTMLElement {
+    const form = document.createElement('form')
+    const input = document.createElement('input')
+    input.placeholder = '64-character package signature'
+    input.spellcheck = false
+    input.autocapitalize = 'off'
+    input.setAttribute('aria-label', 'Package signature')
+    const take = document.createElement('button')
+    take.type = 'submit'
+    take.textContent = 'Replicate'
+    form.append(input, take)
+    form.addEventListener('submit', event => {
+      event.preventDefault()
+      void this.#installSignature(input.value, take)
+    })
+    return form
+  }
+
+  #hostBox(zone: string, self: boolean): HTMLElement {
+    const host = document.createElement('section')
+    host.className = self ? 'host self' : 'host'
+    const header = document.createElement('header')
+    const name = document.createElement('span')
+    name.className = 'zone'
+    name.textContent = zone
+    header.append(name)
+    if (self) {
+      const tag = document.createElement('span')
+      tag.className = 'tag'
+      tag.textContent = 'this host'
+      header.append(tag)
+    }
+    const body = document.createElement('div')
+    body.className = 'body'
+    const loading = document.createElement('p')
+    loading.className = 'muted'
+    loading.textContent = 'Asking…'
+    body.append(loading)
+    host.append(header, body)
+    return host
+  }
+
+  async #ask(zone: string): Promise<Answer> {
+    try { return await askHostPackages(zone, { limit: 1 }) } catch { return { packages: [], answered: false } }
+  }
+
+  /** "Publishes nothing" and "did not answer" are different facts, and only
+   *  the second is about reachability — the box says which. */
+  async #fill(box: HTMLElement, pending: Promise<Answer>, nothing: string): Promise<void> {
+    const { packages, answered } = await pending
+    const body = box.querySelector('.body')
+    if (!body) return
+    body.replaceChildren()
+    if (packages.length === 0) {
+      const none = document.createElement('p')
+      none.className = 'muted'
+      none.textContent = answered ? nothing : 'The host did not answer.'
+      body.append(none)
+      return
+    }
+    const latest = document.createElement('p')
+    latest.className = 'lbl'
+    latest.textContent = 'Latest offered revision'
+    const list = document.createElement('ul')
+    list.append(this.#packageRow(packages[0]!))
+
+    const history = document.createElement('details')
+    history.className = 'history'
+    const summary = document.createElement('summary')
+    summary.textContent = 'Browse publication history'
+    const contents = document.createElement('div')
+    history.append(summary, contents)
+    let loaded = false
+    history.addEventListener('toggle', () => {
+      if (!history.open || loaded) return
+      loaded = true
+      void this.#loadHistory(packages[0]!.zone, contents, [])
+    })
+    body.append(latest, list, history)
+  }
+
+  async #loadHistory(zone: string, into: HTMLElement, held: HostPackage[]): Promise<void> {
+    const before = held.at(-1)?.poolIndex
+    into.textContent = 'Loading revisions…'
+    let page: HostPackage[]
+    try { page = (await askHostPackages(zone, { limit: 25, ...(before !== undefined ? { before } : {}) })).packages }
+    catch {
+      into.textContent = 'Could not read publication history.'
+      return
+    }
+    if (!into.isConnected) return
+    const rows = [...held, ...page]
+    into.replaceChildren()
+    const groups = new Map<string, HostPackage[]>()
+    for (const row of rows) {
+      const name = row.label || 'Unlabeled'
+      const group = groups.get(name) ?? []
+      group.push(row)
+      groups.set(name, group)
+    }
+    for (const [name, revisions] of groups) {
+      const group = document.createElement('details')
+      const title = document.createElement('summary')
+      title.textContent = name
+      const list = document.createElement('ul')
+      for (const revision of revisions) list.append(this.#packageRow(revision, true))
+      group.append(title, list)
+      into.append(group)
+    }
+    if (page.length === 25 && rows.at(-1)?.poolIndex !== 0) {
+      const more = document.createElement('button')
+      more.type = 'button'
+      more.textContent = 'Load older revisions'
+      more.addEventListener('click', () => { void this.#loadHistory(zone, into, rows) })
+      into.append(more)
+    }
+  }
+
+  #packageRow(pkg: HostPackage, revision = false): HTMLElement {
+    const row = document.createElement('li')
+    const label = document.createElement('div')
+    label.className = 'label'
+    const title = document.createElement('b')
+    title.textContent = revision ? `Revision ${pkg.packageSig.slice(0, 12)}…` : pkg.label
+    const detail = document.createElement('span')
+    const atoms = pkg.bees.length + pkg.dependencies.length + pkg.layers.length
+    detail.textContent = revision
+      ? (pkg.at ? pkg.at.slice(0, 10) : pkg.packageSig)
+      : atoms > 0
+        ? `Revision ${pkg.packageSig.slice(0, 12)}… · ${atoms} atoms · ` +
+          `${pkg.bees.length} bees, ${pkg.dependencies.length} deps, ${pkg.layers.length} layers`
+        : `Revision ${pkg.packageSig.slice(0, 12)}…${pkg.at ? ` · ${pkg.at.slice(0, 10)}` : ''}`
+    detail.title = pkg.packageSig
+    label.append(title, detail)
+
+    const take = document.createElement('button')
+    take.type = 'button'
+    take.textContent = pkg.packageSig === installedPackageSig() ? 'Repair' : 'Replicate'
+    // A row that states its atoms gives the bar an end; one that does not
+    // (admission derives the real inventory) moves as a count.
+    const total = new Set([...pkg.layers, ...pkg.bees, ...pkg.dependencies].map(bareSig)).size
+    take.addEventListener('click', () => {
+      void this.#replicate(pkg.packageSig, take, row, total, onHeld => installPackage(pkg, [], { onHeld }))
+    })
+    row.append(label, take)
+    return row
+  }
+
+  async #installSignature(raw: string, button: HTMLButtonElement): Promise<void> {
+    if (this.#busy) return
+    const sig = raw.trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(sig)) {
+      this.#sayPackages('Enter a 64-character package signature.', 'bad')
+      return
+    }
+    const zones = [...new Set([this.#self, ...await listHostZones()].filter(Boolean))]
+    if (zones.length === 0) {
+      this.#sayPackages('Add a domain that holds this package first.', 'bad')
+      return
+    }
+    const form = button.closest('form') ?? button
+    await this.#replicate(sig, button, form as HTMLElement, 0, onHeld => acquire(sig, zones, { onHeld }))
+  }
+
+  async #replicate(
+    sig: string,
+    button: HTMLButtonElement,
+    at: HTMLElement,
+    total: number,
+    run: (onHeld: (sig: string) => void) => Promise<InstallOutcome>,
+  ): Promise<void> {
+    if (this.#busy) return
+    this.#busy = true
+    for (const other of this.#root.querySelectorAll('button')) other.disabled = true
+    const action = button.textContent ?? 'Replicate'
+    button.textContent = 'Replicating…'
+    this.#sayPackages(`Replicating ${sig.slice(0, 12)}…`)
+
+    // Under the row it replicates; a form is a single line, so beneath it.
+    const meter = replicationMeter(`Replicating ${sig.slice(0, 12)}`)
+    if (at.tagName === 'FORM') at.after(meter.element)
+    else at.append(meter.element)
+    // Files arrive by the hundred: count every one, paint at most every tenth
+    // of a second. A timer, not a frame — a hidden tab never runs a frame.
+    const held = new Set<string>()
+    let painting = 0
+    const paint = (): void => { painting = 0; meter.paint(held.size, total) }
+    const onHeld = (file: string): void => {
+      held.add(bareSig(file))
+      if (!painting) painting = window.setTimeout(paint, 100)
+    }
+    const restore = (message: string): void => {
+      window.clearTimeout(painting)
+      this.#busy = false
+      for (const other of this.#root.querySelectorAll('button')) other.disabled = false
+      button.textContent = action
+      meter.element.remove()
+      this.#sayPackages(message, 'bad')
+    }
+
+    let outcome: InstallOutcome
+    try { outcome = await run(onHeld) }
+    catch (error) {
+      restore(error instanceof Error ? error.message : 'Replication failed.')
+      return
+    }
+    if (!outcome.ok) {
+      restore(outcome.error ?? 'Replication failed.')
+      console.warn('[shim] replication incomplete', outcome)
+      return
+    }
+
+    window.clearTimeout(painting)
+    const count = outcome.fetched + outcome.present
+    meter.paint(count, Math.max(total, count))
+    this.#sayPackages(`Held ${count} atoms (${outcome.fetched} fetched). Starting…`, 'good')
+    console.log('[shim] replication complete', outcome)
+    // A reload, and only here. The import map has to be live BEFORE the first
+    // module script evaluates, and the bees that just landed are exactly those
+    // module scripts — so the honest move after a cold install is to start the
+    // boot again with the heap full, rather than to patch a running graph.
+    setTimeout(() => location.reload(), 400)
+  }
+
 
   #footer(links: readonly WelcomeLink[]): HTMLElement {
     const footer = document.createElement('footer')

@@ -25,6 +25,10 @@ const effects = vi.hoisted(() => {
         meaning: creation.meaning, key: creation.key, location: creation.location })
       return true
     }),
+    ask: vi.fn(async (_zone: string, _options?: unknown) =>
+      ({ packages: [] as unknown[], answered: true })),
+    install: vi.fn(async (..._args: unknown[]) => ({ ok: false, error: 'not wired' }) as unknown),
+    acquire: vi.fn(async (..._args: unknown[]) => ({ ok: false, error: 'not wired' }) as unknown),
     listPending: vi.fn(async () => [...pending]),
     clearPending: vi.fn(async (selection: Choice) => {
       const at = pending.findIndex(row => row.source === selection.source
@@ -50,6 +54,14 @@ vi.mock('./hosts', () => ({
     effects.zones.splice(at, 1)
     return true
   }),
+}))
+
+vi.mock('@hypercomb/runtime/host-packages', () => ({ askHostPackages: effects.ask }))
+
+vi.mock('./replicate', () => ({
+  acquire: effects.acquire,
+  installPackage: effects.install,
+  installedPackageSig: () => '',
 }))
 
 vi.mock('./offerings', () => ({
@@ -87,6 +99,12 @@ afterEach(() => {
   effects.adoptions.mockResolvedValue([])
   effects.revisions.mockReset()
   effects.revisions.mockResolvedValue([])
+  effects.ask.mockReset()
+  effects.ask.mockResolvedValue({ packages: [], answered: true })
+  effects.install.mockReset()
+  effects.acquire.mockReset()
+  effects.add.mockReset()
+  effects.add.mockResolvedValue(true)
   effects.stage.mockClear()
   effects.stageCreation.mockClear()
   effects.listPending.mockClear()
@@ -302,4 +320,81 @@ it('shows local deployment tiles and known revisions in host details without pac
   expect(details.textContent).toContain(current.slice(0, 12))
   expect(details.textContent).toContain(previous.slice(0, 12))
   expect(details.textContent).not.toMatch(/essentials|Replicate a package by signature|Latest offered revision|Browse publication history/i)
+})
+
+it('replicates a host package with a bar that fills as its files are held', async () => {
+  const sig = (letter: string) => letter.repeat(64)
+  const pkg = { zone: 'localhost:3000', base: 'http://localhost:3000', packageSig: sig('a'), label: 'essentials',
+    at: '2026-09-25T00:00:00Z', generation: null, layers: [sig('b')], bees: [`${sig('c')}.js`], dependencies: [sig('d')] }
+  effects.ask.mockResolvedValue({ packages: [pkg], answered: true })
+  let finish: (outcome: unknown) => void = () => {}
+  effects.install.mockImplementation(async (...args: unknown[]) => {
+    const { onHeld } = args[2] as { onHeld: (sig: string) => void }
+    onHeld(sig('b'))
+    onHeld(`${sig('c')}.js`)
+    return new Promise(resolve => { finish = resolve })
+  })
+
+  const { showHostPanel } = await import('./host-panel')
+  showHostPanel()
+  const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
+  const take = await vi.waitFor(() => {
+    const button = root.querySelector<HTMLButtonElement>('.packages .host li button')
+    expect(button?.textContent).toBe('Replicate')
+    return button!
+  })
+  take.click()
+  const bar = await vi.waitFor(() => {
+    const meter = root.querySelector<HTMLElement>('.packages .replication[role="progressbar"]')
+    expect(meter?.getAttribute('aria-valuenow')).toBe('2')
+    return meter!
+  })
+  expect(bar.getAttribute('aria-valuemax')).toBe('3')
+  expect(bar.textContent).toContain('2 of 3 files held')
+  expect(effects.install).toHaveBeenCalledOnce()
+  expect(take.textContent).toBe('Replicating…')
+
+  // Incomplete: nothing is marked installed, the bar goes, the button returns.
+  finish({ ok: false, packageSig: sig('a'), fetched: 2, present: 0, holes: [sig('d')], refused: [], error: 'package incomplete' })
+  await vi.waitFor(() => expect(root.querySelector('.package-status')?.textContent).toBe('package incomplete'))
+  expect(root.querySelector('.packages .replication')).toBeNull()
+  expect(take.textContent).toBe('Replicate')
+  expect(take.disabled).toBe(false)
+})
+
+it('shows a turned-on offering replicating on its own review tile', async () => {
+  const publisher = 'a'.repeat(64)
+  const offer = {
+    kind: 'host:offering', title: 'Garden', route: 'https://garden.example.com/',
+    lineage: 'garden', pubkey: publisher, head: 'b'.repeat(64),
+    location: 'c'.repeat(64), doors: ['example.com'], index: { created_at: 1 },
+  }
+  effects.offers.mockResolvedValue([offer])
+  let finish: (ok: boolean) => void = () => {}
+  effects.add.mockImplementation(async (...args: unknown[]) => {
+    const onProgress = args[3] as (progress: { done: number; total: number }) => void
+    onProgress({ done: 1, total: 4 })
+    return new Promise<boolean>(resolve => { finish = resolve })
+  })
+  history.replaceState(null, '', `/hosts?${new URLSearchParams({ add: offer.route, publisher,
+    lineage: offer.lineage, source: 'example.com' })}`)
+
+  const { showHostPanel } = await import('./host-panel')
+  showHostPanel()
+  const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
+  const turnOn = await vi.waitFor(() => {
+    const button = root.querySelector<HTMLButtonElement>('.review .pending-tile button')
+    expect(button?.textContent).toBe('Turn on here')
+    return button!
+  })
+  turnOn.click()
+  const bar = await vi.waitFor(() => {
+    const meter = root.querySelector<HTMLElement>('.review .pending-tile .replication')
+    expect(meter?.getAttribute('aria-valuenow')).toBe('1')
+    return meter!
+  })
+  expect(bar.getAttribute('aria-valuemax')).toBe('4')
+  expect(bar.getAttribute('aria-label')).toBe('Replicating Garden')
+  finish(true)
+  await vi.waitFor(() => expect(effects.clearPending).toHaveBeenCalledOnce())
 })

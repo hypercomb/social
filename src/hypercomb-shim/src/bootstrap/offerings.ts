@@ -97,6 +97,9 @@ export const listActivePublicCreations = async (): Promise<ActivePublicCreation[
   })
 }
 
+/** How far a replication is: files held here against the files known so far. */
+export type ReplicationProgress = { done: number; total: number }
+
 const fetchSignedBytes = async (host: string, sig: string, limit: number): Promise<Uint8Array | null> => {
   try {
     const url = new URL(`/${sig}`, publicCreationOrigin(host))
@@ -351,7 +354,9 @@ export const listRevisionCandidates = async (): Promise<RevisionCandidate[]> => 
 /** Carry the selected site's declared typed closure before its local on layer
  * can become current. The walk is bounded and stops on unknown reference
  * shapes; unused package siblings stay remote. */
-const replicateSiteClosure = async (held: Store, offer: Offering, sources: string[]): Promise<boolean> => {
+const replicateSiteClosure = async (held: Store, offer: Offering, sources: string[],
+  onProgress?: (progress: ReplicationProgress) => void): Promise<boolean> => {
+  const tell = (done: number, total: number): void => { try { onProgress?.({ done, total }) } catch { /* the card's problem */ } }
   let networkBytes = 0
   const fetched = new Map<string, Uint8Array<ArrayBuffer>>()
   const fetchOne = async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
@@ -411,6 +416,7 @@ const replicateSiteClosure = async (held: Store, offer: Offering, sources: strin
     return true
   }
   if (!enqueue({ sig: offer.head, kind: 'layer' })) return false
+  tell(0, queue.length)
   for (let at = 0; at < queue.length;) {
     const batch = queue.slice(at, at + 8)
     at += batch.length
@@ -437,12 +443,16 @@ const replicateSiteClosure = async (held: Store, offer: Offering, sources: strin
       if (!refs) return false
       for (const ref of refs) if (!enqueue(ref)) return false
     }
+    // The total grows as layers name what they use: a bar that can move
+    // backwards is honest here, one that claims to know the end is not.
+    tell(at, queue.length)
   }
   return true
 }
 
 /** Add only this signed root and its used references. */
-export const addOffering = async (offer: Offering, localRoute: string, selectedHost?: string): Promise<boolean> => {
+export const addOffering = async (offer: Offering, localRoute: string, selectedHost?: string,
+  onProgress?: (progress: ReplicationProgress) => void): Promise<boolean> => {
   const held = store()
   if (!held) return false
   const target = hostRouteName(localRoute)
@@ -467,7 +477,7 @@ export const addOffering = async (offer: Offering, localRoute: string, selectedH
   await held.initialize()
   const source = selectedHost ?? new URL(offer.route).host
   const bytesFrom = [...new Set([source, new URL(offer.route).host])]
-  try { if (!await replicateSiteClosure(held, offer, bytesFrom)) return false }
+  try { if (!await replicateSiteClosure(held, offer, bytesFrom, onProgress)) return false }
   catch { return false }
   // A failed route replacement must not create a newer adoption record that
   // can mask the route's actual, still-on layer in the management gallery.
