@@ -7,20 +7,12 @@
 //                                reader steps into the hive
 //   arrival <lineage> none       withdraw it — the whole package loads again
 //
-// The plan is a record `{ arrive: [IoC keys] }`, content-addressed, sent to
-// your host under your key and named in your signed index as
-// `plan:<lineage>` (hypercomb-runtime arrival-plan.ts reads it). Names are IoC
-// keys, which survive every rebuild of the package; a bare class name is taken
-// as `@diamondcoreprocessor.com/<Class>`.
+// The act itself lives in arrival-plan-publish.ts, shared with the Publish
+// window's Optimize section.
 
-import { EffectBus, QueenBee, SignatureService } from '@hypercomb/core'
-import { clearHiveRoot, setHiveRoot } from './hive-pointer.js'
+import { EffectBus, QueenBee } from '@hypercomb/core'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
-
-type HostSyncLike = {
-  publishAtoms?: (host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>) =>
-    Promise<{ ok: true } | { ok: false; error: string }>
-}
+import { publishArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
 
 const say = (type: string, message: string): void => {
   EffectBus.emit('toast:show', { type, title: 'arrival', message, duration: 6000 })
@@ -29,13 +21,6 @@ const say = (type: string, message: string): void => {
 /** A lineage as the signed index keys it: lower-case segments joined by `/`. */
 const lineageOf = (raw: string): string =>
   raw.trim().toLowerCase().split('/').map(s => s.trim()).filter(Boolean).join('/')
-
-const keyOf = (raw: string): string => {
-  const name = raw.trim()
-  if (!name) return ''
-  if (name.startsWith('@')) return name
-  return /^[A-Za-z][A-Za-z0-9]*$/.test(name) ? `@diamondcoreprocessor.com/${name}` : ''
-}
 
 export class ArrivalQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -51,27 +36,10 @@ export class ArrivalQueenBee extends QueenBee {
     const lineage = lineageOf(branch)
     const host = PUBLIC_CONTENT_HOSTS[0] ?? ''
     if (!lineage || !host) { say('warning', 'Name the branch and the bees: "arrival revolucion ViewBee SiteViewDrone".'); return }
-    const pointer = `plan:${lineage}`
-
-    if (names.length === 1 && names[0]!.toLowerCase() === 'none') {
-      const cleared = await clearHiveRoot(host, pointer)
-      say(cleared.ok ? 'success' : 'error', cleared.ok
-        ? `${lineage} loads its whole package again.`
-        : `Your index on ${host} refused it: ${cleared.reason ?? 'unknown'}`)
-      return
-    }
-
-    const keys = [...new Set(names.map(keyOf).filter(Boolean))]
-    if (!keys.length) { say('warning', 'Name at least one bee by its class or IoC key.'); return }
-    const bytes = new TextEncoder().encode(JSON.stringify({ arrive: keys }))
-    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
-    const sync = window.ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as HostSyncLike | undefined
-    if (!sync?.publishAtoms) { say('error', 'Host sync is not available here.'); return }
-    const sent = await sync.publishAtoms(host, [sig], async wanted => (wanted === sig ? bytes : null))
-    if (!sent.ok) { say('error', `The plan could not be sent to ${host}: ${sent.error}`); return }
-    const stamped = await setHiveRoot(host, pointer, sig)
-    if (!stamped.ok) { say('error', `Your index on ${host} refused it: ${stamped.reason ?? 'unknown'}`); return }
-    say('success', `${lineage} arrives on ${keys.length} bee${keys.length === 1 ? '' : 's'}; the rest wakes in the hive.`)
+    const withdraw = names.length === 1 && names[0]!.toLowerCase() === 'none'
+    const result = withdraw ? await withdrawArrivalPlan(host, lineage) : await publishArrivalPlan(host, lineage, names)
+    if (!result.ok) { say('error', `${lineage}: ${result.reason}`); return }
+    say('success', withdraw ? `${lineage} loads its whole package again.` : `${lineage} arrives on its plan; the rest wakes in the hive.`)
   }
 }
 

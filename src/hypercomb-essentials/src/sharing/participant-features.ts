@@ -20,6 +20,7 @@
 
 import { SignatureService } from '@hypercomb/core'
 import { artifactKindFor } from '../pheromones/enrollment.js'
+import { setHiveRoot } from './hive-pointer.js'
 
 const get = <T,>(key: string): T | undefined => (window as any).ioc?.get?.(key) as T | undefined
 
@@ -98,4 +99,29 @@ export async function removeParticipantFeature(raw: unknown): Promise<boolean> {
   const dir = name ? await pool() : null
   if (!dir) return false
   try { await dir.removeEntry(await featureArtifactSig(name)); return true } catch { return false }
+}
+
+type HostSyncLike = {
+  publishAtoms?: (host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>) =>
+    Promise<{ ok: true } | { ok: false; error: string }>
+}
+
+/** The published snapshot's signature for the set as it stands here — what
+ *  `pool:features:participant` names once this set is published. */
+export const participantSnapshotSig = async (): Promise<string> =>
+  participantSnapshot(await listParticipantFeatures()).sigOf()
+
+/** Fold the pool into its snapshot, send it under the participant's key and
+ *  name it in their signed index. One act, two doors: the `features` word and
+ *  the Publish window's Optimize section. */
+export async function publishParticipantFeatures(host: string): Promise<{ ok: true; names: string[] } | { ok: false; reason: string }> {
+  const names = await listParticipantFeatures()
+  const snapshot = participantSnapshot(names)
+  const sig = await snapshot.sigOf()
+  const sync = get<HostSyncLike>('@diamondcoreprocessor.com/HostSyncService')
+  if (!sync?.publishAtoms) return { ok: false, reason: 'host sync is not available here' }
+  const sent = await sync.publishAtoms(host, [sig], async wanted => (wanted === sig ? snapshot.bytes : null))
+  if (!sent.ok) return { ok: false, reason: sent.error }
+  const stamped = await setHiveRoot(host, PARTICIPANT_FEATURES_POINTER, sig)
+  return stamped.ok ? { ok: true, names } : { ok: false, reason: stamped.reason ?? 'the index refused it' }
 }

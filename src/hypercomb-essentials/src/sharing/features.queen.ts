@@ -11,20 +11,13 @@
 // publish folds it into one snapshot and names it in your signed index.
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
-import { setHiveRoot } from './hive-pointer.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import {
-  PARTICIPANT_FEATURES_POINTER,
   addParticipantFeature,
   listParticipantFeatures,
-  participantSnapshot,
+  publishParticipantFeatures,
   removeParticipantFeature,
 } from './participant-features.js'
-
-type HostSyncLike = {
-  publishAtoms?: (host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>) =>
-    Promise<{ ok: true } | { ok: false; error: string }>
-}
 
 const say = (type: string, message: string): void => {
   EffectBus.emit('toast:show', { type, title: 'features', message, duration: 6000 })
@@ -66,16 +59,9 @@ export class FeaturesQueenBee extends QueenBee {
 
   async #publish(host: string): Promise<void> {
     if (!host) { say('error', 'No host to publish to.'); return }
-    const names = await listParticipantFeatures()
-    const snapshot = participantSnapshot(names)
-    const sig = await snapshot.sigOf()
-    const sync = window.ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as HostSyncLike | undefined
-    if (!sync?.publishAtoms) { say('error', 'Host sync is not available here.'); return }
-    const sent = await sync.publishAtoms(host, [sig], async wanted => (wanted === sig ? snapshot.bytes : null))
-    if (!sent.ok) { say('error', `The set could not be sent to ${host}: ${sent.error}`); return }
-    const stamped = await setHiveRoot(host, PARTICIPANT_FEATURES_POINTER, sig)
-    if (!stamped.ok) { say('error', `Your index on ${host} refused it: ${stamped.reason ?? 'unknown'}`); return }
-    say('success', `Published to ${host}: readers of your sites skip ${names.length ? names.join(', ') : 'nothing'}.`)
+    const result = await publishParticipantFeatures(host)
+    if (!result.ok) { say('error', `The set could not be published to ${host}: ${result.reason}`); return }
+    say('success', `Published to ${host}: readers of your sites skip ${result.names.length ? result.names.join(', ') : 'nothing'}.`)
   }
 }
 
