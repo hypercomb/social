@@ -30,5 +30,17 @@ if (Object.keys(locales).length !== 0) throw new Error('pure host: bundled local
 const core = await readdir(resolve(dist, 'core', 'dist'))
 if (core.length !== 1 || core[0] !== 'index.js') throw new Error('pure host: core runtime must be ESM only')
 if (names.includes('main.js.map')) throw new Error('pure host: source map belongs to the source checkout')
+const fontsCss = await readFile(resolve(dist, 'fonts', 'fonts.css'), 'utf8')
+// The host renders Inter and upright Source Serif 4; icon and italic faces
+// belong to the packages that render them.
+const HOST_FAMILIES = new Set(['Inter', 'Source Serif 4'])
+const families = new Set([...fontsCss.matchAll(/font-family:\s*'([^']+)'/g)].map(m => m[1]))
+const extra = [...families].filter(family => !HOST_FAMILIES.has(family))
+if (extra.length) throw new Error(`pure host: application fonts belong to their packages (${extra.join(', ')})`)
+if (/font-style:\s*italic/.test(fontsCss)) throw new Error('pure host: italic faces belong to their packages')
+const named = new Set([...fontsCss.matchAll(/url\(\.\/([^?)]+)/g)].map(m => m[1]))
+const fontFiles = (await readdir(resolve(dist, 'fonts'))).filter(name => name !== 'fonts.css')
+const stray = fontFiles.filter(name => !named.has(name))
+if (stray.length) throw new Error(`pure host: font files no face names (${stray.join(', ')})`)
 
 console.log('[host] pure install verified')

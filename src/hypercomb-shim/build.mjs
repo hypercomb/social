@@ -75,6 +75,28 @@ await cp(staticRoot, dist, { recursive: true })
 // parser executes before any module script. It is not a new file, so no host's
 // route list changes.
 let indexHtml = await readFile(resolve(here, 'index.html'), 'utf8')
+// HOST FACES ONLY. The host panel renders Inter and upright Source Serif 4
+// (its headings), plus system monospace. The icon face and the italic serif
+// are application assets: a package that renders them carries them as signed
+// resources and declares its own @font-face, so the harness ships neither.
+if (pure) {
+  const fontsDir = resolve(dist, 'fonts')
+  const css = await readFile(resolve(fontsDir, 'fonts.css'), 'utf8')
+  const [header, ...faces] = css.split('@font-face')
+  const kept = faces.filter(face => /font-family:\s*'Inter'/.test(face)
+    || (/font-family:\s*'Source Serif 4'/.test(face) && /font-style:\s*normal/.test(face)))
+  if (kept.length === 0) throw new Error('[shim] fonts.css has no host face')
+  const keptCss = header + kept.map(face => '@font-face' + face).join('')
+  const keptFiles = new Set([...keptCss.matchAll(/url\(\.\/([^?)]+)/g)].map(m => m[1]))
+  for (const name of await readdir(fontsDir)) {
+    if (name !== 'fonts.css' && !keptFiles.has(name)) await rm(resolve(fontsDir, name), { force: true })
+  }
+  await writeFile(resolve(fontsDir, 'fonts.css'), keptCss, 'utf8')
+  const version = createHash('sha256').update(keptCss).digest('hex').slice(0, 10)
+  const link = /fonts\/fonts\.css\?v=[0-9a-f]+/
+  if (!link.test(indexHtml)) throw new Error('[shim] index.html does not link fonts/fonts.css?v=')
+  indexHtml = indexHtml.replace(link, `fonts/fonts.css?v=${version}`)
+}
 if (pure) {
   const ioc = await build({
     entryPoints: [resolve(here, '..', 'hypercomb-runtime', 'src', 'ioc.web.ts')],
