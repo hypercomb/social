@@ -268,3 +268,103 @@ describe('ScriptPreloader priority scheduling', () => {
     expect([...harness.pulses.values()]).toEqual([1, 1, 1, 1])
   })
 })
+
+// A read-only visitor (main.visitor.ts stamps window.__HC_READONLY__ before
+// the boot graph imports) gets the SAME bees as a participant, just not all
+// in one wave the moment critical settles — see the "The landing" section of
+// documentation/read-only-deployment.md. This is the one behaviour the flag
+// is allowed to change; everything above this block proves it changes
+// NOTHING when the flag is absent (every test there runs with it unset).
+describe('ScriptPreloader background wave — read-only visitor', () => {
+  const VISITOR_ROOT = signature('1')
+  const VISITOR_PIXI = signature('2')
+  const VISITOR_SHOW = signature('3')
+  const VISITOR_BACKGROUND = signature('4')
+  // Ten distinct 64-hex signatures: a varying leading digit over 63 nines.
+  const VISITOR_REST = Array.from({ length: 10 }, (_, i) => i.toString(16) + '9'.repeat(63))
+  const VISITOR_CRITICAL = [VISITOR_PIXI, VISITOR_SHOW, VISITOR_BACKGROUND]
+  const VISITOR_ALL = [...VISITOR_CRITICAL, ...VISITOR_REST]
+
+  const visitorStore = () => {
+    const started: string[] = []
+    const pulses = new Map<string, number>(VISITOR_ALL.map(sig => [sig, 0]))
+    const rootBytes = new TextEncoder().encode(JSON.stringify({
+      name: 'root', cells: [], bees: VISITOR_ALL, dependencies: [], criticalBees: VISITOR_CRITICAL,
+    }))
+    const registerCriticalServices = (sig: string, bee: unknown): void => {
+      if (sig === VISITOR_PIXI) { ioc.register(PIXI_KEY, bee); ioc.register('@diamondcoreprocessor.com/Settings', {}) }
+      else if (sig === VISITOR_SHOW) {
+        ioc.register(SHOW_KEY, bee)
+        ioc.register('@diamondcoreprocessor.com/AxialService', {})
+        ioc.register('@diamondcoreprocessor.com/LayoutService', {})
+      } else if (sig === VISITOR_BACKGROUND) ioc.register(BACKGROUND_KEY, bee)
+    }
+    const store = {
+      getLayerBytes: async (sig: string) => sig === VISITOR_ROOT ? rootBytes : null,
+      bees: { getFileHandle: async (name: string) => {
+        const sig = name.replace(/\.js$/i, '')
+        started.push(sig)
+        return { getFile: async () => ({ arrayBuffer: async () => new TextEncoder().encode(sig).buffer as ArrayBuffer }) }
+      } },
+      legacyBees: undefined,
+      getBee: async (sig: string) => {
+        const key = sig === VISITOR_PIXI ? PIXI_KEY : sig === VISITOR_SHOW ? SHOW_KEY
+          : sig === VISITOR_BACKGROUND ? BACKGROUND_KEY : '@diamondcoreprocessor.com/RestDrone'
+        const bee = { iocKey: key, name: key.split('/').pop(), pulse: async () => { pulses.set(sig, (pulses.get(sig) ?? 0) + 1) } }
+        registerCriticalServices(sig, bee)
+        return bee
+      },
+      preheatResource: async () => undefined,
+    }
+    return { store, started, pulses }
+  }
+
+  const publishVisitorRoot = (): void => {
+    localStorage.setItem(INSTALLED_KEY, VISITOR_ROOT)
+    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({
+      version: 2, layers: [VISITOR_ROOT], bees: VISITOR_ALL, dependencies: [],
+    }))
+  }
+
+  it('batches the background wave across idle turns instead of starting it all at once', async () => {
+    vi.useFakeTimers()
+    const readonly = window as Window & { __HC_READONLY__?: boolean }
+    readonly.__HC_READONLY__ = true
+    try {
+      const harness = visitorStore()
+      currentStore = harness.store
+      publishVisitorRoot()
+
+      const preloader = new ScriptPreloader()
+      const finding = preloader.find('')
+      await vi.advanceTimersByTimeAsync(0)
+
+      // Critical settles synchronously; the background wave has been HANDED
+      // to the idle scheduler but its first batch has not run yet — none of
+      // the ten rest bees have started.
+      expect(harness.started).toEqual(expect.arrayContaining(VISITOR_CRITICAL))
+      expect(VISITOR_REST.some(sig => harness.started.includes(sig))).toBe(false)
+
+      // One idle turn (the 50ms fallback) runs exactly one batch of 8.
+      await vi.advanceTimersByTimeAsync(50)
+      const afterFirstBatch = VISITOR_REST.filter(sig => harness.started.includes(sig)).length
+      expect(afterFirstBatch).toBe(8)
+
+      // The remaining two need a second idle turn.
+      await vi.advanceTimersByTimeAsync(50)
+      expect(VISITOR_REST.every(sig => harness.started.includes(sig))).toBe(true)
+
+      const encounter = await finding
+      for (const bee of encounter) await bee.pulse('')
+      await vi.advanceTimersByTimeAsync(0)
+
+      // Every bee — critical and background alike — still pulses EXACTLY
+      // once. The idle scheduler changes timing only, never the eviction /
+      // pulse-once contract the participant path already guarantees.
+      expect([...harness.pulses.values()]).toEqual(Array(VISITOR_ALL.length).fill(1))
+    } finally {
+      delete readonly.__HC_READONLY__
+      vi.useRealTimers()
+    }
+  })
+})

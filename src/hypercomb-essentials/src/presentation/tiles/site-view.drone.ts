@@ -128,6 +128,10 @@ export class SiteViewDrone extends Drone {
     'Full-viewport site takeover. Mounts each cell\'s `context` HTML resource as the active page; lineage navigation drives page changes.'
 
   #mount: MountState | null = null
+  /** The sig of the cell page on screen right now, '' when the hexagons
+   *  are. The publish reads it to ship the page as the door's landing
+   *  (sharing/landing-capture.ts). */
+  get mountedPageSig(): string { return this.#mount?.pageSig ?? '' }
   /** Re-entrancy generation — bumped at the top of every #reconcile; a reconcile
    *  bails after any await once a newer one has started (see #reconcile), so the
    *  latest reconcile always wins. */

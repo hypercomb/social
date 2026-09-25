@@ -40,10 +40,12 @@ const isLoopback = (zone: string): boolean =>
 /**
  * Every URL base worth asking, in order.
  *
- * Loopback hosts speak http; everything else https. A published site serves
- * the heap FLAT at its root, while a shell origin serves it under `/content`
- * — both are tried, and the pool probe settles which. `content.<zone>` is
- * the relay/write face that a wildcard zone gets for free, so it is asked too.
+ * Loopback hosts speak http; everything else https. The flat root is the
+ * canonical address (a published site serves the heap FLAT at its root, and
+ * a build never emits a `/content` layout any more), so it is asked first;
+ * `/content` is tried second, for the shrinking set of legacy shell layouts
+ * that still serve it there. `content.<zone>` is the relay/write face that a
+ * wildcard zone gets for free, so it is asked too.
  */
 const allHostBases = (zone: string): string[] => {
   const scheme = isLoopback(zone) ? 'http' : 'https'
@@ -54,7 +56,7 @@ const allHostBases = (zone: string): string[] => {
   const faces = /^content\./i.test(zone)
     ? [`${scheme}://${zone}`]
     : [`${scheme}://${zone}`, `${scheme}://content.${zone}`]
-  return faces.flatMap(base => [`${base}/content`, base])
+  return faces.flatMap(base => [base, `${base}/content`])
 }
 
 /**

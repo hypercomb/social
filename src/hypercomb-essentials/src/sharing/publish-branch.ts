@@ -41,6 +41,7 @@ import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-publ
 import { knownRoots, listPublishRecords, writePublishRecord, type PublishRecord } from './publish-heads.js'
 import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.js'
 import { readGlobalOnKinds } from './behavior-enablement.js'
+import { captureLanding, isOnScreen } from './landing-capture.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
@@ -259,6 +260,26 @@ export async function publishBranch(
     catch { /* the stamp is a courtesy to the reader, never a gate */ }
   }
 
+  // 2b. THE LANDING. The branch is on screen right now — take it before
+  //     anything moves, so the door can paint it inside its loading cover
+  //     while the engine loads (landing-capture.ts). Its bytes go public
+  //     with the closure below; a landing that cannot be taken (another
+  //     location on screen, no page mounted) leaves the index's entry as it
+  //     was. Best-effort: never a gate on the publish.
+  const landing: Record<string, string> = {}
+  if (isOnScreen(segs)) {
+    try {
+      const taken = await captureLanding()
+      if (taken) {
+        const landingSig = await store.putResource(taken.blob)
+        if (SIG_RE.test(landingSig)) {
+          await hostSync.markPublic(landingSig, 'resource')
+          landing[lineageKey(segs)] = `${landingSig}/${taken.name}`
+        }
+      }
+    } catch { /* the cover stays plain */ }
+  }
+
   // 3. A merkle-coherent root from LIVE heads, else fail loud — never
   //    publish a lossy seal, and never auto-heal on the way (see step 6).
   report({ phase: 'sealing' })
@@ -329,7 +350,7 @@ export async function publishBranch(
   if (marked.length > 0) doors[key] = marked
 
   const roots = { ...existing, [key]: sealed }
-  const put = await putHiveManifest(indexHost, roots, doors)
+  const put = await putHiveManifest(indexHost, roots, doors, 0, landing, read.ok ? read.manifest.landing ?? {} : {})
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason, sealed }
 
   // 7. The stable bearer link: segments + pubkey + hosts (+ the sealed head

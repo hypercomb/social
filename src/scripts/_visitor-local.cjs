@@ -40,6 +40,19 @@ const handler = (req, res) => {
   reqs++
   const url = req.url.split('?')[0]
   if (url === '/site.json') return proxySiteJson(req, res)
+  // A module import at the flat root (`/<sig>`, Sec-Fetch-Dest script/worker)
+  // is THIS build's package, not the live heap's: serve it from dist/content
+  // with a JavaScript MIME exactly as the worker does, and proxy only what the
+  // build does not carry.
+  const flat = url.match(/^\/([0-9a-f]{64})$/)
+  if (flat) {
+    const dest = String(req.headers['sec-fetch-dest'] || '').toLowerCase()
+    const local = path.join(ROOT, 'content', flat[1])
+    if (fs.existsSync(local)) {
+      const type = (dest === 'script' || dest === 'worker' || dest === 'sharedworker') ? 'text/javascript' : 'application/octet-stream'
+      return fs.readFile(local, (err, buf) => err ? proxy(req, res) : res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=31536000, immutable' }).end(buf))
+    }
+  }
   if (/^\/(publications)\.json$/.test(url) || /^\/hive\/[0-9a-f]{64}$/.test(url) || /^\/(@resource\/)?[0-9a-f]{64}$/.test(url)) return proxy(req, res)
   let file = path.join(ROOT, url === '/' ? 'index.html' : decodeURIComponent(url))
   if (!file.startsWith(ROOT)) file = path.join(ROOT, 'index.html')

@@ -222,6 +222,15 @@ const RESOURCE_SUBS_MAX = 24
 // own slot or evicts a peer who hasn't kept theirs alive.
 const PEER_STALE_SWEEP_INTERVAL_MS = 30_000
 
+// Fast retry cadence for the first seconds after ARRIVING somewhere
+// (join or navigation) with nobody found yet. #publishDrillRequest's own
+// pageEmpty throttle is 5s, so a 3s tick yields a fresh drill roughly
+// every other tick. Before this, a cold arrival's only retry path was the
+// 30s heartbeat. Armed once per arrival, never by the heartbeat — a
+// participant who is simply alone must not burst forever.
+const JOIN_FAST_RETRY_MS = 3_000
+const JOIN_FAST_RETRY_WINDOW_MS = 20_000
+
 // Slow-phase pubkey resolve retry, after the ~10s fast poll at boot.
 // The swarm is half-deaf without our own key (see
 // #resolveMyPubkeyWithRetry), so it never stops trying.
@@ -889,6 +898,31 @@ export class SwarmDrone extends Drone {
 
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null
   #peerSweepTimer: ReturnType<typeof setInterval> | null = null
+  #joinRetryTimer: ReturnType<typeof setInterval> | null = null
+  #joinRetryDeadlineMs = 0
+
+  // Fast-retry the sync while freshly public and alone — see
+  // JOIN_FAST_RETRY_MS. Idempotent: a call while already running just
+  // extends nothing (the running loop keeps its own deadline), so every
+  // #syncForCurrentLineage pass can call this unconditionally.
+  #startJoinFastRetry = (): void => {
+    if (this.#joinRetryTimer) return
+    this.#joinRetryDeadlineMs = Date.now() + JOIN_FAST_RETRY_WINDOW_MS
+    this.#joinRetryTimer = setInterval(() => {
+      if (Date.now() >= this.#joinRetryDeadlineMs || this.participantsAtCurrentSig().length > 0) {
+        this.#stopJoinFastRetry()
+        return
+      }
+      void this.#syncForCurrentLineage()
+    }, JOIN_FAST_RETRY_MS)
+  }
+
+  #stopJoinFastRetry = (): void => {
+    if (this.#joinRetryTimer) {
+      clearInterval(this.#joinRetryTimer)
+      this.#joinRetryTimer = null
+    }
+  }
 
   // Walk every sig in the peer cache and drop entries from peers whose
   // last event is older than PEER_STALE_MS. Emits swarm:peers-changed
@@ -1058,6 +1092,7 @@ export class SwarmDrone extends Drone {
       clearInterval(this.#peerSweepTimer)
       this.#peerSweepTimer = null
     }
+    this.#stopJoinFastRetry()
     if (this.#pubkeyRetryTimer) {
       clearTimeout(this.#pubkeyRetryTimer)
       this.#pubkeyRetryTimer = null
@@ -1216,6 +1251,7 @@ export class SwarmDrone extends Drone {
         // Graceful leave — tell the whole swarm we're gone in one shot so
         // peers drop our tiles immediately instead of waiting on beacon
         // expiry. Fire-and-forget; the beacon expiry is the backstop.
+        this.#stopJoinFastRetry()
         void this.#publishLeave()
         if (this.#lifecycleSub) { try { this.#lifecycleSub.close() } catch { /* ignore */ } this.#lifecycleSub = null }
         this.#lifecycleSig = ''
@@ -1848,6 +1884,9 @@ export class SwarmDrone extends Drone {
       peers,
       reason: 'initial-sync',
     })
+    // Nobody found yet — fall back to the fast retry cadence instead of
+    // the 30s heartbeat until someone shows up or the window elapses.
+    if (peers.length === 0) this.#startJoinFastRetry()
   }
 
   // STICKY MODE refresh — rides the heartbeat and re-announces every page
