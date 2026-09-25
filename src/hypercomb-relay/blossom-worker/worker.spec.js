@@ -9,13 +9,13 @@ const sk = Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 1 : 0)
 const pubkey = hex(schnorr.getPublicKey(sk))
 const head = 'a'.repeat(64)
 
-async function signedIndex(roots, createdAt = 1_800_000_000, doors) {
+async function signedIndex(roots, createdAt = 1_800_000_000, doors, landing) {
   const event = {
     pubkey,
     created_at: createdAt,
     kind: 30564,
     tags: [],
-    content: JSON.stringify(doors ? { roots, doors } : { roots }),
+    content: JSON.stringify({ roots, ...(doors ? { doors } : {}), ...(landing ? { landing } : {}) }),
   }
   const serial = JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content])
   event.id = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serial))))
@@ -92,6 +92,62 @@ test('site.json resolves the allowlisted publisher signed head', async () => {
     hosts: ['revolucion.pluginthematrix.com'],
     publishedAt: 1_800_000_000,
   })
+})
+
+// ── the landing (sharing/landing-capture.ts) ────────────────────────────────
+//
+// The signed index names a branch's landing beside its head; the door
+// reports it in site.json and paints it inside the visitor page's loading
+// cover, so the site is on screen before the engine loads.
+const landing = 'f'.repeat(64) + '/landing.webp'
+
+test('site.json carries the signed landing of the branch', async () => {
+  const event = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_000, undefined,
+    { revolucion: landing, pluginthematrix: 'not-an-address' })
+  const { env } = await fixture(event)
+  const withLanding = await (await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)).json()
+  assert.equal(withLanding.landing, landing)
+  const withoutLanding = await (await worker.fetch(new Request('https://pluginthematrix.com/site.json'), env)).json()
+  assert.equal('landing' in withoutLanding, false)
+})
+
+test('painting is OFF by default — a signed landing leaves the cover plain until PAINT_LANDING=1', async () => {
+  const event = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_000, undefined, { revolucion: landing })
+  const { env } = await fixture(event)
+  const shell = '<!doctype html><html><head><title>x</title></head><body><app-root><div class="site-loading" role="status"></div></app-root></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  assert.equal(html, shell)
+})
+
+test('the visitor page paints a landing picture into its cover and share image', async () => {
+  const event = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_000, undefined, { revolucion: landing })
+  const { env } = await fixture(event)
+  env.PAINT_LANDING = '1'
+  const shell = '<!doctype html><html><head><title>x</title></head><body><app-root><div class="site-loading" role="status"></div></app-root></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html', 'content-length': String(shell.length) } })
+  const painted = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
+  assert.equal(painted.status, 200)
+  const html = await painted.text()
+  assert.match(html, new RegExp(`class="site-loading" style="background-image:url\\(/${landing}\\)"`))
+  assert.match(html, new RegExp(`<link rel="preload" as="image" href="/${landing}">`))
+  assert.match(html, new RegExp(`<meta property="og:image" content="https://revolucion.pluginthematrix.com/${landing}">`))
+  assert.equal(painted.headers.get('content-length'), null)
+  // the apex branch carries no landing — its shell is untouched
+  const plain = await (await worker.fetch(page('https://pluginthematrix.com/'), env)).text()
+  assert.equal(plain, shell)
+})
+
+test('a page landing is framed inside the cover, sandboxed, never painted', async () => {
+  const pageLanding = 'e'.repeat(64) + '/landing.html'
+  const event = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_000, undefined, { revolucion: pageLanding })
+  const { env } = await fixture(event)
+  env.PAINT_LANDING = '1'
+  const shell = '<!doctype html><html><head><title>x</title></head><body><app-root><div class="site-loading" role="status"></div></app-root></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  assert.match(html, new RegExp(`<div class="site-loading" role="status"><iframe class="site-landing" src="/${pageLanding}" sandbox=""`))
+  assert.doesNotMatch(html, /background-image|og:image/)
 })
 
 test('publications.json exposes the verified Core host registry', async () => {

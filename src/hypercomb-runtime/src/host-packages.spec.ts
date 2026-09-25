@@ -241,6 +241,55 @@ describe('a zone that publishes nothing — asked quietly', () => {
   })
 })
 
+describe("a host deployed before the empty listing — its final 404", () => {
+  beforeEach(() => vi.unstubAllGlobals())
+
+  /** A fetch that answers `said` with a 404 carrying that body — how a host
+   *  that speaks the directory branch said the address holds nothing — and
+   *  404s everything else with a body that says nothing about a pool. */
+  const sayingNoPool = (said: Record<string, string>): ReturnType<typeof vi.fn> =>
+    vi.fn(async (url: string) => ({
+      ok: false,
+      status: 404,
+      headers: new Headers(),
+      text: async () => said[String(url)] ?? 'Not Found',
+    }) as unknown as Response)
+
+  it("stops at the worker's `no pool at this address`: one request", async () => {
+    const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+    const fetchMock = sayingNoPool({ [`https://host.example/${pool}/`]: 'no pool at this address\n' })
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await askHostPackages('host.example')).toEqual({ packages: [], answered: true })
+    expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([`https://host.example/${pool}/`])
+  })
+
+  it("reads the live relay's `pool not held` as the same final answer", async () => {
+    const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+    const fetchMock = sayingNoPool({ [`https://host.example/content/${pool}/`]: 'pool not held' })
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await headPackage('host.example')).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(2)   // the flat base's plain 404, then the final one
+  })
+
+  it('asks the base that said so first once the memo has run out — one request', async () => {
+    vi.useFakeTimers()
+    try {
+      const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+      const fetchMock = sayingNoPool({ [`https://host.example/content/${pool}/`]: 'pool not held' })
+      vi.stubGlobal('fetch', fetchMock)
+      await headPackage('host.example')
+      expect(localStorage.getItem('hc:host-base:host.example')).toBe('https://host.example/content')
+
+      vi.advanceTimersByTime(16 * 60_000)
+      fetchMock.mockClear()
+      expect(await headPackage('host.example')).toBeNull()
+      expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([`https://host.example/content/${pool}/`])
+    } finally { vi.useRealTimers() }
+  })
+})
+
 describe('listHostPackages — the browse surface', () => {
   beforeEach(() => { vi.unstubAllGlobals() })
 

@@ -214,5 +214,5 @@ export function createDefaultPassiveReplicationQueue(): PassiveReplicationQueue 
 
 const runtimeQueue = createDefaultPassiveReplicationQueue()
 runtimeQueue.start()
-/** The running queue; content-broker.drone.ts registers it (atomic-modules-plan.md). */
+/** The running queue; content-broker.boot.drone.ts registers it (atomic-modules-plan.md). */
 export const passiveReplicationQueue = runtimeQueue

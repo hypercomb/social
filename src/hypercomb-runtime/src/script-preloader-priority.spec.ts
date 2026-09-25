@@ -25,6 +25,7 @@ describe('ScriptPreloader critical-bee integration', () => {
     expect(PRELOADER).not.toContain('#RENDER_CRITICAL_KEYS')
   })
 
+
   it('keeps learned hints package-bound and all-or-nothing', () => {
     expect(PRELOADER).toContain('parseLearnedCriticalBeeSigs(raw, packageSig, enabled) ?? []')
     expect(PRELOADER).toContain('serializeLearnedCriticalBeeSigs(packageSig, sigs)')

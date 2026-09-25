@@ -261,6 +261,18 @@ const probePool = (zone: string): Promise<PoolProbe> => {
   return probe
 }
 
+/** How a host deployed before the empty listing says it holds no pool at
+ *  this address: the cloud worker's `servePoolListing` and the live relay's
+ *  directory branch (blossom-worker/worker.js, relay.js). That 404 is final —
+ *  the host listed the address and it is empty — unlike a door with no
+ *  directory branch, whose 404 says nothing about the pool. */
+const NO_POOL_ANSWER = /^(no pool at this address|pool not held)\s*$/
+
+/** A response's text, or '' when it has none to give. */
+const bodyOf = async (res: Response): Promise<string> => {
+  try { return await res.text() } catch { return '' }
+}
+
 const walkBases = async (zone: string): Promise<PoolProbe> => {
   const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
   const remembered = settledBase(zone)
@@ -278,6 +290,12 @@ const walkBases = async (zone: string): Promise<PoolProbe> => {
       // by readdir, the edge worker by prefix, a static ship by the listing
       // it writes as index.html. A 404 or a page here is simply not this
       // base; the next is asked.
+      if (res.status === 404 && NO_POOL_ANSWER.test(await bodyOf(res))) {
+        // A zone's faces are one store, so the host that said "nothing here"
+        // speaks for every base: stop walking, and ask this base first next time.
+        settleBase(zone, base)
+        return { found: null, none: true, answered }
+      }
       const listing = res.ok ? parsePoolListing(await res.text()) : null
       if (!listing) continue
       const indices = markerIndices(listing)

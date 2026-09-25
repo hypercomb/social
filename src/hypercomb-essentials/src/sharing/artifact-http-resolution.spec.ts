@@ -7,7 +7,7 @@ const registrations = new Map<string, unknown>()
   whenReady: () => void 0,
 }
 
-let ContentBrokerDrone: typeof import('./content-broker.drone.js').ContentBrokerDrone
+let ContentBrokerDrone: typeof import('./content-broker.boot.drone.js').ContentBrokerDrone
 
 const sha256 = async (bytes: Uint8Array): Promise<string> => {
   const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
@@ -16,7 +16,7 @@ const sha256 = async (bytes: Uint8Array): Promise<string> => {
 }
 
 beforeAll(async () => {
-  ;({ ContentBrokerDrone } = await import('./content-broker.drone.js'))
+  ;({ ContentBrokerDrone } = await import('./content-broker.boot.drone.js'))
 })
 
 afterEach(() => {

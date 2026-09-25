@@ -14,7 +14,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
   whenReady: () => void 0,
 }
 
-let ContentBrokerDrone: typeof import('./content-broker.drone.js').ContentBrokerDrone
+let ContentBrokerDrone: typeof import('./content-broker.boot.drone.js').ContentBrokerDrone
 
 const SIG = (seed: string): string => seed.repeat(64).slice(0, 64)
 
@@ -41,7 +41,7 @@ const makeBroker = () => {
 }
 
 beforeAll(async () => {
-  ;({ ContentBrokerDrone } = await import('./content-broker.drone.js'))
+  ;({ ContentBrokerDrone } = await import('./content-broker.boot.drone.js'))
 })
 
 beforeEach(() => {

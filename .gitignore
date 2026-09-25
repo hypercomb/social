@@ -32,6 +32,8 @@ dist/
 # namespaces are reserved as disposable by AGENTS.md and may never hold source.
 **/.tmp/
 **/.tmp-*/
+**/.tmp-*.txt
+**/.tmp-*.log
 **/.scratch/
 **/.scratch-*/
 **/.audit/

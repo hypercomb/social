@@ -301,19 +301,20 @@ export async function listDecorations<TPayload>(opts: {
     ? slot.map(s => String(s)).filter(s => /^[0-9a-f]{64}$/.test(s))
     : []
 
-  const out: Array<{ sig: string; record: DecorationRecord<TPayload> }> = []
-  for (const sig of sigs) {
+  // Read together, keep slot order: one round trip for the whole slot on a
+  // cold cell instead of one per decoration (see decoration-kind-index.ts
+  // hydrateLabel, which paid ~2.3 s this way on a published site's arrival).
+  const read = await Promise.all(sigs.map(async sig => {
     try {
       const blob = await store.getResource(sig)
-      if (!blob) continue
+      if (!blob) return null
       const parsed = JSON.parse(await blob.text()) as DecorationRecord<TPayload>
-      if (parsed?.kind !== opts.kind) continue
-      out.push({ sig, record: parsed })
+      return parsed?.kind === opts.kind ? { sig, record: parsed } : null
     } catch {
-      /* malformed record — skip */
+      return null /* malformed record — skip */
     }
-  }
-  return out
+  }))
+  return read.filter((entry): entry is { sig: string; record: DecorationRecord<TPayload> } => entry !== null)
 }
 
 // ── Slot registration ────────────────────────────────────────────────

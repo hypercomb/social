@@ -268,3 +268,4 @@ describe('ScriptPreloader priority scheduling', () => {
     expect([...harness.pulses.values()]).toEqual([1, 1, 1, 1])
   })
 })
+

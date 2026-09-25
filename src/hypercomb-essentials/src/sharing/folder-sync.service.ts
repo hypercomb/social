@@ -24,7 +24,7 @@ import { EffectBus, SignatureService, classifyDirectoryEntry, poolKindOfMeaning,
 import { extractLayerSigFromMarker } from '../history/history.service.js'
 // TYPE ONLY — erased at compile time, so this stays an IoC relationship at
 // runtime and no bundle edge is created between the two drones.
-import type { MirrorSink, UnresolvedRef } from './content-broker.drone.js'
+import type { MirrorSink, UnresolvedRef } from './content-broker.boot.drone.js'
 
 export const FOLDER_SYNC_KEY = '@diamondcoreprocessor.com/FolderSyncService'
 
