@@ -13,7 +13,7 @@
 //   node build.mjs                 minimal — core + fetcher + runner + content
 //   node build.mjs --no-content    cold host; boots to 0 surfaces, correct
 //   node build.mjs --assets        + shared-public (substrate art, ~47 MB)
-//   node build.mjs --minify        production bytes
+//   node build.mjs --minify        production bytes (always on with --pure)
 //
 // DEPLOY SAFETY: this script writes ONLY into hypercomb-shim/dist. It never
 // touches hypercomb-web, so it cannot alter the artifact the live workflow
@@ -35,7 +35,9 @@ const sharedPublic = resolve(here, '..', 'shared-public')
 const pure = process.argv.includes('--pure')
 const withContent = !pure && !process.argv.includes('--no-content')
 const withAssets = !pure && process.argv.includes('--assets')
-const minify = process.argv.includes('--minify')
+// The pure build is the release, so it is always minified: leaving Angular's
+// builder must not cost the compression it gave.
+const minify = pure || process.argv.includes('--minify')
 
 const SIG_NAME = /^[0-9a-f]{64}$/i
 // A real newline, held in a template literal — this file generates JSON and
@@ -92,6 +94,7 @@ if (pure) {
     format: 'esm',
     platform: 'browser',
     target: ['es2022'],
+    minify,
     logLevel: 'warning',
   })
 }
