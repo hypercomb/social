@@ -757,8 +757,13 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // assertion can go: it was a copy, and it was the only unsigned thing
   // deciding which modules the preloader would run. Same derivation the shim
   // and window.hypercomb.acquire use; there is one acquisition, not three.
+  // A VISITOR'S STORE IS BORN EMPTY: every published-site boot starts a new
+  // memory filesystem, so asking it for each of ~900 atoms first only throws
+  // ~3,600 not-found errors (the largest single cost of a cold visit,
+  // measured 2026-09-25). It goes straight to the fetch.
+  const nothingHeld = async (): Promise<null> => null
   const layersIo = {
-    read: readFrom([store.hypercombRoot, store.legacyHive, store.legacyHypercombIo, store.layers], sig => [sig, `${sig}.json`]),
+    read: readonlyVisitor ? nothingHeld : readFrom([store.hypercombRoot, store.legacyHive, store.legacyHypercombIo, store.layers], sig => [sig, `${sig}.json`]),
     fetch: fetchFirst(sig => [`/content/${sig}`, `/content/__layers__/${sig}.json`]),
     write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/__layers__/${sig}.json`, 'application/json; charset=utf-8'),
   } satisfies ReplicationIo
@@ -789,12 +794,12 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // a held file is reused unhashed; a repeat call is an idempotent delta repair.
   const [depsResult, beesResult] = await Promise.all([
     resolveInventory(bundled.packageSig, inventory.dependencies, {
-      read: readFrom([store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig]),
+      read: readonlyVisitor ? nothingHeld : readFrom([store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig]),
       fetch: fetchFirst(sig => [`/content/${sig}`, `/content/__dependencies__/${sig}.js`]),
       write: writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8'),
     } satisfies ReplicationIo, { trusted }),
     resolveInventory(bundled.packageSig, inventory.bees, {
-      read: readFrom([store.bees, store.legacyBees], sig => [`${sig}.js`, sig]),
+      read: readonlyVisitor ? nothingHeld : readFrom([store.bees, store.legacyBees], sig => [`${sig}.js`, sig]),
       fetch: fetchFirst(sig => [`/content/${sig}`, `/content/__bees__/${sig}.js`]),
       write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
     } satisfies ReplicationIo, { trusted }),
@@ -807,10 +812,14 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // ("does not provide an export named …", nine dependencies down, live
   // 2026-09-04). Thrown rather than returned so the caller unwinds before it
   // touches the install it is replacing; the bytes stay for the delta repair.
-  const compat = await checkCoreCompatibility(
-    [...inventory.bees, ...inventory.dependencies],
-    readFrom([store.bees, store.legacyBees, store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig]),
-  )
+  // Each module is read from its own pool: a dependency looked for among the
+  // bees first costs two thrown not-founds before it is found, twice over
+  // (the core check and the bee-deps pass), for every dependency.
+  const beeSigs = new Set(inventory.bees)
+  const readBee = readFrom([store.bees, store.legacyBees], sig => [`${sig}.js`, sig])
+  const readDependency = readFrom([store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig])
+  const readModule = (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => beeSigs.has(sig) ? readBee(sig) : readDependency(sig)
+  const compat = await checkCoreCompatibility([...inventory.bees, ...inventory.dependencies], readModule)
   if (!compat.ok) {
     console.warn(`[ensure-install] bundled package ${bundled.packageSig.slice(0, 12)} ${describeCoreMismatch(compat.missing)}`)
     throw new CoreMismatchError(compat.missing)
@@ -819,11 +828,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // beeDeps, worked out from the bytes just admitted rather than taken from
   // the bundled manifest (bee-deps.ts). A HINT: an empty map means every
   // dependency loads eagerly, which is correct and merely heavier at boot.
-  const beeDeps = await deriveBeeDeps(
-    inventory.bees,
-    inventory.dependencies,
-    readFrom([store.bees, store.legacyBees, store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig]),
-  )
+  const beeDeps = await deriveBeeDeps(inventory.bees, inventory.dependencies, readModule)
 
   // THE BAGS, BUILT HERE RATHER THAN DOWNLOADED (bags.ts).
   //
@@ -876,9 +881,8 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     return ordered.length
   }
 
-  const readDep = readFrom([store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig])
   const aliases = new Map<string, string>()
-  for (const sig of inventory.dependencies) aliases.set(sig, aliasOf(await readDep(sig)))
+  for (const sig of inventory.dependencies) aliases.set(sig, aliasOf(await readDependency(sig)))
 
   const depBagCount = await putBag(store.dependencies, dependencyEntries(inventory.dependencies, sig => aliases.get(sig) ?? ''))
   const beeBagCount = await putBag(store.bees, beeEntries(inventory.bees))

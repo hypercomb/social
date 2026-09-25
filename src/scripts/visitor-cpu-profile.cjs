@@ -1,7 +1,8 @@
 // A CPU profile of one cold visitor load, up to the cover, summarised by
 // self time per function and per phase. Finds where the main thread goes.
 //   node scripts/visitor-cpu-profile.cjs [url] [cpuRate] [untilMs]
-// HC_VERSION measures a worker version staged at 0%.
+// HC_VERSION measures a worker version staged at 0%. KEYS="@x.com/A,@x.com/B"
+// injects a trial arrival plan (visitor-plan-check.cjs).
 const { chromium } = require('playwright')
 
 const url = process.argv[2] || 'https://revolucion.pluginthematrix.com/'
@@ -15,6 +16,15 @@ const VERSION = process.env.HC_VERSION || ''
     ...(VERSION ? { extraHTTPHeaders: { 'Cloudflare-Workers-Version-Overrides': `pluginthematrix-core="${VERSION}"` } } : {}),
   })
   const page = await context.newPage()
+  if (process.env.KEYS) {
+    const body = JSON.stringify({ arrive: process.env.KEYS.split(',').map(s => s.trim()).filter(Boolean) })
+    const plan = require('crypto').createHash('sha256').update(body).digest('hex')
+    await page.route(`**/content/${plan}`, route => route.fulfill({ status: 200, contentType: 'application/json', body }))
+    await page.route('**/site.json*', async route => {
+      const response = await route.fetch()
+      await route.fulfill({ response, json: { ...(await response.json()), plan } })
+    })
+  }
   const cdp = await context.newCDPSession(page)
   await cdp.send('Emulation.setCPUThrottlingRate', { rate })
   await cdp.send('Profiler.enable')

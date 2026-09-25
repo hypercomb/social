@@ -3,7 +3,7 @@
 // and loads bee modules on demand. The processor (hypercomb.act()) is the
 // sole caller of find() → pulse → synchronize.
 
-import { Bee, type BeeResolver, EffectBus, mayRunBee } from '@hypercomb/core'
+import { Bee, type BeeResolver, EffectBus, hypercomb, mayRunBee } from '@hypercomb/core'
 import { Store } from './store'
 import { installedPackageSig } from './installed-package.js'
 import { arrivalNames, beeClassesOfDocs, resolveArrival, type BeeClass } from './arrival-plan.js'
@@ -331,7 +331,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     // Late-value replay: an approach that happened before this line still
     // wakes them.
     EffectBus.on('loader:activate', () => { this.#activatePassive() })
-    this.#warmPassiveAtIdle()
   }
 
   /** Load exactly the arrival's bees, together, and hand them to the
@@ -347,7 +346,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   /** The visitor approached the rest (it left the page for the hive, or a
    *  bee asked): wake every passive bee — the renderers first, so the hive
-   *  paints while the others arrive. They join the next cycle. */
+   *  paints while the others arrive — then run one cycle, trunk to leaf, so
+   *  every bee (the woken ones included) meets the place the visitor is in. */
   #activatePassive = (): void => {
     const passive = this.#passive
     if (!passive?.size) return
@@ -360,30 +360,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     void (async () => {
       const firstLoads = first.map(sig => this.#loadBeeBySignature(sig))
       await Promise.allSettled(firstLoads)
-      this.#finishBeeLoadsInBackground(pending, [...firstLoads, ...rest.map(sig => this.#loadBeeBySignature(sig))])
+      const loads = [...firstLoads, ...rest.map(sig => this.#loadBeeBySignature(sig))]
+      this.#finishBeeLoadsInBackground(pending, loads)
+      await Promise.allSettled(loads)
+      await new hypercomb().act('')
     })()
-  }
-
-  /** READY AT A MOMENT'S NOTICE: the passive bees' bytes (and their
-   *  dependencies') come into the HTTP cache while the main thread idles —
-   *  fetched, never compiled, never run. Only where modules have a stable URL
-   *  to warm (root-served, resolve-import-map.ts). */
-  #warmPassiveAtIdle = (): void => {
-    if ((globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ !== true) return
-    const beeDeps = ((globalThis as { __hypercombBeeDeps?: Record<string, string[]> }).__hypercombBeeDeps) ?? {}
-    const queue = [...new Set([...(this.#passive ?? [])].flatMap(sig => [sig, ...(beeDeps[sig] ?? [])]))]
-    const whenIdle: (run: () => void) => void =
-      typeof (globalThis as any).requestIdleCallback === 'function'
-        ? run => (globalThis as any).requestIdleCallback(() => run(), { timeout: 5000 })
-        : run => { setTimeout(run, ScriptPreloader.#PREHEAT_FALLBACK_MS) }
-    const pump = (): void => {
-      if (!this.#passive?.size) return
-      const batch = queue.splice(0, 6)
-      if (!batch.length) return
-      void Promise.allSettled(batch.map(sig => fetch(`/${sig}`, { priority: 'low' } as RequestInit)))
-        .then(() => { if (queue.length) whenIdle(pump) })
-    }
-    setTimeout(() => whenIdle(pump), 2000)
   }
 
   /** Resources already queued for preheat — the walk repeats across finds,
