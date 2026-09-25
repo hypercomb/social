@@ -397,7 +397,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const passive = this.#passive
     if (!passive?.size) return
     this.#passive = new Set()
-    const pending = [...passive].filter(sig => !this.#beeCache.has(sig))
+    // A queen asleep until her word stays asleep: stepping into the hive is
+    // not asking for her.
+    const pending = [...passive].filter(sig => !this.#beeCache.has(sig) && !this.#sleeping.has(sig))
     if (!pending.length) return
     console.log(`[script-preloader] approached: waking ${pending.length} passive bees`)
     const first = pending.filter(sig => this.#arrivalCritical.includes(sig))
