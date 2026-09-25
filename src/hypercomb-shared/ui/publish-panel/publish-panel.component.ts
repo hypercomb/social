@@ -73,6 +73,8 @@ interface PublishRow {
   opensAs: string
   /** Published heads, newest first — a version IS a signature. */
   versions: { sig: string; at: number }[]
+  /** OPTIMIZE — the published arrival plan (IoC keys); null = whole package. */
+  plan: string[] | null
 }
 
 interface PublishViewChoice {
@@ -128,6 +130,10 @@ interface PublishRenderPayload {
   rows: PublishRow[]
   collisions: PublishCollision[]
   views: PublishViewChoice[]
+  /** OPTIMIZE — the features readers never load, and whether the published
+   *  snapshot matches them. */
+  participantOnly?: string[]
+  participantState?: 'published' | 'changed' | 'none'
 }
 
 const SIG_SHOWN = 12
@@ -183,6 +189,11 @@ export class PublishPanelComponent implements OnDestroy {
   /** Opens-as choices from the drone — svg sanitized ONCE per payload, never
    *  in a template helper (change detection would re-trust every check). */
   readonly views = signal<{ view: string; label: string; icon: SafeHtml; dormant: boolean }[]>([])
+  /** OPTIMIZE — the participant-only features, and whether readers have them. */
+  readonly participantOnly = signal<string[]>([])
+  readonly participantState = signal<'published' | 'changed' | 'none'>('none')
+  /** The text being typed into the Optimize fields, keyed by row / 'features'. */
+  readonly optimizeDraft = signal<Record<string, string>>({})
   readonly #sanitizer = inject(DomSanitizer)
   /** A deliberately coarse render clock. Template helpers must not call
    *  Date.now() themselves: Angular's development check renders twice and a
@@ -363,8 +374,11 @@ export class PublishPanelComponent implements OnDestroy {
             doors: Array.isArray(row.doors) ? row.doors.map(String) : null,
             opensAs: String(row.opensAs ?? ''),
             versions: Array.isArray(row.versions) ? row.versions.map(v => ({ ...v })) : [],
+            plan: Array.isArray(row.plan) ? row.plan.map(String) : null,
           }))
         : [])
+      this.participantOnly.set(Array.isArray(p.participantOnly) ? p.participantOnly.map(String) : [])
+      this.participantState.set(p.participantState === 'published' || p.participantState === 'changed' ? p.participantState : 'none')
       this.views.set(Array.isArray(p.views)
         ? p.views.map(v => ({
             view: String(v.view ?? ''),
@@ -418,6 +432,60 @@ export class PublishPanelComponent implements OnDestroy {
 
   copyLink(row: PublishRow): void {
     EffectBus.emit('publish:copy-link', { key: row.key })
+  }
+
+  // ── OPTIMIZE ─────────────────────────────────────────────────────────
+  // What a published branch's first view loads, and which features its
+  // readers never load. The drone does the acts (the same ones the `arrival`
+  // and `features` words do); the panel only names them.
+
+  /** A plan's bees by class — `@diamondcoreprocessor.com/SiteViewDrone` reads
+   *  as `SiteViewDrone`. */
+  planClasses(row: PublishRow): string[] {
+    return (row.plan ?? []).map(key => key.slice(key.lastIndexOf('/') + 1))
+  }
+
+  draftOf(slot: string, fallback = ''): string {
+    const held = this.optimizeDraft()[slot]
+    return held === undefined ? fallback : held
+  }
+
+  setDraft(slot: string, text: string): void {
+    this.optimizeDraft.update(all => ({ ...all, [slot]: text }))
+  }
+
+  #clearDraft(slot: string): void {
+    this.optimizeDraft.update(all => { const next = { ...all }; delete next[slot]; return next })
+  }
+
+  /** Publish the typed plan: bees by class or IoC key, space-separated. */
+  saveArrival(row: PublishRow): void {
+    if (row.busyPhase) return
+    const names = this.draftOf(row.key, this.planClasses(row).join(' ')).split(/[\s,]+/).filter(Boolean)
+    if (!names.length) return
+    EffectBus.emit('publish:arrival', { key: row.key, names })
+    this.#clearDraft(row.key)
+  }
+
+  /** Withdraw the plan: the branch loads its whole package again. */
+  clearArrival(row: PublishRow): void {
+    if (row.busyPhase) return
+    EffectBus.emit('publish:arrival', { key: row.key, names: [] })
+    this.#clearDraft(row.key)
+  }
+
+  addParticipant(): void {
+    const names = this.draftOf('features').split(/[\s,]+/).filter(Boolean)
+    for (const name of names) EffectBus.emit('publish:participant', { name, on: true })
+    this.#clearDraft('features')
+  }
+
+  removeParticipant(name: string): void {
+    EffectBus.emit('publish:participant', { name, on: false })
+  }
+
+  publishParticipants(): void {
+    EffectBus.emit('publish:participant-publish', {})
   }
 
   /** Pin (or unpin) the branch root's opening face — the drone writes the

@@ -543,6 +543,38 @@ $quiet: #8ea2b0;
   padding-top: 0.15em;
 }
 
+// OPTIMIZE — the arrival plan and the participant-only features.
+.popt { display: flex; flex-direction: column; gap: 0.35em; }
+.popt-head { color: var(--hc-window-accent-quiet); letter-spacing: 0.04em; font-size: 0.72em; margin-top: 0.4em; }
+.popt-note { color: var(--hc-window-ink-quiet, inherit); font-size: 0.66em; opacity: 0.8; }
+.popt-input {
+  font: inherit;
+  font-size: 0.72em;
+  color: var(--hc-panel-text);
+  background: rgba(var(--acc), 0.06);
+  border: 1px solid rgba(var(--acc), 0.3);
+  border-radius: tw.$radius-control;
+  padding: tw.$button-padding-compact-block tw.$button-padding-compact-inline;
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
+}
+.popt-chips { display: flex; flex-wrap: wrap; gap: 0.3em; }
+.popt-chip {
+  display: inline-flex; align-items: center; gap: 0.25em;
+  font-size: 0.68em;
+  color: var(--hc-window-ink-loud);
+  border: 1px solid rgba(var(--acc), 0.3);
+  border-radius: tw.$radius-control;
+  padding: 0.1em 0.2em 0.1em 0.5em;
+}
+.popt-chip-x {
+  background: none; border: none; cursor: pointer; font: inherit;
+  color: var(--hc-window-accent-quiet);
+  padding: 0 0.2em;
+  &:hover { color: var(--hc-panel-text); }
+}
+.popt-due { border-color: rgba(var(--acc), 0.7); }
+.popt-state { font-size: 0.64em; color: var(--hc-window-accent-quiet); align-self: center; }
+
 .pdet-btn {
   background: none;
   border: 1px solid rgba(var(--acc), 0.3);
