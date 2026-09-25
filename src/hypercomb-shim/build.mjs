@@ -113,6 +113,12 @@ if (pure) {
   const marker = '<!-- hc:ioc -->'
   if (!indexHtml.includes(marker)) throw new Error('[shim] index.html has no ' + marker + ' marker')
   indexHtml = indexHtml.replace(marker, `<script>${code}</script>`)
+  // THE KERNEL DECLARES THE IMPORT MAP once it holds the core library, so
+  // the page's own replay (for the full shells) is dropped: browsers without
+  // late-map merging accept only one map.
+  const replay = /\n    <!-- Import map pre-apply\.[\s\S]*?<\/script>\n/
+  if (!replay.test(indexHtml)) throw new Error('[shim] index.html has no import map replay to hand to the kernel')
+  indexHtml = indexHtml.replace(replay, '\n')
   // main.js is the kernel: a classic script, so it runs before any module
   // loads and what it starts can still declare the import map.
   const moduleTag = '<script type="module" src="./main.js"></script>'
@@ -126,29 +132,58 @@ const themeCss = compile(resolve(here, '..', 'hypercomb-shared', 'styles', '_mat
   style: 'compressed',
 }).css
 await writeFile(resolve(dist, 'theme.css'), themeCss, 'utf8')
+let coreLibrary = null
 if (pure) {
   // A cold harness has no renderer. A package that needs Pixi may provide it;
   // the installable seed must not carry one particular rendering library.
   await rm(resolve(dist, 'vendor'), { recursive: true, force: true })
   await rm(resolve(dist, 'pixi.js'), { force: true })
-  // Build the browser ABI directly from source. A clean checkout has no
-  // generated public/core/dist, and a pure build must not require the Pixi
-  // vendor step just to obtain core. The published ABI is ESM only.
-  const coreOut = resolve(dist, 'core', 'dist')
-  await mkdir(coreOut, { recursive: true })
-  for (const name of await readdir(coreOut)) {
-    await rm(resolve(coreOut, name), { force: true })
-  }
-  await build({
-    entryPoints: [resolve(here, '..', 'hypercomb-core', 'src', 'index.ts')],
-    outfile: resolve(coreOut, 'index.js'),
+  // CORE IS TWO PARTS. The processor (act, the bee lifecycle, IoC, effects,
+  // signing) is the core a host cannot run without: the install ships it as
+  // /hypercomb-core.runtime.js. The library (everything else core exports) is
+  // content: written under its own signature, which the kernel knows and
+  // resolves like the host bundle. It imports the processor through
+  // `@hypercomb/core/processor`, so there is one IoC and one bee lifecycle.
+  await rm(resolve(dist, 'core'), { recursive: true, force: true })
+  const coreSrc = resolve(here, '..', 'hypercomb-core', 'src')
+  const processor = await build({
+    entryPoints: [resolve(coreSrc, 'processor.ts')],
+    outfile: resolve(dist, 'hypercomb-core.runtime.js'),
     bundle: true,
     format: 'esm',
     platform: 'browser',
     target: ['es2022'],
-    minify,
+    minify: true,
+    metafile: true,
     logLevel: 'warning',
   })
+  const processorFiles = new Set(Object.keys(processor.metafile.inputs).map(p => resolve(p)))
+  const library = await build({
+    entryPoints: [resolve(coreSrc, 'library.ts')],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: ['es2022'],
+    minify: true,
+    write: false,
+    metafile: true,
+    outfile: 'library.js',
+    logLevel: 'warning',
+    plugins: [{
+      name: 'processor-external',
+      setup(b) {
+        b.onResolve({ filter: /^\./ }, args => {
+          const ts = resolve(args.resolveDir, args.path.replace(/\.js$/, '.ts'))
+          return processorFiles.has(ts) ? { path: '@hypercomb/core/processor', external: true } : undefined
+        })
+      },
+    }],
+  })
+  const libraryInputs = Object.keys(library.metafile.inputs).map(p => resolve(p))
+  if (libraryInputs.some(p => processorFiles.has(p))) {
+    throw new Error('[shim] the core library carries its own copy of the processor')
+  }
+  coreLibrary = Buffer.from(library.outputFiles[0].contents)
 }
 
 // ── the content heap ─────────────────────────────────────────────────────────
@@ -413,6 +448,8 @@ if (pure) {
   await writeFile(resolve(dist, hostSig), hostBytes)
   await writeFile(resolve(dist, 'pin'), hostSig + '\n', 'utf8')
   await rm(resolve(dist, mainFile), { force: true })
+  const librarySig = createHash('sha256').update(coreLibrary).digest('hex')
+  await writeFile(resolve(dist, librarySig), coreLibrary)
   await build({
     entryPoints: [resolve(here, 'src/kernel.ts')],
     outfile: resolve(dist, 'main.js'),
@@ -422,10 +459,12 @@ if (pure) {
     target: ['es2022'],
     minify: true,
     logLevel: 'warning',
-    define: { __HC_HOST_SIG__: JSON.stringify(hostSig) },
+    define: { __HC_HOST_SIG__: JSON.stringify(hostSig), __HC_LIBRARY_SIG__: JSON.stringify(librarySig) },
   })
   const kernelBytes = (await stat(resolve(dist, 'main.js'))).size
-  console.log(`[shim] kernel main.js ${(kernelBytes / 1024).toFixed(1)} kB · runs host ${hostSig.slice(0, 12)}… (${(hostBytes.length / 1024).toFixed(0)} kB)`)
+  const processorBytes = (await stat(resolve(dist, 'hypercomb-core.runtime.js'))).size
+  console.log(`[shim] kernel main.js ${(kernelBytes / 1024).toFixed(1)} kB · processor ${(processorBytes / 1024).toFixed(1)} kB`)
+  console.log(`[shim]   resolves host ${hostSig.slice(0, 12)}… (${(hostBytes.length / 1024).toFixed(0)} kB) · core library ${librarySig.slice(0, 12)}… (${(coreLibrary.length / 1024).toFixed(0)} kB)`)
 }
 console.log(
   `[shim] origin ${mib(await dirBytes(dist))} total` +

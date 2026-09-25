@@ -17,7 +17,8 @@
       (function () {
         try {
           // `@hypercomb/core` never moves, so it is declared even on the
-          // coldest boot: the pure main.js imports it through this map.
+          // coldest boot. The pure build drops this script: its kernel
+          // declares the one map once it holds the core library.
           var CORE = '/hypercomb-core.runtime.js';
           var raw = null, parsed = null;
           try { raw = localStorage.getItem('hc:importmap'); parsed = raw && JSON.parse(raw); } catch (e) {}

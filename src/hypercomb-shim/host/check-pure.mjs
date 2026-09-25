@@ -27,8 +27,21 @@ for (const name of ['content', 'vendor', 'pixi.js']) {
 }
 const locales = JSON.parse(await readFile(resolve(dist, 'locales.json'), 'utf8'))
 if (Object.keys(locales).length !== 0) throw new Error('pure host: bundled locale content')
-const core = await readdir(resolve(dist, 'core', 'dist'))
-if (core.length !== 1 || core[0] !== 'index.js') throw new Error('pure host: core runtime must be ESM only')
+// CORE IS THE PROCESSOR in the install; the library is content the kernel
+// resolves. Every signature-named file must hash to its name and be one the
+// kernel knows — an unknown one is dead weight or a second install.
+if (names.includes('core')) throw new Error('pure host: core ships as the processor, not core/dist')
+const processorBytes = (await stat(resolve(dist, 'hypercomb-core.runtime.js'))).size
+if (processorBytes > 8192) throw new Error(`pure host: the processor grew to ${processorBytes} bytes — the rest of core belongs in the library`)
+const kernel = await readFile(resolve(dist, 'main.js'), 'utf8')
+const signed = names.filter(name => /^[a-f0-9]{64}$/.test(name))
+if (signed.length !== 2) throw new Error(`pure host: expected the host bundle and the core library, found ${signed.length} signed files`)
+for (const sig of signed) {
+  if (createHash('sha256').update(await readFile(resolve(dist, sig))).digest('hex') !== sig) {
+    throw new Error(`pure host: ${sig.slice(0, 12)} does not hash to its name`)
+  }
+  if (!kernel.includes(sig)) throw new Error(`pure host: the kernel does not know ${sig.slice(0, 12)}`)
+}
 if (names.includes('main.js.map')) throw new Error('pure host: source map belongs to the source checkout')
 // THE KERNEL stays a one-pager: it knows one signature, verifies, and runs it.
 // Anything more belongs in the signed host bundle, not in the install.

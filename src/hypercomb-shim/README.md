@@ -52,23 +52,34 @@ No `publications.json` catalog is read.
 The pure build carries no application package, locale catalog, Pixi renderer,
 or Angular. An empty `/content` and no `host:offerings` pool are valid.
 
-**The install is a kernel.** `main.js` is `src/kernel.ts`: a 1.4 kB classic
-script that knows one signature, baked in by the build (no signature lives in
-source). It finds those bytes on this device, then this origin, then the
-default hosts (hypercomb.com, jwize.com), refuses any that do not hash to the
-signature, keeps them, and runs them. What it runs is the signed host bundle:
-the engine and the host console, one module. `/pin` still names it for tools.
-`check-pure` fails if the kernel grows past 4 kB.
+**The install is a kernel and the processor.** Two small files run by
+themselves; everything else is resolved.
 
-The host bundle is always minified, core runtime included, and it carries core once:
-`main.js` imports `@hypercomb/core` through the import map (declared by
-`index.html` on every boot), the same runtime file the bootstrap and adopted
-bees load, and the build inlines the ioc install ahead of every module script
-so core's module-scope registrations find `window.ioc`. It ships only the
-faces the host renders (Inter and upright Source Serif 4); icon and italic
-faces belong to the packages that render them. `check-pure` refuses a build
-that breaks any of this. On 2026-09-25: kernel 1.4 kB, host bundle 230 kB, core
-runtime 149 kB, origin 0.9 MiB. A local
+- `main.js` is `src/kernel.ts`, a classic script. It knows two signatures,
+  baked in by the build (no signature lives in source): the host bundle and
+  the core library. For each it tries this device, then this origin, then the
+  default hosts (hypercomb.com, jwize.com), refuses bytes that do not hash to
+  the signature, and keeps what it verified. Warm boots read both from the
+  device in parallel. It then declares the page's one import map and runs the
+  host. `/pin` still names the host bundle for tools.
+- `hypercomb-core.runtime.js` is the processor (`hypercomb-core/src/processor.ts`):
+  `act()` and its optimize pass, bee/drone/queen/worker, IoC, the effect bus
+  and signing. It is the core a host cannot run without.
+- The core library (`hypercomb-core/src/library.ts`) is everything else core
+  exports. It imports the processor as `@hypercomb/core/processor`, so there
+  is one IoC and one bee lifecycle. The kernel maps `@hypercomb/core` to a
+  two-line module that re-exports both, so packages and the host import one
+  surface, unchanged. The full shells still ship core as one file.
+
+`check-pure` fails if the kernel grows past 4 kB, the processor past 8 kB, a
+signed file does not hash to its name, or the kernel does not know it.
+
+The host bundle is always minified and carries no copy of core; the build
+inlines the ioc install ahead of every script so core's module-scope
+registrations find `window.ioc`. It ships only the faces the host renders
+(Inter and upright Source Serif 4); icon and italic faces belong to the
+packages that render them. On 2026-09-25: kernel 2.3 kB, processor 4.1 kB,
+resolved by signature: host bundle 230 kB, core library 142 kB. A local
 completion click verifies and holds the selected branch's typed child, executable, and
 resource closure before adding an on/off layer at the local route. A selected
 public text theme keeps the publisher's exact meta head in
@@ -134,7 +145,7 @@ hosts and is reached by signature.
 
 | | where | what |
 |---|---|---|
-| **core** | `public/core/dist/` + `public/hypercomb-core.runtime.js` | the runtime ABI. `@hypercomb/core` resolves here. |
+| **core** | `public/core/dist/` + `public/hypercomb-core.runtime.js` | the runtime ABI. `@hypercomb/core` resolves here (the pure build ships the processor here and resolves the library by signature). |
 | **fetcher** | `src/replicate.ts` + `public/hypercomb.worker.js` | acquisition by signature, and the service worker that resolves `/@resource/<sig>` and `/opfs/<pool>/<sig>` out of the flat root. |
 | **runner** | `src/main.ts` + `src/surfaces.ts` | boots, pulses the processor, mounts whatever registered. |
 

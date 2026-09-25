@@ -84,7 +84,10 @@ export const cacheImportMap = async (): Promise<void> => {
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
   const aliasSource = new Map<string, string>()
-  imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
+  // Under the kernel, core is what the kernel declared (processor + the
+  // signed library); re-deriving must keep it, or the map would disagree.
+  const kernelCore = (window as Window & { __hcCoreImports?: ResolvedImports }).__hcCoreImports
+  Object.assign(imports, kernelCore ?? { '@hypercomb/core': '/hypercomb-core.runtime.js' })
   if (typeof __HC_PURE__ !== 'boolean' || !__HC_PURE__) {
     imports['pixi.js'] = '/vendor/pixi.runtime.js'
   }

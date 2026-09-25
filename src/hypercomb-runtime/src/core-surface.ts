@@ -107,7 +107,10 @@ export const exportSurfaceSignature = async (names: readonly string[]): Promise<
  */
 export const liveCoreExports = async (): Promise<Set<string> | null> => {
   try {
-    const url = new URL(CORE_RUNTIME_URL, location.origin).href
+    // The minimal install's kernel declares core as processor + library and
+    // says where (window.__hcCoreImports); ask that module, the whole surface.
+    const declared = (globalThis as { __hcCoreImports?: Record<string, string> }).__hcCoreImports?.['@hypercomb/core']
+    const url = declared ?? new URL(CORE_RUNTIME_URL, location.origin).href
     const mod = await import(/* @vite-ignore */ url) as Record<string, unknown>
     return new Set(Object.keys(mod))
   } catch {
