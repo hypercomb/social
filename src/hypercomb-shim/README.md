@@ -50,7 +50,17 @@ only routes actually on here and their known revision heads.
 No `publications.json` catalog is read.
 
 The pure build carries no application package, locale catalog, Pixi renderer,
-or Angular. An empty `/content` and no `host:offerings` pool are valid. A local
+or Angular. An empty `/content` and no `host:offerings` pool are valid.
+
+It is always minified, core runtime included, and it carries core once:
+`main.js` imports `@hypercomb/core` through the import map (declared by
+`index.html` on every boot), the same runtime file the bootstrap and adopted
+bees load, and the build inlines the ioc install ahead of every module script
+so core's module-scope registrations find `window.ioc`. It ships only the
+faces the host renders (Inter and upright Source Serif 4); icon and italic
+faces belong to the packages that render them. `check-pure` refuses a build
+that breaks any of this. On 2026-09-25: `main.js` 84 kB (26 kB gzip), pinned
+bootstrap 142 kB, core runtime 149 kB, origin 0.9 MiB. A local
 completion click verifies and holds the selected branch's typed child, executable, and
 resource closure before adding an on/off layer at the local route. A selected
 public text theme keeps the publisher's exact meta head in
