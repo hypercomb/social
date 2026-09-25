@@ -26,6 +26,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { dirname, extname, join, relative, resolve } from 'path'
 import { build, type Plugin } from 'esbuild'
 import { PACKAGE_FONTS } from '../src/presentation/fonts/package-fonts.js'
+import { buildPixiRuntime } from '../../scripts/pixi-vendor.mjs'
 
 // -------------------------------------------------
 // esm globals
@@ -65,7 +66,11 @@ const TARGET = 'es2022'
 const EXCLUDED_DOMAINS: string[] = ['revolucionstyle.com']
 const NAMESPACE_SEGMENTS_MAX = 3
 const PACKAGE_SPECIFIER = '@hypercomb/essentials'
-const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
+// `pixi.js` is NOT platform: the package carries the renderer as its own
+// vendor atom (below), built by the same recipe as a shell's runtime, so a host
+// that ships no renderer still runs it. A shell that maps `pixi.js` itself
+// keeps its own: import maps are first-wins, and the shells set theirs first.
+const PLATFORM_EXTERNALS = ['@hypercomb/core']
 
 /** VENDOR ATOMS (atomic-modules-plan.md, "find the overlap before creating
  *  redundancy"). An npm specifier that two or more source files import is built
@@ -1274,6 +1279,13 @@ const main = async (): Promise<void> => {
   // The whole package (`export *`): a dynamic or namespace import reaches any
   // export, and one copy costs less than the smallest two.
   for (const pkg of VENDOR_PACKAGES) {
+    if (pkg === 'pixi.js') {
+      const bytes = textToBytes(`// ${pkg}\n${LAZY_MARKER_LINE}\n${await buildPixiRuntime(PROJECT_ROOT)}`)
+      const sig = await SignatureService.sign(toArrayBuffer(bytes))
+      dependencyBytes.set(sig, bytes)
+      atomAliasBySig.set(sig, pkg)
+      continue
+    }
     const r = await build({
       stdin: { contents: `export * from '${pkg}';\n`, resolveDir: PROJECT_ROOT, sourcefile: `virtual:vendor:${pkg}`, loader: 'ts' },
       bundle: true,

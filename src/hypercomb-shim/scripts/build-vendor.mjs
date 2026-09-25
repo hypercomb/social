@@ -15,12 +15,13 @@
 //                             web script baked ANTHROPIC_API_KEY into the
 //                             shipped bundle and leaked it to every visitor.
 //
-// This is a copy of hypercomb-web/scripts/build-{core,pixi}-vendor, narrowed
-// to the shim's own output dir, so the shim builds with no reference to
-// hypercomb-web. When web retires, this becomes the only copy.
+// The core step mirrors hypercomb-web/scripts/build-core-vendor, narrowed to
+// the shim's own output dir, so the shim builds with no reference to
+// hypercomb-web. The Pixi recipe is shared by every build of it
+// (scripts/pixi-vendor.mjs), including the copy a package carries.
 
-import { build } from 'esbuild'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { buildPixiRuntime } from '../../scripts/pixi-vendor.mjs'
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -45,58 +46,12 @@ const pixiFile = resolve(vendorOut, 'pixi.runtime.js')
 rmSync(vendorOut, { recursive: true, force: true })
 mkdirSync(vendorOut, { recursive: true })
 
-await build({
-  // `pixi.js/unsafe-eval` swaps the new-Function uniform-sync for a static
-  // parser, so the renderer constructs under a CSP with no 'unsafe-eval' —
-  // published hosts serve exactly that CSP, and without this import
-  // PixiHostWorker dies at Application.init.
-  stdin: {
-    contents: "import 'pixi.js/unsafe-eval'\nexport * from 'pixi.js'\n",
-    resolveDir: shim,
-    sourcefile: 'pixi-vendor-entry.js',
-    loader: 'js',
-  },
-  bundle: true,
-  format: 'esm',
-  platform: 'browser',
-  target: ['es2022'],
-  outfile: pixiFile,
-  splitting: false,
-  treeShaking: false,
-  mainFields: ['module', 'browser', 'main'],
-  define: { 'process.env.NODE_ENV': '"production"' },
-  minify: false,
-  sourcemap: false,
-  logLevel: 'warning',
-})
-
-// pixi 8.16's isWebGLSupported() probes WebGL **1**, but GlContextSystem
-// prefers WebGL **2**. A browser with working WebGL2 and broken WebGL1 is
-// misclassified as "no WebGL" and falls back to the canvas renderer, which has
-// no mesh pipe — the tile scene then crashes every frame. Exact-match and
-// counted: a pixi upgrade that changes the probe fails the build here instead
-// of silently shipping an unpatched (or doubly-patched) bundle.
-const PROBE_V1 = 'let gl = canvas.getContext("webgl", contextOptions);'
-const PROBE_V2 = 'let gl = canvas.getContext("webgl", contextOptions) || canvas.getContext("webgl2", contextOptions);'
-const bundled = readFileSync(pixiFile, 'utf8')
-const occurrences = bundled.split(PROBE_V1).length - 1
-if (occurrences !== 1) {
-  throw new Error(`[shim-vendor] expected exactly 1 isWebGLSupported probe to patch, found ${occurrences} — pixi changed; re-check whether the WebGL2 probe patch is still needed`)
-}
-// pixi ships CDN URLs for the KTX/Basis transcoders and would fetch them from
-// jsdelivr the first time a compressed texture is loaded — a third-party
-// request from inside our own bundle (documentation/no-third-party-requests.md).
-// Nothing loads such a texture today, so this is latent rather than live;
-// rewriting the URLs local means that if one ever IS loaded it fails visibly
-// here instead of quietly reaching out. Counted, so a pixi change fails loudly.
-const CDN = 'https://cdn.jsdelivr.net/npm/pixi.js/transcoders/'
-const LOCAL = '/vendor/transcoders/'
-const patched = bundled.replace(PROBE_V1, PROBE_V2)
-const cdnHits = patched.split(CDN).length - 1
-if (cdnHits !== 4) {
-  throw new Error(`[shim-vendor] expected exactly 4 CDN transcoder URLs to localise, found ${cdnHits} — pixi changed; re-check the transcoder wiring`)
-}
-writeFileSync(pixiFile, patched.replaceAll(CDN, LOCAL))
+// `pixi.js/unsafe-eval` swaps the new-Function uniform-sync for a static
+// parser, so the renderer constructs under a CSP with no 'unsafe-eval' —
+// published hosts serve exactly that CSP, and without this import
+// PixiHostWorker dies at Application.init. The recipe (that entry, the WebGL2
+// probe patch, local transcoder URLs) is shared: scripts/pixi-vendor.mjs.
+writeFileSync(pixiFile, await buildPixiRuntime(shim))
 console.log('[shim-vendor] ✔ pixi → public/vendor/pixi.runtime.js (WebGL2 probe patched, transcoder URLs localised)')
 
 // ── env stub ─────────────────────────────────────────────────────────────────
