@@ -35,6 +35,11 @@ describe('passive queen', () => {
     expect(passiveQueen('a/layout.queen.ts', queen(), others)).toMatchObject({ passive: false, why: 'imported by b/menu.drone.ts' })
   })
 
+  it('a namespace barrel re-exporting her does not keep her awake — its build drops bees', () => {
+    const others = new Map([['a/index.ts', "export * from './layout.queen'"]])
+    expect(passiveQueen('a/layout.queen.ts', queen(), others)).toMatchObject({ passive: true })
+  })
+
   it('stays awake when she registers anything else, or is not a queen module', () => {
     const two = queen() + "window.ioc.register('@diamondcoreprocessor.com/LayoutService', {})"
     expect(passiveQueen('a/layout.queen.ts', two, new Map())).toMatchObject({ passive: false })

@@ -44,7 +44,10 @@ export const passiveQueen = (
   for (const [path, text] of others) {
     if (path === file) continue
     if (text.includes(key)) return { passive: false, why: `key named by ${path}` }
-    if (imported.test(text)) return { passive: false, why: `imported by ${path}` }
+    // A namespace barrel's `export *` of a bee is dropped when the barrel is
+    // built (it re-exports atoms only), so it never loads her.
+    const barrel = /(^|\/)index\.ts$/.test(path)
+    if (!barrel && imported.test(text)) return { passive: false, why: `imported by ${path}` }
   }
   return { passive: true, key }
 }
