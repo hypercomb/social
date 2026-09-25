@@ -113,6 +113,55 @@ cold host 13 passed / 0 failed. In a Linux container with npm 10.9, `npm ci`
 at `src/` refuses the lock (`@noble/hashes@2.4.0` missing) on `development`
 too; `npm install --no-save` was used there instead.
 
+## Snapshot review (2026-09-25)
+
+Nothing newer on `development` is reversed. Of the 103 files `development`
+changed after the snapshot's original base (`876029a5`), only 8 are also in
+the snapshot's net diff, and each still carries `development`'s change; no
+line `development` deleted is added back. Full Vitest on this branch and on
+`18bfea47`: no failure here that does not also fail on the base (12 vs 14).
+
+Fixed on this branch: the shim's `host:pending-selections` and
+`host:revision-candidates` pools were missing from the seed census (a root
+walk could prune them as lineage bags); two game specs stubbed
+`@hypercomb/core` without the canonical-layer functions that moved there;
+`#ensureEmptyMarker` now tolerates a racing first read instead of throwing
+`Location marker 00000000 already exists`; one new sentence of creations
+copy broke the "no single home domain" doctrine pin.
+
+The net diff is three sets. Only the first is the minimal host:
+
+- **Host** (~58 files): shim, core offerings/location marker/canonical
+  layer/panel-groups text-theme registry, runtime activation and pools,
+  relay offering projection, `main.visitor.ts` return-to-hive link, Tauri
+  minimal profile, CI workflow.
+- **Theme colour-role migration** (~29 files, half of it regenerated
+  `test-results/toolwindow-contrast/contrast.json`): `data-hc-theme-mood`
+  replaces the bright-theme name list; `theme.service.ts`,
+  `_panel-identity.scss` and the three pre-paint snippets must move together.
+- **Other legacy UI** (~49 files): docked-panel text-theme picker and
+  settings restyle, quick-menu pool, `onHeld` progress in acquire and the
+  host directory, history marker refactor, essentials view restyles.
+
+Open findings not fixed here (legacy side unless noted):
+
+- Quick-menu pool seeds shipped menus once, then prefers the pool copy, so
+  a later build's menu changes never reach a hive that already booted.
+- Docked-panel text-theme picker shows on windows without a reading surface;
+  its domain placeholder hardcodes `jwize.com`.
+- Pre-paint mood guesses `dark` only for the theme named `dark`; a stored
+  community dark theme paints the light mood until ThemeService runs.
+- Shim `index.html` adds a render-blocking `theme.css` with no version tag.
+- Host: `main.visitor.ts` accepts any `https:` `?home=` origin for its
+  fixed top-layer button, and sends an empty lineage for a site with
+  segments but no lineage.
+- Host: `relay.js` now strips `/content/` even without a shell dir and never
+  serves location bags, so `host:offerings` members that need one, and the
+  text-theme "on" status, stay pending behind a Node relay.
+- Host: `hive-pointer.ts` rejects a whole index whose `offerings` is not an
+  object, after which `publishBranch` refuses with `index-unsafe`.
+- `folder-sync-drain.spec.ts` flakes under full-suite load on both sides.
+
 ## Behaviour changes to confirm before integration
 
 The snapshot changes door semantics relative to `development`, independent
@@ -120,7 +169,10 @@ of the landing: `opensOn` now closes a branch with no `doors` entry (it was
 open everywhere), and `publishedRoot` serves a host only for its site's
 primary publisher and only when the route's location bag agrees with the
 signed head. These are deliberate hardening for signed offerings, but they
-will close existing published sites whose indexes predate doors.
+will close existing published sites whose indexes predate doors, and
+`publishBranch` writes a doors entry only when the branch has host marks, so
+an ordinary publish with none produces a site that 404s everywhere. Non-primary
+publishers also lose `site.json?publisher=` and their ledger heads.
 
 The broad snapshot also carries legacy theme, tool window, sharing, and
 presentation changes alongside the minimal host. Review its net diff against

@@ -310,6 +310,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Both are pools at derived meaning addresses, not root-level files.
   'host:offerings',
   'host:adoptions',
+  // A visitor's choice waiting for this hive's review click, and a newer
+  // signed head waiting for the participant to take it
+  // (hypercomb-shim/src/bootstrap/pending-selections.ts, offerings.ts).
+  'host:pending-selections',
+  'host:revision-candidates',
   // Discoverable text-theme creations. Members name stable hashed locations;
   // the location's current signed layer is read when a settings menu opens.
   'themes:text',

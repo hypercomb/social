@@ -1227,7 +1227,18 @@ export class HistoryService {
 
     // Write the 00000000 marker as a POINTER RECORD pointing at the
     // empty layer's sig.
-    const { bytes: markerBytes } = await writeLayerMarker(bag, sig, '00000000')
+    // Two first reads of a new bag can both pass the existence check above
+    // while the sign/store awaits run. writeLayerMarker refuses to replace a
+    // marker; the empty layer is determined by the name, so a racer that got
+    // here first wrote these same bytes and there is nothing left to do.
+    let markerBytes: Uint8Array
+    try { ({ bytes: markerBytes } = await writeLayerMarker(bag, sig, '00000000')) }
+    catch (error) {
+      let raced = true
+      try { await bag.getFileHandle('00000000', { create: false }) } catch { raced = false }
+      if (!raced) throw error
+      return
+    }
     if (locationSig) {
       EffectBus.emit('history:marker-wrote', {
         lineageSig: locationSig,
