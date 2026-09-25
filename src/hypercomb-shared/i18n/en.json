@@ -3187,6 +3187,7 @@
   "hosts.downgrade.note": "Taken anyway, the newer parts are hidden, not deleted, until {name} is on its latest revision again.",
   "hosts.remove": "Remove {host} from your host directory",
   "slash.hosts": "Open your host directory",
+  "slash.trust": "Say whose code may run your hive — trust a domain, withdraw it, or list them",
   "slash.from": "Gather this page from a group — what you make here is made in the group",
   "slash.feed": "On a group, switch a page it feeds on or off",
   "slash.references": "Open Portals and References together to see and manage this page's links",
