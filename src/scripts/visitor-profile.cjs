@@ -10,6 +10,8 @@ const rate = Number(process.argv[3] || 1)
   const browser = await chromium.launch({ headless: true })
   const VERSION = process.env.HC_VERSION || ''
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(VERSION ? { extraHTTPHeaders: { 'Cloudflare-Workers-Version-Overrides': 'pluginthematrix-core="' + VERSION + '"' } } : {}) })
+  // The production console is quiet; hc:verbose=1 reopens the [boot] trail.
+  if (process.env.VERBOSE) await context.addInitScript(() => { try { localStorage.setItem('hc:verbose', '1') } catch {} })
   const page = await context.newPage()
   const cdp = await context.newCDPSession(page)
   await cdp.send('Emulation.setCPUThrottlingRate', { rate })
@@ -25,7 +27,7 @@ const rate = Number(process.argv[3] || 1)
   const boot = []
   page.on('console', m => {
     const t = m.text()
-    if (/^\[boot\]|script-preloader|\[acquire\]|\[visitor\]|ensure-install|hc:ready|\[hypercomb\]/.test(t)) boot.push(`${String(Date.now() - t0).padStart(6)}ms  ${t.slice(0, 170)}`)
+    if (/^\[boot\]|script-preloader|\[acquire\]|\[visitor\]|ensure-install|hc:ready|\[hypercomb\]|hive-visit|view:|site-view/.test(t)) boot.push(`${String(Date.now() - t0).padStart(6)}ms  ${t.slice(0, 170)}`)
   })
 
   await page.goto(url, { waitUntil: 'domcontentloaded' })
