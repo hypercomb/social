@@ -424,6 +424,44 @@ This also closes the visitor half of the standing update gap: publisher
 republish = every visitor current, because a visitor holds no state that can
 go stale.
 
+## The landing: the site is on screen before the engine exists (2026-09-24)
+
+A published door opened onto a black cover for several seconds while the
+visitor's browser fetched the pack, installed the package and evaluated the
+engine ("they seem broken when you get there" — jwize). The fix is to show
+the site at HTML-parse time and let the engine hydrate behind it.
+
+**At publish** (`sharing/publish-branch.ts` step 2b, `sharing/landing-capture.ts`):
+when the branch being published is the location on screen, the publish takes
+its LANDING —
+
+- **hexagons on screen** → a picture: the Pixi canvas composited with the DOM
+  tile names (`tile-name.drone.ts` draws names as spans over the canvas), WebP,
+  longest edge 1600 px → `<sig>/landing.webp`;
+- **a takeover view on screen** (`body.hc-view-covered`, a website page) → the
+  page itself: the mounted cell page's bytes with their `resource:` refs
+  rewritten to heap URLs exactly as the site view mounts them (`SiteViewDrone`
+  exposes `mountedPageSig`) → `<sig>/landing.html`.
+
+The bytes are an ordinary resource, marked public with the closure and pushed
+by the same drain. The signed hive index names them beside the head:
+`landing[lineageKey] = "<sig>/<name>"` (`hive-pointer.ts`; the name is the
+one-segment presentation suffix the heap already honours, `/<sig>/chrome.css`).
+Entries ride through every later index write and drop with the root they
+describe. A publish that cannot take the landing (another location on screen,
+no page mounted) leaves the entry as it was — never a gate on the publish.
+
+**At the door** (`blossom-worker/worker.js`): `site.json` carries `landing`,
+and the visitor page for a bound host is served with the landing inside its
+loading cover (`index.visitor.html` `.site-loading`, the element
+`main.visitor.ts` fades once the site is up): a picture becomes the cover's
+background (`center/cover`) plus `og:image`; a page is framed inside the cover
+in a sandboxed `<iframe>` — the heap already serves it under a `sandbox`
+policy, so nothing in it runs, and its stylesheets, fonts and pictures load
+from `/@resource/<sig>/<name>` on the same host.
+
+A derived record, never truth: nothing reads it back but the cover.
+
 ## Why this is mostly assembly, not invention
 
 | Needed | Already exists |
