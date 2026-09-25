@@ -233,7 +233,7 @@ describe('the host directory shows the creations a domain serves', () => {
   })
 
   it('mints the offer where the offers live — the directory never builds one', () => {
-    expect(STATIC_PEERS).toMatch(/const offer = offerFromCard\(card\)/)
+    expect(STATIC_PEERS).toMatch(/const offer = offerFromHostOffering\(card, zone\)/)
     expect(VIEW).not.toMatch(/offerFromCard/)
     expect(VIEW).toMatch(/offer: unknown \| null/)
     expect(VIEW).toMatch(/else if \(row\.offer\) EffectBus\.emit\('community:offer', row\.offer\)/)
@@ -251,14 +251,15 @@ describe('the host directory shows the creations a domain serves', () => {
     expect(EN['hosts.creations.unheld']).toBeTruthy()
   })
 
-  it('tells "publishes nothing" from "did not answer" for creations too', () => {
-    expect(STATIC_PEERS).toMatch(/answered: cards !== null/)
+  it('uses neutral copy when the pool yields no verified offering', () => {
+    expect(STATIC_PEERS).toMatch(/answered: cards\.length > 0/)
     expect(VIEW).toMatch(/known\.answered\s*\?\s*t\('hosts\.creations\.none'/)
-    expect(EN['hosts.creations.silent']).toMatch(/down/i)
+    expect(EN['hosts.creations.silent']).toMatch(/offerings available/i)
   })
 
-  it('asks the domain’s OWN ledger, never a canonical directory standing in for it', () => {
-    expect(STATIC_PEERS).toMatch(/fetchPublicationCards\(\{\}, `https:\/\/\$\{zone\}`\)/)
+  it('asks the domain’s signed offering pool through the shared reader', () => {
+    expect(STATIC_PEERS).toMatch(/readHostOfferings\(zone, index => verifyEvent\(index as never\)\)/)
+    expect(STATIC_PEERS).not.toMatch(/fetchPublicationCards/)
   })
 
   it('shows what your hive carries without being asked, from every domain at once', () => {

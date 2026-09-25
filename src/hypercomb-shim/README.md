@@ -14,6 +14,10 @@ and `npm run host:check -- <url>`. The folder is still called `hypercomb-shim`,
 because that is what it is: Phase 5 of
 [everything-is-a-beehavior](../documentation/everything-is-a-beehavior.md),
 stood up first so the lean shell could be grown into rather than arrived at.
+The legacy platform and this host share [the primitive](../documentation/life-primitive.md):
+signature-named bytes, typed meta, a stable hashed location, and a meaning
+pool that discovers that location. Both implementations must follow its
+publication and local on/off rules.
 
 The published package serves a prebuilt origin. Its build scripts are for the
 source checkout; an installed host does not need the monorepo or npm runtime
@@ -21,18 +25,69 @@ dependencies. It serves bytes that were signed elsewhere.
 
 ## Pure install
 
-`npm run build:pure` (or `npm run build:shim:pure` from `src/`) builds the cold harness: core, the signature fetcher,
-the runner and one pinned ESM host-management beehavior. Its UI appears before
-any adopted beehavior loads. It shows the selected package, lets a participant
-add or remove hosts, browse their offers, and replicate a package by signature.
-It carries no application
-package, locale catalogs, or Pixi renderer. An empty `/content` and no
-`host:packages` pool are valid until a participant adopts a package.
+`npm run build:pure` (or `npm run build:shim:pure` from `src/`) builds the cold
+harness: core, the signature fetcher, the runner, and one pinned ESM host UI.
+The root shows square creation tiles from the `host:offerings` meaning pool;
+each member names a stable hashed host location. A reader takes the newest
+marker from the serving host's location bag and checks the head against the
+publisher's signed hive index. A missing or mismatched bag is refused. The
+root leads with creation cards. The domain list stays inside the collapsed
+**Sources** filter, where a visitor can show, remove, or visit a root domain.
+When none are offered, two labelled open slots show where real cards will appear;
+they are presentation only, and the first opens Sources.
+Search matches creation names in the shown sources; typing a known domain also
+reads that source on demand without opening a long directory. Click a domain name
+there to visit its root portal with this hive as the return address. There,
+**Turn on** selects site or text-theme creation tiles without running them;
+**Return to my hive** carries only their signed references back and opens a
+revision review list. A new head is marked on its creation tile; there is no
+pagewide update check. The review can turn on one selected revision or all
+available selections from that source. Each action rechecks the current signed
+head and verifies its referenced closure before a local activation layer is
+appended; a failed selection stays pending. Text themes install their signed
+data layer through the same review step. The collapsed deployment details show
+only routes actually on here and their known revision heads.
+No `publications.json` catalog is read.
 
-The package's `prepack` check refuses a build that includes application content
-or a renderer. A release therefore builds pure first, then packs the host.
+The pure build carries no application package, locale catalog, Pixi renderer,
+or Angular. An empty `/content` and no `host:offerings` pool are valid. A local
+completion click verifies and holds the selected branch's typed child, executable, and
+resource closure before adding an on/off layer at the local route. A selected
+public text theme keeps the publisher's exact meta head in
+the local `themes:text` pool and can be switched off with a later layer.
+The optional [pure native profile](../hypercomb-client/MINIMAL-PROFILE.md)
+uses the same native hive for the shim and route resolver. It accepts a remote
+visitor's single or batch deep link as a pending selection only; a local click
+performs the activation. A live installed native round trip remains to be
+verified.
+Updates remain candidates until clicked.
+
+For a local proof of concept, build into a fresh temporary directory and seed
+one verified public subdomain into that output's meaning pool:
+
+```bash
+HYPERCOMB_HOST_OUT_DIR=/tmp/hypercomb-host-proof npm run build:pure
+node host/seed-offering.mjs /tmp/hypercomb-host-proof https://revolucion.jwize.com/
+node host/serve.mjs /tmp/hypercomb-host-proof 4850
+```
+
+`seed-offering.mjs` reads the target's signed index and root before writing a
+stable location member into the pool. It is a local proof tool for a static
+build. The Cloudflare content worker projects its domain's active locations
+from verified publisher hive indexes at the same pool address. A new root
+keeps the location member's name; withdrawing the offering removes its tile
+on the next read.
+
+The package's `prepack` hook builds pure and refuses application content or a
+renderer. Packing the npm host and building the
+[desktop installer](../hypercomb-client/MINIMAL-PROFILE.md) run the same pure
+builder. The desktop profile embeds that output in its window and bundles it
+again as the host resource, so a hosted visitor sees the same shell.
 The existing `npm run build` remains the content-bearing host build for
 development and deployments that intentionally publish a package.
+`hypercomb-host serve` serves the packaged static directory. A live machine
+hive is served by the native `hypercomb-serve` component used by the desktop
+app; the browser's OPFS is not the Node server's hive.
 
 ## What it is
 
@@ -54,9 +109,8 @@ directives use standard field decorators, and without the Angular AOT compiler
 they throw `"not supported in JIT mode"` at module evaluation. A framework
 import here does not bloat the shim, it stops it booting.
 
-Current: **35 modules, 186 kB entry, boots in ~40 ms, 18 MiB origin — and no
-`hypercomb-shared` in the bundle at all.** The runtime it needs is
-`@hypercomb/runtime`; the locales and the content are on the host.
+The runtime it needs is `@hypercomb/runtime`; application content stays on
+hosts and is reached by signature.
 
 ## The three pieces
 
@@ -121,27 +175,27 @@ SPA-fallback page can only ever cost a 404.
 > `hypercomb-web/public/hypercomb.worker.js`, which stays frozen for the live
 > deploy. Do not resync them — the shim is the survivor.
 
-## One screen for hosts and packages
+## Root portal and diagnostic console
 
-This describes the current diagnostic console. The intended visitor entrance
-is a zone's active hive doors, then one hive's hexagon page and its explicit
-adoption action. The `host:packages` pool remains the code transport inventory;
-its labels and revisions are not hives. See
+The root portal reads `sign('host:offerings')` from this host and domains the
+participant has added. Site tiles represent a publisher and hive path; a
+selected text theme is also a creation tile at its own location. A site's
+routes open its implementation. A local tile can expose its signed root and
+link back to the offering host; new activation goes through the host's tile
+switch and the local domain update icon.
+The transport inventory remains in `host:packages`; labels such as
+`essentials` do not become visitor tiles. See
 [everything-is-a-beehavior.md](../documentation/everything-is-a-beehavior.md).
 
-A cold node shows one card: its selected revision, the hosts it carries and
-each host's latest offered revision, and a field for a known package signature.
-Older publication history is opened on request and grouped by publication
-label. A label such as `essentials` names a publication series; a package
-branch is a path inside the signed root and is picked by a later beehavior.
-The card remains reachable at `/hosts` after imported views take over. The in-hive
-command line, like every other view, arrives as a beehavior; the `host/` scripts
-in this repository are device setup and deployment tools.
+The collapsed details show active local deployment tiles and known revisions;
+raw package publication history is not visitor UI. The card remains reachable at `/hosts` after
+imported views take over. The in-hive command line, like every other view,
+arrives as a beehavior; `host/` scripts are device setup tools.
 
 ```
-add a domain  →  <domain>/manifest.json  →  seal the record
-              →  resolve the inventory (sha256 every atom before write)
-              →  complete-or-absent gate  →  activate  →  boot
+add a domain  →  visit its root  →  turn on tiles there  →  return with references
+              →  domain update icon  →  inspect signed head and closure
+              →  verify selected bytes  →  append local on/off layer
 ```
 
 `src/hosts.ts` is the domains — the same `community:hosts` pool essentials

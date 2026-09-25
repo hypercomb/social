@@ -91,6 +91,9 @@ const button = (className: string, text: string, label = ''): HTMLButtonElement 
 
 const zoneOf = (raw: unknown): string => hostZone(raw)
 
+/** A module is named `<sig>.js` in one record and `<sig>` in another. */
+const bareSig = (sig: string): string => sig.trim().toLowerCase().replace(/.(?:js|json)$/, '')
+
 // ── the pure part ────────────────────────────────────────────────────────────
 
 const parentOf = (path: string): string =>
@@ -414,6 +417,10 @@ export class HostDirectoryElement extends HTMLElement {
   #busy = ''
   #error = ''
   #restarting = false
+  /** UPDATE ALL, MOVING: every file held here since it was pressed, as the
+   *  install port reports it. Null when no Update all is running. */
+  #held: Set<string> | null = null
+  #heldPaint = 0
 
   /** The domain this app runs on: never offered a Visit — a second tab on
    *  your own hive is a second writer on one store. */
@@ -826,8 +833,11 @@ export class HostDirectoryElement extends HTMLElement {
     if (!zone && (trunk || runsSource()) && this.#next && this.#next.root !== trunk) {
       const bar = make('div', 'hd-updates')
       bar.setAttribute('role', 'status')
-      bar.append(make('span', '', t('packages.updates.shared', 'An update is ready')))
-      const take = button('hd-primary', t('hosts.update-all', 'Update all'))
+      const moving = this.#held
+      bar.append(make('span', '', moving
+        ? t('hosts.updating', 'Updating — {count} files in', { count: moving.size })
+        : t('packages.updates.shared', 'An update is ready')))
+      const take = button('hd-primary', moving ? t('hosts.updating-short', 'Updating…') : t('hosts.update-all', 'Update all'))
       take.disabled = !!this.#busy
       take.addEventListener('click', () => { void this.#updateAll() })
       bar.append(take)
@@ -891,8 +901,13 @@ export class HostDirectoryElement extends HTMLElement {
     const acts = !!reach && !!trunk
     const recursive = !!reach?.recursive
     const list = make('ul', 'hd-list')
-    for (const row of rows) {
+    // WHILE UPDATE ALL RUNS, what it is changing rises to the top, each row
+    // filling as its files are held here.
+    const moving = this.#held
+    const ordered = moving ? [...rows.filter(row => row.update), ...rows.filter(row => !row.update)] : rows
+    for (const row of ordered) {
       const li = make('li', 'hd-row')
+      const progress = moving && row.update ? this.#progressOf(row.path, moving) : null
       if (!row.on) li.classList.add('off')
       if (this.#busy === row.path) li.classList.add('busy')
 
@@ -936,6 +951,23 @@ export class HostDirectoryElement extends HTMLElement {
       revisions.disabled = !recursive
       revisions.addEventListener('click', () => { void this.#openRevisions(row.path) })
 
+      if (progress) {
+        const done = progress.total > 0 && progress.done >= progress.total
+        li.classList.add(done ? 'updated' : 'updating')
+        marks.prepend(make('span', `hd-mark${done ? '' : ' quiet'}`, done
+          ? t('hosts.update-in', 'in')
+          : `${progress.done}/${progress.total}`))
+        const bar = make('span', 'hd-progress')
+        bar.setAttribute('role', 'progressbar')
+        bar.setAttribute('aria-valuemin', '0')
+        bar.setAttribute('aria-valuemax', String(progress.total))
+        bar.setAttribute('aria-valuenow', String(progress.done))
+        bar.setAttribute('aria-label', t('hosts.update-progress', 'Updating {name}', { name: row.path }))
+        const fill = make('span', 'hd-progress-fill')
+        fill.style.width = `${progress.total ? Math.round(100 * progress.done / progress.total) : 0}%`
+        bar.append(fill)
+        li.append(bar)
+      }
       li.append(bulb, name, marks, count, revisions)
       if (row.children) {
         const walk = button('hd-icon', '›', t('hosts.walk-in', 'Open {name}', { name: row.path }))
@@ -1044,14 +1076,14 @@ export class HostDirectoryElement extends HTMLElement {
     const back = button('hd-back', '‹', t('hosts.revisions.back', 'Back to the list'))
     back.addEventListener('click', () => { this.#view = 'domains'; this.#render() })
     head.append(back, make('span', 'hd-drill-title', t('hosts.creations.title', 'Creations on {host}', { host: zone })))
-    body.append(head, make('p', 'hd-note', t('hosts.creations.note', 'What people made on this domain. Showing one puts it in your hive, shaded, until you walk into it.')))
+    body.append(head, make('p', 'hd-note', t('hosts.creations.note', 'What people made on this domain. Showing one adds a shaded tile to your hive. Serving it from a domain of your own requires choosing a local route.')))
 
     const known = this.#creations.get(zone)
     if (!known) { body.append(make('p', 'hd-note', t('hosts.probing', 'asking…'))); return }
     if (!known.rows.length) {
       body.append(make('p', 'hd-note', known.answered
-        ? t('hosts.creations.none', 'publishes no creations here')
-        : t('hosts.creations.silent', 'no ledger at this domain, or it is down')))
+        ? t('hosts.creations.none', 'No offerings available from this domain')
+        : t('hosts.creations.silent', 'No offerings available from this domain')))
       return
     }
     const list = make('ul', 'hd-list')
@@ -1161,16 +1193,44 @@ export class HostDirectoryElement extends HTMLElement {
     if (!reach || !next || this.#busy) return
     this.#busy = '*'
     this.#error = ''
+    const held = new Set<string>()
+    this.#held = held
     this.#renderBody()
     try {
-      const outcome = await reach.install.acquire(next.root, [...new Set([...this.#sources(), ...this.#channelSources()])])
+      const outcome = await reach.install.acquire(next.root, [...new Set([...this.#sources(), ...this.#channelSources()])], {
+        onHeld: sig => { held.add(bareSig(sig)); this.#paintHeld() },
+      })
       if (!outcome.ok) { this.#error = outcome.error ?? 'package incomplete'; return }
       this.#restart()
     } catch (error) {
       this.#error = error instanceof Error ? error.message : 'update could not be applied'
     } finally {
-      if (!this.#restarting) { this.#busy = ''; this.#renderBody() }
+      if (!this.#restarting) { this.#busy = ''; this.#held = null; this.#renderBody() }
     }
+  }
+
+  /** How far one path is: the layers of its subtree in the new root, and the
+   *  bees they declare, against what is held here so far. */
+  #progressOf(path: string, held: ReadonlySet<string>): { done: number; total: number } {
+    const wanted = new Set<string>()
+    for (const node of this.#next?.nodes ?? []) {
+      if (!within(node.path, path)) continue
+      if (node.layerSig) wanted.add(bareSig(node.layerSig))
+      for (const bee of node.bees) wanted.add(bareSig(bee))
+    }
+    let done = 0
+    for (const sig of wanted) if (held.has(sig)) done++
+    return { done, total: wanted.size }
+  }
+
+  /** Files arrive by the hundred — paint at most every tenth of a second. A
+   *  timer, not a frame: a hidden tab never runs a frame. */
+  #paintHeld(): void {
+    if (this.#heldPaint) return
+    this.#heldPaint = window.setTimeout(() => {
+      this.#heldPaint = 0
+      if (this.#held) this.#renderBody()
+    }, 100)
   }
 
   async #openRevisions(path: string): Promise<void> {
@@ -1364,9 +1424,9 @@ export function installHostDirectoryStyles(): void {
   style.textContent = `
 ${S}{position:fixed;inset:0;z-index:100002;pointer-events:none;display:block;}
 ${S} .hd-panel{
-  --acc:126,182,214;
+  --acc:var(--hc-chrome-accent);
   --hc-window-accent:rgb(var(--acc));
-  --hc-window-on-accent:rgb(var(--hc-panel-pane,253,254,255));
+  --hc-window-on-accent:var(--md-on-primary);
   --hd-ink:var(--hc-window-ink-loud,currentColor);
   --hd-ink-quiet:var(--hc-window-ink-quiet,currentColor);
   --hd-rule:var(--hc-window-line,rgba(128,128,128,0.18));
@@ -1397,7 +1457,7 @@ ${S} .hd-domain-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-sp
 ${S} .hd-chevron{color:var(--hd-ink-quiet);}
 ${S} .hd-add{display:flex;align-items:center;gap:.25em;margin:.7em 0 0;}
 ${S} .hd-add-input{flex:1 1 auto;min-width:0;padding:.2em .4em;font:inherit;font-size:.7em;color:var(--hd-ink);background:rgba(var(--acc),0.06);border:1px solid rgba(var(--acc),0.22);border-radius:var(--hc-radius-control,2px);}
-${S} .hd-add-input[aria-invalid="true"]{border-color:rgba(217,160,135,0.72);}
+${S} .hd-add-input[aria-invalid="true"]{border-color:var(--hc-status-alert);}
 ${S} .hd-quiet{padding:.2em .45em;font:inherit;font-size:.7em;color:var(--hd-ink-quiet);background:none;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);cursor:pointer;}
 ${S} .hd-quiet:hover{color:var(--hd-ink);background:rgba(var(--acc),0.07);}
 ${S} .hd-quiet:disabled{cursor:default;opacity:.55;}
@@ -1416,20 +1476,25 @@ ${S} .hd-drill-title{color:var(--hd-ink);}
 ${S} .hd-updates{display:flex;align-items:center;justify-content:space-between;gap:.5em;margin:.2em 0 .5em;padding:.45em .6em;font-size:.76em;background:rgba(var(--acc),0.1);border:1px solid rgba(var(--acc),0.42);border-radius:var(--hc-radius-card,3px);}
 ${S} .hd-primary{padding:.38em .8em;font:inherit;font-size:.95em;font-weight:600;color:var(--hc-window-on-accent);background:var(--hc-window-accent);border:1px solid var(--hc-window-accent);border-radius:var(--hc-radius-control,2px);cursor:pointer;}
 ${S} .hd-primary:disabled{cursor:default;opacity:.55;}
-${S} .hd-error{margin:.1em 0 .4em;font-size:.72em;line-height:1.35;color:rgb(217,160,135);}
+${S} .hd-error{margin:.1em 0 .4em;font-size:.72em;line-height:1.35;color:var(--hc-status-alert);}
 ${S} .hd-note{margin:.5em 0 0;font-size:.72em;line-height:1.45;color:var(--hd-ink-quiet);}
 ${S} .hd-list{list-style:none;margin:0;padding:0;}
 ${S} .hd-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto auto;column-gap:.4em;align-items:center;padding:.3em .2em;border-bottom:1px solid rgba(var(--acc),0.08);}
 ${S} .hd-row:hover{background:rgba(var(--acc),0.04);}
 ${S} .hd-row.busy{cursor:progress;}
-${S} .hd-bulb{background:none;border:none;padding:.1em;font-size:1em;line-height:1;color:rgb(255,205,100);cursor:pointer;}
+${S} .hd-row{position:relative;}
+${S} .hd-row.updating,${S} .hd-row.updated{background:rgba(var(--acc),0.05);}
+${S} .hd-progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(var(--acc),0.12);pointer-events:none;}
+${S} .hd-progress-fill{display:block;height:100%;background:var(--hc-window-accent);transition:width .2s ease-out;}
+${S} .hd-row.updated .hd-progress-fill{background:var(--hc-status-ok);}
+${S} .hd-bulb{background:none;border:none;padding:.1em;font-size:1em;line-height:1;color:var(--hc-status-warn);cursor:pointer;}
 ${S} .hd-row.off .hd-bulb{color:var(--hd-ink-quiet);}
 ${S} .hd-bulb:disabled{cursor:default;opacity:.55;}
 ${S} .hd-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8em;color:var(--hd-ink);background:none;border:none;padding:0;font-family:inherit;text-align:left;cursor:pointer;}
 ${S} .hd-name:hover{text-decoration:underline;}
 ${S} .hd-row.off .hd-name{color:var(--hd-ink-quiet);}
 ${S} .hd-marks{display:inline-flex;gap:.25em;}
-${S} .hd-mark{padding:.05em .4em;font:inherit;font-size:.62em;letter-spacing:.06em;text-transform:uppercase;color:rgb(255,205,100);background:none;border:1px solid rgba(var(--acc),0.35);border-radius:var(--hc-radius-control,2px);}
+${S} .hd-mark{padding:.05em .4em;font:inherit;font-size:.62em;letter-spacing:.06em;text-transform:uppercase;color:var(--hc-status-warn);background:none;border:1px solid rgba(var(--acc),0.35);border-radius:var(--hc-radius-control,2px);}
 ${S} button.hd-mark{cursor:pointer;}
 ${S} button.hd-mark:disabled{cursor:default;opacity:.55;}
 ${S} .hd-mark.quiet{color:var(--hd-ink-quiet);}
@@ -1451,7 +1516,7 @@ ${S} .hd-rev-choose:disabled{cursor:default;}
 ${S} .hd-rev-sig{font-variant-numeric:tabular-nums;}
 ${S} .hd-rev-at,${S} .hd-rev-hosts{color:var(--hd-ink-quiet);}
 ${S} .hd-rev-hosts{margin-right:auto;}
-${S} .hd-warning{margin:.2em 0 .6em;padding:.5em .6em;font-size:.76em;border:1px solid rgba(217,160,135,0.55);border-radius:var(--hc-radius-card,3px);}
+${S} .hd-warning{margin:.2em 0 .6em;padding:.5em .6em;font-size:.76em;border:1px solid color-mix(in srgb,var(--hc-status-alert) 55%,transparent);border-radius:var(--hc-radius-card,3px);}
 ${S} .hd-warning-title{margin:0 0 .3em;color:var(--hd-ink);}
 ${S} .hd-warning-list{margin:0 0 .5em;padding-left:1.1em;color:var(--hd-ink-quiet);}
 ${S} .hd-warning-list .quiet{list-style:none;}

@@ -9,7 +9,11 @@ import { BUBBLE_DOS_BRANCH, BubbleTileSurface } from './tile-surface.js'
 // the real public importTree API and the real LayerMachine implementation, the
 // same harness Solomon's integration spec uses.
 
-vi.mock('@hypercomb/core', () => ({ EffectBus: { on: vi.fn(), emit: vi.fn() } }))
+// canonical-layer.js re-exports core's byte form, so that half stays real.
+vi.mock('@hypercomb/core', async importOriginal => {
+  const { canonicalizeLayer, canonicalLayerJson } = await importOriginal<typeof import('@hypercomb/core')>()
+  return { canonicalizeLayer, canonicalLayerJson, EffectBus: { on: vi.fn(), emit: vi.fn() } }
+})
 vi.mock('../../history/history.service.js', () => ({ ROOT_NAME: '/' }))
 afterEach(() => { vi.unstubAllGlobals() })
 

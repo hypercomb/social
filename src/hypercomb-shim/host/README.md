@@ -1,7 +1,8 @@
 # Hosting a Hypercomb node
 
-A host is a directory of static files. There is no server-side execution
-anywhere in the path — `dist/` **is** the host, and serving it is the whole job.
+A host begins with a directory of static files. `dist/` is the shell payload;
+the signed content heap may be served from the same directory or from a live
+host beside it.
 
 ```bash
 npm run build                                   # from hypercomb-shim/
@@ -30,10 +31,10 @@ state, and no request whose answer depends on who is asking.
 So: no containers, no instances to turn on and off, no origin to patch or page
 someone about. A CDN edge is strictly better at this than a server, and free.
 
-**The shim needs no Worker either.** The blossom-worker exists for the
-publish/visitor path — the R2 heap, site bindings, `Sec-Fetch-Dest` MIME
-negotiation. None of that applies here, because the shim never bare-URL-imports
-an extension-less file:
+The shim needs no application server. On Cloudflare Pages, a narrow Pages
+Function makes missing machine addresses return 404 instead of the SPA's HTML
+fallback. The blossom-worker still owns the R2 publication heap and site
+bindings. The shim does not bare-URL-import an extension-less file:
 
 | what | how it resolves | needs server logic? |
 |---|---|---|
@@ -82,9 +83,9 @@ caught it:
 [ FAIL ] atom bytes hash to their name — 0306efe8336a… served 9b9d8ed55464…
 ```
 
-Cloudflare Pages gets this right natively (assets are matched before
-`_redirects`). If you are configuring anything else, this is the rule to check
-first.
+Cloudflare Pages serves real assets before the SPA fallback. The Pages Function
+checks missing signature and pool paths so they return 404. If you configure
+another host, check both cases.
 
 ### Rule 5 is the one that looks like something else
 
@@ -98,8 +99,9 @@ there is no request whose origin changes the answer.
 
 ## Cloudflare Pages
 
-`public/_headers` and `public/_redirects` ship in the build and Pages reads both
-natively, so the contract is satisfied by uploading `dist/`.
+`public/_headers`, `public/_redirects`, and `public/_routes.json` ship in the
+build. `functions/[[path]].js` supplies the missing machine-address 404 rule
+on Pages. Direct Upload sends the shell and this Function together.
 
 ```bash
 npm run host:deploy -- --project my-hive --domain hive.example.com
@@ -125,24 +127,23 @@ with nothing held, and that card is the host's front door. With nothing
 staged, every host presents itself the same way:
 
 - the mark, the **hostname** as the title, and one sentence about what a host is;
-- **Published here** — what this origin publishes, each package with its
-  *Replicate* button, before anyone types anything;
-- **Add a domain** — the other hosts this browser carries and what they publish;
+- **Creations** — one tile per verified offering from the public
+  `host:offerings` meaning pool, with a link to its running implementation;
+- **Add a domain** — include another host's public offering pool in the gallery;
+- **Host and revision details** — the older package console, collapsed;
 - a footer where the platform explains itself: the tour, hypercomb.io,
   documentation, source, licensing.
 
 On a domain that is also a *website*, the card is the website, so it can carry
 the site's own name, a sentence about it, the links that belong on its front
-page, and the hives live on its zone. Stage a `welcome.json` next to the shell
+page. Stage a `welcome.json` next to the shell
 and the card reads it:
 
 ```json
 {
   "title": "hypercomb",
   "tagline": "An open software platform.",
-  "links": [{ "label": "Watch the tour", "href": "/tour/", "note": "≈ 19 minutes" }],
-  "doorsLabel": "live on hypercomb.com · 6 hives",
-  "doors": [{ "title": "Revolución", "host": "revolucion.hypercomb.com" }]
+  "links": [{ "label": "Watch the tour", "href": "/tour/", "note": "≈ 19 minutes" }]
 }
 ```
 
@@ -176,9 +177,24 @@ Hive ▸ Serve This Hive                              (the desktop app)
 hypercomb-serve --hive <dir> --shell <dist>          (a server, no window)
 ```
 
-The shell it serves is a staged copy of this `dist/`, so the two are not
-alternatives so much as the same host pointed at a different heap. See
+The minimal desktop profile embeds this pure `dist/` as its renderer and maps
+the same directory into the installer as `host-shell`. The standalone server
+uses this shell with a native hive. See
 [hosting-from-a-machine.md](../../documentation/hosting-from-a-machine.md).
+
+The install paths share the shell and the host contract; they differ only in
+where the hive lives:
+
+| Install | Hive read by the public host |
+|---|---|
+| `@hypercomb/host` through npm | The packaged static directory. A browser's OPFS is local to that browser and is not published by the Node server. |
+| Minimal desktop installer | The native hive owned by the app, served through `hypercomb-serve`. |
+| Headless `hypercomb-serve` | Its own native hive directory, with the same pure shell. |
+
+For a server that must publish new local revisions without redeploying a static
+directory, use the native host or a content worker behind the shell. The npm
+command currently serves the cold static host; it does not turn visitors'
+browser storage into a shared server hive.
 
 ## Anything else
 

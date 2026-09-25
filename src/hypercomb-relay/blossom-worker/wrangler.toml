@@ -14,9 +14,9 @@ compatibility_date = "2026-06-01"
 # detaches it just as cleanly.
 routes = [
   { pattern = "content.jwize.com", custom_domain = true },
-  # pluginthematrix.io is the legacy-client alias: every deployed client
-  # already probes it as a byte fallback, so serving the same sig heap
-  # here gives old installs public-content reads with zero updates.
+  # pluginthematrix.io remains the legacy byte fallback. The same worker now
+  # serves a pure host door for human routes without changing signed reads or
+  # writes on this hostname.
   { pattern = "pluginthematrix.io", custom_domain = true }
 ]
 
@@ -40,9 +40,11 @@ id = "11e24dcda743413ab24397e936671641"
 #   wrangler kv namespace create HIVES
 [[kv_namespaces]]
 binding = "HIVES"
-id = "REPLACE_WITH_HIVES_NAMESPACE_ID"
+id = "186c91f7458b421abea02d7647f27821"
 
 [vars]
+HOST_DOOR_ORIGIN = "https://hypercomb-host.pages.dev"
+HOST_DOOR_HOSTS = "pluginthematrix.io"
 AUTO_GRANT = "1"                    # '1' mints a grant on first valid upload; '0' closes the door
 DEFAULT_QUOTA_BYTES = "104857600"   # 100 MB per auto-granted pubkey
 GRANT_TTL_DAYS = "90"               # grants lapse; under AUTO_GRANT they re-mint fresh

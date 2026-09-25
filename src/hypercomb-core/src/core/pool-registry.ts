@@ -306,6 +306,21 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // seeded: `ensure-install` reaches it on the BOOT path, and any root walk
   // that ran first would have met the directory with the registry still cold.
   'host:packages',
+  // The public creation gallery and this participant's accepted references.
+  // Both are pools at derived meaning addresses, not root-level files.
+  'host:offerings',
+  'host:adoptions',
+  // A visitor's choice waiting for this hive's review click, and a newer
+  // signed head waiting for the participant to take it
+  // (hypercomb-shim/src/bootstrap/pending-selections.ts, offerings.ts).
+  'host:pending-selections',
+  'host:revision-candidates',
+  // Discoverable text-theme creations. Members name stable hashed locations;
+  // the location's current signed layer is read when a settings menu opens.
+  'themes:text',
+  // Reserved: quick-menu creations (a legacy-app feature kept off the host
+  // branch). A hive that already wrote the pool must not have it pruned.
+  'menus:quick',
   // The changes repository — one append-only record per act that touched a
   // group of tiles (see assistant/changes.ts). Colon-scoped so it can never
   // collide with a tile slugged 'changes'.

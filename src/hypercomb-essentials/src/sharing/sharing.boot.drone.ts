@@ -6,9 +6,10 @@
 // loaded right after the dependencies, registers them. Both are dependencies;
 // this bee is the one that registers them.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, textThemeChanges } from '@hypercomb/core'
 import { NostrSigner } from './nostr-signer.js'
 import { hostSyncService } from './host-sync.service.js'
+import { setTextThemeOffering, textThemeOfferingStatus, textThemeOfferHost } from './text-theme-offering.js'
 // The retired push pool's collector schedules itself when loaded, as it did
 // in the namespace bundle at boot; the boot lane keeps that timing.
 import './retired-push-pool.js'
@@ -28,5 +29,14 @@ window.ioc.register('@diamondcoreprocessor.com/HostSyncService', hostSyncService
 // resolves this as '@HostSyncService'. The store's read-triggered staging (the
 // author's push half) goes through that key; without it, it is inert.
 window.ioc.register('@HostSyncService', hostSyncService)
+
+if (!(window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__) {
+  window.ioc.register('@diamondcoreprocessor.com/TextThemeOffering', {
+    defaultHost: () => textThemeOfferHost(hostSyncService),
+    status: textThemeOfferingStatus,
+    set: setTextThemeOffering,
+  })
+  textThemeChanges.dispatchEvent(new Event('change'))
+}
 
 window.ioc.register('@diamondcoreprocessor.com/SharingBootDrone', new SharingBootDrone())

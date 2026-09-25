@@ -71,11 +71,10 @@ export function installRootOf(roots: Record<string, string>, channel: string): s
 //
 // A reserved roots key, for two reasons that are both hard constraints:
 //
-//   * The index cannot carry an extra TOP-LEVEL field. `putHiveManifest`
-//     re-serializes `{ v, roots }` and its signature accepts only `roots`, so
-//     anything else is erased by the very next publish from ANY client —
-//     including an older one, which is precisely the silent divergence this
-//     marker exists to prevent.
+//   * Older index writers re-serialize `{ v, roots }` and erase additional
+//     top-level fields. Current writers preserve fields they do not interpret,
+//     but an older deployed client can still erase one on its next publish.
+//     A required format declaration therefore cannot rely on an extra field.
 //   * A roots VALUE must be 64-hex or `fetchHiveIndex` rejects the WHOLE
 //     index as malformed (and the host repeats the rule). So the version can
 //     never be inlined; the key points at a content-addressed declaration.
@@ -97,8 +96,8 @@ export function formatRootOf(roots: Record<string, string>): string | null {
 // ── The signed VOCABULARY CLAIM (documentation/vocabulary-claim.md) ────────
 //
 // Same two hard constraints as `format:hive`, and for the same reasons: the
-// index cannot carry an extra TOP-LEVEL field (the next publish from ANY
-// client re-serializes `{v, roots}` and erases it), and a roots VALUE must be
+// older index writers erase extra TOP-LEVEL fields on their next publish,
+// even though current writers preserve them, and a roots VALUE must be
 // 64-hex or `fetchHiveIndex` rejects the WHOLE index as malformed — one bad
 // value unpublishes every branch for every reader. So the vocabulary is a
 // reserved KEY pointing at a content-addressed claim atom, never an inline

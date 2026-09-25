@@ -41,7 +41,7 @@ export const HOST_PACKAGES_POOL = sha256(Buffer.from('host:packages', 'utf8'))
 // A host's packages are public because it is a host; the community pools are
 // the directory hosts publish to each other. `hypercomb:windows` is the
 // desktop installer, offered to anyone (documentation/windows-installer-pool.md).
-export const PUBLIC_POOL_MEANINGS = Object.freeze(['host:packages', 'community:hosts', 'community:offers', 'hypercomb:windows'])
+export const PUBLIC_POOL_MEANINGS = Object.freeze(['host:packages', 'host:offerings', 'community:hosts', 'community:offers', 'hypercomb:windows'])
 export const PUBLIC_POOL_ADDRESSES = new Set(PUBLIC_POOL_MEANINGS.map(m => sha256(Buffer.from(m, 'utf8'))))
 const PACKAGE_ENTRY_RE = /^[0-9]{8}$/
 const packageEntryName = index => String(index).padStart(8, '0')

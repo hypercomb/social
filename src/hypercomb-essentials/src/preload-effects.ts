@@ -15,6 +15,7 @@ export function preloadEffects(): Promise<void> {
   import('./games/roper/roper.queen'),
   import('./games/solomon/solomon.drone'),
   import('./games/solomon/solomon.queen'),
+  import('./games/story.queen'),
   import('./games/tutor/game-registry')
   ]).then(() => undefined)
 }

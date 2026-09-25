@@ -34,6 +34,7 @@
   // preference — which meant every theme past the first two answered wrong on
   // half the machines. A theme says what it is; nothing keeps a list.
   --md-is-light: 1;
+  --md-color-scheme: light;
 
   // ── surface system (LIGHT default — per /instructions/styles doctrine) ─
   // Fresh sites and the dev shell default to light. Dark is the explicit
@@ -332,6 +333,7 @@
 
 @mixin md-dark-tokens {
   --md-is-light: 0;
+  --md-color-scheme: dark;
   // DARK IS ONE HUE ALL THE WAY DOWN. It had light's disagreement mirrored:
   // a cold blue-black ground under warm cream ink (#e8e2d6) with a tan second
   // (#b6a99a) and a mud third (#7a7060). A warm mark on a cold ground has
@@ -640,8 +642,8 @@
 // Theming is driven at runtime by ThemeService (@hypercomb.social/Theme) +
 // the /theme queen. It reflects the participant's choice onto `<html
 // data-theme>`; the selectors above do the rest. 'system' (no attribute) falls
-// back to the prefers-color-scheme query. The shell boots dark by default — a
-// pre-paint snippet in each shell's index.html sets `data-theme="dark"` when no
+// back to the prefers-color-scheme query. The shell boots honey by default — a
+// pre-paint snippet in each shell's index.html sets `data-theme="honey"` when no
 // preference is stored, so there is no flash before ThemeService takes over.
 // Light is `:root`; `data-theme="light"` forces it even on a dark-OS machine.
 
