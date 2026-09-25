@@ -647,6 +647,8 @@
   "slash.join": "Rejoindre l’essaim ici — tes tuiles publiques sont proposées et les autres participants apparaissent",
   "slash.leave": "Quitter l’essaim — tes tuiles ne sont plus proposées et les autres disparaissent",
   "swarm.join.already": "tu es déjà dans l’essaim ici",
+  "swarm.join.published": "{cell} publié depuis votre hôte — proposé ici",
+  "swarm.join.publish-failed": "{cell} n'est pas proposé : {reason}",
   "swarm.leave.already": "tu n’es dans aucun essaim",
   "slash.format": "Copier le format visuel de la tuile active",
   "slash.layout": "Enregistrer, appliquer, lister ou supprimer des modèles de disposition",

@@ -647,6 +647,8 @@
   "slash.join": "Gabung ke kawanan di sini — ubin publikmu ditawarkan dan peserta lain muncul",
   "slash.leave": "Keluar dari kawanan — berhenti menawarkan ubinmu dan melihat peserta lain",
   "swarm.join.already": "kamu sudah ada di kawanan ini",
+  "swarm.join.published": "{cell} diterbitkan dari host Anda — ditawarkan di sini",
+  "swarm.join.publish-failed": "{cell} tidak ditawarkan: {reason}",
   "swarm.leave.already": "kamu tidak sedang di kawanan",
   "slash.format": "Salin format visual dari ubin aktif",
   "slash.layout": "Simpan, terapkan, daftarkan, atau hapus template tata letak",

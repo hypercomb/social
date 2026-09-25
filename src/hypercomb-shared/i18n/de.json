@@ -647,6 +647,8 @@
   "slash.join": "Dem Schwarm hier beitreten — deine öffentlichen Kacheln werden angeboten, andere Teilnehmer erscheinen",
   "slash.leave": "Den Schwarm verlassen — deine Kacheln werden nicht mehr angeboten, andere verschwinden",
   "swarm.join.already": "du bist hier schon im Schwarm",
+  "swarm.join.published": "{cell} von deinem Host veröffentlicht — wird hier angeboten",
+  "swarm.join.publish-failed": "{cell} wird nicht angeboten: {reason}",
   "swarm.leave.already": "du bist in keinem Schwarm",
   "slash.format": "Visuelles Format der aktiven Kachel kopieren",
   "slash.layout": "Layout-Vorlagen speichern, anwenden, auflisten oder entfernen",

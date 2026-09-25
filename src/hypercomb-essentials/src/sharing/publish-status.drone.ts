@@ -33,7 +33,7 @@
 // back as intents (publish:run, publish:unpublish, publish:inspect, …).
 
 import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, type I18nProvider } from '@hypercomb/core'
-import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
 import {
@@ -523,7 +523,7 @@ export class PublishStatusDrone extends Drone {
         for (const key of Object.keys(ix.roots)) {
           // A colon never appears in a lineage key: `plan:…`, `pool:…`,
           // `install:…` are pointers the index carries, not branches.
-          if (key.includes(':')) continue
+          if (isReservedRootKey(key)) continue
           if (!candidates.has(key)) candidates.set(key, [])
         }
       }

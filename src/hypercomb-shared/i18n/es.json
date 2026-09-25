@@ -647,6 +647,8 @@
   "slash.join": "Únete al enjambre aquí — tus mosaicos públicos se ofrecen y aparecen otros participantes",
   "slash.leave": "Sal del enjambre — deja de ofrecer tus mosaicos y de ver a otros participantes",
   "swarm.join.already": "ya estás en el enjambre aquí",
+  "swarm.join.published": "{cell} publicado desde tu host — ofrecido aquí",
+  "swarm.join.publish-failed": "{cell} no se ofrece: {reason}",
   "swarm.leave.already": "no estás en un enjambre",
   "slash.format": "Copiar formato visual del mosaico activo",
   "slash.layout": "Guardar, aplicar, listar o eliminar plantillas de diseño",

@@ -647,6 +647,8 @@
   "slash.join": "Unisciti allo sciame qui — le tue tessere pubbliche vengono offerte e compaiono gli altri partecipanti",
   "slash.leave": "Lascia lo sciame — smetti di offrire le tue tessere e di vedere gli altri",
   "swarm.join.already": "sei già nello sciame qui",
+  "swarm.join.published": "{cell} pubblicato dal tuo host — offerto qui",
+  "swarm.join.publish-failed": "{cell} non è offerto: {reason}",
   "swarm.leave.already": "non sei in uno sciame",
   "slash.format": "Copia la formattazione visiva dalla tessera attiva",
   "slash.layout": "Salva, applica, elenca o rimuovi modelli di layout",

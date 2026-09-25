@@ -3,8 +3,9 @@
 **Status:** doctrine direction from the owner; conventions defined by the
 agent at the owner's invitation, then reviewed against the code and the
 molecule doctrine by a 90-agent panel (37 findings folded in). Section 6
-holds the items only the owner decides. Nothing here is built yet except the
-two rulings it rests on.
+holds the items only the owner decides. Built: the first ruling (63cb9b515)
+and §4 steps 1–3 (`stage-succession.ts`, `publish-branch.ts`,
+`swarm.drone.ts`); steps 4–6 remain.
 
 **The rulings (jwize, 2026-09-25):**
 - "You shouldn't be allowed to share if you're not a host. People can still
@@ -46,14 +47,16 @@ at the gesture, never asserted by a claim.
 
 | stage (word) | role in code | what entering requires | the gesture and its word |
 |---|---|---|---|
-| `shared` | OFFERED — announced to the participants of a zone, who can adopt it | the closure hosted; a zone to stand in | `join` / `leave` — the lock button |
+| `shared` | OFFERED — announced to the participants of a zone, who can adopt it | the closure hosted; an index door answered — `join` IS the branch publish, so a joined branch is also `published` (and `live` where it wears host marks); a zone to stand in | `join` / `leave` — the lock button |
 | `published` | INDEXED — a link a stranger can open: the publisher's signed index names this head, and the link bundle is receipted | the closure hosted; an index door answered; the wipe guard satisfied | `publish` / unpublish — the Publish panel row |
 | `live` | OPENED — a domain's signed door opens on this head: the visitor site | `published`; a host mark on the branch; the door signed | the Publish panel's per-domain switch (`setBranchDoors`) |
 
-The stages form a DAG, not a line: `published` needs `hosted`, not `shared`.
-A creation is usually at several stages at once and each list keeps it. "There
-are updates" is the divergence between the head a stage list names for a
-location and the location's local head; the next gesture sends them.
+The stages form a DAG, not a line: `published` needs `hosted`, not `shared`
+(the publish panel publishes without joining), while `join` enters `shared`
+AND `published` in one act. A creation is usually at several stages at once
+and each list keeps it. A location is at a stage when the head its index
+names is a member of that list; "there are updates" is that index head
+differing from the location's local head, and the next gesture sends them.
 
 Modules keep their own two acts (`trial` → `promoted`,
 [module-sandbox.md](module-sandbox.md)); they are candidates for the same
@@ -75,7 +78,10 @@ bucket `sign(stage)/<pubkey>/` holds ONE head claim
 key, head, prev, seq; the claim declares no location) naming the author's
 succession atom `{succession:1, signer, prev, members:[envelopeSig…]}` — the
 shape `facet-succession.ts` already writes. Each member is a life-primitive
-envelope over one creation, `{meta:1, layer:<head>, root:<creation word>}`.
+envelope over one creation, `{meta:1, layer:<head>, relation:<stage>, root:<stage>,
+slot:<order>}` — `root` is the grammar the envelope is an incidence of
+(life-primitive rule 5), and that is the stage word; the creation's own word is
+carried by the head it points at.
 The stage pool is declared kind `succession` (`declarePoolKind`) where its
 address is derived. A repeated advance to a head the newest list already
 names mints nothing (`changed:false`). `seq` never goes backward: the mint
@@ -86,11 +92,18 @@ lists a directory. The publisher's signed record — the hive index
 `/hive/<pubkey>` (kind 30564) today; the attested head map when
 `publish-branch.ts` moves onto it per the lineage doc's migration table —
 carries, in the SAME signed PUT, a pointer per stage: the root key
-`stage:<word>` whose value is the author's stage succession sig, beside the
-per-branch `roots` and `doors` legacy readers keep using. The local replica
-writes the same atom under `sign(stage)/<pubkey>/`. Same act, same
-signature, same atom: the pointers cannot disagree, and there is no
-reconciler. `published-pools.ts` (one shared file per origin, colon meanings
+`stage:<word>` whose value is the sig of the author's SIGNED HEAD CLAIM for
+that stage — the same bytes as the bucket file, kept as a root resource so
+one GET reaches it on any host — beside the per-branch `roots` and `doors`
+legacy readers keep using. A reader GETs the claim, verifies it against
+`sign(word)` and the key it asked for (`acceptHeadClaim`), follows it to the
+succession and checks the succession's `signer` (`headClaimAuthors`). The
+local replica holds the same claim under `sign(stage)/<pubkey>/`. One act
+writes both pointers; the claim is minted BEFORE the index PUT so the PUT
+can name it, and a refused claim leaves the previous pointer in place (the
+index and the bucket then agree on the older list). The window that
+remains: a PUT that fails after the claim was minted leaves the local bucket
+one list ahead until the next write carries it. `published-pools.ts` (one shared file per origin, colon meanings
 only) is NOT the carrier: a shared per-origin file is last-writer-wins across
 tenants and holds no bucket key to verify against.
 
@@ -133,7 +146,9 @@ row's stages (R6).
 
 **R8 — The meeting point is the creation's location among the members of
 `shared`.** A swarm for a creation meets where that creation's location
-appears in `shared` lists unioned across the hosts the reader asks;
+appears in `shared` lists unioned across the hosts the reader asks, for the
+keys it follows or meets there (each list is read through that key's signed
+index — there is no listing to walk);
 liveness (who is here now) rides the relay as today — a meeting point, never
 a store. Two different things are both called "zone" elsewhere; here: a
 **domain** is where a branch publishes (`host:<domain>` marks, doors); a
@@ -167,14 +182,22 @@ name, not a molecule address.
 
 ## 4. What changes in the code, in order
 
-1. **`publishBranch` mints the `published` list** beside the index PUT:
-   after the ledger record and before confirm; the member's envelope names
-   the head the index names; the succession and its envelopes go wherever
-   the sealed closure went (`answering`, via `markPublic` as resources) and
-   hold a receipt before `confirmed`; the `stage:published` pointer rides the
-   same signed `putHiveManifest`. A refused signature returns `ok:true` with
-   `claim:'refused'`, never a failed publish. `setBranchDoors` does the same
-   for `live`. (`signHeadClaim`, `head-claim-signer.ts`.)
+1. **`publishBranch` mints the `published` list BEFORE the index PUT** —
+   the pointer rides that write, so the claim must exist first. The member is
+   an envelope over the head the index names, the branch's previous head is
+   dropped, and the claim, the succession and the envelopes go wherever the
+   sealed closure went (`answering`, via `markPublic` as resources) and are
+   receipted beside the link bundle before `confirmed` (`stagesReceipted`).
+   `stage:published` (and every stage the act names — `join` names
+   `shared`) rides the same signed `putHiveManifest`. A refused signature
+   returns `ok:true` with `stages.<word>: 'refused'`, never a failed
+   publish. WITHDRAWAL rides the same writes: `unpublishBranch` mints the
+   next `published`, `shared` and `live` lists without the withdrawn head in
+   the PUT that drops the key; `setBranchDoors` enters `live` in the PUT that
+   opens a door, and an empty door set is the unpublish above;
+   `leaveBranches` (the swarm's leave) mints the next `shared` list without
+   the roots you stood among. (`signHeadClaim`, `head-claim-signer.ts`;
+   `advanceStage` / `withdrawStage`, `stage-succession.ts`.)
 2. **`join` = the branch publish, per public branch root.** On the join
    gesture only — never from the heartbeat, a re-walk or `host:receipt` —
    the swarm drone runs, for each public-branch root the walk at the current
@@ -190,9 +213,11 @@ name, not a molecule address.
    Participants who joined before this ships get lists on their next
    explicit join. At the root, the root itself has nothing to advance; its
    public branches do.
-3. **`hosted` has one definition for both paths:** receipts on the host set
-   the list is served from — the branch's host marks, else the standing
-   targets — read through `isClosureAvailable`.
+3. **`hosted` has one definition for both paths:** a confirmed receipt for
+   every sig of the closure on at least one enabled target, read through
+   `isClosureAvailable` — the same gate the publish panel and the announce
+   walk already use. The index door is one of the nodes the bytes went to
+   (`answering`), so what the pointer names is served where the pointer is.
 4. **The control reads the stage of the branch you stand in** through an
    essentials service on IoC (`mesh-header` has only a boolean today), and
    keeps a single-press `leave`. The world-review step stays until the
@@ -216,6 +241,16 @@ Each step is a forward commit with read-fallback and ships behind proof on
 - "Current stage" is a read across an author's successions plus the index; a
   cold listing of many creations wants the R6 cache, and cold paths must
   answer identically without it.
+- The next list is planned from THIS replica's bucket and minted ledger
+  (`facet:minted`), exactly as the notes facet is. A second device of the
+  same key that has not replicated the bucket starts a list of its own, and
+  readers keep the chain with the higher `seq` until the buckets meet. That
+  is the molecule model's multi-device story, not a stage-specific one, and
+  it is solved where buckets replicate, not here.
+- A stage writer replaces the whole list. When a tile-succession writer for
+  a molecule of the same word lands (numbered markers are still the live
+  convention), the two share one bucket and one ledger (R11) and must
+  preserve each other's members — or §6.2 chooses a system spelling first.
 
 ## 6. The items only the owner decides
 

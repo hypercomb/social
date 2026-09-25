@@ -647,6 +647,8 @@
   "slash.join": "Buradaki kümeye katıl — herkese açık karoların sunulur ve diğer katılımcılar görünür",
   "slash.leave": "Kümeden ayrıl — karoların sunulmaz, diğerleri görünmez",
   "swarm.join.already": "zaten buradaki kümedesin",
+  "swarm.join.published": "{cell} kendi sunucunuzdan yayımlandı — burada sunuluyor",
+  "swarm.join.publish-failed": "{cell} sunulmuyor: {reason}",
   "swarm.leave.already": "bir kümede değilsin",
   "slash.format": "Etkin döşemenin görsel biçimini kopyala",
   "slash.layout": "Düzen şablonlarını kaydet, uygula, listele veya kaldır",

@@ -647,6 +647,8 @@
   "slash.join": "加入此处的蜂群 — 你的公开贴片被提供，其他参与者出现",
   "slash.leave": "离开蜂群 — 不再提供你的贴片，也不再看到其他参与者",
   "swarm.join.already": "你已经在这里的蜂群中",
+  "swarm.join.published": "已从你的主机发布 {cell} — 在此提供",
+  "swarm.join.publish-failed": "{cell} 未提供：{reason}",
   "swarm.leave.already": "你不在任何蜂群中",
   "slash.format": "复制活动磁贴的可视格式",
   "slash.layout": "保存、应用、列出或删除布局模板",
