@@ -117,14 +117,17 @@ export const startArrivalTrial = (bus: BusLike, names: readonly string[]): void 
       render()
     } else if (!covered && state.arrived && !approachedAt) {
       approachedAt = performance.now()
-      // The rest wakes over a few seconds: report when modules stop arriving.
-      let count = modulesSoFar()
+      // The rest wakes over a few seconds, and may start late: report once
+      // modules have come and then stopped coming.
+      const before = modulesSoFar()
+      let count = before
       let changedAt = approachedAt
       const settle = setInterval(() => {
         const now = performance.now()
         const next = modulesSoFar()
         if (next !== count) { count = next; changedAt = now }
-        if (now - changedAt < 1500 && now - approachedAt < 30_000) return
+        const settled = count > before && now - changedAt >= 1500
+        if (!settled && now - approachedAt < 30_000) return
         clearInterval(settle)
         state.approach = { ms: changedAt - approachedAt, modules: count }
         render()
