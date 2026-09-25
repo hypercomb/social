@@ -175,14 +175,14 @@ describe('listHostPackages — the browse surface', () => {
 })
 
 describe('hostBases', () => {
-  it('asks the content-scoped base before the bare one, http only for loopback', () => {
+  it('asks the bare base before the content-scoped one, http only for loopback', () => {
     expect(hostBases('unsettled.example')).toEqual([
-      'https://unsettled.example/content',
       'https://unsettled.example',
-      'https://content.unsettled.example/content',
+      'https://unsettled.example/content',
       'https://content.unsettled.example',
+      'https://content.unsettled.example/content',
     ])
-    expect(hostBases('localhost:4270')[0]).toBe('http://localhost:4270/content')
+    expect(hostBases('localhost:4270')[0]).toBe('http://localhost:4270')
   })
 })
 
