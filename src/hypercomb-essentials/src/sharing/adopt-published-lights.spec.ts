@@ -90,7 +90,7 @@ describe('adoptPublishedLights', () => {
     const { fileURLToPath } = await import('node:url')
     const { dirname, join } = await import('node:path')
     const src = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), 'hive-visit.drone.ts'), 'utf8')
+      join(dirname(fileURLToPath(import.meta.url)), 'hive-visit.boot.drone.ts'), 'utf8')
     expect(src).toMatch(/if \(lights\?\.length\) adoptPublishedLights\(lights\)/)
     expect(src).not.toMatch(/if \(lights\) adoptPublishedLights/)
   })

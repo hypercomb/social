@@ -920,7 +920,7 @@ null` across a `publish:render` payload.
   index's `created_at` monotonicity makes this last-writer-wins rather than
   divergent; it is not silently wrong, but it is not converged either.
 - **The visit path still falls back on a forged index.** `fetchHiveManifest`
-  collapses every failure to null and `hive-visit.drone.ts:148` then does
+  collapses every failure to null and `hive-visit.boot.drone.ts:148` then does
   `manifest?.roots[key] ?? bundle.rootSig`, so a host serving a FORGED index
   silently gets the mint-time hint used instead. The publish path refuses; the
   visit path shrugs. This predates step 4 and is untouched by it — but a head

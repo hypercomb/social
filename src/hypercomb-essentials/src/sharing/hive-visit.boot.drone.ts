@@ -1,4 +1,4 @@
-// sharing/hive-visit.drone.ts
+// sharing/hive-visit.boot.drone.ts
 //
 // A hive-link arrives — what happens depends on WHO you are.
 //
@@ -53,6 +53,15 @@ const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 const NAV_KEY = '@hypercomb.social/Navigation'
 
 const SIG_RE = /^[a-f0-9]{64}$/
+
+/** A service once it registers, or undefined after `ms`. */
+const serviceOf = <T>(key: string, ms = 30_000): Promise<T | undefined> => new Promise(resolve => {
+  const ioc = (window as { ioc?: { get?: <V>(k: string) => V | undefined; whenReady?: <V>(k: string, cb: (v: V) => void) => void } }).ioc
+  const now = ioc?.get?.<T>(key)
+  if (now) { resolve(now); return }
+  const timer = setTimeout(() => resolve(undefined), ms)
+  ioc?.whenReady?.<T>(key, value => { clearTimeout(timer); resolve(value) })
+})
 
 /** The route a door carried, read off the SAME payload the bundle came in —
  *  `at` is never part of the bundle (it would change its signature and mean
@@ -160,7 +169,7 @@ export class HiveVisitDrone extends Drone {
     // door said where its reader was standing, go THERE: inside the offer, at
     // the route they came from. Still shaded, still taken one tile at a time
     // — landing somewhere is not holding it.
-    this.#ioc()?.get<NavLike>(NAV_KEY)?.go(name && at.length ? [name, ...at] : [])
+    ;(await serviceOf<NavLike>(NAV_KEY, 5_000))?.go(name && at.length ? [name, ...at] : [])
     const i18n = this.#i18n()
     this.emitEffect('activity:log', {
       message: i18n?.t('offer.arrived', { name })
@@ -173,9 +182,12 @@ export class HiveVisitDrone extends Drone {
 
   #previewForVisitor = async (bundle: HiveLinkBundle): Promise<void> => {
     const i18n = this.#i18n()
-    const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
-    const broker = this.#ioc()?.get<BrokerLike>(BROKER_KEY)
-    const nav = this.#ioc()?.get<NavLike>(NAV_KEY)
+    // A boot bee arrives before the bees it drives: take each service as it
+    // registers, never assume it is already here (a silent return here left
+    // the cover up for good).
+    const [history, broker, nav] = await Promise.all([
+      serviceOf<HistoryLike>(HISTORY_KEY), serviceOf<BrokerLike>(BROKER_KEY), serviceOf<NavLike>(NAV_KEY),
+    ])
     if (!history?.seedPreviewHead || !broker?.adopt || !nav) {
       console.warn('[hive-visit] cannot open: missing services', {
         history: !!history?.seedPreviewHead, broker: !!broker?.adopt, nav: !!nav,

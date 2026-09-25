@@ -508,7 +508,7 @@ deposit is cargo at rest; it carries no directions.
 
 **The waggle dance closes it.** A route carries the *preimage* — already
 shipped as `HiveManifest.roots: Record<lineageKey, sealedHeadSig>`
-(`hive-pointer.ts`), flown by `hive-visit.drone.ts`. `lineageKey` is
+(`hive-pointer.ts`), flown by `hive-visit.boot.drone.ts`. `lineageKey` is
 precisely the inverse that converts an opaque trail address back into a
 walkable location. So the two primitives are complementary and neither
 substitutes for the other:

@@ -53,7 +53,7 @@ decorations — see [embedded-sites.md](embedded-sites.md).
 **What this does not do:** update anyone. Consumer installs hold their own
 folded generation; the head still travels by hand (the printed sync line) or
 via the static-follow boot poll for hives adopted from a hive-link
-(`sharing/hive-visit.drone.ts`).
+(`sharing/hive-visit.boot.drone.ts`).
 
 ## 2. Publishing modules
 
@@ -102,7 +102,7 @@ profile only via DCP sentinel push, `window.upgradeHypercomb()` /
 ## 5. Visiting without adopting
 
 The nearest thing to a visitor experience today is the hive-link preview
-(`sharing/hive-visit.drone.ts`): a signed hive index resolves the publisher's
+(`sharing/hive-visit.boot.drone.ts`): a signed hive index resolves the publisher's
 current head, the closure is localized as inert cache, and the branch renders
 from a session-only preview head — zero lineage writes, refresh forgets.
 But it runs INSIDE an installed shell: the visitor must already have

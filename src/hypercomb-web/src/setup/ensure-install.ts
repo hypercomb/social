@@ -710,6 +710,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // The write side owns PLACEMENT and the service-worker cache seed. The
   // walker itself knows no kinds, pools, or URL shapes (its squeaky-clean
   // rule) — everything kind-shaped lives here, in the caller's io wiring.
+  const readonlyVisitor = (window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true
   const writeTo = (
     dir: FileSystemDirectoryHandle | undefined,
     nameFor: (sig: string) => string,
@@ -719,7 +720,9 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     if (!dir) throw new Error(`[ensure-install] no destination for ${sig.slice(0, 12)}`)
     const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
     await writeBytes(dir, nameFor(sig), buffer)
-    await seedCacheEntry(cacheUrlFor(sig), buffer, contentType)
+    // A published site has no service worker to read the seed, and keeps
+    // nothing: 900 durable cache writes per cold visit were pure cost.
+    if (!readonlyVisitor) await seedCacheEntry(cacheUrlFor(sig), buffer, contentType)
   }
 
   const beesUrlBase = `/opfs/${await Store.poolSignature(Store.BEES_MEANING)}`
