@@ -1,5 +1,6 @@
 import { installMemoryFilesystem } from './setup/memory-filesystem'
 import { installReadonlyNetwork } from './setup/readonly-network'
+import { readArrivalTrial, startArrivalTrial } from './setup/arrival-trial'
 
 interface SiteDescriptor {
   head?: string
@@ -118,7 +119,10 @@ const descriptorUrl = new URL('/site.json', location.origin)
 const siteRead: Promise<SiteDescriptor | null> = fetch(descriptorUrl, { cache: 'no-store' })
   .then(response => response.ok ? response.json() as Promise<SiteDescriptor> : null)
   .catch(() => null)
-;(globalThis as { __hcArrival?: Promise<string[] | null> }).__hcArrival = siteRead.then(async site => {
+// A TRIAL (`?arrival=`, setup/arrival-trial.ts) replaces the signed plan for
+// this one visit — the Publish window's Optimize section tries a plan with it.
+const arrivalTrial = readArrivalTrial()
+;(globalThis as { __hcArrival?: Promise<string[] | null> }).__hcArrival = arrivalTrial ? Promise.resolve(arrivalTrial) : siteRead.then(async site => {
   const plan = String(site?.plan ?? '').toLowerCase()
   if (!SIG_RE.test(plan)) return null
   // Served by the door that served this code: its host hashed the bytes on
@@ -145,6 +149,7 @@ const siteRead: Promise<SiteDescriptor | null> = fetch(descriptorUrl, { cache: '
 // above is installed. It loads the same verified core and render path as the
 // participant shell, but every filesystem operation lands in session memory.
 const { EffectBus } = await import('@hypercomb/core')
+if (arrivalTrial) startArrivalTrial(EffectBus, arrivalTrial)
 
 // ── the loading cover owns the screen until the SITE is on it ──────────────
 // `.site-loading` starts inside <app-root>, which Angular REPLACES at

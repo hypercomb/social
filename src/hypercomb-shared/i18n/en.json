@@ -3221,5 +3221,19 @@
   "publish.optimize.state.published": "readers have this set",
   "publish.optimize.state.changed": "changed here — publish to tell readers",
   "publish.optimize.state.none": "nothing is participant-only",
-  "publish.optimize.failed": "The change could not be saved."
+  "publish.optimize.failed": "The change could not be saved.",
+  "publish.optimize.test": "Test",
+  "publish.optimize.test-tip": "Open the site with this arrival for one visit — nothing is published",
+  "publish.optimize.tried": "Opened {address} with this arrival. Its result shows in the corner of that page; try the page there, then save.",
+  "arrival-trial.title": "Trying an arrival — not published",
+  "arrival-trial.missing": "Not in the package: {names}",
+  "arrival-trial.whole": "None of these bees is in the package, so the whole package loaded.",
+  "arrival-trial.plan": "{now} bees now, {passive} wait for the approach",
+  "arrival-trial.arrived": "Page on screen in {seconds} s · {modules} modules",
+  "arrival-trial.stuck": "No page after {seconds} s — this plan is likely missing a bee the page needs.",
+  "arrival-trial.waiting": "Waiting for the page…",
+  "arrival-trial.approach": "Hive woke in {seconds} s · {modules} modules",
+  "arrival-trial.errors": "{count} errors on this page",
+  "arrival-trial.hint": "Use the page as a reader would, then step into the hive. Readers still get your published arrival.",
+  "arrival-trial.close": "Close"
 }

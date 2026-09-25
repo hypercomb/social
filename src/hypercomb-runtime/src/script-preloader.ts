@@ -543,6 +543,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     if (!names) return
     const { bees, missing } = resolveArrival(names, walked.classes, new Set(walked.bees))
     if (missing.length) console.warn(`[script-preloader] arrival plan names what this package does not carry: ${missing.join(', ')}`)
+    // What the arrival came to — the shell's arrival trial reports it.
+    EffectBus.emit('loader:arrival', { now: bees.size, passive: bees.size ? walked.bees.length - bees.size : 0, missing })
     if (!bees.size) return
     this.#arrivalBees = bees
     this.#passive = new Set(walked.bees.filter(sig => !bees.has(sig) && !this.#beeCache.has(sig)))

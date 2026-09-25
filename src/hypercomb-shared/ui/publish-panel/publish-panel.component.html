@@ -285,11 +285,22 @@
                 [placeholder]="'publish.optimize.arrival-placeholder' | t"
               />
               <div class="pdet-actions">
+                <button
+                  class="pdet-btn"
+                  type="button"
+                  [disabled]="row.zones.length === 0"
+                  [attr.data-tip]="'publish.optimize.test-tip' | t"
+                  (click)="testArrival(row)"
+                >{{ 'publish.optimize.test' | t }}</button>
                 <button class="pdet-btn" type="button" [disabled]="!!row.busyPhase" (click)="saveArrival(row)">{{ 'publish.optimize.save' | t }}</button>
                 @if (row.plan) {
                   <button class="pdet-btn" type="button" [disabled]="!!row.busyPhase" (click)="clearArrival(row)">{{ 'publish.optimize.whole' | t }}</button>
                 }
               </div>
+
+              @if (optimizeTried()[row.key]; as tried) {
+                <div class="popt-note">{{ 'publish.optimize.tried' | t: { address: tried } }}</div>
+              }
 
               <div class="popt-head">{{ 'publish.optimize.participant' | t }}</div>
               <div class="popt-note">{{ 'publish.optimize.participant-note' | t }}</div>

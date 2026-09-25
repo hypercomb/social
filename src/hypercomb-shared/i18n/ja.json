@@ -2669,5 +2669,19 @@
   "publish.optimize.state.published": "読者はこのセットを持っています",
   "publish.optimize.state.changed": "ここで変更済み — 公開して読者に伝えてください",
   "publish.optimize.state.none": "参加者専用のものはありません",
-  "publish.optimize.failed": "変更を保存できませんでした。"
+  "publish.optimize.failed": "変更を保存できませんでした。",
+  "publish.optimize.test": "テスト",
+  "publish.optimize.test-tip": "この到着で一度だけサイトを開きます — 何も公開されません",
+  "publish.optimize.tried": "{address} をこの到着で開きました。結果はそのページの隅に表示されます。そこで操作を試してから保存してください。",
+  "arrival-trial.title": "到着を試しています — 未公開",
+  "arrival-trial.missing": "パッケージにないもの: {names}",
+  "arrival-trial.whole": "これらのビーはどれもパッケージにないため、パッケージ全体を読み込みました。",
+  "arrival-trial.plan": "今読み込んだビー {now} 個、ハイブに入るまで待機 {passive} 個",
+  "arrival-trial.arrived": "{seconds} 秒でページ表示 · モジュール {modules} 個",
+  "arrival-trial.stuck": "{seconds} 秒たってもページが表示されません — ページに必要なビーがこの計画に足りない可能性があります。",
+  "arrival-trial.waiting": "ページを待っています…",
+  "arrival-trial.approach": "{seconds} 秒でハイブが起動 · モジュール {modules} 個",
+  "arrival-trial.errors": "このページのエラー {count} 件",
+  "arrival-trial.hint": "読者と同じようにページを操作してから、ハイブに入ってください。読者には公開済みの到着が届きます。",
+  "arrival-trial.close": "閉じる"
 }

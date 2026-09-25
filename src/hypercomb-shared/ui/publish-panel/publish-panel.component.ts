@@ -194,6 +194,8 @@ export class PublishPanelComponent implements OnDestroy {
   readonly participantState = signal<'published' | 'changed' | 'none'>('none')
   /** The text being typed into the Optimize fields, keyed by row / 'features'. */
   readonly optimizeDraft = signal<Record<string, string>>({})
+  /** Where each row's last trial arrival opened, keyed by row. */
+  readonly optimizeTried = signal<Record<string, string>>({})
   readonly #sanitizer = inject(DomSanitizer)
   /** A deliberately coarse render clock. Template helpers must not call
    *  Date.now() themselves: Angular's development check renders twice and a
@@ -465,6 +467,18 @@ export class PublishPanelComponent implements OnDestroy {
     if (!names.length) return
     EffectBus.emit('publish:arrival', { key: row.key, names })
     this.#clearDraft(row.key)
+  }
+
+  /** Try the typed plan before saving it: open the published site with it for
+   *  one visit (`?arrival=`). The site says in a corner what it came to —
+   *  hypercomb-web setup/arrival-trial.ts. Nothing is published. */
+  testArrival(row: PublishRow): void {
+    const names = this.draftOf(row.key, this.planClasses(row).join(' ')).split(/[s,]+/).filter(Boolean)
+    const zone = row.zones.find(z => this.doorOn(row, z)) ?? row.zones[0]
+    if (!names.length || !zone) return
+    const url = `${this.addressUrl(row, zone)}/?arrival=${encodeURIComponent(names.join(','))}`
+    window.open(url, '_blank', 'noopener')
+    this.optimizeTried.update(all => ({ ...all, [row.key]: this.address(row, zone) }))
   }
 
   /** Withdraw the plan: the branch loads its whole package again. */
