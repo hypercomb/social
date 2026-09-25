@@ -6,7 +6,11 @@ import { SOLOMON_MAZE_BRANCH, SolomonTileSurface } from './tile-surface.js'
 
 // Storage and notification delivery are the only substitutes. The test calls
 // the real public importTree/update APIs and real LayerMachine implementation.
-vi.mock('@hypercomb/core', () => ({ EffectBus: { on: vi.fn(), emit: vi.fn() } }))
+// canonical-layer.js re-exports core's byte form, so that half stays real.
+vi.mock('@hypercomb/core', async importOriginal => {
+  const { canonicalizeLayer, canonicalLayerJson } = await importOriginal<typeof import('@hypercomb/core')>()
+  return { canonicalizeLayer, canonicalLayerJson, EffectBus: { on: vi.fn(), emit: vi.fn() } }
+})
 vi.mock('../../history/history.service.js', () => ({ ROOT_NAME: '/' }))
 afterEach(() => { vi.unstubAllGlobals() })
 

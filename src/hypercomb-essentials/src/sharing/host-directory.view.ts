@@ -1076,7 +1076,7 @@ export class HostDirectoryElement extends HTMLElement {
     const back = button('hd-back', '‹', t('hosts.revisions.back', 'Back to the list'))
     back.addEventListener('click', () => { this.#view = 'domains'; this.#render() })
     head.append(back, make('span', 'hd-drill-title', t('hosts.creations.title', 'Creations on {host}', { host: zone })))
-    body.append(head, make('p', 'hd-note', t('hosts.creations.note', 'What people made on this domain. Showing one adds a shaded tile to your hive. Serving it on your domain requires choosing a local route.')))
+    body.append(head, make('p', 'hd-note', t('hosts.creations.note', 'What people made on this domain. Showing one adds a shaded tile to your hive. Serving it from a domain of your own requires choosing a local route.')))
 
     const known = this.#creations.get(zone)
     if (!known) { body.append(make('p', 'hd-note', t('hosts.probing', 'asking…'))); return }
