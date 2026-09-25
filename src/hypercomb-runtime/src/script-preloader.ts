@@ -7,6 +7,7 @@ import { Bee, type BeeResolver, EffectBus, hypercomb, mayRunBee } from '@hyperco
 import { Store } from './store'
 import { installedPackageSig } from './installed-package.js'
 import { arrivalNames, beeClassesOfDocs, resolveArrival, type BeeClass } from './arrival-plan.js'
+import { activeInstallIndex } from './install-index.js'
 import {
   learnedCriticalBeeSigs,
   parseLearnedCriticalBeeSigs,
@@ -808,13 +809,20 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       }
       if (handle) break
     }
-    if (!handle) {
+    // A VISITOR INSTALLED FROM THE INDEX holds no modules (install-index.ts):
+    // the bee is imported from the door by its signature — no bytes needed
+    // where the door serves modules at the root, fetched from it otherwise.
+    let buffer: ArrayBuffer
+    if (handle) {
+      buffer = await (await handle.getFile()).arrayBuffer()
+    } else if (activeInstallIndex()) {
+      buffer = (globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ === true
+        ? new ArrayBuffer(0)
+        : await fetch(`/content/${signature}`).then(res => res.ok ? res.arrayBuffer() : new ArrayBuffer(0)).catch(() => new ArrayBuffer(0))
+    } else {
       console.warn(`[script-preloader] bee ${signature} not found in OPFS`)
       return null
     }
-
-    const file = await handle.getFile()
-    const buffer = await file.arrayBuffer()
     tOpfs = performance.now() - tStart
 
     // Ensure namespace dependencies are loaded before the bee

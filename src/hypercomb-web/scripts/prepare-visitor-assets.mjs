@@ -108,6 +108,33 @@ if (SIG_RE.test(packSig) && await stat(join(sourceContent, packSig)).then(() => 
   console.warn(`[visitor-assets] no transfer pack for ${currentSig.slice(0, 12)}… — visitors will install file by file`)
 }
 
+// THE INSTALL INDEX (hypercomb-runtime/src/install-index.ts). What a visitor
+// used to learn by unpacking all ~900 files into memory and reading every
+// module three times — aliases, which dependencies are atoms, what each bee
+// claims, what the package needs of core — derived here once, by the same
+// functions, from the same bytes. Keyed by the package it describes, beside
+// a transfer pack of just the layers. A derived record: a visitor with none
+// installs the old way.
+{
+  const { tsImport } = await import('tsx/esm/api')
+  const { deriveInstallIndex, INSTALL_INDEX_MEANING } = await tsImport('../../hypercomb-runtime/src/install-index.ts', import.meta.url)
+  const { encodeTransferPack, gzipBytes } = await tsImport('../../hypercomb-runtime/src/transfer-pack.ts', import.meta.url)
+  const read = async (sig) => new Uint8Array(await readFile(join(outputContent, sig)).catch(() => null) ?? []) || null
+  const layerMembers = await Promise.all((current.layers ?? []).map(async (sig) => [sig, await read(sig)]))
+  const layersPackBytes = await gzipBytes(encodeTransferPack(layerMembers))
+  const layersPack = createHash('sha256').update(layersPackBytes).digest('hex')
+  await writeFile(join(outputContent, layersPack), layersPackBytes)
+  const index = await deriveInstallIndex(currentSig, { bees: current.bees ?? [], dependencies: current.dependencies ?? [] }, read, layersPack)
+  const indexPool = createHash('sha256').update(INSTALL_INDEX_MEANING).digest('hex')
+  await mkdir(join(outputContent, indexPool), { recursive: true })
+  await writeFile(join(outputContent, indexPool, currentSig), JSON.stringify(index), 'utf8')
+  console.log(
+    `[visitor-assets] install index: ${Object.keys(index.aliases).length} aliases, ${index.lazy.length} atoms, ` +
+    `${Object.keys(index.beeDeps).length} bees with claims, ${index.coreImports.length} core names; ` +
+    `layers pack ${layersPack.slice(0, 12)}… (${(layersPackBytes.byteLength / 1024).toFixed(0)} KB)`,
+  )
+}
+
 let bytes = 0
 const addSize = async (path) => {
   const held = await stat(path)

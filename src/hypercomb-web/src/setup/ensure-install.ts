@@ -19,7 +19,9 @@ import { acquire, applySelection, deriveInventory, headPackage, listHostPackages
 import { readPicks } from '@hypercomb/runtime/package-tree'
 import { readOffUnits } from '@hypercomb/runtime/package-units'
 import { deriveBeeDeps } from '@hypercomb/runtime/bee-deps'
-import { checkCoreCompatibility, CoreMismatchError, describeCoreMismatch } from '@hypercomb/runtime/core-surface'
+import { checkCoreCompatibility, coreCompatibility, CoreMismatchError, describeCoreMismatch, liveCoreExports } from '@hypercomb/runtime/core-surface'
+import { INSTALL_INDEX_MEANING, parseInstallIndex, setActiveInstallIndex } from '@hypercomb/runtime/install-index'
+import { decodeTransferPack, gunzipBytes } from '@hypercomb/runtime/transfer-pack'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from '@hypercomb/runtime/bags'
 import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from '@hypercomb/runtime/host-pool'
 import { registerPoolMeaning, sandboxDoorOf } from '@hypercomb/core'
@@ -725,6 +727,14 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     if (!readonlyVisitor) await seedCacheEntry(cacheUrlFor(sig), buffer, contentType)
   }
 
+  // A VISITOR WITH AN INDEX UNPACKS NOTHING (install-index.ts): it takes the
+  // layers from one small pack and the facts about the modules from the
+  // index, and every module stays on the door until something imports it.
+  if (readonlyVisitor) {
+    const indexed = await installFromIndex(bundled, store, sigStore, readFrom, fetchLoose(sig => [`/content/${sig}`]), writeTo)
+    if (indexed !== null) return indexed
+  }
+
   const beesUrlBase = `/opfs/${await Store.poolSignature(Store.BEES_MEANING)}`
   const depsUrlBase = `/opfs/${await Store.poolSignature(Store.DEPENDENCIES_MEANING)}`
 
@@ -939,6 +949,84 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     `[ensure-install] bundled package complete: ${bundled.packageSig.slice(0, 12)} ` +
     `(bees ${held(beesResult)}, deps ${held(depsResult)}, layers ${held(layersResult)}, ` +
     `bags: deps=${depBagCount} bees=${beeBagCount})`,
+  )
+  return true
+}
+
+type Reader = (dirs: (FileSystemDirectoryHandle | undefined)[], namesFor: (sig: string) => string[]) =>
+  (sig: string) => Promise<Uint8Array<ArrayBuffer> | null>
+type Writer = (dir: FileSystemDirectoryHandle | undefined, nameFor: (sig: string) => string, cacheUrlFor: (sig: string) => string, contentType: string) =>
+  (sig: string, bytes: Uint8Array<ArrayBuffer>) => Promise<void>
+
+/**
+ * THE VISITOR'S INSTALL, FROM THE INDEX (hypercomb-runtime install-index.ts).
+ * The door ships, beside its package, a derived record of everything the
+ * install used to learn by unpacking and reading every module — and a pack of
+ * just the layers. Only the layers land in the memory store; the modules are
+ * imported from the door by signature when something needs them.
+ *
+ * Null means "no index for this package here" — the caller installs the old
+ * way. False is a real refusal (an incomplete tree).
+ */
+const installFromIndex = async (
+  bundled: BundledPackage,
+  store: Store,
+  sigStore: SignatureStore,
+  readFrom: Reader,
+  loose: (sig: string) => Promise<Uint8Array<ArrayBuffer> | null>,
+  writeTo: Writer,
+): Promise<boolean | null> => {
+  const pool = await registerPoolMeaning(INSTALL_INDEX_MEANING)
+  const response = await fetch(`/content/${pool}/${bundled.packageSig}`).catch(() => null)
+  if (!response?.ok || (response.headers.get('content-type') || '').includes('text/html')) return null
+  const index = parseInstallIndex(await response.text(), bundled.packageSig)
+  if (!index) return null
+
+  const carried = new Map<string, Uint8Array<ArrayBuffer>>()
+  if (index.layersPack) {
+    try {
+      const packed = await fetch(`/content/${index.layersPack}`)
+      if (packed.ok) {
+        for (const [sig, bytes] of decodeTransferPack(await gunzipBytes(new Uint8Array(await packed.arrayBuffer()))) ?? []) carried.set(sig, bytes)
+      }
+    } catch { /* the layers come loose instead */ }
+  }
+  // Served by the door that served this code, into a store that keeps
+  // nothing: taken as named (replication-walker.ts, `trusted`).
+  const layersIo = {
+    read: readFrom([store.hypercombRoot], sig => [sig]),
+    fetch: async (sig: string) => carried.get(sig) ?? loose(sig),
+    write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/__layers__/${sig}.json`, 'application/json; charset=utf-8'),
+  } satisfies ReplicationIo
+  const { inventory, result } = await deriveInventory(bundled.packageSig, layersIo, { trusted: true })
+  if (!isComplete(result) || !validateSealedPackage(bundled.packageSig, inventory).valid) return null
+  // The index must speak for exactly this tree; anything less is no index.
+  if (inventory.dependencies.some(sig => !index.aliases[sig])) return null
+
+  // The core gate, still a derivation: the names were read out of these
+  // modules where the door was built, and the live core is asked now.
+  const compat = coreCompatibility(index.coreImports, await liveCoreExports())
+  if (!compat.ok) {
+    console.warn(`[ensure-install] bundled package ${bundled.packageSig.slice(0, 12)} ${describeCoreMismatch(compat.missing)}`)
+    throw new CoreMismatchError(compat.missing)
+  }
+
+  const beeSet = new Set(inventory.bees)
+  const beeDeps: Record<string, string[]> = {}
+  for (const [bee, deps] of Object.entries(index.beeDeps)) if (beeSet.has(bee)) beeDeps[bee] = [...deps]
+
+  localStorage.setItem(MANIFEST_KEY, JSON.stringify({
+    version: 2, layers: inventory.layers, bees: inventory.bees, dependencies: inventory.dependencies, beeDeps, source: 'bundled' as const,
+  }))
+  localStorage.setItem(SYNC_SIG_KEY, bundled.packageSig)
+  stampInstalledPackage(bundled.packageSig)
+  localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
+  if (Object.keys(beeDeps).length) (globalThis as any).__hypercombBeeDeps = beeDeps
+  setActiveInstallIndex({ ...index, bees: inventory.bees })
+  sigStore.trustAll([...inventory.bees, ...inventory.dependencies, ...inventory.layers])
+  console.log(
+    `[ensure-install] indexed package ${bundled.packageSig.slice(0, 12)}: ${inventory.layers.length} layers held, ` +
+    `${inventory.bees.length} bees + ${inventory.dependencies.length} deps left on the door`,
   )
   return true
 }
