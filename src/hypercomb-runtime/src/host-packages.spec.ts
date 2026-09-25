@@ -41,11 +41,23 @@ const poolAt = async (base: string, sigs: string[]): Promise<Served> => {
   }
 }
 
-/** A host whose relay predates the directory branch: entries, no listing. */
+/** The page a door answers with where it has no directory branch. */
+const PAGE = '<!doctype html><html></html>'
+
+/** A host whose relay predates the directory branch: entries, and its page
+ *  where the listing would be. */
 const poolWithoutListing = async (base: string, sigs: string[]): Promise<Served> => {
   const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
-  return Object.fromEntries(sigs.map((sig, i) => [`${base}/${pool}/${poolEntryName(i)}`, sig]))
+  return {
+    [`${base}/${pool}/`]: PAGE,
+    ...Object.fromEntries(sigs.map((sig, i) => [`${base}/${pool}/${poolEntryName(i)}`, sig])),
+  }
 }
+
+/** A door that publishes nothing, as the relay and the edge worker answer it:
+ *  an EMPTY listing — 200, so no follower's console prints a 404. */
+const emptyPoolAt = async (base: string): Promise<Served> =>
+  ({ [`${base}/${await registerPoolMeaning(HOST_PACKAGES_MEANING)}/`]: '' })
 
 beforeEach(() => { _resetSettledBases() })
 
@@ -83,45 +95,50 @@ describe('headPackage — discovery', () => {
   it('refuses a head entry that is not a signature, rather than trusting it', async () => {
     const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
     vi.stubGlobal('fetch', serving({
+      [`https://host.example/${pool}/`]: poolEntryName(0),
       [`https://host.example/${pool}/${poolEntryName(0)}`]: 'see https://example.com/setup',
     }))
 
     expect(await headPackage('host.example')).toBeNull()
   })
 
-  it('treats an SPA fallback page as an empty pool', async () => {
+  it('treats an SPA fallback page as no pool', async () => {
     const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
     vi.stubGlobal('fetch', serving({
-      [`https://host.example/${pool}/${poolEntryName(0)}`]: '<!doctype html><html></html>',
+      [`https://host.example/${pool}/`]: PAGE,
+      [`https://host.example/${pool}/${poolEntryName(0)}`]: PAGE,
     }))
 
     expect(await headPackage('host.example')).toBeNull()
   })
 
-  it('falls back to probing for a host whose relay cannot list a directory', async () => {
-    vi.stubGlobal('fetch', serving(await poolWithoutListing('https://host.example', [SIG_B, SIG_A])))
+  it('never probes entry by entry — a door that cannot list is not a pool', async () => {
+    const fetchMock = serving(await poolWithoutListing('https://host.example', [SIG_B, SIG_A]))
+    vi.stubGlobal('fetch', fetchMock)
 
-    expect((await headPackage('host.example'))?.packageSig).toBe(SIG_A)
+    expect(await headPackage('host.example')).toBeNull()
+    const asked = fetchMock.mock.calls.map(call => String(call[0]))
+    expect(asked.some(url => url.endsWith(poolEntryName(0)))).toBe(false)
   })
 
   it('asks the base that answered first on the next probe, sparing the dead bases', async () => {
-    const fetchMock = serving(await poolAt('https://root.example', [SIG_A]))
+    const fetchMock = serving(await poolAt('https://root.example/content', [SIG_A]))
     vi.stubGlobal('fetch', fetchMock)
 
-    expect((await headPackage('root.example'))?.base).toBe('https://root.example')
+    expect((await headPackage('root.example'))?.base).toBe('https://root.example/content')
     fetchMock.mockClear()
     expect((await headPackage('root.example'))?.packageSig).toBe(SIG_A)
 
     const asked = fetchMock.mock.calls.map(call => String(call[0]))
-    expect(asked.some(url => url.startsWith('https://root.example/content/'))).toBe(false)
+    expect(asked.some(url => url.startsWith('https://root.example/') && !url.startsWith('https://root.example/content/'))).toBe(false)
   })
 
   it('once the pool has settled a base, atoms are fetched from that base alone', async () => {
-    vi.stubGlobal('fetch', serving(await poolAt('https://root.example', [SIG_A])))
-    expect(hostBases('root.example')).toHaveLength(4)
+    vi.stubGlobal('fetch', serving(await poolAt('https://root.example/content', [SIG_A])))
+    expect(hostBases('root.example')).toHaveLength(2)
 
     await headPackage('root.example')
-    expect(hostBases('root.example')).toEqual(['https://root.example'])
+    expect(hostBases('root.example')).toEqual(['https://root.example/content'])
   })
 
   it('remembers the settled base across sessions, and forgets one that no longer fits the zone', async () => {
@@ -130,12 +147,146 @@ describe('headPackage — discovery', () => {
     expect(localStorage.getItem('hc:host-base:root.example')).toBe('https://root.example/content')
 
     localStorage.setItem('hc:host-base:other.example', 'https://elsewhere.example')
-    expect(hostBases('other.example')).toHaveLength(4)
+    expect(hostBases('other.example')).toHaveLength(2)
   })
 
   it('answers null for a domain that publishes nothing at all', async () => {
     vi.stubGlobal('fetch', serving({}))
     expect(await headPackage('host.example')).toBeNull()
+  })
+})
+
+describe('a zone that publishes nothing — asked quietly', () => {
+  beforeEach(() => { vi.unstubAllGlobals() })
+
+  const asked = (fetchMock: ReturnType<typeof vi.fn>): string[] => fetchMock.mock.calls.map(call => String(call[0]))
+
+  it('an empty listing is the whole answer — one request, and a 200', async () => {
+    const fetchMock = serving(await emptyPoolAt('https://site.example'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await askHostPackages('site.example')).toEqual({ packages: [], answered: true })
+    expect(asked(fetchMock)).toHaveLength(1)
+  })
+
+  it('a 404 from a door not yet redeployed asks the zone\'s own bases and nothing else', async () => {
+    const fetchMock = serving({})
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await headPackage('site.example')).toBeNull()
+
+    // One listing per own base: no `00000000`, no content.<zone>.
+    expect(asked(fetchMock)).toEqual([
+      expect.stringMatching(/^https:\/\/site\.example\/[0-9a-f]{64}\/$/),
+      expect.stringMatching(/^https:\/\/site\.example\/content\/[0-9a-f]{64}\/$/),
+    ])
+  })
+
+  it('content.<zone> is asked only when the zone\'s own name does not answer', async () => {
+    const pool = await poolAt('https://content.apexless.example', [SIG_A])
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith('https://apexless.example')) throw new TypeError('Failed to fetch')
+      return serving(pool)(url)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const head = await headPackage('apexless.example')
+    expect(head?.packageSig).toBe(SIG_A)
+    expect(head?.base).toBe('https://content.apexless.example')
+    expect(hostBases('apexless.example')).toEqual(['https://content.apexless.example'])
+  })
+
+  it('remembers the absence, so Update all asking again makes no request at all', async () => {
+    const fetchMock = serving({})
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listHostPackages('site.example')
+    fetchMock.mockClear()
+    expect(await headPackage('site.example')).toBeNull()
+    expect(await askHostPackages('site.example')).toEqual({ packages: [], answered: true })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('asks again once the memo has run out', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchMock = serving({})
+      vi.stubGlobal('fetch', fetchMock)
+      await headPackage('site.example')
+      fetchMock.mockClear()
+
+      vi.advanceTimersByTime(16 * 60_000)
+      await headPackage('site.example')
+      expect(fetchMock).toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('callers asking at once share one probe', async () => {
+    const fetchMock = serving({})
+    vi.stubGlobal('fetch', fetchMock)
+
+    await Promise.all([headPackage('site.example'), listHostPackages('site.example'), askHostPackages('site.example')])
+
+    expect(asked(fetchMock)).toHaveLength(2)
+  })
+
+  it('a zone that did not answer is not remembered as empty', async () => {
+    const fetchMock = vi.fn(async () => { throw new TypeError('Failed to fetch') })
+    vi.stubGlobal('fetch', fetchMock)
+    await headPackage('down.example')
+
+    vi.stubGlobal('fetch', serving(await poolAt('https://down.example', [SIG_A])))
+    expect((await headPackage('down.example'))?.packageSig).toBe(SIG_A)
+  })
+})
+
+describe("a host deployed before the empty listing — its final 404", () => {
+  beforeEach(() => vi.unstubAllGlobals())
+
+  /** A fetch that answers `said` with a 404 carrying that body — how a host
+   *  that speaks the directory branch said the address holds nothing — and
+   *  404s everything else with a body that says nothing about a pool. */
+  const sayingNoPool = (said: Record<string, string>): ReturnType<typeof vi.fn> =>
+    vi.fn(async (url: string) => ({
+      ok: false,
+      status: 404,
+      headers: new Headers(),
+      text: async () => said[String(url)] ?? 'Not Found',
+    }) as unknown as Response)
+
+  it("stops at the worker's `no pool at this address`: one request", async () => {
+    const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+    const fetchMock = sayingNoPool({ [`https://host.example/${pool}/`]: 'no pool at this address\n' })
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await askHostPackages('host.example')).toEqual({ packages: [], answered: true })
+    expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([`https://host.example/${pool}/`])
+  })
+
+  it("reads the live relay's `pool not held` as the same final answer", async () => {
+    const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+    const fetchMock = sayingNoPool({ [`https://host.example/content/${pool}/`]: 'pool not held' })
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await headPackage('host.example')).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(2)   // the flat base's plain 404, then the final one
+  })
+
+  it('asks the base that said so first once the memo has run out — one request', async () => {
+    vi.useFakeTimers()
+    try {
+      const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+      const fetchMock = sayingNoPool({ [`https://host.example/content/${pool}/`]: 'pool not held' })
+      vi.stubGlobal('fetch', fetchMock)
+      await headPackage('host.example')
+      expect(localStorage.getItem('hc:host-base:host.example')).toBe('https://host.example/content')
+
+      vi.advanceTimersByTime(16 * 60_000)
+      fetchMock.mockClear()
+      expect(await headPackage('host.example')).toBeNull()
+      expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([`https://host.example/content/${pool}/`])
+    } finally { vi.useRealTimers() }
   })
 })
 
@@ -175,12 +326,10 @@ describe('listHostPackages — the browse surface', () => {
 })
 
 describe('hostBases', () => {
-  it('asks the bare base before the content-scoped one, http only for loopback', () => {
+  it('asks the zone\'s own name, flat before /content, http only for loopback — never content.<zone>', () => {
     expect(hostBases('unsettled.example')).toEqual([
       'https://unsettled.example',
       'https://unsettled.example/content',
-      'https://content.unsettled.example',
-      'https://content.unsettled.example/content',
     ])
     expect(hostBases('localhost:4270')[0]).toBe('http://localhost:4270')
   })
@@ -208,86 +357,5 @@ describe('askHostPackages — an empty answer says which kind of empty', () => {
     const { packages, answered } = await askHostPackages('host.example')
     expect(answered).toBe(true)
     expect(packages.map(p => p.packageSig)).toEqual([SIG_A])
-  })
-})
-
-describe('a zone that publishes nothing — asked once, quietly', () => {
-  beforeEach(() => vi.unstubAllGlobals())
-
-  /** A fetch that answers `said` with a 404 carrying that body — how a host
-   *  that speaks the directory branch says the address holds nothing — and
-   *  404s everything else with a body that says nothing about a pool. */
-  const sayingNoPool = (said: Record<string, string>): ReturnType<typeof vi.fn> =>
-    vi.fn(async (url: string) => ({
-      ok: false,
-      status: 404,
-      headers: new Headers(),
-      text: async () => said[String(url)] ?? 'Not Found',
-    }) as unknown as Response)
-
-  it("stops at the worker's final 404: no index probe, no other face", async () => {
-    const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
-    const fetchMock = sayingNoPool({ [`https://host.example/${pool}/`]: 'no pool at this address\n' })
-    vi.stubGlobal('fetch', fetchMock)
-
-    expect(await askHostPackages('host.example')).toEqual({ packages: [], answered: true })
-
-    expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([
-      `https://host.example/content/${pool}/`,
-      `https://host.example/content/${pool}/${poolEntryName(0)}`,   // a door with no directory branch still gets its probe
-      `https://host.example/${pool}/`,                              // and the final answer ends the walk
-    ])
-  })
-
-  it("reads the live relay's `pool not held` as the same final answer", async () => {
-    const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
-    const fetchMock = sayingNoPool({ [`https://host.example/content/${pool}/`]: 'pool not held' })
-    vi.stubGlobal('fetch', fetchMock)
-
-    expect(await headPackage('host.example')).toBeNull()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('asks nothing more this session, whichever way the zone said it', async () => {
-    const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
-    const final = sayingNoPool({ [`https://final.example/${pool}/`]: 'no pool at this address\n' })
-    vi.stubGlobal('fetch', final)
-    await headPackage('final.example')
-    final.mockClear()
-    expect(await headPackage('final.example')).toBeNull()
-    expect(await listHostPackages('final.example')).toEqual([])
-    expect(final).not.toHaveBeenCalled()
-
-    const silent = serving({})   // every base an honest 404, none of them final
-    vi.stubGlobal('fetch', silent)
-    await headPackage('silent.example')
-    silent.mockClear()
-    expect(await askHostPackages('silent.example')).toEqual({ packages: [], answered: true })
-    expect(silent).not.toHaveBeenCalled()
-  })
-
-  it('asks the base that said so first next session — one request', async () => {
-    const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
-    const fetchMock = sayingNoPool({ [`https://host.example/${pool}/`]: 'no pool at this address\n' })
-    vi.stubGlobal('fetch', fetchMock)
-    await headPackage('host.example')
-    const stored = localStorage.getItem('hc:host-base:host.example')
-    expect(stored).toBe('https://host.example')
-
-    _resetSettledBases()   // a reload: the session forgets, the stored memo stays
-    localStorage.setItem('hc:host-base:host.example', stored!)
-    fetchMock.mockClear()
-
-    expect(await headPackage('host.example')).toBeNull()
-    expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([`https://host.example/${pool}/`])
-  })
-
-  it('a zone that did not answer is asked again — that is the network, not the host', async () => {
-    const down = vi.fn(async () => { throw new TypeError('Failed to fetch') })
-    vi.stubGlobal('fetch', down)
-    await headPackage('host.example')
-
-    vi.stubGlobal('fetch', serving(await poolAt('https://host.example', [SIG_A])))
-    expect((await headPackage('host.example'))?.packageSig).toBe(SIG_A)
   })
 })
