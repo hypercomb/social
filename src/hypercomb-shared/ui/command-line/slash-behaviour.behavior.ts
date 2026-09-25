@@ -32,14 +32,14 @@ export class SlashBehaviourBehavior implements CommandLineBehavior {
     // only match if a queen bee recognizes the behaviour — otherwise fall through
     // to path-based behaviors (e.g. /folder/ for navigation)
     const behaviourName = this.#extractBehaviourName(input)
-    return this.#findQueen(behaviourName) !== null
+    return this.#findQueen(behaviourName) !== null || this.#asleep(behaviourName)
   }
 
   async execute(input: string): Promise<void> {
     const behaviourName = this.#extractBehaviourName(input)
     const args = this.#extractArgs(input)
 
-    const queen = this.#findQueen(behaviourName)
+    const queen = await this.#wakeQueen(behaviourName)
     if (!queen) {
       console.warn(`[/] Unknown behaviour: ${behaviourName}`)
       return
@@ -71,6 +71,25 @@ export class SlashBehaviourBehavior implements CommandLineBehavior {
       return stripped.slice(bracketIdx)
     }
     return spaceIdx >= 0 ? stripped.slice(spaceIdx + 1).trim() : ''
+  }
+
+  // A QUEEN MAY BE ASLEEP (script-preloader.ts #sleeping): her word is known
+  // from the package's docs before her module is loaded. The word still
+  // claims the line; running it wakes her first.
+  #preloader(): { sleepingWords?: () => Array<{ command: string }>; wakeWord?: (word: string) => Promise<unknown> } | undefined {
+    return get('@hypercomb.social/ScriptPreloader') as any
+  }
+
+  #asleep(word: string): boolean {
+    const wanted = word.toLowerCase()
+    return !!this.#preloader()?.sleepingWords?.().some(entry => entry.command === wanted)
+  }
+
+  async #wakeQueen(word: string): Promise<any | null> {
+    const found = this.#findQueen(word)
+    if (found || !this.#asleep(word)) return found
+    await this.#preloader()?.wakeWord?.(word)
+    return this.#findQueen(word)
   }
 
   #findQueen(behaviourName: string): any | null {

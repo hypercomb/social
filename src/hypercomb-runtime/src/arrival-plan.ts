@@ -17,6 +17,11 @@ export type BeeClass = {
   readonly sig: string
   /** IoC keys the bee declares it reads (`deps` in its layer doc). */
   readonly needs: readonly string[]
+  /** A queen's word, and whether loading her only readies it — then she
+   *  sleeps until the word is used (essentials scripts/passive-queen.ts). */
+  readonly command?: string
+  readonly description?: string
+  readonly passive?: boolean
 }
 
 /** `@domain.com/ClassName` → `ClassName`; a bare class name stays itself. */
@@ -39,7 +44,15 @@ export const beeClassesOfDocs = (docs: unknown): Array<[string, BeeClass]> => {
     const needs = deps && typeof deps === 'object'
       ? Object.values(deps as Record<string, unknown>).filter((v): v is string => typeof v === 'string')
       : []
-    out.push([className, { sig, needs }])
+    const command = (doc as { command?: unknown }).command
+    const description = (doc as { description?: unknown }).description
+    out.push([className, {
+      sig,
+      needs,
+      ...(typeof command === 'string' && command ? { command } : {}),
+      ...(typeof description === 'string' && description ? { description } : {}),
+      ...((doc as { passive?: unknown }).passive === true ? { passive: true } : {}),
+    }])
   }
   return out
 }

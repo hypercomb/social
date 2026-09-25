@@ -20,6 +20,7 @@ import { spawnSync } from 'child_process'
 import { createHash } from 'node:crypto'
 import { builtinModules } from 'node:module'
 import { TRANSFER_PACKS_MEANING, encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.js'
+import { passiveQueen } from './passive-queen.js'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
@@ -403,6 +404,29 @@ interface BeeDocEntry {
   links: { label: string; url: string; purpose?: string }[]
   command: string | null
   aliases: string[]
+  /** A queen whose loading only readies her word: she sleeps until it is
+   *  used (passive-queen.ts). Decided fresh every build — it depends on the
+   *  other sources, not only her own, so it never rides the doc cache. */
+  passive?: boolean
+}
+
+/** Every source file of the package, for rules that ask what OTHER files say
+ *  (passive-queen.ts). Generated indexes name every key and are left out. */
+let packageSources: Map<string, string> | null = null
+const allPackageSources = (): Map<string, string> => {
+  if (packageSources) return packageSources
+  packageSources = new Map()
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (/\.ts$/.test(entry.name) && !/\.spec\.ts$/.test(entry.name) && !/^(essentials-keys|side-effects|preload-effects)\.ts$/.test(entry.name)) {
+        packageSources!.set(relative(SRC_ROOT, full).replace(/\\/g, '/'), readFileSync(full, 'utf8'))
+      }
+    }
+  }
+  walk(SRC_ROOT)
+  return packageSources
 }
 
 const kindFromName = (className: string): BeeDocEntry['kind'] | null =>
@@ -1346,6 +1370,12 @@ const main = async (): Promise<void> => {
         newDocCache[src.entry] = { contentSignature: beeFileLeaf.sig, doc: beeDoc }
       }
       docCacheMisses++
+    }
+
+    if (beeDoc?.kind === 'queen') {
+      const rel = relative(SRC_ROOT, src.entry).replace(/\\/g, '/')
+      const verdict = passiveQueen(rel, allPackageSources().get(rel) ?? readFileSync(src.entry, 'utf8'), allPackageSources())
+      beeDoc = { ...beeDoc, passive: verdict.passive }
     }
 
     if (beeDoc) {
