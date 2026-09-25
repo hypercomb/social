@@ -4,6 +4,7 @@
 // is a cold load with the plan injected at /site.json, judged by one
 // selector appearing. Prints the plan, as IoC-style names, when it settles.
 //   node scripts/visitor-plan-search.cjs <url> <success-selector> <dist-dir> [Face,...]
+// CLICK=<selector> presses something first (a game's start); success is judged after.
 // HC_VERSION targets a worker version staged at 0% (it must carry the arrival
 // preloader). <dist-dir> is the essentials build the visitor ships.
 const { chromium } = require('playwright')
@@ -48,6 +49,13 @@ const works = async (names) => {
       await route.fulfill({ response, json: { ...(await response.json()), plan } })
     })
     await page.goto(url, { waitUntil: 'domcontentloaded' })
+    // CLICK="<selector>": the arrival must also ANSWER — press this first, and
+    // only then look for the success selector (a start button that shows but
+    // starts nothing is not an arrival).
+    if (process.env.CLICK) {
+      const pressed = await page.locator(process.env.CLICK).first().click({ timeout: WAIT }).then(() => true, () => false)
+      if (!pressed) return false
+    }
     return await page.locator(success).first().waitFor({ state: 'visible', timeout: WAIT }).then(() => true, () => false)
   } finally {
     await browser.close()
