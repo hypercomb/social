@@ -2647,6 +2647,8 @@
   "aliases.refused-is-the-command": "それはすでに正式名です",
   "aliases.refused-is-another-command": "別のビヘイビアがその名前に応答します",
   "aliases.refused-taken": "その名前は別のビヘイビアに付けています",
+  "swarm.availability-hold.title": "スワーム参加中はここから共有中",
+  "swarm.availability-hold.message": "滞在している間、あなたのタイルは他の参加者に届きます。退出後も届くようにするには、ホストパネルでホストを設定するか /use-live-relay と入力してください。",
   "swarm.needs-host.title": "スワーム参加中はここから共有中",
   "swarm.needs-host.message": "滞在している間、あなたのタイルは他の参加者に届きます。退出後も届くようにするには、ホストパネルでホストを設定するか /use-live-relay と入力してください。"
 }

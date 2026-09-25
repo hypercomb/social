@@ -113,28 +113,49 @@ already the pattern), not faster.
 4. Community mirroring: adopters who hold bytes announce as peer sources —
    free replication with integrity guaranteed by the primitive.
 
-## Availability gate (publishing — BUILT; the swarm has none)
+## Availability gate (publishing AND the swarm — BUILT)
 
-"To publish something it already has to be available." Receipts are the
+"To share something it already has to be available." Receipts are the
 proof surface; the gate is their read side (`host-sync.service.ts` +
-`publish-branch.ts` + `invite.queen.ts`):
+`publish-branch.ts` + `swarm.drone.ts` + `invite.queen.ts`):
 
 - `HostSyncService.isClosureAvailable(sig, kind, closure)` — a closure is
   available once EVERY sig in it (markPublic's exact traversal, read-only)
   holds a confirmed read-back receipt on at least one enabled host.
   Confirmed closures memoize permanently (bytes immutable, receipts
   accrue); misses re-check only when a new receipt bumps the epoch.
-- **The swarm does not gate on it (2026-09-24).** A participant standing in
-  the swarm IS the host of what they announce — layers answer over the
-  broker, pictures over the resource subscription — so both announce
-  surfaces (the publish walk AND the personal subscribe channel) announce
-  every public child at once. The gate used to hold back every tile whose
-  closure had no host receipt, and a hive with no host configured (the
-  default) had none, so it announced nothing and the swarm read as dead.
-  Uploads still stage (`markPublic`) so the tiles outlive the sharer's
-  session; the drain reports `host-sync:progress { done, total }` and the
-  presence strip paints "uploading N of M" while it runs. Joining with no
-  host says so once per session and never holds.
+- **Sharing requires hosting (jwize, 2026-09-25).** Both announce surfaces
+  (the publish walk AND the personal subscribe channel) announce a public
+  child only once its closure is available on a host, and hold it back
+  (retracting any earlier slot) until then. Watching a swarm and bringing
+  things in stays open to everyone; offering your own tiles means your host
+  serves them — that is the personal responsibility of joining. There is no
+  escape hatch (`hc:swarm:ungated` is gone). Joining with no host says so
+  once per session: you are watching, set a host in `/hosts` to share. This
+  supersedes the 2026-09-24 "sharer is a host while present" relaxation,
+  which re-uploaded whole hives and announced bytes nobody served after the
+  sharer left.
+- **The host is the truth; the receipt is a memo of it.** Before the drain
+  PUTs a queued entry it reconciles the entry against every target it owes:
+  a receipt on file, else one HEAD on `https://<host>/<sig>`
+  (`#hostHolds`, under the verify concurrency cap, with its own PER-HOST
+  breaker — never the self-domain audit's). A served answer mints the
+  receipt on the spot and the bytes are never sent: any non-HTML 200 is
+  bytes, and an HTML 200 is bytes only when its ETag names the sig or its
+  body hashes to it (a website page body), otherwise it is an SPA fallback
+  (`#servesSig`, the same test the push read-back and the receipt audit
+  use). 404 or a fallback page is the host asserting absence — remembered
+  for the session, so a push that then fails for its own reason never costs
+  a fresh HEAD every tick — and the push proceeds. A host paused by a 401 is
+  asked nothing and sent nothing. A browser without the ledger — new
+  profile, lost receipts pool, a publish node named for the first time —
+  discovers what the host already holds instead of re-uploading its hive.
+  Entries every target already serves are retired in that pass; the pass
+  runs four entries wide.
+- **The counter is honest.** `host-sync:progress { done, total }` counts
+  only entries the hosts actually lack: `total` is the work list after
+  reconciliation and `done` ticks once per entry sent. The presence strip
+  paints "uploading N of M" from it; the reconciliation itself is silent.
 - `/invite` refuses without hosting ("sharing requires hosting") and
   waits for the bundle's receipt (`ensureReceipt`) before declaring the
   link live.

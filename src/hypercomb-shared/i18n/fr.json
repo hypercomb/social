@@ -2590,6 +2590,8 @@
   "chat.route.summary.cardBy": "Ce résumé par {model}",
   "mesh-modal.needs-location": "un lieu est nécessaire pour rejoindre",
   "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre",
+  "swarm.availability-hold.title": "Partagé d'ici tant que vous êtes dans l'essaim",
+  "swarm.availability-hold.message": "Vos tuiles atteignent les autres tant que vous restez. Pour qu’elles restent accessibles après votre départ, définissez un hôte dans le panneau des hôtes ou tapez /use-live-relay.",
   "swarm.needs-host.title": "Partagé d'ici tant que vous êtes dans l'essaim",
   "swarm.needs-host.message": "Vos tuiles atteignent les autres tant que vous restez. Pour qu’elles restent accessibles après votre départ, définissez un hôte dans le panneau des hôtes ou tapez /use-live-relay."
 }

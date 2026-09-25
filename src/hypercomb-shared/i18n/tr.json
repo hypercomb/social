@@ -2590,6 +2590,8 @@
   "chat.route.summary.cardBy": "Bu özet: {model} modeli",
   "mesh-modal.needs-location": "katılmak için bir konum gerekli",
   "mesh-modal.needs-secret": "katılmak için bir parola gerekli",
+  "swarm.availability-hold.title": "Sürüde olduğun sürece buradan paylaşılıyor",
+  "swarm.availability-hold.message": "Kaldığın sürece karoların diğerlerine ulaşır. Ayrıldıktan sonra da erişilebilir kalmaları için host panelinden bir host ayarla ya da /use-live-relay yaz.",
   "swarm.needs-host.title": "Sürüde olduğun sürece buradan paylaşılıyor",
   "swarm.needs-host.message": "Kaldığın sürece karoların diğerlerine ulaşır. Ayrıldıktan sonra da erişilebilir kalmaları için host panelinden bir host ayarla ya da /use-live-relay yaz."
 }

@@ -2590,6 +2590,8 @@
   "chat.route.summary.cardBy": "Ringkasan ini oleh {model}",
   "mesh-modal.needs-location": "perlu lokasi untuk bergabung",
   "mesh-modal.needs-secret": "perlu kunci rahasia untuk bergabung",
+  "swarm.availability-hold.title": "Berbagi dari sini selama kamu di dalam kawanan",
+  "swarm.availability-hold.message": "Ubinmu sampai ke yang lain selama kamu tetap di sini. Agar tetap terjangkau setelah kamu pergi, atur host di panel host atau ketik /use-live-relay.",
   "swarm.needs-host.title": "Berbagi dari sini selama kamu di dalam kawanan",
   "swarm.needs-host.message": "Ubinmu sampai ke yang lain selama kamu tetap di sini. Agar tetap terjangkau setelah kamu pergi, atur host di panel host atau ketik /use-live-relay."
 }

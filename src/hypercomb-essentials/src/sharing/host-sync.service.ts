@@ -278,6 +278,7 @@ export class HostSyncService extends EventTarget {
     // "I fixed the relay, retry now" signal. Clears every host's window —
     // worst case a still-broken host costs one extra 401 before re-pausing.
     this.#unauthorizedUntil.clear()
+    this.#assertedAbsent.clear()
     void this.drain()
   }
 
@@ -300,6 +301,7 @@ export class HostSyncService extends EventTarget {
     try { localStorage.setItem(PUBLIC_HOST_KEY, '1') } catch { /* private mode — honor in-session */ }
     // The operator's "retry now" signal for THIS host.
     this.#unauthorizedUntil.delete(this.publicHostDomain())
+    this.#assertedAbsent.clear()
     void this.drain()
   }
 
@@ -881,15 +883,21 @@ export class HostSyncService extends EventTarget {
         const entries = await this.#listQueue()
         if (entries.length === 0) break
         let progressed = false
-        // Live progress for the surfaces that paint an upload (the presence
-        // strip): one tick per entry, the pass total as the denominator.
-        // Reports only — nothing waits on it.
-        let done = 0
-        const total = entries.length
-        EffectBus.emit('host-sync:progress', { done, total })
-        for (const entry of entries) {
-          done++
-          EffectBus.emit('host-sync:progress', { done, total })
+        // THE HOST IS THE TRUTH; the receipt is a memo of it. Before any
+        // byte is sent, every entry is reconciled against every target it
+        // owes: a receipt on file, or — lacking one — the host asked
+        // directly (a HEAD). A host that already serves the sig earns its
+        // receipt on the spot and is never sent the bytes again. This is
+        // what a host is FOR: it is already up to date, and a browser
+        // without the ledger (new profile, lost pool, a node named for the
+        // first time) must discover that rather than re-upload its hive.
+        // The reconciliation is silent; only real uploads are painted.
+        // A paused host (401 backoff) is asked nothing and sent nothing this
+        // pass — before this gate it received no request at all, and a HEAD
+        // per queued entry every 30 s against a capped Worker is not free.
+        // Entries owed only to paused hosts wait, uncounted.
+        type Owed = { entry: QueueEntry; applicable: SyncTarget[]; owed: SyncTarget[]; paused: number }
+        const reconcile = async (entry: QueueEntry): Promise<Owed | null> => {
           // Applicable targets for THIS sig: a public-only target requires
           // the `.public` marker — skip silently without it (the doctrine
           // gate; the marker may arrive later via markPublic).
@@ -898,12 +906,47 @@ export class HostSyncService extends EventTarget {
             if (target.publicOnly && !(await this.#isPublicMarked(entry.sig))) continue
             applicable.push(target)
           }
-          if (applicable.length === 0) continue // no destination (yet) — entry waits
-          let receipted = 0
-          let corrupt = false
+          if (applicable.length === 0) return null // no destination (yet) — entry waits
+          const owed: SyncTarget[] = []
+          let paused = 0
           for (const target of applicable) {
-            if (await this.#targetReceipted(entry.sig, target)) { receipted++; continue }
-            if (!active(target)) continue // host paused (401 backoff) — entry stays; others proceed
+            if (await this.#targetReceipted(entry.sig, target)) continue
+            if (!active(target)) { paused++; continue }
+            if (await this.#hostHolds(entry.sig, target)) continue // served already — receipted just now
+            owed.push(target)
+          }
+          return { entry, applicable, owed, paused }
+        }
+        // Reconciled CONCURRENTLY (the probes share the verify cap), so the
+        // pre-pass costs N/4 round trips, not N×T, ahead of the first byte.
+        const work: Owed[] = []
+        for (const r of await HostSyncService.#mapConcurrently(entries, HostSyncService.#VERIFY_MAX_CONCURRENT, reconcile)) {
+          if (!r) continue
+          if (r.owed.length === 0 && r.paused === 0) {
+            // Every target serves it — the entry's job was already done
+            // somewhere else. Retire it exactly as a confirmed push would.
+            await this.#removeEntry(r.entry)
+            progressed = true
+            this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: r.entry.sig } }))
+            EffectBus.emit('host:receipt', { sig: r.entry.sig })
+            continue
+          }
+          if (r.owed.length === 0) continue // owed only to paused hosts — waits, uncounted
+          work.push(r)
+        }
+        // Live progress for the surfaces that paint an upload (the presence
+        // strip): the denominator is what the hosts actually lack, and
+        // `done` ticks AFTER an entry's sends resolve — so "k of M" means k
+        // landed, and the strip clears only when the last one has.
+        // Reports only — nothing waits on it.
+        let done = 0
+        const total = work.length
+        if (total > 0) EffectBus.emit('host-sync:progress', { done, total })
+        for (const { entry, applicable, owed, paused } of work) try {
+          let receipted = applicable.length - owed.length - paused
+          let corrupt = false
+          for (const target of owed) {
+            if (!active(target)) continue // paused by an earlier 401 in THIS pass — entry stays
             const ok = await this.#pushAndReceipt(target, entry)
             if (ok === 'unauthorized') {
               // The host refused our writer key — a config gap, not a
@@ -925,7 +968,11 @@ export class HostSyncService extends EventTarget {
                   `ioc.get('@diamondcoreprocessor.com/HostSyncService').enable() to retry now: ` +
                   `${pubkey || '(no signer available)'}`
               )
-              EffectBus.emit('sync:state', { host: target.domain, pending: entries.length, status: 'unauthorized' })
+              EffectBus.emit('sync:state', {
+                host: target.domain,
+                pending: work.filter(w => w.owed.includes(target)).length,
+                status: 'unauthorized',
+              })
               continue
             }
             if (ok === 'corrupt') { corrupt = true; break }
@@ -964,6 +1011,9 @@ export class HostSyncService extends EventTarget {
             this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: entry.sig } }))
             EffectBus.emit('host:receipt', { sig: entry.sig })
           }
+        } finally {
+          done++
+          EffectBus.emit('host-sync:progress', { done, total })
         }
         if (!progressed) break // nothing advanced (hosts unreachable/paused) — stop; timer retries
       }
@@ -1052,10 +1102,12 @@ export class HostSyncService extends EventTarget {
         // queued burst still fired (measured: 1000 HEADs against a 503ing
         // host despite the breaker).
         if (Date.now() < this.#probesPausedUntil) { this.#verifiedOnHost.add(sig); return true }
-        const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
-        const res = await fetch(`${scheme}://${host}/${sig}`, { method: 'HEAD', cache: 'no-store' })
-        if (res.ok) { this.#probeFailStreak = 0; this.#verifiedOnHost.add(sig); return true }
-        if (res.status === 404) {
+        const url = `${HostSyncService.#schemeFor(host)}://${host}/${sig}`
+        const res = await fetch(url, { method: 'HEAD', cache: 'no-store' })
+        if (await this.#servesSig(res, url, sig)) { this.#probeFailStreak = 0; this.#verifiedOnHost.add(sig); return true }
+        // 404 — or a page where bytes should be (an SPA fallback) — is the
+        // host ASSERTING the sig is not served: the receipt lied.
+        if (res.status === 404 || res.ok) {
           this.#probeFailStreak = 0 // the host is alive and ASSERTING — not a failure
           // Revoke from BOTH the pool and the legacy dir — mid-migration the
           // receipt may still sit in the legacy source; leaving it there would
@@ -1147,6 +1199,7 @@ export class HostSyncService extends EventTarget {
     this.#walkedLayers.clear()
     this.#walkedResources.clear()
     this.#verifiedOnHost.clear()
+    this.#assertedAbsent.clear()
     this.#unauthorizedUntil.clear()
 
     // Every previously-receipted sig: pool + legacy source, both name
@@ -1567,8 +1620,7 @@ export class HostSyncService extends EventTarget {
       await this.#acquireVerifySlot()
       try {
         if (Date.now() < this.#servedPausedUntil) return 'unknown'
-        const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(h) ? 'http' : 'https'
-        const res = await fetch(`${scheme}://${h}/${s}`, { method: 'HEAD', cache: 'no-store' })
+        const res = await fetch(`${HostSyncService.#schemeFor(h)}://${h}/${s}`, { method: 'HEAD', cache: 'no-store' })
         if (res.ok) { this.#servedFailStreak = 0; return 'served' }
         if (res.status === 404) { this.#servedFailStreak = 0; return 'absent' } // host alive and asserting
         this.#noteServedFailure()
@@ -1643,8 +1695,7 @@ export class HostSyncService extends EventTarget {
     const path = this.#pathFor(entry.sig)
     // Loopback hosts use plain http (content-side analog of allow-loopback);
     // real domains use https.
-    const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
-    const url = `${scheme}://${host}${path}`
+    const url = `${HostSyncService.#schemeFor(host)}://${host}${path}`
 
     const auth = await this.#nip98(url, 'PUT')
     if (!auth) {
@@ -1674,26 +1725,138 @@ export class HostSyncService extends EventTarget {
       // Confirmed read-back: a fresh GET (cache-bypassing) must show the
       // host actually serving the sig. A bare PUT 200 is NOT proof — the
       // silent-drop lesson. Only a served read-back closes the loop.
-      // The receipt needs the STATUS, not the bytes — cancel the body so
-      // backup doesn't re-download every byte it just uploaded.
+      // The receipt needs the ANSWER, not the bytes — cancel the body so
+      // backup doesn't re-download every byte it just uploaded. An HTML
+      // answer is checked against the sig (#servesSig): an SPA fallback
+      // page must never mint a receipt.
       const back = await fetch(url, { cache: 'no-store' })
+      const served = await this.#servesSig(back, url, entry.sig)
       try { await back.body?.cancel() } catch { /* already drained/closed */ }
-      if (!back.ok) return false
+      if (!served) return false
     } catch {
       return false // network/CORS/host-down — retry later
     }
 
+    return this.#writeReceipt(entry.sig, target)
+  }
+
+  /** Record that a target serves a sig. The receipt is a memo of the
+   *  host's answer — written after a confirmed read-back or a HEAD that
+   *  found the sig already served. */
+  readonly #writeReceipt = async (sig: string, target: SyncTarget): Promise<boolean> => {
     try {
       const receiptsDir = await this.#getReceiptsDir()
       if (!receiptsDir) return false
-      const handle = await receiptsDir.getFileHandle(HostSyncService.#receiptName(entry.sig, target), { create: true })
+      const handle = await receiptsDir.getFileHandle(HostSyncService.#receiptName(sig, target), { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(new Uint8Array(0)) } finally { await writable.close() }
       // A new receipt can flip a closure from unavailable → available:
       // advance the epoch so the share gate re-walks stale misses.
       this.#receiptEpoch++
+      if (target.hostHash === null) this.#verifiedOnHost.add(sig)
       return true
     } catch { return false }
+  }
+
+  /** Does this answer prove the host SERVES the sig? Bytes at the flat
+   *  address (any non-HTML type) do. An HTML answer is ambiguous — an SPA
+   *  fallback page, or a held HTML resource (a website page body) — and the
+   *  primitive tells them apart: an ETag naming the sig, else the body
+   *  hashing to it. Anything else is not the sig. */
+  readonly #servesSig = async (res: Response, url: string, sig: string): Promise<boolean> => {
+    if (!res.ok) return false
+    const type = (res.headers.get('content-type') ?? '').toLowerCase()
+    if (!type.includes('text/html')) return true
+    const etag = (res.headers.get('etag') ?? '').replace(/^W\//i, '').replace(/"/g, '').trim().toLowerCase()
+    if (etag === sig) return true
+    try {
+      const body = await fetch(url, { cache: 'no-store' })
+      if (!body.ok) return false
+      return (await SignatureService.sign(await body.arrayBuffer())) === sig
+    } catch { return false }
+  }
+
+  /** Loopback answers over plain http — including any `*.localhost` name
+   *  (RFC 6761), the shape a zone's content face takes on one machine. One
+   *  rule for the probe, the push, the read-back and the audit, so they can
+   *  never disagree about which origin is "the host". */
+  static #schemeFor(host: string): 'http' | 'https' {
+    return /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+  }
+
+  /** Bounded fan-out that keeps the input order. */
+  static async #mapConcurrently<T, R>(items: readonly T[], width: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+    const out: R[] = new Array(items.length)
+    let next = 0
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const i = next++
+        if (i >= items.length) return
+        out[i] = await fn(items[i]!)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(width, items.length)) }, worker))
+    return out
+  }
+
+  /** Probe health for the HEAD-before-PUT gate, PER HOST — its own state,
+   *  never the self-domain receipt audit's (#probeFailStreak and
+   *  #verifiedOnHost are keyed to #hostBase() alone, and a sick public CDN
+   *  must not blind the audit of a healthy self-domain, or vice versa). */
+  readonly #holdsHealth = new Map<string, { streak: number; pausedUntil: number }>()
+
+  /** Absence a host ASSERTED this session (404, or a page where bytes should
+   *  be), keyed host:sig. A push that then fails for its own reason (no
+   *  signer, host down) must not cost a fresh HEAD on every 30 s tick.
+   *  Cleared when something could have changed what the host holds:
+   *  reDrain(), enable(), enablePublicHost(); a landed receipt supersedes
+   *  it on its own. */
+  readonly #assertedAbsent = new Set<string>()
+
+  /** ASK THE HOST before sending: does it already serve this sig? One HEAD
+   *  on the flat address, under the verify concurrency cap and this host's
+   *  own breaker. A served answer (#servesSig) mints the receipt and returns
+   *  true — the bytes are never sent. 404, or a page instead of bytes, is
+   *  the host asserting absence → remembered, false, push. Network trouble
+   *  or 5xx asserts nothing → false; the push that follows fails the same
+   *  way and waits for the retry timer, and a streak pauses this host's
+   *  probes. */
+  readonly #hostHolds = async (sig: string, target: SyncTarget): Promise<boolean> => {
+    const host = target.domain
+    const key = `${host}:${sig}`
+    if (this.#assertedAbsent.has(key)) return false
+    const health = this.#holdsHealth.get(host) ?? { streak: 0, pausedUntil: 0 }
+    this.#holdsHealth.set(host, health)
+    if (Date.now() < health.pausedUntil) return false // breaker open — no probes; the push will tell
+    await this.#acquireVerifySlot()
+    try {
+      if (Date.now() < health.pausedUntil) return false // re-check after the slot wait (burst)
+      const url = `${HostSyncService.#schemeFor(host)}://${host}${this.#pathFor(sig)}`
+      const res = await fetch(url, { method: 'HEAD', cache: 'no-store' })
+      if (res.ok || res.status === 404) health.streak = 0 // the host is alive and ASSERTING
+      if (await this.#servesSig(res, url, sig)) {
+        if (!(await this.#writeReceipt(sig, target))) return false
+        // A public-target receipt means the CDN serves this sig — the same
+        // attribution a confirmed push records, so adopt can answer
+        // getKnownDomains() without a mesh wait.
+        if (target.publicOnly) this.#noteAttribution(sig, host)
+        return true
+      }
+      if (res.ok || res.status === 404) { this.#assertedAbsent.add(key); return false }
+      this.#noteHoldsFailure(host, health)
+      return false
+    } catch { this.#noteHoldsFailure(host, health); return false }
+    finally { this.#verifySlots-- }
+  }
+
+  /** A held-probe failed without the host asserting anything; on a streak,
+   *  pause THIS host's probes so a sick host stops costing HEADs. */
+  #noteHoldsFailure(host: string, health: { streak: number; pausedUntil: number }): void {
+    if (++health.streak >= HostSyncService.#PROBE_FAIL_STREAK_MAX && Date.now() >= health.pausedUntil) {
+      health.pausedUntil = Date.now() + HostSyncService.#PROBE_PAUSE_MS
+      health.streak = 0
+      console.warn(`[host-sync] ${host} unhealthy — pausing held-probes for ${HostSyncService.#PROBE_PAUSE_MS / 60000}min; pushes will tell`)
+    }
   }
 
   /**

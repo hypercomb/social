@@ -2590,6 +2590,8 @@
   "chat.route.summary.cardBy": "Este resumo por {model}",
   "mesh-modal.needs-location": "é necessário um local para entrar",
   "mesh-modal.needs-secret": "é necessário um segredo para entrar",
+  "swarm.availability-hold.title": "Compartilhando daqui enquanto você está no enxame",
+  "swarm.availability-hold.message": "Seus blocos chegam aos outros enquanto você ficar. Para mantê-los acessíveis depois de sair, defina um host no painel de hosts ou digite /use-live-relay.",
   "swarm.needs-host.title": "Compartilhando daqui enquanto você está no enxame",
   "swarm.needs-host.message": "Seus blocos chegam aos outros enquanto você ficar. Para mantê-los acessíveis depois de sair, defina um host no painel de hosts ou digite /use-live-relay."
 }

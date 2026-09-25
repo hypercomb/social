@@ -2590,6 +2590,8 @@
   "chat.route.summary.cardBy": "이 요약: {model} 모델",
   "mesh-modal.needs-location": "참여하려면 위치가 필요합니다",
   "mesh-modal.needs-secret": "참여하려면 비밀키가 필요합니다",
+  "swarm.availability-hold.title": "스웜에 있는 동안 여기서 공유 중",
+  "swarm.availability-hold.message": "머무는 동안 타일이 다른 참가자에게 전달됩니다. 떠난 뒤에도 접근 가능하게 하려면 호스트 패널에서 호스트를 설정하거나 /use-live-relay 를 입력하세요.",
   "swarm.needs-host.title": "스웜에 있는 동안 여기서 공유 중",
   "swarm.needs-host.message": "머무는 동안 타일이 다른 참가자에게 전달됩니다. 떠난 뒤에도 접근 가능하게 하려면 호스트 패널에서 호스트를 설정하거나 /use-live-relay 를 입력하세요."
 }

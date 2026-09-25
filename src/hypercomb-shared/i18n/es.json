@@ -2590,6 +2590,8 @@
   "chat.route.summary.cardBy": "Este resumen, por {model}",
   "mesh-modal.needs-location": "se necesita una ubicación para unirse",
   "mesh-modal.needs-secret": "se necesita un secreto para unirse",
+  "swarm.availability-hold.title": "Compartiendo desde aquí mientras estás en el enjambre",
+  "swarm.availability-hold.message": "Tus fichas llegan a los demás mientras te quedes. Para que sigan accesibles cuando salgas, define un host en el panel de hosts o escribe /use-live-relay.",
   "swarm.needs-host.title": "Compartiendo desde aquí mientras estás en el enjambre",
   "swarm.needs-host.message": "Tus fichas llegan a los demás mientras te quedes. Para que sigan accesibles cuando salgas, define un host en el panel de hosts o escribe /use-live-relay."
 }

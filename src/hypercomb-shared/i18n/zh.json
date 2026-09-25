@@ -2590,6 +2590,8 @@
   "chat.route.summary.cardBy": "此摘要由 {model} 撰写",
   "mesh-modal.needs-location": "加入需要一个位置",
   "mesh-modal.needs-secret": "加入需要一个密钥",
+  "swarm.availability-hold.title": "在蜂群中时从这里共享",
+  "swarm.availability-hold.message": "只要你在，其他人就能收到你的方块。要在离开后仍可访问，请在主机面板中设置主机或输入 /use-live-relay。",
   "swarm.needs-host.title": "在蜂群中时从这里共享",
   "swarm.needs-host.message": "只要你在，其他人就能收到你的方块。要在离开后仍可访问，请在主机面板中设置主机或输入 /use-live-relay。"
 }

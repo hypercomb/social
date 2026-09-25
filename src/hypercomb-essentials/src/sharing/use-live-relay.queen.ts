@@ -26,8 +26,9 @@
 //      preserving a stale room here.
 //   3. public — the same guarded mesh.togglePublic gesture the keymap uses
 //      (only when not already public; never toggles OFF).
-//   4. (retired) the availability gate — the swarm has none now: the sharer
-//      serves what they announce while present, so nothing is held back.
+//   4. the availability gate STANDS (jwize, 2026-09-25): sharing requires
+//      hosting. Your public tiles announce once your host serves them; the
+//      drain asks the host before it sends, so a hosted hive is quick.
 //
 // Sharing CONTENT stays a deliberate act (world mode / in-zone creates are
 // auto-public) — this command makes the PARTICIPANT work, it does not

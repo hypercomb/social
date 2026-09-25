@@ -2590,6 +2590,8 @@
   "chat.route.summary.cardBy": "Questo riepilogo da {model}",
   "mesh-modal.needs-location": "serve un luogo per unirsi",
   "mesh-modal.needs-secret": "serve un segreto per unirsi",
+  "swarm.availability-hold.title": "Condivisione da qui finché sei nello sciame",
+  "swarm.availability-hold.message": "Le tue tessere raggiungono gli altri finché resti. Per tenerle raggiungibili dopo che esci, imposta un host nel pannello host o digita /use-live-relay.",
   "swarm.needs-host.title": "Condivisione da qui finché sei nello sciame",
   "swarm.needs-host.message": "Le tue tessere raggiungono gli altri finché resti. Per tenerle raggiungibili dopo che esci, imposta un host nel pannello host o digita /use-live-relay."
 }
