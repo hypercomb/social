@@ -1448,7 +1448,7 @@ export class SwarmAdoptDrone extends Drone {
   }
 
   /** Sync an ALREADY-RESOLVED branch — the shared tail of #syncPeerTile,
-   *  also driven by the static-hive boot pass (hive-visit.drone.ts), where
+   *  also driven by the static-hive boot pass (hive-visit.boot.drone.ts), where
    *  the publisher's current head comes from a signed hive index instead of
    *  a live broadcast. Auto-sync semantics: never clears tombstones (the
    *  caller skips revoked targets), announces a landed update visibly. */

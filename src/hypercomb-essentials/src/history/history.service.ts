@@ -1996,7 +1996,7 @@ export class HistoryService {
   //
   // A preview is a virtual head seeded at a path the visitor does NOT own:
   // a statically-hosted branch resolved from a publisher-signed hive index
-  // (sharing/hive-visit.drone.ts). It rides the SAME session-only seed
+  // (sharing/hive-visit.boot.drone.ts). It rides the SAME session-only seed
   // machinery as pasted-subtree resolution — renders through the one real
   // render path, browsable, gone on refresh — with two extra guarantees:
   //   1. NOTHING persists: commitLayer refuses to materialize a preview

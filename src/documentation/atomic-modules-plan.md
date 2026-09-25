@@ -387,6 +387,11 @@ boot bees so far:
   history's own builds and snapshots slots.
 - `sharing/sharing.boot.drone.ts` and `commands/commands.boot.drone.ts` —
   see batches 6 and 8.
+- `sharing/hive-visit.boot.drone.ts` (2026-09-24) — HiveVisitDrone, the
+  engine a published site opens with. It sat in the background wave of ~255
+  bees, so every visitor waited for all of them before the site could open,
+  and a stalled wave stranded the cover ("read-only visit engine did not
+  become ready"). 11.5 KB in the boot lane.
 
 **Batch 4 — BUILT and browser-verified 2026-09-22:** navigation, history.
 Besides the boot bees: the zoom bee registers the mousewheel input too (it

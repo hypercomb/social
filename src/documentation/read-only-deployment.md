@@ -289,7 +289,7 @@ somewhere else.
 
 The caller brings the domain with the request and uses it to get resources —
 because a domain is only a WHERE, never a WHAT. The protocol (already built
-in `sharing/hive-visit.drone.ts` for hive-links; the resolver's `--from` is
+in `sharing/hive-visit.boot.drone.ts` for hive-links; the resolver's `--from` is
 the same move from the command line):
 
 1. **The meta layer names everything**: publisher pubkey, place (segments),
@@ -431,7 +431,7 @@ go stale.
 | Serve sig-addressed content from a static host | Proven by the DCP bundle (flat `<sig>` files + `manifest.json` on Azure SWA) and the R2 worker |
 | Walk + verify a creation's closure at publish time | `scripts/publish-content.ts` (seed → BFS → sha256 gate) |
 | Resolvable "current head of a branch" pointer | Signed hive index (`sharing/hive-pointer.ts`, `fetchHiveManifestFromAny`) — pubkey-verified, host-independent |
-| Render a foreign branch with ZERO writes | `history.seedPreviewHead` + the preview state (`sharing/hive-visit.drone.ts`): session-only virtual head, commits refused, refresh forgets |
+| Render a foreign branch with ZERO writes | `history.seedPreviewHead` + the preview state (`sharing/hive-visit.boot.drone.ts`): session-only virtual head, commits refused, refresh forgets |
 | Localize a closure as inert cache, not adoption | `broker.adopt(head, { layersOnly, silent })` |
 | Strip UI without forking templates | Shell-surface registry — inclusion IS registration; a surface that never registers never mounts |
 | Load signed bees + deps into a running shell | `ensure-install.ts` bundled path (`installFromBundled`), import map, `ScriptPreloader` |

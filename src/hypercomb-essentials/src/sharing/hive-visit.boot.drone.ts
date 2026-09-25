@@ -1,4 +1,4 @@
-// sharing/hive-visit.drone.ts
+// sharing/hive-visit.boot.drone.ts
 //
 // A hive-link arrives — what happens depends on WHO you are.
 //

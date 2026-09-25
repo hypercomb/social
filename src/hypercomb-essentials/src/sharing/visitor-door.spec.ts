@@ -26,10 +26,10 @@ import { routeWithin } from './visitor-door.view.js'
 const here = dirname(fileURLToPath(import.meta.url))
 const CAPTURE = readFileSync(join(here, '..', '..', '..', 'hypercomb-shared', 'core', 'invite-capture.ts'), 'utf8')
 const WORKER = readFileSync(join(here, 'meeting-invite.worker.ts'), 'utf8')
-const VISIT = readFileSync(join(here, 'hive-visit.drone.ts'), 'utf8')
+const VISIT = readFileSync(join(here, 'hive-visit.boot.drone.ts'), 'utf8')
 const DOOR = readFileSync(join(here, 'visitor-door.view.ts'), 'utf8')
 // The hive-visit bee defines the door element and adds its surface (atomic-modules-plan.md).
-const VISIT_BEE = readFileSync(join(here, 'hive-visit.drone.ts'), 'utf8')
+const VISIT_BEE = readFileSync(join(here, 'hive-visit.boot.drone.ts'), 'utf8')
 
 const K = 'e'.repeat(64)
 
