@@ -13,8 +13,8 @@
 //
 // An origin that is also a website stages `welcome.json` next to the shell
 // and the card reads it: a title and a tagline in place of the defaults, the
-// links that belong on ITS front page (the first one leads), and the hives
-// live on its zone. Nothing about any particular domain is compiled in — the
+// links that belong on ITS front page (the first one leads). Active hives
+// arrive through the public offering pool. No particular domain is compiled in — the
 // platform's own doors are the shim's provenance, not a host's identity, and
 // the footer never repeats a door the operator already put on the page.
 // Absent is the normal case.
@@ -24,14 +24,10 @@
 // address or a path on this origin, so nothing in the file can become script.
 
 export type WelcomeLink = { label: string; href: string; note: string }
-export type WelcomeDoor = { title: string; host: string }
-
 export type Welcome = {
   title: string
   tagline: string
   links: WelcomeLink[]
-  doorsLabel: string
-  doors: WelcomeDoor[]
 }
 
 /** The card, resolved: what it shows whether or not anything was staged. */
@@ -39,8 +35,6 @@ export type FrontDoor = {
   readonly title: string
   readonly tagline: string
   readonly links: readonly WelcomeLink[]
-  readonly doorsLabel: string
-  readonly doors: readonly WelcomeDoor[]
   /** Where the platform explains itself, minus any door the staged links
    *  already open — `/tour/` on hypercomb.com IS the tour. */
   readonly footer: readonly WelcomeLink[]
@@ -48,8 +42,7 @@ export type FrontDoor = {
 
 /** What every host is, until its operator says otherwise. */
 export const DEFAULT_TAGLINE =
-  'A hypercomb host. What it publishes is named by its own content, ' +
-  'taken by replication, and verified by whoever takes it.'
+  'Discover creations, inspect their source, and choose what to carry into your hive.'
 
 /** The platform's own doors. A host is a directory of files that somebody
  *  chose to serve; these say what the files are for, and they are the same
@@ -61,8 +54,6 @@ export const PLATFORM_LINKS: readonly WelcomeLink[] = [
   { label: 'source', href: 'https://github.com/hypercomb/social', note: 'AGPL-3.0' },
   { label: 'licensing', href: 'https://github.com/hypercomb/social/blob/main/documentation/licensing.md', note: '' },
 ]
-
-const HOSTNAME_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
 
 const text = (value: unknown, max: number): string =>
   typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, max) : ''
@@ -92,18 +83,6 @@ const linksFrom = (value: unknown): WelcomeLink[] => {
   return links
 }
 
-const doorsFrom = (value: unknown): WelcomeDoor[] => {
-  if (!Array.isArray(value)) return []
-  const doors: WelcomeDoor[] = []
-  for (const entry of value.slice(0, 60)) {
-    const record = entry as Record<string, unknown>
-    const host = text(record?.host, 253).toLowerCase()
-    if (!HOSTNAME_RE.test(host)) continue
-    doors.push({ host, title: text(record?.title, 60) || host.split('.')[0] })
-  }
-  return doors
-}
-
 /** The staged file, believed only as far as each field survives its clamp.
  *  Null when nothing usable is in it. */
 export const parseWelcome = (raw: unknown): Welcome | null => {
@@ -114,10 +93,8 @@ export const parseWelcome = (raw: unknown): Welcome | null => {
     title: text(record.title, 60),
     tagline: text(record.tagline, 400),
     links: linksFrom(record.links),
-    doorsLabel: text(record.doorsLabel, 80),
-    doors: doorsFrom(record.doors),
   }
-  const empty = !welcome.title && !welcome.tagline && welcome.links.length === 0 && welcome.doors.length === 0
+  const empty = !welcome.title && !welcome.tagline && welcome.links.length === 0
   return empty ? null : welcome
 }
 
@@ -149,70 +126,15 @@ const sameDoor = (a: string, b: string, origin: string): boolean => {
   } catch { return false }
 }
 
-/** THE DEPLOYED NODES ARE AN OPERATOR'S VIEW. The hives live on a zone are
- *  staged with the rest of the front door, but a visitor is shown the details
- *  — the name, the sentence, the links, what this host publishes — and not
- *  the directory of nodes, unless this browser asks for it:
- *  `localStorage.setItem('hc:show-deployed-nodes', '1')`. */
-export const SHOW_DEPLOYED_NODES_KEY = 'hc:show-deployed-nodes'
-
-export const showsDeployedNodes = (): boolean => {
-  try {
-    const value = localStorage.getItem(SHOW_DEPLOYED_NODES_KEY)
-    return value === '1' || value === 'true'
-  } catch { return false }
-}
-
 /** The card a host shows: the staged front door where there is one, and the
  *  host's own name, the platform's sentence and the platform's doors where
  *  there is not. Pure, so the default is a fact the suite can pin. */
-export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: string, showNodes = false): FrontDoor => {
+export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: string): FrontDoor => {
   const links = welcome?.links ?? []
   return {
     title: welcome?.title || hostname,
     tagline: welcome?.tagline || DEFAULT_TAGLINE,
     links,
-    doorsLabel: welcome?.doorsLabel ?? '',
-    doors: showNodes ? welcome?.doors ?? [] : [],
     footer: PLATFORM_LINKS.filter(door => !links.some(link => sameDoor(link.href, door.href, origin))),
   }
-}
-
-/** THE LIVE DIRECTORY — every hive this domain opens a door for, read from the
- *  host's own `/publications.json` (the worker answers it on every door, and
- *  it lists only what a publisher's SIGNED index switches on here). A staged
- *  welcome.json still leads when it names doors; this is the default, so an
- *  apex is the entrance to its public hives with nothing hand-kept.
- *
- *  A door counts when its host is this domain or under it. The shape is
- *  validated, never trusted — an SPA fallback answers any path 200 with HTML. */
-export const readPublicDoors = async (zone: string): Promise<WelcomeDoor[]> => {
-  const here = String(zone ?? '').trim().toLowerCase()
-  if (!here) return []
-  try {
-    const response = await fetch('/publications.json', { cache: 'no-store' })
-    if (!response.ok) return []
-    return publicDoorsIn(await response.json(), here)
-  } catch { return [] }
-}
-
-/** The pure half of readPublicDoors — one door per hive, on this domain. */
-export const publicDoorsIn = (ledger: unknown, zone: string): WelcomeDoor[] => {
-  const sites = (ledger as { sites?: unknown })?.sites
-  if (!Array.isArray(sites)) return []
-  const doors: WelcomeDoor[] = []
-  const seen = new Set<string>()
-  for (const site of sites as Record<string, unknown>[]) {
-    const published = Array.isArray(site?.['publishers']) &&
-      (site['publishers'] as Record<string, unknown>[]).some(p => typeof p?.['head'] === 'string' && p['head'])
-    if (!published) continue
-    const hosts = Array.isArray(site['hosts']) ? site['hosts'] as Record<string, unknown>[] : []
-    const door = hosts
-      .map(h => String(h?.['host'] ?? '').toLowerCase())
-      .find(h => h !== zone && h.endsWith(`.${zone}`))
-    if (!door || seen.has(door)) continue
-    seen.add(door)
-    doors.push({ title: String(site['title'] ?? '') || door.split('.')[0]!, host: door })
-  }
-  return doors.sort((a, b) => a.title.localeCompare(b.title))
 }

@@ -6,7 +6,7 @@
 // field survives its clamp.
 
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_TAGLINE, PLATFORM_LINKS, frontDoorOf, parseWelcome, publicDoorsIn } from './welcome'
+import { DEFAULT_TAGLINE, PLATFORM_LINKS, frontDoorOf, parseWelcome } from './welcome'
 
 describe('parseWelcome — the staged file is data', () => {
   it('keeps a path on this origin and a plain web address; drops anything that could become script', () => {
@@ -27,7 +27,7 @@ describe('parseWelcome — the staged file is data', () => {
     ])
   })
 
-  it('clamps text, folds a door to a lowercase hostname, and refuses one that is not a hostname', () => {
+  it('clamps text and ignores the former staged door list', () => {
     const welcome = parseWelcome({
       title: 'x'.repeat(80),
       tagline: '  two   words  ',
@@ -39,10 +39,8 @@ describe('parseWelcome — the staged file is data', () => {
     })
     expect(welcome?.title).toHaveLength(60)
     expect(welcome?.tagline).toBe('two words')
-    expect(welcome?.doors).toEqual([
-      { title: 'Revolución', host: 'revolucion.hypercomb.com' },
-      { title: 'susan', host: 'susan.hypercomb.com' },
-    ])
+    expect('doors' in (welcome ?? {})).toBe(false)
+    expect(parseWelcome({ doors: [{ host: 'susan.hypercomb.com' }] })).toBeNull()
   })
 
   it('a file with nothing usable in it is no front door at all', () => {
@@ -59,7 +57,6 @@ describe('frontDoorOf — the default experience, and a staged one on top', () =
     expect(door.title).toBe('my-hive.pages.dev')
     expect(door.tagline).toBe(DEFAULT_TAGLINE)
     expect(door.links).toEqual([])
-    expect(door.doors).toEqual([])
     expect(door.footer).toEqual(PLATFORM_LINKS)
   })
 
@@ -71,8 +68,6 @@ describe('frontDoorOf — the default experience, and a staged one on top', () =
         { label: 'Watch the tour', href: '/tour/', note: '' },
         { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: '' },
       ],
-      doorsLabel: '',
-      doors: [{ title: 'susan', host: 'susan.hypercomb.com' }],
     }, 'hypercomb.com', 'https://hypercomb.com')
     expect(door.title).toBe('hypercomb')
     expect(door.tagline).toBe('An open software platform.')
@@ -80,45 +75,9 @@ describe('frontDoorOf — the default experience, and a staged one on top', () =
   })
 
   it('a staged title or tagline that is empty falls back to the default, field by field', () => {
-    const door = frontDoorOf({ title: '', tagline: '', links: [], doorsLabel: '', doors: [{ title: 'a', host: 'a.example.com' }] },
-      'host.example', 'https://host.example', true)
+    const door = frontDoorOf({ title: '', tagline: '', links: [] },
+      'host.example', 'https://host.example')
     expect(door.title).toBe('host.example')
     expect(door.tagline).toBe(DEFAULT_TAGLINE)
-    expect(door.doors).toHaveLength(1)
-  })
-
-  it('the deployed nodes stay off the card unless the browser asks for them; every other detail shows', () => {
-    const staged = {
-      title: 'hypercomb', tagline: 'An open software platform.',
-      links: [{ label: 'Watch the tour', href: '/tour/', note: '' }],
-      doorsLabel: 'live on hypercomb.com · 1 hive',
-      doors: [{ title: 'susan', host: 'susan.hypercomb.com' }],
-    }
-    const visitor = frontDoorOf(staged, 'hypercomb.com', 'https://hypercomb.com')
-    expect(visitor.doors).toEqual([])
-    expect(visitor.title).toBe('hypercomb')
-    expect(visitor.links).toHaveLength(1)
-    expect(frontDoorOf(staged, 'hypercomb.com', 'https://hypercomb.com', true).doors).toEqual(staged.doors)
-  })
-})
-
-describe('publicDoorsIn — the apex lists the hives switched on for it', () => {
-  const ledger = {
-    sites: [
-      { title: 'Susan', lineage: 'susan', hosts: [{ host: 'susan.realones.online' }, { host: 'susan.hypercomb.com' }], publishers: [{ head: 'a'.repeat(64) }] },
-      { title: 'Dylan', lineage: 'dylan', hosts: [{ host: 'dylan.hypercomb.com' }], publishers: [{ head: 'b'.repeat(64) }] },
-      { title: 'Held', lineage: 'held', hosts: [{ host: 'held.realones.online' }], publishers: [{ head: null }] },
-      { title: 'Apex', lineage: 'realones.online', hosts: [{ host: 'realones.online' }], publishers: [{ head: 'c'.repeat(64) }] },
-    ],
-  }
-
-  it('keeps only published hives with a door under this domain', () => {
-    expect(publicDoorsIn(ledger, 'realones.online')).toEqual([{ title: 'Susan', host: 'susan.realones.online' }])
-    expect(publicDoorsIn(ledger, 'hypercomb.com').map(d => d.host)).toEqual(['dylan.hypercomb.com', 'susan.hypercomb.com'])
-  })
-
-  it('an SPA fallback or garbage is no directory', () => {
-    expect(publicDoorsIn('<!doctype html>', 'realones.online')).toEqual([])
-    expect(publicDoorsIn({ sites: 'nope' }, 'realones.online')).toEqual([])
   })
 })

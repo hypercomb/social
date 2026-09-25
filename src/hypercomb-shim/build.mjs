@@ -20,6 +20,7 @@
 // uploads (src/hypercomb-web/dist/hypercomb-web/browser).
 
 import { build } from 'esbuild'
+import { compile } from 'sass'
 import { createHash } from 'node:crypto'
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
@@ -65,6 +66,12 @@ if (!pure && !(await exists(resolve(staticRoot, 'vendor', 'pixi.runtime.js')))) 
 }
 await cp(staticRoot, dist, { recursive: true })
 await cp(resolve(here, 'index.html'), resolve(dist, 'index.html'))
+// The cold front door reads the same theme values as the full shells. Compile
+// only their shared token sheet; Sass is a build tool and ships no runtime code.
+const themeCss = compile(resolve(here, '..', 'hypercomb-shared', 'styles', '_material-tokens.scss'), {
+  style: 'compressed',
+}).css
+await writeFile(resolve(dist, 'theme.css'), themeCss, 'utf8')
 if (pure) {
   // A cold harness has no renderer. A package that needs Pixi may provide it;
   // the installable seed must not carry one particular rendering library.

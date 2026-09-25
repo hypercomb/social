@@ -1,0 +1,122 @@
+name: Build Minimal Host
+
+# Device bootstrap only. Creations and revisions are published through hives.
+on:
+  workflow_dispatch:
+  push:
+    branches: [development, main]
+    paths:
+      - "src/hypercomb-shim/**"
+      - "src/hypercomb-client/**"
+      - "src/hypercomb-core/**"
+      - "src/hypercomb-runtime/**"
+      - "src/hypercomb-shared/styles/_material-tokens.scss"
+      - "src/package.json"
+      - "src/package-lock.json"
+      - ".github/workflows/build-minimal-host.yml"
+
+concurrency:
+  group: minimal-host-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            bundle: nsis
+          - name: macos-arm64
+            os: macos-15
+            bundle: dmg
+          - name: macos-x64
+            os: macos-15-intel
+            bundle: dmg
+          - name: linux-x64
+            os: ubuntu-24.04
+            bundle: deb
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            bundle: deb
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/hypercomb-target
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.1"
+          cache: npm
+          cache-dependency-path: src/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux WebKit dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev build-essential patchelf
+
+      - name: Install build dependencies
+        working-directory: src
+        run: npm ci
+
+      - name: Verify the native host contract
+        working-directory: src/hypercomb-client
+        run: cargo test --release -p hypercomb-protocol -p hypercomb-store -p hypercomb-host -p hypercomb-serve
+
+      - name: Build the pure desktop installer
+        working-directory: src/hypercomb-client/app
+        run: npm exec --yes --package=@tauri-apps/cli@2 -- tauri build --config tauri.minimal.conf.json --bundles ${{ matrix.bundle }} --no-sign --ci
+
+      - name: Build the headless host
+        working-directory: src/hypercomb-client
+        run: cargo build --release -p hypercomb-serve
+
+      - name: Pack npm and static server payloads
+        if: matrix.name == 'linux-x64'
+        run: |
+          cp src/hypercomb-shim/dist/pin "$RUNNER_TEMP/desktop-pin"
+          (cd src/hypercomb-shim && npm pack --pack-destination "$RUNNER_TEMP")
+          cmp "$RUNNER_TEMP/desktop-pin" src/hypercomb-shim/dist/pin
+          test "$(tar -xOf "$RUNNER_TEMP"/hypercomb-host-*.tgz package/dist/pin)" = "$(cat "$RUNNER_TEMP/desktop-pin")"
+          tar -C src/hypercomb-shim/dist -czf "$RUNNER_TEMP/hypercomb-host-pure-static.tar.gz" .
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypercomb-minimal-${{ matrix.name }}
+          path: ${{ runner.temp }}/hypercomb-target/release/bundle/${{ matrix.bundle }}/*
+          if-no-files-found: error
+
+      - name: Upload headless host
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypercomb-serve-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/hypercomb-target/release/hypercomb-serve
+            ${{ runner.temp }}/hypercomb-target/release/hypercomb-serve.exe
+          if-no-files-found: error
+
+      - name: Upload npm and static payloads
+        if: matrix.name == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypercomb-pure-server-payloads
+          path: |
+            ${{ runner.temp }}/hypercomb-host-*.tgz
+            ${{ runner.temp }}/hypercomb-host-pure-static.tar.gz
+          if-no-files-found: error

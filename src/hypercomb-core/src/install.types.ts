@@ -136,8 +136,11 @@ export interface InstallProvider {
   unpick(path: string): Promise<InstallOutcomeInfo>
   /** Make a root yours through the one verified, gated acquisition. This is
    *  the participant taking the WHOLE root (Update all): a pick the root moves
-   *  past is released, except a confirmed downgrade or a trial taken by hand. */
-  acquire(root: string, zones: readonly string[]): Promise<InstallOutcomeInfo>
+   *  past is released, except a confirmed downgrade or a trial taken by hand.
+   *  `onHeld` is told each file's signature the moment it is held here — read
+   *  back or fetched — so the window can show the update moving; a shell from
+   *  before it simply never calls it. */
+  acquire(root: string, zones: readonly string[], options?: { onHeld?: (sig: string) => void }): Promise<InstallOutcomeInfo>
   /** Re-write the activation record from what is held — the repoint a toggle
    *  needs. False when the held selection does not resolve. */
   applyUnits(): Promise<boolean>

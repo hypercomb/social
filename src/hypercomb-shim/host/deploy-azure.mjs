@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const shim = resolve(here, '..')
-const dist = resolve(shim, 'dist')
+const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(shim, 'dist'))
 const SIG_RE = /^[a-f0-9]{64}$/
 const PACKAGES_POOL = createHash('sha256').update('host:packages', 'utf8').digest('hex')
 

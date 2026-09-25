@@ -29,14 +29,19 @@
       })();
     </script>
 
-    <!-- Theme pre-paint, so there is no flash before ThemeService takes over. -->
+    <!-- Theme pre-paint, before the adopted ThemeService takes over. -->
     <script>
       (function () {
         try {
           var t = localStorage.getItem('hc:theme');
           var el = document.documentElement;
-          if (t === 'system') el.removeAttribute('data-theme');
-          else el.setAttribute('data-theme', t || 'dark');
+          if (t === 'system') {
+            el.removeAttribute('data-theme');
+            el.removeAttribute('data-hc-theme-mood');
+          } else {
+            el.setAttribute('data-theme', t || 'honey');
+            el.setAttribute('data-hc-theme-mood', t === 'dark' ? 'dark' : 'light');
+          }
         } catch (e) {}
       })();
     </script>
@@ -70,6 +75,7 @@
          — name EVERY family the shell ships: the script deletes the ones
          you leave out. -->
     <link rel="stylesheet" href="fonts/fonts.css?v=25dc9561e8" />
+    <link rel="stylesheet" href="theme.css" />
 
     <style>
       html, body {
@@ -77,7 +83,7 @@
         /* Lock page scrolling — the Pixi canvas owns wheel events for zoom
            and any document scrollbar would steal them. */
         overflow: hidden;
-        background-color: #05060a;
+        background-color: var(--md-surface, #0d151e);
         touch-action: manipulation;
         font-family: Inter, system-ui, sans-serif;
       }

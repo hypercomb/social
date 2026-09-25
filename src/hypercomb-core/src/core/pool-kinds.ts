@@ -151,6 +151,10 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // which left the pool that EXISTS to be fetched cross-origin reading as
   // undeclared to `registerPublishedPool`.
   ['host:packages', 'set'],
+  ['host:offerings', 'set'],
+  ['host:adoptions', 'set'],
+  ['themes:text', 'set'],
+  ['menus:quick', 'set'],
   ['pheromones:content', 'set'],
   ['pheromones:deposits', 'set'],
   // The DECLARED VOCABULARY of pheromone kinds this participant has minted or

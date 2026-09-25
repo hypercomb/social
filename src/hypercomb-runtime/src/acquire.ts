@@ -316,6 +316,19 @@ const writeTo = (
   await seedCache(cacheUrlFor(sig), buffer, contentType)
 }
 
+/** Say each file the moment it is held here — read back, or fetched and
+ *  written — so a window can show an install moving. A listener that throws
+ *  never costs the install. */
+const telling = (io: ReplicationIo, onHeld?: (sig: string) => void): ReplicationIo => {
+  if (!onHeld) return io
+  const tell = (sig: string): void => { try { onHeld(sig) } catch { /* the window's problem, not the install's */ } }
+  return {
+    ...io,
+    read: async sig => { const bytes = await io.read(sig); if (bytes) tell(sig); return bytes },
+    write: async (sig, bytes) => { await io.write(sig, bytes); tell(sig) },
+  }
+}
+
 const merge = (root: string, parts: ReplicationResult[]): ReplicationResult =>
   parts.reduce<ReplicationResult>((acc, r) => ({
     root,
@@ -490,8 +503,9 @@ export const acquire = async (
    *  (activation-authority.ts, FLOOR). Only the shell passes it.
    *  `takeAll`: the participant pressed Update all — picks the new root moves
    *  past are released. Only the install port passes it; boot repair and the
-   *  floor never do, so neither can move what the participant picked. */
-  opts: { floor?: boolean; takeAll?: boolean } = {},
+   *  floor never do, so neither can move what the participant picked.
+   *  `onHeld`: told each file's signature as it is held here. */
+  opts: { floor?: boolean; takeAll?: boolean; onHeld?: (sig: string) => void } = {},
 ): Promise<InstallOutcome> => {
   const fail = (error: string): InstallOutcome =>
     ({ ok: false, packageSig, fetched: 0, present: 0, holes: [], refused: [], error })
@@ -541,7 +555,7 @@ export const installPackage = async (
   /** Extra domains to pull the SAME signature from. Every carried host that
    *  publishes it is a byte source for it — see {@link acquire}. */
   alsoFrom: readonly string[] = [],
-  opts: { floor?: boolean; takeAll?: boolean } = {},
+  opts: { floor?: boolean; takeAll?: boolean; onHeld?: (sig: string) => void } = {},
 ): Promise<InstallOutcome> => {
   const fail = (error: string): InstallOutcome =>
     ({ ok: false, packageSig: pkg.packageSig, fetched: 0, present: 0, holes: [], refused: [], error })
@@ -603,6 +617,7 @@ export const installPackage = async (
     fetch: early?.fetch ?? fetchFrom,
     write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/${sig}`, 'application/json; charset=utf-8'),
   } satisfies ReplicationIo
+  const walkIo = telling(layersIo, opts.onHeld)
 
   // DERIVE, THEN SEAL. The inventory is read out of the layer closure the
   // package root names — never out of the arrays the host handed us. Those
@@ -610,7 +625,7 @@ export const installPackage = async (
   // one link in the chain nothing verifies: a host that shortens or pads the
   // bee list is choosing which modules `activate()` will run. Walking the
   // signed tree removes the choice (documentation/host-packages-pool.md).
-  const { inventory, result: layerResult } = await deriveInventory(pkg.packageSig, layersIo)
+  const { inventory, result: layerResult } = await deriveInventory(pkg.packageSig, walkIo)
   if (!isComplete(layerResult)) {
     return {
       ok: false,
@@ -637,16 +652,16 @@ export const installPackage = async (
   const modules = early ?? await packedFetch(pkg.packageSig, [...inventory.dependencies, ...inventory.bees], heldModules, origins, fetchFrom)
 
   const results = await Promise.all([
-    resolveInventory(pkg.packageSig, inventory.dependencies, {
+    resolveInventory(pkg.packageSig, inventory.dependencies, telling({
       read: readFrom([store.dependencies], sig => [`${sig}.js`, sig]),
       fetch: modules.fetch,
       write: writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8'),
-    } satisfies ReplicationIo),
-    resolveInventory(pkg.packageSig, inventory.bees, {
+    } satisfies ReplicationIo, opts.onHeld)),
+    resolveInventory(pkg.packageSig, inventory.bees, telling({
       read: readFrom([store.bees], sig => [`${sig}.js`, sig]),
       fetch: modules.fetch,
       write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
-    } satisfies ReplicationIo),
+    } satisfies ReplicationIo, opts.onHeld)),
   ])
 
   const held = merge(pkg.packageSig, [layerResult, ...results])
@@ -1327,8 +1342,8 @@ const installProvider: InstallProvider = {
   // window's Update all is its one caller — so it takes everything the root
   // offers. Decided here, not by the window, so an installed window from any
   // older package gets it the moment the shell ships.
-  acquire: async (root, zones) => {
-    const outcome = await acquire(root, zones, { takeAll: true })
+  acquire: async (root, zones, options) => {
+    const outcome = await acquire(root, zones, { takeAll: true, ...(options?.onHeld ? { onHeld: options.onHeld } : {}) })
     return {
       ok: outcome.ok, fetched: outcome.fetched, present: outcome.present,
       ...(outcome.error ? { error: outcome.error } : {}),

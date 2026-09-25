@@ -306,6 +306,16 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // seeded: `ensure-install` reaches it on the BOOT path, and any root walk
   // that ran first would have met the directory with the registry still cold.
   'host:packages',
+  // The public creation gallery and this participant's accepted references.
+  // Both are pools at derived meaning addresses, not root-level files.
+  'host:offerings',
+  'host:adoptions',
+  // Discoverable text-theme creations. Members name stable hashed locations;
+  // the location's current signed layer is read when a settings menu opens.
+  'themes:text',
+  // Quick-menu creations use the same member -> location -> current head path.
+  // The in-memory registry only keeps the gesture ready on the first frame.
+  'menus:quick',
   // The changes repository — one append-only record per act that touched a
   // group of tiles (see assistant/changes.ts). Colon-scoped so it can never
   // collide with a tile slugged 'changes'.

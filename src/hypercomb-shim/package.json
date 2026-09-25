@@ -9,6 +9,7 @@
   },
   "files": [
     "dist",
+    "functions",
     "host",
     "README.md"
   ],
@@ -18,7 +19,7 @@
   "scripts": {
     "build": "node build.mjs",
     "build:pure": "node build.mjs --pure",
-    "prepack": "node host/check-pure.mjs",
+    "prepack": "node build.mjs --pure && node host/check-pure.mjs",
     "build:vendor": "node scripts/build-vendor.mjs",
     "start": "node host/serve.mjs dist 4270",
     "typecheck": "npx tsc -p tsconfig.json --noEmit",
@@ -30,7 +31,9 @@
     "@hypercomb/core": "file:../hypercomb-core",
     "@hypercomb/runtime": "file:../hypercomb-runtime",
     "esbuild": "^0.27.0",
+    "nostr-tools": "^2.23.1",
     "pixi.js": "^8.16.0",
+    "sass": "^1.97.3",
     "typescript": "~5.9.3"
   },
   "keywords": [
