@@ -79,6 +79,7 @@ export const sleepers: readonly Sleeper[] = [
   { command: "frame", description: "Read this branch through a fixed pattern", load: () => import('./sequence/frame.queen') },
   { command: "pattern", description: "Draw a tile shape a frame can be read through", load: () => import('./sequence/pattern.queen') },
   { command: "sequence", description: "Open Tile arrangements or edit a named drop-target sequence", load: () => import('./sequence/sequence.queen') },
+  { command: "arrival", description: "Name what a published branch\\", load: () => import('./sharing/arrival.queen') },
   { command: "features", description: "Which features exist only for participants — readers of your published sites never load them", load: () => import('./sharing/features.queen') },
   { command: "folder-sync", description: "Back up the complete local hive to a private folder, USB disk, NAS, or cloud-synced directory", load: () => import('./sharing/folder-sync.queen') },
   { wakesOn: ["swarm:leader-moved"], load: () => import('./sharing/follow.drone') },
