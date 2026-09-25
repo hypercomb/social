@@ -171,13 +171,13 @@ export class WidgetZoomDrone {
       position: fixed; z-index: 100002; display: none;
       align-items: center; gap: 8px;
       padding: 6px 10px;
-      background: rgba(14, 18, 24, 0.94);
-      border: 1px solid rgba(126, 182, 214, 0.28);
+      background: rgba(var(--hc-panel-pane), 0.96);
+      border: 1px solid var(--hc-window-line-firm);
       border-radius: var(--hc-radius-floating, 4px);
       backdrop-filter: blur(12px);
-      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+      box-shadow: 0 8px 28px rgba(var(--hc-panel-shadow), 0.45);
       font-family: var(--hc-mono); font-size: 11px;
-      color: rgba(235, 242, 248, 0.82);
+      color: var(--hc-window-ink-loud);
       user-select: none; pointer-events: auto;
     `
     wrap.addEventListener('pointerenter', () => { this.#overSlider = true })
@@ -186,7 +186,7 @@ export class WidgetZoomDrone {
 
     const icon = document.createElement('span')
     icon.textContent = '⤢'
-    icon.style.cssText = 'opacity: 0.6; font-size: 12px;'
+    icon.style.cssText = 'color:var(--hc-window-ink-quiet);font-size:12px;'
 
     const range = document.createElement('input')
     range.type = 'range'
@@ -196,7 +196,7 @@ export class WidgetZoomDrone {
     range.value = '1'
     const i18n = (window as any).ioc?.get?.('@hypercomb.social/I18n') as import('@hypercomb/core').I18nProvider | undefined
     range.title = i18n?.t('widgets.zoom.title') ?? 'Drag to scale · double-click to reset'
-    range.style.cssText = 'width: 120px; accent-color: rgba(126, 182, 214, 0.9); cursor: pointer;'
+    range.style.cssText = 'width:120px;accent-color:var(--md-primary);cursor:pointer;'
     range.addEventListener('input', () => {
       if (!this.#active) return
       const v = parseFloat(range.value)
@@ -211,7 +211,7 @@ export class WidgetZoomDrone {
     })
 
     const label = document.createElement('span')
-    label.style.cssText = 'min-width: 34px; text-align: right; opacity: 0.7;'
+    label.style.cssText = 'min-width:34px;text-align:right;color:var(--hc-window-ink-quiet);'
 
     wrap.append(icon, range, label)
     document.body.appendChild(wrap)

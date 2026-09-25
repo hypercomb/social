@@ -14,6 +14,9 @@
 //   node scripts/drive-toolwindow-contrast.cjs [--url http://localhost:4250]
 //                                              [--out <dir>] [--engine chrome]
 //                                              [--themes light,dark,honey,bloom,sherbet,system-light,system-dark]
+//                                              [--windows chat,notes]
+//                                              [--settings]
+//                                              [--stdout-only]
 //                                              [--allow-missing]
 
 const fs = require('node:fs')
@@ -62,6 +65,10 @@ const WINDOWS = [
   { id: 'context',    effect: 'context:tile-changed', payload: {},                   sel: '.ctx-panel' },
   { id: 'publish',    effect: 'publish:render',      payload: {},                    sel: '.publish-panel' },
   { id: 'references', effect: 'references:compose',  payload: {},                    sel: '.ref-panel' },
+  { id: 'providers',  effect: 'providers:open',      payload: {},                    sel: '.hc-providers' },
+  { id: 'skills',     effect: 'skills:open',         payload: {},                    sel: '.hc-skills' },
+  { id: 'vocabulary', effect: 'vocabulary:open',     payload: {}, stamp: true,       sel: '.hc-vocab' },
+  { id: 'offers',     effect: 'offers:open',         payload: {}, stamp: true,       sel: '.hc-offers' },
   // The tile editor docks into the view with no border of its own, so every
   // caption rests on the page ground through a translucent pane — exactly the
   // case this measures. `tile:action` opens it on any label, existing or not.
@@ -164,8 +171,12 @@ async function main() {
   const url = String(arg('url', 'http://localhost:4250'))
   const outDir = path.resolve(String(arg('out', 'test-results/toolwindow-contrast')))
   const themes = String(arg('themes', 'light,dark,honey,bloom,sherbet,system-light,system-dark')).split(',').map(s => s.trim()).filter(Boolean)
+  const windowNames = String(arg('windows', '')).split(',').map(s => s.trim()).filter(Boolean)
+  const windows = windowNames.length ? WINDOWS.filter(w => windowNames.includes(w.id)) : WINDOWS
+  const settings = arg('settings', false) === true
+  const stdoutOnly = arg('stdout-only', false) === true
   const allowMissing = arg('allow-missing', false) === true
-  fs.mkdirSync(outDir, { recursive: true })
+  if (!stdoutOnly) fs.mkdirSync(outDir, { recursive: true })
 
   const { type, opts } = launcherFor(arg('engine', 'chrome'))
   const browser = await type.launch({ headless: true, ...opts })
@@ -182,7 +193,7 @@ async function main() {
       await page.evaluate((t) => window.ioc && window.ioc.get && window.ioc.get('@hypercomb.social/Theme') && window.ioc.get('@hypercomb.social/Theme').setTheme(t), systemScheme ? 'system' : theme)
       await page.waitForTimeout(400)
 
-      for (const w of WINDOWS) {
+      for (const w of windows) {
         // The dev server rebuilds under us mid-run; a reload destroys the
         // execution context and every evaluate after it throws. Re-settle and
         // retry once rather than losing the whole sweep.
@@ -191,7 +202,7 @@ async function main() {
           await page.waitForTimeout(1200)
         }
         const attempt = async () => {
-          await page.evaluate((a) => window.__hypercombEffectBus.emit(a[0], a[1]), [w.effect, w.payload])
+          await page.evaluate((a) => window.__hypercombEffectBus.emit(a[0], a[2] ? { ...a[1], at: Date.now() } : a[1]), [w.effect, w.payload, w.stamp])
           await page.waitForTimeout(650)
           return page.evaluate(MEASURE, w.sel)
         }
@@ -205,9 +216,33 @@ async function main() {
           worst: res.rows.length ? Math.min.apply(null, res.rows.map(r => r.ratio)) : null,
           failing: fails.slice(0, 14),
         })
-        if (fails.length) {
+        if (fails.length && !stdoutOnly) {
           const el = await page.$(w.sel)
           if (el) await el.screenshot({ path: path.join(outDir, theme + '-' + w.id + '.png') }).catch(() => {})
+        }
+        if (settings) {
+          const gearSelector = `:is(${w.sel}) [data-hc-panel-settings]`
+          const gear = await page.$(gearSelector)
+          if (gear) {
+            // The installer/splash can cover the pane during a theme audit.
+            // Invoke the gear's own handler so the popover can still be measured.
+            await page.evaluate(sel => document.querySelector(sel)?.click(), gearSelector)
+            const menuSelector = `:is(${w.sel}) .hc-settings`
+            await page.evaluate(sel => {
+              document.querySelector(sel)?.querySelectorAll('details[data-hc-fold]').forEach(fold => { fold.open = true })
+            }, menuSelector)
+            const menu = await page.evaluate(MEASURE, menuSelector)
+            if (menu.present) {
+              const menuFails = menu.rows.filter(r => !r.pass)
+              report.push({
+                theme, window: `${w.id}-settings`, present: true,
+                runs: menu.rows.length, fails: menuFails.length,
+                worst: menu.rows.length ? Math.min(...menu.rows.map(r => r.ratio)) : null,
+                failing: menuFails.slice(0, 14),
+              })
+            }
+            await page.keyboard.press('Escape')
+          }
         }
         // Put it away so the next window is measured alone.
         await page.keyboard.press('Escape')
@@ -218,7 +253,7 @@ async function main() {
     await browser.close()
   }
 
-  fs.writeFileSync(path.join(outDir, 'contrast.json'), JSON.stringify(report, null, 2))
+  if (!stdoutOnly) fs.writeFileSync(path.join(outDir, 'contrast.json'), JSON.stringify(report, null, 2))
   let bad = 0
   let missing = 0
   for (const r of report) {
@@ -232,7 +267,7 @@ async function main() {
     console.log('  ' + mark + '  ' + r.theme.padEnd(8) + ' ' + r.window.padEnd(11) + ' ' + String(r.runs).padStart(3) + ' runs, ' + String(r.fails).padStart(3) + ' under target, worst ' + r.worst + ':1')
     for (const f of (r.failing || [])) console.log('           .' + f.cls + ' "' + f.text + '" ' + f.ratio + ':1 (needs ' + f.need + ') ' + f.color + ' on ' + f.ground)
   }
-  console.log('\n' + bad + ' text runs under target; ' + missing + ' surfaces not exercised. Report: ' + path.join(outDir, 'contrast.json'))
+  console.log('\n' + bad + ' text runs under target; ' + missing + ' surfaces not exercised.' + (stdoutOnly ? '' : ' Report: ' + path.join(outDir, 'contrast.json')))
   process.exit(bad || (missing && !allowMissing) ? 1 : 0)
 }
 

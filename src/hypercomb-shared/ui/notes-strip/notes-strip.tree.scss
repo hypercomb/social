@@ -439,20 +439,23 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-height: 2rem;
   padding: 6px 8px;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--hc-radius-control);
   color: var(--md-on-surface);
   font-family: inherit;
   font-size: inherit;
   text-align: left;
   cursor: pointer;
 
-  &:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
+  &:hover { background: var(--hc-window-tint-strong); }
+  &:focus-visible { outline: 2px solid var(--md-primary); outline-offset: -2px; }
+  &:disabled { color: var(--hc-window-ink-quiet); cursor: default; }
 
   &.cv2-kebab-danger {
-    color: color-mix(in srgb, var(--md-error, #d33) 85%, var(--md-on-surface));
+    color: var(--hc-status-alert);
   }
 }
 
@@ -480,15 +483,15 @@
 .cv2-nest-picker-head {
   padding: 4px 8px 6px;
   font-family: var(--md-font-mono);
-  font-size: scaled(9.5px);
+  font-size: scaled(11px);
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--md-on-surface-faint);
+  color: var(--hc-window-ink-quiet);
 }
 
 .cv2-nest-picker-empty {
   padding: 8px;
-  color: var(--md-on-surface-faint);
+  color: var(--hc-window-ink-quiet);
   font-style: italic;
 }
 
@@ -496,10 +499,11 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-height: 2rem;
   padding: 6px 8px;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--hc-radius-control);
   color: var(--md-on-surface);
   font-family: inherit;
   font-size: inherit;
@@ -507,7 +511,9 @@
   cursor: pointer;
   overflow: hidden;
 
-  &:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
+  &:hover { background: var(--hc-window-tint-strong); }
+  &:focus-visible { outline: 2px solid var(--md-primary); outline-offset: -2px; }
+  &:disabled { color: var(--hc-window-ink-quiet); cursor: default; }
 }
 
 // Mark icon on a candidate row — same idea as the note row: the mark when
@@ -515,7 +521,7 @@
 .cv2-nest-picker-mark {
   font-size: scaled(14px);
   flex-shrink: 0;
-  color: var(--md-on-surface-faint);
+  color: var(--hc-window-ink-quiet);
 }
 .cv2-nest-picker-shape {
   width: 12px;

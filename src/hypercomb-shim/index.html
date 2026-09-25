@@ -35,8 +35,13 @@
         try {
           var t = localStorage.getItem('hc:theme');
           var el = document.documentElement;
-          if (t === 'system') el.removeAttribute('data-theme');
-          else el.setAttribute('data-theme', t || 'honey');
+          if (t === 'system') {
+            el.removeAttribute('data-theme');
+            el.removeAttribute('data-hc-theme-mood');
+          } else {
+            el.setAttribute('data-theme', t || 'honey');
+            el.setAttribute('data-hc-theme-mood', t === 'dark' ? 'dark' : 'light');
+          }
         } catch (e) {}
       })();
     </script>

@@ -14,13 +14,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // standalone.
 ;(globalThis as { register?: unknown }).register = (): void => {}
 
-const load = async (stored: string | null): Promise<{ theme: string; reassert(): boolean }> => {
+type Subject = {
+  theme: string
+  reassert(): boolean
+  setTheme(name: string): void
+  registerTheme(name: string, tokens: Record<string, string>): void
+}
+
+const load = async (stored: string | null): Promise<Subject> => {
   vi.resetModules()
   localStorage.clear()
   if (stored !== null) localStorage.setItem('hc:theme', stored)
   document.documentElement.removeAttribute('data-theme')
   const mod = await import('./theme.service.js')
-  return new mod.ThemeService() as unknown as { theme: string; reassert(): boolean }
+  return new mod.ThemeService()
 }
 
 describe('ThemeService.reassert', () => {
@@ -56,11 +63,13 @@ describe('ThemeService.reassert', () => {
   it("restores 'system' by REMOVING the attribute, not by writing a name", async () => {
     const svc = await load('system')
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
+    expect(document.documentElement.hasAttribute('data-hc-theme-mood')).toBe(false)
 
     document.documentElement.setAttribute('data-theme', 'light')
 
     expect(svc.reassert()).toBe(true)
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
+    expect(document.documentElement.hasAttribute('data-hc-theme-mood')).toBe(false)
   })
 
   it('keeps an explicit light choice — it re-asserts the PARTICIPANT, not dark', async () => {
@@ -68,5 +77,25 @@ describe('ThemeService.reassert', () => {
     document.documentElement.setAttribute('data-theme', 'dark')
     expect(svc.reassert()).toBe(true)
     expect(document.documentElement.getAttribute('data-theme')).toBe('light')
+  })
+
+  it('uses a registered theme’s declared mood for panel contrast', async () => {
+    const svc = await load(null)
+    svc.registerTheme('orchid', { '--md-is-light': '1' })
+    svc.setTheme('orchid')
+    expect(document.documentElement.getAttribute('data-hc-theme-mood')).toBe('light')
+
+    svc.registerTheme('orchid', { '--md-is-light': '0' })
+    expect(document.documentElement.getAttribute('data-hc-theme-mood')).toBe('dark')
+  })
+
+  it('repairs a missing panel mood even when the theme name still matches', async () => {
+    const svc = await load(null)
+    svc.registerTheme('orchid', { '--md-is-light': '1' })
+    svc.setTheme('orchid')
+    document.documentElement.removeAttribute('data-hc-theme-mood')
+
+    expect(svc.reassert()).toBe(true)
+    expect(document.documentElement.getAttribute('data-hc-theme-mood')).toBe('light')
   })
 })

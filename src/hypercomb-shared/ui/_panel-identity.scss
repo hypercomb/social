@@ -42,16 +42,7 @@
 // idiom to survive the swap unchanged.
 
 @use 'sass:color';
-@use 'sass:list';
 @use 'sass:math';
-
-/// The themes that need the deep variant. A bright theme is one whose panel
-/// ground is light; they are named here rather than detected because Sass
-/// compiles before any theme is chosen. Keep in step with the bright value-sets
-/// in `styles/_material-tokens.scss` — adding a look means adding it here, and
-/// a look that is missing simply keeps the authored pastel (wrong, but never
-/// broken).
-$bright-themes: 'light', 'honey', 'bloom', 'sherbet';
 
 /// WHAT "DEEP ENOUGH" MEANS — a luminance target, not a fixed step.
 ///
@@ -116,9 +107,9 @@ $deepen-max-steps: 24;
 /// Declare a panel's identity. Emits `--acc` for the current theme and the
 /// deep variant under every bright one.
 ///
-/// The bright rule is written with an `:is()` list so it stays ONE selector no
-/// matter how many looks exist — thirty panels each emitting four
-/// near-identical blocks is how a stylesheet budget gets spent on nothing.
+/// ThemeService reflects each explicit theme's `--md-is-light` token onto
+/// `<html data-hc-theme-mood>`. This keeps community looks on the same
+/// contrast contract as built-ins, with no theme-name list in compiled CSS.
 ///
 /// ── WHY IT IS EMITTED TWICE ──────────────────────────────────────────────
 ///
@@ -138,24 +129,20 @@ $deepen-max-steps: 24;
 ///
 /// `:host-context()` is the one selector Angular deliberately does NOT stamp,
 /// because its whole job is to reach state that lives ABOVE the component. So
-/// the bright value is emitted through it, and the plain `:is()` form is kept
+/// the bright value is emitted through it, and the plain `:root` form is kept
 /// alongside for any consumer that is not a component stylesheet (a global
 /// sheet drops the `:host-context` rule as an unknown pseudo-class, and an
-/// encapsulated one is unharmed by the `:is()` rule that cannot match). One of
+/// encapsulated one is unharmed by the `:root` rule that cannot match). One of
 /// the two always applies; neither can misfire.
 @mixin accent($accent) {
   --acc: #{triple($accent)};
 
-  $sel: ();
-  @each $theme in $bright-themes {
-    $sel: list.append($sel, '[data-theme="#{$theme}"]', $separator: comma);
-  }
   $deep: triple(deepen($accent));
 
-  @at-root :is(#{$sel}) & {
+  @at-root :root[data-hc-theme-mood='light'] & {
     --acc: #{$deep};
   }
-  @at-root :host-context(:is(#{$sel})) & {
+  @at-root :host-context(:root[data-hc-theme-mood='light']) & {
     --acc: #{$deep};
   }
 

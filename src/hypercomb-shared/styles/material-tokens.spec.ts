@@ -248,4 +248,10 @@ describe('material theme contrast', () => {
     expect(systemLight).toContain(':host-context(:root:not([data-theme]))')
     expect(systemLight.match(/--acc:\s*#\{\$deep\}/g)).toHaveLength(2)
   })
+
+  it('deepens panel identities by declared mood, including registered themes', () => {
+    expect(PANEL_IDENTITY).toContain(":root[data-hc-theme-mood='light']")
+    expect(PANEL_IDENTITY).toContain(":host-context(:root[data-hc-theme-mood='light'])")
+    expect(PANEL_IDENTITY).not.toContain('$bright-themes')
+  })
 })

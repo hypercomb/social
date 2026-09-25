@@ -13,7 +13,8 @@
 .teaser-panel {
   @include tw.floating-panel(#7eb6d6);
   position: fixed;
-  width: 230px;
+  box-sizing: border-box;
+  width: min(230px, calc(100vw - 1rem));
   pointer-events: auto;
   background: rgba(var(--hc-panel-pane), 0.96);
   backdrop-filter: blur(14px) saturate(120%);
@@ -63,7 +64,7 @@
   flex: none;
   font-variant-numeric: tabular-nums;
   font-size: 11px;
-  color: var(--hc-window-ink-quiet);
+  color: var(--hc-window-ink-loud);
   background: var(--hc-window-wash);
   border-radius: 999px;
   padding: 1px 7px;
@@ -71,12 +72,12 @@
 
 .teaser-close {
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 1.75rem;
+  height: 1.75rem;
   display: grid;
   place-items: center;
   border: none;
-  border-radius: var(--hc-radius-floating);
+  border-radius: var(--hc-radius-control);
   background: transparent;
   color: var(--hc-window-ink-quiet);
   font-size: 15px;
@@ -84,9 +85,18 @@
   cursor: pointer;
 
   &:hover {
-    background: color-mix(in srgb, #{tw.ink(#ff9b9b)} 16%, transparent);
-    color: tw.ink(#ff9b9b);
+    background: var(--hc-window-wash);
+    color: var(--hc-window-accent);
   }
+  &:focus-visible { outline: 2px solid var(--hc-window-accent); outline-offset: 1px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .teaser-panel { animation: none; }
+}
+
+@media (max-width: 599px), (max-height: 449px) {
+  .teaser-close { min-inline-size: 44px; min-block-size: 44px; }
 }
 
 .teaser-empty {
