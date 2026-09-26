@@ -33,6 +33,12 @@
   Cache-Control: no-cache, no-store, must-revalidate
 /content/44150aa24d2f2a1c1b544530e2f7e177cde71130f882f37984d0cdba16bf2363/*
   Cache-Control: no-cache, no-store, must-revalidate
+# The version pools' listings (host/builds.mjs): the members are immutable,
+# the set grows.
+/84978344425881115d466b6b117edeeeb0a55eb878debab8c6c9730b4c64b8d3/
+  Cache-Control: no-cache, no-store, must-revalidate
+/1239abeb847a818d25109b9ff03afaeacc02bbf52645d033a54a6f8f1fa5f13d/
+  Cache-Control: no-cache, no-store, must-revalidate
 
 /vendor/*
   Cache-Control: public, max-age=0, must-revalidate

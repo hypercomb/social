@@ -86,11 +86,12 @@ describe('participant signatures', () => {
 
   it('shows a forged signature as not verifying', async () => {
     const first = await record(undefined, 'a')
-    const { pubkey } = await builds.signRevision(first.sig, 'reviewer')
+    const { pubkey, file } = await builds.signRevision(first.sig, 'reviewer')
     const pool = builds.poolDir(builds.SIGNATURES_MEANING)
-    const file = resolve(pool, first.sig, 'reviewer', pubkey)
-    const event = JSON.parse(await readFile(file, 'utf8'))
-    await writeFile(file, JSON.stringify({ ...event, content: event.content.replace('reviewer', 'author') }))
+    const event = JSON.parse(await readFile(resolve(pool, file), 'utf8'))
+    const forged = Buffer.from(JSON.stringify({ ...event, content: event.content.replace('reviewer', 'author') }))
+    await rm(resolve(pool, file))
+    await writeFile(resolve(pool, builds.sign(forged)), forged)
     expect(await builds.signaturesOf(first.sig, first.record.version)).toEqual([{ role: 'reviewer', pubkey, ok: false }])
   })
 
@@ -100,5 +101,47 @@ describe('participant signatures', () => {
     delete process.env.HYPERCOMB_SIGNER_KEY
     await expect(builds.signRevision(first.sig, 'author')).rejects.toThrow(/no signing key/)
     expect(await readdir(builds.poolDir(builds.SIGNATURES_MEANING)).catch(() => [])).toEqual([])
+  })
+})
+
+describe('pools on hosts', () => {
+  it('pushes both pools to a host and pulls them into another device', async () => {
+    const first = await record(undefined, 'a')
+    await record('beta', 'b')
+    const { pubkey } = await builds.signRevision(first.sig, 'author')
+    const host = resolve(root, 'host')
+    await builds.carryPools(host)
+    expect(await builds.carryPools(host)).toBe(0)
+
+    // A static host: `/<pool>/` answers its index.html, `/<pool>/<sig>` the file.
+    const served = async (url: string) => {
+      const path = new URL(url).pathname.replace(/^\/content/, '')
+      const file = resolve(host, '.' + (path.endsWith('/') ? path + 'index.html' : path))
+      try { return new Response(await readFile(file)) } catch { return new Response('', { status: 404 }) }
+    }
+    process.env.HYPERCOMB_POOLS_DIR = resolve(root, 'device')
+    const report = await builds.pullPools(['https://example.test'], { fetch: served })
+    expect(report).toEqual([{ host: 'https://example.test', answered: true, taken: expect.any(Number), refused: 0 }])
+    expect((await builds.revisions()).map((r: { record: { version: string } }) => r.record.version))
+      .toEqual(['2026.9.26.2', '2026.9.26.1'])
+    expect(await builds.signaturesOf(first.sig, first.record.version)).toEqual([{ role: 'author', pubkey, ok: true }])
+    expect((await builds.pullPools(['https://example.test'], { fetch: served }))[0].taken).toBe(0)
+  })
+
+  it('refuses a pulled file that does not hash to its name, and keeps the rest', async () => {
+    await record(undefined, 'a')
+    const host = resolve(root, 'host')
+    await builds.carryPools(host)
+    const pool = resolve(host, builds.sign(builds.BUILDS_MEANING))
+    const victim = (await readdir(pool)).find(n => n !== 'index.html')!
+    await writeFile(resolve(pool, victim), 'tampered')
+    const served = async (url: string) => {
+      const file = resolve(host, '.' + new URL(url).pathname + (url.endsWith('/') ? 'index.html' : ''))
+      try { return new Response(await readFile(file)) } catch { return new Response('', { status: 404 }) }
+    }
+    process.env.HYPERCOMB_POOLS_DIR = resolve(root, 'device')
+    const [report] = await builds.pullPools(['https://example.test'], { fetch: served })
+    expect(report.refused).toBe(1)
+    expect(await readdir(builds.poolDir(builds.BUILDS_MEANING))).not.toContain(victim)
   })
 })

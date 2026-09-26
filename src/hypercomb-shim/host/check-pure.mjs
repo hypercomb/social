@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { installFilesOf, sign, signaturesOf, SIGNATURES_MEANING } from './builds.mjs'
+import { BUILDS_MEANING, installFilesOf, readSignatures, sign, signaturesOf, SIGNATURES_MEANING } from './builds.mjs'
 
 const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist'))
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -74,8 +74,18 @@ for (const [path, bytes] of [...await installFilesOf(dist)].sort(([a], [b]) => a
 if (sign(JSON.stringify({ name: 'install', files: installFiles })) !== record.install) {
   throw new Error(`pure host: the origin's files are not the install ${record.version} recorded`)
 }
-// A signature the origin carries must verify: a forged one is refused, not shown.
-const forged = (await signaturesOf(buildSig, record.version, resolve(dist, sign(SIGNATURES_MEANING)))).filter(s => !s.ok)
+// The version pools an origin may carry (host/builds.mjs): every member must
+// hash to its name, and a signature of this build must verify.
+for (const meaning of [BUILDS_MEANING, SIGNATURES_MEANING]) {
+  const pool = resolve(dist, sign(meaning))
+  for (const name of await readdir(pool).catch(() => [])) {
+    if (name === 'index.html') continue
+    if (!/^[a-f0-9]{64}$/.test(name) || sign(await readFile(resolve(pool, name))) !== name) {
+      throw new Error(`pure host: ${meaning} carries ${name.slice(0, 12)}, which does not hash to its name`)
+    }
+  }
+}
+const forged = (await signaturesOf(buildSig, record.version, await readSignatures(resolve(dist, sign(SIGNATURES_MEANING))))).filter(s => !s.ok)
 if (forged.length) throw new Error(`pure host: ${forged.length} build signature(s) do not verify (${forged.map(s => s.role + ' ' + s.pubkey.slice(0, 12)).join(', ')})`)
 closure.add(buildSig)
 const unnamed = signed.filter(sig => !known.includes(sig) && !closure.has(sig))

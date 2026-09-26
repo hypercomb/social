@@ -8,6 +8,18 @@
       }
     },
     {
+      "route": "/84978344425881115d466b6b117edeeeb0a55eb878debab8c6c9730b4c64b8d3/",
+      "headers": {
+        "cache-control": "no-cache, no-store, must-revalidate"
+      }
+    },
+    {
+      "route": "/1239abeb847a818d25109b9ff03afaeacc02bbf52645d033a54a6f8f1fa5f13d/",
+      "headers": {
+        "cache-control": "no-cache, no-store, must-revalidate"
+      }
+    },
+    {
       "route": "/pin",
       "headers": {
         "cache-control": "no-cache, no-store, must-revalidate"

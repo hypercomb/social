@@ -375,6 +375,39 @@ if (!contentOnly) {
   }
 }
 
+// ── the version pools (host/builds.mjs) ─────────────────────────────────────
+// Optional: a host that publishes its build history serves sign('host:builds')
+// and sign('host:build-signatures') as pools. Absent is a warning, never a failure.
+for (const meaning of ['host:builds', 'host:build-signatures']) {
+  const pool = await sha256(new TextEncoder().encode(meaning))
+  const name = `publishes the ${meaning} pool`
+  let found = null
+  for (const base of ['', '/content']) {
+    const res = await get(`${base}/${pool}/`, { cache: 'no-store' })
+    if (res.error || !res.ok) continue
+    const members = (await res.text()).split(/\r?\n/).map(n => n.trim()).filter(n => SIG_RE.test(n))
+    found = { base, res, members }
+    break
+  }
+  if (!found) {
+    record(null, name, 'no listing at / or /content',
+      'optional — `node host/builds.mjs push` (a relay) or deploy with the pools (deploy-azure carries them)')
+    continue
+  }
+  const cache = String(found.res.headers.get('cache-control') ?? '').toLowerCase()
+  const member = found.members[0]
+  let verified = !member
+  if (member) {
+    const res = await get(`${found.base}/${pool}/${member}`)
+    verified = !res.error && res.ok && (await sha256(await res.arrayBuffer())) === member
+  }
+  record(verified, name, `${found.members.length} member(s) at ${found.base}/${pool.slice(0, 12)}…/${member ? (verified ? ', a member verified' : ', a member does NOT hash to its name') : ''}`,
+    'every member must be served byte-for-byte under its own signature')
+  if (!/no-store|no-cache|max-age=0/.test(cache)) {
+    record(null, `the ${meaning} listing is not hard-cached`, cache || '(no cache-control)', 'the set grows — serve the listing no-store')
+  }
+}
+
 // ── verdict ──────────────────────────────────────────────────────────────────
 const failed = results.filter(r => r.ok === false)
 const warned = results.filter(r => r.ok === null)

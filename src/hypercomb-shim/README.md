@@ -110,20 +110,18 @@ node build.mjs --pure --name beta                  # a new revision under "beta"
 node host/builds.mjs                               # revisions by name, newest first
 node host/builds.mjs show 2026.9.26.2              # what it changed, who signed it
 node host/builds.mjs publish 2026.9.26.1 -- --project my-hive   # any revision, again
-node host/builds.mjs out 2026.9.26.1 /tmp/r1 [--with-source]    # or write it out
+node host/builds.mjs out 2026.9.26.1 /tmp/r1                    # or write it out
 ```
 
-`publish` writes the revision into a temporary directory, runs `check-pure`
-on it and deploys that directory (`--azure` for Azure). `--with-source` also
-carries the revision's source files, so another participant can read and
-rebuild it.
+`publish` writes the revision into a temporary directory with the version
+pools, runs `check-pure` on it and deploys that directory (`--azure` for Azure).
 
 **Participants sign revisions** with the nostr key their hive already signs
 with (secp256k1 Schnorr, the key `NostrSigner` holds), read from
 `HYPERCOMB_SIGNER_KEY` or the file `HYPERCOMB_SIGNER_KEY_FILE`. A signature is a
 kind-30567 nostr event over `hc:build:v1 / buildSig / version / role`, kept in
-the `sign('host:build-signatures')` pool at `<buildSig>/<role>/<pubkey>`; the
-record never carries its own signatures. An origin written out carries the
+the `sign('host:build-signatures')` pool under the signature of its own bytes;
+the record never carries its own signatures. An origin written out carries the
 revision's signatures, and `check-pure` refuses one that does not verify.
 
 ```bash
@@ -136,6 +134,30 @@ A witness signs only a revision they reproduced: a revision of their own, built
 here, with the same install, atoms, host bundle, core library and host package.
 `take` hashes every file once, as it arrives, and refuses an origin whose files
 are not the ones its revision names.
+
+**The pools are published to hosts** as any pool is: `/<sign(meaning)>/` lists
+the members (names, one per line, never cached) and `/<sign(meaning)>/<sig>` is
+one. Every member is signature-named, so a host cannot alter one unnoticed, and
+nothing is ever removed.
+
+- **hypercomb.com** (`npm run deploy:hypercomb.com`): `deploy-azure` carries
+  both pools this machine holds into the staged site (`--no-version-pools`
+  leaves them out), checks the stage, and uploads it.
+- **jwize.com** (the machine relay): `node host/builds.mjs push` carries them
+  into `hypercomb-relay/content`, which the relay serves at once. A relay lists
+  a pool only when its operator declares it, so declare both once, in the
+  hive: `hosts list host:builds @jwize.com` and
+  `hosts list host:build-signatures @jwize.com`.
+
+```bash
+node host/builds.mjs push [host dir]    # default: hypercomb-relay/content
+node host/builds.mjs pull               # jwize.com, hypercomb.com (or name hosts)
+npm run host:check -- https://hypercomb.com    # reports the version pools
+```
+
+`pull` brings in every revision and signature the hosts hold, each file hashed
+once as it arrives; a file that does not hash to its name is refused. A device
+that pulls into an empty pool continues from the newest revision it took.
 
 The host bundle is always minified and carries no copy of core; the build
 inlines the ioc install ahead of every script so core's module-scope

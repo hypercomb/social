@@ -9,6 +9,9 @@
 // `--welcome` stages the front door the cold-host card reads (welcome.json —
 // this origin's name, what it is, where else it leads). All three are overlays
 // in a temporary deployment directory; the host dist itself remains generic.
+// The version pools this machine holds (host/builds.mjs) ride along the same
+// way, so the host publishes its build history; `--no-version-pools` leaves
+// them out.
 
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -18,6 +21,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { carryPools, revisions } from './builds.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const shim = resolve(here, '..')
@@ -55,7 +59,7 @@ if (!app || !group) {
   console.error(`
 Deploy the shim to an existing Azure Static Web App.
 
-  npm run host:deploy:azure -- --app <name> --group <resource-group> [--domain <hostname>] [--tour <html> --tour-og <image>] [--welcome <json>] [--page <route>=<path>] [--check-only]
+  npm run host:deploy:azure -- --app <name> --group <resource-group> [--domain <hostname>] [--tour <html> --tour-og <image>] [--welcome <json>] [--page <route>=<path>] [--no-version-pools] [--check-only]
 
 Authentication comes from the active Azure CLI session. The deployment token
 is read only for this process and is never printed or written to disk.
@@ -308,9 +312,10 @@ await access(resolve(dist, 'pin'))
 
 let stage = dist
 let temporary = ''
+const versionPools = !process.argv.includes('--no-version-pools') && (await revisions()).length > 0
 
 try {
-  if (tour || welcome || pages.length > 0) {
+  if (tour || welcome || pages.length > 0 || versionPools) {
     temporary = await mkdtemp(resolve(tmpdir(), 'hypercomb-azure-'))
     stage = resolve(temporary, 'site')
     await cp(dist, stage, { recursive: true })
@@ -350,6 +355,11 @@ try {
       throw new Error('--welcome must name a JSON object')
     }
     await writeFile(resolve(stage, 'welcome.json'), JSON.stringify(staged, null, 2) + '\n')
+  }
+
+  if (versionPools) {
+    const carried = await carryPools(stage)
+    console.log(`[deploy] staged the version pools (${carried} file(s) not already in the origin)`)
   }
 
   // Upload is the irreversible boundary. Verify the exact staged bytes first,
