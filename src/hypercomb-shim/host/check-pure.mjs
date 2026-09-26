@@ -2,8 +2,9 @@
 // Refuse to package an application snapshot as the installable cold harness.
 import { createHash } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { dirname, relative, resolve, sep } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { installFilesOf, sign, signaturesOf, SIGNATURES_MEANING } from './builds.mjs'
 
 const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist'))
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -34,7 +35,8 @@ if (names.includes('core')) throw new Error('pure host: core ships as the proces
 const processorBytes = (await stat(resolve(dist, 'hypercomb-core.runtime.js'))).size
 if (processorBytes > 8192) throw new Error(`pure host: the processor grew to ${processorBytes} bytes — the rest of core belongs in the library`)
 const kernel = await readFile(resolve(dist, 'main.js'), 'utf8')
-const signed = names.filter(name => /^[a-f0-9]{64}$/.test(name))
+// Signature-named FILES; a 64-hex directory is a pool (build signatures).
+const signed = (await readdir(dist, { withFileTypes: true })).filter(e => e.isFile() && /^[a-f0-9]{64}$/.test(e.name)).map(e => e.name)
 for (const sig of signed) {
   if (createHash('sha256').update(await readFile(resolve(dist, sig))).digest('hex') !== sig) {
     throw new Error(`pure host: ${sig.slice(0, 12)} does not hash to its name`)
@@ -64,20 +66,17 @@ if (record.name !== 'build' || !/^\d{4}\.\d{1,2}\.\d{1,2}\.\d+$/.test(record.ver
 if (record.host !== pin || record.hostPackage !== hostRoot || !known.includes(record.library) || record.library === pin) {
   throw new Error('pure host: the build record does not name this host bundle, core library and host package')
 }
+if (JSON.stringify(record.atoms) !== JSON.stringify(signed.filter(sig => sig !== buildSig).sort())) {
+  throw new Error('pure host: the build record does not name exactly the signed files here')
+}
 const installFiles = {}
-const walk = async dir => {
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    const path = resolve(dir, entry.name)
-    const rel = relative(dist, path).split(sep).join('/')
-    if (entry.isDirectory()) await walk(path)
-    else if (!(dir === dist && /^[a-f0-9]{64}$/.test(entry.name)) && rel !== 'build') installFiles[rel] = createHash('sha256').update(await readFile(path)).digest('hex')
-  }
+for (const [path, bytes] of [...await installFilesOf(dist)].sort(([a], [b]) => a < b ? -1 : 1)) installFiles[path] = sign(bytes)
+if (sign(JSON.stringify({ name: 'install', files: installFiles })) !== record.install) {
+  throw new Error(`pure host: the origin's files are not the install ${record.version} recorded`)
 }
-await walk(dist)
-const sorted = Object.fromEntries(Object.entries(installFiles).sort(([a], [b]) => a < b ? -1 : 1))
-if (createHash('sha256').update(JSON.stringify({ name: 'install', files: sorted })).digest('hex') !== record.install) {
-  throw new Error(`pure host: the origin's files are not the install build ${record.version} recorded`)
-}
+// A signature the origin carries must verify: a forged one is refused, not shown.
+const forged = (await signaturesOf(buildSig, record.version, resolve(dist, sign(SIGNATURES_MEANING)))).filter(s => !s.ok)
+if (forged.length) throw new Error(`pure host: ${forged.length} build signature(s) do not verify (${forged.map(s => s.role + ' ' + s.pubkey.slice(0, 12)).join(', ')})`)
 closure.add(buildSig)
 const unnamed = signed.filter(sig => !known.includes(sig) && !closure.has(sig))
 if (unnamed.length) throw new Error(`pure host: signed files nothing names (${unnamed.map(s => s.slice(0, 12)).join(', ')})`)

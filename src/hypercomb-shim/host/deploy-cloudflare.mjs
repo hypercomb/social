@@ -32,7 +32,9 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const shim = resolve(here, '..')
-const dist = resolve(shim, 'dist')
+// The origin to upload: the build's output dir, as build.mjs, check-pure and
+// deploy-azure read it (host/builds.mjs publish points it at a revision).
+const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(shim, 'dist'))
 
 const arg = (name, fallback = '') => {
   const index = process.argv.indexOf(`--${name}`)

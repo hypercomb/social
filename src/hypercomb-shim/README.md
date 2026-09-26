@@ -90,26 +90,52 @@ themselves; everything else is resolved.
 signed file does not hash to its name, a signed file is neither known to the
 kernel nor part of the host package, or the host bundle carries the console.
 
-Every pure build is recorded in the **version pool** (`host/builds.mjs`), the
-`sign('host:builds')` pool, by default under `~/.hypercomb/` (override with
-`HYPERCOMB_BUILDS_DIR`). The record is a signed layer
-`{ name: 'build', version, parent, install, host, library, hostPackage, source }`:
+Every pure build is a **revision**, kept in the version pool
+(`host/builds.mjs`): the `sign('host:builds')` pool under `~/.hypercomb/`
+(override with `HYPERCOMB_POOLS_DIR`). A revision is a signed record
+`{ name: 'build', label, version, parent, install, host, library, hostPackage, atoms, source }`.
 `install` and `source` are layers naming, by path and signature, every file of
-the origin and every source file the build read, and all of it is kept in the
-pool. The version is year.month.day.n (UTC), n counting that day's builds; a
-build that changes nothing mints no version, so each version is one group of
-changes. `parent` chains the builds, `head` names the newest, and the origin
-names its record in `/build`, as `/pin` names the host bundle. `check-pure`
-fails unless that record names exactly the files the origin holds.
+the origin and every source file the build read; `atoms` are its signed files.
+All of it is kept in the pool, so any revision can be written out and
+published again, exactly. The version is year.month.day.n (UTC), n counting
+the revisions the pool holds for that day. The label is the revision's name,
+as for packages ([publishing a revision](../documentation/publishing-a-revision.md)):
+`--name beta` builds under "beta", a new name starts a new heading, and
+unnamed means `host`. The origin names its revision in `/build`, as `/pin`
+names the host bundle, and `check-pure` fails unless the revision names
+exactly the files the origin holds.
 
 ```bash
-node host/builds.mjs               # 2026.9.26.2  1ab26eb6735b  install source · 2 files
-node host/builds.mjs 2026.9.26.2   # the files that version changed
+node build.mjs --pure --name beta                  # a new revision under "beta"
+node host/builds.mjs                               # revisions by name, newest first
+node host/builds.mjs show 2026.9.26.2              # what it changed, who signed it
+node host/builds.mjs publish 2026.9.26.1 -- --project my-hive   # any revision, again
+node host/builds.mjs out 2026.9.26.1 /tmp/r1 [--with-source]    # or write it out
 ```
 
-A participant who vouches for a build (author, reviewer, a witness who rebuilt
-it and got the same signatures) signs the record's signature; the record never
-carries its own signatures.
+`publish` writes the revision into a temporary directory, runs `check-pure`
+on it and deploys that directory (`--azure` for Azure). `--with-source` also
+carries the revision's source files, so another participant can read and
+rebuild it.
+
+**Participants sign revisions** with the nostr key their hive already signs
+with (secp256k1 Schnorr, the key `NostrSigner` holds), read from
+`HYPERCOMB_SIGNER_KEY` or the file `HYPERCOMB_SIGNER_KEY_FILE`. A signature is a
+kind-30567 nostr event over `hc:build:v1 / buildSig / version / role`, kept in
+the `sign('host:build-signatures')` pool at `<buildSig>/<role>/<pubkey>`; the
+record never carries its own signatures. An origin written out carries the
+revision's signatures, and `check-pure` refuses one that does not verify.
+
+```bash
+node host/builds.mjs sign 2026.9.26.1 --as author     # or reviewer
+node host/builds.mjs take /path/to/origin             # another participant's revision
+node host/builds.mjs sign 2026.9.26.1 --as witness    # only after reproducing it
+```
+
+A witness signs only a revision they reproduced: a revision of their own, built
+here, with the same install, atoms, host bundle, core library and host package.
+`take` hashes every file once, as it arrives, and refuses an origin whose files
+are not the ones its revision names.
 
 The host bundle is always minified and carries no copy of core; the build
 inlines the ioc install ahead of every script so core's module-scope

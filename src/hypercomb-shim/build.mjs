@@ -14,6 +14,8 @@
 //   node build.mjs --no-content    cold host; boots to 0 surfaces, correct
 //   node build.mjs --assets        + shared-public (substrate art, ~47 MB)
 //   node build.mjs --minify        production bytes (always on with --pure)
+//   node build.mjs --pure --name beta   a revision under the name "beta"
+//                                  (default "host"; see host/builds.mjs)
 //
 // DEPLOY SAFETY: this script writes ONLY into hypercomb-shim/dist. It never
 // touches hypercomb-web, so it cannot alter the artifact the live workflow
@@ -25,7 +27,7 @@ import { createHash } from 'node:crypto'
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { recordBuild } from './host/builds.mjs'
+import { installFilesOf, recordBuild } from './host/builds.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(here, 'dist'))
@@ -48,7 +50,7 @@ const NEWLINE = `
 `
 const exists = async (p) => { try { await stat(p); return true } catch { return false } }
 // Every file a pure build reads, for its source layer in the version pool.
-const sourceInputs = new Set([resolve(here, 'build.mjs'), resolve(here, 'index.html')])
+const sourceInputs = new Set(['build.mjs', 'index.html', 'host/builds.mjs'].map(p => resolve(here, p)))
 const readFrom = meta => { for (const p of Object.keys(meta.inputs)) sourceInputs.add(resolve(p)) }
 const mib = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MiB`
 
@@ -525,31 +527,31 @@ if (pure) {
   console.log(`[shim]   resolves host ${hostSig.slice(0, 12)}… (${(hostBytes.length / 1024).toFixed(0)} kB) · core library ${librarySig.slice(0, 12)}… (${(coreLibrary.length / 1024).toFixed(0)} kB)`)
   readFrom(kernel.metafile)
 
-  // THE VERSION POOL (host/builds.mjs). The origin as built — its install
-  // files, its signed atoms, and every source file it was built from — is kept
-  // as a signed build record chained to the last one. The origin names it in
-  // /build, as /pin names the host bundle.
+  // THE VERSION POOL (host/builds.mjs). Every pure build is a revision: the
+  // origin as built — its install files, its signed atoms, and every source
+  // file it was built from — kept as a signed record chained to the last one,
+  // under the name given with --name. The origin names it in /build, as /pin
+  // names the host bundle.
   const repo = resolve(here, '..', '..')
   const source = new Map()
   for (const abs of sourceInputs) {
     const bytes = await readFile(abs).catch(() => null)
-    if (bytes) source.set(relative(repo, abs).split(sep).join('/'), bytes)
+    // A dependency is named from node_modules on, wherever it is installed.
+    const path = abs.split(sep).join('/')
+    const at = path.indexOf('/node_modules/')
+    if (bytes) source.set(at >= 0 ? path.slice(at + 1) : relative(repo, abs).split(sep).join('/'), bytes)
   }
-  const install = new Map()
   const signed = []
-  const walk = async dir => {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      const path = resolve(dir, entry.name)
-      if (entry.isDirectory()) await walk(path)
-      else if (dir === dist && SIG_NAME.test(entry.name)) signed.push(await readFile(path))
-      else install.set(relative(dist, path).split(sep).join('/'), await readFile(path))
-    }
-  }
-  await walk(dist)
-  const made = await recordBuild({ install, source, signed, host: hostSig, library: librarySig, hostPackage: hostPackageRoot })
+  for (const name of await readdir(dist)) if (SIG_NAME.test(name)) signed.push(await readFile(resolve(dist, name)))
+  const nameAt = process.argv.indexOf('--name')
+  const made = await recordBuild({
+    label: nameAt >= 0 ? process.argv[nameAt + 1] : undefined,
+    install: await installFilesOf(dist), source, signed,
+    host: hostSig, library: librarySig, hostPackage: hostPackageRoot,
+  })
   await writeFile(resolve(dist, made.sig), made.bytes)
   await writeFile(resolve(dist, 'build'), made.sig + '\n', 'utf8')
-  console.log(`[shim] build ${made.record.version} ${made.sig.slice(0, 12)}… ${made.minted ? 'minted' : 'unchanged'} · ${source.size} source files · pool ${made.pool}`)
+  console.log(`[shim] revision ${made.record.label} ${made.record.version} ${made.sig.slice(0, 12)}…${made.unchanged ? ' (no change)' : ''} · ${source.size} source files · node host/builds.mjs`)
 }
 console.log(
   `[shim] origin ${mib(await dirBytes(dist))} total` +
