@@ -180,6 +180,13 @@ export class DependencyLoader extends EventTarget {
     // hard refresh is a fresh navigation, which the by-then-active worker
     // does control. Reading the verified bytes ourselves and blob-wrapping
     // them removes the dependency on the worker (and the host) entirely.
+    //
+    // MEASURED (2026-09-26): importing packages from the worker's stable
+    // `/opfs/<pool>/<sig>` addresses instead (compiled code kept between
+    // boots, no bytes read here) made the first hive frame ~0.3 s SLOWER on a
+    // warm boot, for dependencies alone and for bees and dependencies
+    // together: ~230 module requests queue through the one worker thread. The
+    // blob stays. The kernel's two large atoms are the exception (kernel.ts).
     const bytes = this.store.opfsAvailable ? await this.store.getDependencyBytes(pureSig) : null
     // AN ATOM IS NEVER IMPORTED HERE. It registers nothing, so it has no
     // reason to load at boot; and a blob import would be a SECOND instance
