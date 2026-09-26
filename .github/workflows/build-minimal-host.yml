@@ -45,10 +45,12 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/hypercomb-target
 
     steps:
+      # `runner` is not available to job-level env; export the target dir from a step.
+      - name: Cargo target directory
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/hypercomb-target" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
         with:
           submodules: true
