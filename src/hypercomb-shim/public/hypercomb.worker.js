@@ -33,6 +33,8 @@ const SITE_RESOURCE_PREFIX = '/@resource/'
 // The name is shared with src/kernel.ts.
 const SIG_PREFIX = '/@sig/'
 const SIG_CACHE = 'hypercomb-sig-v1'
+// The page's boot pack (hypercomb-runtime/src/boot-pack.ts): kept on activate.
+const BOOT_PACK_CACHE = 'hypercomb-boot-pack-v1'
 
 // Pools of meaning: install-cache dirs at the OPFS root named by
 // sign(<meaning>) — sha256 of the UTF-8 bytes of the meaning string.
@@ -81,7 +83,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then(names => Promise.all(
-        names.filter(n => n !== CACHE_NAME && n !== SIG_CACHE).map(n => caches.delete(n))
+        names.filter(n => n !== CACHE_NAME && n !== SIG_CACHE && n !== BOOT_PACK_CACHE).map(n => caches.delete(n))
       ))
       .then(() => loadDomains())
       .then(domains => { if (domains.length) KNOWN_DOMAINS = domains })

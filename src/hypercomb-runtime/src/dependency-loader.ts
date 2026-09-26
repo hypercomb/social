@@ -3,6 +3,7 @@
 import { EffectBus } from '@hypercomb/core'
 import { Store } from './store'
 import { activeInstallIndex } from './install-index.js'
+import { packedBytes } from './boot-pack.js'
 
 /** Line 2 of an atom or atomized barrel, written by the essentials build
  *  (`LAZY_MARKER_LINE` in build-module.ts). */
@@ -187,7 +188,9 @@ export class DependencyLoader extends EventTarget {
     // warm boot, for dependencies alone and for bees and dependencies
     // together: ~230 module requests queue through the one worker thread. The
     // blob stays. The kernel's two large atoms are the exception (kernel.ts).
-    const bytes = this.store.opfsAvailable ? await this.store.getDependencyBytes(pureSig) : null
+    const bytes = this.store.opfsAvailable
+      ? (await packedBytes(pureSig, 'dependency', this.store)) ?? await this.store.getDependencyBytes(pureSig)
+      : null
     // AN ATOM IS NEVER IMPORTED HERE. It registers nothing, so it has no
     // reason to load at boot; and a blob import would be a SECOND instance
     // beside the one every importer reaches through the import map
