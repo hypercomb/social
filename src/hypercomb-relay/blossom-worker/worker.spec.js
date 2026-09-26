@@ -803,14 +803,52 @@ test('an index whose signature fails opens nothing', async () => {
   assert.deepEqual(assetRequests, [])
 })
 
-test('an old signed head without an explicit door cannot publish a route', async () => {
-  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head },
-    1_800_000_000, null))
-  const site = await doorMeta('https://revolucion.pluginthematrix.com/', env)
-  assert.equal(site.status, 404)
-  const pool = await sha256Hex('host:offerings')
-  const offered = await worker.fetch(new Request(`https://pluginthematrix.com/${pool}/`), env)
-  assert.equal(offered.status, 404)
+test('an entry signed before doors opens as it did before doors — everywhere', async () => {
+  const index = await signedIndex({ pluginthematrix: head, revolucion: head, 'games/arkanoid': head, dylan: head, susan: head,
+    favorites: head, 'behaviors/guidance': head, 'revolucion/meetup': head, 'hypercomb/architecture/replication-by-signature': head },
+    1_800_000_000, null)
+  const { env } = await fixture(index, TWO_ZONES)
+  for (const host of ['revolucion.pluginthematrix.com', 'dylan.pluginthematrix.com', 'susan.pluginthematrix.com',
+    'pluginthematrix.com', 'favorites.pluginthematrix.com', 'meetup.pluginthematrix.com', 'dylan.hypercomb.com']) {
+    const door = await doorMeta(`https://${host}/`, env)
+    assert.equal(door.status, 200, host)
+  }
+  // The ledger lists them too, and nothing was written into the index.
+  const ledger = await (await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
+  assert(ledger.sites.some((s) => s.lineage === 'dylan' && s.publishers[0].head === head))
+  assert.equal(JSON.parse((await env.HIVES.get(pubkey))).content.includes('doors'), false)
+})
+
+test('an entry with doors is still obeyed exactly beside one without', async () => {
+  const index = await signedIndex({ pluginthematrix: head, susan: head, dylan: head }, 1_800_000_000, { susan: ['hypercomb.com'] })
+  const content = JSON.parse(index.content)
+  delete content.doors.dylan
+  delete content.doors.pluginthematrix
+  const reSigned = await signedIndex(content.roots, 1_800_000_000, null, undefined, { doors: content.doors })
+  const { env } = await fixture(reSigned, TWO_ZONES)
+  assert.equal((await doorMeta('https://susan.hypercomb.com/', env)).status, 200)
+  assert.equal((await doorMeta('https://susan.pluginthematrix.com/', env)).status, 404, 'off its doors')
+  assert.equal((await doorMeta('https://dylan.pluginthematrix.com/', env)).status, 200, 'no doors entry: opens')
+})
+
+test('the drain routes answer the same bytes as the signature addresses', async () => {
+  const { env } = await fixture()
+  const same = async (named, address) => {
+    const a = await (await worker.fetch(new Request(named), env)).text()
+    const b = await (await worker.fetch(new Request(address), env)).text()
+    assert.equal(a, b, named)
+  }
+  await same('https://pluginthematrix.com/publications.json', `https://pluginthematrix.com/${PUBLICATIONS}`)
+  await same('https://pluginthematrix.com/trials.json', `https://pluginthematrix.com/${TRIALS}`)
+  await same(`https://content.pluginthematrix.com/hive/${pubkey}`, `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`)
+  // An old install still publishes through /hive/<pubkey>, into the same pool member.
+  const later = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_050)
+  const url = `https://content.pluginthematrix.com/hive/${pubkey}`
+  const put = await worker.fetch(new Request(url, { method: 'PUT',
+    headers: { authorization: await nip98(url, 'PUT') }, body: JSON.stringify(later) }), env)
+  assert.equal(put.status, 200)
+  const held = await (await worker.fetch(new Request(`https://content.pluginthematrix.com/${INDEXES}/${pubkey}`), env)).json()
+  assert.equal(held.created_at, 1_800_000_050)
 })
 
 test('signed doors switch a branch per domain — on where listed, hidden elsewhere', async () => {
@@ -1331,11 +1369,11 @@ test('a locale is listed from every verified index, at the pool\'s own address, 
   // The pool's own derived address answers the same index — what a published-pool probe fetches.
   const atAddress = await (await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256('i18n:ja')}`), env)).json()
   assert.deepEqual(atAddress.members, [catalog])
-  // A locale this host never heard of has no answer at its address, and the
-  // retired named route answers nothing.
+  // A locale this host never heard of has no answer at its address; the drain
+  // route answers the same bytes as the address while installs still call it.
   assert.equal((await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256Hex('i18n:fr')}`), env)).status, 404)
-  const named = await worker.fetch(new Request('https://content.hypercomb.com/i18n/ja.json'), env)
-  assert.equal(String(named.headers.get('content-type') ?? '').includes('application/json') && named.status === 200, false)
+  const named = await (await worker.fetch(new Request('https://content.hypercomb.com/i18n/ja.json'), env)).json()
+  assert.deepEqual(named, atAddress)
 })
 
 // ── the trials on a zone: every open try- door, from what the door serves ─

@@ -796,9 +796,14 @@ const HIVE_INDEX_KIND = 30564
 const HIVE_INDEXES_POOL = sha256Hex(Buffer.from('hive:indexes', 'utf8'))
 
 function tryServeHiveIndex(req, res) {
-  const match = (req.url || '').split('?')[0].match(/^\/([0-9a-f]{64})\/([0-9a-f]{64})$/)
-  if (!match || match[1] !== HIVE_INDEXES_POOL) return false
-  const pubkey = match[2]
+  const path = (req.url || '').split('?')[0]
+  const match = path.match(/^\/([0-9a-f]{64})\/([0-9a-f]{64})$/)
+  // DRAIN ROUTE: /hive/<pubkey>, the retired name, answers the same index —
+  // installs already in use still read and publish through it. Retire it once
+  // nothing in use calls it (jwize 2026-09-25).
+  const drain = path.match(/^\/hive\/([0-9a-f]{64})$/)
+  if (!drain && (!match || match[1] !== HIVE_INDEXES_POOL)) return false
+  const pubkey = drain ? drain[1] : match[2]
 
   if (req.method === 'GET' || req.method === 'HEAD') {
     const row = newestEvent(pubkey, HIVE_INDEX_KIND)

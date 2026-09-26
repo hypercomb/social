@@ -421,11 +421,13 @@ test("a pool past the floor is listed only while the operator's signed index dec
   const stranger = generateSecretKey()
   const child = spawn(process.execPath, ['relay.js', '--port', String(port), '--memory', '--content-dir', dir, '--writers', getPublicKey(operator)], { cwd: import.meta.dirname, stdio: 'ignore' })
   const base = `http://127.0.0.1:${port}`
-  const declare = async (secret, listed) => {
+  const declare = async (secret, listed, viaDrain = false) => {
     const url = `${base}/${sha(Buffer.from('hive:indexes', 'utf8'))}/${getPublicKey(secret)}`
+    const drainUrl = `${base}/hive/${getPublicKey(secret)}`
     const evt = finalizeEvent({ kind: 30564, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ roots: {}, listed }) }, secret)
     const body = Buffer.from(JSON.stringify(evt))
-    const put = await fetch(url, { method: 'PUT', body, headers: { Authorization: auth(secret, url, 'PUT', body), 'Content-Type': 'application/json' } })
+    const target = viaDrain ? drainUrl : url
+    const put = await fetch(target, { method: 'PUT', body, headers: { Authorization: auth(secret, target, 'PUT', body), 'Content-Type': 'application/json' } })
     assert.equal(put.status, 200)
   }
   try {
@@ -433,7 +435,12 @@ test("a pool past the floor is listed only while the operator's signed index dec
     assert.equal((await fetch(`${base}/${windows}/`)).status, 404)
     assert.equal((await fetch(`${base}/${windows}/${member}`)).status, 404)
     // Anyone may sign their own index; only the operator's word lists a pool.
-    await declare(stranger, ['hypercomb:windows'])
+    // An install already in use publishes through the drain route, /hive/<pubkey>.
+    await declare(stranger, ['hypercomb:windows'], true)
+    const strangerKey = getPublicKey(stranger)
+    const viaDrain = await (await fetch(`${base}/hive/${strangerKey}`)).text()
+    const viaAddress = await (await fetch(`${base}/${sha(Buffer.from('hive:indexes', 'utf8'))}/${strangerKey}`)).text()
+    assert.equal(viaDrain, viaAddress)
     assert.equal((await fetch(`${base}/${windows}/`)).status, 404)
     await declare(operator, ['hypercomb:windows'])
     const listing = await fetch(`${base}/${windows}/`)

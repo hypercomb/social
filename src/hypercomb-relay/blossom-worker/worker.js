@@ -338,11 +338,18 @@ async function bindingsEnv(env, read = indexReader(env)) {
   return view
 }
 
-/** A signed index opens only the domains explicitly listed for a lineage.
- *  Older events without a doors entry require a fresh publication. */
+/** Does this signed index open `lineage` on `host`? An entry WITH doors
+ *  is obeyed exactly: only the domains it lists. An entry with NO doors was
+ *  signed before doors existed and opens as it did then — everywhere (jwize
+ *  2026-09-25: data never heals, older versions keep working). Nothing is
+ *  inferred or written; the branch becomes explicit the next time its
+ *  publisher publishes with doors. The same reading as the Publish window's
+ *  doorOn. */
 function opensOn(index, lineage, host) {
+  if (!host) return false
   const listed = index?.doors?.[lineage]
-  if (!host || !Array.isArray(listed)) return false
+  if (listed === undefined) return true
+  if (!Array.isArray(listed)) return false
   const h = String(host).toLowerCase()
   return listed.some((z) => {
     const zone = String(z || '').toLowerCase()
@@ -2301,6 +2308,26 @@ export default {
       && /^(?:worker|sharedworker|serviceworker)$/.test(String(request.headers.get('sec-fetch-dest') || '').toLowerCase())
       && /^\/(?:(?:@resource\/)?[0-9a-f]{64}(?:\/[^/]+)?|content\/[0-9a-f]{64})$/.test(pathname)) {
       return text(403, 'a sandbox door runs no worker from the heap')
+    }
+
+    // DRAIN ROUTES — the retired names, answering the SAME bytes as the
+    // signature addresses, for the installs already in use: their update scout
+    // and their publish still call these. The addresses are the truth; retire
+    // each route once nothing in use calls it (jwize 2026-09-25).
+    const drainIndex = pathname.match(/^\/hive\/([0-9a-f]{64})$/)
+    if (drainIndex) {
+      if (method === 'GET' || method === 'HEAD') return getHive(request, env, drainIndex[1])
+      if (method === 'PUT') return putHive(request, env, drainIndex[1])
+      return text(405, 'method not allowed')
+    }
+    if (method === 'GET' || method === 'HEAD') {
+      if (pathname === '/publications.json') return servePublications(request, (await route()).env)
+      if (pathname === '/trials.json') {
+        const routed = await route()
+        return serveTrials(request, routed.env, routed.implicit ? routed.zone : requestUrl.hostname)
+      }
+      const drainLocale = pathname.match(/^\/i18n\/([a-z]{2,3}(?:-[a-z0-9]{2,8})?)\.json$/)
+      if (drainLocale) return serveTranslations(request, env, drainLocale[1])
     }
 
     // A PUBLISHER'S SIGNED INDEX — the member of sign('hive:indexes') named by
