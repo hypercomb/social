@@ -162,8 +162,8 @@ export interface PublishOptions {
    *  after a failure does nothing; the resume/re-push paths need this. */
   forceReDrain?: boolean
   onProgress?: (p: PublishProgress) => void
-  /** Stage lists to advance in the same act besides `published` — `join`
-   *  passes `['shared']`: joining a swarm IS publishing the branch. */
+  /** Stage lists to advance in the same act besides `published` —
+   *  `publish here` (the offering act) passes `['shared']`. */
   stages?: readonly StageWord[]
 }
 
@@ -592,42 +592,6 @@ async function withdrawFromStages(
   return pointers
 }
 
-/**
- * LEAVE THE SWARM: the `shared` lists no longer name these branches' heads
- * (deployment-stages.md R7). One index read and at most one write per branch
- * door; a branch that was never published, or never shared, changes nothing.
- * Never throws — leaving is never gated on it.
- */
-export async function leaveBranches(
-  branches: readonly (readonly string[])[],
-): Promise<{ withdrawn: number }> {
-  const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
-  const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
-  if (!signer?.getPublicKeyHex) return { withdrawn: 0 }
-  const pubkey = String((await signer.getPublicKeyHex().catch(() => null)) ?? '').toLowerCase()
-  if (!SIG_RE.test(pubkey)) return { withdrawn: 0 }
-  let withdrawn = 0
-  for (const branch of branches) {
-    const segs = branch.map(s => String(s ?? '').trim()).filter(Boolean)
-    if (segs.length === 0) continue
-    try {
-      const nodes = await nodesFor(segs, hostSync)
-      if (nodes.length === 0) continue
-      const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
-      if (!read.ok) continue
-      const head = String(read.manifest.roots[lineageKey(segs)] ?? '').toLowerCase()
-      if (!SIG_RE.test(head)) continue
-      hostSync?.addPublishNodes?.(nodes)
-      const indexed = indexedHeads(read.manifest.roots)
-      const pointers = await withdrawFromStages([STAGE_SHARED], [head], hostSync, pubkey, () => h => indexed.has(h))
-      if (Object.keys(pointers).length === 0) continue
-      const put = await putHiveManifest(indexHost, { ...read.manifest.roots, ...pointers }, read.manifest.doors ?? {},
-        read.manifest.createdAt, read.manifest.signedContent)
-      if (put.ok) withdrawn++
-    } catch { /* best effort — the relay leave already happened */ }
-  }
-  return { withdrawn }
-}
 
 /** Say which domains an ALREADY-PUBLISHED branch opens on — the per-domain
  *  switch. One signed index rewrite, no seal and no upload: the bytes are

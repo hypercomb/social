@@ -31,9 +31,7 @@ import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-prop
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { noteVisualHosts, visualArtifactSigs } from './visual-hosts.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
-import { isBranchPublic, isCellPublic, publicBranchRootsAt, setCellPublic } from '../presentation/tiles/tile-public.js'
-import { leaveBranches, publishBranch } from './publish-branch.js'
-import { STAGE_SHARED } from './stage-succession.js'
+import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-public.js'
 import { referenceTargetForLabel, titlesForSegments } from '../commands/decoration-kind-index.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
 import { kindsForLabel } from '../commands/decoration-kind-index.js'
@@ -1243,12 +1241,6 @@ export class SwarmDrone extends Drone {
         mesh.resubscribeAll?.()
       }
 
-      // The GESTURE is the transition. A replayed `true` at boot is not a join
-      // and publishes nothing; a `false` after `true` is the leave.
-      const joined = payload?.public === true && !this.#wasPublic
-      const left = payload?.public === false && this.#wasPublic
-      this.#wasPublic = payload?.public === true
-
       if (payload?.public === true) {
         // SHARING REQUIRES HOSTING (jwize, 2026-09-25). Every join path lands
         // here, so this is the one place that can ASK whether a participant
@@ -1257,9 +1249,8 @@ export class SwarmDrone extends Drone {
         // things in, and are told so once per session. The service never
         // provisions a third-party host on its own: joining is "share with
         // these people", not "upload to that company".
-        let target: 'ready' | 'opted-out' | 'needs-host' | undefined
         try {
-          target = this.#getHostSync()?.ensureSwarmTarget?.()
+          const target = this.#getHostSync()?.ensureSwarmTarget?.()
           // 'needs-host' and 'opted-out' both mean the same thing here: you
           // watch. Say so once either way — an opt-out that stays silent
           // reads as a join that did nothing.
@@ -1273,11 +1264,6 @@ export class SwarmDrone extends Drone {
             })
           }
         } catch { /* never block the join */ }
-        // JOINING A SWARM IS PUBLISHING THE BRANCH (deployment-stages.md
-        // §4.2): with a host, each public-branch root you stand among is
-        // published from it with its `shared` list advanced — updates go
-        // out at join time. Detached: the sync below never waits on it.
-        if (joined && target === 'ready') void this.#joinAsPublish()
       }
 
       if (payload?.public === false) {
@@ -1286,9 +1272,6 @@ export class SwarmDrone extends Drone {
         // expiry. Fire-and-forget; the beacon expiry is the backstop.
         this.#stopJoinFastRetry()
         void this.#publishLeave()
-        // The `shared` lists no longer name what you stood among — you
-        // offer nothing while away. Best effort; leaving is never gated.
-        if (left) void this.#leaveShared()
         if (this.#lifecycleSub) { try { this.#lifecycleSub.close() } catch { /* ignore */ } this.#lifecycleSub = null }
         this.#lifecycleSig = ''
         for (const sub of this.#subsBySig.values()) {
@@ -2553,24 +2536,6 @@ export class SwarmDrone extends Drone {
   /** Once-per-session latch for the "watching only — no host" note on
    *  join: sharing requires hosting, and one explanation is plenty. */
   static #needsHostNoted = false
-
-  /** Whether the mesh was public when the last `mesh:public-changed` landed.
-   *  Seeded FALSE: both shells force the flag off at load (refresh → private,
-   *  web `core-adapter.ts`, dev `app.ts:80`), so no membership exists before
-   *  the first event of a session, and the boot emit (web `app.ts:299`, dev
-   *  `app.ts:286`) can only say `false`. Only the false→true transition is
-   *  the JOIN gesture; a seed read from stale storage would turn that boot
-   *  emit into a LEAVE with signed index writes. */
-  #wasPublic = false
-
-  /** The public-branch roots the last join advanced — what leave withdraws,
-   *  wherever the participant stands by then. */
-  #sharedRoots: string[][] = []
-  /** The in-flight join, so a leave that follows a pending join withdraws
-   *  what that join actually advanced, and a join that outlives its session
-   *  announces nothing. */
-  #joinInFlight: Promise<void> | null = null
-  #joinGeneration = 0
 
   /** Debounce token for the receipt-driven republish: each landed host
    *  receipt can flip a held-back closure to available, but a big drain
@@ -4725,71 +4690,6 @@ const payload: SwarmLayerPayload = myLabel
       /** Does this participant have a durable byte target? Never provisions one. */
       ensureSwarmTarget?: () => 'ready' | 'opted-out' | 'needs-host'
     } | undefined
-
-  /** The location you stand in, as the announce walk reads it. */
-  #standingSegments = (): string[] =>
-    ((this.#getLineage()?.explorerSegments?.() ?? []) as readonly unknown[])
-      .map(s => String(s ?? '').trim())
-      .filter(Boolean)
-
-  /** JOIN = PUBLISH THE BRANCH (documentation/deployment-stages.md §4.2).
-   *  On the join gesture only — never the boot replay, never a re-walk —
-   *  each public-branch root at the location you stand in is published from
-   *  your host with its `shared` list advanced: seal, stage the delta (the
-   *  drain asks the host first, so a hosted branch is quick), wait for
-   *  availability, advance the index. The announce walk then finds the
-   *  closure available and offers it. A branch that does not make it says
-   *  so in the activity log; the join itself never waits. */
-  #joinAsPublish = (): Promise<void> => {
-    const generation = ++this.#joinGeneration
-    const run = (async (): Promise<void> => {
-      const roots = publicBranchRootsAt('/' + this.#standingSegments().join('/'))
-      if (roots.length === 0) return
-      const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
-      let advanced = false
-      for (const segs of roots) {
-        const cell = segs[segs.length - 1] ?? ''
-        let result: Awaited<ReturnType<typeof publishBranch>>
-        try { result = await publishBranch(segs, { stages: [STAGE_SHARED] }) }
-        catch (err) { result = { ok: false, failure: 'services', reason: String(err) } }
-        if (result.ok) {
-          advanced = true
-          if (!this.#sharedRoots.some(r => r.join('/') === segs.join('/'))) this.#sharedRoots.push(segs)
-          EffectBus.emit('activity:log', {
-            message: i18n?.t('swarm.join.published', { cell }) ?? `published ${cell} from your host — offering it here`,
-            icon: '✦',
-          })
-        } else {
-          const reason = result.reason ?? result.failure
-          EffectBus.emit('activity:log', {
-            message: i18n?.t('swarm.join.publish-failed', { cell, reason }) ?? `${cell} is not offered: ${reason}`,
-            icon: '✦',
-          })
-        }
-      }
-      // The receipts landed and the lists changed: re-run the announce walk so
-      // the gate re-reads instead of waiting for the heartbeat — but only for
-      // the session that joined: a participant who left meanwhile announces
-      // nothing to a swarm they are no longer in.
-      if (advanced && this.#currentSig && this.#wasPublic && generation === this.#joinGeneration) {
-        void this.#publishMyLayerAt(this.#currentSig)
-      }
-    })()
-    this.#joinInFlight = run.finally(() => { if (this.#joinInFlight === run) this.#joinInFlight = null })
-    return this.#joinInFlight
-  }
-
-  /** LEAVE: withdraw the `shared` lists for exactly the roots the join
-   *  advanced — after any join still in flight, so a leave that follows a
-   *  pending join withdraws what that join listed. Detached from the leave
-   *  itself, which is never gated. */
-  #leaveShared = async (): Promise<void> => {
-    try { await this.#joinInFlight } catch { /* the join reported its own failures */ }
-    const roots = this.#sharedRoots
-    this.#sharedRoots = []
-    if (roots.length === 0) return
-    try { await leaveBranches(roots) } catch { /* best effort */ }
-  }
 
   #getRegistry = (): TileSourceRegistryLike | undefined =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(TILE_SOURCE_REGISTRY_KEY) as TileSourceRegistryLike | undefined
