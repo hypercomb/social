@@ -602,9 +602,34 @@ type BundledPackage = {
  * the ship's `index.html` when it cannot. Both answer the same URL, which is
  * why this needs no branch for "am I on a dev server or a bucket".
  */
+/** The package pool's head the page carries, when it carries one for `pool`. */
+const readCarriedInstall = (pool: string): { text: string; at?: string } | null => {
+  try {
+    const raw = typeof document === 'undefined' ? null : document.getElementById('hc-install')?.textContent
+    const carried = raw ? JSON.parse(raw) as { pool?: unknown; text?: unknown; at?: unknown } : null
+    if (!carried || carried.pool !== pool || typeof carried.text !== 'string' || carried.text.includes('<')) return null
+    const at = typeof carried.at === 'string' ? new Date(carried.at).toISOString() : undefined
+    return { text: carried.text, ...(at && at !== 'Invalid Date' ? { at } : {}) }
+  } catch { return null }
+}
+
 const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
   try {
     const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+
+    // The page a door serves carries the head of this very pool (#hc-install,
+    // written by the worker beside #hc-door): the newest marker and its text,
+    // exactly what the listing and the marker read below would return.
+    const carried = readCarriedInstall(pool)
+    if (carried) {
+      const member = parseMember(carried.text)
+      if (member) {
+        return {
+          packageSig: member.packageSig, bees: [], dependencies: [], layers: [],
+          label: member.label || undefined, at: carried.at, previous: null,
+        }
+      }
+    }
 
     const entryAt = async (index: number): Promise<{ text: string; at: string } | null> => {
       const res = await fetch(`/content/${pool}/${poolEntryName(index)}`)

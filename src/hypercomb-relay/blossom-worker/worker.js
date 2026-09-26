@@ -221,8 +221,9 @@ async function verifiedIndex(env, pubkey) {
 }
 
 /** One request's index reads, memoized by pubkey. The ledger asks the same
- *  key for every site it reports; without this a directory read re-fetched
- *  and re-verified one schnorr signature per site per publisher. */
+ *  key for every site it reports; a page passes one reader to its gate and its
+ *  package. A reader never outlives the request that made it, so an index is
+ *  never answered stale. */
 function indexReader(env) {
   const reads = new Map()
   return (pubkey) => {
@@ -324,9 +325,23 @@ function mergeBindings(fromVar, records) {
 
 /** A per-request view of env whose bindings include the operators' signed
  *  records — or env itself when no zone is operated or none verifies. */
+/** How long one isolate trusts the operators' signed bindings and a site's
+ *  open answer. Every request routes through them; a change is seen within
+ *  this window (the same bound as the bag's newest marker). */
+const SITE_TTL_MS = 5_000
+const heldBindings = new WeakMap()
+
 async function bindingsEnv(env, read = indexReader(env)) {
   const operators = siteOperators(env)
   if (!operators.length) return env
+  const held = heldBindings.get(env)
+  if (held && Date.now() - held.at < SITE_TTL_MS && held.hives === env.HIVES?.get) return held.view
+  const view = await readBindingsEnv(env, read, operators)
+  heldBindings.set(env, { at: Date.now(), view, hives: env.HIVES?.get })
+  return view
+}
+
+async function readBindingsEnv(env, read, operators) {
   const records = new Map()
   for (const [zone, pubkey] of operators) {
     const entries = await operatorRecord(env, read, zone, pubkey)
@@ -730,6 +745,23 @@ async function routeMarkers(env, host) {
   return locationMarkers(env, await poolAddress(host.toLowerCase()))
 }
 
+/** How long one isolate trusts a location's newest marker. Every page request
+ *  gates on it; a write in this isolate drops the entry at once, and another
+ *  isolate's write is seen within this window. */
+const LOCATION_TTL_MS = 5_000
+const newestAt = new Map()
+
+/** A location's marker names and its newest record, cached per isolate. */
+async function newestLocation(env, location) {
+  const held = newestAt.get(location)
+  if (held && Date.now() - held.at < LOCATION_TTL_MS && held.env === env.CONTENT) return held
+  const names = await locationMarkers(env, location)
+  const record = names?.length ? await locationRecord(env, location, names.at(-1)) : null
+  const fresh = { names, record, at: Date.now(), env: env.CONTENT }
+  newestAt.set(location, fresh)
+  return fresh
+}
+
 /** One marker's record, or null. Markers are small, immutable JSON. */
 async function locationRecord(env, location, name) {
   if (!ROUTE_MARKER_RE.test(name) || !env.CONTENT?.get) return null
@@ -759,6 +791,7 @@ async function putLocationMarker(env, location, name, record) {
   // between two writers that both saw the next number free. There is no
   // transaction with the signed-index KV; reads verify both authorities.
   if (await env.CONTENT.head(key)) return false
+  newestAt.delete(location)
   const written = await env.CONTENT.put(key, new TextEncoder().encode(JSON.stringify(record)), {
     onlyIf: new Headers({ 'If-None-Match': '*' }),
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
@@ -774,7 +807,7 @@ async function putLocationMarker(env, location, name, record) {
  *  forward; nothing is rewritten or deleted). */
 async function currentRouteHead(env, host, signedHead, meta) {
   const location = await poolAddress(host.toLowerCase())
-  const markers = await locationMarkers(env, location)
+  const { names: markers, record: newest } = await newestLocation(env, location)
   if (!markers) return null
   if (markers.length === 0) {
     if (!SIG_RE.test(String(signedHead))) return null
@@ -784,13 +817,19 @@ async function currentRouteHead(env, host, signedHead, meta) {
     const seeded = await locationMarkers(env, location)
     return seeded?.length ? locationMarkerHead(env, location, seeded.at(-1)) : null
   }
-  const latest = await locationRecord(env, location, markers.at(-1))
+  const latest = newest
   if (!latest) return null
-  if (meta && latest.layer === signedHead && typeof latest.pubkey !== 'string') {
+  // A marker from before doors carried their meta is not an authority over
+  // the signed index: an older worker passed index writes without advancing
+  // bags. Whether it names the signed head or an older one, it gains a
+  // successor holding the index's record — a forward commit, nothing
+  // rewritten (jwize 2026-09-25: older versions keep working). A marker that
+  // DOES carry meta stays the authority: a disagreement there closes the door.
+  if (meta && typeof latest.pubkey !== 'string') {
     const next = Number(markers.at(-1)) + 1
-    if (Number.isSafeInteger(next) && next <= 99_999_999) {
-      await putLocationMarker(env, location, String(next).padStart(8, '0'), meta)
-    }
+    if (Number.isSafeInteger(next) && next <= 99_999_999
+      && await putLocationMarker(env, location, String(next).padStart(8, '0'), meta)) return signedHead
+    return latest.layer === signedHead ? signedHead : null
   }
   return String(latest.layer)
 }
@@ -1143,6 +1182,47 @@ async function answerPackage(request, url, found, lineage) {
  *  index, so `<change>.<zone>` runs the package `try-<change>.<zone>` ran —
  *  the same signature, moved by one pointer. Read from the publisher the
  *  site's hive is read from; none stamped ⇒ the visitor engine's own package. */
+/** Is this site open, and what package does it run? A page asks fresh and
+ *  leaves the answer for its host; the bundled, content-addressed assets the
+ *  page then pulls reuse it for SITE_TTL_MS instead of re-reading indexes. */
+const openSites = new Map()
+async function siteOpen(env, site, read, host, reuse) {
+  const key = host.toLowerCase()
+  const held = openSites.get(key)
+  if (reuse && held && Date.now() - held.at < SITE_TTL_MS && held.content === env.CONTENT && held.hives === env.HIVES?.get) return held
+  const open = await anyPublishedRoot(env, site, read, host)
+  const promoted = open ? await sitePackage(env, site, read) : null
+  const answer = { open, promoted, at: Date.now(), content: env.CONTENT, hives: env.HIVES?.get }
+  openSites.set(key, answer)
+  return answer
+}
+
+/** The head of the package pool this page installs from — the newest
+ *  host:packages marker, as ensureInstall would read it: the promoted
+ *  package's member, or the bundle's own. */
+async function installPointer(request, env, site, promoted) {
+  const pool = await poolAddress(HOST_PACKAGES_MEANING)
+  if (promoted) return { pool, marker: '00000000', text: `${promoted.root}\n${site.lineage}` }
+  if (!env.ASSETS?.fetch) return null
+  try {
+    const url = new URL(request.url)
+    url.search = ''
+    url.pathname = `/content/${pool}/`
+    const listing = await env.ASSETS.fetch(new Request(url))
+    if (!listing.ok) return null
+    const marker = (await listing.text()).split(/\r?\n/).map((name) => name.trim())
+      .filter((name) => ROUTE_MARKER_RE.test(name)).sort().at(-1)
+    if (!marker) return null
+    url.pathname = `/content/${pool}/${marker}`
+    const entry = await env.ASSETS.fetch(new Request(url))
+    if (!entry.ok) return null
+    const text = await entry.text()
+    if (text.includes('<')) return null
+    const modified = entry.headers.get('last-modified')
+    return { pool, marker, text, ...(modified ? { at: modified } : {}) }
+  } catch { return null }
+}
+
 async function sitePackage(env, site, read = indexReader(env)) {
   const publisher = site.publishers?.find(p => p.primary) || site.publishers?.[0]
   if (!publisher) return null
@@ -1446,7 +1526,22 @@ async function serveSandboxShell(request, env, zone) {
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
 }
 
-async function serveVisitorAsset(request, env, { spa = true } = {}) {
+/** The door's record as page data: JSON with every '<' escaped, so no value
+ *  can close the script element. */
+function doorScript(record, id = 'hc-door') {
+  return `<script id="${id}" type="application/json">${JSON.stringify(record).replace(/</g, '\\u003c')}</script>`
+}
+
+/** Past this a publisher's signed index stays off the page and is fetched. */
+const PAGE_INDEX_MAX = 65_536
+
+/** The signed index event as page data, exactly its bytes with '<' escaped —
+ *  a JSON escape, so the event still verifies byte for byte once parsed. */
+function indexScript(raw) {
+  return `<script id="hc-index" type="application/json">${raw.replace(/</g, '\\u003c')}</script>`
+}
+
+async function serveVisitorAsset(request, env, { spa = true, door = null, install = null, index = null } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   let response = await env.ASSETS.fetch(request)
   // Under /content/ a miss is a miss. The engine walks its package pool by
@@ -1470,6 +1565,17 @@ async function serveVisitorAsset(request, env, { spa = true } = {}) {
   // without this header a hive replicating from another origin died as an
   // opaque "Failed to fetch" and the door read as publishing nothing.
   headers.set('Access-Control-Allow-Origin', '*')
+  if (door && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
+    const html = await response.text()
+    const at = html.indexOf('</head>')
+    if (at >= 0) {
+      headers.delete('Content-Length')
+      headers.set('Cache-Control', 'no-store')
+      const body = html.slice(0, at) + doorScript(door) + (install ? doorScript(install, 'hc-install') : '') + (index ? indexScript(index) : '') + html.slice(at)
+      return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers })
+    }
+    return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers })
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -1964,13 +2070,54 @@ async function getGrant(request, env) {
 // indexes before is read as a drain source and never written.
 const HIVE_INDEXES_MEANING = 'hive:indexes'
 
+/** A signed index is self-verifying, so a copy a few seconds old is safe to
+ *  hand out: every reader checks the schnorr signature against the key it
+ *  pins, and compares the stamp with what it already signed. The edge cache
+ *  holds the bytes for INDEX_EDGE_SECONDS per publisher; a write drops the
+ *  copy in its own colo, and every other colo catches up within the window. */
+const INDEX_EDGE_SECONDS = 5
+const indexCacheKey = async (pubkey) =>
+  new Request(`https://hive-indexes.invalid/${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`)
+const edgeCache = () => globalThis.caches?.default ?? null
+
 async function heldIndexRaw(env, pubkey) {
-  const object = await env.CONTENT?.get?.(`${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`)
+  const edge = edgeCache()
+  if (edge) {
+    try {
+      const hit = await edge.match(await indexCacheKey(pubkey))
+      if (hit) return await hit.text()
+    } catch { /* read the pool */ }
+  }
+  const raw = await readHeldIndex(env, pubkey)
+  if (edge && raw) {
+    try {
+      await edge.put(await indexCacheKey(pubkey), new Response(raw, {
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${INDEX_EDGE_SECONDS}` },
+      }))
+    } catch { /* uncached is only slower */ }
+  }
+  return raw
+}
+
+async function readHeldIndex(env, pubkey) {
+  const key = `${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`
+  const object = await env.CONTENT?.get?.(key)
   if (object) return new TextDecoder().decode(await object.arrayBuffer())
-  return (await env.HIVES?.get?.(pubkey)) ?? null
+  // DRAIN: an index only the KV namespace holds is carried into its pool member
+  // the first time it is read, so every later read is one get. The KV entry is
+  // left as it was.
+  const drained = (await env.HIVES?.get?.(pubkey)) ?? null
+  if (drained && env.CONTENT?.put) {
+    try {
+      await env.CONTENT.put(key, drained, { onlyIf: new Headers({ 'If-None-Match': '*' }),
+        httpMetadata: { contentType: 'application/json; charset=utf-8' } })
+    } catch { /* read again next time */ }
+  }
+  return drained
 }
 
 async function holdIndex(env, pubkey, evt) {
+  try { await edgeCache()?.delete(await indexCacheKey(pubkey)) } catch { /* the window closes it */ }
   await env.CONTENT.put(`${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`, JSON.stringify(evt), {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
   })
@@ -2524,20 +2671,35 @@ export default {
       // A door — named or wildcard — is a website only while an approved
       // publisher's signed index carries its lineage (the open mark, above).
       // Until then, and again after a withdrawal, an honest 404 page.
-      if (!(await anyPublishedRoot(env, site, indexReader(env), requestUrl.hostname))) {
-        return nothingHere(requestUrl.hostname, implicit ? siteZone : null)
-      }
+      const read = indexReader(env)
+      const opened = await siteOpen(env, site, read, requestUrl.hostname, pathname.startsWith('/content/'))
+      if (!opened.open) return nothingHere(requestUrl.hostname, implicit ? siteZone : null)
       // A promoted trial: the site runs its publisher's package, not the
       // engine's own.
       if (pathname.startsWith('/content/')) {
-        const promoted = await sitePackage(env, site)
-        const answered = promoted && await answerPackage(request, requestUrl, promoted, site.lineage)
+        const answered = opened.promoted && await answerPackage(request, requestUrl, opened.promoted, site.lineage)
         if (answered) return answered
       }
       // Everything under /content/ is a FILE the build shipped — the package
       // pool above all — and is never held and never a page.
       if (pathname.startsWith('/content/')) return serveVisitorAsset(request, env, { spa: false })
-      return serveVisitorAsset(request, env)
+      // THE PAGE CARRIES ITS DOOR: the record the gate just read from the bag
+      // at sign(<host>), so the visitor needs no round trip before its plan.
+      // …and the head of its host:packages pool, so the install walks no
+      // listing and no marker before it starts. The two reads run side by side.
+      // …and its publisher's signed index, so the visitor verifies it against
+      // the key it pins with no round trip. The reads run side by side.
+      const frontDoor = !!siteBinding(env, requestUrl.hostname)?.frontDoor
+      const publisher = site.publishers?.find((p) => p.primary) || site.publishers?.[0]
+      const [located, pointer, signedIndex] = frontDoor ? [null, null, null] : await Promise.all([
+        newestLocation(env, await poolAddress(requestUrl.hostname.toLowerCase())),
+        installPointer(request, env, site, opened.promoted),
+        publisher ? heldIndexRaw(env, publisher.pubkey).catch(() => null) : null,
+      ])
+      const door = located?.record ?? null
+      const install = door ? pointer : null
+      const index = door && signedIndex && signedIndex.length <= PAGE_INDEX_MAX ? signedIndex : null
+      return serveVisitorAsset(request, env, { door, install, index })
     }
 
     // A zone subdomain that could not even become an implicit site (nested

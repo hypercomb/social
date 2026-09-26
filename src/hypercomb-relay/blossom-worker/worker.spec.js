@@ -70,6 +70,10 @@ const TWO_ZONES = {
   },
 }
 
+/** The page paths a request log shows — without the install pointer's own
+ *  read of the bundled package pool, which every served page makes. */
+const pages = (requests) => requests.filter((path) => !path.startsWith('/content/'))
+
 async function fixture(event, bindings = ONE_ZONE) {
   event ??= await signedIndex({ pluginthematrix: head, revolucion: head })
   const assetRequests = []
@@ -185,7 +189,119 @@ test('a signed landing field is inert — the door omits it and the visitor page
   const shell = '<!doctype html><html><head><title>x</title></head><body><app-root><div class="site-loading" role="status"></div></app-root></body></html>'
   env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
   const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
-  assert.equal(html, shell)
+  // The page carries its door's record and nothing else of the index.
+  const door = /<script id="hc-door" type="application\/json">([^<]*)<\/script>/.exec(html)
+  assert(door, 'the page carries its door')
+  assert.equal('landing' in JSON.parse(door[1]), false)
+  // The signed index rides verbatim (its landing field inert inside the publisher's own signed bytes).
+  const signed = /<script id="hc-index" type="application\/json">[^<]*<\/script>/.exec(html)
+  assert.equal(html.replace(door[0], '').replace(signed?.[0] ?? '', ''), shell)
+})
+
+test('a page carries its door record, escaped so no value can close the script', async () => {
+  const bindings = { ...ONE_ZONE, 'revolucion.pluginthematrix.com': { ...ONE_ZONE['revolucion.pluginthematrix.com'], title: 'a</script><b>' } }
+  const { env } = await fixture(undefined, bindings)
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  const door = /<script id="hc-door" type="application\/json">([^<]*)<\/script>/.exec(html)
+  assert(door, 'the record is not able to break out of its element')
+  const record = JSON.parse(door[1])
+  assert.equal(record.title, 'a</script><b>')
+  assert.equal(record.layer, head)
+  assert.equal(record.pubkey, pubkey)
+})
+
+test('a page carries the head of its package pool, and its bundled assets reuse the gate', async () => {
+  const { env } = await fixture()
+  const pool = await sha256Hex('host:packages')
+  const pkg = 'e'.repeat(64)
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  env.ASSETS.fetch = async (request) => {
+    const path = new URL(request.url).pathname
+    if (path === `/content/${pool}/`) return new Response('00000000\n', { headers: { 'content-type': 'text/plain' } })
+    if (path === `/content/${pool}/00000000`) return new Response(`${pkg}\nessentials`, { headers: { 'content-type': 'text/plain', 'last-modified': 'Fri, 25 Sep 2026 12:00:00 GMT' } })
+    return new Response(shell, { headers: { 'content-type': 'text/html' } })
+  }
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  const install = /<script id="hc-install" type="application\/json">([^<]*)<\/script>/.exec(html)
+  assert(install, 'the page carries its install pointer')
+  assert.deepEqual(JSON.parse(install[1]), { pool, marker: '00000000', text: `${pkg}\nessentials`, at: 'Fri, 25 Sep 2026 12:00:00 GMT' })
+  // The assets the page then pulls reuse the page's gate: no index read.
+  const reads = []
+  const get = env.HIVES.get
+  env.HIVES.get = async (key) => { reads.push(key); return get(key) }
+  const heldGet = env.CONTENT.get
+  env.CONTENT.get = async (key) => { if (key.startsWith(INDEXES)) reads.push(key); return heldGet(key) }
+  // (a swapped reader is a different store, so this first read refreshes once…)
+  await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/00000000`), env)
+  reads.length = 0
+  // …and every asset after it reuses that answer.
+  await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/`), env)
+  await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/00000000`), env)
+  assert.deepEqual(reads, [])
+})
+
+test('an index is held at the edge a few seconds, and a write drops the copy', async () => {
+  const held = new Map()
+  const edge = {
+    match: async (request) => (held.has(request.url) ? new Response(held.get(request.url)) : undefined),
+    put: async (request, response) => { held.set(request.url, await response.text()) },
+    delete: async (request) => held.delete(request.url),
+  }
+  const before = globalThis.caches
+  globalThis.caches = { default: edge }
+  try {
+    const { env } = await fixture()
+    const url = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
+    const first = await (await worker.fetch(new Request(url), env)).json()
+    assert.equal(held.size, 1, 'the first read leaves a copy at the edge')
+    // The pool is not asked again while the copy is fresh.
+    const get = env.CONTENT.get
+    env.CONTENT.get = async (key) => { assert(!key.startsWith(INDEXES), 'served from the edge'); return get(key) }
+    assert.deepEqual(await (await worker.fetch(new Request(url), env)).json(), first)
+    env.CONTENT.get = get
+    // A write drops the copy, so the next read is the new index.
+    const later = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_070)
+    const put = await worker.fetch(new Request(url, { method: 'PUT',
+      headers: { authorization: await nip98(url, 'PUT') }, body: JSON.stringify(later) }), env)
+    assert.equal(put.status, 200)
+    assert.equal((await (await worker.fetch(new Request(url), env)).json()).created_at, 1_800_000_070)
+  } finally {
+    if (before === undefined) delete globalThis.caches
+    else globalThis.caches = before
+  }
+})
+
+test('a page carries its publisher\'s signed index, byte-identical once parsed', async () => {
+  const { env } = await fixture()
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  const carried = /<script id="hc-index" type="application\/json">([^<]*)<\/script>/.exec(html)
+  assert(carried, 'the page carries the signed index')
+  const served = await (await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${INDEXES}/${pubkey}`), env)).json()
+  assert.deepEqual(JSON.parse(carried[1]), served)
+})
+
+test('a stale marker from before door records moves forward to the signed head', async () => {
+  const later = 'c'.repeat(64)
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: later }))
+  const bag = await sha256Hex('revolucion.pluginthematrix.com')
+  // Seeded by an older worker, then passed by an index write that never advanced it.
+  await env.CONTENT.put(`${bag}/00000000`, JSON.stringify({ layer: head }))
+  const { status, record } = await doorMeta('https://revolucion.pluginthematrix.com/', env)
+  assert.equal(status, 200)
+  assert.equal(record.layer, later)
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(env.CONTENT.held.get(`${bag}/00000000`))), { layer: head }, 'nothing rewritten')
+})
+
+test('a marker that carries meta stays the authority: a disagreement closes the door', async () => {
+  const later = 'c'.repeat(64)
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: later }))
+  const bag = await sha256Hex('revolucion.pluginthematrix.com')
+  await env.CONTENT.put(`${bag}/00000000`, JSON.stringify({ layer: head, pubkey, lineage: 'revolucion', title: 'Revolución', publishedAt: 1 }))
+  assert.equal((await doorMeta('https://revolucion.pluginthematrix.com/', env)).status, 404)
 })
 
 test('the door carries the arrival plan the publisher signed beside the root', async () => {
@@ -373,7 +489,7 @@ test('application paths receive the shared visitor engine', async () => {
   const revisions = await worker.fetch(new Request('https://pluginthematrix.com/revisions'), env)
   assert.equal(await journal.text(), 'visitor engine')
   assert.equal(await revisions.text(), 'visitor engine')
-  assert.deepEqual(assetRequests, ['/journal', '/revisions'])
+  assert.deepEqual(pages(assetRequests), ['/journal', '/revisions'])
   assert.match(journal.headers.get('content-security-policy'), /connect-src 'self'/)
   assert.equal(journal.headers.get('referrer-policy'), 'no-referrer')
 })
@@ -384,7 +500,7 @@ test('bare domain is a Core creation, not a server-authored landing page', async
   const entrance = await worker.fetch(new Request('https://pluginthematrix.com/'), env)
   assert.equal(descriptor.record.lineage, 'pluginthematrix')
   assert.equal(await entrance.text(), 'visitor engine')
-  assert.deepEqual(assetRequests, ['/'])
+  assert.deepEqual(pages(assetRequests), ['/'])
 })
 
 test('published Core hosts reject every mutation before relay routing', async () => {
@@ -513,7 +629,9 @@ test('the offerings pool projects only open, signed creations on this domain', a
   const bytes = await member.text()
   assert.equal(member.status, 200)
   assert.equal(await sha256Hex(bytes), names[0])
-  assert.equal(retained.size, 0, 'pool discovery does not fetch or mint every location bag')
+  // The publisher's index moved into its pool member on first read; no location bag was minted.
+  assert.deepEqual([...retained.keys()].filter((key) => !key.startsWith(`${INDEXES}/`)), [], 'pool discovery does not fetch or mint every location bag')
+  assert(retained.has(`${INDEXES}/${pubkey}`), 'an index only KV held moves into its pool member when read')
   assert.equal((await doorMeta('https://revolucion.pluginthematrix.com/', env)).status, 200)
   assert(retained.has(`${await sha256Hex('revolucion.pluginthematrix.com')}/00000000`),
     'visiting a legacy signed route seeds its location bag once')
@@ -726,9 +844,10 @@ test('a changed index read cannot advance or overwrite an existing location bag'
   assert.equal((await doorMeta(`${route}/`, env)).status, 200)
   const key = `${location}/00000000`
   const original = env.CONTENT.held.get(key).slice()
-  env.HIVES.get = async publisher => publisher === pubkey
-    ? JSON.stringify(await signedIndex({ pluginthematrix: head, revolucion: 'b'.repeat(64) }, 1_800_000_001))
-    : null
+  // The index changes where it is held — its pool member — without passing
+  // through a PUT (another isolate, another host).
+  env.CONTENT.held.set(`${INDEXES}/${pubkey}`, new TextEncoder().encode(
+    JSON.stringify(await signedIndex({ pluginthematrix: head, revolucion: 'b'.repeat(64) }, 1_800_000_001))))
   assert.equal((await doorMeta(`${route}/`, env)).status, 404)
   assert.equal((await worker.fetch(new Request(`${route}/content/${location}/`), env)).status, 404)
   assert.deepEqual([...env.CONTENT.held.keys()].filter(name => name.startsWith(`${location}/`)), [key])
@@ -779,7 +898,7 @@ test('a door the signed index names serves the engine — no hold, no cookie', a
   const res = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
   assert.equal(res.headers.get('x-reason'), null)
   assert.equal(await res.text(), 'visitor engine')
-  assert.deepEqual(assetRequests, ['/'])
+  assert.deepEqual(pages(assetRequests), ['/'])
 })
 
 test('a named door whose lineage is not in the signed index is hidden — page, files and descriptor', async () => {
@@ -863,7 +982,7 @@ test('signed doors switch a branch per domain — on where listed, hidden elsewh
   // The fixture explicitly opens the apex while susan has one chosen domain.
   const legacy = await worker.fetch(page('https://pluginthematrix.com/'), env)
   assert.equal(await legacy.text(), 'visitor engine')
-  assert.deepEqual(assetRequests, ['/', '/'])
+  assert.deepEqual(pages(assetRequests), ['/', '/'])
   // the ledger lists susan only where it opens
   const ledger = await (await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
   const susan = ledger.sites.find((site) => site.lineage === 'susan')
