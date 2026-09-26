@@ -2,10 +2,12 @@
 //
 // SequenceService owns drop-target sequences end to end:
 //
-//   • Palette — named sets the participant has authored. localStorage cache
-//     of `name → { sig, indexes }`. Drives `/sequence` autocomplete and lets
-//     the editor re-open a set for editing. Participant-local convenience;
-//     the canonical, shareable copy is the content-addressed resource.
+//   • Palette — named sets the participant has authored: `name → { sig,
+//     indexes }`, one document in the `sequences:palette` pool
+//     (preferences/participant-document.ts; the old `hc:sequences` key is
+//     read once as a fallback). Drives `/sequence` autocomplete and lets the
+//     editor re-open a set for editing. The canonical, shareable copy of each
+//     set is its content-addressed resource.
 //
 //   • Sets — each saved set is a resource `{ kind:'sequence', name, indexes }`
 //     stored as a sig file at the flat OPFS root (legacy `__resources__/` is a
@@ -27,13 +29,16 @@
 //         prior session).
 
 import { EffectBus } from '@hypercomb/core'
+import { ParticipantDocument } from '../preferences/participant-document.js'
 import {
   listSequenceTargetHere,
   writeSequenceTarget,
   SEQUENCE_TARGET_KIND,
 } from './sequence-target.js'
 
-const PALETTE_KEY = 'hc:sequences'
+export const SEQUENCES_PALETTE_MEANING = 'sequences:palette'
+
+type PaletteRecord = Record<string, { sig?: unknown; indexes?: unknown }>
 
 const keyOf = (segs: readonly string[]): string => segs.join(' ')
 
@@ -64,9 +69,23 @@ export class SequenceService extends EventTarget {
   /** hydration guard — keys already walked from committed layers. */
   #checked = new Set<string>()
 
+  /** The participant's palette as a pool document. */
+  #paletteDoc = new ParticipantDocument<PaletteRecord>({
+    meaning: SEQUENCES_PALETTE_MEANING,
+    legacyKey: 'hc:sequences',
+    empty: {},
+    parse: raw => raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as PaletteRecord : null,
+  })
+
   constructor() {
     super()
     this.#restore()
+    // The pool's copy arrives after the first frame; it replaces the palette.
+    this.#paletteDoc.addEventListener('change', () => {
+      this.#palette.clear()
+      this.#restore()
+      this.dispatchEvent(new CustomEvent('change'))
+    })
     EffectBus.on('render:cell-count', () => this.#hydrate())
     EffectBus.on('decorations:changed', (p) => { void this.#onDecorations(p as never) })
   }
@@ -223,11 +242,7 @@ export class SequenceService extends EventTarget {
 
   #restore(): void {
     try {
-      const raw = localStorage.getItem(PALETTE_KEY)
-      if (!raw) return
-      const obj = JSON.parse(raw) as Record<string, { sig?: unknown; indexes?: unknown }>
-      if (!obj || typeof obj !== 'object') return
-      for (const [name, v] of Object.entries(obj)) {
+      for (const [name, v] of Object.entries(this.#paletteDoc.value)) {
         if (v && typeof v.sig === 'string' && Array.isArray(v.indexes)) {
           const indexes = v.indexes.filter((n): n is number => Number.isFinite(n)).map(n => Math.floor(n))
           this.#palette.set(name, { name, sig: v.sig, indexes })
@@ -242,11 +257,7 @@ export class SequenceService extends EventTarget {
   #persist(): void {
     const obj: Record<string, { sig: string; indexes: number[] }> = {}
     for (const [name, set] of this.#palette) obj[name] = { sig: set.sig, indexes: set.indexes }
-    try {
-      localStorage.setItem(PALETTE_KEY, JSON.stringify(obj))
-    } catch {
-      /* ignore quota / disabled storage */
-    }
+    this.#paletteDoc.write(obj)
   }
 }
 

@@ -180,6 +180,13 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['icons:overrides', 'document'],
   ['locations:saved', 'document'],
   ['portals:recent', 'document'],
+  // What participants make, moved out of localStorage the same way
+  // (essentials preferences/participant-document.ts).
+  ['sequences:palette', 'document'],
+  ['patterns:palette', 'document'],
+  ['arkanoid:levels', 'document'],
+  ['solomon:levels', 'document'],
+  ['journal:entries', 'document'],
   // Hand-authored insights, one current catalog via putPoolDoc — a PARTICIPANT'S
   // record, not a derivation. It was seeded 'index' (wipe-safe), which told the
   // collector a hand-written catalog could be thrown away.

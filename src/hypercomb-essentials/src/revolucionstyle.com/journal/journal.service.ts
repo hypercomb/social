@@ -2,6 +2,7 @@
 import { EffectBus } from '@hypercomb/core'
 import type { Cigar, CigarRatings, FlavorProfile, JournalEntry, Pairing } from './journal-entry.js'
 import { emptyEntry } from './journal-entry.js'
+import { ParticipantDocument } from '../../preferences/participant-document.js'
 
 type Store = {
   current: FileSystemDirectoryHandle
@@ -9,9 +10,21 @@ type Store = {
   getResource: (sig: string) => Promise<Blob | null>
 }
 
+/** The participant's journal: which saved entries are theirs, newest last —
+ *  one document of entry resource sigs in the `journal:entries` pool
+ *  (preferences/participant-document.ts). The old `hc:journal-index` key is
+ *  read once as a fallback and never written again. */
+export const JOURNAL_ENTRIES_MEANING = 'journal:entries'
+const SIG = /^[0-9a-f]{64}$/
+
 export class JournalService extends EventTarget {
 
-  static readonly #INDEX_KEY = 'hc:journal-index'
+  #index = new ParticipantDocument<string[]>({
+    meaning: JOURNAL_ENTRIES_MEANING,
+    legacyKey: 'hc:journal-index',
+    empty: [],
+    parse: raw => Array.isArray(raw) ? raw.filter((s): s is string => typeof s === 'string' && SIG.test(s)) : null,
+  })
 
   #mode: 'idle' | 'editing' = 'idle'
   #entry: JournalEntry = emptyEntry()
@@ -107,12 +120,9 @@ export class JournalService extends EventTarget {
     const blob = new Blob([json], { type: 'application/json' })
     const sig = await store.putResource(blob)
 
-    // persist index so we can enumerate entries later
-    const index: string[] = JSON.parse(localStorage.getItem(JournalService.#INDEX_KEY) ?? '[]')
-    if (!index.includes(sig)) {
-      index.push(sig)
-      localStorage.setItem(JournalService.#INDEX_KEY, JSON.stringify(index))
-    }
+    // record the entry so the journal can enumerate it later
+    const index = this.#index.value
+    if (!index.includes(sig)) this.#index.write([...index, sig])
 
     const savedCigar = structuredClone(this.#entry.cigar)
     this.close()
@@ -142,7 +152,7 @@ export class JournalService extends EventTarget {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     if (!store) return []
 
-    const index: string[] = JSON.parse(localStorage.getItem(JournalService.#INDEX_KEY) ?? '[]')
+    const index = this.#index.value
     const entries: { sig: string; entry: JournalEntry }[] = []
 
     for (const sig of index) {

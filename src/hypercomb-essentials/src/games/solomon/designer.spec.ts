@@ -4,13 +4,33 @@
 // files a creation by identity rather than by name, and a saved level can be
 // continued (Save files over it) or duplicated (a new creation).
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import { Designer, STELE_CHEST_TOOLS } from './designer.js'
-import { SolomonOverlay } from './overlay.js'
-import { emptyLevel, forgetCreations, fromAscii, loadCreations, sanitizeLevel, uniqueCreationName } from './levels.js'
-import { COMBAT_SKILLS, EMPTY, WALL } from './engine.js'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-beforeEach(() => localStorage.clear())
+// Saved creations and the draft live in module-level pool documents now
+// (levels.ts), which a localStorage clear does not reset: every test gets
+// fresh modules, so each starts from an empty store and reads the legacy
+// keys anew.
+let Designer: typeof import('./designer.js').Designer
+let STELE_CHEST_TOOLS: typeof import('./designer.js').STELE_CHEST_TOOLS
+let SolomonOverlay: typeof import('./overlay.js').SolomonOverlay
+let emptyLevel: typeof import('./levels.js').emptyLevel
+let forgetCreations: typeof import('./levels.js').forgetCreations
+let fromAscii: typeof import('./levels.js').fromAscii
+let loadCreations: typeof import('./levels.js').loadCreations
+let sanitizeLevel: typeof import('./levels.js').sanitizeLevel
+let uniqueCreationName: typeof import('./levels.js').uniqueCreationName
+let COMBAT_SKILLS: typeof import('./engine.js').COMBAT_SKILLS
+let EMPTY: typeof import('./engine.js').EMPTY
+let WALL: typeof import('./engine.js').WALL
+
+beforeEach(async () => {
+  localStorage.clear()
+  vi.resetModules()
+  ;({ Designer, STELE_CHEST_TOOLS } = await import('./designer.js'))
+  ;({ SolomonOverlay } = await import('./overlay.js'))
+  ;({ emptyLevel, forgetCreations, fromAscii, loadCreations, sanitizeLevel, uniqueCreationName } = await import('./levels.js'))
+  ;({ COMBAT_SKILLS, EMPTY, WALL } = await import('./engine.js'))
+})
 
 describe('Solomon designer creations', () => {
   it('restores the canvas exactly as it was left', () => {

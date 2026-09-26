@@ -10,9 +10,11 @@
 // read once per render pass by show-cell rather than once per creation, and it
 // must be synchronous for the same reason (a geometry build cannot await).
 //
-//   • Palette — named patterns, cached in localStorage. Seeded with the
-//     built-ins so `/frame honeycomb` works on a cold hive. Participant-local
-//     convenience; the canonical copy is the content-addressed resource.
+//   • Palette — named patterns, one document in the `patterns:palette` pool
+//     (preferences/participant-document.ts; the old `hc:patterns` key is read
+//     once as a fallback). Seeded with the built-ins so `/frame honeycomb`
+//     works on a cold hive. The canonical copy is the content-addressed
+//     resource.
 //
 //   • Resolver — walks the lineage upward to the nearest `layout:frame`
 //     decoration, exactly like the sequence resolver. Kept hot two ways:
@@ -33,6 +35,7 @@
 // mirror it without a round-trip through IoC.
 
 import { EffectBus } from '@hypercomb/core'
+import { ParticipantDocument } from '../preferences/participant-document.js'
 import {
   BUILTIN_PATTERNS,
   maxOffset,
@@ -52,7 +55,9 @@ import {
   writeFrameTarget,
 } from './frame-target.js'
 
-const PALETTE_KEY = 'hc:patterns'
+export const PATTERNS_PALETTE_MEANING = 'patterns:palette'
+
+type PaletteRecord = Record<string, { sig?: unknown; pattern?: unknown }>
 
 /** Emitted when the tiles move through the frame. Carries the location so a
  *  listener bundled separately can tell whose scroll it is. */
@@ -113,11 +118,25 @@ export class FrameService extends EventTarget {
   #counts = new Map<string, number>()
   /** Derived-frame cache so a render pass does not re-sort every pattern. */
   #frameBySig = new Map<string, ActiveFrame>()
+  /** The participant's palette as a pool document. */
+  #paletteDoc = new ParticipantDocument<PaletteRecord>({
+    meaning: PATTERNS_PALETTE_MEANING,
+    legacyKey: 'hc:patterns',
+    empty: {},
+    parse: raw => raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as PaletteRecord : null,
+  })
 
   constructor() {
     super()
     this.#restore()
     this.#seedBuiltins()
+    // The pool's copy arrives after the first frame; it replaces the palette.
+    this.#paletteDoc.addEventListener('change', () => {
+      this.#palette.clear()
+      this.#restore()
+      this.#seedBuiltins()
+      this.dispatchEvent(new CustomEvent('change'))
+    })
     EffectBus.on('render:cell-count', () => this.#hydrate())
     EffectBus.on('decorations:changed', (p) => { void this.#onDecorations(p as never) })
   }
@@ -381,11 +400,7 @@ export class FrameService extends EventTarget {
 
   #restore(): void {
     try {
-      const raw = localStorage.getItem(PALETTE_KEY)
-      if (!raw) return
-      const obj = JSON.parse(raw) as Record<string, { sig?: unknown; pattern?: unknown }>
-      if (!obj || typeof obj !== 'object') return
-      for (const [name, v] of Object.entries(obj)) {
+      for (const [name, v] of Object.entries(this.#paletteDoc.value)) {
         const pattern = parsePattern(v?.pattern)
         if (!pattern || typeof v.sig !== 'string') continue
         this.#palette.set(name, { name, sig: v.sig, pattern })
@@ -402,11 +417,7 @@ export class FrameService extends EventTarget {
       if (!set.sig) continue   // built-in not yet minted — nothing to remember
       obj[name] = { sig: set.sig, pattern: patternRecord(set.pattern) }
     }
-    try {
-      localStorage.setItem(PALETTE_KEY, JSON.stringify(obj))
-    } catch {
-      /* ignore quota / disabled storage */
-    }
+    this.#paletteDoc.write(obj)
   }
 }
 

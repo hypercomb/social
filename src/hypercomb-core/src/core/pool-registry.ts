@@ -313,6 +313,16 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'icons:overrides',
   'locations:saved',
   'portals:recent',
+  // What participants make that is theirs alone, moved out of localStorage the
+  // same way (essentials preferences/participant-document.ts): saved sequences
+  // and patterns, Arkanoid and Solomon levels (Solomon's creations and designer
+  // draft as two sub-bucket documents), and the cigar journal's entry list.
+  // DOCUMENT; the old localStorage keys stay READ-FALLBACK only.
+  'sequences:palette',
+  'patterns:palette',
+  'arkanoid:levels',
+  'solomon:levels',
+  'journal:entries',
   // What a HOST is offering — the package pointers a shim publishes for
   // clients to replicate from (runtime/host-pool.ts, consumed by
   // web/setup/ensure-install.ts). The address is DERIVED by every client for
