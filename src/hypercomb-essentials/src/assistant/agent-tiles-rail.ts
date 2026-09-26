@@ -570,6 +570,12 @@ const RAIL_CSS = `
   padding:0.45rem 0.45rem 0.2rem;font-family:var(--hc-mono,monospace);font-size:0.64rem;
   letter-spacing:0.12em;text-transform:uppercase;color:var(--hc-window-ink-quiet);}
 .hc-rail-convos-count{letter-spacing:0.04em;text-transform:none;color:var(--hc-window-ink-plain);}
+/* THE WAY TO BEGIN sits in the head, a word in the accent ink — the same
+   quiet "+ New conversation" a tile's fold wears, not a button box. */
+.hc-rail-convos-new{margin-left:auto;padding:0;border:0;background:none;font:inherit;
+  letter-spacing:0.04em;text-transform:none;cursor:pointer;
+  color:var(--hc-window-accent, rgb(${STEEL}));}
+.hc-rail-convos-new:hover,.hc-rail-convos-new:focus-visible{text-decoration:underline;outline:none;}
 .hc-rail-convos-group{padding:0.45rem 0.45rem 0.15rem;font-family:var(--hc-mono,monospace);
   font-size:0.66rem;color:var(--hc-window-ink-quiet);}
 .hc-rail-convo{display:grid;grid-template-columns:1.3rem minmax(0,1fr) auto;gap:0.45rem;
@@ -1695,7 +1701,19 @@ export class AgentTilesRail {
     count.className = 'hc-rail-convos-count'
     const open = groups.waiting.length + groups.open.length
     count.textContent = open ? this.#t('agent.rail-convos-open', '{count} open').replace('{count}', String(open)) : ''
-    head.append(title, count)
+    // A WAY TO START, on the list itself (jwize, 2026-09-26: the level page
+    // listed every conversation and offered no way to begin one — the only
+    // "+ New conversation" lived inside a tile's fold, one click away from a
+    // list that never says so). The thread begins on the level in hand.
+    const fresh = document.createElement('button')
+    fresh.type = 'button'
+    fresh.className = 'hc-rail-convos-new'
+    fresh.textContent = this.#t('agent.rail-chat-new', '+ New conversation')
+    fresh.addEventListener('click', event => {
+      event.stopPropagation()
+      this.#startConvoHere()
+    })
+    head.append(title, count, fresh)
     section.appendChild(head)
 
     const current = this.#openConvo || this.#subject?.convoId || ''
@@ -1775,6 +1793,20 @@ export class AgentTilesRail {
       this.#enterConvo(chat)
     })
     return row
+  }
+
+  /** A NEW conversation on the level in hand: the hive's own at the root,
+   *  otherwise the tile this level is inside. Nothing is created — the
+   *  press puts a fresh composer in the window, and the row appears when
+   *  the first turn lands and names it. */
+  #startConvoHere(): void {
+    const segments = this.#here()
+    if (!segments.length) { this.#enterChat(this.#hiveRow(), HIVE_KEY, newTileConvoId([])); return }
+    const key = pathKey(segments)
+    const parent = this.#trail[this.#trail.length - 2] ?? []
+    const row = (this.#levels.get(pathKey(parent)) ?? []).find(candidate => pathKey(candidate.segments) === key)
+      ?? { name: segments[segments.length - 1]!, segments: [...segments], childCount: 0 }
+    this.#enterChat(row, key, newTileConvoId(row.segments))
   }
 
   /** Enter a conversation from the list, wherever its tile is. A tile on the
