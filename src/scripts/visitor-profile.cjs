@@ -49,7 +49,7 @@ const rate = Number(process.argv[3] || 1)
       : /^\/@resource\//.test(u.pathname) ? 'resource'
       : u.pathname.startsWith('/content/') ? 'content-other'
       : u.pathname.startsWith('/hive/') ? 'hive-index'
-      : u.pathname === '/site.json' ? 'site.json'
+      : /^\/[0-9a-f]{64}\/([0-9]{8})?$/.test(u.pathname) ? 'door'
       : u.protocol === 'blob:' ? 'blob'
       : `shell ${r.type}`
     const g = groups[kind] ||= { n: 0, bytes: 0, first: Infinity, last: 0 }

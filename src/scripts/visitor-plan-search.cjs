@@ -1,7 +1,7 @@
 // Find the smallest arrival plan that still opens a published site. Starting
 // from the named faces, delta-debugging adds bee classes from the package
 // (by the class names in its layer docs) until the arrival works — each trial
-// is a cold load with the plan injected at /site.json, judged by one
+// is a cold load with the plan injected into the door's record, judged by one
 // selector appearing. Prints the plan, as IoC-style names, when it settles.
 //   node scripts/visitor-plan-search.cjs <url> <success-selector> <dist-dir> [Face,...]
 // CLICK=<selector> presses something first (a game's start); success is judged after.
@@ -44,7 +44,8 @@ const works = async (names) => {
     })
     const page = await context.newPage()
     await page.route(`**/content/${plan}`, route => route.fulfill({ status: 200, contentType: 'application/json', body }))
-    await page.route('**/site.json*', async route => {
+    // The door's record: the newest marker of its own bag, sign(<host>).
+    await page.route(url => /^\/[0-9a-f]{64}\/[0-9]{8}$/.test(url.pathname), async route => {
       const response = await route.fetch()
       await route.fulfill({ response, json: { ...(await response.json()), plan } })
     })

@@ -6,21 +6,10 @@ const ROOT = path.resolve(process.env.VISITOR_ROOT || path.join(__dirname, '../h
 const UPSTREAM = 'revolucion.pluginthematrix.com', UPSTREAM_IP = '104.21.25.138'
 const TYPES = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.json': 'application/json', '.svg': 'image/svg+xml', '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.png': 'image/png', '.ico': 'image/x-icon', '.webp': 'image/webp' }
 let reqs = 0, proxied = 0, lastProxyAt = 0
-// site.json must advertise THIS origin: the visitor's read-only network gate
-// allows same-origin reads only, and the harness serves the same heap.
-const proxySiteJson = (req, res) => {
-  const up = https.request({ host: UPSTREAM_IP, servername: UPSTREAM, headers: { Host: UPSTREAM }, path: req.url, method: 'GET', timeout: 30000 }, r => {
-    const chunks = []
-    r.on('data', d => chunks.push(d))
-    r.on('end', () => {
-      let body = Buffer.concat(chunks).toString()
-      try { const j = JSON.parse(body); if (j.hosts) j.hosts = [process.env.HOST_REWRITE || 'localhost:4300']; body = JSON.stringify(j) } catch {}
-      res.writeHead(r.statusCode, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(body)
-    })
-  })
-  up.on('error', () => res.writeHead(502).end('proxy error'))
-  up.end()
-}
+// The door's own bag: the visitor asks sign(<this host>); the answer is the
+// upstream door's bag, sign(UPSTREAM) — the same records, on this origin.
+const sha = text => require('crypto').createHash('sha256').update(text).digest('hex')
+const UPSTREAM_BAG = sha(UPSTREAM)
 const DELAY = Number(process.env.PROXY_DELAY_MS || 0)
 const proxy = (req, res) => {
   if (DELAY > 0) { setTimeout(() => proxyNow(req, res), DELAY); return }
@@ -39,7 +28,8 @@ const proxyNow = (req, res) => {
 const handler = (req, res) => {
   reqs++
   const url = req.url.split('?')[0]
-  if (url === '/site.json') return proxySiteJson(req, res)
+  const localBag = sha(String(req.headers.host || 'localhost').split(':')[0].toLowerCase())
+  if (url.startsWith(`/${localBag}/`)) { req.url = `/${UPSTREAM_BAG}/${url.slice(localBag.length + 2)}`; return proxy(req, res) }
   // A module import at the flat root (`/<sig>`, Sec-Fetch-Dest script/worker)
   // is THIS build's package, not the live heap's: serve it from dist/content
   // with a JavaScript MIME exactly as the worker does, and proxy only what the
