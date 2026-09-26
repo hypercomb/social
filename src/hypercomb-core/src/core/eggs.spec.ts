@@ -49,6 +49,80 @@ describe('eggs — a signature that has not arrived, at rest', () => {
     expect(net.asked).toEqual(['https://one', 'https://one'])
   })
 
+  describe('asks in flight at once for one signature take turns', () => {
+    /** Hosts that answer only when released, so asks can be piled up first. */
+    const slowHosts = (held: Record<string, EggProbe<string>>) => {
+      const asked: string[] = []
+      const waiting: (() => void)[] = []
+      const ask = (base: string): Promise<EggProbe<string>> => new Promise(resolve => {
+        asked.push(base)
+        waiting.push(() => resolve(held[base] ?? 'absent'))
+      })
+      const tick = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
+      // Answer every ask as it lands, until a few ticks pass with none.
+      const release = async (): Promise<void> => {
+        for (let idle = 0; idle < 3; idle++) {
+          await tick()
+          while (waiting.length) { waiting.shift()!(); await tick(); idle = 0 }
+        }
+      }
+      return { asked, ask, release }
+    }
+
+    it('a burst of misses asks each host once, not once per caller', async () => {
+      const s = sig('f')
+      const net = slowHosts({})
+      const bases = ['https://one', 'https://two']
+      const burst = Array.from({ length: 6 }, () => askUntried(s, bases, net.ask))
+      await net.release()
+      expect(await Promise.all(burst)).toEqual([null, null, null, null, null, null])
+      expect(net.asked).toEqual(['https://one', 'https://two'])
+    })
+
+    it('a burst that finds the bytes shares the one answer', async () => {
+      const s = sig('1')
+      const net = slowHosts({ 'https://two': 'bytes' })
+      const bases = ['https://one', 'https://two']
+      const burst = Array.from({ length: 6 }, () => askUntried(s, bases, net.ask))
+      await net.release()
+      expect(await Promise.all(burst)).toEqual(['bytes', 'bytes', 'bytes', 'bytes', 'bytes', 'bytes'])
+      expect(net.asked).toEqual(['https://one', 'https://two'])
+    })
+
+    it('a later caller listing more hosts asks only what the first left untried', async () => {
+      const s = sig('2')
+      const net = slowHosts({ 'https://two': 'bytes' })
+      const first = askUntried(s, ['https://one'], net.ask)
+      const second = askUntried(s, ['https://one', 'https://two'], net.ask)
+      await net.release()
+      expect(await first).toBeNull()
+      expect(await second).toBe('bytes')
+      expect(net.asked).toEqual(['https://one', 'https://two'])
+    })
+
+    it('bytes found for the first are the answer for a later caller listing other hosts', async () => {
+      const s = sig('3')
+      const net = slowHosts({ 'https://two': 'bytes', 'https://three': 'bytes' })
+      const first = askUntried(s, ['https://one', 'https://two'], net.ask)
+      const second = askUntried(s, ['https://one', 'https://three'], net.ask)
+      await net.release()
+      expect(await first).toBe('bytes')
+      expect(await second).toBe('bytes')
+      // The signature arrived: nobody asks three, and one is not asked twice.
+      expect(net.asked).toEqual(['https://one', 'https://two'])
+    })
+
+    it('an ask that throws frees the signature for the next caller', async () => {
+      const s = sig('4')
+      const asked: string[] = []
+      const failing = askUntried(s, ['https://one'], async () => { throw new Error('boom') })
+      const next = askUntried(s, ['https://one'], async base => { asked.push(base); return 'bytes' })
+      await expect(failing).rejects.toThrow('boom')
+      expect(await next).toBe('bytes')
+      expect(asked).toEqual(['https://one'])
+    })
+  })
+
   it('clearEggs asks everyone again', async () => {
     const s = sig('e')
     const net = hosts({})
