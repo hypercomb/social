@@ -2,7 +2,7 @@
 // Refuse to package an application snapshot as the installable cold harness.
 import { createHash } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist'))
@@ -54,6 +54,31 @@ for (const tile of rootLayer.cells ?? []) {
   closure.add(tile)
   for (const bee of JSON.parse(await readFile(resolve(dist, tile), 'utf8')).bees ?? []) closure.add(bee)
 }
+// THE BUILD RECORD (host/builds.mjs) names this origin exactly: the host
+// bundle, the core library, the host package, and the install layer — every
+// other file here, by path and signature.
+const buildSig = (await readFile(resolve(dist, 'build'), 'utf8')).trim()
+if (!signed.includes(buildSig)) throw new Error('pure host: /build names no build record here')
+const record = JSON.parse(await readFile(resolve(dist, buildSig), 'utf8'))
+if (record.name !== 'build' || !/^\d{4}\.\d{1,2}\.\d{1,2}\.\d+$/.test(record.version)) throw new Error('pure host: /build is not a build record')
+if (record.host !== pin || record.hostPackage !== hostRoot || !known.includes(record.library) || record.library === pin) {
+  throw new Error('pure host: the build record does not name this host bundle, core library and host package')
+}
+const installFiles = {}
+const walk = async dir => {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = resolve(dir, entry.name)
+    const rel = relative(dist, path).split(sep).join('/')
+    if (entry.isDirectory()) await walk(path)
+    else if (!(dir === dist && /^[a-f0-9]{64}$/.test(entry.name)) && rel !== 'build') installFiles[rel] = createHash('sha256').update(await readFile(path)).digest('hex')
+  }
+}
+await walk(dist)
+const sorted = Object.fromEntries(Object.entries(installFiles).sort(([a], [b]) => a < b ? -1 : 1))
+if (createHash('sha256').update(JSON.stringify({ name: 'install', files: sorted })).digest('hex') !== record.install) {
+  throw new Error(`pure host: the origin's files are not the install build ${record.version} recorded`)
+}
+closure.add(buildSig)
 const unnamed = signed.filter(sig => !known.includes(sig) && !closure.has(sig))
 if (unnamed.length) throw new Error(`pure host: signed files nothing names (${unnamed.map(s => s.slice(0, 12)).join(', ')})`)
 for (const sig of closure) if (!signed.includes(sig)) throw new Error(`pure host: the host package names ${sig.slice(0, 12)}, which is not here`)

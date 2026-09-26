@@ -90,6 +90,27 @@ themselves; everything else is resolved.
 signed file does not hash to its name, a signed file is neither known to the
 kernel nor part of the host package, or the host bundle carries the console.
 
+Every pure build is recorded in the **version pool** (`host/builds.mjs`), the
+`sign('host:builds')` pool, by default under `~/.hypercomb/` (override with
+`HYPERCOMB_BUILDS_DIR`). The record is a signed layer
+`{ name: 'build', version, parent, install, host, library, hostPackage, source }`:
+`install` and `source` are layers naming, by path and signature, every file of
+the origin and every source file the build read, and all of it is kept in the
+pool. The version is year.month.day.n (UTC), n counting that day's builds; a
+build that changes nothing mints no version, so each version is one group of
+changes. `parent` chains the builds, `head` names the newest, and the origin
+names its record in `/build`, as `/pin` names the host bundle. `check-pure`
+fails unless that record names exactly the files the origin holds.
+
+```bash
+node host/builds.mjs               # 2026.9.26.2  1ab26eb6735b  install source · 2 files
+node host/builds.mjs 2026.9.26.2   # the files that version changed
+```
+
+A participant who vouches for a build (author, reviewer, a witness who rebuilt
+it and got the same signatures) signs the record's signature; the record never
+carries its own signatures.
+
 The host bundle is always minified and carries no copy of core; the build
 inlines the ioc install ahead of every script so core's module-scope
 registrations find `window.ioc`. It ships only the faces the host renders

@@ -23,8 +23,9 @@ import { build } from 'esbuild'
 import { compile } from 'sass'
 import { createHash } from 'node:crypto'
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { recordBuild } from './host/builds.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(here, 'dist'))
@@ -46,6 +47,9 @@ const SIG_NAME = /^[0-9a-f]{64}$/i
 const NEWLINE = `
 `
 const exists = async (p) => { try { await stat(p); return true } catch { return false } }
+// Every file a pure build reads, for its source layer in the version pool.
+const sourceInputs = new Set([resolve(here, 'build.mjs'), resolve(here, 'index.html')])
+const readFrom = meta => { for (const p of Object.keys(meta.inputs)) sourceInputs.add(resolve(p)) }
 const mib = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MiB`
 
 const dirBytes = async (path) => {
@@ -106,8 +110,10 @@ if (pure) {
     target: ['es2022'],
     minify: true,
     write: false,
+    metafile: true,
     logLevel: 'warning',
   })
+  readFrom(ioc.metafile)
   const code = ioc.outputFiles[0].text.trim()
   if (code.includes('</script')) throw new Error('[shim] inlined ioc would close its own script tag')
   const marker = '<!-- hc:ioc -->'
@@ -130,8 +136,9 @@ await writeFile(resolve(dist, 'index.html'), indexHtml, 'utf8')
 // only their shared token sheet; Sass is a build tool and ships no runtime code.
 const themeCss = compile(resolve(here, '..', 'hypercomb-shared', 'styles', '_material-tokens.scss'), {
   style: 'compressed',
-}).css
-await writeFile(resolve(dist, 'theme.css'), themeCss, 'utf8')
+})
+for (const url of themeCss.loadedUrls) if (url.protocol === 'file:') sourceInputs.add(fileURLToPath(url))
+await writeFile(resolve(dist, 'theme.css'), themeCss.css, 'utf8')
 let coreLibrary = null
 if (pure) {
   // A cold harness has no renderer. A package that needs Pixi may provide it;
@@ -157,6 +164,7 @@ if (pure) {
     metafile: true,
     logLevel: 'warning',
   })
+  readFrom(processor.metafile)
   const processorFiles = new Set(Object.keys(processor.metafile.inputs).map(p => resolve(p)))
   const library = await build({
     entryPoints: [resolve(coreSrc, 'library.ts')],
@@ -183,6 +191,7 @@ if (pure) {
   if (libraryInputs.some(p => processorFiles.has(p))) {
     throw new Error('[shim] the core library carries its own copy of the processor')
   }
+  readFrom(library.metafile)
   coreLibrary = Buffer.from(library.outputFiles[0].contents)
 }
 
@@ -375,6 +384,7 @@ if (pure) {
   })
   // One installer, one Store, one host directory: a bee that carried its own
   // copy of any would run a second one beside the host's.
+  readFrom(consoleBee.metafile)
   const stateful = Object.keys(consoleBee.metafile.inputs)
     .filter(p => /hypercomb-runtime[\/]src[\/](acquire|store|script-preloader|dependency-loader|host-packages)\.ts$/.test(p))
   if (stateful.length) throw new Error('[shim] the host console bee carries a stateful runtime module: ' + stateful.join(', '))
@@ -434,6 +444,7 @@ const result = await build({
 
 // The scoreboard that matters: if @angular shows up in the shim's own bundle,
 // the shim is not framework-free and the build should say so loudly.
+if (pure) readFrom(result.metafile)
 const mainOut = Object.keys(result.metafile.outputs).find(k => k.endsWith(mainFile))
 const inputs = Object.keys(result.metafile.outputs[mainOut].inputs)
 const angular = inputs.filter(p => p.includes('node_modules/@angular'))
@@ -496,7 +507,7 @@ if (pure) {
   await rm(resolve(dist, mainFile), { force: true })
   const librarySig = createHash('sha256').update(coreLibrary).digest('hex')
   await writeFile(resolve(dist, librarySig), coreLibrary)
-  await build({
+  const kernel = await build({
     entryPoints: [resolve(here, 'src/kernel.ts')],
     outfile: resolve(dist, 'main.js'),
     bundle: true,
@@ -505,12 +516,40 @@ if (pure) {
     target: ['es2022'],
     minify: true,
     logLevel: 'warning',
+    metafile: true,
     define: { __HC_HOST_SIG__: JSON.stringify(hostSig), __HC_LIBRARY_SIG__: JSON.stringify(librarySig) },
   })
   const kernelBytes = (await stat(resolve(dist, 'main.js'))).size
   const processorBytes = (await stat(resolve(dist, 'hypercomb-core.runtime.js'))).size
   console.log(`[shim] kernel main.js ${(kernelBytes / 1024).toFixed(1)} kB · processor ${(processorBytes / 1024).toFixed(1)} kB`)
   console.log(`[shim]   resolves host ${hostSig.slice(0, 12)}… (${(hostBytes.length / 1024).toFixed(0)} kB) · core library ${librarySig.slice(0, 12)}… (${(coreLibrary.length / 1024).toFixed(0)} kB)`)
+  readFrom(kernel.metafile)
+
+  // THE VERSION POOL (host/builds.mjs). The origin as built — its install
+  // files, its signed atoms, and every source file it was built from — is kept
+  // as a signed build record chained to the last one. The origin names it in
+  // /build, as /pin names the host bundle.
+  const repo = resolve(here, '..', '..')
+  const source = new Map()
+  for (const abs of sourceInputs) {
+    const bytes = await readFile(abs).catch(() => null)
+    if (bytes) source.set(relative(repo, abs).split(sep).join('/'), bytes)
+  }
+  const install = new Map()
+  const signed = []
+  const walk = async dir => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = resolve(dir, entry.name)
+      if (entry.isDirectory()) await walk(path)
+      else if (dir === dist && SIG_NAME.test(entry.name)) signed.push(await readFile(path))
+      else install.set(relative(dist, path).split(sep).join('/'), await readFile(path))
+    }
+  }
+  await walk(dist)
+  const made = await recordBuild({ install, source, signed, host: hostSig, library: librarySig, hostPackage: hostPackageRoot })
+  await writeFile(resolve(dist, made.sig), made.bytes)
+  await writeFile(resolve(dist, 'build'), made.sig + '\n', 'utf8')
+  console.log(`[shim] build ${made.record.version} ${made.sig.slice(0, 12)}… ${made.minted ? 'minted' : 'unchanged'} · ${source.size} source files · pool ${made.pool}`)
 }
 console.log(
   `[shim] origin ${mib(await dirBytes(dist))} total` +

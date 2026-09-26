@@ -2,7 +2,7 @@
   "version": 1,
   "include": ["/*"],
   "exclude": [
-    "/", "/index.html", "/pin", "/main.js", "/theme.css",
+    "/", "/index.html", "/pin", "/build", "/main.js", "/theme.css",
     "/hypercomb.worker.js", "/hypercomb-core.runtime.js", "/env.js",
     "/core/*", "/favicon*", "/icon*", "/apple-touch-icon.png",
     "/locales.json", "/manifest.webmanifest", "/404.txt"

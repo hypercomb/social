@@ -63,7 +63,7 @@ Seven rules. `check-host.mjs` tests all of them against a live URL.
    But a missing *signature* must be a real 404.
 5. **`Access-Control-Allow-Origin: *` on content.** A host exists to be pulled
    FROM.
-6. **Never hard-cache `/pin`, `hypercomb.worker.js`, `main.js`, `env.js`.**
+6. **Never hard-cache `/pin`, `/build`, `hypercomb.worker.js`, `main.js`, `env.js`.**
    Signature paths may be cached forever — the name IS the hash.
 7. **Never serve outside the root.**
 
