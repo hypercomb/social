@@ -553,6 +553,90 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     // Late-value replay: an approach that happened before this line still
     // wakes them.
     EffectBus.on('loader:activate', () => { this.#activatePassive() })
+    // Within range of the approach, fetch them ahead of it (#preloadPassive).
+    EffectBus.on('loader:preload', () => { this.#preloadPassive() })
+    this.#watchRange()
+  }
+
+  // ── WITHIN RANGE: preload what the approach would wake ─────────────────
+  // A door into the hive marks itself `data-hc-approach` (the site view's
+  // exit). When the reader comes within range of one — the pointer near it,
+  // focus on it, a press starting on it — the passive bees are FETCHED at low
+  // priority, a few at a time, never run: a good chance that what the
+  // approach needs is already here. The approach itself stops the queue, so
+  // its own loads go first (renderers leading).
+
+  static readonly #RANGE_PX = 160
+  static readonly #PRELOAD_LANES = 4
+  #preloadStarted = false
+  #preloadStopped = false
+
+  #watchRange = (): void => {
+    if (typeof document === 'undefined') return
+    const DOOR = '[data-hc-approach]'
+    let x = 0
+    let y = 0
+    let frame = 0
+    const stop = (): void => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('focusin', onReach, true)
+      document.removeEventListener('pointerdown', onReach, true)
+      if (frame) cancelAnimationFrame(frame)
+    }
+    const inRange = (): void => { stop(); EffectBus.emit('loader:preload', { reason: 'range' }) }
+    const onReach = (event: Event): void => {
+      if ((event.target as Element | null)?.closest?.(DOOR)) inRange()
+    }
+    const onMove = (event: PointerEvent): void => {
+      x = event.clientX
+      y = event.clientY
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        for (const door of document.querySelectorAll<HTMLElement>(DOOR)) {
+          const box = door.getBoundingClientRect()
+          if (!box.width && !box.height) continue
+          const dx = Math.max(box.left - x, 0, x - box.right)
+          const dy = Math.max(box.top - y, 0, y - box.bottom)
+          if (Math.hypot(dx, dy) <= ScriptPreloader.#RANGE_PX) { inRange(); return }
+        }
+      })
+    }
+    document.addEventListener('pointermove', onMove, { passive: true })
+    document.addEventListener('focusin', onReach, true)
+    document.addEventListener('pointerdown', onReach, true)
+    EffectBus.on('loader:activate', stop)
+  }
+
+  /** Fetch (never run) the passive bees a door away. Only door-served modules
+   *  have an address to preload; the renderers go first, as they wake. */
+  #preloadPassive = (): void => {
+    const passive = this.#passive
+    if (this.#preloadStarted || this.#preloadStopped || !passive?.size) return
+    if ((globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ !== true) return
+    this.#preloadStarted = true
+    const asleep = this.#asleep()
+    const pending = [...passive].filter(sig => !this.#beeCache.has(sig) && !asleep.has(sig))
+    const ordered = [
+      ...pending.filter(sig => this.#arrivalCritical.includes(sig)),
+      ...pending.filter(sig => !this.#arrivalCritical.includes(sig)),
+    ]
+    console.log(`[script-preloader] within range: preloading ${ordered.length} passive bees`)
+    let next = 0
+    const lane = async (): Promise<void> => {
+      while (next < ordered.length && !this.#preloadStopped) {
+        const sig = ordered[next++]
+        await new Promise<void>(resolve => {
+          const link = document.createElement('link')
+          link.rel = 'modulepreload'
+          link.href = `/${sig}`
+          link.setAttribute('fetchpriority', 'low')
+          link.onload = link.onerror = () => resolve()
+          document.head.append(link)
+        })
+      }
+    }
+    for (let i = 0; i < ScriptPreloader.#PRELOAD_LANES; i++) void lane()
   }
 
   /** Load exactly the arrival's bees, together, and hand them to the
@@ -571,6 +655,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *  paints while the others arrive — then run one cycle, trunk to leaf, so
    *  every bee (the woken ones included) meets the place the visitor is in. */
   #activatePassive = (): void => {
+    // The approach outranks the preload: stop feeding it.
+    this.#preloadStopped = true
     const passive = this.#passive
     if (!passive?.size) return
     this.#passive = new Set()

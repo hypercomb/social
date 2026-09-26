@@ -940,6 +940,9 @@ export class SiteViewDrone extends Drone {
     if (!this.#exitOverlay) {
       const btn = document.createElement('button')
       btn.id = 'hc-site-exit'
+      // A door into the hive: coming within range of it preloads what the
+      // approach wakes (hypercomb-runtime script-preloader.ts #watchRange).
+      btn.dataset['hcApproach'] = ''
       btn.type = 'button'
       btn.style.cssText = EXIT_OVERLAY_CSS
       // Click = close the site (back to its spawn). Ctrl/⌘-click = stay on
