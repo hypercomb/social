@@ -1707,3 +1707,70 @@ test('the host AI answers its bound publishers, and a stranger\'s key is refused
     assert.deepEqual(upstream, ['https://api.anthropic.com/v1/messages'])
   } finally { globalThis.fetch = original }
 })
+
+// ── the guest list is a pool of meaning ───────────────────────────────────
+// Each key's grant is the member of sign('host:grants') named by the key; the
+// old KV namespace is only read, and a row it alone holds moves into the pool.
+const textHeap = (objects = new Map()) => ({
+  objects,
+  get: async (k) => objects.has(k) ? { text: async () => objects.get(k), arrayBuffer: async () => new TextEncoder().encode(objects.get(k)).buffer } : null,
+  head: async (k) => objects.has(k) ? { size: objects.get(k).length, httpMetadata: {} } : null,
+  put: async (k, body, o) => {
+    if (o?.onlyIf && objects.has(k)) return null
+    objects.set(k, typeof body === 'string' ? body : new TextDecoder().decode(body))
+    return {}
+  },
+})
+
+test('an upload records its grant in the host:grants pool, never in KV', async () => {
+  const GRANTS_POOL = await sha256Hex('host:grants')
+  const kv = kvMap()
+  const content = textHeap()
+  const env = { SITE_BINDINGS: '{}', CONTENT: content, GRANTS: kv }
+  const bytes = 'a guest upload'
+  const url = `https://content.hypercomb.com/${await sha256Hex(bytes)}`
+  const res = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT') }, body: bytes }), env)
+  assert.equal(res.status, 201)
+  const row = JSON.parse(content.objects.get(`${GRANTS_POOL}/${pubkey}`))
+  assert.equal(row.usedBytes, bytes.length)
+  assert.equal(kv.values.size, 0)
+  // The member is not a public read: the flat path answers by signature only.
+  const probe = await worker.fetch(new Request(`https://content.hypercomb.com/${GRANTS_POOL}/${pubkey}`), env)
+  assert.notEqual(await probe.text(), content.objects.get(`${GRANTS_POOL}/${pubkey}`))
+})
+
+test('a grant only KV holds is read, and carried into the pool', async () => {
+  const GRANTS_POOL = await sha256Hex('host:grants')
+  const expiresAt = Math.floor(Date.now() / 1000) + 3600
+  const kv = kvMap(new Map([[pubkey, JSON.stringify({ quotaBytes: 500, usedBytes: 120, expiresAt })]]))
+  const content = textHeap()
+  const env = { SITE_BINDINGS: '{}', CONTENT: content, GRANTS: kv }
+  const url = 'https://content.hypercomb.com/grant'
+  const res = await worker.fetch(new Request(url, { headers: { authorization: await nip98(url, 'GET') } }), env)
+  assert.equal(res.status, 200)
+  assert.deepEqual(await res.json(), { state: 'active', quotaBytes: 500, usedBytes: 120, expiresAt })
+  assert.deepEqual(JSON.parse(content.objects.get(`${GRANTS_POOL}/${pubkey}`)), { quotaBytes: 500, usedBytes: 120, expiresAt })
+})
+
+test('the AI meter keeps one row per key, in the host:ai-meters pool', async () => {
+  const METERS = await sha256Hex('host:ai-meters')
+  const content = textHeap()
+  const kv = kvMap()
+  const env = { SITE_BINDINGS: JSON.stringify(ONE_ZONE), ANTHROPIC_API_KEY: 'test', CONTENT: content, GRANTS: kv }
+  const url = 'https://content.pluginthematrix.com/ai/ask'
+  const ask = async () => worker.fetch(new Request(url, {
+    method: 'POST', headers: { authorization: await nip98(url, 'POST'), 'content-type': 'application/json' },
+    body: JSON.stringify({ question: 'what is here?', stream: false }),
+  }), env)
+  const original = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({ content: [{ type: 'text', text: 'tiles' }] }), { headers: { 'content-type': 'application/json' } })
+  try {
+    assert.equal((await ask()).status, 200)
+    const first = JSON.parse(content.objects.get(`${METERS}/${pubkey}`))
+    assert.equal(first.day, new Date().toISOString().slice(0, 10).replace(/-/g, ''))
+    assert.ok(first.used > 0)
+    assert.equal((await ask()).status, 200)
+    assert.equal(JSON.parse(content.objects.get(`${METERS}/${pubkey}`)).used, first.used * 2)
+    assert.equal(kv.values.size, 0)
+  } finally { globalThis.fetch = original }
+})
