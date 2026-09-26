@@ -6,6 +6,8 @@
 // barrier (never counts toward the clear — place it so it shields nothing
 // completely, or the level cannot be won). Engine.#build reads these.
 
+import { ParticipantDocument } from '../../preferences/participant-document.js'
+
 export interface ArkanoidLevel {
   readonly name: string
   readonly rows: readonly string[]
@@ -1178,15 +1180,18 @@ export function cloneLevel(l: ArkanoidLevel): ArkanoidLevel {
 
 // ── designer dimensions + custom-level store ────────────────
 //
-// The designer paints a fixed grid; custom levels live in localStorage — the
-// same class of participant-local UI data as screensaver prefs / accent colour,
-// NOT layer state (a level in the layer would skew the lineage signature across
-// peers, the rule that keeps viewport + clipboard out of history).
+// The designer paints a fixed grid; custom levels are the participant's own
+// record, NOT layer state (a level in the layer would skew the lineage
+// signature across peers, the rule that keeps viewport + clipboard out of
+// history). They live in the `arkanoid:levels` document pool
+// (preferences/participant-document.ts); the old localStorage key is read once
+// as a fallback and never written again.
 
 export const EDIT_COLS = 11   // matches engine COLS
 export const EDIT_ROWS = 12
 
-const STORE_KEY = 'hc:arkanoid-levels'
+const LEGACY_KEY = 'hc:arkanoid-levels'
+export const ARKANOID_LEVELS_MEANING = 'arkanoid:levels'
 
 /** A blank grid (all empty) ready for the designer. */
 export function emptyLevel(name: string): ArkanoidLevel {
@@ -1207,17 +1212,20 @@ function isValid(l: unknown): l is ArkanoidLevel {
     && d['rows'].every(r => typeof r === 'string' && r.length <= MAX_RAW_LINE)
 }
 
+let levelsDocument: ParticipantDocument<ArkanoidLevel[]> | null = null
+const levelsDoc = (): ParticipantDocument<ArkanoidLevel[]> => levelsDocument ??= new ParticipantDocument<ArkanoidLevel[]>({
+  meaning: ARKANOID_LEVELS_MEANING,
+  legacyKey: LEGACY_KEY,
+  empty: [],
+  parse: raw => Array.isArray(raw) ? raw.filter(isValid) : null,
+})
+
 export function loadCustomLevels(): ArkanoidLevel[] {
-  try {
-    const raw = localStorage.getItem(STORE_KEY)
-    if (!raw) return []
-    const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr.filter(isValid).map(cloneLevel) : []
-  } catch { return [] }
+  return levelsDoc().value.map(cloneLevel)
 }
 
 export function saveCustomLevels(levels: ArkanoidLevel[]): void {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(levels)) } catch { /* quota / disabled */ }
+  levelsDoc().write(levels.filter(isValid).map(cloneLevel))
 }
 
 /** Insert or replace a custom level by name. Returns the new list. */

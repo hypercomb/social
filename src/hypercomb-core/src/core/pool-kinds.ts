@@ -127,6 +127,9 @@ export const declarePoolKind = (meaning: string, kind: PoolKind): PoolKindFacts 
 const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // DERIVED CACHES — recomputable, wipe-safe, never sent.
   ['computed:genome', 'index'],
+  // A door's landing pack, keyed by the head it was walked from: derived,
+  // wipe-safe, rebuilt on a miss (blossom-worker serveContentPack).
+  ['content:packs', 'index'],
   ['manifests', 'index'],
   ['system:manifests', 'index'],
   // A package's transfer pack, keyed by its root (pool-registry.ts). Wipe-safe:
@@ -180,6 +183,13 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['icons:overrides', 'document'],
   ['locations:saved', 'document'],
   ['portals:recent', 'document'],
+  // What participants make, moved out of localStorage the same way
+  // (essentials preferences/participant-document.ts).
+  ['sequences:palette', 'document'],
+  ['patterns:palette', 'document'],
+  ['arkanoid:levels', 'document'],
+  ['solomon:levels', 'document'],
+  ['journal:entries', 'document'],
   // Hand-authored insights, one current catalog via putPoolDoc — a PARTICIPANT'S
   // record, not a derivation. It was seeded 'index' (wipe-safe), which told the
   // collector a hand-written catalog could be thrown away.

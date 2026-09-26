@@ -243,7 +243,10 @@ describe('the host directory', () => {
     expect(apply).toMatch(/missingNamespaces\(/)
     expect(apply.indexOf('writePicks(live)')).toBeGreaterThan(apply.indexOf('checkCoreCompatibility('))
     expect(apply.indexOf('writePicks(live)')).toBeLessThan(apply.indexOf('await activate('))
-    expect(ACQUIRE).toMatch(/if \(Object\.keys\(readPicks\(\)\)\.length\) \{\s*const selection = await applySelection\(pkg\.packageSig, held\.held\)/)
+    // 076c59e8f (2026-09-23): Update all may release picks first, and the
+    // brood is held before the selection is composed.
+    expect(ACQUIRE).toMatch(/let picks = readPicks\(\)/)
+    expect(ACQUIRE).toMatch(/if \(Object\.keys\(picks\)\.length\) \{[\s\S]{0,800}?const selection = await applySelection\(pkg\.packageSig, held\.held, picks\)/)
     expect(INSTALL_TYPES).toMatch(/pick\(\s*path: string,[\s\S]{0,240}?revision: \{ layer: string; root: string; roots\?: readonly string\[\] \}/)
   })
 

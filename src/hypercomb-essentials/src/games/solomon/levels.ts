@@ -9,8 +9,13 @@
 // exact block maps are screenshots, not data, so geometry is authored to make
 // each room's documented solution work, with faithful item placements.)
 //
-// Custom levels live in localStorage — participant-local UI data, NOT layer
-// state (a level in the layer would skew the lineage signature across peers).
+// Custom levels are the participant's own record, NOT layer state (a level in
+// the layer would skew the lineage signature across peers). They live in the
+// `solomon:levels` document pool — the saved creations and the designer's
+// draft as two documents (preferences/participant-document.ts). The old
+// localStorage keys are read once as a fallback and never written again.
+
+import { ParticipantDocument } from '../../preferences/participant-document.js'
 
 import {
   COMBAT_SKILLS, EMPTY, WALL, BRICK, LIFE_FULL, LIFE_HALF,
@@ -18,8 +23,27 @@ import {
   type ItemSpawn, type ItemKind, type MirrorSpawn, type MirrorKind,
 } from './engine.js'
 
-const STORE_KEY = 'hc:solomon-levels'
-const DRAFT_KEY = 'hc:solomon-designer:draft'
+const LEGACY_KEY = 'hc:solomon-levels'
+const LEGACY_DRAFT_KEY = 'hc:solomon-designer:draft'
+export const SOLOMON_LEVELS_MEANING = 'solomon:levels'
+
+let creationsDocument: ParticipantDocument<unknown[]> | null = null
+const creationsDoc = (): ParticipantDocument<unknown[]> => creationsDocument ??= new ParticipantDocument<unknown[]>({
+  meaning: SOLOMON_LEVELS_MEANING,
+  subKey: 'creations',
+  legacyKey: LEGACY_KEY,
+  empty: [],
+  parse: raw => Array.isArray(raw) ? raw : null,
+})
+
+let draftDocument: ParticipantDocument<unknown> | null = null
+const draftDoc = (): ParticipantDocument<unknown> => draftDocument ??= new ParticipantDocument<unknown>({
+  meaning: SOLOMON_LEVELS_MEANING,
+  subKey: 'draft',
+  legacyKey: LEGACY_DRAFT_KEY,
+  empty: null,
+  parse: raw => raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null,
+})
 
 // ASCII legend (one char per cell):
 //   '#' grey WALL · 'B' orange BRICK · '.'/' ' EMPTY · 'P' player · 'D' door
@@ -621,7 +645,7 @@ export function decideNext(p: {
   return { kind: 'next', index: target % p.totalCount }
 }
 
-// ── custom level store (localStorage) ────────────────────────
+// ── custom level store (the solomon:levels pool) ────────────
 
 const MAX_DIM = 120
 const MAX_ENTITIES = MAX_DIM * MAX_DIM
@@ -735,15 +759,13 @@ export function newCreationId(): string {
 
 function writeCreations(creations: readonly Creation[]): void {
   const rows = creations.map(c => ({ ...c.level, id: c.id, savedAt: c.savedAt }))
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(rows)) } catch { /* quota / disabled */ }
+  creationsDoc().write(rows)
 }
 
 /** Every saved level, in the order filed. Rows are stored as a LevelDef carrying
  *  `id` + `savedAt`, so the key stays readable as a plain level list. */
 export function loadCreations(): Creation[] {
-  let rows: unknown
-  try { rows = JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]') } catch { return [] }
-  if (!Array.isArray(rows)) return []
+  const rows = creationsDoc().value
   const creations: Creation[] = []
   let minted = false
   for (const row of rows) {
@@ -806,7 +828,7 @@ export interface DesignerDraft { level: LevelDef; editingId: string | null; tool
 
 export function loadDesignerDraft(): DesignerDraft | null {
   try {
-    const raw = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as Record<string, unknown> | null
+    const raw = draftDoc().value as Record<string, unknown> | null
     const level = raw ? sanitizeLevel(raw['level']) : null
     if (!raw || !level) return null
     const id = raw['editingId']
@@ -815,7 +837,7 @@ export function loadDesignerDraft(): DesignerDraft | null {
 }
 
 export function saveDesignerDraft(draft: DesignerDraft): void {
-  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)) } catch { /* quota / disabled */ }
+  draftDoc().write(draft)
 }
 
 export function cloneLevel(l: LevelDef): LevelDef {

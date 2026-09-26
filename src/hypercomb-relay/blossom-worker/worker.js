@@ -34,6 +34,7 @@
 
 import { schnorr } from '@noble/curves/secp256k1'
 import { HOST_LISTING_FLOOR, listedMeanings } from '../host-listing.js'
+import { encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 // A hostname LABEL, per DNS. A lineage is only a name the wildcard can bring to
@@ -2162,6 +2163,102 @@ async function holdIndex(env, pubkey, evt) {
   })
 }
 
+// ── the landing pack ─────────────────────────────────────────────────────────
+//
+// A published site's first view is its head layer and the small layers and
+// records a short walk below it. Fetched one by one that was ~176 round trips,
+// most of a second at phone speed and all of it latency. The door serves them
+// as ONE transfer pack: the member of sign('content:packs') named by the head,
+// GET /<sign('content:packs')>/<head> (hypercomb-web setup/content-pack.ts).
+//
+// A DERIVED RECORD, keyed by its only input: the head's signature names
+// exactly one closure, so a pack built once is kept and never rebuilt, and a
+// new head simply has no pack yet. It is built only for the head this host's
+// door names — nobody can make the host walk an arbitrary tree. Nothing may
+// make it load-bearing: the visitor re-hashes every member and fetches loose
+// whatever the pack lacks.
+//
+// The walk takes every 64-hex string in a small JSON member as a reference
+// (the reachability rule every byte walker uses) down to CONTENT_PACK_DEPTH
+// hops, and packs only members up to CONTENT_PACK_MEMBER_MAX bytes: pictures
+// and pages stay loose, the hundreds of tiny layers and records travel
+// together. Measured on revolucion 2026-09-26: every sig a cold visitor
+// fetched sat within four hops, 404 members, 126 KB before gzip.
+const CONTENT_PACKS_MEANING = 'content:packs'
+const CONTENT_PACK_DEPTH = 4
+const CONTENT_PACK_MEMBER_MAX = 16_384
+const CONTENT_PACK_MAX = 524_288
+const CONTENT_PACK_READS_MAX = 800
+const CONTENT_PACK_BATCH = 48
+
+const contentPackHeaders = (length) => ({
+  'Content-Type': 'application/octet-stream',
+  'Content-Length': String(length),
+  'Cache-Control': IMMUTABLE,
+  ...CORS,
+})
+
+/** The head's landing members, sig → bytes, walked out of the heap. */
+async function walkLandingMembers(env, head) {
+  const members = new Map()
+  const seen = new Set([head])
+  let frontier = [head]
+  let reads = 0
+  let total = 0
+  const decoder = new TextDecoder()
+  for (let depth = 0; depth <= CONTENT_PACK_DEPTH && frontier.length; depth++) {
+    const next = []
+    for (let at = 0; at < frontier.length && reads < CONTENT_PACK_READS_MAX; at += CONTENT_PACK_BATCH) {
+      const batch = frontier.slice(at, at + CONTENT_PACK_BATCH).slice(0, CONTENT_PACK_READS_MAX - reads)
+      reads += batch.length
+      const read = await Promise.all(batch.map(async (sig) => {
+        try {
+          const object = await env.CONTENT.get(sig)
+          if (!object) return null
+          if (object.size > CONTENT_PACK_MEMBER_MAX) { try { await object.body?.cancel?.() } catch { /* released */ } return null }
+          return [sig, new Uint8Array(await object.arrayBuffer())]
+        } catch { return null }
+      }))
+      for (const entry of read) {
+        if (!entry) continue
+        const [sig, bytes] = entry
+        if (total + bytes.byteLength > CONTENT_PACK_MAX) continue
+        members.set(sig, bytes)
+        total += bytes.byteLength
+        if (depth === CONTENT_PACK_DEPTH) continue
+        const text = decoder.decode(bytes)
+        if (!/^\s*[[{]/.test(text)) continue
+        for (const match of text.matchAll(/\b[0-9a-f]{64}\b/g)) {
+          if (!seen.has(match[0])) { seen.add(match[0]); next.push(match[0]) }
+        }
+      }
+    }
+    frontier = next
+  }
+  return members
+}
+
+async function serveContentPack(request, env, host, head) {
+  const key = `${await poolAddress(CONTENT_PACKS_MEANING)}/${head}`
+  const held = await env.CONTENT?.get?.(key)
+  if (held) {
+    const bytes = new Uint8Array(await held.arrayBuffer())
+    return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers: contentPackHeaders(bytes.byteLength) })
+  }
+  // Built only for the head this door names.
+  const door = (await newestLocation(env, await poolAddress(host)))?.record
+  if (!door || String(door.layer || '').toLowerCase() !== head || !env.CONTENT?.get) {
+    return new Response(null, { status: 404, headers: CORS })
+  }
+  const members = await walkLandingMembers(env, head)
+  if (!members.has(head)) return new Response(null, { status: 404, headers: CORS })
+  const bytes = await gzipBytes(encodeTransferPack([...members]))
+  try {
+    await env.CONTENT.put(key, bytes, { httpMetadata: { contentType: 'application/octet-stream' } })
+  } catch { /* built again next time */ }
+  return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers: contentPackHeaders(bytes.byteLength) })
+}
+
 /** The member names of a pool of meaning: the R2 keys under sign(meaning)/. */
 async function poolMemberNames(env, meaning) {
   const pool = await poolAddress(meaning)
@@ -2526,6 +2623,12 @@ export default {
     // their key (see putHive/getHive). Before every heap and pool branch, which
     // would read /<sig>/<name> as a named file.
     const indexMatch = pathname.match(/^\/([0-9a-f]{64})\/([0-9a-f]{64})$/)
+    // …and a door's LANDING PACK, the member of sign('content:packs') named by
+    // its head (serveContentPack).
+    if (indexMatch && indexMatch[1] === await poolAddress(CONTENT_PACKS_MEANING)) {
+      if (method === 'GET' || method === 'HEAD') return serveContentPack(request, env, requestUrl.hostname.toLowerCase(), indexMatch[2])
+      return text(405, 'method not allowed')
+    }
     if (indexMatch && indexMatch[1] === await poolAddress(HIVE_INDEXES_MEANING)) {
       if (method === 'GET' || method === 'HEAD') return getHive(request, env, indexMatch[2])
       if (method === 'PUT') return putHive(request, env, indexMatch[2])

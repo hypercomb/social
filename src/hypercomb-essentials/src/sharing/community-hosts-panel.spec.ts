@@ -33,8 +33,11 @@ describe('the host directory — the set, apart from the publishing', () => {
     expect(EN['publish.tab.community']).toBeUndefined()
   })
 
-  it('a stored `community` or `domains` tab lands on Status rather than nothing', () => {
-    expect(TS).toMatch(/return v === 'opens' \|\| v === 'versions' \? v : 'status'/)
+  // 11e42505e (2026-09-22) took the tabs out: the panel is the layer you are
+  // on, with one switch per domain, so no stored tab is left to restore.
+  it('has no tabs left, so no stored tab can land it on nothing', () => {
+    expect(HTML).not.toMatch(/class="publish-tabs"/)
+    expect(TS).not.toMatch(/setTab\(/)
   })
 
   it('adds and REMOVES hosts, through the drone that owns the pool', () => {
@@ -170,17 +173,13 @@ describe('the host directory — the set, apart from the publishing', () => {
     expect(HOSTS_DRONE).toMatch(/whenReady\?\.\(STORE_KEY, \(\) => \{ void this\.#read\(\) \}\)/)
   })
 
-  it('the branch still picks its hosts on its own line item, and may pick several', () => {
-    const row = HTML.indexOf('class="pdet-domains pcur-hosts"')
-    const tabs = HTML.indexOf('<nav class="publish-tabs"')
-    expect(row).toBeGreaterThan(-1)
-    expect(row).toBeLessThan(tabs)
-    expect(HTML).toMatch(/toggleHost\(row, choice\.zone\)/)
-    expect(HTML).toMatch(/makePrimary\(row, choice\.zone\)/)
+  it('the layer you are on shows one switch per domain, and the hosts are managed in their own window', () => {
+    expect(HTML).toMatch(/doorOn\(current\(\), zone\)/)
+    expect(HTML).toMatch(/class="pcur-hosts-manage"[^>]*\(click\)="openHosts\(\)"/)
   })
 
   it('renders branch details once, in the properties pane rather than every list row', () => {
-    expect((HTML.match(/class="pdet-domains pcur-hosts"/g) ?? [])).toHaveLength(1)
+    expect((HTML.match(/class="pcur-hosts-manage"/g) ?? [])).toHaveLength(1)
     expect(HTML).not.toMatch(/row\.expanded/)
     expect(HTML).not.toMatch(/class="prow-detail"/)
     expect(TS).not.toMatch(/expanded: boolean/)
@@ -189,7 +188,9 @@ describe('the host directory — the set, apart from the publishing', () => {
   })
 
   it('the pick-list is the community, never a union of past claims', () => {
-    expect(DRONE).toMatch(/#knownZones\(\): string\[\] \{[\s\S]{0,600}?return \[\.\.\.this\.#community\]/)
+    // 8696916c1 (2026-09-22): plus every domain the host SERVES, from its own
+    // ledger — still never a union of past claims.
+    expect(DRONE).toMatch(/#knownZones\(\): string\[\] \{[\s\S]{0,900}?return \[\.\.\.new Set\(\[\.\.\.this\.#community, \.\.\.this\.#served\]\)\]/)
     expect(DRONE).toMatch(/this\.#community = await listCommunityHosts\(\)/)
     expect(DRONE).not.toMatch(/#readCommunity/)
     expect(DRONE).not.toMatch(/publicHostDomainsFor/)

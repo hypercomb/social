@@ -1,6 +1,7 @@
 import { installMemoryFilesystem } from './setup/memory-filesystem'
 import { installReadonlyNetwork } from './setup/readonly-network'
 import { readArrivalTrial, startArrivalTrial } from './setup/arrival-trial'
+import { fetchContentPack } from './setup/content-pack'
 
 /** What this door is: the newest marker of its own bag, sign(<hostname>)
  *  (blossom-worker locationMeta). Only signatures are queried — no named
@@ -142,6 +143,12 @@ const readDoor = async (): Promise<DoorMeta | null> => {
   return selected && selected !== String(door.pubkey ?? '').toLowerCase() ? null : door
 }
 const siteRead: Promise<DoorMeta | null> = readDoor().catch(() => null)
+// THE LANDING VIEW IN ONE REQUEST (setup/content-pack.ts): the head's pack is
+// fetched beside the boot graph, and the content broker takes its first
+// layers and records from it instead of one round trip each.
+;(globalThis as { __hcCarriedContent?: Promise<Map<string, Uint8Array>> }).__hcCarriedContent = siteRead
+  .then(site => site?.layer ? fetchContentPack(String(site.layer).toLowerCase()) : new Map<string, Uint8Array>())
+  .catch(() => new Map<string, Uint8Array>())
 // A TRIAL (`?arrival=`, setup/arrival-trial.ts) replaces the signed plan for
 // this one visit — the Publish window's Optimize section tries a plan with it.
 const arrivalTrial = readArrivalTrial()
