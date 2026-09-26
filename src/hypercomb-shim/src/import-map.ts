@@ -14,6 +14,11 @@ declare const __HC_PURE__: boolean
 
 export type ResolvedImports = Record<string, string>
 
+/** A map minted for THIS page alone: blob: URLs die with it, so it is never
+ *  cached for the next boot's early script (main.ts, cacheImportMap). */
+export const sessionBound = (imports: ResolvedImports): boolean =>
+  Object.values(imports).some(url => url.startsWith('blob:'))
+
 /**
  * Build the runtime importmap by opening exactly one bag.
  *
@@ -75,6 +80,7 @@ export const cacheImportMap = async (): Promise<void> => {
   if ((window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) return
   try {
     const imports = await resolveImportMap()
+    if (sessionBound(imports)) return
     localStorage.setItem(IMPORT_MAP_STORAGE_KEY, JSON.stringify({ imports }))
   } catch (err) {
     console.warn('[resolveImportMap] could not cache import map', err)
@@ -257,6 +263,25 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   // Cache the alias map for in-session reuse by DependencyLoader.
   // NOT consulted on the next boot — every cold boot re-derives from OPFS.
   ;(globalThis as any).__hypercombAliasMap = aliasSource
+
+  // A PAGE THE WORKER DOES NOT CONTROL — a hard reload, DevTools "bypass for
+  // network", a browser without service workers. Nothing answers `/opfs/`
+  // there: the request reaches the host, whose SPA catch-all answers
+  // text/html, and the browser refuses the module. Bees already import from
+  // verified OPFS bytes (Store.getBee), and so do the boot dependencies
+  // (dependency-loader); the atoms a bee imports by specifier were the one
+  // path still riding the worker — every one of them failed, and with them
+  // every bee that names one. Read the bytes ourselves and let the map carry
+  // self-typed blob URLs, as the visitor's does. Session-bound: main.ts never
+  // caches such a map (`sessionBound`).
+  if (!readonlyVisitor && !navigator.serviceWorker?.controller && aliasSource.size > 0) {
+    await Promise.all([...aliasSource].map(async ([alias, sig]) => {
+      const bytes = await store.getDependencyBytes(sig.replace(/\.js$/i, ''))
+      if (!bytes) return
+      const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+      imports[alias] = URL.createObjectURL(new Blob([exact], { type: 'text/javascript' }))
+    }))
+  }
 
   // THE XCOPY CONTRACT. A published site must run from ANY static host —
   // plain nginx/Apache/cPanel, no config. Dependencies are sig-named and

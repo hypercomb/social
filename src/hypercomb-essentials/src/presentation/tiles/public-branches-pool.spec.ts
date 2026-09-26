@@ -1,8 +1,9 @@
-// public-branches-pool.spec.ts — the public:branches pool is the set, and
-// hc:public-branches the synchronous cache every renderer reads.
+// public-branches-pool.spec.ts — the public:branches and public:tiles pools
+// are the sets; hc:public-branches and hc:public-tiles:<location> are the
+// synchronous caches every renderer reads.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { isCellPublic, readPublicBranches, reconcilePublicBranches, setBranchPublic } from './tile-public.js'
+import { isCellPublic, readPublicBranches, readPublicLabels, reconcilePublicBranches, reconcilePublicTiles, setBranchPublic, setCellPublic } from './tile-public.js'
 
 /** A directory handle over a Map: enough of OPFS for one flat pool. */
 const fakePool = () => {
@@ -38,8 +39,10 @@ beforeEach(() => {
 })
 afterEach(() => { delete ioc.ioc })
 
-const pathsInPool = (): string[] =>
-  [...pool!.files.values()].filter(Boolean).map(text => (JSON.parse(text) as { path: string }).path).sort()
+const recordsInPool = (): { kind: string; path: string }[] =>
+  [...pool!.files.values()].filter(Boolean).map(text => JSON.parse(text) as { kind: string; path: string })
+const pathsInPool = (kind = 'public:branch'): string[] =>
+  recordsInPool().filter(r => r.kind === kind).map(r => r.path).sort()
 
 describe('public branches pool', () => {
   it('writes the cache at once and the pool record after', async () => {
@@ -77,5 +80,34 @@ describe('public branches pool', () => {
     pool = null
     setBranchPublic('/', 'work', true)
     expect(isCellPublic('/work', 'x')).toBe(true)
+  })
+})
+
+describe('public tiles pool', () => {
+  it('writes the cache at once and the pool record after', async () => {
+    setCellPublic('/My Folder', 'Notes', true)
+    expect(readPublicLabels('/my-folder')).toEqual(['notes'])
+    expect(isCellPublic('/My Folder', 'Notes')).toBe(true)
+    await vi.waitFor(() => expect(pathsInPool('public:tile')).toEqual(['/my-folder/notes']))
+  })
+
+  it('withdraws from both', async () => {
+    setCellPublic('/', 'notes', true)
+    await vi.waitFor(() => expect(pathsInPool('public:tile')).toEqual(['/notes']))
+    setCellPublic('/', 'notes', false)
+    await vi.waitFor(() => expect(pathsInPool('public:tile')).toEqual([]))
+    expect(await reconcilePublicTiles()).toBe(0)
+    expect(isCellPublic('/', 'notes')).toBe(false)
+  })
+
+  it('backfills cache-only tiles and restores a cleared browser', async () => {
+    localStorage.setItem('hc:public-tiles:/work', JSON.stringify(['plan']))
+    localStorage.setItem('hc:public-tiles:/', JSON.stringify(['home']))
+    expect(await reconcilePublicTiles()).toBe(2)
+    expect(pathsInPool('public:tile')).toEqual(['/home', '/work/plan'])
+    localStorage.clear()
+    expect(await reconcilePublicTiles()).toBe(2)
+    expect(isCellPublic('/work', 'plan')).toBe(true)
+    expect(isCellPublic('/', 'home')).toBe(true)
   })
 })

@@ -15,13 +15,23 @@
          signature URL and there is no map at all. -->
     <script>
       (function () {
+        // The cached map points every dependency at /opfs/, which only the
+        // service worker answers. A page the worker does not control (a hard
+        // reload, DevTools "bypass for network", a browser without workers)
+        // would send those imports to the host, whose SPA catch-all answers
+        // text/html — and an early entry can never be overridden by a later
+        // map. So an uncontrolled page replays nothing: main.ts derives a
+        // self-typed blob map for it (import-map.ts) and appends it.
+        var controlled = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
         try {
-          // `@hypercomb/core` never moves, so it is declared even on the
-          // coldest boot. The pure build drops this script: its kernel
-          // declares the one map once it holds the core library.
+          // `@hypercomb/core` never moves and is a real file, so it is
+          // declared even on the coldest or an uncontrolled boot; only the
+          // cached /opfs/ entries wait for a controlled page. The pure build
+          // drops this script: its kernel declares the one map once it holds
+          // the core library.
           var CORE = '/hypercomb-core.runtime.js';
           var raw = null, parsed = null;
-          try { raw = localStorage.getItem('hc:importmap'); parsed = raw && JSON.parse(raw); } catch (e) {}
+          try { raw = controlled ? localStorage.getItem('hc:importmap') : null; parsed = raw && JSON.parse(raw); } catch (e) {}
           if (!parsed || typeof parsed.imports !== 'object' || !parsed.imports) { parsed = { imports: {} }; raw = null; }
           if (!parsed.imports['@hypercomb/core']) { parsed.imports['@hypercomb/core'] = CORE; raw = null; }
           if (!raw) raw = JSON.stringify(parsed);

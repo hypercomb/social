@@ -29,6 +29,14 @@ export function hideStorageKey(location: string): string {
 // local annotation, so it must never enter the signed lineage (that would
 // skew the layer signature across peers, same rule as hide/clipboard).
 // Absence from the set means private. We store only the PUBLIC exceptions.
+//
+// THE POOL IS THE SET: each public tile is one record in `public:tiles`
+// (see the pools below); `hc:public-tiles:<location>` is its synchronous
+// read cache, written first so the tile repaints at once.
+export const PUBLIC_TILES_MEANING = 'public:tiles'
+const PUBLIC_TILES_PREFIX = 'hc:public-tiles:'
+const TILE_RECORD_KIND = 'public:tile'
+
 export function publicStorageKey(location: string): string {
   // Normalize every location segment so the key is identical whether the
   // location arrives as a RAW nav path (explorerLabel, e.g. "/My Folder") or
@@ -37,7 +45,7 @@ export function publicStorageKey(location: string): string {
   // when the publisher reaches its folder by descent. Branches already match
   // because tilePath() normalizes; this brings the individual key in line.
   const norm = location.split('/').map(s => s.trim()).filter(Boolean).map(s => normalizeCell(s) || s).join('/')
-  return `hc:public-tiles:/${norm}`
+  return `${PUBLIC_TILES_PREFIX}/${norm}`
 }
 
 /** Public tile labels at `location`. Empty array on any parse failure. */
@@ -61,7 +69,8 @@ export function setCellPublic(location: string, label: string, makePublic: boole
   else if (!makePublic && has) next = list.filter(x => x !== l)
   try {
     localStorage.setItem(publicStorageKey(location), JSON.stringify(next))
-  } catch { /* private-browsing edge case — flag won't persist */ }
+  } catch { /* private-browsing edge case — the pool still holds it */ }
+  if (next !== list) void mark(PUBLIC_TILES_MEANING, TILE_RECORD_KIND, tilePath(location, l), makePublic)
   return next
 }
 
@@ -84,43 +93,81 @@ export function setCellPublic(location: string, label: string, makePublic: boole
 export const PUBLIC_BRANCHES_MEANING = 'public:branches'
 const PUBLIC_BRANCHES_KEY = 'hc:public-branches'
 const BRANCH_RECORD_KIND = 'public:branch'
+
+// ── The two pools of public marks ────────────────────────────────
+// A public tile and a public branch are each one record `{ kind, path }`,
+// named by its own bytes, in its pool: `public:tiles` and `public:branches`.
+// Both are keyed by the tile's canonical path (tilePath), so the record for a
+// tile is the same wherever the toggle came from.
 const STORE_KEY = '@hypercomb.social/Store'
 
 type PoolStore = { getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null> }
 
 const encoder = new TextEncoder()
 /** The record's exact bytes: it is named by them and written as them. */
-const branchRecordBytes = (path: string): ArrayBuffer => {
-  const bytes = encoder.encode(JSON.stringify({ kind: BRANCH_RECORD_KIND, path }))
+const recordBytes = (kind: string, path: string): ArrayBuffer => {
+  const bytes = encoder.encode(JSON.stringify({ kind, path }))
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
-const branchRecordName = (path: string): Promise<string> => SignatureService.sign(branchRecordBytes(path))
+const recordName = (kind: string, path: string): Promise<string> => SignatureService.sign(recordBytes(kind, path))
 
-const branchPool = async (): Promise<FileSystemDirectoryHandle | null> => {
+const markPool = async (meaning: string): Promise<FileSystemDirectoryHandle | null> => {
   try {
     const store = (window as { ioc?: { get?: (key: string) => unknown } }).ioc?.get?.(STORE_KEY) as PoolStore | undefined
-    return (await store?.getPool?.(PUBLIC_BRANCHES_MEANING)) ?? null
+    return (await store?.getPool?.(meaning)) ?? null
   } catch { return null }
 }
 
-const writeBranchRecord = async (dir: FileSystemDirectoryHandle, path: string): Promise<void> => {
-  const handle = await dir.getFileHandle(await branchRecordName(path), { create: true })
+const writeRecord = async (dir: FileSystemDirectoryHandle, kind: string, path: string): Promise<void> => {
+  const handle = await dir.getFileHandle(await recordName(kind, path), { create: true })
   const writable = await handle.createWritable()
-  try { await writable.write(branchRecordBytes(path)) } finally { await writable.close() }
+  try { await writable.write(recordBytes(kind, path)) } finally { await writable.close() }
 }
 
-const readBranchPool = async (dir: FileSystemDirectoryHandle): Promise<Set<string>> => {
+const readRecords = async (dir: FileSystemDirectoryHandle, kind: string): Promise<Set<string>> => {
   const out = new Set<string>()
   try {
     for await (const [, handle] of dir as unknown as AsyncIterable<[string, FileSystemHandle]>) {
       if (handle.kind !== 'file') continue
       try {
         const record = JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as { kind?: unknown; path?: unknown }
-        if (record?.kind === BRANCH_RECORD_KIND && typeof record.path === 'string' && record.path.startsWith('/')) out.add(record.path)
+        if (record?.kind === kind && typeof record.path === 'string' && record.path.startsWith('/')) out.add(record.path)
       } catch { /* not a record — skip it */ }
     }
   } catch { /* unreadable pool — treat as empty */ }
   return out
+}
+
+/** Record or withdraw one mark in its pool. A failure is left for the next
+ *  reconcile, which backfills a missing record. */
+const mark = async (meaning: string, kind: string, path: string, makePublic: boolean): Promise<void> => {
+  const dir = await markPool(meaning)
+  if (!dir) return
+  try {
+    if (makePublic) await writeRecord(dir, kind, path)
+    else await dir.removeEntry(await recordName(kind, path))
+  } catch { /* no record to remove, or the write failed */ }
+}
+
+/** Union one pool and its read cache into each other: records the cache
+ *  lacks are handed to `addToCache`, and cached paths the pool lacks are
+ *  written. Returns how many paths are public. */
+const reconcileMarks = async (
+  meaning: string,
+  kind: string,
+  cached: readonly string[],
+  addToCache: (paths: string[]) => void,
+): Promise<number> => {
+  const dir = await markPool(meaning)
+  if (!dir) return cached.length
+  const held = await readRecords(dir, kind)
+  const missing = [...held].filter(p => !cached.includes(p))
+  if (missing.length) addToCache(missing)
+  for (const path of cached) {
+    if (held.has(path)) continue
+    try { await writeRecord(dir, kind, path) } catch { /* the next reconcile backfills it */ }
+  }
+  return cached.length + missing.length
 }
 
 const writeBranchCache = (paths: readonly string[]): void => {
@@ -129,31 +176,43 @@ const writeBranchCache = (paths: readonly string[]): void => {
   } catch { /* private-browsing edge case — the pool still holds it */ }
 }
 
-/** Record or withdraw one branch in the pool. A failure is left for the next
- *  reconcile, which backfills a missing record. */
-const markBranch = async (path: string, makePublic: boolean): Promise<void> => {
-  const dir = await branchPool()
-  if (!dir) return
-  try {
-    if (makePublic) await writeBranchRecord(dir, path)
-    else await dir.removeEntry(await branchRecordName(path))
-  } catch { /* no record to remove, or the write failed */ }
-}
-
-/** Union the pool and the read cache into each other. Returns how many
+/** Union the public:branches pool and its read cache. Returns how many
  *  branches are public. */
 export async function reconcilePublicBranches(): Promise<number> {
-  const dir = await branchPool()
   const cached = readPublicBranches()
-  if (!dir) return cached.length
-  const held = await readBranchPool(dir)
-  const missing = [...held].filter(p => !cached.includes(p))
-  if (missing.length) writeBranchCache([...cached, ...missing])
-  for (const path of cached) {
-    if (held.has(path)) continue
-    try { await writeBranchRecord(dir, path) } catch { /* the next reconcile backfills it */ }
-  }
-  return cached.length + missing.length
+  return reconcileMarks(PUBLIC_BRANCHES_MEANING, BRANCH_RECORD_KIND, cached, missing => writeBranchCache([...cached, ...missing]))
+}
+
+/** Every individually public tile in the read cache, as canonical paths. */
+const cachedPublicTilePaths = (): string[] => {
+  const out: string[] = []
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (!key?.startsWith(PUBLIC_TILES_PREFIX)) continue
+      const location = key.slice(PUBLIC_TILES_PREFIX.length)
+      for (const label of readPublicLabels(location)) out.push(tilePath(location, label))
+    }
+  } catch { /* no storage — nothing cached */ }
+  return out
+}
+
+/** Union the public:tiles pool and its read caches (one per location).
+ *  Returns how many tiles are individually public. */
+export async function reconcilePublicTiles(): Promise<number> {
+  return reconcileMarks(PUBLIC_TILES_MEANING, TILE_RECORD_KIND, cachedPublicTilePaths(), missing => {
+    for (const path of missing) {
+      const cut = path.lastIndexOf('/')
+      const label = path.slice(cut + 1)
+      if (!label) continue
+      const location = path.slice(0, cut) || '/'
+      const labels = readPublicLabels(location)
+      if (labels.includes(label)) continue
+      try {
+        localStorage.setItem(publicStorageKey(location), JSON.stringify([...labels, label]))
+      } catch { /* private-browsing edge case — the pool still holds it */ }
+    }
+  })
 }
 
 /** Canonical absolute path of a tile, with EVERY segment normalized so the
@@ -199,7 +258,7 @@ export function setBranchPublic(location: string, label: string, makePublic: boo
   if (makePublic && !has) next = [...list, p]
   else if (!makePublic && has) next = list.filter(x => x !== p)
   writeBranchCache(next)
-  void markBranch(p, makePublic)
+  if (next !== list) void mark(PUBLIC_BRANCHES_MEANING, BRANCH_RECORD_KIND, p, makePublic)
   return next
 }
 

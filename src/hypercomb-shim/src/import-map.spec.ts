@@ -38,7 +38,12 @@ const world = (bagName: string) => {
 }
 
 describe('resolveImportMap', () => {
-  beforeEach(() => { localStorage.clear(); bagReads = 0 })
+  // A page the worker controls: its map points at /opfs/ (an uncontrolled
+  // page mints blob URLs instead — uncontrolled-page.spec.ts).
+  beforeEach(() => {
+    localStorage.clear(); bagReads = 0
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { controller: {} } })
+  })
 
   it('reads a bag once, then maps it from its name alone', async () => {
     world(sig('1'))

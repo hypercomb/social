@@ -114,7 +114,7 @@ import { postCommunityDomainsToServiceWorker } from '@hypercomb/runtime/sw-domai
 // AOT compiler). `ioc.web` above is what installs the ambient `register()` /
 // `get()` globals the narrow modules expect at their module scope, which is
 // why narrowing is safe here and the import ORDER is not cosmetic.
-import { IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './import-map'
+import { IMPORT_MAP_STORAGE_KEY, resolveImportMap, sessionBound } from './import-map'
 // Only the LOADER is compiled in — the acquisition it loads is not. That
 // bundle is fetched by signature at boot and verified before it runs, so
 // nothing below imports it and the type is the only thing that crosses.
@@ -158,12 +158,18 @@ const ensureSwControl = async (): Promise<void> => {
  *  is a boot-flow decision that belongs to the installer bee, and a shim
  *  that reloads itself is much harder to reason about while it is being
  *  built. Browsers that merge late maps (Chrome/Edge 133+) resolve fine;
- *  index.html's synchronous replay covers the rest from the second boot. */
+ *  index.html's synchronous replay covers the rest from the second boot.
+ *  A page the worker does not control (hard reload, DevTools "bypass for
+ *  network", no worker) gets a self-typed blob map (import-map.ts) and boots
+ *  on this late append — the same footing as a web page that stays
+ *  uncontrolled, minus the reload the web tries first. */
 const attachImportMap = async (): Promise<void> => {
   const imports = await resolveImportMap()
   const json = JSON.stringify({ imports })
   if ((window as any).__hcImportMapApplied === json) return
-  try { localStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch {}
+  // A map minted for an uncontrolled page holds blob: URLs that die with it —
+  // cached, it would replay dead specifiers into the next boot's early script.
+  if (!sessionBound(imports)) try { localStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch {}
   const script = document.createElement('script')
   script.type = 'importmap'
   script.textContent = json

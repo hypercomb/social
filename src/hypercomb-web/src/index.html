@@ -71,8 +71,16 @@
         var CORE = { '@hypercomb/core': '/hypercomb-core.runtime.js' };
         var raw = null;
         var map = { imports: CORE };
+        // The cached map points every dependency at /opfs/, which only the
+        // service worker answers. A page the worker does not control (a hard
+        // reload, DevTools "bypass for network", a browser without workers)
+        // would send those imports to the host, whose SPA catch-all answers
+        // text/html — and an early entry can never be overridden by a later
+        // map. So an uncontrolled page replays nothing: main.ts derives a
+        // self-typed blob map for it (resolve-import-map.ts) and appends it.
+        var controlled = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
         try {
-          raw = localStorage.getItem('hc:importmap');
+          raw = controlled ? localStorage.getItem('hc:importmap') : null;
           var parsed = raw ? JSON.parse(raw) : null;
           if (parsed && typeof parsed.imports === 'object' && parsed.imports) {
             parsed.imports['@hypercomb/core'] = CORE['@hypercomb/core'];
