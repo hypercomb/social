@@ -47,13 +47,14 @@ at the gesture, never asserted by a claim.
 
 | stage (word) | role in code | what entering requires | the gesture and its word |
 |---|---|---|---|
-| `shared` | OFFERED — announced to the participants of a zone, who can adopt it | the closure hosted; an index door answered — `join` IS the branch publish, so a joined branch is also `published` (and `live` where it wears host marks); a zone to stand in | `join` / `leave` — the lock button |
+| `shared` | OFFERED — announced to the participants of a zone, who can adopt it | the branch published here (`publish here`) — join writes nothing and offers what your host serves; a zone to stand in | `join` / `leave` — the lock button |
 | `published` | INDEXED — a link a stranger can open: the publisher's signed index names this head, and the link bundle is receipted | the closure hosted; an index door answered; the wipe guard satisfied | `publish` / unpublish — the Publish panel row |
 | `live` | OPENED — a domain's signed door opens on this head: the visitor site | `published`; a host mark on the branch; the door signed | the Publish panel's per-domain switch (`setBranchDoors`) |
 
 The stages form a DAG, not a line: `published` needs `hosted`, not `shared`
-(the publish panel publishes without joining), while `join` enters `shared`
-AND `published` in one act. A creation is usually at several stages at once
+(the publish panel publishes without joining), and `join` enters nothing:
+`publish here` enters `published` and `shared` in one act, and joining then
+offers it. A creation is usually at several stages at once
 and each list keeps it. A location is at a stage when the head its index
 names is a member of that list; "there are updates" is that index head
 differing from the location's local head, and the next gesture sends them.
@@ -136,8 +137,10 @@ load-bearing ([optimize-phase.md](optimize-phase.md)); the control never
 gates on it.
 
 **R7 — One control, two directions, no new words.** The lock button is
-`join` (advance the public branches you stand among to `shared`, which is
-the branch publish of §4) and, once in the swarm, `leave`. `publish`,
+`join` (stand in the swarm; the gate offers what your host serves) and, once
+in the swarm, `leave`. Publishing the layer you stand on is its own word,
+`publish here` (jwize, 2026-09-25: "we should just publish here to publish
+the current, check hosts for this layer"). `publish`,
 unpublish and the per-domain door switches stay in the Publish panel, one
 row per creation, where they already are. No behaviour word is added:
 `open`, `close` and `withdraw` are sub-words of existing behaviours and the
@@ -198,21 +201,14 @@ name, not a molecule address.
    `leaveBranches` (the swarm's leave) mints the next `shared` list without
    the roots you stood among. (`signHeadClaim`, `head-claim-signer.ts`;
    `advanceStage` / `withdrawStage`, `stage-succession.ts`.)
-2. **`join` = the branch publish, per public branch root.** On the join
-   gesture only — never from the heartbeat, a re-walk or `host:receipt` —
-   the swarm drone runs, for each public-branch root the walk at the current
-   location announces (never a single public tile, never a whole-branch
-   `markPublic`), the `hosted` requirement (`markPublic` + the drain, which
-   asks the host first) and mints the `shared` list; then it announces
-   through the availability gate exactly as now. The announce filter keeps
-   reading `.public` markers; the claim is written, not read, in this step.
-   A branch not available within the publish deadline gets no member and
-   the toast names it; join never flips the flag back. The boot replay of
-   `mesh:public-changed` (web `app.ts:299`, dev `app.ts:286`) mints nothing:
-   remember the previous flag, as `mesh-adapter.drone.ts` reads it.
-   Participants who joined before this ships get lists on their next
-   explicit join. At the root, the root itself has nothing to advance; its
-   public branches do.
+2. **`publish here` = the offering act; `join` writes nothing.** `publish
+   here` publishes the layer you stand on to the hosts THIS layer names (its
+   host marks, else your standing host) — the share-sheet routine
+   (`hostCurrentBranch`) with `shared` riding along. Join is the share
+   control or the word: the announce walk offers what is available through
+   the gate, and a hive whose layer is not published watches and is told so.
+   (Built 2026-09-25 as join-publishes, then simplified the same day: the
+   coupling was more than the doctrine needed.)
 3. **`hosted` has one definition for both paths:** a confirmed receipt for
    every sig of the closure on at least one enabled target, read through
    `isClosureAvailable` — the same gate the publish panel and the announce
