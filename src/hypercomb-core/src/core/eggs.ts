@@ -102,17 +102,21 @@ export const hatchEgg = async (sig: string): Promise<void> => {
   try { await (await eggsDir(false))?.removeEntry(sig) } catch { /* no egg to hatch */ }
 }
 
-/**
- * Ask each host this signature has not already been refused by, in order,
- * until one holds it. The hosts that answered a definite no are laid as an
- * egg; the one that answered hatches it. Returns null when nobody (asked this
- * time) had it.
- */
-export const askUntried = async <T>(
+// ONE ASK IN FLIGHT PER SIGNATURE. An egg is laid when an ask ENDS, so two
+// asks for the same signature started a tick apart (the Hosts window reads
+// from more than one handler) both found no egg and both asked every host —
+// one miss became a burst of the same 404. The second ask now waits for the
+// first: if the first was answered, the bytes have arrived and that is its
+// answer too; otherwise the egg is laid by then and it asks only what is still
+// untried. The record is in memory only — nothing outlives the ask.
+type InFlight = { readonly done: Promise<{ answer: unknown; found: boolean }> }
+const inFlight: Map<string, InFlight> = ((globalThis as { __hypercombAsking?: Map<string, InFlight> }).__hypercombAsking ??= new Map())
+
+const askEach = async <T>(
   sig: string,
   bases: readonly string[],
   ask: (base: string) => Promise<EggProbe<T>>,
-): Promise<T | null> => {
+): Promise<{ answer: T | null; found: boolean }> => {
   const refused: string[] = []
   try {
     for (const base of await untriedHosts(sig, bases)) {
@@ -122,12 +126,35 @@ export const askUntried = async <T>(
       // Held somewhere: the ones before it refusing no longer matter.
       refused.length = 0
       await hatchEgg(sig)
-      return answer
+      return { answer, found: true }
     }
-    return null
+    return { answer: null, found: false }
   } finally {
     if (refused.length) await layEgg(sig, refused)
   }
+}
+
+/**
+ * Ask each host this signature has not already been refused by, in order,
+ * until one holds it. The hosts that answered a definite no are laid as an
+ * egg; the one that answered hatches it. Returns null when nobody (asked this
+ * time) had it. Concurrent asks for one signature take turns, so a host is
+ * asked once for it however many callers want it at the same moment.
+ */
+export const askUntried = async <T>(
+  sig: string,
+  bases: readonly string[],
+  ask: (base: string) => Promise<EggProbe<T>>,
+): Promise<T | null> => {
+  if (!SIG.test(sig)) return (await askEach(sig, bases, ask)).answer
+  for (let ahead = inFlight.get(sig); ahead; ahead = inFlight.get(sig)) {
+    const { answer, found } = await ahead.done
+    if (found) return answer as T
+  }
+  const run = askEach(sig, bases, ask)
+  const mine: InFlight = { done: run.catch(() => ({ answer: null, found: false })) }
+  inFlight.set(sig, mine)
+  try { return (await run).answer } finally { if (inFlight.get(sig) === mine) inFlight.delete(sig) }
 }
 
 /** Forget every egg — "ask everyone again". Session copy first, then the pool. */
