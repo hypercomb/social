@@ -58,6 +58,24 @@ const DOOR = `http://${SANDBOX}.${HOST}`
 // Writes go to the zone's content face, as in production (content.<zone> is
 // the relay, never a site); the door opens on the zone itself.
 const WRITE = `content.${HOST}`
+
+/** What the door the page is on says about itself, read by signature only. */
+const readDoor = (page) => page.evaluate(async () => {
+  const sign = async (text) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+    .map(b => b.toString(16).padStart(2, '0')).join('')
+  const names = async (path) => { const r = await fetch(path, { cache: 'no-store' }); return r.ok ? (await r.text()).split('\n').filter(Boolean) : [] }
+  const json = async (path) => { const r = await fetch(path, { cache: 'no-store' }); return r.ok ? r.json() : null }
+  const bag = await sign(location.hostname.toLowerCase())
+  const newest = (await names(`/${bag}/`)).filter(n => /^\d{8}$/.test(n)).sort().at(-1)
+  const door = newest ? await json(`/${bag}/${newest}`) : null
+  if (!door) return null
+  const jev = door.jev ? await json(`/content/${door.jev}`) : null
+  const pool = await sign(`assess:${door.layer}`)
+  const assessments = []
+  for (const key of await names(`/${pool}/`)) { const a = await json(`/${pool}/${key}`); if (a) assessments.push(a) }
+  return { ...door, package: door.layer, jevVerdict: jev?.verdict, assessments }
+})
+
 const hostState = async () => (await fetch(`http://${HOST}/__state`)).json()
 // The zone's own listing of its trials (the local binding makes the zone an apex site).
 const trialsOnZone = async () => (await (await fetch(`http://${HOST}/trials.json`, { cache: 'no-store' })).json()).trials ?? []
@@ -167,7 +185,7 @@ const announcedOn = page => page.evaluate(() => {
   const tester = await testerContext.newPage()
   H.logPage(tester, 'tester')
   const doorResponse = await tester.goto(DOOR, { waitUntil: 'domcontentloaded', timeout: 180_000 })
-  const site = await tester.evaluate(() => fetch('/site.json', { cache: 'no-store' }).then(r => r.json())).catch(() => null)
+  const site = await readDoor(tester).catch(() => null)
   check('the door describes itself as the sandbox of that package', site?.sandbox === true && site?.package === sandboxRoot && site?.pubkey === pubkey)
   check('the door names the change and the review, for anyone to read', site?.change === changeSig && site?.review === reviewSig)
   check('the door names Jev\'s reading and where the change stands', site?.jev === jevSig && site?.jevVerdict === 'follows')
@@ -227,7 +245,7 @@ const announcedOn = page => page.evaluate(() => {
   await H.watchToasts(fol.page)
   await H.say(fol.page, `module assess ${CHANGE} refuse raises zoom without asking @${WRITE}`)
   console.log('   assessor toasts:', JSON.stringify(await H.toastsUntil(fol.page, /assessment/)))
-  const listed = await tester.evaluate(() => fetch('/site.json', { cache: 'no-store' }).then(r => r.json()))
+  const listed = await readDoor(tester)
   const mine = (listed.assessments ?? []).find(a => a.pubkey === testerKey)
   const assessment = mine ? JSON.parse(await fromHost(mine.record)) : null
   const note = assessment ? await openHop(assessment.note) : ''

@@ -1080,7 +1080,8 @@ function servesHostDoor(env, hostname) {
 //   /content/<sign('host:packages')>/00000000  `<root>\n<label>`
 //   /content/<sig>                             the package's files, from the heap
 //   /content/<sign('transfer:packs')>/<root>   the package's transfer pack, if named
-//   /site.json                                 who published it, and what
+//   /<sign(<door host>)>/000x                  what the door is: who published it, and what
+//   /<sign('assess:<root>')>/<pubkey>          who assessed it, re-verified as read
 const SANDBOX_LABEL_RE = /^try-[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?$/
 const HOST_PACKAGES_MEANING = 'host:packages'
 // One member per package, named by its root and holding its transfer pack's
@@ -1147,17 +1148,6 @@ async function serveSandbox(request, env, site, zone) {
   if (answered) return answered
   const plain = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
   const body = (value) => (request.method === 'HEAD' ? null : value)
-  if (url.pathname === '/site.json') {
-    return json(200, {
-      sandbox: true, title: site.lineage, channel: `install:${site.lineage}`, package: found.root,
-      pubkey: found.pubkey, publisher: found.label, publishedAt: found.publishedAt, hosts: [url.host],
-      ...(found.change ? { change: found.change } : {}), ...(found.review ? { review: found.review } : {}),
-      ...(found.review ? { reviewVerdict: await heapRecord(env, found.review).then((r) => ASSESS_VERDICTS.has(r?.verdict) ? r.verdict : 'unclear') } : {}),
-      // Jev's reading of the change, rule by rule (essentials module-review.ts jevReadTrial).
-      ...(found.jev ? { jev: found.jev, jevVerdict: await heapRecord(env, found.jev).then((r) => JEV_VERDICTS.has(r?.verdict) ? r.verdict : 'unsure') } : {}),
-      assessments: await assessmentsOf(env, found.root, indexReader(env)),
-    }, { 'Cache-Control': 'no-store' })
-  }
   const moduleMatch = url.pathname.match(/^\/content\/([0-9a-f]{64})$/)
   if (moduleMatch) return serveModule(request, env, moduleMatch[1])
   if (url.pathname.startsWith('/content/')) return new Response(body('not held\n'), { status: 404, headers: plain })
@@ -1176,7 +1166,6 @@ async function serveSandbox(request, env, site, zone) {
 const ASSESS_KEY_RE = /^assess:([0-9a-f]{64})$/
 const ASSESS_VERDICTS = new Set(['accept', 'refuse', 'unclear'])
 const JEV_VERDICTS = new Set(['follows', 'unsure', 'breaks'])
-const ASSESSORS_MAX = 500
 const ASSESSMENTS_SHOWN = 50
 
 async function noteAssessors(env, pubkey, evt) {
@@ -1185,11 +1174,11 @@ async function noteAssessors(env, pubkey, evt) {
   for (const key of Object.keys(roots)) {
     const root = ASSESS_KEY_RE.exec(key)?.[1]
     if (!root) continue
-    const listKey = `assessors:${root}`
-    let listed = []
-    try { listed = JSON.parse((await env.HIVES.get(listKey)) ?? '[]') } catch { listed = [] }
-    if (!Array.isArray(listed) || listed.includes(pubkey)) continue
-    await env.HIVES.put(listKey, JSON.stringify([...listed, pubkey].slice(-ASSESSORS_MAX)))
+    // A member of the root's pool, named by the assessor's key. Membership
+    // only: what they said is read, and re-verified, from their index.
+    const member = `${await poolAddress(`assess:${root}`)}/${pubkey}`
+    if (!env.CONTENT?.put || await env.CONTENT.head?.(member)) continue
+    await env.CONTENT.put(member, new Uint8Array(0), { onlyIf: new Headers({ 'If-None-Match': '*' }) })
   }
 }
 
@@ -1278,19 +1267,97 @@ async function heapRecord(env, sig) {
   } catch { return null }
 }
 
-/** Every current, signed assessment of a package root. */
+/** Who assessed a root: the members of its pool, sign('assess:<root>'), each
+ *  named by the assessor's key. The KV list kept before assessors were a pool
+ *  is read as a drain source and never written. */
+async function assessorsOf(env, root) {
+  const pool = await poolAddress(`assess:${root}`)
+  const keys = new Set()
+  try {
+    for (const pubkey of JSON.parse((await env.HIVES?.get?.(`assessors:${root}`)) ?? '[]')) {
+      if (SIG_RE.test(String(pubkey))) keys.add(String(pubkey))
+    }
+  } catch { /* no older list */ }
+  if (env.CONTENT?.list) {
+    let cursor
+    do {
+      const page = await env.CONTENT.list({ prefix: `${pool}/`, cursor, limit: 1000 })
+      for (const object of page.objects ?? []) {
+        const name = String(object.key ?? '').slice(pool.length + 1)
+        if (SIG_RE.test(name)) keys.add(name)
+      }
+      cursor = page.truncated ? page.cursor : undefined
+    } while (cursor)
+  }
+  return [...keys]
+}
+
+/** Every current, signed assessment of a package root, newest last. Every
+ *  assessor's index is read and re-verified; one who dropped the key is not shown. */
 async function assessmentsOf(env, root, read) {
-  let listed = []
-  try { listed = JSON.parse((await env.HIVES.get(`assessors:${root}`)) ?? '[]') } catch { listed = [] }
   const out = []
-  for (const pubkey of (Array.isArray(listed) ? listed : []).filter((pk) => SIG_RE.test(String(pk))).slice(-ASSESSMENTS_SHOWN)) {
+  for (const pubkey of await assessorsOf(env, root)) {
     const index = await read(pubkey)
     const record = String(index?.roots?.[`assess:${root}`] || '').toLowerCase()
     const body = await heapRecord(env, record)
     if (body?.kind !== 'module-assessment' || body.root !== root) continue
     out.push({ pubkey, record, verdict: ASSESS_VERDICTS.has(body.verdict) ? body.verdict : 'unclear', at: Number(index.createdAt || 0) })
   }
-  return out
+  return out.sort((a, b) => a.at - b.at).slice(-ASSESSMENTS_SHOWN)
+}
+
+/** WHAT A SANDBOX DOOR IS — the record in its own bag, sign(<try-host>): the
+ *  door's twin of locationMeta. The door answers from the publisher's signed
+ *  index; the bag is where a reader finds that answer, by signature. */
+function sandboxMeta(site, found) {
+  return {
+    sandbox: true,
+    layer: found.root,
+    pubkey: found.pubkey,
+    lineage: site.lineage,
+    title: site.lineage,
+    channel: `install:${site.lineage}`,
+    ...(found.label ? { publisher: found.label } : {}),
+    ...(found.change ? { change: found.change } : {}),
+    ...(found.review ? { review: found.review } : {}),
+    ...(found.jev ? { jev: found.jev } : {}),
+    ...(found.pack ? { pack: found.pack } : {}),
+    publishedAt: Number(found.publishedAt || 0),
+  }
+}
+
+/** A sandbox door's two pools, by signature: its own bag (what it is) and
+ *  sign('assess:<root>') (who assessed what it runs). The bag is kept current
+ *  as it is read — a record that no longer says what the signed index says
+ *  gains a successor, nothing rewritten. Null for any other address. */
+async function serveSandboxPools(request, env, site, pool, member) {
+  const host = new URL(request.url).hostname.toLowerCase()
+  const found = await sandboxRoot(env, site, '')
+  if (!found) return null
+  const none = () => new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store', ...CORS } })
+  const body = (value) => (request.method === 'HEAD' ? null : value)
+  const listing = (names) => new Response(body(names.length ? names.join('\n') + '\n' : ''), {
+    status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS },
+  })
+  const record = (value, cache) => new Response(body(JSON.stringify(value)), {
+    status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': cache, ...CORS },
+  })
+  if (pool === await poolAddress(host)) {
+    if (member && !ROUTE_MARKER_RE.test(member)) return none()
+    await advanceLocation(env, pool, sandboxMeta(site, found))
+    const names = await locationMarkers(env, pool)
+    if (!names?.length) return none()
+    if (!member) return listing(names)
+    const held = names.includes(member) ? await locationRecord(env, pool, member) : null
+    return held ? record(held, 'public, max-age=31536000, immutable') : none()
+  }
+  if (pool === await poolAddress(`assess:${found.root}`)) {
+    const assessed = await assessmentsOf(env, found.root, indexReader(env))
+    if (!member) return listing(assessed.map((a) => a.pubkey))
+    const one = assessed.find((a) => a.pubkey === member)
+    return one ? record(one, 'no-store') : none()
+  }
+  return null
 }
 
 // ── the trials on a zone (documentation/module-sandbox.md, "The communal build")
@@ -1304,7 +1371,7 @@ async function assessmentsOf(env, root, read) {
 // source files its change touched, the paths it turned off and what it took
 // from other builds (the change record), when it was committed, and how the
 // host's AI and Jev read it. People's
-// assessments stay at each door's /site.json, re-verified as they are read.
+// assessments stay in each door's sign('assess:<root>') pool, re-verified as read.
 const TRIALS_SHOWN = 100
 
 async function serveTrials(request, env, zone) {
@@ -2202,6 +2269,18 @@ export default {
       && /^(?:worker|sharedworker|serviceworker)$/.test(String(request.headers.get('sec-fetch-dest') || '').toLowerCase())
       && /^\/(?:(?:@resource\/)?[0-9a-f]{64}(?:\/[^/]+)?|content\/[0-9a-f]{64})$/.test(pathname)) {
       return text(403, 'a sandbox door runs no worker from the heap')
+    }
+
+    // A SANDBOX DOOR'S POOLS — its own bag and its assessments — answered
+    // before the published-route bag and the pool listing, which would read
+    // both as private. The label test is free: only a try- host pays a read.
+    const sandboxPool = pathname.match(/^\/(?:content\/)?([0-9a-f]{64})\/([0-9a-f]{64}|[0-9]{8})?$/)
+    if (sandboxPool && (method === 'GET' || method === 'HEAD') && SANDBOX_LABEL_RE.test(requestUrl.hostname.split('.')[0])) {
+      const routed = await route()
+      if (routed.site && routed.implicit && SANDBOX_LABEL_RE.test(routed.site.lineage)) {
+        const answered = await serveSandboxPools(request, routed.env, routed.site, sandboxPool[1], sandboxPool[2])
+        if (answered) return answered
+      }
     }
 
     // The only exposed location bag is this DNS door's own hashed name. Its

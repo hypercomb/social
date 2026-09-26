@@ -16,12 +16,17 @@ if (route.protocol !== 'https:' || route.pathname !== '/' || route.search || rou
 }
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
-const siteResponse = await fetch(new URL('/site.json', route), { cache: 'no-store' })
-if (!siteResponse.ok) throw new Error(`site descriptor: HTTP ${siteResponse.status}`)
-const site = await siteResponse.json()
-const { pubkey, lineage, head } = site
+// The door describes itself in its own bag, sign(<hostname>): newest marker.
+const bag = sha(route.hostname.toLowerCase())
+const listing = await fetch(new URL(`/${bag}/`, route), { cache: 'no-store' })
+if (!listing.ok) throw new Error(`door bag: HTTP ${listing.status}`)
+const newest = (await listing.text()).split('\n').filter(name => /^[0-9]{8}$/.test(name)).sort().at(-1)
+if (!newest) throw new Error('door bag holds no marker')
+const marker = await fetch(new URL(`/${bag}/${newest}`, route))
+if (!marker.ok) throw new Error(`door marker: HTTP ${marker.status}`)
+const { pubkey, lineage, layer: head } = await marker.json()
 if (![pubkey, head].every(value => /^[a-f0-9]{64}$/.test(String(value))) || !lineage) {
-  throw new Error('site descriptor has no signed root coordinates')
+  throw new Error('the door record has no signed root coordinates')
 }
 const indexResponse = await fetch(new URL(`/hive/${pubkey}`, route), { cache: 'no-store' })
 if (!indexResponse.ok) throw new Error(`publisher index: HTTP ${indexResponse.status}`)

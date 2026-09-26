@@ -22,11 +22,16 @@ const toasts: { type: string; message: string }[] = []
 EffectBus.on('toast:show', (toast: { type: string; message: string }) => { toasts.push(toast) })
 
 const revisionsOf = vi.fn(async () => [])
-/** The door's /site.json names `root`. */
+/** The door's own bag, sign(<door host>), names `root`: one marker. */
 const doorNames = (root: string): void => {
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/site.json')
-    ? new Response(JSON.stringify({ sandbox: true, title: 'fresh rooms', package: root, pubkey: 'p' }))
-    : new Response(null, { status: 404 })))
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (/\/[0-9a-f]{64}\/$/.test(url)) return new Response('00000000\n')
+    if (/\/[0-9a-f]{64}\/00000000$/.test(url)) {
+      return new Response(JSON.stringify({ sandbox: true, title: 'fresh rooms', layer: root, pubkey: 'e'.repeat(64) }))
+    }
+    return new Response(null, { status: 404 })
+  }))
 }
 const audited = (root: string): void => {
   localStorage.setItem('hc:module-audited', JSON.stringify({ 'try-fresh-rooms': { root, record: 'c'.repeat(64) } }))

@@ -1084,11 +1084,29 @@ test("a pool is listed only while an operator's signed index declares it", async
 const sandboxEnv = async (roots, shellRequests = []) => ({
   SITE_BINDINGS: JSON.stringify({ 'hypercomb.com': { title: 'Hypercomb', lineage: 'hypercomb', publishers: [{ pubkey, label: 'Jaime', primary: true }] } }),
   HIVES: { get: async (key) => key === pubkey ? JSON.stringify(await signedIndex(roots)) : null },
-  CONTENT: { get: async () => null, head: async () => null, list: async () => ({ objects: [], truncated: false }) },
+  CONTENT: contentBag(),
   SANDBOX_SHELL_ORIGIN: 'https://shell.example',
   __shellRequests: shellRequests,
 })
 const hostPackagesPool = async () => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('host:packages'))))
+
+/** What a sandbox door is, read the one way there is: the newest marker of
+ *  its own bag, sign(<try-host>). */
+async function sandboxDoor(env, host = 'try-fresh-rooms.hypercomb.com') {
+  const bag = await sha256Hex(host)
+  const listing = await worker.fetch(new Request(`https://${host}/${bag}/`), env)
+  if (listing.status !== 200) return null
+  const newest = (await listing.text()).trim().split('\n').at(-1)
+  return (await worker.fetch(new Request(`https://${host}/${bag}/${newest}`), env)).json()
+}
+
+/** Who assessed the door's root: the members of sign('assess:<root>'). */
+async function doorAssessments(env, root, host = 'try-fresh-rooms.hypercomb.com') {
+  const pool = await sha256Hex(`assess:${root}`)
+  const listing = await worker.fetch(new Request(`https://${host}/${pool}/`), env)
+  const keys = (await listing.text()).split('\n').filter(Boolean)
+  return Promise.all(keys.map(async (key) => (await worker.fetch(new Request(`https://${host}/${pool}/${key}`), env)).json()))
+}
 
 test('a try- door names the stamped sandbox root as its one package', async () => {
   const root = 'b'.repeat(64)
@@ -1099,9 +1117,9 @@ test('a try- door names the stamped sandbox root as its one package', async () =
   assert.equal(await listing.text(), '00000000\n')
   const member = await worker.fetch(new Request(`https://try-fresh-rooms.hypercomb.com/content/${pool}/00000000`), env)
   assert.equal(await member.text(), `${root}\ntry-fresh-rooms`)
-  const site = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
+  const site = await sandboxDoor(env)
   assert.equal(site.sandbox, true)
-  assert.equal(site.package, root)
+  assert.equal(site.layer, root)
   assert.equal(site.pubkey, pubkey)
   assert.equal(site.channel, 'install:try-fresh-rooms')
 })
@@ -1154,7 +1172,7 @@ test('a try- door with no pack key says so, and the visitor installs file by fil
 test('a try- door names the published change and the host AI review beside the sandbox', async () => {
   const [root, change, review] = ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64)]
   const env = await sandboxEnv({ 'install:try-fresh-rooms': root, 'change:try-fresh-rooms': change, 'review:try-fresh-rooms': review })
-  const site = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
+  const site = await sandboxDoor(env)
   assert.equal(site.change, change)
   assert.equal(site.review, review)
 })
@@ -1219,12 +1237,15 @@ test('one route location follows its selected publisher even if another key is l
 test('writing an index that names assess:<root> lists its signer as an assessor of that root', async () => {
   const root = 'e'.repeat(64)
   const HIVES = kvMap()
-  const env = { SITE_BINDINGS: '{}', HIVES }
+  const CONTENT = contentBag()
+  const env = { SITE_BINDINGS: '{}', HIVES, CONTENT }
   const url = `https://content.hypercomb.com/hive/${assessor}`
   const body = JSON.stringify(await indexBy(assessorKey, { [`assess:${root}`]: 'f'.repeat(64) }))
   const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
   assert.equal(response.status, 201)
-  assert.deepEqual(JSON.parse(HIVES.values.get(`assessors:${root}`)), [assessor])
+  // A member of the root's pool, named by the assessor's key — never a KV list.
+  assert(CONTENT.held.has(`${await sha256Hex(`assess:${root}`)}/${assessor}`))
+  assert.equal(HIVES.values.get(`assessors:${root}`), undefined)
 })
 
 test('a try- door lists every signed assessment of its root, and the host AI verdict', async () => {
@@ -1239,20 +1260,24 @@ test('a try- door lists every signed assessment of its root, and the host AI ver
     [reviewSig, { kind: 'module-review', verdict: 'accept' }],
     ['e'.repeat(64), { kind: 'jev-reading', verdict: 'follows' }],
   ])
+  const CONTENT = contentBag()
+  const bytesOf = (record) => new TextEncoder().encode(JSON.stringify(record))
+  for (const [sig, record] of records) CONTENT.held.set(sig, bytesOf(record))
   const env = {
     SITE_BINDINGS: JSON.stringify({ 'hypercomb.com': { title: 'Hypercomb', lineage: 'hypercomb', publishers: [{ pubkey, label: 'Jaime', primary: true }] } }),
     HIVES,
-    CONTENT: { get: async (k) => records.has(k) ? { arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(records.get(k))).buffer } : null, head: async () => null, list: async () => ({ objects: [], truncated: false }) },
+    CONTENT,
     SANDBOX_SHELL_ORIGIN: 'https://shell.example',
   }
-  const site = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
-  assert.equal(site.reviewVerdict, 'accept')
-  assert.deepEqual([site.jev, site.jevVerdict], ['e'.repeat(64), 'follows'])
-  assert.deepEqual(site.assessments.map((a) => [a.pubkey, a.record, a.verdict]), [[assessor, goodRecord, 'refuse']])
+  // The door names the review and Jev's reading by signature; a reader reads
+  // their verdicts from those records.
+  const site = await sandboxDoor(env)
+  assert.deepEqual([site.review, site.jev], [reviewSig, 'e'.repeat(64)])
+  // The KV list from before assessors were a pool still drains in, read only.
+  assert.deepEqual((await doorAssessments(env, root)).map((a) => [a.pubkey, a.record, a.verdict]), [[assessor, goodRecord, 'refuse']])
   // A record that assesses another root is not an assessment of this one.
-  records.set(goodRecord, { kind: 'module-assessment', root: 'a'.repeat(64), verdict: 'accept' })
-  const again = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
-  assert.deepEqual(again.assessments, [])
+  CONTENT.held.set(goodRecord, bytesOf({ kind: 'module-assessment', root: 'a'.repeat(64), verdict: 'accept' }))
+  assert.deepEqual(await doorAssessments(env, root), [])
 })
 
 // ── the community's translations: who translated, who is missing what ────

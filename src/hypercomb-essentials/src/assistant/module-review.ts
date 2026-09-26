@@ -251,7 +251,7 @@ export interface ModuleAssessmentRecord {
   readonly at: number
 }
 
-/** What a sandbox's door says about itself (worker serveSandbox /site.json). */
+/** What a sandbox door says about itself — its record in its own bag, sign(<door host>), with the verdicts and assessments beside it (readSandboxDoor). */
 export interface SandboxSite {
   readonly sandbox: true
   readonly title: string
@@ -324,10 +324,76 @@ export const trialsOf = (listing: unknown): SandboxTrial[] => {
   return trials.sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
 }
 
-/** Is this what a sandbox door answers at /site.json? */
+/** Is this a sandbox door, as readSandboxDoor assembles one? */
 export const isSandboxSite = (value: unknown): value is SandboxSite => {
   const site = value as Partial<SandboxSite> | null
   return !!site && site.sandbox === true && typeof site.title === 'string' && SIG_RE.test(String(site.package ?? ''))
+}
+
+const exactBuffer = (bytes: Uint8Array): ArrayBuffer =>
+  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+
+/**
+ * WHAT A SANDBOX DOOR IS, read the one way there is (jwize 2026-09-25: only
+ * signatures are queried; state lives in pools of meaning). The newest marker
+ * of the door's own bag, sign(<door host>), names its package, publisher,
+ * change, review and Jev's reading; the verdicts are read from those records
+ * by signature; who assessed its root are the members of sign('assess:<root>').
+ * `door` is the door's origin, '' for the door this hive is on. Null when no
+ * sandbox answers.
+ */
+export const readSandboxDoor = async (door: string): Promise<SandboxSite | null> => {
+  const base = door.replace(/\/+$/, '')
+  const sign = (text: string): Promise<string> => SignatureService.sign(exactBuffer(new TextEncoder().encode(text)))
+  const names = async (path: string): Promise<string[]> => {
+    const res = await fetch(`${base}${path}`, { cache: 'no-store' })
+    return res.ok ? (await res.text()).split(/\r?\n/).map(name => name.trim()).filter(Boolean) : []
+  }
+  const json = async (path: string, init?: RequestInit): Promise<Record<string, unknown> | null> => {
+    const res = await fetch(`${base}${path}`, init)
+    const value = res.ok ? await res.json() as unknown : null
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+  }
+  const sig = (value: unknown): string | undefined => SIG_RE.test(String(value ?? '')) ? String(value) : undefined
+  try {
+    const host = (base ? new URL(base).hostname : location.hostname).toLowerCase()
+    const bag = await sign(host)
+    const newest = (await names(`/${bag}/`)).filter(name => /^\d{8}$/.test(name)).sort().at(-1)
+    const record = newest ? await json(`/${bag}/${newest}`) : null
+    const root = sig(record?.['layer'])
+    const pubkey = sig(record?.['pubkey'])
+    if (!record || record['sandbox'] !== true || !root || !pubkey) return null
+    const verdictOf = async <T extends string>(of: string | undefined, allowed: readonly T[], otherwise: T): Promise<T | undefined> => {
+      if (!of) return undefined
+      const read = await json(`/content/${of}`).catch(() => null)
+      return allowed.includes(read?.['verdict'] as T) ? read!['verdict'] as T : otherwise
+    }
+    const review = sig(record['review'])
+    const jev = sig(record['jev'])
+    const change = sig(record['change'])
+    const pool = await sign(`assess:${root}`)
+    const assessments = (await Promise.all((await names(`/${pool}/`)).filter(key => SIG_RE.test(key))
+      .map(key => json(`/${pool}/${key}`, { cache: 'no-store' }).catch(() => null))))
+      .filter((a): a is Record<string, unknown> => !!a && SIG_RE.test(String(a['pubkey'] ?? '')) && SIG_RE.test(String(a['record'] ?? '')))
+      .map(a => ({
+        pubkey: String(a['pubkey']), record: String(a['record']),
+        verdict: VERDICTS.includes(a['verdict'] as ReviewVerdict) ? a['verdict'] as ReviewVerdict : 'unclear' as ReviewVerdict,
+        at: Number(a['at'] ?? 0) || 0,
+      }))
+    const reviewVerdict = await verdictOf<ReviewVerdict>(review, VERDICTS, 'unclear')
+    const jevVerdict = await verdictOf<JevReadingVerdict>(jev, JEV_VERDICTS, 'unsure')
+    return {
+      sandbox: true,
+      title: String(record['title'] ?? record['lineage'] ?? ''),
+      package: root,
+      pubkey,
+      ...(typeof record['publisher'] === 'string' ? { publisher: record['publisher'] } : {}),
+      ...(change ? { change } : {}),
+      ...(review ? { review, ...(reviewVerdict ? { reviewVerdict } : {}) } : {}),
+      ...(jev ? { jev, ...(jevVerdict ? { jevVerdict } : {}) } : {}),
+      assessments,
+    }
+  } catch { return null }
 }
 
 /**

@@ -91,7 +91,7 @@
 import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, isSandboxDoor, sandboxDoorOf, type I18nProvider, type InstallProvider, type ModuleDraftsProvider } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
 import { JEV_IOC_KEY, jevDoctrineSections, type JevReadingInput, type JevReadingResult, type JevPassInput, type JevPassResult } from './jev-decision.js'
-import { assessSandbox, changedPaths, countedAssessors, doorReader, isSandboxSite, jevReadTrial, publishChange, readChange, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
+import { assessSandbox, changedPaths, countedAssessors, doorReader, jevReadTrial, publishChange, readChange, readSandboxDoor, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
 import { INSTALL_CHANNEL_PREFIX, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 // A type only: the audit itself is loaded when the word is said.
 import type { ModuleAuditRecord } from './module-audit.js'
@@ -226,12 +226,10 @@ const atDoorOf = (name: string): boolean => sandboxDoorOf(location.hostname)?.la
 
 /** What a sandbox's door says about itself — read from the door itself when
  *  this hive IS that door, and across origins otherwise (the host answers
- *  /site.json with CORS). Null when no sandbox answers. */
+ *  the door's own bag, sign(<door host>), with CORS). Null when no sandbox answers. */
 const sandboxSite = async (name: string, host: string): Promise<SandboxSite | null> => {
   try {
-    const res = await fetch(atDoorOf(name) ? '/site.json' : `${sandboxDoorUrl(name, host)}/site.json`, { cache: 'no-store' })
-    const site = res.ok ? await res.json() as unknown : null
-    return isSandboxSite(site) ? site : null
+    return await readSandboxDoor(atDoorOf(name) ? '' : sandboxDoorUrl(name, host))
   } catch { return null }
 }
 
