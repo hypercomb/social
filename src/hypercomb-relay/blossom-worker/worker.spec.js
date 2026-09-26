@@ -185,7 +185,45 @@ test('a signed landing field is inert — the door omits it and the visitor page
   const shell = '<!doctype html><html><head><title>x</title></head><body><app-root><div class="site-loading" role="status"></div></app-root></body></html>'
   env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
   const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
-  assert.equal(html, shell)
+  // The page carries its door's record and nothing else of the index.
+  const door = /<script id="hc-door" type="application\/json">([^<]*)<\/script>/.exec(html)
+  assert(door, 'the page carries its door')
+  assert.equal('landing' in JSON.parse(door[1]), false)
+  assert.equal(html.replace(door[0], ''), shell)
+})
+
+test('a page carries its door record, escaped so no value can close the script', async () => {
+  const bindings = { ...ONE_ZONE, 'revolucion.pluginthematrix.com': { ...ONE_ZONE['revolucion.pluginthematrix.com'], title: 'a</script><b>' } }
+  const { env } = await fixture(undefined, bindings)
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  const door = /<script id="hc-door" type="application\/json">([^<]*)<\/script>/.exec(html)
+  assert(door, 'the record is not able to break out of its element')
+  const record = JSON.parse(door[1])
+  assert.equal(record.title, 'a</script><b>')
+  assert.equal(record.layer, head)
+  assert.equal(record.pubkey, pubkey)
+})
+
+test('a stale marker from before door records moves forward to the signed head', async () => {
+  const later = 'c'.repeat(64)
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: later }))
+  const bag = await sha256Hex('revolucion.pluginthematrix.com')
+  // Seeded by an older worker, then passed by an index write that never advanced it.
+  await env.CONTENT.put(`${bag}/00000000`, JSON.stringify({ layer: head }))
+  const { status, record } = await doorMeta('https://revolucion.pluginthematrix.com/', env)
+  assert.equal(status, 200)
+  assert.equal(record.layer, later)
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(env.CONTENT.held.get(`${bag}/00000000`))), { layer: head }, 'nothing rewritten')
+})
+
+test('a marker that carries meta stays the authority: a disagreement closes the door', async () => {
+  const later = 'c'.repeat(64)
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: later }))
+  const bag = await sha256Hex('revolucion.pluginthematrix.com')
+  await env.CONTENT.put(`${bag}/00000000`, JSON.stringify({ layer: head, pubkey, lineage: 'revolucion', title: 'Revolución', publishedAt: 1 }))
+  assert.equal((await doorMeta('https://revolucion.pluginthematrix.com/', env)).status, 404)
 })
 
 test('the door carries the arrival plan the publisher signed beside the root', async () => {

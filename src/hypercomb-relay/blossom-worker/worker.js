@@ -730,6 +730,23 @@ async function routeMarkers(env, host) {
   return locationMarkers(env, await poolAddress(host.toLowerCase()))
 }
 
+/** How long one isolate trusts a location's newest marker. Every page request
+ *  gates on it; a write in this isolate drops the entry at once, and another
+ *  isolate's write is seen within this window. */
+const LOCATION_TTL_MS = 5_000
+const newestAt = new Map()
+
+/** A location's marker names and its newest record, cached per isolate. */
+async function newestLocation(env, location) {
+  const held = newestAt.get(location)
+  if (held && Date.now() - held.at < LOCATION_TTL_MS && held.env === env.CONTENT) return held
+  const names = await locationMarkers(env, location)
+  const record = names?.length ? await locationRecord(env, location, names.at(-1)) : null
+  const fresh = { names, record, at: Date.now(), env: env.CONTENT }
+  newestAt.set(location, fresh)
+  return fresh
+}
+
 /** One marker's record, or null. Markers are small, immutable JSON. */
 async function locationRecord(env, location, name) {
   if (!ROUTE_MARKER_RE.test(name) || !env.CONTENT?.get) return null
@@ -759,6 +776,7 @@ async function putLocationMarker(env, location, name, record) {
   // between two writers that both saw the next number free. There is no
   // transaction with the signed-index KV; reads verify both authorities.
   if (await env.CONTENT.head(key)) return false
+  newestAt.delete(location)
   const written = await env.CONTENT.put(key, new TextEncoder().encode(JSON.stringify(record)), {
     onlyIf: new Headers({ 'If-None-Match': '*' }),
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
@@ -774,7 +792,7 @@ async function putLocationMarker(env, location, name, record) {
  *  forward; nothing is rewritten or deleted). */
 async function currentRouteHead(env, host, signedHead, meta) {
   const location = await poolAddress(host.toLowerCase())
-  const markers = await locationMarkers(env, location)
+  const { names: markers, record: newest } = await newestLocation(env, location)
   if (!markers) return null
   if (markers.length === 0) {
     if (!SIG_RE.test(String(signedHead))) return null
@@ -784,13 +802,19 @@ async function currentRouteHead(env, host, signedHead, meta) {
     const seeded = await locationMarkers(env, location)
     return seeded?.length ? locationMarkerHead(env, location, seeded.at(-1)) : null
   }
-  const latest = await locationRecord(env, location, markers.at(-1))
+  const latest = newest
   if (!latest) return null
-  if (meta && latest.layer === signedHead && typeof latest.pubkey !== 'string') {
+  // A marker from before doors carried their meta is not an authority over
+  // the signed index: an older worker passed index writes without advancing
+  // bags. Whether it names the signed head or an older one, it gains a
+  // successor holding the index's record — a forward commit, nothing
+  // rewritten (jwize 2026-09-25: older versions keep working). A marker that
+  // DOES carry meta stays the authority: a disagreement there closes the door.
+  if (meta && typeof latest.pubkey !== 'string') {
     const next = Number(markers.at(-1)) + 1
-    if (Number.isSafeInteger(next) && next <= 99_999_999) {
-      await putLocationMarker(env, location, String(next).padStart(8, '0'), meta)
-    }
+    if (Number.isSafeInteger(next) && next <= 99_999_999
+      && await putLocationMarker(env, location, String(next).padStart(8, '0'), meta)) return signedHead
+    return latest.layer === signedHead ? signedHead : null
   }
   return String(latest.layer)
 }
@@ -1446,7 +1470,13 @@ async function serveSandboxShell(request, env, zone) {
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
 }
 
-async function serveVisitorAsset(request, env, { spa = true } = {}) {
+/** The door's record as page data: JSON with every '<' escaped, so no value
+ *  can close the script element. */
+function doorScript(record) {
+  return `<script id="hc-door" type="application/json">${JSON.stringify(record).replace(/</g, '\\u003c')}</script>`
+}
+
+async function serveVisitorAsset(request, env, { spa = true, door = null } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   let response = await env.ASSETS.fetch(request)
   // Under /content/ a miss is a miss. The engine walks its package pool by
@@ -1470,6 +1500,17 @@ async function serveVisitorAsset(request, env, { spa = true } = {}) {
   // without this header a hive replicating from another origin died as an
   // opaque "Failed to fetch" and the door read as publishing nothing.
   headers.set('Access-Control-Allow-Origin', '*')
+  if (door && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
+    const html = await response.text()
+    const at = html.indexOf('</head>')
+    if (at >= 0) {
+      headers.delete('Content-Length')
+      headers.set('Cache-Control', 'no-store')
+      const body = html.slice(0, at) + doorScript(door) + html.slice(at)
+      return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers })
+    }
+    return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers })
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -2537,7 +2578,11 @@ export default {
       // Everything under /content/ is a FILE the build shipped — the package
       // pool above all — and is never held and never a page.
       if (pathname.startsWith('/content/')) return serveVisitorAsset(request, env, { spa: false })
-      return serveVisitorAsset(request, env)
+      // THE PAGE CARRIES ITS DOOR: the record the gate just read from the bag
+      // at sign(<host>), so the visitor needs no round trip before its plan.
+      const door = siteBinding(env, requestUrl.hostname)?.frontDoor ? null
+        : (await newestLocation(env, await poolAddress(requestUrl.hostname.toLowerCase()))).record
+      return serveVisitorAsset(request, env, { door })
     }
 
     // A zone subdomain that could not even become an implicit site (nested

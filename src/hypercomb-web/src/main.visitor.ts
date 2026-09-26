@@ -114,6 +114,19 @@ installReadonlyNetwork()
 // plan, so these reads start here, before the boot graph, and run beside it —
 // a plan that is slow or absent simply means the whole package loads, as always.
 const readDoor = async (): Promise<DoorMeta | null> => {
+  // The worker writes the newest marker's record into the page it serves
+  // (#hc-door), so the door is read with no round trip. A host that serves
+  // the page as a file carries none, and the bag is read instead.
+  const selected = new URLSearchParams(location.search).get('publisher')?.toLowerCase()
+  const carried = document.getElementById('hc-door')?.textContent
+  if (carried) {
+    try {
+      const door = JSON.parse(carried) as DoorMeta
+      if (door && typeof door.layer === 'string') {
+        return selected && selected !== String(door.pubkey ?? '').toLowerCase() ? null : door
+      }
+    } catch { /* read the bag */ }
+  }
   const name = new TextEncoder().encode(location.hostname.toLowerCase())
   const bag = [...new Uint8Array(await crypto.subtle.digest('SHA-256', name))]
     .map(byte => byte.toString(16).padStart(2, '0')).join('')
@@ -126,7 +139,6 @@ const readDoor = async (): Promise<DoorMeta | null> => {
   if (!marker.ok) return null
   const door = await marker.json() as DoorMeta
   // A link naming its publisher opens only that publisher's door.
-  const selected = new URLSearchParams(location.search).get('publisher')?.toLowerCase()
   return selected && selected !== String(door.pubkey ?? '').toLowerCase() ? null : door
 }
 const siteRead: Promise<DoorMeta | null> = readDoor().catch(() => null)
