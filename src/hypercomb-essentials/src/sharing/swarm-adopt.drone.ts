@@ -11,20 +11,15 @@
 // content and no snapshot bridge: your layer is the one way into your hive.
 //
 // SAFETY: this drone applies content ONLY in response to an explicit user
-// click. ADOPT IS ADOPT: clicking adopt folds the branch's LAYER closure in
-// right away (structure only — resources stream on demand at render), then
-// lands on the Beehaviors panel so the participant can see what behaviors
-// the adopted tiles carry. Consent stays where it matters: a branch that
-// declares CODE still stops for an explicit allow before anything installs,
-// and foreign pages stay behind the render-time verification gate until
-// allowed. There is NO adopt-time decision surface, no per-feature add, and
-// no tile merging from the Beehaviors window — behaviors are toggles on
-// what the adopted tile already carries. `sync` (re-pull a publisher's
-// current version of a tile you hold) has NO user button — it remains a
-// programmatic action a future auto-sync can ride. Nothing enters your tree
-// without a participant action.
+// click. ADOPT IS ADOPT: clicking adopt folds the complete branch's LAYER
+// closure in one import when it fits the bounded tile limit (structure only —
+// resources stream on demand at render). A held branch merges additively, so
+// local-only content survives. A branch that declares CODE is refused until
+// an install channel exists, and foreign pages stay behind the render-time
+// verification gate until allowed. Nothing enters your tree without a
+// participant action.
 
-import { Drone, EffectBus, hypercomb, requestConfirm, revisionName, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb, revisionName, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
   childLayerOf,
   childNamesOfStrict,
@@ -96,6 +91,15 @@ const STORE_KEY_LOCAL = '@hypercomb.social/Store'
 // The durable work-list behind a multi-tile adopt (AdoptQueueService).
 const ADOPT_QUEUE_KEY = '@diamondcoreprocessor.com/AdoptQueueService'
 
+/** One explicit branch adoption is deliberately bounded. The bound applies
+ * to the complete remote subtree, root included: a branch with one tile over
+ * the limit is refused before importTree, never clipped into a partial copy.
+ * The participant can enter that branch and adopt one of its smaller roots. */
+export const MAX_BRANCH_ADOPT_TILES = 256
+
+type BranchCommitMode = 'fold' | 'sync' | 'additive'
+type BranchCommitResult = 'committed' | 'exists' | 'unavailable' | 'rewound' | 'too-large'
+
 /** The queue surface this drone drains. Structural, so an older bundle
  *  without the service simply resolves undefined and the direct fold runs. */
 interface AdoptQueueLike {
@@ -160,7 +164,7 @@ interface CommitterLike {
 interface FoldedEntry { sig: string; name: string; at: string[] }
 
 /** A deferred fold's durable intent (see PENDING_FOLDS_KEY). */
-interface PendingFold { sig: string; at: string[]; domain?: string; mode: 'fold' | 'sync' }
+interface PendingFold { sig: string; at: string[]; domain?: string; mode: BranchCommitMode }
 
 interface TileActionPayload {
   action: string
@@ -308,8 +312,9 @@ export class SwarmAdoptDrone extends Drone {
     // layer at a time, two beats per layer.
     //
     // Two gestures reach this handler, both taking exactly ONE ITEM and
-    // never its children (what is inside becomes yours by clicking in
-    // there too):
+    // never its children. The separate Adopt action takes the whole branch;
+    // this one-tile gesture is also how a participant descends when a branch
+    // is too large for one atomic adopt:
     //   • TileOverlayDrone's entry choke point (#firstClickTakes) — the
     //     first click, hold-to-enter, or tap on a shaded tile. The only
     //     take a finger can perform.
@@ -368,12 +373,10 @@ export class SwarmAdoptDrone extends Drone {
       // still disambiguate through the participant-grouped panel first.
       if (action === 'adopt') {
         if (!this.#isPeerTile(label)) return
-        // PAGE TILES ONLY (Jaime's ruling, 2026-08-20): the adopt verb —
-        // like the walk and the pick-tiles pill — acquires the ONE tile as
-        // it stands on this page, never its branch. WHAT YOU SEE IS WHAT
-        // YOU GET on name collisions: the freshest entry, the copy the
-        // canvas rendered.
-        void this.#adoptPageTile(label)
+        // The explicit adopt action takes the complete signed branch. The
+        // ordinary first click still takes one tile so the participant can
+        // move down an oversized tree and adopt a smaller branch there.
+        void this.#adoptWholeBranch(label)
         return
       }
 
@@ -409,7 +412,8 @@ export class SwarmAdoptDrone extends Drone {
     // A landed commit / exists / ladder give-up clears the entry.
     try {
       for (const f of this.#loadPendingFolds()) {
-        this.#scheduleFoldRetry(f.sig, f.at, f.domain, f.mode === 'sync' ? 'sync' : 'fold')
+        const mode: BranchCommitMode = f.mode === 'sync' || f.mode === 'additive' ? f.mode : 'fold'
+        this.#scheduleFoldRetry(f.sig, f.at, f.domain, mode)
       }
     } catch { /* best-effort — a manual re-adopt always works */ }
 
@@ -426,10 +430,7 @@ export class SwarmAdoptDrone extends Drone {
   /** Is this label currently surfaced as a peer tile (current-location
    *  cache or subscribed channel)? Gate for opening the adopt panel. */
   #isPeerTile = (label: string): boolean => {
-    const swarm = this.#ioc()?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
-    if (!swarm?.peerTilesAtCurrentSig) return false
-    if (swarm.peerTilesAtCurrentSig().some(p => p.name === label)) return true
-    return swarm.subscribedTiles?.().some(p => p.name === label) ?? false
+    return this.#peerEntryFor(label) !== null
   }
 
   // ── resolve a peer tile → its signed branch + natural placement ────
@@ -457,20 +458,12 @@ export class SwarmAdoptDrone extends Drone {
     pubkey?: string,
   ): { layerSig: string; at: string[]; domain?: string; label: string; pubkey?: string } | null => {
     const ioc = this.#ioc()
-    const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
-    if (!swarm?.peerTilesAtCurrentSig) return null
-
-    const matches = (p: { name: string; peerPubkey: string }): boolean =>
-      p.name === label && (!pubkey || p.peerPubkey === pubkey)
-    const peerTiles = swarm.peerTilesAtCurrentSig()
-    let peerEntry = peerTiles.find(matches)
-    if (!peerEntry && swarm.subscribedTiles) peerEntry = swarm.subscribedTiles().find(matches)
-    if (!peerEntry && pubkey) {
-      peerEntry = peerTiles.find(p => p.name === label) ?? swarm.subscribedTiles?.().find(p => p.name === label)
-    }
+    // Use the same witnessed entry the renderer/action surface chose. This
+    // includes static public hosts as well as live mesh participants.
+    const peerEntry = this.#peerEntryFor(label, pubkey)
     if (!peerEntry) return null
 
-    const layerSig = String((peerEntry as Record<string, unknown>)['layerSig'] ?? '').trim().toLowerCase()
+    const layerSig = String(peerEntry['layerSig'] ?? '').trim().toLowerCase()
     if (!SIG_RE.test(layerSig)) return null
 
     const lineage = ioc?.get?.(LINEAGE_KEY) as LineageLike | undefined
@@ -480,7 +473,7 @@ export class SwarmAdoptDrone extends Drone {
     const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
     const ownerDomain = String(broker?.getKnownDomains?.(layerSig)?.[0] ?? '').trim()
 
-    const publisherPubkey = String(peerEntry.peerPubkey ?? '').trim().toLowerCase()
+    const publisherPubkey = String(peerEntry['peerPubkey'] ?? pubkey ?? '').trim().toLowerCase()
     return { layerSig, at, domain: ownerDomain || undefined, label, pubkey: publisherPubkey || undefined }
   }
 
@@ -550,13 +543,9 @@ export class SwarmAdoptDrone extends Drone {
     this.#visitStage('witnessed', { name })
   }
 
-  /** THE one-level fold — the single acquisition primitive of the swarm
-   *  surface. The WAND rides it per wanded tile; the programmatic verbs
-   *  and the pick-tiles pill ride it per picked tile. Walking rides it
-   *  no longer (a walk keeps nothing). It acquires exactly ONE tile of
-   *  the current page — never a branch, never the children: what is
-   *  inside a taken tile becomes the participant's only when they walk
-   *  in and take it there too. Returns true when the tile is held here
+  /** THE one-level fold used by the wand and its retry. It acquires exactly
+   *  one tile of the current page. The explicit Adopt action uses the bounded
+   *  whole-branch primitive instead. Returns true when the tile is held here
    *  after the call (landed now or already ours). */
   #foldPageTile = async (
     parentSegments: string[],
@@ -595,11 +584,7 @@ export class SwarmAdoptDrone extends Drone {
     // THE INTAKE GATE, and it belongs HERE — on the single acquisition
     // primitive — rather than on one of its callers.
     //
-    // It sat on `#adoptPageTile`, which is one of FOUR paths into this
-    // function. The others are the wand (`#onWand`, the only take a finger can
-    // perform), the retry, and the child fold of an adopted branch — all of
-    // them arriving content, none of them gated. Worse, the wand's own
-    // `wandEligible` check is SYNCHRONOUS and so can only answer from marks
+    // The wand's own `wandEligible` check is SYNCHRONOUS and so can only answer from marks
     // already in memory, which for a peer's freshly-arrived signature is
     // nothing: the half that can actually refuse foreign bytes was exactly the
     // half that path skipped. Two takes of the same bytes disagreed — refused
@@ -894,10 +879,50 @@ export class SwarmAdoptDrone extends Drone {
     EffectBus.emit('features:outcome', { cell, kind: kind ?? '', ok, message })
   }
 
-  /** Fold a SET of picked page tiles — the verb behind the pick-tiles pill
-   *  and `adopt-selected`. PAGE TILES ONLY: each pick folds as the ONE tile
-   *  it is on this page (props from the wire), never its branch — deeper
-   *  pages join the hive only when the participant walks into them.
+  /** Explicit branch take. A foreign root is folded whole; a root already in
+   * the hive is merged additively so participant-owned children and visuals
+   * survive while every missing peer descendant arrives in the same atomic
+   * import. The first-click wand remains the one-tile route used to descend
+   * into a branch that exceeds MAX_BRANCH_ADOPT_TILES. */
+  #adoptWholeBranch = async (
+    label: string,
+    pubkey?: string,
+    opts?: {
+      branch?: { layerSig: string; at: string[]; domain?: string; label: string; pubkey?: string } | null
+      silent?: boolean
+    },
+  ): Promise<boolean> => {
+    const branch = opts?.branch ?? this.#resolvePeerBranch(label, pubkey)
+    if (!branch) {
+      this.#rowOutcome(label, undefined, false, `couldn't adopt "${label}" — its branch is no longer offered here`)
+      return false
+    }
+
+    const held = await this.#isHeldHere(branch.at, branch.label)
+    if (!held && !await intakeAllows({ sig: branch.layerSig })) {
+      this.#rowOutcome(label, undefined, false, `didn't adopt "${label}" — it doesn't match your intake filters`)
+      return false
+    }
+
+    const res = await this.adoptResolvedBranch(branch, {
+      silent: true,
+      mode: held ? 'additive' : 'fold',
+    })
+    const landed = res === 'committed' || res === 'exists'
+    if (landed && !opts?.silent) {
+      this.#rowOutcome(
+        label,
+        undefined,
+        true,
+        held ? `added the complete shared branch to "${label}"` : `"${label}" and its complete branch are yours now`,
+      )
+    }
+    return landed
+  }
+
+  /** Fold a SET of picked branches — the verb behind the pick-tiles pill
+   *  and `adopt-selected`. Each picked root is complete-or-nothing and is
+   *  independently subject to MAX_BRANCH_ADOPT_TILES.
    *
    *  ENTRIES FIRST, FOLDS AFTER: every pick's wire entry is snapshotted
    *  before any fold — each fold commits and re-renders, which invalidates
@@ -908,70 +933,25 @@ export class SwarmAdoptDrone extends Drone {
     const resolved = picks.map(pick => ({
       label: pick.label,
       pubkey: pick.pubkey || undefined,
-      entry: this.#peerEntryFor(pick.label, pick.pubkey || undefined),
+      branch: this.#resolvePeerBranch(pick.label, pick.pubkey || undefined),
     }))
     let first: string | null = null
     let landed = 0
     for (const r of resolved) {
-      if (!r.entry) {
+      if (!r.branch) {
         this.#rowOutcome(r.label, undefined, false, `couldn't keep "${r.label}" — it's no longer offered here`)
         continue
       }
-      const ok = await this.#adoptPageTile(r.label, r.pubkey, { entry: r.entry, silent: true })
+      const ok = await this.#adoptWholeBranch(r.label, r.pubkey, { branch: r.branch, silent: true })
       if (ok) { landed++; if (!first) first = r.label }
     }
     if (landed > 0) {
       EffectBus.emit('activity:log', {
-        message: `kept ${landed} tile${landed === 1 ? '' : 's'} from this page`,
+        message: `kept ${landed} complete branch${landed === 1 ? '' : 'es'} from this page`,
         icon: '●',
       })
       if (first) this.#openBehaviours(first)
     }
-  }
-
-  /** One picked page tile. Held → additive (its missing PAGE children fold,
-   *  one level, nothing removed); foreign → the one-level fold. True when
-   *  the tile is held here afterwards. */
-  #adoptPageTile = async (
-    label: string,
-    pubkey?: string,
-    opts?: { entry?: Record<string, unknown> | null; silent?: boolean },
-  ): Promise<boolean> => {
-    const at = this.#currentSegments()
-    // HELD HERE ALREADY? Then this is not intake at all — it is a SYNC of a
-    // tile the participant accepted at some earlier point, and the intake gate
-    // must not sit in front of it. Judging it would refuse an update to their
-    // own content the moment a filter excluded something about it, and would
-    // say "didn't keep it" about a tile sitting in their hive. The gate is for
-    // what is arriving, not for what has already been taken.
-    if (await this.#isHeldHere(at, label)) {
-      const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
-      const layerSig = String(entry?.['layerSig'] ?? '').trim().toLowerCase()
-      await this.#additiveAdoptHeld({
-        layerSig: SIG_RE.test(layerSig) ? layerSig : '',
-        at, label,
-      })
-      return true
-    }
-    // The intake gate lives in `#foldPageTile` — the acquisition primitive all
-    // four take paths share. It ran here as well, on an entry resolved BEFORE
-    // its own await and then thrown away: the offer was re-resolved afterwards,
-    // so the gate could judge one entry while a different one was committed.
-    // One gate, on the primitive, judging the entry it is actually given.
-    const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
-    if (!entry) {
-      this.#rowOutcome(label, undefined, false, `couldn't keep "${label}" — it's no longer offered here`)
-      return false
-    }
-    const ok = await this.#foldPageTile(at, label, entry)
-    if (ok && !opts?.silent) {
-      this.#rowOutcome(label, undefined, true, `"${label}" is yours now`)
-      this.#openBehaviours(label)
-    }
-    if (!ok && !opts?.silent) {
-      this.#rowOutcome(label, undefined, false, `couldn't keep "${label}" just now — step into it or try again in a moment`)
-    }
-    return ok
   }
 
   #adoptQueue = (): AdoptQueueLike | undefined =>
@@ -1006,13 +986,14 @@ export class SwarmAdoptDrone extends Drone {
         let landed = false
         try {
           // A tile we already hold is ADDITIVE — add the children the peer
-          // publishes that we lack, never re-home (a shared tile stays one
-          // tile). Anything else folds whole through the normal gates.
+          // publishes that we lack at every depth, never re-home (a shared
+          // tile stays one tile). Anything else folds whole through the
+          // normal gates.
           if (await this.#isHeldHere(entry.at, entry.label)) {
-            await this.#additiveAdoptHeld(branch)
-            landed = true
+            const res = await this.adoptResolvedBranch(branch, { silent: true, mode: 'additive' })
+            landed = res === 'committed' || res === 'exists'
           } else {
-            const res = await this.adoptResolvedBranch(branch, { silent: true })
+            const res = await this.adoptResolvedBranch(branch, { silent: true, mode: 'fold' })
             landed = res === 'committed' || res === 'exists'
             // 'unavailable' means the bytes aren't reachable from any host we
             // know — "they didn't find the file". That is the EGG case: put
@@ -1077,12 +1058,6 @@ export class SwarmAdoptDrone extends Drone {
     }
   }
 
-  // (#adoptInline — the whole-branch mesh fold — is deleted: every swarm
-  // acquisition rides #foldPageTile / #adoptPageTile now. adoptResolvedBranch
-  // remains the branch primitive for the NON-mesh flows that legitimately
-  // install a whole bundle: hive-link previews, the DCP round-trip, the
-  // example-hives first-boot offer, and the legacy queue drain.)
-
   /** Is `label` a live child of the layer at `at` right now? Routes adopt to
    *  its additive branch. Cursor-aware; resolves through the parent chain so a
    *  cold own-bag never reads as absent. False on any resolve failure — treat
@@ -1100,99 +1075,6 @@ export class SwarmAdoptDrone extends Drone {
     return !!child
   }
 
-  /**
-   * Additive adopt for a tile you ALREADY HOLD: fold in the children the peer
-   * publishes that you don't have — and NOTHING else. Never re-homes the tile
-   * (that SETs its children to the peer's list, dropping your own-only ones);
-   * never removes; never overwrites a child you already hold. One level here —
-   * deeper divergence re-lights as you navigate in, matching the one-level
-   * detector. On full success records the peer's current generation as the
-   * held tile's receipt so the adopt affordance clears.
-   */
-  #additiveAdoptHeld = async (
-    branch: { layerSig: string; at: string[]; domain?: string; label: string },
-  ): Promise<void> => {
-    const ioc = this.#ioc()
-    const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
-    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
-    const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
-    const childLoc = [...branch.at, branch.label]
-
-    if (!swarm?.composeSigForSegments || !swarm?.peerTilesAtSig || !history) {
-      this.#rowOutcome(branch.label, undefined, false, `couldn't read what "${branch.label}" is missing — try again in a moment`)
-      return
-    }
-
-    // Their direct children of the held tile (from the live peer cache at the
-    // held tile's OWN location sig — the same read the divergence scan used).
-    // A cold cache is PRIMED first (forced — a user gesture is behind this):
-    // the receiver never subscribed at the child sig, so without the probe
-    // this read was empty unless the user had walked into the tile earlier,
-    // and the adopt reported "already has everything" against no evidence.
-    const theirSig = await swarm.composeSigForSegments(childLoc).catch(() => '')
-    if (theirSig && swarm.primePeerTilesAt && swarm.peerTilesAtSig(theirSig).length === 0) {
-      await swarm.primePeerTilesAt(theirSig, { force: true }).catch(() => undefined)
-    }
-    const theirs = theirSig ? swarm.peerTilesAtSig(theirSig) : []
-
-    // My direct children — resolved THROUGH the parent so a cold own-bag never
-    // reads as empty. coldMiss ⇒ refuse rather than mis-add against partial
-    // knowledge (a cold read that dropped a child I hold would re-add it).
-    const cursor = ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as { currentLayerSig?: string } | undefined
-    const parent = await resolveCurrentLayer(history, lineage?.domain, branch.at, cursor?.currentLayerSig).catch(() => null)
-    const held = parent ? await childLayerOf(history, parent, branch.label).catch(() => null) : null
-    const { names: myNames, coldMiss } = held
-      ? await childNamesOfStrict(history, held.layer).catch(() => ({ names: [] as string[], coldMiss: true }))
-      : { names: [] as string[], coldMiss: true }
-    if (coldMiss) {
-      this.#rowOutcome(branch.label, undefined, false, `"${branch.label}" isn't fully loaded yet — try again in a moment`)
-      return
-    }
-    const mine = new Set(myNames.map(n => n.trim().toLowerCase()))
-
-    const missing = theirs
-      .map(t => ({
-        name: String(t?.name ?? '').trim(),
-        entry: t as Record<string, unknown>,
-      }))
-      .filter(t => t.name.length > 0 && !mine.has(t.name.toLowerCase()))
-
-    // Fold each missing child as the ONE PAGE TILE it is (props from the
-    // wire) — never its branch: "only the tiles on the current page are
-    // adopted"; anything deeper joins when the participant walks in. A
-    // props fold cannot carry code, so no consent modal can interrupt a
-    // bulk additive pass — and no fold is ever counted landed without the
-    // read-back (the old path counted a routed-away install as success and
-    // dark-cleared the divergence light over missing content).
-    let failed = 0
-    for (const child of missing) {
-      const ok = await this.#foldPageTile(childLoc, child.name, child.entry)
-      if (!ok) failed++
-    }
-
-    // Acknowledge the peer's current generation for the HELD tile so rule 1
-    // (adopted-root receipt ≠ announced sig) clears — but only when nothing was
-    // left owed, so a deferred/failed child keeps the affordance lit to retry.
-    if (failed === 0 && SIG_RE.test(branch.layerSig)) this.#recordSyncReceipt(childLoc, branch.layerSig.toLowerCase())
-
-    // Recompute the diverged set now so the adopt icon updates without waiting
-    // for the next peer burst.
-    this.#scheduleDivergenceScan()
-
-    const added = missing.length - failed
-    if (missing.length === 0) {
-      // Nothing to add AT THIS LEVEL. The icon lit because the publisher's
-      // branch sig moved (their merkle handle covers the whole subtree), so
-      // when their top-level children all match ours the change lives deeper
-      // — say where to go instead of claiming there's nothing.
-      this.#rowOutcome(branch.label, undefined, true, `"${branch.label}" matches what they share at this level — any update is deeper inside; step in and adopt where it lights up`)
-    } else if (failed === 0) {
-      this.#rowOutcome(branch.label, undefined, true, `added ${added} to "${branch.label}"`)
-    } else {
-      this.#rowOutcome(branch.label, undefined, false, `added ${added} to "${branch.label}", ${failed} couldn't be reached — try again shortly`)
-    }
-  }
-
   /** Adopt an ALREADY-RESOLVED branch — the shared tail of every explicit
    *  adopt gesture. Mesh adopt resolves via #resolvePeerBranch (live peer
    *  cache); the static hive-visit drone resolves via a publisher-signed
@@ -1200,19 +1082,29 @@ export class SwarmAdoptDrone extends Drone {
    *  Beehaviors landing are identical either way — ADOPT IS ADOPT. */
   public adoptResolvedBranch = async (
     branch: { layerSig: string; at: string[]; domain?: string; label: string },
-    opts?: { silent?: boolean },
-  ): Promise<'committed' | 'exists' | 'rewound' | 'unavailable' | 'declined' | 'uninspectable'> => {
+    opts?: { silent?: boolean; mode?: BranchCommitMode },
+  ): Promise<BranchCommitResult | 'declined' | 'uninspectable'> => {
     // The explicit adopt gesture is the participant RE-SUBSCRIBING — clear
     // any revocation on this path before the fold (delete's counterpart).
     clearAdoptTombstone([...branch.at, branch.label])
-    const codeSigs = await this.#branchCodeSigs(branch.layerSig, branch.domain)
-    if (codeSigs === null) {
+    const inspection = await this.#inspectBranch(branch.layerSig, branch.domain)
+    if (inspection === null) {
       // Couldn't resolve the branch to inspect it. Never inline-fold content we
       // couldn't verify, and don't falsely claim "brings code" for something we
       // can't see — say so and fold nothing.
       EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: false, message: `"${branch.label}" could not be resolved for inspection — nothing was folded` })
       return 'uninspectable'
     }
+    if (inspection.tileCount > MAX_BRANCH_ADOPT_TILES) {
+      this.#rowOutcome(
+        branch.label,
+        undefined,
+        false,
+        `couldn't adopt "${branch.label}" — the complete branch exceeds ${MAX_BRANCH_ADOPT_TILES} tiles, so nothing was added; step inside it and adopt a smaller branch`,
+      )
+      return 'too-large'
+    }
+    const codeSigs = inspection.codeSigs
     if (codeSigs.length > 0) {
       // Declares CODE. There is no installer to route this to: code arrives by
       // replicating a root signature (documentation/install-by-replication.md),
@@ -1229,7 +1121,7 @@ export class SwarmAdoptDrone extends Drone {
     // nothing. An unchanged branch still dedups to no new marker (commitLayer
     // byte-dedup), so re-adopting settled content is free. The render-time gate
     // stays the trust surface (a foreign page is reviewed before it mounts).
-    const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'sync')
+    const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, opts?.mode ?? 'sync')
     if (res === 'committed') {
       // The pull may add/refresh feature decorations without a per-decoration
       // event — forget the label so the re-render re-walks the decorations slot
@@ -1264,6 +1156,13 @@ export class SwarmAdoptDrone extends Drone {
       // write, so a fold now would be a phantom. Only the user can return
       // to head; say so instead of blaming reachability.
       this.#rowOutcome(branch.label, undefined, false, `couldn't adopt "${branch.label}" — you're viewing history here; return to the present first, then adopt again`)
+    } else if (res === 'too-large') {
+      this.#rowOutcome(
+        branch.label,
+        undefined,
+        false,
+        `couldn't adopt "${branch.label}" — the complete branch exceeds ${MAX_BRANCH_ADOPT_TILES} tiles, so nothing was added; step inside it and adopt a smaller branch`,
+      )
     } else {
       // 'unavailable' — bytes unreachable or a cold-sibling abort. Loud, not
       // console-only: the user clicked and must see WHY nothing appeared.
@@ -1346,7 +1245,10 @@ export class SwarmAdoptDrone extends Drone {
   //   []    → content-only (fold inline)
   //   [...] → declares code (headless DCP install of these sigs)
   //   null  → couldn't resolve/inspect fully (caller opens the visible installer)
-  #branchCodeSigs = async (layerSig: string, domain?: string): Promise<string[] | null> => {
+  #inspectBranch = async (
+    layerSig: string,
+    domain?: string,
+  ): Promise<{ codeSigs: string[]; tileCount: number } | null> => {
     const ioc = this.#ioc()
     const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
     const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
@@ -1357,21 +1259,25 @@ export class SwarmAdoptDrone extends Drone {
       await broker.adopt(layerSig, { layersOnly: true, silent: true })
       const root = await history.getLayerBySig(layerSig)
       if (!root) return null
-      // Seed the root so an adversarial child→root back-reference can't re-walk it.
-      const seen = new Set<string>([String(layerSig).trim().toLowerCase()])
       const codeSigs = new Set<string>()
       // Fail CLOSED: if ANY descendant layer can't be resolved (cold pool /
       // partially-offline publisher), we can't trust a "content-only" verdict —
       // a bee/dep may live on the unreachable node. Route to the visible
       // installer instead of inline-folding hidden code.
       let incomplete = false
+      let tileCount = 0
       const collect = (arr: unknown): void => {
         if (Array.isArray(arr)) for (const s of arr) {
           const v = String(s ?? '').trim().toLowerCase()
           if (SIG_RE.test(v)) codeSigs.add(v)
         }
       }
-      const walk = async (layer: PlacementLayer): Promise<void> => {
+      const walk = async (layer: PlacementLayer, ancestors: ReadonlySet<string>): Promise<void> => {
+        tileCount++
+        // Once the complete branch cannot fit, no content will be committed.
+        // Stop the walk early; MAX+1 is all the caller needs for an honest
+        // atomic refusal.
+        if (tileCount > MAX_BRANCH_ADOPT_TILES) return
         collect((layer as { bees?: unknown }).bees)
         collect((layer as { dependencies?: unknown }).dependencies)
         // Descend into whichever canonical child slot the layer uses — a built
@@ -1379,15 +1285,19 @@ export class SwarmAdoptDrone extends Drone {
         // code entirely and mis-route the branch to an inline fold.
         for (const sig of childSigsOf(layer)) {
           const s = String(sig).trim().toLowerCase()
-          if (seen.has(s)) continue
-          seen.add(s)
+          if (ancestors.has(s)) { incomplete = true; continue }
           const child = await history.getLayerBySig(s)
-          if (child) await walk(child)
-          else incomplete = true
+          const childName = child && typeof child.name === 'string' ? child.name.trim() : ''
+          if (!child || !childName || /[\\/\x00-\x1f]/.test(childName)) {
+            incomplete = true
+            continue
+          }
+          await walk(child, new Set([...ancestors, s]))
+          if (tileCount > MAX_BRANCH_ADOPT_TILES) break
         }
       }
-      await walk(root)
-      return incomplete ? null : [...codeSigs]
+      await walk(root, new Set([String(layerSig).trim().toLowerCase()]))
+      return incomplete ? null : { codeSigs: [...codeSigs], tileCount }
     } catch {
       return null
     }
@@ -1454,7 +1364,7 @@ export class SwarmAdoptDrone extends Drone {
    *  caller skips revoked targets), announces a landed update visibly. */
   public syncResolvedBranch = async (
     branch: { layerSig: string; at: string[]; domain?: string; label: string },
-  ): Promise<'committed' | 'exists' | 'unavailable' | 'rewound'> => {
+  ): Promise<BranchCommitResult> => {
     const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'sync')
     if (res === 'committed' || res === 'exists') {
       this.#recordSyncReceipt([...branch.at, branch.label], branch.layerSig)
@@ -1814,8 +1724,8 @@ export class SwarmAdoptDrone extends Drone {
     branchSig: string,
     atSegments: readonly string[],
     domain?: string,
-    mode: 'fold' | 'sync' = 'fold',
-  ): Promise<'committed' | 'exists' | 'unavailable' | 'rewound'> => {
+    mode: BranchCommitMode = 'fold',
+  ): Promise<BranchCommitResult> => {
     const run = () => this.#doCommitBranch(branchSig, atSegments, domain, mode)
     const next = this.#commitLock.then(run, run)
     this.#commitLock = next.catch(() => undefined)
@@ -1838,7 +1748,7 @@ export class SwarmAdoptDrone extends Drone {
     branchSig: string,
     atSegments: readonly string[],
     domain?: string,
-    mode: 'fold' | 'sync' = 'fold',
+    mode: BranchCommitMode = 'fold',
   ): void => {
     const attempt = this.#foldRetryAttempts.get(branchSig) ?? 0
     if (attempt >= SwarmAdoptDrone.#FOLD_RETRY_DELAYS_MS.length) {
@@ -1886,8 +1796,8 @@ export class SwarmAdoptDrone extends Drone {
     branchSig: string,
     atSegments: readonly string[],
     domain?: string,
-    mode: 'fold' | 'sync' = 'fold',
-  ): Promise<'committed' | 'exists' | 'unavailable' | 'rewound'> => {
+    mode: BranchCommitMode = 'fold',
+  ): Promise<BranchCommitResult> => {
     const sig = String(branchSig ?? '').toLowerCase().trim()
     if (!SIG_RE.test(sig)) return 'unavailable'
 
@@ -1978,7 +1888,7 @@ export class SwarmAdoptDrone extends Drone {
       // FOLD is idempotent — a tile already present here is left untouched.
       // SYNC deliberately falls through to re-home the publisher's CURRENT
       // subtree over the stale local copy (the "pull their latest" gesture).
-      if (alreadyChild && mode !== 'sync') {
+      if (alreadyChild && mode === 'fold') {
         this.#clearPendingFold(sig)
         return 'exists'
       }
@@ -1989,7 +1899,79 @@ export class SwarmAdoptDrone extends Drone {
       // flattenLayerTree re-expresses the branch subtree as importTree updates
       // (children by name, other slots verbatim); the parent update folds in the
       // new top.
-      const treeUpdates = await flattenLayerTree(history, branchLayer, [...at, name])
+      let treeUpdates = await flattenLayerTree(history, branchLayer, [...at, name])
+
+      // Atomic size gate: the unit is the complete remote branch, root
+      // included. Refuse before importTree when it cannot fit; never slice the
+      // update list because that would manufacture a locally "complete" tree
+      // with descendants silently missing.
+      if (treeUpdates.length > MAX_BRANCH_ADOPT_TILES) {
+        this.#foldRetryAttempts.delete(sig)
+        this.#clearPendingFold(sig)
+        console.warn('[swarm-adopt] branch exceeds atomic adopt limit; refusing whole import', {
+          sig: sig.slice(0, 8), tiles: treeUpdates.length, limit: MAX_BRANCH_ADOPT_TILES,
+        })
+        return 'too-large'
+      }
+
+      // A held root uses additive semantics at every depth. For each remote
+      // path that already exists locally, preserve the participant's layer
+      // slots and union the complete child-name sets. Remote-only nodes retain
+      // the publisher's exact layer. This preparation is read-only and all
+      // cold local membership aborts before the single importTree call.
+      if (mode === 'additive') {
+        const merged: typeof treeUpdates = []
+        const pathKey = (segments: readonly string[]): string => JSON.stringify(segments)
+        const localByPath = new Map<string, PlacementLayer>()
+        if (alreadyChild) {
+          const localRoot = await childLayerOf(history, parent, name)
+          if (!localRoot) {
+            this.#scheduleFoldRetry(sig, atSegments, domain, mode)
+            return 'unavailable'
+          }
+          localByPath.set(pathKey([...at, name]), localRoot.layer)
+        }
+        for (const update of treeUpdates) {
+          // Only a layer reachable through the live local parent is a match.
+          // A direct location-bag lookup can see an old marker for a tile the
+          // participant deleted and would accidentally resurrect its subtree.
+          const local = localByPath.get(pathKey(update.segments))
+          if (!local) {
+            merged.push(update)
+            continue
+          }
+          const { names: localNames, coldMiss: localCold } = await childNamesOfStrict(history, local)
+          if (localCold) {
+            console.warn('[swarm-adopt] additive branch aborted — local descendant membership is cold', {
+              at: update.segments,
+            })
+            this.#scheduleFoldRetry(sig, atSegments, domain, mode)
+            return 'unavailable'
+          }
+          const remoteNames = Array.isArray(update.layer['children'])
+            ? update.layer['children'].map(v => String(v ?? '').trim()).filter(Boolean)
+            : []
+          const seen = new Set(localNames.map(v => v.toLowerCase()))
+          const children = [...localNames]
+          for (const child of remoteNames) {
+            const key = child.toLowerCase()
+            if (seen.has(key)) {
+              const localName = localNames.find(v => v.toLowerCase() === key) ?? child
+              const localChild = await childLayerOf(history, local, localName)
+              if (!localChild) {
+                this.#scheduleFoldRetry(sig, atSegments, domain, mode)
+                return 'unavailable'
+              }
+              localByPath.set(pathKey([...update.segments, child]), localChild.layer)
+            } else {
+              seen.add(key)
+              children.push(child)
+            }
+          }
+          merged.push({ segments: update.segments, layer: { ...local, children } })
+        }
+        treeUpdates = merged
+      }
 
       // Layer-sig-keyed props seeds ONLY (visuals-across-lineages.md,
       // Phase B — the location-keyed fill-if-empty/sync SEED-DANCE IS
@@ -2108,7 +2090,7 @@ export class SwarmAdoptDrone extends Drone {
     at: readonly string[],
     branchSig: string,
     name: string,
-    mode: 'fold' | 'sync',
+    mode: BranchCommitMode,
   ): Promise<void> => {
     try {
       const h = history as unknown as {
