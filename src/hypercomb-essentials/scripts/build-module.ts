@@ -662,7 +662,9 @@ const atomExternalPlugin = (atomByAbs: ReadonlyMap<string, string>, self?: strin
         if (candidate === self) return undefined
         const specifier = atomByAbs.get(candidate)
         if (specifier) return { path: specifier, external: true }
-        if (atomizedBees.has(candidate)) return { path: candidate, namespace: 'bee-elsewhere' }
+        // Named relative to src/: the path lands in the bundle, and an absolute
+        // one would make the bytes (and the root) depend on the checkout.
+        if (atomizedBees.has(candidate)) return { path: relative(SRC_ROOT, candidate).replace(/\\/g, '/'), namespace: 'bee-elsewhere' }
       }
       return undefined
     })
