@@ -55,5 +55,6 @@ export const boot = (_context: BootstrapContext = {}): Acquisition => {
   return { prompt: showHostPanel, dismiss: hideHostPanel }
 }
 
-export { acquire, installPackage, installedPackageSig, listHostPackages } from './replicate'
+export { acquire, installPackage, installedPackageSig } from './replicate'
+export { listHostPackages } from '@hypercomb/runtime/host-packages'
 export { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'

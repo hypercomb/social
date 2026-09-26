@@ -119,11 +119,16 @@ import { IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './import-map'
 // bundle is fetched by signature at boot and verified before it runs, so
 // nothing below imports it and the type is the only thing that crosses.
 import { loadBootstrap, type BootstrapHandle } from './bootstrap-loader'
-// THE KERNEL BUILD (build.mjs --pure) runs this whole file as ONE bundle the
-// kernel fetched by its baked signature, so the host console travels inside
-// it instead of behind a second pin. Elsewhere the loader above fetches it.
-import { boot as bootHostConsole } from './bootstrap/index'
+// THE KERNEL BUILD (build.mjs --pure) runs the host console as a beehavior: the
+// host package's one bee, on its `host` tile, resolved by the root signature
+// the build bakes in (host-package.ts). Elsewhere the loader above fetches the
+// console bundle by its pin.
+import { holdHostPackage } from './host-package'
+import { HOST_ACQUIRE_KEY, HOST_CONSOLE_KEY } from './bootstrap/ports'
+import { acquire as hostAcquire, installPackage as hostInstallPackage } from '@hypercomb/runtime/acquire'
+import { askHostPackages as hostAskPackages } from '@hypercomb/runtime/host-packages'
 declare const __HC_KERNEL__: boolean
+declare const __HC_HOST_PACKAGE__: string
 // Locales resolve by signature from the host, never from this bundle.
 import { signatureCatalogs } from './locales'
 
@@ -187,8 +192,24 @@ const renderBootFailure = (error: unknown): void => {
   } catch { /* the console error remains the last-resort diagnostic */ }
 }
 
+/** The host package's console: hold the package, run its boot bees, and take
+ *  the console its bee registers. Null when it cannot be held or did not run. */
+const hostConsole = async (): Promise<BootstrapHandle | null> => {
+  const root = typeof __HC_HOST_PACKAGE__ === 'string' ? __HC_HOST_PACKAGE__ : ''
+  if (!await holdHostPackage(root)) {
+    console.error(`[shim] host package ${root.slice(0, 12)} could not be held here or on the default hosts`)
+    return null
+  }
+  await window.ioc?.get<{ loadBootBees?: (root?: string | null) => Promise<void> }>('@hypercomb.social/ScriptPreloader')?.loadBootBees?.(root)
+  const hosted = window.ioc?.get<{ show(): void; hide(): void }>(HOST_CONSOLE_KEY)
+  return hosted ? { prompt: hosted.show, dismiss: hosted.hide, pin: root } : null
+}
+
 const boot = async (): Promise<void> => {
   ;(window as any).__hcBoot('shim boot() started')
+
+  // The one installer, offered to the host console (bootstrap/replicate.ts).
+  window.ioc?.register(HOST_ACQUIRE_KEY, { acquire: hostAcquire, installPackage: hostInstallPackage, askHostPackages: hostAskPackages })
 
   // ONE-WAY DOOR GATE. Before ANY module can acquire OPFS. A hive drained
   // into the packed store is not fully present in the flat layout, and
@@ -211,7 +232,7 @@ const boot = async (): Promise<void> => {
   let acquisition: BootstrapHandle | null = null
   try {
     acquisition = typeof __HC_KERNEL__ === 'boolean' && __HC_KERNEL__
-      ? { ...bootHostConsole({ reason: 'cold' }), pin: 'kernel' }
+      ? await hostConsole()
       : await loadBootstrap({ reason: 'cold' })
   } catch (error) {
     console.error('[shim] bootstrap failed to load', error)
@@ -225,8 +246,9 @@ const boot = async (): Promise<void> => {
   // hive keeps it; a warm hive yields to a surface after the first pulse.
   document.getElementById('hc-splash')?.remove()
   if (!acquisition) {
-    renderBootFailure(new Error(
-      'The host and replication console could not be loaded. The origin must publish /pin and serve the bundle it names.',
+    renderBootFailure(new Error(typeof __HC_KERNEL__ === 'boolean' && __HC_KERNEL__
+      ? 'The host console could not be loaded: its host package is not held here, and neither this origin nor the default hosts served it intact.'
+      : 'The host and replication console could not be loaded. The origin must publish /pin and serve the bundle it names.',
     ))
     return
   }

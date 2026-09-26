@@ -16,8 +16,7 @@
 
 import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
 import { hostRouteName } from '@hypercomb/runtime/host-activation'
-import { askHostPackages } from '@hypercomb/runtime/host-packages'
-import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
+import { acquire, askHostPackages, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
 import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,

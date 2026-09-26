@@ -35,12 +35,30 @@ const processorBytes = (await stat(resolve(dist, 'hypercomb-core.runtime.js'))).
 if (processorBytes > 8192) throw new Error(`pure host: the processor grew to ${processorBytes} bytes — the rest of core belongs in the library`)
 const kernel = await readFile(resolve(dist, 'main.js'), 'utf8')
 const signed = names.filter(name => /^[a-f0-9]{64}$/.test(name))
-if (signed.length !== 2) throw new Error(`pure host: expected the host bundle and the core library, found ${signed.length} signed files`)
 for (const sig of signed) {
   if (createHash('sha256').update(await readFile(resolve(dist, sig))).digest('hex') !== sig) {
     throw new Error(`pure host: ${sig.slice(0, 12)} does not hash to its name`)
   }
-  if (!kernel.includes(sig)) throw new Error(`pure host: the kernel does not know ${sig.slice(0, 12)}`)
+}
+// The kernel knows two: the host bundle and the core library. The host bundle
+// knows one more: the host package's root, whose tile and console bee are the
+// rest. Anything else signed here is dead weight or a second install.
+const known = signed.filter(sig => kernel.includes(sig))
+if (known.length !== 2) throw new Error(`pure host: the kernel should know the host bundle and the core library, knows ${known.length}`)
+const hostBundle = await readFile(resolve(dist, pin), 'utf8')
+const hostRoot = signed.find(sig => !known.includes(sig) && hostBundle.includes(sig))
+if (!hostRoot) throw new Error('pure host: the host bundle names no host package')
+const rootLayer = JSON.parse(await readFile(resolve(dist, hostRoot), 'utf8'))
+const closure = new Set([hostRoot, ...(rootLayer.bootBees ?? [])])
+for (const tile of rootLayer.cells ?? []) {
+  closure.add(tile)
+  for (const bee of JSON.parse(await readFile(resolve(dist, tile), 'utf8')).bees ?? []) closure.add(bee)
+}
+const unnamed = signed.filter(sig => !known.includes(sig) && !closure.has(sig))
+if (unnamed.length) throw new Error(`pure host: signed files nothing names (${unnamed.map(s => s.slice(0, 12)).join(', ')})`)
+for (const sig of closure) if (!signed.includes(sig)) throw new Error(`pure host: the host package names ${sig.slice(0, 12)}, which is not here`)
+if (/customElements\.define\(/.test(hostBundle) && hostBundle.includes('hc-shim-hosts')) {
+  throw new Error('pure host: the host bundle defines the host console — it belongs to the host package')
 }
 if (names.includes('main.js.map')) throw new Error('pure host: source map belongs to the source checkout')
 // THE KERNEL stays a one-pager: it knows one signature, verifies, and runs it.

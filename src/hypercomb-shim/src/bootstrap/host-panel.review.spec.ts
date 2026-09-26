@@ -60,6 +60,7 @@ vi.mock('@hypercomb/runtime/host-packages', () => ({ askHostPackages: effects.as
 
 vi.mock('./replicate', () => ({
   acquire: effects.acquire,
+  askHostPackages: effects.ask,
   installPackage: effects.install,
   installedPackageSig: () => '',
 }))

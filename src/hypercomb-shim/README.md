@@ -76,15 +76,27 @@ themselves; everything else is resolved.
   two-line module that re-exports both, so packages and the host import one
   surface, unchanged. The full shells still ship core as one file.
 
+- The host console is a beehavior. It is the one bee of the **host package**:
+  a root layer, a `host` tile carrying the console bee, and the bee itself
+  (`src/bootstrap/host-console.drone.ts`). The build bakes the host package's
+  root signature into the host bundle; on boot the host holds that package
+  (device, then this origin, then the default hosts, each file hashed once on
+  arrival), runs its boot bees, and shows the console the bee registers. The
+  host package is never "the installed package": it runs beside whatever a
+  person installs. Its bee installs through the host's one installer, offered
+  under `@hypercomb.social/HostAcquire`, so there is never a second one.
+
 `check-pure` fails if the kernel grows past 4 kB, the processor past 8 kB, a
-signed file does not hash to its name, or the kernel does not know it.
+signed file does not hash to its name, a signed file is neither known to the
+kernel nor part of the host package, or the host bundle carries the console.
 
 The host bundle is always minified and carries no copy of core; the build
 inlines the ioc install ahead of every script so core's module-scope
 registrations find `window.ioc`. It ships only the faces the host renders
 (Inter and upright Source Serif 4); icon and italic faces belong to the
 packages that render them. On 2026-09-25: kernel 3.1 kB, processor 4.1 kB,
-resolved by signature: host bundle 230 kB, core library 142 kB. A local
+resolved by signature: host bundle 129 kB, core library 142 kB, host
+package (console bee) 116 kB. A local
 completion click verifies and holds the selected branch's typed child, executable, and
 resource closure before adding an on/off layer at the local route. A selected
 public text theme keeps the publisher's exact meta head in

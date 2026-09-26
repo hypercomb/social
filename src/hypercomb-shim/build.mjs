@@ -304,8 +304,8 @@ if (!pure) {
 // `@hypercomb/core` stays EXTERNAL. Bundling it would mint a second copy of
 // the runtime the shim already loaded; the import map resolves the bare
 // specifier to the one true runtime instead.
-// THE KERNEL BUILD (--pure) has no second pin: the host console travels inside
-// the one host bundle the kernel runs (see the kernel section below).
+// THE KERNEL BUILD (--pure) has no second pin: the host console is a
+// beehavior of the host package (below).
 if (!pure) {
 const bootstrapBuild = await build({
   entryPoints: [resolve(here, 'src/bootstrap/index.ts')],
@@ -350,6 +350,46 @@ const bootstrapBuild = await build({
 }
 }
 
+// ── the host package ─────────────────────────────────────────────────────────
+// The kernel build's host console is a BEEHAVIOR: the one bee of the host
+// package, carried by its `host` tile. Three signed files: the bee, the tile
+// layer that carries it, and the root layer that names the tile and the bee
+// as a boot bee. The host bundle knows only the root (baked in below) and
+// resolves the rest the hypercomb way (src/host-package.ts).
+let hostPackageRoot = ''
+if (pure) {
+  const sha = bytes => createHash('sha256').update(bytes).digest('hex')
+  const consoleBee = await build({
+    entryPoints: [resolve(here, 'src/bootstrap/host-console.drone.ts')],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: ['es2022'],
+    tsconfig: resolve(here, 'tsconfig.json'),
+    minify: true,
+    write: false,
+    metafile: true,
+    outfile: 'host-console.js',
+    logLevel: 'warning',
+    external: ['@hypercomb/core'],
+  })
+  // One installer, one Store, one host directory: a bee that carried its own
+  // copy of any would run a second one beside the host's.
+  const stateful = Object.keys(consoleBee.metafile.inputs)
+    .filter(p => /hypercomb-runtime[\/]src[\/](acquire|store|script-preloader|dependency-loader|host-packages)\.ts$/.test(p))
+  if (stateful.length) throw new Error('[shim] the host console bee carries a stateful runtime module: ' + stateful.join(', '))
+  const beeBytes = Buffer.from(consoleBee.outputFiles[0].contents)
+  const beeSig = sha(beeBytes)
+  const tile = Buffer.from(JSON.stringify({ name: 'host', cells: [], bees: [beeSig], dependencies: [] }))
+  const tileSig = sha(tile)
+  const root = Buffer.from(JSON.stringify({ name: 'root', cells: [tileSig], bees: [], dependencies: [], bootBees: [beeSig] }))
+  hostPackageRoot = sha(root)
+  for (const [sig, bytes] of [[beeSig, beeBytes], [tileSig, tile], [hostPackageRoot, root]]) {
+    await writeFile(resolve(dist, sig), bytes)
+  }
+  console.log(`[shim] host package ${hostPackageRoot.slice(0, 12)}… · host tile · console bee ${(beeBytes.length / 1024).toFixed(0)} kB`)
+}
+
 // ── the runner ───────────────────────────────────────────────────────────────
 // The shipped catalogs are unreachable at RUNTIME in the shim — main.ts always
 // passes `catalogs: signatureCatalogs`, so runtime-initializer's static loader
@@ -382,7 +422,10 @@ const result = await build({
   minify,
   logLevel: 'info',
   metafile: true,
-  define: { __HC_BARREL_ENTRIES__: String(barrelEntries), __HC_PURE__: String(pure), __HC_KERNEL__: String(pure) },
+  define: {
+    __HC_BARREL_ENTRIES__: String(barrelEntries), __HC_PURE__: String(pure), __HC_KERNEL__: String(pure),
+    ...(pure ? { __HC_HOST_PACKAGE__: JSON.stringify(hostPackageRoot) } : {}),
+  },
   // Bees and their dependencies are fetched at runtime by signature, never
   // bundled. Anything that resolves to an /opfs or bare module specifier is
   // the runtime graph's problem, not the shim's.
@@ -405,6 +448,9 @@ if (angular.length) {
   console.log('[shim] ✓ framework-free — no @angular in the bundle')
 }
 if (pure && angular.length) throw new Error('[shim] pure install includes Angular')
+if (pure && inputs.some(p => /bootstrap[\/]host-panel\.ts$/.test(p))) {
+  throw new Error('[shim] the host bundle carries the host console — it is the host package\'s beehavior')
+}
 if (pure && inputs.some(p => p.includes('hypercomb-core/src/'))) {
   throw new Error('[shim] pure main.js carries its own copy of core — it must load the runtime through the import map')
 }
