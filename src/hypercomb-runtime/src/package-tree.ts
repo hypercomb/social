@@ -24,7 +24,6 @@
 // nothing here activates anything — acquire.ts does that.
 
 import { resolveSignatureClosure, type ReplicationIo } from './replication-walker.js'
-import { SignatureService } from '@hypercomb/core'
 
 /** localStorage key holding the participant's picks, by name path. */
 export const PICKS_KEY = 'hc:install:picks'
@@ -94,10 +93,11 @@ const parseLayer = (bytes: Uint8Array | null): LayerRecord | null => {
   } catch { return null }
 }
 
-/** One layer, held or admitted, and only ever parsed once it hashed to its own name. */
+/** One layer, held or admitted. A held layer hashed to its name when it was
+ *  stored; an admitted one is hashed by the walker on the way in. */
 const readLayer = async (sig: string, io: ReplicationIo): Promise<LayerRecord | null> => {
   const held = await io.read(sig)
-  if (held && (await SignatureService.sign(held.buffer.slice(held.byteOffset, held.byteOffset + held.byteLength) as ArrayBuffer)) === sig) return parseLayer(held)
+  if (held) return parseLayer(held)
   const result = await resolveSignatureClosure(sig, io, { children: () => [] })
   return result.held.includes(sig) ? parseLayer(await io.read(sig)) : null
 }

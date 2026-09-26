@@ -643,8 +643,9 @@ const bytesOf = async (sig: string, deps: ModuleDraftDeps = liveDeps()): Promise
 
 /** A TRANSFER PACK of these files (transfer-pack.ts), minted in memory for a
  *  publish and never written into the hive. Complete or absent: null when
- *  any file is not held here or does not hash to its name, so a door never
- *  serves a pack that silently lacks part of the package. */
+ *  any file is not held here, so a door never serves a pack that silently
+ *  lacks part of the package. Held files are not hashed again; the receiver
+ *  hashes each one when it arrives. */
 const PACK_READ_BATCH = 32
 
 export const packFiles = async (
@@ -656,7 +657,7 @@ export const packFiles = async (
     for (let at = 0; at < files.length; at += PACK_READ_BATCH) {
       const read = await Promise.all(files.slice(at, at + PACK_READ_BATCH).map(async sig => [sig, await bytesOf(sig, deps)] as const))
       for (const [sig, bytes] of read) {
-        if (!bytes || (await SignatureService.sign(bytes.slice().buffer as ArrayBuffer)) !== sig) return null
+        if (!bytes) return null   // held: hashed when it was stored
         members.push([sig, bytes])
       }
     }

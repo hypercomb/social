@@ -46,11 +46,12 @@ const parseLayer = (bytes: Uint8Array | null): LayerRecord | null => {
   try { return JSON.parse(new TextDecoder().decode(bytes)) as LayerRecord } catch { return null }
 }
 
-/** One atom, held or admitted: the walker verifies it against its own name
- *  and writes it before it is read back, so nothing unverified is parsed. */
+/** One atom, held or admitted: the walker verifies an incoming atom against
+ *  its own name before writing it, and a held one was verified when stored,
+ *  so nothing unverified is parsed and nothing is hashed twice. */
 const readAtom = async (sig: string, io: ReplicationIo): Promise<Uint8Array<ArrayBuffer> | null> => {
   const held = await io.read(sig)
-  if (held && (await SignatureService.sign(held.buffer)) === sig) return held
+  if (held) return held
   const result = await resolveSignatureClosure(sig, io, { children: () => [] })
   return result.held.includes(sig) ? io.read(sig) : null
 }

@@ -60,11 +60,12 @@ themselves; everything else is resolved.
   the core library. For each it tries this device, then this origin, then the
   default hosts (hypercomb.com, jwize.com), refuses bytes that do not hash to
   the signature, and keeps what it verified: in OPFS, and in the service
-  worker's `hypercomb-sig-v1` cache. Warm boots import both from `/@sig/<sig>`,
-  which the worker answers from that cache, so nothing is read or hashed
-  before the host starts and the browser reuses its compiled code. The cached
-  copy is re-hashed after the fact; a damaged one is evicted, and a boot it
-  broke reloads once from verified bytes. The kernel then declares the page's
+  worker's `hypercomb-sig-v1` cache. That is the one hash: bytes are hashed
+  once, when they first arrive, and a held copy never again. Warm boots
+  import both from `/@sig/<sig>`, which the worker answers from that cache,
+  so nothing is read before the host starts and the browser reuses its
+  compiled code. A cached copy that fails to run is evicted and the boot
+  reloads once from the device copy. The kernel then declares the page's
   one import map and runs the host. `/pin` still names the host bundle.
 - `hypercomb-core.runtime.js` is the processor (`hypercomb-core/src/processor.ts`):
   `act()` and its optimize pass, bee/drone/queen/worker, IoC, the effect bus

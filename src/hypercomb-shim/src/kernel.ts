@@ -34,7 +34,8 @@ const verified = async (sig: string, bytes: ArrayBuffer | null): Promise<ArrayBu
 const fromDevice = async (sig: string): Promise<ArrayBuffer | null> => {
   try {
     const root = await navigator.storage.getDirectory()
-    return await (await (await root.getFileHandle(sig)).getFile()).arrayBuffer()
+    const bytes = await (await (await root.getFileHandle(sig)).getFile()).arrayBuffer()
+    return bytes.byteLength ? bytes : null   // empty: an interrupted write, not a copy
   } catch { return null }
 }
 
@@ -65,20 +66,15 @@ const sigCache = async (): Promise<Cache | null> => {
   try { return await caches.open(SIG_CACHE) } catch { return null }
 }
 
-/** Where to import the verified bytes of `sig` from, or null when no place
- *  has them. Warm: the service worker's stable address, nothing read here;
- *  the copy is re-hashed off the critical path and evicted if it rotted. */
+/** Where to import the bytes of `sig` from, or null when no place has them.
+ *  THE ONE HASH is on the way in (fromNetwork): what this device holds was
+ *  hashed when it was kept, so it is never hashed again. Warm: the service
+ *  worker's stable address, nothing read here at all. */
 const resolveSig = async (sig: string): Promise<string | null> => {
   const cache = await sigCache()
   const served = !!navigator.serviceWorker?.controller
-  const hit = served ? await cache?.match(stable(sig)) : undefined
-  if (hit) {
-    void hit.arrayBuffer().then(bytes => verified(sig, bytes)).then(ok => {
-      if (!ok) { console.error(`[kernel] cached ${sig.slice(0, 12)} is damaged — evicted`); void cache!.delete(stable(sig)) }
-    })
-    return stable(sig)
-  }
-  const local = await verified(sig, await fromDevice(sig))
+  if (served && await cache?.match(stable(sig))) return stable(sig)
+  const local = await fromDevice(sig)
   const bytes = local ?? await fromNetwork(sig)
   if (!bytes) return null
   if (!local) await keep(sig, bytes)
@@ -123,7 +119,8 @@ void (async () => {
   declareImports(library!)
   try { await import(/* @vite-ignore */ host!) } catch (error) {
     // A cached copy that no longer runs: drop both and start once more from
-    // verified bytes (the import map is declared, so only a reload re-picks).
+    // the device or the network (the import map is declared, so only a
+    // reload re-picks).
     if (host!.startsWith('/@sig/') && !sessionStorage.getItem('hc:kernel-retry')) {
       sessionStorage.setItem('hc:kernel-retry', '1')
       const cache = await sigCache()

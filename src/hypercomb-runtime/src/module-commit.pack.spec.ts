@@ -2,8 +2,9 @@
 //
 // module-commit.pack.spec.ts — A COMMIT'S TRANSFER PACK is minted in memory
 // from the files the package holds (module-drafts.ts packFiles), complete or
-// absent: every file inside hashes to its own name, and a file that is not
-// held here means no pack at all — a door never serves a pack that silently
+// absent: every file inside was hashed to its own name when it was stored
+// (and is hashed again only by the receiver, on arrival), and a file that is
+// not held here means no pack at all — a door never serves a pack that silently
 // lacks part of the package. Nothing is written into the hive.
 
 import { describe, expect, it } from 'vitest'
@@ -54,11 +55,19 @@ describe('packFiles', () => {
     expect((await packFiles([...w.files].reverse(), w.deps))?.sig).toBe((await packFiles(w.files, w.deps))?.sig)
   })
 
-  it('mints nothing when a file is not held here, or does not hash to its name', async () => {
+  it('mints nothing when a file is not held here', async () => {
     const w = await world()
     expect(await packFiles([...w.files, 'e'.repeat(64)], w.deps)).toBeNull()
+  })
+
+  it('does not hash held files again: the receiver hashes each one on arrival', async () => {
+    const w = await world()
     const bee = w.files[2]!
     w.bees.set(bee, encode('tampered'))
-    expect(await packFiles(w.files, w.deps)).toBeNull()
+    const minted = await packFiles(w.files, w.deps)
+    expect(minted).not.toBeNull()
+    const members = decodeTransferPack(await gunzipBytes(minted!.bytes))!
+    const carried = new Map(members)
+    expect(await SignatureService.sign(carried.get(bee)!.slice().buffer as ArrayBuffer)).not.toBe(bee)
   })
 })

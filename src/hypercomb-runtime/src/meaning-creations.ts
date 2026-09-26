@@ -46,7 +46,7 @@ const heldLayer = async <T extends CanonicalLayerContent>(
 ): Promise<T | null> => {
   if (!SIG.test(head)) return null
   const metaBlob = await store.getResourceLocal(head)
-  if (!metaBlob || await SignatureService.sign(await metaBlob.arrayBuffer()) !== head) return null
+  if (!metaBlob) return null   // held: hashed when it was stored
   let meta: unknown
   try { meta = JSON.parse(await metaBlob.text()) } catch { return null }
   const payload = metaPayloadOf(meta)
@@ -136,13 +136,14 @@ export const writeCreation = async <T extends CanonicalLayerContent>(
   if (before && canonicalLayerJson(before.layer) === new TextDecoder().decode(layerBytes)) return before
   const layerSig = await digest(layerBytes)
   await store.writeLayerBytes(layerSig, exact(layerBytes))
-  if (await digest(await store.getLayerPoolBytes(layerSig) ?? new Uint8Array()) !== layerSig) return null
+  // The write hashed these bytes; asking whether they landed needs no second hash.
+  if (!await store.getLayerPoolBytes(layerSig)) return null
   const head = await store.putArtifactMeta('layer', layerSig, {
     relation: meaning, at: Date.now(),
   })
   if (!SIG.test(head)) return null
   const meta = await store.getResourceLocal(head)
-  if (!meta || await SignatureService.sign(await meta.arrayBuffer()) !== head) return null
+  if (!meta) return null
   await writeLayerMarker(bag, head)
   await writeMember(pool, member)
   return readHead<T>(store, pool, meaning, member)

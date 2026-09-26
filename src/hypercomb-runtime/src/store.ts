@@ -2070,17 +2070,20 @@ export class Store extends EventTarget {
     } catch { /* best-effort */ }
   }
 
-  /** Read a bee module from its canonical meaning pool or legacy drain. */
+  /** Read a bee module from its canonical meaning pool or legacy drain.
+   *  Not hashed: every writer hashed it on the way in (writeBeeBytes,
+   *  replication), which is the one time (replication-walker.ts). */
   public getBeeBytes = async (signature: string): Promise<Uint8Array | null> => {
     const expected = signature.toLowerCase()
     for (const source of [this.bees, this.legacyBees]) {
       if (!source) continue
       for (const name of [`${expected}.js`, expected]) {
         try {
+          // Held, so hashed once already, when it was stored: never again.
+          // An empty file is an interrupted write (no module is empty): a miss.
           const bytes = new Uint8Array(await (await (await source.getFileHandle(name, { create: false })).getFile()).arrayBuffer())
-          const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-          if (await SignatureService.sign(exact) === expected) return bytes
-        } catch { /* miss/corruption */ }
+          if (bytes.byteLength) return bytes
+        } catch { /* miss */ }
       }
     }
     return null
@@ -2107,10 +2110,11 @@ export class Store extends EventTarget {
       if (!source) continue
       for (const name of [`${expected}.js`, expected]) {
         try {
+          // Held, so hashed once already, when it was stored: never again.
+          // An empty file is an interrupted write (no module is empty): a miss.
           const bytes = new Uint8Array(await (await (await source.getFileHandle(name, { create: false })).getFile()).arrayBuffer())
-          const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-          if (await SignatureService.sign(exact) === expected) return bytes
-        } catch { /* miss/corruption */ }
+          if (bytes.byteLength) return bytes
+        } catch { /* miss */ }
       }
     }
     return null

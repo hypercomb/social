@@ -398,7 +398,8 @@ const verifiedArtifactBytes = async (
     return (await io.sign(bytes)).toLowerCase() === expected ? bytes : null
   }
 
-  const local = await verify(await io.readLocal(expected, kind))
+  // Held locally: hashed once, when it was cached. Only incoming bytes hash.
+  const local = await io.readLocal(expected, kind)
   if (local) return { bytes: local, source: 'local' }
 
   const remote = await verify(await io.fetchHttp(expected, kind))

@@ -136,7 +136,7 @@ export const signatureCatalogs = async (locale: string): Promise<Record<string, 
   if (!sig) return null
 
   const local = await readFromPool(sig) ?? await readFromRoot(sig)
-  if (local && await verify(local, sig)) return decode(local)
+  if (local) return decode(local)   // held: hashed when it was stored
   if (local) console.warn(`[locales] local copy of ${locale} failed verification — refetching`)
 
   const remote = await fetchFromOrigin(sig)

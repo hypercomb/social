@@ -92,7 +92,7 @@ const fetchFromOrigin = async (sig: string): Promise<ArrayBuffer | null> => {
  *  produced bytes that hash to the name. */
 const resolveVerified = async (sig: string): Promise<ArrayBuffer | null> => {
   const local = await readFromOpfs(sig)
-  if (local && await verify(local, sig)) return local
+  if (local) return local   // written only after it verified: never hashed again
   if (local) console.warn(`[bootstrap] local copy of ${sig.slice(0, 12)} failed verification — refetching`)
 
   const remote = await fetchFromOrigin(sig)
