@@ -32,7 +32,7 @@
 // essentials, so everything crosses as `publish:render` payloads and comes
 // back as intents (publish:run, publish:unpublish, publish:inspect, …).
 
-import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
 import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
@@ -1012,14 +1012,14 @@ const _publishStatus = new PublishStatusDrone()
   _publishStatus,
 )
 
-/** Every domain a host serves, read from its `/publications.json`: each door
+/** Every domain a host serves, read from its publications at sign('host:publications'): each door
  *  is `<name>.<zone>`, so the zones are the doors less their first label.
  *  Best-effort and bounded — no answer means no extra domains, never an error. */
 async function servedZones(zone: string): Promise<string[]> {
   const apex = String(zone ?? '').trim().toLowerCase()
   if (!apex || LOOPBACK_RE.test(apex)) return []
   try {
-    const res = await fetch(`https://${apex}/publications.json`, { cache: 'no-store', signal: AbortSignal.timeout(6000) })
+    const res = await fetch(`https://${apex}/${await registerPoolMeaning('host:publications')}`, { cache: 'no-store', signal: AbortSignal.timeout(6000) })
     if (!res.ok) return []
     const sites = (await res.json() as { sites?: { hosts?: { host?: string }[] }[] })?.sites
     if (!Array.isArray(sites)) return []

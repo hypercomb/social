@@ -422,7 +422,7 @@ test("a pool past the floor is listed only while the operator's signed index dec
   const child = spawn(process.execPath, ['relay.js', '--port', String(port), '--memory', '--content-dir', dir, '--writers', getPublicKey(operator)], { cwd: import.meta.dirname, stdio: 'ignore' })
   const base = `http://127.0.0.1:${port}`
   const declare = async (secret, listed) => {
-    const url = `${base}/hive/${getPublicKey(secret)}`
+    const url = `${base}/${sha(Buffer.from('hive:indexes', 'utf8'))}/${getPublicKey(secret)}`
     const evt = finalizeEvent({ kind: 30564, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ roots: {}, listed }) }, secret)
     const body = Buffer.from(JSON.stringify(evt))
     const put = await fetch(url, { method: 'PUT', body, headers: { Authorization: auth(secret, url, 'PUT', body), 'Content-Type': 'application/json' } })

@@ -1,6 +1,6 @@
 # Signed site bindings — bringing the directory under the primitives
 
-Two plans against the same seam: `/publications.json` is honest about what it
+Two plans against the same seam: `/<sign('host:publications')>` is honest about what it
 reports, but half of what it reports comes from a place the primitives cannot
 see, and the half that IS signed is reported at only one of the addresses it
 answers on.
@@ -18,7 +18,7 @@ pays for itself immediately and it is not blocked on A.
 
 ## Where things stand
 
-`/publications.json` is a **live view**, not a stored artifact. Nothing caches
+`/<sign('host:publications')>` is a **live view**, not a stored artifact. Nothing caches
 it (`Cache-Control: no-store`); the worker recomputes it per request from two
 inputs of very different character:
 
@@ -26,7 +26,7 @@ inputs of very different character:
 env.SITE_BINDINGS ─────────────────┐
   operator config (wrangler var)   │
   host → {title, lineage,          │
-          publishers:[pubkey…]}    ├──► servePublications()  ──►  /publications.json
+          publishers:[pubkey…]}    ├──► servePublications()  ──►  /<sign('host:publications')>
                                    │      resolveSite()             [{host, url, title,
 env.HIVES[pubkey] ─────────────────┘      ledgerEntry()               lineage, publishers:
   one schnorr-signed nostr event                                      [{pubkey, head, …}]}]
@@ -212,7 +212,7 @@ back through `resolveSite` is what makes that impossible rather than unlikely.
 >   of env, so a revocation lands on the next read, and the flat sig read and
 >   pool listing never pay for it.
 > - **Step 6** — the vector plus worker cases: the pool record answers
->   `/publications.json` byte for byte as the var; forged bytes, an unnamed
+>   `/<sign('host:publications')>` byte for byte as the var; forged bytes, an unnamed
 >   record and a stranger as operator all fall back; a record cannot speak for
 >   another zone; a dropped publisher is gone on the next read.
 >
@@ -342,7 +342,7 @@ once permanent.
    pattern, for the same reason). **The var stays as the fallback** for the whole
    migration and as the cold-start answer for a zone with nothing published.
 5. **Migrate one zone at a time, reversibly.** Publish `pluginthematrix.com`'s
-   record, confirm `/publications.json` is byte-identical to what the var
+   record, confirm `/<sign('host:publications')>` is byte-identical to what the var
    produced, then drop that zone's key from the var. The two never both win: the
    pool is consulted only when the index verifies and the bytes hash.
 6. **A conformance vector.** A fixed binding artifact and the exact ledger it must

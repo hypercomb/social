@@ -7,7 +7,7 @@
 // Serves dist/hypercomb-web/visitor with the REAL site data so renderer
 // changes are testable before `wrangler deploy` touches the live worker:
 //   /<sign(localhost)>/…  → the live door's own bag, sign(<site host>)
-//   /hive/<pubkey>        → proxied live signed index (never cached)
+//   /<sign('hive:indexes')>/<pubkey> → proxied live signed index (never cached)
 //   /<sig>, /@resource/<sig> → proxied from the live domain, disk-cached
 //   everything else       → static visitor assets (SPA fallback to index)
 // Every non-static request is logged — the boot's fetch trail is the
@@ -51,7 +51,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(r.status, { 'content-type': r.headers.get('content-type') ?? 'text/plain', 'cache-control': 'no-store' })
       return res.end(body)
     }
-    if (path.startsWith('/hive/')) {
+    if (path.startsWith(`/${createHash('sha256').update('hive:indexes').digest('hex')}/`)) {
       const r = await fetch(`${LIVE}${path}`)
       const body = Buffer.from(await r.arrayBuffer())
       log(`→ live index ${r.status} ${body.length}B`)

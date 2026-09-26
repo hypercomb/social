@@ -43,7 +43,7 @@ const handler = (req, res) => {
       return fs.readFile(local, (err, buf) => err ? proxy(req, res) : res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=31536000, immutable' }).end(buf))
     }
   }
-  if (/^\/(publications)\.json$/.test(url) || /^\/hive\/[0-9a-f]{64}$/.test(url) || /^\/(@resource\/)?[0-9a-f]{64}$/.test(url)) return proxy(req, res)
+  if (/^\/[0-9a-f]{64}\/[0-9a-f]{64}$/.test(url) || /^\/(@resource\/)?[0-9a-f]{64}$/.test(url)) return proxy(req, res)
   let file = path.join(ROOT, url === '/' ? 'index.html' : decodeURIComponent(url))
   if (!file.startsWith(ROOT)) file = path.join(ROOT, 'index.html')
   fs.readFile(file, (err, buf) => {

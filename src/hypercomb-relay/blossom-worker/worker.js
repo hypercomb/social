@@ -209,7 +209,7 @@ function nothingHere(hostname, zone) {
  *  null when the key holds nothing this host will trust. */
 async function verifiedIndex(env, pubkey) {
   let evt
-  try { evt = JSON.parse((await env.HIVES.get(pubkey)) ?? 'null') } catch { return null }
+  try { evt = JSON.parse((await heldIndexRaw(env, pubkey)) ?? 'null') } catch { return null }
   if (!evt || Number(evt.kind) !== HIVE_KIND || evt.pubkey !== pubkey) return null
   if (!(await verifyEventSig(evt))) return null
   let content
@@ -523,6 +523,11 @@ async function hostsOfLineage(env, read, lineage) {
 // directory forever: publishing a new creation went live but never earned a
 // plate. Each candidate is resolved back through resolveSite, so this can
 // never advertise an address the router would refuse to serve.
+/** The host's publications and its open trials: one-file indexes answered at
+ *  their pools' own addresses, sign('host:publications') and sign('host:trials'). */
+const HOST_PUBLICATIONS_MEANING = 'host:publications'
+const HOST_TRIALS_MEANING = 'host:trials'
+
 async function servePublications(request, env) {
   const protocol = new URL(request.url).protocol
   const read = indexReader(env)
@@ -1176,9 +1181,7 @@ async function noteAssessors(env, pubkey, evt) {
     if (!root) continue
     // A member of the root's pool, named by the assessor's key. Membership
     // only: what they said is read, and re-verified, from their index.
-    const member = `${await poolAddress(`assess:${root}`)}/${pubkey}`
-    if (!env.CONTENT?.put || await env.CONTENT.head?.(member)) continue
-    await env.CONTENT.put(member, new Uint8Array(0), { onlyIf: new Headers({ 'If-None-Match': '*' }) })
+    await addPoolMember(env, `assess:${root}`, pubkey)
   }
 }
 
@@ -1189,41 +1192,41 @@ async function noteAssessors(env, pubkey, evt) {
 // write keeps one derived list per locale of who did each — never trusted on
 // its own: every listed index is read and re-verified when the locale is
 // served, and a key that was dropped is simply not shown. The locale's index
-// is answered for people at `/i18n/<locale>.json` and for machines at the
-// pool's own derived address `sign('i18n:<locale>')` — the one-file index
-// every published pool uses — so a hive computes where to look.
+// is answered at the pool's own derived address `sign('i18n:<locale>')` —
+// the one-file index every published pool uses — so a hive computes where to
+// look. There is no named route (jwize 2026-09-25).
 const I18N_KEY_RE = /^i18n:([a-z]{2,3}(?:-[a-z0-9]{2,8})?)$/
 const I18N_MISSING_KEY_RE = /^i18n-missing:([a-z]{2,3}(?:-[a-z0-9]{2,8})?)$/
 const I18N_LOCALE_RE = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/
-const I18N_LISTED_MAX = 500
 const I18N_SHOWN = 64
 
+// Who translated a locale and who lacks it are members of the locale's pools,
+// sign('i18n:<locale>') and sign('i18n-missing:<locale>'), named by the key;
+// the locales this host has heard of are members of sign('i18n:locales'). The
+// KV lists that held them before are read as drain sources, never written.
 async function noteTranslators(env, pubkey, evt) {
   let roots = {}
   try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
-  const note = async (listKey, locale) => {
-    let listed = []
-    try { listed = JSON.parse((await env.HIVES.get(listKey)) ?? '[]') } catch { listed = [] }
-    if (!Array.isArray(listed)) listed = []
-    if (!listed.includes(pubkey)) await env.HIVES.put(listKey, JSON.stringify([...listed, pubkey].slice(-I18N_LISTED_MAX)))
-    let locales = []
-    try { locales = JSON.parse((await env.HIVES.get('i18n:locales')) ?? '[]') } catch { locales = [] }
-    if (!Array.isArray(locales)) locales = []
-    if (!locales.includes(locale)) await env.HIVES.put('i18n:locales', JSON.stringify([...locales, locale].slice(-I18N_LISTED_MAX)))
-  }
   for (const key of Object.keys(roots)) {
     const translator = I18N_KEY_RE.exec(key)?.[1]
-    if (translator) await note(`translators:${translator}`, translator)
     const missing = I18N_MISSING_KEY_RE.exec(key)?.[1]
-    if (missing) await note(`missing:${missing}`, missing)
+    const locale = translator ?? missing
+    if (!locale) continue
+    await addPoolMember(env, translator ? `i18n:${locale}` : `i18n-missing:${locale}`, pubkey)
+    await addPoolMember(env, 'i18n:locales', locale)
   }
+}
+
+/** The keys a locale's pool holds, with the KV list it replaced drained in. */
+async function localeMembers(env, meaning, legacyKey) {
+  const keys = new Set([...await drainedList(env, legacyKey), ...await poolMemberNames(env, meaning)])
+  return [...keys].filter((pk) => SIG_RE.test(pk)).slice(-I18N_SHOWN)
 }
 
 /** The locale a pool address stands for, when it is one this host has heard of. */
 async function localeAtAddress(env, sig) {
-  let locales = []
-  try { locales = JSON.parse((await env.HIVES?.get('i18n:locales')) ?? '[]') } catch { locales = [] }
-  for (const locale of Array.isArray(locales) ? locales : []) {
+  const locales = new Set([...await drainedList(env, 'i18n:locales'), ...await poolMemberNames(env, 'i18n:locales')])
+  for (const locale of locales) {
     if (I18N_LOCALE_RE.test(String(locale)) && (await poolAddress(`i18n:${locale}`)) === sig) return locale
   }
   return null
@@ -1234,13 +1237,8 @@ async function serveTranslations(request, env, locale) {
   const read = indexReader(env)
   const labels = new Map()
   for (const zone of Object.values(siteBindings(env))) for (const p of zone.publishers ?? []) if (p.label) labels.set(p.pubkey, p.label)
-  const listed = async (key) => {
-    let list = []
-    try { list = JSON.parse((await env.HIVES.get(key)) ?? '[]') } catch { list = [] }
-    return (Array.isArray(list) ? list : []).filter((pk) => SIG_RE.test(String(pk))).slice(-I18N_SHOWN)
-  }
   const translators = []
-  for (const pubkey of await listed(`translators:${locale}`)) {
+  for (const pubkey of await localeMembers(env, `i18n:${locale}`, `translators:${locale}`)) {
     const index = await read(pubkey)
     const sig = String(index?.roots?.[`i18n:${locale}`] || '').toLowerCase()
     const record = await heapRecord(env, sig)
@@ -1248,7 +1246,7 @@ async function serveTranslations(request, env, locale) {
     translators.push({ pubkey, label: labels.get(pubkey) || '', catalog: sig, at: Number(index.createdAt || 0) })
   }
   const missing = []
-  for (const pubkey of await listed(`missing:${locale}`)) {
+  for (const pubkey of await localeMembers(env, `i18n-missing:${locale}`, `missing:${locale}`)) {
     const index = await read(pubkey)
     const sig = String(index?.roots?.[`i18n-missing:${locale}`] || '').toLowerCase()
     const record = await heapRecord(env, sig)
@@ -1271,25 +1269,8 @@ async function heapRecord(env, sig) {
  *  named by the assessor's key. The KV list kept before assessors were a pool
  *  is read as a drain source and never written. */
 async function assessorsOf(env, root) {
-  const pool = await poolAddress(`assess:${root}`)
-  const keys = new Set()
-  try {
-    for (const pubkey of JSON.parse((await env.HIVES?.get?.(`assessors:${root}`)) ?? '[]')) {
-      if (SIG_RE.test(String(pubkey))) keys.add(String(pubkey))
-    }
-  } catch { /* no older list */ }
-  if (env.CONTENT?.list) {
-    let cursor
-    do {
-      const page = await env.CONTENT.list({ prefix: `${pool}/`, cursor, limit: 1000 })
-      for (const object of page.objects ?? []) {
-        const name = String(object.key ?? '').slice(pool.length + 1)
-        if (SIG_RE.test(name)) keys.add(name)
-      }
-      cursor = page.truncated ? page.cursor : undefined
-    } while (cursor)
-  }
-  return [...keys]
+  const keys = new Set([...await drainedList(env, `assessors:${root}`), ...await poolMemberNames(env, `assess:${root}`)])
+  return [...keys].filter((pubkey) => SIG_RE.test(pubkey))
 }
 
 /** Every current, signed assessment of a package root, newest last. Every
@@ -1955,7 +1936,7 @@ async function getGrant(request, env) {
 
 // ── hive pointers (path → head, one signed index per publisher) ──────────────
 //
-// GET/PUT /hive/<pubkey> — the ONE mutable object per publisher on an
+// GET/PUT /<sign('hive:indexes')>/<pubkey> — the ONE mutable object per publisher on an
 // otherwise immutable heap: a schnorr-signed nostr event (kind 30564) whose
 // content is {"v":1,"roots":{"<lineageKey>":"<headSig>", …}} mapping the
 // publisher's PUBLIC lineage keys to their current sealed head sigs. This is
@@ -1967,8 +1948,58 @@ async function getGrant(request, env) {
 // bundle) verifies the index END-TO-END — this worker, or any mirror
 // serving the same JSON from a static file, can withhold an index but never
 // forge one. Monotonic created_at closes the rollback hole: a replayed
-// older index can never overwrite a newer one. Kept in its own KV namespace
-// (HIVES) because R2 objects here are content-addressed and this is not.
+// older index can never overwrite a newer one.
+//
+// ADDRESSED BY SIGNATURE, HELD IN A POOL (jwize 2026-09-25: only signatures
+// are queried; state lives only in pools of meaning). The index is the member
+// of sign('hive:indexes') named by its publisher's key:
+// GET/PUT /<sign('hive:indexes')>/<pubkey>. The KV namespace (HIVES) that held
+// indexes before is read as a drain source and never written.
+const HIVE_INDEXES_MEANING = 'hive:indexes'
+
+async function heldIndexRaw(env, pubkey) {
+  const object = await env.CONTENT?.get?.(`${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`)
+  if (object) return new TextDecoder().decode(await object.arrayBuffer())
+  return (await env.HIVES?.get?.(pubkey)) ?? null
+}
+
+async function holdIndex(env, pubkey, evt) {
+  await env.CONTENT.put(`${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`, JSON.stringify(evt), {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+  })
+}
+
+/** The member names of a pool of meaning: the R2 keys under sign(meaning)/. */
+async function poolMemberNames(env, meaning) {
+  const pool = await poolAddress(meaning)
+  const names = []
+  if (!env.CONTENT?.list) return names
+  let cursor
+  do {
+    const page = await env.CONTENT.list({ prefix: `${pool}/`, cursor, limit: 1000 })
+    for (const object of page.objects ?? []) {
+      const name = String(object.key ?? '').slice(pool.length + 1)
+      if (name && !name.includes('/')) names.push(name)
+    }
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+  return names
+}
+
+/** Membership only: an empty member named `name` under sign(meaning). */
+async function addPoolMember(env, meaning, name) {
+  const key = `${await poolAddress(meaning)}/${name}`
+  if (!env.CONTENT?.put || await env.CONTENT.head?.(key)) return
+  await env.CONTENT.put(key, new Uint8Array(0), { onlyIf: new Headers({ 'If-None-Match': '*' }) })
+}
+
+/** A KV list a pool replaced: read as a drain source, never written. */
+async function drainedList(env, key) {
+  try {
+    const list = JSON.parse((await env.HIVES?.get?.(key)) ?? '[]')
+    return Array.isArray(list) ? list.map(String) : []
+  } catch { return [] }
+}
 
 function validHiveEventContent(evt) {
   let parsed
@@ -1991,7 +2022,7 @@ async function validOfferingLocations(evt) {
   return true
 }
 
-// PUT /hive/<pubkey> — NIP-98 proves the CALLER, the body event proves the
+// PUT /<sign('hive:indexes')>/<pubkey> — NIP-98 proves the CALLER, the body event proves the
 // INDEX. Both must be the path pubkey: a valid guest can't plant an index
 // under someone else's key, and a leaked index event can't be replanted by
 // a stranger (the NIP-98 envelope binds this URL + freshness).
@@ -2011,7 +2042,7 @@ async function putHive(request, env, pubkey) {
   if (!await validOfferingLocations(evt)) return text(400, 'offering location is not the hash of its meaning and key')
 
   let stored = null
-  try { stored = JSON.parse((await env.HIVES.get(pubkey)) ?? 'null') } catch { stored = null }
+  try { stored = JSON.parse((await heldIndexRaw(env, pubkey)) ?? 'null') } catch { stored = null }
   if (stored) {
     if (String(stored.id || '') === String(evt.id || '')) {
       return await advancePublishedLocations(env, pubkey, evt)
@@ -2022,7 +2053,8 @@ async function putHive(request, env, pubkey) {
       return text(409, 'a newer (or same-age) index is already held - refusing rollback')
     }
   }
-  await env.HIVES.put(pubkey, JSON.stringify(evt))
+  if (!env.CONTENT?.put) return text(503, 'this host holds no pools')
+  await holdIndex(env, pubkey, evt)
   await noteTranslators(env, pubkey, evt)
   await noteAssessors(env, pubkey, evt)
   if (!await advancePublishedLocations(env, pubkey, evt)) {
@@ -2032,11 +2064,11 @@ async function putHive(request, env, pubkey) {
   return text(stored ? 200 : 201, `hive index updated for ${pubkey.slice(0, 12)}...`)
 }
 
-// GET /hive/<pubkey> — open read, never cached: the whole point of the
+// GET /<sign('hive:indexes')>/<pubkey> — open read, never cached: the whole point of the
 // pointer is freshness. The client re-verifies the schnorr signature, so
 // serving it needs no auth and grants no trust.
 async function getHive(request, env, pubkey) {
-  const raw = await env.HIVES.get(pubkey)
+  const raw = await heldIndexRaw(env, pubkey)
   if (raw == null) return text(404, 'no hive index for this key')
   return new Response(raw, {
     status: 200,
@@ -2271,6 +2303,16 @@ export default {
       return text(403, 'a sandbox door runs no worker from the heap')
     }
 
+    // A PUBLISHER'S SIGNED INDEX — the member of sign('hive:indexes') named by
+    // their key (see putHive/getHive). Before every heap and pool branch, which
+    // would read /<sig>/<name> as a named file.
+    const indexMatch = pathname.match(/^\/([0-9a-f]{64})\/([0-9a-f]{64})$/)
+    if (indexMatch && indexMatch[1] === await poolAddress(HIVE_INDEXES_MEANING)) {
+      if (method === 'GET' || method === 'HEAD') return getHive(request, env, indexMatch[2])
+      if (method === 'PUT') return putHive(request, env, indexMatch[2])
+      return text(405, 'method not allowed')
+    }
+
     // A SANDBOX DOOR'S POOLS — its own bag and its assessments — answered
     // before the published-route bag and the pool listing, which would read
     // both as private. The label test is free: only a try- host pays a read.
@@ -2346,11 +2388,18 @@ export default {
         const heap = (dest === 'script' || dest === 'worker' || dest === 'sharedworker')
           ? await serveModule(request, env, sigMatch[2])
           : await serveBlob(request, env, sigMatch[2], named ? suffixType(pathname) : null)
-        // The community's translations, at the pool's own derived address —
-        // the one-file index a published-pool probe fetches.
+        // The one-file indexes answered at a pool's own derived address —
+        // what a published-pool probe fetches: the community's translations,
+        // and this host's publications and trials (jwize 2026-09-25: no named
+        // route answers them).
         if (heap.status === 404 && !isAlias && !named) {
           const locale = await localeAtAddress(env, sigMatch[2])
           if (locale) return serveTranslations(request, env, locale)
+          if (sigMatch[2] === await poolAddress(HOST_PUBLICATIONS_MEANING)) return servePublications(request, (await route()).env)
+          if (sigMatch[2] === await poolAddress(HOST_TRIALS_MEANING)) {
+            const routed = await route()
+            return serveTrials(request, routed.env, routed.implicit ? routed.zone : requestUrl.hostname)
+          }
         }
         // A front-door apex also serves the shim's OWN bytes (its pinned
         // bootstrap, its packages), which live with the card, not in the heap.
@@ -2421,25 +2470,13 @@ export default {
       return text(405, 'method not allowed')
     }
 
-    // The community's translations for a locale, for people: who translated,
-    // who is missing what. Served on every host name, before any site logic.
-    const i18nMatch = pathname.match(/^\/i18n\/([a-z]{2,3}(?:-[a-z0-9]{2,8})?)\.json$/)
-    if (i18nMatch && (method === 'GET' || method === 'HEAD')) return serveTranslations(request, env, i18nMatch[1])
-
-    // Hive pointer — the per-publisher path→head index (see putHive/getHive).
-    const hiveMatch = pathname.match(/^\/hive\/([0-9a-f]{64})$/)
-    if (hiveMatch) {
-      if (method === 'GET' || method === 'HEAD') return getHive(request, env, hiveMatch[1])
-      if (method === 'PUT') return putHive(request, env, hiveMatch[1])
-      return text(405, 'method not allowed')
-    }
 
     // THE FRONT DOOR — an apex is the entrance to its domain, not a hive: the
     // shim host card (HOST_DOOR_ORIGIN, a static Pages deployment) draws it,
-    // and lists the hives switched on here from /publications.json. Every
+    // and lists the hives switched on here from sign('host:publications'). Every
     // machine read stays on this worker — flat sigs and pools are answered
     // above, the index and the ledger here — so the card reads the one heap.
-    if (site?.frontDoor && (method === 'GET' || method === 'HEAD') && pathname !== '/publications.json' && pathname !== '/trials.json') {
+    if (site?.frontDoor && (method === 'GET' || method === 'HEAD')) {
       return serveFrontDoor(request, env)
     }
 
@@ -2448,10 +2485,8 @@ export default {
     // including /revisions, receives the shared read-only engine.
     if (site && (method === 'GET' || method === 'HEAD')) {
       // Every open trial on this zone — from its apex or any door on it.
-      if (pathname === '/trials.json') return serveTrials(request, env, implicit ? siteZone : requestUrl.hostname)
       // A `try-` name under a zone is a sandbox door, not a website.
       if (implicit && SANDBOX_LABEL_RE.test(site.lineage)) return serveSandbox(request, env, site, siteZone)
-      if (pathname === '/publications.json') return servePublications(request, env)
       // Signed module imports — the visitor engine maps bee/dependency
       // imports to /content/<sig>. Same immutable blob as the flat read,
       // but with a JavaScript MIME: browsers enforce strict MIME checks on

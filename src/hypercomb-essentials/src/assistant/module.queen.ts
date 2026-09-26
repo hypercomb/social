@@ -88,7 +88,7 @@
 // Only a courtesy: this file is itself the publisher's code at their door,
 // and the host's gate is the real guard.
 
-import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, isSandboxDoor, sandboxDoorOf, type I18nProvider, type InstallProvider, type ModuleDraftsProvider } from '@hypercomb/core'
+import { QueenBee, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, MODULE_DRAFTS_IOC_KEY, isSandboxDoor, sandboxDoorOf, type I18nProvider, type InstallProvider, type ModuleDraftsProvider, registerPoolMeaning } from '@hypercomb/core'
 import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer.js'
 import { JEV_IOC_KEY, jevDoctrineSections, type JevReadingInput, type JevReadingResult, type JevPassInput, type JevPassResult } from './jev-decision.js'
 import { assessSandbox, changedPaths, countedAssessors, doorReader, jevReadTrial, publishChange, readChange, readSandboxDoor, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
@@ -240,7 +240,7 @@ export const sandboxName = (change: string): string => {
 }
 
 /** The zone sandboxes open on for a host: the sandbox zone for the public
- *  host, the host's own zone otherwise. Its /trials.json lists them. */
+ *  host, the host's own zone otherwise. Its sign('host:trials') lists them. */
 export const sandboxZoneUrl = (host: string): string => {
   const bare = host.replace(/^https?:\/\//, '').replace(/\/+$/, '')
   const publicHost = PUBLIC_CONTENT_HOSTS.includes(bare) || !bare
@@ -296,7 +296,7 @@ const counted = async (): Promise<ReadonlySet<string>> => {
 /** The trials a zone lists, or why it lists none. */
 const zoneTrials = async (zone: string): Promise<{ ok: true; trials: SandboxTrial[] } | { ok: false; reason: string }> => {
   try {
-    const res = await fetch(`${zone}/trials.json`, { cache: 'no-store' })
+    const res = await fetch(`${zone}/${await registerPoolMeaning('host:trials')}`, { cache: 'no-store' })
     if (!res.ok) return { ok: false, reason: `it answered ${res.status}` }
     return { ok: true, trials: trialsOf(await res.json()) }
   } catch (error) {

@@ -89,7 +89,7 @@ ledger the facet writer keeps (`facet:minted`) is kept for stages too.
 
 **R3 — One signed write, two pointers, never two facts.** A stranger never
 lists a directory. The publisher's signed record — the hive index
-`/hive/<pubkey>` (kind 30564) today; the attested head map when
+`/<sign('hive:indexes')>/<pubkey>` (kind 30564) today; the attested head map when
 `publish-branch.ts` moves onto it per the lineage doc's migration table —
 carries, in the SAME signed PUT, a pointer per stage: the root key
 `stage:<word>` whose value is the sig of the author's SIGNED HEAD CLAIM for

@@ -8,7 +8,7 @@
 // `susan.hypercomb.com` its website, with no configuration anywhere. A
 // hand-written list on the splash would therefore be stale the moment somebody
 // publishes. The worker already derives the ledger from the publishers' signed
-// indexes (`/publications.json` → `servePublications` in
+// indexes (sign('host:publications') → `servePublications` in
 // hypercomb-relay/blossom-worker/worker.js); this reads that ledger, keeps the
 // doors that are under this zone, and writes hosts.json — which build.cjs bakes
 // into the page.
@@ -47,10 +47,11 @@ const LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 // belongs once the Azure→worker cutover lands; today the apex is the Azure app,
 // which rewrites every unknown path to index.html — so a 200 proves nothing and
 // every answer is validated as a real ledger before it is believed. The second
-// entry is any label on the zone: `/publications.json` is served by every
+// entry is any label on the zone: sign('host:publications') is served by every
 // resolved site host, published or not, so it answers even when nothing is
 // published under that name.
-const LEDGERS = [`https://${ZONE}/publications.json`, `https://directory.${ZONE}/publications.json`]
+const PUBLICATIONS = require('crypto').createHash('sha256').update('host:publications').digest('hex')
+const LEDGERS = [`https://${ZONE}/${PUBLICATIONS}`, `https://directory.${ZONE}/${PUBLICATIONS}`]
 
 const get = async (url, ms = 12_000) => {
   const stop = AbortSignal.timeout(ms)

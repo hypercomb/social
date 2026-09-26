@@ -68,7 +68,7 @@ const server = http.createServer(async (request, response) => {
       response.end(JSON.stringify({ layer: head, pubkey, lineage: 'revolucion', title: 'Revolución', publishedAt: createdAt }))
       return
     }
-    if (url.pathname === `/hive/${pubkey}`) {
+    if (url.pathname === `/${createHash('sha256').update('hive:indexes').digest('hex')}/${pubkey}`) {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
       response.end(JSON.stringify(signedIndex))
       return

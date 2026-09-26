@@ -572,7 +572,7 @@ back to the path-keyed bag.
   which is why the bucket is not optional.
 - Two host pieces gate the interop claim: a directory branch for live hosts
   (relay), or a signed `heads: Record<moleculeSig, headSuccessionSig>` map in
-  `/hive/<pubkey>` for static hosts (Pages, buckets). Until one ships,
+  `/<sign('hive:indexes')>/<pubkey>` for static hosts (Pages, buckets). Until one ships,
   cross-host search is designed but not reachable.
 - Every root walker must learn "the ENTRY decides, never the directory".
 - GC roots become every head entry in every molecule: with no parent→child

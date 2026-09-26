@@ -28,7 +28,7 @@ const { pubkey, lineage, layer: head } = await marker.json()
 if (![pubkey, head].every(value => /^[a-f0-9]{64}$/.test(String(value))) || !lineage) {
   throw new Error('the door record has no signed root coordinates')
 }
-const indexResponse = await fetch(new URL(`/hive/${pubkey}`, route), { cache: 'no-store' })
+const indexResponse = await fetch(new URL(`/${sha('hive:indexes')}/${pubkey}`, route), { cache: 'no-store' })
 if (!indexResponse.ok) throw new Error(`publisher index: HTTP ${indexResponse.status}`)
 const index = await indexResponse.json()
 if (index.kind !== 30564 || index.pubkey !== pubkey || !verifyEvent(index)) {

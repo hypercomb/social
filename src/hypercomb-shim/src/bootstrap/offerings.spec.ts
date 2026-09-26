@@ -6,6 +6,12 @@ import { addOffering, addPublicCreation, listActiveOfferings, listActivePublicCr
   turnOffOffering, turnOffPublicCreation, type Adoption, type Offering } from './offerings'
 import { currentLocationLayer, locationAddress } from '@hypercomb/runtime/location-layer'
 
+// A publisher's signed index is the member of sign('hive:indexes') named by
+// their key — the only address a host answers it at.
+const INDEXES = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('hive:indexes')))]
+  .map(byte => byte.toString(16).padStart(2, '0')).join('')
+
+
 const head = 'a'.repeat(64)
 const index = finalizeEvent({
   kind: 30564,
@@ -67,7 +73,7 @@ describe('location offerings', () => {
       seen.push(url)
       if (url === `https://example.com/content/${pool}/`) return new Response(`${member}\n`)
       if (url === `https://example.com/content/${pool}/${member}`) return new Response(bytes)
-      if (url === `https://garden.example.com/hive/${index.pubkey}`) return Response.json(index)
+      if (url === `https://garden.example.com/${INDEXES}/${index.pubkey}`) return Response.json(index)
       if (url === `https://garden.example.com/content/${location}/`) return new Response('00000000\n00000002\n')
       if (url === `https://garden.example.com/content/${location}/00000002`) return Response.json({ layer: head })
       return new Response(null, { status: 404 })
@@ -90,7 +96,7 @@ describe('location offerings', () => {
       const url = String(input)
       if (url === `https://example.com/content/${pool}/`) return new Response(`${member}\n`)
       if (url === `https://example.com/content/${pool}/${member}`) return new Response(bytes)
-      if (url === `https://garden.example.com/hive/${index.pubkey}`) return Response.json(index)
+      if (url === `https://garden.example.com/${INDEXES}/${index.pubkey}`) return Response.json(index)
       if (url === `https://garden.example.com/content/${location}/`) return new Response('00000001\n')
       if (url === `https://garden.example.com/content/${location}/00000001`) return Response.json({ layer: 'b'.repeat(64) })
       return new Response(null, { status: 404 })
@@ -109,7 +115,7 @@ describe('location offerings', () => {
       const url = String(input)
       if (url === `https://example.com/content/${pool}/`) return new Response(`${member}\n`)
       if (url === `https://example.com/content/${pool}/${member}`) return new Response(bytes)
-      if (url === `https://garden.example.com/hive/${index.pubkey}`) return Response.json(index)
+      if (url === `https://garden.example.com/${INDEXES}/${index.pubkey}`) return Response.json(index)
       return new Response(null, { status: 404 })
     }))
     expect(await readOfferings('example.com')).toEqual([])
@@ -153,7 +159,7 @@ describe('public creation locations', () => {
       const url = String(input)
       if (url === `https://${host}/content/${pool}/`) return new Response(`${member}\n`)
       if (url === `https://${host}/content/${pool}/${member}`) return new Response(memberText)
-      if (url === `https://${host}/hive/${signed.pubkey}`) return Response.json(servedIndex)
+      if (url === `https://${host}/${INDEXES}/${signed.pubkey}`) return Response.json(servedIndex)
       if (url === `https://${host}/content/${location}/`) return new Response('00000000\n')
       if (url === `https://${host}/content/${location}/00000000`) return Response.json({ layer: bagHead })
       if (url === `https://${host}/${head}`) return new Response(metaText)
@@ -405,8 +411,8 @@ describe('one-click activation', () => {
         if (current && segments.length === 1) return new Response('00000000\n')
         if (current && segments[1] === '00000000') return Response.json({ layer: current })
       }
-      if (url.pathname.startsWith('/hive/')) {
-        const index = publicIndexes.get(`${url.host}:${url.pathname.slice('/hive/'.length)}`)
+      if (url.pathname.startsWith(`/${INDEXES}/`)) {
+        const index = publicIndexes.get(`${url.host}:${url.pathname.slice(`/${INDEXES}/`.length)}`)
         return index ? Response.json(index) : new Response(null, { status: 404 })
       }
       const sig = url.pathname.slice(1)

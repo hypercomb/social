@@ -78,7 +78,10 @@ const readDoor = (page) => page.evaluate(async () => {
 
 const hostState = async () => (await fetch(`http://${HOST}/__state`)).json()
 // The zone's own listing of its trials (the local binding makes the zone an apex site).
-const trialsOnZone = async () => (await (await fetch(`http://${HOST}/trials.json`, { cache: 'no-store' })).json()).trials ?? []
+// Named routes are retired: a host answers these at signatures only.
+const TRIALS = require('crypto').createHash('sha256').update('host:trials').digest('hex')
+const INDEXES = require('crypto').createHash('sha256').update('hive:indexes').digest('hex')
+const trialsOnZone = async () => (await (await fetch(`http://${HOST}/${TRIALS}`, { cache: 'no-store' })).json()).trials ?? []
 const channelOf = (state, pubkey, key) => state.hives[pubkey] ? JSON.parse(state.hives[pubkey].content).roots[key] ?? null : null
 const selectionHas = (page, path) => page.evaluate(async p => (await window.ioc.get('@hypercomb.social/Install').selection()).nodes.some(n => n.path === p), path)
 const proofOf = page => H.waitFor(() => page.evaluate(() => globalThis.__hivePublishProof ?? null), 90_000, 800)
@@ -217,8 +220,8 @@ const announcedOn = page => page.evaluate(() => {
   }))
   check('the door cannot dial the visitor\'s own machine (the local bridge)', bridgeDial !== 'allowed', bridgeDial)
   const doorKey = await tester.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/NostrSigner').getPublicKeyHex())
-  const doorWrite = await tester.evaluate(([host, key]) => fetch(`http://${host}/hive/${key}`, { method: 'PUT', body: '{}' })
-    .then(r => `status:${r.status}`, error => `refused:${error?.name}`), [WRITE, doorKey])
+  const doorWrite = await tester.evaluate(([host, key, indexes]) => fetch(`http://${host}/${indexes}/${key}`, { method: 'PUT', body: '{}' })
+    .then(r => `status:${r.status}`, error => `refused:${error?.name}`), [WRITE, doorKey, INDEXES])
   check('the door writes nothing at the host', doorWrite === 'status:403' || doorWrite.startsWith('refused:'), doorWrite)
   const doorShell = await tester.evaluate(async () => {
     const core = await import('@hypercomb/core')

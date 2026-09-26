@@ -323,6 +323,14 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // The public creation gallery and this participant's accepted references.
   // Both are pools at derived meaning addresses, not root-level files.
   'host:offerings',
+  // A host's one-file indexes, answered at their own addresses — never a
+  // named route (jwize 2026-09-25): its publications and its open trials.
+  'host:publications',
+  'host:trials',
+  // Every publisher's signed index, the member named by their key.
+  'hive:indexes',
+  // Whose code may run this hive (essentials sharing/code-trust.ts).
+  'trust:code',
   'host:adoptions',
   // A visitor's choice waiting for this hive's review click, and a newer
   // signed head waiting for the participant to take it

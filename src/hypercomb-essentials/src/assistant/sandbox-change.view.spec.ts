@@ -5,6 +5,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+// The zone lists its trials at sign('host:trials') — never a named route.
+const TRIALS = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('host:trials')))]
+  .map(byte => byte.toString(16).padStart(2, '0')).join('')
+
 vi.hoisted(() => {
   ;(window as unknown as { ioc: unknown }).ioc = {
     register: () => { /* noop */ },
@@ -52,7 +56,7 @@ const realFetch = globalThis.fetch
 beforeEach(() => {
   globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
     const address = String(url)
-    if (address === 'https://hypercomb.com/trials.json') return new Response(JSON.stringify(listing(['try-zoom', 'try-other'])))
+    if (address === `https://hypercomb.com/${TRIALS}`) return new Response(JSON.stringify(listing(['try-zoom', 'try-other'])))
     return new Response('nothing', { status: 404 })
   }) as typeof fetch
   element = document.createElement(SANDBOX_CHANGE_SURFACE) as InstanceType<typeof SandboxChangeElement>

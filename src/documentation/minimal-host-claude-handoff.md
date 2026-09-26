@@ -21,7 +21,7 @@ pushed to `development`, published to npm, or deployed to the controlled domains
   completes local verification and activation. An update badge belongs on the
   tile or source; there is no page-wide automatic update action. Off is a new
   location layer. Earlier signed bytes remain addressable.
-- The visitor UI must not use `publications.json` as its offering catalog. The
+- The visitor UI must not use `sign('host:publications')` as its offering catalog. The
   relay may retain that endpoint for older host/operator contracts. Publisher
   choices and public switch state come from signed index content and pools.
 - GitHub is for minimum device builds. Creation source, revisions, and payload

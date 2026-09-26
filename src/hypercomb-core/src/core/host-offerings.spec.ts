@@ -3,6 +3,12 @@ import { finalizeEvent, verifyEvent } from 'nostr-tools/pure'
 import { SignatureService } from './signature.service.js'
 import { readHostCreations, readHostOfferings } from './host-offerings.js'
 
+// A publisher's signed index is the member of sign('hive:indexes') named by
+// their key — the only address a host answers it at.
+const INDEXES = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('hive:indexes')))]
+  .map(byte => byte.toString(16).padStart(2, '0')).join('')
+
+
 const sha = (value: string): Promise<string> =>
   SignatureService.sign(new TextEncoder().encode(value).buffer as ArrayBuffer)
 
@@ -27,7 +33,7 @@ const offered = async (sourceHead: string | null, routeHead: string | null,
     seen.push(url)
     if (url === `https://${servingHost}/content/${pool}/`) return new Response(`${member}\n`)
     if (url === `https://${servingHost}/content/${pool}/${member}`) return new Response(bytes)
-    if (url === `https://garden.example.com/hive/${index.pubkey}`) return Response.json(index)
+    if (url === `https://garden.example.com/${INDEXES}/${index.pubkey}`) return Response.json(index)
     for (const [base, current] of [[`https://${servingHost}`, sourceHead],
       ['https://garden.example.com', routeHead]] as const) {
       if (current && url === `${base}/content/${location}/`) return new Response('00000000\n')
@@ -94,7 +100,7 @@ it('reads a signed creation from the static harness pool address', async () => {
     seen.push(url)
     if (url === `${base}/${pool}/`) return new Response(`${member}\n`)
     if (url === `${base}/${pool}/${member}`) return new Response(bytes)
-    if (url === `${base}/hive/${index.pubkey}`) return Response.json(index)
+    if (url === `${base}/${INDEXES}/${index.pubkey}`) return Response.json(index)
     if (url === `${base}/content/${location}/`) return new Response('00000000\n')
     if (url === `${base}/content/${location}/00000000`) return Response.json({ layer: head })
     if (url === `${base}/${head}`) return new Response(meta)

@@ -76,7 +76,7 @@ export interface HorizonCard {
  * community's whole horizon, so a word can be looked for ACROSS DOMAINS
  * without having visited or been offered anything first. A ledger card
  * names its publisher and every door the creation answers on; those doors
- * serve the publisher's signed index too (`/hive/<pubkey>` answers on a
+ * serve the publisher's signed index too (`/<sign('hive:indexes')>/<pubkey>` answers on a
  * site door and on the relay face alike), so they are the doors to ask.
  * Keyed so the same publisher listed by two hosts folds to one row with
  * both hosts' doors. Cards without a usable key contribute nothing.
@@ -134,7 +134,7 @@ export const contentDoorOf = (zone: unknown): string => {
 /**
  * EVERY DOOR WORTH ASKING FOR A ZONE, in reading order.
  *
- * The zone ITSELF is a door: `/hive/<pubkey>` is matched above the site branch
+ * The zone ITSELF is a door: `/<sign('hive:indexes')>/<pubkey>` is matched above the site branch
  * in the worker's router, so a published site serves its publisher's signed
  * index on its own hostname. Asking only the relay face threw that away — and
  * on a wildcard zone the relay face it minted did not exist. Both are asked

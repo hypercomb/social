@@ -35,7 +35,9 @@ const read = (page) => H.evalSafe(() => page.evaluate(async () => {
   const first = await read(page)
   console.log('after boot:', JSON.stringify(first))
   const index = await H.evalSafe(() => page.evaluate(async () => {
-    const r = await fetch('https://content.pluginthematrix.com/hive/eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a')
+    // The publisher's signed index: the member of sign('hive:indexes') named by their key.
+    const pool = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('hive:indexes')))].map(b => b.toString(16).padStart(2, '0')).join('')
+    const r = await fetch(`https://content.pluginthematrix.com/${pool}/eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a`)
     const j = await r.json(); const roots = JSON.parse(j.content).roots
     return roots['install:essentials']
   }))

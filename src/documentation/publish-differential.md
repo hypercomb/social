@@ -145,7 +145,7 @@ Three independent proofs, each answering a different lie.
 ### 1. Authenticity — schnorr, against a pinned pubkey
 
 `fetchHiveIndex(host, pubkey)` (in `hive-pointer.ts`) fetches
-`GET <scheme>://<host>/hive/<pubkey>` with `cache: 'no-store'` and then
+`GET <scheme>://<host>/<sign('hive:indexes')>/<pubkey>` with `cache: 'no-store'` and then
 refuses to trust the host: the body must be a kind-`30564` event
 (`HIVE_INDEX_EVENT_KIND`), its `pubkey` must equal the one we asked for, and
 `verifyEvent` must pass. A wrong pubkey and a bad signature are both
@@ -210,7 +210,7 @@ sha256-gates what it reads anyway (`public-content-endpoint.md`). So a cached
 200 on `/<sig>` is a true statement about the world: those bytes are
 retrievable under that name.
 
-`/hive/<pubkey>` is the one **mutable** object in the protocol. A cached 200
+`/<sign('hive:indexes')>/<pubkey>` is the one **mutable** object in the protocol. A cached 200
 there says only "some index existed", which is why the index is fetched
 `no-store`, verified by signature, and then compared for freshness against our
 own stamp. Content-addressing carries the byte tier; the index tier needs the

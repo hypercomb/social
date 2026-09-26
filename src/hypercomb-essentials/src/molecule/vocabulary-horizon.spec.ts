@@ -36,7 +36,7 @@ describe('the doors', () => {
   })
 
   // A published site serves its publisher's signed index on its OWN hostname:
-  // `/hive/<pubkey>` is matched above the site branch in the worker's router.
+  // `/<sign('hive:indexes')>/<pubkey>` is matched above the site branch in the worker's router.
   // Asking only the relay face threw that door away.
   it('asks the zone itself as well as the relay face', () => {
     expect(doorsOfZone('susan.hypercomb.com')).toEqual(['susan.hypercomb.com', 'content.hypercomb.com'])

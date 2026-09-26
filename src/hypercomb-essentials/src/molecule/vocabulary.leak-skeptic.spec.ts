@@ -133,7 +133,7 @@ describe('one press of Look', () => {
     // `buildHorizon` gives EVERY publisher the shared doors — every community
     // zone plus the standing public endpoint. `searchVocabulary` then asks
     // every door of every publisher concurrently, and `hiveIndexUrl` puts the
-    // publisher's key in the PATH (`https://<host>/hive/<pubkey>`).
+    // publisher's key in the PATH (`https://<host>/<sign('hive:indexes')>/<pubkey>`).
     //
     // So one press sends the standing endpoint one request per publisher this
     // participant has ever followed or visited: the follow graph, disclosed in

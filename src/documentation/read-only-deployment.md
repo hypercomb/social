@@ -102,7 +102,7 @@ The small conventional host surface is:
 GET /                 visitor engine; opens the designated current root
 GET /<sign(host)>/    the door's own bag: its numbered markers, newest last
 GET /<sign(host)>/000x one marker — what the door is (below), immutable
-GET /publications.json configured hosts plus their verified signed heads
+GET /<sign('host:publications')> configured hosts plus their verified signed heads
 GET /<64-hex sig>     immutable public object from the shared heap
 HEAD /<64-hex sig>    object presence/metadata probe
 ```
@@ -117,9 +117,9 @@ that changes the door (blossom-worker `locationMeta`), and a marker from before
 doors carried their meta gains a successor with the same head on its first
 read. The listing is no-store; every marker is immutable.
 
-`/publications.json` is a machine coordinate, not an alternate
+`/<sign('host:publications')>` is a machine coordinate, not an alternate
 server application. Human routes—including `/revisions`—always enter Core. The
-`/pluginthematrix` directory creation reads `/publications.json` and renders
+`/pluginthematrix` directory creation reads `/<sign('host:publications')>` and renders
 the approved published sites as square plates — the **publications view**
 (`/publications`, kind `visual:publications:view`; reader
 `sharing/publications-ledger.ts`, renderer
@@ -226,7 +226,7 @@ The one-time supervised sequence is:
    allowlists in `blossom-worker/wrangler.pluginthematrix.toml`, with its display label.
    **Completed locally 2026-08-28:** the supervised `/behaviors` test publish
    identified Jaime's key; only the public key is pinned in both bindings.
-4. Verify the door's bag `/<sign(host)>/`, `/publications.json`, `/revisions`, `/`, one deep link
+4. Verify the door's bag `/<sign(host)>/`, `/<sign('host:publications')>`, `/revisions`, `/`, one deep link
    such as `/journal`, and a direct `GET /<signature>`. The machine descriptors
    must name the signed current roots; `/revisions` must be rendered by Core;
    forged or unapproved indexes must remain invisible.

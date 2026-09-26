@@ -267,7 +267,7 @@ export interface SandboxSite {
   readonly assessments?: readonly { readonly pubkey: string; readonly record: string; readonly verdict: ReviewVerdict; readonly at: number }[]
 }
 
-/** One open trial on a zone, as the zone's /trials.json lists it (worker
+/** One open trial on a zone, as the zone's sign('host:trials') lists it (worker
  *  serveTrials): what its door serves, what its change touched, when it was
  *  committed, and the host AI's verdict. */
 export interface SandboxTrial {

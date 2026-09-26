@@ -27,6 +27,10 @@ import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferi
   type ActiveOffering, type ActivePublicCreation, type Adoption, type Offering, type PublicCreation,
   type PendingSelection, type ReplicationProgress } from './offerings'
 
+/** Where a publisher's signed index lives on any host: sign('hive:indexes'). */
+const HIVE_INDEXES: Promise<string> = crypto.subtle.digest('SHA-256', new TextEncoder().encode('hive:indexes'))
+  .then(bytes => [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join(''))
+
 const STYLE = `
 :host { all: initial }
 .card {
@@ -1212,7 +1216,7 @@ class HostPanelElement extends HTMLElement {
     const files = document.createElement('div')
     files.className = 'offer-files'
     for (const [label, href] of [
-      ['Signed index', new URL(`hive/${offer.pubkey}`, offer.route).href],
+      ['Signed index', ''],
       ['Payload bytes', new URL(offer.head, offer.route).href],
     ]) {
       const file = document.createElement('a')
@@ -1220,6 +1224,8 @@ class HostPanelElement extends HTMLElement {
       file.target = '_blank'
       file.rel = 'noopener'
       file.textContent = label
+      // The publisher's signed index: the member of sign('hive:indexes') named by their key.
+      if (!href) void HIVE_INDEXES.then(pool => { file.href = new URL(`${pool}/${offer.pubkey}`, offer.route).href })
       files.append(file)
     }
     const action = installed ? document.createElement('button') : document.createElement('a')

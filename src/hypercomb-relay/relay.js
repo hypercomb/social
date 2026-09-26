@@ -769,7 +769,10 @@ function resolveFlatSig(sig) {
 
 const receiptIndex = new ReceiptIndex(cfg.contentDir, resolveFlatSig)
 
-// ── GET/PUT /hive/<pubkey> — the signed index a publisher owns here ──────────
+// ── GET/PUT /<sign('hive:indexes')>/<pubkey> — the signed index a publisher owns here
+//
+// Addressed by signature only (jwize 2026-09-25): the index is the member of
+// the pool sign('hive:indexes') named by its publisher's key. No named route.
 //
 // A HOST THAT CARRIES BYTES BUT CANNOT SAY WHO SIGNED THEM IS NOT A HOST.
 // Every atom on this machine is content-addressed and verifiable, but the one
@@ -790,10 +793,12 @@ const receiptIndex = new ReceiptIndex(cfg.contentDir, resolveFlatSig)
 // is theirs, and nobody else may move it.
 const HIVE_INDEX_KIND = 30564
 
+const HIVE_INDEXES_POOL = sha256Hex(Buffer.from('hive:indexes', 'utf8'))
+
 function tryServeHiveIndex(req, res) {
-  const match = (req.url || '').split('?')[0].match(/^\/hive\/([0-9a-f]{64})$/)
-  if (!match) return false
-  const pubkey = match[1]
+  const match = (req.url || '').split('?')[0].match(/^\/([0-9a-f]{64})\/([0-9a-f]{64})$/)
+  if (!match || match[1] !== HIVE_INDEXES_POOL) return false
+  const pubkey = match[2]
 
   if (req.method === 'GET' || req.method === 'HEAD') {
     const row = newestEvent(pubkey, HIVE_INDEX_KIND)
@@ -1506,7 +1511,7 @@ const server = createServer((req, res) => {
   if (tryServeReplicationStatus(req, res)) return
 
   // The publisher's signed index — must precede the generic content branch,
-  // which would otherwise treat /hive/<pubkey> as a path in the heap.
+  // which would otherwise treat /<sign('hive:indexes')>/<pubkey> as a pool member in the heap.
   if (tryServeHiveIndex(req, res)) return
 
   // Read side: GET/HEAD/OPTIONS content serving (returns true if handled)

@@ -14,7 +14,7 @@
 // authenticates the HTTP write with a NIP-98 header — the same envelope
 // HostSyncService uses for byte PUTs.
 
-import { get, poolKindOfMeaning } from '@hypercomb/core'
+import { get, poolKindOfMeaning, registerPoolMeaning } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { HIVE_INDEX_EVENT_KIND, HIVE_LINK_VERSION } from './hive-link.js'
 
@@ -69,10 +69,14 @@ const NIP98_KIND = 27235
 const LOOPBACK_RE = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 
-export function hiveIndexUrl(host: string, pubkey: string): string {
+/** Where a publisher's signed index lives on a host: the member of the pool
+ *  sign('hive:indexes') named by their key — addressed by signature only
+ *  (jwize 2026-09-25: no named route). */
+export async function hiveIndexUrl(host: string, pubkey: string): Promise<string> {
   const bare = host.replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
   const scheme = LOOPBACK_RE.test(bare) ? 'http' : 'https'
-  return `${scheme}://${bare}/hive/${pubkey}`
+  const pool = await registerPoolMeaning('hive:indexes')
+  return `${scheme}://${bare}/${pool}/${pubkey}`
 }
 
 /** Fetch + verify one host's copy of the publisher's hive index, REPORTING
@@ -88,7 +92,7 @@ export async function fetchHiveIndex(host: string, pubkey: string): Promise<Hive
   if (!SIG_RE.test(key)) return { ok: false, reason: 'malformed' }
   let res: Response
   try {
-    res = await fetch(hiveIndexUrl(host, key), { cache: 'no-store' })
+    res = await fetch(await hiveIndexUrl(host, key), { cache: 'no-store' })
   } catch { return { ok: false, reason: 'unreachable' } }
   if (!res.ok) return { ok: false, reason: 'http', status: res.status }
 
@@ -219,7 +223,7 @@ export async function putHiveManifest(
   const createdAt = Number(signed?.['created_at'] ?? 0) || 0
   if (!SIG_RE.test(pubkey)) return { ok: false, pubkey: '', createdAt, reason: 'signer returned no pubkey' }
 
-  const url = hiveIndexUrl(host, pubkey)
+  const url = await hiveIndexUrl(host, pubkey)
   const auth = await nip98Header(signer, url, 'PUT')
   if (!auth) return { ok: false, pubkey, createdAt, reason: 'nip-98 signing failed' }
 

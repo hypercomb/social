@@ -1,7 +1,7 @@
 // The publication ledger — the read side of publish/unpublish.
 //
 // A publication-directory host (pluginthematrix.com) answers
-// `GET /publications.json` with its operator-approved publisher bindings
+// its publications — the one-file index at sign('host:publications') — with its operator-approved publisher bindings
 // and, per publisher, the verified signed head of that lineage — null until
 // the approved key has actually published it. The worker builds the answer
 // from the same publisher-signed hive indexes every other read trusts, so
@@ -16,6 +16,8 @@
 // falls back to the canonical public directory, whose worker answers with
 // open CORS. The fallback is a default, not a binding — a different
 // deployment's own origin always answers first.
+
+import { registerPoolMeaning } from '@hypercomb/core'
 
 /** One approved publisher on a site binding, as the worker reports it. */
 export interface LedgerPublisher {
@@ -75,7 +77,8 @@ export interface PublicationCard {
 /** The public directory this beehavior reads when its own origin has no
  *  ledger (authoring hive, dev shell). A deployed directory site never
  *  reaches this — same origin answers first. */
-export const CANONICAL_DIRECTORY = 'https://pluginthematrix.com/publications.json'
+/** The directory host whose publications are asked when no other is named. */
+export const CANONICAL_DIRECTORY = 'https://pluginthematrix.com'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 
@@ -148,9 +151,12 @@ export async function fetchPublicationCards(
   exclude: { host?: string; lineage?: string } = {},
   directory?: string,
 ): Promise<PublicationCard[] | null> {
+  // A host's publications: the one-file index at sign('host:publications') —
+  // addressed by signature, never a named route (jwize 2026-09-25).
+  const publications = await registerPoolMeaning('host:publications')
   const doors = directory
-    ? [`${directory.replace(/\/+$/, '')}/publications.json`]
-    : ['/publications.json', CANONICAL_DIRECTORY]
+    ? [`${directory.replace(/\/+$/, '')}/${publications}`]
+    : [`/${publications}`, `${CANONICAL_DIRECTORY}/${publications}`]
   for (const url of doors) {
     try {
       const response = await fetch(url, { cache: 'no-store' })
