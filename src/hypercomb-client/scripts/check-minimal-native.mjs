@@ -66,15 +66,6 @@ if (root.status !== 200 || sha(root.body) !== layer.head) {
   throw new Error('selected root bytes are absent or do not hash to their name')
 }
 
-const siteReply = await request('/site.json')
-if (expected === 'on') {
-  if (siteReply.status !== 200) throw new Error(`enabled site descriptor returned ${siteReply.status}`)
-  const site = json(siteReply)
-  if (site.head !== layer.head || site.pubkey !== layer.pubkey || site.lineage !== layer.lineage) {
-    throw new Error('site descriptor disagrees with the latest activation layer')
-  }
-} else if (siteReply.status !== 404) {
-  throw new Error(`disabled site descriptor returned ${siteReply.status}, expected 404`)
-}
-
-console.log(`${hostname} ${expected}: marker ${markerName}, layer ${layerSig}, root ${layer.head}; /site.json ${siteReply.status}`)
+// No named route describes the door: the bag, its marker and the layer it
+// names — every read above a signature — are the whole answer.
+console.log(`${hostname} ${expected}: marker ${markerName}, layer ${layerSig}, root ${layer.head}`)

@@ -10,7 +10,6 @@
 //!   GET /<sig>                content bytes        (THE STORE)
 //!   GET /<bagSig>/00000007    a revision marker    (THE STORE)
 //!   GET /<poolSig>/<member>   a pool member        (THE STORE)
-//!   GET /site.json            active host location (latest bag marker)
 //!   GET /a/deep/hive/location the shell, 200       (a location is not a file)
 //! ```
 //!
@@ -53,7 +52,6 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
-mod activation;
 mod http;
 
 pub use http::{Body, Reply};
@@ -397,30 +395,6 @@ pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) 
     cors(Reply::new(404))
 }
 
-/// Resolve a request addressed to a particular host name. The hostname names
-/// a local activation location; `resolve` remains the common content and shell
-/// contract for all hosts.
-pub fn resolve_on_host(
-    shell: &Path, hive: &dyn HiveSource, method: &str, target: &str, host: Option<&str>,
-) -> Reply {
-    if target.split(['?', '#']).next() == Some("/site.json") {
-        if method == "OPTIONS" {
-            return resolve(shell, hive, method, target);
-        }
-        if method != "GET" && method != "HEAD" {
-            return cors(Reply::new(405).with("allow", "GET, HEAD, OPTIONS"));
-        }
-        return match host.and_then(|name| activation::site_descriptor(hive, name)) {
-            Some(bytes) => cors(Reply::new(200))
-                .with("content-type", "application/json; charset=utf-8")
-                .with("cache-control", "no-store")
-                .body(Body::Bytes(bytes)),
-            None => cors(Reply::new(404)),
-        };
-    }
-    resolve(shell, hive, method, target)
-}
-
 /// How many connections may be in flight before the host sheds load.
 ///
 /// A thread per connection is the right shape for a host whose work is a B-tree
@@ -587,9 +561,7 @@ fn handle(stream: TcpStream, shell: &Path, hive: &dyn HiveSource) {
                 return;
             }
         };
-        let reply = resolve_on_host(
-            shell, hive, &request.method, &request.target, request.host.as_deref(),
-        );
+        let reply = resolve(shell, hive, &request.method, &request.target);
         let keep_alive = request.keep_alive;
         let sent = http::write_reply(&mut writer, &reply, request.method != "HEAD", keep_alive);
         if sent.is_err() || !keep_alive {
