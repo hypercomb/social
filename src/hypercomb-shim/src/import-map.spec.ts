@@ -9,7 +9,7 @@ vi.mock('@hypercomb/runtime/store', () => ({
   Store: { DEPENDENCIES_MEANING: 'dependencies', poolSignature: async () => 'd'.repeat(64) },
 }))
 
-import { resolveImportMap } from './import-map'
+import { liveAlready, resolveImportMap, sessionBound } from './import-map'
 
 const sig = (c: string): string => c.repeat(64)
 let bagReads = 0
@@ -65,5 +65,24 @@ describe('resolveImportMap', () => {
     await resolveImportMap()
     expect(bagReads).toBe(2)
     expect(Object.keys(localStorage).filter(k => k.startsWith('hc:bag:'))).toEqual([`hc:bag:${sig('2')}`])
+  })
+})
+
+describe('the pure kernel\'s map', () => {
+  const core = { '@hypercomb/core': 'blob:https://hypercomb.com/facade', '@hypercomb/core/processor': '/hypercomb-core.runtime.js' }
+  const deps = { '@scope/a': `/opfs/${sig('d')}/${sig('a')}` }
+  beforeEach(() => { Object.assign(window, { __hcCoreImports: core, __hcImportMapApplied: undefined }) })
+
+  it('does not make a controlled map session-bound: its core facade is a blob on every boot', () => {
+    expect(sessionBound({ ...deps, ...core })).toBe(false)
+    expect(sessionBound({ ...core, '@scope/a': 'blob:https://hypercomb.com/a' })).toBe(true)
+  })
+
+  it('is live when every entry is declared, whatever the key order', () => {
+    ;(window as any).__hcImportMapApplied = JSON.stringify({ imports: { ...core, ...deps } })
+    expect(liveAlready({ ...deps, ...core })).toBe(true)
+    expect(liveAlready({ ...deps, ...core, '@scope/b': `/opfs/${sig('d')}/${sig('b')}` })).toBe(false)
+    ;(window as any).__hcImportMapApplied = undefined
+    expect(liveAlready({ ...deps })).toBe(false)
   })
 })

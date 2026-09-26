@@ -102,7 +102,9 @@ const declareImports = (library: string): void => {
     '@hypercomb/core/processor': PROCESSOR,
   }
   let cached: Record<string, string> = {}
-  try { cached = JSON.parse(localStorage.getItem('hc:importmap') ?? '{}').imports ?? {} } catch { /* none */ }
+  // The cached entries point at /opfs/, which only the worker answers: an
+  // uncontrolled page replays none (the host appends its blob map late).
+  if (navigator.serviceWorker?.controller) try { cached = JSON.parse(localStorage.getItem('hc:importmap') ?? '{}').imports ?? {} } catch { /* none */ }
   const imports = { ...core, ...Object.fromEntries(Object.entries(cached).filter(([key]) => !(key in core))) }
   const json = JSON.stringify({ imports })
   const map = document.createElement('script')

@@ -14,10 +14,29 @@ declare const __HC_PURE__: boolean
 
 export type ResolvedImports = Record<string, string>
 
+/** The kernel's own entries (the pure build): `@hypercomb/core` is a blob
+ *  facade the kernel mints on EVERY boot, before this map exists. */
+const kernelCore = (): ResolvedImports =>
+  (window as Window & { __hcCoreImports?: ResolvedImports }).__hcCoreImports ?? {}
+
 /** A map minted for THIS page alone: blob: URLs die with it, so it is never
- *  cached for the next boot's early script (main.ts, cacheImportMap). */
-export const sessionBound = (imports: ResolvedImports): boolean =>
-  Object.values(imports).some(url => url.startsWith('blob:'))
+ *  cached for the next boot's early script (main.ts, cacheImportMap). The
+ *  kernel's core facade is a blob on every boot, controlled or not, so it
+ *  does not make a map session-bound. */
+export const sessionBound = (imports: ResolvedImports): boolean => {
+  const core = kernelCore()
+  return Object.entries(imports).some(([alias, url]) => url.startsWith('blob:') && core[alias] !== url)
+}
+
+/** Is every entry of `imports` already live in the map the page declared
+ *  before any module loaded (index.html's replay, or the kernel's)? Compared
+ *  entry by entry: the kernel's map orders its keys differently and carries
+ *  its core facade, so its JSON text never equals this map's. */
+export const liveAlready = (imports: ResolvedImports): boolean => {
+  let applied: ResolvedImports = {}
+  try { applied = JSON.parse((window as Window & { __hcImportMapApplied?: string }).__hcImportMapApplied ?? '{}').imports ?? {} } catch { return false }
+  return Object.entries(imports).every(([alias, url]) => applied[alias] === url)
+}
 
 /**
  * Build the runtime importmap by opening exactly one bag.
@@ -120,8 +139,8 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const aliasSource = new Map<string, string>()
   // Under the kernel, core is what the kernel declared (processor + the
   // signed library); re-deriving must keep it, or the map would disagree.
-  const kernelCore = (window as Window & { __hcCoreImports?: ResolvedImports }).__hcCoreImports
-  Object.assign(imports, kernelCore ?? { '@hypercomb/core': '/hypercomb-core.runtime.js' })
+  const core = (window as Window & { __hcCoreImports?: ResolvedImports }).__hcCoreImports
+  Object.assign(imports, core ?? { '@hypercomb/core': '/hypercomb-core.runtime.js' })
   if (typeof __HC_PURE__ !== 'boolean' || !__HC_PURE__) {
     imports['pixi.js'] = '/vendor/pixi.runtime.js'
   }

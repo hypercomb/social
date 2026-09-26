@@ -114,7 +114,7 @@ import { postCommunityDomainsToServiceWorker } from '@hypercomb/runtime/sw-domai
 // AOT compiler). `ioc.web` above is what installs the ambient `register()` /
 // `get()` globals the narrow modules expect at their module scope, which is
 // why narrowing is safe here and the import ORDER is not cosmetic.
-import { IMPORT_MAP_STORAGE_KEY, resolveImportMap, sessionBound } from './import-map'
+import { IMPORT_MAP_STORAGE_KEY, liveAlready, resolveImportMap, sessionBound } from './import-map'
 // Only the LOADER is compiled in — the acquisition it loads is not. That
 // bundle is fetched by signature at boot and verified before it runs, so
 // nothing below imports it and the type is the only thing that crosses.
@@ -139,6 +139,9 @@ import { mountSurfaces, scoreboardLine, surfaceReport } from './surfaces'
 /** How long a boot waits for a worker to register and activate. A first
  *  visit's worker is ready well inside it (measured locally: tens of ms). */
 const SW_READY_MS = 3000
+/** No worker became ready this boot: a reload cannot bring one, so the
+ *  uncontrolled page's reload-once (attachImportMap) is skipped. */
+let workerBlocked = false
 
 const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
@@ -151,7 +154,7 @@ const ensureSwControl = async (): Promise<void> => {
       navigator.serviceWorker.register('/hypercomb.worker.js', { scope: '/' }).then(() => navigator.serviceWorker.ready),
       new Promise<null>(resolve => setTimeout(() => resolve(null), SW_READY_MS)),
     ])
-    if (!reg) { console.warn('[shim] no service worker became ready — booting uncontrolled'); return }
+    if (!reg) { workerBlocked = true; console.warn('[shim] no service worker became ready — booting uncontrolled'); return }
     if (navigator.serviceWorker.controller) return
     // Hard-reload state: active worker, nothing installing/waiting —
     // controllerchange can never fire, so waiting buys nothing.
@@ -186,7 +189,7 @@ const reloadUnlessVisitor = (why: string): boolean => {
 const attachImportMap = async (): Promise<void> => {
   const imports = await resolveImportMap()
   const json = JSON.stringify({ imports })
-  if ((window as any).__hcImportMapApplied === json) return
+  if (liveAlready(imports)) return
 
   // A map minted for an uncontrolled page holds blob: URLs that die with it —
   // cached, it would replay dead specifiers into the next boot's early script.
@@ -212,6 +215,7 @@ const attachImportMap = async (): Promise<void> => {
   // every boot, so the guard for it is the state, not the map — a page that
   // stays uncontrolled (DevTools bypass, no worker at all) boots on the late
   // blob map and never loops.
+  if (bound && workerBlocked) return
   const guardValue = bound ? 'uncontrolled' : json
   let guard: string | null = null
   try { guard = sessionStorage.getItem(IMPORT_MAP_STORAGE_KEY) } catch {}
