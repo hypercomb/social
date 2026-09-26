@@ -325,9 +325,23 @@ function mergeBindings(fromVar, records) {
 
 /** A per-request view of env whose bindings include the operators' signed
  *  records — or env itself when no zone is operated or none verifies. */
+/** How long one isolate trusts the operators' signed bindings and a site's
+ *  open answer. Every request routes through them; a change is seen within
+ *  this window (the same bound as the bag's newest marker). */
+const SITE_TTL_MS = 5_000
+const heldBindings = new WeakMap()
+
 async function bindingsEnv(env, read = indexReader(env)) {
   const operators = siteOperators(env)
   if (!operators.length) return env
+  const held = heldBindings.get(env)
+  if (held && Date.now() - held.at < SITE_TTL_MS && held.hives === env.HIVES?.get) return held.view
+  const view = await readBindingsEnv(env, read, operators)
+  heldBindings.set(env, { at: Date.now(), view, hives: env.HIVES?.get })
+  return view
+}
+
+async function readBindingsEnv(env, read, operators) {
   const records = new Map()
   for (const [zone, pubkey] of operators) {
     const entries = await operatorRecord(env, read, zone, pubkey)
@@ -1168,6 +1182,47 @@ async function answerPackage(request, url, found, lineage) {
  *  index, so `<change>.<zone>` runs the package `try-<change>.<zone>` ran —
  *  the same signature, moved by one pointer. Read from the publisher the
  *  site's hive is read from; none stamped ⇒ the visitor engine's own package. */
+/** Is this site open, and what package does it run? A page asks fresh and
+ *  leaves the answer for its host; the bundled, content-addressed assets the
+ *  page then pulls reuse it for SITE_TTL_MS instead of re-reading indexes. */
+const openSites = new Map()
+async function siteOpen(env, site, read, host, reuse) {
+  const key = host.toLowerCase()
+  const held = openSites.get(key)
+  if (reuse && held && Date.now() - held.at < SITE_TTL_MS && held.content === env.CONTENT && held.hives === env.HIVES?.get) return held
+  const open = await anyPublishedRoot(env, site, read, host)
+  const promoted = open ? await sitePackage(env, site, read) : null
+  const answer = { open, promoted, at: Date.now(), content: env.CONTENT, hives: env.HIVES?.get }
+  openSites.set(key, answer)
+  return answer
+}
+
+/** The head of the package pool this page installs from — the newest
+ *  host:packages marker, as ensureInstall would read it: the promoted
+ *  package's member, or the bundle's own. */
+async function installPointer(request, env, site, promoted) {
+  const pool = await poolAddress(HOST_PACKAGES_MEANING)
+  if (promoted) return { pool, marker: '00000000', text: `${promoted.root}\n${site.lineage}` }
+  if (!env.ASSETS?.fetch) return null
+  try {
+    const url = new URL(request.url)
+    url.search = ''
+    url.pathname = `/content/${pool}/`
+    const listing = await env.ASSETS.fetch(new Request(url))
+    if (!listing.ok) return null
+    const marker = (await listing.text()).split(/\r?\n/).map((name) => name.trim())
+      .filter((name) => ROUTE_MARKER_RE.test(name)).sort().at(-1)
+    if (!marker) return null
+    url.pathname = `/content/${pool}/${marker}`
+    const entry = await env.ASSETS.fetch(new Request(url))
+    if (!entry.ok) return null
+    const text = await entry.text()
+    if (text.includes('<')) return null
+    const modified = entry.headers.get('last-modified')
+    return { pool, marker, text, ...(modified ? { at: modified } : {}) }
+  } catch { return null }
+}
+
 async function sitePackage(env, site, read = indexReader(env)) {
   const publisher = site.publishers?.find(p => p.primary) || site.publishers?.[0]
   if (!publisher) return null
@@ -1473,11 +1528,11 @@ async function serveSandboxShell(request, env, zone) {
 
 /** The door's record as page data: JSON with every '<' escaped, so no value
  *  can close the script element. */
-function doorScript(record) {
-  return `<script id="hc-door" type="application/json">${JSON.stringify(record).replace(/</g, '\\u003c')}</script>`
+function doorScript(record, id = 'hc-door') {
+  return `<script id="${id}" type="application/json">${JSON.stringify(record).replace(/</g, '\\u003c')}</script>`
 }
 
-async function serveVisitorAsset(request, env, { spa = true, door = null } = {}) {
+async function serveVisitorAsset(request, env, { spa = true, door = null, install = null } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   let response = await env.ASSETS.fetch(request)
   // Under /content/ a miss is a miss. The engine walks its package pool by
@@ -1507,7 +1562,7 @@ async function serveVisitorAsset(request, env, { spa = true, door = null } = {})
     if (at >= 0) {
       headers.delete('Content-Length')
       headers.set('Cache-Control', 'no-store')
-      const body = html.slice(0, at) + doorScript(door) + html.slice(at)
+      const body = html.slice(0, at) + doorScript(door) + (install ? doorScript(install, 'hc-install') : '') + html.slice(at)
       return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers })
     }
     return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers })
@@ -2578,14 +2633,12 @@ export default {
       // publisher's signed index carries its lineage (the open mark, above).
       // Until then, and again after a withdrawal, an honest 404 page.
       const read = indexReader(env)
-      if (!(await anyPublishedRoot(env, site, read, requestUrl.hostname))) {
-        return nothingHere(requestUrl.hostname, implicit ? siteZone : null)
-      }
+      const opened = await siteOpen(env, site, read, requestUrl.hostname, pathname.startsWith('/content/'))
+      if (!opened.open) return nothingHere(requestUrl.hostname, implicit ? siteZone : null)
       // A promoted trial: the site runs its publisher's package, not the
       // engine's own.
       if (pathname.startsWith('/content/')) {
-        const promoted = await sitePackage(env, site, read)
-        const answered = promoted && await answerPackage(request, requestUrl, promoted, site.lineage)
+        const answered = opened.promoted && await answerPackage(request, requestUrl, opened.promoted, site.lineage)
         if (answered) return answered
       }
       // Everything under /content/ is a FILE the build shipped — the package
@@ -2595,7 +2648,10 @@ export default {
       // at sign(<host>), so the visitor needs no round trip before its plan.
       const door = siteBinding(env, requestUrl.hostname)?.frontDoor ? null
         : (await newestLocation(env, await poolAddress(requestUrl.hostname.toLowerCase()))).record
-      return serveVisitorAsset(request, env, { door })
+      // …and the head of its host:packages pool, so the install walks no
+      // listing and no marker before it starts.
+      const install = door ? await installPointer(request, env, site, opened.promoted) : null
+      return serveVisitorAsset(request, env, { door, install })
     }
 
     // A zone subdomain that could not even become an implicit site (nested

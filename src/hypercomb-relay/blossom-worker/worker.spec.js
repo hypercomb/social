@@ -70,6 +70,10 @@ const TWO_ZONES = {
   },
 }
 
+/** The page paths a request log shows — without the install pointer's own
+ *  read of the bundled package pool, which every served page makes. */
+const pages = (requests) => requests.filter((path) => !path.startsWith('/content/'))
+
 async function fixture(event, bindings = ONE_ZONE) {
   event ??= await signedIndex({ pluginthematrix: head, revolucion: head })
   const assetRequests = []
@@ -204,6 +208,36 @@ test('a page carries its door record, escaped so no value can close the script',
   assert.equal(record.title, 'a</script><b>')
   assert.equal(record.layer, head)
   assert.equal(record.pubkey, pubkey)
+})
+
+test('a page carries the head of its package pool, and its bundled assets reuse the gate', async () => {
+  const { env } = await fixture()
+  const pool = await sha256Hex('host:packages')
+  const pkg = 'e'.repeat(64)
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  env.ASSETS.fetch = async (request) => {
+    const path = new URL(request.url).pathname
+    if (path === `/content/${pool}/`) return new Response('00000000\n', { headers: { 'content-type': 'text/plain' } })
+    if (path === `/content/${pool}/00000000`) return new Response(`${pkg}\nessentials`, { headers: { 'content-type': 'text/plain', 'last-modified': 'Fri, 25 Sep 2026 12:00:00 GMT' } })
+    return new Response(shell, { headers: { 'content-type': 'text/html' } })
+  }
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  const install = /<script id="hc-install" type="application\/json">([^<]*)<\/script>/.exec(html)
+  assert(install, 'the page carries its install pointer')
+  assert.deepEqual(JSON.parse(install[1]), { pool, marker: '00000000', text: `${pkg}\nessentials`, at: 'Fri, 25 Sep 2026 12:00:00 GMT' })
+  // The assets the page then pulls reuse the page's gate: no index read.
+  const reads = []
+  const get = env.HIVES.get
+  env.HIVES.get = async (key) => { reads.push(key); return get(key) }
+  const heldGet = env.CONTENT.get
+  env.CONTENT.get = async (key) => { if (key.startsWith(INDEXES)) reads.push(key); return heldGet(key) }
+  // (a swapped reader is a different store, so this first read refreshes once…)
+  await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/00000000`), env)
+  reads.length = 0
+  // …and every asset after it reuses that answer.
+  await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/`), env)
+  await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/00000000`), env)
+  assert.deepEqual(reads, [])
 })
 
 test('a stale marker from before door records moves forward to the signed head', async () => {
@@ -411,7 +445,7 @@ test('application paths receive the shared visitor engine', async () => {
   const revisions = await worker.fetch(new Request('https://pluginthematrix.com/revisions'), env)
   assert.equal(await journal.text(), 'visitor engine')
   assert.equal(await revisions.text(), 'visitor engine')
-  assert.deepEqual(assetRequests, ['/journal', '/revisions'])
+  assert.deepEqual(pages(assetRequests), ['/journal', '/revisions'])
   assert.match(journal.headers.get('content-security-policy'), /connect-src 'self'/)
   assert.equal(journal.headers.get('referrer-policy'), 'no-referrer')
 })
@@ -422,7 +456,7 @@ test('bare domain is a Core creation, not a server-authored landing page', async
   const entrance = await worker.fetch(new Request('https://pluginthematrix.com/'), env)
   assert.equal(descriptor.record.lineage, 'pluginthematrix')
   assert.equal(await entrance.text(), 'visitor engine')
-  assert.deepEqual(assetRequests, ['/'])
+  assert.deepEqual(pages(assetRequests), ['/'])
 })
 
 test('published Core hosts reject every mutation before relay routing', async () => {
@@ -820,7 +854,7 @@ test('a door the signed index names serves the engine — no hold, no cookie', a
   const res = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
   assert.equal(res.headers.get('x-reason'), null)
   assert.equal(await res.text(), 'visitor engine')
-  assert.deepEqual(assetRequests, ['/'])
+  assert.deepEqual(pages(assetRequests), ['/'])
 })
 
 test('a named door whose lineage is not in the signed index is hidden — page, files and descriptor', async () => {
@@ -904,7 +938,7 @@ test('signed doors switch a branch per domain — on where listed, hidden elsewh
   // The fixture explicitly opens the apex while susan has one chosen domain.
   const legacy = await worker.fetch(page('https://pluginthematrix.com/'), env)
   assert.equal(await legacy.text(), 'visitor engine')
-  assert.deepEqual(assetRequests, ['/', '/'])
+  assert.deepEqual(pages(assetRequests), ['/', '/'])
   // the ledger lists susan only where it opens
   const ledger = await (await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
   const susan = ledger.sites.find((site) => site.lineage === 'susan')
