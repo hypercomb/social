@@ -551,7 +551,9 @@ test('the offerings pool projects only open, signed creations on this domain', a
   const bytes = await member.text()
   assert.equal(member.status, 200)
   assert.equal(await sha256Hex(bytes), names[0])
-  assert.equal(retained.size, 0, 'pool discovery does not fetch or mint every location bag')
+  // The publisher's index moved into its pool member on first read; no location bag was minted.
+  assert.deepEqual([...retained.keys()].filter((key) => !key.startsWith(`${INDEXES}/`)), [], 'pool discovery does not fetch or mint every location bag')
+  assert(retained.has(`${INDEXES}/${pubkey}`), 'an index only KV held moves into its pool member when read')
   assert.equal((await doorMeta('https://revolucion.pluginthematrix.com/', env)).status, 200)
   assert(retained.has(`${await sha256Hex('revolucion.pluginthematrix.com')}/00000000`),
     'visiting a legacy signed route seeds its location bag once')
@@ -764,9 +766,10 @@ test('a changed index read cannot advance or overwrite an existing location bag'
   assert.equal((await doorMeta(`${route}/`, env)).status, 200)
   const key = `${location}/00000000`
   const original = env.CONTENT.held.get(key).slice()
-  env.HIVES.get = async publisher => publisher === pubkey
-    ? JSON.stringify(await signedIndex({ pluginthematrix: head, revolucion: 'b'.repeat(64) }, 1_800_000_001))
-    : null
+  // The index changes where it is held — its pool member — without passing
+  // through a PUT (another isolate, another host).
+  env.CONTENT.held.set(`${INDEXES}/${pubkey}`, new TextEncoder().encode(
+    JSON.stringify(await signedIndex({ pluginthematrix: head, revolucion: 'b'.repeat(64) }, 1_800_000_001))))
   assert.equal((await doorMeta(`${route}/`, env)).status, 404)
   assert.equal((await worker.fetch(new Request(`${route}/content/${location}/`), env)).status, 404)
   assert.deepEqual([...env.CONTENT.held.keys()].filter(name => name.startsWith(`${location}/`)), [key])

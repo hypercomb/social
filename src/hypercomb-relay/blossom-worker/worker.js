@@ -221,8 +221,9 @@ async function verifiedIndex(env, pubkey) {
 }
 
 /** One request's index reads, memoized by pubkey. The ledger asks the same
- *  key for every site it reports; without this a directory read re-fetched
- *  and re-verified one schnorr signature per site per publisher. */
+ *  key for every site it reports; a page passes one reader to its gate and its
+ *  package. A reader never outlives the request that made it, so an index is
+ *  never answered stale. */
 function indexReader(env) {
   const reads = new Map()
   return (pubkey) => {
@@ -2006,9 +2007,20 @@ async function getGrant(request, env) {
 const HIVE_INDEXES_MEANING = 'hive:indexes'
 
 async function heldIndexRaw(env, pubkey) {
-  const object = await env.CONTENT?.get?.(`${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`)
+  const key = `${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`
+  const object = await env.CONTENT?.get?.(key)
   if (object) return new TextDecoder().decode(await object.arrayBuffer())
-  return (await env.HIVES?.get?.(pubkey)) ?? null
+  // DRAIN: an index only the KV namespace holds is carried into its pool member
+  // the first time it is read, so every later read is one get. The KV entry is
+  // left as it was.
+  const drained = (await env.HIVES?.get?.(pubkey)) ?? null
+  if (drained && env.CONTENT?.put) {
+    try {
+      await env.CONTENT.put(key, drained, { onlyIf: new Headers({ 'If-None-Match': '*' }),
+        httpMetadata: { contentType: 'application/json; charset=utf-8' } })
+    } catch { /* read again next time */ }
+  }
+  return drained
 }
 
 async function holdIndex(env, pubkey, evt) {
@@ -2565,13 +2577,14 @@ export default {
       // A door — named or wildcard — is a website only while an approved
       // publisher's signed index carries its lineage (the open mark, above).
       // Until then, and again after a withdrawal, an honest 404 page.
-      if (!(await anyPublishedRoot(env, site, indexReader(env), requestUrl.hostname))) {
+      const read = indexReader(env)
+      if (!(await anyPublishedRoot(env, site, read, requestUrl.hostname))) {
         return nothingHere(requestUrl.hostname, implicit ? siteZone : null)
       }
       // A promoted trial: the site runs its publisher's package, not the
       // engine's own.
       if (pathname.startsWith('/content/')) {
-        const promoted = await sitePackage(env, site)
+        const promoted = await sitePackage(env, site, read)
         const answered = promoted && await answerPackage(request, requestUrl, promoted, site.lineage)
         if (answered) return answered
       }
