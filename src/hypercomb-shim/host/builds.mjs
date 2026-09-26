@@ -35,8 +35,8 @@
 //   node host/builds.mjs publish <version|sig> [--azure] [-- deploy args]
 //   node host/builds.mjs sign <version|sig> --as author|reviewer|witness
 //   node host/builds.mjs take <origin dir>        bring in a published revision
-//   node host/builds.mjs push [host dir]          carry the pools to a host
-//   node host/builds.mjs push --r2 [--dry-run]    …to R2, for the subdomain worker
+//   node host/builds.mjs push [host dir]          carry the pools and atoms to a host
+//   node host/builds.mjs push --r2 [--dry-run]    …to R2, for the worker and content.*
 //   node host/builds.mjs pull [host…]             bring in the hosts' pools
 //
 // Pools live under HYPERCOMB_POOLS_DIR (default ~/.hypercomb). The signing key
@@ -291,12 +291,32 @@ const takePools = async dir => {
 
 // ── the pools on hosts ───────────────────────────────────────────────────────
 /**
+ * THE ATOMS A KERNEL ASKS FOR. A pure install whose origin lacks its host
+ * bundle, core library or host package asks the default hosts for them at
+ * `/<sig>` (kernel.ts, host-package.ts). Every revision's atoms, so a kernel
+ * baked by any build — an npm install, a desktop installer — still finds its
+ * host in the wild.
+ */
+export const releaseAtoms = async () => [...new Set((await revisions()).flatMap(r => r.record.atoms))].sort()
+
+/**
  * Carry both pools into a host directory: `<dir>/<sign(meaning)>/<sig>`, and
  * the pool's listing as its `index.html` (names, one per line — what a static
- * host serves at `/<sign(meaning)>/`). Additive: what the host holds stays.
+ * host serves at `/<sign(meaning)>/`). With `atoms`, every revision's atoms
+ * too, flat at `<dir>/<sig>`. Additive: what the host holds stays.
  */
-export const carryPools = async dir => {
+export const carryPools = async (dir, { atoms = false } = {}) => {
   let carried = 0
+  await mkdir(dir, { recursive: true })
+  if (atoms) {
+    const from = poolDir(BUILDS_MEANING)
+    const held = new Set(await readdir(dir))
+    for (const atom of await releaseAtoms()) {
+      if (held.has(atom)) continue
+      await writeFile(resolve(dir, atom), await readFile(resolve(from, atom)))
+      carried++
+    }
+  }
   for (const meaning of [BUILDS_MEANING, SIGNATURES_MEANING]) {
     const from = poolDir(meaning)
     const into = resolve(dir, sign(meaning))
@@ -320,6 +340,24 @@ export const carryPools = async dir => {
  */
 export const pushToR2 = async ({ bucket = 'hypercomb-content', via = 'https://content.jwize.com', put, fetch: get = fetch, dryRun = false } = {}) => {
   const report = { uploaded: 0, present: 0, failed: 0 }
+  const upload = async (key, path, name) => {
+    const first = (await readFile(path)).subarray(0, 1).toString()
+    const type = first === '{' || first === '[' ? 'application/json' : 'text/javascript'
+    try {
+      if (!dryRun) await put(key, path, type)
+      report.uploaded++
+    } catch (e) {
+      report.failed++
+      if (report.failed <= 3) console.warn(`[builds] r2 put failed: ${name.slice(0, 12)} — ${String(e.message).slice(0, 120)}`)
+    }
+  }
+  // The atoms, flat at `<sig>` — where the worker's /<sig> reads, and where
+  // content.jwize.com and content.hypercomb.com answer a kernel.
+  for (const atom of await releaseAtoms()) {
+    const there = await get(`${via}/${atom}`, { method: 'HEAD' }).catch(() => null)
+    if (there?.ok) { report.present++; continue }
+    await upload(`${bucket}/${atom}`, resolve(poolDir(BUILDS_MEANING), atom), atom)
+  }
   for (const meaning of [BUILDS_MEANING, SIGNATURES_MEANING]) {
     const pool = sign(meaning)
     const from = poolDir(meaning)
@@ -328,16 +366,7 @@ export const pushToR2 = async ({ bucket = 'hypercomb-content', via = 'https://co
     for (const name of await readdir(from).catch(() => [])) {
       if (!SIG.test(name)) continue
       if (present.has(name)) { report.present++; continue }
-      const path = resolve(from, name)
-      const first = (await readFile(path)).subarray(0, 1).toString()
-      const type = first === '{' || first === '[' ? 'application/json' : 'application/octet-stream'
-      try {
-        if (!dryRun) await put(`${bucket}/${pool}/${name}`, path, type)
-        report.uploaded++
-      } catch (e) {
-        report.failed++
-        if (report.failed <= 3) console.warn(`[builds] r2 put failed: ${name.slice(0, 12)} — ${String(e.message).slice(0, 120)}`)
-      }
+      await upload(`${bucket}/${pool}/${name}`, resolve(from, name), name)
     }
   }
   return report
@@ -491,8 +520,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       } else {
         const dir = resolve(args[0] ?? RELAY_CONTENT)
         await access(dir).catch(() => { throw new Error(`${dir} does not exist — name the host's content directory`) })
-        const carried = await carryPools(dir)
-        console.log(`carried ${carried} new file(s) into ${dir}`)
+        const carried = await carryPools(dir, { atoms: true })
+        console.log(`carried ${carried} new file(s) into ${dir} — the version pools and every revision's atoms`)
       }
       console.log(`a host lists a pool only when its operator declares it; once, in the hive:\n  hosts list ${BUILDS_MEANING} @<host>\n  hosts list ${SIGNATURES_MEANING} @<host>`)
     } else if (command === 'pull') {

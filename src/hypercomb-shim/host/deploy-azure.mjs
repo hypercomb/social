@@ -358,8 +358,10 @@ try {
   }
 
   if (versionPools) {
-    const carried = await carryPools(stage)
-    console.log(`[deploy] staged the version pools (${carried} file(s) not already in the origin)`)
+    // The pools, and every revision's atoms at /<sig>: where a pure kernel
+    // anywhere asks hypercomb.com for the host it was built with.
+    const carried = await carryPools(stage, { atoms: true })
+    console.log(`[deploy] staged the version pools and release atoms (${carried} file(s) not already in the origin)`)
   }
 
   // Upload is the irreversible boundary. Verify the exact staged bytes first,

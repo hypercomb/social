@@ -145,18 +145,38 @@ describe('pools on hosts', () => {
     expect(await readdir(builds.poolDir(builds.BUILDS_MEANING))).not.toContain(victim)
   })
 
-  it('puts both pools into R2 under the pool, skipping what the CDN already lists', async () => {
+  it('puts the atoms flat and both pools under the pool into R2, skipping what the CDN holds', async () => {
     const first = await record(undefined, 'a')
     await builds.signRevision(first.sig, 'author')
     const builtPool = builds.sign(builds.BUILDS_MEANING)
     const held = (await readdir(builds.poolDir(builds.BUILDS_MEANING))).filter((n: string) => /^[a-f0-9]{64}$/.test(n))
-    const listed = held[0]
+    const [atom] = first.record.atoms
+    const listed = held.find((n: string) => n !== atom)!
     const cdn = async (url: string) => url.endsWith(`/${builtPool}/`) ? new Response(listed + '\n') : new Response('', { status: 404 })
     const puts: string[] = []
     const report = await builds.pushToR2({ fetch: cdn, put: async (key: string) => { puts.push(key) } })
-    expect(report).toEqual({ uploaded: held.length, present: 1, failed: 0 })
+    // every pool member but the listed one, one signature, and the atom flat
+    expect(report).toEqual({ uploaded: held.length - 1 + 1 + 1, present: 1, failed: 0 })
+    expect(puts).toContain(`hypercomb-content/${atom}`)
     expect(puts).not.toContain(`hypercomb-content/${builtPool}/${listed}`)
-    expect(puts.every(key => /^hypercomb-content\/[a-f0-9]{64}\/[a-f0-9]{64}$/.test(key))).toBe(true)
     expect(puts.filter(key => key.includes(builds.sign(builds.SIGNATURES_MEANING)))).toHaveLength(1)
+
+    // An atom the CDN already answers is not uploaded again.
+    const holds = async (url: string) => url.endsWith(`/${atom}`) ? new Response('') : cdn(url)
+    const again = await builds.pushToR2({ fetch: holds, put: async () => {}, dryRun: true })
+    expect(again.present).toBe(2)
+  })
+
+  it('carries every revision\'s atoms flat into a host directory, where a kernel asks', async () => {
+    const one = await record(undefined, 'a')
+    const two = await record(undefined, 'b')
+    const host = resolve(root, 'host')
+    await builds.carryPools(host, { atoms: true })
+    for (const atom of [...one.record.atoms, ...two.record.atoms]) {
+      expect(builds.sign(await readFile(resolve(host, atom)))).toBe(atom)
+    }
+    await builds.carryPools(resolve(root, 'bare'))
+    expect((await readdir(resolve(root, 'bare'))).filter((n: string) => /^[a-f0-9]{64}$/.test(n)))
+      .toEqual([builds.sign(builds.BUILDS_MEANING), builds.sign(builds.SIGNATURES_MEANING)].sort())
   })
 })

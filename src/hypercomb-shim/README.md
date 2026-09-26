@@ -135,6 +135,16 @@ here, with the same install, atoms, host bundle, core library and host package.
 `take` hashes every file once, as it arrives, and refuses an origin whose files
 are not the ones its revision names.
 
+**Publishing carries the atoms too.** A pure install whose origin lacks its
+host bundle, core library or host package asks the default hosts for them at
+`/<sig>` (hypercomb.com, content.hypercomb.com, jwize.com, content.jwize.com).
+`push`, `push --r2` and the hypercomb.com deploy put every revision's atoms
+there, flat, so a kernel baked by any build still finds its host in the wild.
+An origin holding nothing but the kernel boots from them (measured with the
+default hosts answered from a pushed directory: host bundle and core library
+from hypercomb.com, the host package from jwize.com, then install and a warm
+render with no failures).
+
 **The pools are published to hosts** as any pool is: `/<sign(meaning)>/` lists
 the members (names, one per line, never cached) and `/<sign(meaning)>/<sig>` is
 one. Every member is signature-named, so a host cannot alter one unnoticed, and
