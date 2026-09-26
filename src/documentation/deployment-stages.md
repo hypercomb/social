@@ -265,3 +265,72 @@ Each step is a forward commit with read-fallback and ships behind proof on
 3. **Zone required or optional.** A swarm needs room + secret today. Under
    R8 the zone is tenancy and could default to the community commons, so
    `join` on a hosted branch needs no selector. Say which.
+4. **The swarm as a place (raised 2026-09-25).** Today `join` is a global
+   mode (`hc:mesh-public`) and the root has no subject. The alternative:
+   joining a branch re-roots the view there (as entering a site does), back
+   past the entrance ends PRESENCE and nothing else, the offer stays on the
+   host until it is withdrawn in the panel, and the root is never a swarm.
+   Under that model the built `leaveBranches` (leave withdraws `shared`)
+   comes out. Say which.
+
+## 7. The template — the cadence of a place (decided 2026-09-25)
+
+**The ruling (jwize):** "If somebody's hosting a swarm they should give you
+a default template, and based on how much of that template you fulfil you
+will see a percentage; you'll see them filled in with your content,
+otherwise they'll be empty, and when you get there other people have those
+tiles." Decided the same day: the template is a **declared subset** of the
+host's branch, and an unfilled slot is an **empty outline**, never the
+host's content.
+
+**T1 — The template is a declared list of the host's own names.** A place is
+a published branch; its children are molecules, and a name is a grammar
+([template-addressing.md](template-addressing.md): the name is the
+placeholder). The host declares which of those names are the cadence — a
+succession in the branch's own molecule, kind `succession`, whose members
+are envelopes over the branch's slot tiles, relation `template` — and the
+list rides the host's signed index as `stage:template`, exactly like a
+stage pointer (R3). Undeclared children are the host's content, not the
+place's shape. Declaring is a panel act on the branch's row; nothing is
+inferred from a branch as it stands.
+
+**T2 — Joining superimposes, never copies.** Nothing from the template is
+written into a joiner's hive. A joiner's branch whose children carry the
+template's names lands ON the host's addresses — the superimposable-trees
+law ([superimposition.md](superimposition.md)): same addresses, layers
+stacked, differences visible. A slot the joiner has a tile for shows the
+joiner's tile; a slot they do not is painted as the template's outline —
+name and position, no body, no picture, no host content.
+
+**T3 — Fulfilment is a read.** `filled / declared`, where `filled` counts
+the template names the joiner's `shared` head has a member for. It is
+derived from two successions (the host's template list and the joiner's
+branch) and is keyed by their two sigs in a derived-cache pool; it is never
+stored on a creation and never gates anything ([optimize-phase.md](optimize-phase.md)).
+
+**T4 — Arriving shows every member's answer in the same slot.** At the place,
+each `shared` member (R8: the heads listed by the keys you follow or meet
+there) is a branch with the same names, so the `people` slot stacks the
+host's people, yours, and every member's — one word, many authors, filtered
+by whose keys the reader follows. This is what the rendezvous means: the
+template is the meeting point's shape.
+
+**T5 — Filling a slot is the visible way to contribute.** Creating a tile
+with a template name inside a joined place enrols it there (create on a
+holder = member in the group); fulfilment rises, and the next `join`
+advance carries it in the joiner's `shared` head. A tile named outside the
+template is the joiner's own, shown in their layer, counted nowhere.
+
+**T6 — The template is versioned like everything else.** A host who changes
+the cadence mints the next template succession; the pointer moves in the
+same signed write. A joiner's fulfilment is always read against the
+template the host's CURRENT index names, so an old percentage never
+lingers, and the previous template is one `prev` back.
+
+**What this adds to the build**, in order after §4 steps 4–6: (a) the
+template list and its `stage:template` pointer (a `declare` act on the
+publish panel's row, reusing `advanceStage` with the word `template`);
+(b) the outline paint for an unfilled slot in the superimposed render;
+(c) the fulfilment cache and its percentage on the row and at the place;
+(d) enrolment of a template-named tile into the joiner's `shared` head at
+the next advance.
