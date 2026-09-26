@@ -240,6 +240,37 @@ test('a page carries the head of its package pool, and its bundled assets reuse 
   assert.deepEqual(reads, [])
 })
 
+test('an index is held at the edge a few seconds, and a write drops the copy', async () => {
+  const held = new Map()
+  const edge = {
+    match: async (request) => (held.has(request.url) ? new Response(held.get(request.url)) : undefined),
+    put: async (request, response) => { held.set(request.url, await response.text()) },
+    delete: async (request) => held.delete(request.url),
+  }
+  const before = globalThis.caches
+  globalThis.caches = { default: edge }
+  try {
+    const { env } = await fixture()
+    const url = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
+    const first = await (await worker.fetch(new Request(url), env)).json()
+    assert.equal(held.size, 1, 'the first read leaves a copy at the edge')
+    // The pool is not asked again while the copy is fresh.
+    const get = env.CONTENT.get
+    env.CONTENT.get = async (key) => { assert(!key.startsWith(INDEXES), 'served from the edge'); return get(key) }
+    assert.deepEqual(await (await worker.fetch(new Request(url), env)).json(), first)
+    env.CONTENT.get = get
+    // A write drops the copy, so the next read is the new index.
+    const later = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_070)
+    const put = await worker.fetch(new Request(url, { method: 'PUT',
+      headers: { authorization: await nip98(url, 'PUT') }, body: JSON.stringify(later) }), env)
+    assert.equal(put.status, 200)
+    assert.equal((await (await worker.fetch(new Request(url), env)).json()).created_at, 1_800_000_070)
+  } finally {
+    if (before === undefined) delete globalThis.caches
+    else globalThis.caches = before
+  }
+})
+
 test('a stale marker from before door records moves forward to the signed head', async () => {
   const later = 'c'.repeat(64)
   const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: later }))

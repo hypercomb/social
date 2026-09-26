@@ -2061,7 +2061,36 @@ async function getGrant(request, env) {
 // indexes before is read as a drain source and never written.
 const HIVE_INDEXES_MEANING = 'hive:indexes'
 
+/** A signed index is self-verifying, so a copy a few seconds old is safe to
+ *  hand out: every reader checks the schnorr signature against the key it
+ *  pins, and compares the stamp with what it already signed. The edge cache
+ *  holds the bytes for INDEX_EDGE_SECONDS per publisher; a write drops the
+ *  copy in its own colo, and every other colo catches up within the window. */
+const INDEX_EDGE_SECONDS = 5
+const indexCacheKey = async (pubkey) =>
+  new Request(`https://hive-indexes.invalid/${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`)
+const edgeCache = () => globalThis.caches?.default ?? null
+
 async function heldIndexRaw(env, pubkey) {
+  const edge = edgeCache()
+  if (edge) {
+    try {
+      const hit = await edge.match(await indexCacheKey(pubkey))
+      if (hit) return await hit.text()
+    } catch { /* read the pool */ }
+  }
+  const raw = await readHeldIndex(env, pubkey)
+  if (edge && raw) {
+    try {
+      await edge.put(await indexCacheKey(pubkey), new Response(raw, {
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${INDEX_EDGE_SECONDS}` },
+      }))
+    } catch { /* uncached is only slower */ }
+  }
+  return raw
+}
+
+async function readHeldIndex(env, pubkey) {
   const key = `${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`
   const object = await env.CONTENT?.get?.(key)
   if (object) return new TextDecoder().decode(await object.arrayBuffer())
@@ -2079,6 +2108,7 @@ async function heldIndexRaw(env, pubkey) {
 }
 
 async function holdIndex(env, pubkey, evt) {
+  try { await edgeCache()?.delete(await indexCacheKey(pubkey)) } catch { /* the window closes it */ }
   await env.CONTENT.put(`${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`, JSON.stringify(evt), {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
   })
@@ -2646,11 +2676,15 @@ export default {
       if (pathname.startsWith('/content/')) return serveVisitorAsset(request, env, { spa: false })
       // THE PAGE CARRIES ITS DOOR: the record the gate just read from the bag
       // at sign(<host>), so the visitor needs no round trip before its plan.
-      const door = siteBinding(env, requestUrl.hostname)?.frontDoor ? null
-        : (await newestLocation(env, await poolAddress(requestUrl.hostname.toLowerCase()))).record
       // …and the head of its host:packages pool, so the install walks no
-      // listing and no marker before it starts.
-      const install = door ? await installPointer(request, env, site, opened.promoted) : null
+      // listing and no marker before it starts. The two reads run side by side.
+      const frontDoor = !!siteBinding(env, requestUrl.hostname)?.frontDoor
+      const [located, pointer] = frontDoor ? [null, null] : await Promise.all([
+        newestLocation(env, await poolAddress(requestUrl.hostname.toLowerCase())),
+        installPointer(request, env, site, opened.promoted),
+      ])
+      const door = located?.record ?? null
+      const install = door ? pointer : null
       return serveVisitorAsset(request, env, { door, install })
     }
 
