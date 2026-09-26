@@ -31,8 +31,12 @@ export const readArrivalTrial = (): string[] | null => {
   return names
 }
 
-const modulesSoFar = (): number => performance.getEntriesByType('resource')
-  .filter(entry => { try { return MODULE_RE.test(new URL(entry.name).pathname) } catch { return false } }).length
+/** Code only: a layer or record is sig-named too, but it arrives by fetch. */
+const modulesSoFar = (): number => (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
+  .filter(entry => {
+    if (entry.initiatorType !== 'script') return false
+    try { return MODULE_RE.test(new URL(entry.name).pathname) } catch { return false }
+  }).length
 
 const seconds = (ms: number): string => (ms / 1000).toFixed(1)
 

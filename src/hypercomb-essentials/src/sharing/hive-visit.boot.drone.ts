@@ -97,6 +97,7 @@ const routeBeside = (raw: unknown): string[] => {
 interface HistoryLike {
   sign: (lineage: { explorerSegments: () => string[] }) => Promise<string>
   currentLayerAt: (locationSig: string, stats?: { cold?: boolean }) => Promise<Record<string, unknown> | null>
+  currentLayerRefAt?: (locationSig: string) => Promise<{ layerSig: string } | null>
   getLayerBySig: (sig: string) => Promise<Record<string, unknown> | null>
   seedPreviewHead: (segments: readonly string[], layerSig: string) => Promise<string | null>
   dropPreviewHead: () => void
@@ -107,7 +108,12 @@ interface BrokerLike {
   noteDomainsForSig?: (sig: string, domains: string[]) => void
 }
 
-interface NavLike { go: (segments: readonly string[]) => void }
+interface NavLike { go: (segments: readonly string[]) => void; segments?: () => string[] }
+
+/** How far below where the reader stands the tree is kept local: their own
+ *  tiles (1) and each of those tiles' tiles (2) — so the next click opens
+ *  from memory, and nothing further down is fetched until they move. */
+const RING_AHEAD = 2
 
 /** Is this shell a READER of a published site, rather than a participant with
  *  a hive of their own? The visitor bootstrap stamps both marks before it
@@ -237,15 +243,24 @@ export class HiveVisitDrone extends Drone {
     // The walk runs WHILE the package's bees finish loading (the broker is a
     // boot bee now, so the walk no longer waits behind them), and the arrival
     // waits for both.
+    //
+    // ONE RING AHEAD, NEVER THE WHOLE TREE. After the paint, and again each
+    // time the reader moves, the tree is localized RING_AHEAD levels below
+    // where they stand — enough that the next click opens from memory. The
+    // old walk took the whole closure after every arrival (revolucion: ~210
+    // records for a reader who may never leave the page).
     console.log('[hive-visit] localizing the top of the closure from', bundle.hosts.join(','), 'head', head.slice(0, 12))
     const [stats] = await Promise.all([
       broker.adopt(head, { layersOnly: true, silent: true, maxDepth: 1 }),
       beesSettled(15_000),
     ])
     console.log('[hive-visit] top localized', JSON.stringify(stats))
-    const rest = (): void => {
-      void broker.adopt(head, { layersOnly: true, silent: true, quiet: true })
-        .then(all => console.log('[hive-visit] closure localized', JSON.stringify(all)))
+    const ringed = new Set<string>()
+    const ringAhead = (layerSig: string): void => {
+      if (!SIG_RE.test(layerSig) || ringed.has(layerSig)) return
+      ringed.add(layerSig)
+      void broker.adopt(layerSig, { layersOnly: true, silent: true, quiet: true, maxDepth: RING_AHEAD })
+        .then(ring => console.log('[hive-visit] ring ahead localized', layerSig.slice(0, 12), JSON.stringify(ring)))
         .catch(() => { /* on-demand fetches still cover any layer it missed */ })
     }
     const root = await history.getLayerBySig(head)
@@ -312,7 +327,19 @@ export class HiveVisitDrone extends Drone {
       tiles: stats.layers,
     })
     // Only now: the arrival's own fetches go first.
-    rest()
+    ringAhead(head)
+    // Where the reader goes next, the ring follows.
+    // A place is known once its render has seeded it, so a miss right at the
+    // move tries once more after the processor's next pass.
+    const ringHere = async (retry: boolean): Promise<void> => {
+      const here = nav.segments?.() ?? []
+      if (here.length <= mount.length || mount.some((segment, i) => here[i] !== segment)) return
+      const locationSig = await history.sign({ explorerSegments: () => [...here] })
+      const ref = await history.currentLayerRefAt?.(locationSig).catch(() => null)
+      if (ref) { ringAhead(ref.layerSig); return }
+      if (retry) window.addEventListener('synchronize', () => { void ringHere(false) }, { once: true })
+    }
+    window.addEventListener('navigate', () => { void ringHere(true).catch(() => { /* on-demand fetches cover it */ }) })
   }
 }
 
