@@ -132,6 +132,11 @@ if (pure) {
   const moduleTag = '<script type="module" src="./main.js"></script>'
   if (!indexHtml.includes(moduleTag)) throw new Error('[shim] index.html does not load ./main.js as expected')
   indexHtml = indexHtml.replace(moduleTag, '<script src="./main.js"></script>')
+  // No pure origin ships env.js (only the Angular apps' prebuild writes the
+  // stub), so the tag cost a blocking round trip and a MIME error per boot.
+  const envTag = /\n\s*<script src="env\.js"><\/script>/
+  if (!envTag.test(indexHtml)) throw new Error('[shim] index.html does not load env.js as expected')
+  indexHtml = indexHtml.replace(envTag, '')
 }
 await writeFile(resolve(dist, 'index.html'), indexHtml, 'utf8')
 // The cold front door reads the same theme values as the full shells. Compile

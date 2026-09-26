@@ -94,6 +94,7 @@ for (const sig of closure) if (!signed.includes(sig)) throw new Error(`pure host
 if (/customElements\.define\(/.test(hostBundle) && hostBundle.includes('hc-shim-hosts')) {
   throw new Error('pure host: the host bundle defines the host console — it belongs to the host package')
 }
+if ((await readFile(resolve(dist, 'index.html'), 'utf8')).includes('env.js')) throw new Error('pure host: index.html loads env.js, which no pure origin ships')
 if (names.includes('main.js.map')) throw new Error('pure host: source map belongs to the source checkout')
 // THE KERNEL stays a one-pager: it knows one signature, verifies, and runs it.
 // Anything more belongs in the signed host bundle, not in the install.

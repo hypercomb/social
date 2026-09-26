@@ -36,6 +36,16 @@ const SIG_CACHE = 'hypercomb-sig-v1'
 // The page's boot pack (hypercomb-runtime/src/boot-pack.ts): kept on activate.
 const BOOT_PACK_CACHE = 'hypercomb-boot-pack-v1'
 
+// THE SHELL, FOR OFFLINE. The files that start a page — the page itself, the
+// kernel, the processor, the theme and the host faces — live under fixed
+// names that change with every deploy, so they are fetched network-first,
+// exactly as fresh as without a worker. Each good answer is kept, and when
+// the network fails the kept copy answers, so an installed hive (whose atoms
+// and packages are already held on the device) starts offline.
+const SHELL_CACHE = 'hypercomb-shell-v1'
+const SHELL_FILES = new Set(['/main.js', '/hypercomb-core.runtime.js', '/theme.css', '/fonts/fonts.css'])
+const isShellFile = (pathname) => SHELL_FILES.has(pathname) || /^\/fonts\/[\w.-]+\.woff2$/.test(pathname)
+
 // Pools of meaning: install-cache dirs at the OPFS root named by
 // sign(<meaning>) — sha256 of the UTF-8 bytes of the meaning string.
 // DERIVED at runtime so the SW computes the identical address Store does,
@@ -83,7 +93,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then(names => Promise.all(
-        names.filter(n => n !== CACHE_NAME && n !== SIG_CACHE && n !== BOOT_PACK_CACHE).map(n => caches.delete(n))
+        names.filter(n => n !== CACHE_NAME && n !== SIG_CACHE && n !== BOOT_PACK_CACHE && n !== SHELL_CACHE).map(n => caches.delete(n))
       ))
       .then(() => loadDomains())
       .then(domains => { if (domains.length) KNOWN_DOMAINS = domains })
@@ -155,7 +165,34 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(handleSigRequest(event.request, url.pathname))
     return
   }
+
+  // Any page of the hive is the one page (the host's SPA fallback): kept as '/'.
+  if (event.request.mode === 'navigate' && method === 'GET') {
+    event.respondWith(networkThenShell(event.request, '/'))
+    return
+  }
+  if (method === 'GET' && isShellFile(url.pathname)) {
+    event.respondWith(networkThenShell(event.request, url.pathname))
+    return
+  }
 })
+
+/** Network first; keep a good answer; answer from the kept copy when the
+ *  network fails. Only a whole, same-origin 200 is kept. */
+async function networkThenShell(request, key) {
+  try {
+    const response = await fetch(request)
+    if (response.ok && response.status === 200 && response.type === 'basic') {
+      const copy = response.clone()
+      caches.open(SHELL_CACHE).then(cache => cache.put(key, copy)).catch(() => {})
+    }
+    return response
+  } catch (err) {
+    const kept = await (await caches.open(SHELL_CACHE)).match(key)
+    if (kept) return kept
+    throw err
+  }
+}
 
 // The kernel maps an atom here only after seeing it in SIG_CACHE; a miss is
 // a plain 404 (never the SPA fallback), and the kernel falls back to bytes.

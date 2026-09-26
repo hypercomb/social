@@ -67,6 +67,11 @@ themselves; everything else is resolved.
   compiled code. A cached copy that fails to run is evicted and the boot
   reloads once from the device copy. The kernel then declares the page's
   one import map and runs the host. `/pin` still names the host bundle.
+- **Offline.** The worker answers the page itself, the kernel, the processor,
+  the theme and the host faces network-first and keeps each good answer
+  (`hypercomb-shell-v1`); when the network fails, the kept copy answers. With
+  the atoms in `hypercomb-sig-v1` and the packages in OPFS, an installed hive
+  starts and renders with the network cut.
 - `hypercomb-core.runtime.js` is the processor (`hypercomb-core/src/processor.ts`):
   `act()` and its optimize pass, bee/drone/queen/worker, IoC, the effect bus
   and signing. It is the core a host cannot run without.
