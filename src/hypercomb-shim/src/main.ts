@@ -136,11 +136,22 @@ import { mountSurfaces, scoreboardLine, surfaceReport } from './surfaces'
 
 /** Register the OPFS module server. It serves `/@resource/<sig>` from the
  *  flat root; without it, composed pages 404 their shared chrome. */
+/** How long a boot waits for a worker to register and activate. A first
+ *  visit's worker is ready well inside it (measured locally: tens of ms). */
+const SW_READY_MS = 3000
+
 const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
   try {
-    await navigator.serviceWorker.register('/hypercomb.worker.js', { scope: '/' })
-    const reg = await navigator.serviceWorker.ready
+    // A BLOCKED WORKER IS NOT A HUNG BOOT. Where policy, a privacy mode or an
+    // extension blocks registration without rejecting it, `ready` never
+    // settles; the host then boots uncontrolled, on its blob map
+    // (import-map.ts), instead of waiting forever.
+    const reg = await Promise.race([
+      navigator.serviceWorker.register('/hypercomb.worker.js', { scope: '/' }).then(() => navigator.serviceWorker.ready),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), SW_READY_MS)),
+    ])
+    if (!reg) { console.warn('[shim] no service worker became ready — booting uncontrolled'); return }
     if (navigator.serviceWorker.controller) return
     // Hard-reload state: active worker, nothing installing/waiting —
     // controllerchange can never fire, so waiting buys nothing.
