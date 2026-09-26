@@ -363,10 +363,9 @@ const bootstrapBuild = await build({
 
 // ── the host package ─────────────────────────────────────────────────────────
 // The kernel build's host console is a BEEHAVIOR: the one bee of the host
-// package, carried by its `host` tile. Three signed files: the bee, the tile
-// layer that carries it, and the root layer that names the tile and the bee
-// as a boot bee. The host bundle knows only the root (baked in below) and
-// resolves the rest the hypercomb way (src/host-package.ts).
+// package. Two signed files: the bee, and the root layer that carries it and
+// names it a boot bee. The host bundle knows only the root (baked in below)
+// and resolves the rest the hypercomb way (src/host-package.ts).
 let hostPackageRoot = ''
 if (pure) {
   const sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -392,14 +391,14 @@ if (pure) {
   if (stateful.length) throw new Error('[shim] the host console bee carries a stateful runtime module: ' + stateful.join(', '))
   const beeBytes = Buffer.from(consoleBee.outputFiles[0].contents)
   const beeSig = sha(beeBytes)
-  const tile = Buffer.from(JSON.stringify({ name: 'host', cells: [], bees: [beeSig], dependencies: [] }))
-  const tileSig = sha(tile)
-  const root = Buffer.from(JSON.stringify({ name: 'root', cells: [tileSig], bees: [], dependencies: [], bootBees: [beeSig] }))
+  // THE HOST IS THE ROOT of wherever you stand, so its beehaviors belong to
+  // the root layer itself: it carries the console bee, and names it a boot bee.
+  const root = Buffer.from(JSON.stringify({ name: 'root', cells: [], bees: [beeSig], dependencies: [], bootBees: [beeSig] }))
   hostPackageRoot = sha(root)
-  for (const [sig, bytes] of [[beeSig, beeBytes], [tileSig, tile], [hostPackageRoot, root]]) {
+  for (const [sig, bytes] of [[beeSig, beeBytes], [hostPackageRoot, root]]) {
     await writeFile(resolve(dist, sig), bytes)
   }
-  console.log(`[shim] host package ${hostPackageRoot.slice(0, 12)}… · host tile · console bee ${(beeBytes.length / 1024).toFixed(0)} kB`)
+  console.log(`[shim] host package ${hostPackageRoot.slice(0, 12)}… · root carries the console bee ${(beeBytes.length / 1024).toFixed(0)} kB`)
 }
 
 // ── the runner ───────────────────────────────────────────────────────────────

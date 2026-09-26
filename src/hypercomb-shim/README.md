@@ -77,9 +77,10 @@ themselves; everything else is resolved.
   surface, unchanged. The full shells still ship core as one file.
 
 - The host console is a beehavior. It is the one bee of the **host package**:
-  a root layer, a `host` tile carrying the console bee, and the bee itself
-  (`src/bootstrap/host-console.drone.ts`). The build bakes the host package's
-  root signature into the host bundle; on boot the host holds that package
+  a root layer and the bee it carries (`src/bootstrap/host-console.drone.ts`).
+  The host is the root of wherever you stand, so its beehaviors sit on the
+  root layer itself, not on a tile below it. The build bakes the host
+  package's root signature into the host bundle; on boot the host holds that package
   (device, then this origin, then the default hosts, each file hashed once on
   arrival), runs its boot bees, and shows the console the bee registers. The
   host package is never "the installed package": it runs beside whatever a

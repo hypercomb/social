@@ -51,7 +51,7 @@ const hostBundle = await readFile(resolve(dist, pin), 'utf8')
 const hostRoot = signed.find(sig => !known.includes(sig) && hostBundle.includes(sig))
 if (!hostRoot) throw new Error('pure host: the host bundle names no host package')
 const rootLayer = JSON.parse(await readFile(resolve(dist, hostRoot), 'utf8'))
-const closure = new Set([hostRoot, ...(rootLayer.bootBees ?? [])])
+const closure = new Set([hostRoot, ...(rootLayer.bees ?? []), ...(rootLayer.bootBees ?? [])])
 for (const tile of rootLayer.cells ?? []) {
   closure.add(tile)
   for (const bee of JSON.parse(await readFile(resolve(dist, tile), 'utf8')).bees ?? []) closure.add(bee)

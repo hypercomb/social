@@ -1,8 +1,8 @@
 // hypercomb-shim/src/host-package.ts
 //
 // THE HOST PACKAGE. The host's own beehaviors (its console first) are a
-// package like any other: a root layer, a `host` tile, and the bees it
-// carries. build.mjs builds it and bakes its root signature into this bundle,
+// package like any other. The host is the root of wherever you stand, so its
+// bees sit on the root layer itself; tiles the root names are held too. build.mjs builds it and bakes its root signature into this bundle,
 // so a cold host, with nothing installed, still knows one package to run.
 //
 // Held files are read as they are. Missing ones are fetched from this origin,
@@ -29,7 +29,7 @@ const SIG = /^[a-f0-9]{64}$/
 const sigsOf = (value: unknown): string[] =>
   (Array.isArray(value) ? value : []).map(String).map(sig => sig.replace(/\.js$/, '')).filter(sig => SIG.test(sig))
 
-/** Hold the host package's root, its tiles and every bee they carry. */
+/** Hold the host package's root, any tiles it names, and every bee they carry. */
 export const holdHostPackage = async (root: string): Promise<boolean> => {
   const store = window.ioc?.get?.<HostPackageStore>('@hypercomb.social/Store')
   if (!store || !SIG.test(root)) return false
@@ -56,7 +56,7 @@ export const holdHostPackage = async (root: string): Promise<boolean> => {
 
   const top = await layer(root)
   if (!top) return false
-  const bees = new Set(sigsOf(top.bootBees))
+  const bees = new Set([...sigsOf(top.bees), ...sigsOf(top.bootBees)])
   for (const tile of await Promise.all(sigsOf(top.cells).map(layer))) {
     if (!tile) return false
     for (const sig of sigsOf(tile.bees)) bees.add(sig)
