@@ -331,6 +331,9 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'hive:indexes',
   // Whose code may run this hive (essentials sharing/code-trust.ts).
   'trust:code',
+  // Which branches this participant made public (essentials
+  // presentation/tiles/tile-public.ts).
+  'public:branches',
   'host:adoptions',
   // A visitor's choice waiting for this hive's review click, and a newer
   // signed head waiting for the participant to take it
