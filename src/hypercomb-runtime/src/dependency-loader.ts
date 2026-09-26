@@ -189,7 +189,7 @@ export class DependencyLoader extends EventTarget {
     // together: ~230 module requests queue through the one worker thread. The
     // blob stays. The kernel's two large atoms are the exception (kernel.ts).
     const bytes = this.store.opfsAvailable
-      ? (await packedBytes(pureSig, 'dependency', this.store)) ?? await this.store.getDependencyBytes(pureSig)
+      ? await packedBytes(pureSig, () => this.store.getDependencyBytes(pureSig))
       : null
     // AN ATOM IS NEVER IMPORTED HERE. It registers nothing, so it has no
     // reason to load at boot; and a blob import would be a SECOND instance

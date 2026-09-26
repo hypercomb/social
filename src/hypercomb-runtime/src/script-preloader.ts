@@ -1142,11 +1142,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     // the bee is imported from the door by its signature — no bytes needed
     // where the door serves modules at the root, fetched from it otherwise.
     let buffer: ArrayBuffer
-    const packed = handle ? await packedBytes(signature, 'bee', this.store) : null
-    if (packed) {
-      buffer = packed.buffer.slice(packed.byteOffset, packed.byteOffset + packed.byteLength) as ArrayBuffer
-    } else if (handle) {
-      buffer = await (await handle.getFile()).arrayBuffer()
+    const held = handle
+    if (held) {
+      const bytes = await packedBytes(signature, async () => new Uint8Array(await (await held.getFile()).arrayBuffer()))
+      buffer = bytes ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer : new ArrayBuffer(0)
     } else if (activeInstallIndex()) {
       buffer = (globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ === true
         ? new ArrayBuffer(0)

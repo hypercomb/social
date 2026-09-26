@@ -28,10 +28,9 @@ const fakeCaches = () => {
   }
 }
 
-const source = {
-  getBeeBytes: async (sig: string) => (sig === A ? bytes('bee a') : null),
-  getDependencyBytes: async (sig: string) => (sig === B ? bytes('dep b') : null),
-}
+let reads = 0
+const readA = async () => { reads++; return bytes('bee a') }
+const readB = async () => { reads++; return bytes('dep b') }
 
 const boot = async () => {
   vi.resetModules()
@@ -46,25 +45,30 @@ describe('the boot pack', () => {
     EffectBus.clear()
   })
 
-  it('misses on the first boot, then serves every file that boot used', async () => {
+  it('reads each file on the first boot, then serves every one from the pack', async () => {
+    reads = 0
     const first = await boot()
-    expect(await first.packedBytes(A, 'bee', source)).toBeNull()
-    expect(await first.packedBytes(B, 'dependency', source)).toBeNull()
+    expect(new TextDecoder().decode((await first.packedBytes(A, readA))!)).toBe('bee a')
+    expect(new TextDecoder().decode((await first.packedBytes(B, readB))!)).toBe('dep b')
+    expect(reads).toBe(2)
     EffectBus.emit('loader:bees-done', {})
     await vi.advanceTimersByTimeAsync(3000)
-    await vi.advanceTimersByTimeAsync(1000)
 
     EffectBus.clear()
+    reads = 0
     const second = await boot()
-    expect(new TextDecoder().decode((await second.packedBytes(A, 'bee', source))!)).toBe('bee a')
-    expect(new TextDecoder().decode((await second.packedBytes(B, 'dependency', source))!)).toBe('dep b')
+    expect(new TextDecoder().decode((await second.packedBytes(A, readA))!)).toBe('bee a')
+    expect(new TextDecoder().decode((await second.packedBytes(B, readB))!)).toBe('dep b')
+    expect(reads).toBe(0)
   })
 
-  it('lets the bytes go once the bees are in', async () => {
+  it('reads on its own once the bees are in', async () => {
+    reads = 0
     const first = await boot()
-    await first.packedBytes(A, 'bee', source)
+    await first.packedBytes(A, readA)
     EffectBus.emit('loader:bees-done', {})
-    await vi.advanceTimersByTimeAsync(4000)
-    expect(await first.packedBytes(A, 'bee', source)).toBeNull()
+    await vi.advanceTimersByTimeAsync(3000)
+    await first.packedBytes(A, readA)
+    expect(reads).toBe(2)
   })
 })

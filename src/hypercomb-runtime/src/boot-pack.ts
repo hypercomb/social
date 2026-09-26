@@ -10,7 +10,8 @@
 // (transfer-pack.ts), in Cache Storage under the installed package's root
 // signature. The loaders take bytes from it first and read the single file
 // on a miss. When a boot missed anything, a fresh pack is written once the
-// bees are loaded, at idle time. A new install has a new root, so its pack
+// bees are loaded, from the bytes that boot already served, so no file is
+// read twice. A new install has a new root, so its pack
 // starts empty; every member is content-addressed, so a stale pack can only
 // be incomplete, never wrong. Nothing is hashed: the members were hashed when
 // they were stored.
@@ -22,17 +23,11 @@ import { decodeTransferPack, encodeTransferPack } from './transfer-pack.js'
 const CACHE = 'hypercomb-boot-pack-v1'
 const keyOf = (root: string): string => `/@boot-pack/${root}`
 
-type Kind = 'bee' | 'dependency'
-export type BootPackSource = {
-  getBeeBytes(sig: string): Promise<Uint8Array | null>
-  getDependencyBytes(sig: string): Promise<Uint8Array | null>
-}
-
 let opened: Promise<Map<string, Uint8Array> | null> | null = null
 let released = false
-const asked = new Map<string, Kind>()
 let missed = 0
-let source: BootPackSource | null = null
+/** Every file this boot served, from the pack or read on its own: the next pack. */
+const served = new Map<string, Uint8Array>()
 
 const open = (): Promise<Map<string, Uint8Array> | null> => opened ??= (async () => {
   const root = installedPackageSig()
@@ -45,35 +40,34 @@ const open = (): Promise<Map<string, Uint8Array> | null> => opened ??= (async ()
   } catch { return null }
 })()
 
-/** Bytes of a held bee or dependency from the boot pack, or null (then read
- *  the file). Records the ask, so the next pack holds what this boot used. */
-export const packedBytes = async (sig: string, kind: Kind, from: BootPackSource): Promise<Uint8Array | null> => {
-  source ??= from
+/** Bytes of a held bee or dependency: from the boot pack, or read on their
+ *  own by `read` on a miss. Either way they are kept for the next pack. */
+export const packedBytes = async (
+  sig: string,
+  read: () => Promise<Uint8Array | null>,
+): Promise<Uint8Array | null> => {
   watch()
-  asked.set(sig, kind)
-  if (released) return null
-  const bytes = (await open())?.get(sig) ?? null
-  if (!bytes) missed++
+  if (released) return read()
+  const packed = (await open())?.get(sig)
+  if (packed) { served.set(sig, packed); return packed }
+  missed++
+  const bytes = await read()
+  if (bytes?.byteLength) served.set(sig, bytes)
   return bytes
 }
 
-/** Write the pack of everything this boot asked for. */
+/** Write the pack of everything this boot served. No file is read again. */
 const mint = async (): Promise<void> => {
   const root = installedPackageSig()
-  if (!root || !source || !asked.size || typeof caches === 'undefined') return
-  const members: Array<[string, Uint8Array]> = []
-  for (const [sig, kind] of asked) {
-    const bytes = kind === 'bee' ? await source.getBeeBytes(sig) : await source.getDependencyBytes(sig)
-    if (bytes) members.push([sig, bytes])
-  }
-  if (!members.length) return
+  const members = [...served]
+  served.clear()
+  if (!root || !members.length || typeof caches === 'undefined') return
   try {
     const cache = await caches.open(CACHE)
     await cache.put(keyOf(root), new Response(encodeTransferPack(members)))
     for (const request of await cache.keys()) {
       if (new URL(request.url).pathname !== keyOf(root)) await cache.delete(request)
     }
-    missed = 0
   } catch { /* a cache; the files are still there */ }
 }
 
@@ -93,9 +87,8 @@ const onBeesDone = (): void => {
   settle = setTimeout(() => {
     released = true
     opened = null
-    if (!missed && asked.size) return
-    const idle = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback
-    if (idle) idle(() => { void mint() }, { timeout: 5000 })
-    else void mint()
+    if (!missed) { served.clear(); return }
+    missed = 0
+    void mint()
   }, 3000)
 }
