@@ -1260,7 +1260,10 @@ export class SwarmDrone extends Drone {
         let target: 'ready' | 'opted-out' | 'needs-host' | undefined
         try {
           target = this.#getHostSync()?.ensureSwarmTarget?.()
-          if (!SwarmDrone.#needsHostNoted && target === 'needs-host') {
+          // 'needs-host' and 'opted-out' both mean the same thing here: you
+          // watch. Say so once either way — an opt-out that stays silent
+          // reads as a join that did nothing.
+          if (!SwarmDrone.#needsHostNoted && (target === 'needs-host' || target === 'opted-out')) {
             SwarmDrone.#needsHostNoted = true
             const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
             EffectBus.emit('toast:show', {
