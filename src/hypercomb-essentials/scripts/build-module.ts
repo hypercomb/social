@@ -620,8 +620,17 @@ const ATOMIZED_ROOTS: readonly string[] =
  *  are atomized decides what a unit inlines and what it reaches by specifier —
  *  without touching a single source file — so a unit's cache must miss when
  *  the list moves, and so must the whole-build early exit. The vendor
- *  packages decide the same thing for npm code, so they are folded in too. */
-const BUILD_SHAPE = `atomized:${[...ATOMIZED_ROOTS].sort().join(',')}|vendor:${VENDOR_PACKAGES.join(',')}`
+ *  packages decide the same thing for npm code, so they are folded in too.
+ *
+ *  So do the build's own scripts: a change to how a unit is compiled leaves
+ *  every source file untouched, and a warm cache would keep shipping the old
+ *  bytes (observed 2026-09-26: a checkout-path fix to this file still built
+ *  the old root until dist was moved aside). */
+const BUILD_SCRIPTS_SIG = createHash('sha256')
+  .update(readFileSync(fileURLToPath(import.meta.url)))
+  .update(readFileSync(join(__dirname, 'passive-queen.ts')))
+  .digest('hex')
+const BUILD_SHAPE = `atomized:${[...ATOMIZED_ROOTS].sort().join(',')}|vendor:${VENDOR_PACKAGES.join(',')}|scripts:${BUILD_SCRIPTS_SIG}`
 
 const isAtomizedRelPath = (relPath: string): boolean =>
   ATOMIZED_ROOTS.some(root => relPath === root || relPath.startsWith(`${root}/`))
