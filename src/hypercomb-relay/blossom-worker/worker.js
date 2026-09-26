@@ -26,7 +26,8 @@
 //   2. writer-authorization — a schnorr-signed nostr event proves WHO
 //      without ever sending a secret. Instead of relay.js's static
 //      --writers allowlist, this tier meters an auto-grant guest list:
-//      KV GRANTS[pubkey] → { quotaBytes, usedBytes, expiresAt }.
+//      Pool sign('host:grants')/<pubkey> → { quotaBytes, usedBytes, expiresAt }
+//      (KV GRANTS read as a drain source only).
 //
 // Never logs or echoes request bodies. Only dependency: @noble/curves
 // (schnorr verify — wrangler bundles it).
@@ -1718,7 +1719,12 @@ async function verifyBud02(evt, bodyHash) {
 
 // ── quota (the auto-grant guest list) ────────────────────────────────────────
 //
-// GRANTS[pubkey] → { quotaBytes, usedBytes, expiresAt }. Policy via env:
+// The guest list is a pool of meaning (jwize 2026-09-25: state lives only in
+// pools of meaning): each key's grant { quotaBytes, usedBytes, expiresAt } is
+// the member of sign('host:grants') named by the key. Never listed, so never
+// public — only GET /grant hands a key its own row. The KV namespace (GRANTS)
+// that held it before is read as a drain source and never written. Policy
+// via env:
 //   AUTO_GRANT           '1' (default) mints a grant on first valid upload
 //   DEFAULT_QUOTA_BYTES  104857600 (100 MB)
 //   GRANT_TTL_DAYS       90
@@ -1730,9 +1736,42 @@ async function verifyBud02(evt, bodyHash) {
 // as an unknown pubkey: the guest list forgets you, it doesn't ban you.
 // With AUTO_GRANT off, missing and expired both close the door (403).
 //
-// KV is eventually consistent and last-write-wins; two racing uploads can
-// under-count briefly. Acceptable for a guest list — the ceiling holds on
-// the next read.
+// Last write wins; two racing uploads can under-count briefly. Acceptable
+// for a guest list — the ceiling holds on the next read.
+
+const HOST_GRANTS_MEANING = 'host:grants'
+const HOST_AI_METERS_MEANING = 'host:ai-meters'
+
+/** A private ledger row: the member of sign(meaning) named by the key. Read
+ *  from the pool; a row only the KV namespace holds is carried into the pool
+ *  the first time it is read (the KV entry is left as it was). */
+async function readLedger(env, meaning, member, drainKey) {
+  const key = `${await poolAddress(meaning)}/${member}`
+  try {
+    const object = await env.CONTENT?.get?.(key)
+    if (object) return JSON.parse(await object.text())
+  } catch { /* unreadable row — try the drain source */ }
+  let drained = null
+  try { drained = drainKey ? ((await env.GRANTS?.get?.(drainKey)) ?? null) : null } catch { drained = null }
+  if (drained === null) return null
+  let row = null
+  try { row = JSON.parse(drained) } catch { return null }
+  if (row !== null && env.CONTENT?.put) {
+    try {
+      await env.CONTENT.put(key, drained, { onlyIf: new Headers({ 'If-None-Match': '*' }),
+        httpMetadata: { contentType: 'application/json; charset=utf-8' } })
+    } catch { /* carried next time */ }
+  }
+  return row
+}
+
+async function writeLedger(env, meaning, member, row) {
+  await env.CONTENT.put(`${await poolAddress(meaning)}/${member}`, JSON.stringify(row), {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+  })
+}
+
+const readGrant = (env, pubkey) => readLedger(env, HOST_GRANTS_MEANING, pubkey, pubkey)
 
 function policy(env) {
   return {
@@ -1748,8 +1787,8 @@ function policy(env) {
 async function admit(env, pubkey, size) {
   const p = policy(env)
   const now = Math.floor(Date.now() / 1000)
-  let grant = null
-  try { grant = JSON.parse((await env.GRANTS.get(pubkey)) ?? 'null') } catch { grant = null }
+  const held = await readGrant(env, pubkey)
+  let grant = held && typeof held === 'object' ? held : null
   const expired = !!grant && Number(grant.expiresAt || 0) <= now
   if (!grant || expired) {
     if (!p.autoGrant) {
@@ -1770,7 +1809,7 @@ async function admit(env, pubkey, size) {
 
 async function consume(env, pubkey, grant, size) {
   grant.usedBytes = Number(grant.usedBytes || 0) + size
-  await env.GRANTS.put(pubkey, JSON.stringify(grant))
+  await writeLedger(env, HOST_GRANTS_MEANING, pubkey, grant)
 }
 
 // ── read side (BUD-01) ───────────────────────────────────────────────────────
@@ -2038,8 +2077,8 @@ async function getGrant(request, env) {
   if (!auth.ok) return text(401, auth.reason)
   const p = policy(env)
   const now = Math.floor(Date.now() / 1000)
-  let grant = null
-  try { grant = JSON.parse((await env.GRANTS.get(auth.pubkey)) ?? 'null') } catch { grant = null }
+  const held = await readGrant(env, auth.pubkey)
+  const grant = held && typeof held === 'object' ? held : null
   const state = !grant ? 'none' : Number(grant.expiresAt || 0) <= now ? 'expired' : 'active'
   const body = state === 'active'
     ? { state, quotaBytes: Number(grant.quotaBytes || 0), usedBytes: Number(grant.usedBytes || 0), expiresAt: Number(grant.expiresAt || 0) }
@@ -2249,7 +2288,8 @@ async function getHive(request, env, pubkey) {
 //   AI_WRITERS set   → allowlist (comma-separated pubkeys): only the
 //                      operator's own keys may spend their API money.
 //   AI_WRITERS unset → any valid signer, throttled by a per-pubkey per-day
-//                      token meter in GRANTS KV (`ai:<pubkey>:<day>`). An
+//                      token meter, the member of sign('host:ai-meters')
+//                      named by the key ({ day, used }). An
 //                      anti-abuse ceiling, not billing — same doctrine as
 //                      the byte quota.
 //
@@ -2278,8 +2318,10 @@ function aiPolicy(env) {
   }
 }
 
-// Per-day token meter (estimate: chars/4 in + max_tokens reserved out).
-// KV row auto-expires two days on so the ledger cleans itself.
+// Per-day token meter (estimate: chars/4 in + max_tokens reserved out). One
+// row per key holds only today: a row from another day reads as zero and the
+// next write replaces it, so the ledger never grows. Today's row in the old
+// KV namespace (`ai:<pubkey>:<day>`) is read as a drain source.
 async function aiAdmit(env, pubkey, estimate) {
   const p = aiPolicy(env)
   if (p.writers.length) {
@@ -2295,13 +2337,16 @@ async function aiAdmit(env, pubkey, estimate) {
     return { ok: false, reason: 'this host answers its own publishers only — ask from a host that binds your key' }
   }
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const key = `ai:${pubkey}:${day}`
+  const row = await readLedger(env, HOST_AI_METERS_MEANING, pubkey, null)
   let used = 0
-  try { used = Number(JSON.parse((await env.GRANTS.get(key)) ?? '0')) || 0 } catch { used = 0 }
+  if (row && typeof row === 'object' && row.day === day) used = Number(row.used) || 0
+  else {
+    try { used = Number(JSON.parse((await env.GRANTS?.get?.(`ai:${pubkey}:${day}`)) ?? '0')) || 0 } catch { used = 0 }
+  }
   if (used + estimate > p.dailyTokens) {
     return { ok: false, reason: 'daily AI allowance used up for this key — try again tomorrow' }
   }
-  return { ok: true, meter: { key, used, estimate } }
+  return { ok: true, meter: { pubkey, day, used, estimate } }
 }
 
 /** Every key this host admitted: each zone's operator and every publisher
@@ -2318,7 +2363,7 @@ async function aiAdmitted(env) {
 async function aiConsume(env, meter) {
   if (!meter) return
   try {
-    await env.GRANTS.put(meter.key, JSON.stringify(meter.used + meter.estimate), { expirationTtl: 172_800 })
+    await writeLedger(env, HOST_AI_METERS_MEANING, meter.pubkey, { day: meter.day, used: meter.used + meter.estimate })
   } catch { /* meter write raced — ceiling holds on next read */ }
 }
 

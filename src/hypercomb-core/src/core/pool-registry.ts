@@ -329,6 +329,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'host:trials',
   // Every publisher's signed index, the member named by their key.
   'hive:indexes',
+  // A host's private ledgers, each member named by a key: its upload
+  // grants and its daily AI meters (blossom-worker/worker.js).
+  'host:grants',
+  'host:ai-meters',
   // Whose code may run this hive (essentials sharing/code-trust.ts).
   'trust:code',
   // Which branches and tiles this participant made public (essentials
