@@ -23,6 +23,8 @@ Adopted by the repository owner on 2026-09-26.
 - Beehaviors belong to tiles. Every running beehavior is carried by a tile in the
   hive, so the hive shows what is running, and any hive resource can be opened to
   see its code in place.
+- That is why: any agent, from anywhere, can open a tile, see the code that runs
+  there, and tend it, without first learning a shell or a bundle.
 - The only code outside a tile is what runs tiles: the install's kernel and the
   core processor (`hypercomb-core/src/processor.ts`). Keep both to a couple of pages.
 - New features are new beehaviors on tiles. Do not add code to a shell, host bundle,
