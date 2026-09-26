@@ -16,6 +16,11 @@ not an untangling.
 This is a living document. Chip an item, check its box, remove its ratchet
 line.
 
+**Doctrine (2026-09-26, `AGENTS.md`):** all code lives in atomic beehaviors,
+and beehaviors belong to tiles, so the hive shows what is running and any
+resource opens to its code in place. The only code outside a tile is the
+install's kernel and the core processor. This plan is how the rest gets there.
+
 **The primitive** is the one rule underneath these experiences: a creation is
 signatured content, its typed meta envelope places it in a named relation,
 and successive heads at its stable hashed location change what that place

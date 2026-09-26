@@ -14,6 +14,27 @@ Disposable output must not be created in normal source paths.
 
 Commit the ignore rule, not the generated files.
 
+## All code is atomic beehaviors on tiles (mandatory)
+
+Adopted by the repository owner on 2026-09-26.
+
+- All code lives in beehaviors (drones, queens, workers), and all code is atomic:
+  one signed atom per beehavior or dependency, addressed by its signature.
+- Beehaviors belong to tiles. Every running beehavior is carried by a tile in the
+  hive, so the hive shows what is running, and any hive resource can be opened to
+  see its code in place.
+- The only code outside a tile is what runs tiles: the install's kernel and the
+  core processor (`hypercomb-core/src/processor.ts`). Keep both to a couple of pages.
+- New features are new beehaviors on tiles. Do not add code to a shell, host bundle,
+  or core library; when you touch code that lives there, prefer moving it out into
+  an atomic beehavior. Data (word lists, catalogs, locales) belongs in pools of
+  meaning, not in code.
+- Signatures are hashed once, when bytes first arrive on the device. A held copy is
+  never hashed again.
+
+The migration plan and its progress live in
+`src/documentation/everything-is-a-beehavior.md`.
+
 ## Protected `development` branch (mandatory)
 
 `development` is maintained directly by the repository owner only. Agents must
