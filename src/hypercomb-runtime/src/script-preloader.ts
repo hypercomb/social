@@ -562,12 +562,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // A door into the hive marks itself `data-hc-approach` (the site view's
   // exit). When the reader comes within range of one — the pointer near it,
   // focus on it, a press starting on it — the passive bees are FETCHED at low
-  // priority, a few at a time, never run: a good chance that what the
+  // priority, six at a time, never run: a good chance that what the
   // approach needs is already here. The approach itself stops the queue, so
   // its own loads go first (renderers leading).
 
   static readonly #RANGE_PX = 160
-  static readonly #PRELOAD_LANES = 4
+  static readonly #PRELOAD_LANES = 6
   #preloadStarted = false
   #preloadStopped = false
 
@@ -617,11 +617,25 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     this.#preloadStarted = true
     const asleep = this.#asleep()
     const pending = [...passive].filter(sig => !this.#beeCache.has(sig) && !asleep.has(sig))
-    const ordered = [
+    const bees = [
       ...pending.filter(sig => this.#arrivalCritical.includes(sig)),
       ...pending.filter(sig => !this.#arrivalCritical.includes(sig)),
     ]
-    console.log(`[script-preloader] within range: preloading ${ordered.length} passive bees`)
+    // Each bee's dependencies come in at load, not through its own imports
+    // (#ensureDeps) — queue them just ahead of the bee.
+    const depsOf = (globalThis as { __hypercombBeeDeps?: Record<string, string[]> }).__hypercombBeeDeps ?? {}
+    const queued = new Set<string>()
+    const ordered: string[] = []
+    for (const bee of bees) {
+      for (const dep of depsOf[bee] ?? []) {
+        if (this.#loadedDeps.has(dep) || queued.has(dep)) continue
+        queued.add(dep)
+        ordered.push(dep)
+      }
+      if (!queued.has(bee)) { queued.add(bee); ordered.push(bee) }
+    }
+    const integrity = (globalThis as { __hypercombImportIntegrity?: Record<string, string> }).__hypercombImportIntegrity ?? {}
+    console.log(`[script-preloader] within range: preloading ${bees.length} passive bees, ${ordered.length - bees.length} dependencies`)
     let next = 0
     const lane = async (): Promise<void> => {
       while (next < ordered.length && !this.#preloadStopped) {
@@ -631,6 +645,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
           link.rel = 'modulepreload'
           link.href = `/${sig}`
           link.setAttribute('fetchpriority', 'low')
+          const hash = integrity[`/${sig}`]
+          if (hash) link.integrity = hash
           link.onload = link.onerror = () => resolve()
           document.head.append(link)
         })
