@@ -23,6 +23,8 @@ import { WEBSITE_SLOT } from './website-slot.js'
 
 export class CommandsBootDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  /** The boot lane: named in the root, loaded before the bee wave. */
+  readonly lane = 'boot'
 
   public override description =
     'Registers the decorations, the decoration index and the visual-bee registry before the shell renders.'

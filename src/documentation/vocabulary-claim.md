@@ -219,17 +219,17 @@ vocabulary", which sounds like a setting.
 | `GET /<sig>` (a file) | yes | yes | yes | yes | yes |
 | `GET /<sigDir>/<name>` | yes | **NO** | yes | yes | yes |
 | `GET /<poolSig>/` (listing) | yes | **NO** | **NO** | **NO** | `index.html` only |
-| `GET /hive/<pubkey>` (pointer) | **NO** | **YES** | file only | **NO** | file only |
+| `GET /<sign('hive:indexes')>/<pubkey>` (pointer) | **NO** | **YES** | file only | **NO** | file only |
 
 Two corrections worth writing down:
 
-* **`/hive/<pubkey>` is implemented in exactly one server** — `blossom-worker/worker.js`. `relay.js` has no `/hive/` route at all; the native host routes `["hive", pubkey]` through its `[dir, entry] if is_sig(dir)` arm, `"hive"` is not a sig, and it 404s. `serve.mjs` and a bucket serve it only if a file is shipped at that path.
+* **`/<sign('hive:indexes')>/<pubkey>` is implemented in exactly one server** — `blossom-worker/worker.js`. `relay.js` has no `/hive/` route at all; the native host routes `["hive", pubkey]` through its `[dir, entry] if is_sig(dir)` arm, `"hive"` is not a sig, and it 404s. `serve.mjs` and a bucket serve it only if a file is shipped at that path.
 * **`pools-across-hosts.md`'s "BOTH BUILT 2026-09-03"** is true for `relay.js`'s directory branch and the static ship only. The shim host, the native host and the R2 worker all still 404 a pool URL — and the worker is *actively wrong* rather than merely absent: `GET /<pool>/<member>` matches its sig route with `named=true` and looks the blob up at the POOL signature, discarding the member name.
 
 ### Where the claim lives
 
 ```
-GET /hive/<pubkey>   → verified index → roots['vocabulary:hive'] = <claimSig>
+GET /<sign('hive:indexes')>/<pubkey>   → verified index → roots['vocabulary:hive'] = <claimSig>
 GET /<claimSig>      → the signed event bytes; hash-checked against the sig
 GET /<bodySig>       → the canonical word atom; hash-checked against line 4
 ```
@@ -279,7 +279,7 @@ proven high-water, and it degrades to `unknown/'regressed'`.
   `/content/<pool>/index.html` — the opposite of the `no-store` a directory is
   contracted to have. A static host's membership can be a year stale with no
   signal. This design does not depend on a listing.
-* `check-host.mjs` never requests `/<pool>/` or `/hive/<pubkey>`. A host can
+* `check-host.mjs` never requests `/<pool>/` or `/<sign('hive:indexes')>/<pubkey>`. A host can
   print `HOST OK` and be unable to answer a vocabulary query.
 
 ---

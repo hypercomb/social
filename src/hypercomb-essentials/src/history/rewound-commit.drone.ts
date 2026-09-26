@@ -18,6 +18,11 @@ type PromotedPayload = {
 }
 
 export class RewoundCommitDrone extends Drone {
+  /** THE EFFECTS THAT WAKE THIS BEE, and until one arrives it does nothing:
+   *  it may stay unloaded until one is emitted, and the bus replays that
+   *  emission to it (essentials scripts/passive-queen.ts effectSleeper). */
+  readonly wakesOn: readonly string[] = ['history:promoted']
+
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'Reconciles mode, selection, and user feedback after a rewound-state promotion.'
 

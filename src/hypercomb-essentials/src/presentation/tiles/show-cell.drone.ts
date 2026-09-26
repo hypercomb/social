@@ -710,6 +710,8 @@ function upgradeThinPack(
 
 export class ShowCellDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  /** Render-critical: loaded first so the hexagons paint (the root's criticalBees). */
+  readonly lane = 'first-paint'
 
   public override description =
     'Renders the hex grid — maps cells to coordinates, manages geometry, and syncs with the Nostr mesh.'

@@ -17,6 +17,8 @@ import { DEFAULT_HEX_GEOMETRY } from '../presentation/grid/hex-geometry.js'
 
 export class NavigationBootDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  /** The boot lane: named in the root, loaded before the bee wave. */
+  readonly lane = 'boot'
 
   public override description =
     'Navigation at boot: registers the input gate, the mode registry, the input mode stack, the back gesture, view-back and the hex detector.'

@@ -10,12 +10,15 @@ import { Drone, textThemeChanges } from '@hypercomb/core'
 import { NostrSigner } from './nostr-signer.js'
 import { hostSyncService } from './host-sync.service.js'
 import { setTextThemeOffering, textThemeOfferingStatus, textThemeOfferHost } from './text-theme-offering.js'
+import { reconcileCodeTrust, trustCode, trustedCodeDomains, untrustCode } from './code-trust.js'
 // The retired push pool's collector schedules itself when loaded, as it did
 // in the namespace bundle at boot; the boot lane keeps that timing.
 import './retired-push-pool.js'
 
 export class SharingBootDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  /** The boot lane: named in the root, loaded before the bee wave. */
+  readonly lane = 'boot'
 
   public override description =
     'Sharing at boot: registers the Nostr signer and the host sync (and its runtime contract key).'
@@ -37,6 +40,15 @@ if (!(window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__) {
     set: setTextThemeOffering,
   })
   textThemeChanges.dispatchEvent(new Event('change'))
+  // WHOSE CODE MAY RUN HERE (code-trust.ts): the one consent the shell's
+  // TrustService and the host directory both keep, held in the trust:code
+  // pool. Reconciled with its read cache once the store is up.
+  window.ioc.register('@diamondcoreprocessor.com/CodeTrust', {
+    trusted: trustedCodeDomains,
+    trust: trustCode,
+    untrust: untrustCode,
+  })
+  window.ioc.whenReady('@hypercomb.social/Store', () => { void reconcileCodeTrust() })
 }
 
 window.ioc.register('@diamondcoreprocessor.com/SharingBootDrone', new SharingBootDrone())

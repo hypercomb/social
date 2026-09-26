@@ -6,6 +6,8 @@ import type { BackgroundProvider } from './background.provider.js'
 
 export class BackgroundDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  /** Render-critical: loaded first so the hexagons paint (the root's criticalBees). */
+  readonly lane = 'first-paint'
   override description = 'pluggable canvas background coordinator'
 
   #container: Container | null = null

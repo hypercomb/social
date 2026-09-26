@@ -47,6 +47,7 @@ import {
   type WindowSession,
 } from '@hypercomb/core'
 import { hostZone } from './community-hosts.js'
+import { trustCode, trustedCodeDomains } from './code-trust.js'
 import { readInstallFollow } from './update-scout.service.js'
 
 export const HOST_DIRECTORY_SURFACE = 'hc-host-directory'
@@ -340,22 +341,17 @@ type Warning = { revision: InstallRevision; replaced: string[]; picksBeneath: st
  *  that domain's code runs your hive from the next restart — signatures prove
  *  the bytes are what it published, never what the code does. So the first
  *  time a domain's code would run here, the window says so and waits. A
- *  domain you accept is remembered (a per-participant consent, local to this
- *  browser); your own origin and the publisher you follow never ask. */
-const CODE_TRUST_KEY = 'hc:hosts:code-trusted'
+ *  domain you accept is remembered in the `trust:code` pool — the same consent
+ *  the activation prompt keeps (code-trust.ts); your own origin and the
+ *  publisher you follow never ask. */
 type CodeGate = { host: string; sig: string; go: () => void }
 
 function readCodeTrust(): Set<string> {
-  try {
-    const raw = JSON.parse(localStorage.getItem(CODE_TRUST_KEY) ?? '[]')
-    return new Set(Array.isArray(raw) ? raw.map(zoneOf).filter(Boolean) : [])
-  } catch { return new Set() }
+  return new Set([...trustedCodeDomains()].map(zoneOf).filter(Boolean))
 }
 
 function writeCodeTrust(host: string): void {
-  const trusted = readCodeTrust()
-  trusted.add(host)
-  try { localStorage.setItem(CODE_TRUST_KEY, JSON.stringify([...trusted])) } catch { /* private browsing — asks again next time */ }
+  void trustCode(host)
 }
 
 /** The install port, or an older shell's port read as a tree one level deep. */

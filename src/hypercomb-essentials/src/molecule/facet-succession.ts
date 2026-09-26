@@ -64,6 +64,11 @@ export interface FacetStore {
   getPool: (meaning: string) => Promise<FileSystemDirectoryHandle | null | undefined>
   putResource: (blob: Blob, options?: { emit?: boolean }) => Promise<string>
   getResource: (sig: string) => Promise<Blob | null | undefined>
+  /** The RAW bytes under a sig. `Store.getResource` RESOLVES a meta envelope
+   *  to its payload (a `layer` hop reads as null, a `resource` hop as the
+   *  payload bytes), so an envelope or a succession atom must be read here.
+   *  Absent in a fake that stores raw bytes only. */
+  getResourceLocal?: (sig: string) => Promise<Blob | null | undefined>
   /** The document-pool contract, for the per-device minted record. */
   putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
@@ -108,14 +113,17 @@ export interface FacetWriteInput {
  * CARRY"). Memory is only a cache in front of it.
  */
 export const FACET_MINTED_MEANING = 'facet:minted'
-const minted = new Map<string, HeldHeadClaim>()
+/** A held claim plus the sig of its signed bytes — the name the bucket file
+ *  and the root copy share, and what an index pointer names. */
+type MintedClaim = HeldHeadClaim & { claim?: string }
+const minted = new Map<string, MintedClaim>()
 
 /** Test seam — clears the CACHE only; the document stays, as it would across a reload. */
 export const _resetMintedFacetClaims = (): void => { minted.clear() }
 
 const mintedKey = (facet: string, pubkey: string): string => `${facet}:${pubkey}`
 
-const readMinted = async (store: FacetStore, facet: string, pubkey: string): Promise<HeldHeadClaim | null> => {
+const readMinted = async (store: FacetStore, facet: string, pubkey: string): Promise<MintedClaim | null> => {
   const cached = minted.get(mintedKey(facet, pubkey))
   if (cached) return cached
   if (!store.getPoolDoc) return null
@@ -123,15 +131,16 @@ const readMinted = async (store: FacetStore, facet: string, pubkey: string): Pro
     const pool = await store.getPool(FACET_MINTED_MEANING)
     const bytes = await store.getPoolDoc(pool ?? undefined, mintedKey(facet, pubkey))
     if (!bytes || bytes.byteLength === 0) return null
-    const doc = JSON.parse(new TextDecoder().decode(bytes)) as Partial<HeldHeadClaim> & { facet?: string; pubkey?: string }
+    const doc = JSON.parse(new TextDecoder().decode(bytes)) as Partial<MintedClaim> & { facet?: string; pubkey?: string }
     if (doc.facet !== facet || doc.pubkey !== pubkey || !SIG_RE.test(String(doc.head ?? ''))) return null
-    const record: HeldHeadClaim = { head: String(doc.head), prev: doc.prev ?? null, seq: Number(doc.seq) }
+    const record: MintedClaim = { head: String(doc.head), prev: doc.prev ?? null, seq: Number(doc.seq) }
+    if (SIG_RE.test(String(doc.claim ?? ''))) record.claim = String(doc.claim)
     minted.set(mintedKey(facet, pubkey), record)
     return record
   } catch { return null }
 }
 
-const writeMinted = async (store: FacetStore, facet: string, pubkey: string, record: HeldHeadClaim): Promise<void> => {
+const writeMinted = async (store: FacetStore, facet: string, pubkey: string, record: MintedClaim): Promise<void> => {
   minted.set(mintedKey(facet, pubkey), record)
   if (!store.putPoolDoc) return
   try {
@@ -151,8 +160,9 @@ const heldHead = async (
   bucket: FileSystemDirectoryHandle,
   facet: string,
   pubkey: string,
-): Promise<HeldHeadClaim | null> => {
+): Promise<MintedClaim | null> => {
   const claims: HeldHeadClaim[] = []
+  const names = new Map<HeldHeadClaim, string>()
   try {
     for await (const [name, handle] of (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
       if (handle.kind !== 'file' || !SIG_RE.test(name)) continue
@@ -160,17 +170,22 @@ const heldHead = async (
         const read = readHeadEntry(await (await (handle as FileSystemFileHandle).getFile()).text())
         if (!read || read.signedFor.molecule !== facet || read.signedFor.pubkey !== pubkey) continue
         claims.push(read.offered)
+        names.set(read.offered, name.toLowerCase())
       } catch { /* an unreadable claim ranks nobody */ }
     }
   } catch { return null }
-  return resolveBucketHead(claims)
+  const head = resolveBucketHead(claims)
+  if (!head) return null
+  // The winning claim's file name IS its content sig — what a pointer names.
+  const winner = claims.find(c => c.head === head.head && c.seq === head.seq)
+  return { ...head, claim: winner ? names.get(winner) : undefined }
 }
 
 /** The members the head atom names, so an unchanged list writes nothing. */
 const membersOfHead = async (store: FacetStore, head: string | null): Promise<string[] | null> => {
   if (!head) return null
   try {
-    const blob = await store.getResource(head)
+    const blob = await (store.getResourceLocal ?? store.getResource).call(store, head)
     if (!blob) return null
     const atom = JSON.parse(await blob.text()) as Partial<SuccessionAtom>
     return atom?.succession === 1 && Array.isArray(atom.members) ? atom.members.map(String) : null
@@ -184,28 +199,71 @@ const membersOfHead = async (store: FacetStore, head: string | null): Promise<st
  * members are unchanged is not re-claimed. Never throws.
  */
 export const writeFacetHead = async (input: FacetWriteInput): Promise<FacetWriteResult> => {
-  const pubkey = String(input.pubkey ?? '').toLowerCase()
-  if (!SIG_RE.test(pubkey)) return { ok: false, reason: 'no identity' }
-  const store = input.store
-  if (!store?.getPool || !store.putResource || !store.getResource) return { ok: false, reason: 'no store' }
-  if (!store.putArtifactMeta) return { ok: false, reason: 'no envelope minter' }
   const subject = String(input.subjectSig ?? '').toLowerCase()
   if (!SIG_RE.test(subject)) return { ok: false, reason: 'bad subject' }
-  const members = input.members.map(m => String(m ?? '').toLowerCase())
-  if (members.some(m => !SIG_RE.test(m))) return { ok: false, reason: 'bad member' }
-  const kind = input.kind ?? 'resource'
   const word = moleculeKey(input.plural)
-  const sign = input.sign ?? signHeadClaim
-  const now = input.now ?? Date.now
-
   let meaning: string
   let facet: string
   try {
     meaning = facetPreimage(input.plural, subject)
     facet = await facetAddress(input.plural, subject)
   } catch (err) { return { ok: false, reason: 'bad subject', detail: String(err) } }
-  // A facet is per-author buckets of signed claims: the SUCCESSION kind. Said
-  // at the write, in the same breath as the address is derived.
+  return writeSuccessionHead({
+    meaning,
+    molecule: facet,
+    members: input.members,
+    kind: input.kind ?? 'resource',
+    incidence: (i) => ({ relation: word, root: word, slot: i }),
+    store: input.store,
+    pubkey: input.pubkey,
+    sign: input.sign,
+    now: input.now,
+  })
+}
+
+/** One author's list in ANY succession molecule — a facet
+ *  (`sign('notes:' + subject)`) or a bare word (`sign('shared')`, the stage
+ *  lists of documentation/deployment-stages.md). `meaning` is what the pool
+ *  is opened by; `molecule` is the address the claim is signed for — the
+ *  directory a reader routes to. */
+export interface SuccessionWriteInput {
+  meaning: string
+  molecule: string
+  members: readonly string[]
+  kind: 'resource' | 'layer'
+  /** The incidence each member's envelope wears (relation, root, slot). */
+  incidence: (slot: number) => Record<string, unknown>
+  store: FacetStore
+  pubkey: string | null
+  sign?: (molecule: string, head: string, prev: string | null, seq: number) => Promise<HeadClaimSignResult>
+  now?: () => number
+}
+
+export type SuccessionWriteResult =
+  | { ok: true; facet: string; head: string; seq: number; claim: string; changed: boolean; envelopes: string[] }
+  | Extract<FacetWriteResult, { ok: false }>
+
+/**
+ * Write the molecule's head for THIS author: envelopes for the members, one
+ * succession atom, one signed claim into the author's bucket. Idempotent — the
+ * same members in the same order mint the same envelopes, and a head whose
+ * members are unchanged is not re-claimed. Never throws.
+ */
+export const writeSuccessionHead = async (input: SuccessionWriteInput): Promise<SuccessionWriteResult> => {
+  const pubkey = String(input.pubkey ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return { ok: false, reason: 'no identity' }
+  const store = input.store
+  if (!store?.getPool || !store.putResource || !store.getResource) return { ok: false, reason: 'no store' }
+  if (!store.putArtifactMeta) return { ok: false, reason: 'no envelope minter' }
+  const molecule = String(input.molecule ?? '').toLowerCase()
+  if (!SIG_RE.test(molecule)) return { ok: false, reason: 'bad subject' }
+  const members = input.members.map(m => String(m ?? '').toLowerCase())
+  if (members.some(m => !SIG_RE.test(m))) return { ok: false, reason: 'bad member' }
+  const sign = input.sign ?? signHeadClaim
+  const now = input.now ?? Date.now
+  const meaning = input.meaning
+  // Per-author buckets of signed claims: the SUCCESSION kind. Said at the
+  // write, in the same breath as the address is derived.
   declarePoolKind(meaning, 'succession')
   const pool = await store.getPool(meaning).catch(() => null)
   if (!pool) return { ok: false, reason: 'no pool' }
@@ -215,28 +273,29 @@ export const writeFacetHead = async (input: FacetWriteInput): Promise<FacetWrite
   // 1. The envelopes — one typed incidence per member, order in `slot`.
   const envelopes: string[] = []
   for (let i = 0; i < members.length; i++) {
-    const sig = await store.putArtifactMeta(kind, members[i]!, { relation: word, root: word, slot: i })
+    const sig = await store.putArtifactMeta(input.kind, members[i]!, input.incidence(i))
     envelopes.push(String(sig).toLowerCase())
   }
 
   // 2. Where this author's chain stands, from the bucket and from memory.
-  const held = await heldHead(bucket, facet, pubkey)
-  const own = await readMinted(store, facet, pubkey)
+  const held = await heldHead(bucket, molecule, pubkey)
+  const own = await readMinted(store, molecule, pubkey)
   const plan = planHeadClaim(held, own)
   const current = plan.prev
   const currentMembers = await membersOfHead(store, current)
   if (currentMembers && currentMembers.length === envelopes.length && currentMembers.every((m, i) => m === envelopes[i])) {
     const base = own && held ? (own.seq >= held.seq ? own : held) : (own ?? held)!
-    return { ok: true, facet, head: base.head, seq: base.seq, claim: '', changed: false }
+    return { ok: true, facet: molecule, head: base.head, seq: base.seq, claim: base.claim ?? '', changed: false, envelopes }
   }
 
   // 3. The succession atom — signer bound, prev chained.
   const atom: SuccessionAtom = { succession: 1, signer: pubkey, prev: current, members: envelopes, at: now() }
   const head = String(await store.putResource(new Blob([canonicalAtom(atom)], { type: 'application/json' }))).toLowerCase()
 
-  // 4. The signed claim into MY bucket. The molecule line is the FACET address
-  //    — the directory a reader routes to — never the subject.
-  const signed = await sign(facet, head, plan.prev, plan.seq)
+  // 4. The signed claim into MY bucket. The molecule line is the address a
+  //    reader routes to — a facet's address or the bare word's — never a
+  //    subject or a location the bytes declare.
+  const signed = await sign(molecule, head, plan.prev, plan.seq)
   if (!signed.ok) return { ok: false, reason: 'sign failed', detail: signed.reason }
   const bytes = new TextEncoder().encode(signed.json)
   const claim = (await SignatureService.sign(bytes.buffer as ArrayBuffer)).toLowerCase()
@@ -245,8 +304,14 @@ export const writeFacetHead = async (input: FacetWriteInput): Promise<FacetWrite
     const writable = await handle.createWritable()
     try { await writable.write(bytes) } finally { await writable.close() }
   } catch (err) { return { ok: false, reason: 'no pool', detail: String(err) } }
-  await writeMinted(store, facet, pubkey, { head, prev: plan.prev, seq: plan.seq })
-  return { ok: true, facet, head, seq: plan.seq, claim, changed: true }
+  // The same bytes at the root, under the same name: a pointer that names the
+  // claim (an index root key, a link) resolves it with one GET on any host
+  // and verifies it against the address the reader asked for — the bucket
+  // file alone is reachable only by listing, which a static host cannot do.
+  try { await store.putResource(new Blob([bytes], { type: 'application/json' }), { emit: false }) }
+  catch { /* the bucket file stands; the pointer may still be served from it */ }
+  await writeMinted(store, molecule, pubkey, { head, prev: plan.prev, seq: plan.seq, claim })
+  return { ok: true, facet: molecule, head, seq: plan.seq, claim, changed: true, envelopes }
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +330,10 @@ export const writeFacetHead = async (input: FacetWriteInput): Promise<FacetWrite
 export interface FacetReadStore {
   openPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null | undefined>
   getResource: (sig: string) => Promise<Blob | null | undefined>
+  /** The raw bytes — see FacetStore.getResourceLocal. A list is read through
+   *  this: the real `getResource` would resolve each member envelope to its
+   *  payload and the list would read as empty. */
+  getResourceLocal?: (sig: string) => Promise<Blob | null | undefined>
 }
 
 export interface FacetReadInput {
@@ -289,9 +358,10 @@ export interface FacetReadResult {
 /** A verified head's member sigs, in slot order, or null when the atom or an
  *  envelope will not read. */
 const membersOfAtom = async (store: FacetReadStore, head: string): Promise<string[] | null> => {
+  const raw = (store.getResourceLocal ?? store.getResource).bind(store)
   let atom: Partial<SuccessionAtom>
   try {
-    const blob = await store.getResource(head)
+    const blob = await raw(head)
     if (!blob) return null
     atom = JSON.parse(await blob.text()) as Partial<SuccessionAtom>
   } catch { return null }
@@ -299,7 +369,7 @@ const membersOfAtom = async (store: FacetReadStore, head: string): Promise<strin
   const rows: Array<{ sig: string; slot: number }> = []
   for (const envelopeSig of atom.members) {
     try {
-      const blob = await store.getResource(String(envelopeSig))
+      const blob = await raw(String(envelopeSig))
       if (!blob) return null
       const envelope = JSON.parse(await blob.text()) as Record<string, unknown>
       const payload = metaPayloadOf(envelope)
@@ -318,13 +388,36 @@ const membersOfAtom = async (store: FacetReadStore, head: string): Promise<strin
  */
 export const readFacetMembers = async (input: FacetReadInput): Promise<FacetReadResult | null> => {
   const subject = String(input.subjectSig ?? '').toLowerCase()
-  if (!SIG_RE.test(subject) || !input.store?.openPool || !input.store.getResource) return null
+  if (!SIG_RE.test(subject)) return null
   let facet: string
-  let pool: FileSystemDirectoryHandle | null | undefined
+  let meaning: string
   try {
     facet = await facetAddress(input.plural, subject)
-    pool = await input.store.openPool(facetPreimage(input.plural, subject))
+    meaning = facetPreimage(input.plural, subject)
   } catch { return null }
+  return readSuccessionMembers({ meaning, molecule: facet, store: input.store, ownPubkey: input.ownPubkey, verify: input.verify })
+}
+
+export interface SuccessionReadInput {
+  meaning: string
+  molecule: string
+  store: FacetReadStore
+  ownPubkey?: string | null
+  verify?: (event: Record<string, unknown>) => HeadClaimVerifier
+  /** Read ONLY this reader's own bucket — an author asking what THEY listed. */
+  ownOnly?: boolean
+}
+
+/**
+ * Read a succession molecule's members across every author bucket (or the
+ * reader's own alone). Never throws; an absent pool is `null`.
+ */
+export const readSuccessionMembers = async (input: SuccessionReadInput): Promise<FacetReadResult | null> => {
+  if (!input.store?.openPool || !input.store.getResource) return null
+  const facet = String(input.molecule ?? '').toLowerCase()
+  if (!SIG_RE.test(facet)) return null
+  let pool: FileSystemDirectoryHandle | null | undefined
+  try { pool = await input.store.openPool(input.meaning) } catch { return null }
   if (!pool) return null
   const verify = input.verify ?? verifierFor
   const own = String(input.ownPubkey ?? '').toLowerCase()
@@ -333,6 +426,7 @@ export const readFacetMembers = async (input: FacetReadInput): Promise<FacetRead
   try {
     for await (const [bucketName, bucket] of (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
       if (bucket.kind !== 'directory' || !SIG_RE.test(bucketName)) continue
+      if (input.ownOnly && bucketName.toLowerCase() !== own) continue
       const address = { molecule: facet, pubkey: bucketName.toLowerCase() }
       let held: HeldHeadClaim | null = null
       try {

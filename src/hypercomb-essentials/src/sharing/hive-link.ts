@@ -116,6 +116,15 @@ export function vocabularyRootOf(roots: Record<string, string>): string | null {
   return SIG_RE.test(sig) ? sig : null
 }
 
+/** A RESERVED root key — a pointer's name, never a branch. The reservation
+ *  is a colon with word characters on BOTH sides (`vocabulary:hive`,
+ *  `format:hive`, `install:<channel>`, `stage:<word>`): a lineage key folds
+ *  every segment, and only a symbol-only segment falls back to its raw text
+ *  (the "NARROWER THAN IT READS" note above), so a bare `:` can occur in a
+ *  branch key but `word:word` cannot. Every such key is a pointer at a
+ *  content-addressed atom, and no reader may treat it as a published branch. */
+export const isReservedRootKey = (key: unknown): boolean => /[\p{L}\p{N}]:[\p{L}\p{N}]/u.test(String(key ?? ''))
+
 /**
  * ROOT KEYS THE BRIDGE MAY NEVER SET.
  *

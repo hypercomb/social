@@ -5,7 +5,7 @@
 //   1. a TRANSLATOR writes a Japanese line of their own for a key the shipped
 //      ja catalog lacks (`i18n-override`), and `language offer ja` makes it
 //      a signed catalog on the host, named in their index as i18n:ja
-//   2. the host lists it at /i18n/ja.json and at sign('i18n:ja'), verified
+//   2. the host lists it at sign('i18n:ja'), verified
 //   3. a SUBSCRIBER in Japanese sees the English fallback, says
 //      `language sync ja`, and the line HEALS — only the missing key, never a
 //      shipped string — and stays healed after a reload (the translations pool)
@@ -50,7 +50,7 @@ const waitWord = page => H.waitFor(() => page.evaluate(() => !!window.ioc?.get('
   check('the translator\'s own line becomes a signed catalog on the host, named in their index as i18n:ja', catalog?.kind === 'i18n-catalog' && catalog.locale === 'ja' && catalog.keys?.[KEY] === JA, JSON.stringify(published))
 
   // ── 2. THE HOST LISTS IT, by convention ─────────────────────────────────
-  const listed = await (await fetch(`http://${HOST}/i18n/ja.json`)).json()
+  const listed = await (await fetch(`http://${HOST}/${require('crypto').createHash('sha256').update('i18n:ja').digest('hex')}`)).json()
   check('the host lists the locale: the verified catalog, and who translated it', listed?.members?.includes(catalogSig) && listed.translators?.some(t => t.pubkey === translator && t.catalog === catalogSig), JSON.stringify(listed?.translators))
   const atAddress = await (await fetch(`http://${HOST}/${await sha256('i18n:ja')}`)).json().catch(() => null)
   check('the same index answers at the pool\'s own derived address — what a published-pool probe fetches', atAddress?.meaning === 'i18n:ja' && atAddress.members?.includes(catalogSig))
@@ -81,7 +81,7 @@ const waitWord = page => H.waitFor(() => page.evaluate(() => !!window.ioc?.get('
   const subscriber = await sub.page.evaluate(() => window.ioc.get('@diamondcoreprocessor.com/NostrSigner').getPublicKeyHex())
   const missingSig = await H.waitFor(async () => channelOf(await hostState(), subscriber, 'i18n-missing:ja'), 30_000, 1000)
   const missing = missingSig ? JSON.parse(await fromHost(missingSig)) : null
-  const listedAgain = await (await fetch(`http://${HOST}/i18n/ja.json`)).json()
+  const listedAgain = await (await fetch(`http://${HOST}/${require('crypto').createHash('sha256').update('i18n:ja').digest('hex')}`)).json()
   check('the subscriber publishes what its locale lacks, under its own key, and the host lists who is missing what', missing?.kind === 'i18n-missing' && missing.keys.includes('module.jevread') && !missing.keys.includes(KEY) && listedAgain.missing?.some(m => m.pubkey === subscriber && m.keys.includes('module.jevread')), JSON.stringify(told))
 
   await browser.close()

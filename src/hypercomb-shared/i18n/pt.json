@@ -647,6 +647,8 @@
   "slash.join": "Junta-te ao enxame aqui — os teus mosaicos públicos são oferecidos e aparecem outros participantes",
   "slash.leave": "Sai do enxame — deixa de oferecer os teus mosaicos e de ver os outros",
   "swarm.join.already": "já estás no enxame aqui",
+  "swarm.join.published": "{cell} publicado do seu host — oferecido aqui",
+  "swarm.join.publish-failed": "{cell} não está sendo oferecido: {reason}",
   "swarm.leave.already": "não estás num enxame",
   "slash.format": "Copiar formatação visual do bloco ativo",
   "slash.layout": "Salvar, aplicar, listar ou remover modelos de layout",
@@ -2590,6 +2592,8 @@
   "chat.route.summary.cardBy": "Este resumo por {model}",
   "mesh-modal.needs-location": "é necessário um local para entrar",
   "mesh-modal.needs-secret": "é necessário um segredo para entrar",
+  "swarm.availability-hold.title": "Compartilhando daqui enquanto você está no enxame",
+  "swarm.availability-hold.message": "Seus blocos chegam aos outros enquanto você ficar. Para mantê-los acessíveis depois de sair, defina um host no painel de hosts ou digite /use-live-relay.",
   "swarm.needs-host.title": "Compartilhando daqui enquanto você está no enxame",
   "swarm.needs-host.message": "Seus blocos chegam aos outros enquanto você ficar. Para mantê-los acessíveis depois de sair, defina um host no painel de hosts ou digite /use-live-relay."
 }

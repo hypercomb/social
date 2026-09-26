@@ -7,7 +7,7 @@ import { Bee, type BeeResolver, EffectBus, hypercomb, mayRunBee } from '@hyperco
 import { Store } from './store'
 import { installedPackageSig } from './installed-package.js'
 import { packedBytes } from './boot-pack.js'
-import { arrivalNames, beeClassesOfDocs, resolveArrival, type BeeClass } from './arrival-plan.js'
+import { arrivalNames, beeClassesOfDocs, quietFeatureNames, resolveArrival, type BeeClass } from './arrival-plan.js'
 import { activeInstallIndex } from './install-index.js'
 import {
   learnedCriticalBeeSigs,
@@ -218,6 +218,13 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         const keep = new Set([...enabled, ...walked.criticalBees])
         walked = { ...walked, bees: walked.bees.filter(sig => keep.has(sig)) }
       }
+      // FEATURES FOR PARTICIPANTS ONLY: a read-only reader never loads a bee
+      // under a layer its publisher's `features:participant` pool names —
+      // not at arrival, not on the approach. Decided once.
+      if (layerRoots.length && (globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) {
+        const quiet = await this.#quietBees(layerRoots)
+        if (quiet.size) walked = { ...walked, bees: walked.bees.filter(sig => !quiet.has(sig)) }
+      }
       const walkMs = performance.now() - tWalk
 
       // Cache warming, AT IDLE AND IN SMALL BATCHES.
@@ -331,28 +338,153 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   readonly #viewSleeping = new Map<string, { renders: readonly string[]; className: string }>()
   #viewWakeBound = false
 
-  /** Every bee asleep, queens and views — what no load may start. */
-  #asleep = (): ReadonlySet<string> => new Set([...this.#sleeping.keys(), ...this.#viewSleeping.keys()])
+  /** BEES ASLEEP UNTIL AN EFFECT (essentials passive-queen.ts
+   *  effectSleeper): a bee that declares the effects that wake it loads when
+   *  the first one is emitted; the bus replays that emission to it. */
+  readonly #effectSleeping = new Map<string, { wakesOn: readonly string[]; className: string }>()
+  readonly #effectWatched = new Set<string>()
+
+  /** Every bee asleep, queens, views and effect sleepers — what no load may start. */
+  #asleep = (): ReadonlySet<string> => new Set([...this.#sleeping.keys(), ...this.#viewSleeping.keys(), ...this.#effectSleeping.keys()])
+
+  /** Wake every bee asleep for `effect`, then run one cycle. */
+  #wakeOnEffect = async (effect: string): Promise<void> => {
+    const sigs = [...this.#effectSleeping].filter(([, entry]) => entry.wakesOn.includes(effect)).map(([sig]) => sig)
+    if (!sigs.length) return
+    for (const sig of sigs) {
+      this.#effectSleeping.delete(sig)
+      this.#woken.add(sig)
+    }
+    await Promise.allSettled(sigs.map(sig => this.#wakeLoad(sig)))
+    await new hypercomb().act('')
+  }
+
+  /** Subscribe once per waking effect. Replayed on subscribe: an effect
+   *  already sent still wakes its bee. */
+  #watchEffect = (effect: string): void => {
+    if (this.#effectWatched.has(effect)) return
+    this.#effectWatched.add(effect)
+    EffectBus.on(effect, () => { void this.#wakeOnEffect(effect) })
+  }
+
+  /** The two ways a view is entered — the mode changes, or a tile opens it —
+   *  each wake that view's renderers. Bound once. */
+  #bindViewWake = (): void => {
+    if (this.#viewWakeBound) return
+    this.#viewWakeBound = true
+    // Replayed on subscribe: a view opened before this line still wakes.
+    EffectBus.on<{ view?: string }>('view:open-for-tile', payload => { void this.wakeView(String(payload?.view ?? '')) })
+    const ioc = window.ioc as { whenReady?: (key: string, cb: (value: unknown) => void) => void }
+    ioc.whenReady?.('@hypercomb.social/ViewMode', (value) => {
+      const vm = value as EventTarget & { mode?: string }
+      const enter = (): void => { void this.wakeView(String(vm.mode ?? '')) }
+      vm.addEventListener?.('change', enter)
+      enter()
+    })
+  }
+
+  #quiet: Set<string> | null = null
+
+  /** Every bee under a layer whose name the quiet list carries, sub-layers
+   *  included — read from the walk's own layer cache. */
+  #quietBees = async (roots: readonly string[]): Promise<Set<string>> => {
+    if (this.#quiet) return this.#quiet
+    const names = await quietFeatureNames()
+    const quiet = new Set<string>()
+    const seen = new Set<string>()
+    const visit = (sig: string, inside: boolean): void => {
+      const layer = this.#layerCache.get(this.#stripExt(sig))
+      if (!layer || seen.has(sig)) return
+      seen.add(sig)
+      const within = inside || names.has(layer.name)
+      if (within) for (const bee of layer.bees) quiet.add(bee)
+      for (const child of layer.children) visit(child, within)
+    }
+    if (names.size) for (const root of roots) visit(this.#stripExt(root), false)
+    if (quiet.size) console.log(`[script-preloader] ${quiet.size} participant-only bees never load for this reader (${[...names].join(', ')})`)
+    this.#quiet = quiet
+    return quiet
+  }
+
+  // -------------------------------------------------
+  // the dev shell's sleepers
+  // -------------------------------------------------
+
+  /** How the dev shell loads a sleeper: the module, by its own import. */
+  readonly #devLoaders = new Map<string, () => Promise<unknown>>()
+
+  /** THE DEV SHELL SLEEPS THE SAME BEES (hypercomb-essentials
+   *  sleeping-effects.ts, generated by prepare with the rules the package
+   *  build uses). The dev shell imports its bees directly, so it hands over
+   *  loaders instead of signatures; the same triggers wake them. */
+  public useSleepers = (entries: ReadonlyArray<{
+    readonly load: () => Promise<unknown>
+    readonly command?: string
+    readonly description?: string
+    readonly renders?: readonly string[]
+    readonly wakesOn?: readonly string[]
+  }>): void => {
+    entries.forEach((entry, index) => {
+      const id = `dev:${index}`
+      if (this.#devLoaders.has(id)) return
+      this.#devLoaders.set(id, entry.load)
+      if (entry.command) {
+        this.#sleeping.set(id, { command: entry.command.toLowerCase(), description: entry.description ?? entry.command, className: entry.command })
+      } else if (entry.renders?.length) {
+        this.#viewSleeping.set(id, { renders: entry.renders, className: id })
+      } else if (entry.wakesOn?.length) {
+        this.#effectSleeping.set(id, { wakesOn: entry.wakesOn, className: id })
+        for (const effect of entry.wakesOn) this.#watchEffect(effect)
+      }
+    })
+    if (this.#viewSleeping.size) this.#bindViewWake()
+    console.log(`[script-preloader] dev: ${this.#sleeping.size} queens, ${this.#viewSleeping.size} views, ${this.#effectSleeping.size} effect bees asleep`)
+    EffectBus.emit('loader:sleeping', { words: this.sleepingWords() })
+  }
+
+  /** Load one sleeper: by its dev loader when it has one, by signature
+   *  otherwise. The dev processor pulses no bee it did not start with, so a
+   *  bee a dev module registers gets its first heartbeat here. */
+  #wakeLoad = async (id: string): Promise<Bee | null> => {
+    const load = this.#devLoaders.get(id)
+    if (!load) return this.#loadBeeBySignature(id)
+    const before = new Set(window.ioc.list())
+    try { await load() } catch (err) {
+      console.warn(`[script-preloader] dev sleeper ${id} failed to load:`, err)
+      return null
+    }
+    let first: Bee | null = null
+    for (const key of window.ioc.list()) {
+      if (before.has(key)) continue
+      const bee = window.ioc.get(key) as Bee | undefined
+      if (!bee) continue
+      first ??= bee
+      if (typeof (bee as any).pulse === 'function') {
+        try { await bee.pulse('') } catch (err) { console.warn(`[script-preloader] woken ${key} failed its first pulse:`, err) }
+      }
+    }
+    return first
+  }
 
   #noteSleepers = (walked: { bees: readonly string[]; classes: ReadonlyMap<string, BeeClass> }): void => {
     const inPackage = new Set(walked.bees)
+    let effectSleepers = 0
+    for (const [className, cls] of walked.classes) {
+      if (!cls.passive || cls.command || cls.renders?.length || !cls.wakesOn?.length || !inPackage.has(cls.sig)) continue
+      if (this.#beeCache.has(cls.sig) || this.#woken.has(cls.sig) || this.#effectSleeping.has(cls.sig) || this.#arrivalBees.has(cls.sig)) continue
+      this.#effectSleeping.set(cls.sig, { wakesOn: cls.wakesOn, className })
+      effectSleepers++
+      for (const effect of cls.wakesOn) this.#watchEffect(effect)
+    }
+    if (effectSleepers) console.log(`[script-preloader] ${effectSleepers} bees asleep until their effect`)
     for (const [className, cls] of walked.classes) {
       if (!cls.passive || cls.command || !cls.renders?.length || !inPackage.has(cls.sig)) continue
       if (this.#beeCache.has(cls.sig) || this.#woken.has(cls.sig) || this.#viewSleeping.has(cls.sig) || this.#arrivalBees.has(cls.sig)) continue
       this.#viewSleeping.set(cls.sig, { renders: cls.renders, className })
     }
     if (this.#viewSleeping.size && !this.#viewWakeBound) {
-      this.#viewWakeBound = true
       console.log(`[script-preloader] ${this.#viewSleeping.size} views asleep until entered`)
-      // Replayed on subscribe: a view opened before this line still wakes.
-      EffectBus.on<{ view?: string }>('view:open-for-tile', payload => { void this.wakeView(String(payload?.view ?? '')) })
-      const ioc = window.ioc as { whenReady?: (key: string, cb: (value: unknown) => void) => void }
-      ioc.whenReady?.('@hypercomb.social/ViewMode', (value) => {
-        const vm = value as EventTarget & { mode?: string }
-        const enter = (): void => { void this.wakeView(String(vm.mode ?? '')) }
-        vm.addEventListener?.('change', enter)
-        enter()
-      })
+      this.#bindViewWake()
     }
     let added = false
     for (const [className, cls] of walked.classes) {
@@ -381,7 +513,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       this.#viewSleeping.delete(sig)
       this.#woken.add(sig)
     }
-    await Promise.allSettled(sigs.map(sig => this.#loadBeeBySignature(sig)))
+    await Promise.allSettled(sigs.map(sig => this.#wakeLoad(sig)))
     await new hypercomb().act('')
   }
 
@@ -393,7 +525,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const [sig] = found
     this.#sleeping.delete(sig)
     this.#woken.add(sig)
-    const bee = await this.#loadBeeBySignature(sig)
+    const bee = await this.#wakeLoad(sig)
     EffectBus.emit('loader:sleeping', { words: this.sleepingWords() })
     return bee
   }
@@ -412,6 +544,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     if (!names) return
     const { bees, missing } = resolveArrival(names, walked.classes, new Set(walked.bees))
     if (missing.length) console.warn(`[script-preloader] arrival plan names what this package does not carry: ${missing.join(', ')}`)
+    // What the arrival came to — the shell's arrival trial reports it.
+    EffectBus.emit('loader:arrival', { now: bees.size, passive: bees.size ? walked.bees.length - bees.size : 0, missing })
     if (!bees.size) return
     this.#arrivalBees = bees
     this.#passive = new Set(walked.bees.filter(sig => !bees.has(sig) && !this.#beeCache.has(sig)))
@@ -420,6 +554,106 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     // Late-value replay: an approach that happened before this line still
     // wakes them.
     EffectBus.on('loader:activate', () => { this.#activatePassive() })
+    // Within range of the approach, fetch them ahead of it (#preloadPassive).
+    EffectBus.on('loader:preload', () => { this.#preloadPassive() })
+    this.#watchRange()
+  }
+
+  // ── WITHIN RANGE: preload what the approach would wake ─────────────────
+  // A door into the hive marks itself `data-hc-approach` (the site view's
+  // exit). When the reader comes within range of one — the pointer near it,
+  // focus on it, a press starting on it — the passive bees are FETCHED at low
+  // priority, six at a time, never run: a good chance that what the
+  // approach needs is already here. The approach itself stops the queue, so
+  // its own loads go first (renderers leading).
+
+  static readonly #RANGE_PX = 160
+  static readonly #PRELOAD_LANES = 6
+  #preloadStarted = false
+  #preloadStopped = false
+
+  #watchRange = (): void => {
+    if (typeof document === 'undefined') return
+    const DOOR = '[data-hc-approach]'
+    let x = 0
+    let y = 0
+    let frame = 0
+    const stop = (): void => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('focusin', onReach, true)
+      document.removeEventListener('pointerdown', onReach, true)
+      if (frame) cancelAnimationFrame(frame)
+    }
+    const inRange = (): void => { stop(); EffectBus.emit('loader:preload', { reason: 'range' }) }
+    const onReach = (event: Event): void => {
+      if ((event.target as Element | null)?.closest?.(DOOR)) inRange()
+    }
+    const onMove = (event: PointerEvent): void => {
+      x = event.clientX
+      y = event.clientY
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        for (const door of document.querySelectorAll<HTMLElement>(DOOR)) {
+          const box = door.getBoundingClientRect()
+          if (!box.width && !box.height) continue
+          const dx = Math.max(box.left - x, 0, x - box.right)
+          const dy = Math.max(box.top - y, 0, y - box.bottom)
+          if (Math.hypot(dx, dy) <= ScriptPreloader.#RANGE_PX) { inRange(); return }
+        }
+      })
+    }
+    document.addEventListener('pointermove', onMove, { passive: true })
+    document.addEventListener('focusin', onReach, true)
+    document.addEventListener('pointerdown', onReach, true)
+    EffectBus.on('loader:activate', stop)
+  }
+
+  /** Fetch (never run) the passive bees a door away. Only door-served modules
+   *  have an address to preload; the renderers go first, as they wake. */
+  #preloadPassive = (): void => {
+    const passive = this.#passive
+    if (this.#preloadStarted || this.#preloadStopped || !passive?.size) return
+    if ((globalThis as { __HC_MODULE_ROOT__?: boolean }).__HC_MODULE_ROOT__ !== true) return
+    this.#preloadStarted = true
+    const asleep = this.#asleep()
+    const pending = [...passive].filter(sig => !this.#beeCache.has(sig) && !asleep.has(sig))
+    const bees = [
+      ...pending.filter(sig => this.#arrivalCritical.includes(sig)),
+      ...pending.filter(sig => !this.#arrivalCritical.includes(sig)),
+    ]
+    // Each bee's dependencies come in at load, not through its own imports
+    // (#ensureDeps) — queue them just ahead of the bee.
+    const depsOf = (globalThis as { __hypercombBeeDeps?: Record<string, string[]> }).__hypercombBeeDeps ?? {}
+    const queued = new Set<string>()
+    const ordered: string[] = []
+    for (const bee of bees) {
+      for (const dep of depsOf[bee] ?? []) {
+        if (this.#loadedDeps.has(dep) || queued.has(dep)) continue
+        queued.add(dep)
+        ordered.push(dep)
+      }
+      if (!queued.has(bee)) { queued.add(bee); ordered.push(bee) }
+    }
+    const integrity = (globalThis as { __hypercombImportIntegrity?: Record<string, string> }).__hypercombImportIntegrity ?? {}
+    console.log(`[script-preloader] within range: preloading ${bees.length} passive bees, ${ordered.length - bees.length} dependencies`)
+    let next = 0
+    const lane = async (): Promise<void> => {
+      while (next < ordered.length && !this.#preloadStopped) {
+        const sig = ordered[next++]
+        await new Promise<void>(resolve => {
+          const link = document.createElement('link')
+          link.rel = 'modulepreload'
+          link.href = `/${sig}`
+          link.setAttribute('fetchpriority', 'low')
+          const hash = integrity[`/${sig}`]
+          if (hash) link.integrity = hash
+          link.onload = link.onerror = () => resolve()
+          document.head.append(link)
+        })
+      }
+    }
+    for (let i = 0; i < ScriptPreloader.#PRELOAD_LANES; i++) void lane()
   }
 
   /** Load exactly the arrival's bees, together, and hand them to the
@@ -438,6 +672,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *  paints while the others arrive — then run one cycle, trunk to leaf, so
    *  every bee (the woken ones included) meets the place the visitor is in. */
   #activatePassive = (): void => {
+    // The approach outranks the preload: stop feeding it.
+    this.#preloadStopped = true
     const passive = this.#passive
     if (!passive?.size) return
     this.#passive = new Set()
@@ -504,6 +740,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     dependencies: string[]
     resources: string[]
     children: string[]
+    name: string
     criticalBees?: unknown
     classes: Array<[string, BeeClass]>
   }>()
@@ -553,6 +790,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
             dependencies: ((layer['dependencies'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
             resources: ((layer['resources'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
             children: ((childRefs as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
+            name: String(layer['name'] ?? ''),
             criticalBees: layer['criticalBees'],
             classes: beeClassesOfDocs(layer['docs']),
           }

@@ -86,7 +86,7 @@ binding = "ASSETS"
 #
 # Everything NOT negated still runs the Worker first — `/` (so the implicit-site
 # "nothing published here" check and the page CSP are unchanged), bare
-# `/<sig>`, `/@resource/*`, `/content/*`, `/site.json`, `/publications.json`,
+# `/<sig>`, a door's bag `/<sign(host)>/`, `/@resource/*`, `/content/*`, `/publications.json`,
 # `/hive/*`, `/upload`, `/grant`, `/ai/ask`. Security headers for the negated
 # paths live in hypercomb-web/public/_headers.
 run_worker_first = [

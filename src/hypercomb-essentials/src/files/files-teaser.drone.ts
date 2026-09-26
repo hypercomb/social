@@ -29,6 +29,11 @@ type HistoryLike = {
 }
 
 export class FilesTeaserDrone extends Drone {
+  /** THE EFFECTS THAT WAKE THIS BEE, and until one arrives it does nothing:
+   *  it may stay unloaded until one is emitted, and the bus replays that
+   *  emission to it (essentials scripts/passive-queen.ts effectSleeper). */
+  readonly wakesOn: readonly string[] = ['files:teaser:request', 'files:teaser:request-pin', 'files:teaser:request-hide']
+
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'files'
 

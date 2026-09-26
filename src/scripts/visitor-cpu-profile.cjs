@@ -20,7 +20,8 @@ const VERSION = process.env.HC_VERSION || ''
     const body = JSON.stringify({ arrive: process.env.KEYS.split(',').map(s => s.trim()).filter(Boolean) })
     const plan = require('crypto').createHash('sha256').update(body).digest('hex')
     await page.route(`**/content/${plan}`, route => route.fulfill({ status: 200, contentType: 'application/json', body }))
-    await page.route('**/site.json*', async route => {
+    // The door's record: the newest marker of its own bag, sign(<host>).
+    await page.route(url => /^\/[0-9a-f]{64}\/[0-9]{8}$/.test(url.pathname), async route => {
       const response = await route.fetch()
       await route.fulfill({ response, json: { ...(await response.json()), plan } })
     })

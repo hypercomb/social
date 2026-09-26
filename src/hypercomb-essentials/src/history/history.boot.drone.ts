@@ -16,6 +16,8 @@ import { SNAPSHOTS_SLOT_DECLARATION } from './snapshots-slot.js'
 
 export class HistoryBootDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  /** The boot lane: named in the root, loaded before the bee wave. */
+  readonly lane = 'boot'
 
   public override description =
     'History at boot: registers the history service, its cursor, the layer slot registry and history\'s own slots.'

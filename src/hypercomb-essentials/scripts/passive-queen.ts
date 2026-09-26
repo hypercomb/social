@@ -38,6 +38,52 @@ const reachedFromElsewhere = (file: string, keys: readonly string[], others: Rea
   return null
 }
 
+export type EffectSleepVerdict = { sleeps: true; wakesOn: string[] } | { sleeps: false; why: string }
+
+/** Every effect subscription in a source: literal names, and whether any
+ *  subscription names its effect some other way (a constant, an expression). */
+const subscriptionsOf = (source: string): { literal: string[]; opaque: boolean } => {
+  const literal = [...source.matchAll(/(?:onEffect|EffectBus\.on|EffectBus\.once)(?:<[^>]*>)?\(\s*(['"`])([^'"`]+)\1/g)].map(match => match[2]!)
+  const all = [...source.matchAll(/(?:onEffect|EffectBus\.on|EffectBus\.once)(?:<[^>]*>)?\(\s*([^\s,)]+)/g)].length
+  return { literal, opaque: all > literal.length }
+}
+
+/**
+ * MAY THIS BEE SLEEP UNTIL AN EFFECT? A bee that DECLARES the effects that
+ * wake it (`readonly wakesOn = ['expand:layer', …]`) claims it does nothing
+ * until one arrives; it stays unloaded until one is emitted, and the bus
+ * replays that emission to it when it wakes. The build holds the claim to
+ * what it can see: every subscription the bee makes is declared, none is
+ * sent without replay (emitTransient), it listens to no DOM, and nothing
+ * else names its key or imports it.
+ */
+export const effectSleeper = (
+  file: string,
+  source: string,
+  others: ReadonlyMap<string, string>,
+): EffectSleepVerdict => {
+  const declared = /readonly\s+wakesOn\s*(?::[^=]+)?=\s*\[([^\]]*)\]/.exec(source)
+  if (!declared) return { sleeps: false, why: 'declares no wakesOn' }
+  const wakesOn = [...declared[1]!.matchAll(/['"]([^'"]+)['"]/g)].map(match => match[1]!)
+  if (!wakesOn.length) return { sleeps: false, why: 'wakes on nothing' }
+  const subscriptions = subscriptionsOf(source)
+  if (subscriptions.opaque) return { sleeps: false, why: 'subscribes to an effect it does not name' }
+  const undeclared = subscriptions.literal.filter(effect => !wakesOn.includes(effect))
+  if (undeclared.length) return { sleeps: false, why: `subscribes to undeclared ${undeclared[0]}` }
+  if (/addEventListener\(/.test(source)) return { sleeps: false, why: 'listens to the DOM' }
+  for (const [path, text] of others) {
+    for (const effect of wakesOn) {
+      if (new RegExp(`emitTransient(?:<[^>]*>)?\\(\\s*['"]${effect.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`).test(text)) {
+        return { sleeps: false, why: `${effect} is sent without replay by ${path}` }
+      }
+    }
+  }
+  const keys = [...source.matchAll(LITERAL_REGISTER)].map(match => match[1]!)
+  const reached = reachedFromElsewhere(file, keys, others)
+  if (reached) return { sleeps: false, why: reached }
+  return { sleeps: true, wakesOn }
+}
+
 export type ViewSleepVerdict = { sleeps: true; renders: string[] } | { sleeps: false; why: string }
 
 /**
@@ -68,7 +114,10 @@ export const passiveQueen = (
   /** Every other source file of the package, by path. */
   others: ReadonlyMap<string, string>,
 ): PassiveVerdict => {
-  if (!/\.queen\.ts$/.test(file)) return { passive: false, why: 'not a queen module' }
+  // A queen is what DECLARES the one word it answers — never what its file is
+  // called. A module that also pulses does work every cycle, so it stays awake.
+  if (!/readonly\s+command\s*=\s*['"][^'"]+['"]/.test(source)) return { passive: false, why: 'declares no word' }
+  if (/^\s*(?:(?:public|protected|override|async)\s+)*(?:heartbeat|sense)\s*\(/m.test(source)) return { passive: false, why: 'pulses' }
   const keys = [...source.matchAll(LITERAL_REGISTER)].map(match => match[1]!)
   if (keys.length !== 1) return { passive: false, why: `registers ${keys.length} literal keys` }
   const side = SIDE_EFFECT.exec(source)

@@ -5,7 +5,7 @@
 // bees must wake.
 //   node scripts/visitor-plan-check.cjs <url> [planSig]
 // HC_VERSION targets a worker version staged at 0%. A planSig is injected
-// into /site.json (before the publisher has signed one); without it the page
+// into the door's record (before the publisher has signed one); without it the page
 // runs whatever its descriptor says. Keys instead of a signature
 // ("@x.com/ViewBee,@x.com/SiteViewDrone") try a plan nothing has published. SHOT=dir saves screenshots.
 const { chromium } = require('playwright')
@@ -35,17 +35,24 @@ const label = new URL(url).hostname.split('.')[0] + (plan ? '-plan' : '-full')
   const errors = []
   page.on('console', m => {
     const text = m.text()
-    if (/\[script-preloader\] (arrival|approached|find:)|arrival plan/.test(text)) logs.push(text.slice(0, 200))
+    if (/\[script-preloader\] (arrival|approached|find:|.*participant-only)|arrival plan/.test(text)) logs.push(text.slice(0, 200))
     if (m.type() === 'error') errors.push(text.slice(0, 160))
   })
   page.on('pageerror', e => errors.push(`pageerror ${String(e.message).slice(0, 160)}`))
   if (trialKeys) {
     await page.route(`**/content/${plan}`, route => route.fulfill({ status: 200, contentType: 'application/json', body: trialBody }))
   }
-  if (plan) {
-    await page.route('**/site.json*', async route => {
+  // QUIET="assistant,editor" injects a participant-only snapshot (as a
+  // publisher's `features publish` would) and names it in the door's record.
+  const quietNames = (process.env.QUIET || '').split(',').map(s => s.trim()).filter(Boolean)
+  const quietBody = quietNames.length ? JSON.stringify({ features: [...new Set(quietNames)].sort() }) : ''
+  const quiet = quietBody ? require('crypto').createHash('sha256').update(quietBody).digest('hex') : ''
+  if (quiet) await page.route(`**/content/${quiet}`, route => route.fulfill({ status: 200, contentType: 'application/json', body: quietBody }))
+  if (plan || quiet) {
+    // The door's record: the newest marker of its own bag, sign(<host>).
+    await page.route(url => /^\/[0-9a-f]{64}\/[0-9]{8}$/.test(url.pathname), async route => {
       const response = await route.fetch()
-      const body = { ...(await response.json()), plan }
+      const body = { ...(await response.json()), ...(plan ? { plan } : {}), ...(quiet ? { quiet } : {}) }
       await route.fulfill({ response, json: body })
     })
   }

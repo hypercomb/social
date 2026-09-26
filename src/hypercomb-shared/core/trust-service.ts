@@ -10,7 +10,8 @@
 //
 // The trust gate fires at the activation step, not at adoption. When a
 // participant attempts to enable an item whose source domain isn't in their
-// trusted community (`hc:community:domains`), the UI prompts them. Three
+// trusted community (the trust:code pool, read through its cache
+// `hc:community:domains`), the UI prompts them. Three
 // outcomes:
 //
 //   - 'allow-once'    — code runs this session; not added to community
@@ -58,6 +59,15 @@ export class TrustService extends EventTarget {
   public readonly addToCommunity = (domain: string): void => {
     const host = this.#normalize(domain)
     if (!host) return
+    // The consent lives in the trust:code pool (essentials code-trust.ts),
+    // which writes this same key first; the shell writes it alone only while
+    // that module is not loaded, and the next reconcile carries it into the pool.
+    const codeTrust = get<{ trust?: (domain: string) => Promise<string> }>('@diamondcoreprocessor.com/CodeTrust')
+    if (codeTrust?.trust) {
+      void codeTrust.trust(host)
+      this.dispatchEvent(new Event('change'))
+      return
+    }
     const current = this.getCommunity()
     if (current.has(host)) return
     current.add(host)

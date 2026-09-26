@@ -20,7 +20,7 @@ import { spawnSync } from 'child_process'
 import { createHash } from 'node:crypto'
 import { builtinModules } from 'node:module'
 import { TRANSFER_PACKS_MEANING, encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.js'
-import { passiveQueen, viewSleeper } from './passive-queen.js'
+import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen.js'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
@@ -110,18 +110,27 @@ const VENDOR_PACKAGES: readonly string[] = (() => {
 /** What every bee, atom and namespace bundle leaves to the import map. */
 const UNIT_EXTERNALS = [...PLATFORM_EXTERNALS, ...VENDOR_PACKAGES]
 
-// Bee artifacts that must evaluate before the first visible hive frame can
-// settle. Constructor-registered services such as Settings, AxialService and
-// LayoutService are namespace dependencies of these artifacts, not bee
-// artifacts themselves. The signed root layer publishes the resolved sigs as
-// an optimization hint; the runtime still verifies readiness and can fall back
-// to the full bee wave.
-const RENDER_CRITICAL_BEE_CLASSES = Object.freeze([
-  'PixiHostWorker',
-  'ShowCellDrone',
-  'BackgroundDrone',
-] as const)
-const RENDER_CRITICAL_BEE_CLASS_SET = new Set<string>(RENDER_CRITICAL_BEE_CLASSES)
+// A BEE DECLARES ITS LANE (`readonly lane = 'first-paint' | 'boot'`) and the
+// build reads the declaration — never a class-name list or a file suffix.
+//
+// `first-paint`: bee artifacts that must evaluate before the first visible
+// hive frame can settle. Constructor-registered services such as Settings,
+// AxialService and LayoutService are namespace dependencies of these
+// artifacts, not bee artifacts themselves. The signed root layer publishes the
+// resolved sigs as `criticalBees`, an optimization hint; the runtime still
+// verifies readiness and can fall back to the full bee wave. (Runtimes today
+// accept a hint of exactly their three known classes — hypercomb-runtime
+// critical-bees.ts — and take the cold path for any other.)
+//
+// `boot`: the boot lane's bees, named in the root as `bootBees`.
+const LANE_RE = /readonly\s+lane\s*(?::[^=]+)?=\s*['"]([^'"]+)['"]/
+const LANES = new Set(['first-paint', 'boot'])
+const declaredLane = (source: string, where: string): 'first-paint' | 'boot' | null => {
+  const lane = LANE_RE.exec(source)?.[1]
+  if (lane === undefined) return null
+  if (!LANES.has(lane)) throw new Error(`build-module: ${where} declares unknown lane "${lane}"`)
+  return lane as 'first-paint' | 'boot'
+}
 
 // Separately owned capability packs may still use domain-shaped roots. The
 // package's own capabilities live directly under src/ and publish beneath the
@@ -238,7 +247,7 @@ interface BuildCache {
  *  change here must reach them even when no source file moved — the "nothing
  *  changed" early exit asks this too. Bump it with any change to what a doc
  *  carries. queen-passive:1 = queens carry `passive` (passive-queen.ts). */
-const DOCS_SHAPE = 'queen-passive:1|renders:1'
+const DOCS_SHAPE = 'queen-passive:1|renders:1|wakesOn:1'
 
 const CACHE_FILE = join(PROJECT_ROOT, '.build-cache.json')
 const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
@@ -424,6 +433,8 @@ interface BeeDocEntry {
   passive?: boolean
   /** The views a sleeping renderer answers (passive-queen.ts viewSleeper). */
   renders?: string[]
+  /** The effects that wake a sleeping bee (passive-queen.ts effectSleeper). */
+  wakesOn?: string[]
 }
 
 /** Every source file of the package, for rules that ask what OTHER files say
@@ -1356,10 +1367,9 @@ const main = async (): Promise<void> => {
   // bees — extract deps from compiled output and map to dep sigs
   const beeDepsMap = new Map<string, string[]>()
   const docsByDir = new Map<string, Record<string, BeeDocEntry>>()
-  const criticalBeeMatches = new Map<string, string[]>(
-    RENDER_CRITICAL_BEE_CLASSES.map(className => [className, []]),
-  )
-  /** `*.boot.drone.ts` — the boot lane's bees, named in the root. */
+  /** Bees that declare `lane = 'first-paint'`, by their source entry. */
+  const firstPaint: { entry: string; sig: string }[] = []
+  /** Bees that declare `lane = 'boot'` — the boot lane, named in the root. */
   const bootBees: string[] = []
   const beeExternals = [...UNIT_EXTERNALS, ...allSpecifiers]
   let beeCacheHits = 0
@@ -1406,7 +1416,10 @@ const main = async (): Promise<void> => {
 
     resourceBytes.set(sig, bytes)
     addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'bee')
-    if (/\.boot\.drone\.[tj]s$/.test(src.entry)) bootBees.push(sig)
+    const entryRel = relative(SRC_ROOT, src.entry).replace(/\\/g, '/')
+    const lane = declaredLane(allPackageSources().get(entryRel) ?? readFileSync(src.entry, 'utf8'), entryRel)
+    if (lane === 'boot') bootBees.push(sig)
+    if (lane === 'first-paint') firstPaint.push({ entry: entryRel, sig })
 
     // beeline: cache bee doc extraction by content signature
     const beeFileLeaf = newBees[src.relPath]?.files[src.entry]
@@ -1434,16 +1447,16 @@ const main = async (): Promise<void> => {
       const rel = relative(SRC_ROOT, src.entry).replace(/\\/g, '/')
       const verdict = viewSleeper(rel, allPackageSources().get(rel) ?? readFileSync(src.entry, 'utf8'), allPackageSources())
       if (verdict.sleeps) beeDoc = { ...beeDoc, passive: true, renders: verdict.renders }
+      else {
+        const woken = effectSleeper(rel, allPackageSources().get(rel) ?? readFileSync(src.entry, 'utf8'), allPackageSources())
+        if (woken.sleeps) beeDoc = { ...beeDoc, passive: true, wakesOn: woken.wakesOn }
+      }
     }
 
     if (beeDoc) {
       const dirDocs = docsByDir.get(src.relDir) ?? {}
       dirDocs[sig] = beeDoc
       docsByDir.set(src.relDir, dirDocs)
-
-      if (RENDER_CRITICAL_BEE_CLASS_SET.has(beeDoc.className)) {
-        criticalBeeMatches.get(beeDoc.className)!.push(sig)
-      }
     }
 
     // beeline: cache bee dependency mapping by outputSig.
@@ -1486,26 +1499,15 @@ const main = async (): Promise<void> => {
 
   console.log(`[build-module] bees: ${beeCacheHits} cached, ${beeCacheMisses} built`)
 
-  // Resolve class intent to content identity. This is deliberately strict:
+  // Resolve declared intent to content identity. This is deliberately strict:
   // silently emitting a partial or ambiguous startup hint would move a
   // compiler mistake onto the participant's first-paint path. Older roots may
-  // omit the field; every root produced by this compiler must name each
-  // expected bee exactly once.
-  const criticalErrors: string[] = []
-  for (const className of RENDER_CRITICAL_BEE_CLASSES) {
-    const matches = criticalBeeMatches.get(className) ?? []
-    if (matches.length === 0) criticalErrors.push(`${className} was not found`)
-    if (matches.length > 1) criticalErrors.push(`${className} matched ${matches.length} bee artifacts`)
-  }
-  if (criticalErrors.length) {
-    throw new Error(`build-module: invalid render-critical bee set: ${criticalErrors.join('; ')}`)
-  }
-
-  const criticalBees = uniqSorted(
-    RENDER_CRITICAL_BEE_CLASSES.map(className => criticalBeeMatches.get(className)![0]!),
-  )
-  if (criticalBees.length !== RENDER_CRITICAL_BEE_CLASSES.length) {
-    throw new Error('build-module: render-critical classes resolved to duplicate bee signatures')
+  // omit the field; every root produced by this compiler names each declared
+  // bee exactly once.
+  if (!firstPaint.length) throw new Error('build-module: no bee declares lane = \'first-paint\'')
+  const criticalBees = uniqSorted(firstPaint.map(bee => bee.sig))
+  if (criticalBees.length !== firstPaint.length) {
+    throw new Error(`build-module: first-paint bees resolved to duplicate signatures: ${firstPaint.map(bee => bee.entry).join(', ')}`)
   }
   for (const sig of criticalBees) {
     if (!isSig(sig)) throw new Error(`build-module: render-critical bee has invalid signature: ${sig}`)

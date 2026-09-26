@@ -1,17 +1,23 @@
 import { installMemoryFilesystem } from './setup/memory-filesystem'
 import { installReadonlyNetwork } from './setup/readonly-network'
+import { readArrivalTrial, startArrivalTrial } from './setup/arrival-trial'
 
-interface SiteDescriptor {
-  head?: string
-  hosts?: string[]
+/** What this door is: the newest marker of its own bag, sign(<hostname>)
+ *  (blossom-worker locationMeta). Only signatures are queried — no named
+ *  route describes a site. */
+interface DoorMeta {
+  /** The published head. */
+  layer?: string
   icon?: string
   lineage?: string
   pubkey?: string
-  segments?: string[]
   title?: string
   /** The publisher's arrival plan (signed index `plan:<lineage>`): a record
    *  naming the bees this branch's arrival needs, by IoC key. */
   plan?: string
+  /** The publisher's participant-only features (signed index
+   *  `pool:features:participant`): a snapshot record naming them. */
+  quiet?: string
 }
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -101,21 +107,33 @@ const applySiteIcon = (icon: string): void => {
 installMemoryFilesystem()
 installReadonlyNetwork()
 
-// ── what this site is, read FIRST ──────────────────────────────────────────
-// The descriptor names the publication and, when its publisher planned one,
-// the ARRIVAL: the bees this branch's first view needs (hypercomb-runtime
-// arrival-plan.ts). The runtime's first bee load reads the plan, so both
-// reads start here, before the boot graph, and run beside it — a plan that
-// is slow or absent simply means the whole package loads, as always.
-const descriptorUrl = new URL('/site.json', location.origin)
-{
-  const selectedPublisher = new URLSearchParams(location.search).get('publisher')
-  if (selectedPublisher) descriptorUrl.searchParams.set('publisher', selectedPublisher)
+// ── what this door is, read FIRST ──────────────────────────────────────────
+// Its own bag, sign(<hostname>), names the publication and, when its publisher
+// planned one, the ARRIVAL: the bees this branch's first view needs
+// (hypercomb-runtime arrival-plan.ts). The runtime's first bee load reads the
+// plan, so these reads start here, before the boot graph, and run beside it —
+// a plan that is slow or absent simply means the whole package loads, as always.
+const readDoor = async (): Promise<DoorMeta | null> => {
+  const name = new TextEncoder().encode(location.hostname.toLowerCase())
+  const bag = [...new Uint8Array(await crypto.subtle.digest('SHA-256', name))]
+    .map(byte => byte.toString(16).padStart(2, '0')).join('')
+  // The listing grows, so it is never cached; a marker never changes.
+  const listing = await fetch(`/${bag}/`, { cache: 'no-store' })
+  if (!listing.ok) return null
+  const newest = (await listing.text()).split(/\r?\n/).filter(n => /^\d{8}$/.test(n)).sort().at(-1)
+  if (!newest) return null
+  const marker = await fetch(`/${bag}/${newest}`)
+  if (!marker.ok) return null
+  const door = await marker.json() as DoorMeta
+  // A link naming its publisher opens only that publisher's door.
+  const selected = new URLSearchParams(location.search).get('publisher')?.toLowerCase()
+  return selected && selected !== String(door.pubkey ?? '').toLowerCase() ? null : door
 }
-const siteRead: Promise<SiteDescriptor | null> = fetch(descriptorUrl, { cache: 'no-store' })
-  .then(response => response.ok ? response.json() as Promise<SiteDescriptor> : null)
-  .catch(() => null)
-;(globalThis as { __hcArrival?: Promise<string[] | null> }).__hcArrival = siteRead.then(async site => {
+const siteRead: Promise<DoorMeta | null> = readDoor().catch(() => null)
+// A TRIAL (`?arrival=`, setup/arrival-trial.ts) replaces the signed plan for
+// this one visit — the Publish window's Optimize section tries a plan with it.
+const arrivalTrial = readArrivalTrial()
+;(globalThis as { __hcArrival?: Promise<string[] | null> }).__hcArrival = arrivalTrial ? Promise.resolve(arrivalTrial) : siteRead.then(async site => {
   const plan = String(site?.plan ?? '').toLowerCase()
   if (!SIG_RE.test(plan)) return null
   // Served by the door that served this code: its host hashed the bytes on
@@ -125,11 +143,24 @@ const siteRead: Promise<SiteDescriptor | null> = fetch(descriptorUrl, { cache: '
   const record = await response.json() as { arrive?: unknown }
   return Array.isArray(record?.arrive) ? record.arrive.map(name => String(name ?? '')) : null
 }).catch(() => null)
+// FEATURES FOR PARTICIPANTS ONLY: the snapshot of the publisher's
+// `features:participant` pool (signed index `pool:features:participant`,
+// essentials sharing/participant-features.ts). A read-only reader never loads
+// what it names (hypercomb-runtime script-preloader.ts #quietBees).
+;(globalThis as { __hcQuietFeatures?: Promise<string[] | null> }).__hcQuietFeatures = siteRead.then(async site => {
+  const quiet = String(site?.quiet ?? '').toLowerCase()
+  if (!SIG_RE.test(quiet)) return null
+  const response = await fetch(`/content/${quiet}`)
+  if (!response.ok) return null
+  const record = await response.json() as { features?: unknown }
+  return Array.isArray(record?.features) ? record.features.map(name => String(name ?? '')) : null
+}).catch(() => null)
 
 // The standard boot graph is deliberately imported only after the OPFS gate
 // above is installed. It loads the same verified core and render path as the
 // participant shell, but every filesystem operation lands in session memory.
 const { EffectBus } = await import('@hypercomb/core')
+if (arrivalTrial) startArrivalTrial(EffectBus, arrivalTrial)
 
 // ── the loading cover owns the screen until the SITE is on it ──────────────
 // `.site-loading` starts inside <app-root>, which Angular REPLACES at
@@ -221,14 +252,13 @@ const waitForIoc = async (key: string, timeoutMs = 30_000): Promise<boolean> => 
 window.addEventListener('hypercomb:runtime-ready', () => {
   void (async () => {
     const site = await siteRead
-    if (!site) throw new Error('site descriptor unavailable')
+    if (!site) throw new Error('this door does not describe itself')
     const pubkey = String(site.pubkey ?? '').toLowerCase()
-    const head = String(site.head ?? '').toLowerCase()
-    const segments = (site.segments ?? String(site.lineage ?? '').split('/'))
-      .map(s => String(s ?? '').trim()).filter(Boolean)
-    const hosts = (site.hosts ?? [location.host]).map(h => String(h ?? '').trim()).filter(Boolean)
-    if (!SIG_RE.test(pubkey) || !SIG_RE.test(head) || segments.length === 0 || hosts.length === 0) {
-      throw new Error('site descriptor is incomplete')
+    const head = String(site.layer ?? '').toLowerCase()
+    const segments = String(site.lineage ?? '').split('/').map(s => s.trim()).filter(Boolean)
+    const hosts = [location.host]
+    if (!SIG_RE.test(pubkey) || !SIG_RE.test(head) || segments.length === 0) {
+      throw new Error('this door\'s description is incomplete')
     }
     offerHome(pubkey, String(site.lineage ?? ''))
     if (site.title) document.title = site.title

@@ -578,7 +578,7 @@ export class SwarmDrone extends Drone {
   // emits it on every render; if it fires before our lineage-change hook
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
-  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'behavior:enablement-changed', 'swarm:visit-folded']
+  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed', 'swarm:visit-folded']
   protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed', 'swarm:zone-incomplete', 'swarm:zone-complete', 'swarm:tile-visited']
 
   // Per-lineage subscription handle. We open one per visited sig and
@@ -1201,6 +1201,20 @@ export class SwarmDrone extends Drone {
     // zone credentials aren't set / we're not public.
     this.onEffect(ENABLEMENT_CHANGED, () => { void this.#publishWithheld() })
 
+    // Host receipt landed — a closure the availability gate held back may
+    // just have become fully served. Re-run the publish walk (debounced;
+    // a big first drain confirms receipts in bursts) so held content
+    // announces the moment it turns durable instead of waiting for the
+    // ~30-75s heartbeat.
+    this.onEffect('host:receipt', () => {
+      if (!this.#currentSig) return
+      if (this.#receiptRepublishTimer !== null) return
+      this.#receiptRepublishTimer = setTimeout(() => {
+        this.#receiptRepublishTimer = null
+        void this.#publishMyLayerAt(this.#currentSig)
+      }, 2_000)
+    })
+
     // Mesh-public toggle handler. Going OFF tears down state so temp
     // shared tiles disappear from the canvas. Going ON re-runs the
     // current-lineage sync so subscriptions reattach + we publish
@@ -1228,20 +1242,25 @@ export class SwarmDrone extends Drone {
       }
 
       if (payload?.public === true) {
-        // Every join path lands here, so this is the one place that can ASK
-        // whether a participant has somewhere to put the bytes they share.
-        // Without a host the swarm still works — the sharer serves while
-        // present — so this is a note, once per session, not a hold. The
-        // service never provisions a third-party host on its own: joining
-        // is "share with these people", not "upload to that company".
+        // SHARING REQUIRES HOSTING (jwize, 2026-09-25). Every join path lands
+        // here, so this is the one place that can ASK whether a participant
+        // has a host to share from. Without one the availability gate holds
+        // every announcement back — correct: they WATCH the swarm and bring
+        // things in, and are told so once per session. The service never
+        // provisions a third-party host on its own: joining is "share with
+        // these people", not "upload to that company".
         try {
-          if (!SwarmDrone.#needsHostNoted && this.#getHostSync()?.ensureSwarmTarget?.() === 'needs-host') {
+          const target = this.#getHostSync()?.ensureSwarmTarget?.()
+          // 'needs-host' and 'opted-out' both mean the same thing here: you
+          // watch. Say so once either way — an opt-out that stays silent
+          // reads as a join that did nothing.
+          if (!SwarmDrone.#needsHostNoted && (target === 'needs-host' || target === 'opted-out')) {
             SwarmDrone.#needsHostNoted = true
             const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
             EffectBus.emit('toast:show', {
               type: 'info',
-              title: i18n?.t('swarm.needs-host.title') ?? 'Sharing from here while you are in the swarm',
-              message: i18n?.t('swarm.needs-host.message') ?? 'Your tiles reach the others as long as you stay. To keep them reachable after you leave, set a host in the hosts panel or type /use-live-relay.',
+              title: i18n?.t('swarm.needs-host.title') ?? 'Watching only — no host to share from',
+              message: i18n?.t('swarm.needs-host.message') ?? 'You can see the swarm and bring things in. To share your own tiles, set a host in /hosts first: sharing means your host serves them.',
             })
           }
         } catch { /* never block the join */ }
@@ -2509,9 +2528,20 @@ export class SwarmDrone extends Drone {
    *  writes coalesce into one publish at the trailing edge. */
   #propsRepublishTimer: ReturnType<typeof setTimeout> | null = null
 
-  /** Once-per-session latch for the "no host yet" note on join — one
-   *  explanation is plenty; the swarm works without a host. */
+  /** Once-per-session latch for the availability-gate toast — the gate
+   *  holds on every heartbeat while a big first upload drains, and one
+   *  explanation is plenty. */
+  static #availabilityHoldToasted = false
+
+  /** Once-per-session latch for the "watching only — no host" note on
+   *  join: sharing requires hosting, and one explanation is plenty. */
   static #needsHostNoted = false
+
+  /** Debounce token for the receipt-driven republish: each landed host
+   *  receipt can flip a held-back closure to available, but a big drain
+   *  confirms hundreds of receipts in bursts — coalesce to one publish
+   *  walk at a 2s trailing edge (the walk itself also single-flights). */
+  #receiptRepublishTimer: ReturnType<typeof setTimeout> | null = null
 
   // A tile created in a swarm is public by default so the swarm can
   // collaborate on it. Gated on the SAME room+secret check as every other
@@ -2699,16 +2729,34 @@ export class SwarmDrone extends Drone {
     const prunedNames: string[] = []
     const filteredRefs: { name: string; layerSig?: string }[] = []
     const hostSync = this.#getHostSync()
-    // THE SHARER IS A HOST WHILE THEY ARE HERE. A participant standing in
-    // the swarm serves every byte they announce: layers answer over the
-    // broker (kind 20400 → 30401), pictures over the resource subscription.
-    // So a public child announces AT ONCE — there is no availability gate
-    // on the swarm any more. The gate held every tile whose closure had no
-    // host receipt, and a hive with no host configured (the default) had
-    // no receipts, so it announced nothing and read as a dead swarm.
-    // Uploads still stage below (markPublic) so the tiles stay reachable
-    // after the sharer leaves; host-sync reports that progress
-    // (`host-sync:progress`) and the presence strip paints it.
+    // AVAILABILITY GATE — the share doctrine: "to share something in a
+    // swarm it already has to be available." Being in a swarm MEANS the
+    // files are there, so adopt never 404s. A public child is announced
+    // ONLY once its closure holds confirmed read-back receipts on at least
+    // one enabled host — until then it is HELD BACK (and retracted if
+    // previously announced): announcing a sig no host serves is exactly the
+    // receiver-404 bug. markPublic below stages the uploads; every landed
+    // receipt bumps the gate's epoch and `host:receipt` re-triggers this
+    // walk, so held content announces the moment it becomes durable.
+    //
+    // The gate used to switch OFF whenever no host was configured, which
+    // read as a dev convenience and was in fact the default for every real
+    // participant (both host-sync gates ship off). So the one case the gate
+    // exists for — a hive with nowhere to put its bytes — was precisely the
+    // case that skipped it, and peers got tiles whose pictures 404'd on
+    // every candidate host. Going public now provisions a target instead
+    // (ensureSwarmTarget, on mesh:public-changed), so "no host" is no longer
+    // a state a sharing hive is in.
+    //
+    // NO ESCAPE HATCH (jwize, 2026-09-25): sharing requires hosting.
+    // Watching a swarm and bringing things in stays open to everyone; to
+    // SHARE, your content must already be on a host — that is the
+    // personal responsibility of joining. The old `hc:swarm:ungated`
+    // opt-out is gone. The host-first drain (host-sync) makes the gate
+    // cheap for a hosted hive: bytes the host already serves earn their
+    // receipts by asking, never by re-uploading.
+    const gateActive = typeof hostSync?.isClosureAvailable === 'function'
+    const heldBack: string[] = []
     for (const c of childRefs) {
       if (isCellPublic(publicLocation, c.name)) {
         // CDN doctrine-gate feed: this walk enumerates EXACTLY the public
@@ -2725,9 +2773,43 @@ export class SwarmDrone extends Drone {
               .catch(() => undefined)
           } catch { /* never disturb the publish walk */ }
         }
+        // Gate check — sig-less children (layer not committed yet) pass
+        // through: their wire entry is name+props only, nothing for a
+        // receiver to 404 on; the next commit gives them a sig and the
+        // gate takes over.
+        if (gateActive && c.layerSig) {
+          let available = false
+          try {
+            available = await hostSync!.isClosureAvailable!(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name))
+          } catch { available = false }
+          if (!available) {
+            heldBack.push(c.name)
+            // Retract any previously-published slot for this branch — a
+            // peer must not keep resolving tiles whose bytes no host
+            // confirms (host drift revokes receipts the same way).
+            prunedNames.push(c.name)
+            continue
+          }
+        }
         filteredRefs.push(c)
       }
       else prunedNames.push(c.name)
+    }
+    if (heldBack.length > 0) {
+      EffectBus.emit('swarm:availability-hold', { location: publicLocation, held: [...heldBack] })
+      slog('[swarm] availability gate holding', { location: publicLocation, held: heldBack })
+      // Once per session: tell the user WHY their shared tiles aren't
+      // announcing yet — uploads still confirming. Not per-walk (the
+      // heartbeat re-runs this constantly while a big drain lands).
+      if (!SwarmDrone.#availabilityHoldToasted) {
+        SwarmDrone.#availabilityHoldToasted = true
+        const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+        EffectBus.emit('toast:show', {
+          type: 'info',
+          title: i18n?.t('swarm.availability-hold.title') ?? 'Uploading before sharing',
+          message: i18n?.t('swarm.availability-hold.message') ?? 'Your tiles announce here once your host serves them — the upload is running.',
+        })
+      }
     }
     childRefs = filteredRefs
     const childNames = childRefs.map(c => c.name)  // legacy local var — still used by recursion + log
@@ -3956,8 +4038,31 @@ const payload: SwarmLayerPayload = myLabel
           } catch { /* never disturb the publish */ }
         }
       }
-      // No availability gate here either (see #publishSubtree): the sharer
-      // serves what they announce while they are in the swarm.
+      // AVAILABILITY GATE — same contract as #publishSubtree: the personal
+      // channel is the second announce surface, and a follower adopting a
+      // sealed handle no host serves yet 404s identically. Held entries
+      // re-announce via the host:receipt republish once their uploads
+      // confirm. Sealed handles are pool-written locally at seal time, so
+      // the closure walk always has bytes to verify against.
+      // Same unconditional contract as #publishSubtree above — the old
+      // isGateActive() check meant a hostless hive skipped the gate on this
+      // surface too, so a follower adopted handles nothing served.
+      if (typeof hostSync?.isClosureAvailable === 'function') {
+        const gated: typeof childEntries = []
+        for (const c of childEntries) {
+          let available = false
+          try {
+            available = await hostSync.isClosureAvailable(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name))
+          } catch { available = false }
+          if (available) gated.push(c)
+        }
+        if (gated.length < childEntries.length) {
+          slog('[swarm] availability gate holding on personal channel', {
+            held: childEntries.filter(c => !gated.includes(c)).map(c => c.name),
+          })
+        }
+        childEntries = gated
+      }
     }
 
     type ChildEntry = { name: string; layerSig: string } & Record<string, unknown>
@@ -4572,13 +4677,16 @@ const payload: SwarmLayerPayload = myLabel
   #getSigner = (): SignerApi | undefined =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(NOSTR_SIGNER_KEY) as SignerApi | undefined
 
-  // Host sync — the `.public` marker writer that stages uploads so shared
-  // tiles outlive the sharer's session. Resolved at runtime via IoC (no
-  // import); inert until the service registers AND the operator opts in
-  // to a host. It never gates the swarm.
+  // Host sync — the `.public` marker writer (CDN doctrine gate) AND the
+  // availability gate (isGateActive/isClosureAvailable — receipts-backed
+  // "share it only once a host serves it"). Resolved at runtime via IoC
+  // (no import); inert until the service registers AND the operator opts
+  // in to a host.
   #getHostSync = () =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as {
       markPublic: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<void>
+      isGateActive?: () => boolean
+      isClosureAvailable?: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<boolean>
       /** Does this participant have a durable byte target? Never provisions one. */
       ensureSwarmTarget?: () => 'ready' | 'opted-out' | 'needs-host'
     } | undefined

@@ -24,7 +24,7 @@ const PUBLISHER = require('../hypercomb-essentials/src/sharing/install-publisher
 const channelRoot = async () => {
   for (const host of PUBLISHER.hosts) {
     try {
-      const event = await (await fetch(`https://${host}/hive/${PUBLISHER.pubkey}`)).json()
+      const event = await (await fetch(`https://${host}/${require('crypto').createHash('sha256').update('hive:indexes').digest('hex')}/${PUBLISHER.pubkey}`)).json()
       const root = JSON.parse(event.content).roots?.[`install:${PUBLISHER.channel || 'essentials'}`]
       if (/^[a-f0-9]{64}$/.test(root ?? '')) return root
     } catch { /* next host */ }

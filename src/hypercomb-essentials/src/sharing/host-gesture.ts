@@ -27,6 +27,7 @@
 import { EffectBus, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { deliverLink } from './deliver-link.js'
 import { publishBranch, type PublishProgress } from './publish-branch.js'
+import { STAGE_SHARED } from './stage-succession.js'
 
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 
@@ -87,7 +88,7 @@ export const hostCurrentBranch = async (): Promise<void> => {
         '○')
     }
 
-    const result = await publishBranch(segments, { onProgress })
+    const result = await publishBranch(segments, { onProgress, stages: [STAGE_SHARED] })
 
     if (!result.ok) {
       switch (result.failure) {
@@ -164,5 +165,5 @@ export const hostCurrentBranch = async (): Promise<void> => {
           { count: result.missingFromIndex.length }))
     }
 
-    console.log(`[host] "${name}" sealed=${result.sealed.slice(0, 12)}… index=${result.host}/hive/${result.pubkey.slice(0, 12)}… link=${result.url} status=${result.status}`)
+    console.log(`[host] "${name}" sealed=${result.sealed.slice(0, 12)}… index=${result.host}/<sign('hive:indexes')>/${result.pubkey.slice(0, 12)}… link=${result.url} status=${result.status}`)
   }

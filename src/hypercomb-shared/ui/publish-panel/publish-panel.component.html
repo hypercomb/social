@@ -258,6 +258,84 @@
           }
         </section>
       }
+      <!-- OPTIMIZE — what this branch's first view loads (its arrival plan,
+           signed as plan:<key>), and which features readers of your sites
+           never load (the features:participant pool). The drone does the
+           acts; the same ones the arrival and features words do. -->
+      @if (row.live) {
+        <section class="psec">
+          <button
+            class="psec-head"
+            type="button"
+            [attr.aria-expanded]="sectionsOpen.isOpen('optimize')"
+            (click)="sectionsOpen.toggle('optimize')"
+          >{{ 'publish.optimize.title' | t }}</button>
+          @if (sectionsOpen.isOpen('optimize')) {
+            <div class="psec-body popt">
+              <div class="popt-head">{{ 'publish.optimize.arrival' | t }}</div>
+              <div class="popt-note">{{ (row.plan ? 'publish.optimize.arrival-planned' : 'publish.optimize.arrival-whole') | t: { count: row.plan?.length ?? 0 } }}</div>
+              <input
+                class="popt-input"
+                type="text"
+                spellcheck="false"
+                [value]="draftOf(row.key, planClasses(row).join(' '))"
+                (input)="setDraft(row.key, $any($event.target).value)"
+                (keydown.enter)="saveArrival(row)"
+                [attr.aria-label]="'publish.optimize.arrival' | t"
+                [placeholder]="'publish.optimize.arrival-placeholder' | t"
+              />
+              <div class="pdet-actions">
+                <button
+                  class="pdet-btn"
+                  type="button"
+                  [disabled]="row.zones.length === 0"
+                  [attr.data-tip]="'publish.optimize.test-tip' | t"
+                  (click)="testArrival(row)"
+                >{{ 'publish.optimize.test' | t }}</button>
+                <button class="pdet-btn" type="button" [disabled]="!!row.busyPhase" (click)="saveArrival(row)">{{ 'publish.optimize.save' | t }}</button>
+                @if (row.plan) {
+                  <button class="pdet-btn" type="button" [disabled]="!!row.busyPhase" (click)="clearArrival(row)">{{ 'publish.optimize.whole' | t }}</button>
+                }
+              </div>
+
+              @if (optimizeTried()[row.key]; as tried) {
+                <div class="popt-note">{{ 'publish.optimize.tried' | t: { address: tried } }}</div>
+              }
+
+              <div class="popt-head">{{ 'publish.optimize.participant' | t }}</div>
+              <div class="popt-note">{{ 'publish.optimize.participant-note' | t }}</div>
+              @if (participantOnly().length > 0) {
+                <div class="popt-chips">
+                  @for (name of participantOnly(); track name) {
+                    <span class="popt-chip">{{ name }}<button
+                      class="popt-chip-x"
+                      type="button"
+                      [attr.aria-label]="'publish.optimize.remove' | t: { name: name }"
+                      [attr.data-tip]="'publish.optimize.remove' | t: { name: name }"
+                      (click)="removeParticipant(name)"
+                    >✕</button></span>
+                  }
+                </div>
+              }
+              <input
+                class="popt-input"
+                type="text"
+                spellcheck="false"
+                [value]="draftOf('features')"
+                (input)="setDraft('features', $any($event.target).value)"
+                (keydown.enter)="addParticipant()"
+                [attr.aria-label]="'publish.optimize.participant' | t"
+                [placeholder]="'publish.optimize.participant-placeholder' | t"
+              />
+              <div class="pdet-actions">
+                <button class="pdet-btn" type="button" (click)="addParticipant()">{{ 'publish.optimize.add' | t }}</button>
+                <button class="pdet-btn" type="button" [class.popt-due]="participantState() === 'changed'" (click)="publishParticipants()">{{ 'publish.optimize.publish-set' | t }}</button>
+                <span class="popt-state">{{ ('publish.optimize.state.' + participantState()) | t }}</span>
+              </div>
+            </div>
+          }
+        </section>
+      }
       <section class="psec">
         <button
           class="psec-head"

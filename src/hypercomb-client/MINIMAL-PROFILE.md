@@ -40,8 +40,9 @@ node scripts/check-minimal-native.mjs http://127.0.0.1:4270 tile-jwize-com.local
 ```
 
 Turn the same creation off in the pure window and repeat with `off`. The check
-requires the latest marker to name the off layer, `/site.json` to return 404,
-and the previously selected root bytes to remain available by signature.
+requires the latest marker in the hostname's bag, sign(<hostname>), to name the
+off layer, and the previously selected root bytes to remain available by
+signature. Every read is a signature; there is no `/site.json`.
 
 This proves that the pure renderer and native HTTP host share one hive. A
 separate browser visiting the native host still has its own OPFS. This profile

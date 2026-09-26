@@ -32,9 +32,18 @@
 // essentials, so everything crosses as `publish:render` payloads and comes
 // back as intents (publish:run, publish:unpublish, publish:inspect, …).
 
-import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, type I18nProvider } from '@hypercomb/core'
-import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
+import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
+import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
+import {
+  PARTICIPANT_FEATURES_POINTER,
+  addParticipantFeature,
+  listParticipantFeatures,
+  participantSnapshotSig,
+  publishParticipantFeatures,
+  removeParticipantFeature,
+} from './participant-features.js'
 import { publishVerdict, type PublishIndexState, type PublishRowState } from './publish-verdict.js'
 // READS the community. HostsDrone owns its seed, add and remove operations, so
 // there is one writer of `community:hosts` and this drone is not it.
@@ -164,6 +173,9 @@ export interface PublishRow {
   /** Every head this branch has ever published, newest first — the ledger's
    *  immutable records, so a version IS a signature and nothing more. */
   versions: { sig: string; at: number }[]
+  /** OPTIMIZE — what the published branch's first view loads (IoC keys), from
+   *  `plan:<key>` in the signed index; null = the whole package. */
+  plan: string[] | null
 }
 
 /** One choice on the "opens as" strip. `view: ''` is the hexagons ground. */
@@ -213,6 +225,11 @@ export interface PublishRenderPayload {
   /** The opens-as choices, once for every row — the registry's views plus the
    *  hexagons ground. */
   views: PublishViewChoice[]
+  /** OPTIMIZE — the features readers of this participant's sites never load
+   *  (the local `features:participant` pool), and whether the published
+   *  snapshot matches it: 'published', 'changed' here since, or 'none'. */
+  participantOnly: string[]
+  participantState: 'published' | 'changed' | 'none'
 }
 
 export class PublishStatusDrone extends Drone {
@@ -228,7 +245,7 @@ export class PublishStatusDrone extends Drone {
     'publish:run', 'publish:unpublish', 'publish:inspect', 'publish:copy-link',
     'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
-    'hosts:render',
+    'hosts:render', 'publish:arrival', 'publish:participant', 'publish:participant-publish',
   ]
   protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log']
 
@@ -256,6 +273,7 @@ export class PublishStatusDrone extends Drone {
     open: false, host: '', zone: '', pubkey: '', currentKey: '', hosts: [],
     index: 'checking', indexCreatedAt: 0, indexStale: false,
     keyMismatch: false, refreshing: false, rows: [], collisions: [], views: [],
+    participantOnly: [], participantState: 'none',
   }
   #debounce: ReturnType<typeof setTimeout> | null = null
   /** Something changed while a sweep was in flight — sweep again after it. */
@@ -330,6 +348,15 @@ export class PublishStatusDrone extends Drone {
     this.onEffect<{ key?: string; view?: string }>('publish:opens-as', (p) => {
       void this.#setOpensAs(String(p?.key ?? ''), String(p?.view ?? ''))
     })
+    // OPTIMIZE (Publish window): the branch's arrival plan, and the features
+    // readers never load. The same acts as the `arrival` and `features` words.
+    this.onEffect<{ key?: string; names?: string[] }>('publish:arrival', (p) => {
+      void this.#setArrival(String(p?.key ?? ''), Array.isArray(p?.names) ? p.names.map(String) : [])
+    })
+    this.onEffect<{ name?: string; on?: boolean }>('publish:participant', (p) => {
+      void this.#setParticipant(String(p?.name ?? ''), p?.on === true)
+    })
+    this.onEffect('publish:participant-publish', () => { void this.#publishParticipant() })
 
     // A commit anywhere bumps the tree epoch, which invalidates every seal —
     // so every row's local side is stale. Coalesce: a burst of commits must
@@ -494,6 +521,9 @@ export class PublishStatusDrone extends Drone {
       // row carries the key itself and can be compared but not re-sealed.
       for (const ix of indexes.values()) {
         for (const key of Object.keys(ix.roots)) {
+          // A colon never appears in a lineage key: `plan:…`, `pool:…`,
+          // `install:…` are pointers the index carries, not branches.
+          if (isReservedRootKey(key)) continue
           if (!candidates.has(key)) candidates.set(key, [])
         }
       }
@@ -530,12 +560,20 @@ export class PublishStatusDrone extends Drone {
       }
       draft.sort((a, b) => a.path.localeCompare(b.path))
       this.#rows = draft
+      // OPTIMIZE: the participant-only set here, against the snapshot the
+      // standing door's index names.
+      const participantOnly = await listParticipantFeatures()
+      const publishedSet = head?.roots[PARTICIPANT_FEATURES_POINTER] ?? ''
+      const participantState: PublishRenderPayload['participantState'] = publishedSet
+        ? (publishedSet === await participantSnapshotSig() ? 'published' : 'changed')
+        : (participantOnly.length ? 'changed' : 'none')
       this.#payload = {
         open: this.#open, host, zone: this.#zone, pubkey, currentKey,
         hosts: this.#knownZones(),
         index: indexState, indexCreatedAt, indexStale, keyMismatch,
         refreshing: true, rows: this.#rows, collisions,
         views: this.#viewChoices(),
+        participantOnly, participantState,
       }
       this.#emit()
 
@@ -553,6 +591,10 @@ export class PublishStatusDrone extends Drone {
         if (row.segments.length > 0) {
           row.opensAs = await beforeDeadline(defaultViewAt(row.segments).catch(() => ''), '')
         }
+        // OPTIMIZE: the published arrival plan, read from its door.
+        const planDoor = this.#hostByKey.get(row.key) ?? host
+        const planSig = indexes.get(planDoor)?.roots[arrivalPointer(row.key)] ?? ''
+        row.plan = planSig ? await beforeDeadline(this.#readPlan(planDoor, planSig), null) : null
         const here = row.segments.length > 0 && history?.sealSubtree
           ? await beforeDeadline(history.sealSubtree(row.segments).catch(() => null), null)
           : null
@@ -622,6 +664,7 @@ export class PublishStatusDrone extends Drone {
       busyPhase: null,
       opensAs: '',
       versions: [],
+      plan: null,
     }
   }
 
@@ -681,6 +724,56 @@ export class PublishStatusDrone extends Drone {
     // Coalesced, never immediate: ticking three hosts in a row is one sweep,
     // and the sweep is a re-observation, not part of making the choice.
     this.#invalidate()
+  }
+
+  readonly #plans = new Map<string, string[] | null>()
+
+  /** A plan record, read once per signature — a signature never changes. */
+  async #readPlan(door: string, sig: string): Promise<string[] | null> {
+    if (this.#plans.has(sig)) return this.#plans.get(sig) ?? null
+    const keys = await readArrivalPlan(door, sig)
+    if (keys) this.#plans.set(sig, keys)
+    return keys
+  }
+
+  /** Publish (or, with no names, withdraw) a branch's arrival plan. */
+  async #setArrival(key: string, names: string[]): Promise<void> {
+    const row = this.#rows.find(r => r.key === key)
+    if (!row) return
+    const door = this.#hostByKey.get(key) ?? this.#payload.host
+    const before = row.plan
+    row.busyPhase = 'optimize'
+    this.#emit()
+    const result = names.length ? await publishArrivalPlan(door, key, names) : await withdrawArrivalPlan(door, key)
+    row.busyPhase = null
+    if (!result.ok) {
+      row.plan = before
+      this.#toast('error', 'publish.optimize.failed', `The arrival could not be saved: ${result.reason}`)
+      this.#emit()
+      return
+    }
+    row.plan = result.sig ? await this.#readPlan(door, result.sig) : null
+    this.#emit()
+  }
+
+  /** Add or remove a participant-only feature here; publishing is separate. */
+  async #setParticipant(name: string, on: boolean): Promise<void> {
+    if (on) await addParticipantFeature(name)
+    else await removeParticipantFeature(name)
+    const participantOnly = await listParticipantFeatures()
+    this.#payload = { ...this.#payload, participantOnly, participantState: 'changed' }
+    this.#emit()
+  }
+
+  /** Send the participant-only set, signed, to the standing door. */
+  async #publishParticipant(): Promise<void> {
+    const result = await publishParticipantFeatures(this.#payload.host)
+    if (!result.ok) {
+      this.#toast('error', 'publish.optimize.failed', `The set could not be published: ${result.reason}`)
+      return
+    }
+    this.#payload = { ...this.#payload, participantOnly: result.names, participantState: 'published' }
+    this.#emit()
   }
 
   async #setOpensAs(key: string, view: string): Promise<void> {
@@ -919,14 +1012,14 @@ const _publishStatus = new PublishStatusDrone()
   _publishStatus,
 )
 
-/** Every domain a host serves, read from its `/publications.json`: each door
+/** Every domain a host serves, read from its publications at sign('host:publications'): each door
  *  is `<name>.<zone>`, so the zones are the doors less their first label.
  *  Best-effort and bounded — no answer means no extra domains, never an error. */
 async function servedZones(zone: string): Promise<string[]> {
   const apex = String(zone ?? '').trim().toLowerCase()
   if (!apex || LOOPBACK_RE.test(apex)) return []
   try {
-    const res = await fetch(`https://${apex}/publications.json`, { cache: 'no-store', signal: AbortSignal.timeout(6000) })
+    const res = await fetch(`https://${apex}/${await registerPoolMeaning('host:publications')}`, { cache: 'no-store', signal: AbortSignal.timeout(6000) })
     if (!res.ok) return []
     const sites = (await res.json() as { sites?: { hosts?: { host?: string }[] }[] })?.sites
     if (!Array.isArray(sites)) return []

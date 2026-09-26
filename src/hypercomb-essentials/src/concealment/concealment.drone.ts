@@ -39,6 +39,11 @@ export interface HiddenRenderPayload {
 }
 
 export class ConcealmentDrone extends Drone {
+  /** THE EFFECTS THAT WAKE THIS BEE, and until one arrives it does nothing:
+   *  it may stay unloaded until one is emitted, and the bus replays that
+   *  emission to it (essentials scripts/passive-queen.ts effectSleeper). */
+  readonly wakesOn: readonly string[] = ['hidden:refresh', 'hidden:reveal', 'hidden:delete']
+
 
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'concealment'

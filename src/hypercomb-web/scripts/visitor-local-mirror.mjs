@@ -6,13 +6,14 @@
 //
 // Serves dist/hypercomb-web/visitor with the REAL site data so renderer
 // changes are testable before `wrangler deploy` touches the live worker:
-//   /site.json            → live descriptor, hosts rewritten to localhost
-//   /hive/<pubkey>        → proxied live signed index (never cached)
+//   /<sign(localhost)>/…  → the live door's own bag, sign(<site host>)
+//   /<sign('hive:indexes')>/<pubkey> → proxied live signed index (never cached)
 //   /<sig>, /@resource/<sig> → proxied from the live domain, disk-cached
 //   everything else       → static visitor assets (SPA fallback to index)
 // Every non-static request is logged — the boot's fetch trail is the
 // observability that found the nav/enablement/index bugs (2026-08-28).
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, extname, resolve, normalize, relative, isAbsolute, dirname } from 'node:path'
@@ -39,14 +40,18 @@ const server = http.createServer(async (req, res) => {
   const path = url.pathname
   const log = (note) => console.log(`${req.method} ${path} ${note}`)
   try {
-    if (path === '/site.json') {
-      const live = await fetch(`${LIVE}/site.json`).then(r => r.json())
-      live.hosts = [`localhost:${port}`]
-      log('→ live descriptor (host rewritten)')
-      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-      return res.end(JSON.stringify(live))
+    // The door's own bag: the visitor asks sign('localhost'); the answer is
+    // the live door's bag, sign('<site>.pluginthematrix.com').
+    const localBag = createHash('sha256').update(url.hostname.toLowerCase()).digest('hex')
+    const liveBag = createHash('sha256').update(new URL(LIVE).hostname).digest('hex')
+    if (path === `/${localBag}/` || path.startsWith(`/${localBag}/`)) {
+      const r = await fetch(`${LIVE}/${liveBag}/${path.slice(localBag.length + 2)}`)
+      const body = Buffer.from(await r.arrayBuffer())
+      log(`→ live door bag ${r.status}`)
+      res.writeHead(r.status, { 'content-type': r.headers.get('content-type') ?? 'text/plain', 'cache-control': 'no-store' })
+      return res.end(body)
     }
-    if (path.startsWith('/hive/')) {
+    if (path.startsWith(`/${createHash('sha256').update('hive:indexes').digest('hex')}/`)) {
       const r = await fetch(`${LIVE}${path}`)
       const body = Buffer.from(await r.arrayBuffer())
       log(`→ live index ${r.status} ${body.length}B`)

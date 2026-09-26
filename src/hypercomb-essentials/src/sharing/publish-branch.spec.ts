@@ -276,3 +276,157 @@ describe('domain doors', () => {
     expect(preservedCalls).toEqual([signedContent])
   })
 })
+
+// ── THE STAGE LISTS RIDE THE SAME INDEX WRITE ───────────────────────────────
+// documentation/deployment-stages.md R3: one signed PUT carries the branch's
+// head AND the pointer `stage:<word>` at the author's stage succession — two
+// pointers, one signature, never two facts. A refused signature does not fail
+// the publish: the pointer is absent and the result says so.
+import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
+import { SignatureService, mintMetaEnvelope } from '@hypercomb/core'
+
+const SECRET = new Uint8Array(32).fill(9)
+const REAL_PUBKEY = getPublicKey(SECRET)
+const SIG64 = /^[0-9a-f]{64}$/
+
+const readBlobText = (blob: Blob): Promise<string> =>
+  typeof (blob as { text?: unknown }).text === 'function'
+    ? blob.text()
+    : new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(r.error); r.readAsText(blob) })
+
+/** A store with pools, buckets and content-addressed resources — what a stage
+ *  list needs to be written. `putResource` mints real sigs here (the minimal
+ *  fake above returns one constant), so the bundle sig is whatever the bytes
+ *  hash to; the tests below read the pointers, not the bundle. */
+const fullStore = () => {
+  const resources = new Map<string, string>()
+  const pools = new Map<string, Map<string, Map<string, string>>>()
+  const docs = new Map<string, ArrayBuffer>()
+  const bucketDir = (files: Map<string, string>, name: string) => ({
+    name, kind: 'directory',
+    async *entries() { for (const n of files.keys()) yield [n, { kind: 'file', getFile: async () => ({ text: async () => files.get(n) }) }] },
+    getFileHandle: async (n: string) => ({ createWritable: async () => ({ write: async (b: Uint8Array) => { files.set(n, new TextDecoder().decode(b)) }, close: async () => {} }) }),
+  }) as unknown as FileSystemDirectoryHandle
+  const poolDir = (meaning: string) => {
+    if (!pools.has(meaning)) pools.set(meaning, new Map())
+    const buckets = pools.get(meaning)!
+    return {
+      name: meaning, kind: 'directory',
+      getDirectoryHandle: async (pubkey: string) => { if (!buckets.has(pubkey)) buckets.set(pubkey, new Map()); return bucketDir(buckets.get(pubkey)!, pubkey) },
+      async *entries() { for (const [pubkey, files] of buckets) yield [pubkey, bucketDir(files, pubkey)] },
+    } as unknown as FileSystemDirectoryHandle
+  }
+  const store = {
+    getPool: async (meaning: string) => poolDir(meaning),
+    openPool: async (meaning: string) => (pools.has(meaning) ? poolDir(meaning) : null),
+    putPoolDoc: async (_p: unknown, bytes: ArrayBuffer, subKey?: string) => { docs.set(String(subKey), bytes); return 'f'.repeat(64) },
+    getPoolDoc: async (_p: unknown, subKey?: string) => docs.get(String(subKey)) ?? null,
+    putResource: async (blob: Blob) => {
+      const text = await readBlobText(blob)
+      const sig = await SignatureService.sign(new TextEncoder().encode(text).buffer as ArrayBuffer)
+      resources.set(sig, text)
+      return sig
+    },
+    // Resolves envelopes like the real Store (a `layer` hop reads as null);
+    // the raw bytes are getResourceLocal — the door a list is read through.
+    getResource: async (sig: string) => {
+      const t = resources.get(sig)
+      if (t === undefined) return null
+      try {
+        const record = JSON.parse(t) as Record<string, unknown>
+        if (record['meta'] === 1) {
+          if (typeof record['layer'] === 'string') return null
+          if (typeof record['resource'] === 'string') return store.getResourceLocal(String(record['resource']))
+        }
+      } catch { /* raw bytes */ }
+      return { text: async () => t } as unknown as Blob
+    },
+    getResourceLocal: async (sig: string) => { const t = resources.get(sig); return t === undefined ? null : ({ text: async () => t } as unknown as Blob) },
+    putArtifactMeta: async (kind: string, sig: string, incidence: Record<string, unknown>) =>
+      store.putResource(new Blob([JSON.stringify(mintMetaEnvelope({ [kind]: sig, ...incidence }))])),
+    resources,
+  }
+  return store
+}
+
+describe('the stage lists ride the same index write', () => {
+  const ioc = (window as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+  const original = ioc.get
+  const realSigner = {
+    getPublicKeyHex: async () => REAL_PUBKEY,
+    signEvent: async (event: { kind: number; created_at: number; tags: string[][]; content: string }) => finalizeEvent(event, SECRET),
+  }
+  // Nothing published yet: the only sanctioned empty baseline.
+  beforeEach(() => { indexRead = { ok: false, reason: 'http', status: 404 } })
+  const withFullStore = async (run: () => Promise<void>): Promise<void> => {
+    const store = fullStore()
+    const { resetReaderPubkey } = await import('./head-claim-signer.js')
+    const { _resetMintedFacetClaims } = await import('../molecule/facet-succession.js')
+    _resetMintedFacetClaims()
+    ioc.get = (key: string): unknown => {
+      if (key === '@hypercomb.social/Store') return store
+      if (key === '@diamondcoreprocessor.com/NostrSigner') return realSigner
+      return original(key)
+    }
+    // No priming: the publish paths carry the key they sign with, and the
+    // stage writer must never depend on a cache another gesture filled.
+    resetReaderPubkey()
+    try { await run() } finally { ioc.get = original; resetReaderPubkey() }
+  }
+
+  it('publishing carries `stage:published` beside the branch head, in ONE write', async () => {
+    await withFullStore(async () => {
+      const result = await publishBranch(['site'])
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.stages).toEqual({ published: 'listed' })
+      const write = putCalls[putCalls.length - 1]!
+      expect(write[lineageKey(['site'])]).toBe(HEAD)
+      expect(write['stage:published']).toMatch(SIG64)
+      expect(putCalls).toHaveLength(1)
+    })
+  })
+
+  it('a join names `shared` too, and a second publish of the same head changes no list', async () => {
+    await withFullStore(async () => {
+      const first = await publishBranch(['site'], { stages: ['shared'] })
+      expect(first.ok && first.stages).toEqual({ published: 'listed', shared: 'listed' })
+      const write = putCalls[putCalls.length - 1]!
+      expect(write['stage:shared']).toMatch(SIG64)
+      expect(write['stage:published']).toMatch(SIG64)
+      expect(write['stage:shared']).not.toBe(write['stage:published'])
+      const again = await publishBranch(['site'], { stages: ['shared'] })
+      expect(again.ok && again.stages).toEqual({ published: 'unchanged', shared: 'unchanged' })
+      expect(putCalls[putCalls.length - 1]!['stage:shared']).toBe(write['stage:shared'])
+    })
+  })
+
+  it('a store that cannot mint a list refuses the pointer and the publish still stands', async () => {
+    const result = await publishBranch(['site'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.stages).toEqual({ published: 'refused' })
+    expect(Object.keys(putCalls[putCalls.length - 1]!).some(k => k.startsWith('stage:'))).toBe(false)
+  })
+
+  it('unpublishing withdraws the head from the lists — a new pointer in the same write, nothing deleted', async () => {
+    await withFullStore(async () => {
+      await publishBranch(['site'], { stages: ['shared'] })
+      const before = putCalls[putCalls.length - 1]!
+      const out = await unpublishBranch(['site'])
+      expect(out).toEqual({ ok: true, removed: true })
+      const after = putCalls[putCalls.length - 1]!
+      expect(after[lineageKey(['site'])]).toBeUndefined()
+      expect(after['stage:published']).toMatch(SIG64)
+      expect(after['stage:published']).not.toBe(before['stage:published'])
+      expect(after['stage:shared']).not.toBe(before['stage:shared'])
+      // The pointer names the signed claim; the claim names the list; the
+      // prior list is one prev back, byte for byte.
+      const store = ioc.get('@hypercomb.social/Store') as ReturnType<typeof fullStore>
+      const headOf = (claimSig: string): string => String(JSON.parse(store.resources.get(claimSig)!).content).split('\n')[3]!
+      const atom = JSON.parse(store.resources.get(headOf(after['stage:published']!))!)
+      expect(atom.prev).toBe(headOf(before['stage:published']!))
+      expect(atom.members).toEqual([])
+    })
+  })
+})

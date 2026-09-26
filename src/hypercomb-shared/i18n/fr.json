@@ -647,6 +647,8 @@
   "slash.join": "Rejoindre l’essaim ici — tes tuiles publiques sont proposées et les autres participants apparaissent",
   "slash.leave": "Quitter l’essaim — tes tuiles ne sont plus proposées et les autres disparaissent",
   "swarm.join.already": "tu es déjà dans l’essaim ici",
+  "swarm.join.published": "{cell} publié depuis votre hôte — proposé ici",
+  "swarm.join.publish-failed": "{cell} n'est pas proposé : {reason}",
   "swarm.leave.already": "tu n’es dans aucun essaim",
   "slash.format": "Copier le format visuel de la tuile active",
   "slash.layout": "Enregistrer, appliquer, lister ou supprimer des modèles de disposition",
@@ -2590,6 +2592,8 @@
   "chat.route.summary.cardBy": "Ce résumé par {model}",
   "mesh-modal.needs-location": "un lieu est nécessaire pour rejoindre",
   "mesh-modal.needs-secret": "un secret est nécessaire pour rejoindre",
+  "swarm.availability-hold.title": "Partagé d'ici tant que vous êtes dans l'essaim",
+  "swarm.availability-hold.message": "Vos tuiles atteignent les autres tant que vous restez. Pour qu’elles restent accessibles après votre départ, définissez un hôte dans le panneau des hôtes ou tapez /use-live-relay.",
   "swarm.needs-host.title": "Partagé d'ici tant que vous êtes dans l'essaim",
   "swarm.needs-host.message": "Vos tuiles atteignent les autres tant que vous restez. Pour qu’elles restent accessibles après votre départ, définissez un hôte dans le panneau des hôtes ou tapez /use-live-relay."
 }

@@ -24,6 +24,8 @@ export type BeeClass = {
   readonly passive?: boolean
   /** The views a sleeping renderer answers: it wakes when one is entered. */
   readonly renders?: readonly string[]
+  /** The effects that wake a sleeping bee: it loads when one is emitted. */
+  readonly wakesOn?: readonly string[]
 }
 
 /** `@domain.com/ClassName` → `ClassName`; a bare class name stays itself. */
@@ -54,6 +56,9 @@ export const beeClassesOfDocs = (docs: unknown): Array<[string, BeeClass]> => {
       ...(typeof command === 'string' && command ? { command } : {}),
       ...(typeof description === 'string' && description ? { description } : {}),
       ...((doc as { passive?: unknown }).passive === true ? { passive: true } : {}),
+      ...(Array.isArray((doc as { wakesOn?: unknown }).wakesOn)
+        ? { wakesOn: ((doc as { wakesOn: unknown[] }).wakesOn).map(String).filter(Boolean) }
+        : {}),
       ...(Array.isArray((doc as { renders?: unknown }).renders)
         ? { renders: ((doc as { renders: unknown[] }).renders).map(String).filter(Boolean) }
         : {}),
@@ -108,4 +113,21 @@ export const arrivalNames = async (ms = 4000): Promise<string[] | null> => {
   if (!Array.isArray(value)) return null
   const names = value.map(v => String(v ?? '').trim()).filter(Boolean)
   return names.length ? names : null
+}
+
+/** FEATURES FOR PARTICIPANTS ONLY (essentials sharing/participant-features.ts):
+ *  the names in the `features:participant` pool of the publisher whose site
+ *  this is, as the shell read them from the snapshot the publisher's signed
+ *  index names (`pool:features:participant`). A read-only reader never loads
+ *  a bee under a layer so named. Absent, slow or empty: nothing is quiet. */
+export const quietFeatureNames = async (ms = 4000): Promise<Set<string>> => {
+  const pending = (globalThis as { __hcQuietFeatures?: Promise<unknown> | unknown }).__hcQuietFeatures
+  if (pending === undefined || pending === null) return new Set()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const value = await Promise.race([
+    Promise.resolve(pending).catch(() => null),
+    new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms) }),
+  ])
+  clearTimeout(timer)
+  return new Set(Array.isArray(value) ? value.map(v => String(v ?? '').trim()).filter(Boolean) : [])
 }

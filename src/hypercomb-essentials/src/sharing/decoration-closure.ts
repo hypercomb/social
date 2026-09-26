@@ -139,6 +139,16 @@ export function nestedResourceSigs(recordBytes: Bytes): string[] {
   if (!record || typeof record !== 'object') return []
   const kind = (record as Record<string, unknown>)['kind']
   if (typeof kind === 'string' || typeof kind === 'number') return []
+  // A succession atom (a facet or stage list) has exactly one edge slot,
+  // `members`; `signer` is a key and `prev` a referent, and a deep harvest
+  // would mark both public — a pubkey with no bytes behind it, and an older
+  // list the doctrine says never travels in a closure.
+  const succession = record as { succession?: unknown; members?: unknown }
+  if (succession.succession === 1) {
+    return Array.isArray(succession.members)
+      ? succession.members.map(m => String(m ?? '').toLowerCase()).filter(m => /^[0-9a-f]{64}$/.test(m))
+      : []
+  }
   return collectSigsDeep(record)
 }
 

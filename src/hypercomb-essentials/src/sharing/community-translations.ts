@@ -13,7 +13,7 @@
 //     signature on the catalog, exactly as an assessment is signed.
 //   - A HOST lists every verified catalog for a locale at the pool's derived
 //     address `sign('i18n:<locale>')` — the same one-file index every published
-//     pool uses (published-pools.ts) — and at `/i18n/<locale>.json` for people.
+//     pool uses (published-pools.ts). There is no named route.
 //     No registry: a hive computes the address and asks.
 //   - A SUBSCRIBER'S `language sync` probes the hosts it follows, verifies each
 //     catalog against its signature, and HEALS: only keys its locale lacks are
@@ -28,7 +28,7 @@
 // Data never heals destructively: the shipped catalogs remain the walk-back,
 // a catalog is additive, and the merged record is a document replaced whole.
 
-import { SignatureService } from '@hypercomb/core'
+import { SignatureService, registerPoolMeaning } from '@hypercomb/core'
 
 export const I18N_KEY_PREFIX = 'i18n:'
 export const I18N_MISSING_PREFIX = 'i18n-missing:'
@@ -177,10 +177,12 @@ export const publishMissing = async (
 
 // ── the reads: the host's index, a catalog by signature ────────────────────
 
-/** `GET <zone>/i18n/<locale>.json` — what the host lists for a locale. */
+/** `GET <zone>/<sign('i18n:<locale>')>` — what the host lists for a locale, at
+ *  the pool's own address (no named route). */
 export const readTranslationIndex = async (zone: string, locale: string): Promise<TranslationIndex | null> => {
   try {
-    const res = await fetch(`${zone.replace(/\/+$/, '')}/i18n/${locale}.json`, { cache: 'no-store' })
+    const pool = await registerPoolMeaning(`${I18N_KEY_PREFIX}${locale}`)
+    const res = await fetch(`${zone.replace(/\/+$/, '')}/${pool}`, { cache: 'no-store' })
     if (!res.ok) return null
     return translationIndexOf(await res.json(), locale)
   } catch { return null }

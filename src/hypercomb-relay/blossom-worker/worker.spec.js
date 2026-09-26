@@ -8,6 +8,10 @@ const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).jo
 const sk = Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? 1 : 0)
 const pubkey = hex(schnorr.getPublicKey(sk))
 const head = 'a'.repeat(64)
+// Named routes are retired: every host answer is at a signature.
+const PUBLICATIONS = await sha256Hex('host:publications')
+const TRIALS = await sha256Hex('host:trials')
+const INDEXES = await sha256Hex('hive:indexes')
 
 async function signedIndex(roots, createdAt = 1_800_000_000, doors, offerings, extra = {}) {
   const explicitDoors = doors === null ? null : {
@@ -106,31 +110,77 @@ function contentBag(held = new Map()) {
   }
 }
 
-test('site.json resolves the allowlisted publisher signed head', async () => {
+/** A door's meta, read the one way there is: the newest marker of the bag at
+ *  sign(<host>) (worker.js locationMeta). No named route describes a site. */
+async function doorMeta(url, env) {
+  const { origin, hostname } = new URL(url)
+  const bag = `${origin}/${await sha256Hex(hostname)}/`
+  const listing = await worker.fetch(new Request(bag), env)
+  if (listing.status !== 200) return { status: listing.status, record: null }
+  const newest = (await listing.text()).trim().split('\n').at(-1)
+  const marker = await worker.fetch(new Request(bag + newest), env)
+  return { status: marker.status, marker, record: marker.status === 200 ? await marker.json() : null }
+}
+
+test('a door describes itself in its own bag, sign(<host>), and nowhere else', async () => {
   const { env } = await fixture()
-  const response = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)
-  assert.equal(response.status, 200)
-  assert.equal(response.headers.get('cache-control'), 'no-store')
-  assert.deepEqual(await response.json(), {
-    title: 'Revolución',
+  const { status, marker, record } = await doorMeta('https://revolucion.pluginthematrix.com/', env)
+  assert.equal(status, 200)
+  assert.equal(marker.headers.get('cache-control'), 'public, max-age=31536000, immutable')
+  assert.deepEqual(record, {
+    layer: head,
     pubkey,
-    head,
     lineage: 'revolucion',
-    segments: ['revolucion'],
-    hosts: ['revolucion.pluginthematrix.com'],
+    title: 'Revolución',
     publishedAt: 1_800_000_000,
   })
+  // The retired named route describes nothing: the path falls to the page.
+  const named = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)
+  assert.equal(String(named.headers.get('content-type') ?? '').includes('application/json'), false)
+})
+
+test('a marker from before doors carried their meta gains a successor with the same head', async () => {
+  const { env } = await fixture()
+  const bag = await sha256Hex('revolucion.pluginthematrix.com')
+  await env.CONTENT.put(`${bag}/00000000`, JSON.stringify({ layer: head }))
+  const { record } = await doorMeta('https://revolucion.pluginthematrix.com/', env)
+  assert.equal(record.layer, head)
+  assert.equal(record.title, 'Revolución')
+  // Nothing is rewritten: the old marker is exactly as it was.
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(env.CONTENT.held.get(`${bag}/00000000`))), { layer: head })
+})
+
+test('a signed index that changes nothing about a door appends nothing to its bag', async () => {
+  const { env } = await fixture()
+  await doorMeta('https://revolucion.pluginthematrix.com/', env)
+  const bag = await sha256Hex('revolucion.pluginthematrix.com')
+  const count = () => [...env.CONTENT.held.keys()].filter(key => key.startsWith(bag + '/')).length
+  assert.equal(count(), 1)
+  const later = await signedIndex({ pluginthematrix: head, revolucion: head, unrelated: 'b'.repeat(64) }, 1_800_000_100)
+  const indexUrl = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
+  const put = await worker.fetch(new Request(indexUrl, { method: 'PUT',
+    headers: { authorization: await nip98(indexUrl, 'PUT') }, body: JSON.stringify(later) }), env)
+  assert.equal(put.status, 200)
+  assert.equal(count(), 1)
+  // A change the door does carry — its arrival plan — is one new marker.
+  const planned = await signedIndex({ pluginthematrix: head, revolucion: head, 'plan:revolucion': 'c'.repeat(64) }, 1_800_000_200)
+  assert.equal((await worker.fetch(new Request(indexUrl, { method: 'PUT',
+    headers: { authorization: await nip98(indexUrl, 'PUT') }, body: JSON.stringify(planned) }), env)).status, 200)
+  assert.equal(count(), 2)
+  const { record } = await doorMeta('https://revolucion.pluginthematrix.com/', env)
+  assert.equal(record.plan, 'c'.repeat(64))
+  assert.equal(record.publishedAt, 1_800_000_200)
 })
 
 // The landing picture is retired (0ec3c2d15): an index signed while it
 // existed still names one, and the door must serve neither the field nor a
 // painted cover.
-test('a signed landing field is inert — site.json omits it and the visitor page is untouched', async () => {
+test('a signed landing field is inert — the door omits it and the visitor page is untouched', async () => {
   const landing = 'f'.repeat(64) + '/landing.webp'
   const event = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_000, undefined, undefined,
     { landing: { revolucion: landing } })
   const { env } = await fixture(event)
-  const site = await (await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)).json()
+  const site = (await doorMeta('https://revolucion.pluginthematrix.com/', env)).record
   assert.equal('landing' in site, false)
   const shell = '<!doctype html><html><head><title>x</title></head><body><app-root><div class="site-loading" role="status"></div></app-root></body></html>'
   env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
@@ -138,20 +188,30 @@ test('a signed landing field is inert — site.json omits it and the visitor pag
   assert.equal(html, shell)
 })
 
-test('site.json carries the arrival plan the publisher signed beside the root', async () => {
+test('the door carries the arrival plan the publisher signed beside the root', async () => {
   const plan = 'c'.repeat(64)
   const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head, 'plan:revolucion': plan, 'plan:other': 'd'.repeat(64) }))
-  const descriptor = await (await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)).json()
+  const descriptor = (await doorMeta('https://revolucion.pluginthematrix.com/', env)).record
   assert.equal(descriptor.plan, plan)
   // Not a signature — no plan; the whole package loads, as always.
   const { env: garbled } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head, 'plan:revolucion': 'not-a-sig' }))
-  const plain = await (await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), garbled)).json()
+  const plain = (await doorMeta('https://revolucion.pluginthematrix.com/', garbled)).record
   assert.equal('plan' in plain, false)
+})
+
+test('the door carries the publisher\'s participant-only features, signed under their key', async () => {
+  const quiet = 'e'.repeat(64)
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head, 'pool:features:participant': quiet }))
+  const descriptor = (await doorMeta('https://revolucion.pluginthematrix.com/', env)).record
+  assert.equal(descriptor.quiet, quiet)
+  const { env: none } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head }))
+  const plain = (await doorMeta('https://revolucion.pluginthematrix.com/', none)).record
+  assert.equal('quiet' in plain, false)
 })
 
 test('publications.json exposes the verified Core host registry', async () => {
   const { env } = await fixture()
-  const response = await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)
+  const response = await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)
   const registry = await response.json()
   assert.equal(response.status, 200)
   assert.equal(response.headers.get('cache-control'), 'no-store')
@@ -182,7 +242,7 @@ test('publications.json lists the names publishing brought to life', async () =>
     content: head,
   })
   const { env } = await fixture(event)
-  const response = await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)
+  const response = await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)
   const registry = await response.json()
   assert.deepEqual(registry.sites.map(({ host, lineage }) => ({ host, lineage })), [
     { host: 'pluginthematrix.com', lineage: 'pluginthematrix' },
@@ -197,14 +257,14 @@ test('publications.json lists the names publishing brought to life', async () =>
     pubkey, label: 'Jaime', primary: true, head, publishedAt: 1_800_000_000,
   }])
   // And the address it advertises is one the router actually serves.
-  const descriptor = await worker.fetch(new Request('https://dylan.pluginthematrix.com/site.json'), env)
+  const descriptor = await doorMeta('https://dylan.pluginthematrix.com/', env)
   assert.equal(descriptor.status, 200)
-  assert.equal((await descriptor.json()).lineage, 'dylan')
+  assert.equal(descriptor.record.lineage, 'dylan')
 })
 
 test('an unpublished name keeps its plate off the directory', async () => {
   const { env } = await fixture(await signedIndex({ pluginthematrix: head }))
-  const response = await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)
+  const response = await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)
   const registry = await response.json()
   // revolucion stays listed — it is BOUND, and the ledger reports it as
   // approved-but-unpublished (head null). Nothing else is invented.
@@ -219,7 +279,7 @@ test('a creation reports every door it answers on, primary first', async () => {
   const event = await signedIndex({ pluginthematrix: head, revolucion: head, dylan: head })
   const { env } = await fixture(event, TWO_ZONES)
   const registry = await (await worker.fetch(
-    new Request('https://pluginthematrix.com/publications.json'), env)).json()
+    new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
 
   // An implicit name lives on every wildcard zone that carries it. The first
   // zone stays the primary, so `host` is what it has always been.
@@ -246,9 +306,9 @@ test('a creation reports every door it answers on, primary first', async () => {
   // Every advertised door is one the router actually serves.
   for (const site of registry.sites) {
     for (const door of site.hosts) {
-      const descriptor = await worker.fetch(new Request(`https://${door.host}/site.json`), env)
+      const descriptor = await doorMeta(`https://${door.host}/`, env)
       assert.equal(descriptor.status, 200, `${door.host} was advertised and does not answer`)
-      assert.equal((await descriptor.json()).lineage, site.lineage)
+      assert.equal(descriptor.record.lineage, site.lineage)
     }
   }
 })
@@ -257,7 +317,7 @@ test('a nested lineage reports exactly its bound host', async () => {
   const event = await signedIndex({ pluginthematrix: head, 'revolucion/meetup': head })
   const { env } = await fixture(event, TWO_ZONES)
   const registry = await (await worker.fetch(
-    new Request('https://pluginthematrix.com/publications.json'), env)).json()
+    new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
 
   // The wildcard maps ONE label, never a path — `meetup.hypercomb.com` is not
   // a door and inventing one would advertise a 404.
@@ -269,7 +329,7 @@ test('a route that is not deployed is not a door', async () => {
   const event = await signedIndex({ pluginthematrix: head, hypercomb: head, 'anchor.example': head })
   const { env } = await fixture(event, TWO_ZONES)
   const registry = await (await worker.fetch(
-    new Request('https://pluginthematrix.com/publications.json'), env)).json()
+    new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
 
   // `hypercomb.com`'s apex route is commented out, so the apex is not advertised
   // even though the lineage is published and the host resolves. The zone's
@@ -294,7 +354,7 @@ test('a lineage that is not a hostname is never given a door', async () => {
   const event = await signedIndex({ pluginthematrix: head, 'install:essentials': head })
   const { env } = await fixture(event, TWO_ZONES)
   const registry = await (await worker.fetch(
-    new Request('https://pluginthematrix.com/publications.json'), env)).json()
+    new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
   assert.ok(!registry.sites.some((s) => s.lineage === 'install:essentials'),
     registry.sites.map((s) => s.host).join(' '))
 })
@@ -303,7 +363,7 @@ test('forged hive indexes never become website roots', async () => {
   const event = await signedIndex({ revolucion: head })
   event.content = JSON.stringify({ roots: { revolucion: 'b'.repeat(64) } })
   const { env } = await fixture(event)
-  const response = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)
+  const response = await doorMeta('https://revolucion.pluginthematrix.com/', env)
   assert.equal(response.status, 404)
 })
 
@@ -320,9 +380,9 @@ test('application paths receive the shared visitor engine', async () => {
 
 test('bare domain is a Core creation, not a server-authored landing page', async () => {
   const { env, assetRequests } = await fixture()
-  const descriptor = await worker.fetch(new Request('https://pluginthematrix.com/site.json'), env)
+  const descriptor = await doorMeta('https://pluginthematrix.com/', env)
   const entrance = await worker.fetch(new Request('https://pluginthematrix.com/'), env)
-  assert.equal((await descriptor.json()).lineage, 'pluginthematrix')
+  assert.equal(descriptor.record.lineage, 'pluginthematrix')
   assert.equal(await entrance.text(), 'visitor engine')
   assert.deepEqual(assetRequests, ['/'])
 })
@@ -330,7 +390,7 @@ test('bare domain is a Core creation, not a server-authored landing page', async
 test('published Core hosts reject every mutation before relay routing', async () => {
   const { env, assetRequests } = await fixture()
   const upload = await worker.fetch(new Request('https://pluginthematrix.com/upload', { method: 'PUT' }), env)
-  const hive = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/hive/${pubkey}`, { method: 'PUT' }), env)
+  const hive = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${INDEXES}/${pubkey}`, { method: 'PUT' }), env)
   const options = await worker.fetch(new Request('https://pluginthematrix.com/', { method: 'OPTIONS' }), env)
   assert.equal(upload.status, 405)
   assert.equal(hive.status, 405)
@@ -388,8 +448,8 @@ test('a site may declare its own icon, and only a same-origin one', async () => 
     icon: 'https://cdn.example.com/mark.png',
   }
   const { env } = await fixture(undefined, own)
-  const declared = await (await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)).json()
-  const offOrigin = await (await worker.fetch(new Request('https://pluginthematrix.com/site.json'), env)).json()
+  const declared = (await doorMeta('https://revolucion.pluginthematrix.com/', env)).record
+  const offOrigin = (await doorMeta('https://pluginthematrix.com/', env)).record
   assert.equal(declared.icon, `/${'c'.repeat(64)}/mark.svg`)
   // Refused, not passed through: the visitor keeps the Hypercomb mark rather
   // than fetching an icon from a third party on every page load.
@@ -454,7 +514,7 @@ test('the offerings pool projects only open, signed creations on this domain', a
   assert.equal(member.status, 200)
   assert.equal(await sha256Hex(bytes), names[0])
   assert.equal(retained.size, 0, 'pool discovery does not fetch or mint every location bag')
-  assert.equal((await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)).status, 200)
+  assert.equal((await doorMeta('https://revolucion.pluginthematrix.com/', env)).status, 200)
   assert(retained.has(`${await sha256Hex('revolucion.pluginthematrix.com')}/00000000`),
     'visiting a legacy signed route seeds its location bag once')
   const offer = JSON.parse(bytes)
@@ -474,7 +534,7 @@ test('the offerings pool projects only open, signed creations on this domain', a
   assert(otherOffers.some(row => row.route === 'https://susan.other.example/'))
   assert(!otherOffers.some(row => row.lineage === 'revolucion'))
 
-  const indexUrl = `https://content.pluginthematrix.com/hive/${pubkey}`
+  const indexUrl = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
   const revise = await signedIndex({ pluginthematrix: head, revolucion: 'b'.repeat(64), susan: head },
     1_800_000_001, { revolucion: ['pluginthematrix.com'], susan: ['other.example'] })
   const published = await worker.fetch(new Request(indexUrl, { method: 'PUT',
@@ -486,9 +546,9 @@ test('the offerings pool projects only open, signed creations on this domain', a
   const history = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${location}/`), env)
   assert.equal(await history.text(), '00000000\n00000001\n')
   const marker = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${location}/00000001`), env)
-  assert.deepEqual(await marker.json(), { layer: 'b'.repeat(64) })
+  assert.equal((await marker.json()).layer, 'b'.repeat(64))
   const older = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${location}/00000000`), env)
-  assert.deepEqual(await older.json(), { layer: head }, 'a known older marker remains readable')
+  assert.equal((await older.json()).layer, head, 'a known older marker remains readable')
 
   const withdraw = await signedIndex({ pluginthematrix: head }, 1_800_000_002)
   assert.equal((await worker.fetch(new Request(indexUrl, { method: 'PUT',
@@ -520,7 +580,7 @@ test('a signed public creation projects one location and keeps its revisions the
     await env.CONTENT.put(metaSig, meta)
     return metaSig
   }
-  const indexUrl = `https://content.pluginthematrix.com/hive/${pubkey}`
+  const indexUrl = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
   const publish = async (headSig, stamp, offerings) => worker.fetch(new Request(indexUrl, {
     method: 'PUT', headers: { authorization: await nip98(indexUrl, 'PUT') },
     body: JSON.stringify(await signedIndex({ pluginthematrix: head, revolucion: head }, stamp, undefined, offerings)),
@@ -578,7 +638,7 @@ test('a public creation waits for staged bytes and rejects a false location', as
   const meta = JSON.stringify({ meta: 1, layer: layerSig, relation: meaning })
   const metaSig = await sha256Hex(meta)
   const offer = { meaning, key, head: metaSig, title: 'Quiet', host: 'pluginthematrix.com' }
-  const url = `https://content.pluginthematrix.com/hive/${pubkey}`
+  const url = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
   const request = async (offerings, stamp) => worker.fetch(new Request(url, {
     method: 'PUT', headers: { authorization: await nip98(url, 'PUT') },
     body: JSON.stringify(await signedIndex({ pluginthematrix: head }, stamp, undefined, offerings)),
@@ -606,7 +666,7 @@ test('an unknown creation meaning stays off the public projection', async () => 
   const metaSig = await sha256Hex(meta)
   await env.CONTENT.put(layerSig, layer)
   await env.CONTENT.put(metaSig, meta)
-  const url = `https://content.pluginthematrix.com/hive/${pubkey}`
+  const url = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
   const event = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_001, undefined,
     { [location]: { meaning, key, head: metaSig, title: 'Unresolved', host: 'pluginthematrix.com' } })
   assert.equal((await worker.fetch(new Request(url, { method: 'PUT',
@@ -642,8 +702,8 @@ test('equal meaning and key on two hosts keep separate location histories', asyn
   }
   const firstHead = await putHead('First host')
   const secondHead = await putHead('Second host')
-  const firstUrl = `https://content.pluginthematrix.com/hive/${pubkey}`
-  const secondUrl = `https://content.pluginthematrix.com/hive/${assessor}`
+  const firstUrl = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
+  const secondUrl = `https://content.pluginthematrix.com/${INDEXES}/${assessor}`
   const firstOffer = { [location]: { meaning, key, head: firstHead, title: 'First host', host: 'pluginthematrix.com' } }
   const secondOffer = { [location]: { meaning, key, head: secondHead, title: 'Second host', host: 'other.example' } }
   assert.equal((await worker.fetch(new Request(firstUrl, { method: 'PUT',
@@ -655,7 +715,7 @@ test('equal meaning and key on two hosts keep separate location histories', asyn
   for (const [host, expected] of [['pluginthematrix.com', firstHead], ['other.example', secondHead]]) {
     const bag = `https://${host}/content/${location}/`
     assert.equal(await (await worker.fetch(new Request(bag), env)).text(), '00000000\n')
-    assert.deepEqual(await (await worker.fetch(new Request(`${bag}00000000`), env)).json(), { layer: expected })
+    assert.equal((await (await worker.fetch(new Request(`${bag}00000000`), env)).json()).layer, expected)
   }
 })
 
@@ -663,13 +723,13 @@ test('a changed index read cannot advance or overwrite an existing location bag'
   const { env } = await fixture()
   const route = 'https://revolucion.pluginthematrix.com'
   const location = await sha256Hex('revolucion.pluginthematrix.com')
-  assert.equal((await worker.fetch(new Request(`${route}/site.json`), env)).status, 200)
+  assert.equal((await doorMeta(`${route}/`, env)).status, 200)
   const key = `${location}/00000000`
   const original = env.CONTENT.held.get(key).slice()
   env.HIVES.get = async publisher => publisher === pubkey
     ? JSON.stringify(await signedIndex({ pluginthematrix: head, revolucion: 'b'.repeat(64) }, 1_800_000_001))
     : null
-  assert.equal((await worker.fetch(new Request(`${route}/site.json`), env)).status, 404)
+  assert.equal((await doorMeta(`${route}/`, env)).status, 404)
   assert.equal((await worker.fetch(new Request(`${route}/content/${location}/`), env)).status, 404)
   assert.deepEqual([...env.CONTENT.held.keys()].filter(name => name.startsWith(`${location}/`)), [key])
   assert.deepEqual(env.CONTENT.held.get(key), original)
@@ -679,13 +739,13 @@ test('a stale signed index cannot roll a route location backward', async () => {
   const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_010))
   const route = 'https://revolucion.pluginthematrix.com'
   const location = await sha256Hex('revolucion.pluginthematrix.com')
-  assert.equal((await worker.fetch(new Request(`${route}/site.json`), env)).status, 200)
-  const url = `https://content.pluginthematrix.com/hive/${pubkey}`
+  assert.equal((await doorMeta(`${route}/`, env)).status, 200)
+  const url = `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`
   const stale = await signedIndex({ pluginthematrix: head, revolucion: 'b'.repeat(64) }, 1_800_000_009)
   const result = await worker.fetch(new Request(url, { method: 'PUT',
     headers: { authorization: await nip98(url, 'PUT') }, body: JSON.stringify(stale) }), env)
   assert.equal(result.status, 409)
-  assert.equal((await worker.fetch(new Request(`${route}/site.json`), env)).status, 200)
+  assert.equal((await doorMeta(`${route}/`, env)).status, 200)
   assert.deepEqual([...env.CONTENT.held.keys()].filter(name => name.startsWith(`${location}/`)), [`${location}/00000000`])
 })
 
@@ -729,7 +789,7 @@ test('a named door whose lineage is not in the signed index is hidden — page, 
   assert.match(await res.text(), /nothing published at revolucion.pluginthematrix.com/)
   const manifest = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/content/manifest.json'), env)
   assert.equal(manifest.status, 404)
-  const descriptor = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)
+  const descriptor = await doorMeta('https://revolucion.pluginthematrix.com/', env)
   assert.equal(descriptor.status, 404)
   assert.deepEqual(assetRequests, [])
 })
@@ -743,14 +803,52 @@ test('an index whose signature fails opens nothing', async () => {
   assert.deepEqual(assetRequests, [])
 })
 
-test('an old signed head without an explicit door cannot publish a route', async () => {
-  const { env } = await fixture(await signedIndex({ pluginthematrix: head, revolucion: head },
-    1_800_000_000, null))
-  const site = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)
-  assert.equal(site.status, 404)
-  const pool = await sha256Hex('host:offerings')
-  const offered = await worker.fetch(new Request(`https://pluginthematrix.com/${pool}/`), env)
-  assert.equal(offered.status, 404)
+test('an entry signed before doors opens as it did before doors — everywhere', async () => {
+  const index = await signedIndex({ pluginthematrix: head, revolucion: head, 'games/arkanoid': head, dylan: head, susan: head,
+    favorites: head, 'behaviors/guidance': head, 'revolucion/meetup': head, 'hypercomb/architecture/replication-by-signature': head },
+    1_800_000_000, null)
+  const { env } = await fixture(index, TWO_ZONES)
+  for (const host of ['revolucion.pluginthematrix.com', 'dylan.pluginthematrix.com', 'susan.pluginthematrix.com',
+    'pluginthematrix.com', 'favorites.pluginthematrix.com', 'meetup.pluginthematrix.com', 'dylan.hypercomb.com']) {
+    const door = await doorMeta(`https://${host}/`, env)
+    assert.equal(door.status, 200, host)
+  }
+  // The ledger lists them too, and nothing was written into the index.
+  const ledger = await (await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
+  assert(ledger.sites.some((s) => s.lineage === 'dylan' && s.publishers[0].head === head))
+  assert.equal(JSON.parse((await env.HIVES.get(pubkey))).content.includes('doors'), false)
+})
+
+test('an entry with doors is still obeyed exactly beside one without', async () => {
+  const index = await signedIndex({ pluginthematrix: head, susan: head, dylan: head }, 1_800_000_000, { susan: ['hypercomb.com'] })
+  const content = JSON.parse(index.content)
+  delete content.doors.dylan
+  delete content.doors.pluginthematrix
+  const reSigned = await signedIndex(content.roots, 1_800_000_000, null, undefined, { doors: content.doors })
+  const { env } = await fixture(reSigned, TWO_ZONES)
+  assert.equal((await doorMeta('https://susan.hypercomb.com/', env)).status, 200)
+  assert.equal((await doorMeta('https://susan.pluginthematrix.com/', env)).status, 404, 'off its doors')
+  assert.equal((await doorMeta('https://dylan.pluginthematrix.com/', env)).status, 200, 'no doors entry: opens')
+})
+
+test('the drain routes answer the same bytes as the signature addresses', async () => {
+  const { env } = await fixture()
+  const same = async (named, address) => {
+    const a = await (await worker.fetch(new Request(named), env)).text()
+    const b = await (await worker.fetch(new Request(address), env)).text()
+    assert.equal(a, b, named)
+  }
+  await same('https://pluginthematrix.com/publications.json', `https://pluginthematrix.com/${PUBLICATIONS}`)
+  await same('https://pluginthematrix.com/trials.json', `https://pluginthematrix.com/${TRIALS}`)
+  await same(`https://content.pluginthematrix.com/hive/${pubkey}`, `https://content.pluginthematrix.com/${INDEXES}/${pubkey}`)
+  // An old install still publishes through /hive/<pubkey>, into the same pool member.
+  const later = await signedIndex({ pluginthematrix: head, revolucion: head }, 1_800_000_050)
+  const url = `https://content.pluginthematrix.com/hive/${pubkey}`
+  const put = await worker.fetch(new Request(url, { method: 'PUT',
+    headers: { authorization: await nip98(url, 'PUT') }, body: JSON.stringify(later) }), env)
+  assert.equal(put.status, 200)
+  const held = await (await worker.fetch(new Request(`https://content.pluginthematrix.com/${INDEXES}/${pubkey}`), env)).json()
+  assert.equal(held.created_at, 1_800_000_050)
 })
 
 test('signed doors switch a branch per domain — on where listed, hidden elsewhere', async () => {
@@ -760,14 +858,14 @@ test('signed doors switch a branch per domain — on where listed, hidden elsewh
   assert.equal(await on.text(), 'visitor engine')
   const off = await worker.fetch(page('https://susan.pluginthematrix.com/'), env)
   assert.equal(off.status, 404)
-  const descriptor = await worker.fetch(new Request('https://susan.pluginthematrix.com/site.json'), env)
+  const descriptor = await doorMeta('https://susan.pluginthematrix.com/', env)
   assert.equal(descriptor.status, 404)
   // The fixture explicitly opens the apex while susan has one chosen domain.
   const legacy = await worker.fetch(page('https://pluginthematrix.com/'), env)
   assert.equal(await legacy.text(), 'visitor engine')
   assert.deepEqual(assetRequests, ['/', '/'])
   // the ledger lists susan only where it opens
-  const ledger = await (await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)).json()
+  const ledger = await (await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()
   const susan = ledger.sites.find((site) => site.lineage === 'susan')
   assert.deepEqual(susan.hosts.map((door) => door.host), ['susan.hypercomb.com'])
 })
@@ -783,7 +881,7 @@ test('a front-door apex is the shim host card; the ledger and the heap stay on t
     const card = await worker.fetch(page('https://pluginthematrix.com/?x=1'), env)
     assert.equal(await card.text(), 'host card')
     assert.deepEqual(asked, ['https://door.example/?x=1'])
-    const ledger = await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)
+    const ledger = await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)
     assert.ok(Array.isArray((await ledger.json()).sites))
     assert.deepEqual(asked, ['https://door.example/?x=1'])
     assert.deepEqual(assetRequests, [])
@@ -910,8 +1008,8 @@ function contentStore(objects) {
   }
 }
 
-async function operated({ roots, objects, bindings = {}, operators }) {
-  const event = await signedIndex(roots)
+async function operated({ roots, objects, bindings = {}, operators, extra }) {
+  const event = await signedIndex(roots, undefined, undefined, undefined, extra)
   const hiveReads = []
   return {
     hiveReads,
@@ -926,7 +1024,7 @@ async function operated({ roots, objects, bindings = {}, operators }) {
 }
 
 const publicationsText = async (env) =>
-  (await worker.fetch(new Request('https://pluginthematrix.com/publications.json'), env)).text()
+  (await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).text()
 const sitesOf = async (env) => JSON.parse(await publicationsText(env)).sites
 
 const BOUND_ROOTS = { pluginthematrix: head, revolucion: head, ['binding:' + VECTOR.zone]: VECTOR.recordSig }
@@ -981,11 +1079,44 @@ test('a record speaks for its own zone only, and a publisher it drops is gone on
   assert.deepEqual(sites.find((s) => s.lineage === 'revolucion').publishers, [])
 })
 
-test('the pool listing never reads an index for bindings, even on an operated zone', async () => {
+test('the floor pool listing never reads an index, even on an operated zone', async () => {
   const { env, hiveReads } = await operated({ roots: BOUND_ROOTS, objects: { [VECTOR.recordSig]: VECTOR.record } })
-  const response = await worker.fetch(new Request('https://pluginthematrix.com/' + 'c'.repeat(64) + '/'), env)
-  assert.equal(response.status, 404)
+  const response = await worker.fetch(new Request('https://pluginthematrix.com/' + await sha256('host:packages') + '/'), env)
+  assert.equal(response.status, 200)
   assert.deepEqual(hiveReads, [])
+})
+
+test('an undeclared pool is not listed, and repeated probes do not re-read the index', async () => {
+  const { env, hiveReads } = await operated({ roots: BOUND_ROOTS, objects: { [VECTOR.recordSig]: VECTOR.record } })
+  const probe = () => worker.fetch(new Request('https://pluginthematrix.com/' + 'c'.repeat(64) + '/'), env)
+  assert.equal((await probe()).status, 404)
+  const reads = hiveReads.length
+  assert.ok(reads <= 1)
+  assert.equal((await probe()).status, 404)
+  assert.equal(hiveReads.length, reads)
+})
+
+test("a pool is listed only while an operator's signed index declares it", async () => {
+  const windows = await sha256('hypercomb:windows')
+  const member = 'd'.repeat(64)
+  const objects = { [VECTOR.recordSig]: VECTOR.record }
+  const listingOf = async (env, sig) => {
+    await env.CONTENT.put(windows + '/' + member, '{}')
+    return worker.fetch(new Request('https://pluginthematrix.com/' + sig + '/'), env)
+  }
+
+  const declared = await operated({ roots: BOUND_ROOTS, objects, extra: { listed: ['hypercomb:windows', 'bare', 42] } })
+  const listed = await listingOf(declared.env, windows)
+  assert.equal(listed.status, 200)
+  assert.equal(await listed.text(), member + '\n')
+  // A bare word is never declarable: it would address a molecule pool.
+  assert.equal((await listingOf(declared.env, await sha256('bare'))).status, 404)
+
+  const silent = await operated({ roots: BOUND_ROOTS, objects })
+  assert.equal((await listingOf(silent.env, windows)).status, 404)
+
+  const stranger = await operated({ roots: BOUND_ROOTS, objects, extra: { listed: ['hypercomb:windows'] }, operators: { [VECTOR.zone]: 'b'.repeat(64) } })
+  assert.equal((await listingOf(stranger.env, windows)).status, 404)
 })
 
 // ── the sandbox door (documentation/module-sandbox.md) ────────────────────
@@ -995,11 +1126,29 @@ test('the pool listing never reads an index for bindings, even on an operated zo
 const sandboxEnv = async (roots, shellRequests = []) => ({
   SITE_BINDINGS: JSON.stringify({ 'hypercomb.com': { title: 'Hypercomb', lineage: 'hypercomb', publishers: [{ pubkey, label: 'Jaime', primary: true }] } }),
   HIVES: { get: async (key) => key === pubkey ? JSON.stringify(await signedIndex(roots)) : null },
-  CONTENT: { get: async () => null, head: async () => null, list: async () => ({ objects: [], truncated: false }) },
+  CONTENT: contentBag(),
   SANDBOX_SHELL_ORIGIN: 'https://shell.example',
   __shellRequests: shellRequests,
 })
 const hostPackagesPool = async () => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('host:packages'))))
+
+/** What a sandbox door is, read the one way there is: the newest marker of
+ *  its own bag, sign(<try-host>). */
+async function sandboxDoor(env, host = 'try-fresh-rooms.hypercomb.com') {
+  const bag = await sha256Hex(host)
+  const listing = await worker.fetch(new Request(`https://${host}/${bag}/`), env)
+  if (listing.status !== 200) return null
+  const newest = (await listing.text()).trim().split('\n').at(-1)
+  return (await worker.fetch(new Request(`https://${host}/${bag}/${newest}`), env)).json()
+}
+
+/** Who assessed the door's root: the members of sign('assess:<root>'). */
+async function doorAssessments(env, root, host = 'try-fresh-rooms.hypercomb.com') {
+  const pool = await sha256Hex(`assess:${root}`)
+  const listing = await worker.fetch(new Request(`https://${host}/${pool}/`), env)
+  const keys = (await listing.text()).split('\n').filter(Boolean)
+  return Promise.all(keys.map(async (key) => (await worker.fetch(new Request(`https://${host}/${pool}/${key}`), env)).json()))
+}
 
 test('a try- door names the stamped sandbox root as its one package', async () => {
   const root = 'b'.repeat(64)
@@ -1010,9 +1159,9 @@ test('a try- door names the stamped sandbox root as its one package', async () =
   assert.equal(await listing.text(), '00000000\n')
   const member = await worker.fetch(new Request(`https://try-fresh-rooms.hypercomb.com/content/${pool}/00000000`), env)
   assert.equal(await member.text(), `${root}\ntry-fresh-rooms`)
-  const site = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
+  const site = await sandboxDoor(env)
   assert.equal(site.sandbox, true)
-  assert.equal(site.package, root)
+  assert.equal(site.layer, root)
   assert.equal(site.pubkey, pubkey)
   assert.equal(site.channel, 'install:try-fresh-rooms')
 })
@@ -1065,7 +1214,7 @@ test('a try- door with no pack key says so, and the visitor installs file by fil
 test('a try- door names the published change and the host AI review beside the sandbox', async () => {
   const [root, change, review] = ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64)]
   const env = await sandboxEnv({ 'install:try-fresh-rooms': root, 'change:try-fresh-rooms': change, 'review:try-fresh-rooms': review })
-  const site = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
+  const site = await sandboxDoor(env)
   assert.equal(site.change, change)
   assert.equal(site.review, review)
 })
@@ -1119,24 +1268,26 @@ test('one route location follows its selected publisher even if another key is l
   const originalGet = env.HIVES.get
   env.HIVES.get = async key => key === assessor ? JSON.stringify(otherIndex) : originalGet(key)
   const route = 'https://revolucion.pluginthematrix.com'
-  const site = await worker.fetch(new Request(`${route}/site.json`), env)
-  assert.equal((await site.json()).head, head)
-  const alternate = await worker.fetch(new Request(`${route}/site.json?publisher=${assessor}`), env)
-  assert.equal(alternate.status, 404)
+  const site = await doorMeta(`${route}/`, env)
+  assert.equal(site.record.layer, head)
+  assert.equal(site.record.pubkey, pubkey, 'the selected publisher, not the first listed')
   const location = await sha256Hex('revolucion.pluginthematrix.com')
   const marker = await worker.fetch(new Request(`${route}/content/${location}/00000000`), env)
-  assert.deepEqual(await marker.json(), { layer: head })
+  assert.equal((await marker.json()).layer, head)
 })
 
 test('writing an index that names assess:<root> lists its signer as an assessor of that root', async () => {
   const root = 'e'.repeat(64)
   const HIVES = kvMap()
-  const env = { SITE_BINDINGS: '{}', HIVES }
-  const url = `https://content.hypercomb.com/hive/${assessor}`
+  const CONTENT = contentBag()
+  const env = { SITE_BINDINGS: '{}', HIVES, CONTENT }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
   const body = JSON.stringify(await indexBy(assessorKey, { [`assess:${root}`]: 'f'.repeat(64) }))
   const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
   assert.equal(response.status, 201)
-  assert.deepEqual(JSON.parse(HIVES.values.get(`assessors:${root}`)), [assessor])
+  // A member of the root's pool, named by the assessor's key — never a KV list.
+  assert(CONTENT.held.has(`${await sha256Hex(`assess:${root}`)}/${assessor}`))
+  assert.equal(HIVES.values.get(`assessors:${root}`), undefined)
 })
 
 test('a try- door lists every signed assessment of its root, and the host AI verdict', async () => {
@@ -1151,36 +1302,47 @@ test('a try- door lists every signed assessment of its root, and the host AI ver
     [reviewSig, { kind: 'module-review', verdict: 'accept' }],
     ['e'.repeat(64), { kind: 'jev-reading', verdict: 'follows' }],
   ])
+  const CONTENT = contentBag()
+  const bytesOf = (record) => new TextEncoder().encode(JSON.stringify(record))
+  for (const [sig, record] of records) CONTENT.held.set(sig, bytesOf(record))
   const env = {
     SITE_BINDINGS: JSON.stringify({ 'hypercomb.com': { title: 'Hypercomb', lineage: 'hypercomb', publishers: [{ pubkey, label: 'Jaime', primary: true }] } }),
     HIVES,
-    CONTENT: { get: async (k) => records.has(k) ? { arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(records.get(k))).buffer } : null, head: async () => null, list: async () => ({ objects: [], truncated: false }) },
+    CONTENT,
     SANDBOX_SHELL_ORIGIN: 'https://shell.example',
   }
-  const site = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
-  assert.equal(site.reviewVerdict, 'accept')
-  assert.deepEqual([site.jev, site.jevVerdict], ['e'.repeat(64), 'follows'])
-  assert.deepEqual(site.assessments.map((a) => [a.pubkey, a.record, a.verdict]), [[assessor, goodRecord, 'refuse']])
+  // The door names the review and Jev's reading by signature; a reader reads
+  // their verdicts from those records.
+  const site = await sandboxDoor(env)
+  assert.deepEqual([site.review, site.jev], [reviewSig, 'e'.repeat(64)])
+  // The KV list from before assessors were a pool still drains in, read only.
+  assert.deepEqual((await doorAssessments(env, root)).map((a) => [a.pubkey, a.record, a.verdict]), [[assessor, goodRecord, 'refuse']])
   // A record that assesses another root is not an assessment of this one.
-  records.set(goodRecord, { kind: 'module-assessment', root: 'a'.repeat(64), verdict: 'accept' })
-  const again = await (await worker.fetch(new Request('https://try-fresh-rooms.hypercomb.com/site.json'), env)).json()
-  assert.deepEqual(again.assessments, [])
+  CONTENT.held.set(goodRecord, bytesOf({ kind: 'module-assessment', root: 'a'.repeat(64), verdict: 'accept' }))
+  assert.deepEqual(await doorAssessments(env, root), [])
 })
 
 // ── the community's translations: who translated, who is missing what ────
 test('writing an index that names i18n:<locale> lists its signer as a translator, and i18n-missing:<locale> as missing', async () => {
   const HIVES = kvMap()
-  const env = { SITE_BINDINGS: '{}', HIVES }
-  const url = `https://content.hypercomb.com/hive/${assessor}`
+  const CONTENT = contentBag()
+  const env = { SITE_BINDINGS: '{}', HIVES, CONTENT }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
   const body = JSON.stringify(await indexBy(assessorKey, { 'i18n:ja': 'f'.repeat(64), 'i18n-missing:de': 'a'.repeat(64) }))
   const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
   assert.equal(response.status, 201)
-  assert.deepEqual(JSON.parse(HIVES.values.get('translators:ja')), [assessor])
-  assert.deepEqual(JSON.parse(HIVES.values.get('missing:de')), [assessor])
-  assert.deepEqual(JSON.parse(HIVES.values.get('i18n:locales')).sort(), ['de', 'ja'])
+  // Members of the locales' pools, named by the key — never KV lists.
+  const member = async (meaning, name) => CONTENT.held.has(`${await sha256Hex(meaning)}/${name}`)
+  assert.equal(await member('i18n:ja', assessor), true)
+  assert.equal(await member('i18n-missing:de', assessor), true)
+  assert.equal(await member('i18n:locales', 'ja'), true)
+  assert.equal(await member('i18n:locales', 'de'), true)
+  assert.equal(HIVES.values.size, 0)
+  // The index itself is the member of sign('hive:indexes') named by the key.
+  assert.equal(await member('hive:indexes', assessor), true)
 })
 
-test('a locale is listed from every verified index — at /i18n/<locale>.json and at the pool\'s own address', async () => {
+test('a locale is listed from every verified index, at the pool\'s own address, with the older KV lists drained in', async () => {
   const [catalog, missingRecord, stale] = ['c'.repeat(64), 'd'.repeat(64), 'e'.repeat(64)]
   const HIVES = kvMap(new Map([
     [pubkey, JSON.stringify(await signedIndex({ 'i18n:ja': catalog }))],
@@ -1199,7 +1361,7 @@ test('a locale is listed from every verified index — at /i18n/<locale>.json an
     HIVES,
     CONTENT: { get: async (k) => records.has(k) ? { arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(records.get(k))).buffer } : null, head: async () => null, list: async () => ({ objects: [], truncated: false }) },
   }
-  const listed = await (await worker.fetch(new Request('https://content.hypercomb.com/i18n/ja.json'), env)).json()
+  const listed = await (await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256Hex('i18n:ja')}`), env)).json()
   assert.deepEqual(listed.meaning, 'i18n:ja')
   assert.deepEqual(listed.members, [catalog])
   assert.deepEqual(listed.translators.map((t) => [t.pubkey, t.label, t.catalog]), [[pubkey, 'Jaime', catalog]])
@@ -1207,9 +1369,11 @@ test('a locale is listed from every verified index — at /i18n/<locale>.json an
   // The pool's own derived address answers the same index — what a published-pool probe fetches.
   const atAddress = await (await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256('i18n:ja')}`), env)).json()
   assert.deepEqual(atAddress.members, [catalog])
-  // A locale nobody touched is an honest empty list, and a bad locale is not found.
-  assert.deepEqual((await (await worker.fetch(new Request('https://content.hypercomb.com/i18n/fr.json'), env)).json()).members, [])
-  assert.equal((await worker.fetch(new Request('https://content.hypercomb.com/i18n/Japanese.json'), env)).status, 404)
+  // A locale this host never heard of has no answer at its address; the drain
+  // route answers the same bytes as the address while installs still call it.
+  assert.equal((await worker.fetch(new Request(`https://content.hypercomb.com/${await sha256Hex('i18n:fr')}`), env)).status, 404)
+  const named = await (await worker.fetch(new Request('https://content.hypercomb.com/i18n/ja.json'), env)).json()
+  assert.deepEqual(named, atAddress)
 })
 
 // ── the trials on a zone: every open try- door, from what the door serves ─
@@ -1240,7 +1404,7 @@ test('a zone lists every open trial from what its door serves, newest first', as
     SANDBOX_SHELL_ORIGIN: 'https://shell.example',
   }
   // The front door answers the listing itself; it never goes to the host card.
-  const listing = await (await worker.fetch(new Request('https://hypercomb.com/trials.json'), env)).json()
+  const listing = await (await worker.fetch(new Request(`https://hypercomb.com/${TRIALS}`), env)).json()
   assert.equal(listing.zone, 'hypercomb.com')
   assert.deepEqual(listing.trials.map((t) => [t.name, t.pubkey, t.package]), [
     ['try-new-rooms', pubkey, newer], ['try-old-rooms', pubkey, older], ['try-theirs', assessor, 'a'.repeat(64)],
@@ -1254,10 +1418,10 @@ test('a zone lists every open trial from what its door serves, newest first', as
   assert.deepEqual([old.sections, old.off, old.reviewVerdict], [['src/a.ts'], ['games/pong'], undefined])
   assert.deepEqual([theirs.at, theirs.publisher, theirs.sections], [null, 'Other', []])
   // Any door on the zone answers the same listing.
-  const fromDoor = await (await worker.fetch(new Request('https://try-old-rooms.hypercomb.com/trials.json'), env)).json()
+  const fromDoor = await (await worker.fetch(new Request(`https://try-old-rooms.hypercomb.com/${TRIALS}`), env)).json()
   assert.deepEqual(fromDoor.trials.map((t) => t.name), ['try-new-rooms', 'try-old-rooms', 'try-theirs'])
   // A zone whose * route is not up lists nothing: none of its doors can be dialled.
-  const offZone = await (await worker.fetch(new Request('https://hypercomb.com/trials.json'), { ...env, SITE_BINDINGS: zone({ wildcard: false }) })).json()
+  const offZone = await (await worker.fetch(new Request(`https://hypercomb.com/${TRIALS}`), { ...env, SITE_BINDINGS: zone({ wildcard: false }) })).json()
   assert.deepEqual(offZone.trials, [])
 })
 
@@ -1306,13 +1470,13 @@ test('a door on a loopback zone reaches exactly its own two http faces', async (
 
 test('a door writes nothing at our hosts — refused before any route, while home and Node still write', async () => {
   // The signed index: a real NIP-98 PUT that succeeds from anywhere but a door.
-  const url = `https://content.hypercomb.com/hive/${assessor}`
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
   const body = JSON.stringify(await indexBy(assessorKey, { 'try-fresh-rooms': head }))
   const putHive = async (origin) => {
-    const env = { SITE_BINDINGS: '{}', HIVES: kvMap() }
+    const env = { SITE_BINDINGS: '{}', HIVES: kvMap(), CONTENT: contentBag() }
     const headers = { authorization: await nip98(url, 'PUT', assessorKey), ...(origin ? { origin } : {}) }
     const response = await worker.fetch(new Request(url, { method: 'PUT', headers, body }), env)
-    return { status: response.status, text: await response.text(), written: env.HIVES.values.has(assessor) }
+    return { status: response.status, text: await response.text(), written: env.CONTENT.held.has(`${INDEXES}/${assessor}`) }
   }
   // A door on any zone, the loopback harness's included — and an OPAQUE
   // origin, which is what a sandboxed frame or data: worker a door opens sends.
@@ -1356,7 +1520,7 @@ test('a door runs no worker from the heap — its package cannot start one outsi
 
 test('a door is told only the reads it may make, and its reads still answer', async () => {
   const env = { SITE_BINDINGS: '{}', HIVES: kvMap(new Map([[assessor, JSON.stringify(await indexBy(assessorKey, { 'try-fresh-rooms': head }))]])) }
-  const url = `https://content.hypercomb.com/hive/${assessor}`
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
   const preflight = (origin) => worker.fetch(new Request(url, { method: 'OPTIONS', headers: { origin, 'access-control-request-method': 'PUT' } }), env)
   const fromDoor = await preflight('https://try-x.hypercomb.com')
   assert.equal(fromDoor.status, 204)

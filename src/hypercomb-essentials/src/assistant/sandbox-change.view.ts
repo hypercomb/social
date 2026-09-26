@@ -23,9 +23,9 @@
 // A dependency: it exports the element; the sandbox feature's bee
 // (sandbox-door.drone.ts) defines it and adds it to the ShellSurfaceRegistry.
 
-import { EffectBus, I18N_IOC_KEY, isSandboxDoor, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, isSandboxDoor, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
 import type { DiffRow } from './line-diff.js'
-import { countedAssessors, doorReader, isSandboxSite, readTrial, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
+import { countedAssessors, doorReader, readSandboxDoor, readTrial, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
 
 export const SANDBOX_CHANGE_SURFACE = 'hc-sandbox-change'
 export const SANDBOX_CHANGE_OWNER = '@diamondcoreprocessor.com/SandboxChangeView'
@@ -101,7 +101,7 @@ export class SandboxChangeElement extends HTMLElement {
     this.#render()
     const [reading, trials] = await Promise.all([
       readTrial(payload.site, this.reader(payload.door)),
-      fetch(`${zoneOf(payload.door, payload.name)}/trials.json`, { cache: 'no-store' })
+      registerPoolMeaning('host:trials').then(trials => fetch(`${zoneOf(payload.door, payload.name)}/${trials}`, { cache: 'no-store' }))
         .then(res => res.ok ? res.json() : null).then(trialsOf).catch(() => [] as SandboxTrial[]),
     ])
     if (turn !== this.#turn) return
@@ -177,8 +177,8 @@ export class SandboxChangeElement extends HTMLElement {
     if (!shown || this.#trials.length < 2) return
     const here = Math.max(0, this.#trials.findIndex(trial => trial.name === shown.name))
     const next = this.#trials[(here + by + this.#trials.length) % this.#trials.length]!
-    const site = await fetch(`${next.door}/site.json`, { cache: 'no-store' }).then(res => res.ok ? res.json() : null).catch(() => null)
-    if (!isSandboxSite(site)) return
+    const site = await readSandboxDoor(next.door)
+    if (!site) return
     await this.show({ name: next.name, door: next.door, site, at: Date.now() })
   }
 

@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
-import { clearHiveRoot, fetchHiveIndex, ownHiveRoot, putHiveManifest, setHiveRoot, type HiveIndexResult, type PutHiveResult } from './hive-pointer.js'
+import { clearHiveRoot, setHostListing, fetchHiveIndex, ownHiveRoot, putHiveManifest, setHiveRoot, type HiveIndexResult, type PutHiveResult } from './hive-pointer.js'
 import { HIVE_LINK_VERSION } from './hive-link.js'
 
 const PUB = 'a'.repeat(64)
@@ -232,5 +232,40 @@ describe('putHiveManifest signed content', () => {
       shell.ioc = original
       globalThis.fetch = fetchBefore
     }
+  })
+})
+
+describe('setHostListing — a host lists a pool past the floor only by its operator\'s signed word', () => {
+  const withContent = (signedContent: Record<string, unknown>): HiveIndexResult => ({ ok: true, manifest: {
+    roots: { arkanoid: OTHER }, createdAt: 1600000000, pubkey: PUB, signedContent,
+  } })
+
+  it('adds the meaning and carries every other signed field through', async () => {
+    const signedContent = { v: 1, roots: { arkanoid: OTHER }, offerings: { theme: { location: SIG } } }
+    const { deps, puts } = harness(withContent(signedContent))
+    const result = await setHostListing(HOST, 'hypercomb:windows', true, deps)
+    expect(result).toEqual({ ok: true, listed: ['hypercomb:windows'] })
+    expect(puts[0].roots).toEqual({ arkanoid: OTHER })
+    expect(puts[0].previousContent).toEqual({ ...signedContent, listed: ['hypercomb:windows'] })
+  })
+
+  it('withdraws the meaning and drops an empty list entirely', async () => {
+    const { deps, puts } = harness(withContent({ v: 1, roots: { arkanoid: OTHER }, listed: ['hypercomb:windows'] }))
+    expect((await setHostListing(HOST, 'hypercomb:windows', false, deps)).ok).toBe(true)
+    expect(puts[0].previousContent).not.toHaveProperty('listed')
+  })
+
+  it('no-ops without re-signing when nothing would change', async () => {
+    const { deps, puts } = harness(withContent({ v: 1, roots: {}, listed: ['hypercomb:windows'] }))
+    expect(await setHostListing(HOST, 'hypercomb:windows', true, deps)).toEqual({ ok: true, listed: ['hypercomb:windows'], reason: 'unchanged' })
+    expect(puts).toHaveLength(0)
+  })
+
+  it('refuses a bare word, a derived cache, and an index it cannot see', async () => {
+    const { deps, puts } = harness(withContent({ v: 1, roots: {} }))
+    expect((await setHostListing(HOST, 'windows', true, deps)).ok).toBe(false)
+    expect((await setHostListing(HOST, 'molecule:index', true, deps)).ok).toBe(false)
+    expect((await setHostListing(HOST, 'hypercomb:windows', true, harness({ ok: false, reason: 'forged' }).deps)).ok).toBe(false)
+    expect(puts).toHaveLength(0)
   })
 })

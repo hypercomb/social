@@ -35,6 +35,29 @@ import {
   type HiveLinkBundle,
 } from './hive-link.js'
 import { fetchHiveIndex, nip98Header, putHiveManifest } from './hive-pointer.js'
+import {
+  STAGE_LIVE,
+  STAGE_PUBLISHED,
+  STAGE_SHARED,
+  advanceStage,
+  stageRootKey,
+  withdrawStage,
+  type StageWord,
+} from './stage-succession.js'
+import { isReservedRootKey } from './hive-link.js'
+
+/** The heads the index names under its branch keys — what a stage list may
+ *  hold (deployment-stages.md R2: a list is reconciled against the index). */
+const indexedHeads = (roots: Record<string, string>): Set<string> =>
+  new Set(Object.entries(roots)
+    .filter(([k, v]) => !isReservedRootKey(k) && SIG_RE.test(String(v ?? '').toLowerCase()))
+    .map(([, v]) => String(v).toLowerCase()))
+
+/** The indexed heads whose branch opens on at least one domain — the `live` list. */
+const liveHeadsOf = (roots: Record<string, string>, doors: Record<string, readonly string[]>): Set<string> =>
+  new Set(Object.entries(roots)
+    .filter(([k, v]) => !isReservedRootKey(k) && SIG_RE.test(String(v ?? '').toLowerCase()) && (doors[k] ?? []).length > 0)
+    .map(([, v]) => String(v).toLowerCase()))
 import { lineageKey } from '../history/lineage-key.js'
 import { hostsOfBranch } from './community-hosts.js'
 import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-public.js'
@@ -122,6 +145,14 @@ export type PublishResult =
        *  Reported, never silently re-asserted: resurrecting a branch the
        *  participant deliberately unpublished would be its own kind of lie. */
       missingFromIndex: string[]
+      /** The stage lists this act advanced (documentation/deployment-stages.md):
+       *  `listed` = a new succession, its pointer in this index write;
+       *  `unchanged` = the list already named this head; `refused` = no
+       *  identity or signature — the publish stands, the pointer is absent. */
+      stages: Partial<Record<StageWord, 'listed' | 'unchanged' | 'refused'>>
+      /** Every advanced succession (and its envelopes) holds a receipt on the
+       *  host — a stranger reading the pointer finds the atom. */
+      stagesReceipted: boolean
     }
   | { ok: false; failure: PublishFailure; reason?: string; sealed?: string }
 
@@ -131,6 +162,9 @@ export interface PublishOptions {
    *  after a failure does nothing; the resume/re-push paths need this. */
   forceReDrain?: boolean
   onProgress?: (p: PublishProgress) => void
+  /** Stage lists to advance in the same act besides `published` —
+   *  `publish here` (the offering act) passes `['shared']`. */
+  stages?: readonly StageWord[]
 }
 
 const normalizeHost = (raw: string): string =>
@@ -328,7 +362,48 @@ export async function publishBranch(
   try { marked = await hostsOfBranch(segs) } catch { /* no marks — keep what the index says */ }
   if (marked.length > 0) doors[key] = marked
 
-  const roots = { ...existing, [key]: sealed }
+  // THE STAGE LISTS (documentation/deployment-stages.md R2, R3). `published`
+  // always; whatever else the act names (`join` names `shared`). Each list is
+  // the author's next succession with THIS head as the member and the branch's
+  // previous head dropped; its pointer `stage:<word>` rides THIS index write —
+  // one signature, two pointers, never two facts. A refused signature does not
+  // fail the publish: the pointer is simply absent and the result says so.
+  // A list is RECONCILED against the index every time it is written: a head
+  // no non-reserved key names any more (this branch's previous head, an
+  // orphan a failed write left, a republished door) is dropped — so a stale
+  // member never lingers and identity needs no field beyond the head.
+  const nextRoots: Record<string, string> = { ...existing, [key]: sealed }
+  const indexed = indexedHeads(nextRoots)
+  const liveHeads = liveHeadsOf(nextRoots, doors)
+  const opensHere = (doors[key] ?? []).length > 0
+  const stageWords: StageWord[] = [STAGE_PUBLISHED]
+  for (const word of options.stages ?? []) if (!stageWords.includes(word)) stageWords.push(word)
+  if (opensHere && !stageWords.includes(STAGE_LIVE)) stageWords.push(STAGE_LIVE)
+  const stages: Partial<Record<StageWord, 'listed' | 'unchanged' | 'refused'>> = {}
+  const stageRoots: Record<string, string> = {}
+  const stageAtoms: string[] = []
+  for (const word of stageWords) {
+    const keep = word === STAGE_LIVE ? (h: string) => liveHeads.has(h) : (h: string) => indexed.has(h)
+    // The author key is the one this act signs with — never a cache some
+    // other gesture may or may not have primed.
+    const advanced = await advanceStage(word, { add: [sealed], keep }, { pubkey })
+    if (!advanced.ok) { stages[word] = 'refused'; continue }
+    stages[word] = advanced.changed ? 'listed' : 'unchanged'
+    // The pointer names the SIGNED CLAIM, not the bare list: a stranger GETs
+    // it, verifies it against sign(word) and the pinned key
+    // (acceptHeadClaim), and only then follows it to the list. An unchanged
+    // list whose claim this replica cannot name yields no pointer.
+    if (!SIG_RE.test(advanced.claim)) continue
+    stageRoots[stageRootKey(word)] = advanced.claim
+    // The claim, the succession and its envelopes travel with the closure: a
+    // stranger who reads the pointer must find the atoms on the same host.
+    for (const sig of [advanced.claim, advanced.head, ...advanced.envelopes]) {
+      if (!stageAtoms.includes(sig)) stageAtoms.push(sig)
+      await hostSync.markPublic(sig, 'resource')
+    }
+  }
+
+  const roots = { ...nextRoots, ...stageRoots }
   const put = await putHiveManifest(indexHost, roots, doors,
     read.ok ? read.manifest.createdAt : 0, read.ok ? read.manifest.signedContent : undefined)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason, sealed }
@@ -352,6 +427,11 @@ export async function publishBranch(
   catch { return { ok: false, failure: 'bundle-failed', sealed } }
   await hostSync.markPublic(bundleSig, 'resource')
   const linkReceipted = (await hostSync.ensureReceipt?.(bundleSig, BUNDLE_RECEIPT_MS)) === true
+  // The stage atoms share the link's budget, side by side: a pointer a
+  // stranger can read must find its atom on the host.
+  const stagesReceipted = (await Promise.all(
+    stageAtoms.map(async sig => (await hostSync.ensureReceipt?.(sig, BUNDLE_RECEIPT_MS)) === true),
+  )).every(Boolean)
 
   const linkHost = normalizeHost(window.location.host) || window.location.host
   const scheme = LOOPBACK_RE.test(linkHost) ? 'http' : 'https'
@@ -379,7 +459,9 @@ export async function publishBranch(
 
   return {
     ok: true,
-    status: confirmed ? 'confirmed' : 'unconfirmed',
+    // A pointer a stranger can read must find its atoms: an unreceipted
+    // stage list makes the publish `unconfirmed`, like an unnamed head.
+    status: confirmed && stagesReceipted ? 'confirmed' : 'unconfirmed',
     sealed,
     pubkey,
     host: indexHost,
@@ -388,6 +470,8 @@ export async function publishBranch(
     url,
     linkReceipted,
     missingFromIndex,
+    stages,
+    stagesReceipted,
   }
 }
 
@@ -454,9 +538,26 @@ export async function unpublishBranch(
   }
   if (!(key in read.manifest.roots)) return { ok: true, removed: false }
   const roots = { ...read.manifest.roots }
+  const head = String(roots[key] ?? '').toLowerCase()
   delete roots[key]
   const doors = { ...(read.manifest.doors ?? {}) }
   delete doors[key]
+  // The withdrawn head leaves every stage list — an unlink, never a forget:
+  // the prior lists are one `prev` back and the bytes stay by signature. The
+  // new pointers ride this same write (deployment-stages.md R4). A head another
+  // still-published key shares stays listed: the lists are reconciled against
+  // the index as it will be after this write.
+  const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+  hostSync?.addPublishNodes?.(nodes)
+  const indexed = indexedHeads(roots)
+  const liveHeads = liveHeadsOf(roots, doors)
+  Object.assign(roots, await withdrawFromStages(
+    [STAGE_PUBLISHED, STAGE_SHARED, STAGE_LIVE],
+    indexed.has(head) ? [] : [head],
+    hostSync,
+    pubkey,
+    word => (word === STAGE_LIVE ? h => liveHeads.has(h) : h => indexed.has(h)),
+  ))
 
   const put = await putHiveManifest(indexHost, roots, doors,
     read.manifest.createdAt, read.manifest.signedContent)
@@ -468,6 +569,29 @@ export async function unpublishBranch(
   if (isBranchPublic(parentLocation, name)) setBranchPublic(parentLocation, name, false)
   return { ok: true, removed: true }
 }
+
+/** Withdraw `heads` from each stage list; the changed pointers, keyed
+ *  `stage:<word>`, for the caller's index write. A list that never named a
+ *  head is untouched and yields no pointer. Refusals (no identity, no
+ *  signature) yield nothing — the withdrawal of the index key stands alone. */
+async function withdrawFromStages(
+  words: readonly StageWord[],
+  heads: readonly string[],
+  hostSync: HostSyncLike | undefined,
+  pubkey: string,
+  keepFor: (word: StageWord) => (head: string) => boolean = () => () => true,
+): Promise<Record<string, string>> {
+  const pointers: Record<string, string> = {}
+  const gone = heads.filter(h => SIG_RE.test(h))
+  for (const word of words) {
+    const next = await withdrawStage(word, gone, { pubkey }, keepFor(word))
+    if (!next.ok || !next.changed || !SIG_RE.test(next.claim)) continue
+    pointers[stageRootKey(word)] = next.claim
+    for (const sig of [next.claim, next.head, ...next.envelopes]) await hostSync?.markPublic?.(sig, 'resource')
+  }
+  return pointers
+}
+
 
 /** Say which domains an ALREADY-PUBLISHED branch opens on — the per-domain
  *  switch. One signed index rewrite, no seal and no upload: the bytes are
@@ -498,7 +622,19 @@ export async function setBranchDoors(
   if (!(key in read.manifest.roots)) return { ok: false, failure: 'no-branch', reason: 'not published yet' }
 
   const doors = { ...(read.manifest.doors ?? {}), [key]: wanted }
-  const put = await putHiveManifest(indexHost, read.manifest.roots, doors,
+  // Opening a door is entering `live` (deployment-stages.md §2): the head the
+  // index names joins the author's live list, its pointer in this same write.
+  const roots = { ...read.manifest.roots }
+  const head = String(roots[key] ?? '').toLowerCase()
+  const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+  hostSync?.addPublishNodes?.(nodes)
+  const liveHeads = liveHeadsOf(roots, doors)
+  const live = await advanceStage(STAGE_LIVE, { add: [head], keep: h => liveHeads.has(h) }, { pubkey })
+  if (live.ok && live.changed && SIG_RE.test(live.claim)) {
+    roots[stageRootKey(STAGE_LIVE)] = live.claim
+    for (const sig of [live.claim, live.head, ...live.envelopes]) await hostSync?.markPublic?.(sig, 'resource')
+  }
+  const put = await putHiveManifest(indexHost, roots, doors,
     read.manifest.createdAt, read.manifest.signedContent)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
   return { ok: true }

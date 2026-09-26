@@ -129,3 +129,31 @@ export function isCellPublic(location: string, label: string): boolean {
   const p = tilePath(location, label)
   return readPublicBranches().some(b => p === b || p.startsWith(b + '/'))
 }
+
+/** The public-BRANCH roots that are direct children of `location` — what a
+ *  swarm join publishes from your host (documentation/deployment-stages.md
+ *  §4.2: per public-branch root, never a single public tile). Each entry is
+ *  the branch's segments. The root location has no branch of its own; its
+ *  public branches are its children and are returned. */
+export function publicBranchRootsAt(location: string): string[][] {
+  const here = location.split('/').map(s => s.trim()).filter(Boolean).map(s => normalizeCell(s) || s)
+  const prefix = '/' + here.join('/')
+  const out: string[][] = []
+  const seen = new Set<string>()
+  const take = (segs: string[]): void => {
+    const k = segs.join('/')
+    if (seen.has(k)) return
+    seen.add(k)
+    out.push(segs)
+  }
+  for (const path of readPublicBranches()) {
+    const segs = path.split('/').filter(Boolean)
+    if (segs.length === 0) continue
+    // Standing INSIDE a public branch: that branch is the one you offer.
+    if (prefix === path || prefix.startsWith(path + '/')) { take(segs); continue }
+    if (segs.length !== here.length + 1) continue
+    if ('/' + segs.slice(0, -1).join('/') !== prefix) continue
+    take(segs)
+  }
+  return out
+}

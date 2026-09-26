@@ -8,9 +8,12 @@ const hive = globalThis.SmartAutolinkerHive;
 
 const SIG = (n) => n.repeat(64).slice(0, 64);
 
+// A host answers its publications at sign('host:publications').
+const PUBLICATIONS = "https://ledger.test/" + require("crypto").createHash("sha256").update("host:publications").digest("hex");
+
 // A tiny published universe: one ledger, one site, three layers deep.
 const universe = {
-  "https://ledger.test/publications.json": {
+  [PUBLICATIONS]: {
     sites: [{
       host: "revolucion.test",
       url: "https://revolucion.test/",
@@ -60,7 +63,7 @@ async function run() {
   }
   {
     fetches = 0;
-    const state = await hive.syncPublications("https://ledger.test/publications.json", io);
+    const state = await hive.syncPublications("https://ledger.test", io);
     assert.equal(state.sites.length, 1, "site without a published head is skipped");
     assert.equal(state.sites[0].host, "revolucion.test");
     assert.equal(state.sites[0].head, SIG("a"));
@@ -78,7 +81,7 @@ async function run() {
     // Re-sync with the same head walks nothing — signature cache hit.
     const before = fetches;
     state.sites[0].enabled = false;
-    const again = await hive.syncPublications("https://ledger.test/publications.json", io, state);
+    const again = await hive.syncPublications("https://ledger.test", io, state);
     assert.equal(fetches, before + 1, "only the ledger is re-fetched");
     assert.equal(again.replacements.length, 5);
     assert.equal(again.sites[0].enabled, false, "per-site toggle survives re-sync");

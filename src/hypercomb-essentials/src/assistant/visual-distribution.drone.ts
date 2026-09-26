@@ -70,6 +70,11 @@ type HistoryLike = PlacementHistory & {
 }
 
 export class VisualDistributionDrone extends Drone {
+  /** THE EFFECTS THAT WAKE THIS BEE, and until one arrives it does nothing:
+   *  it may stay unloaded until one is emitted, and the bus replays that
+   *  emission to it (essentials scripts/passive-queen.ts effectSleeper). */
+  readonly wakesOn: readonly string[] = ['parts:distribute-visual']
+
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'assistant'
   override description = 'divides a broken-apart tile’s appearance among its parts and leaves the whole a frame'

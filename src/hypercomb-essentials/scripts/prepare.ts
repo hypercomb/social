@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { basename, dirname, extname, join, resolve } from 'path'
 import ts from 'typescript'
 import { fileURLToPath } from 'url'
+import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen.js'
 
 // -------------------------------------------------
 // anchors
@@ -124,6 +125,7 @@ const isSideEffectModule = (f: string): boolean =>
 const isGenerated = (f: string) =>
   f.endsWith('-keys.ts') || f.endsWith('.d.ts') || basename(f) === 'index.ts'
   || basename(f) === 'side-effects.ts' || basename(f) === 'preload-effects.ts'
+  || basename(f) === 'sleeping-effects.ts'
 
 const relFrom = (root: string, full: string) =>
   full.replace(root, '').replace(/^[\\/]/, '').replace(/\\/g, '/')
@@ -204,6 +206,7 @@ const preClean = () => {
     join(SRC_ROOT, 'index.ts'),
     join(SRC_ROOT, 'side-effects.ts'),
     join(SRC_ROOT, 'preload-effects.ts'),
+    join(SRC_ROOT, 'sleeping-effects.ts'),
     join(SRC_ROOT, 'essentials-keys.ts'),
   ])
   for (const file of walkFiles(SRC_ROOT)) {
@@ -532,8 +535,14 @@ const computeTreeSignature = (): string => {
     const st = safeStat(f)
     return `${relFrom(SRC_ROOT, f)}:${st?.mtimeMs ?? 0}`
   })
-  return signContent(parts.join('\n'))
+  // The generator's own shape rides in the signature: a change to WHAT is
+  // generated must regenerate even when no source file moved.
+  return signContent([GENERATOR_SHAPE, ...parts].join('\n'))
 }
+
+/** Bump with any change to what prepare generates. sleepers:1 = the
+ *  sleeping-effects lane (queens, views, effect sleepers load on demand). */
+const GENERATOR_SHAPE = 'sleepers:1'
 
 const treeSignature = computeTreeSignature()
 
@@ -544,8 +553,9 @@ if (prepareCache?.treeSignature === treeSignature) {
   const rootIndexFile = join(SRC_ROOT, 'index.ts')
   const sideEffectsFile = join(SRC_ROOT, 'side-effects.ts')
   const preloadEffectsFile = join(SRC_ROOT, 'preload-effects.ts')
+  const sleepingEffectsFile = join(SRC_ROOT, 'sleeping-effects.ts')
   if (existsSync(masterKeysFile) && existsSync(rootIndexFile)
-    && existsSync(sideEffectsFile) && existsSync(preloadEffectsFile)) {
+    && existsSync(sideEffectsFile) && existsSync(preloadEffectsFile) && existsSync(sleepingEffectsFile)) {
     console.log('[prepare] tree signature unchanged — skipping (beeline)')
     process.exit(0)
   }
@@ -642,8 +652,70 @@ else filesSkipped++
     if (RENDER_CRITICAL_GAME_MODULES.includes(rel)) return false
     return rel.startsWith('games/')
   }
-  const startupFiles = sideEffectFiles.filter(f => !isPreload(f))
   const preloadFiles = sideEffectFiles.filter(isPreload)
+
+  // THE SLEEPING LANE (scripts/passive-queen.ts). What the packaged runtime
+  // leaves asleep — queens until their word, views until entered, bees until
+  // their effect — the dev shell leaves asleep too: out of the startup
+  // barrel, into a table of loaders the preloader wakes by the same triggers.
+  // The same rules over the same sources, so dev runs what ships.
+  const generatedNames = new Set(['essentials-keys.ts', 'side-effects.ts', 'preload-effects.ts', 'sleeping-effects.ts', 'index.ts'])
+  const packageSources = new Map<string, string>(
+    walkFiles(SRC_ROOT)
+      .filter(file => file.endsWith('.ts') && !file.endsWith('.d.ts') && !isTestFile(file) && !generatedNames.has(basename(file)))
+      .map(file => [relFrom(SRC_ROOT, file), readFileSync(file, 'utf8')]),
+  )
+  const COMMAND_RE = /readonly\s+command\s*=\s*['"]([^'"]+)['"]/
+  const DESCRIPTION_RE = /description\s*=\s*'([^']+)'|description\s*=\s*"([^"]+)"/
+  const sleeperEntries: string[] = []
+  const sleeping = new Set<string>()
+  for (const file of sideEffectFiles.filter(f => !isPreload(f))) {
+    const rel = relFrom(SRC_ROOT, file)
+    const source = packageSources.get(rel) ?? readFileSync(file, 'utf8')
+    const load = `load: () => import('./${rel.replace(/\.ts$/, '')}')`
+    if (passiveQueen(rel, source, packageSources).passive) {
+      const command = COMMAND_RE.exec(source)?.[1]
+      if (!command) continue
+      const described = DESCRIPTION_RE.exec(source)
+      const description = described?.[1] ?? described?.[2] ?? command
+      sleeperEntries.push(`  { command: ${JSON.stringify(command)}, description: ${JSON.stringify(description)}, ${load} },`)
+      sleeping.add(file)
+      continue
+    }
+    const view = viewSleeper(rel, source, packageSources)
+    if (view.sleeps) {
+      sleeperEntries.push(`  { renders: ${JSON.stringify(view.renders)}, ${load} },`)
+      sleeping.add(file)
+      continue
+    }
+    const effect = effectSleeper(rel, source, packageSources)
+    if (effect.sleeps) {
+      sleeperEntries.push(`  { wakesOn: ${JSON.stringify(effect.wakesOn)}, ${load} },`)
+      sleeping.add(file)
+    }
+  }
+  const startupFiles = sideEffectFiles.filter(f => !isPreload(f) && !sleeping.has(f))
+
+  const sleepingEffectsContent = `// auto-generated
+// sleeping lane — self-registering modules that load on demand: a queen on
+// her word, a view when entered, a bee on its effect (scripts/passive-queen.ts).
+// The dev shell hands this table to the preloader (useSleepers).
+// do not edit manually
+
+export type Sleeper = {
+  readonly load: () => Promise<unknown>
+  readonly command?: string
+  readonly description?: string
+  readonly renders?: readonly string[]
+  readonly wakesOn?: readonly string[]
+}
+
+export const sleepers: readonly Sleeper[] = [
+${sleeperEntries.join('\n')}
+]
+`
+  if (writeIfChanged(join(SRC_ROOT, 'sleeping-effects.ts'), sleepingEffectsContent)) filesWritten++
+  else filesSkipped++
 
   const lines = startupFiles.map(f => {
     const rel = relFrom(SRC_ROOT, f).replace(/\.ts$/, '')

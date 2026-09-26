@@ -647,6 +647,8 @@
   "slash.join": "加入此处的蜂群 — 你的公开贴片被提供，其他参与者出现",
   "slash.leave": "离开蜂群 — 不再提供你的贴片，也不再看到其他参与者",
   "swarm.join.already": "你已经在这里的蜂群中",
+  "swarm.join.published": "已从你的主机发布 {cell} — 在此提供",
+  "swarm.join.publish-failed": "{cell} 未提供：{reason}",
   "swarm.leave.already": "你不在任何蜂群中",
   "slash.format": "复制活动磁贴的可视格式",
   "slash.layout": "保存、应用、列出或删除布局模板",
@@ -2590,6 +2592,8 @@
   "chat.route.summary.cardBy": "此摘要由 {model} 撰写",
   "mesh-modal.needs-location": "加入需要一个位置",
   "mesh-modal.needs-secret": "加入需要一个密钥",
+  "swarm.availability-hold.title": "在蜂群中时从这里共享",
+  "swarm.availability-hold.message": "只要你在，其他人就能收到你的方块。要在离开后仍可访问，请在主机面板中设置主机或输入 /use-live-relay。",
   "swarm.needs-host.title": "在蜂群中时从这里共享",
   "swarm.needs-host.message": "只要你在，其他人就能收到你的方块。要在离开后仍可访问，请在主机面板中设置主机或输入 /use-live-relay。"
 }

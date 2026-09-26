@@ -10,12 +10,12 @@
 // door on a dedicated domain.
 //
 // Plain DOM, not Angular: it must stand before bootstrap and depend on
-// nothing a package could replace. It reads the door's own /site.json for the
+// nothing a package could replace. It reads the door's own bag, sign(<host>), for the
 // sandbox's name and publisher and falls back to generic words.
 
 import { I18N_IOC_KEY, sandboxDoorOf, type I18nProvider } from '@hypercomb/core'
 
-/** What a door's /site.json says, every field unchecked until read. */
+/** What a door's record says, every field unchecked until read. */
 type DoorSite = { title?: unknown; publisher?: unknown; pubkey?: unknown }
 
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
@@ -75,8 +75,16 @@ export const showDoorBar = (): void => {
   // label is theirs to choose, so it never stands alone.
   void (async () => {
     try {
-      const res = await fetch('/site.json', { cache: 'no-store' })
-      const site = (res.ok ? await res.json() : null) as DoorSite | null
+      // The door's record: the newest marker of its own bag, sign(<host>).
+      const hostBytes = new TextEncoder().encode(location.hostname.toLowerCase())
+      const bag = [...new Uint8Array(await crypto.subtle.digest('SHA-256', hostBytes))]
+        .map(byte => byte.toString(16).padStart(2, '0')).join('')
+      const listing = await fetch(`/${bag}/`, { cache: 'no-store' })
+      const newest = listing.ok
+        ? (await listing.text()).split(/\r?\n/).filter(n => /^\d{8}$/.test(n)).sort().at(-1)
+        : undefined
+      const res = newest ? await fetch(`/${bag}/${newest}`) : null
+      const site = (res?.ok ? await res.json() : null) as DoorSite | null
       if (text(site?.title)) name = text(site?.title)
       const key = text(site?.pubkey).slice(0, 12)
       const label = text(site?.publisher)

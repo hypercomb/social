@@ -1,7 +1,14 @@
 (function (root) {
   "use strict";
 
-  const DEFAULT_LEDGER = "https://pluginthematrix.com/publications.json";
+  // The directory host whose publications are read. A host answers them at
+  // one address only: sign('host:publications') — never a named route.
+  const DEFAULT_LEDGER = "https://pluginthematrix.com";
+  const publicationsAt = async (host) => {
+    const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("host:publications"));
+    const sig = [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `${new URL(host).origin}/${sig}`;
+  };
   const SIG_RE = /^[a-f0-9]{64}$/;
   const MAX_NODES = 400;
   const MAX_DEPTH = 6;
@@ -112,7 +119,7 @@
   // re-sync keep per-site enabled flags and skip unchanged heads — same
   // signature, same tree, instant cache hit.
   async function syncPublications(ledgerUrl, io, previous = null) {
-    const url = String(ledgerUrl || "").trim() || DEFAULT_LEDGER;
+    const url = await publicationsAt(String(ledgerUrl || "").trim() || DEFAULT_LEDGER);
     const ledger = await io.json(url);
     if (!ledger || !Array.isArray(ledger.sites)) throw new Error("ledger has no sites");
     const sites = [];

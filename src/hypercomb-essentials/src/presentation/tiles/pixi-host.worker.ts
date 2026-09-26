@@ -52,6 +52,8 @@ function followDevicePixelRatio(app: Application, phone: boolean): void {
 
 export class PixiHostWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
+  /** Render-critical: loaded first so the hexagons paint (the root's criticalBees). */
+  readonly lane = 'first-paint'
 
   public override description =
     'Initializes the Pixi.js application, canvas, and root container for all rendering drones.'

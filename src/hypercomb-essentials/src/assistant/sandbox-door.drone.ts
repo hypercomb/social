@@ -2,7 +2,7 @@
 //
 // THE DOOR SAYS WHAT IT IS (documentation/module-sandbox.md). A hive opened
 // at `try-<change>.<zone>` runs a change someone has not promoted yet. Once,
-// as it boots, this drone reads the door's own /site.json and says so: whose
+// as it boots, this drone reads the door's own bag, sign(<host>), and says so: whose
 // sandbox it is, how the host's AI read the change, and how people assessed
 // it — with the word to read it again or add your own. It also emits
 // `module:door` with the whole descriptor, for any surface that wants to show
@@ -22,7 +22,7 @@
 // was accepted is what runs after a reload.
 
 import { Drone, EffectBus, I18N_IOC_KEY, INSTALL_IOC_KEY, sandboxDoorOf, type I18nProvider } from '@hypercomb/core'
-import { isSandboxSite, tallyAssessments } from './module-review.js'
+import { readSandboxDoor, tallyAssessments } from './module-review.js'
 import type { SandboxChangePayload } from './sandbox-change.view.js'
 
 // THE PANEL'S NAMES, spelled here: importing even a constant from the view
@@ -52,12 +52,9 @@ export class SandboxDoorDrone extends Drone {
     if (this.#done) return
     this.#done = true
     const name = sandboxDoorOf(location.hostname)?.label ?? ''
-    let site: unknown = null
-    try {
-      const res = await fetch('/site.json', { cache: 'no-store' })
-      site = res.ok ? await res.json() : null
-    } catch { site = null }
-    if (!isSandboxSite(site)) return
+    // What this door is: its own bag, sign(<host>) — never a named route.
+    const site = await readSandboxDoor('')
+    if (!site) return
     EffectBus.emit('module:door', site)
     const i18n = window.ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
     const t = (key: string, fallback: string, params: Record<string, string | number>): string => {

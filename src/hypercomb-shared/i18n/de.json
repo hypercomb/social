@@ -647,6 +647,8 @@
   "slash.join": "Dem Schwarm hier beitreten — deine öffentlichen Kacheln werden angeboten, andere Teilnehmer erscheinen",
   "slash.leave": "Den Schwarm verlassen — deine Kacheln werden nicht mehr angeboten, andere verschwinden",
   "swarm.join.already": "du bist hier schon im Schwarm",
+  "swarm.join.published": "{cell} von deinem Host veröffentlicht — wird hier angeboten",
+  "swarm.join.publish-failed": "{cell} wird nicht angeboten: {reason}",
   "swarm.leave.already": "du bist in keinem Schwarm",
   "slash.format": "Visuelles Format der aktiven Kachel kopieren",
   "slash.layout": "Layout-Vorlagen speichern, anwenden, auflisten oder entfernen",
@@ -2590,6 +2592,8 @@
   "chat.route.summary.cardBy": "Diese Zusammenfassung von {model}",
   "mesh-modal.needs-location": "zum Beitreten wird ein Ort benötigt",
   "mesh-modal.needs-secret": "zum Beitreten wird ein Geheimnis benötigt",
+  "swarm.availability-hold.title": "Geteilt von hier, solange du im Schwarm bist",
+  "swarm.availability-hold.message": "Deine Kacheln erreichen die anderen, solange du bleibst. Damit sie auch nach dem Verlassen erreichbar bleiben, setze einen Host im Host-Panel oder tippe /use-live-relay.",
   "swarm.needs-host.title": "Geteilt von hier, solange du im Schwarm bist",
   "swarm.needs-host.message": "Deine Kacheln erreichen die anderen, solange du bleibst. Damit sie auch nach dem Verlassen erreichbar bleiben, setze einen Host im Host-Panel oder tippe /use-live-relay."
 }

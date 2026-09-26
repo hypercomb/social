@@ -36,7 +36,8 @@
 // ONCE by the static peer source and become offers; nothing folds at boot
 // any more, and nothing writes that key again.
 
-import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY, isMetaEnvelope, type I18nProvider } from '@hypercomb/core'
+import { adoptDescendantsOf } from './adopt-descendants.js'
 import { ensureDecorationsIndexed } from '../commands/decoration-kind-index.js'
 import { publishLightsWithinAt } from '../commands/publish-lights.js'
 import { adoptPublishedLights } from './behavior-enablement.js'
@@ -107,7 +108,42 @@ interface BrokerLike {
   noteDomainsForSig?: (sig: string, domains: string[]) => void
 }
 
-interface NavLike { go: (segments: readonly string[]) => void }
+interface NavLike { go: (segments: readonly string[]) => void; segments?: () => string[] }
+
+/** How far below where the reader stands the tree is kept local: their own
+ *  tiles (1) and each of those tiles' tiles (2) — so the next click opens
+ *  from memory, and nothing further down is fetched until they move. */
+const RING_AHEAD = 2
+
+/** The layer standing at `names` below `rootSig`: each name matched among
+ *  its parent's children, stepping through meta envelopes (the edge a child
+ *  slot holds) to the layer they name. Null when a name is not there. */
+export const layerBelow = async (
+  rootSig: string,
+  names: readonly string[],
+  read: (sig: string) => Promise<Record<string, unknown> | null>,
+): Promise<string | null> => {
+  let at = rootSig
+  for (const name of names) {
+    const parent = await read(at)
+    if (!parent) return null
+    let found = ''
+    for (const slot of adoptDescendantsOf(parent).layers) {
+      let sig = slot
+      let child = await read(sig)
+      for (let hops = 0; child && isMetaEnvelope(child) && hops < 4; hops++) {
+        const next = adoptDescendantsOf(child).layers[0]
+        if (!next) { child = null; break }
+        sig = next
+        child = await read(sig)
+      }
+      if (child && String(child['name'] ?? '').trim().toLowerCase() === name.trim().toLowerCase()) { found = sig; break }
+    }
+    if (!found) return null
+    at = found
+  }
+  return at
+}
 
 /** Is this shell a READER of a published site, rather than a participant with
  *  a hive of their own? The visitor bootstrap stamps both marks before it
@@ -124,6 +160,8 @@ function isReadOnlySession(): boolean {
 export class HiveVisitDrone extends Drone {
 
   readonly namespace = 'diamondcoreprocessor.com'
+  /** The boot lane: named in the root, loaded before the bee wave. */
+  readonly lane = 'boot'
   override genotype = 'sharing'
 
   public override description =
@@ -235,15 +273,24 @@ export class HiveVisitDrone extends Drone {
     // The walk runs WHILE the package's bees finish loading (the broker is a
     // boot bee now, so the walk no longer waits behind them), and the arrival
     // waits for both.
+    //
+    // ONE RING AHEAD, NEVER THE WHOLE TREE. After the paint, and again each
+    // time the reader moves, the tree is localized RING_AHEAD levels below
+    // where they stand — enough that the next click opens from memory. The
+    // old walk took the whole closure after every arrival (revolucion: ~210
+    // records for a reader who may never leave the page).
     console.log('[hive-visit] localizing the top of the closure from', bundle.hosts.join(','), 'head', head.slice(0, 12))
     const [stats] = await Promise.all([
       broker.adopt(head, { layersOnly: true, silent: true, maxDepth: 1 }),
       beesSettled(15_000),
     ])
     console.log('[hive-visit] top localized', JSON.stringify(stats))
-    const rest = (): void => {
-      void broker.adopt(head, { layersOnly: true, silent: true, quiet: true })
-        .then(all => console.log('[hive-visit] closure localized', JSON.stringify(all)))
+    const ringed = new Set<string>()
+    const ringAhead = (layerSig: string): void => {
+      if (!SIG_RE.test(layerSig) || ringed.has(layerSig)) return
+      ringed.add(layerSig)
+      void broker.adopt(layerSig, { layersOnly: true, silent: true, quiet: true, maxDepth: RING_AHEAD })
+        .then(ring => console.log('[hive-visit] ring ahead localized', layerSig.slice(0, 12), JSON.stringify(ring)))
         .catch(() => { /* on-demand fetches still cover any layer it missed */ })
     }
     const root = await history.getLayerBySig(head)
@@ -310,7 +357,17 @@ export class HiveVisitDrone extends Drone {
       tiles: stats.layers,
     })
     // Only now: the arrival's own fetches go first.
-    rest()
+    ringAhead(head)
+    // Where the reader goes next, the ring follows. A place below the preview
+    // root has no head of its own, so it is found by name down the tree the
+    // ring already made local.
+    window.addEventListener('navigate', () => {
+      const here = nav.segments?.() ?? []
+      if (here.length <= mount.length || mount.some((segment, i) => here[i] !== segment)) return
+      void layerBelow(head, here.slice(mount.length), sig => history.getLayerBySig(sig))
+        .then(sig => { if (sig) ringAhead(sig) })
+        .catch(() => { /* on-demand fetches cover where they stand */ })
+    })
   }
 }
 

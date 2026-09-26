@@ -270,7 +270,7 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    `sharing/hive-pointer.ts` client with end-to-end pinned-pubkey
    verification and the forged/malformed/unreachable taxonomy,
    `putHiveManifest` producer, blossom-worker `verifiedIndex` server-side,
-   served at `GET /hive/<pubkey>`). The package universe joins it via
+   served at `GET /<sign('hive:indexes')>/<pubkey>`). The package universe joins it via
    **install channels**: a reserved `install:<channel>` root in the SAME
    index (`installChannelKey` / `installRootOf` in hive-link.ts) —
    collision-free by the pool-meaning argument (lineageKey folds

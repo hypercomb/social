@@ -69,76 +69,11 @@ fn body_of(reply: &Reply) -> Vec<u8> {
     }
 }
 
-fn activation(hive: &mut Stub, hostname: &str, enabled: bool, index: u32) -> String {
-    let root = b"signed creation root";
-    let head = hypercomb_protocol::sign(root).to_hex();
-    hive.content.insert(head.clone(), root.to_vec());
-    let bytes = serde_json::to_vec(&serde_json::json!({
-        "name": "host:activation", "enabled": enabled,
-        "pubkey": SIG_A, "lineage": "garden", "sourceRoute": "https://garden.jwize.com/",
-        "localRoute": hostname, "head": head, "source": "jwize.com",
-    })).unwrap();
-    let layer = hypercomb_protocol::sign(&bytes).to_hex();
-    hive.content.insert(layer.clone(), bytes);
-    let bag = hypercomb_protocol::sign_str(hostname).to_hex();
-    hive.entries.insert(
-        (bag, format!("{index:08}")),
-        serde_json::to_vec(&serde_json::json!({ "layer": layer })).unwrap(),
-    );
-    head
-}
-
 #[test]
-fn site_descriptor_reads_only_the_latest_host_location_layer() {
-    let (_dir, root) = shell();
-    let mut hive = Stub::default();
-    let head = activation(&mut hive, "garden.localhost", true, 0);
-    let reply = resolve_on_host(&root, &hive, "GET", "/site.json", Some("garden.localhost:4270"));
-    assert_eq!(reply.status, 200);
-    assert_eq!(reply.header("cache-control"), Some("no-store"));
-    let site: serde_json::Value = serde_json::from_slice(&body_of(&reply)).unwrap();
-    assert_eq!(site["head"], head);
-    assert_eq!(site["hosts"][0], "garden.localhost:4270");
-
-    // A second layer turns the same hostname off without deleting its bytes.
-    activation(&mut hive, "garden.localhost", false, 1);
-    assert_eq!(resolve_on_host(&root, &hive, "GET", "/site.json", Some("garden.localhost:4270")).status, 404);
-    assert_eq!(resolve_on_host(&root, &hive, "GET", "/site.json", Some("other.localhost:4270")).status, 404);
-    assert_eq!(hive.content(&head), Some(b"signed creation root".to_vec()));
-
-    activation(&mut hive, "garden.localhost", true, 2);
-    assert_eq!(resolve_on_host(&root, &hive, "GET", "/site.json", Some("garden.localhost:4270")).status, 200);
-}
-
-#[test]
-fn site_descriptor_refuses_missing_or_unverified_payload() {
-    let (_dir, root) = shell();
-    let mut hive = Stub::default();
-    let head = activation(&mut hive, "garden.localhost", true, 0);
-    hive.content.remove(&head);
-    assert_eq!(resolve_on_host(&root, &hive, "GET", "/site.json", Some("garden.localhost")).status, 404);
-    hive.content.insert(head, b"wrong root".to_vec());
-    assert_eq!(resolve_on_host(&root, &hive, "GET", "/site.json", Some("garden.localhost")).status, 404);
-    assert_eq!(resolve_on_host(&root, &hive, "GET", "/site.json", Some("garden.localhost/path")).status, 404);
-}
-
-#[test]
-fn wire_host_header_selects_its_own_activation_bag() {
-    let (_dir, root) = shell();
-    let mut hive = Stub::default();
-    let head = activation(&mut hive, "garden.localhost", true, 0);
-    let serving = serve(root, Arc::new(hive), LOOPBACK, 0).expect("bind");
-    let addr = serving.addr();
-    let response = fetch(addr, "GET /site.json HTTP/1.1\r\nHost: garden.localhost:4270\r\nConnection: close\r\n\r\n");
-    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-    assert!(response.contains(&head), "{response}");
-    let other = fetch(addr, "GET /site.json HTTP/1.1\r\nHost: other.localhost:4270\r\nConnection: close\r\n\r\n");
-    assert!(other.starts_with("HTTP/1.1 404"), "{other}");
-    serving.stop();
-}
-
-#[test]
-fn a_real_hive_resolves_the_hashed_hostname_bag() {
+fn a_door_is_read_by_signature_never_by_a_named_route() {
+    // There is no `/site.json`: a host name is read as its bag,
+    // sign(<hostname>), whose newest marker names the activation layer —
+    // every step a signature (jwize 2026-09-25).
     let (_dir, root) = shell();
     let hive_dir = tempfile::tempdir().expect("a temp dir");
     let hive = hypercomb_host::Host::open(hive_dir.path()).expect("a hive");
@@ -153,10 +88,14 @@ fn a_real_hive_resolves_the_hashed_hostname_bag() {
     hive.raw_dir_put(&bag, "00000000", &serde_json::to_vec(&serde_json::json!({ "layer": layer_sig })).unwrap())
         .expect("marker");
 
-    let reply = resolve_on_host(&root, &hive, "GET", "/site.json", Some("garden.localhost:4270"));
-    assert_eq!(reply.status, 200);
-    let site: serde_json::Value = serde_json::from_slice(&body_of(&reply)).unwrap();
-    assert_eq!(site["head"], head);
+    let marker = resolve(&root, &hive, "GET", &format!("/{bag}/00000000"));
+    assert_eq!(marker.status, 200);
+    let named: serde_json::Value = serde_json::from_slice(&body_of(&marker)).unwrap();
+    assert_eq!(named["layer"], layer_sig);
+    let activation = resolve(&root, &hive, "GET", &format!("/{layer_sig}"));
+    assert_eq!(activation.status, 200);
+    let door: serde_json::Value = serde_json::from_slice(&body_of(&activation)).unwrap();
+    assert_eq!(door["head"], head);
 }
 
 #[test]

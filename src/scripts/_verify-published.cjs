@@ -18,14 +18,18 @@ function get(sig, method = 'GET') {
 const SIGRE = /^[0-9a-f]{64}$/
 const CHILD = new Set(['cells', 'layers', 'children'])
 ;(async () => {
-  const site = await new Promise(resolve => {
-    const req = https.request({ host: IP, servername: HOST, headers: { Host: HOST }, path: '/site.json', timeout: 20000 }, res => {
-      const c = []; res.on('data', d => c.push(d)); res.on('end', () => resolve(JSON.parse(Buffer.concat(c).toString())))
+  // The door describes itself in its own bag, sign(<host>): newest marker.
+  const bag = require('crypto').createHash('sha256').update(HOST.toLowerCase(), 'utf8').digest('hex')
+  const read = path => new Promise(resolve => {
+    const req = https.request({ host: IP, servername: HOST, headers: { Host: HOST }, path, timeout: 20000 }, res => {
+      const c = []; res.on('data', d => c.push(d)); res.on('end', () => resolve(res.statusCode === 200 ? Buffer.concat(c).toString() : null))
     }); req.on('error', () => resolve(null)); req.end()
   })
-  console.log('head', site && site.head)
+  const newest = String(await read(`/${bag}/`) ?? '').split('\n').filter(n => /^[0-9]{8}$/.test(n)).sort().at(-1)
+  const site = newest ? JSON.parse(await read(`/${bag}/${newest}`) ?? 'null') : null
+  console.log('head', site && site.layer)
   const visited = new Set(), missing = [], kinds = { layer: 0, resource: 0, bee: 0, dependency: 0 }
-  const queue = [[site.head, 'layer', 'root']]
+  const queue = [[site.layer, 'layer', 'root']]
   while (queue.length) {
     const [sig, kind, via] = queue.shift()
     if (visited.has(sig)) continue

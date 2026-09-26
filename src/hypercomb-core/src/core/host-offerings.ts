@@ -2,6 +2,7 @@
 // a stable location; that location's latest marker names the current head.
 // The publisher's signed index authorizes the route and attests that head.
 import { SignatureService } from './signature.service.js'
+import { registerPoolMeaning } from './pool-registry.js'
 import { isMetaEnvelope, metaPayloadOf } from './life-primitive.js'
 
 const SIG = /^[a-f0-9]{64}$/
@@ -128,7 +129,8 @@ const resolveLocation = async (raw: unknown, sourceHost: string, verify: VerifyH
   if (!pending) {
     pending = (async () => {
       try {
-        const response = await fetch(`${entry.route}hive/${entry.pubkey}`, { cache: 'no-store' })
+        const indexes = await registerPoolMeaning('hive:indexes')
+        const response = await fetch(`${entry.route}${indexes}/${entry.pubkey}`, { cache: 'no-store' })
         if (!response.ok || Number(response.headers.get('content-length') ?? 0) > 524_288) return null
         const bytes = await response.arrayBuffer()
         return bytes.byteLength <= 524_288
@@ -231,10 +233,11 @@ const resolveCreation = async (raw: unknown, host: string, verify: VerifyHostInd
   let pending = indexCache.get(member.pubkey)
   if (!pending) {
     pending = (async () => {
-      // Hive indices are signed events addressed by pubkey, not content hash.
-      // Fetch them separately from signature-named atoms.
+      // A publisher's signed index is the member of sign('hive:indexes')
+      // named by their key — addressed by signature, never a named route.
       try {
-        const response = await fetch(`${base}/hive/${member.pubkey}`, { cache: 'no-store' })
+        const indexes = await registerPoolMeaning('hive:indexes')
+        const response = await fetch(`${base}/${indexes}/${member.pubkey}`, { cache: 'no-store' })
         if (!response.ok || Number(response.headers.get('content-length') ?? 0) > 524_288) return null
         const value = await response.arrayBuffer()
         return value.byteLength <= 524_288

@@ -100,15 +100,26 @@ The small conventional host surface is:
 
 ```text
 GET /                 visitor engine; opens the designated current root
-GET /site.json        domain coordinates and current verified root
-GET /publications.json configured hosts plus their verified signed heads
+GET /<sign(host)>/    the door's own bag: its numbered markers, newest last
+GET /<sign(host)>/000x one marker — what the door is (below), immutable
+GET /<sign('host:publications')> configured hosts plus their verified signed heads
 GET /<64-hex sig>     immutable public object from the shared heap
 HEAD /<64-hex sig>    object presence/metadata probe
 ```
 
-`/site.json` and `/publications.json` are machine coordinates, not an alternate
+**A door describes itself in its own bag, by signature (2026-09-25).** Only
+signatures are queried, and state lives only in pools of meaning, so there is
+no `/site.json`. The door's hostname, signed — `sign('revolucion.pluginthematrix.com')`
+— is a bag whose newest marker is the door's record: `{ layer, pubkey,
+lineage, title, icon?, plan?, quiet?, publishedAt }`, `layer` being the
+published head. The worker appends a marker only on a signed index update
+that changes the door (blossom-worker `locationMeta`), and a marker from before
+doors carried their meta gains a successor with the same head on its first
+read. The listing is no-store; every marker is immutable.
+
+`/<sign('host:publications')>` is a machine coordinate, not an alternate
 server application. Human routes—including `/revisions`—always enter Core. The
-`/pluginthematrix` directory creation reads `/publications.json` and renders
+`/pluginthematrix` directory creation reads `/<sign('host:publications')>` and renders
 the approved published sites as square plates — the **publications view**
 (`/publications`, kind `visual:publications:view`; reader
 `sharing/publications-ledger.ts`, renderer
@@ -215,7 +226,7 @@ The one-time supervised sequence is:
    allowlists in `blossom-worker/wrangler.pluginthematrix.toml`, with its display label.
    **Completed locally 2026-08-28:** the supervised `/behaviors` test publish
    identified Jaime's key; only the public key is pinned in both bindings.
-4. Verify `/site.json`, `/publications.json`, `/revisions`, `/`, one deep link
+4. Verify the door's bag `/<sign(host)>/`, `/<sign('host:publications')>`, `/revisions`, `/`, one deep link
    such as `/journal`, and a direct `GET /<signature>`. The machine descriptors
    must name the signed current roots; `/revisions` must be rendered by Core;
    forged or unapproved indexes must remain invisible.
@@ -460,30 +471,31 @@ permanently.
 ├── content/
 │   ├── manifest.json              # the module package (bees, deps, layers)
 │   └── <sig> …                    # module bytes AND the creation's closure, flat
-├── site.json                      # the baked descriptor (below)
+├── <sign(host)>/00000000          # the door's record, in its own bag (below)
 └── (optional SPA-fallback config per host — the site must also work without one)
 ```
 
-`site.json` — the one deployment-specific file. The site's identity (title,
-favicon, theme) is derived from the creation at publish time and baked into
-`index.html`; `site.json` carries only what boot needs:
+The door's record — the one deployment-specific file, a marker in the bag at
+`sign(<host>)`. The site's identity (title, favicon, theme) is derived from the
+creation at publish time and baked into `index.html`; the record carries only
+what boot needs:
 
 ```json
 {
-  "head": "<64-hex branch head sig>",
-  "segments": ["revolucion"],
+  "layer": "<64-hex branch head sig>",
+  "lineage": "revolucion",
   "pubkey": "<publisher pubkey>",
   "title": "Revolución"
 }
 ```
 
 The head is baked at publish time, so the deployment is immutable and
-cache-forever except `site.json` + `content/manifest.json` (serve those
-no-store). Republish = new sigs land, `site.json` repoints, done.
+cache-forever except the bag listing + `content/manifest.json` (serve those
+no-store). Republish = new sigs land, a new marker names them, done.
 
 ### Visitor boot
 
-1. Fetch `site.json`. No sentinel, no DCP iframe, no install prompt, no
+1. Read the door's own bag, `sign(<host>)`, newest marker. No sentinel, no DCP iframe, no install prompt, no
    packed-store gate, no `hypercomb:start-install` flow.
 2. **Silent module install from own origin** — reuse the bundled-install path
    (`fetchBundledPackage` → `installFromBundled`), sha256-gated as always, no
