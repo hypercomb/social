@@ -15,8 +15,16 @@
          signature URL and there is no map at all. -->
     <script>
       (function () {
+        // The cached map points every dependency at /opfs/, which only the
+        // service worker answers. A page the worker does not control (a hard
+        // reload, DevTools "bypass for network", a browser without workers)
+        // would send those imports to the host, whose SPA catch-all answers
+        // text/html — and an early entry can never be overridden by a later
+        // map. So an uncontrolled page replays nothing: main.ts derives a
+        // self-typed blob map for it (import-map.ts) and appends it.
+        var controlled = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
         try {
-          var raw = localStorage.getItem('hc:importmap');
+          var raw = controlled ? localStorage.getItem('hc:importmap') : null;
           if (!raw) return;
           var parsed = JSON.parse(raw);
           if (!parsed || typeof parsed.imports !== 'object' || !parsed.imports) return;
