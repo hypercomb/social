@@ -55,12 +55,17 @@ let origin = ''
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? '/', origin)
-    if (url.pathname === '/site.json') {
-      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-      response.end(JSON.stringify({
-        title: 'Revolución', pubkey, head, lineage: 'revolucion',
-        segments: ['revolucion'], hosts: [new URL(origin).host], publishedAt: createdAt,
-      }))
+    // The door describes itself in its own bag, sign(<hostname>): one marker
+    // holding the meta the worker mints (blossom-worker locationMeta).
+    const bag = createHash('sha256').update(new URL(origin).hostname.toLowerCase()).digest('hex')
+    if (url.pathname === `/${bag}/`) {
+      response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+      response.end('00000000\n')
+      return
+    }
+    if (url.pathname === `/${bag}/00000000`) {
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=31536000, immutable' })
+      response.end(JSON.stringify({ layer: head, pubkey, lineage: 'revolucion', title: 'Revolución', publishedAt: createdAt }))
       return
     }
     if (url.pathname === `/hive/${pubkey}`) {

@@ -132,9 +132,11 @@ function derivedDoorsFrom(sites) {
   return [...doors.values()].sort(byTitle)
 }
 
-/** A door is only advertised if it opens: the site descriptor has to be there. */
+/** A door is only advertised if it opens: its own bag, sign(<host>), has to
+ *  describe it (blossom-worker locationMeta). */
 async function answers(door) {
-  try { return (await get(`https://${door.host}/site.json`, 15_000)).status === 200 } catch { return false }
+  const bag = require('crypto').createHash('sha256').update(door.host.toLowerCase(), 'utf8').digest('hex')
+  try { return (await get(`https://${door.host}/${bag}/`, 15_000)).status === 200 } catch { return false }
 }
 
 /** The committed list — what the build uses when the network is not there. */
