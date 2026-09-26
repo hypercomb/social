@@ -755,12 +755,35 @@ const newestAt = new Map()
 async function newestLocation(env, location) {
   const held = newestAt.get(location)
   if (held && Date.now() - held.at < LOCATION_TTL_MS && held.env === env.CONTENT) return held
+  // A fresh isolate asks the colo's edge copy before R2: the same window, so a
+  // cold first page pays no list and get. A write drops the copy in its colo.
+  const edge = edgeCache()
+  if (edge) {
+    try {
+      const hit = await edge.match(await locationCacheKey(location))
+      if (hit) {
+        const { names, record } = await hit.json()
+        const warmed = { names, record, at: Date.now(), env: env.CONTENT }
+        newestAt.set(location, warmed)
+        return warmed
+      }
+    } catch { /* read the bag */ }
+  }
   const names = await locationMarkers(env, location)
   const record = names?.length ? await locationRecord(env, location, names.at(-1)) : null
   const fresh = { names, record, at: Date.now(), env: env.CONTENT }
   newestAt.set(location, fresh)
+  if (edge && names) {
+    try {
+      await edge.put(await locationCacheKey(location), new Response(JSON.stringify({ names, record }), {
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': `public, max-age=${LOCATION_TTL_MS / 1000}` },
+      }))
+    } catch { /* uncached is only slower */ }
+  }
   return fresh
 }
+
+const locationCacheKey = async (location) => new Request(`https://locations.invalid/${location}/`)
 
 /** One marker's record, or null. Markers are small, immutable JSON. */
 async function locationRecord(env, location, name) {
@@ -792,6 +815,7 @@ async function putLocationMarker(env, location, name, record) {
   // transaction with the signed-index KV; reads verify both authorities.
   if (await env.CONTENT.head(key)) return false
   newestAt.delete(location)
+  try { await edgeCache()?.delete(await locationCacheKey(location)) } catch { /* the window closes it */ }
   const written = await env.CONTENT.put(key, new TextEncoder().encode(JSON.stringify(record)), {
     onlyIf: new Headers({ 'If-None-Match': '*' }),
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
