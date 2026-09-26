@@ -130,6 +130,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   readonly #bySignature = new Map<string, ActionDescriptor>()
   readonly #beeCache = new Map<string, Bee>()
+  /** Bees a boot lane loaded for a package BESIDE the installed one (the
+   *  host package: its console). The installed package's manifest does not
+   *  name them, so its eviction pass must not dispose them. */
+  readonly #beside = new Set<string>()
   readonly #loadedDeps = new Set<string>()
   /** Dependency sig → alias, rebuilt whenever the alias map is replaced. */
   #aliasBySig = new Map<string, string>()
@@ -175,6 +179,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       .filter(sig => /^[a-f0-9]{64}$/.test(sig))
     if (!sigs.length) return
     const results = await Promise.allSettled(sigs.map(sig => this.#loadBeeBySignature(sig)))
+    if (root !== installedPackageSig()) {
+      results.forEach((r, i) => { if (r.status === 'fulfilled' && r.value) this.#beside.add(sigs[i]) })
+    }
     const failed = results.filter(r => r.status === 'rejected' || !r.value).length
     console.log(`[script-preloader] boot lane: ${sigs.length - failed} of ${sigs.length} boot bees loaded`)
   }
@@ -271,7 +278,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         const enabledSet = new Set(walked.bees)
         let evicted = false
         for (const [sig, bee] of this.#beeCache) {
-          if (!enabledSet.has(sig)) {
+          if (!enabledSet.has(sig) && !this.#beside.has(sig)) {
             // Pulse-less UI drones are plain classes — markDisposed and
             // iocKey may not exist; dispose/unregister best-effort.
             const key = (bee as any)?.iocKey

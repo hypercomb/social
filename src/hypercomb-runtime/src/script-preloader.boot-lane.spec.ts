@@ -73,6 +73,22 @@ describe('ScriptPreloader.loadBootBees', () => {
     expect(loaded).toEqual([MEADOW_BOOT])
   })
 
+  it('keeps the bees of a package beside the installed one when the installed manifest is enforced', async () => {
+    localStorage.setItem(INSTALLED_KEY, LIVE_ROOT)
+    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({ layers: [LIVE_ROOT] }))
+    const disposed: string[] = []
+    const original = store.getBee
+    store.getBee = async (sig: string) => ({ ...(await original(sig)), markDisposed: () => { disposed.push(sig) } })
+    try {
+      const preloader = new ScriptPreloader()
+      await preloader.loadBootBees(MEADOW_ROOT)
+      await preloader.find('')
+    } finally { store.getBee = original }
+    // The installed package's walk loaded its own bee; the one beside it stays.
+    expect(loaded).toEqual(expect.arrayContaining([MEADOW_BOOT, LIVE_BOOT]))
+    expect(disposed).toEqual([])
+  })
+
   it('does nothing when there is no root at all', async () => {
     await new ScriptPreloader().loadBootBees(null)
     await new ScriptPreloader().loadBootBees()
