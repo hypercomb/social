@@ -1532,7 +1532,16 @@ function doorScript(record, id = 'hc-door') {
   return `<script id="${id}" type="application/json">${JSON.stringify(record).replace(/</g, '\\u003c')}</script>`
 }
 
-async function serveVisitorAsset(request, env, { spa = true, door = null, install = null } = {}) {
+/** Past this a publisher's signed index stays off the page and is fetched. */
+const PAGE_INDEX_MAX = 65_536
+
+/** The signed index event as page data, exactly its bytes with '<' escaped —
+ *  a JSON escape, so the event still verifies byte for byte once parsed. */
+function indexScript(raw) {
+  return `<script id="hc-index" type="application/json">${raw.replace(/</g, '\\u003c')}</script>`
+}
+
+async function serveVisitorAsset(request, env, { spa = true, door = null, install = null, index = null } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   let response = await env.ASSETS.fetch(request)
   // Under /content/ a miss is a miss. The engine walks its package pool by
@@ -1562,7 +1571,7 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
     if (at >= 0) {
       headers.delete('Content-Length')
       headers.set('Cache-Control', 'no-store')
-      const body = html.slice(0, at) + doorScript(door) + (install ? doorScript(install, 'hc-install') : '') + html.slice(at)
+      const body = html.slice(0, at) + doorScript(door) + (install ? doorScript(install, 'hc-install') : '') + (index ? indexScript(index) : '') + html.slice(at)
       return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers })
     }
     return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers })
@@ -2678,14 +2687,19 @@ export default {
       // at sign(<host>), so the visitor needs no round trip before its plan.
       // …and the head of its host:packages pool, so the install walks no
       // listing and no marker before it starts. The two reads run side by side.
+      // …and its publisher's signed index, so the visitor verifies it against
+      // the key it pins with no round trip. The reads run side by side.
       const frontDoor = !!siteBinding(env, requestUrl.hostname)?.frontDoor
-      const [located, pointer] = frontDoor ? [null, null] : await Promise.all([
+      const publisher = site.publishers?.find((p) => p.primary) || site.publishers?.[0]
+      const [located, pointer, signedIndex] = frontDoor ? [null, null, null] : await Promise.all([
         newestLocation(env, await poolAddress(requestUrl.hostname.toLowerCase())),
         installPointer(request, env, site, opened.promoted),
+        publisher ? heldIndexRaw(env, publisher.pubkey).catch(() => null) : null,
       ])
       const door = located?.record ?? null
       const install = door ? pointer : null
-      return serveVisitorAsset(request, env, { door, install })
+      const index = door && signedIndex && signedIndex.length <= PAGE_INDEX_MAX ? signedIndex : null
+      return serveVisitorAsset(request, env, { door, install, index })
     }
 
     // A zone subdomain that could not even become an implicit site (nested

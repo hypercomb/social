@@ -99,6 +99,12 @@ export async function fetchHiveIndex(host: string, pubkey: string): Promise<Hive
   let evt: Record<string, unknown>
   try { evt = await res.json() as Record<string, unknown> } catch { return { ok: false, reason: 'malformed' } }
 
+  return hiveIndexOf(evt, key)
+}
+
+/** A signed index event, verified against the pinned key: the same checks
+ *  whether it was fetched from a host or carried by the page. */
+function hiveIndexOf(evt: Record<string, unknown>, key: string): HiveIndexResult {
   if (Number(evt?.['kind']) !== HIVE_INDEX_EVENT_KIND) return { ok: false, reason: 'malformed' }
   // Wrong pubkey and bad signature are BOTH substitution, not corruption:
   // the host handed back an index that is not this publisher's.
@@ -158,7 +164,22 @@ export async function fetchHiveManifest(host: string, pubkey: string): Promise<H
 
 /** Try each host in order; first verified index wins. The signature check
  *  makes order a matter of latency, never of trust. */
+/** The signed index the page this code runs in carries (#hc-index, written by
+ *  the door that served it), verified exactly as a fetched one — or null. */
+function carriedHiveIndex(pubkey: string): HiveManifest | null {
+  try {
+    const raw = typeof document === 'undefined' ? null : document.getElementById('hc-index')?.textContent
+    if (!raw) return null
+    const read = hiveIndexOf(JSON.parse(raw) as Record<string, unknown>, String(pubkey ?? '').trim().toLowerCase())
+    return read.ok ? read.manifest : null
+  } catch { return null }
+}
+
 export async function fetchHiveManifestFromAny(hosts: readonly string[], pubkey: string): Promise<HiveManifest | null> {
+  // The door's page carries its publisher's signed index: verified against
+  // the pinned key, it answers with no round trip; otherwise ask the hosts.
+  const carried = carriedHiveIndex(pubkey)
+  if (carried) return carried
   for (const host of hosts) {
     const manifest = await fetchHiveManifest(host, pubkey)
     if (manifest) return manifest

@@ -193,7 +193,9 @@ test('a signed landing field is inert — the door omits it and the visitor page
   const door = /<script id="hc-door" type="application\/json">([^<]*)<\/script>/.exec(html)
   assert(door, 'the page carries its door')
   assert.equal('landing' in JSON.parse(door[1]), false)
-  assert.equal(html.replace(door[0], ''), shell)
+  // The signed index rides verbatim (its landing field inert inside the publisher's own signed bytes).
+  const signed = /<script id="hc-index" type="application\/json">[^<]*<\/script>/.exec(html)
+  assert.equal(html.replace(door[0], '').replace(signed?.[0] ?? '', ''), shell)
 })
 
 test('a page carries its door record, escaped so no value can close the script', async () => {
@@ -269,6 +271,17 @@ test('an index is held at the edge a few seconds, and a write drops the copy', a
     if (before === undefined) delete globalThis.caches
     else globalThis.caches = before
   }
+})
+
+test('a page carries its publisher\'s signed index, byte-identical once parsed', async () => {
+  const { env } = await fixture()
+  const shell = '<!doctype html><html><head><title>x</title></head><body></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)).text()
+  const carried = /<script id="hc-index" type="application\/json">([^<]*)<\/script>/.exec(html)
+  assert(carried, 'the page carries the signed index')
+  const served = await (await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${INDEXES}/${pubkey}`), env)).json()
+  assert.deepEqual(JSON.parse(carried[1]), served)
 })
 
 test('a stale marker from before door records moves forward to the signed head', async () => {
