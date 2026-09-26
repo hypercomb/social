@@ -37,6 +37,21 @@ Adopted by the repository owner on 2026-09-26.
 The migration plan and its progress live in
 `src/documentation/everything-is-a-beehavior.md`.
 
+## Porting to the minimal host must not cost performance (mandatory)
+
+Moving anything from the Angular build to the minimal (pure) host must not
+make loading or running worse; at most negligibly. Before handing off such a
+change, build both hosts with the same package and run the gate:
+
+```bash
+node scripts/bench-minimal-host.mjs --pure <pure origin> --web <web origin> --root <package sig>
+```
+
+It compares first frame, all bees loaded, boot blocking, heap, drag frame
+times, janky frames and idle blocking, and exits non-zero when the minimal
+host is worse beyond a small tolerance. Report its table with the change; run
+it at `--rate 4` as well when the change touches boot or rendering.
+
 ## Protected `development` branch (mandatory)
 
 `development` is maintained directly by the repository owner only. Agents must

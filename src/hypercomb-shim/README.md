@@ -92,6 +92,19 @@ themselves; everything else is resolved.
   person installs. Its bee installs through the host's one installer, offered
   under `@hypercomb.social/HostAcquire`, so there is never a second one.
 
+**The porting gate.** Moving code from the Angular build here must not cost
+performance. `node scripts/bench-minimal-host.mjs --pure <url> --web <url>
+--root <sig>` (from `src/`) runs both hosts on the same package and fails when
+the minimal host is worse. On 2026-09-26, package `dfdf6eca9eab`, warm boots:
+
+| | minimal | Angular |
+|---|---|---|
+| first frame | 587 ms (4× CPU: 1594) | 1184 ms (4× CPU: 3349) |
+| all bees loaded | 1377 ms | 2022 ms |
+| boot blocking | 73 ms | 164 ms |
+| drag frame p95, janky | 16.7 ms, 0% | 66.7 ms, 9.5% |
+| JS heap | 37–85 MB | 59–126 MB |
+
 `check-pure` fails if the kernel grows past 4 kB, the processor past 8 kB, a
 signed file does not hash to its name, a signed file is neither known to the
 kernel nor part of the host package, or the host bundle carries the console.
