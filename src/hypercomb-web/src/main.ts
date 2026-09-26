@@ -100,7 +100,7 @@ import { Store } from '@hypercomb/shared'
 import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
 import { ensureInstall, installFromHosts, opfsWritable, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
-import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
+import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap, sessionBound } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
 import {
@@ -207,7 +207,10 @@ const attachImportMap = async (): Promise<void> => {
   // Already applied by index.html before the module graph loaded — done.
   if ((window as any).__hcImportMapApplied === json) return
 
-  try { localStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch {}
+  // A map minted for an uncontrolled page holds blob: URLs that die with it —
+  // cached, it would replay dead specifiers into the next boot's early script.
+  const bound = sessionBound(imports)
+  if (!bound) try { localStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch {}
 
   // Late append: correct on browsers that merge late maps, ignored (with a
   // console warning) on those that don't — hence the reload guard below.
@@ -225,13 +228,21 @@ const attachImportMap = async (): Promise<void> => {
   // that ignored the late append, every dep and bee import is about to fail.
   // Reload once per map per session so index.html applies it up front; the
   // guard means a browser that DID accept the late map never loops.
+  // An uncontrolled page reloads once too: after a hard reload the next
+  // navigation IS controlled and lands on the cached map. Its blob map is new
+  // every boot, so the guard for it is the state, not the map — a page that
+  // stays uncontrolled (DevTools bypass, no worker at all) boots on the late
+  // blob map and never loops.
+  const guardValue = bound ? 'uncontrolled' : json
   let guard: string | null = null
   try { guard = sessionStorage.getItem(IMPORT_MAP_STORAGE_KEY) } catch {}
-  if (guard === json) return
+  if (guard === guardValue) return
 
-  try { sessionStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch { return }
-  console.warn('[main] import map was not live at module load — reloading once to apply it early')
-  if (!reloadUnlessVisitor('import map not live')) return
+  try { sessionStorage.setItem(IMPORT_MAP_STORAGE_KEY, guardValue) } catch { return }
+  console.warn(bound
+    ? '[main] the service worker does not control this page — reloading once so it does'
+    : '[main] import map was not live at module load — reloading once to apply it early')
+  if (!reloadUnlessVisitor(bound ? 'page not controlled' : 'import map not live')) return
   // Stop boot here; the reload is in flight and nothing below should run.
   await new Promise<never>(() => {})
 }
