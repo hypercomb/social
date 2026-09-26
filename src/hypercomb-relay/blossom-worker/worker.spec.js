@@ -1238,6 +1238,34 @@ test("a pool is listed only while an operator's signed index declares it", async
   assert.equal((await listingOf(stranger.env, windows)).status, 404)
 })
 
+test("a listed pool's members are read from R2 under the pool; an unlisted pool's never are", async () => {
+  const builds = await sha256('host:builds')
+  const bytes = '{"name":"build"}'
+  const member = await sha256(bytes)
+  const objects = { [VECTOR.recordSig]: VECTOR.record }
+  const read = async (env, name = member) => {
+    await env.CONTENT.put(builds + '/' + member, bytes)
+    return worker.fetch(new Request('https://pluginthematrix.com/' + builds + '/' + name), env)
+  }
+
+  const declared = await operated({ roots: BOUND_ROOTS, objects, extra: { listed: ['host:builds'] } })
+  const held = await read(declared.env)
+  const listing = await worker.fetch(new Request('https://pluginthematrix.com/' + builds + '/'), declared.env)
+  assert.equal(await listing.text(), member + '\n')
+  assert.equal(held.status, 200)
+  assert.equal(await held.text(), bytes)
+  assert.equal(held.headers.get('cache-control'), 'public, max-age=31536000, immutable')
+  assert.equal(held.headers.get('access-control-allow-origin'), '*')
+  // A member R2 does not hold is not answered from the pool.
+  assert.equal((await read(declared.env, 'e'.repeat(64))).status, 404)
+
+  // Undeclared, the same bytes under the same key are never read.
+  const silent = await operated({ roots: BOUND_ROOTS, objects })
+  const hidden = await read(silent.env)
+  assert.equal(hidden.status, 404)
+  assert.notEqual(await hidden.text(), bytes)
+})
+
 // ── the sandbox door (documentation/module-sandbox.md) ────────────────────
 // `try-<change>.<zone>` is a full hive whose own origin names the package the
 // approved publisher stamped as `install:try-<change>`; a door with no stamp

@@ -144,4 +144,19 @@ describe('pools on hosts', () => {
     expect(report.refused).toBe(1)
     expect(await readdir(builds.poolDir(builds.BUILDS_MEANING))).not.toContain(victim)
   })
+
+  it('puts both pools into R2 under the pool, skipping what the CDN already lists', async () => {
+    const first = await record(undefined, 'a')
+    await builds.signRevision(first.sig, 'author')
+    const builtPool = builds.sign(builds.BUILDS_MEANING)
+    const held = (await readdir(builds.poolDir(builds.BUILDS_MEANING))).filter((n: string) => /^[a-f0-9]{64}$/.test(n))
+    const listed = held[0]
+    const cdn = async (url: string) => url.endsWith(`/${builtPool}/`) ? new Response(listed + '\n') : new Response('', { status: 404 })
+    const puts: string[] = []
+    const report = await builds.pushToR2({ fetch: cdn, put: async (key: string) => { puts.push(key) } })
+    expect(report).toEqual({ uploaded: held.length, present: 1, failed: 0 })
+    expect(puts).not.toContain(`hypercomb-content/${builtPool}/${listed}`)
+    expect(puts.every(key => /^hypercomb-content\/[a-f0-9]{64}\/[a-f0-9]{64}$/.test(key))).toBe(true)
+    expect(puts.filter(key => key.includes(builds.sign(builds.SIGNATURES_MEANING)))).toHaveLength(1)
+  })
 })

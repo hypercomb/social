@@ -2534,6 +2534,31 @@ export default {
       return text(405, 'method not allowed')
     }
 
+    // A MEMBER OF A LISTED POOL — `/<pool>/<member>`, a file its listing names,
+    // held in R2 at `<pool>/<member>` (the version pools, host:builds and
+    // host:build-signatures, are published this way: hypercomb-shim/host/
+    // builds.mjs push --r2). The same gate as the listing: an unlisted pool's
+    // members are never read. Only names a listing holds — a signature or an
+    // 8-digit marker — so a human-named read (`/<sig>/chrome.css`) never
+    // comes here, and a member R2 does not hold falls through to the answers
+    // below (a front door's own package pool lives with its card).
+    const memberPath = pathname.match(/^\/([0-9a-f]{64})\/([0-9a-f]{64}|[0-9]{8})$/)
+    if (memberPath && (method === 'GET' || method === 'HEAD') && env.CONTENT?.get
+      && await listedPool(env, memberPath[1])) {
+      const held = await env.CONTENT.get(`${memberPath[1]}/${memberPath[2]}`)
+      if (held) {
+        return new Response(method === 'HEAD' ? null : held.body, {
+          status: 200,
+          headers: {
+            'Content-Type': held.httpMetadata?.contentType || 'application/octet-stream',
+            // A signature-named member never changes; a marker may be rewritten.
+            'Cache-Control': SIG_RE.test(memberPath[2]) ? 'public, max-age=31536000, immutable' : 'no-cache',
+            ...CORS,
+          },
+        })
+      }
+    }
+
     // Flat sig endpoint — the canonical read: https://<host>/<sig>.
     // Lowercase 64-hex only; this bucket is flat from birth (no legacy
     // typed-dir layout ever lands here, so no fallback probing).

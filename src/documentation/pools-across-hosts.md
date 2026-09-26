@@ -120,6 +120,11 @@ makes is the one the wire needs:
 |---|---|---|
 | `/<sig>` | a file — content, a member record | `immutable` |
 | `/<sig>/` | a directory — a pool, a lineage bag | `no-store` |
+| `/<sig>/<member>` | one member of a listed pool | `immutable` when the member is a signature |
+
+Every host shape reads a member the same way: the relay from its content
+directory, a static host from the file, and the blossom worker from R2 at
+`<pool>/<member>` — for listed pools only, the same gate as the listing.
 
 Today `relay.js` has no directory branch: it `readFileSync`s every path and
 tags anything containing a 64-hex run as immutable. The change is one

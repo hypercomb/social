@@ -36,11 +36,12 @@
 //   node host/builds.mjs sign <version|sig> --as author|reviewer|witness
 //   node host/builds.mjs take <origin dir>        bring in a published revision
 //   node host/builds.mjs push [host dir]          carry the pools to a host
+//   node host/builds.mjs push --r2 [--dry-run]    …to R2, for the subdomain worker
 //   node host/builds.mjs pull [host…]             bring in the hosts' pools
 //
 // Pools live under HYPERCOMB_POOLS_DIR (default ~/.hypercomb). The signing key
 // is read from HYPERCOMB_SIGNER_KEY (64 hex) or the file HYPERCOMB_SIGNER_KEY_FILE.
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { access, mkdir, mkdtemp, open, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
@@ -312,6 +313,46 @@ export const carryPools = async dir => {
   return carried
 }
 
+/**
+ * Carry both pools into R2 (the bucket behind content.jwize.com and the
+ * *.jwize.com / *.hypercomb.com worker) at `<pool>/<member>`, where the worker
+ * serves a listed pool's members. What `via` already lists is skipped.
+ */
+export const pushToR2 = async ({ bucket = 'hypercomb-content', via = 'https://content.jwize.com', put, fetch: get = fetch, dryRun = false } = {}) => {
+  const report = { uploaded: 0, present: 0, failed: 0 }
+  for (const meaning of [BUILDS_MEANING, SIGNATURES_MEANING]) {
+    const pool = sign(meaning)
+    const from = poolDir(meaning)
+    const listing = await get(`${via}/${pool}/`, { cache: 'no-store' }).catch(() => null)
+    const present = new Set(listing?.ok ? (await listing.text()).split(/\r?\n/).map(n => n.trim()) : [])
+    for (const name of await readdir(from).catch(() => [])) {
+      if (!SIG.test(name)) continue
+      if (present.has(name)) { report.present++; continue }
+      const path = resolve(from, name)
+      const first = (await readFile(path)).subarray(0, 1).toString()
+      const type = first === '{' || first === '[' ? 'application/json' : 'application/octet-stream'
+      try {
+        if (!dryRun) await put(`${bucket}/${pool}/${name}`, path, type)
+        report.uploaded++
+      } catch (e) {
+        report.failed++
+        if (report.failed <= 3) console.warn(`[builds] r2 put failed: ${name.slice(0, 12)} — ${String(e.message).slice(0, 120)}`)
+      }
+    }
+  }
+  return report
+}
+
+// Wrangler as the relay's worker installs it, entered directly (Node will not
+// spawn npx.cmd on Windows). It reads the operator's Cloudflare login.
+const WORKER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'hypercomb-relay', 'blossom-worker')
+const wranglerPut = async (key, file, type) => {
+  const wrangler = resolve(WORKER_DIR, 'node_modules', 'wrangler', 'bin', 'wrangler.js')
+  await access(wrangler).catch(() => { throw new Error(`wrangler is not installed — npm install in ${WORKER_DIR}`) })
+  execFileSync(process.execPath, [wrangler, 'r2', 'object', 'put', key, '--file', file, '--content-type', type, '--remote'],
+    { cwd: WORKER_DIR, stdio: 'pipe', timeout: 60_000 })
+}
+
 /** Where a host's pools are read: its root, then its /content. */
 const basesOf = host => {
   const base = /^https?:\/\//.test(host) ? host.replace(/\/+$/, '') : `https://${host}`
@@ -440,11 +481,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const { record, sig, signatures } = await takeIn(resolve(ref))
       console.log(`took ${record.label} ${record.version} ${short(sig)}${signersLine(signatures)}`)
     } else if (command === 'push') {
-      const dir = resolve(ref ?? RELAY_CONTENT)
-      await access(dir).catch(() => { throw new Error(`${dir} does not exist — name the host's content directory`) })
-      const carried = await carryPools(dir)
-      console.log(`carried ${carried} new file(s) into ${dir}`)
-      console.log(`a relay lists a pool only when its operator declares it; once, in the hive:\n  hosts list ${BUILDS_MEANING} @<host>\n  hosts list ${SIGNATURES_MEANING} @<host>`)
+      const args = [ref, ...rest].filter(Boolean)
+      if (args.includes('--r2')) {
+        const option = name => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined }
+        const dryRun = args.includes('--dry-run')
+        const { uploaded, present, failed } = await pushToR2({ bucket: option('--bucket'), via: option('--via'), put: wranglerPut, dryRun })
+        console.log(`r2: ${dryRun ? 'would upload' : 'uploaded'} ${uploaded}, already there ${present}, failed ${failed}`)
+        if (failed) process.exitCode = 1
+      } else {
+        const dir = resolve(args[0] ?? RELAY_CONTENT)
+        await access(dir).catch(() => { throw new Error(`${dir} does not exist — name the host's content directory`) })
+        const carried = await carryPools(dir)
+        console.log(`carried ${carried} new file(s) into ${dir}`)
+      }
+      console.log(`a host lists a pool only when its operator declares it; once, in the hive:\n  hosts list ${BUILDS_MEANING} @<host>\n  hosts list ${SIGNATURES_MEANING} @<host>`)
     } else if (command === 'pull') {
       for (const { host, answered, taken, refused } of await pullPools([ref, ...rest].filter(Boolean).length ? [ref, ...rest].filter(Boolean) : DEFAULT_HOSTS)) {
         console.log(`${host.padEnd(24)} ${answered ? `${taken} new file(s)${refused ? `, ${refused} refused (not what they are named)` : ''}` : 'holds no version pools'}`)

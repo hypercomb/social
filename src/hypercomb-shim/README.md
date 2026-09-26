@@ -149,8 +149,17 @@ nothing is ever removed.
   hive: `hosts list host:builds @jwize.com` and
   `hosts list host:build-signatures @jwize.com`.
 
+- **The subdomains** (`*.jwize.com`, `*.hypercomb.com`, content.jwize.com —
+  the blossom worker over R2 `hypercomb-content`):
+  `node host/builds.mjs push --r2` puts both pools into the bucket at
+  `<pool>/<member>` with the operator's wrangler login, skipping what
+  content.jwize.com already lists (`--dry-run` counts first). The worker
+  serves a listed pool's members from there, so declare the pools for those
+  zones too.
+
 ```bash
 node host/builds.mjs push [host dir]    # default: hypercomb-relay/content
+node host/builds.mjs push --r2          # the R2 bucket behind the worker
 node host/builds.mjs pull               # jwize.com, hypercomb.com (or name hosts)
 npm run host:check -- https://hypercomb.com    # reports the version pools
 ```
