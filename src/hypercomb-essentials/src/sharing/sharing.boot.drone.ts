@@ -11,6 +11,7 @@ import { NostrSigner } from './nostr-signer.js'
 import { hostSyncService } from './host-sync.service.js'
 import { setTextThemeOffering, textThemeOfferingStatus, textThemeOfferHost } from './text-theme-offering.js'
 import { reconcileCodeTrust, trustCode, trustedCodeDomains, untrustCode } from './code-trust.js'
+import { reconcilePublicBranches } from '../presentation/tiles/tile-public.js'
 // The retired push pool's collector schedules itself when loaded, as it did
 // in the namespace bundle at boot; the boot lane keeps that timing.
 import './retired-push-pool.js'
@@ -49,6 +50,9 @@ if (!(window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__) {
     untrust: untrustCode,
   })
   window.ioc.whenReady('@hypercomb.social/Store', () => { void reconcileCodeTrust() })
+  // Which branches this participant made public: the public:branches pool
+  // and its read cache (presentation/tiles/tile-public.ts).
+  window.ioc.whenReady('@hypercomb.social/Store', () => { void reconcilePublicBranches() })
 }
 
 window.ioc.register('@diamondcoreprocessor.com/SharingBootDrone', new SharingBootDrone())

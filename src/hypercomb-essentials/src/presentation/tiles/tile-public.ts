@@ -5,7 +5,7 @@
 // show-cell, the swarm and publishing read and write through it; a bee is
 // never imported for a value (atomic-modules-plan.md).
 
-import { normalizeCell } from '@hypercomb/core'
+import { normalizeCell, SignatureService } from '@hypercomb/core'
 
 /** Zone-scoped localStorage key for the hide list at this location.
  *  SwarmDrone writes `hc:current-zone` on every room/secret change
@@ -71,7 +71,90 @@ export function setCellPublic(location: string, label: string, makePublic: boole
 // branch ROOT's canonical path; a tile counts as public-via-branch when any
 // stored branch path is a prefix of (or equal to) the tile's own path. O(1)
 // per tile at render time, and it covers descendants that aren't loaded yet.
+//
+// THE POOL IS THE SET (jwize 2026-09-25: state lives only in pools of
+// meaning). Each public branch is one record in the `public:branches` pool,
+// named by its own content, like a trusted domain (sharing/code-trust.ts).
+// `hc:public-branches` stays as the synchronous read cache every renderer
+// and the publish scope already read: a toggle writes it first so the tile
+// repaints at once, and the pool record follows. `reconcilePublicBranches`
+// (sharing.boot.drone.ts, once the store is up) unions the two into each
+// other, so a cleared browser gets its public branches back from the pool
+// and an older writer's cache-only entry is backfilled.
+export const PUBLIC_BRANCHES_MEANING = 'public:branches'
 const PUBLIC_BRANCHES_KEY = 'hc:public-branches'
+const BRANCH_RECORD_KIND = 'public:branch'
+const STORE_KEY = '@hypercomb.social/Store'
+
+type PoolStore = { getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null> }
+
+const encoder = new TextEncoder()
+/** The record's exact bytes: it is named by them and written as them. */
+const branchRecordBytes = (path: string): ArrayBuffer => {
+  const bytes = encoder.encode(JSON.stringify({ kind: BRANCH_RECORD_KIND, path }))
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+}
+const branchRecordName = (path: string): Promise<string> => SignatureService.sign(branchRecordBytes(path))
+
+const branchPool = async (): Promise<FileSystemDirectoryHandle | null> => {
+  try {
+    const store = (window as { ioc?: { get?: (key: string) => unknown } }).ioc?.get?.(STORE_KEY) as PoolStore | undefined
+    return (await store?.getPool?.(PUBLIC_BRANCHES_MEANING)) ?? null
+  } catch { return null }
+}
+
+const writeBranchRecord = async (dir: FileSystemDirectoryHandle, path: string): Promise<void> => {
+  const handle = await dir.getFileHandle(await branchRecordName(path), { create: true })
+  const writable = await handle.createWritable()
+  try { await writable.write(branchRecordBytes(path)) } finally { await writable.close() }
+}
+
+const readBranchPool = async (dir: FileSystemDirectoryHandle): Promise<Set<string>> => {
+  const out = new Set<string>()
+  try {
+    for await (const [, handle] of dir as unknown as AsyncIterable<[string, FileSystemHandle]>) {
+      if (handle.kind !== 'file') continue
+      try {
+        const record = JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as { kind?: unknown; path?: unknown }
+        if (record?.kind === BRANCH_RECORD_KIND && typeof record.path === 'string' && record.path.startsWith('/')) out.add(record.path)
+      } catch { /* not a record — skip it */ }
+    }
+  } catch { /* unreadable pool — treat as empty */ }
+  return out
+}
+
+const writeBranchCache = (paths: readonly string[]): void => {
+  try {
+    localStorage.setItem(PUBLIC_BRANCHES_KEY, JSON.stringify(paths))
+  } catch { /* private-browsing edge case — the pool still holds it */ }
+}
+
+/** Record or withdraw one branch in the pool. A failure is left for the next
+ *  reconcile, which backfills a missing record. */
+const markBranch = async (path: string, makePublic: boolean): Promise<void> => {
+  const dir = await branchPool()
+  if (!dir) return
+  try {
+    if (makePublic) await writeBranchRecord(dir, path)
+    else await dir.removeEntry(await branchRecordName(path))
+  } catch { /* no record to remove, or the write failed */ }
+}
+
+/** Union the pool and the read cache into each other. Returns how many
+ *  branches are public. */
+export async function reconcilePublicBranches(): Promise<number> {
+  const dir = await branchPool()
+  const cached = readPublicBranches()
+  if (!dir) return cached.length
+  const held = await readBranchPool(dir)
+  const missing = [...held].filter(p => !cached.includes(p))
+  if (missing.length) writeBranchCache([...cached, ...missing])
+  for (const path of cached) {
+    if (held.has(path)) continue
+    try { await writeBranchRecord(dir, path) } catch { /* the next reconcile backfills it */ }
+  }
+  return cached.length + missing.length
+}
 
 /** Canonical absolute path of a tile, with EVERY segment normalized so the
  *  stored branch-root path and a descendant's path agree even though nav
@@ -115,9 +198,8 @@ export function setBranchPublic(location: string, label: string, makePublic: boo
   let next = list
   if (makePublic && !has) next = [...list, p]
   else if (!makePublic && has) next = list.filter(x => x !== p)
-  try {
-    localStorage.setItem(PUBLIC_BRANCHES_KEY, JSON.stringify(next))
-  } catch { /* private-browsing edge case — flag won't persist */ }
+  writeBranchCache(next)
+  void markBranch(p, makePublic)
   return next
 }
 
