@@ -141,26 +141,65 @@ const ensureSwControl = async (): Promise<void> => {
   }
 }
 
-/** Late-append the import map. The shim keeps the RELOAD-ONCE half out: it
- *  is a boot-flow decision that belongs to the installer bee, and a shim
- *  that reloads itself is much harder to reason about while it is being
- *  built. Browsers that merge late maps (Chrome/Edge 133+) resolve fine;
- *  index.html's synchronous replay covers the rest from the second boot.
+/** A published website must NEVER reload itself. Every reload site routes
+ *  through here; the visitor carries on with the late-appended map, which
+ *  nothing it learns would survive a reload anyway. */
+const reloadUnlessVisitor = (why: string): boolean => {
+  if ((window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) {
+    console.log(`[shim] visitor: skipping reload (${why}) — a published website never reloads itself`)
+    return false
+  }
+  location.reload()
+  return true
+}
+
+/** Late-append the import map, then reload ONCE if it was not live at
+ *  module load — the twin of hypercomb-web's attachImportMap. Browsers that
+ *  merge late maps (Chrome/Edge 133+) resolve fine either way; the reload
+ *  lets index.html's synchronous replay apply the map up front for the rest.
  *  A page the worker does not control (hard reload, DevTools "bypass for
- *  network", no worker) gets a self-typed blob map (import-map.ts) and boots
- *  on this late append — the same footing as a web page that stays
- *  uncontrolled, minus the reload the web tries first. */
+ *  network", no worker) gets a self-typed blob map (import-map.ts). */
 const attachImportMap = async (): Promise<void> => {
   const imports = await resolveImportMap()
   const json = JSON.stringify({ imports })
   if ((window as any).__hcImportMapApplied === json) return
+
   // A map minted for an uncontrolled page holds blob: URLs that die with it —
   // cached, it would replay dead specifiers into the next boot's early script.
-  if (!sessionBound(imports)) try { localStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch {}
+  const bound = sessionBound(imports)
+  if (!bound) try { localStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch {}
+
   const script = document.createElement('script')
   script.type = 'importmap'
   script.textContent = json
   document.head.appendChild(script)
+
+  // No dependency aliases resolved (nothing installed yet) → no bare specifier
+  // gets resolved this session; the next boot picks the cache up early.
+  const aliasMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
+  if (!aliasMap?.size) return
+
+  // The map this session needs was NOT live at module-load time. On a browser
+  // that ignored the late append, every dep and bee import is about to fail.
+  // Reload once per map per session so index.html applies it up front; the
+  // guard means a browser that DID accept the late map never loops.
+  // An uncontrolled page reloads once too: after a hard reload the next
+  // navigation IS controlled and lands on the cached map. Its blob map is new
+  // every boot, so the guard for it is the state, not the map — a page that
+  // stays uncontrolled (DevTools bypass, no worker at all) boots on the late
+  // blob map and never loops.
+  const guardValue = bound ? 'uncontrolled' : json
+  let guard: string | null = null
+  try { guard = sessionStorage.getItem(IMPORT_MAP_STORAGE_KEY) } catch {}
+  if (guard === guardValue) return
+
+  try { sessionStorage.setItem(IMPORT_MAP_STORAGE_KEY, guardValue) } catch { return }
+  console.warn(bound
+    ? '[shim] the service worker does not control this page — reloading once so it does'
+    : '[shim] import map was not live at module load — reloading once to apply it early')
+  if (!reloadUnlessVisitor(bound ? 'page not controlled' : 'import map not live')) return
+  // Stop boot here; the reload is in flight and nothing below should run.
+  await new Promise<never>(() => {})
 }
 
 const renderBootFailure = (error: unknown): void => {

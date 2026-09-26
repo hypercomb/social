@@ -22,6 +22,19 @@ describe('an uncontrolled shim page', () => {
     expect(early).toMatch(/controlled \? localStorage\.getItem\('hc:importmap'\) : null/)
   })
 
+  it('reloads once on the state, never on the blob map, and a visitor never reloads', () => {
+    const main = readFileSync(join(shim, 'src/main.ts'), 'utf8')
+    const at = main.indexOf('const attachImportMap')
+    const attach = main.slice(at, main.indexOf('const renderBootFailure', at))
+    expect(attach).toMatch(/const guardValue = bound \? 'uncontrolled' : json/)
+    expect(attach).toMatch(/sessionStorage\.getItem\(IMPORT_MAP_STORAGE_KEY\)/)
+    expect(attach).toMatch(/if \(guard === guardValue\) return/)
+    expect(attach).toMatch(/sessionStorage\.setItem\(IMPORT_MAP_STORAGE_KEY, guardValue\)/)
+    expect(attach).toMatch(/if \(!bound\) try \{ localStorage\.setItem\(IMPORT_MAP_STORAGE_KEY, json\)/)
+    expect(attach).toContain('reloadUnlessVisitor(')
+    expect(main).toMatch(/__HC_READONLY__ === true\) \{[\s\S]{0,200}return false/)
+  })
+
   it('a blob map is session-bound; a worker-served map is not', async () => {
     const { sessionBound } = await import('./import-map')
     const sig = 'a'.repeat(64)
