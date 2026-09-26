@@ -1746,3 +1746,40 @@ test('the AI meter keeps one row per key, in the host:ai-meters pool', async () 
     assert.equal(kv.values.size, 0)
   } finally { globalThis.fetch = original }
 })
+
+// ── the landing pack ──────────────────────────────────────────────────────
+// A door serves its head's first view as ONE transfer pack at
+// /<sign('content:packs')>/<head>: small members a short walk below the head,
+// built once and kept; pictures stay loose; only the door's own head is built.
+test('a door packs its head\'s landing view, keeps it, and builds nothing else', async () => {
+  const { decodeTransferPack, gunzipBytes } = await import('../../hypercomb-runtime/src/transfer-pack.ts')
+  const host = 'landing.pluginthematrix.com'
+  const enc = (text) => new TextEncoder().encode(text)
+  const child = enc('{"name":"child","cells":[]}')
+  const childSig = await sha256Hex('{"name":"child","cells":[]}')
+  const picture = new Uint8Array(40_000).fill(7)
+  const pictureSig = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', picture)))
+  const headText = JSON.stringify({ name: 'home', cells: [childSig], image: pictureSig })
+  const headSig = await sha256Hex(headText)
+  const held = new Map([[headSig, enc(headText)], [childSig, child], [pictureSig, picture]])
+  const bag = await sha256Hex(host)
+  held.set(`${bag}/00000001`, enc(JSON.stringify({ layer: headSig })))
+  const CONTENT = contentBag(held)
+  const env = { SITE_BINDINGS: '{}', CONTENT }
+  const PACKS = await sha256Hex('content:packs')
+  const ask = (sig) => worker.fetch(new Request(`https://${host}/${PACKS}/${sig}`), env)
+
+  const res = await ask(headSig)
+  assert.equal(res.status, 200)
+  const members = new Map(decodeTransferPack(await gunzipBytes(new Uint8Array(await res.arrayBuffer()))))
+  assert.deepEqual([...members.keys()].sort(), [headSig, childSig].sort())
+  assert.equal(new TextDecoder().decode(members.get(childSig)), '{"name":"child","cells":[]}')
+  assert.ok(held.has(`${PACKS}/${headSig}`), 'the pack is kept')
+
+  // Kept: served again with the heap gone.
+  held.delete(childSig)
+  assert.equal((await ask(headSig)).status, 200)
+  // Only the door's own head is ever built.
+  assert.equal((await ask(childSig)).status, 404)
+  assert.ok(!held.has(`${PACKS}/${childSig}`))
+})

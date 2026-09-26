@@ -127,6 +127,9 @@ export const declarePoolKind = (meaning: string, kind: PoolKind): PoolKindFacts 
 const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // DERIVED CACHES — recomputable, wipe-safe, never sent.
   ['computed:genome', 'index'],
+  // A door's landing pack, keyed by the head it was walked from: derived,
+  // wipe-safe, rebuilt on a miss (blossom-worker serveContentPack).
+  ['content:packs', 'index'],
   ['manifests', 'index'],
   ['system:manifests', 'index'],
   // A package's transfer pack, keyed by its root (pool-registry.ts). Wipe-safe:

@@ -436,6 +436,32 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 const SIG_RE = /^[0-9a-f]{64}$/
 
+/** How long a first ask waits for the landing pack still in flight. The pack
+ *  starts at page load, so it is normally there first; past this the ask goes
+ *  loose and the pack is only a head start for later asks. */
+const CARRIED_WAIT_MS = 1500
+
+/** A member of the visitor's landing pack, or null. Reads the promise the
+ *  visitor entry leaves on globalThis (`__hcCarriedContent`); a participant
+ *  hive has none and pays one property read. */
+let carriedPack: Map<string, Uint8Array> | null = null
+let carriedWait: Promise<void> | null = null
+const carriedContent = async (sig: string): Promise<Uint8Array | null> => {
+  if (carriedPack) return carriedPack.get(sig) ?? null
+  const pending = (globalThis as { __hcCarriedContent?: Promise<Map<string, Uint8Array>> }).__hcCarriedContent
+  if (!pending) return null
+  // One bounded wait shared by every early ask; the pack is kept once it lands.
+  carriedWait ??= Promise.race([
+    pending.then(map => { carriedPack = map }, () => { carriedPack = new Map() }),
+    new Promise<void>(resolve => setTimeout(resolve, CARRIED_WAIT_MS)),
+  ])
+  await carriedWait
+  // Set inside the race above; TypeScript still holds the narrowing from the
+  // early return.
+  const landed = carriedPack as Map<string, Uint8Array> | null
+  return landed?.get(sig) ?? null
+}
+
 /** How many sibling layers an adopt walk fetches at once. Bounded so a wide
  *  tree cannot open hundreds of sockets; large enough that latency, not
  *  bandwidth, stops being what a visitor waits on. */
@@ -1296,6 +1322,16 @@ export class ContentBrokerDrone extends Drone {
       this.#missBackoff.delete(s)   // resolved — reset any prior backoff
       this.#mintOutcome('local', 'ok')
       return local
+    }
+
+    // THE LANDING PACK (a visitor only — hypercomb-web setup/content-pack.ts):
+    // the door's first view arrived as one transfer pack. A member is taken
+    // like any fetched bytes — re-hashed against its name, then stored — so a
+    // pack can only save round trips, never change what is read.
+    const carried = await carriedContent(s)
+    if (carried) {
+      const accepted = await this.#acceptVerifiedBytes(s, type, carried)
+      if (accepted) return accepted
     }
 
     // MISS WINDOW (egg semantics): a sig the full cascade could not
