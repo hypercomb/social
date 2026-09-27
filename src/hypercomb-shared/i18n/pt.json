@@ -307,7 +307,7 @@
   "providers.orHostsNone": "OpenRouter não lista hosts para este modelo agora; ele mesmo o roteirizará.",
   "providers.orHostsAlias": "Este é um alias dinâmico que sempre aponta para a versão mais recente, portanto não tem hosts fixos. Escolha uma versão específica.",
   "providers.hiveBudget": "Ler orçamento por conversa, em caracteres",
-  "providers.hiveBudgetHint": "Quanto da hive pode sair desta máquina através deste provedor em uma conversa. Vazio significa o padrão, 24 000.",
+  "providers.hiveBudgetHint": "Quanto da hive pode sair desta máquina através deste provedor em uma conversa. Vazio significa sem limite: o trabalho lê o que precisa.",
   "providers.orchestrator": "Assistente de fundo",
   "providers.orchestratorHint": "Quem marca e resume uma conversa para seu fluxo de trabalho de barra lateral.",
   "providers.orchestratorLocal": "Local",

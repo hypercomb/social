@@ -163,16 +163,49 @@ export const persistJevReceipt = async (store: ResourceWriter | undefined, sourc
   })
 }
 
+/** JEV IS THE CHANGE GATE (jwize, 2026-09-26: the hive AI must work like an
+ *  agent, not hand the participant a menu). The worker takes its own steps
+ *  with the ordinary read, do and write blocks; reads run as written; Jev
+ *  judges each change and the final answer. A table is still understood, but
+ *  no longer asked for. */
 export const JEV_WORK_INSTRUCTION =
-  'JEV RUNS THE SHOW. You do not choose the next step; you list the possible ones and Jev, a decision service, picks in one fast call. '
-  + 'Every round, end your reply with ONE closed fence whose opening line is exactly three backticks followed by hypercomb-table (never json, never a bare fence), holding JSON: {"rows":[{"id":"a","kind":"read","label":"See who is under people","line":"list /business/people"},'
-  + '{"id":"b","kind":"do","label":"Create the people tile","lines":["create people"]},{"id":"c","kind":"answer","label":"Answer now"},{"id":"d","kind":"ask","label":"Ask how to group","line":"Group by city or by role?"}]}. '
-  + `Two to ${JEV_MAX_ROWS} rows. Kinds: read (one read line: tree, read, list, history, summary, find or code), do (one to six behaviour sentences from the vocabulary, in lines), answer (you could answer the request now from what the messages hold), ask (a question only the participant can answer, in line). `
-  + 'To change a module\'s code or a doctrine section, send the hypercomb-write block ALONE instead of a table: the hive judges it as a one-row write table (read a module section first, or the write is not grounded). A write row inside a table has no body and is dropped. '
-  + 'Ids are lowercase letters, digits, underscores; labels under 70 characters and distinct; an optional why under 200 characters. '
-  + 'List every step that could reasonably be next: the reads that would settle an assumption, the change the request asks for, the answer row whenever you might be done, the ask row when a preference is missing. '
-  + 'Do not argue for a row, rank the rows, or reason about which is best — that is Jev\'s job and it is faster at it. Write no prose while working. '
-  + 'The next message says what Jev chose and what ran; continue from it. After a change ran, include a read row that would verify it. When told to answer, answer in prose with no block.'
+  'JEV CHECKS THE CHANGES. You choose your own steps with the blocks above, and keep going until the request is done: reads run as written. '
+  + 'Every change you send — a hypercomb-do block, or a hypercomb-write block — is first judged by Jev, a decision service, against the doctrine and against what you read this turn (read a module section before you write it, or the write is not grounded). '
+  + 'A change Jev clears runs; one it cannot clear waits in Execution for the participant\'s review; one that conflicts with the doctrine comes back to you refused, with the reason — revise it or choose another way. '
+  + 'Jev also checks your final answer against what the hive read, so say only what the reads showed. '
+  + 'Ask the participant (one hypercomb-question) only for a preference that is truly theirs; never ask them to pick your next step.'
+
+/** Jev's own limits on what it is shown (essentials jev-decision.ts
+ *  JEV_MAX_STATE_CHARS and the evidence limits of jevInput / jevVerifyInput),
+ *  restated because the shell may not import a module. */
+export const JEV_STATE_CHARS = 24_000
+const JEV_EVIDENCE_CHARS = 16_000
+const JEV_EVIDENCE_ITEMS = 12
+
+/** WHAT JEV IS SHOWN OF THE EVIDENCE. Reading a lot is the work, never a
+ *  reason for Jev to fall away: the first `keep` pieces (the request) stay,
+ *  then the newest pieces the worker can still see as written — after the
+ *  ledger folded older rounds, those are the ones Jev may judge by — within
+ *  `room` characters as they travel (JSON-escaped) and Jev's own limits. A
+ *  piece too long is cut from its start; a cut of what was written is still
+ *  what was written. */
+export const fitEvidence = (evidence: readonly string[], seen: (part: string) => boolean, room: number, keep = 0): string[] => {
+  const cost = (part: string): number => JSON.stringify(part).length + 1
+  const head = evidence.slice(0, keep)
+  let left = Math.min(room, JEV_EVIDENCE_CHARS) - head.reduce((sum, part) => sum + cost(part), 0)
+  const tail: string[] = []
+  for (let i = evidence.length - 1; i >= keep && head.length + tail.length < JEV_EVIDENCE_ITEMS && left > 256; i--) {
+    const part = evidence[i]
+    if (!seen(part)) continue
+    let cut = part
+    while (cut && cost(cut) > left) cut = cut.slice(0, Math.floor(cut.length * Math.min(0.9, left / cost(cut))))
+    cut = cut.trim()
+    if (!cut) continue
+    tail.unshift(cut)
+    left -= cost(cut)
+  }
+  return [...head, ...tail]
+}
 
 /** The table the model wrote, before the hive's parsers and Jev see it. */
 export const parseTable = (lines: readonly string[]): readonly Row[] => {

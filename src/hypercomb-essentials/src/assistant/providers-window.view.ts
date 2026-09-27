@@ -1164,7 +1164,8 @@ export class ProvidersWindowView extends EventTarget {
         budget.min = String(MIN_BUDGET)
         budget.max = String(MAX_BUDGET)
         budget.step = '1000'
-        budget.placeholder = '24000'
+        // Empty is no limit: a provider allowed to read reads what the work needs.
+        budget.placeholder = '∞'
         budget.value = llmHiveAccess.budget(provider.id)?.toString() ?? ''
         budget.addEventListener('change', () => {
           const chars = budget.value.trim() ? Number(budget.value) : undefined
@@ -1176,7 +1177,7 @@ export class ProvidersWindowView extends EventTarget {
         )
         budgetRow.title = this.#t(
           'providers.hiveBudgetHint',
-          'How much of the hive may leave this machine through this provider in one conversation. Empty means the default, 24 000.',
+          'How much of the hive may leave this machine through this provider in one conversation. Empty means no limit: the work reads what it needs.',
         )
         actions.appendChild(budgetRow)
       }

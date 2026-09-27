@@ -36,6 +36,8 @@ export interface PreparedTable {
   readonly writeOf: ReadonlyMap<string, readonly string[]>
   /** Rows the census refused, with the hive's reason — recorded as misses. */
   readonly dropped: readonly { readonly id: string; readonly reason: string; readonly sentence: string }[]
+  /** The worker sent one change of its own, not a table of options. */
+  readonly bare?: true
 }
 
 export type RoundStep =
@@ -54,6 +56,8 @@ export const WRITE_ROW_REFUSAL = 'a write row carries no code; send the hypercom
 export interface RoundTable {
   readonly lines: readonly string[]
   readonly write?: readonly string[]
+  /** A change block the worker chose itself, wrapped as a one-row table. */
+  readonly bare?: true
 }
 
 /** A write row's label: what the header names — the section path, or the
@@ -78,12 +82,12 @@ export const tableFor = (request: WorkRequest, jevMode: boolean): RoundTable | u
   if (!jevMode || !request.lines.length) return undefined
   if (request.kind === 'write') {
     const label = writeLabelOf(request.lines)
-    if (!label) return { lines: [JSON.stringify({ rows: [] })], write: request.lines }
-    return { lines: [JSON.stringify({ rows: [{ id: 'write', kind: 'write', label, line: writeHeaderOf(request.lines) }] })], write: request.lines }
+    if (!label) return { lines: [JSON.stringify({ rows: [] })], write: request.lines, bare: true }
+    return { lines: [JSON.stringify({ rows: [{ id: 'write', kind: 'write', label, line: writeHeaderOf(request.lines) }] })], write: request.lines, bare: true }
   }
   if (request.kind !== 'do') return undefined
   const label = request.lines[0].replace(/^\//, '').replace(/[\x00-\x1f\x7f`~*]/g, ' ').trim().slice(0, 70) || 'change'
-  return { lines: [JSON.stringify({ rows: [{ id: 'action', kind: 'do', label, lines: request.lines }] })] }
+  return { lines: [JSON.stringify({ rows: [{ id: 'action', kind: 'do', label, lines: request.lines }] })], bare: true }
 }
 
 /** THE HIVE'S PARSERS GO FIRST. Jev only ever chooses among rows the hive can
@@ -121,7 +125,7 @@ export const prepareTable = (table: RoundTable, census: RoundCensus): PreparedTa
     }
   })
   if (!rows.length) throw new WorkRefused(`no row can run: ${dropped.map(row => `${row.id}: ${row.reason}`).join('; ')}`)
-  return { rows, grammarOf, writeOf, dropped }
+  return { rows, grammarOf, writeOf, dropped, ...(table.bare ? { bare: true as const } : {}) }
 }
 
 const blockRefusal = (write: readonly string[]): string => {
@@ -134,6 +138,17 @@ export const stepFor = (decision: Decision, table: PreparedTable, words: Questio
   const plan = decision.plan
   const note = tableChoiceNote(decision, table.rows, table.dropped)
   const row = (id: string): Row | undefined => table.rows.find(candidate => candidate.id === id)
+  // JEV IS THE CHANGE GATE, NOT THE ONE WHO STEERS. The worker chose this
+  // change itself; when Jev cannot clear it — unsure, out of budget, or not
+  // there — the change waits in Execution for the participant's review. The
+  // participant is never handed a menu of the worker's next steps.
+  const change = table.bare && plan.kind === 'participant' ? table.rows.find(candidate => candidate.kind === 'do' || candidate.kind === 'write') : undefined
+  if (change) {
+    const held = `Jev did not clear this change on its own (${decision.reason}); it waits in Execution for the participant's review. This decision grants no permission of its own.`
+    const write = table.writeOf.get(change.id)
+    if (write) return { kind: 'write', lines: write, review: true, note: held }
+    return { kind: 'do', grammars: table.grammarOf.get(change.id) ?? [], review: true, note: held }
+  }
   switch (plan.kind) {
     case 'revise':
       return { kind: 'refuse', reason: decision.reason }

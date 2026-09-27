@@ -178,7 +178,7 @@ import {
   workLineGrammar,
   WorkStreamGuard,
 } from './hypercomb-work-fence'
-import { JEV_IOC_KEY, JEV_MODEL, JEV_WORK_INSTRUCTION, doctrineSections, persistJevFront, persistJevInput, persistJevVerify, persistJevReceipt, formatJevUsage, type JevLike, type FrontDecision, type Row, type Decision } from './hypercomb-jev'
+import { JEV_IOC_KEY, JEV_MODEL, JEV_STATE_CHARS, JEV_WORK_INSTRUCTION, doctrineSections, fitEvidence, persistJevFront, persistJevInput, persistJevVerify, persistJevReceipt, formatJevUsage, type JevLike, type FrontDecision, type Row, type Decision } from './hypercomb-jev'
 import { offeredSentence, prepareTable, stepFor, tableFor, type RoundCensus } from './jev-round'
 
 type TurnRole = 'user' | 'assistant'
@@ -197,6 +197,9 @@ type ChatTurn = {
   /** A leg's handover: what the work still has left. The next leg starts
    *  from it, on this device now or on whichever reopens the conversation. */
   readonly left?: string
+  /** What the conversation's reads found, as `<sig> <read>` entries — the
+   *  signatures the next message opens again without searching. */
+  readonly known?: readonly string[]
   /** The turn's manifest signature — its file name in the bucket. Present
    *  on a turn read back from disk, absent on one this window appended in
    *  memory and has not re-read yet. It is the ONLY join between a drawn
@@ -1226,6 +1229,7 @@ type ExecutionQueueLike = {
  *  restated because the shell may not import a module. */
 type TurnMetaLike = {
   readonly left?: string
+  readonly known?: readonly string[]
   readonly anatomy?: string
   readonly context?: string
   readonly observed?: readonly string[]
@@ -6198,6 +6202,14 @@ export class ChatWindowComponent implements OnDestroy {
     // Where the participant is travels only to a provider that reads freely.
     const anatomyText = (ioc()?.get(ANATOMY_IOC_KEY) as { text?: string } | undefined)?.text ?? ''
     const vocabulary = canChange ? hypercombVocabulary(behaviourEntries) : ''
+    // WHAT EARLIER MESSAGES FOUND SURVIVES A RELOAD: the newest turn that
+    // carries the conversation's known reads restores them, oldest first.
+    if (!this.#readSignatures.has(convoId)) {
+      const stored = [...this.turns()].reverse().find(turn => turn.known?.length)?.known ?? []
+      const restored = new Map<string, string>()
+      for (const entry of stored) restored.set(entry.slice(0, 64), entry.slice(65))
+      if (restored.size) this.#readSignatures.set(convoId, restored)
+    }
     // Taken once per message, so the system text stays byte-stable across
     // the rounds of one answer (a vendor's prompt cache keys on the prefix).
     const knownReads = [...(this.#readSignatures.get(convoId) ?? new Map<string, string>())].slice(-24)
@@ -6298,7 +6310,6 @@ export class ChatWindowComponent implements OnDestroy {
       // How the last read or change settled — what jev:outcome reports.
       let lastRun: 'ran' | 'skipped' | 'failed' = 'failed'
       let decisionCalls = 0
-      let decisionChars = 0
       const evidence = [message]
       const decisionCache = new Map<string, Decision>()
       let needsVerification = false
@@ -6314,9 +6325,14 @@ export class ChatWindowComponent implements OnDestroy {
         // Mechanics are already implemented by the harness; only the verbatim
         // doctrine is needed, section by section, each judged on its own.
         const doctrine = doctrineSections(anatomyText)
-        const input = { request: message, doctrine, evidence: [...evidence], rows }
-        const chars = JSON.stringify(input).length
-        const budget = hiveAccess?.budget?.('openrouter') ?? MAX_OBSERVATION_CONTEXT_CHARS
+        // EACH DECISION IS SIZED ON ITS OWN, never charged against what the
+        // work read: Jev is shown the request and the newest evidence that
+        // fits one call (a number the participant set for OpenRouter still
+        // bounds it), so reading a whole module never shuts the gate.
+        const base = { request: message, doctrine, evidence: [] as string[], rows }
+        const cap = Math.min(JEV_STATE_CHARS, hiveAccess?.budget?.('openrouter') || JEV_STATE_CHARS)
+        const seen = (part: string): boolean => messages.some(entry => entry.content.includes(part))
+        const input = { ...base, evidence: fitEvidence(evidence, seen, cap - JSON.stringify(base).length - 512, 1) }
         stillHere()
         if (snapshotIds.length && treeReader && !await treeReader.validateSnapshots(snapshotIds, signal)) {
           discardStaleEvidence()
@@ -6326,9 +6342,7 @@ export class ChatWindowComponent implements OnDestroy {
         const cached = sourceSig ? decisionCache.get(sourceSig) : undefined
         if (cached) return cached
         if (decisionCalls >= MAX_WORK_ROUNDS) return participant('The decision budget is spent; the participant must choose.')
-        if (decisionChars + chars > budget) return participant('The decision context exceeds the remaining budget; the participant must choose.')
         decisionCalls++
-        decisionChars += chars
         EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'evaluating the direction with Jev' })
         const startedAt = Date.now()
         let result: Decision
@@ -6372,6 +6386,7 @@ export class ChatWindowComponent implements OnDestroy {
           prompt: promptSig,
           observed: [...observed],
           read: [...readSigs],
+          known: [...(component.#readSignatures.get(convoId) ?? new Map<string, string>())].map(([sig, grammar]) => `${sig} ${grammar.replace(/[\r\n]/g, ' ').slice(0, 200)}`),
           attempts: [...settledAttempts],
           providerId,
           model,
@@ -6416,8 +6431,15 @@ export class ChatWindowComponent implements OnDestroy {
         const readLines = contextLines.length ? lines.filter(line => !contextLines.includes(line)) : lines
         const contextReceipt = contextLines.length ? component.#contextLines(contextLines) : ''
         if (!readLines.length) return readResultMessage(contextReceipt, message)
-        if (readRounds >= MAX_OBSERVATION_ROUNDS) throw new WorkRefused('no more reads are available for this message')
-        const budget = hiveAccess?.budget?.(providerId) || MAX_OBSERVATION_CONTEXT_CHARS
+        // A SIZE LIMIT IS A PRIVACY CONTROL, NOT A WORK LIMIT. A provider the
+        // participant granted reads as much as the work needs — the request's
+        // token budget and the model's own window bound it (the leg folds and
+        // hands over); a number the participant set in the providers console
+        // stays their limit; a provider that asks read by read keeps the
+        // small default, rounds included.
+        const readsOpen = readsFreely(providerId)
+        if (!readsOpen && readRounds >= MAX_OBSERVATION_ROUNDS) throw new WorkRefused('no more reads are available for this message')
+        const budget = hiveAccess?.budget?.(providerId) || (readsOpen ? Number.POSITIVE_INFINITY : MAX_OBSERVATION_CONTEXT_CHARS)
         const remaining = budget - readChars
         if (remaining < 1_500) throw new WorkRefused('the read budget for this conversation is spent')
         const plan = parseHypercombObservationGrammars(readLines, grammarContext.segments)
@@ -6494,7 +6516,8 @@ export class ChatWindowComponent implements OnDestroy {
       /** Jev's check of the final answer, or undefined when it holds, when
        *  nothing was read to check it against, or when Jev is unavailable. */
       const verifyAnswer = async (answer: string, spoken: string, providerId: string): Promise<string | undefined> => {
-        const read = evidence.slice(1)
+        const said = [...messages, { content: spoken }]
+        const read = fitEvidence(evidence.slice(1), part => said.some(entry => entry.content.includes(part)), JEV_STATE_CHARS)
         if (!jev?.verify || !read.length || !jev.ready(providerId)) return undefined
         const startedAt = Date.now()
         let decision: Awaited<ReturnType<NonNullable<JevLike['verify']>>>
@@ -6870,8 +6893,10 @@ export class ChatWindowComponent implements OnDestroy {
           component.#answeredProvider.set(convoId, chunk.providerId)
           if (chunk.text) {
             roundText += chunk.text
+            // Prose streams in every mode: the worker narrates its own steps,
+            // and Jev only judges the changes and the final answer.
             const visible = guard.push(chunk.text)
-            if (visible && !jevTurn) {
+            if (visible) {
               wrote = true
               yield `${lead}${visible}`
               lead = ''
@@ -6879,7 +6904,7 @@ export class ChatWindowComponent implements OnDestroy {
           }
         }
         const tail = guard.end()
-        if (tail && !jevTurn) {
+        if (tail) {
           wrote = true
           yield `${lead}${tail}`
         }
@@ -6914,8 +6939,7 @@ export class ChatWindowComponent implements OnDestroy {
         }
         if (!work.request || lastRound) {
           if (jevTurn && work.prose) {
-            wrote = true
-            yield `${lead}${work.prose}`
+            // The prose already streamed.
             // JEV CHECKS THE ANSWER (jev-creative-plan.md §2.1) against what
             // the hive read this turn. Never rewrites it; says so when unsure.
             const note = await verifyAnswer(work.prose, roundText, roundProviderId)

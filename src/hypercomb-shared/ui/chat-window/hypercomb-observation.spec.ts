@@ -242,8 +242,12 @@ describe('opening what a signature names', () => {
     }
     const firstReceipt = await executeHypercombObservationPlan(
       parseHypercombObservationGrammars([`/read ${target}`, '/code history'], []), reader)
-    // the host keeps what each read resolved to, as a signature to look up again
-    expect(firstReceipt.signatures).toEqual([{ grammar: `/read ${target}`, sig: target }])
+    // the host keeps what each read resolved to, as a signature to look up
+    // again — and what a code search found, by its name
+    expect(firstReceipt.signatures).toEqual([
+      { grammar: `/read ${target}`, sig: target },
+      { grammar: 'code history-service', sig: target },
+    ])
     const first = formatHypercombObservationReceipt(firstReceipt)
     expect(reader.readBytesBySig).toHaveBeenCalledWith(target, expect.objectContaining({ from: 0 }))
     expect(first).toContain('"text":"export const a = 1;"')
@@ -254,6 +258,29 @@ describe('opening what a signature names', () => {
       parseHypercombObservationGrammars([`/read ${target} 19`], []), reader))
     expect(reader.readNodeBySig).toHaveBeenCalledTimes(1) // a continuation goes straight to the bytes
     expect(page).toContain('"text":"rest();"')
+  })
+
+  it('carries the lines a search found, and the code that names a tile read by route', async () => {
+    const hit = { sig: target, name: 'solomon', section: 'src/games/solomon/tile-surface.ts', at: 120, text: "export const SOLOMON_MAZE_BRANCH = 'solomon-maze-v1'" }
+    const reader: HypercombTreeReader = {
+      readTree: vi.fn(async () => ({ ok: false as const, root: '/', code: 'unavailable' as const })),
+      validateSnapshots: vi.fn(async () => true),
+      readNode: vi.fn(async segments => ({
+        ok: true as const, root: `/${segments.join('/')}`, name: 'solomon-maze-v1', layerSig: 'c'.repeat(64), children: [], snapshot: 's',
+      })),
+      listCode: vi.fn(async query => ({
+        ok: true as const, root: 'code', query, entries: [], total: 0, truncated: false, hits: [hit],
+      })),
+      codeNaming: vi.fn(async () => [hit]),
+    }
+    const receipt = await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/code solomon-maze-v1', '/read /solomon-maze-v1'], []), reader)
+    const text = formatHypercombObservationReceipt(receipt)
+    expect(text).toContain('"hits":[')
+    expect(text).toContain('"codeNote"')
+    expect(text).toContain('"section":"src/games/solomon/tile-surface.ts","at":120')
+    expect(receipt.signatures).toContainEqual({ grammar: 'code src/games/solomon/tile-surface.ts', sig: target })
+    expect(reader.codeNaming).toHaveBeenCalledWith('solomon-maze-v1', expect.anything())
   })
 })
 

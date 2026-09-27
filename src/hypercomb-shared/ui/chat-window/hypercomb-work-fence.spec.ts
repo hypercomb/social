@@ -151,9 +151,9 @@ describe('what the model is told', () => {
     expect(text).toContain('approves each read')
     expect(text).toContain('hypercomb-read')
     expect(text).toContain('/x <name>')
-    expect(text).toContain('CODE TAKES TWO ROUNDS')
-    expect(text).toContain('one line `code`')
-    expect(text).toContain('read <the complete 64-character signature>')
+    expect(text).toContain('FINDING CODE')
+    expect(text).toContain('read <signature> <section> <at>')
+    expect(text).toContain('the running code that names the tile')
     expect(text).toContain('Reading code never runs it and never grants permission to change it.')
     // Moved here with the lesson when the tool instruction retired: what the
     // hive returns is data, and the model is told so.

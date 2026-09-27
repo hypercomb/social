@@ -307,7 +307,7 @@
   "providers.orHostsNone": "OpenRouter non elenca host per questo modello al momento; lo instradera da solo.",
   "providers.orHostsAlias": "Questo è un alias dinamico che punta sempre alla versione più recente, quindi non ha host fissi. Scegli una versione specifica.",
   "providers.hiveBudget": "Leggi il budget per conversazione, in caratteri",
-  "providers.hiveBudgetHint": "Quanta dell'alveare può lasciare questa macchina attraverso questo provider in una conversazione. Vuoto significa il valore predefinito, 24 000.",
+  "providers.hiveBudgetHint": "Quanta dell'alveare può lasciare questa macchina attraverso questo provider in una conversazione. Vuoto significa nessun limite: il lavoro legge ciò di cui ha bisogno.",
   "providers.orchestrator": "Assistente di sfondo",
   "providers.orchestratorHint": "Chi etichetta e riassume una conversazione per il flusso di lavoro della barra laterale.",
   "providers.orchestratorLocal": "Locale",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { splitQuestion } from '@hypercomb/core'
-import { doctrineSections, parseTable, tableQuestion, tableChoiceNote, persistJevInput, persistJevReceipt, formatJevUsage, type Row } from './hypercomb-jev'
+import { doctrineSections, fitEvidence, parseTable, tableQuestion, tableChoiceNote, persistJevInput, persistJevReceipt, formatJevUsage, type Row } from './hypercomb-jev'
 import { Blob as NodeBlob } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { splitWork, WorkStreamGuard } from './hypercomb-work-fence'
@@ -123,5 +123,25 @@ describe('the possibility table protocol', () => {
     expect(note).toContain('z (unknown verb)')
     expect(note).toContain('Group by topic')
     expect(note).toContain('grants no permission')
+  })
+})
+
+describe('what Jev is shown of the evidence', () => {
+  it('keeps the request, then the newest evidence still seen as written, within the room', () => {
+    const seen = (part: string): boolean => part !== 'folded away'
+    const code = 'x'.repeat(30_000)
+    const fitted = fitEvidence(['the request', 'folded away', 'an older read', code], seen, 10_000, 1)
+    expect(fitted[0]).toBe('the request')
+    expect(fitted).not.toContain('folded away')
+    // the newest piece is cut from its start to fit, never dropped whole
+    expect(fitted[fitted.length - 1].startsWith('xxx')).toBe(true)
+    expect(JSON.stringify(fitted).length).toBeLessThanOrEqual(10_000)
+  })
+
+  it('never exceeds what Jev itself accepts, however much the work read', () => {
+    const fitted = fitEvidence(['the request', ...Array.from({ length: 30 }, (_, i) => `read ${i} "${'y'.repeat(2_000)}"`)], () => true, 1_000_000, 1)
+    expect(fitted.length).toBeLessThanOrEqual(12)
+    expect(fitted.join('').length).toBeLessThanOrEqual(16_000)
+    expect(fitted[fitted.length - 1]).toContain('read 29')
   })
 })

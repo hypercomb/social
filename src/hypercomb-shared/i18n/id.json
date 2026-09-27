@@ -307,7 +307,7 @@
   "providers.orHostsNone": "OpenRouter tidak mencantumkan host untuk model ini sekarang; itu akan mengarahkannya sendiri.",
   "providers.orHostsAlias": "Ini adalah alias dinamis yang selalu menunjuk ke versi terbaru, jadi tidak memiliki host tetap. Pilih versi tertentu.",
   "providers.hiveBudget": "Baca anggaran per percakapan, dalam karakter",
-  "providers.hiveBudgetHint": "Berapa banyak sarang yang dapat meninggalkan mesin ini melalui penyedia ini dalam satu percakapan. Kosong berarti default, 24 000.",
+  "providers.hiveBudgetHint": "Berapa banyak sarang yang dapat meninggalkan mesin ini melalui penyedia ini dalam satu percakapan. Kosong berarti tanpa batas: pekerjaan membaca apa yang dibutuhkannya.",
   "providers.orchestrator": "Pembantu latar belakang",
   "providers.orchestratorHint": "Siapa yang menandai dan merangkum percakapan untuk alur kerja bilah sisinya.",
   "providers.orchestratorLocal": "Lokal",

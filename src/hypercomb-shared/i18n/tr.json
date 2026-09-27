@@ -307,7 +307,7 @@
   "providers.orHostsNone": "OpenRouter şu anda bu model için konakları listelemiyor; kendi yönlendirecektir.",
   "providers.orHostsAlias": "Bu, her zaman en yeni sürüme işaret eden dinamik bir takma addır, bu nedenle sabit konaklara sahip değildir. Belirli bir sürüm seçin.",
   "providers.hiveBudget": "Konuşma başına bütçe oku, karakterlerde",
-  "providers.hiveBudgetHint": "Bu sağlayıcı aracılığıyla bir konuşmada bu makineden ne kadar arı kovanı ayrılabilir. Boş, varsayılanı anlamına gelir, 24 000.",
+  "providers.hiveBudgetHint": "Bu sağlayıcı aracılığıyla bir konuşmada bu makineden ne kadar arı kovanı ayrılabilir. Boş, sınır yok demektir: iş ihtiyaç duyduğu kadarını okur.",
   "providers.orchestrator": "Arka plan Yardımcısı",
   "providers.orchestratorHint": "Kimin bir konuşmayı etiketlemesi ve yan çubuk iş akışı için özetlemesi.",
   "providers.orchestratorLocal": "Yerel",

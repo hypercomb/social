@@ -307,7 +307,7 @@
   "providers.orHostsNone": "OpenRouter ne liste aucun hôte pour ce modèle en ce moment ; il l'acheminera lui-même.",
   "providers.orHostsAlias": "Ceci est un alias dynamique qui pointe toujours vers la version la plus récente, il n'a donc pas d'hôtes fixes. Choisissez une version spécifique.",
   "providers.hiveBudget": "Budget de lecture par conversation, en caractères",
-  "providers.hiveBudgetHint": "Combien du hive peut quitter cette machine via ce fournisseur dans une conversation. Vide signifie la valeur par défaut, 24 000.",
+  "providers.hiveBudgetHint": "Combien du hive peut quitter cette machine via ce fournisseur dans une conversation. Vide signifie aucune limite : le travail lit ce dont il a besoin.",
   "providers.orchestrator": "Assistant en arrière-plan",
   "providers.orchestratorHint": "Qui étiquette et résume une conversation pour son flux de travail de barre latérale.",
   "providers.orchestratorLocal": "Local",

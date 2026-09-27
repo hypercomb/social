@@ -59,6 +59,10 @@ export interface ChatTurn {
    *  has left, one line. The next leg starts from it, on this device or on
    *  whichever reopens the conversation. Absent on a finished answer. */
   readonly left?: string
+  /** What the conversation's reads found, kept by signature so a later
+   *  message — or a reload — opens it again without searching: each entry is
+   *  `<sig> <the read that found it>`. Lookup keys, never content. */
+  readonly known?: readonly string[]
 }
 
 export type TurnAttemptUsage = {
@@ -121,6 +125,10 @@ type TurnManifest = {
    *  has left, one line. The next leg starts from it, on this device or on
    *  whichever reopens the conversation. Absent on a finished answer. */
   readonly left?: string
+  /** What the conversation's reads found, kept by signature so a later
+   *  message — or a reload — opens it again without searching: each entry is
+   *  `<sig> <the read that found it>`. Lookup keys, never content. */
+  readonly known?: readonly string[]
 }
 
 /** The optional provenance a caller attaches to a model-produced turn. */
@@ -138,9 +146,17 @@ export type TurnMeta = {
    *  has left, one line. The next leg starts from it, on this device or on
    *  whichever reopens the conversation. Absent on a finished answer. */
   readonly left?: string
+  /** What the conversation's reads found, kept by signature so a later
+   *  message — or a reload — opens it again without searching: each entry is
+   *  `<sig> <the read that found it>`. Lookup keys, never content. */
+  readonly known?: readonly string[]
 }
 
 const SIG64 = /^[0-9a-f]{64}$/
+/** One known-read entry: a signature, a space, the read that found it. */
+const KNOWN_ENTRY = /^[0-9a-f]{64} [^\u0000-\u001f\u007f]{1,200}$/
+const cleanKnown = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && KNOWN_ENTRY.test(entry)).slice(-64) : []
 const finiteNonNegative = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
 
@@ -206,6 +222,8 @@ const cleanMeta = (meta: TurnMeta | undefined): Partial<TurnMeta> => {
   if (typeof meta.model === 'string' && meta.model) out['model'] = meta.model.slice(0, 128)
   if (typeof meta.prompt === 'string' && SIG64.test(meta.prompt)) out['prompt'] = meta.prompt
   if (typeof meta.left === 'string' && meta.left.trim()) out['left'] = meta.left.trim().slice(0, 300)
+  const known = cleanKnown(meta.known)
+  if (known.length) out['known'] = known
   if (Array.isArray(meta.attempts) && meta.attempts.length) {
     const attempts = cleanAttempts(meta.attempts)
     if (attempts.length) out['attempts'] = attempts
@@ -283,6 +301,10 @@ type RawTurn = {
    *  has left, one line. The next leg starts from it, on this device or on
    *  whichever reopens the conversation. Absent on a finished answer. */
   readonly left?: string
+  /** What the conversation's reads found, kept by signature so a later
+   *  message — or a reload — opens it again without searching: each entry is
+   *  `<sig> <the read that found it>`. Lookup keys, never content. */
+  readonly known?: readonly string[]
   /** The entry's file name — set by the walk, never read from the bytes. */
   readonly sig?: string
 }
@@ -659,6 +681,8 @@ export const readTurnsStrict = async (
       text: body,
       ...(raw.contentSig ? { contentSig: raw.contentSig } : {}),
       ...(raw.sig ? { sig: raw.sig } : {}),
+      ...(typeof raw.left === 'string' && raw.left.trim() ? { left: raw.left.trim().slice(0, 300) } : {}),
+      ...(cleanKnown(raw.known).length ? { known: cleanKnown(raw.known) } : {}),
       ...(typeof raw.prompt === 'string' && SIG64.test(raw.prompt) ? { prompt: raw.prompt } : {}),
       ...(attempts.length ? { attempts } : {}),
     }
@@ -707,6 +731,7 @@ const materializeTurns = async (
       ...(r.sig ? { sig: r.sig } : {}),
       ...(r.asks === true ? { asks: true as const } : {}),
       ...(typeof r.left === 'string' && r.left.trim() ? { left: r.left.trim().slice(0, 300) } : {}),
+      ...(cleanKnown(r.known).length ? { known: cleanKnown(r.known) } : {}),
       ...(typeof r.prompt === 'string' && SIG64.test(r.prompt) ? { prompt: r.prompt } : {}),
       ...(attempts.length ? { attempts } : {}),
     }
