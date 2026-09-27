@@ -11,18 +11,18 @@
 //    the reference's own bag — a husk the target never sees. The route is
 //    walked through every reference on it, the way a portal click walks.
 //
-// 2. ON A HOLDER. A page whose tiles are mostly references gathered from one
-//    group (`friends` gathering from `people`) is a view of that group. A new
-//    tile made there is a new MEMBER of the group: it is made in the group and
-//    the holder gathers it as a reference — one `bob`, reachable from both,
-//    never a second `bob` only `friends` knows about.
+// 2. ON A HOLDER. A page linked to a group (`friends` gathering from `people`,
+//    attached with `/from <group>` — references/gather/gather-link.ts) is a
+//    view of that group. A new tile made there is a new MEMBER of the group:
+//    it is made in the group and the holder gathers it as a reference — one
+//    `bob`, reachable from both, never a second `bob` only `friends` knows
+//    about.
 //
-// The group is the page's own LINK when it wears one (`gathers`, attached with
-// `/from <group>` — references/gather/gather-link.ts): the explicit answer, and the first one
-// asked. A page with no link falls back to the GUESS — the most common parent
-// of the routes its references already carry, when references outnumber its
-// ordinary tiles (the same vote the references window shows as "Already
-// gathered from").
+// THE LINK IS THE ONLY ANSWER. A page with no link is an ordinary page, however
+// many references it carries — the landing is never guessed from them (jwize,
+// 2026-09-27: "when you add here you add there", nothing else). The link is
+// followed ONE hop: the group's own link is never asked, so linked pages can
+// chain or point at each other and a make still terminates.
 
 export type CreateLanding = {
   /** The page the first of `parts` is made on. */
@@ -45,7 +45,7 @@ export type LandingReader = {
   /** The names of the tiles listed on `page`. */
   childNames(page: readonly string[]): Promise<readonly string[]>
   /** The group `page` is explicitly linked to (its first `gathers` mark), or
-   *  null when it wears none. Optional: absent = the guess alone. */
+   *  null when it wears none. Optional: absent = no page is a holder. */
   groupOf?(page: readonly string[]): Promise<readonly string[] | null>
 }
 
@@ -76,42 +76,12 @@ export async function createLanding(
     return target ? { base: target, parts: rest, gather: null } : plain
   }
 
-  // THE LINK, when the page wears one, is the answer — no counting.
+  // THE LINK, when the page wears one, is the answer — and the only one.
   const linked = await read.groupOf?.(route) ?? null
-  if (linked && linked.length > 0 && linked.join('/') !== route.join('/')) {
-    return {
-      base: linked,
-      parts,
-      gather: { name: first, sourceSegments: [...linked, first], parentSegments: route },
-    }
-  }
-
-  let references = 0
-  const votes = new Map<string, { segments: readonly string[]; count: number }>()
-  for (const name of names) {
-    const target = await read.targetAt([...route, name])
-    if (!target) continue
-    references++
-    const group = target.slice(0, -1)
-    if (group.length === 0) continue
-    const key = group.join('/')
-    const vote = votes.get(key) ?? { segments: group, count: 0 }
-    vote.count++
-    votes.set(key, vote)
-  }
-  // A holder is a page its references outnumber; a page of ordinary tiles
-  // that happens to carry one doorway stays an ordinary page.
-  if (references * 2 <= names.length) return plain
-
-  let best: { segments: readonly string[]; count: number } | null = null
-  for (const vote of votes.values()) if (!best || vote.count > best.count) best = vote
-  const group = best?.segments
-  // A page gathering its own children is not a holder of anything else.
-  if (!group || group.join('/') === route.join('/')) return plain
-
+  if (!linked || linked.length === 0 || linked.join('/') === route.join('/')) return plain
   return {
-    base: group,
+    base: linked,
     parts,
-    gather: { name: first, sourceSegments: [...group, first], parentSegments: route },
+    gather: { name: first, sourceSegments: [...linked, first], parentSegments: route },
   }
 }

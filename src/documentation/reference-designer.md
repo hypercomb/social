@@ -222,8 +222,10 @@ children's routes, ties to the first seen) and shows "Already gathered from
 {group}" with one door, "Choose more from {group}", which makes the group the
 picker's source and lands the choices under the same holder. Nothing is
 written; the line is absent while the holder gathers nothing, and while the
-group is the very portal in hand. **Reversed in part 2026-09-22 (§9):** the
-derivation stays as the fallback, but a page can now wear an explicit link.
+group is the very portal in hand. **Reversed in part 2026-09-22 (§9):** a page can
+now wear an explicit link. **Superseded for creation 2026-09-27:** the
+derivation is a picker hint only ("Already gathered from"); it never decides
+where a tile is made — only the link does.
 The objection above was to a back-pointer rewritten whenever MEMBERS change;
 the link is written once, when the page is attached, and never again until it
 is detached — the holder's signature moves with the link, not with its members.
@@ -232,9 +234,13 @@ is detached — the holder's signature moves with the link, not with its members
 `bob` on `friends` used to mint a `bob` only `friends` knew about. Now the
 create path asks the reference door where the tile lands
 (`commands/create-landing.ts`, `CanonicalReferenceService.landing`): on a page
-whose references outnumber its ordinary tiles, the new tile is made in the
-derived group (`/people/bob`) and the holder gathers it (`place`), so the same
-`bob` is reachable from both. A name the holder already lists is walked, never
+linked to a group (`/from people`), the new tile is made in the group
+(`/people/bob`) and the holder gathers it (`place`), so the same `bob` is
+reachable from both. **Since 2026-09-27 the link is the only answer** (jwize:
+"when you add here you add there"): the old guess — a page whose references
+outnumber its ordinary tiles landing in their most common parent — is gone, so
+an unlinked page is always an ordinary page. The link is followed one hop, never
+the group's own link, so chained or mutual links still terminate. A name the holder already lists is walked, never
 re-made — `susan/phone` where `susan` is a reference lands at
 `/people/susan/phone`. Standing INSIDE a reference (a deep link, back/forward,
 a click before the index warmed) makes the tile at the target, never in the
