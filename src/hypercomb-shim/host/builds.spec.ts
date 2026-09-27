@@ -267,3 +267,45 @@ describe('pools on hosts', () => {
       .toEqual([builds.sign(builds.BUILDS_MEANING), builds.sign(builds.SIGNATURES_MEANING)].sort())
   })
 })
+
+describe('the offline copy', () => {
+  it('backs up every pool and the stage to a folder, and restores a wiped device from it', async () => {
+    await record(undefined, 'a')
+    await stage('work-in-progress', 'b')
+    const keep = resolve(root, 'disk')
+    const first = await builds.backup(keep)
+    expect(first.refused).toEqual([])
+    expect(first.copied).toBeGreaterThan(0)
+    // A second backup copies only what is new.
+    expect((await builds.backup(keep)).copied).toBe(0)
+
+    const before = { revisions: await builds.revisions(), stage: await builds.readStage() }
+    await rm(process.env.HYPERCOMB_POOLS_DIR!, { recursive: true, force: true })
+    expect(await builds.revisions()).toEqual([])
+
+    const back = await builds.restore(keep)
+    expect(back.refused).toEqual([])
+    expect(back.local).toContain('stage.json restored')
+    expect(await builds.revisions()).toEqual(before.revisions)
+    expect(await builds.readStage()).toEqual(before.stage)
+    // Staged work came back too: it is written out exactly.
+    const out = resolve(root, 'out')
+    await builds.writeOut('work-in-progress', out)
+    expect(await readFile(resolve(out, 'main.js'), 'utf8')).toBe('b')
+  })
+
+  it('refuses a backed-up file that is not what it is named, and never overwrites newer local state', async () => {
+    await record(undefined, 'a')
+    const keep = resolve(root, 'disk')
+    await builds.backup(keep)
+    const pool = builds.sign(builds.BUILDS_MEANING)
+    const [victim] = await files(resolve(keep, pool))
+    await writeFile(resolve(keep, pool, victim!), 'tampered')
+    await rm(resolve(process.env.HYPERCOMB_POOLS_DIR!, pool), { recursive: true, force: true })
+
+    const back = await builds.restore(keep)
+    expect(back.refused).toEqual([`${pool.slice(0, 12)}/${victim}`])
+    expect(await files(resolve(process.env.HYPERCOMB_POOLS_DIR!, pool))).not.toContain(victim)
+    expect(back.local).toEqual(['stage.json kept (this device has its own)'])
+  })
+})

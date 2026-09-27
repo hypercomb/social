@@ -46,6 +46,8 @@
 //   node host/builds.mjs take <origin dir>        bring in a published revision
 //   node host/builds.mjs push [host dir] | push --r2 [--dry-run]
 //   node host/builds.mjs pull [host…]             bring in the hosts' pools
+//   node host/builds.mjs backup <dir>             every pool + local state to a disk you own
+//   node host/builds.mjs restore <dir>            bring a backup back (verified)
 //
 // Pools live under HYPERCOMB_POOLS_DIR (default ~/.hypercomb); the stage and
 // the subscriptions in its `local/`, which never travels. The signing key is
@@ -587,6 +589,80 @@ const basesOf = host => {
   return [base, `${base}/content`]
 }
 
+// ── the offline copy ─────────────────────────────────────────────────────────
+// Leaving GitHub means this pool IS the history, so it needs a copy that does
+// not depend on any host: a folder on a disk you own. `backup` mirrors every
+// pool this device keeps (promoted and STAGED work, stories, signatures, the
+// conversations) plus the local stage and subscriptions. Every file is named
+// by its hash, so each is verified on the way out and on the way back, and a
+// second backup into the same folder copies only what is new. The signing key
+// is never copied: it stays wherever you keep it.
+
+const verifiedCopy = async (from, into) => {
+  const counts = { copied: 0, present: 0, refused: [] }
+  await mkdir(into, { recursive: true })
+  const held = new Set(await readdir(into).catch(() => []))
+  for (const name of await readdir(from).catch(() => [])) {
+    if (!SIG.test(name)) continue
+    if (held.has(name)) { counts.present++; continue }
+    const bytes = await readFile(resolve(from, name))
+    if (sign(bytes) !== name) { counts.refused.push(name); continue }
+    await writeFile(resolve(into, name), bytes)
+    counts.copied++
+  }
+  return counts
+}
+
+const poolNames = async root => (await readdir(root, { withFileTypes: true }).catch(() => []))
+  .filter(entry => entry.isDirectory() && SIG.test(entry.name)).map(entry => entry.name)
+
+const LOCAL_FILES = ['stage.json', 'subscriptions.json']
+
+/** Mirror every pool and the local state into `dir`. */
+export const backup = async dir => {
+  const root = poolsRoot()
+  const pools = await poolNames(root)
+  const result = { pools: pools.length, copied: 0, present: 0, refused: [] }
+  for (const pool of pools) {
+    const counts = await verifiedCopy(resolve(root, pool), resolve(dir, pool))
+    result.copied += counts.copied; result.present += counts.present
+    result.refused.push(...counts.refused.map(name => `${pool.slice(0, 12)}/${name}`))
+  }
+  for (const name of LOCAL_FILES) {
+    const bytes = await readFile(localFile(name)).catch(() => null)
+    if (bytes) await put(resolve(dir, 'local', name), bytes)
+  }
+  await writeFile(resolve(dir, 'backup.json'), JSON.stringify({
+    at: new Date().toISOString(), from: root,
+    pools: Object.fromEntries(await Promise.all(pools.map(async pool => [pool, (await readdir(resolve(dir, pool))).filter(n => SIG.test(n)).length]))),
+  }, null, 2) + '\n')
+  return result
+}
+
+/** Bring a backup back: every pool file verified against its name, and the
+ *  local stage and subscriptions only where this device has none (newer local
+ *  state is never overwritten). */
+export const restore = async dir => {
+  const root = poolsRoot()
+  const pools = await poolNames(dir)
+  if (!pools.length) throw new Error(`${dir} holds no pools — is it a backup folder?`)
+  const result = { pools: pools.length, copied: 0, present: 0, refused: [], local: [] }
+  for (const pool of pools) {
+    const counts = await verifiedCopy(resolve(dir, pool), resolve(root, pool))
+    result.copied += counts.copied; result.present += counts.present
+    result.refused.push(...counts.refused.map(name => `${pool.slice(0, 12)}/${name}`))
+  }
+  for (const name of LOCAL_FILES) {
+    const bytes = await readFile(resolve(dir, 'local', name)).catch(() => null)
+    if (!bytes) continue
+    if (await readFile(localFile(name)).catch(() => null)) { result.local.push(`${name} kept (this device has its own)`); continue }
+    await put(localFile(name), bytes)
+    result.local.push(`${name} restored`)
+  }
+  return result
+}
+
+
 /** Bring in what the hosts hold of both pools, each file hashed once on arrival. */
 export const pullPools = async (hosts = DEFAULT_HOSTS, { fetch: get = fetch } = {}) => {
   const report = []
@@ -763,6 +839,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         console.log(`carried ${carried} new file(s) into ${dir} — promoted work and its atoms`)
       }
       console.log(`a host lists a pool only when its operator declares it; once, in the hive:\n  hosts list ${BUILDS_MEANING} @<host>\n  hosts list ${SIGNATURES_MEANING} @<host>`)
+    } else if (command === 'backup' || command === 'restore') {
+      if (!ref) throw new Error(`${command} wants a directory`)
+      const dir = resolve(ref)
+      const r = command === 'backup' ? await backup(dir) : await restore(dir)
+      console.log(`${command}: ${r.pools} pool(s), ${r.copied} file(s) copied, ${r.present} already there${r.refused.length ? `, ${r.refused.length} REFUSED (not what they are named): ${r.refused.join(', ')}` : ''}`)
+      for (const line of r.local ?? []) console.log(`  ${line}`)
+      if (r.refused.length) process.exitCode = 1
     } else if (command === 'pull') {
       for (const { host, answered, taken, refused } of await pullPools([ref, ...rest].filter(Boolean).length ? [ref, ...rest].filter(Boolean) : DEFAULT_HOSTS)) {
         console.log(`${host.padEnd(24)} ${answered ? `${taken} new file(s)${refused ? `, ${refused} refused (not what they are named)` : ''}` : 'holds no version pools'}`)

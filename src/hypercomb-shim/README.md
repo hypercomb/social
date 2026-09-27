@@ -250,6 +250,21 @@ npm run host:check -- https://hypercomb.com    # reports the version pools
 once as it arrives; a file that does not hash to its name is refused. A device
 that pulls into an empty pool continues from the newest revision it took.
 
+**The offline copy.** Only the minimal build lives on GitHub; everything
+else is a versioned, signature-named file in these pools, so the pools are
+the history and need a copy no host controls. `backup` mirrors every pool on
+this device, promoted and staged work, stories, signatures and the
+conversations, plus the local stage and subscriptions, into a folder on a disk
+you own. Every file is verified against its name on the way out and back; a
+second backup into the same folder copies only what is new. `restore` brings
+it back and never overwrites newer local state. The signing key is never
+copied.
+
+```bash
+node host/builds.mjs backup /media/you/hive-backup
+node host/builds.mjs restore /media/you/hive-backup
+```
+
 The host bundle is always minified and carries no copy of core; the build
 inlines the ioc install ahead of every script so core's module-scope
 registrations find `window.ioc`. It ships only the faces the host renders
