@@ -2452,6 +2452,7 @@
   "chat.link.down": "कोई Claude सत्र नहीं — हाइव तक पहुँच के लिए ब्रिज शुरू करें",
   "chat.link.direct": "{provider} उत्तर देता है",
   "chat.link.direct.any": "एक कॉन्फ़िगर किया गया मॉडल उत्तर देता है",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "आपका लोकल मॉडल सर्वर चल नहीं रहा",
   "chat.link.local.blocked": "आपके लोकल मॉडल सर्वर ने इस पेज को अस्वीकार किया — इस ऑरिजिन को अनुमति दें",
   "chat.link.local.permission": "इस पेज को आपकी मशीन तक पहुँचने दें — /providers खोलें और फिर से जाँचें दबाएँ",

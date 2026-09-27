@@ -2452,6 +2452,7 @@
   "chat.link.down": "لا توجد جلسة Claude — شغّل الجسر للوصول إلى الخلية",
   "chat.link.direct": "{provider} يجيب",
   "chat.link.direct.any": "نموذج مُهيَّأ يجيب",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "خادم النماذج المحلي لديك لا يعمل",
   "chat.link.local.blocked": "رفض خادم النماذج المحلي هذه الصفحة — اسمح بهذا الأصل",
   "chat.link.local.permission": "اسمح لهذه الصفحة بالوصول إلى جهازك — افتح /providers واضغط تحقّق مجدداً",

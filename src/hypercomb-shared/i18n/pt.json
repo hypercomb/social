@@ -2452,6 +2452,7 @@
   "chat.link.down": "Nenhuma sessão do Claude — inicie a ponte para dar acesso à colmeia",
   "chat.link.direct": "{provider} responde",
   "chat.link.direct.any": "Um modelo configurado responde",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "Seu servidor de modelos local não está em execução",
   "chat.link.local.blocked": "Seu servidor de modelos local recusou esta página — permita esta origem",
   "chat.link.local.permission": "Permita que esta página alcance sua máquina — abra /providers e pressione Verificar de novo",

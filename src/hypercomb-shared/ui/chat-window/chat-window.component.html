@@ -362,6 +362,13 @@
           } @else {
             <span>{{ linkKeyAny() | t }}</span>
           }
+          <!-- THE METER. Long work says where it stands — which leg, how
+               many rounds, how many tokens — on the same quiet line, so the
+               participant can see a request working and what it is costing
+               without a second surface. Absent when nothing long runs. -->
+          @if (legMeter(); as meter) {
+            <span class="chat-leg-meter">{{ 'chat.leg-meter' | t: { legs: meter.legs, rounds: meter.rounds, ktokens: meter.ktokens } }}</span>
+          }
           <!-- THE ROUTE COULD NOT BE READ — a store fault, not an empty ledger.
                One quiet line here, beside the link state, and never an empty
                pipe standing in for an answer (chat-route.md §3.5). -->

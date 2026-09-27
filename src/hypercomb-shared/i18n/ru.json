@@ -2452,6 +2452,7 @@
   "chat.link.down": "Сессии Claude нет — запустите мост для доступа к улью",
   "chat.link.direct": "Отвечает {provider}",
   "chat.link.direct.any": "Отвечает настроенная модель",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "Ваш локальный сервер моделей не запущен",
   "chat.link.local.blocked": "Ваш локальный сервер моделей отклонил эту страницу — разрешите этот origin",
   "chat.link.local.permission": "Разрешите этой странице доступ к вашему компьютеру — откройте /providers и снова нажмите «Проверить»",

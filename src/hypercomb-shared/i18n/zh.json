@@ -2452,6 +2452,7 @@
   "chat.link.down": "没有 Claude 会话 — 启动桥接以访问蜂巢",
   "chat.link.direct": "由 {provider} 回答",
   "chat.link.direct.any": "由已配置的模型回答",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "你的本地模型服务器没有运行",
   "chat.link.local.blocked": "你的本地模型服务器拒绝了此页面 — 请允许此来源",
   "chat.link.local.permission": "允许此页面访问你的机器 — 打开 /providers 并再次按下“检查”",

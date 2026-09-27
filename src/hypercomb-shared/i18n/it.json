@@ -2452,6 +2452,7 @@
   "chat.link.down": "Nessuna sessione Claude — avvia il ponte per l'accesso all'alveare",
   "chat.link.direct": "Risponde {provider}",
   "chat.link.direct.any": "Risponde un modello configurato",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "Il tuo server di modelli locale non è in esecuzione",
   "chat.link.local.blocked": "Il tuo server di modelli locale ha rifiutato questa pagina — consenti questa origine",
   "chat.link.local.permission": "Consenti a questa pagina di raggiungere la tua macchina — apri /providers e premi di nuovo Verifica",

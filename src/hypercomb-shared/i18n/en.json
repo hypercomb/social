@@ -2202,6 +2202,7 @@
   "chat.link.down": "No Claude session — start the bridge for hive access",
   "chat.link.direct": "{provider} answers",
   "chat.link.direct.any": "A configured model answers",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "Your local model server is not running",
   "chat.link.local.blocked": "Your local model server refused this page — allow this origin",
   "chat.link.local.permission": "Allow this page to reach your machine — open /providers and press Check again",

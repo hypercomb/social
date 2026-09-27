@@ -59,6 +59,9 @@ export interface ChatTurn {
    *  has left, one line. The next leg starts from it, on this device or on
    *  whichever reopens the conversation. Absent on a finished answer. */
   readonly left?: string
+  /** What the request had spent when it handed over — rounds and tokens —
+   *  so the next leg keeps the running total across a reload. */
+  readonly spent?: { readonly rounds: number; readonly tokens: number }
   /** What the conversation's reads found, kept by signature so a later
    *  message — or a reload — opens it again without searching: each entry is
    *  `<sig> <the read that found it>`. Lookup keys, never content. */
@@ -125,6 +128,9 @@ type TurnManifest = {
    *  has left, one line. The next leg starts from it, on this device or on
    *  whichever reopens the conversation. Absent on a finished answer. */
   readonly left?: string
+  /** What the request had spent when it handed over — rounds and tokens —
+   *  so the next leg keeps the running total across a reload. */
+  readonly spent?: { readonly rounds: number; readonly tokens: number }
   /** What the conversation's reads found, kept by signature so a later
    *  message — or a reload — opens it again without searching: each entry is
    *  `<sig> <the read that found it>`. Lookup keys, never content. */
@@ -146,6 +152,9 @@ export type TurnMeta = {
    *  has left, one line. The next leg starts from it, on this device or on
    *  whichever reopens the conversation. Absent on a finished answer. */
   readonly left?: string
+  /** What the request had spent when it handed over — rounds and tokens —
+   *  so the next leg keeps the running total across a reload. */
+  readonly spent?: { readonly rounds: number; readonly tokens: number }
   /** What the conversation's reads found, kept by signature so a later
    *  message — or a reload — opens it again without searching: each entry is
    *  `<sig> <the read that found it>`. Lookup keys, never content. */
@@ -222,6 +231,9 @@ const cleanMeta = (meta: TurnMeta | undefined): Partial<TurnMeta> => {
   if (typeof meta.model === 'string' && meta.model) out['model'] = meta.model.slice(0, 128)
   if (typeof meta.prompt === 'string' && SIG64.test(meta.prompt)) out['prompt'] = meta.prompt
   if (typeof meta.left === 'string' && meta.left.trim()) out['left'] = meta.left.trim().slice(0, 300)
+  if (meta.spent && Number.isFinite(meta.spent.rounds) && Number.isFinite(meta.spent.tokens)) {
+    out['spent'] = { rounds: Math.max(0, Math.floor(meta.spent.rounds)), tokens: Math.max(0, Math.floor(meta.spent.tokens)) }
+  }
   const known = cleanKnown(meta.known)
   if (known.length) out['known'] = known
   if (Array.isArray(meta.attempts) && meta.attempts.length) {
@@ -301,6 +313,9 @@ type RawTurn = {
    *  has left, one line. The next leg starts from it, on this device or on
    *  whichever reopens the conversation. Absent on a finished answer. */
   readonly left?: string
+  /** What the request had spent when it handed over — rounds and tokens —
+   *  so the next leg keeps the running total across a reload. */
+  readonly spent?: { readonly rounds: number; readonly tokens: number }
   /** What the conversation's reads found, kept by signature so a later
    *  message — or a reload — opens it again without searching: each entry is
    *  `<sig> <the read that found it>`. Lookup keys, never content. */
@@ -731,6 +746,8 @@ const materializeTurns = async (
       ...(r.sig ? { sig: r.sig } : {}),
       ...(r.asks === true ? { asks: true as const } : {}),
       ...(typeof r.left === 'string' && r.left.trim() ? { left: r.left.trim().slice(0, 300) } : {}),
+      ...(r.spent && Number.isFinite(r.spent.rounds) && Number.isFinite(r.spent.tokens)
+        ? { spent: { rounds: r.spent.rounds, tokens: r.spent.tokens } } : {}),
       ...(cleanKnown(r.known).length ? { known: cleanKnown(r.known) } : {}),
       ...(typeof r.prompt === 'string' && SIG64.test(r.prompt) ? { prompt: r.prompt } : {}),
       ...(attempts.length ? { attempts } : {}),

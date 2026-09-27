@@ -1399,6 +1399,16 @@ $accent: #7eb6d6;
   display: flex;
   align-items: center;
   gap: 0.35em;
+
+  // THE METER sits at the far end of the line, in the same quiet ink and
+  // the mono of every other count in the window — a fact, not a warning.
+  .chat-leg-meter {
+    margin-left: auto;
+    font-family: var(--hc-mono, monospace);
+    letter-spacing: 0.04em;
+    opacity: 0.85;
+    white-space: nowrap;
+  }
   padding: 0.55em 0.75em 0.5em;
   // This row typesets at 65% of the window font, so its `em` inset used to
   // shrink with the text and begin left of the full-size composer below it.

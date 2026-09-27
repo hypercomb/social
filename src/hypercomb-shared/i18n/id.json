@@ -2452,6 +2452,7 @@
   "chat.link.down": "Tidak ada sesi Claude — jalankan bridge untuk akses sarang",
   "chat.link.direct": "{provider} menjawab",
   "chat.link.direct.any": "Model yang sudah diatur menjawab",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "Server model lokal Anda tidak berjalan",
   "chat.link.local.blocked": "Server model lokal Anda menolak halaman ini — izinkan origin ini",
   "chat.link.local.permission": "Izinkan halaman ini menjangkau mesin Anda — buka /providers dan tekan Periksa lagi",

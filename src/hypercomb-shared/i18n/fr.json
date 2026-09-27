@@ -2452,6 +2452,7 @@
   "chat.link.down": "Aucune session Claude — démarrez le pont pour accéder à la ruche",
   "chat.link.direct": "{provider} répond",
   "chat.link.direct.any": "Un modèle configuré répond",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "Votre serveur de modèles local n'est pas lancé",
   "chat.link.local.blocked": "Votre serveur de modèles local a refusé cette page — autorisez cette origine",
   "chat.link.local.permission": "Autorisez cette page à joindre votre machine — ouvrez /providers et appuyez de nouveau sur Vérifier",

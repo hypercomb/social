@@ -2452,6 +2452,7 @@
   "chat.link.down": "Claude oturumu yok — kovan erişimi için köprüyü başlatın",
   "chat.link.direct": "{provider} yanıtlıyor",
   "chat.link.direct.any": "Yapılandırılmış bir model yanıtlıyor",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "Yerel model sunucunuz çalışmıyor",
   "chat.link.local.blocked": "Yerel model sunucunuz bu sayfayı reddetti — bu kaynağa izin verin",
   "chat.link.local.permission": "Bu sayfanın makinenize erişmesine izin verin — /providers’ı açın ve Denetle’ye yeniden basın",

@@ -198,6 +198,7 @@ type ChatTurn = {
   /** A leg's handover: what the work still has left. The next leg starts
    *  from it, on this device now or on whichever reopens the conversation. */
   readonly left?: string
+  readonly spent?: { readonly rounds: number; readonly tokens: number }
   /** What the conversation's reads found, as `<sig> <read>` entries — the
    *  signatures the next message opens again without searching. */
   readonly known?: readonly string[]
@@ -1230,6 +1231,7 @@ type ExecutionQueueLike = {
  *  restated because the shell may not import a module. */
 type TurnMetaLike = {
   readonly left?: string
+  readonly spent?: { readonly rounds: number; readonly tokens: number }
   readonly known?: readonly string[]
   readonly anatomy?: string
   readonly context?: string
@@ -5821,7 +5823,7 @@ export class ChatWindowComponent implements OnDestroy {
     // A typed word starts a fresh request with a fresh budget; a leg
     // continuing itself keeps the running total.
     this.#left.delete(convoId)
-    if (!opts.auto) this.#task.delete(convoId)
+    if (!opts.auto) { this.#task.delete(convoId); this.legMeter.set(null) }
 
     if (element && text === undefined) { element.value = ''; this.autosize(element) }
     // SENT IS NOT HELD. The thinking became a turn; leaving a copy in the
@@ -6003,6 +6005,17 @@ export class ChatWindowComponent implements OnDestroy {
 
   readonly #left = new Map<string, string>()
   readonly #task = new Map<string, { rounds: number; tokens: number; legs: number }>()
+  /** THE METER — what the request being shown has spent so far, beside the
+   *  availability line while it runs. Null when nothing long is under way. */
+  readonly legMeter = signal<{ readonly legs: number; readonly rounds: number; readonly ktokens: number } | null>(null)
+
+  #meter(convoId: string): void {
+    if (convoId !== this.activeId()) return
+    const task = this.#task.get(convoId)
+    this.legMeter.set(task && task.rounds > 0
+      ? { legs: task.legs + 1, rounds: task.rounds, ktokens: Math.round(task.tokens / 1000) }
+      : null)
+  }
 
   /** Charge one round to the request. True when the budget is gone. */
   #spend(convoId: string, attempts: readonly TurnAttemptLike[], estimated: number, budget: WorkBudget): boolean {
@@ -6011,6 +6024,7 @@ export class ChatWindowComponent implements OnDestroy {
     const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
     const next = { ...task, rounds: task.rounds + 1, tokens: task.tokens + (reported || estimated) }
     this.#task.set(convoId, next)
+    this.#meter(convoId)
     return next.rounds >= budget.rounds || next.tokens >= budget.tokens
   }
 
@@ -6022,15 +6036,19 @@ export class ChatWindowComponent implements OnDestroy {
     this.#left.delete(convoId)
     const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
     this.#task.set(convoId, { ...task, legs: task.legs + 1 })
+    this.#meter(convoId)
     await this.send(continueMessage(left), { auto: true })
   }
 
   /** A conversation opened on a stored handover picks the work back up,
    *  while the handover is recent enough to be the same sitting. */
-  #resumeLeft(convoId: string, turns: readonly { readonly role: string; readonly at: number; readonly left?: string }[]): void {
+  #resumeLeft(convoId: string, turns: readonly { readonly role: string; readonly at: number; readonly left?: string; readonly spent?: { readonly rounds: number; readonly tokens: number } }[]): void {
     const last = turns[turns.length - 1]
     if (!last || last.role !== 'assistant' || !last.left) return
     if (Date.now() - last.at > RESUME_LEFT_MS || this.#outstanding.has(convoId)) return
+    // The running total rides on the handover, so a reload does not hand
+    // the request a fresh purse.
+    if (last.spent && !this.#task.has(convoId)) this.#task.set(convoId, { ...last.spent, legs: 0 })
     this.#left.set(convoId, last.left)
     void this.#continueIfLeft(convoId)
   }
@@ -6971,7 +6989,12 @@ export class ChatWindowComponent implements OnDestroy {
           const left = work.left
             ?? (work.request ? `carry on from: ${work.request.lines.join(' · ').slice(0, 200)}` : undefined)
           if (left) {
-            component.#turnMeta.set(convoId, { ...(component.#turnMeta.get(convoId) ?? {}), left })
+            const task = component.#task.get(convoId)
+            component.#turnMeta.set(convoId, {
+              ...(component.#turnMeta.get(convoId) ?? {}),
+              left,
+              ...(task ? { spent: { rounds: task.rounds, tokens: task.tokens } } : {}),
+            })
             wrote = true
             if (budgetSpent) yield budgetSpentMessage(component.#task.get(convoId) ?? { rounds, tokens: 0 })
             else {

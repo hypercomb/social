@@ -2452,6 +2452,7 @@
   "chat.link.down": "Keine Claude-Session — starte die Brücke für den Zugriff auf den Bienenstock",
   "chat.link.direct": "{provider} antwortet",
   "chat.link.direct.any": "Ein eingerichtetes Modell antwortet",
+  "chat.leg-meter": "leg {legs} · {rounds} rounds · {ktokens}k tokens",
   "chat.link.local.down": "Dein lokaler Modellserver läuft nicht",
   "chat.link.local.blocked": "Dein lokaler Modellserver hat diese Seite abgewiesen — erlaube diesen Origin",
   "chat.link.local.permission": "Erlaube dieser Seite den Zugriff auf deinen Rechner — öffne /providers und drücke erneut auf Prüfen",
