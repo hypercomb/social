@@ -418,11 +418,111 @@ if (pure) {
       ['movement', 'hypercomb-shared/core/movement.service.ts'],
       ['lineage', 'hypercomb-shared/core/lineage.ts'],
     ] },
+    // WHAT DRAWS THE TILES — the Pixi host, the tiles themselves and the
+    // background beneath them. These the package already carries, so the spot
+    // names the package's own bees by class (below): the same bytes are the
+    // same flavour, loaded once. A different flavour here would displace the
+    // package's bee of that class (ScriptPreloader's flavour rule).
+    { name: 'tiles', fromPackage: [
+      ['pixi-host', 'PixiHostWorker'],
+      ['show-cell', 'ShowCellDrone'],
+      ['background', 'BackgroundDrone'],
+    ] },
   ]
+  // THE PACKAGE, AS IT DESCRIBES ITSELF (hypercomb-essentials/dist): each
+  // layer's docs name its bees' classes, each dependency's first line names
+  // the specifier it answers, and esbuild's `// src/…` lines name the source
+  // a unit was built from. The build cache records the hash of every source
+  // file each unit inlined, so a source edited after the package was built is
+  // refused rather than shown as the code that runs.
+  const essentials = resolve(here, '..', 'hypercomb-essentials')
+  const thePackage = async () => {
+    const dist = resolve(essentials, 'dist')
+    const manifest = JSON.parse(await readFile(resolve(dist, 'manifest.json'), 'utf8').catch(() => 'null'))
+    const cache = JSON.parse(await readFile(resolve(essentials, '.build-cache.json'), 'utf8').catch(() => 'null'))
+    const packageSig = Object.keys(manifest?.packages ?? {})[0]
+    if (!packageSig || !cache) return null
+    const read = sig => readFile(resolve(dist, sig.replace(/\.js$/, '')))
+    const top = JSON.parse(await read(packageSig))
+    const bySpecifier = new Map()
+    for (const ref of top.dependencies ?? []) {
+      const sig = ref.replace(/\.js$/, '')
+      const specifier = /^\/\/\s+(\S+)/.exec((await read(sig)).subarray(0, 512).toString('utf8').split('\n', 1)[0])?.[1]
+      if (specifier) bySpecifier.set(specifier, sig)
+    }
+    const byClass = new Map()
+    for (const layer of [packageSig, ...(manifest.packages[packageSig].layers ?? [])]) {
+      for (const [ref, doc] of Object.entries(JSON.parse(await read(layer)).docs?.bees ?? {})) {
+        if (doc?.className) byClass.set(doc.className, ref.replace(/\.js$/, ''))
+      }
+    }
+    const recorded = new Map()
+    for (const units of [cache.bees, cache.atoms, cache.namespaces]) {
+      for (const unit of Object.values(units ?? {})) {
+        for (const [file, entry] of Object.entries(unit.files ?? {})) recorded.set(file.split(/[\\/]hypercomb-essentials[\\/]/).pop().split(/[\\/]/).join('/'), entry.sig)
+      }
+    }
+    return { packageSig, read, bySpecifier, byClass, recorded }
+  }
+  const IMPORTED = /(?:\bfrom|\bimport)\s*\(?\s*"([^"]+)"/g
+  const SOURCED = /^\/\/ (src\/\S+\.tsx?)$/gm
+  let pkg
+  /** A behaviour the package carries: its bee, every dependency it reaches
+   *  through the import map (the whole atom closure, which the spot checks is
+   *  live before it runs the bee), and the source files it was built from. */
+  const packageBehaviour = async (className) => {
+    pkg ??= await thePackage()
+    if (!pkg) return null
+    const beeSig = pkg.byClass.get(className)
+    if (!beeSig) throw new Error(`[shim] the package names no bee of class ${className}`)
+    const bytes = { [beeSig]: await pkg.read(beeSig) }
+    const dependencies = new Set(), queue = [beeSig]
+    while (queue.length) {
+      for (const [, specifier] of bytes[queue.shift()].toString('utf8').matchAll(IMPORTED)) {
+        if (specifier === '@hypercomb/core') continue // the kernel's
+        const dep = pkg.bySpecifier.get(specifier)
+        if (!dep) throw new Error(`[shim] ${className} imports ${specifier}, which the package does not carry`)
+        if (dependencies.has(dep)) continue
+        dependencies.add(dep); bytes[dep] = await pkg.read(dep); queue.push(dep)
+      }
+    }
+    const files = []
+    for (const sig of [beeSig, ...[...dependencies].sort()]) {
+      for (const [, path] of bytes[sig].toString('utf8').matchAll(SOURCED)) {
+        if (files.includes(path)) continue
+        const text = await readFile(resolve(essentials, path))
+        if (pkg.recorded.get(path) !== sha(text)) throw new Error(`[shim] hypercomb-essentials/${path} changed since the package was built: rebuild it (npm run build:module)`)
+        files.push(path)
+      }
+    }
+    for (const [sig, b] of Object.entries(bytes)) if (await keep(b) !== sig) throw new Error(`[shim] package file ${sig.slice(0, 12)} does not hash to its name`)
+    return { beeSig, dependencies: [...dependencies].sort(), files: files.map(path => resolve(essentials, path)) }
+  }
+  /** A behaviour's source, as file nodes under it (the drill-down). */
+  const sourceNodes = async (inputs) => {
+    const children = []
+    for (const input of inputs) {
+      sourceInputs.add(input)
+      const path = relative(repoRoot, input).split(sep).join('/')
+      const node = await record({ name: path, content: await meta({ resource: await keep(await readFile(input)), relation: 'content' }) })
+      children.push(await meta({ layer: node, relation: 'children' }))
+    }
+    return children
+  }
   const spotCells = []
   for (const spot of SPOTS) {
     const members = []
-    for (const [name, entry] of spot.behaviours) {
+    for (const [name, className] of spot.fromPackage ?? []) {
+      const found = await packageBehaviour(className)
+      if (!found) break
+      const behaviour = await record({ name, bee: await meta({ bee: found.beeSig, relation: 'bee' }), dependencies: found.dependencies, children: await sourceNodes(found.files) })
+      members.push(Buffer.from(JSON.stringify({ meta: 1, layer: behaviour, relation: 'beehavior', root: spot.name })))
+    }
+    if (spot.fromPackage && !members.length) {
+      console.warn(`[shim] spot ${spot.name} left out: hypercomb-essentials is not built here (npm run build:module), so the package's own renderers run unplaced`)
+      continue
+    }
+    for (const [name, entry] of spot.behaviours ?? []) {
       const built = await build({
         entryPoints: [resolve(here, '..', entry)],
         bundle: true, format: 'esm', platform: 'browser', target: ['es2022'],
@@ -435,12 +535,7 @@ if (pure) {
       const inputs = Object.keys(built.metafile.inputs).map(p => resolve(p))
       const foreign = inputs.filter(p => /node_modules[\\/]@angular|hypercomb-runtime[\\/]src[\\/](acquire|store|script-preloader|dependency-loader|host-packages)\.ts$/.test(p))
       if (foreign.length) throw new Error(`[shim] spot ${spot.name}: behaviour ${name} carries ${foreign.join(', ')}`)
-      const children = []
-      for (const input of inputs.filter(p => !p.includes('node_modules'))) {
-        const path = relative(repoRoot, input).split(sep).join('/')
-        const node = await record({ name: path, content: await meta({ resource: await keep(await readFile(input)), relation: 'content' }) })
-        children.push(await meta({ layer: node, relation: 'children' }))
-      }
+      const children = await sourceNodes(inputs.filter(p => !p.includes('node_modules')))
       const behaviour = await record({ name, bee: await meta({ bee: await keep(Buffer.from(built.outputFiles[0].contents)), relation: 'bee' }), children })
       members.push(Buffer.from(JSON.stringify({ meta: 1, layer: behaviour, relation: 'beehavior', root: spot.name })))
     }
@@ -452,7 +547,7 @@ if (pure) {
     for (const member of members) { const sig = sha(member); names.push(sig); await writeFile(resolve(pool, sig), member) }
     await writeFile(resolve(pool, 'index.html'), names.sort().join('\n'), 'utf8')
     spotCells.push(await meta({ layer: await record({ name: spot.name }), relation: 'cells', root: spot.name }))
-    console.log(`[shim] spot ${spot.name} · ${members.length} beehavior(s) in ${spot.name}:beehaviors`)
+    console.log(`[shim] spot ${spot.name} · ${members.length} beehavior(s) in ${spot.name}:beehaviors${spot.fromPackage ? ` · the package's own bees (${pkg.packageSig.slice(0, 12)}…)` : ''}`)
   }
 
   // THE HOST IS THE ROOT of wherever you stand, so its beehaviors belong to

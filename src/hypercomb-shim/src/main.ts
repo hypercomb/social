@@ -124,7 +124,7 @@ import { loadBootstrap, type BootstrapHandle } from './bootstrap-loader'
 // the build bakes in (host-package.ts). Elsewhere the loader above fetches the
 // console bundle by its pin.
 import { holdHostPackage } from './host-package'
-import { holdSpots, registerSpots } from './spots'
+import { holdSpots, liveDependencies, registerSpots, runnable } from './spots'
 import { HOST_ACQUIRE_KEY, HOST_CONSOLE_KEY } from './bootstrap/ports'
 import { acquire as hostAcquire, installPackage as hostInstallPackage } from '@hypercomb/runtime/acquire'
 import { askHostPackages as hostAskPackages } from '@hypercomb/runtime/host-packages'
@@ -259,10 +259,13 @@ const renderBootFailure = (error: unknown): void => {
  *  of meaning, run beside whatever package is installed. */
 const loadSpots = async (root: string): Promise<void> => {
   const spots = await holdSpots(root)
-  const bees = spots.flatMap(spot => spot.behaviours.map(b => b.bee))
+  const { run, wait } = runnable(spots, liveDependencies())
+  if (wait.length) console.log(`[shim] waiting, the package's flavour runs: ${wait.join(', ')}`)
+  const bees = run.map(b => b.bee)
   if (bees.length) {
-    const loaded = await window.ioc?.get<{ loadBeside?: (sigs: readonly string[]) => Promise<number> }>('@hypercomb.social/ScriptPreloader')?.loadBeside?.(bees) ?? 0
-    ;(window as any).__hcBoot?.(`spots ${spots.map(s => `${s.name}(${s.behaviours.length})`).join(' ')} — ${loaded} beehavior(s) loaded`)
+    const needs = Object.fromEntries(run.map(b => [b.bee, b.dependencies]))
+    const loaded = await window.ioc?.get<{ loadBeside?: (sigs: readonly string[], needs?: Record<string, readonly string[]>) => Promise<number> }>('@hypercomb.social/ScriptPreloader')?.loadBeside?.(bees, needs) ?? 0
+    ;(window as any).__hcBoot?.(`spots ${spots.map(s => `${s.name}(${s.behaviours.length})`).join(' ')} — ${loaded} beehavior(s) loaded beside, ${bees.length - loaded} run in the package's lanes`)
   }
   registerSpots(spots)
 }

@@ -19,7 +19,7 @@ vi.mock('@hypercomb/runtime/acquire', () => ({
 vi.mock('@hypercomb/runtime/host-packages', () => ({ hostBases: () => [] }))
 vi.mock('@hypercomb/runtime/host-zones', () => ({ DEFAULT_HOST_ZONES: [] }))
 
-const { beehaviorsOf, holdSpots, registerSpots, SPOTS_KEY } = await import('./spots')
+const { beehaviorsOf, holdSpots, registerSpots, runnable, SPOTS_KEY } = await import('./spots')
 
 const sha = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
 const origin = new Map<string, Uint8Array>()
@@ -78,7 +78,7 @@ beforeEach(() => {
 describe('landing spots', () => {
   it('resolves a spot the root names, its pool read from a host and held here', async () => {
     const spots = await holdSpots(hostRoot)
-    expect(spots).toEqual([{ name: 'lineage', meaning: 'lineage:beehaviors', behaviours: [expect.objectContaining({ name: 'lineage', bee: beeSig })] }])
+    expect(spots).toEqual([{ name: 'lineage', meaning: 'lineage:beehaviors', behaviours: [expect.objectContaining({ name: 'lineage', bee: beeSig, dependencies: [] })] }])
     expect(here.bees.has(beeSig)).toBe(true)
     expect([...here.pools.get('lineage:beehaviors')!.keys()]).toEqual([memberSig])
 
@@ -97,5 +97,17 @@ describe('landing spots', () => {
     registerSpots(await holdSpots(hostRoot))
     const port = services.get(SPOTS_KEY) as { source(spot: string, behaviour: string): Promise<{ path: string; text: string }[]> }
     expect(await port.source('lineage', 'lineage')).toEqual([{ path: 'src/core/lineage.ts', text: 'export class Lineage {}' }])
+  })
+
+  it('runs a behaviour only when its whole closure is live', async () => {
+    const [dep1, dep2] = [put('export const a = 1'), put('export const b = 2')]
+    const spot = { name: 'tiles', meaning: 'tiles:beehaviors', behaviours: [
+      { name: 'show-cell', bee: beeSig, node: '', dependencies: [dep1, dep2], children: [] },
+      { name: 'free', bee: put('export {}'), node: '', dependencies: [], children: [] },
+    ] }
+    const partly = runnable([spot], new Set([dep1]))
+    expect(partly.run.map(b => b.name)).toEqual(['free'])
+    expect(partly.wait).toEqual(['tiles/show-cell (1 of 2 dependencies not live)'])
+    expect(runnable([spot], new Set([dep1, dep2])).run.map(b => b.name)).toEqual(['show-cell', 'free'])
   })
 })

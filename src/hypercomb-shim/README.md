@@ -107,6 +107,21 @@ themselves; everything else is resolved.
   boot bees, and are held before the runtime starts; warm boots are
   unchanged (12 alternating: first frame 557 vs 554 ms, console 159 vs 150 ms).
 
+  The second spot is `tiles`: what draws them, the Pixi host, show-cell and
+  the background. The package already carries these, so the build names the
+  package's own bees by class, read from the package as it describes itself
+  (layer docs name each bee's class, each dependency's first line its
+  specifier, esbuild's `// src/…` lines its source; a source edited since the
+  package was built is refused). A behaviour here also names `dependencies`,
+  the whole closure its bee reaches through the import map, and runs only
+  when every one is live in the session; otherwise it waits and the package's
+  flavour runs. **One flavour per class**: a spot's bee of a class the
+  package also carries runs instead of the package's (ScriptPreloader's
+  flavour rule), so no IoC key is registered twice. The same bytes are the
+  same flavour, and a bee the installed package already runs stays in the
+  package's render-critical lane, where it is fastest. Warm boots, 3 × 12
+  alternating: first frame +16/−44/+17 ms, bees +8/−60/+33 ms (noise ≈ 40 ms).
+
 **The porting gate.** Moving code from the Angular build here must not cost
 performance. `node scripts/bench-minimal-host.mjs --pure <url> --web <url>
 --root <sig>` (from `src/`) runs both hosts on the same package and fails when

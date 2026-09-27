@@ -7,11 +7,14 @@
 // meaning `<name>:beehaviors` holds — position answers membership — each an
 // incidence { meta: 1, layer: <behaviour>, relation: 'beehavior' }:
 //
-//   behaviour { name, bee: M(bee), children: [M(layer → source file node)] }
+//   behaviour { name, bee: M(bee), dependencies?: [sig], children: [M(layer → source file node)] }
 //   source    { name: <repo path>, content: M(resource) }
 //
 // A behaviour carries what it needs, and its code: from any spot the hive can
 // be drilled down to the source that runs there (the `Spots` port below).
+// `dependencies` is the whole closure its bee reaches through the import map;
+// a behaviour runs only when every one of them is live in this session
+// (`runnable`), and otherwise waits while the package's flavour runs.
 //
 // Held records are read as they are; a missing one is fetched from this
 // origin, then the default hosts, and written through the Store's writers,
@@ -26,13 +29,15 @@ type SpotStore = {
   getLayerPoolBytes(sig: string): Promise<Uint8Array | null>
   writeLayerBytes(sig: string, bytes: ArrayBuffer): Promise<void>
   getBeeBytes(sig: string): Promise<Uint8Array | null>
+  bees?: FileSystemDirectoryHandle | null
+  legacyBees?: FileSystemDirectoryHandle | null
   writeBeeBytes(sig: string, bytes: Uint8Array): Promise<void>
   getPool(meaning: string): Promise<FileSystemDirectoryHandle | null>
 }
 type Json = Record<string, unknown>
 type Envelope = { meta: 1; layer?: string; bee?: string; resource?: string; relation?: string; root?: string }
 
-export type Behaviour = { name: string; bee: string; node: string; children: string[] }
+export type Behaviour = { name: string; bee: string; node: string; dependencies: string[]; children: string[] }
 export type Spot = { name: string; meaning: string; behaviours: Behaviour[] }
 
 export const SPOTS_KEY = '@hypercomb.social/Spots'
@@ -64,9 +69,20 @@ const reader = (store: SpotStore) => {
     }
     return bytes ? decode(bytes) : null
   }
+  /** Is a bee held? Its file answers without its bytes being read. */
+  const held = async (sig: string): Promise<boolean> => {
+    if (!store.bees && !store.legacyBees) return !!(await store.getBeeBytes(sig))
+    for (const source of [store.bees, store.legacyBees]) {
+      if (!source) continue
+      for (const name of [`${sig}.js`, sig]) {
+        try { if ((await (await source.getFileHandle(name)).getFile()).size) return true } catch { /* miss */ }
+      }
+    }
+    return false
+  }
   /** A bee: held, or fetched and written through (hashed once). */
   const bee = async (sig: string): Promise<boolean> => {
-    if (await store.getBeeBytes(sig)) return true
+    if (await held(sig)) return true
     const fetched = await fetchSig(sig)
     if (!fetched) return false
     await store.writeBeeBytes(sig, fetched)
@@ -116,12 +132,12 @@ export const holdSpots = async (root: string): Promise<Spot[]> => {
   const io = reader(store)
   const top = await io.record(root)
   const cells = Array.isArray(top?.['cells']) ? (top['cells'] as unknown[]).map(String) : []
-  const spots: Spot[] = []
-  for (const cell of cells) {
+  // The spots resolve side by side; their order is the root's.
+  const resolvedSpots = await Promise.all(cells.map(async (cell): Promise<Spot | null> => {
     const incidence = envelope(await io.record(cell))
-    if (!incidence?.layer) continue
+    if (!incidence?.layer) return null
     const name = String((await io.record(incidence.layer))?.['name'] ?? '').trim()
-    if (!name) continue
+    if (!name) return null
     const meaning = beehaviorsOf(name)
     // The members resolve side by side; their order is the pool's.
     const resolved = await Promise.all((await io.members(meaning)).map(async (bytes): Promise<Behaviour | null> => {
@@ -134,13 +150,32 @@ export const holdSpots = async (root: string): Promise<Spot[]> => {
         name: String(node['name'] ?? ''),
         bee: beeRef.bee,
         node: member.layer,
+        dependencies: Array.isArray(node['dependencies']) ? (node['dependencies'] as unknown[]).map(String).filter(sig => SIG.test(sig)) : [],
         children: Array.isArray(node['children']) ? (node['children'] as unknown[]).map(String) : [],
       }
     }))
     const behaviours = resolved.filter((b): b is Behaviour => b !== null)
-    spots.push({ name, meaning, behaviours })
+    return { name, meaning, behaviours }
+  }))
+  return resolvedSpots.filter((s): s is Spot => s !== null)
+}
+
+/** The dependency signatures live in this session's import map. */
+export const liveDependencies = (): Set<string> => {
+  const aliases = (globalThis as { __hypercombAliasMap?: Map<string, string> }).__hypercombAliasMap
+  return new Set([...(aliases?.values() ?? [])].map(sig => String(sig).replace(/\.js$/i, '').toLowerCase()))
+}
+
+/** WHAT MAY RUN NOW. A behaviour whose closure is all live runs; any other
+ *  waits, and the package's own flavour of it runs. */
+export const runnable = (spots: Spot[], live: ReadonlySet<string>): { run: Behaviour[]; wait: string[] } => {
+  const run: Behaviour[] = [], wait: string[] = []
+  for (const spot of spots) for (const behaviour of spot.behaviours) {
+    const missing = behaviour.dependencies.filter(sig => !live.has(sig)).length
+    if (missing) { wait.push(`${spot.name}/${behaviour.name} (${missing} of ${behaviour.dependencies.length} dependencies not live)`); continue }
+    run.push(behaviour)
   }
-  return spots
+  return { run, wait }
 }
 
 /** THE DRILL-DOWN: from a spot to its behaviours, and from a behaviour to the

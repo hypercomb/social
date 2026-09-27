@@ -11,6 +11,7 @@ import { arrivalNames, beeClassesOfDocs, quietFeatureNames, resolveArrival, type
 import { activeInstallIndex } from './install-index.js'
 import {
   learnedCriticalBeeSigs,
+  normalizeCriticalClassName,
   parseLearnedCriticalBeeSigs,
   renderCriticalStatus,
   serializeLearnedCriticalBeeSigs,
@@ -134,6 +135,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    *  host package: its console). The installed package's manifest does not
    *  name them, so its eviction pass must not dispose them. */
   readonly #beside = new Set<string>()
+  /** THE FLAVOUR RULE. A bee a landing spot loads beside the package is that
+   *  spot's chosen flavour of its class, and the package's own bee of the
+   *  same class then never loads: one flavour per class, so one registration
+   *  per IoC key. The same bytes are the same flavour, and nothing is
+   *  displaced. Class → the chosen signature. */
+  readonly #chosen = new Map<string, string>()
   readonly #loadedDeps = new Set<string>()
   /** Dependency sig → alias, rebuilt whenever the alias map is replaced. */
   #aliasBySig = new Map<string, string>()
@@ -188,13 +195,40 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   /** Load bees that belong BESIDE the installed package — a spot's
    *  beehaviors (hypercomb-shim/src/spots.ts). Like a beside boot lane, the
-   *  installed manifest never evicts them. */
-  public loadBeside = async (sigs: readonly string[]): Promise<number> => {
-    const clean = sigs.map(sig => this.#stripExt(String(sig ?? '')).toLowerCase()).filter(sig => /^[a-f0-9]{64}$/.test(sig))
+   *  installed manifest never evicts them. The same bytes are the same
+   *  flavour: a bee the installed package already runs is left to the
+   *  package's own lanes (its render-critical wave is the faster one), so
+   *  only a flavour of the spot's own loads here, its dependency closure
+   *  (`needs`) claimed so every module of it is asked for at once
+   *  (#ensureDeps). Answers how many loaded. */
+  public loadBeside = async (sigs: readonly string[], needs: Readonly<Record<string, readonly string[]>> = {}): Promise<number> => {
+    const carried = new Set(ScriptPreloader.readManifestBees().map(sig => this.#stripExt(String(sig)).toLowerCase()))
+    const clean = sigs.map(sig => this.#stripExt(String(sig ?? '')).toLowerCase()).filter(sig => /^[a-f0-9]{64}$/.test(sig) && !carried.has(sig))
+    const claims = globalThis as { __hypercombBeeDeps?: Record<string, string[]> }
+    for (const sig of clean) if (needs[sig]?.length) (claims.__hypercombBeeDeps ??= {})[sig] ??= [...needs[sig]!]
     const results = await Promise.allSettled(clean.map(sig => this.#loadBeeBySignature(sig)))
     let loaded = 0
-    results.forEach((r, i) => { if (r.status === 'fulfilled' && r.value) { this.#beside.add(clean[i]!); loaded++ } })
+    results.forEach((r, i) => {
+      if (r.status !== 'fulfilled' || !r.value) return
+      this.#beside.add(clean[i]!); loaded++
+      const bee = r.value as { iocKey?: unknown; constructor?: { name?: unknown } }
+      const className = normalizeCriticalClassName(typeof bee.iocKey === 'string' ? bee.iocKey : bee.constructor?.name)
+      if (className && className !== 'Object') this.#chosen.set(className, clean[i]!)
+    })
     return loaded
+  }
+
+  /** The package's bees a spot's chosen flavour displaces (#chosen). */
+  #displaced = (classes: ReadonlyMap<string, BeeClass>): Set<string> => {
+    const displaced = new Set<string>()
+    for (const [className, sig] of this.#chosen) {
+      const own = classes.get(className)?.sig
+      if (own && own !== sig) {
+        displaced.add(own)
+        console.log(`[script-preloader] flavour: ${className} runs as the spot's ${sig.slice(0, 12)}, not the package's ${own.slice(0, 12)}`)
+      }
+    }
+    return displaced
   }
 
   public find = async (_grammar: string): Promise<Bee[]> => {
@@ -242,6 +276,14 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       if (layerRoots.length && (globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) {
         const quiet = await this.#quietBees(layerRoots)
         if (quiet.size) walked = { ...walked, bees: walked.bees.filter(sig => !quiet.has(sig)) }
+      }
+      if (this.#chosen.size) {
+        const displaced = this.#displaced(walked.classes)
+        if (displaced.size) walked = {
+          ...walked,
+          bees: walked.bees.filter(sig => !displaced.has(sig)),
+          criticalBees: walked.criticalBees.filter(sig => !displaced.has(sig)),
+        }
       }
       const walkMs = performance.now() - tWalk
 
