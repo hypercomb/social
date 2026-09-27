@@ -165,6 +165,7 @@ import {
   continueMessage,
   estimateTokens,
   foldWorkLedger,
+  leftFromProse,
   LEG_ROUNDS,
   workBudget,
   type WorkBudget,
@@ -6206,6 +6207,21 @@ export class ChatWindowComponent implements OnDestroy {
       readonly segments: readonly string[]
       readonly selected: readonly string[]
     } => {
+      // A CONVERSATION ABOUT A TILE READS FROM THAT TILE, wherever the
+      // participant is browsing meanwhile. Long work used to die the moment
+      // they looked at another page ("the participant moved to another page
+      // or selection, so nothing ran") because "here" meant the page under
+      // their eyes. The conversation's own subject is the anchor; only a
+      // free-floating chat reads from the page and the selection in hand.
+      const subject = this.subjectPath().split('/').filter(Boolean)
+      if (subject.length) {
+        return {
+          key: hypercombContextKey(subject, []),
+          page: `/${subject.join('/')}`,
+          segments: subject,
+          selected: [],
+        }
+      }
       const lineage = ioc()?.get('@hypercomb.social/Lineage') as LineageLike | undefined
       const pageParts = (lineage?.explorerSegments?.() ?? []).map(String).filter(Boolean)
       const selection = ioc()?.get('@diamondcoreprocessor.com/SelectionService') as SelectionLike | undefined
@@ -6462,10 +6478,21 @@ export class ChatWindowComponent implements OnDestroy {
         // stays their limit; a provider that asks read by read keeps the
         // small default, rounds included.
         const readsOpen = readsFreely(providerId)
-        if (!readsOpen && readRounds >= MAX_OBSERVATION_ROUNDS) throw new WorkRefused('no more reads are available for this message')
+        // A SPENT READ BUDGET ENDS THE LEG, IT DOES NOT END THE WORK (jwize's
+        // Solomon transcript, 2026-09-27: "I've hit the read budget for this
+        // message" and the model stalled). The refusal marks the leg as its
+        // last round, so the model hands over and the next leg reads with a
+        // fresh budget from where this one stopped.
+        if (!readsOpen && readRounds >= MAX_OBSERVATION_ROUNDS) {
+          lastRound = true
+          throw new WorkRefused('this stretch has used its reads; hand the work over — say what you found and what is left — and the next stretch reads on with a fresh budget')
+        }
         const budget = hiveAccess?.budget?.(providerId) || (readsOpen ? Number.POSITIVE_INFINITY : MAX_OBSERVATION_CONTEXT_CHARS)
         const remaining = budget - readChars
-        if (remaining < 1_500) throw new WorkRefused('the read budget for this conversation is spent')
+        if (remaining < 1_500) {
+          lastRound = true
+          throw new WorkRefused('this stretch has used its read budget; hand the work over — say what you found and what is left — and the next stretch reads on with a fresh budget')
+        }
         const plan = parseHypercombObservationGrammars(readLines, grammarContext.segments)
         const grammars = plan.observations.map(observation => observation.grammar)
         // What each read RESOLVED to — the key an allowed read is remembered
@@ -6500,7 +6527,10 @@ export class ChatWindowComponent implements OnDestroy {
             signal,
           })
           const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt)
-          if (content.length > remaining) throw new WorkRefused('those reads are larger than what is left of the read budget; ask for less')
+          if (content.length > remaining) {
+            lastRound = true
+            throw new WorkRefused('those reads are larger than what is left of this stretch\'s read budget; hand the work over — say what you found and what is left — and ask for them first thing in the next stretch')
+          }
           const allSnapshots = [...snapshotIds, ...receipt.snapshots]
           if (allSnapshots.length && !await treeReader.validateSnapshots(allSnapshots, signal)) {
             discardStaleEvidence()
@@ -6986,8 +7016,12 @@ export class ChatWindowComponent implements OnDestroy {
           // so the next leg — now, or after a reload — starts from it. A leg
           // that ended with a request still open and no word about it hands
           // the request itself over rather than dropping it.
+          // A model that wrote "what is still left" in prose and forgot the
+          // fence still handed over; the words say so, and stopping there
+          // would be the old cap wearing a new name.
           const left = work.left
             ?? (work.request ? `carry on from: ${work.request.lines.join(' · ').slice(0, 200)}` : undefined)
+            ?? (lastRound ? leftFromProse(work.prose) : undefined)
           if (left) {
             const task = component.#task.get(convoId)
             component.#turnMeta.set(convoId, {
@@ -7115,7 +7149,7 @@ export class ChatWindowComponent implements OnDestroy {
         const window = (roundModel && router.contextLengthForModel?.(roundModel)) || 128_000
         const room = (): boolean => estimateTokens(system) + tokensOf(messages) < window - 8_000
         if (!room()) messages.splice(0, messages.length, ...foldWorkLedger(messages, workStart) as typeof messages)
-        if (spent || rounds >= LEG_ROUNDS || !room()) {
+        if (spent || lastRound || rounds >= LEG_ROUNDS || !room()) {
           messages[messages.length - 1] = { role: 'user', content: `${reply}\n\n${lastRoundMessage(message)}` }
           lastRound = true
           budgetSpent = spent

@@ -71,6 +71,22 @@ class MemoryWritable {
   async abort(): Promise<void> {}
 }
 
+/** A File whose reads answer from the bytes the page already holds. The
+ *  native `arrayBuffer()`/`text()` read a Blob back through the browser's
+ *  blob machinery — for bytes that never left this JS heap (measured
+ *  2026-09-27, revolucion ×4: ~100 ms off the cover). Everything else
+ *  (size, slice, stream) stays the native File's. */
+class MemoryFile extends File {
+  readonly #held: Uint8Array<ArrayBuffer>
+  constructor(held: Uint8Array<ArrayBuffer>, name: string, lastModified: number) {
+    super([held], name, { lastModified })
+    this.#held = held
+  }
+  override arrayBuffer(): Promise<ArrayBuffer> { return Promise.resolve(this.#held.slice().buffer) }
+  override bytes(): Promise<Uint8Array<ArrayBuffer>> { return Promise.resolve(this.#held.slice()) }
+  override text(): Promise<string> { return Promise.resolve(new TextDecoder().decode(this.#held)) }
+}
+
 class MemoryFileHandle {
   readonly kind = 'file' as const
   bytes: Uint8Array<ArrayBufferLike> = new Uint8Array()
@@ -90,7 +106,7 @@ class MemoryFileHandle {
 
   async getFile(): Promise<File> {
     if (!this.#snapshot) {
-      this.#snapshot = new File([this.bytes.slice()], this.name, { lastModified: this.#modified })
+      this.#snapshot = new MemoryFile(this.bytes.slice(), this.name, this.#modified)
     }
     return this.#snapshot
   }

@@ -13,6 +13,7 @@ import {
   CONTINUE_FENCE_LANG,
   foldWorkLedger,
   lastRoundMessage,
+  leftFromProse,
   workBudget,
 } from './hypercomb-work-fence'
 
@@ -245,5 +246,22 @@ then /b
   it('the budget is the default unless the device says otherwise', () => {
     expect(workBudget(() => null)).toEqual({ rounds: 400, tokens: 6_000_000 })
     expect(workBudget(key => key.endsWith('rounds') ? '50' : 'nonsense')).toEqual({ rounds: 50, tokens: 6_000_000 })
+  })
+})
+
+describe('a handover said in prose', () => {
+  it('reads a "what is still left" paragraph as the handover', () => {
+    const prose = [
+      'What I found. The engine hydrates rooms on demand.',
+      '',
+      "What's still left. I never got to read chamber-view.ts and rpg-overworld.ts, where the touch-to-enter change would live.",
+    ].join('\n')
+    expect(leftFromProse(prose)).toBe('I never got to read chamber-view.ts and rpg-overworld.ts, where the touch-to-enter change would live.')
+  })
+
+  it('reads "Next step:" too, and ignores prose with no handover', () => {
+    expect(leftFromProse(['Done.', '', 'Next step: read the rest of tile-surface.ts from offset 8000.'].join('\n'))).toBe('read the rest of tile-surface.ts from offset 8000.')
+    expect(leftFromProse('All three tiles are rewritten and verified.')).toBeUndefined()
+    expect(leftFromProse('Remaining: none')).toBeUndefined()
   })
 })
