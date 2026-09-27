@@ -145,9 +145,10 @@ import {
   MAX_OBSERVATIONS,
   OBSERVATION_VERBS,
   parseHypercombObservationGrammars,
+  READ_PAGE_CHARS,
   type HypercombTreeReader,
 } from './hypercomb-observation'
-import { contextNeedFor, effortFromJev, effortInThread, type MessageEffort } from './message-effort'
+import { contextNeedFor, effortForWork, effortFromJev, effortInThread, type MessageEffort } from './message-effort'
 import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-compiler'
 import { executionLineParts } from './execution-line'
 import {
@@ -5976,6 +5977,8 @@ export class ChatWindowComponent implements OnDestroy {
    *  read that found each. Told to the model on the next message, so content
    *  already found opens again by signature instead of by walking to it. */
   readonly #readSignatures = new Map<string, Map<string, string>>()
+  /** Conversations whose work has opened the hive's code this session. */
+  readonly #codeThreads = new Set<string>()
 
   /** Why no model took a conversation's last question, in the words the
    *  participant is shown instead of a queue nobody drains. */
@@ -6083,6 +6086,17 @@ export class ChatWindowComponent implements OnDestroy {
     // preferred only while the weight is the same — so the mediator chooses
     // again the moment the work gets heavier or lighter.
     const previousTier = this.#answeredTier.get(convoId)
+    // WHAT EARLIER MESSAGES FOUND SURVIVES A RELOAD: the newest turn that
+    // carries the conversation's known reads restores them, oldest first.
+    if (!this.#readSignatures.has(convoId)) {
+      const stored = [...this.turns()].reverse().find(turn => turn.known?.length)?.known ?? []
+      const restored = new Map<string, string>()
+      for (const entry of stored) restored.set(entry.slice(0, 64), entry.slice(65))
+      if (restored.size) this.#readSignatures.set(convoId, restored)
+    }
+    // A CONVERSATION THAT HAS READ CODE IS CODE WORK, and code work is deep.
+    const codeThread = this.#codeThreads.has(convoId)
+      || [...(this.#readSignatures.get(convoId)?.values() ?? [])].some(grammar => /^\/?code\s/.test(grammar))
     const namedModel = this.modelExplicit() ? this.model() || undefined : undefined
     // …and only on the provider that gave it. The name a vendor reports back
     // is not always a name another provider knows: a remembered OpenRouter
@@ -6098,7 +6112,7 @@ export class ChatWindowComponent implements OnDestroy {
     const askerHolds = !namedModel && lastModelHere && !!previousTier
       && this.turns().at(-2)?.role === 'assistant' && this.turns().at(-2)?.asks === true
     const need = {
-      tier: askerHolds && previousTier ? previousTier : effortInThread(message, previousTier),
+      tier: askerHolds && previousTier ? previousTier : effortForWork(effortInThread(message, previousTier), codeThread),
       streaming: true, minContext: contextNeedFor(transcriptChars, message),
     }
     const preferFor = (tier: MessageEffort): string | undefined => !this.modelExplicit() && previousTier === tier && lastModelHere
@@ -6202,14 +6216,6 @@ export class ChatWindowComponent implements OnDestroy {
     // Where the participant is travels only to a provider that reads freely.
     const anatomyText = (ioc()?.get(ANATOMY_IOC_KEY) as { text?: string } | undefined)?.text ?? ''
     const vocabulary = canChange ? hypercombVocabulary(behaviourEntries) : ''
-    // WHAT EARLIER MESSAGES FOUND SURVIVES A RELOAD: the newest turn that
-    // carries the conversation's known reads restores them, oldest first.
-    if (!this.#readSignatures.has(convoId)) {
-      const stored = [...this.turns()].reverse().find(turn => turn.known?.length)?.known ?? []
-      const restored = new Map<string, string>()
-      for (const entry of stored) restored.set(entry.slice(0, 64), entry.slice(65))
-      if (restored.size) this.#readSignatures.set(convoId, restored)
-    }
     // Taken once per message, so the system text stays byte-stable across
     // the rounds of one answer (a vendor's prompt cache keys on the prefix).
     const knownReads = [...(this.#readSignatures.get(convoId) ?? new Map<string, string>())].slice(-24)
@@ -6462,7 +6468,13 @@ export class ChatWindowComponent implements OnDestroy {
         }
         try {
           stillHere()
-          const perReadBytes = Math.max(1_024, Math.min(8_000, Math.floor((remaining - 512) / plan.observations.length)))
+          // A WHOLE FILE AT ONCE WHERE THE WINDOW HAS ROOM. Each read may
+          // take up to half of what is left of the model's window (about
+          // three characters to a token of code), shared by the block's
+          // reads, and never past a page — so reading never overflows it.
+          const windowTokens = (model && router.contextLengthForModel?.(model)) || 128_000
+          const room = Math.max(0, windowTokens - 8_000 - estimateTokens(system) - tokensOf(messages)) * 3 / 2
+          const perReadBytes = Math.max(1_024, Math.min(READ_PAGE_CHARS, Math.floor(Math.min(remaining - 512, room) / plan.observations.length)))
           const receipt = await executeHypercombObservationPlan(plan, treeReader, {
             maxDepth: 2,
             maxNodes: 48,
@@ -6478,6 +6490,9 @@ export class ChatWindowComponent implements OnDestroy {
           }
           readRounds++
           readChars += content.length
+          if (receipt.results.some(result => result.kind === 'code' || (result.kind === 'bytes' && result.read.ok && result.read.of !== 'resource'))) {
+            component.#codeThreads.add(convoId)
+          }
           if (!evidence.includes(content)) evidence.push(content)
           needsVerification = false
           snapshotIds.push(...receipt.snapshots)
@@ -6829,7 +6844,7 @@ export class ChatWindowComponent implements OnDestroy {
         // reasoning effort, never a change of model (buildRequest keeps the
         // named model whatever the tier).
         if (!askerHolds) {
-          const tier = effortFromJev(need.tier, door, previousTier)
+          const tier = effortForWork(effortFromJev(need.tier, door, previousTier), codeThread)
           const moved = { ...need, tier }
           if (tier !== need.tier && router.ready?.({ ...(pinned ? { providerId: pinned } : {}), need: moved }) !== false) routeNeed = moved
         }

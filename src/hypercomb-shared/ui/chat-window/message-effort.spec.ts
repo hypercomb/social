@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contextNeedFor, effortFor, effortFromJev, effortInThread } from './message-effort'
+import { contextNeedFor, effortFor, effortForWork, effortFromJev, effortInThread } from './message-effort'
 
 describe('how much work a message is', () => {
   it('keeps a short question fast', () => {
@@ -56,5 +56,19 @@ describe('the weight Jev read', () => {
     expect(effortFromJev('fast', { weight: 'fast', carry: true }, 'deep')).toBe('deep')
     expect(effortFromJev('fast', { weight: 'deep', carry: true }, 'balanced')).toBe('deep')
     expect(effortFromJev('fast', { weight: 'fast', carry: true }, undefined)).toBe('fast')
+  })
+})
+
+describe('code work is deep work', () => {
+  it('sends a message about code, bugs or preloading to the strongest model', () => {
+    expect(effortFor('the labyrinth is broken')).toBe('deep')
+    expect(effortFor('read the module')).toBe('deep')
+    expect(effortFor('why is preload slow')).toBe('deep')
+    expect(effortFor('hello')).toBe('fast')
+  })
+  it('keeps every message of a conversation that has read code at the deep tier', () => {
+    expect(effortForWork(effortInThread('okay find it', 'fast'), true)).toBe('deep')
+    expect(effortForWork(effortInThread('Read what you need and do the work', undefined), true)).toBe('deep')
+    expect(effortForWork('fast', false)).toBe('fast')
   })
 })

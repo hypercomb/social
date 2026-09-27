@@ -27,6 +27,9 @@ const UNSAFE_NAME = /[\\/\u0000-\u001f\u007f]/
 const MAX_DEPTH = 3
 const MAX_NODES = 64
 const MAX_BYTES = 12_000
+/** A page of a module or resource (`/read <sig>`): a whole file of code at
+ *  once where the model's window has room — the shell sizes each ask. */
+const MAX_PAGE_BYTES = 48_000
 const MAX_READ_MS = 5_000
 const SNAPSHOT_TTL_MS = 2 * 60_000
 const SNAPSHOT_LIMIT = 32
@@ -782,7 +785,7 @@ export class HypercombHiveTreeReader {
     const store = this.#store()
     if (!store?.getResource) return { ok: false, root, code: 'unavailable' }
     if (!SIG.test(sig)) return { ok: false, root, code: 'not-found' }
-    const maxBytes = Math.max(512, boundedInteger(options.maxBytes, 8_000, MAX_BYTES))
+    const maxBytes = Math.max(512, boundedInteger(options.maxBytes, 8_000, MAX_PAGE_BYTES))
     try {
       let of: 'bee' | 'dependency' | 'resource' = 'bee'
       let type = 'text/javascript'

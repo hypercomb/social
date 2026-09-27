@@ -10,6 +10,10 @@
 
 /** Reads per request — also what the work fence teaches a model. */
 export const MAX_OBSERVATIONS = 2
+/** The most one read may return: a whole source file of a module at once
+ *  (the reader's own page limit). The shell asks for less when the model's
+ *  window has less room. */
+export const READ_PAGE_CHARS = 48_000
 const MAX_GRAMMAR_LENGTH = 1_000
 const MAX_PATH_SEGMENTS = 32
 const MAX_SEGMENT_LENGTH = 256
@@ -433,7 +437,7 @@ export const executeHypercombObservationPlan = async (
 ): Promise<HypercombObservationReceipt> => {
   const maxDepth = Math.max(0, Math.min(3, Math.floor(options.maxDepth ?? 2)))
   const maxNodes = Math.max(1, Math.min(64, Math.floor(options.maxNodes ?? 48)))
-  const maxBytes = Math.max(1_024, Math.min(12_000, Math.floor(options.maxBytes ?? 8_000)))
+  const maxBytes = Math.max(1_024, Math.min(READ_PAGE_CHARS, Math.floor(options.maxBytes ?? 8_000)))
   const results: Array<{ grammar: string } & HypercombRead> = []
   const snapshots: string[] = []
 
