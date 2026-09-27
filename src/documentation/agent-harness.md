@@ -1,0 +1,205 @@
+# The agent harness — a signed, swappable loop
+
+*jwize, 2026-09-27: "we are missing the grand overall picture to build this
+into a customizable harness. Let's use the latest and greatest theory on this,
+doing it the hypercomb way."* This is that picture. It names what the chat's
+agent loop is made of today, what the field converged on by September 2026,
+and how the two become ONE thing: a harness that is content — signed,
+sig-addressed, held in a pool of meaning, swappable like a theme, shareable
+across the network — with the shipped loop as its default.
+
+Doctrine that binds this document: [known-location-pools](known-location-pools.md),
+[hypergraph-molecule-lineage](hypergraph-molecule-lineage.md),
+[life-primitive](life-primitive.md), [everything-is-a-beehavior](everything-is-a-beehavior.md),
+[hive-read-fence](hive-read-fence.md), [jev-decisions](jev-decisions.md),
+[chat-route](chat-route.md), [replayable-agent-loop](replayable-agent-loop.md),
+[model-mediation-and-the-training-prompt](model-mediation-and-the-training-prompt.md),
+[module-sandbox](module-sandbox.md).
+
+## 1. What exists today, as one machine
+
+Everything below is built and live. It is listed as the PARTS of a harness,
+because that is what it already is — the parts are just wired by constants in
+code rather than named by a record.
+
+| Part | What it is | Where |
+|---|---|---|
+| **Tools** | Plain-text fences the model ends a reply with: `hypercomb-read`, `hypercomb-do`, `hypercomb-write`, `hypercomb-table`, `hypercomb-handoff`, `hypercomb-continue`; plus context lines (`context`, `context add`, `context drop`) | `chat-window/hypercomb-work-fence.ts` |
+| **Tool registry** | The CENSUS: every behaviour word the participant granted a machine (`/grant`), declared per behaviour (`machine-grammar`); reads: `read` `list` `tree` `find` `history` `summary` `code` | `hypercomb-grammar.ts`, `hypercomb-observation.ts` |
+| **Instructions as data** | The anatomy (doctrine sections the participant edits, `hypercomb-write doctrine`), the work instruction, the training prompt | `anatomy`, `workInstruction()` |
+| **Planner / worker** | Whatever model the policy designates for the need (tier, context, reads-hive) | `model-policy.ts`, `llm-dispatch.ts` |
+| **Judge** | Jev — System One: snap judgments over rows the worker lists; the CHANGE GATE; verifies answers against what was read | `hypercomb-jev.ts`, `jev-round.ts` |
+| **Approval** | The Execution window: every `do`/`write` waits for Run or Skip unless the participant set that kind to auto | `execution-queue.ts` |
+| **Durable execution** | LEGS: one stretch of context per leg; the older rounds fold into a progress ledger; a full leg hands over in prose plus a continue fence; the handover is a stored turn (`left`, `spent`) so a reopen resumes | `hypercomb-work-fence.ts`, `chat-window.component.ts` |
+| **Budget** | Rounds and tokens per request, from the providers' own usage reports; device-local overrides | `workBudget()` |
+| **Memory** | Pools of meaning: the transcript (threads), read signatures on the turn, the context basket, the compaction pool, the run ledger | `chat-thread.ts`, `context-basket.ts`, `compaction.ts`, `chat-steps.ts` |
+| **Traces** | The run ledger records ATTEMPTS by pointer; history records EFFECTS; the route beside the thread draws it; `jev:turn` carries legs, rounds, weight, ms | `replayable-agent-loop.md`, `chat-route.md` |
+| **Delegation** | A model that cannot hands off (fence) to the next the policy ranks; a bridge session takes what no model could; peer models lend by heartbeat | `llm-dispatch.ts`, bridge, `peer-models.drone.ts` |
+| **Evals** | Trials on a domain, Jev readings, signed assessments | `module-sandbox.md` |
+
+## 2. The theory, and its hypercomb name
+
+By September 2026 the agent field agreed on a shape. Nothing in it is foreign
+to us; each idea already has a hypercomb word, and where the word is a POOL
+the idea is already data.
+
+| Theory (2026) | Hypercomb |
+|---|---|
+| A loop of observe → decide → act → verify, with tools | Rounds of read → Jev → do/write → readback, with fences |
+| Tools as a registry the model is shown, not hardwired | The census, per participant grant; a new power is a WORD, never a code path |
+| Skills and instructions as files the agent reads | Doctrine sections in the anatomy; the training prompt; both content |
+| Context engineering: windows, compaction, retrieval by reference, memory files | Leg + fold + `read <signature>` (what a signature names never changes) + pools |
+| Durable execution: checkpoint, resume, idempotent steps | The handover turn (`left`, `spent`); the ledger records attempts by pointer |
+| Generator / judge separation; verifier models | Worker lists, Jev judges, code composes; Jev checks the answer against the reads |
+| Human-in-the-loop gates on irreversible acts | The Execution window; `do` and `write` held by default; reads run freely when granted |
+| Budgets and observability (tokens, steps, traces) | `workBudget`, the meter on the availability line, `jev:turn`, the route |
+| Sub-agents with narrow context; orchestrator–worker | A conversation per tile (artifact paradigm); hand-off; bridge sessions; peers |
+| Evals as the way harnesses improve | Trials on your own domain; Jev readings; signed assessments; the ledger's numbers |
+| Model-agnostic routing by need, not vendor | `ModelNeed` → policy → provider; OpenRouter lines; local; bridge; peer |
+
+The one idea the field is still circling — **the harness itself as a
+first-class, versioned, shareable artifact** — is the one hypercomb is built
+for. A harness is content. It gets a signature. It lives in a pool.
+
+## 3. The harness record
+
+A harness is a `harness@1` JSON resource. Every field that could be shared,
+versioned or composed is a SIGNATURE of another resource, never inline
+([signature-system](signature-system.md)). The record names the loop's
+policy; the loop reads the record; nothing in the loop is a constant any more.
+
+```json
+{
+  "kind": "harness@1",
+  "name": "default",
+  "steps": ["<sig front>", "<sig route>", "<sig stretch>", "<sig fold>", "<sig handover>", "<sig verify>", "<sig receipt>"],
+  "instruction": "<sig of the work instruction text>",
+  "doctrine": ["<sig section>", "<sig section>"],
+  "leg": { "rounds": 12, "reserveTokens": 8000, "keepVerbatim": 4 },
+  "budget": { "rounds": 400, "tokens": 6000000 },
+  "reads": { "pageChars": 48000, "roundsWhenAsked": 6, "charsWhenAsked": 24000 },
+  "judge": { "word": "jev", "gate": "change", "verify": true },
+  "review": { "auto": ["read"], "held": ["do", "write"] },
+  "vocabulary": { "allow": [], "deny": [] },
+  "handover": { "fence": "hypercomb-continue", "resumeSeconds": 3600, "proseFallback": true },
+  "delegates": ["handoff", "bridge", "peer"],
+  "need": { "tier": "auto", "streaming": true }
+}
+```
+
+- **`steps`** name the loop's stages by the signature of the bee that runs
+  each one (section 4). The default harness names the shipped bees.
+- **`instruction`** and **`doctrine`** are the words the model is given; a
+  community harness can carry its own training prompt and its own sections,
+  and the participant's anatomy still applies on top (doctrine outranks).
+- **`leg`, `budget`, `reads`** are the numbers that were constants
+  (`LEG_ROUNDS`, `WORK_BUDGET`, `MAX_OBSERVATION_*`, `READ_PAGE_CHARS`).
+- **`judge`** says who gates changes and whether answers are verified;
+  `word` is a behaviour word, so a second judge (another model, a rubric bee)
+  is a record change, not a code change.
+- **`review`** is the Execution window's default per kind; the participant's
+  own auto choices still win — a harness never widens what a person held.
+- **`vocabulary`** narrows the census for this harness (a "read-only
+  researcher" harness denies every `do`); it can never widen past the grant.
+- **`handover`** and **`delegates`** are the durable-execution and
+  delegation policy.
+
+### Where it lives
+
+- Pool of meaning **`sign('harness')`** at the OPFS root, one sig-named file
+  per harness, addressed only through `Store.poolSignature('harness')`.
+- **The active harness is a pointer**, two levels: the device default
+  (`hc:harness`, a signature) and a per-conversation mark on the thread
+  (a `harness` field in the conversation record) that wins while set.
+- **Ships as a seed**, exactly as backgrounds and themes do: the `default`
+  record is minted at boot if the pool is empty, and re-minted when the
+  shipped default changes (new content, new signature; the old one stays).
+- **Arrives from the network like a theme**: `registerPublishedPool({meaning:
+  'harness'})` — every host the participant learns is probed once at
+  `<origin>/<sign('harness')>`, members are sig-verified, and a third-party
+  record is HELD (visible, off) until the participant turns it on
+  ([llm-provider plug-in: the hold](model-mediation-and-the-training-prompt.md)).
+
+## 4. Steps are beehaviors
+
+The loop today is one long function. The harness splits it at the seams that
+already exist, and each seam is a WORD resolved through IoC, so a harness can
+swap one step without touching the others ([everything-is-a-beehavior](everything-is-a-beehavior.md)).
+
+| Step | Word | What the default bee does | Effect it announces |
+|---|---|---|---|
+| Front door | `front` | Jev reads the request: answer at once, weigh the tier, or step aside | `agent:front` |
+| Route | `route` | The policy designates a provider for the need; hand-offs and avoid lists | `agent:route` |
+| Stretch | `stretch` | One leg: stream rounds, run fences through the queue, count the spend | `agent:round` |
+| Fold | `fold` | When the window is full, fold the older rounds into the progress ledger | `agent:fold` |
+| Handover | `handover` | End the leg: the prose, the continue fence, the stored `left` and `spent` | `agent:handover` |
+| Verify | `verify` | Jev checks the answer against what was read; a second judge if named | `agent:verify` |
+| Receipt | `receipt` | The run ledger, `jev:turn`, the route pieces, goal reached | `agent:receipt` |
+
+Rules for a step bee: it takes the harness record and the leg's state, it
+returns the next state, it announces its effect with the facts a surface
+needs (never a rendering), and it never writes truth outside its seam — a
+`fold` derives, a `handover` stores a turn, a `receipt` stores attempts by
+pointer. The chat window becomes a surface that runs the steps the harness
+names and paints what they announce; nothing imports the window.
+
+## 5. What stays fixed
+
+A harness can change policy. It cannot change these, and a record that tries
+is refused at import the way a provider spec that smuggles an endpoint is:
+
+- **Signatures are the only references.** No inline instruction text, no
+  path-keyed anything.
+- **Reads never grant change.** A harness may deny `do`; it may never auto-run
+  a kind the participant holds.
+- **The transcript is the checkpoint.** A handover is a stored turn; no
+  side-channel state, no localStorage beyond device preference.
+- **Judgment is separated from generation.** The worker lists, the judge
+  decides, code composes. A harness may name the judge; it may not remove the
+  change gate.
+- **Doctrine outranks vendor advice**, and the participant's anatomy outranks
+  the harness's sections.
+- **Every act has a word.** A harness names words; it introduces no new
+  transport, no new fence kind the parsers do not know.
+
+## 6. Words
+
+| Word | What it does |
+|---|---|
+| `harness` | Lists the pool: name, signature, on/held, which is the device default and which this conversation uses |
+| `harness use <name or sig>` | Sets the conversation's harness (with `default` scope, the device default) |
+| `harness edit` | Opens the active record as a tile whose body is the JSON — hives are our source files; saving mints a new signature |
+| `harness offer <name>` | Signs the record and lists it on the participant's host (`harness` index key), as `language offer` does for catalogs |
+| `harness sync` | Heals from followed hosts: records the pool lacks, held until turned on |
+| `harness try <sig> <request>` | Runs one request under another harness on the same conversation and files both receipts, so Jev and the ledger can compare |
+
+## 7. What the numbers already say
+
+The ledger and `jev:turn` carry per-turn legs, rounds, weight, tokens and
+outcome. Keyed by harness signature they become the eval: a `harness try`
+over a small set of requests on your own domain yields, per harness,
+rounds-to-done, tokens-to-done, hand-offs, reads refused, and Jev's
+supported/complete scores. That is how a community harness earns adoption —
+by its receipts, not its description.
+
+## 8. Execution order
+
+1. **Lift the constants into the record.** Mint `default` from today's
+   values into `sign('harness')` at boot (seed like themes); the chat window
+   reads `leg`, `budget`, `reads`, `handover`, `review` from it. No behaviour
+   change; the harness exists.
+2. **Announce every stage.** The seven `agent:*` effects with their facts;
+   the meter, the route and the bee panel read from them instead of from the
+   window's signals.
+3. **Split the loop at the seams into step bees**, default ones shipped in
+   essentials, resolved by word; `steps` in the record names them by
+   signature. The window shrinks to a surface.
+4. **Words.** `harness`, `harness use`, `harness edit`; the per-conversation
+   mark.
+5. **Network.** `harness offer` and `harness sync` over the published-pool
+   probe, held-if-third-party; the i18n and providers precedents carry it.
+6. **Evals.** `harness try`; the ledger keyed by harness; a trials page that
+   shows the receipts side by side.
+
+Each step lands alone, ratcheted, with the previous one still working. Step 1
+is a morning; step 3 is the one that takes care.
