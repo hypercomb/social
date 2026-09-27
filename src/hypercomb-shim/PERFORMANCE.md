@@ -44,7 +44,7 @@ Minimal first, Angular second.
 | 2026-09-27 | first install 2.4–3.2 s (was 6.8–7.8 s) | ±35 ms | ±42 ms | cold install −4.5 s | faster install, same warm |
 | 2026-09-27 | the `lineage` spot (tiles in the pure host) | 557 vs 554 ms | 1316 vs 1326 ms | console 159 vs 150 ms | same |
 | 2026-09-27 | the `tiles` spot (renderers placed, one flavour per class) | +16 / −44 / +17 ms | +8 / −60 / +33 ms | first try was +22 to +85 ms, fixed before commit | same |
-| 2026-09-27 | image atlas without multisampling (package `310e976a049b`) | — | — | GPU memory −1 GiB (an 8192² 4-sample buffer); in the sandbox, boots that draw every tile went from 1 of 8 to 8 of 8 | better |
+| 2026-09-27 | image atlas without multisampling (package `310e976a049b`) | — | — | GPU memory −1 GiB (an 8192² 4-sample buffer); in the sandbox, boots that draw every tile went from 1 of 8 to 8 of 8; pictures identical inside, only the 1-px border of a letterboxed picture is crisp instead of half-blended | better |
 
 Adding a row: run the gate (and `--rate 4` when boot or rendering moved),
 then add the change's line here in the same commit.

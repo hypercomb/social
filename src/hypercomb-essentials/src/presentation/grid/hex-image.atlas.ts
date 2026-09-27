@@ -67,9 +67,12 @@ export class HexImageAtlas {
     this.#rows = Math.max(1, rows)
 
     // NO MULTISAMPLING. Every write is an axis-aligned sprite scaled into its
-    // cell, and the shader cuts the hexagon out of the cell, so MSAA has no
-    // edge to smooth — yet at 4096² × resolution 2 it asked the GPU for an
-    // 8192² 4-sample buffer: 1 GiB beside the 256 MiB atlas itself. Software
+    // cell, and the shader cuts the hexagon out of the cell, so MSAA smooths
+    // only the one-pixel border of a picture that does not fill its cell
+    // (measured: every differing pixel is on that border, none inside a
+    // picture; about a quarter of a screen pixel at tile size) — yet at
+    // 4096² × resolution 2 it asked the GPU for an 8192² 4-sample buffer:
+    // 1 GiB beside the 256 MiB atlas itself. Software
     // GPUs refused it outright (GL_OUT_OF_MEMORY, then a lost context and
     // Chromium blocking WebGL for the site), and on a phone it is the kind
     // of allocation that ends in a crash-reload.
