@@ -62,7 +62,7 @@ for (const tile of rootLayer.cells ?? []) {
 const buildSig = (await readFile(resolve(dist, 'build'), 'utf8')).trim()
 if (!signed.includes(buildSig)) throw new Error('pure host: /build names no build record here')
 const record = JSON.parse(await readFile(resolve(dist, buildSig), 'utf8'))
-if (record.name !== 'build' || !/^\d{4}\.\d{1,2}\.\d{1,2}\.\d+$/.test(record.version)) throw new Error('pure host: /build is not a build record')
+if (record.name !== 'build' || !(record.version === 'staged' || /^\d{4}\.\d{1,2}\.\d{1,2}\.\d+$/.test(record.version))) throw new Error('pure host: /build is not a build record')
 if (record.host !== pin || record.hostPackage !== hostRoot || !known.includes(record.library) || record.library === pin) {
   throw new Error('pure host: the build record does not name this host bundle, core library and host package')
 }

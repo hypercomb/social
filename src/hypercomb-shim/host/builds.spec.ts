@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { generateSecretKey } from 'nostr-tools/pure'
@@ -23,31 +23,118 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-const record = (label: string | undefined, main: string, now = DAY) => {
+const stage = (label: string | undefined, main: string) => {
   const atom = b('atom:' + main)
   return builds.recordBuild({
-    label, now, signed: [atom],
+    label, signed: [atom],
     install: new Map([['main.js', b(main)], ['index.html', b('<html>')]]),
     source: new Map([['src/main.ts', b('// ' + main)]]),
     host: builds.sign(atom), library: 'l'.repeat(64), hostPackage: 'p'.repeat(64),
   })
 }
+/** Stage, then promote: a revision in the lineage. */
+const record = async (label: string | undefined, main: string, now = DAY) => {
+  await stage(label, main)
+  return builds.promote(label ?? 'host', { now, sync: false, sign: false })
+}
+const files = async (dir: string) => (await readdir(dir).catch(() => [])).filter((n: string) => /^[a-f0-9]{64}$/.test(n))
 
-describe('version pool', () => {
-  it('makes every build a revision, numbered by the day, under its name', async () => {
-    const one = await record(undefined, 'a')
-    const two = await record(undefined, 'a')
-    const three = await record('Beta Line', 'b')
-    const four = await record(undefined, 'b', new Date('2026-10-01T00:00:00Z'))
+describe('stage, then promote', () => {
+  it('a build stages; promotion appends the next version of the day, chained to the last', async () => {
+    const staged = await stage(undefined, 'a')
+    expect(staged.record.version).toBe('staged')
+    expect(await builds.revisions()).toEqual([])
+    const one = await builds.promote('host', { now: DAY, sync: false, sign: false })
+    const two = await record(undefined, 'b')
+    const three = await record('Beta Line', 'c')
+    const four = await record(undefined, 'd', new Date('2026-10-01T00:00:00Z'))
     expect([one, two, three, four].map(r => `${r.record.label} ${r.record.version}`))
       .toEqual(['host 2026.9.26.1', 'host 2026.9.26.2', 'beta-line 2026.9.26.3', 'host 2026.10.1.1'])
-    expect(two.unchanged).toBe(true)
+    expect(one.record.parent).toBe(null)
     expect(two.record.parent).toBe(one.sig)
-    const { parts, files } = await builds.changesOf(builds.poolDir(builds.BUILDS_MEANING), three.record)
+    expect(three.record.parent).toBe(two.sig)
+    const { parts, files: changed } = await builds.changesOf(builds.poolDir(builds.BUILDS_MEANING), three.record)
     expect(parts).toEqual(['install', 'host', 'source'])
-    expect(files.install).toEqual(['~ main.js'])
+    expect(changed.install).toEqual(['~ main.js'])
   })
 
+  it('keeps one stage per story: a rebuild replaces it, and what only the old stage named is collected', async () => {
+    const pool = builds.poolDir(builds.BUILDS_MEANING)
+    const first = await stage(undefined, 'draft one')
+    const second = await stage(undefined, 'draft two')
+    const held = await files(pool)
+    expect(held).not.toContain(first.sig)
+    expect(held).toContain(second.sig)
+    expect(held).not.toContain(builds.sign(b('draft one')))
+    expect(Object.keys(await builds.readStage())).toEqual(['host'])
+  })
+
+  it('never lets staged work travel', async () => {
+    const promoted = await record(undefined, 'released')
+    const draft = await stage(undefined, 'unfinished')
+    const host = resolve(root, 'host')
+    await builds.carryPools(host, { atoms: true })
+    const carried = await files(resolve(host, builds.sign(builds.BUILDS_MEANING)))
+    expect(carried).toContain(promoted.sig)
+    expect(carried).not.toContain(draft.sig)
+    expect(carried).not.toContain(builds.sign(b('unfinished')))
+    expect(await files(host)).toEqual([builds.sign(b('atom:released'))].concat([builds.sign(builds.BUILDS_MEANING), builds.sign(builds.SIGNATURES_MEANING)]).sort())
+  })
+
+  it('signs a promotion as its author when a key is at hand', async () => {
+    await stage(undefined, 'a')
+    const done = await builds.promote('host', { now: DAY, sync: false })
+    expect(done.signed).toBe(true)
+    expect((await builds.signaturesOf(done.sig, done.record.version)).map((s: { role: string; ok: boolean }) => [s.role, s.ok])).toEqual([['author', true]])
+    await expect(builds.promote('host', { sync: false })).rejects.toThrow(/nothing staged/)
+  })
+})
+
+describe('stories', () => {
+  it('tells a story within a larger one; a retelling is newest', async () => {
+    await builds.tellStory('minimal host', 'The platform in two small files', { now: DAY })
+    await builds.tellStory('offline', 'An installed hive starts with the network cut', { within: 'minimal host', now: DAY })
+    await builds.tellStory('offline', 'Starts, and renders, with the network cut', { within: 'minimal-host', now: new Date('2026-09-27T00:00:00Z') })
+    const told = await builds.stories()
+    expect(told.get('offline')).toMatchObject({ description: 'Starts, and renders, with the network cut', within: 'minimal-host' })
+    expect(told.get('minimal-host')).toMatchObject({ within: null })
+    await expect(builds.tellStory('loop', 'x', { within: 'loop' })).rejects.toThrow(/within itself/)
+  })
+
+  it('names the conversations that did the work, and carries them with the promotion', async () => {
+    const transcript = resolve(root, 'chat.jsonl')
+    await writeFile(transcript, '{"role":"user","text":"make it start offline"}')
+    await stage('offline', 'a')
+    const { sig: conversation } = await builds.attachConversation('offline', transcript)
+    const done = await builds.promote('offline', { now: DAY, sync: false, sign: false })
+    expect(done.record.conversations).toEqual([conversation])
+    const host = resolve(root, 'host')
+    await builds.carryPools(host)
+    expect(await files(resolve(host, builds.sign(builds.BUILDS_MEANING)))).toContain(conversation)
+  })
+})
+
+describe('subscriptions', () => {
+  it('carries every promotion to the subscribed hosts by itself, and retries what did not arrive', async () => {
+    const relay = resolve(root, 'relay')
+    await builds.subscribe(relay)
+    await stage(undefined, 'a')
+    const first = await builds.promote('host', { now: DAY, sign: false })
+    expect(first.synced).toEqual([{ to: relay, ok: false, detail: 'the directory is not there' }])
+    expect((await builds.readSubscriptions())[0].synced).toBe(null)
+    await mkdir(relay)
+    const retried = await builds.sync()
+    expect(retried[0].ok).toBe(true)
+    expect(await files(resolve(relay, builds.sign(builds.BUILDS_MEANING)))).toContain(first.sig)
+    await stage(undefined, 'b')
+    const second = await builds.promote('host', { now: DAY, sign: false })
+    expect(second.synced[0].ok).toBe(true)
+    expect((await builds.readSubscriptions())[0].synced).toBe(second.sig)
+    expect(await files(resolve(relay, builds.sign(builds.BUILDS_MEANING)))).toContain(second.sig)
+  })
+})
+
+describe('version pool', () => {
   it('writes any revision back out exactly, and takes it into another pool', async () => {
     const first = await record(undefined, 'a')
     await record(undefined, 'b')
@@ -78,7 +165,7 @@ describe('participant signatures', () => {
   it('lets a witness sign only a build reproduced here', async () => {
     const first = await record(undefined, 'a')
     await expect(builds.signRevision(first.sig, 'witness')).rejects.toThrow(/reproduces/)
-    await record('rebuilt', 'a')
+    await stage('rebuilt', 'a')
     const signed = await builds.signRevision(first.sig, 'witness')
     const found = await builds.signaturesOf(first.sig, first.record.version)
     expect(found).toEqual([{ role: 'witness', pubkey: signed.pubkey, ok: true }])
@@ -149,7 +236,7 @@ describe('pools on hosts', () => {
     const first = await record(undefined, 'a')
     await builds.signRevision(first.sig, 'author')
     const builtPool = builds.sign(builds.BUILDS_MEANING)
-    const held = (await readdir(builds.poolDir(builds.BUILDS_MEANING))).filter((n: string) => /^[a-f0-9]{64}$/.test(n))
+    const held = [...(await builds.published())[builds.BUILDS_MEANING]]
     const [atom] = first.record.atoms
     const listed = held.find((n: string) => n !== atom)!
     const cdn = async (url: string) => url.endsWith(`/${builtPool}/`) ? new Response(listed + '\n') : new Response('', { status: 404 })

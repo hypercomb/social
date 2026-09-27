@@ -109,28 +109,48 @@ the minimal host is worse. On 2026-09-26, package `dfdf6eca9eab`, warm boots:
 signed file does not hash to its name, a signed file is neither known to the
 kernel nor part of the host package, or the host bundle carries the console.
 
-Every pure build is a **revision**, kept in the version pool
-(`host/builds.mjs`): the `sign('host:builds')` pool under `~/.hypercomb/`
-(override with `HYPERCOMB_POOLS_DIR`). A revision is a signed record
-`{ name: 'build', label, version, parent, install, host, library, hostPackage, atoms, source }`.
+**Work is told as stories** (`host/builds.mjs`), kept in the
+`sign('host:builds')` pool under `~/.hypercomb/` (override with
+`HYPERCOMB_POOLS_DIR`). A story is a named layer of work with a description,
+told within a larger story, so each layer holds its part of the bigger
+picture: `{ name: 'story', label, description, within, at }`. A retelling is a
+new record; the newest is the story.
+
+A story's **revisions** are signed records
+`{ name: 'build', label, version, parent, install, host, library, hostPackage, atoms, source, conversations? }`.
 `install` and `source` are layers naming, by path and signature, every file of
 the origin and every source file the build read; `atoms` are its signed files.
 All of it is kept in the pool, so any revision can be written out and
-published again, exactly. The version is year.month.day.n (UTC), n counting
-the revisions the pool holds for that day. The label is the revision's name,
-as for packages ([publishing a revision](../documentation/publishing-a-revision.md)):
-`--name beta` builds under "beta", a new name starts a new heading, and
-unnamed means `host`. The origin names its revision in `/build`, as `/pin`
-names the host bundle, and `check-pure` fails unless the revision names
-exactly the files the origin holds.
+published again, exactly.
+
+**Stage, then promote.** A build stages: it replaces its story's one staged
+revision, local and unsigned, so work in progress never piles up in the
+lineage. `promote` is the one act that appends: the stage becomes the
+story's next version (year.month.day.n, UTC), chained to the last promoted
+build, signed by its author when a key is at hand, and carried to every
+subscribed host. What only a replaced stage named is collected; nothing
+promoted is ever removed, and staged work never leaves the device. The
+conversations that did the work ride with it: `attach` keeps a transcript in
+the pool and the promotion names it (attached files are published). The
+origin names its revision in `/build`, as `/pin` names the host bundle, and
+`check-pure` fails unless the revision names exactly the files the origin
+holds.
 
 ```bash
-node build.mjs --pure --name beta                  # a new revision under "beta"
-node host/builds.mjs                               # revisions by name, newest first
-node host/builds.mjs show 2026.9.26.2              # what it changed, who signed it
-node host/builds.mjs publish 2026.9.26.1 -- --project my-hive   # any revision, again
-node host/builds.mjs out 2026.9.26.1 /tmp/r1                    # or write it out
+node build.mjs --pure --story offline               # stage the build in "offline"
+node host/builds.mjs story offline "An installed hive starts offline" --within minimal-host
+node host/builds.mjs attach offline ~/chat.jsonl    # the conversation behind it
+node host/builds.mjs promote offline                # the next version, signed, synced
+node host/builds.mjs                                # stories, their stage and revisions
+node host/builds.mjs show 2026.9.27.1               # what it changed, who signed it
+node host/builds.mjs publish 2026.9.27.1 -- --project my-hive   # any revision, again
 ```
+
+**No change is lost.** `subscribe <dir|r2[:bucket]>` names a host that every
+promotion reaches by itself (the jwize.com relay's content directory, the R2
+bucket behind the worker). Each subscription remembers the head it last
+received; the listing warns when one is behind, and `sync` carries what did
+not arrive.
 
 `publish` writes the revision into a temporary directory with the version
 pools, runs `check-pure` on it and deploys that directory (`--azure` for Azure).

@@ -14,7 +14,7 @@
 //   node build.mjs --no-content    cold host; boots to 0 surfaces, correct
 //   node build.mjs --assets        + shared-public (substrate art, ~47 MB)
 //   node build.mjs --minify        production bytes (always on with --pure)
-//   node build.mjs --pure --name beta   a revision under the name "beta"
+//   node build.mjs --pure --story beta  stage the build in the story "beta"
 //                                  (default "host"; see host/builds.mjs)
 //
 // DEPLOY SAFETY: this script writes ONLY into hypercomb-shim/dist. It never
@@ -531,11 +531,11 @@ if (pure) {
   console.log(`[shim]   resolves host ${hostSig.slice(0, 12)}… (${(hostBytes.length / 1024).toFixed(0)} kB) · core library ${librarySig.slice(0, 12)}… (${(coreLibrary.length / 1024).toFixed(0)} kB)`)
   readFrom(kernel.metafile)
 
-  // THE VERSION POOL (host/builds.mjs). Every pure build is a revision: the
-  // origin as built — its install files, its signed atoms, and every source
-  // file it was built from — kept as a signed record chained to the last one,
-  // under the name given with --name. The origin names it in /build, as /pin
-  // names the host bundle.
+  // THE VERSION POOL (host/builds.mjs). Every pure build is STAGED in its
+  // story (--story, default "host"): the origin as built — its install files,
+  // its signed atoms, and every source file it was built from — replaces the
+  // story's staged revision; `builds.mjs promote` appends it to the lineage.
+  // The origin names its record in /build, as /pin names the host bundle.
   const repo = resolve(here, '..', '..')
   const source = new Map()
   for (const abs of sourceInputs) {
@@ -547,7 +547,7 @@ if (pure) {
   }
   const signed = []
   for (const name of await readdir(dist)) if (SIG_NAME.test(name)) signed.push(await readFile(resolve(dist, name)))
-  const nameAt = process.argv.indexOf('--name')
+  const nameAt = Math.max(process.argv.indexOf('--story'), process.argv.indexOf('--name'))
   const made = await recordBuild({
     label: nameAt >= 0 ? process.argv[nameAt + 1] : undefined,
     install: await installFilesOf(dist), source, signed,
@@ -555,7 +555,7 @@ if (pure) {
   })
   await writeFile(resolve(dist, made.sig), made.bytes)
   await writeFile(resolve(dist, 'build'), made.sig + '\n', 'utf8')
-  console.log(`[shim] revision ${made.record.label} ${made.record.version} ${made.sig.slice(0, 12)}…${made.unchanged ? ' (no change)' : ''} · ${source.size} source files · node host/builds.mjs`)
+  console.log(`[shim] staged ${made.record.label} ${made.sig.slice(0, 12)}…${made.unchanged ? ' (no change from the last promotion)' : ''} · ${source.size} source files · promote: node host/builds.mjs promote ${made.record.label}`)
 }
 console.log(
   `[shim] origin ${mib(await dirBytes(dist))} total` +
