@@ -544,7 +544,24 @@ export class JevGone extends Error {
 export const HELD_DO_NOTE = `Your ${DO_FENCE_LANG} block was not run: the same reply also asked to read. Read first; propose changes in a later reply.`
 
 export const lastRoundMessage = (request: string): string =>
-  `This stretch of context is full. Answer now in prose: say what you did, what you found, and what is still left. If the request is not finished, end with a \`${CONTINUE_FENCE_LANG}\` block holding one line — what is left — and the work continues in a fresh stretch. If it is finished, no block.${carry(request)}`
+  `This stretch of context is full. Answer now in prose: say what you did, what you found, and what is still left. If the request is not finished, end your reply with exactly this block, its one line saying what is left:\n\n\`\`\`${CONTINUE_FENCE_LANG}\nwhat is left, in one line\n\`\`\`\n\nThe work then continues in a fresh stretch with a fresh read budget. If the request is finished, no block.${carry(request)}`
+
+/** THE HANDOVER SAID IN PROSE. A model that ends a full stretch with "what
+ *  is still left: …" or "next step: …" and no fence has handed over all the
+ *  same; this reads that line so the next leg starts. Conservative: only a
+ *  paragraph that opens with one of the handover phrasings counts, and only
+ *  at a stretch's end (the caller checks that). */
+export const leftFromProse = (prose: string): string | undefined => {
+  const paragraphs = String(prose ?? '').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean)
+  const opener = /^(?:\*\*)?(?:what(?:'s| is) (?:still )?left|still left|left to do|remaining|next steps?|what i haven'?t (?:found|done)(?: yet)?|not (?:yet )?done)(?:\*\*)?\s*[:.—-]?\s*/i
+  for (const paragraph of paragraphs) {
+    const match = opener.exec(paragraph)
+    if (!match) continue
+    const rest = paragraph.slice(match[0].length).replace(/\s+/g, ' ').trim()
+    if (rest.length >= 12) return rest.slice(0, 300)
+  }
+  return undefined
+}
 
 /** The next leg's opening word, as the participant's turn. Honest in the
  *  transcript: it reads as what it is, the work continuing. */
