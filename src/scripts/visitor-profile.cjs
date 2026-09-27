@@ -68,6 +68,15 @@ const rate = Number(process.argv[3] || 1)
       console.log(`${String(Math.round(r.start)).padStart(6)}→${String(Math.round(r.end)).padStart(6)}  ${String(r.size).padStart(7)}  ${new URL(r.url).pathname.slice(1)}`)
     }
   }
+  // SCRIPTS=1 prints every module script, in start order: a staggered start
+  // means the import graph is waiting on itself; a single wave means the time
+  // is evaluation.
+  if (process.env.SCRIPTS) {
+    console.log('\n--- SCRIPT TIMELINE ---')
+    for (const r of before.filter(r => (r.dest || r.type) === 'script').sort((a, b) => a.start - b.start)) {
+      console.log(`${String(Math.round(r.start)).padStart(6)}→${String(Math.round(r.end)).padStart(6)}  ${String(r.size).padStart(7)}  ${new URL(r.url).pathname.slice(1, 60)}`)
+    }
+  }
   const big = [...before].sort((a, b) => b.size - a.size).slice(0, 6)
   console.log('\n--- biggest ---')
   for (const r of big) console.log(`${(r.size / 1024).toFixed(0).padStart(7)} KB  ${String(Math.round(r.end)).padStart(6)} ms  ${r.url.slice(0, 110)}`)
