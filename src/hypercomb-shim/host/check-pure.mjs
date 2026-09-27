@@ -50,12 +50,37 @@ if (known.length !== 2) throw new Error(`pure host: the kernel should know the h
 const hostBundle = await readFile(resolve(dist, pin), 'utf8')
 const hostRoot = signed.find(sig => !known.includes(sig) && hostBundle.includes(sig))
 if (!hostRoot) throw new Error('pure host: the host bundle names no host package')
-const rootLayer = JSON.parse(await readFile(resolve(dist, hostRoot), 'utf8'))
-const closure = new Set([hostRoot, ...(rootLayer.bees ?? []), ...(rootLayer.bootBees ?? [])])
-for (const tile of rootLayer.cells ?? []) {
-  closure.add(tile)
-  for (const bee of JSON.parse(await readFile(resolve(dist, tile), 'utf8')).bees ?? []) closure.add(bee)
+// The host package's closure: its root, everything its records name, and the
+// landing spots' pools (src/spots.ts) with everything their members name. A
+// record is JSON; every signature it names must be a file here.
+const closure = new Set([hostRoot])
+const queue = [hostRoot]
+const follow = async sig => {
+  let text
+  try { text = await readFile(resolve(dist, sig), 'utf8'); JSON.parse(text) } catch { return }
+  for (const named of text.match(/[a-f0-9]{64}/g) ?? []) {
+    if (closure.has(named)) continue
+    if (!signed.includes(named)) throw new Error(`pure host: ${sig.slice(0, 12)} names ${named.slice(0, 12)}, which is not here`)
+    closure.add(named); queue.push(named)
+  }
 }
+const poolDirs = (await readdir(dist, { withFileTypes: true }))
+  .filter(e => e.isDirectory() && /^[a-f0-9]{64}$/.test(e.name) && e.name !== sign(BUILDS_MEANING) && e.name !== sign(SIGNATURES_MEANING))
+for (const dir of poolDirs) {
+  const listing = (await readFile(resolve(dist, dir.name, 'index.html'), 'utf8').catch(() => '')).split('\n').filter(Boolean)
+  for (const member of await readdir(resolve(dist, dir.name))) {
+    if (member === 'index.html') continue
+    const bytes = await readFile(resolve(dist, dir.name, member))
+    if (!/^[a-f0-9]{64}$/.test(member) || sign(bytes) !== member) throw new Error(`pure host: pool ${dir.name.slice(0, 12)} holds ${member.slice(0, 12)}, which does not hash to its name`)
+    if (!listing.includes(member)) throw new Error(`pure host: pool ${dir.name.slice(0, 12)} does not list ${member.slice(0, 12)}`)
+    for (const named of bytes.toString('utf8').match(/[a-f0-9]{64}/g) ?? []) {
+      if (closure.has(named)) continue
+      if (!signed.includes(named)) throw new Error(`pure host: pool member ${member.slice(0, 12)} names ${named.slice(0, 12)}, which is not here`)
+      closure.add(named); queue.push(named)
+    }
+  }
+}
+while (queue.length) await follow(queue.shift())
 // THE BUILD RECORD (host/builds.mjs) names this origin exactly: the host
 // bundle, the core library, the host package, and the install layer — every
 // other file here, by path and signature.

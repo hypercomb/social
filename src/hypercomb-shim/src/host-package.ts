@@ -23,7 +23,7 @@ type HostPackageStore = {
   writeBeeBytes(sig: string, bytes: Uint8Array): Promise<void>
 }
 
-type Layer = { cells?: unknown; bees?: unknown; bootBees?: unknown }
+type Layer = { cells?: unknown; bees?: unknown; bootBees?: unknown; meta?: unknown }
 
 const SIG = /^[a-f0-9]{64}$/
 const sigsOf = (value: unknown): string[] =>
@@ -59,6 +59,9 @@ export const holdHostPackage = async (root: string): Promise<boolean> => {
   const bees = new Set([...sigsOf(top.bees), ...sigsOf(top.bootBees)])
   for (const tile of await Promise.all(sigsOf(top.cells).map(layer))) {
     if (!tile) return false
+    // A cell that is a meta envelope names a landing spot; its beehaviors
+    // come from the spot's pool (spots.ts), not from the cell.
+    if ((tile as { meta?: unknown }).meta === 1) continue
     for (const sig of sigsOf(tile.bees)) bees.add(sig)
   }
   return (await Promise.all([...bees].map(bee))).every(Boolean)

@@ -91,6 +91,21 @@ themselves; everything else is resolved.
   host package is never "the installed package": it runs beside whatever a
   person installs. Its bee installs through the host's one installer, offered
   under `@hypercomb.social/HostAcquire`, so there is never a second one.
+- **The app's landing spots** (`src/spots.ts`), on the living primitive
+  ([life-primitive.md](../documentation/life-primitive.md)). The host root
+  names its spots as cells, meta envelopes `{ meta: 1, layer: { name }, root }`.
+  A spot's beehaviors are the members of the pool of meaning
+  `<spot>:beehaviors`, each `{ meta: 1, layer: <behaviour>, relation:
+  'beehavior' }`; a behaviour carries what it needs, its bee and its source
+  as children (`{ name, bee: M(bee), children: [M(layer → { name: <path>,
+  content: M(resource) })] }`), so the hive can be drilled from a spot down to
+  the code (`@hypercomb.social/Spots`: `spots()`, `source(spot, behaviour)`).
+  The first spot is `lineage`: the lineage, navigation and movement, three
+  pure behaviours built from `hypercomb-shared/core`. Tile rendering reads
+  the layer you stand in through them, so before this spot the pure host
+  drew no tile at all. Spots resolve beside the package's dependencies and
+  boot bees, and are held before the runtime starts; warm boots are
+  unchanged (12 alternating: first frame 557 vs 554 ms, console 159 vs 150 ms).
 
 **The porting gate.** Moving code from the Angular build here must not cost
 performance. `node scripts/bench-minimal-host.mjs --pure <url> --web <url>

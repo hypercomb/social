@@ -396,9 +396,69 @@ if (pure) {
   if (stateful.length) throw new Error('[shim] the host console bee carries a stateful runtime module: ' + stateful.join(', '))
   const beeBytes = Buffer.from(consoleBee.outputFiles[0].contents)
   const beeSig = sha(beeBytes)
+  // THE SPOTS (src/spots.ts), on the living primitive (life-primitive.md).
+  // The app layer names its landing spots; a spot's beehaviors are the
+  // members of the pool of meaning `<spot>:beehaviors`, each an incidence
+  // { meta: 1, layer: <behaviour>, relation: 'beehavior', root: <spot> }. A
+  // behaviour is a node carrying what it needs: its bee, and its source as
+  // children, so the hive can be drilled from a spot down to the code.
+  //   behaviour { name, bee: M(bee), children: [M(layer → source file node)] }
+  //   source    { name: <repo path>, content: M(resource) }
+  // Every record here is signature-named; M(x) is a meta envelope's signature.
+  const repoRoot = resolve(here, '..', '..')
+  const keep = async bytes => { const sig = sha(bytes); await writeFile(resolve(dist, sig), bytes); return sig }
+  const record = value => keep(Buffer.from(JSON.stringify(value)))
+  const meta = payload => record({ meta: 1, ...payload })
+  const SPOTS = [
+    // WHERE YOU ARE — the lineage (the layer you stand in), navigation (the
+    // URL and moving through the hive) and movement. Tiles are drawn from the
+    // current layer, so without this spot a pure host shows none.
+    { name: 'lineage', behaviours: [
+      ['navigation', 'hypercomb-shared/core/navigation.ts'],
+      ['movement', 'hypercomb-shared/core/movement.service.ts'],
+      ['lineage', 'hypercomb-shared/core/lineage.ts'],
+    ] },
+  ]
+  const spotCells = []
+  for (const spot of SPOTS) {
+    const members = []
+    for (const [name, entry] of spot.behaviours) {
+      const built = await build({
+        entryPoints: [resolve(here, '..', entry)],
+        bundle: true, format: 'esm', platform: 'browser', target: ['es2022'],
+        tsconfig: resolve(here, 'tsconfig.json'), minify: true, write: false, metafile: true,
+        outfile: `${name}.js`, logLevel: 'warning', external: ['@hypercomb/core'],
+      })
+      readFrom(built.metafile)
+      // PURE AND ENCAPSULATED: a behaviour carries exactly what it needs, and
+      // never a copy of a stateful runtime service or a framework.
+      const inputs = Object.keys(built.metafile.inputs).map(p => resolve(p))
+      const foreign = inputs.filter(p => /node_modules[\\/]@angular|hypercomb-runtime[\\/]src[\\/](acquire|store|script-preloader|dependency-loader|host-packages)\.ts$/.test(p))
+      if (foreign.length) throw new Error(`[shim] spot ${spot.name}: behaviour ${name} carries ${foreign.join(', ')}`)
+      const children = []
+      for (const input of inputs.filter(p => !p.includes('node_modules'))) {
+        const path = relative(repoRoot, input).split(sep).join('/')
+        const node = await record({ name: path, content: await meta({ resource: await keep(await readFile(input)), relation: 'content' }) })
+        children.push(await meta({ layer: node, relation: 'children' }))
+      }
+      const behaviour = await record({ name, bee: await meta({ bee: await keep(Buffer.from(built.outputFiles[0].contents)), relation: 'bee' }), children })
+      members.push(Buffer.from(JSON.stringify({ meta: 1, layer: behaviour, relation: 'beehavior', root: spot.name })))
+    }
+    // The pool, as a host serves any pool: `/<sign(meaning)>/` lists its
+    // members, `/<sign(meaning)>/<sig>` is one.
+    const pool = resolve(dist, sha(Buffer.from(`${spot.name}:beehaviors`)))
+    await mkdir(pool, { recursive: true })
+    const names = []
+    for (const member of members) { const sig = sha(member); names.push(sig); await writeFile(resolve(pool, sig), member) }
+    await writeFile(resolve(pool, 'index.html'), names.sort().join('\n'), 'utf8')
+    spotCells.push(await meta({ layer: await record({ name: spot.name }), relation: 'cells', root: spot.name }))
+    console.log(`[shim] spot ${spot.name} · ${members.length} beehavior(s) in ${spot.name}:beehaviors`)
+  }
+
   // THE HOST IS THE ROOT of wherever you stand, so its beehaviors belong to
-  // the root layer itself: it carries the console bee, and names it a boot bee.
-  const root = Buffer.from(JSON.stringify({ name: 'root', cells: [], bees: [beeSig], dependencies: [], bootBees: [beeSig] }))
+  // the root layer itself: it carries the console bee, names it a boot bee,
+  // and names the app's landing spots as its cells.
+  const root = Buffer.from(JSON.stringify({ name: 'root', cells: spotCells, bees: [beeSig], dependencies: [], bootBees: [beeSig] }))
   hostPackageRoot = sha(root)
   for (const [sig, bytes] of [[beeSig, beeBytes], [hostPackageRoot, root]]) {
     await writeFile(resolve(dist, sig), bytes)
@@ -546,7 +606,7 @@ if (pure) {
     if (bytes) source.set(at >= 0 ? path.slice(at + 1) : relative(repo, abs).split(sep).join('/'), bytes)
   }
   const signed = []
-  for (const name of await readdir(dist)) if (SIG_NAME.test(name)) signed.push(await readFile(resolve(dist, name)))
+  for (const entry of await readdir(dist, { withFileTypes: true })) if (entry.isFile() && SIG_NAME.test(entry.name)) signed.push(await readFile(resolve(dist, entry.name)))
   const nameAt = Math.max(process.argv.indexOf('--story'), process.argv.indexOf('--name'))
   const made = await recordBuild({
     label: nameAt >= 0 ? process.argv[nameAt + 1] : undefined,

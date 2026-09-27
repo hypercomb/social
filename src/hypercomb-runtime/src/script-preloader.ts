@@ -186,6 +186,17 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     console.log(`[script-preloader] boot lane: ${sigs.length - failed} of ${sigs.length} boot bees loaded`)
   }
 
+  /** Load bees that belong BESIDE the installed package — a spot's
+   *  beehaviors (hypercomb-shim/src/spots.ts). Like a beside boot lane, the
+   *  installed manifest never evicts them. */
+  public loadBeside = async (sigs: readonly string[]): Promise<number> => {
+    const clean = sigs.map(sig => this.#stripExt(String(sig ?? '')).toLowerCase()).filter(sig => /^[a-f0-9]{64}$/.test(sig))
+    const results = await Promise.allSettled(clean.map(sig => this.#loadBeeBySignature(sig)))
+    let loaded = 0
+    results.forEach((r, i) => { if (r.status === 'fulfilled' && r.value) { this.#beside.add(clean[i]!); loaded++ } })
+    return loaded
+  }
+
   public find = async (_grammar: string): Promise<Bee[]> => {
     if (this.#registeredBees) {
       if (!ScriptPreloader.#firstFindMarked) {

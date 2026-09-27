@@ -124,6 +124,7 @@ import { loadBootstrap, type BootstrapHandle } from './bootstrap-loader'
 // the build bakes in (host-package.ts). Elsewhere the loader above fetches the
 // console bundle by its pin.
 import { holdHostPackage } from './host-package'
+import { holdSpots, registerSpots } from './spots'
 import { HOST_ACQUIRE_KEY, HOST_CONSOLE_KEY } from './bootstrap/ports'
 import { acquire as hostAcquire, installPackage as hostInstallPackage } from '@hypercomb/runtime/acquire'
 import { askHostPackages as hostAskPackages } from '@hypercomb/runtime/host-packages'
@@ -254,6 +255,18 @@ const renderBootFailure = (error: unknown): void => {
 
 /** The host package's console: hold the package, run its boot bees, and take
  *  the console its bee registers. Null when it cannot be held or did not run. */
+/** THE APP'S LANDING SPOTS (spots.ts): each spot's beehaviors, from its pool
+ *  of meaning, run beside whatever package is installed. */
+const loadSpots = async (root: string): Promise<void> => {
+  const spots = await holdSpots(root)
+  const bees = spots.flatMap(spot => spot.behaviours.map(b => b.bee))
+  if (bees.length) {
+    const loaded = await window.ioc?.get<{ loadBeside?: (sigs: readonly string[]) => Promise<number> }>('@hypercomb.social/ScriptPreloader')?.loadBeside?.(bees) ?? 0
+    ;(window as any).__hcBoot?.(`spots ${spots.map(s => `${s.name}(${s.behaviours.length})`).join(' ')} — ${loaded} beehavior(s) loaded`)
+  }
+  registerSpots(spots)
+}
+
 const hostConsole = async (): Promise<BootstrapHandle | null> => {
   const root = typeof __HC_HOST_PACKAGE__ === 'string' ? __HC_HOST_PACKAGE__ : ''
   if (!await holdHostPackage(root)) {
@@ -314,6 +327,11 @@ const boot = async (): Promise<void> => {
   }
   acquisition.prompt()
   ;(window as any).__hcBoot('host console shown before package loading')
+  // The spots resolve beside the package's dependencies and boot bees; the
+  // runtime below is the first to read what they register (the lineage).
+  const spotsReady = typeof __HC_KERNEL__ === 'boolean' && __HC_KERNEL__
+    ? loadSpots(acquisition.pin).catch(error => console.error('[shim] the landing spots could not be held', error))
+    : Promise.resolve()
 
   // Dependency namespaces self-register their services before anything asks
   // for them.
@@ -326,6 +344,7 @@ const boot = async (): Promise<void> => {
   await window.ioc?.get<{ loadBootBees?: () => Promise<void> }>('@hypercomb.social/ScriptPreloader')?.loadBootBees?.()
   ;(window as any).__hcBoot('boot bees loaded')
 
+  await spotsReady
   // i18n catalogs, layer materialization, host resolution.
   await initializeRuntime({ logOpfs: false, catalogs: signatureCatalogs })
   ;(window as any).__hcBoot('initializeRuntime done')

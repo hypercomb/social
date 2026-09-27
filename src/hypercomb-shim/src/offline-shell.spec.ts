@@ -1,3 +1,4 @@
+/// <reference types="node" />
 // @vitest-environment node
 //
 // offline-shell.spec.ts — THE SHELL, FOR OFFLINE. The shim's worker answers

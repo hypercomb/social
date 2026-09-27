@@ -390,7 +390,9 @@ export const installFilesOf = async dist => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const path = resolve(dir, entry.name)
       const rel = relative(dist, path).split(sep).join('/')
-      if (dir === dist && (SIG.test(entry.name) || skip.has(entry.name) || entry.name === 'build')) continue
+      // Signed files are atoms, and the version pools travel on their own; a
+      // spot's pool of meaning (a signature-named directory) is part of the origin.
+      if (dir === dist && ((SIG.test(entry.name) && !entry.isDirectory()) || skip.has(entry.name) || entry.name === 'build')) continue
       if (entry.isDirectory()) await walk(path)
       else files.set(rel, await readFile(path))
     }
