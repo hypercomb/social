@@ -13,11 +13,14 @@ export type MessageEffort = 'fast' | 'balanced' | 'deep'
 const DEEP_WORDS = /\b(plan|design|architect\w*|refactor\w*|restructur\w*|reorgani[sz]\w*|organi[sz]e|analy[sz]\w*|compare|research|investigat\w*|audit|migrat\w*|break (?:it |this |them )?apart|step by step|strategy)\b/i
 /** Words that mean changing something in the hive. */
 const CHANGE_WORDS = /\b(create|add|make|move|rename|remove|delete|tag|note|update|change|fix|build|write|put|link|group)\b/i
+/** Words that mean working on code: reading it, finding why it fails,
+ *  changing it. That is the strongest model's work, never the lightest's. */
+const CODE_WORDS = /\b(code|coding|module|modules|bug|bugs|debug\w*|diagnos\w*|broken|crash\w*|exception|stack ?trace|regression|preload\w*|agentic)\b/i
 
 export const effortFor = (message: string): MessageEffort => {
   const text = String(message ?? '').trim()
   const lines = text.split('\n').filter(line => line.trim()).length
-  if (text.length >= 600 || lines >= 3 || DEEP_WORDS.test(text)) return 'deep'
+  if (text.length >= 600 || lines >= 3 || DEEP_WORDS.test(text) || CODE_WORDS.test(text)) return 'deep'
   if (text.length <= 160 && !CHANGE_WORDS.test(text)) return 'fast'
   return 'balanced'
 }
@@ -40,6 +43,14 @@ export const effortInThread = (message: string, previous: MessageEffort | undefi
   if (!previous || text.length > 160 || !FOLLOW_UP.test(text)) return own
   return RANK[previous] > RANK[own] ? previous : own
 }
+
+/**
+ * CODE WORK IS DEEP WORK. Once a conversation has read the hive's code,
+ * "okay find it" or "read what you need and do the work" is the same job
+ * going on, not a lighter question — every message in it goes to the
+ * strongest model, whatever the words or Jev's weight say.
+ */
+export const effortForWork = (tier: MessageEffort, codeWork: boolean): MessageEffort => codeWork ? 'deep' : tier
 
 /**
  * THE WEIGHT JEV READ (essentials jev-front.ts). When Jev is on, it weighs the

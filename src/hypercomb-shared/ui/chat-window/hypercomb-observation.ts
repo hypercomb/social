@@ -10,6 +10,10 @@
 
 /** Reads per request — also what the work fence teaches a model. */
 export const MAX_OBSERVATIONS = 2
+/** The most one read may return: a whole source file of a module at once
+ *  (the reader's own page limit). The shell asks for less when the model's
+ *  window has less room. */
+export const READ_PAGE_CHARS = 48_000
 const MAX_GRAMMAR_LENGTH = 1_000
 const MAX_PATH_SEGMENTS = 32
 const MAX_SEGMENT_LENGTH = 256
@@ -27,6 +31,10 @@ const SIG = /^[0-9a-f]{64}$/
 const MAX_QUERY_LENGTH = 64
 /** Modules and dependencies named per `/code` answer; `total` says how many matched. */
 const CODE_ENTRIES = 60
+/** Lines of code one search returns — what a model can scan in one look. */
+export const CODE_HITS = 40
+/** Findings of one search kept as known signatures for the conversation. */
+const CODE_KEPT = 12
 /** A structural ceiling on `projection`, independent of the caller's byte
  *  budget — matches the cap the writer enforces (assistant/llm-context.ts),
  *  with slack for a record minted by an older build. */
@@ -81,7 +89,20 @@ export type HypercombBytesRead =
   }
   | { readonly ok: false; readonly root: string; readonly code: string }
 
-/** `/code`: the modules and dependencies running in this hive, by name. */
+/** One line of running code that holds what was searched for: the module
+ *  by signature, the source section it sits in, and `at` — where
+ *  `/read <sig> <section> <at>` opens that section at the line (or, with no
+ *  section, where `/read <sig> <at>` opens the module). */
+export type HypercombCodeHit = {
+  readonly sig: string
+  readonly name: string
+  readonly section?: string
+  readonly at: number
+  readonly text: string
+}
+
+/** `/code`: the modules and dependencies running in this hive, by name —
+ *  and, asked with a word, every line of their code that holds it. */
 export type HypercombCodeRead =
   | {
     readonly ok: true
@@ -90,6 +111,7 @@ export type HypercombCodeRead =
     readonly entries: readonly { readonly name: string; readonly sig: string; readonly of: 'bee' | 'dependency' }[]
     readonly total: number
     readonly truncated: boolean
+    readonly hits?: readonly HypercombCodeHit[]
   }
   | { readonly ok: false; readonly root: string; readonly code: string }
 
@@ -121,6 +143,9 @@ export type HypercombNodeRead =
     /** Children the layer declares whose layers are not on this device —
      *  listed by signature rather than failing the whole read. */
     readonly unresolved?: readonly string[]
+    /** `/read` of a tile by route: the running code that names the tile — a
+     *  behaviour keyed to it — so the code behind a tile is one read away. */
+    readonly code?: readonly HypercombCodeHit[]
     /** Absent on a sig-addressed read: a layer by sig has no live head to
      *  revalidate — it is immutable content, which is the whole point. */
     readonly snapshot?: string
@@ -224,11 +249,17 @@ export type HypercombTreeReader = {
     readonly section?: string
     readonly signal?: AbortSignal
   }): Promise<HypercombBytesRead>
-  /** `/code` and `/code <word>` — the running code by name. */
+  /** `/code` and `/code <word>` — the running code by name, and the lines
+   *  of it that hold the word. */
   listCode?(query: string, options: {
     readonly maxEntries: number
     readonly signal?: AbortSignal
   }): Promise<HypercombCodeRead>
+  /** The lines of running code that name this tile as a quoted string —
+   *  empty when none do, or when the name is too common to point anywhere. */
+  codeNaming?(name: string, options: {
+    readonly signal?: AbortSignal
+  }): Promise<readonly HypercombCodeHit[]>
 }
 
 export type HypercombObservationReceipt = {
@@ -373,6 +404,15 @@ const safeRead = (
  *  for this layer) answers exactly as it always did. When it yields text,
  *  `content` is dropped in favour of `projection` — that omission is the
  *  saving the whole cache exists for — while `truncated` is kept. */
+/** THE CODE BEHIND A TILE. A behaviour keyed to a tile names it in its code,
+ *  so a `/read` by route carries the lines that do — optional, like the
+ *  projection: a reader that cannot search answers as it always did. */
+const withCodeNaming = async (read: HypercombNodeRead, reader: HypercombTreeReader, signal?: AbortSignal): Promise<HypercombNodeRead> => {
+  if (!read.ok || !reader.codeNaming) return read
+  const hits = safeHits(await reader.codeNaming(read.name, { signal }).catch(() => []))
+  return hits.length ? { ...read, code: hits } : read
+}
+
 const withProjection = async (read: HypercombNodeRead): Promise<HypercombNodeRead> => {
   if (!read.ok) return read
   const service = ioc<{ project?: (layerSig: string) => Promise<{ readonly text: string } | null> }>(
@@ -397,7 +437,7 @@ export const executeHypercombObservationPlan = async (
 ): Promise<HypercombObservationReceipt> => {
   const maxDepth = Math.max(0, Math.min(3, Math.floor(options.maxDepth ?? 2)))
   const maxNodes = Math.max(1, Math.min(64, Math.floor(options.maxNodes ?? 48)))
-  const maxBytes = Math.max(1_024, Math.min(12_000, Math.floor(options.maxBytes ?? 8_000)))
+  const maxBytes = Math.max(1_024, Math.min(READ_PAGE_CHARS, Math.floor(options.maxBytes ?? 8_000)))
   const results: Array<{ grammar: string } & HypercombRead> = []
   const snapshots: string[] = []
 
@@ -457,7 +497,7 @@ export const executeHypercombObservationPlan = async (
       const read = safeNode(await reader.readNode(segments, {
         maxBytes, withContent: verb === 'read', signal: options.signal,
       }), root, maxNodes)
-      results.push({ grammar, kind: 'node', read: verb === 'read' ? await withProjection(read) : read })
+      results.push({ grammar, kind: 'node', read: verb === 'read' ? await withCodeNaming(await withProjection(read), reader, options.signal) : read })
       if (read.ok && read.snapshot) snapshots.push(read.snapshot)
     }
   }
@@ -466,6 +506,16 @@ export const executeHypercombObservationPlan = async (
     if (result.kind === 'node' && result.read.ok) signatures.push({ grammar: result.grammar, sig: result.read.layerSig })
     else if (result.kind === 'summary' && result.read.ok) signatures.push({ grammar: result.grammar, sig: result.read.layerSig })
     else if (result.kind === 'bytes' && result.read.ok) signatures.push({ grammar: result.grammar, sig: result.read.sig })
+    // WHAT A SEARCH FOUND IS KEPT BY NAME, so the module it pointed at opens
+    // again by signature later in the conversation without searching again.
+    // An unfiltered listing is an inventory, not a finding: it is not kept.
+    else if (result.kind === 'code' && result.read.ok && result.read.query) {
+      for (const entry of result.read.entries.slice(0, CODE_KEPT)) signatures.push({ grammar: `code ${entry.name}`, sig: entry.sig })
+      for (const hit of (result.read.hits ?? []).slice(0, CODE_KEPT)) signatures.push({ grammar: `code ${hit.section ?? hit.name}`, sig: hit.sig })
+    }
+    if (result.kind === 'node' && result.read.ok) {
+      for (const hit of (result.read.code ?? []).slice(0, CODE_KEPT)) signatures.push({ grammar: `code ${hit.section ?? hit.name}`, sig: hit.sig })
+    }
   }
   return { results, snapshots, signatures }
 }
@@ -538,7 +588,20 @@ const safeCode = (read: HypercombCodeRead, expectedRoot: string, maxEntries: num
     }
     return { name: entry.name, sig: entry.sig, of: entry.of }
   })
-  return { ok: true, root: expectedRoot, query: read.query, entries, total: read.total, truncated: read.truncated === true }
+  const hits = safeHits(read.hits ?? [])
+  return { ok: true, root: expectedRoot, query: read.query, entries, total: read.total, truncated: read.truncated === true, ...(hits.length ? { hits } : {}) }
+}
+
+const safeHits = (hits: readonly HypercombCodeHit[]): HypercombCodeHit[] => {
+  if (!Array.isArray(hits) || hits.length > CODE_HITS) throw new HypercombObservationError('the hive reader returned malformed code hits')
+  return hits.map(hit => {
+    if (!SIG.test(hit?.sig) || !safeName(hit.name) || !hit.name || !Number.isInteger(hit.at) || hit.at < 0
+      || typeof hit.text !== 'string' || hit.text.length > 240 || CONTROL_CHARACTER.test(hit.text)
+      || (hit.section !== undefined && (typeof hit.section !== 'string' || hit.section.length > 200 || CONTROL_CHARACTER.test(hit.section)))) {
+      throw new HypercombObservationError('the hive reader returned a malformed code hit')
+    }
+    return { sig: hit.sig, name: hit.name, ...(hit.section !== undefined ? { section: hit.section } : {}), at: hit.at, text: hit.text }
+  })
 }
 
 const safeNode = (read: HypercombNodeRead, expectedRoot: string, maxChildren: number): HypercombNodeRead => {
@@ -577,6 +640,7 @@ const safeNode = (read: HypercombNodeRead, expectedRoot: string, maxChildren: nu
       ? { projection: read.projection, truncated: read.truncated === true }
       : read.content && typeof read.content === 'object' ? { content: read.content, truncated: read.truncated === true } : {}),
     ...(read.snapshot ? { snapshot: read.snapshot } : {}),
+    ...(read.code?.length ? { code: safeHits(read.code) } : {}),
   }
 }
 
@@ -655,7 +719,10 @@ export const formatHypercombObservationReceipt = (
     if (result.kind === 'code') {
       const listed = result.read
       return listed.ok
-        ? { grammar, root: listed.root, query: listed.query, code: listed.entries, total: listed.total, truncated: listed.truncated }
+        ? {
+          grammar, root: listed.root, query: listed.query, code: listed.entries, total: listed.total, truncated: listed.truncated,
+          ...(listed.hits?.length ? { hits: listed.hits, hitsNote: 'lines of code holding the word; read <sig> <section> <at> opens the section at that line' } : {}),
+        }
         : { grammar, root: read.root, error: listed.code }
     }
     const node = result.read
@@ -668,6 +735,9 @@ export const formatHypercombObservationReceipt = (
       ...(node.projection !== undefined
         ? { projection: node.projection, truncated: node.truncated === true }
         : node.content ? { content: node.content, truncated: node.truncated === true } : {}),
+      ...(node.code?.length
+        ? { code: node.code, codeNote: 'running code that names this tile; read <sig> <section> <at> opens it at that line' }
+        : {}),
     }
   }),
 })

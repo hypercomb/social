@@ -80,6 +80,14 @@ describe('the plan becomes one step', () => {
     const step = stepFor(decision({ kind: 'answer' }), prepared)
     expect(step.kind === 'answer' && step.reply).toContain('Answer the participant now in prose')
   })
+  it('holds a change the worker chose itself for review when Jev cannot clear it — never a menu', () => {
+    const own = prepareTable(tableFor({ kind: 'do', lines: ['create people'] }, true)!, census)
+    const step = stepFor(decision({ kind: 'participant', rows: ['action'] }), own)
+    expect(step).toMatchObject({ kind: 'do', grammars: ['/create people'], review: true })
+    expect(step.kind === 'do' && step.note).toContain('waits in Execution')
+    // a doctrine conflict still comes back to the worker refused
+    expect(stepFor({ ...decision({ kind: 'revise' }), reason: 'Conflict.' }, own)).toEqual({ kind: 'refuse', reason: 'Conflict.' })
+  })
   it('refuses when every change conflicts with doctrine', () => {
     expect(stepFor({ ...decision({ kind: 'revise' }), reason: 'Conflict.' }, prepared)).toEqual({ kind: 'refuse', reason: 'Conflict.' })
   })

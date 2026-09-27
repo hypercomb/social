@@ -249,3 +249,37 @@ jwize: "we should be able to use the API endpoint, create new files and run them
 - **Proven end to end (2026-09-22, `scripts/verify-hive-publish.cjs` 21/21, against `scripts/local-content-host.mjs` — the public content host's own worker code over in-memory storage).** Two fresh browsers on the web shell: a model writes a module section through the chat, Jev judges the write row, it runs through Execution, `module commit` uploads 3 files and moves the signed pointer, the publisher and a follower both run the model's code after a reload; then a unit turned off and committed again is gone from the follower's package while the host still holds every earlier file.
 
 **Owed — the atom is still the drone, not the file.** A bee bundles its whole relative import graph: the Solomon bee is 51k lines of which the game itself is 23k, the rest shared code (sharing, assistant providers, even the Arkanoid engine) inlined again per bee; one package's 128 bees are 8.7 MB. Only cross-namespace imports through `@hypercomb/essentials/<ns>` stay external as dependency bundles. A section write therefore rewrites a 2 MB atom to change one file. The honest shape is one sig-named module per source file, imported by alias through the import map, so a bee is a small entry naming its parts and shared code is stored once — then a write is a write of one file. Planned, not built.
+
+## Reading what the work needs, and finding code (2026-09-26)
+
+A pasted conversation showed the chat stopping halfway through one module:
+the 24 000-character allowance, six reads a message and 8 KB pages were
+written as privacy limits and had become work limits.
+
+- **The allowance is a privacy control.** A provider the participant
+  granted reads as much as the work needs; the request's token budget and
+  the leg fold (the long work) bound it. A number set in the providers
+  console is still a limit. A provider that asks read by read keeps the old
+  default of 24 000 characters and six reads.
+- **Pages fit the window.** A `read <sig>` page is up to 48 000 characters
+  (a whole source file), and the shell asks for less when the model's
+  window has less room left — half of what is free, shared by the block's
+  reads.
+- **`code <words>` searches inside the code.** Besides modules whose name
+  holds every word, it returns `hits`: every line of running code holding
+  the words, each with the module signature, its source `section` and `at`,
+  so `read <sig> <section> <at>` opens the file at that line. A file whose
+  own path holds the words comes first. Module text is read as bytes, never
+  imported, and kept by signature.
+- **The code behind a tile.** `read /path` carries `code`: the lines of
+  running code that name the tile as a quoted string
+  (`'solomon-maze-v1'` → `src/games/solomon/tile-surface.ts`). A name found
+  in more than eight places points nowhere and is left out.
+- **Findings persist.** What a search found is kept among the
+  conversation's known signatures (`code <name> → <sig>`) and stored on the
+  turn (`known`), so a later message — or a reload — opens it again by
+  signature instead of searching again.
+- **Code work is deep work.** A message about code, bugs or preloading is
+  routed at the deep tier, and once a conversation has read code every
+  message in it is — a short "okay find it" no longer drops the work to the
+  lightest model. A model named in the chat still wins.

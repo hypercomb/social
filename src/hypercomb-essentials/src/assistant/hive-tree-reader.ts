@@ -27,6 +27,9 @@ const UNSAFE_NAME = /[\\/\u0000-\u001f\u007f]/
 const MAX_DEPTH = 3
 const MAX_NODES = 64
 const MAX_BYTES = 12_000
+/** A page of a module or resource (`/read <sig>`): a whole file of code at
+ *  once where the model's window has room — the shell sizes each ask. */
+const MAX_PAGE_BYTES = 48_000
 const MAX_READ_MS = 5_000
 const SNAPSHOT_TTL_MS = 2 * 60_000
 const SNAPSHOT_LIMIT = 32
@@ -177,8 +180,26 @@ export type HypercombCodeRead =
     readonly entries: readonly { readonly name: string; readonly sig: string; readonly of: 'bee' | 'dependency' }[]
     readonly total: number
     readonly truncated: boolean
+    readonly hits?: readonly CodeHit[]
   }
   | { readonly ok: false; readonly root: string; readonly code: 'unavailable' }
+
+/** One line of running code holding a searched word — the shell's
+ *  `HypercombCodeHit`: `at` is where `/read <sig> <section> <at>` opens. */
+export type CodeHit = {
+  readonly sig: string
+  readonly name: string
+  readonly section?: string
+  readonly at: number
+  readonly text: string
+}
+type CodeEntry = { readonly name: string; readonly sig: string; readonly of: 'bee' | 'dependency' }
+
+/** Lines one search returns, and how many of them one module may hold. */
+const CODE_HITS = 40
+const CODE_HITS_PER_MODULE = 6
+/** A tile name found in more places than this names nothing in particular. */
+const CODE_NAMING_MAX = 8
 
 /** The whole of a Blob as bytes — `arrayBuffer` where the Blob has it, a
  *  FileReader where it does not. */
@@ -764,7 +785,7 @@ export class HypercombHiveTreeReader {
     const store = this.#store()
     if (!store?.getResource) return { ok: false, root, code: 'unavailable' }
     if (!SIG.test(sig)) return { ok: false, root, code: 'not-found' }
-    const maxBytes = Math.max(512, boundedInteger(options.maxBytes, 8_000, MAX_BYTES))
+    const maxBytes = Math.max(512, boundedInteger(options.maxBytes, 8_000, MAX_PAGE_BYTES))
     try {
       let of: 'bee' | 'dependency' | 'resource' = 'bee'
       let type = 'text/javascript'
@@ -828,6 +849,98 @@ export class HypercombHiveTreeReader {
   ): Promise<HypercombCodeRead> {
     const root = 'code'
     if (options.signal?.aborted) throw stopped()
+    const entries = await this.#codeEntries()
+    if (!entries.length) return { ok: false, root, code: 'unavailable' }
+
+    // EVERY WORD NAMES IT: `code solomon view` finds the module whose name
+    // holds both, whatever order the name has them in.
+    const needle = String(query ?? '').trim().toLowerCase()
+    const words = needle.split(/\s+/).filter(Boolean)
+    const matched = entries
+      .filter(entry => words.every(word => entry.name.toLowerCase().includes(word)))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    const limit = Math.max(1, boundedInteger(options.maxEntries, 60, MAX_CODE_ENTRIES))
+    // AND EVERY LINE THAT HOLDS IT. A behaviour is found by what it does or
+    // what it names — a tile, a function, a message — not only by what its
+    // module happens to be called. Section headers are lines too, so a
+    // source path finds the module that bundles it.
+    // A file whose own path holds the word comes first — that is the file
+    // asked for — ahead of every line that merely mentions it.
+    const files = needle ? await this.#searchCode(entries, line => line.startsWith('// src/') && line.includes(needle), CODE_HITS_PER_MODULE, options.signal) : []
+    const lines = needle ? await this.#searchCode(entries, line => line.includes(needle), CODE_HITS, options.signal) : []
+    const same = (a: CodeHit, b: CodeHit): boolean => a.sig === b.sig && a.section === b.section && a.at === b.at
+    const hits = [...files, ...lines.filter(hit => !files.some(file => same(file, hit)))].slice(0, CODE_HITS)
+    return {
+      ok: true, root, query: needle, entries: matched.slice(0, limit), total: matched.length, truncated: matched.length > limit,
+      ...(hits.length ? { hits } : {}),
+    }
+  }
+
+  /**
+   * THE CODE BEHIND A TILE — the lines of running code that name the tile as
+   * a quoted string (`'solomon-maze-v1'`), which is how a behaviour keyed to
+   * a tile says so. A name found in more than a handful of places points
+   * nowhere in particular, and says nothing.
+   */
+  async codeNaming(name: string, options: { readonly signal?: AbortSignal } = {}): Promise<readonly CodeHit[]> {
+    const needle = String(name ?? '').trim().toLowerCase()
+    if (needle.length < 3 || /['"`]/.test(needle)) return []
+    const quoted = [`'${needle}'`, `"${needle}"`, `\`${needle}\``]
+    const entries = await this.#codeEntries()
+    const hits = await this.#searchCode(entries, line => quoted.some(form => line.includes(form)), CODE_NAMING_MAX + 1, options.signal)
+    return hits.length > CODE_NAMING_MAX ? [] : hits
+  }
+
+  /** Lines, in module order, that pass `test` (given lower-cased), with the
+   *  section each sits in and where in that section it starts. */
+  async #searchCode(entries: readonly CodeEntry[], test: (line: string) => boolean, max: number, signal?: AbortSignal): Promise<CodeHit[]> {
+    const hits: CodeHit[] = []
+    for (const entry of entries) {
+      if (signal?.aborted) throw stopped()
+      const text = await this.#codeText(entry.sig)
+      if (!text) continue
+      const sections = sectionIndex(text)
+      let offset = 0
+      let at = -1
+      let taken = 0
+      for (const line of text.split('\n')) {
+        while (at + 1 < sections.length && sections[at + 1].from <= offset) at++
+        if (test(line.toLowerCase())) {
+          const section = at >= 0 ? sections[at] : undefined
+          hits.push({
+            sig: entry.sig, name: entry.name, ...(section ? { section: section.path } : {}),
+            at: offset - (section?.from ?? 0), text: line.replace(CONTROL, ' ').trim().slice(0, 200),
+          })
+          if (++taken >= CODE_HITS_PER_MODULE || hits.length >= max) break
+        }
+        offset += line.length + 1
+      }
+      if (hits.length >= max) break
+    }
+    return hits
+  }
+
+  /** A module's text by signature, read once: immutable, so kept. Code only —
+   *  a resource is never searched. Read as bytes, never imported. */
+  readonly #codeTexts = new Map<string, Promise<string | undefined>>()
+  #codeText(sig: string): Promise<string | undefined> {
+    const hit = this.#codeTexts.get(sig)
+    if (hit) return hit
+    const read = (async (): Promise<string | undefined> => {
+      const artifact = await this.#lookup<CodePreloader>(PRELOADER_KEY)?.readArtifact?.(sig).catch(() => null)
+      const store = this.#store()
+      const bytes = artifact?.bytes
+        ?? await store?.getBeeBytes?.(sig).catch(() => null)
+        ?? await store?.getDependencyBytes?.(sig).catch(() => null)
+      return bytes ? textOf(bytes) : undefined
+    })()
+    this.#codeTexts.set(sig, read)
+    return read
+  }
+
+  /** Every module and dependency running here, named, each with the
+   *  signature `/read` opens. The names come from the runtime. */
+  async #codeEntries(): Promise<CodeEntry[]> {
     const preloader = this.#lookup<CodePreloader>(PRELOADER_KEY)
     const loader = this.#lookup<{ loadedSignatures?: readonly string[] }>(DEPENDENCY_LOADER_KEY)
     const aliases = (globalThis as { __hypercombAliasMap?: unknown }).__hypercombAliasMap
@@ -836,11 +949,8 @@ export class HypercombHiveTreeReader {
     const loadedDependencies = loader?.loadedSignatures ?? []
     const aliasMap = aliases instanceof Map ? aliases : null
     const signed = await this.#signedCodeInventory()
-    if (!actions.length && !readableArtifacts.length && !loadedDependencies.length && !aliasMap?.size && !signed.length) {
-      return { ok: false, root, code: 'unavailable' }
-    }
 
-    const entries = new Map<string, { name: string; sig: string; of: 'bee' | 'dependency' }>()
+    const entries = new Map<string, CodeEntry>()
     const add = (rawSig: unknown, rawName: unknown, of: 'bee' | 'dependency'): void => {
       const sig = String(rawSig ?? '').replace(/\.js$/i, '').toLowerCase()
       if (!SIG.test(sig) || entries.has(sig)) return
@@ -852,13 +962,7 @@ export class HypercombHiveTreeReader {
     for (const sig of loadedDependencies) add(sig, '', 'dependency')
     for (const entry of signed) add(entry.sig, entry.name, entry.of)
     for (const entry of readableArtifacts) add(entry.sig, entry.name, entry.of ?? 'bee')
-
-    const needle = String(query ?? '').trim().toLowerCase()
-    const matched = [...entries.values()]
-      .filter(entry => !needle || entry.name.toLowerCase().includes(needle))
-      .sort((a, b) => a.name.localeCompare(b.name))
-    const limit = Math.max(1, boundedInteger(options.maxEntries, 60, MAX_CODE_ENTRIES))
-    return { ok: true, root, query: needle, entries: matched.slice(0, limit), total: matched.length, truncated: matched.length > limit }
+    return [...entries.values()]
   }
 
   /**

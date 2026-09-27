@@ -312,11 +312,48 @@ describe('opening what a signature names', () => {
     expect(listed.ok && listed.entries).toEqual([{
       name: 'hypercomb-essentials/src/assistant/hive-tree-reader.ts', sig: sourceSig, of: 'bee',
     }])
+    // the search looks inside the text too, once: it is kept by signature
+    expect(listed.ok && listed.hits).toBeUndefined()
+    const inside = await reader.listCode('HiveTreeReader')
+    expect(inside.ok && inside.hits).toEqual([{
+      sig: sourceSig, name: 'hypercomb-essentials/src/assistant/hive-tree-reader.ts', at: 0, text: source,
+    }])
     expect(await reader.readBytesBySig(sourceSig)).toMatchObject({
       ok: true, sig: sourceSig, of: 'bee', type: 'text/typescript', text: source,
     })
     await reader.readBytesBySig(sourceSig)
-    expect(readArtifact).toHaveBeenCalledTimes(1)
+    expect(readArtifact).toHaveBeenCalledTimes(2) // once to search, once to open; each kept after
+  })
+
+  it('finds the lines of code that hold a word, by section, and the code that names a tile', async () => {
+    const bundle = [
+      '// src/games/solomon/tile-surface.ts',
+      "export const SOLOMON_MAZE_BRANCH = 'solomon-maze-v1'",
+      '// src/games/solomon/labyrinth.ts',
+      'const rooms = []',
+      'export const useDoor = (id) => enter(id)',
+    ].join('\n')
+    const beeSig = sig(15)
+    const reader = readerWith({
+      getResource: vi.fn(async () => null),
+      getBeeBytes: vi.fn(async (requested: string) => requested === beeSig ? new TextEncoder().encode(bundle) : null),
+      getDependencyBytes: vi.fn(async () => null),
+    }, [[PRELOADER, { actions: [{ signature: beeSig, name: 'SolomonDrone' }] }]])
+
+    const found = await reader.listCode('usedoor')
+    expect(found.ok && found.entries).toEqual([])
+    expect(found.ok && found.hits).toEqual([{
+      sig: beeSig, name: 'SolomonDrone', section: 'src/games/solomon/labyrinth.ts',
+      at: '// src/games/solomon/labyrinth.ts\nconst rooms = []\n'.length, text: 'export const useDoor = (id) => enter(id)',
+    }])
+    // a section path is a line too: the file finds the module that bundles it
+    const byPath = await reader.listCode('labyrinth.ts')
+    expect(byPath.ok && byPath.hits?.[0]).toMatchObject({ section: 'src/games/solomon/labyrinth.ts', at: 0 })
+    // the tile's name, quoted in code, points at its behaviour
+    expect(await reader.codeNaming('solomon-maze-v1')).toMatchObject([{ sig: beeSig, section: 'src/games/solomon/tile-surface.ts' }])
+    // an unquoted mention, or a name too short to point anywhere, says nothing
+    expect(await reader.codeNaming('rooms')).toEqual([])
+    expect(await reader.codeNaming('id')).toEqual([])
   })
 })
 

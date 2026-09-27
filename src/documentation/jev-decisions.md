@@ -426,3 +426,25 @@ against what it would break here.
 - Live account run: the loop is proven by tests and a mocked router; no
   claim is made that a real OpenRouter account was exercised in this pass.
 - Gate calibration from participant corrections once real decisions exist.
+
+## 8. Jev is the change gate (jwize, 2026-09-26)
+
+Real use showed the table design handing the participant a menu of the
+worker's next steps ("Which step should the hive take?") five times in one
+diagnosis, and Jev's decision allowance — charged with every piece of
+evidence the work had read — running out after a module or two. Following
+the 2026-09-22 real record (Jev never took a step on its own), Jev is
+narrowed to what it does well:
+
+- The worker takes its own steps with the ordinary `hypercomb-read`,
+  `hypercomb-do` and `hypercomb-write` blocks; `JEV_WORK_INSTRUCTION` no
+  longer asks for a table (one is still understood). Reads run as written.
+- Every change is a one-row table Jev judges (`tableFor` marks it `bare`).
+  Cleared, it runs; a doctrine conflict comes back refused; anything else —
+  unsure, decision budget spent, Jev unavailable — makes it wait in
+  Execution for the participant's review (`stepFor`), never a menu.
+- Evidence is fitted per call (`fitEvidence`): the request, then the newest
+  pieces the worker can still see as written, within Jev's own limits. It
+  is no longer charged against a running allowance.
+- Jev still checks the final answer (§5b), on fitted evidence.
+- Prose streams in Jev mode as in any other; only the check line follows.

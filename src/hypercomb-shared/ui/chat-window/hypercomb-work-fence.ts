@@ -439,11 +439,11 @@ export const workInstruction = (powers: WorkPowers): string => {
       'read <signature> · list <signature> — that exact version',
       'read <signature> also opens whatever else a signature names: a note, an attachment, a module\'s code. Long text comes a page at a time; read <signature> <next> continues from the "next" the last page gave',
       'A module\'s first page lists its "sections" — the source files bundled into it, by path. read <signature> <src/path.ts> opens one section alone, which is how to read one file of a large module',
-      'code · code <word> — the code running in this hive: every module and dependency by name, with the signature that opens it',
-      'CODE TAKES TWO ROUNDS. First send the one line `code` to list signed modules (or `code <name>` only when you already know a name fragment). After its result gives a module signature, send one line exactly like `read <the complete 64-character signature>`. Do not try `read code core`, `read /code`, or `read /core`; do not send alternative spellings. Reading code never runs it and never grants permission to change it.',
+      'code · code <words> — the code running in this hive: every module and dependency whose name holds the words, with the signature that opens it, AND "hits": every line of code that holds the words — a function, a message, a tile\'s name — each with its module signature, its section and "at"',
+      'FINDING CODE. Search for what the code does or names: `code useDoor`, `code labyrinth-view`, `code solomon-maze-v1`. A hit opens exactly where it is with `read <signature> <section> <at>`. The code behind a tile is found by its name: `read /path` also lists, under "code", the running code that names the tile. A signature you found earlier stays listed under ALREADY READ, so open it again rather than searching again. Do not try `read code core`, `read /code`, or `read /core`. Reading code never runs it and never grants permission to change it.',
       'find <word> — tiles under the current page whose name contains the word',
       powers.readsRunFreely
-        ? 'Reads run straight away, inside a size budget for this conversation.'
+        ? 'Reads run straight away, as many as the work needs: read whole modules, follow every lead, and do not stop to ask whether to keep reading.'
         : 'The participant approves each read before it runs. A read they skip comes back as skipped.',
       'CONTEXT — what this conversation is about, which you may change. These lines go in the same block and run at once, without approval:',
       'context — list what the conversation is about now',
