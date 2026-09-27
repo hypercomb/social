@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const decode = vi.hoisted(() => vi.fn())
+const created = vi.hoisted(() => [] as Record<string, unknown>[])
 
 vi.hoisted(() => {
   ;(globalThis as unknown as { createImageBitmap: unknown }).createImageBitmap = decode
@@ -11,7 +12,7 @@ vi.hoisted(() => {
 vi.mock('pixi.js', () => ({
   Container: class {},
   RenderTexture: {
-    create: (o: { width: number; height: number }) => ({ width: o.width, height: o.height }),
+    create: (o: { width: number; height: number }) => { created.push(o); return { width: o.width, height: o.height } },
   },
   Sprite: class {
     scale = { set: vi.fn() }
@@ -28,6 +29,14 @@ vi.mock('pixi.js', () => ({
 const { HexImageAtlas } = await import('./hex-image.atlas.js')
 
 const bitmap = () => ({ width: 8, height: 8, close: vi.fn() })
+
+describe('HexImageAtlas GPU memory', () => {
+  it('asks for no multisample buffer: its writes are axis-aligned sprites, and at 4096² × 2 one would be 1 GiB', () => {
+    created.length = 0
+    new HexImageAtlas({ render: vi.fn() }, 256, 16, 16)
+    expect(created).toEqual([expect.objectContaining({ width: 4096, height: 4096, antialias: false })])
+  })
+})
 
 describe('HexImageAtlas atomic replacement', () => {
   beforeEach(() => decode.mockReset())
