@@ -135,6 +135,9 @@ the minimal host is worse. On 2026-09-26, package `dfdf6eca9eab`, warm boots:
 | drag frame p95, janky | 16.7 ms, 0% | 66.7 ms, 9.5% |
 | JS heap | 37–85 MB | 59–126 MB |
 
+Every change that could move loading or running adds a row to
+[PERFORMANCE.md](PERFORMANCE.md), the running record.
+
 `check-pure` fails if the kernel grows past 4 kB, the processor past 8 kB, a
 signed file does not hash to its name, a signed file is neither known to the
 kernel nor part of the host package, or the host bundle carries the console.

@@ -47,10 +47,13 @@ change, build both hosts with the same package and run the gate:
 node scripts/bench-minimal-host.mjs --pure <pure origin> --web <web origin> --root <package sig>
 ```
 
-It compares first frame, all bees loaded, boot blocking, heap, drag frame
-times, janky frames and idle blocking, and exits non-zero when the minimal
-host is worse beyond a small tolerance. Report its table with the change; run
-it at `--rate 4` as well when the change touches boot or rendering.
+It seeds the same tiles in both hosts and compares first frame, tiles on
+screen, all bees loaded, boot blocking, heap, drag frame times, janky frames
+and idle blocking, and exits non-zero when the minimal host is worse beyond a
+small tolerance. Report its table with the change; run it at `--rate 4` as
+well when the change touches boot or rendering. Record the result as a row in
+`src/hypercomb-shim/PERFORMANCE.md` in the same commit, so the trend stays
+visible.
 
 ## Protected `development` branch (mandatory)
 

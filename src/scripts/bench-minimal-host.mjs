@@ -11,13 +11,22 @@
 //   --boots N   warm boots per host for load (default 8)
 //   --rounds N  browsers per host for runtime (default 3)
 //   --rate N    CPU slowdown, 1 = none, 4 = a mid phone (default 1)
+//   --tiles N   tiles seeded at the root of each profile (default 7)
 //
 // LOAD: warm boots alternate between two live profiles, so drift hits both:
-// first frame (render:cell-count), all bees loaded (loader:bees-done), main
-// thread blocked during the boot (long tasks), JS heap.
+// first frame (the first render:cell-count), tiles on screen (the first
+// settled pass that draws every seeded tile), all bees loaded
+// (loader:bees-done), main thread blocked during the boot (long tasks), JS
+// heap. A boot that never draws the seeded tiles fails the gate.
 // RUNTIME: one host per browser (two rendering pages in one headless browser
 // starve each other's WebGL and frames), settled after one warm reload: frame
 // times while dragging and scrolling the hive, and idle blocking over 10 s.
+//
+// Each profile is seeded with the same tiles through the LayerCommitter, so
+// both hosts draw a real hive. Chromium blocks WebGL for a site after a lost
+// context, and a software GPU (a headless sandbox) loses its context on the
+// first draw, so the browser runs with that blocking off: every boot then
+// gets a fresh context, as it would on a real GPU.
 //
 // The web shell installs from the default hosts on a cold start; both
 // jwize.com and hypercomb.com are answered from the web origin, so both hosts
@@ -32,7 +41,8 @@ const arg = (name, fallback) => {
   return i >= 0 ? process.argv[i + 1] : fallback
 }
 const PURE = arg('pure'), WEB = arg('web'), ROOT = arg('root')
-const BOOTS = Number(arg('boots', 8)), ROUNDS = Number(arg('rounds', 3)), RATE = Number(arg('rate', 1))
+const BOOTS = Number(arg('boots', 8)), ROUNDS = Number(arg('rounds', 3)), RATE = Number(arg('rate', 1)), TILES = Number(arg('tiles', 7))
+const NAMES = ['garden', 'kitchen', 'library', 'workshop', 'studio', 'music', 'notes', 'letters', 'maps', 'tools', 'games', 'archive'].slice(0, TILES)
 if (!PURE || !WEB || !/^[0-9a-f]{64}$/.test(ROOT ?? '')) {
   console.error('usage: node scripts/bench-minimal-host.mjs --pure <url> --web <url> --root <package sig> [--boots 8] [--rounds 3] [--rate 1]')
   process.exit(2)
@@ -40,25 +50,32 @@ if (!PURE || !WEB || !/^[0-9a-f]{64}$/.test(ROOT ?? '')) {
 // Worse than the Angular host by more than this is a failure.
 const TOLERANCE = { ratio: 1.05, ms: 30 }
 
-const HOOK = () => {
+const HOOK = tiles => {
   const marks = (window.__hcMarks = {})
   let bus
   Object.defineProperty(globalThis, '__hypercombEffectBus', {
     configurable: true, get: () => bus,
-    set: v => { bus = v; const emit = v.emit.bind(v); v.emit = (e, p) => { if (!(e in marks)) marks[e] = performance.now(); return emit(e, p) } },
+    set: v => {
+      bus = v; const emit = v.emit.bind(v)
+      v.emit = (e, p) => {
+        if (!(e in marks)) marks[e] = performance.now()
+        if (e === 'render:cell-count' && !('tiles' in marks) && p?.settled && (p?.count ?? 0) >= tiles) marks.tiles = performance.now()
+        return emit(e, p)
+      }
+    },
   })
   window.__hcLong = []
   try { new PerformanceObserver(l => { for (const e of l.getEntries()) window.__hcLong.push([e.startTime, e.duration]) }).observe({ type: 'longtask', buffered: true }) } catch {}
 }
 
 const launch = () => chromium.launch({
-  args: ['--enable-precise-memory-info'],
+  args: ['--enable-precise-memory-info', '--disable-domain-blocking-for-3d-apis'],
   ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
 })
 
 const open = async (browser, label, url) => {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
-  await ctx.addInitScript(HOOK)
+  await ctx.addInitScript(HOOK, TILES)
   await ctx.route(/^https:\/\/(content\.)?(hypercomb|jwize)\.com\//, async route => {
     const path = new URL(route.request().url()).pathname
     try {
@@ -73,12 +90,18 @@ const open = async (browser, label, url) => {
     await page.waitForFunction(() => !!document.querySelector('hc-shim-hosts'), null, { timeout: 120000 })
     const ok = await page.evaluate(async r => (await window.ioc.get('@hypercomb.social/Install').acquire(r, [location.host])).ok, ROOT)
     if (!ok) throw new Error('the pure host could not install the package')
+    // The install lands on disk; the next boot runs it.
+    await page.reload({ waitUntil: 'load' })
   }
   await page.waitForTimeout(20000)
+  // The same hive in both hosts.
+  await page.waitForFunction(() => !!window.ioc?.get?.('@diamondcoreprocessor.com/LayerCommitter'), null, { timeout: 120000, polling: 200 })
+  await page.evaluate(async names => window.ioc.get('@diamondcoreprocessor.com/LayerCommitter')
+    .importTree(names.map(name => ({ segments: [name], layer: { name } }))), NAMES)
   return page
 }
 
-const ready = page => page.waitForFunction(() => 'render:cell-count' in (window.__hcMarks ?? {}) && 'loader:bees-done' in window.__hcMarks, null, { timeout: 120000, polling: 50 })
+const ready = page => page.waitForFunction(() => 'tiles' in (window.__hcMarks ?? {}) && 'loader:bees-done' in window.__hcMarks, null, { timeout: 60000, polling: 50 })
 
 const drag = async page => {
   const box = await page.evaluate(() => { const c = document.querySelector('#pixi-host canvas'); if (!c) return null; const r = c.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })
@@ -108,7 +131,7 @@ const load = { pure: [], web: [] }
       const ok = await ready(page).then(() => true, () => false)
       await page.waitForTimeout(1500)
       load[label].push({ ok, ...await page.evaluate(() => ({
-        frame: window.__hcMarks['render:cell-count'], bees: window.__hcMarks['loader:bees-done'],
+        frame: window.__hcMarks['render:cell-count'], tiles: window.__hcMarks.tiles, bees: window.__hcMarks['loader:bees-done'],
         long: window.__hcLong.reduce((n, [, d]) => n + d, 0), heap: performance.memory?.usedJSHeapSize ?? null,
       })) })
     }
@@ -139,6 +162,7 @@ for (let round = 0; round < ROUNDS; round++) {
 // ── verdict ──────────────────────────────────────────────────────────────────
 const rows = [
   ['first frame (ms)', h => median(load[h].map(r => r.frame))],
+  [`${TILES} tiles on screen (ms)`, h => median(load[h].map(r => r.tiles))],
   ['all bees loaded (ms)', h => median(load[h].map(r => r.bees))],
   ['boot blocking (ms)', h => median(load[h].map(r => r.long))],
   ['JS heap (MB)', h => median(load[h].map(r => r.heap)) / 1048576],
@@ -157,7 +181,7 @@ for (const [name, of] of rows) {
   console.log(`${name.padEnd(26)} ${f(pure).padStart(9)} ${f(web).padStart(11)}${bad ? '   WORSE' : ''}`)
 }
 const failedBoots = Object.entries(load).map(([h, r]) => [h, r.filter(x => !x.ok).length]).filter(([, n]) => n)
-for (const [h, n] of failedBoots) console.log(`[bench] ${h}: ${n} boot(s) never reached first frame and all bees`)
+for (const [h, n] of failedBoots) console.log(`[bench] ${h}: ${n} boot(s) never drew the ${TILES} tiles and loaded all bees`)
 if (!run.pure.frames.length || failedBoots.some(([h]) => h === 'pure')) worse++
 console.log(worse ? `\nFAIL — the minimal host is worse on ${worse} measure(s)` : '\nPASS — the minimal host is not worse on any measure')
 process.exit(worse ? 1 : 0)
