@@ -279,19 +279,24 @@ const writeBytes = async (dir: FileSystemDirectoryHandle, name: string, bytes: A
 }
 
 /** Seed the service worker's cache so the first module import does not make a
- *  second round trip for bytes already in hand. Best-effort. */
+ *  second round trip for bytes already in hand. Best-effort. A put replaces,
+ *  so there is nothing to look up first; the cache is opened once. */
+let modulesCache: Promise<Cache> | null = null
+/** Module writes in flight during an install (per pool). */
+const INSTALL_WRITES = 16
 const seedCache = async (path: string, bytes: ArrayBuffer, contentType: string): Promise<void> => {
   try {
-    const cache = await caches.open('hypercomb-modules-v2')
-    const url = new URL(path, location.origin).toString()
-    if (await cache.match(url)) return
+    const cache = await (modulesCache ??= caches.open('hypercomb-modules-v2'))
     const headers = new Headers({ 'content-type': contentType, 'cache-control': 'no-store' })
-    await cache.put(url, new Response(bytes, { headers }))
-  } catch { /* non-fatal */ }
+    await cache.put(new URL(path, location.origin).toString(), new Response(bytes, { headers }))
+  } catch { modulesCache = null /* non-fatal */ }
 }
 
-const readFrom = (dirs: (FileSystemDirectoryHandle | undefined)[], namesFor: (sig: string) => string[]) =>
+/** Read a held atom. `listed`, when given, is what the pools' listings named:
+ *  an atom they did not name is not held, and costs no lookups. */
+const readFrom = (dirs: (FileSystemDirectoryHandle | undefined)[], namesFor: (sig: string) => string[], listed?: Set<string>) =>
   async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+    if (listed && !listed.has(sig)) return null
     for (const dir of dirs) {
       if (!dir) continue
       for (const name of namesFor(sig)) {
@@ -328,6 +333,17 @@ const telling = (io: ReplicationIo, onHeld?: (sig: string) => void): Replication
     write: async (sig, bytes) => { await io.write(sig, bytes); tell(sig) },
   }
 }
+
+/** THE INSTALL'S OWN BYTES. Every module an install admits or finds held is
+ *  kept in memory until it ends, so the checks after admission (core
+ *  compatibility, bee dependencies, bag aliases) read it here instead of
+ *  reading ~900 files back from OPFS three times. The bytes were verified
+ *  once, on arrival; nothing here hashes them again. */
+const remembering = (io: ReplicationIo, into: Map<string, Uint8Array<ArrayBuffer>>): ReplicationIo => ({
+  ...io,
+  read: async sig => { const bytes = await io.read(sig); if (bytes) into.set(sig, bytes); return bytes },
+  write: async (sig, bytes) => { await io.write(sig, bytes); into.set(sig, bytes) },
+})
 
 const merge = (root: string, parts: ReplicationResult[]): ReplicationResult =>
   parts.reduce<ReplicationResult>((acc, r) => ({
@@ -661,17 +677,21 @@ export const installPackage = async (
   // A package mostly missing here comes as one transfer pack (packedFetch).
   const modules = early ?? await packedFetch(pkg.packageSig, [...inventory.dependencies, ...inventory.bees], heldModules, origins, fetchFrom)
 
+  const admitted = new Map<string, Uint8Array<ArrayBuffer>>()
   const results = await Promise.all([
-    resolveInventory(pkg.packageSig, inventory.dependencies, telling({
-      read: readFrom([store.dependencies], sig => [`${sig}.js`, sig]),
+    // A module the pools' listings did not name is not looked for (a first
+    // install asked ~1,800 times for files it knew were absent), and the
+    // modules are written INSTALL_WRITES at a time.
+    resolveInventory(pkg.packageSig, inventory.dependencies, remembering(telling({
+      read: readFrom([store.dependencies], sig => [`${sig}.js`, sig], heldModules),
       fetch: modules.fetch,
       write: writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8'),
-    } satisfies ReplicationIo, opts.onHeld)),
-    resolveInventory(pkg.packageSig, inventory.bees, telling({
-      read: readFrom([store.bees], sig => [`${sig}.js`, sig]),
+    } satisfies ReplicationIo, opts.onHeld), admitted), { concurrency: INSTALL_WRITES }),
+    resolveInventory(pkg.packageSig, inventory.bees, remembering(telling({
+      read: readFrom([store.bees], sig => [`${sig}.js`, sig], heldModules),
       fetch: modules.fetch,
       write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
-    } satisfies ReplicationIo, opts.onHeld)),
+    } satisfies ReplicationIo, opts.onHeld), admitted), { concurrency: INSTALL_WRITES }),
     // Resources land in the flat root beside the layers, where the Store
     // (getResource) and the service worker (/@resource/<sig>) both read them.
     resolveInventory(pkg.packageSig, inventory.resources ?? [], telling({
@@ -733,7 +753,8 @@ export const installPackage = async (
   // what it exports. A shell that is short refuses HERE, by name, instead of
   // activating a package whose every module dies at evaluation. The bytes stay
   // — once the shell ships, the same call is a delta repair.
-  const readAtom = readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig])
+  const readHeldAtom = readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig])
+  const readAtom = async (sig: string) => admitted.get(sig) ?? readHeldAtom(sig)
   const compat = await checkCoreCompatibility([...inventory.bees, ...inventory.dependencies], readAtom)
   if (!compat.ok) {
     console.warn(`[acquire] ${pkg.packageSig.slice(0, 12)} ${describeCoreMismatch(compat.missing)}`)
@@ -743,16 +764,12 @@ export const installPackage = async (
   // beeDeps, worked out from the bytes just admitted rather than taken from
   // anything a host said (bee-deps.ts). A HINT: an empty map means every
   // dependency loads eagerly, which is correct and merely heavier at boot.
-  const beeDeps = await deriveBeeDeps(
-    inventory.bees,
-    inventory.dependencies,
-    readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig]),
-  )
+  const beeDeps = await deriveBeeDeps(inventory.bees, inventory.dependencies, readAtom)
 
   // The bags. Each is a sig-named dir INSIDE the pool whose entries carry the
   // alias→sig pairs the import map is assembled from — legitimate structure,
   // not a typed folder.
-  await writeBags(store, inventory)
+  await writeBags(store, inventory, readAtom)
 
   // THE BROOD (core/brood.ts). Bytes are admitted and verified; nothing has
   // been imported. Anything the participant's rules do not clear is held here,
@@ -1169,7 +1186,11 @@ const activate = async (
  * STRICTLY to the install-owned pools — at the OPFS root the same 64-hex dir
  * shape is a user lineage sigbag.
  */
-const writeBags = async (store: StoreLike, inventory: PackageInventory): Promise<void> => {
+const writeBags = async (
+  store: StoreLike,
+  inventory: PackageInventory,
+  readDep: (sig: string) => Promise<Uint8Array | null> = readFrom([store.dependencies], sig => [`${sig}.js`, sig]),
+): Promise<void> => {
   // "Scoped strictly to the install-owned pools" scopes the HANDLE, not the
   // ADDRESS: `store.bees` IS sign('bees'), and sign('bees') IS the molecule of
   // a tile named `bees`. A 64-hex SUBDIRECTORY there is an author bucket as
@@ -1212,9 +1233,8 @@ const writeBags = async (store: StoreLike, inventory: PackageInventory): Promise
     }))
   }
 
-  const readDep = readFrom([store.dependencies], sig => [`${sig}.js`, sig])
   const aliases = new Map<string, string>()
-  for (const sig of inventory.dependencies) aliases.set(sig, aliasOf(await readDep(sig)))
+  await Promise.all(inventory.dependencies.map(async sig => { aliases.set(sig, aliasOf(await readDep(sig))) }))
 
   await put(store.dependencies, dependencyEntries(inventory.dependencies, sig => aliases.get(sig) ?? ''))
   await put(store.bees, beeEntries(inventory.bees))

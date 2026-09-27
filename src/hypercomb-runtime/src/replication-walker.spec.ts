@@ -194,4 +194,31 @@ describe('replication walker', () => {
     expect(new Set(mined.held)).toEqual(new Set([root, leafSig, straySig]))
   })
 
+  it('keeps an inventory flowing: never more than `concurrency` in flight, a slow write never idles the rest', async () => {
+    const w = world()
+    const atoms = await Promise.all(Array.from({ length: 12 }, async (_, i) => { const bytes = encode(`atom ${i}`); return { sig: await sigOf(bytes), bytes } }))
+    for (const { sig, bytes } of atoms) w.origin.set(sig, bytes)
+    const slow = atoms[0]!.sig
+    let inFlight = 0, most = 0
+    const doneWhileSlow: string[] = []
+    let slowDone = false
+    const io: ReplicationIo = {
+      ...w.io,
+      write: async (sig, bytes) => {
+        inFlight++; most = Math.max(most, inFlight)
+        await new Promise(resolve => setTimeout(resolve, sig === slow ? 40 : 1))
+        if (sig !== slow && !slowDone) doneWhileSlow.push(sig)
+        if (sig === slow) slowDone = true
+        w.heap.set(sig, bytes); inFlight--
+      },
+    }
+    const result = await resolveInventory('r'.repeat(64), atoms.map(a => a.sig), io, { concurrency: 3 })
+    expect(isComplete(result)).toBe(true)
+    expect(result.fetched).toBe(12)
+    expect(most).toBe(3)
+    // Waves would hold every other atom behind the slow one's batch; a pool
+    // finishes the other eleven while it writes.
+    expect(doneWhileSlow.length).toBe(11)
+  })
+
 })

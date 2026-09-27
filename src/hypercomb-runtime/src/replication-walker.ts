@@ -155,8 +155,12 @@ export const resolveInventory = async (
   const unique = [...new Set(signatures)].filter(sig => SIGNATURE_RE.test(sig))
   const result: ReplicationResult = { root, total: unique.length, present: 0, fetched: 0, held: [], holes: [], refused: [], limited: false }
 
-  for (let i = 0; i < unique.length; i += concurrency) {
-    await Promise.all(unique.slice(i, i + concurrency).map(signature => resolveOne(signature, io, result, options.trusted === true)))
+  // A POOL, NOT WAVES: `concurrency` atoms stay in flight, each slot taking
+  // the next as soon as its own is held, so one slow write never idles the rest.
+  let next = 0
+  const slot = async (): Promise<void> => {
+    while (next < unique.length) await resolveOne(unique[next++]!, io, result, options.trusted === true)
   }
+  await Promise.all(Array.from({ length: Math.min(concurrency, unique.length) }, slot))
   return result
 }
