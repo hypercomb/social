@@ -76,6 +76,39 @@ const beesSettled = (ms: number): Promise<void> => new Promise(resolve => {
   off = EffectBus.on('loader:bees-done', finish)
 })
 
+/** Resolves once the arrival at `mount` has its verdict, the page has painted
+ *  it, and the main thread has an idle moment — or after `ms` regardless (a
+ *  hidden tab never fires rAF). The ring ahead waits for this: started straight
+ *  after `nav.go`, its layers came from the landing pack with no network wait
+ *  between them, so its promise chain held the main thread and the site view
+ *  rendered only after it (measured 2026-09-27, revolucion ×4: ~300 ms of the
+ *  cover spent localizing pages the reader had not asked for). Same replay
+ *  guard as `beesSettled`. */
+const arrivalPainted = (mount: readonly string[], ms: number): Promise<void> => new Promise(resolve => {
+  let done = false
+  let seen = false
+  let off: (() => void) | undefined
+  const finish = (): void => {
+    if (done) return
+    done = true
+    clearTimeout(timer)
+    setTimeout(() => off?.(), 0)
+    resolve()
+  }
+  const idle = (): void => {
+    const ric = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
+    if (ric) ric(finish, { timeout: 1_500 })
+    else setTimeout(finish, 0)
+  }
+  const timer = setTimeout(finish, ms)
+  off = EffectBus.on<{ segments?: readonly string[] }>('view:arrival', p => {
+    const at = p?.segments ?? []
+    if (seen || at.length !== mount.length || at.some((segment, i) => segment !== mount[i])) return
+    seen = true
+    requestAnimationFrame(() => requestAnimationFrame(idle))
+  })
+})
+
 /** A service once it registers, or undefined after `ms`. */
 const serviceOf = <T>(key: string, ms = 30_000): Promise<T | undefined> => new Promise(resolve => {
   const ioc = (window as { ioc?: { get?: <V>(k: string) => V | undefined; whenReady?: <V>(k: string, cb: (v: V) => void) => void } }).ioc
@@ -356,8 +389,9 @@ export class HiveVisitDrone extends Drone {
       hosts: bundle.hosts,
       tiles: stats.layers,
     })
-    // Only now: the arrival's own fetches go first.
-    ringAhead(head)
+    // Only once the arrival is on screen: its own fetches and its first
+    // render go first.
+    void arrivalPainted(mount, 4_000).then(() => ringAhead(head))
     // Where the reader goes next, the ring follows. A place below the preview
     // root has no head of its own, so it is found by name down the tree the
     // ring already made local.

@@ -31,4 +31,27 @@ describe('visitor memory filesystem', () => {
     expect((window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__).toBe(true)
     expect(document.documentElement.dataset['hypercombMode']).toBe('visitor')
   })
+
+  it('answers reads from held bytes, as copies, and sees a rewrite', async () => {
+    installMemoryFilesystem()
+    const root = await navigator.storage.getDirectory()
+    const handle = await root.getFileHandle('b'.repeat(64), { create: true })
+    const write = async (text: string): Promise<void> => {
+      const writable = await handle.createWritable()
+      await writable.write(text)
+      await writable.close()
+    }
+    await write('first')
+
+    const file = await handle.getFile()
+    expect(file.size).toBe(5)
+    expect(await file.text()).toBe('first')
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    bytes[0] = 0
+    expect(await file.text()).toBe('first')
+
+    await write('second')
+    expect(await (await handle.getFile()).text()).toBe('second')
+    expect(await file.text()).toBe('first')
+  })
 })
