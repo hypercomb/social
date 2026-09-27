@@ -35,7 +35,68 @@ export const HANDOFF_FENCE_LANG = 'hypercomb-handoff'
 /** How many times one turn may change hands before it stops. */
 export const MAX_HANDOFFS = 2
 
-export const MAX_WORK_ROUNDS = 10
+/** THE WORK IS NOT CAPPED, IT IS BUDGETED (jwize, 2026-09-26: "sometimes
+ *  I see claude sessions go for hours"). A request runs in LEGS — one leg is
+ *  one stretch of a model's context window. A leg ends when the window is
+ *  full or after `LEG_ROUNDS`; the model then hands the work over to itself
+ *  in prose plus a `hypercomb-continue` fence saying what is left, and the
+ *  next leg starts from that handover as a fresh context. Legs chain until
+ *  the model answers without a continue fence (the goal) or the request's
+ *  budget is spent. The transcript IS the checkpoint: every leg's handover
+ *  is a stored turn, so a reload resumes from the last one. */
+export const LEG_ROUNDS = 12
+/** Kept for the decision loop, which still counts rounds. */
+export const MAX_WORK_ROUNDS = LEG_ROUNDS
+/** CONTINUING. The model ends a leg's handover with this fence, one line:
+ *  what is left. Its absence is the goal predicate — the work is done. */
+export const CONTINUE_FENCE_LANG = 'hypercomb-continue'
+/** What one participant request may spend before it must be asked again.
+ *  Rounds and tokens both, because a cheap model can loop on rounds while a
+ *  frontier one burns the purse in ten. Device-local overrides by key. */
+export const WORK_BUDGET = { rounds: 400, tokens: 6_000_000 } as const
+export const WORK_BUDGET_ROUNDS_KEY = 'hc:chat:budget:rounds'
+export const WORK_BUDGET_TOKENS_KEY = 'hc:chat:budget:tokens'
+
+export type WorkBudget = { readonly rounds: number; readonly tokens: number }
+
+export const workBudget = (read: (key: string) => string | null = key => {
+  try { return globalThis.localStorage?.getItem(key) ?? null } catch { return null }
+}): WorkBudget => {
+  const of = (key: string, fallback: number): number => {
+    const n = Number(read(key))
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
+  }
+  return { rounds: of(WORK_BUDGET_ROUNDS_KEY, WORK_BUDGET.rounds), tokens: of(WORK_BUDGET_TOKENS_KEY, WORK_BUDGET.tokens) }
+}
+
+/** Tokens a text costs a model, near enough to fit a window by. */
+export const estimateTokens = (text: string): number => Math.ceil(String(text ?? '').length / 4) + 4
+
+/** THE PROGRESS LEDGER. Rounds a leg no longer has room for are folded
+ *  into one message that says what each asked and what came back, shortest
+ *  first, so the model keeps its own trail without the bytes. Pure: the
+ *  caller decides when the window is full. `from` is the first work message
+ *  (everything before it is the participant's transcript, never folded),
+ *  `keep` how many newest messages stay verbatim. */
+export const foldWorkLedger = (
+  messages: readonly { readonly role: string; readonly content: string }[],
+  from: number,
+  keep = 4,
+): { readonly role: string; readonly content: string }[] => {
+  const end = messages.length - keep
+  if (end - from < 2) return [...messages]
+  const folded = messages.slice(from, end)
+  const lines = folded.map((entry, index) => {
+    const text = String(entry.content ?? '').replace(/\s+/g, ' ').trim()
+    const cut = text.length > 400 ? `${text.slice(0, 400)}…` : text
+    return `${index + 1}. ${entry.role === 'assistant' ? 'you asked' : 'the hive said'}: ${cut}`
+  })
+  const ledger = {
+    role: 'user',
+    content: `PROGRESS LEDGER. Earlier rounds of this work, folded so the window has room; what a signature names never changes, so anything read can be opened again with read <signature>:\n${lines.join('\n')}`,
+  }
+  return [...messages.slice(0, from), ledger, ...messages.slice(end)]
+}
 
 export type WorkKind = 'read' | 'do' | 'table' | 'write'
 
@@ -54,9 +115,11 @@ export type SplitWork = {
   readonly heldDo?: true
   /** The model gave the work up, with its reason. Wins over any request. */
   readonly handoff?: string
+  /** The model handed the work to its next leg: what is left, one line. */
+  readonly left?: string
 }
 
-type BlockKind = WorkKind | 'handoff'
+type BlockKind = WorkKind | 'handoff' | 'continue'
 
 type Block = {
   readonly kind: BlockKind
@@ -98,6 +161,7 @@ const looksLikeTable = (body: readonly string[]): boolean =>
 const kindOf = (info: string): BlockKind | null => {
   const word = info.trim().split(/\s+/)[0] ?? ''
   if (word === HANDOFF_FENCE_LANG) return 'handoff'
+  if (word === CONTINUE_FENCE_LANG) return 'continue'
   if (word === READ_FENCE_LANG) return 'read'
   if (word === DO_FENCE_LANG) return 'do'
   if (word === TABLE_FENCE_LANG) return 'table'
@@ -173,8 +237,12 @@ export const splitWork = (text: string): SplitWork => {
     for (let at = block.open; at <= Math.min(block.end, lines.length - 1); at++) removed.add(at)
   }
   const prose = lines.filter((_, at) => !removed.has(at)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  const oneLine = (block: Block, fallback: string): string =>
+    block.body.map(line => line.trim()).filter(Boolean).join(' ').slice(0, 300) || fallback
   const handoff = blocks.find(block => block.kind === 'handoff')
-  if (handoff) return { prose, handoff: handoff.body.map(line => line.trim()).filter(Boolean).join(' ').slice(0, 300) || 'no reason given' }
+  if (handoff) return { prose, handoff: oneLine(handoff, 'no reason given') }
+  const next = blocks.find(block => block.kind === 'continue')
+  const left = next ? { left: oneLine(next, 'the rest of the request') } : {}
   const linesOf = (kind: WorkKind): string[] => blocks
     .filter(block => block.kind === kind)
     .flatMap(block => block.body)
@@ -187,17 +255,17 @@ export const splitWork = (text: string): SplitWork => {
   // model never closed is not code the hive should run.
   const writes = blocks.filter(block => block.kind === 'write')
   const held = changes.length || tables.length || writes.length ? { heldDo: true as const } : {}
-  if (reads.length) return { prose, request: { kind: 'read', lines: reads }, ...held }
+  if (reads.length) return { prose, request: { kind: 'read', lines: reads }, ...held, ...left }
   if (writes.length) {
     const valid = writes.length === 1 && writes[0].end < lines.length
-    return { prose, request: { kind: 'write', lines: valid ? writes[0].body : [] }, ...(changes.length || tables.length ? { heldDo: true as const } : {}) }
+    return { prose, request: { kind: 'write', lines: valid ? writes[0].body : [] }, ...(changes.length || tables.length ? { heldDo: true as const } : {}), ...left }
   }
   if (tables.length) {
     const valid = tables.length === 1 && tables[0].end < lines.length
-    return { prose, request: { kind: 'table', lines: valid ? tables[0].body : [] }, ...(changes.length ? { heldDo: true as const } : {}) }
+    return { prose, request: { kind: 'table', lines: valid ? tables[0].body : [] }, ...(changes.length ? { heldDo: true as const } : {}), ...left }
   }
-  if (changes.length) return { prose, request: { kind: 'do', lines: changes } }
-  return { prose }
+  if (changes.length) return { prose, request: { kind: 'do', lines: changes }, ...left }
+  return { prose, ...left }
 }
 
 export type WriteRequest = {
@@ -360,6 +428,7 @@ export const workInstruction = (powers: WorkPowers): string => {
   }
   const parts = [
     'WORKING ON THE HIVE. You work in rounds and keep going until the participant\'s request is done. When you need to read the hive or change it, end your reply with ONE fenced block and stop there. The result comes back to you as the next message; continue from it. When the work is done, answer in prose with no block.',
+    CONTINUE_INSTRUCTION,
     HANDOFF_INSTRUCTION,
   ]
   if (powers.canRead) {
@@ -376,6 +445,9 @@ export const workInstruction = (powers: WorkPowers): string => {
       powers.readsRunFreely
         ? 'Reads run straight away, inside a size budget for this conversation.'
         : 'The participant approves each read before it runs. A read they skip comes back as skipped.',
+      'CONTEXT — what this conversation is about, which you may change. These lines go in the same block and run at once, without approval:',
+      'context — list what the conversation is about now',
+      'context add /path — bring a tile into the conversation\'s context · context drop /path — take it out again',
     ].join('\n'))
   } else {
     parts.push('You cannot read the hive in this conversation.')
@@ -409,6 +481,8 @@ const REQUEST_ECHO_MAX = 500
 /** Every message back ends by carrying the request, so a long exchange never
  *  loses what it is for. */
 /** Taught to every model, whatever its powers: giving up is a fence, never an apology. */
+export const CONTINUE_INSTRUCTION = 'LONG WORK. There is no fixed number of rounds: you keep working until the request is done. When the hive tells you this stretch of context is full, answer in prose — what you did, what you found, what is left — and, if the request is not finished, end with a fenced block whose info string is `' + CONTINUE_FENCE_LANG + '` holding one line: what is left. The work then continues in a fresh stretch that starts from your prose and that line; anything you read can be opened again by its signature. No continue block means the request is done.'
+
 export const HANDOFF_INSTRUCTION = 'HANDING OFF. If the request is beyond what you can do — it needs abilities, knowledge or a length of reasoning you do not have — do not apologise or answer partially. Reply with ONLY a fenced block whose info string is `' + HANDOFF_FENCE_LANG + '`, holding one line saying what the work needs. A more capable model takes the question with this same transcript.'
 
 const carry = (request: string): string => {
@@ -470,7 +544,17 @@ export class JevGone extends Error {
 export const HELD_DO_NOTE = `Your ${DO_FENCE_LANG} block was not run: the same reply also asked to read. Read first; propose changes in a later reply.`
 
 export const lastRoundMessage = (request: string): string =>
-  `That was the last round for this message. Answer now in prose, with no block: say what you did, what you found, and what is still left.${carry(request)}`
+  `This stretch of context is full. Answer now in prose: say what you did, what you found, and what is still left. If the request is not finished, end with a \`${CONTINUE_FENCE_LANG}\` block holding one line — what is left — and the work continues in a fresh stretch. If it is finished, no block.${carry(request)}`
+
+/** The next leg's opening word, as the participant's turn. Honest in the
+ *  transcript: it reads as what it is, the work continuing. */
+export const continueMessage = (left: string): string =>
+  `Continue. Left: ${String(left ?? '').trim() || 'the rest of the request'}`
+
+/** When the budget is gone the work stops and says so; the participant's
+ *  next word starts a fresh budget. */
+export const budgetSpentMessage = (spent: { readonly rounds: number; readonly tokens: number }): string =>
+  `\n\n*Paused: this request has used ${spent.rounds} rounds and about ${Math.round(spent.tokens / 1000)}k tokens, the budget for one request. Say continue to go on.*`
 
 /** The transcript as a model should read it: another model's reply is
  *  marked as that model's, so nobody inherits a stranger's actions. */

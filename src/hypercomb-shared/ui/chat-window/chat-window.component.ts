@@ -160,6 +160,13 @@ import {
   identityInstruction,
   isWorkRefusal,
   lastRoundMessage,
+  budgetSpentMessage,
+  continueMessage,
+  estimateTokens,
+  foldWorkLedger,
+  LEG_ROUNDS,
+  workBudget,
+  type WorkBudget,
   MAX_HANDOFFS,
   MAX_WORK_ROUNDS,
   readResultMessage,
@@ -187,6 +194,9 @@ type ChatTurn = {
   readonly model?: string
   /** A reply that ended in a question nobody has answered yet. */
   readonly asks?: true
+  /** A leg's handover: what the work still has left. The next leg starts
+   *  from it, on this device now or on whichever reopens the conversation. */
+  readonly left?: string
   /** The turn's manifest signature — its file name in the bucket. Present
    *  on a turn read back from disk, absent on one this window appended in
    *  memory and has not re-read yet. It is the ONLY join between a drawn
@@ -1215,6 +1225,7 @@ type ExecutionQueueLike = {
 /** Provenance attached to a model-produced turn — chat-thread.ts `TurnMeta`,
  *  restated because the shell may not import a module. */
 type TurnMetaLike = {
+  readonly left?: string
   readonly anatomy?: string
   readonly context?: string
   readonly observed?: readonly string[]
@@ -1228,6 +1239,9 @@ const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeRea
 /** Reads one message may make: enough for a model to find its way in. */
 const MAX_OBSERVATION_ROUNDS = 6
 const MAX_OBSERVATION_CONTEXT_CHARS = 24_000
+/** How old a stored handover may be and still resume by itself when the
+ *  conversation is reopened. Older, the participant says continue. */
+const RESUME_LEFT_MS = 60 * 60 * 1000
 const hypercombPlanQueue = new HypercombPlanQueue()
 
 /** How far back a pending ask record may reach and still be shown as waiting.
@@ -4992,6 +5006,8 @@ export class ChatWindowComponent implements OnDestroy {
    * `mode:'stop'` marker AgentRegistry leaves for a responder already mid-flight.
    */
   async stop(): Promise<void> {
+    // Stop means stop: no next leg starts from what this one left.
+    this.#left.delete(this.activeId())
     if (this.hostStreaming()) {
       // The run keeps whatever had already arrived and stores it — stopping is
       // not discarding. Its `chat:host-done` ends the wait.
@@ -5181,6 +5197,7 @@ export class ChatWindowComponent implements OnDestroy {
         this.#clearRoute()
         this.#scheduleRouteRefresh(recent.convoId)
         this.#scrollDown(true)
+        this.#resumeLeft(recent.convoId, latestTurns)
       } else if (!this.activeId()) {
         this.newChat(false)
       }
@@ -5435,6 +5452,7 @@ export class ChatWindowComponent implements OnDestroy {
     // Switching threads re-pins: you are arriving at a conversation, and its
     // newest turn is where arriving means.
     this.#scrollDown(true)
+    this.#resumeLeft(convoId, turns)
   }
 
   // ── a conversation per tile ─────────────────────────────────────────────
@@ -5772,7 +5790,7 @@ export class ChatWindowComponent implements OnDestroy {
    * questions above them. The reply's own durability was never the half that
    * was missing.
    */
-  async send(text?: string): Promise<void> {
+  async send(text?: string, opts: { readonly auto?: boolean } = {}): Promise<void> {
     this.#refreshAvailability()
     this.#refreshDesignation()
     if (!this.enabled()) return
@@ -5795,6 +5813,10 @@ export class ChatWindowComponent implements OnDestroy {
 
     let convoId = this.activeId()
     if (!convoId) { convoId = threads.newConvoId(); this.activeId.set(convoId) }
+    // A typed word starts a fresh request with a fresh budget; a leg
+    // continuing itself keeps the running total.
+    this.#left.delete(convoId)
+    if (!opts.auto) this.#task.delete(convoId)
 
     if (element && text === undefined) { element.value = ''; this.autosize(element) }
     // SENT IS NOT HELD. The thinking became a turn; leaving a copy in the
@@ -5821,7 +5843,21 @@ export class ChatWindowComponent implements OnDestroy {
     // Ollama and participant-keyed APIs, applies policy, and owns bounded
     // fallback. It cannot take an explicitly named bridge model, so those
     // choices fall through without silently changing vendor.
-    const routed = await this.#askProvider(convoId, message)
+    //
+    // NOTHING WAITS IN SILENCE (jwize, 2026-09-26: a conversation read
+    // "waiting for reply…" for good after an ask that never went out). A
+    // route that throws before a model is even reached used to leave the
+    // wait open with no turn and no word; now it lands in the conversation
+    // like any other reply, so the row wears the reason instead of a clock.
+    let routed: 'answered' | 'declined' | 'aborted'
+    try {
+      routed = await this.#askProvider(convoId, message)
+    } catch (error) {
+      console.warn('[chat] the question could not be routed:', error)
+      await this.#landFailure(convoId, `The model could not answer: ${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
+    if (routed === 'answered') { void this.#continueIfLeft(convoId) }
     if (routed === 'answered' || routed === 'aborted') return
 
     // The two legacy transports remain honest fallbacks.
@@ -5839,7 +5875,14 @@ export class ChatWindowComponent implements OnDestroy {
       // stores and counts it (`#onHostDone`), because the run outlives this
       // component and its answer must land whether or not anybody is still
       // awaiting here. What comes back is only the ROUTING decision.
-      const outcome = await this.#askHost(convoId, message)
+      let outcome: 'answered' | 'declined' | 'aborted'
+      try {
+        outcome = await this.#askHost(convoId, message)
+      } catch (error) {
+        console.warn('[chat] the host could not be asked:', error)
+        await this.#landFailure(convoId, `The model could not answer: ${error instanceof Error ? error.message : String(error)}`)
+        return
+      }
       if (outcome === 'answered') return
       // STOPPED BY THE PARTICIPANT. Handing a question they just called back
       // to the durable bridge queue would be the opposite of what Stop means.
@@ -5852,22 +5895,17 @@ export class ChatWindowComponent implements OnDestroy {
     // session is listening, or the participant named a model only a bridge
     // serves. Otherwise they are told why, now.
     if (!this.bridgeUp() && !this.modelExplicit()) {
-      this.#endWait()
       const reason = this.#declineReason.get(convoId)
         ?? 'No model is ready to answer. Check the providers console.'
       console.warn('[chat] no model took the question:', reason)
-      EffectBus.emit('toast:show', { type: 'warning', message: reason })
+      await this.#landFailure(convoId, reason)
       return
     }
 
     // A participant-host failure is retryable, but without a configured local
     // bridge there is nobody who could ever drain the durable bridge queue.
     if (!this.bridgeConfigured() || !queen?.submitChat) {
-      this.#endWait()
-      EffectBus.emit('toast:show', {
-        type: 'warning',
-        message: 'Your AI host is unavailable. Check its setup and try again.',
-      })
+      await this.#landFailure(convoId, 'Your AI host is unavailable. Check its setup and try again.')
       return
     }
 
@@ -5943,6 +5981,76 @@ export class ChatWindowComponent implements OnDestroy {
     const meta = this.#turnMeta.get(convoId)
     this.#turnMeta.delete(convoId)
     return meta
+  }
+
+  // ── THE LONG WORK (jwize, 2026-09-26) ─────────────────────────────────
+  //
+  // A request is not capped at a round count; it runs in LEGS, one per
+  // stretch of context, and the legs chain until the model answers with
+  // nothing left or the request's budget is spent. `#left` is the handover
+  // between two legs in this window; the same line is stored on the turn
+  // (`left` in its meta), so a reopened conversation resumes from disk.
+  // `#task` is what one request has spent so far — rounds and tokens from
+  // the providers' own usage reports — and is reset by the participant's
+  // next typed message.
+
+  readonly #left = new Map<string, string>()
+  readonly #task = new Map<string, { rounds: number; tokens: number; legs: number }>()
+
+  /** Charge one round to the request. True when the budget is gone. */
+  #spend(convoId: string, attempts: readonly TurnAttemptLike[], estimated: number, budget: WorkBudget): boolean {
+    const reported = attempts.reduce((sum, attempt) => sum
+      + (attempt.usage?.totalTokens ?? ((attempt.usage?.inputTokens ?? 0) + (attempt.usage?.outputTokens ?? 0))), 0)
+    const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
+    const next = { ...task, rounds: task.rounds + 1, tokens: task.tokens + (reported || estimated) }
+    this.#task.set(convoId, next)
+    return next.rounds >= budget.rounds || next.tokens >= budget.tokens
+  }
+
+  /** The next leg, if the last one left work behind. Only for the
+   *  conversation being shown: another one resumes when it is opened. */
+  async #continueIfLeft(convoId: string): Promise<void> {
+    const left = this.#left.get(convoId)
+    if (!left || convoId !== this.activeId() || this.#outstanding.has(convoId)) return
+    this.#left.delete(convoId)
+    const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
+    this.#task.set(convoId, { ...task, legs: task.legs + 1 })
+    await this.send(continueMessage(left), { auto: true })
+  }
+
+  /** A conversation opened on a stored handover picks the work back up,
+   *  while the handover is recent enough to be the same sitting. */
+  #resumeLeft(convoId: string, turns: readonly { readonly role: string; readonly at: number; readonly left?: string }[]): void {
+    const last = turns[turns.length - 1]
+    if (!last || last.role !== 'assistant' || !last.left) return
+    if (Date.now() - last.at > RESUME_LEFT_MS || this.#outstanding.has(convoId)) return
+    this.#left.set(convoId, last.left)
+    void this.#continueIfLeft(convoId)
+  }
+
+  /** The model's own hand on the conversation's context: list, add, drop.
+   *  Runs at once — the context is the model's working set, not a change to
+   *  the hive — and answers in the same receipt a read does. */
+  #contextLines(lines: readonly string[]): string {
+    const said: string[] = []
+    for (const raw of lines) {
+      const words = raw.trim().replace(/^\//, '').split(/\s+/)
+      const verb = (words[1] ?? '').toLowerCase()
+      const path = words.slice(2).join(' ').trim()
+      const key = path ? (path.startsWith('/') ? path : `/${path}`) : ''
+      if (verb === 'add' && key) {
+        this.addContext({ name: '', path: key, sig: '' })
+        said.push(`context add ${key}: in`)
+      } else if ((verb === 'drop' || verb === 'remove') && key) {
+        const index = this.references().findIndex(held => held.key === key)
+        if (index >= 0) this.removeContext(index)
+        said.push(`context drop ${key}: ${index >= 0 ? 'out' : 'was not in'}`)
+      } else {
+        const keys = this.references().map(held => held.key)
+        said.push(keys.length ? `context: ${keys.join(' · ')}` : 'context: nothing yet')
+      }
+    }
+    return said.join('\n')
   }
 
   async #askProvider(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
@@ -6168,6 +6276,10 @@ export class ChatWindowComponent implements OnDestroy {
       let readRounds = 0
       let readChars = 0
       let lastRound = false
+      let budgetSpent = false
+      const budget = workBudget()
+      const tokensOf = (list: readonly { readonly content: string }[]): number =>
+        list.reduce((sum, entry) => sum + estimateTokens(entry.content), 0)
       // THE WORK STAYS WITH WHOEVER STARTED IT. The first round may be routed
       // by policy; every later round names that provider, so a fallback can
       // never hand a half-done job — or its read results — to another vendor.
@@ -6298,11 +6410,17 @@ export class ChatWindowComponent implements OnDestroy {
 
       const runRead = async (lines: readonly string[], providerId: string, model: string): Promise<string> => {
         if (!canRead || !treeReader || !queue) throw new WorkRefused('reading the hive is not available here')
+        // CONTEXT LINES run here and now: the model's working set is its own
+        // to shape, and it is not a read of the hive nor a change to it.
+        const contextLines = lines.filter(line => /^\/?context(?:\s|$)/i.test(line.trim()))
+        const readLines = contextLines.length ? lines.filter(line => !contextLines.includes(line)) : lines
+        const contextReceipt = contextLines.length ? component.#contextLines(contextLines) : ''
+        if (!readLines.length) return readResultMessage(contextReceipt, message)
         if (readRounds >= MAX_OBSERVATION_ROUNDS) throw new WorkRefused('no more reads are available for this message')
         const budget = hiveAccess?.budget?.(providerId) || MAX_OBSERVATION_CONTEXT_CHARS
         const remaining = budget - readChars
         if (remaining < 1_500) throw new WorkRefused('the read budget for this conversation is spent')
-        const plan = parseHypercombObservationGrammars(lines, grammarContext.segments)
+        const plan = parseHypercombObservationGrammars(readLines, grammarContext.segments)
         const grammars = plan.observations.map(observation => observation.grammar)
         // What each read RESOLVED to — the key an allowed read is remembered
         // by, so "read here" allowed on one page never covers another.
@@ -6329,7 +6447,7 @@ export class ChatWindowComponent implements OnDestroy {
             maxBytes: perReadBytes,
             signal,
           })
-          const content = formatHypercombObservationReceipt(receipt)
+          const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt)
           if (content.length > remaining) throw new WorkRefused('those reads are larger than what is left of the read budget; ask for less')
           const allSnapshots = [...snapshotIds, ...receipt.snapshots]
           if (allSnapshots.length && !await treeReader.validateSnapshots(allSnapshots, signal)) {
@@ -6698,6 +6816,9 @@ export class ChatWindowComponent implements OnDestroy {
         }
       }
 
+      // Everything before this index is the participant's transcript; the
+      // rounds after it are the leg's own work, and the only thing folded.
+      const workStart = messages.length
       while (true) {
         if (signal?.aborted) throw stopped()
         // Prose streams live; a work block is held back from the first line
@@ -6804,9 +6925,20 @@ export class ChatWindowComponent implements OnDestroy {
             ? '\n\nThe commands ran, but no subsequent readback was completed.'
             : '\n\nReadback was collected after execution; correctness of every affected item has not been independently verified.'
           if (jevTurn) yield `\n\n${formatJevUsage(settledAttempts)}`
-          if (work.request) {
+          // THE HANDOVER. What the model says is left is stored on the turn,
+          // so the next leg — now, or after a reload — starts from it. A leg
+          // that ended with a request still open and no word about it hands
+          // the request itself over rather than dropping it.
+          const left = work.left
+            ?? (work.request ? `carry on from: ${work.request.lines.join(' · ').slice(0, 200)}` : undefined)
+          if (left) {
+            component.#turnMeta.set(convoId, { ...(component.#turnMeta.get(convoId) ?? {}), left })
             wrote = true
-            yield `\n\nStopped after ${MAX_WORK_ROUNDS} rounds.`
+            if (budgetSpent) yield budgetSpentMessage(component.#task.get(convoId) ?? { rounds, tokens: 0 })
+            else {
+              component.#left.set(convoId, left)
+              yield `\n\n*Continuing: ${left}*`
+            }
           }
           if (snapshotIds.length && treeReader && !await treeReader.validateSnapshots(snapshotIds, signal)) {
             wrote = true
@@ -6909,11 +7041,23 @@ export class ChatWindowComponent implements OnDestroy {
           reply = error instanceof JevGone ? error.message : blockRefusedMessage(work.request.kind, (error as Error).message, message)
         }
         if (work.heldDo) reply = `${HELD_DO_NOTE}\n\n${reply}`
-        if (rounds >= MAX_WORK_ROUNDS - 1) {
-          reply = `${reply}\n\n${lastRoundMessage(message)}`
-          lastRound = true
-        }
         messages.push({ role: 'user', content: reply })
+        // THE LEG ENDS WHEN ITS STRETCH IS FULL, NOT AT A COUNT. The window
+        // is the model's own; when the rounds no longer fit, the older ones
+        // fold into a ledger first, and only a leg that still cannot fit —
+        // or has run its rounds, or spent the request's budget — hands over.
+        const spent = component.#spend(
+          convoId, settledAttempts.filter(attempt => attempt.round === rounds),
+          estimateTokens(system) + tokensOf(messages), budget,
+        )
+        const window = (roundModel && router.contextLengthForModel?.(roundModel)) || 128_000
+        const room = (): boolean => estimateTokens(system) + tokensOf(messages) < window - 8_000
+        if (!room()) messages.splice(0, messages.length, ...foldWorkLedger(messages, workStart) as typeof messages)
+        if (spent || rounds >= LEG_ROUNDS || !room()) {
+          messages[messages.length - 1] = { role: 'user', content: `${reply}\n\n${lastRoundMessage(message)}` }
+          lastRound = true
+          budgetSpent = spent
+        }
       }
     }
 
@@ -7102,6 +7246,24 @@ export class ChatWindowComponent implements OnDestroy {
     if (!live) return
     this.hostStreaming.set(true)
     this.streaming.set(live.text)
+  }
+
+  /** A question nobody could take LANDS, as a reply. The wait ends, the
+   *  reason is stored as the assistant's turn so the conversation carries it
+   *  through a reload, and every list repaints off the same fact. A toast
+   *  was the old word for this and it was gone before anyone read it, while
+   *  the row went on saying "waiting for reply…" to nobody. */
+  async #landFailure(convoId: string, text: string): Promise<void> {
+    const at = Date.now()
+    const stored = await this.#threads()?.appendTurn(convoId, 'assistant', text)
+    if (!stored) console.warn('[chat] the failure was not stored — it will be missing after a reload')
+    if (convoId === this.activeId()) {
+      this.turns.update(list => [...list, { kind: 'chat-turn', convoId, role: 'assistant', text, at }])
+      this.#scrollDown()
+    }
+    this.#endWait(convoId)
+    if (!this.#bumpList(convoId, 2)) void this.#refreshList()
+    EffectBus.emit('chat:threads-changed', { convoId })
   }
 
   #onReply(payload?: { convoId?: string; text?: string }): void {

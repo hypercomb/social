@@ -55,6 +55,10 @@ export interface ChatTurn {
   readonly prompt?: string
   /** Settled model attempts, safe for evaluation and routing diagnostics. */
   readonly attempts?: readonly TurnAttempt[]
+  /** A leg's handover (chat-window, the long work): what the request still
+   *  has left, one line. The next leg starts from it, on this device or on
+   *  whichever reopens the conversation. Absent on a finished answer. */
+  readonly left?: string
 }
 
 export type TurnAttemptUsage = {
@@ -113,6 +117,10 @@ type TurnManifest = {
   readonly model?: string
   readonly prompt?: string
   readonly attempts?: readonly TurnAttempt[]
+  /** A leg's handover (chat-window, the long work): what the request still
+   *  has left, one line. The next leg starts from it, on this device or on
+   *  whichever reopens the conversation. Absent on a finished answer. */
+  readonly left?: string
 }
 
 /** The optional provenance a caller attaches to a model-produced turn. */
@@ -126,6 +134,10 @@ export type TurnMeta = {
   readonly model?: string
   readonly prompt?: string
   readonly attempts?: readonly TurnAttempt[]
+  /** A leg's handover (chat-window, the long work): what the request still
+   *  has left, one line. The next leg starts from it, on this device or on
+   *  whichever reopens the conversation. Absent on a finished answer. */
+  readonly left?: string
 }
 
 const SIG64 = /^[0-9a-f]{64}$/
@@ -193,6 +205,7 @@ const cleanMeta = (meta: TurnMeta | undefined): Partial<TurnMeta> => {
   if (typeof meta.providerId === 'string' && meta.providerId) out['providerId'] = meta.providerId.slice(0, 64)
   if (typeof meta.model === 'string' && meta.model) out['model'] = meta.model.slice(0, 128)
   if (typeof meta.prompt === 'string' && SIG64.test(meta.prompt)) out['prompt'] = meta.prompt
+  if (typeof meta.left === 'string' && meta.left.trim()) out['left'] = meta.left.trim().slice(0, 300)
   if (Array.isArray(meta.attempts) && meta.attempts.length) {
     const attempts = cleanAttempts(meta.attempts)
     if (attempts.length) out['attempts'] = attempts
@@ -266,6 +279,10 @@ type RawTurn = {
   readonly contentSig?: string
   readonly prompt?: string
   readonly attempts?: readonly TurnAttempt[]
+  /** A leg's handover (chat-window, the long work): what the request still
+   *  has left, one line. The next leg starts from it, on this device or on
+   *  whichever reopens the conversation. Absent on a finished answer. */
+  readonly left?: string
   /** The entry's file name — set by the walk, never read from the bytes. */
   readonly sig?: string
 }
@@ -689,6 +706,7 @@ const materializeTurns = async (
       ...(r.contentSig ? { contentSig: r.contentSig } : {}),
       ...(r.sig ? { sig: r.sig } : {}),
       ...(r.asks === true ? { asks: true as const } : {}),
+      ...(typeof r.left === 'string' && r.left.trim() ? { left: r.left.trim().slice(0, 300) } : {}),
       ...(typeof r.prompt === 'string' && SIG64.test(r.prompt) ? { prompt: r.prompt } : {}),
       ...(attempts.length ? { attempts } : {}),
     }

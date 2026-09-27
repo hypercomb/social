@@ -8,6 +8,12 @@ import {
   workInstruction,
   workLineGrammar,
   WorkStreamGuard,
+  budgetSpentMessage,
+  continueMessage,
+  CONTINUE_FENCE_LANG,
+  foldWorkLedger,
+  lastRoundMessage,
+  workBudget,
 } from './hypercomb-work-fence'
 
 describe('the work fence', () => {
@@ -174,5 +180,70 @@ describe('what the model is told', () => {
   it('a failure says what ran before it stopped', () => {
     expect(doFailedMessage(['/a b'], '/c d', 'no such tile', 'q')).toContain('It ran before stopping:\n- /a b')
     expect(doFailedMessage([], '/c d', 'no such tile', 'q')).toContain('Nothing ran.')
+  })
+})
+
+describe('the long work: legs, handover and budget', () => {
+  it('a continue fence is the handover, and rides with the prose', () => {
+    const work = splitWork(`Read the three tiles; two are done.
+
+\`\`\`${CONTINUE_FENCE_LANG}
+rewrite the third tile's summary
+\`\`\``)
+    expect(work.prose).toBe('Read the three tiles; two are done.')
+    expect(work.request).toBeUndefined()
+    expect(work.left).toBe("rewrite the third tile's summary")
+  })
+
+  it('no continue fence means the request is done', () => {
+    expect(splitWork('All three are rewritten.').left).toBeUndefined()
+  })
+
+  it('a continue fence beside a read keeps the read', () => {
+    const work = splitWork(`\`\`\`hypercomb-read
+read /a
+\`\`\`
+
+\`\`\`${CONTINUE_FENCE_LANG}
+then /b
+\`\`\``)
+    expect(work.request?.kind).toBe('read')
+    expect(work.left).toBe('then /b')
+  })
+
+  it('the leg-end message asks for a handover, and the next leg opens on it', () => {
+    expect(lastRoundMessage('q')).toContain(CONTINUE_FENCE_LANG)
+    expect(continueMessage('the rest')).toBe('Continue. Left: the rest')
+    expect(continueMessage('')).toContain('the rest of the request')
+    expect(budgetSpentMessage({ rounds: 400, tokens: 6_000_000 })).toContain('400 rounds')
+  })
+
+  it('the ledger folds the older rounds and keeps the transcript and the newest verbatim', () => {
+    const messages = [
+      { role: 'user', content: 'the request' },
+      { role: 'assistant', content: 'round 1 ask' },
+      { role: 'user', content: 'round 1 result '.repeat(100) },
+      { role: 'assistant', content: 'round 2 ask' },
+      { role: 'user', content: 'round 2 result' },
+      { role: 'assistant', content: 'round 3 ask' },
+      { role: 'user', content: 'round 3 result' },
+    ]
+    const folded = foldWorkLedger(messages, 1, 2)
+    expect(folded[0]).toEqual(messages[0])
+    expect(folded[1].role).toBe('user')
+    expect(folded[1].content).toContain('PROGRESS LEDGER')
+    expect(folded[1].content).toContain('1. you asked: round 1 ask')
+    expect(folded[1].content).toContain('…')
+    expect(folded.slice(2)).toEqual(messages.slice(5))
+  })
+
+  it('too little to fold is left alone', () => {
+    const messages = [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'a' }, { role: 'user', content: 'r' }]
+    expect(foldWorkLedger(messages, 1, 2)).toEqual(messages)
+  })
+
+  it('the budget is the default unless the device says otherwise', () => {
+    expect(workBudget(() => null)).toEqual({ rounds: 400, tokens: 6_000_000 })
+    expect(workBudget(key => key.endsWith('rounds') ? '50' : 'nonsense')).toEqual({ rounds: 50, tokens: 6_000_000 })
   })
 })
