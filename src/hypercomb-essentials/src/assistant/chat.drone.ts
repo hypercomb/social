@@ -13,6 +13,7 @@ import { CHAT_THREADS_IOC_KEY, ChatThreads } from './chat-threads.js'
 import { COMPACTION_IOC_KEY, compaction } from './compaction.js'
 import { EXECUTION_QUEUE_IOC_KEY, executionQueue } from './execution-queue.js'
 import { HARNESS_IOC_KEY, bootHarness, harness } from './harness.js'
+import { AGENT_STEPS_IOC_KEY, agentSteps, shippedAgentSteps } from './agent-steps.js'
 import { publishService } from './llm-provider-registry.js'
 
 export class ChatDrone extends Drone {
@@ -30,6 +31,10 @@ publishService(EXECUTION_QUEUE_IOC_KEY, executionQueue)
 // THE HARNESS (documentation/agent-harness.md): the loop's policy record,
 // published here and seeded once the Store answers — the bee wires it.
 publishService(HARNESS_IOC_KEY, harness)
+// THE STEPS, by word: the shipped fold, handover and receipt, and any bee
+// that registered its own beside them under its signature.
+for (const step of shippedAgentSteps()) agentSteps.register(step)
+publishService(AGENT_STEPS_IOC_KEY, agentSteps)
 window.ioc.whenReady?.('@hypercomb.social/Store', () => { bootHarness() })
 bootHarness()
 

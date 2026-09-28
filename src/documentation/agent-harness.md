@@ -262,3 +262,26 @@ steps, so the steps must be words first). Seed ten from the table above;
 make `route` able to fan out over providers (panel, second opinion); make a
 sub-conversation a first-class part with its own budget slice (fan-out,
 supervisor, self-authoring delegation).
+
+## 10. Standing
+
+What of the order above is built, and where each piece landed.
+
+| Step | Standing | Where |
+|---|---|---|
+| 1 · the record | BUILT 2026-09-27 | `assistant/harness.ts` — `harness@1`, `parseHarness` (narrow only), `HarnessStore` (sweep, seed, import, use), pool `agent:harness` (scoped census in core), device pointer `hc:harness`, published and seeded by `chat.drone`; the window reads `activeHarness()` per send |
+| 2 · the stages | BUILT 2026-09-27 | `core/agent-effects.ts` — the seven `agent:*` effects with typed facts; the window emits; the meter and the bee panel read them |
+| 3 · steps as words | BUILT 2026-09-27, three of seven | `core/agent-steps.ts` the contract, `core/agent-leg.ts` the leg primitives and the shipped `fold`, `handover`, `receipt`; `assistant/agent-steps.ts` the registry (word → shipped or a bee by signature), published by `chat.drone`; the window resolves each word against the harness's `steps` and falls back to the shipped objects |
+| 3 · the rest | OPEN | `stretch` (the streaming rounds with the fences and the Execution window), `front` (Jev's door), `route` (the provider pick) and `verify` (Jev's check) still run inside the window; each is a seam of the same shape and takes the same door when lifted |
+| 4 · words | OPEN | `harness`, `harness use`, `harness edit`; the per-conversation mark |
+| 5 · network | OPEN | `harness offer`, `harness sync` over the published-pool probe |
+| 6 · evals | OPEN | `harness try`; the ledger keyed by harness |
+
+Why the leg primitives are in core and not essentials: shared may not import
+essentials at compile time (the web shell never bundles modules), and
+essentials may not import shared. A primitive both sides run — the fold, the
+leg-end word, the handover read from prose — has exactly one home that both
+can reach, and that is core, beside the fence regex it already held. The
+step BEES are essentials' (the registry, the registrations, any community
+step); the window's fallback is the same shipped object core exports, so
+nothing is written twice.

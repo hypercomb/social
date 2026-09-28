@@ -108,8 +108,10 @@ import {
   splitQuestion,
   SignatureService,
   type SettledQuestion,
-  AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_RECEIPT, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY,
+  AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY,
   type AgentHandoverEvent, type AgentRoundEvent, type AgentSpent, type AgentStageEffect,
+  AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedHandoverStep, shippedReceiptStep,
+  type AgentStepRegistry, type HandoverStep, type WorkMessage,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
@@ -1263,6 +1265,8 @@ const RESUME_LEFT_MS = 60 * 60 * 1000
 const HARNESS_IOC_KEY = '@hypercomb.social/Harness'
 type HarnessRecordLike = {
   readonly name: string
+  /** Step bees by signature, in order; the registry resolves each word. */
+  readonly steps?: readonly string[]
   readonly leg: { readonly rounds: number; readonly reserveTokens: number; readonly keepVerbatim: number }
   readonly budget: { readonly rounds: number; readonly tokens: number }
   readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number }
@@ -1278,6 +1282,13 @@ const SHIPPED_HARNESS: HarnessRecordLike = {
 }
 const activeHarness = (): HarnessRecordLike =>
   (ioc()?.get(HARNESS_IOC_KEY) as HarnessLike | undefined)?.active ?? SHIPPED_HARNESS
+/** THE STEPS ARE WORDS (core agent-steps): the registry essentials publishes
+ *  resolves each word to the bee the harness names, else the shipped one —
+ *  and the shipped one answers directly when there is no registry at all. */
+const stepRegistry = (): AgentStepRegistry | undefined =>
+  ioc()?.get(AGENT_STEPS_IOC_KEY) as AgentStepRegistry | undefined
+const handoverStepNow = (): HandoverStep =>
+  stepRegistry()?.resolve('handover', activeHarness().steps) ?? shippedHandoverStep
 const hypercombPlanQueue = new HypercombPlanQueue()
 
 /** How far back a pending ask record may reach and still be shown as waiting.
@@ -6067,7 +6078,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.#left.delete(convoId)
     const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
     this.#task.set(convoId, { ...task, legs: task.legs + 1 })
-    await this.send(continueMessage(left), { auto: true })
+    await this.send(handoverStepNow().continueWord(left), { auto: true })
   }
 
   /** A conversation opened on a stored handover picks the work back up,
@@ -6363,6 +6374,8 @@ export class ChatWindowComponent implements OnDestroy {
       // purse.
       const harnessNow = activeHarness()
       const budget = workBudget(undefined, harnessNow.budget)
+      const foldStep = stepRegistry()?.resolve('fold', harnessNow.steps) ?? shippedFoldStep
+      const handoverStep = stepRegistry()?.resolve('handover', harnessNow.steps) ?? shippedHandoverStep
       // EVERY STAGE IS ANNOUNCED (core agent-effects): facts for whoever
       // paints them — the meter, the bee panel, the route — never a render.
       const legOf = (): number => (component.#task.get(convoId)?.legs ?? 0) + 1
@@ -7075,9 +7088,11 @@ export class ChatWindowComponent implements OnDestroy {
           // A model that wrote "what is still left" in prose and forgot the
           // fence still handed over; the words say so, and stopping there
           // would be the old cap wearing a new name.
-          const left = work.left
-            ?? (work.request ? `carry on from: ${work.request.lines.join(' · ').slice(0, 200)}` : undefined)
-            ?? (lastRound && harnessNow.handover.proseFallback ? leftFromProse(work.prose) : undefined)
+          const left = handoverStep.left({
+            ...(work.left ? { left: work.left } : {}),
+            ...(work.request ? { requestLines: work.request.lines } : {}),
+            prose: work.prose, lastRound, proseFallback: harnessNow.handover.proseFallback,
+          })
           if (left) {
             const task = component.#task.get(convoId)
             component.#turnMeta.set(convoId, {
@@ -7087,7 +7102,7 @@ export class ChatWindowComponent implements OnDestroy {
             })
             stage(AGENT_HANDOVER, { round: rounds, left, budgetSpent, spent: spentOf() })
             wrote = true
-            if (budgetSpent) yield budgetSpentMessage(component.#task.get(convoId) ?? { rounds, tokens: 0 })
+            if (budgetSpent) yield handoverStep.pausedNote(component.#task.get(convoId) ?? { rounds, tokens: 0 })
             else {
               component.#left.set(convoId, left)
               yield `\n\n*Continuing: ${left}*`
@@ -7200,14 +7215,19 @@ export class ChatWindowComponent implements OnDestroy {
         // fold into a ledger first, and only a leg that still cannot fit —
         // or has run its rounds, or spent the request's budget — hands over.
         const window = (roundModel && router.contextLengthForModel?.(roundModel)) || 128_000
-        const room = (): boolean => estimateTokens(system) + tokensOf(messages) < window - harnessNow.leg.reserveTokens
-        if (!room()) {
-          const before = messages.length
-          messages.splice(0, messages.length, ...foldWorkLedger(messages, workStart, harnessNow.leg.keepVerbatim) as typeof messages)
-          if (messages.length < before) stage(AGENT_FOLD, { round: rounds, folded: before - messages.length + 1, kept: harnessNow.leg.keepVerbatim })
+        const folded = foldStep.run({
+          messages: messages as WorkMessage[], workStart, keep: harnessNow.leg.keepVerbatim,
+          systemTokens: estimateTokens(system), window, reserve: harnessNow.leg.reserveTokens,
+        })
+        if (folded.folded) {
+          messages.splice(0, messages.length, ...folded.messages as typeof messages)
+          stage(AGENT_FOLD, { round: rounds, folded: folded.folded, kept: harnessNow.leg.keepVerbatim })
         }
-        if (spent || lastRound || rounds >= harnessNow.leg.rounds || !room()) {
-          messages[messages.length - 1] = { role: 'user', content: `${reply}\n\n${lastRoundMessage(message)}` }
+        const decided = handoverStep.decide({
+          request: message, reply, rounds, legRounds: harnessNow.leg.rounds, spent, lastRound, fits: folded.fits,
+        })
+        if (decided.end) {
+          messages[messages.length - 1] = { role: 'user', content: decided.reply }
           lastRound = true
           budgetSpent = spent
         }
@@ -7256,20 +7276,18 @@ export class ChatWindowComponent implements OnDestroy {
         console.warn('[chat] the model could not answer:', error)
         yield `\n\nThe model could not answer: ${detail}`
       } finally {
+        // THE RECEIPT, whatever happened: answered, failed, or stopped — by
+        // the `receipt` step the harness names, else the shipped one.
         const at = Date.now()
-        if (answered && !opts?.signal?.aborted) {
-          EffectBus.emit('jev:turn', {
-            path: turnPath, ms: at - startedAt, rounds: turnRounds, weight: turnWeight, at,
-            ...(firstAt ? { firstMs: firstAt - startedAt } : {}),
-          })
-        }
-        // THE RECEIPT, whatever happened: answered, failed, or stopped.
         const task = component.#task.get(convoId)
-        EffectBus.emit(AGENT_RECEIPT, {
+        const receiptStep = stepRegistry()?.resolve('receipt', activeHarness().steps)
+          ?? shippedReceiptStep((name, payload) => { EffectBus.emit(name, payload) })
+        receiptStep.run({
           id: component.#beeId(convoId), convoId, leg: (task?.legs ?? 0) + 1, at,
           path: turnPath, rounds: turnRounds, weight: turnWeight, ms: at - startedAt,
           ...(firstAt ? { firstMs: firstAt - startedAt } : {}),
           outcome: opts?.signal?.aborted ? 'stopped' : answered ? 'answered' : 'failed',
+          answered: answered && !opts?.signal?.aborted,
           spent: { rounds: task?.rounds ?? 0, tokens: task?.tokens ?? 0 },
         })
       }
