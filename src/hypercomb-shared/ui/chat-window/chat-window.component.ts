@@ -110,8 +110,8 @@ import {
   type SettledQuestion,
   AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY,
   type AgentHandoverEvent, type AgentRoundEvent, type AgentSpent, type AgentStageEffect,
-  AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedHandoverStep, shippedReceiptStep,
-  type AgentStepRegistry, type HandoverStep, type WorkMessage,
+  AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedVerifyStep,
+  type AgentStepRegistry, type FrontDecisionLike, type HandoverStep, type VerifyDecisionLike, type WorkMessage,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
@@ -6376,6 +6376,9 @@ export class ChatWindowComponent implements OnDestroy {
       const budget = workBudget(undefined, harnessNow.budget)
       const foldStep = stepRegistry()?.resolve('fold', harnessNow.steps) ?? shippedFoldStep
       const handoverStep = stepRegistry()?.resolve('handover', harnessNow.steps) ?? shippedHandoverStep
+      const frontStep = stepRegistry()?.resolve('front', harnessNow.steps) ?? shippedFrontStep
+      const verifyStep = stepRegistry()?.resolve('verify', harnessNow.steps) ?? shippedVerifyStep
+      const busEmit = (name: string, payload: Record<string, unknown>): void => { EffectBus.emit(name, payload) }
       // EVERY STAGE IS ANNOUNCED (core agent-effects): facts for whoever
       // paints them — the meter, the bee panel, the route — never a render.
       const legOf = (): number => (component.#task.get(convoId)?.legs ?? 0) + 1
@@ -6637,28 +6640,25 @@ export class ChatWindowComponent implements OnDestroy {
       const verifyAnswer = async (answer: string, spoken: string, providerId: string): Promise<string | undefined> => {
         const said = [...messages, { content: spoken }]
         const read = fitEvidence(evidence.slice(1), part => said.some(entry => entry.content.includes(part)), JEV_STATE_CHARS)
-        if (!jev?.verify || !read.length || !jev.ready(providerId)) return undefined
-        const startedAt = Date.now()
-        let decision: Awaited<ReturnType<NonNullable<JevLike['verify']>>>
-        try {
-          decision = await jev.verify({ request: message, evidence: read, answer },
-            { providerId, system, messages: [...messages, { content: spoken }] }, signal)
-        } catch (error) {
-          if (signal?.aborted) throw error
-          console.warn('[chat] Jev could not check the answer:', error)
-          return undefined
-        }
-        decisionCalls++
-        settledAttempts.push({ round: rounds, attempt: decisionCalls, providerId: 'openrouter', model: decision.model || JEV_MODEL,
-          outcome: 'success', category: 'jev-decision', durationMs: Date.now() - startedAt, outputEmitted: false,
-          ...(decision.usage ? { usage: { inputTokens: decision.usage.inputTokens, outputTokens: decision.usage.outputTokens, estimatedCostUsd: decision.usage.cost } } : {}),
+        // THE VERIFY DOOR is a step (core agent-doors): the judge, the receipt
+        // writer and the bus go in; the verdict and its note come back. The
+        // ledger entry and the stage stay here, where the turn is kept.
+        const checked = await verifyStep.run({
+          request: message, answer, evidence: read, providerId, system, messages: [...messages, { content: spoken }],
+          jev, signal,
+          persist: decision => persistJevVerify(contextStore, answer, decision as VerifyDecisionLike & { answers: Record<string, unknown> }),
+          emit: busEmit,
         })
-        const receipt = await persistJevVerify(contextStore, answer, decision).catch(() => undefined)
-        if (receipt) readSigs.push(receipt)
+        if (!checked) return undefined
+        decisionCalls++
+        settledAttempts.push({ round: rounds, attempt: decisionCalls, providerId: 'openrouter', model: checked.model || JEV_MODEL,
+          outcome: 'success', category: 'jev-decision', durationMs: checked.ms, outputEmitted: false,
+          ...(checked.decision.usage ? { usage: { inputTokens: checked.decision.usage.inputTokens, outputTokens: checked.decision.usage.outputTokens, estimatedCostUsd: checked.decision.usage.cost } } : {}),
+        })
+        if (checked.receipt) readSigs.push(checked.receipt)
         writeTurnMeta(providerId, continuationModel)
-        EffectBus.emit('jev:outcome', { decision: receipt, plan: 'verify', outcome: decision.verified ? 'verified' : 'unverified', at: Date.now() })
-        stage(AGENT_VERIFY, { verified: decision.verified, reason: decision.reason, model: decision.model || JEV_MODEL })
-        return decision.verified ? undefined : `\n\nJev could not confirm this answer against what the hive read (${decision.reason}).`
+        stage(AGENT_VERIFY, { verified: checked.verified, reason: checked.reason, model: checked.model || JEV_MODEL })
+        return checked.note
       }
 
       /** THE FRONT DOOR (essentials jev-front.ts): Jev reads the request once,
@@ -6693,37 +6693,31 @@ export class ChatWindowComponent implements OnDestroy {
             }
           } catch (error) { if (signal?.aborted) throw error }
         }
-        const startedAt = Date.now()
-        let decision: FrontDecision
-        try {
-          decision = await jev.front({
-            request: message,
-            behaviours: offered.map(entry => ({
-              name: entry.name, description: entry.description ?? entry.name,
-              forms: entry.machine!.forms, bare: entry.machine!.bare === true, reach: entry.machine!.reach ?? 'editing',
-            })),
-            tiles,
-            carrying: !!previousTier,
-          }, { providerId, system: vocabulary, messages: [{ content: message }, { content: tiles.join('\n') }] }, signal)
-        } catch (error) {
-          if (signal?.aborted) throw error
-          console.warn('[chat] Jev did not answer at the front door; this turn runs on the regular model:', error)
-          return without
-        }
+        // THE FRONT DOOR is a step (core agent-doors): the census and the tiles
+        // are listed here, where the window holds them; the judge answers in
+        // the step; a direct sentence Jev chose is run here, where the stretch
+        // runs everything else.
+        const asked = await frontStep.run({
+          request: message, providerId, carrying: !!previousTier,
+          behaviours: offered.map(entry => ({
+            name: entry.name, description: entry.description ?? entry.name,
+            forms: entry.machine!.forms, bare: entry.machine!.bare === true, reach: entry.machine!.reach ?? 'editing',
+          })),
+          tiles, vocabulary, jev, signal,
+          persist: decision => persistJevFront(contextStore, message, decision as FrontDecision),
+          emit: busEmit,
+        })
+        if (asked.door === 'stay') return stay
+        if (asked.door === 'without' || !asked.decision) return without
+        const decision: FrontDecisionLike = asked.decision
         decisionCalls++
         settledAttempts.push({ round: 0, attempt: decisionCalls, providerId: 'openrouter', model: decision.model || JEV_MODEL,
-          outcome: 'success', category: 'jev-decision', durationMs: Date.now() - startedAt, outputEmitted: false,
+          outcome: 'success', category: 'jev-decision', durationMs: asked.ms, outputEmitted: false,
           ...(decision.usage ? { usage: { inputTokens: decision.usage.inputTokens, outputTokens: decision.usage.outputTokens, estimatedCostUsd: decision.usage.cost } } : {}),
         })
-        const receipt = await persistJevFront(contextStore, message, decision).catch(() => undefined)
-        if (receipt) readSigs.push(receipt)
-        const report = (outcome: string): void => {
-          EffectBus.emit('jev:outcome', {
-            decision: receipt, plan: 'front', outcome, at: Date.now(),
-            ...(decision.weight ? { weight: decision.weight } : {}), ...(decision.direct?.reach ? { reach: decision.direct.reach } : {}),
-          })
-        }
-        const next: Door = { aside: decision.aside, carry: decision.carry, ...(decision.weight ? { weight: decision.weight } : {}) }
+        if (asked.receipt) readSigs.push(asked.receipt)
+        const report = asked.report
+        const next: Door = { aside: asked.aside, carry: asked.carry, ...(asked.weight ? { weight: asked.weight } : {}) }
         const sentence = decision.direct?.sentence
         if (!sentence) { report(decision.aside ? 'aside' : 'passed'); return next }
         // The hive's parser has the last word; a sentence it refuses is a miss.

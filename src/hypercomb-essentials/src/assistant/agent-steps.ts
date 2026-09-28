@@ -12,7 +12,7 @@
 // the bee that loaded it owns that act. chat.drone publishes this registry.
 
 import {
-  EffectBus, shippedFoldStep, shippedHandoverStep, shippedReceiptStep,
+  EffectBus, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedVerifyStep,
   type AgentStepListing, type AgentStepOf, type AgentStepRegistry, type ImplementedStepWord,
 } from '@hypercomb/core'
 
@@ -58,7 +58,9 @@ export const agentSteps = new AgentStepRegistryStore()
  *  bee that offers a `fold` of its own registers beside them with its
  *  signature and waits for a harness to name it. */
 export const shippedAgentSteps = (): readonly AgentStepOf[ImplementedStepWord][] => [
+  shippedFrontStep,
   shippedFoldStep,
   shippedHandoverStep,
+  shippedVerifyStep,
   shippedReceiptStep((name, payload) => { EffectBus.emit(name, payload) }),
 ]

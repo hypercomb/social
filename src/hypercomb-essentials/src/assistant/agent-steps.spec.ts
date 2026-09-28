@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  EffectBus, shippedFoldStep, shippedHandoverStep, shippedReceiptStep, type FoldStep,
+  EffectBus, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedVerifyStep,
+  type FoldStep, type JevDoorLike,
 } from '@hypercomb/core'
 import { AgentStepRegistryStore } from './agent-steps.js'
 
@@ -71,5 +72,54 @@ describe('the shipped steps', () => {
     step.run({ id: 'chat:b', convoId: 'chat:b', leg: 1, at: 1, path: 'off', rounds: 1, weight: 'fast', ms: 10, outcome: 'failed', spent: { rounds: 1, tokens: 1 }, answered: false })
     off()
     expect(seen.at(-1)).toMatchObject({ convoId: 'chat:b', outcome: 'failed' })
+  })
+})
+
+describe('the two doors Jev keeps', () => {
+  const emitted: [string, Record<string, unknown>][] = []
+  const emit = (name: string, payload: Record<string, unknown>): void => { emitted.push([name, payload]) }
+  const judge = (over: Partial<JevDoorLike> = {}): JevDoorLike => ({
+    ready: () => true,
+    front: async () => ({ aside: false, carry: true, weight: 'deep', reason: 'code work', model: 'jev-1' }),
+    verify: async () => ({ verified: false, reason: 'the answer names a file the reads never opened', model: 'jev-1' }),
+    ...over,
+  })
+  const frontInput = (jev?: JevDoorLike) => ({
+    request: 'why do levels not open', providerId: 'openrouter:deepseek', carrying: false,
+    behaviours: [], tiles: ['solomon', 'levels'], vocabulary: 'the words', jev,
+    persist: async () => 'a'.repeat(64), emit,
+  })
+
+  it('front: no judge stays out of the way; a judge not ready steps the turn down; a judge that answers weighs it', async () => {
+    emitted.length = 0
+    expect((await shippedFrontStep.run(frontInput(undefined))).door).toBe('stay')
+    const down = await shippedFrontStep.run(frontInput(judge({ ready: () => false })))
+    expect(down).toMatchObject({ door: 'without', aside: true, down: true })
+    const asked = await shippedFrontStep.run(frontInput(judge()))
+    expect(asked).toMatchObject({ door: 'asked', aside: false, carry: true, weight: 'deep', receipt: 'a'.repeat(64) })
+    asked.report('passed')
+    expect(emitted.at(-1)).toEqual(['jev:outcome', expect.objectContaining({ plan: 'front', outcome: 'passed', weight: 'deep', decision: 'a'.repeat(64) })])
+  })
+
+  it('front: a judge that throws steps the turn down rather than failing it, and a stop is a stop', async () => {
+    const failing = await shippedFrontStep.run(frontInput(judge({ front: async () => { throw new Error('jev is down') } })))
+    expect(failing.door).toBe('without')
+    const controller = new AbortController()
+    controller.abort()
+    await expect(shippedFrontStep.run({ ...frontInput(judge({ front: async () => { throw new Error('stopped') } })), signal: controller.signal })).rejects.toThrow('stopped')
+  })
+
+  it('verify: nothing to check against answers nothing; an unconfirmed answer carries its note and lands on the bus', async () => {
+    emitted.length = 0
+    const base = { request: 'q', answer: 'the engine hydrates rooms', evidence: ['engine.ts: prepare() ensures rooms'], providerId: 'p', system: 's', messages: [], persist: async () => 'b'.repeat(64), emit }
+    expect(await shippedVerifyStep.run({ ...base, evidence: [], jev: judge() })).toBeUndefined()
+    expect(await shippedVerifyStep.run({ ...base, jev: undefined })).toBeUndefined()
+    const checked = await shippedVerifyStep.run({ ...base, jev: judge() })
+    expect(checked).toMatchObject({ verified: false, model: 'jev-1', receipt: 'b'.repeat(64) })
+    expect(checked?.note).toContain('Jev could not confirm this answer')
+    expect(emitted.at(-1)).toEqual(['jev:outcome', expect.objectContaining({ plan: 'verify', outcome: 'unverified' })])
+    const fine = await shippedVerifyStep.run({ ...base, jev: judge({ verify: async () => ({ verified: true, reason: 'held', model: 'jev-1' }) }) })
+    expect(fine).toMatchObject({ verified: true })
+    expect(fine?.note).toBeUndefined()
   })
 })
