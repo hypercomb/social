@@ -1585,6 +1585,14 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
   // without this header a hive replicating from another origin died as an
   // opaque "Failed to fetch" and the door read as publishing nothing.
   headers.set('Access-Control-Allow-Origin', '*')
+  // The install index is JSON the asset server sends with no type (its name
+  // has no extension), and the edge compresses only what it knows is text:
+  // 221 KB went out raw, the largest thing a visitor loads before the page
+  // shows (measured 2026-09-28, revolucion).
+  if (response.status === 200 && !response.headers.get('content-type')
+      && new URL(request.url).pathname.startsWith(`/content/${await poolAddress(INSTALL_INDEX_MEANING)}/`)) {
+    headers.set('Content-Type', 'application/json; charset=utf-8')
+  }
   if (door && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
     const html = await response.text()
     const at = html.indexOf('</head>')
@@ -2203,6 +2211,8 @@ async function holdIndex(env, pubkey, evt) {
 // together. Measured on revolucion 2026-09-26: every sig a cold visitor
 // fetched sat within four hops, 404 members, 126 KB before gzip.
 const CONTENT_PACKS_MEANING = 'content:packs'
+/** The visitor engine's install index pool (hypercomb-runtime install-index.ts). */
+const INSTALL_INDEX_MEANING = 'install:index'
 const CONTENT_PACK_DEPTH = 4
 const CONTENT_PACK_MEMBER_MAX = 16_384
 const CONTENT_PACK_MAX = 524_288

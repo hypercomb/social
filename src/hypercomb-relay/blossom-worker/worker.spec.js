@@ -242,6 +242,20 @@ test('a page carries the head of its package pool, and its bundled assets reuse 
   assert.deepEqual(reads, [])
 })
 
+test('the install index goes out as JSON, so the edge compresses it', async () => {
+  const { env } = await fixture()
+  const pool = await sha256Hex('install:index')
+  const other = await sha256Hex('host:packages')
+  // Bytes, not a string: the asset server sends this file with no type at all.
+  env.ASSETS.fetch = async () => new Response(new TextEncoder().encode('{"package":"x"}'))
+  const index = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/${'e'.repeat(64)}`), env)
+  assert.equal(index.headers.get('content-type'), 'application/json; charset=utf-8')
+  assert.equal(await index.text(), '{"package":"x"}')
+  // Only the index's own pool is named JSON; another typeless asset is left alone.
+  const elsewhere = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${other}/00000000`), env)
+  assert.equal(elsewhere.headers.get('content-type'), null)
+})
+
 test('an index is held at the edge a few seconds, and a write drops the copy', async () => {
   const held = new Map()
   const edge = {
