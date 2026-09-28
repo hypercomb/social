@@ -1,16 +1,27 @@
-// THE PACKAGE AS TILES, SOURCE AND ALL. A package revision keeps its source
-// the way the hive keeps everything: on the living primitive
-// (life-primitive.md), as the tiles the code belongs to. Never a side list of
-// paths: a file is a child of the unit it was compiled into, that unit is a
-// beehavior (or an atom) of the tile its folder is, and each tile names the
-// cell layer the package runs, so the code a hive runs and the code it was
-// written as are one tree, drilled from the package down to the file.
+// SOURCE AS TILES. A revision keeps its source the way the hive keeps
+// everything: on the living primitive (life-primitive.md), as the tiles the
+// code belongs to. Never a side list of paths: a file is a child of what it
+// was built into, and that is a child of the tile it belongs to, so the code
+// that runs and the code it was written as are one tree, drilled from the
+// revision down to the file. Two trees:
+//
+// THE PACKAGE — a tile per folder, naming the cell layer the package runs;
+// under it each bee as a beehavior and each compiled dependency as an atom;
+// under those the files they were built from.
 //
 //   package   { name, package: <package sig>, children }
 //   tile      { name, cell?: <cell layer sig>, namespace?: <barrel sig>, children }
 //   behaviour { name: <class>, bee: M(bee), dependencies: [sig], children }   — the spot's own shape
 //   atom      { name: <src path>, dependency: <sig>, children }
 //   file      { name: <repo path>, content: M(resource) }                    — the spot's own shape
+//
+// THE HOST — a tile per unit the host build compiles (kernel, processor,
+// core library, host bundle, console bee, …), naming what it produced (a
+// signature, or an install file); under it the files that build read, and
+// for a spot, its beehaviors, which carry their own.
+//
+//   host      { name: 'host', host, library, hostPackage, children }
+//   unit      { name, output?: <sig>, install?: <path>, children }
 //
 // M(x) is a meta envelope's signature ({ meta: 1, …, relation }). Every
 // record is signature-named. A file is placed exactly once: under the unit
@@ -27,6 +38,7 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const posix = path => path.split(sep).join('/')
 const IMPORTED = /(?:\bfrom|\bimport)\s*\(?\s*"([^"]+)"/g
 /** Never source: what a build or an install makes. */
+const SIGNATURE = /^[a-f0-9]{64}$/
 const MADE = /(^|\/)(node_modules|dist|\.git)(\/|$)|(^|\/)\.build-cache\.json$/
 
 /** The package's own files: what its checkout tracks, or — with no checkout
@@ -210,25 +222,61 @@ export const packageTree = async ({ packageDir, repoRoot, keep }) => {
   return { root, packageSig, atoms: [...atoms].sort(), files: files.length }
 }
 
+/**
+ * Build a host's tile tree into a pool. `units` are what the host build
+ * compiled: { name, output?, install?, files: Map(repo path → bytes),
+ * beehaviors?: [behaviour sig] } — a behaviour record must already be kept.
+ */
+export const hostTree = async ({ units, host, library, hostPackage, keep }) => {
+  const record = async value => keep(Buffer.from(JSON.stringify(value)))
+  const meta = payload => record({ meta: 1, ...payload })
+  const children = []
+  let files = 0
+  for (const unit of units) {
+    const kids = []
+    for (const [name, bytes] of [...unit.files].sort(([a], [b]) => a < b ? -1 : 1)) {
+      const content = await meta({ resource: await keep(bytes), relation: 'content' })
+      kids.push(await meta({ layer: await record({ name, content }), relation: 'children' }))
+      files++
+    }
+    for (const behaviour of unit.beehaviors ?? []) kids.push(await meta({ layer: behaviour, relation: 'beehavior' }))
+    const tile = await record({
+      name: unit.name,
+      ...(unit.output ? { output: unit.output } : {}),
+      ...(unit.install ? { install: unit.install } : {}),
+      children: kids,
+    })
+    children.push(await meta({ layer: tile, relation: 'children' }))
+  }
+  const root = await record({ name: 'host', host, library, hostPackage, children })
+  return { root, files }
+}
+
 /** Every file a tree holds, by repo path → resource signature, and every
  *  signature it reaches (records, envelopes, resources, the package's atoms). */
 export const walkTree = async (rootSig, readRecord) => {
   const files = new Map(), reach = new Set()
-  const visit = async (sig, name) => {
+  const visit = async sig => {
     if (reach.has(sig)) return
     reach.add(sig)
     const node = await readRecord(sig)
     if (!node || typeof node !== 'object') return
     if (node.meta === 1) {
       // An envelope: its target is a record to walk, or a leaf (a resource, a bee).
-      if (node.resource) { reach.add(node.resource); if (name) files.set(name, node.resource) }
+      if (node.resource) reach.add(node.resource)
       if (node.bee) reach.add(node.bee)
       if (node.layer) await visit(node.layer)
       return
     }
-    for (const key of ['dependency', 'cell', 'namespace', 'package']) if (typeof node[key] === 'string') reach.add(node[key])
+    for (const key of ['dependency', 'cell', 'namespace', 'package', 'output', 'host', 'library', 'hostPackage']) if (SIGNATURE.test(node[key] ?? '')) reach.add(node[key])
     for (const dep of node.dependencies ?? []) reach.add(dep)
-    if (node.content) await visit(node.content, node.name)
+    // A file is named here, not at its envelope: the same bytes under two
+    // paths share one envelope, and each path is a file of its own.
+    if (node.content) {
+      const envelope = await readRecord(node.content)
+      if (envelope?.resource && typeof node.name === 'string') files.set(node.name, envelope.resource)
+      await visit(node.content)
+    }
     if (node.bee) await visit(node.bee)
     for (const child of node.children ?? []) await visit(child)
   }

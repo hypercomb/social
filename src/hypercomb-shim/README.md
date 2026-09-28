@@ -167,14 +167,18 @@ picture: `{ name: 'story', label, description, within, at }`. A retelling is a
 new record; the newest is the story.
 
 A story's **revisions** are signed records
-`{ name: 'build', label, version, parent, install, host, library, hostPackage, atoms, source, conversations? }`.
-`install` and `source` are layers naming, by path and signature, every file of
-the origin and every source file the build read; `atoms` are its signed files.
-All of it is kept in the pool, so any revision can be written out and
-published again, exactly.
+`{ name: 'build', label, version, parent, install, host, library, hostPackage, atoms, tree, conversations? }`.
+`install` is a layer naming, by path and signature, every file of the origin;
+`atoms` are its signed files. `tree` is its source as tiles
+(`host/source-tree.mjs`): a tile per unit the build compiled (kernel,
+processor, core library, host bundle, console bee, each spot), naming what
+it produced, with the files that unit read beneath it, and under a spot its
+beehaviors, which carry their own. All of it is kept in the pool, so any
+revision can be written out, its source written back (`source`), and
+published again, exactly. (Earlier revisions carry a flat `source` layer;
+both are read.)
 
-**A package revision carries its source as its tiles**
-(`host/package-tree.mjs`):
+**A package revision carries its source as its tiles** too:
 `{ name: 'build', label, version, parent, package, tree, atoms }`. The source
 is never a side list of paths. `tree` is the package drawn on the living
 primitive:

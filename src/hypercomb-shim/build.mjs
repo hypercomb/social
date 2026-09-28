@@ -56,9 +56,16 @@ if (!seedHosts.length) seedHosts.push('hypercomb.com', 'jwize.com')
 const NEWLINE = `
 `
 const exists = async (p) => { try { await stat(p); return true } catch { return false } }
-// Every file a pure build reads, for its source layer in the version pool.
-const sourceInputs = new Set(['build.mjs', 'index.html', 'host/builds.mjs'].map(p => resolve(here, p)))
-const readFrom = meta => { for (const p of Object.keys(meta.inputs)) sourceInputs.add(resolve(p)) }
+// What a pure build compiles, unit by unit, and every file each one reads:
+// the revision's source, as tiles (host/source-tree.mjs hostTree) — each
+// file under the unit it was built into, never a flat list.
+const units = new Map()
+const unit = (name, placed = {}) => {
+  if (!units.has(name)) units.set(name, { name, files: new Set(), beehaviors: [] })
+  return Object.assign(units.get(name), placed)
+}
+const readFrom = (meta, name) => { for (const p of Object.keys(meta.inputs)) unit(name).files.add(resolve(p)) }
+for (const tool of ['build.mjs', 'index.html', 'host/builds.mjs', 'host/source-tree.mjs']) unit('build').files.add(resolve(here, tool))
 const mib = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MiB`
 
 const dirBytes = async (path) => {
@@ -122,7 +129,8 @@ if (pure) {
     metafile: true,
     logLevel: 'warning',
   })
-  readFrom(ioc.metafile)
+  readFrom(ioc.metafile, 'ioc')
+  unit('ioc', { install: 'index.html' })
   const code = ioc.outputFiles[0].text.trim()
   if (code.includes('</script')) throw new Error('[shim] inlined ioc would close its own script tag')
   const marker = '<!-- hc:ioc -->'
@@ -151,7 +159,7 @@ await writeFile(resolve(dist, 'index.html'), indexHtml, 'utf8')
 const themeCss = compile(resolve(here, '..', 'hypercomb-shared', 'styles', '_material-tokens.scss'), {
   style: 'compressed',
 })
-for (const url of themeCss.loadedUrls) if (url.protocol === 'file:') sourceInputs.add(fileURLToPath(url))
+for (const url of themeCss.loadedUrls) if (url.protocol === 'file:') unit('theme', { install: 'theme.css' }).files.add(fileURLToPath(url))
 await writeFile(resolve(dist, 'theme.css'), themeCss.css, 'utf8')
 let coreLibrary = null
 if (pure) {
@@ -178,7 +186,8 @@ if (pure) {
     metafile: true,
     logLevel: 'warning',
   })
-  readFrom(processor.metafile)
+  readFrom(processor.metafile, 'processor')
+  unit('processor', { install: 'hypercomb-core.runtime.js' })
   const processorFiles = new Set(Object.keys(processor.metafile.inputs).map(p => resolve(p)))
   const library = await build({
     entryPoints: [resolve(coreSrc, 'library.ts')],
@@ -205,7 +214,7 @@ if (pure) {
   if (libraryInputs.some(p => processorFiles.has(p))) {
     throw new Error('[shim] the core library carries its own copy of the processor')
   }
-  readFrom(library.metafile)
+  readFrom(library.metafile, 'library')
   coreLibrary = Buffer.from(library.outputFiles[0].contents)
 }
 
@@ -399,12 +408,13 @@ if (pure) {
   })
   // One installer, one Store, one host directory: a bee that carried its own
   // copy of any would run a second one beside the host's.
-  readFrom(consoleBee.metafile)
+  readFrom(consoleBee.metafile, 'console')
   const stateful = Object.keys(consoleBee.metafile.inputs)
     .filter(p => /hypercomb-runtime[\/]src[\/](acquire|store|script-preloader|dependency-loader|host-packages)\.ts$/.test(p))
   if (stateful.length) throw new Error('[shim] the host console bee carries a stateful runtime module: ' + stateful.join(', '))
   const beeBytes = Buffer.from(consoleBee.outputFiles[0].contents)
   const beeSig = sha(beeBytes)
+  unit('console', { output: beeSig })
   // THE SPOTS (src/spots.ts), on the living primitive (life-primitive.md).
   // The app layer names its landing spots; a spot's beehaviors are the
   // members of the pool of meaning `<spot>:beehaviors`, each an incidence
@@ -512,7 +522,6 @@ if (pure) {
   const sourceNodes = async (inputs) => {
     const children = []
     for (const input of inputs) {
-      sourceInputs.add(input)
       const path = relative(repoRoot, input).split(sep).join('/')
       const node = await record({ name: path, content: await meta({ resource: await keep(await readFile(input)), relation: 'content' }) })
       children.push(await meta({ layer: node, relation: 'children' }))
@@ -527,6 +536,7 @@ if (pure) {
       if (!found) break
       const behaviour = await record({ name, bee: await meta({ bee: found.beeSig, relation: 'bee' }), dependencies: found.dependencies, children: await sourceNodes(found.files) })
       members.push(Buffer.from(JSON.stringify({ meta: 1, layer: behaviour, relation: 'beehavior', root: spot.name })))
+      unit(spot.name).beehaviors.push(behaviour)
     }
     if (spot.fromPackage && !members.length) {
       console.warn(`[shim] spot ${spot.name} left out: hypercomb-essentials is not built here (npm run build:module), so the package's own renderers run unplaced`)
@@ -539,7 +549,9 @@ if (pure) {
         tsconfig: resolve(here, 'tsconfig.json'), minify: true, write: false, metafile: true,
         outfile: `${name}.js`, logLevel: 'warning', external: ['@hypercomb/core'],
       })
-      readFrom(built.metafile)
+      // Its own files are its children (below); what it takes from
+      // node_modules is read by the spot.
+      for (const input of Object.keys(built.metafile.inputs)) if (input.includes('node_modules')) unit(spot.name).files.add(resolve(input))
       // PURE AND ENCAPSULATED: a behaviour carries exactly what it needs, and
       // never a copy of a stateful runtime service or a framework.
       const inputs = Object.keys(built.metafile.inputs).map(p => resolve(p))
@@ -548,6 +560,7 @@ if (pure) {
       const children = await sourceNodes(inputs.filter(p => !p.includes('node_modules')))
       const behaviour = await record({ name, bee: await meta({ bee: await keep(Buffer.from(built.outputFiles[0].contents)), relation: 'bee' }), children })
       members.push(Buffer.from(JSON.stringify({ meta: 1, layer: behaviour, relation: 'beehavior', root: spot.name })))
+      unit(spot.name).beehaviors.push(behaviour)
     }
     // The pool, as a host serves any pool: `/<sign(meaning)>/` lists its
     // members, `/<sign(meaning)>/<sig>` is one.
@@ -615,7 +628,7 @@ const result = await build({
 
 // The scoreboard that matters: if @angular shows up in the shim's own bundle,
 // the shim is not framework-free and the build should say so loudly.
-if (pure) readFrom(result.metafile)
+if (pure) readFrom(result.metafile, 'bundle')
 const mainOut = Object.keys(result.metafile.outputs).find(k => k.endsWith(mainFile))
 const inputs = Object.keys(result.metafile.outputs[mainOut].inputs)
 const angular = inputs.filter(p => p.includes('node_modules/@angular'))
@@ -694,7 +707,10 @@ if (pure) {
   const processorBytes = (await stat(resolve(dist, 'hypercomb-core.runtime.js'))).size
   console.log(`[shim] kernel main.js ${(kernelBytes / 1024).toFixed(1)} kB · processor ${(processorBytes / 1024).toFixed(1)} kB`)
   console.log(`[shim]   resolves host ${hostSig.slice(0, 12)}… (${(hostBytes.length / 1024).toFixed(0)} kB) · core library ${librarySig.slice(0, 12)}… (${(coreLibrary.length / 1024).toFixed(0)} kB)`)
-  readFrom(kernel.metafile)
+  readFrom(kernel.metafile, 'kernel')
+  unit('kernel', { install: 'main.js' })
+  unit('bundle', { output: hostSig })
+  unit('library', { output: librarySig })
 
   // THE VERSION POOL (host/builds.mjs). Every pure build is STAGED in its
   // story (--story, default "host"): the origin as built — its install files,
@@ -702,27 +718,33 @@ if (pure) {
   // story's staged revision; `builds.mjs promote` appends it to the lineage.
   // The origin names its record in /build, as /pin names the host bundle.
   const repo = resolve(here, '..', '..')
-  const source = new Map()
-  for (const abs of sourceInputs) {
-    const bytes = await readFile(abs).catch(() => null)
-    // A dependency is named from node_modules on, wherever it is installed.
-    const path = abs.split(sep).join('/')
-    const at = path.indexOf('/node_modules/')
-    if (bytes) source.set(at >= 0 ? path.slice(at + 1) : relative(repo, abs).split(sep).join('/'), bytes)
+  const built = []
+  let sourceFiles = 0
+  for (const u of units.values()) {
+    const files = new Map()
+    for (const abs of u.files) {
+      const bytes = await readFile(abs).catch(() => null)
+      // A dependency is named from node_modules on, wherever it is installed.
+      const path = abs.split(sep).join('/')
+      const at = path.indexOf('/node_modules/')
+      if (bytes) files.set(at >= 0 ? path.slice(at + 1) : relative(repo, abs).split(sep).join('/'), bytes)
+    }
+    sourceFiles += files.size
+    built.push({ ...u, files })
   }
   const signed = []
   for (const entry of await readdir(dist, { withFileTypes: true })) if (entry.isFile() && SIG_NAME.test(entry.name)) signed.push(await readFile(resolve(dist, entry.name)))
   const nameAt = Math.max(process.argv.indexOf('--story'), process.argv.indexOf('--name'))
   const made = await recordBuild({
     label: nameAt >= 0 ? process.argv[nameAt + 1] : undefined,
-    install: await installFilesOf(dist), source, signed,
+    install: await installFilesOf(dist), units: built, signed,
     host: hostSig, library: librarySig, hostPackage: hostPackageRoot,
   })
   await writeFile(resolve(dist, made.sig), made.bytes)
   await writeFile(resolve(dist, 'build'), made.sig + '\n', 'utf8')
-  console.log(`[shim] staged ${made.record.label} ${made.sig.slice(0, 12)}…${made.unchanged ? ' (no change from the last promotion)' : ''} · ${source.size} source files · promote: node host/builds.mjs promote ${made.record.label}`)
+  console.log(`[shim] staged ${made.record.label} ${made.sig.slice(0, 12)}…${made.unchanged ? ' (no change from the last promotion)' : ''} · its source as ${units.size} unit tiles (${sourceFiles} files; the spots' beehaviors carry their own) · promote: node host/builds.mjs promote ${made.record.label}`)
   // The package the spots draw from is staged beside it, its source as its
-  // tiles (host/package-tree.mjs), so nothing outside the minimal build lives
+  // tiles (host/source-tree.mjs), so nothing outside the minimal build lives
   // only in a checkout.
   if (packageBuilt) {
     try {

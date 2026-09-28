@@ -28,7 +28,7 @@ const stage = (label: string | undefined, main: string) => {
   return builds.recordBuild({
     label, signed: [atom],
     install: new Map([['main.js', b(main)], ['index.html', b('<html>')]]),
-    source: new Map([['src/main.ts', b('// ' + main)]]),
+    units: [{ name: 'kernel', install: 'main.js', files: new Map([['src/main.ts', b('// ' + main)]]) }],
     host: builds.sign(atom), library: 'l'.repeat(64), hostPackage: 'p'.repeat(64),
   })
 }
@@ -54,8 +54,9 @@ describe('stage, then promote', () => {
     expect(two.record.parent).toBe(one.sig)
     expect(three.record.parent).toBe(two.sig)
     const { parts, files: changed } = await builds.changesOf(builds.poolDir(builds.BUILDS_MEANING), three.record)
-    expect(parts).toEqual(['install', 'host', 'source'])
+    expect(parts).toEqual(['install', 'host', 'tree'])
     expect(changed.install).toEqual(['~ main.js'])
+    expect(changed.source).toEqual(['~ src/main.ts'])
   })
 
   it('keeps one stage per story: a rebuild replaces it, and what only the old stage named is collected', async () => {
