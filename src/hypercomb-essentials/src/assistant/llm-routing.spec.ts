@@ -12,7 +12,7 @@ const iocMap = new Map<string, unknown>()
 }
 
 const { llmProviderRegistry } = await import('./llm-provider-registry.js')
-const { buildRequest, llmRouter, streamRoutedModel } = await import('./llm-dispatch.js')
+const { buildRequest, llmRouter, streamRoutedModel, upstreamOf } = await import('./llm-dispatch.js')
 const { openAiStreamEvent } = await import('./providers/openai-shape.js')
 const { LOCAL_HOST_STORAGE_KEY } = await import('./providers/local.provider.js')
 
@@ -669,5 +669,53 @@ describe('the participant\'s own local chat', () => {
       localStorage.setItem(LOCAL_MODEL_STORAGE_KEY, stored)
       expect(participantLocalChoice(), stored).toBeNull()
     }
+  })
+})
+
+describe('a busy upstream is routed around, not asked again', () => {
+  const overloaded = '{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"deepseek/deepseek-v4-flash-0731 is temporarily rate-limited upstream.","provider_name":"DeepInfra","is_byok":false,"provider_error_code":"engine_overloaded","limit_source":"upstream_provider_shared_pool"}}}'
+
+  it("reads the upstream that answered busy off the router's error body", () => {
+    expect(upstreamOf(overloaded)).toBe('deepinfra')
+    expect(upstreamOf('{"error":{"metadata":{"provider_name":"Together AI"}}}')).toBe('together-ai')
+    expect(upstreamOf('{"error":"engine_overloaded"}')).toBeUndefined()
+    expect(upstreamOf('not json')).toBeUndefined()
+  })
+
+  it('the retry pass carries the busy host on the ignore list, and the final word names the remedy', async () => {
+    const bodies: string[] = []
+    registry.register({
+      ...descriptor('only-one', 'made it'),
+      toRequest: request => ({
+        url: 'https://only-one.example.test',
+        init: { method: 'POST', body: JSON.stringify({ ignore: request.ignoreUpstreams ?? [] }) },
+      }),
+    })
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      calls += 1
+      bodies.push(String(init?.body ?? ''))
+      return calls === 1
+        ? new Response(overloaded, { status: 429 })
+        : new Response('{}', { status: 200 })
+    }))
+
+    const chunks: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({
+      need: { tier: 'fast', streaming: true },
+      messages: [{ role: 'user', content: 'open the levels' }],
+    })) chunks.push(chunk)
+
+    expect(chunks.map(chunk => chunk.text).join('')).toBe('made it')
+    expect(JSON.parse(bodies[0])).toEqual({ ignore: [] })
+    expect(JSON.parse(bodies[1])).toEqual({ ignore: ['deepinfra'] })
+  })
+
+  it('when the only model fails twice, the word says to switch on another', async () => {
+    registry.register(descriptor('alone', 'unused'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(overloaded, { status: 429, headers: { 'retry-after': '0' } })))
+    await expect((async () => {
+      for await (const _chunk of streamRoutedModel({ need: { tier: 'fast', streaming: true }, messages: [{ role: 'user', content: 'hello' }] })) { /* never */ }
+    })()).rejects.toThrow(/Only one model is switched on; switch on another/)
   })
 })

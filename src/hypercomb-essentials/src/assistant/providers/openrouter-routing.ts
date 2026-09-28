@@ -102,12 +102,21 @@ export const openRouterRouting = new OpenRouterRoutingStore()
 
 /** The request's `provider` block for this model, or undefined when every
  *  setting is OpenRouter's default — so nothing extra is sent. */
-export const providerBlock = (routing: OpenRouterRouting, modelId: string): Record<string, unknown> | undefined => {
-  const only = routing.only?.[modelId] ?? []
+export const providerBlock = (
+  routing: OpenRouterRouting,
+  modelId: string,
+  /** Hosts that just answered busy: route around them this once. A host
+   *  the participant pinned in `only` is still avoided for this request —
+   *  it said it could not take it. */
+  ignore: readonly string[] = [],
+): Record<string, unknown> | undefined => {
+  const skip = [...new Set(ignore.map(hostSlug).filter(slug => SLUG.test(slug)))]
+  const only = (routing.only?.[modelId] ?? []).filter(slug => !skip.includes(slug))
   const block: Record<string, unknown> = {
     ...(only.length ? { order: [...only], only: [...only] } : {}),
+    ...(skip.length ? { ignore: skip } : {}),
     ...(routing.sort ? { sort: routing.sort } : {}),
-    ...(routing.allowFallbacks === false ? { allow_fallbacks: false } : {}),
+    ...(routing.allowFallbacks === false && !skip.length ? { allow_fallbacks: false } : {}),
     ...(routing.denyDataCollection ? { data_collection: 'deny' } : {}),
   }
   return Object.keys(block).length ? block : undefined

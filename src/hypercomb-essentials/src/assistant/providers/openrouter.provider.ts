@@ -66,7 +66,7 @@ export const OPENROUTER_PROVIDER: LlmProviderDescriptor = {
     if (request.model === JEV_MODEL || /^~?typesafe\/jev(?:-|$)/i.test(request.model)) {
       throw new Error('Jev is a decision service; use the Decisions API, not chat completions')
     }
-    const provider = providerBlock(openRouterRouting.get(), request.model)
+    const provider = providerBlock(openRouterRouting.get(), request.model, request.ignoreUpstreams ?? [])
     // The weight of the message as the model's reasoning effort, when the
     // participant fixed the model (llm-provider.types.ts `effort`).
     const reasoning = request.effort ? { reasoning: { effort: REASONING_EFFORT[request.effort] } } : {}
