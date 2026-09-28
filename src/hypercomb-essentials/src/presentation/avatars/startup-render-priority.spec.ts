@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const BEE = readFileSync(join(__dirname, 'agent-bee.drone.ts'), 'utf8')
-const TILES = readFileSync(join(__dirname, '../tiles/show-cell.drone.ts'), 'utf8')
+// The tile renderer: show-cell and the branches it composes
+// (documentation/tile-renderer-tree.md). An invariant holds wherever in the
+// renderer its code now lives.
+const TILES = ['show-cell.drone.ts', 'layer-membership.ts', 'packed-visuals.ts', 'tile-narrowing.ts', 'tile-order.ts', 'tile-mesh.ts']
+  .map(file => readFileSync(join(__dirname, '../tiles', file), 'utf8')).join('\n')
 const BOOT = readFileSync(
   join(__dirname, '../../../../hypercomb-shared/core/bootstrap-history.ts'),
   'utf8',

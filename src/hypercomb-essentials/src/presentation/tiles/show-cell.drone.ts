@@ -1,4 +1,7 @@
-// pixi/show-cell.drone.ts
+// pixi/show-cell.drone.ts — the tile renderer's root. It runs the render
+// pass and composes the branches drawn out beside it (membership, narrowing,
+// order, mesh — documentation/tile-renderer-tree.md). A new tile behaviour
+// is a branch of its own, never more lines here.
 import { Drone, EffectBus, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
 import type { I18nProvider, UsageRanker } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
@@ -9,15 +12,14 @@ import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
-import { TILE_PROPERTIES_SLOT_DECLARATION, isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex, recoverableTileImageSig, seedLayerKeyedEntries } from '../../editor/tile-properties.js'
+import { TILE_PROPERTIES_SLOT_DECLARATION, isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex, recoverableTileImageSig, seedLayerKeyedEntries } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import { visitRecordAt } from '../../sharing/visit-genome.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
-import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel, defaultViewWithinSegments, HEXAGONS_SURFACE } from '../../commands/decoration-kind-index.js'
+import { kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel, defaultViewWithinSegments, HEXAGONS_SURFACE } from '../../commands/decoration-kind-index.js'
 import { defaultViewWithinAt } from '../../commands/view-default.js'
-import { slotAt, type AxialLike } from '../../sequence/pattern.js'
 import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { setTileStacks, type StackVariant } from './tile-stack.js'
@@ -35,6 +37,11 @@ import { HexSdfTextureShaderFactory } from '../grid/hex-sdf.shader.js'
 import { CenterSlotTracker } from '../grid/center-slot-tracker.js'
 import { TILE_SOURCE_REGISTRY_KEY, TileSourceRegistry } from './tile-source-registry.js'
 import { IndexNurse } from './index.nurse.js'
+import { TileNarrowing } from './tile-narrowing.js'
+import { resolveChildNames } from './layer-membership.js'
+import { TileMesh, type MeshApi } from './tile-mesh.js'
+import { TileOrder, type ReferenceDraftPreview } from './tile-order.js'
+import { adoptPackedVisual, packedVisual, type PackedVisualEntry } from './packed-visuals.js'
 
 // Render-path diagnostics are opt-in (localStorage 'hc:diag' = '1').
 // resolveChildNames runs on every non-memoized pass; the per-pass info
@@ -136,12 +143,6 @@ export type DiveCell = {
   borderColor?: [number, number, number]
   /** A reference tile — hovers with the portal shimmer, as on its own page. */
   portal: boolean
-}
-type ReferenceDraftPreview = {
-  name: string
-  imageSig?: string
-  index: number
-  parentSegments: readonly string[]
 }
 type LabelDerivedState = {
   images: Map<string, string | null>
@@ -260,16 +261,6 @@ function labelToRgb(label: string): [number, number, number] {
   return [r + m, g + m, b + m]
 }
 
-type MeshEvt = { relay: string; sig: string; event: any; payload: any }
-type MeshSub = { close: () => void }
-type MeshApi = {
-  ensureStartedForSig: (sig: string) => void
-  awaitReadyForSig?: (sig: string, timeoutMs?: number) => Promise<void>
-  getNonExpired: (sig: string) => MeshEvt[]
-  getSwarmSize?: (sig: string) => number
-  publish?: (kind: number, sig: string, payload: any, extraTags?: string[][]) => Promise<boolean>
-  subscribe?: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
-}
 
 type PixiHostApi = {
   app?: Application | null
@@ -388,314 +379,6 @@ class CellSlots {
   }
 }
 
-/**
- * Resolve a parent layer's `children` (sigs) into a Set of child
- * display names.
- *
- * Each child layer lives in the CHILD's lineage sigbag `<childLocSig>/`
- * (at the flat OPFS root; legacy `__history__/<childLocSig>` is a
- * read-fallback), not the parent's. We don't have a sig→name index, so the only way
- * to map a sig back to a name is to enumerate the parent's on-disk
- * children, compute each child's lineage sig, list that bag's markers,
- * and check if any marker sig matches the parent's `children` entry.
- *
- * Names whose sig matches → "allowed" in this historical layer.
- * Children that have been deleted from disk can't be resolved (no
- * lineage to query) and silently drop out — known limitation of the
- * current design (no global sig→name lookup).
- */
-/**
- * Resolve a parent layer's `children` (sigs) to display names.
- *
- * Mechanical: each sig in `content.children` is a content-addressed
- * pointer to a child layer's bytes. The preloader (HistoryService.
- * getLayerBySig) returns the layer for that sig; its `name` field
- * is the child's display name. No bag scanning, no schema variants,
- * no name-based fallbacks — just sig→content lookup.
- *
- * Sigs that don't resolve are dropped silently (the layer was never
- * registered in the cache and isn't on disk anywhere).
- */
-// Memo: child head sig → does that head have children. A child's head sig
-// only changes when the child (or its own children) change, so a stable
-// subtree costs one head-index lookup per render, never a layer reparse.
-const branchByHeadSig = new Map<string, boolean>()
-
-async function resolveChildNames(
-  history: HistoryService,
-  parentSegments: readonly string[],
-  _parentDir: FileSystemDirectoryHandle | null,
-  content: { children?: string[] } | null,
-  parentLayerSig?: string,
-  // Optional out-param. The caller reads `expected` (child-sig count) vs
-  // `resolved` (sigs that produced a name) to decide whether this pass
-  // saw the COMPLETE child set. A resolution where resolved < expected is
-  // partial — the renderer must NOT paint it (the two-stage load). Counts
-  // resolved SIGS, not unique names, so duplicate child names never read
-  // as "incomplete". `unresolvedSigs` lists the FULL child sigs that did
-  // not produce a name this pass — the completeness gate paints these as
-  // explicit unavailable-placeholders once its retry budget is spent,
-  // instead of silently dropping the tiles.
-  stats?: {
-    expected: number
-    resolved: number
-    unresolvedSigs?: string[]
-  },
-  // Optional out-param: child NAMES that are branches (have their own
-  // children). Derived from each child's `children` array LENGTH — one level
-  // down, never loading grandchildren — from the SAME manifest / per-child
-  // resolution that produces names. Lets the render get name + branch-status
-  // from a single read and DELETE the separate per-child branchSet walk that
-  // re-loaded every child on every frame.
-  branchesOut?: Set<string>,
-  // Optional out-param: set `cold=true` when a child's branch-STATUS could not
-  // be read this pass because its head-layer bytes weren't pooled yet (a
-  // TRANSIENT cold miss, NOT a leaf). The caller uses this to avoid memoizing
-  // an incomplete branch set and to schedule a re-render — never to conclude
-  // "not a branch", which would poison the tile's navigability.
-  branchStats?: { cold: boolean },
-  // Only the pass that is PAINTING may heal this layer's pack. Healing means
-  // decoding and re-encoding the source images, and prepareView runs over the
-  // whole warmed neighbourhood (up to 512 layers, 12-wide) — letting it heal
-  // turned a background warm into a whole-hive re-encode that raced first
-  // paint. The layer you are looking at heals; the ones you might visit wait
-  // for the optimize phase.
-  options?: {
-    mayUpgradePack?: boolean
-    onBranchesFreshened?: (branches: Set<string>) => void
-  },
-): Promise<Set<string>> {
-  const out = new Set<string>()
-  if (stats) {
-    stats.expected = content?.children?.length ?? 0
-    stats.resolved = 0
-  }
-  if (!content?.children?.length) return out
-
-  // Branch-status (does a child have its OWN children?) must come from the
-  // child's CURRENT head, not the parent's stored child sig — per-page
-  // history leaves that sig stale, so a child that gained grandchildren since
-  // the parent last committed would otherwise show no branch dot. Path-address
-  // each child by name and read its head's children length. branchesOut only
-  // gets fresh adds now; the stale parent-sig derivation is gone.
-  const readFreshBranches = async (names: Iterable<string>): Promise<{ branches: Set<string>; cold: boolean }> => {
-    const branches = new Set<string>()
-    let cold = false
-    await Promise.all([...names].map(async (name) => {
-      try {
-        const childLocSig = await history.sign({ explorerSegments: () => [...parentSegments, name] })
-        const headSig = await history.latestMarkerSigFor(childLocSig, name)
-        // No head marker = the child never committed a layer of its own = an
-        // authoritative leaf. NOT a cold miss — don't flag the pass cold, or a
-        // leaf-heavy layer would retry forever.
-        if (!headSig) return
-        let hasChildren = branchByHeadSig.get(headSig)
-        if (hasChildren === undefined) {
-          const head = await history.getLayerBySig(headSig)
-          if (!head) {
-            // TRANSIENT cold-pool miss: the head sig exists but its bytes
-            // aren't pooled yet. getLayerBySig returns null here EXACTLY as it
-            // does for a genuine absence (history.service.ts getLayerBySig), so
-            // we must NOT conclude "no children" — and, critically, must NOT
-            // cache that false into the module-global branchByHeadSig. Doing so
-            // poisoned the branch dot for the whole session: the tile painted
-            // as a non-branch, so #onPointerDown/#onClick routed its click to
-            // the 'open' editor action instead of navigating in — locking the
-            // user out of the child branch until a full reload. Leave it
-            // unresolved and flag the pass cold so the caller re-renders once
-            // the neighbourhood warms.
-            cold = true
-            return
-          }
-          const kids = (head as { children?: unknown } | null)?.children
-          hasChildren = Array.isArray(kids) && kids.length > 0
-          branchByHeadSig.set(headSig, hasChildren)
-        }
-        if (hasChildren) branches.add(name)
-      } catch {
-        // A read threw mid-resolution — transient. Leave the dot off for now
-        // and flag cold so the caller retries; never cache a false.
-        cold = true
-      }
-    }))
-    return { branches, cold }
-  }
-
-  // A current-layer pack already contains each direct child's layer. Names and
-  // branch flags therefore come from that ONE read. Per-child path/head checks
-  // are only a repair for old packs whose ancestor sig was not propagated; they
-  // must never sit between a navigation gesture and paint. Run the repair at
-  // idle and ask the owner to repaint only when a complete fresh result differs.
-  const freshenBranchesAfterPaint = (names: Iterable<string>): void => {
-    if (!options?.onBranchesFreshened) return
-    const snapshot = [...names]
-    const run = () => {
-      void readFreshBranches(snapshot).then(({ branches, cold }) => {
-        if (branchStats) branchStats.cold = cold
-        if (!cold) options.onBranchesFreshened?.(branches)
-      }).catch(() => {
-        if (branchStats) branchStats.cold = true
-      })
-    }
-    const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
-    if (typeof ric === 'function') ric(run, { timeout: 4_000 })
-    else setTimeout(run, 0)
-  }
-
-  // Children manifest fast-path. When the parent's sig is known, try
-  // the sign('manifests') pool keyed by <parentSig> (via
-  // Store.readChildrenManifest; legacy __manifests__/ is a read-fallback)
-  // — a single file read returns the resolved
-  // child layer objects with names already inlined. Skips the per-child
-  // getLayerBySig walk entirely on cold load. Falls through to the
-  // signature-resolution path on miss; the optimize phase mints a fresh
-  // manifest after every commit so subsequent reads stay hot. This is a
-  // READER: the paint never writes the cache (see the enqueue below).
-  const store = parentLayerSig
-    ? (window as any).ioc?.get?.('@hypercomb.social/Store') as {
-        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string; children?: string[] } }> | null>
-      } | undefined
-    : undefined
-
-  if (parentLayerSig && store?.readChildrenManifest) {
-    const manifest = await store.readChildrenManifest(parentLayerSig)
-    if (manifest && manifest.length !== content.children.length) {
-      console.warn(`[diag:childres] MANIFEST STALE parent=${parentLayerSig.slice(0, 12)} manifestLen=${manifest.length} childrenLen=${content.children.length} -> falling to per-child`)
-    }
-    if (manifest && manifest.length === content.children.length) {
-      if (DIAG) console.info(`[diag:childres] MANIFEST HIT parent=${parentLayerSig.slice(0, 12)} len=${manifest.length}`)
-      // Manifest is current iff it covers every child sig in the parent.
-      // Trust it: extract names directly, no bag walk. ALSO seed each
-      // inlined child layer into HistoryService's parsed cache — the
-      // render path immediately follows with per-child getLayerBySig
-      // calls (branch detection), and without the seed every one of
-      // them is a cold pool read on refresh; a single missing pool
-      // entry would then join the multi-second preloadAllBags scan.
-      const seed = (history as { seedParsedLayer?: (sig: string, layer: object) => void }).seedParsedLayer
-      let resolvedCount = 0
-      const manifestUnresolved: string[] = []
-      for (const entry of manifest) {
-        // Bind the visuals from the pack itself — this array IS the layer's
-        // optimization, so every image it carries is decoded from here and
-        // never re-read per tile. Keyed by the SOURCE image sig, so the atlas
-        // identity is identical to the file-fed path.
-        ShowCellDrone.adoptPackedVisual(entry as { visual?: { sig?: string; webp?: string; type?: string } })
-        if (entry?.layer?.name) {
-          out.add(entry.layer.name)
-          if (branchesOut && Array.isArray(entry.layer.children) && entry.layer.children.length > 0) {
-            branchesOut.add(entry.layer.name)
-          }
-          resolvedCount++
-          if (seed && entry.sig) seed.call(history, entry.sig, entry.layer)
-        } else if (entry?.sig) {
-          manifestUnresolved.push(entry.sig)
-        }
-      }
-      // Manifest hit only reaches here when manifest.length === children
-      // length, so a fully-named manifest IS the complete set.
-      if (stats) {
-        stats.resolved = resolvedCount
-        stats.unresolvedSigs = manifestUnresolved
-      }
-      // UPGRADE A THIN PACK. Manifests written before the visuals moved in
-      // carry names only, so this layer would keep paying per-tile reads on
-      // every visit forever. Re-mint it once, off the render path — the next
-      // visit paints from the pack. Once per parent sig per session; keyed by
-      // an immutable content sig, so a successful upgrade is permanent.
-      // Render pass only — see `options.mayUpgradePack`.
-      if (options?.mayUpgradePack) upgradeThinPack(parentLayerSig, manifest, content.children)
-      freshenBranchesAfterPaint(out)
-      return out
-    }
-  }
-
-  // Pure signature resolution. For each child sig in the parent's
-  // layer, fetch that child's LayerContent — its `name` field is the
-  // child's display name. NO folder-name lookups, NO seed-by-name
-  // pre-warming. Names live inside the signed bytes, not on the
-  // filesystem. getLayerBySig is content-addressed: hot from the
-  // preloader cache after warmup, cold-walks bags by sig if missed.
-  // Fired in parallel — every call is independent, and a single cold
-  // miss serializing the whole list was the dominant per-frame cost.
-  const children = await Promise.all(
-    content.children.map(sig => history.getLayerBySig(sig)),
-  )
-  const __nullSigs: string[] = []
-  let __resolvedCount = 0
-  for (let __i = 0; __i < children.length; __i++) {
-    const child = children[__i]
-    if (child?.name) {
-      out.add(child.name); __resolvedCount++
-      if (branchesOut && Array.isArray(child.children) && child.children.length > 0) {
-        branchesOut.add(child.name)
-      }
-    }
-    else if (content.children[__i]) __nullSigs.push(content.children[__i])
-  }
-  if (stats) {
-    stats.resolved = __resolvedCount
-    stats.unresolvedSigs = [...__nullSigs]
-  }
-  if (__nullSigs.length > 0) {
-    console.warn(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} resolved=${out.size} NULL=${__nullSigs.length} nullSigs=[${__nullSigs.map(s => s.slice(0, 12)).join(', ')}]`)
-  } else if (DIAG) {
-    console.info(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} all-resolved=${out.size}`)
-  }
-
-  // (see upgradeThinPack, declared below the resolver)
-
-  // Backfill the manifest for pre-existing layers committed before the
-  // decoration shipped (or after a manifest GC) — but ONLY when EVERY
-  // child resolved this pass. A PARTIAL manifest (missing the children
-  // that were cold) has manifest.length < content.children.length, so the
-  // read-side guard (manifest.length === content.children.length) rejects
-  // it on the next load and drops to the per-child path AGAIN — the
-  // two-stage render perpetuates itself forever. Writing only COMPLETE
-  // manifests lets the first fully-warm pass heal the layer so every
-  // subsequent load is a single manifest read with all children present.
-  // Idle-scheduled so the current render path doesn't pay the write.
-  // THE PAINT DOES NOT WRITE THE CACHE. It says which parent needs one, and
-  // the optimize phase mints it — enriched, budgeted, on the next idle pass
-  // (optimize-phase.md rule 1; manifest-optimizer.drone.ts is the one door).
-  // Until it lands, the render resolves per child exactly as it just did.
-  const allResolved = children.length === content.children.length && children.every(c => !!c?.name)
-  if (parentLayerSig && allResolved) manifestOptimizer()?.enqueue?.(parentLayerSig, content.children)
-
-  freshenBranchesAfterPaint(out)
-  return out
-}
-
-/** Parent sigs whose pack this session already tried to enrich — one attempt
- *  each, so a layer whose children have no local images doesn't re-mint on
- *  every visit. */
-const _packUpgradeTried = new Set<string>()
-
-/** Re-mint a names-only manifest as a full pack (props + optimized visual per
- *  child), off the render path. Silent no-op when the pack is already rich,
- *  when the optimizer isn't registered, or when the re-mint can't complete —
- *  the thin pack stays valid, it just keeps costing per-tile reads. */
-/** The optimizer's one door, when it is registered. */
-const manifestOptimizer = (): {
-  enqueue?: (parentSig: string, childSigs: readonly string[]) => void
-  constructor?: { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean }
-} | undefined =>
-  (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone')
-
-function upgradeThinPack(
-  parentLayerSig: string,
-  manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown }; visual?: unknown }>,
-  childSigs: readonly string[],
-): void {
-  if (!parentLayerSig || _packUpgradeTried.has(parentLayerSig)) return
-  const optimizer = manifestOptimizer()
-  if (!optimizer?.enqueue) return
-  const needs = optimizer.constructor?.packNeedsVisuals
-  if (needs && !needs(manifest)) return
-  _packUpgradeTried.add(parentLayerSig)
-  // The next idle pass re-mints the pack with visuals; the thin pack stays
-  // valid until then, and the visit after that binds from one file.
-  optimizer.enqueue(parentLayerSig, childSigs)
-}
 
 export class ShowCellDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -1291,20 +974,16 @@ export class ShowCellDrone extends Drone {
   // #sourceEntriesCache in the frame a toggle lands.
   #participantFilter = new Set<string>()
 
-  // Per-session in-memory slot assignment cache. Once a tile is placed
-  // via score-based logic (or any other path), its slot is remembered
-  // here so later renders — including pan-triggered re-renders — re-use
-  // the same slot regardless of viewport changes.
-  //
-  // User-spec rule: indexes are fixed; tiles never relocate on pan,
-  // only on manual reorganize. The on-disk index persistence path is
-  // async and can race a rapid pan; this cache fills the gap so
-  // anything once placed stays put for the session.
-  //
-  // Cleared on location change (different lineage = different cell
-  // set; stale cache entries get caught by the sparse-slot-occupied
-  // check anyway, but a fresh cache per location avoids leaks).
-  #sessionSlotByLabel = new Map<string, number>()
+  /** Where each tile sits: indexed, peer, score-filled, framed (tile-order.ts). */
+  readonly #order = new TileOrder({
+    axial: () => this.resolve<any>('axial'),
+    lineage: () => this.resolve<any>('lineage'),
+    slots: () => this.#slots,
+    referenceDraft: () => this.#referenceDraft,
+    keyword: () => this.filterKeyword,
+    tagsFor: label => this.#narrow.tagsFor(label),
+    invalidate: () => { this.renderedCellsKey = ''; this.#layerCellsCache.clear(); this.requestRender() },
+  })
 
   // Currently spotlit peer pubkey (from SpotlightService), or null
   // when no layer is surfaced. Subscribed on the first heartbeat so
@@ -1325,9 +1004,6 @@ export class ShowCellDrone extends Drone {
   // underneath, so multiplicity is visible BEFORE you roll.
   #stackDepthByLabel = new Map<string, number>()
 
-  // mesh scoping — space + secret feed into the signature key
-  #space = ''
-  #secret = ''
 
   // Public/swarm mode. When on, EVERY tile is navigable (you can drill
   // into an empty tile to explore / invite others), unlike private mode
@@ -1346,99 +1022,32 @@ export class ShowCellDrone extends Drone {
   // render and whenever swarm interest changes. Empty in private mode.
   #presenceGlowByLabel = new Map<string, number>()
 
-  // note: mesh cell state (derived on heartbeat)
-  private meshSig = ''
-  private meshCellsRev = 0
-  private meshCells: string[] = []
+  /** The tiles this page shares on the mesh, and the peers' tiles here (tile-mesh.ts). */
+  readonly #mesh = new TileMesh({
+    lineage: () => this.resolve<any>('lineage'),
+    mesh: () => this.tryGetMesh(),
+    signatureOf: lineage => this.computeSignatureLocation(lineage),
+    emit: (effect, payload) => this.emitEffect(effect, payload),
+    requestRender: () => this.requestRender(),
+  })
 
   #lastCursorPosition = -1
   #lastCursorRewound = false
   #lastCursorLocationSig = ''
-  private meshSub: MeshSub | null = null
-  private readonly publisherId: string = (() => {
-    const key = 'hc:show-honeycomb:publisher-id'
-    try {
-      const existing = String(localStorage.getItem(key) ?? '').trim()
-      if (existing) return existing
-
-      const next = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-        ? crypto.randomUUID()
-        : `pub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-
-      localStorage.setItem(key, next)
-      return next
-    } catch {
-      return `pub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-    }
-  })()
-  private snapshotPostedBySig = new Set<string>()
-  private lastLocalCellsBySig = new Map<string, string[]>()
-  private lastPublishedGrammarSig = ''
-  private lastPublishedGrammarCell = ''
-
-  // lease renewal: periodic refresh to keep tiles alive for late joiners
-  #lastRefreshAtMs = new Map<string, number>()
-  // sync-request: one-shot per sig arrival
-  #syncRequestedBySig = new Set<string>()
-  // rate-limit triggered republishes from sync-requests
-  #lastTriggeredRepublishAtMs = new Map<string, number>()
 
   private filterKeyword = ''
-  private filterTags = new Set<string>()
-  /** Marks a REFERENCE demands of what it shows, in force while the participant
-   *  stands inside what that reference points at (see
-   *  reference-requirement.drone). A SECOND source, deliberately not merged into
-   *  `filterTags`: the participant's lens is OR-semantics (a cell matching ANY
-   *  active mark shows), so folding a requirement in would BROADEN the page
-   *  instead of narrowing it — the exact opposite of what a requirement means.
-   *  The two sets are ANDed instead: satisfy the lens (if any) AND the
-   *  requirement (if any). Never listed, never toggleable — a requirement is
-   *  part of the reference's identity, not lens state. */
-  #requiredTags = new Set<string>()
-  /** How wide a tag filter reaches: 'local' = current page only, 'children' =
-   *  the current subtree, 'global' = the whole hive. Defaults to 'local'. */
-  #filterScope: 'local' | 'children' | 'global' = 'local'
-  /** Flat list of matches from the cross-page tag scan. null = normal mode.
-   *  `dir` is null under the layer model (sub-locations have no on-disk folder).
-   *  `path` is the ABSOLUTE lineage of the match — a flattened tile can live
-   *  anywhere, so entering it must goRaw(path); appending the label to the
-   *  current location would mint a phantom segment. `hasChildren` is structural
-   *  truth (drives the branch flag); `matchesInside` counts matches strictly
-   *  below it, which is what the filter would show if you entered — 0 means
-   *  entering lands on an empty mesh, so the click is refused instead. */
-  #tagFlattenResults: {
-    label: string
-    dir: FileSystemDirectoryHandle | null
-    path: string[]
-    hasChildren: boolean
-    matchesInside: number
-  }[] | null = null
-  /** Absolute path per flattened label — handed to tile-overlay so a click
-   *  travels to the match's real location instead of appending its name. */
-  #flatPathByLabel = new Map<string, string[]>()
-  /** Flattened labels whose subtree holds no match under the active filter.
-   *  tile-overlay refuses entry and toasts rather than opening a blank page. */
-  #filterBlockedLabels = new Set<string>()
-  /** Lineage the scan last ran from — re-scan when the location moves under a
-   *  live filter, which is what makes the filter FOLLOW you as you drill in. */
-  #filterScanKey: string | null = null
-  /** A GATHERED SET — tiles handed to us by name and absolute path rather than
-   *  found by a predicate, painted through the same flatten machinery. This is
-   *  the "show me these, wherever they live" lane (the agent audit uses it):
-   *  nothing is committed, no layer is minted, and it is gone the moment the
-   *  participant walks anywhere — a gathered view is a look, not a place. */
-  #gathered: { label: string; path: string[] }[] | null = null
-  /** Identity of the current gather, so a different set rebuilds the geometry. */
-  #gatherKey = ''
-  /** Where the gather was raised. Leaving clears it (see the render path). */
-  #gatherAnchorKey = ''
-  /** Where the filter was switched on. A global filter reads the whole hive
-   *  from the root only while you stand here; once you enter a match the walk
-   *  re-roots to the current location (otherwise every level would show the
-   *  identical global flatten and entering would be a no-op). */
-  #filterAnchorKey: string | null = null
-  /** Saved lineage segments before entering tag filter — restored when filter clears. */
-  #preFilterSegments: string[] | null = null
+  /** What narrows the page — the tag lens, a reference's requirement, a
+   *  gathered set — and the cross-page walk behind it (tile-narrowing.ts). */
+  readonly #narrow = new TileNarrowing({
+    segments: () => { const segs = this.resolve<any>('lineage')?.explorerSegments?.(); return segs ? [...segs] : [] },
+    cachedTags: label => this.cellTagsCache.get(label),
+    emit: (effect, payload) => this.emitEffect(effect, payload),
+    repaint: () => { this.renderedCellsKey = ''; this.requestRender() },
+    requestRender: () => this.requestRender(),
+    goRaw: segments => (window as any).ioc?.get?.('@hypercomb.social/Navigation')?.goRaw?.(segments),
+    history: () => (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService'),
+    store: () => (window as any).ioc?.get?.('@hypercomb.social/Store'),
+  })
   private moveNames: string[] | null = null
   #divergenceFutureAdds = new Set<string>()
   #divergenceFutureRemoves = new Set<string>()
@@ -1555,7 +1164,7 @@ export class ShowCellDrone extends Drone {
   // The handlers mutate #slots synchronously; a single microtask runs one
   // applyGeometry at the end of the turn. Zero awaits in the click path.
   // Pending incremental adds carry the SEGMENTS captured synchronously at
-  // event time — the microtask defer below plus #placePinnedCell's write
+  // event time — the microtask defer below plus TileOrder.placeNew's write
   // must never re-read live lineage (a navigation in that window pinned
   // the new cell's index against the WRONG location's layer).
   #pendingAdds: { name: string; segments: readonly string[] }[] = []
@@ -1685,245 +1294,9 @@ export class ShowCellDrone extends Drone {
     const heartbeatKey = `${locationKey}:${fsRev}:${grammar}`
     if (heartbeatKey !== this.#lastHeartbeatKey) {
       this.#lastHeartbeatKey = heartbeatKey
-      await this.refreshMeshCells(grammar)
+      await this.#mesh.refresh(grammar)
       this.requestRender()
     }
-  }
-
-  private refreshMeshCells = async (grammar: string = '', forceResnapshot = false): Promise<void> => {
-    // Mesh is opt-in. Default: dormant. Joining a public session sets the
-    // flag below. Without it, no relay connections, no event subscriptions,
-    // no per-event secp256k1 verifications. Local-only operation.
-    const meshEnabled = (() => {
-      try { return localStorage.getItem('hc:mesh-enabled') === 'true' } catch { return false }
-    })()
-    if (!meshEnabled) return
-
-    const lineage = this.resolve<any>('lineage')
-    const mesh = this.tryGetMesh()
-    if (!lineage || !mesh) return
-
-    const signatureLocation = await this.computeSignatureLocation(lineage)
-    const sig = signatureLocation.sig
-
-    if (sig !== this.meshSig) {
-      const NOSTR = 'wss://relay.snort.social'
-      const nakPayload = '{"cells":["external.alpha","Street Fighter"]}'
-      const nakCmd = `nak event ${NOSTR} --kind 29010 --tag "x=${sig}" --content '${nakPayload}'`
-      ; (window as any).__showHoneycombNakCommand = nakCmd
-      // (debug logs removed — fired on every nav and slowed render with DevTools open)
-    }
-
-    if (!sig) return
-
-    // Privacy gate — show-cell's legacy kind-29010 subscribe + publish
-    // path was the un-credentialled leak the user reported ("the mesh
-    // is sharing even without a location or password"). Without both
-    // a room and a secret we MUST NOT subscribe (would receive other
-    // peers' cached events from the relay) or publish (would broadcast
-    // our local cell list to anyone listening on this lineage sig).
-    // SwarmDrone has the same gate for the new kind-30200 path.
-    if (!this.#space || !this.#secret) {
-      // If we previously had a subscription open from a session with
-      // credentials, close it now so the leak is sealed immediately
-      // when the user clears credentials, not just on next lineage
-      // change.
-      if (this.meshSub) {
-        try { this.meshSub.close() } catch { /* ignore */ }
-        this.meshSub = null
-      }
-      this.meshSig = ''
-      this.meshCells = []
-      this.meshCellsRev++
-      return
-    }
-
-    const sigChanged = sig !== this.meshSig
-
-    if (sigChanged) {
-      if (this.meshSub) {
-        try { this.meshSub.close() } catch { /* ignore */ }
-        this.meshSub = null
-      }
-
-      this.meshSig = sig
-      this.meshCells = []
-      this.meshCellsRev++
-
-      if (typeof mesh.subscribe === 'function') {
-        this.meshSub = mesh.subscribe(sig, (evt) => {
-          // Only react to the legacy ephemeral kind that this drone owns.
-          // Swarm-layer events (kind 30200) belong to SwarmDrone and don't
-          // affect meshCells — re-rendering on every one of them churns
-          // show-cell on each peer publish (and on our own local fanout).
-          // Peer tiles still update at the next render trigger (navigation
-          // / user interaction); they don't need per-event refreshes.
-          const kind = Number((evt?.event as { kind?: number } | undefined)?.kind ?? 0)
-          if (kind && kind !== 29010) return
-
-          // detect sync-request from another publisher — trigger immediate republish
-          this.#handleIncomingSyncRequest(evt, mesh, sig)
-
-          void (async () => {
-            await this.refreshMeshCells()
-            this.requestRender()
-          })()
-        })
-      }
-    }
-
-    // Private mode is a hard boundary: rendering/warm-up must not start mesh
-    // consumers as a side effect. In particular, the delayed synchronize pass
-    // reaches this method after first paint; emitting mesh:ensure-started here
-    // used to wake SwarmDrone, presence, avatars, and meeting consumers even
-    // while the UI said private. Keep the mesh completely cold until the user
-    // explicitly enters public/swarm mode.
-    let meshPublic = false
-    try { meshPublic = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* privacy-safe default: off */ }
-    if (meshPublic) {
-      mesh.ensureStartedForSig(sig)
-      this.emitEffect('mesh:ensure-started', { signature: sig })
-    }
-
-
-    // note: publish local filesystem cells for this sig when changed
-    await this.publishLocalCells(lineage, mesh, sig, grammar, forceResnapshot)
-
-    // note: get non-expired items (mesh owns ttl)
-    const items = mesh.getNonExpired(sig)
-
-    // sync-request: if we arrived and see no items from other publishers, ask the swarm to republish
-    if (!this.#syncRequestedBySig.has(sig) && this.snapshotPostedBySig.has(sig)) {
-      const hasOtherPublishers = items.some(it => {
-        const pubId = this.readPublisherIdFromEvent(it?.event)
-        return pubId && pubId !== this.publisherId
-      })
-      if (!hasOtherPublishers && typeof mesh.publish === 'function') {
-        this.#syncRequestedBySig.add(sig)
-        void mesh.publish(29010, sig, {
-          type: 'sync-request',
-          publisherId: this.publisherId,
-          requestedAtMs: Date.now()
-        }, [['publisher', this.publisherId], ['mode', 'sync-request']])
-      }
-    }
-
-    if (!items || items.length === 0) {
-      if (this.meshCells.length !== 0) {
-        this.meshCells = []
-        this.meshCellsRev++
-      }
-      return
-    }
-
-    // LATEST-SNAPSHOT-WINS per publisher (was: union every non-expired
-    // payload). The old union could never RETRACT — a tile flipped private
-    // (or removed) lingered in the merged set until its original snapshot
-    // aged out of the 10-min cache. Now each publisher's membership is the
-    // cells of their NEWEST full snapshot, plus any single-cell deltas
-    // published at/after it. A fresh snapshot with the reduced set (forced
-    // on tile:public-changed) therefore drops the retracted tile at once.
-    // getNonExpired returns items newest-first, so the first full we see
-    // for a publisher is their newest; `>=` lets a same-second republish
-    // (sorted oldest-received-first within a tie) supersede correctly.
-    type PubAgg = { fullCells: string[] | null; fullAtMs: number; deltas: { cell: string; atMs: number }[] }
-    const byPublisher = new Map<string, PubAgg>()
-    const anonCells = new Set<string>()   // events with no publisher id (e.g. external tools) — unioned
-
-    for (const it of items) {
-      const evt = it?.event
-      const p = it?.payload
-
-      const tagPublisherId = this.readPublisherIdFromEvent(evt)
-      const payloadPublisherId = String(p?.publisherId ?? p?.publisher ?? p?.clientId ?? '').trim()
-      const publisherId = tagPublisherId || payloadPublisherId
-      if (publisherId && publisherId === this.publisherId) continue   // our own echo
-
-      // Classify via tags: mode=snapshot/refresh → authoritative full list;
-      // mode=delta → additive single cell; mode=sync-request → not cells;
-      // grammar heartbeats (no mode) are additive too. Anything else with
-      // no mode (explicit list publish, external tooling) is a full list.
-      let mode = ''
-      let isGrammar = false
-      const tags = Array.isArray(evt?.tags) ? evt.tags : []
-      for (const t of tags) {
-        if (!Array.isArray(t) || t.length < 2) continue
-        const k = String(t[0] ?? '').trim().toLowerCase()
-        if (k === 'mode') mode = String(t[1] ?? '').trim().toLowerCase()
-        else if (k === 'source' && String(t[1] ?? '').trim() === 'show-honeycomb:grammar-heartbeat') isGrammar = true
-      }
-      if (mode === 'sync-request') continue
-
-      const cells = this.extractCellsFromEventContent(evt?.content)
-      if (cells.length === 0) continue
-
-      const atMs = Number(evt?.created_at ?? 0) > 0 ? Number(evt.created_at) * 1000 : 0
-
-      if (!publisherId) {
-        for (const cell of cells) anonCells.add(cell)
-        continue
-      }
-
-      let agg = byPublisher.get(publisherId)
-      if (!agg) { agg = { fullCells: null, fullAtMs: 0, deltas: [] }; byPublisher.set(publisherId, agg) }
-
-      const isFullList = mode === 'snapshot' || mode === 'refresh' || (!mode && !isGrammar)
-      if (isFullList) {
-        if (agg.fullCells === null || atMs >= agg.fullAtMs) { agg.fullCells = cells; agg.fullAtMs = atMs }
-      } else {
-        for (const cell of cells) agg.deltas.push({ cell, atMs })
-      }
-    }
-
-    const set = new Set<string>(anonCells)
-    for (const agg of byPublisher.values()) {
-      if (agg.fullCells) {
-        for (const cell of agg.fullCells) set.add(cell)
-        // additions published at/after the chosen snapshot
-        for (const d of agg.deltas) if (d.atMs >= agg.fullAtMs) set.add(d.cell)
-      } else {
-        // No snapshot seen from this publisher (deltas/grammar only) — no
-        // baseline to retract against, so union what they sent.
-        for (const d of agg.deltas) set.add(d.cell)
-      }
-    }
-
-    const next = Array.from(set)
-    next.sort((a, b) => a.localeCompare(b))
-
-    const sameLen = next.length === this.meshCells.length
-    let same = sameLen
-    if (same) {
-      for (let i = 0; i < next.length; i++) {
-        if (next[i] !== this.meshCells[i]) { same = false; break }
-      }
-    }
-
-    if (!same) {
-      this.meshCells = next
-      this.meshCellsRev++
-    }
-  }
-
-  public publishExplicitCellList = async (cells: string[]): Promise<boolean> => {
-    const lineage = this.resolve<any>('lineage')
-    const mesh = this.tryGetMesh()
-    if (!lineage || !mesh || typeof mesh.publish !== 'function') return false
-
-    const signatureLocation = await this.computeSignatureLocation(lineage)
-    if (!signatureLocation.sig) return false
-
-    const normalized = Array.isArray(cells)
-      ? cells.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
-      : []
-
-    const payload = normalized.join(',')
-    const ok = await mesh.publish(29010, signatureLocation.sig, payload, [['publisher', this.publisherId]])
-
-    await this.refreshMeshCells()
-    this.requestRender()
-
-    return !!ok
   }
 
   // Use null sentinel (not '') so the very first call for the root
@@ -1958,244 +1331,6 @@ export class ShowCellDrone extends Drone {
     return get<MeshApi>('@diamondcoreprocessor.com/NostrMeshDrone') ?? null
   }
 
-
-  private publishLocalCells = async (lineage: any, mesh: MeshApi, sig: string, grammar: string = '', forceResnapshot = false): Promise<void> => {
-    if (typeof mesh.publish !== 'function') return
-
-    // Source the cell list from the current layer's children (layer-as-primitive),
-    // not from an OPFS dir walk. Reads via lineage.currentLayer() — the
-    // single navigation+state primitive — and resolves child sigs to
-    // names via HistoryService.getLayerBySig. If neither is ready we
-    // publish an empty children list (same semantic as "I'm here,
-    // contributing nothing yet"); we never fall back to OPFS dirs.
-    const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
-      getLayerBySig: (s: string) => Promise<{ name?: string } | null>
-    } | undefined
-    let localCells: string[] = []
-    if (typeof (lineage as { currentLayer?: () => Promise<unknown> })?.currentLayer === 'function' && historyService?.getLayerBySig) {
-      try {
-        const layer = await (lineage as { currentLayer: () => Promise<unknown> }).currentLayer()
-        const childSigs = Array.isArray((layer as { children?: readonly unknown[] } | null)?.children)
-          ? ((layer as { children: readonly unknown[] }).children)
-          : []
-        const resolved = await Promise.all(childSigs.map(async (cs) => {
-          try {
-            const child = await historyService.getLayerBySig(String(cs ?? ''))
-            return typeof child?.name === 'string' && child.name.length > 0 ? child.name : null
-          } catch { return null }
-        }))
-        localCells = resolved.filter((n): n is string => n !== null)
-      } catch { /* keep empty */ }
-    }
-
-    // PUBLIC FILTER — broadcast only the public subset on this mesh path too
-    // (kind 29010), mirroring swarm.drone's #publishSubtree. Private tiles
-    // must never leave the device. isCellPublic is branch-aware.
-    const publicLocation = String(lineage?.explorerLabel?.() ?? '/')
-    localCells = localCells.filter(name => isCellPublic(publicLocation, name))
-
-    const previousCells = this.lastLocalCellsBySig.get(sig) ?? []
-
-    // A full snapshot is authoritative: the latest-snapshot-wins consumer
-    // (refreshMeshCells) treats the newest snapshot per publisher as that
-    // publisher's complete membership. Post one on first publish for this
-    // sig, or on demand (forceResnapshot) when a tile flips public→private —
-    // a fresh snapshot carrying the reduced set is the ONLY way to RETRACT
-    // on this kind-29010 path: it isn't a replaceable event, and the delta
-    // stream below is add-only. Without it, an un-shared tile lingered in
-    // the consumer's union until the original snapshot expired (~10 min).
-    if (forceResnapshot || !this.snapshotPostedBySig.has(sig)) {
-      await mesh.publish(29010, sig, {
-        cells: localCells,
-        publisherId: this.publisherId,
-        mode: 'snapshot',
-        publishedAtMs: Date.now()
-      }, [['publisher', this.publisherId], ['mode', 'snapshot']])
-      this.snapshotPostedBySig.add(sig)
-      this.#lastRefreshAtMs.set(sig, Date.now())
-    } else {
-      // Steady state: post only newly ADDED items as single-cell deltas so
-      // peers see additions instantly without re-sending the whole list.
-      // Removals/retractions never travel as deltas — they ride the next
-      // snapshot (forced above, or the periodic refresh below).
-      const prevSet = new Set(previousCells)
-      for (const cell of localCells) {
-        if (prevSet.has(cell)) continue
-        await mesh.publish(29010, sig, cell, [['publisher', this.publisherId], ['mode', 'delta']])
-      }
-    }
-
-    this.lastLocalCellsBySig.set(sig, localCells)
-
-    // 3) periodic refresh (lease renewal) — re-publish full cell list so late joiners see tiles
-    const now = Date.now()
-    const lastRefresh = this.#lastRefreshAtMs.get(sig) ?? 0
-    const refreshInterval = this.#computeRefreshInterval(mesh, sig)
-    if (lastRefresh > 0 && (now - lastRefresh) >= refreshInterval) {
-      await mesh.publish(29010, sig, {
-        cells: localCells,
-        publisherId: this.publisherId,
-        mode: 'refresh',
-        publishedAtMs: now
-      }, [['publisher', this.publisherId], ['mode', 'refresh']])
-      this.#lastRefreshAtMs.set(sig, now)
-    }
-
-    const grammarCell = this.toGrammarCell(grammar)
-    const grammarIsNew = grammarCell && (sig !== this.lastPublishedGrammarSig || grammarCell !== this.lastPublishedGrammarCell)
-    if (grammarIsNew) {
-      await mesh.publish(29010, sig, grammarCell, [['publisher', this.publisherId], ['source', 'show-honeycomb:grammar-heartbeat']])
-
-      this.lastPublishedGrammarSig = sig
-      this.lastPublishedGrammarCell = grammarCell
-    }
-  }
-
-  // swarm-adaptive refresh interval: smaller swarms refresh more frequently
-  #computeRefreshInterval = (mesh: MeshApi, sig: string): number => {
-    const swarmSize = typeof mesh.getSwarmSize === 'function' ? mesh.getSwarmSize(sig) : 0
-    const jitter = Math.floor(Math.random() * 5000)
-    if (swarmSize > 20) return 90_000 + jitter
-    if (swarmSize > 5) return 60_000 + jitter
-    return 45_000 + jitter
-  }
-
-  // handle incoming sync-request from another publisher — republish snapshot (rate-limited)
-  #handleIncomingSyncRequest = (evt: MeshEvt, mesh: MeshApi, sig: string): void => {
-    if (typeof mesh.publish !== 'function') return
-
-    const tags = evt?.event?.tags
-    if (!Array.isArray(tags)) return
-
-    // check for mode=sync-request tag
-    let isSyncRequest = false
-    let requestPublisherId = ''
-    for (const t of tags) {
-      if (!Array.isArray(t) || t.length < 2) continue
-      if (String(t[0]) === 'mode' && String(t[1]) === 'sync-request') isSyncRequest = true
-      if (String(t[0]) === 'publisher') requestPublisherId = String(t[1] ?? '').trim()
-    }
-
-    if (!isSyncRequest) return
-    if (requestPublisherId === this.publisherId) return // ignore own sync-request
-
-    // rate-limit: at most one triggered republish per 10s + jitter per sig
-    const now = Date.now()
-    const lastTriggered = this.#lastTriggeredRepublishAtMs.get(sig) ?? 0
-    const cooldown = 10_000 + Math.floor(Math.random() * 3000)
-    if ((now - lastTriggered) < cooldown) return
-
-    this.#lastTriggeredRepublishAtMs.set(sig, now)
-
-    // republish current local cells as snapshot
-    const localCells = this.lastLocalCellsBySig.get(sig) ?? []
-    if (localCells.length === 0) return
-
-    void mesh.publish(29010, sig, {
-      cells: localCells,
-      publisherId: this.publisherId,
-      mode: 'snapshot',
-      publishedAtMs: now
-    }, [['publisher', this.publisherId], ['mode', 'snapshot']])
-
-    // reset refresh timer since we just published
-    this.#lastRefreshAtMs.set(sig, now)
-  }
-
-  private readPublisherIdFromEvent = (evt: any): string => {
-    const tags = evt?.tags
-    if (!Array.isArray(tags)) return ''
-
-    for (const t of tags) {
-      if (!Array.isArray(t) || t.length < 2) continue
-      const k = String(t[0] ?? '').trim().toLowerCase()
-      if (k !== 'publisher' && k !== 'p') continue
-
-      const v = String(t[1] ?? '').trim()
-      if (v) return v
-    }
-
-    return ''
-  }
-
-  private extractCellsFromEventContent = (content: any): string[] => {
-    const raw = String(content ?? '').trim()
-    if (!raw) return []
-
-    // direct CSV content (preferred): "a,b,c"
-    if (!raw.startsWith('{') && !raw.startsWith('[') && !raw.startsWith('"')) {
-      return this.splitCsv(raw)
-    }
-
-    // JSON / structured content
-    try {
-      const parsed = JSON.parse(raw)
-
-      if (typeof parsed === 'string') return this.splitCsv(parsed)
-
-      if (Array.isArray(parsed)) {
-        const out: string[] = []
-        for (const x of parsed) out.push(...this.splitCsv(String(x ?? '')))
-        return out
-      }
-
-      if (parsed && typeof parsed === 'object') {
-        const out: string[] = []
-        const cells = (parsed as any).cells ?? (parsed as any).seeds
-        if (Array.isArray(cells)) {
-          for (const x of cells) out.push(...this.splitCsv(String(x ?? '')))
-        }
-
-        const cell = String((parsed as any).cell ?? (parsed as any).seed ?? '').trim()
-        if (cell) out.push(...this.splitCsv(cell))
-        return out
-      }
-    } catch {
-      // tolerant fallback for non-strict object-like payloads:
-      // {cells:[hello2,world2],pubs:123}
-      const cellsMatch = raw.match(/(?:cells|seeds)\s*:\s*\[([^\]]*)\]/i)
-      if (cellsMatch && cellsMatch[1]) {
-        return this.splitCsv(String(cellsMatch[1] ?? ''))
-      }
-
-      // do not split structured text blindly into junk tiles
-      if (this.looksStructuredContent(raw)) return []
-
-      // non-structured plain text fallback
-      return this.splitCsv(raw)
-    }
-
-    return []
-  }
-
-  private looksStructuredContent = (raw: string): boolean => {
-    const s = String(raw ?? '').trim()
-    if (!s) return false
-    return s.startsWith('{') || s.startsWith('[') || s.startsWith('"')
-  }
-
-  private splitCsv = (raw: string): string[] => {
-    const out: string[] = []
-    const parts = String(raw ?? '').split(',')
-    for (const part of parts) {
-      let cell = String(part ?? '').trim()
-      if (cell.startsWith('"') && cell.endsWith('"') && cell.length >= 2) {
-        cell = cell.slice(1, -1).trim()
-      }
-      if (cell.startsWith("'") && cell.endsWith("'") && cell.length >= 2) {
-        cell = cell.slice(1, -1).trim()
-      }
-      if (cell) out.push(cell)
-    }
-    return out
-  }
-
-  private toGrammarCell = (grammar: string): string => {
-    const raw = String(grammar ?? '').trim()
-    if (!raw) return ''
-    if (raw.startsWith('show-honeycomb:')) return ''
-    return raw
-  }
 
   #renderScheduled = false
 
@@ -2619,7 +1754,7 @@ export class ShowCellDrone extends Drone {
     // move any of the others — the slot machine's "put the new one in a free
     // slot" is the wrong answer by construction. Take the full path, which
     // re-reads the layer through the frame.
-    if (!axial?.items || !this.#slots.seeded || this.#locationIsFramed()) {
+    if (!axial?.items || !this.#slots.seeded || this.#order.isFramed()) {
       this.#layerCellsCache.delete(this.renderedLocationKey)
       this.renderedCellsKey = ''
       this.requestRender()
@@ -2636,13 +1771,13 @@ export class ShowCellDrone extends Drone {
       // The async fill pass below will correct this if needed.
       if (this.#slots.add(name, false)) continue
       // Pinned mode (the only mode): #slots.add defers slot assignment.
-      // Place the new cell HERE exactly as #orderByIndexPinned would for an
+      // Place the new cell HERE exactly as TileOrder.pinned would for an
       // unindexed cell — viewport-scored free slot, persisted fire-and-forget
       // — and render incrementally. The old behaviour fell back to a full
       // OPFS re-scan of the whole grid on every create, which both lagged the
       // click and re-rendered every existing tile. Only a genuinely full grid
       // (or missing axial) forces the slow path now.
-      if (this.#placePinnedCell(name, segments) < 0) {
+      if (this.#order.placeNew(name, segments) < 0) {
         this.#layerCellsCache.delete(this.renderedLocationKey)
         this.renderedCellsKey = ''
         this.requestRender()
@@ -2746,7 +1881,7 @@ export class ShowCellDrone extends Drone {
       }
 
       this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
-      this.#emitRenderTags(cells)
+      this.#narrow.emitRenderTags(cells)
     }
 
     // Membership is interaction truth and must paint on the very next frame.
@@ -2780,7 +1915,7 @@ export class ShowCellDrone extends Drone {
     const axial = this.resolve<any>('axial')
     const lineage = this.resolve<any>('lineage')
     // Framed pages re-place from the whole set — see #runIncrementalSync.
-    if (!axial?.items || !lineage || !this.#slots.seeded || this.#locationIsFramed()) {
+    if (!axial?.items || !lineage || !this.#slots.seeded || this.#order.isFramed()) {
       this.#layerCellsCache.delete(this.renderedLocationKey)
       this.renderedCellsKey = ''
       this.requestRender()
@@ -2868,7 +2003,7 @@ export class ShowCellDrone extends Drone {
     await this.applyGeometry(cells)
 
     this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
-    this.#emitRenderTags(cells)
+    this.#narrow.emitRenderTags(cells)
   }
 
   private readonly renderFromSynchronize = async (): Promise<void> => {
@@ -3158,7 +2293,7 @@ export class ShowCellDrone extends Drone {
     // produced new state.
     if (
       locationKey !== this.renderedLocationKey
-      && !(this.#tagFlattenResults && this.#tagFlattenResults.length > 0)
+      && !(this.#narrow.results && this.#narrow.results.length > 0)
     ) {
       const cached = this.#layerCellsCache.get(locationKey)
       // Sub-layer locations no longer mint OPFS folders (layer-primitive
@@ -3225,7 +2360,7 @@ export class ShowCellDrone extends Drone {
         this.cachedCellNames = cached.cellNames
         this.cachedLocalCellSet = cached.localCellSet
         this.cachedBranchSet = cached.branchSet
-        this.#layoutMode = this.#readLayoutMode(locationKey)
+        this.#layoutMode = this.#order.layoutMode(locationKey)
         this.#pendingRemoves.clear()
         // No auto-recenter. The mesh offset was saved alongside pan/zoom
         // when the user first loaded this layer (or when they explicitly
@@ -3296,7 +2431,7 @@ export class ShowCellDrone extends Drone {
           mode: this.#layoutMode,
         })
 
-        this.#emitRenderTags(cached.cells)
+        this.#narrow.emitRenderTags(cached.cells)
         // Stays AFTER applyGeometry deliberately. applyGeometry now publishes
         // the count itself, ahead of its restore-refit, which is what fixes the
         // ordering — but it early-returns before that emit on three paths (0
@@ -3343,12 +2478,12 @@ export class ShowCellDrone extends Drone {
     }
 
     const fsRev = Number(lineage.changed?.() ?? 0)
-    const meshRev = this.meshCellsRev
+    const meshRev = this.#mesh.rev
 
     const isStale = (): boolean => {
       const currentKey = String(lineage.explorerLabel?.() ?? '/')
       const currentRev = Number(lineage.changed?.() ?? 0)
-      const currentMeshRev = this.meshCellsRev
+      const currentMeshRev = this.#mesh.rev
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
     }
 
@@ -3386,30 +2521,18 @@ export class ShowCellDrone extends Drone {
     // its tiles travels to that tile's real home — and the audit is over, so
     // the gather clears rather than following you there and painting the same
     // set again at the destination.
-    if (this.#gathered) {
-      const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
-      if ([...segs].join('/') !== this.#gatherAnchorKey) this.#clearGather()
-    }
-
-    if (this.#narrowing() && !this.#gathered) {
-      const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
-      if ([...segs].join('/') !== this.#filterScanKey) await this.#scanTagsAcrossPages()
-    }
-
-    // Flatten state describes ONE flatten render and nothing else. Drop it here
-    // so an ordinary page can never inherit the previous filter's paths — a
-    // stale entry would redirect (or refuse) a click on an unrelated tile. The
-    // flatten branch below repopulates before it emits.
-    this.#flatPathByLabel.clear()
-    this.#filterBlockedLabels.clear()
+    // The narrowing settles first: a gather left behind clears, a lens that
+    // moved with you re-scans, and the last flatten's paths are dropped so an
+    // ordinary page can never inherit them (tile-narrowing.ts settle).
+    await this.#narrow.settle()
 
     // An active filter that matched nothing in scope shows an EMPTY mesh — not
     // a silent fall-through to the unfiltered page. We deliberately skip
-    // #emitRenderTags here so the last tag list (with the active filter pill)
+    // emitting render:tags here so the last tag list (with the active filter pill)
     // stays on screen, leaving a way to clear the filter.
-    if (this.#narrowing() && this.#tagFlattenResults && this.#tagFlattenResults.length === 0) {
+    if (this.#narrow.active && this.#narrow.results && this.#narrow.results.length === 0) {
       this.clearMesh('tag-filter: no matches in scope')
-      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:${this.#filterScanKey ?? ''}:` + this.#narrowKey()
+      this.renderedCellsKey = this.#narrow.renderKey()
       this.renderedLocationKey = locationKey
       this.renderedCells.clear()
       this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload([]), settled: true })
@@ -3417,8 +2540,8 @@ export class ShowCellDrone extends Drone {
     }
 
     // When tag filter is active, use pre-scanned cross-page results instead of explorer
-    if (this.#tagFlattenResults && this.#tagFlattenResults.length > 0) {
-      const flatResults = this.#tagFlattenResults
+    if (this.#narrow.results && this.#narrow.results.length > 0) {
+      const flatResults = this.#narrow.results
       const cellNames = flatResults.map(r => r.label)
       const flatSeedSet = new Set(cellNames)
 
@@ -3430,10 +2553,7 @@ export class ShowCellDrone extends Drone {
       // click opens the editor. Entering it is gated separately (below) on
       // whether the subtree actually holds a match.
       const flatBranchSet = new Set(flatResults.filter(r => r.hasChildren).map(r => r.label))
-      this.#flatPathByLabel = new Map(flatResults.map(r => [r.label, r.path]))
-      this.#filterBlockedLabels = new Set(
-        flatResults.filter(r => r.hasChildren && r.matchesInside === 0).map(r => r.label),
-      )
+      this.#narrow.adopt(flatResults)
 
       const maxCells = Math.min(cellNames.length, typeof axial.items.size === 'number' ? axial.items.size : cellNames.length)
       const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, flatSeedSet, flatBranchSet)
@@ -3452,14 +2572,14 @@ export class ShowCellDrone extends Drone {
       this.cachedBranchSet = flatBranchSet
       // The scan root is part of the identity of a flatten now — without it a
       // drill-down into a match would reuse the parent level's geometry.
-      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:${this.#filterScanKey ?? ''}:` + this.#narrowKey()
+      this.renderedCellsKey = this.#narrow.renderKey()
       this.renderedLocationKey = locationKey
 
       this.renderedCells.clear()
       for (const cell of cells) this.renderedCells.set(cell.label, cell)
       await this.applyGeometry(cells)
 
-      this.#emitRenderTags(cells)
+      this.#narrow.emitRenderTags(cells)
       // Listeners (TileSelection, TileOverlay) crash on undefined coords
       // when payload omits them. Send the full shape via the helper.
       this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload(cells), settled: true })
@@ -3486,7 +2606,7 @@ export class ShowCellDrone extends Drone {
     // only (a render = the current layer's children, nothing else). The
     // legacy meshCells seed was REMOVED here: it injected the PREVIOUS
     // location's peers across a navigation (meshCells is repopulated async
-    // by refreshMeshCells, so on a fresh nav it still held the old sig's
+    // by TileMesh.refresh, so on a fresh nav it still held the old sig's
     // cells), and clearMesh never cleared it — a cross-location leak. Swarm
     // peers now arrive solely through the TileSourceRegistry preview path
     // below, which is location-scoped by `segments`, so a peer for /A is
@@ -4128,7 +3248,7 @@ export class ShowCellDrone extends Drone {
             const pidx = e.source?.peerIndex
             // First-publisher-wins — if a second peer publishes the same
             // name with a different index, the first one we encountered
-            // anchors the slot. The collision check in #orderByIndexPinned
+            // anchors the slot. The collision check in TileOrder.pinned
             // catches any pathological overlap with local indices.
             if (typeof pidx === 'number' && Number.isFinite(pidx) && pidx >= 0 && !peerIndices.has(e.name)) {
               peerIndices.set(e.name, pidx)
@@ -4413,7 +3533,7 @@ export class ShowCellDrone extends Drone {
     // sharing decision, already vetted by THEIR isCellPublic before it left
     // their device; running our flag over it would blank the swarm. A name
     // that is both ours and peer-published stays for the same reason.
-    if (this.#publicMode && this.#space && this.#secret) {
+    if (this.#publicMode && this.#mesh.credentialed) {
       const shareLocation = String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/')
       for (const name of union) {
         if (!localCellSet.has(name)) continue
@@ -4473,7 +3593,7 @@ export class ShowCellDrone extends Drone {
       if (localCellSet.has(name)) continue
       const src = peerCellSet.has(name) ? 'peer'
         : ephemeralCellSet.has(name) ? 'ephemeral'
-        : this.meshCells.includes(name) ? 'mesh'
+        : this.#mesh.cells.includes(name) ? 'mesh'
         : 'unknown'
       outside.push(`${src}:${name}`)
     }
@@ -4483,13 +3603,13 @@ export class ShowCellDrone extends Drone {
       layerLocal: localCellSet.size,
       ephemeral: ephemeralCellSet.size,
       peer: peerCellSet.size,
-      mesh: this.meshCells.length,
+      mesh: this.#mesh.cells.length,
       union: union.size,
       outside,
     })
 
     // read layout mode for this location
-    this.#layoutMode = this.#readLayoutMode(locationKey)
+    this.#layoutMode = this.#order.layoutMode(locationKey)
 
     // resolve cell ordering through the layout mode strategy. `dir`
     // may be null when no OPFS folder mirror exists for this sub-layer;
@@ -4503,7 +3623,7 @@ export class ShowCellDrone extends Drone {
     // renderedLocationKey is stable across this pass.
     const navPass = locationKey !== this.renderedLocationKey
     const orderStats = { coldIndexNames: [] as string[] }
-    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir as FileSystemDirectoryHandle, union, localCellSet, lineage, peerIndices, passSegments, navPass, orderStats)
+    const cellNames = await this.#order.order(this.#layoutMode, dir as FileSystemDirectoryHandle, union, localCellSet, lineage, peerIndices, passSegments, navPass, orderStats)
 
     // ── INDEX COMPLETENESS GATE ──────────────────────────────────────
     // The name gate above guarantees every child NAME resolved; this one
@@ -5326,7 +4446,7 @@ export class ShowCellDrone extends Drone {
     // A full render rebuilt every attribute from the caches; the edit in
     // progress goes back on top of its tile.
     this.#writeTilePreview()
-    this.#emitRenderTags(cells)
+    this.#narrow.emitRenderTags(cells)
   }
 
   /** 0 = not swapping · 1 = the click takes the hovered tile · 2 = copies it
@@ -5430,220 +4550,6 @@ export class ShowCellDrone extends Drone {
         }
       }
     } catch { /* instrumentation must never break a render */ }
-  }
-
-  /** Tags applied to a cell: the union of the decoration index (canonical, tags
-   *  ride the `tag` decoration kind) and the legacy `properties.tags` cache
-   *  (back-compat for cells tagged before the decoration migration). */
-  #tagsFor(label: string): string[] {
-    const out = new Set<string>(this.cellTagsCache.get(label) ?? [])
-    for (const t of tagsForLabel(label)) out.add(t)
-    return [...out]
-  }
-
-  /** Emit render:tags (name+count) for the controls-bar tag list — the tags
-   *  defining the current page. There is no on-tile tag icon; the bottom tag
-   *  list lights up per-tile on hover (tile:hover-tags). */
-  #emitRenderTags(cells: Cell[]): void {
-    const counts = new Map<string, number>()
-    // Per-tile tags ride alongside the counts. The tag strip only ever
-    // needed the totals, but a tag is the hive's own way of saying what a
-    // tile IS, so anything grouping tiles by kind (the organism's texture
-    // projection) needs to know WHICH tile wears WHICH — and re-deriving
-    // that outside this loop would mean a second reader of the lens,
-    // filters and requirements that already resolved here.
-    const byLabel: Record<string, string[]> = {}
-    for (const cell of cells) {
-      const tags = this.#tagsFor(cell.label)
-      if (tags.length) byLabel[cell.label] = [...tags]
-      for (const tag of tags) {
-        counts.set(tag, (counts.get(tag) ?? 0) + 1)
-      }
-    }
-    const tags = [...counts.entries()].map(([name, count]) => ({ name, count }))
-    this.emitEffect('render:tags', { tags, byLabel })
-  }
-
-  /** Is anything narrowing the page — the participant's lens, a reference's
-   *  requirement, or both? Every flatten guard asks this rather than
-   *  `filterTags.size`, so a requirement alone (entered through a reference
-   *  with no lens set) still flattens. */
-  #narrowing(): boolean {
-    return this.filterTags.size > 0 || this.#requiredTags.size > 0 || this.#gathered !== null
-  }
-
-  /** Put a gathered set down. Called when the participant navigates away and
-   *  when the gatherer sends an empty list. */
-  #clearGather(): void {
-    this.#gathered = null
-    this.#gatherKey = ''
-    this.#gatherAnchorKey = ''
-    this.#tagFlattenResults = null
-    this.#flatPathByLabel.clear()
-    this.#filterBlockedLabels.clear()
-    this.emitEffect('render:gathered', { active: false, count: 0 })
-  }
-
-  /** Identity of the current narrowing, for the render key. Both sources, kept
-   *  apart: `a|b` and `b|a` are different renders. */
-  #narrowKey(): string {
-    return [...this.filterTags].sort().join(',') + '|' + [...this.#requiredTags].sort().join(',')
-      + '|' + this.#gatherKey
-  }
-
-  /** Walk the whole layer tree from the hive root and collect every cell whose
-   *  tag set intersects the active `filterTags`, populating `#tagFlattenResults`
-   *  for the flatten render override. Tags are read per cell from BOTH the `tag`
-   *  decoration kind (canonical) and legacy `properties.tags` — the same union
-   *  the controls-bar pills use — so old and new tags both filter. Mirrors the
-   *  `walkLayer` pattern (website.queen / flattenLayerTree): sign each path,
-   *  read its layer, recurse its `children`. One-shot on filter activation. */
-  async #scanTagsAcrossPages(): Promise<void> {
-    const active = this.filterTags
-    const required = this.#requiredTags
-    if (active.size === 0 && required.size === 0) { this.#tagFlattenResults = null; return }
-
-    const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
-      sign: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
-      currentLayerAt: (sig: string) => Promise<Record<string, unknown> | null>
-      getLayerBySig: (sig: string) => Promise<{ name?: string } | null>
-    } | undefined
-    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
-      getResource: (sig: string) => Promise<Blob | null>
-    } | undefined
-    if (!history?.sign || !history?.currentLayerAt || !store?.getResource) {
-      this.#tagFlattenResults = null
-      // Stamp the key anyway — otherwise the render-side "location moved" check
-      // sees an unscanned location and re-runs this on every single frame.
-      const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
-      this.#filterScanKey = [...segs].join('/')
-      return
-    }
-
-    const SIG_RE = /^[0-9a-f]{64}$/
-    const results: {
-      label: string
-      dir: FileSystemDirectoryHandle | null
-      path: string[]
-      hasChildren: boolean
-      matchesInside: number
-    }[] = []
-    const seen = new Set<string>()
-    const MAX_DEPTH = 32
-
-    // Scope decides where the walk starts and how deep it reaches:
-    //  • global   — the whole hive from the root, unbounded depth
-    //  • children — the current subtree, unbounded depth
-    //  • local    — the current page only (its immediate cells; depth 1)
-    const lineage = this.resolve<any>('lineage')
-    const currentSegments: string[] = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
-    const currentKey = currentSegments.join('/')
-    // A global filter reads from the hive root only while you stand at the
-    // location where you switched it on. Enter a match and the walk re-roots
-    // to where you now are — the filter follows you down instead of redrawing
-    // the same hive-wide flatten at every level.
-    const rootPath: string[] = (this.#filterScope === 'global' && currentKey === this.#filterAnchorKey)
-      ? []
-      : currentSegments
-    const recordDepth = this.#filterScope === 'local' ? 1 : MAX_DEPTH
-    // Walk ONE level past the deepest recorded row purely to count. A local
-    // filter records depth 1, but the enterability gate for those rows asks
-    // "would depth 1 FROM there hold anything?" — which is depth 2 from here.
-    const maxRelDepth = Math.min(recordDepth + 1, MAX_DEPTH)
-
-    // Tag names on a single layer: tag-kind decorations ∪ legacy properties.tags.
-    const tagNamesOf = async (layer: Record<string, unknown>): Promise<Set<string>> => {
-      const names = new Set<string>()
-      const decorations = Array.isArray(layer['decorations']) ? layer['decorations'] as unknown[] : []
-      for (const sig of decorations) {
-        if (typeof sig !== 'string' || !SIG_RE.test(sig)) continue
-        try {
-          const blob = await store.getResource(sig)
-          if (!blob) continue
-          const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: { name?: unknown } }
-          if (rec?.kind === 'tag' && typeof rec.payload?.name === 'string') names.add(rec.payload.name)
-        } catch { /* malformed — skip */ }
-      }
-      const props = Array.isArray(layer['properties']) ? layer['properties'] as unknown[] : []
-      const propSig = props[0]
-      if (typeof propSig === 'string' && SIG_RE.test(propSig)) {
-        try {
-          const blob = await store.getResource(propSig)
-          if (blob) {
-            const p = JSON.parse(await blob.text()) as { tags?: unknown }
-            if (Array.isArray(p?.tags)) for (const t of p.tags) if (typeof t === 'string') names.add(t)
-          }
-        } catch { /* malformed — skip */ }
-      }
-      return names
-    }
-
-    // relDepth is measured from the scope root: 0 is the root itself (a page
-    // container — never a result), 1 is its immediate cells, and so on.
-    // Returns how many matches sit AT `path` or below it, which is what lets a
-    // recorded row learn whether entering it would show anything.
-    const walk = async (path: string[], relDepth: number): Promise<number> => {
-      if (relDepth > maxRelDepth) return 0
-      let layer: Record<string, unknown> | null
-      try {
-        const locSig = await history.sign({ explorerSegments: () => path })
-        layer = await history.currentLayerAt(locSig)
-      } catch { return 0 }
-      if (!layer) return 0
-
-      const rawChildren = Array.isArray(layer['children']) ? layer['children'] as unknown[] : []
-
-      // Push the row before recursing; matchesInside is patched in below, since
-      // it isn't knowable until the subtree has been counted.
-      let selfMatched = false
-      let row: (typeof results)[number] | null = null
-      if (relDepth >= 1) {
-        const label = path[path.length - 1]
-        const names = await tagNamesOf(layer)
-        // Two sources, ANDed. Within each, ANY mark matching is enough — the
-        // rule the participant's lens already uses, applied unchanged to the
-        // requirement rather than inventing a second one. An empty source
-        // demands nothing, so a lens alone behaves exactly as it did before
-        // requirements existed.
-        const meetsLens = active.size === 0 || [...active].some(t => names.has(t))
-        const meetsRequirement = required.size === 0 || [...required].some(t => names.has(t))
-        selfMatched = meetsLens && meetsRequirement
-        // Rows are recorded only down to recordDepth — anything past that is
-        // walked purely to answer "is there a match in here?".
-        if (selfMatched && relDepth <= recordDepth && !seen.has(label)) {
-          seen.add(label)
-          row = { label, dir: null, path: [...path], hasChildren: rawChildren.length > 0, matchesInside: 0 }
-          results.push(row)
-        }
-      }
-
-      let below = 0
-      if (relDepth < maxRelDepth) {
-        for (const entry of rawChildren) {
-          const s = String(entry ?? '').trim()
-          if (!s) continue
-          let childName = s
-          if (SIG_RE.test(s)) {
-            try {
-              const child = await history.getLayerBySig(s)
-              if (!child?.name) continue
-              childName = String(child.name)
-            } catch { continue }
-          }
-          below += await walk([...path, childName], relDepth + 1)
-          // The counting-only level records nothing, so one hit already answers
-          // the gate — stop reading siblings instead of paying for the rest.
-          if (below > 0 && relDepth + 1 > recordDepth) break
-        }
-      }
-
-      if (row) row.matchesInside = below
-      return (selfMatched ? 1 : 0) + below
-    }
-
-    await walk(rootPath, 0)
-    this.#tagFlattenResults = results
-    this.#filterScanKey = currentKey
   }
 
   /** Returns the current imageMix value, accounting for substrate fade-in animation. */
@@ -5949,7 +4855,7 @@ export class ShowCellDrone extends Drone {
     this.onEffect<{ labels: string[] }>('tags:indexed', (payload) => {
       if (!Array.isArray(payload?.labels) || payload.labels.length === 0) return
       if (this.renderedCells.size === 0) return
-      this.#emitRenderTags([...this.renderedCells.values()])
+      this.#narrow.emitRenderTags([...this.renderedCells.values()])
     })
 
     // feature:hidden / feature:restored — the participant hid or restored a
@@ -6083,7 +4989,7 @@ export class ShowCellDrone extends Drone {
       if (previous?.name && previous.name !== payload?.name) {
         this.cellImageCache.delete(previous.name)
         this.atlas?.invalidateLabel(previous.name)
-        this.#sessionSlotByLabel.delete(previous.name)
+        this.#order.forget(previous.name)
       }
       const name = String(payload?.name ?? '').trim()
       const index = Number(payload?.index)
@@ -6120,7 +5026,7 @@ export class ShowCellDrone extends Drone {
       this.#slots.clear()
       this.requestRender()
       const lineage = this.resolve<any>('lineage')
-      if (String(lineage?.explorerLabel?.() ?? '/') !== this.renderedLocationKey) this.#sessionSlotByLabel.clear()
+      if (String(lineage?.explorerLabel?.() ?? '/') !== this.renderedLocationKey) this.#order.forgetAll()
     })
 
     // The committer announces persistence separately from membership. The
@@ -6555,119 +5461,14 @@ export class ShowCellDrone extends Drone {
     // Nothing is committed. No layer is minted, no lineage is written; sending
     // an empty list (or walking anywhere) puts the hive back as it was.
     this.onEffect<{ key?: string; items?: Array<{ label?: string; path?: string[] }> }>(
-      'render:gather-set',
-      ({ key, items }) => {
-        const rows = (items ?? [])
-          .map(item => ({ label: String(item?.label ?? '').trim(), path: (item?.path ?? []).map(String) }))
-          .filter(row => row.label)
-        if (rows.length === 0) {
-          if (this.#gathered) { this.#clearGather(); this.renderedCellsKey = ''; this.requestRender() }
-          return
-        }
-        const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
-        this.#gathered = rows
-        this.#gatherKey = String(key ?? '') || rows.map(r => r.label).join(',')
-        this.#gatherAnchorKey = [...segs].join('/')
-        this.#tagFlattenResults = rows.map(row => ({
-          label: row.label,
-          dir: null,
-          path: row.path,
-          hasChildren: true,
-          matchesInside: 1,
-        }))
-        this.renderedCellsKey = ''
-        this.requestRender()
-        this.emitEffect('render:gathered', { active: true, count: rows.length, key: this.#gatherKey })
-      },
-    )
+      'render:gather-set', ({ key, items }) => this.#narrow.gather(key, items))
 
-    // tags:required effect — the marks a REFERENCE demands of what it shows,
-    // in force while the participant stands inside what it points at. ANDed
-    // with the lens below; never merged into it, never listed as chips, and it
-    // deliberately does NOT touch #preFilterSegments — walking out of a
-    // requirement is an ordinary navigation, not a filter being cleared, so
-    // there is nowhere to restore anyone to.
-    this.onEffect<{ marks?: string[] }>('tags:required', ({ marks }) => {
-      const next = new Set((marks ?? []).map(m => String(m ?? '').trim()).filter(Boolean))
-      if (next.size === this.#requiredTags.size && [...next].every(m => this.#requiredTags.has(m))) return
-      this.#requiredTags = next
-      // The previous walk answered a different question.
-      this.#filterScanKey = null
-      if (!this.#narrowing()) {
-        this.#tagFlattenResults = null
-        this.#flatPathByLabel.clear()
-        this.#filterBlockedLabels.clear()
-      }
-      void (async () => {
-        if (this.#narrowing()) await this.#scanTagsAcrossPages()
-        this.renderedCellsKey = ''
-        this.requestRender()
-      })()
-    })
+    // tags:required — the marks a REFERENCE demands of what it shows, ANDed
+    // with the lens (tile-narrowing.ts).
+    this.onEffect<{ marks?: string[] }>('tags:required', ({ marks }) => this.#narrow.require(marks))
 
-    // tags:filter effect — tag flatten, scoped to page / children / global
-    this.onEffect<{ active: string[]; scope?: 'local' | 'children' | 'global' }>('tags:filter', ({ active, scope }) => {
-      const wasFiltering = this.filterTags.size > 0
-      this.#filterScope = scope ?? 'local'
-      this.filterTags = new Set(active)
-      // Any change to the tag set or the scope invalidates the previous walk.
-      this.#filterScanKey = null
-      if (this.filterTags.size > 0) {
-        const lineage = this.resolve<any>('lineage')
-        const here: string[] = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
-        // Save location before entering filter mode
-        if (!wasFiltering) this.#preFilterSegments = here
-        // Re-anchor on EVERY filter change, not just activation: the anchor is
-        // "where you were when you last touched the filter". A global filter
-        // reads the whole hive while you stand on its anchor and re-roots once
-        // you enter a match — so widening the scope after drilling in has to
-        // move the anchor here, or global would never actually go global.
-        this.#filterAnchorKey = here.join('/')
-        // Scan the whole tree, THEN render — the flatten override reads the
-        // freshly-populated #tagFlattenResults. Clear the render key so the
-        // flatten geometry rebuilds rather than reusing the prior page.
-        void (async () => {
-          await this.#scanTagsAcrossPages()
-          if (!this.#narrowing()) return // narrowing dropped mid-scan
-          this.renderedCellsKey = ''
-          this.requestRender()
-        })()
-      } else if (this.#requiredTags.size > 0) {
-        // The lens cleared but a reference's requirement still stands — the
-        // page stays narrowed to what that reference demands rather than
-        // falling back to the unfiltered layer. Re-scan, because the walk that
-        // just ran answered "lens AND requirement" and this one answers
-        // "requirement alone".
-        this.#filterAnchorKey = null
-        this.#preFilterSegments = null
-        void (async () => {
-          await this.#scanTagsAcrossPages()
-          this.renderedCellsKey = ''
-          this.requestRender()
-        })()
-      } else {
-        this.#tagFlattenResults = null
-        this.#flatPathByLabel.clear()
-        this.#filterBlockedLabels.clear()
-        this.#filterAnchorKey = null
-        this.renderedCellsKey = ''
-        // Restore the pre-filter location ONLY if the filter never moved us.
-        // Entering a match is now a real, path-correct navigation the user
-        // chose — teleporting them back to where they opened the filter would
-        // throw that away. (The restore exists because the old flatten had no
-        // way to enter a match without minting a phantom segment.)
-        if (this.#preFilterSegments !== null) {
-          const lineage = this.resolve<any>('lineage')
-          const here: string[] = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
-          if (here.join('/') === this.#preFilterSegments.join('/')) {
-            const nav = get('@hypercomb.social/Navigation') as { goRaw?: (segs: string[]) => void } | undefined
-            nav?.goRaw?.(this.#preFilterSegments)
-          }
-          this.#preFilterSegments = null
-        }
-        this.requestRender()
-      }
-    })
+    // tags:filter — the lens, scoped to page / children / global.
+    this.onEffect<{ active: string[]; scope?: 'local' | 'children' | 'global' }>('tags:filter', ({ active, scope }) => this.#narrow.filter(active, scope))
 
     // move:preview — reordered names during drag (fast path avoids full OPFS re-read)
     this.onEffect<{ names: string[]; movedLabels: Set<string> } | null>('move:preview', (payload) => {
@@ -6716,8 +5517,8 @@ export class ShowCellDrone extends Drone {
     // would repaint the pre-join cells — unfiltered — until something else
     // invalidated. Credential changes are rare; re-deriving the cells is cheap.
     this.onEffect<{ room: string }>('mesh:room', ({ room }) => {
-      if (this.#space !== room) {
-        this.#space = room
+      if (this.#mesh.room !== room) {
+        this.#mesh.room = room
         this.#layerCellsCache.clear()
         this.renderedCellsKey = ''
         this.renderedLocationKey = ''
@@ -6726,8 +5527,8 @@ export class ShowCellDrone extends Drone {
     })
 
     this.onEffect<{ secret: string }>('mesh:secret', ({ secret }) => {
-      if (this.#secret !== secret) {
-        this.#secret = secret
+      if (this.#mesh.secret !== secret) {
+        this.#mesh.secret = secret
         this.#layerCellsCache.clear()
         this.renderedCellsKey = ''
         this.renderedLocationKey = ''
@@ -6841,12 +5642,12 @@ export class ShowCellDrone extends Drone {
     // cell from persisted stores so secret/room survive page reload
     const roomStore = get<any>('@hypercomb.social/RoomStore')
     const secretStore = get<any>('@hypercomb.social/SecretStore')
-    if (roomStore?.value && this.#space !== roomStore.value) {
-      this.#space = roomStore.value
+    if (roomStore?.value && this.#mesh.room !== roomStore.value) {
+      this.#mesh.room = roomStore.value
       this.renderedLocationKey = ''
     }
-    if (secretStore?.value && this.#secret !== secretStore.value) {
-      this.#secret = secretStore.value
+    if (secretStore?.value && this.#mesh.secret !== secretStore.value) {
+      this.#mesh.secret = secretStore.value
       this.renderedLocationKey = ''
     }
 
@@ -6855,8 +5656,7 @@ export class ShowCellDrone extends Drone {
     this.onEffect<{ public: boolean }>('mesh:public-changed', ({ public: isPublic }) => {
       this.#publicMode = !!isPublic
       if (!isPublic) {
-        this.meshCells = []
-        this.meshCellsRev++
+        this.#mesh.clearPeers()
         // Leaving the swarm: presence glow is meaningless in private mode.
         this.#presenceGlowByLabel.clear()
       }
@@ -7146,23 +5946,23 @@ export class ShowCellDrone extends Drone {
       // until the next navigation or periodic refresh. forceResnapshot posts
       // a fresh authoritative snapshot so the latest-snapshot-wins consumer
       // drops a now-private tile at once instead of unioning it for ~10 min.
-      void this.refreshMeshCells('', true)
+      void this.#mesh.refresh('', true)
       // Render changes in world mode (the dim state of unshared tiles) AND
       // inside a swarm, where the flag decides MEMBERSHIP: the swarm-privacy
       // filter drops an unshared tile from the pass, so a flip either adds it
       // back or takes it away. Everywhere else the flag is invisible.
-      if (!this.#worldMode && !(this.#publicMode && this.#space && this.#secret)) return
+      if (!this.#worldMode && !(this.#publicMode && this.#mesh.credentialed)) return
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
       this.requestRender()
     })
 
     this.onEffect<{ cell: string; index: number }>('cell:place-at', (payload) => {
-      void this.#handlePlaceAt(payload.cell, payload.index)
+      void this.#order.placeAt(payload.cell, payload.index)
     })
 
     this.onEffect<{ labels: string[] }>('cell:reorder', (payload) => {
-      void this.#handleReorder(payload.labels)
+      this.#order.reorder()
     })
 
     // Arrangement activation is presentation-first. Apply its sparse slot map
@@ -7256,7 +6056,7 @@ export class ShowCellDrone extends Drone {
       this.#setPortalShimmer(hoverLabel !== null && referenceTargetForLabel(hoverLabel) !== null)
 
       // Emit hovered tile's tags for UI highlight
-      this.emitEffect('tile:hover-tags', { tags: hoverLabel ? this.#tagsFor(hoverLabel) : [] })
+      this.emitEffect('tile:hover-tags', { tags: hoverLabel ? this.#narrow.tagsFor(hoverLabel) : [] })
     })
 
     // accent color presets: glacier, bloom, aurora, ember, nebula
@@ -7286,7 +6086,7 @@ export class ShowCellDrone extends Drone {
     })
 
     ; (window as any).showCellsPoc = {
-      publishCells: async (cells: string[]) => this.publishExplicitCellList(cells),
+      publishCells: async (cells: string[]) => this.#mesh.publishList(cells),
       signature: async () => {
         const lineage = this.resolve<any>('lineage')
         return await this.computeSignatureLocation(lineage)
@@ -7395,6 +6195,7 @@ export class ShowCellDrone extends Drone {
     window.removeEventListener('navigate', this.#onNavigateStarted)
     window.removeEventListener('navigate', this.#onReadinessNavigate)
     this.#readinessNavHooked = false
+    this.#mesh.close()
 
     if (this.#flashTimer) { clearTimeout(this.#flashTimer); this.#flashTimer = null }
     if (this.#translationPulseTimer) { clearInterval(this.#translationPulseTimer); this.#translationPulseTimer = null }
@@ -7622,11 +6423,11 @@ export class ShowCellDrone extends Drone {
     if (all === null) {
       const marks = new Set(hovered)
       for (const label of this.renderedCells.keys()) {
-        for (const t of this.#tagsFor(label)) if (marks.has(t)) { next.add(label); break }
+        for (const t of this.#narrow.tagsFor(label)) if (marks.has(t)) { next.add(label); break }
       }
     } else if (all.length > 0) {
       for (const label of this.renderedCells.keys()) {
-        const worn = this.#tagsFor(label)
+        const worn = this.#narrow.tagsFor(label)
         if (all.every(t => worn.includes(t))) next.add(label)
       }
       const tint = dragged.length > 0 ? this.#dragShadeColor : this.#armedApplyColor
@@ -7998,481 +6799,12 @@ export class ShowCellDrone extends Drone {
       // but #cellIsPreloading ignores hover, so appearance never counterfeits
       // the honest answer to "has this arrived yet".
       shadedLabels: cells.filter(c => this.#cellIsPreloading(c)).map(c => c.label),
-      // Tag-flatten only — hence the filterTags guard: several render paths
+      // Tag-flatten only — hence the narrowing's own guard: several render paths
       // reach this helper without passing the flatten block, and a stale entry
       // surviving into an ordinary page would redirect (or refuse) a click on
       // an unrelated tile that merely shares a name with a past match.
-      // A match can live anywhere, so entering it travels to its absolute path;
-      // appending the label to wherever you're standing mints a phantom segment.
-      flatPaths: this.#narrowing() ? Object.fromEntries(this.#flatPathByLabel) : {},
-      // Matches with children but nothing tagged inside: entering would land on
-      // a blank filtered mesh, so tile-overlay refuses and says why.
-      filterBlocked: this.#narrowing() ? [...this.#filterBlockedLabels] : [],
+      ...this.#narrow.entry(),
     }
-  }
-
-  #readLayoutMode(_locationKey: string): 'dense' | 'pinned' {
-    // Pinned is the canonical default: each cell keeps its slot index
-    // permanently (stored in its 0000 properties). The spiral/contiguous
-    // fill runs only once — to assign an index to a brand-new cell that
-    // has none yet. Removal leaves a gap, never shifts neighbours.
-    return 'pinned'
-  }
-
-  // `navPass`: true when this pass is a layer CHANGE (navigation). During a
-  // nav the viewport still belongs to the OUTGOING page — the destination
-  // pan/zoom is applied later in the pass, and ViewportPersistence/
-  // CenterSlotTracker aren't synced forward on nav at all — so any
-  // viewport-scored placement here would land tiles relative to the page
-  // the user just LEFT. On nav passes, unindexed placement is therefore
-  // deterministic (lowest free slot), never camera-relative. Same-page
-  // passes (tile added while viewing) keep the viewport score: there the
-  // camera is live and correct.
-  // `orderStats.coldIndexNames`: out-param — tiles whose index read was
-  // TRANSIENTLY unresolvable this pass (layer head cold, bytes not pooled).
-  // The caller gates the paint on it: placing a cold tile means painting a
-  // tile that HAS a durable slot at a wrong one.
-  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false, peerIndices?: Map<string, number>, passSegments?: readonly string[], navPass = false, orderStats?: { coldIndexNames: string[] }): Promise<string[]> {
-    const axial = this.resolve<any>('axial')
-    const maxSlot = axial?.count ?? 60
-    const sparse: string[] = new Array(maxSlot + 1).fill('')
-
-    const unindexed: string[] = []
-
-    // IndexNurse owns the index read path — layer-slot first, 0000
-    // fallback (the legacy path; consulted only when the layer carries
-    // no properties yet). Caches per cell; invalidates on
-    // `cell:0000-changed` broadcast (both writeTilePropertiesAt and
-    // writeCellProperties emit it). Cold misses fall through to either
-    // the layer's properties slot or the 0000 file; warm reads are
-    // constant-time. Registered eagerly in side-effects.
-    const indexNurse = (window as any).ioc?.get?.('@diamondcoreprocessor.com/IndexNurse') as
-      | { read: (parentSegments: readonly string[], cellName: string, cellDir?: FileSystemDirectoryHandle, cacheKey?: string, stats?: { cold?: boolean }) => Promise<number | undefined> }
-      | undefined
-
-    // Cache key is the cell's lineage signature, never its bare folder
-    // name. Two cells in different parent folders can share a leaf
-    // name (a "Notes" tile is common at many depths) and a name-keyed
-    // cache returns the first-seen index for every subsequent read of
-    // the same leaf — which on cold-load-at-subfolder + nav-back
-    // resolves to the SUBFOLDER's index, collides with the parent's
-    // real occupant, demotes the loser to unindexed, and persists it
-    // to slot 0. The lineage signature is unique per location and the
-    // same address inflate uses, so the in-memory cache, the on-disk
-    // 0000.index, and the inflate tree all agree on which cell is
-    // which.
-    const lineage = this.resolve<any>('lineage')
-    // THE ADDRESS OF THIS PASS. Must come from the render pass that named
-    // the cells (passSegments), never re-resolved from live lineage: the
-    // index wave below spans many awaits, and a navigation mid-pass used
-    // to re-key every read against the NEW location — all misses — then
-    // fire-and-forget persist the OLD layer's every tile against the NEW
-    // location. Each of those commits cascade-attached the old cell into
-    // the new layer's children: the "whole layer copied into the next
-    // layer" graft. Names and address now bind at the same instant.
-    const parentSegments: readonly string[] = passSegments ?? lineage?.explorerSegments?.() ?? []
-
-    // Pass 1 — place LOCAL indexed cells first so they own their persisted
-    // slots before any peer-published index gets a chance to claim them.
-    // Peer tiles deferred to Pass 2 below.
-    //
-    // The per-cell index reads are independent — resolve them in ONE
-    // PARALLEL WAVE. Each read costs up to three awaited roundtrips (dir
-    // probe, location-sig hash, nurse read); doing them serially made
-    // this loop O(cells) in wall-time — measured ~275ms for a 120-tile
-    // layer, the entire pre-stream stall of a navigation. PLACEMENT
-    // stays strictly sequential in `names` order below, so collision
-    // semantics are identical to the serial version.
-    const peerNames: string[] = []
-    const localNames: string[] = []
-    for (const name of names) {
-      if (!localCellSet.has(name)) peerNames.push(name)
-      else localNames.push(name)
-    }
-    const idxByName = new Map<string, number | undefined>()
-    // Per-name cold flags: a read is COLD when it was transiently
-    // unresolvable (head not warmed, bytes not pooled, services booting) —
-    // as opposed to an authoritative "tile has no index". Cold + undefined
-    // means we do NOT know this tile's slot; the caller's index gate holds
-    // the paint rather than score-filling a tile that owns a real slot.
-    const coldByName = new Set<string>()
-    await Promise.all(localNames.map(async (name) => {
-      // The draft owns the release slot for the lifetime of the References
-      // composition. Do not ask the layer for an index it cannot have yet and
-      // do not score-fill it somewhere else.
-      const draft = this.#referenceDraft
-      const isDraftHere = !!draft
-        && draft.name === name
-        && draft.parentSegments.length === parentSegments.length
-        && draft.parentSegments.every((segment, index) => String(segment) === String(parentSegments[index]))
-      if (draft && isDraftHere && draft.index <= maxSlot) {
-        idxByName.set(name, draft.index)
-        return
-      }
-      try {
-        // Layer-slot read with 0000 fallback. cellDir is opportunistic
-        // — the dir may not exist for layer-only tiles, in which case
-        // getDirectoryHandle throws and we still read from the layer.
-        let cellDir: FileSystemDirectoryHandle | undefined
-        try { cellDir = await dir.getDirectoryHandle(name, { create: false }) } catch { /* layer-only tile */ }
-        const cacheKey = await cellLocationSig(parentSegments, name)
-        const readStats = { cold: false }
-        const idx = indexNurse
-          ? await indexNurse.read(parentSegments, name, cellDir, cacheKey, readStats)
-          : await readTilePropertiesAt(parentSegments, name, readStats).then(p =>
-              typeof p['index'] === 'number' ? (p['index'] as number) : undefined,
-            )
-        idxByName.set(name, typeof idx === 'number' ? idx : undefined)
-        if (readStats.cold && typeof idx !== 'number') coldByName.add(name)
-      } catch {
-        idxByName.set(name, undefined)
-        // A throw is never an authoritative "no index" — treat as cold so
-        // the gate retries instead of mis-placing the tile.
-        coldByName.add(name)
-      }
-    }))
-    if (orderStats) orderStats.coldIndexNames = [...coldByName].sort()
-    for (const name of localNames) {
-      const idx = idxByName.get(name)
-      if (typeof idx === 'number' && idx >= 0 && idx <= maxSlot) {
-        // collision detection: if slot is already occupied, demote to unindexed
-        if (sparse[idx] !== '') {
-          unindexed.push(name)
-        } else {
-          sparse[idx] = name
-        }
-      } else {
-        unindexed.push(name)
-      }
-    }
-
-    // Pass 2 — peer tiles. Honor the publisher's `index` when the
-    // matching slot is free locally; otherwise demote to the unindexed
-    // pile and let the score-based fill below pick a slot.
-    //
-    // Why honor it: when the receiver has no conflicting local tile at
-    // the published index, using it preserves the visual identity the
-    // publisher set (a tile at "their" slot 3 sits at slot 3 on every
-    // receiver who has slot 3 free). On a fresh incognito canvas with
-    // zero local tiles every peer index lands clean — exactly the
-    // scenario the user called out: "there are most certainly no
-    // indexes in the way with zero initial tiles."
-    //
-    // Why the collision check is enough: Pass 1 (above) has already
-    // claimed every slot a local indexed tile owns. If a peer index
-    // collides with one of those, sparse[peerIdx] !== '' and we fall
-    // through to the unindexed queue. So local layout stays sovereign;
-    // peer indices are only respected on otherwise-empty slots.
-    //
-    // Deterministic peer order: sort peer names before placement so
-    // multi-peer rendering is stable across reruns and freshness
-    // rotation. Without this, two peers republishing the same name
-    // with different indices could flip the surviving slot every
-    // render based on Map-iteration order.
-    peerNames.sort((a, b) => a.localeCompare(b))
-    for (const name of peerNames) {
-      const peerIdx = peerIndices?.get(name)
-      if (typeof peerIdx === 'number' && peerIdx >= 0 && peerIdx <= maxSlot && sparse[peerIdx] === '') {
-        sparse[peerIdx] = name
-      } else {
-        unindexed.push(name)
-      }
-    }
-
-    // Sort the unindexed pile alphabetically before the score-based
-    // fill below. Same determinism reason: scoreMap is deterministic
-    // (slots evaluate identically given the same viewport), so the
-    // ONLY non-deterministic input is the iteration order of unindexed
-    // — sort it and the whole layout becomes reproducible across
-    // renders. Local-without-index and peers share the queue at this
-    // point; both classes are stable name-keyed, which is what the
-    // user-spec wants.
-    unindexed.sort((a, b) => a.localeCompare(b))
-
-    // Place each unindexed cell at the best free slot. #bestFreeSlotByScore
-    // scores empty slots by off-screen distance, then whitespace, then
-    // center proximity (lowest-free fallback when the viewport tracker isn't
-    // ready) — the SAME helper the pinned incremental-add path uses, so a
-    // cell created via the fast path and one placed in a full render land on
-    // identical slots.
-    const placedUnindexed: string[] = []
-    for (const name of unindexed) {
-      // Session-cache short-circuit. If this tile was already placed in a
-      // prior render (local-no-index path during a persistence race, or any
-      // peer tile) and the slot is still free, drop it back into the same
-      // slot. Pans don't change cached assignments; only manual reorganize
-      // clears this map.
-      const cachedSlot = this.#sessionSlotByLabel.get(name)
-      let placed: number
-      if (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && sparse[cachedSlot] === '') {
-        placed = cachedSlot
-      } else if (navPass) {
-        // Navigation pass: the camera on screen (and the persisted
-        // lastZoom/lastPan the CenterSlotTracker scores derive from) still
-        // belongs to the OUTGOING page — the destination viewport is applied
-        // AFTER ordering. Scoring against it places tiles relative to the
-        // page the user just left. Take the lowest free slot instead:
-        // deterministic, camera-independent, stable across re-renders (the
-        // session cache above pins it for the rest of the tab session).
-        placed = -1
-        for (let i = 0; i <= maxSlot; i++) {
-          const v = sparse[i]
-          if (v === '' || v == null) { placed = i; break }
-        }
-        if (placed < 0) continue  // grid genuinely full
-      } else {
-        placed = this.#bestFreeSlotByScore(sparse, maxSlot)
-        if (placed < 0) continue  // grid genuinely full
-      }
-
-      sparse[placed] = name
-      placedUnindexed.push(`${name}→${placed}`)
-      // TRANSIENT reindex only. The session cache keeps the placement
-      // stable across re-renders (pan, peer churn, synchronize passes)
-      // for the lifetime of the tab — but a render pass must NEVER
-      // persist an index. Score-picked slots are a display decision,
-      // not content: stamping them into the layer made accidental
-      // placements permanent, generated a commit cascade per tile on
-      // every cold render, and was the write vector behind the
-      // cross-layer graft. Durable indexes come only from deliberate
-      // actions — cell creation (#placePinnedCell), explicit
-      // place-at (#handlePlaceAt), and the move drone.
-      this.#sessionSlotByLabel.set(name, placed)
-    }
-
-    // Stage diagnosis: which cells came in with a persisted index vs which
-    // had to be score-filled this pass (lost/never-had index, or slot
-    // collision). A tile in the score-fill list whose slot lands past the
-    // axial map's size is the one that misses the first paint.
-    const indexedPlaced = localNames.filter(n => !unindexed.includes(n)).map(n => `${n}@${idxByName.get(n)}`)
-    console.info('[layout] indexed:', indexedPlaced.join(', ') || '(none)', '| score-filled:', placedUnindexed.join(', ') || '(none)')
-
-    // A FRAME re-reads the whole placement through a pattern. Everything above
-    // still runs, and is still what decides the tiles' RELATIVE ORDER — the
-    // frame only decides where that order lands on screen. Nothing is
-    // persisted here: a frame is a way of reading the layer, and the tiles'
-    // own indexes survive underneath it untouched, so releasing the frame
-    // returns the page exactly as it was arranged.
-    const framed = this.#applyFrame(sparse, parentSegments, maxSlot)
-    return framed ?? sparse
-  }
-
-  /**
-   * Re-pack `sparse` onto the slots of the pattern framing this location, or
-   * null when the location is not framed.
-   *
-   * The frame's slots never move and never resize — that is the whole promise
-   * of it. What moves is the TILES: the ordered list slides through the slots
-   * by the location's scroll offset, so tiles arrive at the leading edge and
-   * leave at the trailing one, and a tile past the frame is simply not
-   * painted this pass. There is no cap on how many tiles a framed layer may
-   * hold; the ones off-frame are waiting, not refused.
-   *
-   * Synchronous by construction: FrameService keeps its resolver hot exactly
-   * so a geometry build can ask it without awaiting, the same discipline the
-   * sequence resolver follows.
-   */
-  /** Is the page being rendered read through a frame? Cheap synchronous
-   *  lookup — the incremental paths ask it before assuming a new tile can be
-   *  slotted without disturbing the others. */
-  #locationIsFramed(): boolean {
-    const frames = (window as any).ioc?.get?.('@FrameService') as
-      | { isFramed?: (segs: readonly string[]) => boolean }
-      | undefined
-    if (!frames?.isFramed) return false
-    const segments = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
-    return frames.isFramed(segments)
-  }
-
-  #applyFrame(sparse: readonly string[], parentSegments: readonly string[], maxSlot: number): string[] | null {
-    const frames = (window as any).ioc?.get?.('@FrameService') as
-      | {
-          activeFrameFor: (segs: readonly string[]) => { order: readonly AxialLike[]; stride: number } | null
-          clampedOffsetFor: (segs: readonly string[], count?: number) => number
-          noteTileCount: (segs: readonly string[], count: number) => void
-        }
-      | undefined
-    const frame = frames?.activeFrameFor?.(parentSegments)
-    if (!frame || frame.order.length === 0) return null
-
-    // Slot order IS the tiles' relative order — the pass above already
-    // resolved persisted indexes, peer indexes and score-fills into it.
-    const ordered: string[] = []
-    for (const name of sparse) if (name) ordered.push(name)
-    if (ordered.length === 0) return null
-
-    // The render is the only thing that knows the TOTAL, and the scroll
-    // ceiling is computed from it. Note it before reading the offset back so
-    // a page that lost tiles is not left scrolled past its last one.
-    frames?.noteTileCount?.(parentSegments, ordered.length)
-    const offset = frames?.clampedOffsetFor?.(parentSegments, ordered.length) ?? 0
-
-    const axial = this.resolve<any>('axial')
-    const items = axial?.items as Map<number, { q: number; r: number }> | undefined
-    if (!items || items.size === 0) return null
-    const indexByCoord = new Map<string, number>()
-    for (const [index, coord] of items) indexByCoord.set(`${coord.q},${coord.r}`, index)
-
-    const out: string[] = new Array(maxSlot + 1).fill('')
-    let placed = 0
-    for (let position = 0; position < ordered.length; position++) {
-      const coord = slotAt(frame.order, frame.stride, position, offset)
-      if (!coord) continue                                   // off-frame — waiting
-      const index = indexByCoord.get(`${coord.q},${coord.r}`)
-      if (index === undefined || index > maxSlot) continue    // slot off the grid
-      out[index] = ordered[position]
-      placed++
-    }
-    // A frame that placed nothing is a broken frame, not an empty page — hand
-    // back the unframed placement rather than blanking the layer.
-    if (placed === 0) return null
-
-    console.info('[layout] framed:', placed, 'of', ordered.length, 'tiles | offset', offset)
-    return out
-  }
-
-  // #segmentsStillCurrent removed — render passes no longer persist ANY
-  // per-tile writes (score-fill reindexing is transient, session-cache
-  // only), so the stale-pass write guard has nothing left to guard.
-
-  /**
-   * Score every free slot in `sparse` and return the best one for a new
-   * cell: minimal off-screen distance, then maximal whitespace, then closest
-   * to center — the placement rule pinned layout uses for any cell without a
-   * persisted index. Falls back to the lowest free slot when the viewport
-   * tracker / axial adjacency isn't ready yet (early boot). Returns -1 when
-   * the grid is full. Pure: no side effects, no persistence.
-   *
-   * Shared by #orderByIndexPinned (batch full-render) and #placePinnedCell
-   * (pinned incremental add) so both place new cells identically. A slot is
-   * free when sparse[i] is '' or absent — the incremental caller passes the
-   * slot machine's sparse array, which may be shorter than maxSlot+1, so
-   * trailing indices are unoccupied.
-   */
-  #bestFreeSlotByScore(sparse: readonly string[], maxSlot: number): number {
-    const free = (i: number): boolean => { const v = sparse[i]; return v === '' || v == null }
-
-    const slotTracker = (window as any).ioc?.get?.('@diamondcoreprocessor.com/CenterSlotTracker') as
-      | { scores: ReadonlyMap<number, { off: number; center: number }> }
-      | undefined
-    const axialAny = (window as any).ioc?.get?.('@diamondcoreprocessor.com/AxialService') as
-      | { Adjacents: Map<number, { index: number }[]> }
-      | undefined
-    const scoreMap = slotTracker?.scores
-    const adjacents = axialAny?.Adjacents
-
-    let placed = -1
-    if (scoreMap && adjacents) {
-      let bestOff = Infinity
-      let bestWhitespace = -1
-      let bestCenter = Infinity
-      for (let i = 0; i <= maxSlot; i++) {
-        if (!free(i)) continue
-        const s = scoreMap.get(i)
-        if (!s) continue
-        // Count neighbours that aren't occupied tiles — off-grid neighbours
-        // at the rim of the grid count as whitespace because the visual area
-        // beyond the grid edge is empty.
-        let whitespace = 0
-        const neighbours = adjacents.get(i) ?? []
-        for (const adj of neighbours) {
-          const ai = adj.index
-          if (!Number.isFinite(ai) || ai < 0 || ai > maxSlot || free(ai)) whitespace++
-        }
-        if (
-          s.off < bestOff ||
-          (s.off === bestOff && whitespace > bestWhitespace) ||
-          (s.off === bestOff && whitespace === bestWhitespace && s.center < bestCenter)
-        ) {
-          bestOff = s.off
-          bestWhitespace = whitespace
-          bestCenter = s.center
-          placed = i
-        }
-      }
-    }
-
-    // Lowest-free fallback — tracker/adjacency missing (very early boot).
-    if (placed < 0) {
-      for (let i = 0; i <= maxSlot; i++) {
-        if (free(i)) { placed = i; break }
-      }
-    }
-    return placed
-  }
-
-  /**
-   * Next free slot dictated by a bound `sequence:target` decoration (self or
-   * an ancestor — cascading, position→leaf), or -1 when none is bound / the
-   * sequence is exhausted. Synchronous: reads SequenceService's in-memory
-   * resolver, which is kept hot off `decorations:changed` + cell-count
-   * hydration. The free-slot guard keeps a stale index from colliding.
-   */
-  #sequenceSlot(
-    eventSegments: readonly string[] | undefined,
-    maxSlot: number,
-    free: (i: number) => boolean,
-  ): number {
-    const seq = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SequenceService') as
-      | { nextFreeIndex?: (segs: readonly string[], isFree: (i: number) => boolean) => number | undefined }
-      | undefined
-    if (!seq?.nextFreeIndex) return -1
-    const lineage = this.resolve<any>('lineage')
-    const parentSegments: readonly string[] = eventSegments ?? lineage?.explorerSegments?.() ?? []
-    const next = seq.nextFreeIndex(parentSegments, (i) => i >= 0 && i <= maxSlot && free(i))
-    return (typeof next === 'number' && next >= 0 && next <= maxSlot && free(next)) ? next : -1
-  }
-
-  /**
-   * Pinned-mode incremental placement for a brand-new cell. Picks a slot the
-   * same way #orderByIndexPinned would for an unindexed cell — reuse the
-   * session-cached slot if still free, else the best free slot by viewport
-   * score — injects it into the slot machine at that index, and persists the
-   * index fire-and-forget so the next full render reads it back from Pass 1
-   * (the tile never jumps). Returns the slot, or -1 when the grid is full /
-   * axial isn't ready, signalling the caller to fall back to a full render.
-   */
-  #placePinnedCell(name: string, eventSegments?: readonly string[]): number {
-    const axial = this.resolve<any>('axial')
-    if (!axial?.items) return -1
-    const maxSlot = axial?.count ?? 60
-    const sparse = this.#slots.snapshot().names
-
-    // Already placed — a re-emitted cell:added for a tile that's already on
-    // screen (e.g. a tag/marker refresh re-fires the event to repaint). Keep
-    // its slot; never relocate or re-persist, or the tile would jump on the
-    // next full render.
-    const existing = sparse.indexOf(name)
-    if (existing >= 0) return existing
-
-    const cachedSlot = this.#sessionSlotByLabel.get(name)
-    const free = (i: number): boolean => { const v = sparse[i]; return v === '' || v == null }
-    // Drop-target sequence (cascading, position→leaf): when this location or
-    // an ancestor is bound to a sequence, a new tile fills the next free
-    // sequence slot before any score-based placement. No-op when nothing is
-    // bound or the sequence is exhausted.
-    const seqSlot = this.#sequenceSlot(eventSegments, maxSlot, free)
-    const slot = seqSlot >= 0
-      ? seqSlot
-      : (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && free(cachedSlot))
-        ? cachedSlot
-        : this.#bestFreeSlotByScore(sparse, maxSlot)
-    if (slot < 0) return -1
-
-    if (!this.#slots.addAt(name, slot, false)) return -1
-    this.#sessionSlotByLabel.set(name, slot)
-
-    // Persist against the EVENT's address (captured synchronously with
-    // the cell:added that triggered this placement), never a live lineage
-    // re-read — the microtask defer between event and here is a real
-    // navigation window, and a wrong-location index write cascades the
-    // cell into the wrong layer's children.
-    const lineage = this.resolve<any>('lineage')
-    const parentSegments: readonly string[] = eventSegments ?? lineage?.explorerSegments?.() ?? []
-    void writeTilePropertiesAt(parentSegments, name, { index: slot }).catch(err =>
-      console.warn('[show-cell] failed to persist index for new cell', name, err),
-    )
-    return slot
   }
 
   /**
@@ -8506,110 +6838,6 @@ export class ShowCellDrone extends Drone {
       if (String(segments[i]) !== String(current[i])) return false
     }
     return true
-  }
-
-  /**
-   * Central ordering strategy — all render paths route through here.
-   * Pinned is the only mode: each cell sits at its persisted `index`
-   * slot, gaps are preserved, and collision is resolved by moving the
-   * loser to the next free slot (persisted on write). Returns a sparse
-   * array where cellNames[i] → axial position i, with empty-string
-   * entries marking unoccupied slots.
-   */
-  async #resolveCellOrder(
-    _mode: string,
-    dir: FileSystemDirectoryHandle,
-    union: Set<string>,
-    localCellSet: Set<string>,
-    _lineage: any,
-    peerIndices?: Map<string, number>,
-    passSegments?: readonly string[],
-    navPass = false,
-    orderStats?: { coldIndexNames: string[] },
-  ): Promise<string[]> {
-    // When cursor is rewound, use cursor-aware ordering so deletions
-    // that happened later don't leave stale slot indices in OPFS
-    // overlapping the rewound cell set.
-    const cursor = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
-      HistoryCursorService | undefined
-    const isRewound = cursor?.state?.rewound ?? false
-
-    let cellNames: string[]
-    if (isRewound && cursor) {
-      const content = await cursor.layerContentAtCursor()
-      // Resolve child sigs → names by enumerating parent dir +
-      // matching against each child's bag markers. Falls back to
-      // live disk ordering when the past layer can't be resolved.
-      const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
-      const parentSegments = passSegments ?? (_lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
-      const orderedNames = (content && historyService)
-        ? [...await resolveChildNames(historyService, parentSegments, dir, content)]
-        : []
-      if (orderedNames.length > 0) {
-        const unionSet = new Set(union)
-        const filtered = orderedNames.filter(s => unionSet.has(s))
-        for (const s of union) {
-          if (!filtered.includes(s)) filtered.push(s)
-        }
-        // Slot index is the cell's stable visual position. Even when
-        // rewound, place each cell at its persisted `index` so x/y/scale
-        // don't shift across undo — only membership (which slots are
-        // occupied) changes between history points. readOnly: rewound
-        // viewing must not mutate disk indices.
-        cellNames = await this.#orderByIndexPinned(dir, filtered, localCellSet, true, peerIndices, passSegments, navPass, orderStats)
-      } else {
-        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices, passSegments, navPass, orderStats)
-      }
-    } else {
-      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices, passSegments, navPass, orderStats)
-    }
-
-    if (this.filterKeyword) {
-      const kw = this.filterKeyword
-      // Name OR mark: a pheromone is as good a handle on a tile as its
-      // name, so `>?` narrows on either. Marks come from the decoration
-      // index (already built, location-independent), so this holds on the
-      // very first pass — before any per-cell property read has run.
-      const matches = (s: string): boolean =>
-        s.toLowerCase().includes(kw)
-        || this.#tagsFor(s).some(t => t.toLowerCase().includes(kw))
-      cellNames = cellNames.map(s => s && matches(s) ? s : '')
-    }
-    return cellNames
-  }
-
-  // #orderByIndex (dense-packed) removed — pinned is the only layout
-  // mode. #orderByIndexPinned handles index assignment, collision
-  // detection, and next-available-slot fallback in one pass.
-
-  async #handlePlaceAt(cell: string, targetIndex: number): Promise<void> {
-    // Index is the source of truth. Place this one cell at the target
-    // index — do not renumber anyone else. Render-time collision heal
-    // (in #orderByIndexPinned) demotes any prior occupant to the next
-    // free slot.
-    const lineage = this.resolve<any>('lineage')
-    if (!lineage) return
-
-    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
-    try {
-      await writeTilePropertiesAt(parentSegments, cell, { index: targetIndex })
-    } catch (err) {
-      console.warn('[show-cell] place-at failed for', cell, err)
-    }
-
-    this.renderedCellsKey = ''
-    this.#layerCellsCache.clear()
-    this.requestRender()
-  }
-
-  async #handleReorder(_labels: string[]): Promise<void> {
-    // Cell index is the source of truth — written per-cell by the move
-    // drone (and similar). This handler only invalidates the renderer's
-    // caches so the next pass re-reads the persisted indices. It MUST
-    // NOT renumber indices densely — that was the snap-back bug.
-    this.renderedCellsKey = ''
-    this.#layerCellsCache.clear()
-    this.requestRender()
   }
 
   private checkCellHasBranch = async (parentDir: FileSystemDirectoryHandle, cellName: string): Promise<boolean> => {
@@ -9026,14 +7254,9 @@ export class ShowCellDrone extends Drone {
     // its OWN absolute path, not on the page the view was raised from.
     // Signing the render location for it mints a key no writer ever wrote,
     // so the props lookup missed and every gathered tile painted imageless.
-    // #flatPathByLabel carries the absolute path (ending in the label) for
-    // exactly those tiles; empty for ordinary renders.
-    const segmentsForLabel = (label: string): readonly string[] => {
-      const flat = this.#flatPathByLabel.get(label)
-      return flat && flat.length > 0 && flat[flat.length - 1] === label
-        ? flat.slice(0, -1)
-        : renderSegments
-    }
+    // The narrowing carries the absolute path (ending in the label) for
+    // exactly those tiles; none for ordinary renders.
+    const segmentsForLabel = (label: string): readonly string[] => this.#narrow.parentOf(label) ?? renderSegments
     const indexKeyByLabel = new Map<string, string>()
     for (const c of cells) {
       if (!indexKeyByLabel.has(c.label)) {
@@ -10055,7 +8278,7 @@ export class ShowCellDrone extends Drone {
     // location that has a pack decodes every image WITHOUT a per-image read.
     // That is the whole point of a per-LAYER optimization: two reads to paint
     // a page, not two plus one per tile.
-    const packed = ShowCellDrone.#packVisuals.get(sig)
+    const packed = packedVisual(sig)
     if (packed) return packed
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
       getResourceLocal: (s: string) => Promise<Blob | null>
@@ -10071,31 +8294,10 @@ export class ShowCellDrone extends Drone {
     return raw
   }
 
-  /** Visuals carried INSIDE a layer's manifest, by source image sig. Filled
-   *  whenever a manifest is read (render path or preloader) and consulted by
-   *  every decode. Static because the pack for one layer serves any pass that
-   *  paints those tiles, and content-addressed keys make that safe forever —
-   *  a sig is its bytes. Bounded: the entries are ~6KB renditions and the map
-   *  is trimmed oldest-first past the cap. */
-  static readonly #packVisuals = new Map<string, Blob>()
-  static readonly #PACK_VISUAL_CAP = 2048
-
-  /** Take a manifest entry's inlined visual into the pack. No-op for entries
-   *  that carry only a sig (source too big to inline, or not local when the
-   *  pack was minted) — those decode from the file as they always did. */
-  public static adoptPackedVisual(entry: { visual?: { sig?: string; webp?: string; type?: string } } | null): void {
-    const v = entry?.visual
-    if (!v?.sig || !v.webp || ShowCellDrone.#packVisuals.has(v.sig)) return
-    try {
-      const binary = atob(v.webp)
-      const bytes = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-      if (ShowCellDrone.#packVisuals.size >= ShowCellDrone.#PACK_VISUAL_CAP) {
-        const oldest = ShowCellDrone.#packVisuals.keys().next().value
-        if (oldest !== undefined) ShowCellDrone.#packVisuals.delete(oldest)
-      }
-      ShowCellDrone.#packVisuals.set(v.sig, new Blob([bytes], { type: v.type || 'image/webp' }))
-    } catch { /* malformed inline — the file path still works */ }
+  /** Take a manifest entry's inlined visual into the pack (packed-visuals.ts).
+   *  Kept on the drone because the history service reaches it here. */
+  public static adoptPackedVisual(entry: PackedVisualEntry): void {
+    adoptPackedVisual(entry)
   }
 
   /** Stamp the address of the location just navigated to and seed its
@@ -10490,7 +8692,7 @@ export class ShowCellDrone extends Drone {
       // build the same cache object the revisit fast path consumes.
       const localCellSet = new Set(memo.names)
       const branchSet = new Set(memo.branches)
-      const ordered = await this.#orderByIndexPinned(
+      const ordered = await this.#order.pinned(
         null as unknown as FileSystemDirectoryHandle,
         [...memo.names],
         localCellSet,
@@ -11344,7 +9546,7 @@ export class ShowCellDrone extends Drone {
       this.emitEffect('render:cell-count', this.#buildCellCountPayload(cellsSnapshot))
     }
 
-    this.#emitRenderTags([...this.renderedCells.values()])
+    this.#narrow.emitRenderTags([...this.renderedCells.values()])
     return true
   }
 
