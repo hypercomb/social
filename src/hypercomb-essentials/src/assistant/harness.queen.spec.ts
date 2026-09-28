@@ -58,6 +58,19 @@ describe('the harness word', () => {
     expect(String((toasts.at(-1) as { message: string }).message)).toContain('No harness called "nobody"')
   })
 
+  it('try runs one turn under a named harness by effect; compare with no receipts says so', async () => {
+    await harness.import({ kind: 'harness@1', name: 'quiet-reader' })
+    const queen = new HarnessQueenBee() as unknown as Runnable
+    const trials = heard('chat:harness-try')
+    const toasts = heard('toast:show')
+    await queen.execute('try quiet-reader why do the levels not open')
+    expect(trials.at(-1)).toEqual({ sig: harness.find('quiet-reader')?.sig, request: 'why do the levels not open' })
+    await queen.execute('try nobody anything')
+    expect(String((toasts.at(-1) as { message: string }).message)).toContain('No harness called "nobody"')
+    await queen.execute('compare')
+    expect(String((toasts.at(-1) as { message: string }).message)).toContain('No receipts yet')
+  })
+
   it('brings a record in by its bytes and refuses one that widens', async () => {
     const queen = new HarnessQueenBee() as unknown as Runnable
     const toasts = heard('toast:show')
@@ -71,7 +84,7 @@ describe('the harness word', () => {
   it('completes the sub-words and the names in the pool', async () => {
     await harness.import({ kind: 'harness@1', name: 'quiet-reader' })
     const queen = new HarnessQueenBee()
-    expect(queen.slashComplete('')).toEqual(['use ', 'here ', 'show ', 'import ', 'offer ', 'sync '])
+    expect(queen.slashComplete('')).toEqual(['use ', 'here ', 'show ', 'import ', 'offer ', 'sync ', 'try ', 'compare '])
     expect(queen.slashComplete('offer q')).toEqual(['offer quiet-reader'])
     expect(queen.slashComplete('use q')).toEqual(['use quiet-reader'])
     expect(queen.slashComplete('here d')).toEqual(['here default'])

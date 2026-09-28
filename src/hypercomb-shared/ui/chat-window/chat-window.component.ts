@@ -1280,6 +1280,8 @@ type HarnessLike = {
   readonly active?: HarnessRecordLike
   /** The record a conversation runs under: its own mark, else the device's. */
   activeFor?(mark: string): HarnessRecordLike
+  /** The signature of that record — what a receipt is keyed by. */
+  activeSigFor?(mark: string): string
 }
 const SHIPPED_HARNESS: HarnessRecordLike = {
   name: 'default',
@@ -4605,6 +4607,16 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() }))
     // `harness here <name>` (the harness word): the open conversation wears
     // the mark; the list re-reads it and the next send runs under it.
+    // `harness try <name> <request>`: one turn under another harness, on the
+    // open conversation, filed under that harness's signature.
+    this.#cleanups.push(EffectBus.on<{ sig?: string; request?: string }>('chat:harness-try', payload => {
+      const convoId = this.activeId()
+      const sig = String(payload?.sig ?? '').trim()
+      const request = String(payload?.request ?? '').trim()
+      if (!convoId || !sig || !request) return
+      this.#trial.set(convoId, sig)
+      void this.send(request)
+    }))
     this.#cleanups.push(EffectBus.on<{ sig?: string; scope?: string }>('chat:harness', payload => {
       if (payload?.scope !== 'conversation') return
       const convoId = this.activeId()
@@ -6142,12 +6154,27 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** The harness mark a conversation wears, as the list last read it. */
   #harnessMark(convoId: string): string | undefined {
-    return this.conversations().find(convo => convo.convoId === convoId)?.harness
+    return this.#trial.get(convoId) ?? this.conversations().find(convo => convo.convoId === convoId)?.harness
+  }
+
+  /** `harness try <name> <request>`: the NEXT turn of a conversation runs
+   *  under another harness, once; the receipt is keyed by it, the mark is
+   *  untouched. Taken when the turn starts, so a second send is back to
+   *  the conversation's own. */
+  readonly #trial = new Map<string, string>()
+
+  /** The signature a receipt is keyed by: the trial's, else the mark's,
+   *  else the device's — '' for an older essentials that keeps none. */
+  #harnessSig(convoId: string, mark: string | undefined): string {
+    const store = ioc()?.get(HARNESS_IOC_KEY) as HarnessLike | undefined
+    return store?.activeSigFor?.(mark ?? '') ?? ''
   }
 
   async #askProvider(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
     const router = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
     const harnessMark = this.#harnessMark(convoId)
+    this.#trial.delete(convoId)
+    const harnessSig = this.#harnessSig(convoId, harnessMark)
     // HOW MUCH WORK THIS MESSAGE IS (message-effort.ts), and how much the
     // request must hold — so deep work reaches the most capable model added,
     // and a long conversation never lands on a model too small for it.
@@ -6416,7 +6443,7 @@ export class ChatWindowComponent implements OnDestroy {
         return { rounds: task?.rounds ?? 0, tokens: task?.tokens ?? 0 }
       }
       const stage = (name: AgentStageEffect, facts: Record<string, unknown>): void => {
-        EffectBus.emit(name, { id: component.#beeId(convoId), convoId, leg: legOf(), at: Date.now(), ...facts })
+        EffectBus.emit(name, { id: component.#beeId(convoId), convoId, leg: legOf(), at: Date.now(), ...(harnessSig ? { harness: harnessSig } : {}), ...facts })
       }
       const tokensOf = (list: readonly { readonly content: string }[]): number =>
         list.reduce((sum, entry) => sum + estimateTokens(entry.content), 0)
@@ -7287,6 +7314,7 @@ export class ChatWindowComponent implements OnDestroy {
           ?? shippedReceiptStep((name, payload) => { EffectBus.emit(name, payload) })
         receiptStep.run({
           id: component.#beeId(convoId), convoId, leg: (task?.legs ?? 0) + 1, at,
+          ...(harnessSig ? { harness: harnessSig } : {}),
           path: turnPath, rounds: turnRounds, weight: turnWeight, ms: at - startedAt,
           ...(firstAt ? { firstMs: firstAt - startedAt } : {}),
           outcome: opts?.signal?.aborted ? 'stopped' : answered ? 'answered' : 'failed',

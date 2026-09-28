@@ -189,6 +189,12 @@ export class HarnessStore extends EventTarget {
     return (wanted ? this.#records.get(wanted) : undefined) ?? this.active
   }
 
+  /** Its signature, by the same rule — what a receipt is keyed by. */
+  activeSigFor(mark?: string): string {
+    const wanted = String(mark ?? '').trim()
+    return wanted && this.#records.has(wanted) ? wanted : this.activeSig
+  }
+
   /** A record by name or by signature; a name answers the newest member
    *  wearing it. 'default' answers the shipped record. */
   find(nameOrSig: string): { readonly sig: string; readonly record: HarnessRecord } | undefined {

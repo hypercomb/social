@@ -14,6 +14,7 @@ import { COMPACTION_IOC_KEY, compaction } from './compaction.js'
 import { EXECUTION_QUEUE_IOC_KEY, executionQueue } from './execution-queue.js'
 import { HARNESS_IOC_KEY, bootHarness, harness } from './harness.js'
 import { claimHarnessPool } from './harness-network.js'
+import { startReceiptLedger } from './agent-receipts.js'
 import { AGENT_STEPS_IOC_KEY, agentSteps, shippedAgentSteps } from './agent-steps.js'
 import { publishService } from './llm-provider-registry.js'
 
@@ -41,5 +42,7 @@ bootHarness()
 // A domain the participant learns may offer harnesses beside its providers;
 // they arrive as offers and are placed by the participant's word.
 claimHarnessPool()
+// Every turn's receipt is filed under the harness it ran under — the eval.
+startReceiptLedger()
 
 window.ioc.register('@diamondcoreprocessor.com/ChatDrone', new ChatDrone())
