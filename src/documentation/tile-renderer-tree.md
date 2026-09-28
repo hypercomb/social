@@ -40,17 +40,18 @@ show-cell                          the render pass: synchronize → member names
 │                                           own shader and packer; the page hidden, never torn down, given back
 ├── previews        ✓ tile-previews.ts      looks not yet true: the marks' carriers (hover ANY, in hand or dragged
 │                                           ALL) and the tile editor's edit, painted in place, never persisted
-├── hover           ○ inside                the hovered tile's reveal and opacity (single-cell writes)
+├── hover           ✓ tile-hover.ts         the tile under the pointer, as one: its hidden name revealed, its band
+│                                           as tall as its menu, its cell lit, its shade lifted (single-cell writes)
 └── landing         ✓ tile-landing.ts       quiet landing: a background write lands as truth, the paint waits —
                                             held and counted (writes, not paints) until the tap or the next
                                             thing the participant does; the write's aftershocks measured, not guessed
 ```
 
-✓ is a module beside the drone, with its own spec; ○ is still inside
-show-cell. `doctrine.spec.ts` holds show-cell to a line ceiling that may only
+✓ is a module beside the drone, with its own spec; every branch named here
+is one now. `doctrine.spec.ts` holds show-cell to a line ceiling that may only
 fall, so a new tile behaviour is a branch of its own from the start.
 
-**Adding to it.** Find the branch the behaviour belongs to. If it has a module,
-the change goes there; if the branch is still inside, draw it out first. A
+**Adding to it.** Find the branch the behaviour belongs to. It has a module; the
+change goes there. A
 behaviour that belongs to no branch is a new one: a module beside the drone
 with its host interface, composed in the drone, and a line here.

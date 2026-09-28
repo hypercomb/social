@@ -1,7 +1,7 @@
 // pixi/show-cell.drone.ts — the tile renderer's root. It runs the render
 // pass and composes the branches drawn out beside it (membership, narrowing,
-// order, mesh, readiness, faces, fill geometry, dive, previews, landing —
-// documentation/tile-renderer-tree.md). A new tile behaviour
+// order, mesh, readiness, faces, fill geometry, dive, previews, landing,
+// hover — documentation/tile-renderer-tree.md). A new tile behaviour
 // is a branch of its own, never more lines here.
 import { Drone, EffectBus, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
 import type { I18nProvider, UsageRanker } from '@hypercomb/core'
@@ -47,6 +47,7 @@ import { buildFillQuad, fillKey, type TileLook } from './tile-fill-geometry.js'
 import { TileDive, type DiveCell } from './tile-dive.js'
 import { MarkPreview, TilePreview, type TilePreviewPayload } from './tile-previews.js'
 import { QuietLanding } from './tile-landing.js'
+import { TileHover } from './tile-hover.js'
 import { TileOrder, type ReferenceDraftPreview } from './tile-order.js'
 import { adoptPackedVisual, packedVisual, type PackedVisualEntry } from './packed-visuals.js'
 
@@ -354,12 +355,34 @@ export class ShowCellDrone extends Drone {
    *  the geometry is rebuilt; by then the landed fold paints them native. */
   readonly #wandTakingLabels = new Set<string>()
 
-  /** The hideText tile currently under the pointer, if any. A tile that
-   *  hides its name gets it back for as long as it is hovered — nothing
-   *  else about the tile changes, and no other tile is touched. The reveal
-   *  is purely a label-UV flip (see #setHoverReveal), so the text returns
-   *  in its normal place with its normal backing band. */
-  #hoverRevealLabel: string | null = null
+  /** The tile under the pointer — reveal, band, lit cell, shade lift as one
+   *  (tile-hover.ts). */
+  readonly #hover: TileHover = new TileHover({
+    shader: () => this.shader,
+    indexOf: label => this.#labelToIndex.get(label),
+    hasTile: label => this.renderedCells.has(label),
+    hidesBehindPicture: label => {
+      const cell = this.renderedCells.get(label)
+      if (!cell?.hideText || cell.plain || !cell.imageSig) return false
+      return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
+    },
+    repaintNames: labels => {
+      const labelUV = this.#buf.labelUV
+      if (!labelUV || !this.atlas || !this.geom) return
+      for (const l of labels) {
+        const i = this.#labelToIndex.get(l)
+        if (i === undefined) continue
+        if (this.#labelIsHidden(l)) {
+          this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
+        } else {
+          const r = this.atlas.getLabelUV(l)
+          this.#writeCellVec4(labelUV, i, r.u0, r.v0, r.u1, r.v1)
+        }
+      }
+      this.#pushBuffer('aLabelUV')
+    },
+    paintShade: label => { this.#writeShadeFor(label) },
+  })
 
   /** Last resolved TileSourceRegistry entries per location key — the
    *  fallback a render pass uses when source resolution exceeds its
@@ -501,8 +524,6 @@ export class ShowCellDrone extends Drone {
   // readiness pass often reach the same target together. Joining that work
   // lets both callers observe the completed first-paint snapshot.
   readonly #viewPrepInFlight = new Map<string, Promise<boolean>>()
-  // The tile under the pointer, shown opaque while hovered (never proof).
-  #hoverOpaqueLabel: string | null = null
   /** Is the inside of each branch tile ready — the verdict, its memo, and the
    *  warm and bake work that earns it (tile-readiness.ts). */
   readonly #readiness: TileReadiness = new TileReadiness({
@@ -604,7 +625,7 @@ export class ShowCellDrone extends Drone {
     pageLabels: () => [...this.renderedCells.keys()],
     pageImageSigs: () => [...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])),
     pageCount: () => this.renderedCount,
-    pageHoverIndex: () => (this.#hoverRevealLabel ? this.#labelToIndex.get(this.#hoverRevealLabel) : undefined) ?? -1,
+    pageHoverIndex: () => (this.#hover.reveal ? this.#labelToIndex.get(this.#hover.reveal) : undefined) ?? -1,
     pendingLabel: PENDING_CELL_LABEL,
     build: (cells, foreign) => {
       const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
@@ -735,43 +756,6 @@ export class ShowCellDrone extends Drone {
    *  labelUV write site (bake, in-place update, hover reveal). */
   #hidesName(hideText: boolean | undefined, imagePresent: boolean): boolean {
     return !!hideText && imagePresent && !this.#textOnly
-  }
-  /** Rows the hovered tile's label band must hold (overlay:band-rows). Held as
-   *  drone state, not just pushed at the shader, because a render pass can
-   *  REBUILD the shader — and the overlay only re-lays-out when the hovered hex
-   *  changes, so it would not re-send. Without this the band silently reverted
-   *  to one row under two rows of icons, which read as icons floating outside
-   *  their background above and below. Restored with the other uniforms on
-   *  every pass; see the setFlat/setPivot block in applyGeometry. */
-  #bandRows = 1
-  /** The tile #bandRows was computed FOR. A row count is only ever true of one
-   *  tile, so it is stored with its owner and pushed at the shader only while
-   *  that tile is the hover (#applyBandRows). Navigating in used to carry the
-   *  LEAVING tile's count into the arriving level — a band drawn for one icon
-   *  row under a tile whose icons wrapped to two, which reads as the rows
-   *  collapsing the moment you go inside. */
-  #bandRowsLabel: string | null = null
-  /** Push the band height at the shader. The ONE place that decides it: the
-   *  stored count applies only to the tile it was computed for, and any other
-   *  tile — including one that merely shares a name with a tile on the level we
-   *  just left — gets the resting single row. Called from every path that can
-   *  change either half of that pair (row count, hover, geometry rebuild). */
-  #applyBandRows(): void {
-    const owned = this.#hoverRevealLabel !== null && this.#bandRowsLabel === this.#hoverRevealLabel
-    this.shader?.setBandRows(owned ? this.#bandRows : 1)
-  }
-  /** Put the hover on `label` (null = nothing hovered): the name reveal, the
-   *  band height, the lit cell and its shade lift. ONE path, so the band and
-   *  the icons can never end up describing different tiles — whichever message
-   *  carried the news. A shaded tile is NOT out of reach: hovering it lifts the
-   *  shade and lights its ring like any other, because "this isn't loaded yet"
-   *  must never become "you may not go here". */
-  #applyHover(label: string | null): void {
-    this.#setHoverReveal(label)
-    this.#applyBandRows()
-    if (!this.shader) return
-    this.shader.setHoveredIndex(label !== null ? this.#labelToIndex.get(label) ?? -1 : -1)
-    this.#setHoverOpaque(label)
   }
   #substrateFadeStart: number | null = null
   #substrateFadeRaf = 0
@@ -1837,9 +1821,9 @@ export class ShowCellDrone extends Drone {
       // #recoverHover → tile:hover — which a pass that bails, or one whose
       // recovery is refused mid-navigation, never completes. Re-deriving from
       // the label we already hold needs no round trip and is correct whatever
-      // the pass did: by now #hoverRevealLabel is either the tile still under
+      // the pass did: by now the hover reveal is either the tile still under
       // the cursor, or null because the level it belonged to is gone.
-      this.#applyHover(this.#hoverRevealLabel)
+      this.#hover.apply(this.#hover.reveal)
     }
   }
 
@@ -3957,7 +3941,7 @@ export class ShowCellDrone extends Drone {
     }
     this.shader.setFlat(this.#flat)
     this.shader.setPivot(this.#pivot)
-    this.#applyBandRows()
+    this.#hover.applyBandRows()
     this.shader.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
     this.shader.setGlyphs(this.#domNames ? 0 : 1)
     this.shader.setImageMix(this.#textOnly ? 0.0 : this.#substrateFadeMix())
@@ -4130,10 +4114,10 @@ export class ShowCellDrone extends Drone {
     // before exposing the completed frame. Relying only on another tile:hover
     // event left the normal one-row image strip under a still-visible action
     // overlay until the pointer exited and re-entered the tile.
-    const restoredHoverIndex = this.#hoverRevealLabel
-      ? this.#labelToIndex.get(this.#hoverRevealLabel)
+    const restoredHoverIndex = this.#hover.reveal
+      ? this.#labelToIndex.get(this.#hover.reveal)
       : undefined
-    this.#applyBandRows()
+    this.#hover.applyBandRows()
     this.shader.setHoveredIndex(restoredHoverIndex ?? -1)
     // A geometry replacement can hand us a NEW shader; the swap verb is a
     // property of the open window, not of this frame, so re-apply it here or
@@ -5652,8 +5636,7 @@ export class ShowCellDrone extends Drone {
     // height instead of growing for nothing.
     this.onEffect<{ rows?: number; label?: string | null }>('overlay:band-rows', (payload) => {
       const owner = typeof payload?.label === 'string' ? payload.label : null
-      this.#bandRowsLabel = owner
-      this.#bandRows = Math.max(1, payload?.rows ?? 1)
+      this.#hover.bandRows(owner, payload?.rows ?? 1)
 
       // THE OVERLAY OWNS HOVER — it does the hit-testing and the wrapping, and
       // this message is it naming the tile whose menu is up and how tall that
@@ -5667,7 +5650,7 @@ export class ShowCellDrone extends Drone {
       // band only for the hovered cell, so the icons stayed up on two rows over
       // a background that had snapped back to the resting one-row pill: the
       // rows collapsing, most visibly on the way into a tile.
-      this.#applyHover(owner !== null && this.renderedCells.has(owner) ? owner : null)
+      this.#hover.apply(owner !== null && this.renderedCells.has(owner) ? owner : null)
     })
 
     // q/r and label are absent on the "nothing hovered" broadcast (pointer
@@ -5695,13 +5678,12 @@ export class ShowCellDrone extends Drone {
       // into a one-row band that grows underneath them a frame later. Recorded
       // against the arriving label, so it cannot be read for any other tile.
       if (hoverLabel && payload.bandRows !== undefined) {
-        this.#bandRowsLabel = hoverLabel
-        this.#bandRows = Math.max(1, payload.bandRows)
+        this.#hover.bandRows(hoverLabel, payload.bandRows)
       }
 
       // Same single path the band-rows message goes through, so the two can
       // never leave the reveal, the band height and the lit cell disagreeing.
-      this.#applyHover(hoverLabel)
+      this.#hover.apply(hoverLabel)
       if (!this.shader) return
 
       // Drive the shimmer clock only while a reference/portal tile is hovered,
@@ -5993,8 +5975,7 @@ export class ShowCellDrone extends Drone {
     // set, a same-named tile on the NEXT layer would bake in revealed — and
     // would inherit its band height with it, so drop the row count's owner on
     // the same breath. The arriving level's own layout re-establishes both.
-    this.#hoverRevealLabel = null
-    this.#bandRowsLabel = null
+    this.#hover.forget()
     this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload([]), settled: settledEmpty })
   }
 
@@ -6431,7 +6412,7 @@ export class ShowCellDrone extends Drone {
   #cellIsShaded(c: Cell): boolean {
     // Shade off and hover affect presentation only. Neither can weaken the
     // independent readiness predicate the payload publishes.
-    if (!TILE_SHADE || this.#hoverOpaqueLabel === c.label) return false
+    if (!TILE_SHADE || this.#hover.opaque === c.label) return false
     // THE SWARM'S SHADE — A STANDING STATE, NOT A MODIFIER PREVIEW (Jaime,
     // 2026-08-20: "when you go into a swarm there should be tiles shaded").
     // In a zone, every tile you don't own yet recedes, from the moment you
@@ -6613,21 +6594,6 @@ export class ShowCellDrone extends Drone {
     adoptPackedVisual(entry)
   }
 
-  /** The tile under the pointer shows at full opacity while hovered, and only
-   *  while hovered. Two cells change at most — the one entered and the one
-   *  left — so this writes exactly those, never a pass. */
-  #setHoverOpaque = (label: string | null): void => {
-    const next = label && this.renderedCells.has(label) ? label : null
-    if (next === this.#hoverOpaqueLabel) return
-    const previous = this.#hoverOpaqueLabel
-    this.#hoverOpaqueLabel = next
-    // Attribute writes only — never a render:cell-count emit. That payload
-    // doubles as the overlay's "maps are fresh, release the navigation guard"
-    // signal, and a hover must never be able to say that (see
-    // #repaintReadinessInPlace for the mid-navigation failure it caused).
-    this.#writeShadeFor(previous)   // back to its honest state
-    this.#writeShadeFor(next)       // lifted under the pointer
-  }
 
   /** A take touched `label`: lift it out of the swarm's shade this frame and
    *  stamp the bright taking rim — the prominent "this one is now being
@@ -6927,7 +6893,7 @@ export class ShowCellDrone extends Drone {
     flat: () => this.#flat,
     pivot: () => this.#pivot,
     onLauncherPage: () => isLauncherLocation(this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []),
-    revealLabel: () => this.#hoverRevealLabel,
+    revealLabel: () => this.#hover.reveal,
     hasImage: sig => !!this.imageAtlas?.hasImage(sig),
     imageUV: sig => this.imageAtlas?.getImageUV(sig) ?? null,
     labelUV: (label, ownPage) => this.atlas!.getLabelUV(
@@ -7028,7 +6994,7 @@ export class ShowCellDrone extends Drone {
     (this.#shapeModeByLabel.get(label) ?? 0) > 0
 
   #labelIsHidden(label: string): boolean {
-    if (label === this.#hoverRevealLabel) return false
+    if (label === this.#hover.reveal) return false
     // A tile under a live edit hides its name by the EDIT, not by what is stored.
     const byEdit = this.#tilePreview.hiddenBy(label)
     if (byEdit !== undefined) return byEdit
@@ -7037,45 +7003,6 @@ export class ShowCellDrone extends Drone {
     return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
   }
 
-  /** Point the hover reveal at `next` and repaint just the tiles whose
-   *  hidden-ness actually flipped. Touches one attribute for at most two
-   *  cells, so it is cheap enough to run on every hover change; tiles that
-   *  never hide their text cost nothing but a map lookup. */
-  #setHoverReveal(next: string | null): void {
-    const prev = this.#hoverRevealLabel
-    if (prev === next) return
-
-    // Only a tile that HIDES its text can change appearance here. Resolve
-    // that against the pre-flip state for `prev` and the post-flip state
-    // for `next`, so each is judged as the reveal actually leaves it.
-    const wasHiding = (l: string | null): boolean => {
-      if (!l) return false
-      const cell = this.renderedCells.get(l)
-      if (!cell?.hideText || cell.plain || !cell.imageSig) return false
-      return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
-    }
-    const prevFlips = wasHiding(prev)   // prev was revealed → re-hide it
-    const nextFlips = wasHiding(next)   // next was hidden → reveal it
-
-    this.#hoverRevealLabel = next
-    if (!prevFlips && !nextFlips) return
-
-    const labelUV = this.#buf.labelUV
-    if (!labelUV || !this.atlas || !this.geom) return
-
-    for (const l of [prevFlips ? prev : null, nextFlips ? next : null]) {
-      if (!l) continue
-      const i = this.#labelToIndex.get(l)
-      if (i === undefined) continue
-      if (this.#labelIsHidden(l)) {
-        this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
-      } else {
-        const r = this.atlas.getLabelUV(l)
-        this.#writeCellVec4(labelUV, i, r.u0, r.v0, r.u1, r.v1)
-      }
-    }
-    this.#pushBuffer('aLabelUV')
-  }
 
   // ─────────────────────────────────────────────────────────────────────
   // LIVE PREVIEW — the tile editor's edit, on its own tile (tile-previews.ts)
@@ -7114,7 +7041,7 @@ export class ShowCellDrone extends Drone {
     this.#writeCellVec4(imageUV, i, uv?.u0 ?? 0, uv?.v0 ?? 0, uv?.u1 ?? 0, uv?.v1 ?? 0)
     this.#writeCellScalar(hasImage, i, uv ? 1 : 0)
     this.#writeCellRgb(borderColor, i, border[0], border[1], border[2])
-    if (this.#hidesName(hideText, !!uv) && label !== this.#hoverRevealLabel) {
+    if (this.#hidesName(hideText, !!uv) && label !== this.#hover.reveal) {
       this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
     } else {
       const ruv = this.atlas.getLabelUV(label)
@@ -7163,7 +7090,7 @@ export class ShowCellDrone extends Drone {
     // hidden — unless this is the hovered tile, which is revealing its name,
     // or text-only mode is on, where no tile hides its name (#hidesName).
     const ht = this.#faces.hiddenText.get(label) ?? false
-    if (this.#hidesName(ht, !!imgUV) && label !== this.#hoverRevealLabel) {
+    if (this.#hidesName(ht, !!imgUV) && label !== this.#hover.reveal) {
       this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
     } else {
       const atlasLabel = this.#pendingCellMutations.has(label) && !this.atlas.hasLabel(label)
