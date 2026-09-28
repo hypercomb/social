@@ -53,7 +53,25 @@ describe('a dive', () => {
     expect(host.pins.images).toEqual(['page-img', 'dive-img'])
     expect(host.calls.built.at(-1)).toEqual({ labels: ['oven', 'door'], reveal: null, portals: ['door'] })
     expect(host.children).toHaveLength(1)
-    expect(host.calls.emitted.at(-1)).toEqual(['render:dive-painted', { count: 2 }])
+    expect(host.calls.emitted.at(-1)).toEqual(['render:dive-painted', {
+      count: 2,
+      names: [{ label: 'oven', q: 0, r: 0, hidden: false }, { label: 'door', q: 0, r: 0, hidden: false }],
+    }])
+  })
+
+  it('announces which names hide behind a picture that is actually there', async () => {
+    const host = hostWith({ decode: async sig => sig === 'broken' ? null : new Blob(['px']) })
+    await new TileDive(host).paint([
+      cell('oven', { q: 1, r: 0, imageSig: 'dive-img', hideText: true }),
+      cell('door', { q: 0, r: 1, imageSig: 'broken', hideText: true }),
+      cell('shelf', { imageSig: 'dive-img' }),
+    ])
+    const [, painted] = host.calls.emitted.at(-1)! as [string, { names: { label: string; q: number; r: number; hidden: boolean }[] }]
+    expect(painted.names).toEqual([
+      { label: 'oven', q: 1, r: 0, hidden: true },
+      { label: 'door', q: 0, r: 1, hidden: false },
+      { label: 'shelf', q: 0, r: 0, hidden: false },
+    ])
   })
 
   it('a newer paint wins over one still decoding', async () => {

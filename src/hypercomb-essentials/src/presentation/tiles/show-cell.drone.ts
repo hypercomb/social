@@ -6977,22 +6977,16 @@ export class ShowCellDrone extends Drone {
     } catch { return false }
   }
 
-  /**
-   * Phase 2 fast path for tile:saved — mutate the single cell's attribute
-   * slices directly and push to GPU. Skips geometry rebuild entirely.
-   * Returns true on success; false if the caller should fall back to the
-   * incremental render path.
-   */
-  /** Would this cell's name be hidden right now? True only for a hideText
-   *  tile whose image is actually in the atlas (an image that has not
-   *  landed yet never hid anything) — and never for the hovered tile,
-   *  which is the whole point of the reveal. */
   /** The DOM name layer (tile-name.drone.ts) asks these two; the answers are
    *  the SDF path's own, so the two paths can never disagree. */
   public readonly nameHidden = (label: string): boolean => this.#labelIsHidden(label)
   public readonly shaderDrawsName = (label: string): boolean =>
     (this.#shapeModeByLabel.get(label) ?? 0) > 0
 
+  /** Would this cell's name be hidden right now? True only for a hideText
+   *  tile whose image is actually in the atlas (an image that has not
+   *  landed yet never hid anything) — and never for the hovered tile,
+   *  which is the whole point of the reveal. */
   #labelIsHidden(label: string): boolean {
     if (label === this.#hover.reveal) return false
     // A tile under a live edit hides its name by the EDIT, not by what is stored.

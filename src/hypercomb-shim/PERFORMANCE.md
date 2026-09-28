@@ -42,6 +42,8 @@ comparison holds; the absolute numbers do not transfer.
 | 2026-09-28 | `7057f32c350d` | 7 tiles, drawn in software | 8392 vs 14254 ms | 8392 vs 14359 ms | 6738 vs 11975 ms | 3419 vs 4952 ms | 67 vs 67 ms / 15 vs 21 % | 77 vs 94 MB | 4× — PASS; idle blocking 62 vs 280 ms / 10 s |
 | 2026-09-28 | `23711e50169d` | 7 tiles, drawn in software | 4333 vs 5511 ms | 4333 vs 5586 ms | 3585 vs 4693 ms | 1712 vs 2298 ms | 33 vs 50 ms / 0.3 vs 0.9 % | 82 vs 113 MB | 1× — PASS; idle blocking 0 vs 0 ms / 10 s |
 | 2026-09-28 | `23711e50169d` | 7 tiles, drawn in software | 8717 vs 14534 ms | 8717 vs 14534 ms | 6984 vs 11759 ms | 3402 vs 5249 ms | 67 vs 67 ms / 15 vs 20 % | 75 vs 90 MB | 4× — PASS; idle blocking 158 vs 259 ms / 10 s |
+| 2026-09-28 | `0f3f26e7669a` | 7 tiles, drawn in software | 4630 vs 6140 ms | 4630 vs 6140 ms | 3866 vs 4956 ms | 1709 vs 2749 ms | 50 vs 50 ms / 1.7 vs 2.5 % | 86 vs 93 MB | 1× — PASS; idle blocking 0 vs 50 ms / 10 s |
+| 2026-09-28 | `0f3f26e7669a` | 7 tiles, drawn in software | 9676 vs 15987 ms | 9676 vs 15987 ms | 7501 vs 13712 ms | 4117 vs 6349 ms | 67 vs 67 ms / 30 vs 33 % | 85 vs 100 MB | 4× — PASS; idle blocking 675 vs 1046 ms / 10 s |
 
 Minimal first, Angular second.
 
@@ -62,6 +64,7 @@ Minimal first, Angular second.
 | 2026-09-28 | readiness, faces and fill geometry drawn out of show-cell (package `33c8d74e7636`) | 4012 ms (1×), 8632 ms (4×) | 3316 ms (1×), 6729 ms (4×) | 1× tiles −117 ms against `4259fd754f88`, boot blocking −275 ms; 4× +17 ms (Angular +399 ms in the same run) | same or better |
 | 2026-09-28 | dive and previews drawn out of show-cell (package `7057f32c350d`) | 4168 ms (1×), 8392 ms (4×) | 3640 ms (1×), 6738 ms (4×) | 1× tiles +156 ms against `33c8d74e7636`, with Angular +824 ms in the same run (machine drift); 4× −240 ms, idle blocking 62 vs 151 ms before | same |
 | 2026-09-28 | quiet landing and hover drawn out of show-cell (package `23711e50169d`) | 4333 ms (1×), 8717 ms (4×) | 3585 ms (1×), 6984 ms (4×) | 1× tiles +165 ms against `7057f32c350d` while Angular went −470 ms in the same run, but drag p95 33 ms (was 50) and janky frames 0.3 % (was 1.7); 4× +325 ms with idle blocking 158 ms (was 62) — within the gate's noise band, and neither branch touches boot | same |
+| 2026-09-28 | a dive's names drawn by the DOM name layer, after the merge of `development` (package `0f3f26e7669a`) | 4630 ms (1×), 9676 ms (4×) | 3866 ms (1×), 7501 ms (4×) | 1× tiles +297 ms against `23711e50169d` with Angular +554 ms in the same run; 4× +959 ms with Angular +1453 ms (machine drift, ratio 0.61 vs 0.60). The Angular host was rebuilt for the merged core | same |
 
 Adding a row: run the gate (and `--rate 4` when boot or rendering moved),
 then add the change's line here in the same commit.

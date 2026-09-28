@@ -26,6 +26,13 @@
 // toggle. Every one of those answers comes from ShowCellDrone so the two
 // paths cannot disagree.
 //
+// A DIVE is another layer's tiles painted through the page's own shader
+// (tile-dive.ts), so its names are this layer's to draw too. While one is up
+// the page's names stand aside and the dive's are drawn in their slots, from
+// what the dive announced (render:dive-painted): the same face and size, a
+// picture-only tile's name back under the pointer (render:dive-hover), and
+// nothing of the page's — no band growth, no holder count, no launcher strip.
+//
 // The layer is ONE transformed element: the world div carries the render
 // container's worldTransform as a CSS matrix (one style write per frame the
 // camera moves), and each name is positioned once, in world units, at its
@@ -40,6 +47,7 @@ import type { Application, Container } from 'pixi.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../grid/hex-geometry.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { TILE_STACK_DEPTHS, type TileStackDepths } from './tile-stack.js'
+import type { DiveName, DivePainted } from './tile-dive.js'
 
 type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
@@ -112,6 +120,7 @@ const STYLE = `
   font-family:var(--hc-tile-name-font,${FONT_STACK});font-weight:var(--hc-tile-name-weight,${NAME_WEIGHT});
   font-size:${LAYOUT_PX}px;letter-spacing:${NAME_TRACKING}em;color:var(--hc-tile-name-color,#fff)}
 .hc-tile-names-world>span[hidden]{display:none}
+.hc-tile-names.hc-diving .hc-tile-names-world>span:not([data-dive]){display:none}
 .hc-tile-name-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .hc-tile-name-holders{flex:none;margin-left:.45em;font-size:.5em;letter-spacing:0;color:var(--hc-tile-name-holders-color,${HOLDERS_INK})}
 .hc-tile-name-holders[hidden]{display:none}
@@ -129,7 +138,7 @@ export class TileNameDrone extends Drone {
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'render:set-pivot', 'render:set-text-only', 'tile:toggle-text',
     'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility',
-    TILE_STACK_DEPTHS, 'location:changed',
+    TILE_STACK_DEPTHS, 'location:changed', 'render:dive-painted', 'render:dive-hover',
   ]
   protected override emits: string[] = ['tile-names:dom']
 
@@ -142,6 +151,11 @@ export class TileNameDrone extends Drone {
   #root: HTMLDivElement | null = null
   #world: HTMLDivElement | null = null
   #spans = new Map<string, HTMLSpanElement>()
+  /** The dive's names while one is up (null: the page is showing). Its own
+   *  spans, so a dive tile sharing a page tile's name never borrows its span. */
+  #dive: Map<string, DiveName> | null = null
+  #diveSpans = new Map<string, HTMLSpanElement>()
+  #diveHover: string | null = null
   #cells = new Map<string, Axial>()
   #meshOffset = { x: 0, y: 0 }
   #geo: HexGeometry = DEFAULT_HEX_GEOMETRY
@@ -177,6 +191,11 @@ export class TileNameDrone extends Drone {
     this.onEffect<TileStackDepths>(TILE_STACK_DEPTHS, (p) => { this.#depths = p?.depths ?? {}; this.#placeHovered() })
     this.onEffect('location:changed', () => { this.#depths = {}; this.#placeHovered() })
     this.onEffect<BandRowsPayload>('overlay:band-rows', (p) => { this.#band = { rows: p?.rows ?? 1, label: p?.label ?? null }; this.#placeAll() })
+    this.onEffect<DivePainted>('render:dive-painted', (p) => this.#setDive(p))
+    this.onEffect<{ label?: string | null }>('render:dive-hover', (p) => {
+      this.#diveHover = p?.label ?? null
+      if (this.#dive) this.#placeDive()
+    })
     this.onEffect<{ on: boolean }>('render:big-head-mode', (p) => {
       this.#bigHead = !!p?.on
       this.#root?.classList.toggle('hc-big-head', this.#bigHead)
@@ -194,6 +213,7 @@ export class TileNameDrone extends Drone {
     this.#root = null
     this.#world = null
     this.#spans.clear()
+    this.#diveSpans.clear()
     this.emitEffect('tile-names:dom', { on: false })
   }
 
@@ -215,6 +235,7 @@ export class TileNameDrone extends Drone {
 
     const root = document.createElement('div')
     root.className = this.#bigHead ? 'hc-tile-names hc-big-head' : 'hc-tile-names'
+    root.classList.toggle('hc-diving', !!this.#dive)
     root.hidden = !this.#visible
     const world = document.createElement('div')
     world.className = 'hc-tile-names-world'
@@ -225,6 +246,7 @@ export class TileNameDrone extends Drone {
     this.#root = root
     this.#world = world
     this.#spans.clear()
+    this.#diveSpans.clear()
     this.#last = [NaN, NaN, NaN, NaN, NaN, NaN]
     this.#fitRoot()
     p.renderer.on?.('resize', this.#onResize)
@@ -271,21 +293,51 @@ export class TileNameDrone extends Drone {
     this.#placeAll()
   }
 
-  #spanFor(label: string): HTMLSpanElement | null {
+  #spanFor(label: string, spans = this.#spans): HTMLSpanElement | null {
     if (!this.#world) return null
-    let span = this.#spans.get(label)
+    let span = spans.get(label)
     if (!span) {
       span = document.createElement('span')
+      if (spans === this.#diveSpans) span.dataset['dive'] = ''
       const name = document.createElement('span')
       name.className = 'hc-tile-name-text'
       const holders = document.createElement('small')
       holders.className = 'hc-tile-name-holders'
       holders.hidden = true
       span.append(name, holders)
-      this.#spans.set(label, span)
+      spans.set(label, span)
       this.#world.appendChild(span)
     }
     return span
+  }
+
+  // ── dive ───────────────────────────────────────────────────────────
+
+  /** A dive went up (its names) or came down (count 0): swap whose names
+   *  are drawn. The page's spans are kept, only stood aside, so ending a
+   *  dive shows them again with nothing to rebuild. */
+  #setDive(p: DivePainted | undefined): void {
+    const names = (p?.count ?? 0) > 0 && p?.names?.length ? p.names : null
+    this.#dive = names ? new Map(names.map(n => [n.label, n])) : null
+    if (!this.#dive) this.#diveHover = null
+    for (const [label, span] of this.#diveSpans) {
+      if (!this.#dive?.has(label)) { span.remove(); this.#diveSpans.delete(label) }
+    }
+    this.#root?.classList.toggle('hc-diving', !!this.#dive)
+    this.#placeDive()
+  }
+
+  #placeDive(): void {
+    if (!this.#dive || !this.#world) return
+    const sc = this.#showCell()
+    for (const [label, n] of this.#dive) {
+      const span = this.#spanFor(label, this.#diveSpans)
+      if (!span) continue
+      this.#setText(span, sc?.displayNameFor(label) ?? label, '')
+      const hidden = n.hidden && label !== this.#diveHover
+      if (span.hidden !== hidden) span.hidden = hidden
+      if (!hidden) this.#position(span, n, 1)
+    }
   }
 
   #showCell(): ShowCellLike | null {
@@ -301,6 +353,7 @@ export class TileNameDrone extends Drone {
       const span = this.#spanFor(label)
       if (span) this.#place(span, label, axial, sc)
     }
+    this.#placeDive()
   }
 
   #refreshAll(): void { this.#placeAll() }
@@ -316,29 +369,34 @@ export class TileNameDrone extends Drone {
   }
 
   #place(span: HTMLSpanElement, label: string, axial: Axial, sc: ShowCellLike | null): void {
-    const text = sc?.displayNameFor(label) ?? label
-    const name = span.firstElementChild as HTMLElement
-    if (name.textContent !== text) name.textContent = text
-
     // THE HOLDER COUNT — how many participants hold their own version of this
     // tile, you included. Under the pointer only, on one name only, small and
     // right after it: a number on every tile was noise (Jaime, 2026-09-10:
     // "Distraction is not good"). It sits inside the name's own width, so a
     // long name is cut a little sooner rather than the number spilling out.
-    const holders = span.lastElementChild as HTMLElement
     const depth = label === this.#hovered ? (this.#depths[label] ?? 0) : 0
-    const count = depth > 1 ? String(depth) : ''
-    if (holders.textContent !== count) holders.textContent = count
-    if (holders.hidden !== !count) holders.hidden = !count
+    this.#setText(span, sc?.displayNameFor(label) ?? label, depth > 1 ? String(depth) : '')
 
     const hidden = !!sc && (sc.shaderDrawsName(label) || (label !== this.#hovered && sc.nameHidden(label)))
     if (span.hidden !== hidden) span.hidden = hidden
     if (hidden) return
+    this.#position(span, axial, this.#band.label === label ? Math.max(1, this.#band.rows) : 1)
+  }
 
+  /** A name's text and its holder count ('' for none). */
+  #setText(span: HTMLSpanElement, text: string, count: string): void {
+    const name = span.firstElementChild as HTMLElement
+    if (name.textContent !== text) name.textContent = text
+    const holders = span.lastElementChild as HTMLElement
+    if (holders.textContent !== count) holders.textContent = count
+    if (holders.hidden !== !count) holders.hidden = !count
+  }
+
+  /** Put a name on its tile: centred, raised while its band holds `rows`. */
+  #position(span: HTMLSpanElement, axial: Axial, rows: number): void {
     const R = this.#geo.circumRadiusPx
     const px = this.#axialToPixel(axial.q, axial.r)
     const x = px.x + this.#meshOffset.x
-    const rows = this.#band.label === label ? Math.max(1, this.#band.rows) : 1
     const y = px.y + this.#meshOffset.y - (rows - 1) * ROW_H_R * R
 
     // ONE SIZE, ONE LINE, ALWAYS. A name is never shrunk to fit and never

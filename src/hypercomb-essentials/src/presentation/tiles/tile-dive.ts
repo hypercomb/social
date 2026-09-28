@@ -23,6 +23,16 @@ export type DiveCell = {
   portal: boolean
 }
 
+/** A name the dive puts on screen, for the DOM name layer (tile-name.drone.ts),
+ *  which draws the glyphs the shared shader leaves out. `hidden`: the tile
+ *  hides its name behind a picture that is actually there — the name returns
+ *  under the pointer (render:dive-hover), as on its own page. */
+export type DiveName = { label: string; q: number; r: number; hidden: boolean }
+
+/** `render:dive-painted` — what is up: the dive's names, or nothing (count 0,
+ *  the page is showing). */
+export type DivePainted = { count: number; names?: DiveName[] }
+
 type PinnedLabelAtlas = { setPinned(labels: string[]): void; getLabelUV(label: string): unknown }
 type PinnedImageAtlas = {
   setPinned(sigs: string[]): void
@@ -111,7 +121,11 @@ export class TileDive {
     if (!this.#hidPage) { this.#hidPage = true; this.host.pageMesh()!.visible = false }
     this.#active = true
     this.#applyHover()
-    this.host.emit('render:dive-painted', { count: cells.length })
+    const names: DiveName[] = cells.map(c => ({
+      label: c.label, q: c.q, r: c.r,
+      hidden: this.host.hidesName(c.hideText, !!(c.imageSig && imageAtlas.hasImage(c.imageSig))),
+    }))
+    this.host.emit('render:dive-painted', { count: cells.length, names } satisfies DivePainted)
   }
 
   /** (Re)pack the dive's geometry through the page's own packer, in FOREIGN
@@ -188,7 +202,7 @@ export class TileDive {
     // (no mesh yet, no shader) reads as "the page is showing" to the wave
     // view, which then lets go of the pointer instead of holding a dive that
     // never landed.
-    this.host.emit('render:dive-painted', { count: 0 })
+    this.host.emit('render:dive-painted', { count: 0 } satisfies DivePainted)
     if (!wasActive) return
     this.host.labelAtlas()?.setPinned([...this.host.pageLabels(), this.host.pendingLabel])
     this.host.imageAtlas()?.setPinned(this.host.pageImageSigs())
