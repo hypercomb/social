@@ -110,6 +110,7 @@ import {
 // handing over its `park`/`unpark` pair; the directive only exists while the
 // window is showing, so its own lifetime IS the "currently open" fact.
 import { holdWindow, type WindowSession } from './window-session.js'
+import { DockInset } from './dock-inset.js'
 
 // The one-window rule — opening a tool window puts the others away, with the
 // pheromone palette the single surface allowed to stay beside one.
@@ -219,6 +220,11 @@ export interface DockedPanelOptions {
   hasReadingSurface?: boolean
   hcSession?: WindowSession | null
   dockExclusive?: boolean
+  /** Reserve the edge this window covers, so tiles lay out beside it rather
+   *  than under it (dock-inset.ts). `attachDockedPanel` turns it on; the
+   *  Angular adapter leaves it off while its template still carries the
+   *  `hcDockInset` directive, so no window reserves twice. */
+  reserveInset?: boolean
   /** The window closes ITSELF — this only asks. The owner keeps its signal,
    *  its launcher state and its teardown path authoritative, which is why this
    *  was an @Output and is a callback now rather than anything cleverer. */
@@ -386,6 +392,9 @@ export class DockedPanel implements GroupMember, LaneMember {
   #laneOffset = 0
   /** Drops this window out of the "currently showing" set when it goes. */
   #releaseSession: (() => void) | null = null
+  /** See `reserveInset`. */
+  reserveInset = false
+  #inset: DockInset | null = null
   /** Drops this window out of the one-window rule's set when it goes. */
   #releaseRule: (() => void) | null = null
   /** Only when `ownsSize` is false: watches the window's self-driven resize so
@@ -476,6 +485,10 @@ export class DockedPanel implements GroupMember, LaneMember {
     // The root thunk is what lets the shell-wide Escape owner ask "is the focus
     // inside this window" — the gate that replaced every panel's own listener.
     if (this.hcSession) this.#releaseSession = holdWindow(this.id, this.hcSession, () => this.#el)
+    if (this.reserveInset) {
+      this.#inset = new DockInset(this.#el, this.dockSide, `dock-${this.id || 'panel'}`)
+      this.#inset.start()
+    }
     // And join the ONE-WINDOW-AT-A-TIME rule, which puts the others away.
     // Separate from the lane on purpose: the lane is about POSITION and a
     // window may sit outside it (the notes desk in fullscreen, every panel on
@@ -558,6 +571,8 @@ export class DockedPanel implements GroupMember, LaneMember {
     // session lives on in the parked list, which is what brings it back.
     this.#releaseSession?.()
     this.#releaseSession = null
+    this.#inset?.stop()
+    this.#inset = null
     this.#releaseRule?.()
     this.#releaseRule = null
     this.#stopListeners()
@@ -656,6 +671,7 @@ export class DockedPanel implements GroupMember, LaneMember {
     const wasPaired = this.pairWhen
     assign(this, next)
     if (!this.#initialized) return
+    if (this.#inset && next.dockSide) this.#inset.side = next.dockSide
     if (!('pairWhen' in next) || next.pairWhen === wasPaired) return
     if (next.pairWhen === true) this.#openPairIfWanted()
     else if (wasPaired === true) this.#closePair()
@@ -1638,7 +1654,7 @@ function assign(panel: DockedPanel, options: Partial<DockedPanelOptions>): void 
 /** Give an element the docked-panel chrome. Returns the panel so the caller can
  *  `update()` it and MUST `dispose()` it when the element goes away. */
 export function attachDockedPanel(el: HTMLElement, options: DockedPanelOptions = {}): DockedPanel {
-  const panel = new DockedPanel(el, options)
+  const panel = new DockedPanel(el, { reserveInset: true, ...options })
   panel.init()
   return panel
 }

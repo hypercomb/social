@@ -19,7 +19,7 @@ vi.hoisted(() => {
   }
 })
 
-const { EffectBus, SignatureService } = await import('@hypercomb/core')
+const { EffectBus, SignatureService, toolWindows } = await import('@hypercomb/core')
 const { SandboxChangeElement, SANDBOX_CHANGE_EFFECT, SANDBOX_CHANGE_SURFACE } = await import('./sandbox-change.view.js')
 
 if (!customElements.get(SANDBOX_CHANGE_SURFACE)) customElements.define(SANDBOX_CHANGE_SURFACE, SandboxChangeElement)
@@ -117,13 +117,26 @@ describe('the what-changed panel', () => {
     expect(element.isOpen).toBe(false)
   })
 
-  it('opens on a fresh request only, and closes on Escape', async () => {
+  it('opens on a fresh request only; Escape puts it away through the one policy and brings it back as it was', async () => {
     const site = await trialSite()
     EffectBus.emit(SANDBOX_CHANGE_EFFECT, { name: 'try-zoom', door: 'https://try-zoom.hypercomb.com', site, at: 0 })
     expect(element.isOpen).toBe(false)
     EffectBus.emit(SANDBOX_CHANGE_EFFECT, { name: 'try-zoom', door: 'https://try-zoom.hypercomb.com', site, at: Date.now() })
     expect(element.isOpen).toBe(true)
-    element.querySelector('.hc-trial')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await vi.waitFor(() => expect(panelText()).toContain('try-zoom'))
+    const before = panelText()
+    // The window keeps no Escape listener of its own (tool-window-chrome.md).
+    const root = element.querySelector<HTMLElement>('.hc-trial')!
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(root.hidden).toBe(false)
+    // The policy parks it — reversibly — and the next press brings it back.
+    const putBack = toolWindows.putAwayAll()
+    expect(root.hidden).toBe(true)
+    expect(putBack?.()).toBe(true)
+    expect(root.hidden).toBe(false)
+    expect(panelText()).toBe(before)
+    // The × is the close.
+    root.querySelector<HTMLButtonElement>('.hc-tw-close')!.click()
     expect(element.isOpen).toBe(false)
   })
 })

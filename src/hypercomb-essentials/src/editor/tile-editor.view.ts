@@ -45,7 +45,6 @@ import type { ImageEditorService } from './image-editor.service.js'
 export const TILE_EDITOR_VIEW_KEY = '@diamondcoreprocessor.com/TileEditorView'
 const OWNER = TILE_EDITOR_VIEW_KEY
 const WINDOW_ID = 'tile-editor'
-const INSET_OWNER = 'tile-editor'
 const DEFAULT_BORDER = '#c8975a'
 const SLIDER_STEPS = 1000
 
@@ -153,11 +152,6 @@ export class TileEditorElement extends HTMLElement {
   #leaving = ''
   #switchingTo = ''
 
-  // What this window reserves of the right edge — see #reserve.
-  #insetObserver: ResizeObserver | null = null
-  #offPoll: (() => void) | null = null
-  #insetFrame = 0
-  #insetTimer = 0
 
   readonly #session: WindowSession = {
     // Put away by the shell (another window, a lane, the installer): the
@@ -435,7 +429,6 @@ export class TileEditorElement extends HTMLElement {
         hcSession: this.#session,
         onClose: () => this.#cancel(),
       })
-      this.#reserve()
     } else {
       this.#releaseWindow = holdWindow(WINDOW_ID, this.#session, () => this.#panel)
       this.#watchKeyboard()
@@ -477,7 +470,6 @@ export class TileEditorElement extends HTMLElement {
     this.#stage = null
     this.#dock?.dispose()
     this.#dock = null
-    this.#release()
     this.#releaseWindow?.()
     this.#releaseWindow = null
     this.#releaseBack?.()
@@ -1488,55 +1480,6 @@ export class TileEditorElement extends HTMLElement {
       viewport.removeEventListener('scroll', update)
     })
     update()
-  }
-
-  // ── the edge this window reserves ─────────────────────────────
-  //
-  // What `hcDockInset` does for the Angular windows, which a module cannot
-  // import: say how much of the right edge the dock takes, so the hive's
-  // canvas shrinks to the rest and re-fits beside it. A timer races the frame
-  // (a document that is not rendering still reserves), and a box that spans
-  // the viewport reserves nothing.
-
-  #reserve(): void {
-    const panel = this.#panel
-    if (!panel) return
-    if (typeof ResizeObserver !== 'undefined') {
-      this.#insetObserver = new ResizeObserver(this.#scheduleInset)
-      this.#insetObserver.observe(panel)
-    }
-    window.addEventListener('resize', this.#scheduleInset)
-    this.#offPoll = EffectBus.on('viewport:inset-poll', this.#scheduleInset)
-    this.#scheduleInset()
-  }
-
-  readonly #scheduleInset = (): void => {
-    if (this.#insetFrame || this.#insetTimer) return
-    this.#insetFrame = requestAnimationFrame(this.#measureInset)
-    this.#insetTimer = window.setTimeout(this.#measureInset, 60)
-  }
-
-  readonly #measureInset = (): void => {
-    if (this.#insetFrame) { cancelAnimationFrame(this.#insetFrame); this.#insetFrame = 0 }
-    if (this.#insetTimer) { clearTimeout(this.#insetTimer); this.#insetTimer = 0 }
-    const rect = this.#panel?.getBoundingClientRect()
-    const spans = !rect || rect.width <= 0 || (rect.left <= 1 && rect.right >= window.innerWidth - 1)
-    const size = !rect || spans || this.#surface !== 'dock' ? 0 : Math.max(0, Math.round(window.innerWidth - rect.left))
-    EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'right', size })
-  }
-
-  #release(): void {
-    const wasReserving = this.#insetObserver !== null || this.#offPoll !== null
-    this.#insetObserver?.disconnect()
-    this.#insetObserver = null
-    window.removeEventListener('resize', this.#scheduleInset)
-    this.#offPoll?.()
-    this.#offPoll = null
-    if (this.#insetFrame) cancelAnimationFrame(this.#insetFrame)
-    if (this.#insetTimer) clearTimeout(this.#insetTimer)
-    this.#insetFrame = 0
-    this.#insetTimer = 0
-    if (wasReserving) EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'right', size: 0 })
   }
 }
 

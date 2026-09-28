@@ -21,7 +21,7 @@
 // Module chrome is a framework-free custom element added to the
 // ShellSurfaceRegistry over IoC — never a tag in either app.html.
 
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, mountToolWindow, translateOr as t, type ToolWindow } from '@hypercomb/core'
 import {
   dismissOffers,
   offeredPools,
@@ -38,22 +38,9 @@ export const OPEN_STAMP_MS = 5_000
 const SURFACE = 'hc-offers'
 const STYLE_ID = 'hc-offers-style'
 const OWNER = '@diamondcoreprocessor.com/OffersView'
-
-const STEEL = '126, 182, 214'
-const ACCENT = '201, 162, 39'
-
-const ioc = <T,>(key: string): T | undefined =>
-  (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
-
-const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
-  try {
-    const text = ioc<I18nProvider>(I18N_IOC_KEY)?.t?.(key, params)
-    return text && text !== key ? text : interpolate(fallback, params)
-  } catch { return interpolate(fallback, params) }
-}
-
-const interpolate = (text: string, params?: Record<string, string | number>): string =>
-  params ? text.replace(/\{(\w+)\}/g, (whole, name) => String(params[name] ?? whole)) : text
+/** The window's id: its session, its place in the lane, its width. */
+export const OFFERS_WINDOW = 'offers'
+const ACCENT = [201, 162, 39] as const
 
 // ---------------------------------------------------------------------------
 // THE WORDS
@@ -114,7 +101,7 @@ export interface OffersIo {
 
 export class OffersElement extends HTMLElement {
 
-  #panel: HTMLElement | null = null
+  #window: ToolWindow | null = null
   #said: { text: string; tone: 'ok' | 'quiet' | 'bad' } | null = null
   #busy = false
   #cleanup: (() => void)[] = []
@@ -135,7 +122,7 @@ export class OffersElement extends HTMLElement {
     // A new offer while the window is open redraws it; while closed, one
     // quiet notice per host-and-meaning names the window. Never opens it.
     this.#cleanup.push(EffectBus.on<{ origin?: string; meaning?: string; count?: number }>(OFFERS_OFFERED, payload => {
-      if (this.#panel) { this.#render(); return }
+      if (this.#window) { this.#render(); return }
       const key = `${payload?.origin ?? ''}::${payload?.meaning ?? ''}`
       if (!payload?.origin || this.#noticed.has(key)) return
       this.#noticed.add(key)
@@ -155,70 +142,38 @@ export class OffersElement extends HTMLElement {
   }
 
   open(): void {
-    if (!this.#panel) {
-      const panel = document.createElement('aside')
-      panel.className = 'hc-offers'
-      panel.setAttribute('role', 'dialog')
-      panel.setAttribute('aria-label', t('offers.title', 'Offers'))
-      panel.tabIndex = -1
-      panel.setAttribute('data-consumes-wheel', '')
-      panel.addEventListener('keydown', this.#onKey)
-      this.appendChild(panel)
-      this.#panel = panel
-    }
+    this.#window ??= mountToolWindow(this, {
+      id: OFFERS_WINDOW,
+      title: t('offers.title', 'Offers'),
+      accent: ACCENT,
+      className: 'hc-offers',
+      defaultWidth: 360,
+      minWidth: 260,
+      onClose: () => this.close(),
+    })
     this.#render()
   }
 
   close(): void {
-    if (!this.#panel) return
-    this.#panel.removeEventListener('keydown', this.#onKey)
-    this.#panel.remove()
-    this.#panel = null
+    this.#window?.dispose()
+    this.#window = null
   }
 
-  get open$(): boolean { return !!this.#panel }
+  get open$(): boolean { return !!this.#window }
 
-  readonly #onKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return
-    event.stopPropagation()
-    this.close()
-  }
-
-  // ── the drawing ─────────────────────────────────────────────────────────
-
-  #head(): HTMLElement {
-    const head = document.createElement('header')
-    head.className = 'hc-offers-head'
-    const title = document.createElement('span')
-    title.className = 'hc-offers-title'
-    title.textContent = t('offers.title', 'Offers')
-    head.appendChild(title)
-    const close = document.createElement('button')
-    close.type = 'button'
-    close.className = 'hc-offers-close'
-    close.textContent = '×'
-    close.setAttribute('aria-label', t('panel.close', 'Close'))
-    close.addEventListener('click', () => this.close())
-    head.appendChild(close)
-    return head
-  }
+  // ── the drawing: the window's own slice ─────────────────────────────────
 
   #render(): void {
-    const panel = this.#panel
-    if (!panel) return
-    panel.replaceChildren()
-    panel.appendChild(this.#head())
-
-    const body = document.createElement('div')
-    body.className = 'hc-offers-body'
-    panel.appendChild(body)
+    const body = this.#window?.body
+    if (!body) return
+    body.replaceChildren()
 
     let groups: OfferGroup[] = []
     try { groups = groupOffers(this.io.offered()) } catch { groups = [] }
 
     if (!groups.length) {
-      body.appendChild(note('hc-offers-quiet', PANEL_EMPTY))
-      if (this.#said) body.appendChild(note(`hc-offers-said is-${this.#said.tone}`, this.#said.text))
+      body.appendChild(note('hc-tw-quiet', PANEL_EMPTY))
+      if (this.#said) body.appendChild(note(`hc-tw-said is-${this.#said.tone}`, this.#said.text))
       return
     }
 
@@ -226,7 +181,7 @@ export class OffersElement extends HTMLElement {
 
     for (const group of groups) {
       const section = document.createElement('section')
-      section.className = 'hc-offers-group'
+      section.className = 'hc-tw-card hc-offers-group'
       section.dataset['origin'] = group.origin
       section.dataset['meaning'] = group.meaning
 
@@ -259,14 +214,14 @@ export class OffersElement extends HTMLElement {
       body.appendChild(section)
     }
 
-    body.appendChild(note('hc-offers-quiet', PANEL_NOT_NOW))
-    if (this.#said) body.appendChild(note(`hc-offers-said is-${this.#said.tone}`, this.#said.text))
+    body.appendChild(note('hc-tw-quiet', PANEL_NOT_NOW))
+    if (this.#said) body.appendChild(note(`hc-tw-said is-${this.#said.tone}`, this.#said.text))
   }
 
   #button(label: string, verb: 'place' | 'dismiss', group: OfferGroup): HTMLButtonElement {
     const button = document.createElement('button')
     button.type = 'button'
-    button.className = verb === 'place' ? 'hc-offers-do is-place' : 'hc-offers-do'
+    button.className = verb === 'place' ? 'hc-tw-button hc-offers-do is-primary' : 'hc-tw-button hc-offers-do'
     button.dataset['verb'] = verb
     button.textContent = label
     button.disabled = this.#busy
@@ -308,86 +263,24 @@ const note = (className: string, text: string): HTMLElement => {
   return p
 }
 
+/** Only this window's slice: the shell, header, body, cards, buttons and
+ *  notes are the base layer's (core/panels/tool-window.ts). */
 function ensureStyles(): void {
   if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return
   const style = document.createElement('style')
   style.id = STYLE_ID
   style.textContent = `
-    /* The same material as every other tool window — the recipe restated
-       with the SHARED values, since a module cannot @use the stylesheet. */
     ${SURFACE} { display: contents; }
-    .hc-offers {
-      position: fixed;
-      top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
-      right: var(--hc-controls-right, 0px); bottom: 0;
-      width: 360px; min-width: 260px; max-width: calc(100vw - 1.5rem);
-      box-sizing: border-box; display: flex; flex-direction: column;
-      z-index: 100002;
-      background: rgba(13, 15, 21, 0.975);
-      backdrop-filter: blur(14px) saturate(1.04);
-      -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border: 0; border-left: 1px solid rgba(${STEEL}, 0.38); border-radius: 0;
-      box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46);
-      color: #eef2f5;
-      font-family: var(--hc-mono, system-ui);
-      font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
-      line-height: 1.45; overflow: hidden; outline: none;
-    }
-    .hc-offers-head {
-      flex: 0 0 auto; box-sizing: border-box; display: flex; align-items: center;
-      gap: 0.5rem; height: 2.875rem; min-height: 2.875rem; padding: 0 0.75rem;
-      background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.006));
-      border-bottom: 1px solid rgba(${STEEL}, 0.25);
-    }
-    .hc-offers-title {
-      flex: 1; font-weight: 600; font-size: 0.9em; letter-spacing: 0.06em;
-      text-transform: uppercase; color: rgba(${ACCENT}, 0.95);
-    }
-    .hc-offers-close {
-      margin-left: auto; display: inline-grid; place-items: center;
-      width: 1.75rem; height: 1.75rem; padding: 0;
-      background: none; border: 0; border-radius: var(--hc-radius-control, 2px);
-      color: rgba(238, 244, 248, 0.62); font: inherit; font-size: 1.125rem;
-      line-height: 1; cursor: pointer;
-    }
-    .hc-offers-close:hover { color: #fff; background-color: rgba(255,255,255,0.075); }
-    .hc-offers-body {
-      flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
-      padding: 0.7rem 0.75rem 1.2rem;
-    }
-    .hc-offers-body > p { margin: 0 0 0.5rem; line-height: 1.55; }
-    .hc-offers-quiet { color: rgba(238, 244, 248, 0.5); font-size: 0.85em; }
-    .hc-offers-held { font-size: 0.88em; color: rgba(238, 244, 248, 0.8); }
-    .hc-offers-group {
-      margin: 0.6rem 0; padding: 0.5rem 0.55rem;
-      border: 1px solid rgba(${STEEL}, 0.2); border-radius: var(--hc-radius-card, 3px);
-      background: rgba(255, 255, 255, 0.02);
-    }
+    .hc-offers-held { font-size: 0.88em; }
     .hc-offers-origin {
       margin: 0; font-size: 0.95em; font-weight: 600; letter-spacing: 0.03em;
-      color: rgba(${ACCENT}, 0.95); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--hc-window-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .hc-offers-meaning { margin: 0.1rem 0 0.35rem; font-size: 0.82em; color: rgba(${STEEL}, 0.9); }
+    .hc-offers-meaning { margin: 0.1rem 0 0.35rem; font-size: 0.82em; color: var(--hc-window-ink-faint); }
     .hc-offers-list { margin: 0 0 0.5rem; padding: 0; list-style: none; max-height: 30vh; overflow-y: auto; font-size: 0.88em; }
     .hc-offers-row { padding: 0.05rem 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hc-offers-acts { display: flex; gap: 0.35rem; }
-    .hc-offers-do {
-      flex: 1 1 0; padding: 0.35rem 0.5rem;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
-      color: inherit; font: inherit; font-size: 0.85em; letter-spacing: 0.05em;
-      cursor: pointer;
-    }
-    .hc-offers-do:hover:not(:disabled) { border-color: rgba(${ACCENT}, 0.8); }
-    .hc-offers-do:disabled { opacity: 0.45; cursor: default; }
-    .hc-offers-do.is-place { border-color: rgba(${ACCENT}, 0.6); }
-    .hc-offers-said {
-      margin-top: 0.6rem; padding: 0.45rem 0.55rem; font-size: 0.88em;
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: 2px;
-    }
-    .hc-offers-said.is-ok { border-color: rgba(${ACCENT}, 0.7); }
-    .hc-offers-said.is-quiet { color: rgba(238, 244, 248, 0.62); }
-    .hc-offers-said.is-bad { border-color: rgba(214, 126, 126, 0.75); }
+    .hc-offers-acts > .hc-tw-button { flex: 1 1 0; }
   `
   document.head.appendChild(style)
 }

@@ -37,7 +37,7 @@
 // Angular class in the shared barrel. The tool-window recipe is restated in
 // plain CSS with the shared values.
 
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, mountToolWindow, translateOr, type ToolWindow } from '@hypercomb/core'
 import { cachedPubkey } from '../sharing/head-claim-signer.js'
 import { MOLECULE_INDEX_SERVICE_KEY, type MoleculeIndexReader } from './molecule-index.service.js'
 import {
@@ -69,21 +69,13 @@ const SURFACE = 'hc-vocabulary'
 const STYLE_ID = 'hc-vocabulary-style'
 const OWNER = '@diamondcoreprocessor.com/VocabularyView'
 
-const STEEL = '126, 182, 214'
-const ACCENT = '201, 162, 39'
+const VOCABULARY_WINDOW = 'vocabulary'
+const ACCENT_RGB = [201, 162, 39] as const
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
 
-const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
-  try {
-    const text = ioc<I18nProvider>(I18N_IOC_KEY)?.t?.(key, params)
-    return text && text !== key ? text : interpolate(fallback, params)
-  } catch { return interpolate(fallback, params) }
-}
-
-const interpolate = (text: string, params?: Record<string, string | number>): string =>
-  params ? text.replace(/\{(\w+)\}/g, (whole, name) => String(params[name] ?? whole)) : text
+const t = translateOr
 
 // ---------------------------------------------------------------------------
 // THE READING — pure, injectable, and provably write-free
@@ -241,7 +233,7 @@ export interface VocabularyAct {
 
 export class VocabularyElement extends HTMLElement {
 
-  #panel: HTMLElement | null = null
+  #window: ToolWindow | null = null
   #model: VocabularyPanelModel | null = null
   #intent = ''
   #said: { text: string; tone: 'ok' | 'quiet' | 'bad' } | null = null
@@ -280,29 +272,27 @@ export class VocabularyElement extends HTMLElement {
   }
 
   open(): void {
-    if (!this.#panel) {
-      const panel = document.createElement('aside')
-      panel.className = 'hc-vocab'
-      panel.setAttribute('role', 'dialog')
-      panel.setAttribute('aria-label', t('vocabulary.title', 'Your vocabulary'))
-      panel.tabIndex = -1
-      panel.setAttribute('data-consumes-wheel', '')
-      panel.addEventListener('keydown', this.#onKey)
-      this.appendChild(panel)
-      this.#panel = panel
-    }
+    // The base layer (core/panels/tool-window.ts) is the shell, the header,
+    // the lane and the session; this window adds only its words.
+    this.#window ??= mountToolWindow(this, {
+      id: VOCABULARY_WINDOW,
+      title: t('vocabulary.title', 'Your vocabulary'),
+      accent: ACCENT_RGB,
+      className: 'hc-vocab',
+      defaultWidth: 360,
+      minWidth: 260,
+      onClose: () => this.close(),
+    })
     this.#render()
     void this.refresh()
   }
 
   close(): void {
-    if (!this.#panel) return
-    this.#panel.removeEventListener('keydown', this.#onKey)
-    this.#panel.remove()
-    this.#panel = null
+    this.#window?.dispose()
+    this.#window = null
   }
 
-  get open$(): boolean { return !!this.#panel }
+  get open$(): boolean { return !!this.#window }
 
   /** Read, then draw. Exposed so a spec can await the reading. */
   async refresh(): Promise<void> {
@@ -311,40 +301,12 @@ export class VocabularyElement extends HTMLElement {
     this.#render()
   }
 
-  readonly #onKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return
-    event.stopPropagation()
-    this.close()
-  }
-
   // ── the drawing ─────────────────────────────────────────────────────────
 
-  #head(): HTMLElement {
-    const head = document.createElement('header')
-    head.className = 'hc-vocab-head'
-    const title = document.createElement('span')
-    title.className = 'hc-vocab-title'
-    title.textContent = t('vocabulary.title', 'Your vocabulary')
-    head.appendChild(title)
-    const close = document.createElement('button')
-    close.type = 'button'
-    close.className = 'hc-vocab-close'
-    close.textContent = '×'
-    close.setAttribute('aria-label', t('panel.close', 'Close'))
-    close.addEventListener('click', () => this.close())
-    head.appendChild(close)
-    return head
-  }
-
   #render(): void {
-    const panel = this.#panel
-    if (!panel) return
-    panel.replaceChildren()
-    panel.appendChild(this.#head())
-
-    const body = document.createElement('div')
-    body.className = 'hc-vocab-body'
-    panel.appendChild(body)
+    const body = this.#window?.body
+    if (!body) return
+    body.replaceChildren()
 
     const model = this.#model
     if (!model) {
@@ -408,7 +370,7 @@ export class VocabularyElement extends HTMLElement {
     if (this.#intent === 'publish') body.appendChild(note('hc-vocab-aim', PANEL_INTENT_PUBLISH))
     if (this.#intent === 'withdraw') body.appendChild(note('hc-vocab-aim', PANEL_INTENT_WITHDRAW))
 
-    if (this.#said) body.appendChild(note(`hc-vocab-said is-${this.#said.tone}`, this.#said.text))
+    if (this.#said) body.appendChild(note(`hc-tw-said is-${this.#said.tone}`, this.#said.text))
   }
 
   #ledgerLine(model: VocabularyPanelModel): HTMLElement {
@@ -431,7 +393,7 @@ export class VocabularyElement extends HTMLElement {
   #button(label: string, verb: 'publish' | 'withdraw', aimed: boolean): HTMLButtonElement {
     const button = document.createElement('button')
     button.type = 'button'
-    button.className = aimed ? 'hc-vocab-do is-aimed' : 'hc-vocab-do'
+    button.className = aimed ? 'hc-tw-button hc-vocab-do is-aimed' : 'hc-tw-button hc-vocab-do'
     button.dataset['verb'] = verb
     button.textContent = label
     button.disabled = this.#busy
@@ -485,96 +447,45 @@ function ensureStyles(): void {
   const style = document.createElement('style')
   style.id = STYLE_ID
   style.textContent = `
-    /* The same material as every other tool window. A module cannot @use the
-       shared stylesheet, so the recipe is restated with the SHARED values. */
+    /* The shell, header, title, close and body are the tool window's base
+       layer (core/panels/tool-window.ts). Only the words are here, painted
+       from the theme's roles: the text used to be near-white literals that
+       vanished on every bright theme. */
     ${SURFACE} { display: contents; }
     .hc-vocab {
-      position: fixed;
-      top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
-      right: var(--hc-controls-right, 0px); bottom: 0;
-      width: 360px; min-width: 260px; max-width: calc(100vw - 1.5rem);
-      box-sizing: border-box; display: flex; flex-direction: column;
-      z-index: 100002;
-      background: rgba(13, 15, 21, 0.975);
-      backdrop-filter: blur(14px) saturate(1.04);
-      -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border: 0; border-left: 1px solid rgba(${STEEL}, 0.38); border-radius: 0;
-      box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46);
-      color: #eef2f5;
-      font-family: var(--hc-mono, system-ui);
-      font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
-      line-height: 1.45; overflow: hidden; outline: none;
+      --hc-vocab-steel: color-mix(in srgb, rgb(126, 182, 214), rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
     }
-    .hc-vocab-head {
-      flex: 0 0 auto; box-sizing: border-box; display: flex; align-items: center;
-      gap: 0.5rem; height: 2.875rem; min-height: 2.875rem; padding: 0 0.75rem;
-      background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.006));
-      border-bottom: 1px solid rgba(${STEEL}, 0.25);
-    }
-    .hc-vocab-title {
-      flex: 1; font-weight: 600; font-size: 0.9em; letter-spacing: 0.06em;
-      text-transform: uppercase; color: rgba(${ACCENT}, 0.95);
-    }
-    .hc-vocab-close {
-      margin-left: auto; display: inline-grid; place-items: center;
-      width: 1.75rem; height: 1.75rem; padding: 0;
-      background: none; border: 0; border-radius: var(--hc-radius-control, 2px);
-      color: rgba(238, 244, 248, 0.62); font: inherit; font-size: 1.125rem;
-      line-height: 1; cursor: pointer;
-    }
-    .hc-vocab-close:hover { color: #fff; background-color: rgba(255,255,255,0.075); }
-
-    .hc-vocab-body {
-      flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
-      padding: 0.7rem 0.75rem 1.2rem;
-    }
-    .hc-vocab-body > p { margin: 0 0 0.5rem; line-height: 1.55; }
-    .hc-vocab-count { font-size: 1.02em; color: rgba(${ACCENT}, 0.95); }
-    .hc-vocab-quiet { color: rgba(238, 244, 248, 0.5); font-size: 0.85em; }
+    .hc-vocab-count { font-size: 1.02em; color: var(--hc-window-accent); }
+    .hc-vocab-quiet { color: var(--hc-window-ink-faint); font-size: 0.85em; }
     /* PARTIALITY IS FULL WEIGHT. A surface that hides it is not honest. */
     .hc-vocab-partial {
       padding: 0.45rem 0.55rem; font-size: 0.88em;
-      border: 1px solid rgba(${ACCENT}, 0.55); border-radius: 2px;
-      background: rgba(${ACCENT}, 0.08); color: rgba(238, 244, 248, 0.92);
+      border: 1px solid var(--hc-window-edge-firm); border-radius: var(--hc-radius-control, 2px);
+      background: var(--hc-window-wash); color: var(--hc-panel-text);
     }
-    .hc-vocab-whole { font-size: 0.85em; color: rgba(${STEEL}, 0.85); }
+    .hc-vocab-whole { font-size: 0.85em; color: var(--hc-vocab-steel); }
     /* "The index is not running" is its own state, never an empty list. */
     .hc-vocab-unknown {
       padding: 0.45rem 0.55rem; font-size: 0.9em;
-      border: 1px dashed rgba(${STEEL}, 0.6); border-radius: 2px;
-      color: rgba(238, 244, 248, 0.92);
+      border: 1px dashed var(--hc-vocab-steel); border-radius: var(--hc-radius-control, 2px);
+      color: var(--hc-panel-text);
     }
     .hc-vocab-words {
       margin: 0.3rem 0 0.6rem; padding: 0.35rem 0.5rem; list-style: none;
       max-height: 40vh; overflow-y: auto;
-      border: 1px solid rgba(${STEEL}, 0.2); border-radius: 2px;
-      background: rgba(255, 255, 255, 0.02); font-size: 0.88em;
+      border: 1px solid var(--hc-window-edge); border-radius: var(--hc-radius-control, 2px);
+      background: rgba(var(--hc-panel-ink), 0.02); font-size: 0.88em;
     }
     .hc-vocab-word { padding: 0.05rem 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .hc-vocab-word.is-nameless { color: rgba(238, 244, 248, 0.45); font-style: italic; }
-    .hc-vocab-last { font-size: 0.88em; color: rgba(${STEEL}, 0.95); }
-    .hc-vocab-never { font-size: 0.88em; color: rgba(238, 244, 248, 0.8); }
+    .hc-vocab-word.is-nameless { color: var(--hc-window-ink-faint); font-style: italic; }
+    .hc-vocab-last { font-size: 0.88em; color: var(--hc-vocab-steel); }
+    .hc-vocab-never { font-size: 0.88em; color: var(--hc-window-ink-quiet); }
 
     .hc-vocab-acts { display: flex; gap: 0.35rem; margin: 0.8rem 0 0.5rem; }
-    .hc-vocab-do {
-      flex: 1 1 0; padding: 0.4rem 0.5rem;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
-      color: inherit; font: inherit; font-size: 0.85em; letter-spacing: 0.05em;
-      cursor: pointer;
-    }
-    .hc-vocab-do:hover:not(:disabled) { border-color: rgba(${ACCENT}, 0.8); }
-    .hc-vocab-do:disabled { opacity: 0.45; cursor: default; }
-    .hc-vocab-do.is-aimed { border-color: rgba(${ACCENT}, 0.95); }
-    .hc-vocab-warn { font-size: 0.82em; color: rgba(238, 244, 248, 0.62); }
-    .hc-vocab-aim { font-size: 0.85em; color: rgba(${ACCENT}, 0.92); }
-    .hc-vocab-said {
-      margin-top: 0.6rem; padding: 0.45rem 0.55rem; font-size: 0.88em;
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: 2px;
-    }
-    .hc-vocab-said.is-ok { border-color: rgba(${ACCENT}, 0.7); }
-    .hc-vocab-said.is-quiet { color: rgba(238, 244, 248, 0.62); }
-    .hc-vocab-said.is-bad { border-color: rgba(214, 126, 126, 0.75); }
+    .hc-vocab-acts > .hc-tw-button { flex: 1 1 0; }
+    .hc-vocab-do.is-aimed { border-color: var(--hc-window-accent); }
+    .hc-vocab-warn { font-size: 0.82em; color: var(--hc-window-ink-quiet); }
+    .hc-vocab-aim { font-size: 0.85em; color: var(--hc-window-accent); }
   `
   document.head.appendChild(style)
 }

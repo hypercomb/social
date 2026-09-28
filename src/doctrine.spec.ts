@@ -1676,4 +1676,62 @@ describe('doctrine ratchets', () => {
     expect(grew.concat(paid), msg).toEqual([])
   })
 
+  it('a framework-free window reaches Escape through its session, never a key listener of its own', () => {
+    // tool-window-chrome.md: a window declares dismiss()/close() on its
+    // WindowSession and the one policy knocks. The base layer
+    // (core/panels/tool-window.ts) wires that for every window mounted on it;
+    // these views still listen for the key themselves and may only leave.
+    const offenders = walk(join(ROOT, 'hypercomb-essentials/src'))
+      .filter(f => f.endsWith('.view.ts'))
+      .filter(f => /key\s*(===|!==)\s*'Escape'/.test(stripComments(readFileSync(f, 'utf8'))))
+      .map(f => relative(ROOT, f).replace(/\\/g, '/'))
+    assertRatchet(offenders.sort(), [
+      'hypercomb-essentials/src/assistant/agent-panel.view.ts',
+      'hypercomb-essentials/src/assistant/providers-window.view.ts',
+      'hypercomb-essentials/src/assistant/skills-window.view.ts',
+      'hypercomb-essentials/src/commands/keyword-suggestions.view.ts',
+      'hypercomb-essentials/src/editor/tile-editor.view.ts',
+      'hypercomb-essentials/src/link/link-drop-card.view.ts',
+      'hypercomb-essentials/src/link/photo.view.ts',
+      'hypercomb-essentials/src/tutorial/tutorial-overlay.view.ts',
+    ], 'own Escape listener')
+  })
+
+  it('a framework-free window paints from the theme\'s roles, never the dark theme\'s literals', () => {
+    // A module cannot @use the shared stylesheet, so windows used to restate
+    // it with the dark theme's values (a near-black pane, near-white ink) —
+    // text that vanished on every bright theme. The base layer's stylesheet
+    // is built from the roles; these views still carry the literals.
+    const LITERAL = /rgba\(238,\s*244,\s*248|#eef2f5|rgba\(13,\s*15,\s*21/i
+    const offenders = walk(join(ROOT, 'hypercomb-essentials/src'))
+      .filter(f => f.endsWith('.view.ts'))
+      .filter(f => LITERAL.test(stripComments(readFileSync(f, 'utf8'))))
+      .map(f => relative(ROOT, f).replace(/\\/g, '/'))
+    assertRatchet(offenders.sort(), [
+      'hypercomb-essentials/src/assistant/providers-window.view.ts',
+      'hypercomb-essentials/src/sharing/visitor-door.view.ts',
+      'hypercomb-essentials/src/tutorial/tutorial-overlay.view.ts',
+    ], 'dark-theme literal in a window')
+  })
+
+  it('the edge a docked window covers is reserved in one place — core/panels/dock-inset.ts', () => {
+    // It was written three times and a fourth window that docked without
+    // copying it covered the tiles beside it. DockedPanel reserves for every
+    // framework-free window; the Angular directive is an adapter over the
+    // same class.
+    const EMIT = /emit(?:Transient)?\s*(?:<[^>]*>)?\s*\(\s*'viewport:inset'/
+    const offenders: string[] = []
+    for (const base of ['hypercomb-essentials/src', 'hypercomb-shared', 'hypercomb-core/src', 'hypercomb-web/src']) {
+      if (!existsSync(join(ROOT, base))) continue
+      for (const f of walk(join(ROOT, base))) {
+        if (!f.endsWith('.ts') || f.endsWith('.spec.ts')) continue
+        if (EMIT.test(stripComments(readFileSync(f, 'utf8')))) offenders.push(relative(ROOT, f).replace(/\\/g, '/'))
+      }
+    }
+    assertRatchet(offenders.sort(), [
+      'hypercomb-core/src/core/panels/dock-inset.ts',
+      'hypercomb-essentials/src/presentation/tiles/layer-list.drone.ts',
+    ], 'edge reservation outside core')
+  })
+
 })

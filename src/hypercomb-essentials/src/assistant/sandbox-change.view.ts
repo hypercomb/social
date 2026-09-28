@@ -23,7 +23,7 @@
 // A dependency: it exports the element; the sandbox feature's bee
 // (sandbox-door.drone.ts) defines it and adds it to the ShellSurfaceRegistry.
 
-import { EffectBus, I18N_IOC_KEY, isSandboxDoor, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
+import { EffectBus, isSandboxDoor, mountToolWindow, registerPoolMeaning, translateOr as t, type ToolWindow } from '@hypercomb/core'
 import type { DiffRow } from './line-diff.js'
 import { countedAssessors, doorReader, readSandboxDoor, readTrial, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, type SandboxSite, type SandboxTrial, type TakeDeps, type TrialReading } from './module-review.js'
 
@@ -45,11 +45,10 @@ export interface SandboxChangePayload {
   readonly at: number
 }
 
-const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
-  const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
-  const value = i18n?.t?.(key, params)
-  return value && value !== key ? value : fallback.replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name] ?? ''))
-}
+/** The window's id: its session, its place in the lane, its width. */
+const TRIAL_WINDOW = 'sandbox-change'
+/** Steel: this window's identity is neutral; colour is for the diff. */
+const STEEL_RGB = [126, 182, 214] as const
 
 const INSTALL_KEY = '@hypercomb.social/Install'
 const BROOD_OPEN = 'brood:open'
@@ -58,7 +57,7 @@ const BROOD_OPEN = 'brood:open'
 const zoneOf = (door: string, name: string): string => door.replace(`//${name}.`, '//')
 
 export class SandboxChangeElement extends HTMLElement {
-  #panel: HTMLElement | null = null
+  #window: ToolWindow | null = null
   #cleanup: Array<() => void> = []
   #shown: SandboxChangePayload | null = null
   #reading: TrialReading | null = null
@@ -115,31 +114,28 @@ export class SandboxChangeElement extends HTMLElement {
 
   close(): void {
     this.#turn++
-    if (!this.#panel) return
-    this.#panel.removeEventListener('keydown', this.#onKey)
-    this.#panel.remove()
-    this.#panel = null
+    this.#window?.dispose()
+    this.#window = null
   }
 
-  get isOpen(): boolean { return !!this.#panel }
+  get isOpen(): boolean { return !!this.#window }
 
   #open(): void {
-    if (this.#panel) return
-    const panel = document.createElement('aside')
-    panel.className = 'hc-trial'
-    panel.setAttribute('role', 'dialog')
-    panel.tabIndex = -1
-    panel.setAttribute('data-consumes-wheel', '')
-    panel.addEventListener('keydown', this.#onKey)
-    this.appendChild(panel)
-    this.#panel = panel
-    panel.focus({ preventScroll: true })
-  }
-
-  readonly #onKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return
-    event.stopPropagation()
-    this.close()
+    if (this.#window) return
+    // The base layer (core/panels/tool-window.ts) is the shell, the header,
+    // the lane and the session — Escape reaches this window through the one
+    // policy, never a listener of its own. This window adds the trial.
+    this.#window = mountToolWindow(this, {
+      id: TRIAL_WINDOW,
+      title: this.#shown?.name ?? t('module.panel.title', 'Trial'),
+      accent: STEEL_RGB,
+      className: 'hc-trial',
+      defaultWidth: 736,
+      minWidth: 360,
+      maxWidth: 1100,
+      onClose: () => this.close(),
+    })
+    this.#window.root.focus({ preventScroll: true })
   }
 
   /** Take this trial's layer at one path into this hive, by hand. */
@@ -185,30 +181,27 @@ export class SandboxChangeElement extends HTMLElement {
   // ── the drawing ─────────────────────────────────────────────────────────
 
   #render(): void {
-    const panel = this.#panel
+    const win = this.#window
     const shown = this.#shown
-    if (!panel || !shown) return
-    panel.setAttribute('aria-label', shown.name)
-    panel.replaceChildren(this.#head(shown), this.#body(shown))
+    if (!win || !shown) return
+    win.setTitle(shown.name)
+    win.actions.replaceChildren(...this.#stepper(shown))
+    win.body.replaceChildren(this.#body(shown))
   }
 
-  #head(shown: SandboxChangePayload): HTMLElement {
-    const head = el('header', 'hc-trial-head')
-    head.appendChild(el('span', 'hc-trial-title', shown.name))
+  /** The window's own header controls: step through the zone's trials. */
+  #stepper(shown: SandboxChangePayload): HTMLElement[] {
+    if (this.#trials.length < 2) return []
     const at = this.#trials.findIndex(trial => trial.name === shown.name)
-    if (this.#trials.length > 1) {
-      head.appendChild(word('‹', t('module.panel.previous', 'previous trial'), () => void this.#step(-1)))
-      head.appendChild(el('span', 'hc-trial-count', t('module.panel.of', '{at} of {total}', { at: at < 0 ? '–' : at + 1, total: this.#trials.length })))
-      head.appendChild(word('›', t('module.panel.next', 'next trial'), () => void this.#step(1)))
-    }
-    const close = word('×', t('module.panel.close', 'Close'), () => this.close())
-    close.classList.add('hc-trial-close')
-    head.appendChild(close)
-    return head
+    return [
+      word('‹', t('module.panel.previous', 'previous trial'), () => void this.#step(-1)),
+      el('span', 'hc-trial-count', t('module.panel.of', '{at} of {total}', { at: at < 0 ? '–' : at + 1, total: this.#trials.length })),
+      word('›', t('module.panel.next', 'next trial'), () => void this.#step(1)),
+    ]
   }
 
   #body(shown: SandboxChangePayload): HTMLElement {
-    const body = el('div', 'hc-trial-body')
+    const body = el('div', 'hc-trial-content')
     const reading = this.#reading
     const site = shown.site
     const when = reading?.at ? new Date(reading.at).toLocaleString() : ''
@@ -359,48 +352,23 @@ function ensureStyles(): void {
   // pane and ink from the theme, colour only where it is the point — an added
   // line and a removed one — through the status colours every theme sets.
   style.textContent = `
+    /* The shell, header, title, close and body are the tool window's base
+       layer (core/panels/tool-window.ts); only the trial is here. */
     ${SANDBOX_CHANGE_SURFACE} { display: contents; }
-    .hc-trial {
-      position: fixed;
-      top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
-      right: var(--hc-controls-right, 0px); bottom: 0;
-      width: min(46rem, calc(100vw - 1.5rem));
-      box-sizing: border-box; display: flex; flex-direction: column;
-      z-index: 100002;
-      background: rgba(var(--hc-panel-pane, 12, 19, 27), 0.975);
-      backdrop-filter: blur(14px) saturate(1.04);
-      -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border-left: 1px solid var(--hc-window-line-firm, rgba(227, 237, 245, 0.26));
-      box-shadow: -14px 0 44px rgba(0, 0, 0, 0.36);
-      color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86));
-      font-family: var(--hc-mono, system-ui);
-      font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
-      line-height: 1.45; overflow: hidden; outline: none;
-    }
-    .hc-trial-head {
-      flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem;
-      height: 2.875rem; min-height: 2.875rem; padding: 0 0.75rem; box-sizing: border-box;
-      border-bottom: 1px solid var(--hc-window-line, rgba(227, 237, 245, 0.14));
-    }
-    .hc-trial-title {
-      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      font-weight: 600; letter-spacing: 0.04em; color: var(--hc-window-ink-loud, #eef2f5);
-    }
-    .hc-trial-count { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); font-size: 0.9em; }
+    .hc-trial-count { color: var(--hc-window-ink-quiet); font-size: 0.9em; }
     .hc-trial-word {
       display: inline-grid; place-items: center; min-width: 1.75rem; height: 1.75rem; padding: 0 0.25rem;
       background: none; border: 0; border-radius: var(--hc-radius-control, 2px);
-      color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); font: inherit; font-size: 1.05rem; cursor: pointer;
+      color: var(--hc-window-ink-quiet); font: inherit; font-size: 1.05rem; cursor: pointer;
     }
-    .hc-trial-word:hover { color: var(--hc-window-ink-loud, #fff); background: var(--hc-window-tint-strong, rgba(255, 255, 255, 0.075)); }
-    .hc-trial-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0.7rem 0.75rem 1.2rem; }
-    .hc-trial-meta { margin: 0 0 0.5rem; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
-    .hc-trial-door { color: var(--hc-window-ink-plain, rgba(227, 237, 245, 0.86)); }
+    .hc-trial-word:hover { color: var(--hc-window-ink-loud); background: var(--hc-window-tint-strong); }
+    .hc-trial-meta { margin: 0 0 0.5rem; color: var(--hc-window-ink-quiet); }
+    .hc-trial-door { color: var(--hc-window-ink-plain); }
     .hc-trial-section {
       margin: 0.9rem 0 0.35rem; font-size: 0.82em; font-weight: 600; letter-spacing: 0.06em;
-      text-transform: uppercase; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62));
+      text-transform: uppercase; color: var(--hc-window-ink-quiet);
     }
-    .hc-trial-quiet { margin: 0.2rem 0; color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
+    .hc-trial-quiet { margin: 0.2rem 0; color: var(--hc-window-ink-quiet); }
     .hc-trial-verdict { margin: 0.2rem 0; font-weight: 600; }
     .hc-trial-verdict.is-accept { color: var(--hc-status-ok, #3fbf8f); }
     .hc-trial-verdict.is-refuse { color: var(--hc-status-alert, #e07a72); }
@@ -409,22 +377,22 @@ function ensureStyles(): void {
     .hc-trial-verdict.is-unsure { color: var(--hc-status-warn, #d9a441); }
     .hc-trial-findings, .hc-trial-rows {
       margin: 0.25rem 0 0.5rem; padding: 0.4rem 0.5rem; border-radius: 2px;
-      background: var(--hc-window-tint, rgba(255, 255, 255, 0.045));
+      background: var(--hc-window-tint);
       font-family: var(--hc-mono, ui-monospace, monospace); font-size: 0.92em;
     }
     .hc-trial-findings { white-space: pre-wrap; max-height: 14em; overflow: auto; }
     .hc-trial-person { margin: 0.2rem 0; }
     .hc-trial-person .hc-trial-verdict { margin: 0; }
-    .hc-trial-key { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
+    .hc-trial-key { color: var(--hc-window-ink-quiet); }
     .hc-trial-file { margin: 0 0 0.6rem; }
     .hc-trial-file-head { display: flex; gap: 0.75rem; align-items: baseline; }
-    .hc-trial-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hc-window-ink-loud, #eef2f5); }
-    .hc-trial-file-count { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
+    .hc-trial-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hc-window-ink-loud); }
+    .hc-trial-file-count { color: var(--hc-window-ink-quiet); }
     .hc-trial-word.hc-trial-take { min-width: 0; height: auto; padding: 0; font-size: 0.92em; text-decoration: underline; }
-    .hc-trial-taken { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); font-style: italic; }
+    .hc-trial-taken { color: var(--hc-window-ink-quiet); font-style: italic; }
     .hc-trial-rows { overflow-x: auto; }
     .hc-trial-row { white-space: pre; min-width: max-content; padding: 0 0.25rem; }
-    .hc-trial-row.is-same { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); }
+    .hc-trial-row.is-same { color: var(--hc-window-ink-quiet); }
     .hc-trial-row.is-add {
       color: var(--hc-status-ok, #3fbf8f);
       background: color-mix(in srgb, var(--hc-status-ok, #3fbf8f) 12%, transparent);
@@ -433,11 +401,8 @@ function ensureStyles(): void {
       color: var(--hc-status-alert, #e07a72);
       background: color-mix(in srgb, var(--hc-status-alert, #e07a72) 12%, transparent);
     }
-    .hc-trial-row.is-skip { color: var(--hc-window-ink-quiet, rgba(227, 237, 245, 0.62)); font-style: italic; }
+    .hc-trial-row.is-skip { color: var(--hc-window-ink-quiet); font-style: italic; }
     .hc-trial-off { margin: 0.15rem 0; }
-    @media (max-width: 640px) {
-      .hc-trial { left: 0; width: 100vw; border-left: 0; }
-    }
   `
   document.head.appendChild(style)
 }

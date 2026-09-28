@@ -29,7 +29,7 @@
 // wired itself became a lazy atom nothing imported, and the brood stopped
 // opening (atomic-modules-plan.md, rule 1).
 
-import { broodRoster, broodRules, EffectBus, type BroodRecord, type BroodRules } from '@hypercomb/core'
+import { broodRoster, broodRules, EffectBus, mountToolWindow, type BroodRecord, type BroodRules, type ToolWindow } from '@hypercomb/core'
 import { acceptByHand, auditLine, broodLabel, refuseByHand } from './brood-accept.js'
 import { riskLine, riskOf } from './brood-risk.js'
 
@@ -39,9 +39,8 @@ const OWNER = '@diamondcoreprocessor.com/BroodView'
 const OPEN = 'brood:open'
 const OPEN_STAMP_MS = 4_000
 
-const STEEL = '126, 182, 214'
-const ACCENT = '201, 162, 39'
-const ALARM = '214, 126, 126'
+const BROOD_WINDOW = 'brood'
+const ACCENT_RGB = [201, 162, 39] as const
 
 /** What a row is: held code and the one sentence that describes its standing. */
 const standing = (record: BroodRecord, rules: BroodRules): string => {
@@ -70,7 +69,7 @@ const whereFrom = (record: BroodRecord): string => {
 }
 
 class BroodElement extends HTMLElement {
-  #panel: HTMLElement | null = null
+  #window: ToolWindow | null = null
   #cleanup: Array<() => void> = []
   #roster: readonly BroodRecord[] = []
   #rules: BroodRules | null = null
@@ -93,29 +92,27 @@ class BroodElement extends HTMLElement {
   }
 
   open(): void {
-    if (!this.#panel) {
-      const panel = document.createElement('aside')
-      panel.className = 'hc-brood'
-      panel.setAttribute('role', 'dialog')
-      panel.setAttribute('aria-label', 'The brood')
-      panel.tabIndex = -1
-      panel.setAttribute('data-consumes-wheel', '')
-      panel.addEventListener('keydown', this.#onKey)
-      this.appendChild(panel)
-      this.#panel = panel
-    }
+    // The base layer (core/panels/tool-window.ts) is the shell, the header,
+    // the lane and the session; the brood adds only its roster.
+    this.#window ??= mountToolWindow(this, {
+      id: BROOD_WINDOW,
+      title: 'The brood',
+      accent: ACCENT_RGB,
+      className: 'hc-brood',
+      defaultWidth: 360,
+      minWidth: 260,
+      onClose: () => this.close(),
+    })
     this.#render()
     void this.refresh()
   }
 
   close(): void {
-    if (!this.#panel) return
-    this.#panel.removeEventListener('keydown', this.#onKey)
-    this.#panel.remove()
-    this.#panel = null
+    this.#window?.dispose()
+    this.#window = null
   }
 
-  get open$(): boolean { return !!this.#panel }
+  get open$(): boolean { return !!this.#window }
 
   /** Read, then draw. Exposed so a spec can await the reading. */
   async refresh(): Promise<void> {
@@ -124,40 +121,15 @@ class BroodElement extends HTMLElement {
     this.#render()
   }
 
-  readonly #onKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return
-    event.stopPropagation()
-    this.close()
-  }
-
   // ── the drawing ─────────────────────────────────────────────────────────
 
   #render(): void {
-    const panel = this.#panel
-    if (!panel) return
-    panel.replaceChildren(this.#head(), this.#body())
-  }
-
-  #head(): HTMLElement {
-    const head = document.createElement('header')
-    head.className = 'hc-brood-head'
-    const title = document.createElement('span')
-    title.className = 'hc-brood-title'
-    title.textContent = 'The brood'
-    head.appendChild(title)
-    const close = document.createElement('button')
-    close.type = 'button'
-    close.className = 'hc-brood-close'
-    close.textContent = '×'
-    close.setAttribute('aria-label', 'Close')
-    close.addEventListener('click', () => this.close())
-    head.appendChild(close)
-    return head
+    this.#window?.body.replaceChildren(this.#body())
   }
 
   #body(): HTMLElement {
     const body = document.createElement('div')
-    body.className = 'hc-brood-body'
+    body.className = 'hc-brood-content'
 
     if (!this.#roster.length) {
       const quiet = document.createElement('p')
@@ -280,86 +252,53 @@ function ensureStyles(): void {
   const style = document.createElement('style')
   style.id = STYLE_ID
   style.textContent = `
-    /* The same material as every other tool window. A module cannot @use the
-       shared stylesheet, so the recipe is restated with the SHARED values. */
+    /* The shell, header, title, close and body are the tool window's base
+       layer (core/panels/tool-window.ts). Only the roster is here, painted
+       from the theme's roles: its text used to be near-white literals that
+       vanished on every bright theme. Steel and alarm are brought down to the
+       ground the way tw.ink() brings a colour down. */
     ${SURFACE} { display: contents; }
     .hc-brood {
-      position: fixed;
-      top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
-      right: var(--hc-controls-right, 0px); bottom: 0;
-      width: 360px; min-width: 260px; max-width: calc(100vw - 1.5rem);
-      box-sizing: border-box; display: flex; flex-direction: column;
-      z-index: 100002;
-      background: rgba(13, 15, 21, 0.975);
-      backdrop-filter: blur(14px) saturate(1.04);
-      -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border: 0; border-left: 1px solid rgba(${STEEL}, 0.38); border-radius: 0;
-      box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46);
-      color: #eef2f5;
-      font-family: var(--hc-mono, system-ui);
-      font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
-      line-height: 1.45; overflow: hidden; outline: none;
+      --hc-brood-steel: color-mix(in srgb, rgb(126, 182, 214), rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
+      --hc-brood-alarm: color-mix(in srgb, rgb(214, 126, 126), rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
     }
-    .hc-brood-head {
-      flex: 0 0 auto; box-sizing: border-box; display: flex; align-items: center;
-      gap: 0.5rem; height: 2.875rem; min-height: 2.875rem; padding: 0 0.75rem;
-      background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.006));
-      border-bottom: 1px solid rgba(${STEEL}, 0.25);
-    }
-    .hc-brood-title {
-      flex: 1; font-weight: 600; font-size: 0.9em; letter-spacing: 0.06em;
-      text-transform: uppercase; color: rgba(${ACCENT}, 0.95);
-    }
-    .hc-brood-close {
-      margin-left: auto; display: inline-grid; place-items: center;
-      width: 1.75rem; height: 1.75rem; padding: 0;
-      background: none; border: 0; border-radius: var(--hc-radius-control, 2px);
-      color: rgba(238, 244, 248, 0.62); font: inherit; font-size: 1.125rem;
-      line-height: 1; cursor: pointer;
-    }
-    .hc-brood-close:hover { color: #fff; background-color: rgba(255,255,255,0.075); }
-
-    .hc-brood-body {
-      flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
-      padding: 0.7rem 0.75rem 1.2rem;
-    }
-    .hc-brood-lede { margin: 0 0 0.6rem; color: rgba(${ALARM}, 0.95); }
-    .hc-brood-quiet { margin: 0 0 0.5rem; color: rgba(238, 244, 248, 0.5); font-size: 0.9em; }
+    .hc-brood-lede { margin: 0 0 0.6rem; color: var(--hc-brood-alarm); }
+    .hc-brood-quiet { margin: 0 0 0.5rem; color: var(--hc-window-ink-faint); font-size: 0.9em; }
 
     /* A HELD ROW NEVER LOOKS SAFE. The left edge is the alarm until a hand
        has ruled; only an acceptance turns it to the ordinary accent. */
     .hc-brood-row {
       margin: 0 0 0.6rem; padding: 0.45rem 0.55rem;
-      border: 1px solid rgba(${STEEL}, 0.2); border-left: 2px solid rgba(${ALARM}, 0.8);
-      border-radius: 2px; background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--hc-window-edge); border-left: 2px solid var(--hc-brood-alarm);
+      border-radius: var(--hc-radius-control, 2px); background: rgba(var(--hc-panel-ink), 0.02);
     }
-    .hc-brood-row.is-accepted { border-left-color: rgba(${ACCENT}, 0.85); }
-    .hc-brood-name { font-size: 1.02em; color: rgba(${ACCENT}, 0.95); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .hc-brood-from { font-size: 0.85em; color: rgba(${STEEL}, 0.9); }
-    .hc-brood-said { margin-top: 0.25rem; font-size: 0.88em; color: rgba(238, 244, 248, 0.82); }
+    .hc-brood-row.is-accepted { border-left-color: var(--hc-window-accent); }
+    .hc-brood-name { font-size: 1.02em; color: var(--hc-window-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hc-brood-from { font-size: 0.85em; color: var(--hc-brood-steel); }
+    .hc-brood-said { margin-top: 0.25rem; font-size: 0.88em; color: var(--hc-window-ink-quiet); }
     .hc-brood-risk { margin-top: 0.2rem; font-size: 0.88em; }
-    .hc-brood-risk.is-high { color: rgba(${ALARM}, 0.95); }
-    .hc-brood-risk.is-medium { color: rgba(${ACCENT}, 0.95); }
-    .hc-brood-risk.is-low { color: rgba(${STEEL}, 0.95); }
-    .hc-brood-risk.is-unread { color: rgba(238, 244, 248, 0.6); }
-    .hc-brood-report { margin: 0.3rem 0 0; max-height: 16rem; overflow: auto; white-space: pre-wrap; font-size: 0.82em; color: rgba(238, 244, 248, 0.8); }
-    .hc-brood-state { margin-top: 0.2rem; font-size: 0.85em; color: rgba(${ALARM}, 0.92); }
-    .hc-brood-state.is-accepted { color: rgba(${ACCENT}, 0.92); }
+    .hc-brood-risk.is-high { color: var(--hc-brood-alarm); }
+    .hc-brood-risk.is-medium { color: var(--hc-window-accent); }
+    .hc-brood-risk.is-low { color: var(--hc-brood-steel); }
+    .hc-brood-risk.is-unread { color: var(--hc-window-ink-faint); }
+    .hc-brood-report { margin: 0.3rem 0 0; max-height: 16rem; overflow: auto; white-space: pre-wrap; font-size: 0.82em; color: var(--hc-window-ink-quiet); }
+    .hc-brood-state { margin-top: 0.2rem; font-size: 0.85em; color: var(--hc-brood-alarm); }
+    .hc-brood-state.is-accepted { color: var(--hc-window-accent); }
 
     /* Words, not bordered buttons. */
     .hc-brood-acts { display: flex; gap: 0.75rem; margin-top: 0.45rem; }
     .hc-brood-do {
       padding: 0; background: none; border: 0; border-radius: 0;
-      color: rgba(${STEEL}, 0.95); font: inherit; font-size: 0.88em;
+      color: var(--hc-brood-steel); font: inherit; font-size: 0.88em;
       letter-spacing: 0.04em; cursor: pointer;
     }
-    .hc-brood-do:hover:not(:disabled) { color: #fff; text-decoration: underline; }
+    .hc-brood-do:hover:not(:disabled) { color: var(--hc-panel-text); text-decoration: underline; }
     .hc-brood-do:disabled { opacity: 0.4; cursor: default; }
-    .hc-brood-do.is-danger { color: rgba(${ALARM}, 0.95); }
+    .hc-brood-do.is-danger { color: var(--hc-brood-alarm); }
 
     .hc-brood-rules {
       margin: 0.8rem 0 0; padding-top: 0.5rem; font-size: 0.82em;
-      border-top: 1px solid rgba(${STEEL}, 0.18); color: rgba(238, 244, 248, 0.58);
+      border-top: 1px solid var(--hc-window-edge); color: var(--hc-window-ink-faint);
     }
   `
   document.head.appendChild(style)

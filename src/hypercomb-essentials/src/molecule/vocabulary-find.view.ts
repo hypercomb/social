@@ -45,7 +45,7 @@
 // always against the CLAIMANT's key, and resolving a reader key would give a
 // read-only visitor an identity they never asked for.
 
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, mountToolWindow, translateOr, type ToolWindow } from '@hypercomb/core'
 import { MOLECULE_INDEX_SERVICE_KEY, type MoleculeIndexReader } from './molecule-index.service.js'
 import { buildHorizon, publishersFromCards, type HorizonSources } from './vocabulary-horizon.js'
 import { loadProvenSeqs, rememberProvenSeq } from './vocabulary-ledger.js'
@@ -88,8 +88,8 @@ const SURFACE = 'hc-vocabulary-find'
 const STYLE_ID = 'hc-vocabulary-find-style'
 const OWNER = '@diamondcoreprocessor.com/VocabularyFindView'
 
-const STEEL = '126, 182, 214'
-const ACCENT = '201, 162, 39'
+const FIND_WINDOW = 'vocabulary-find'
+const ACCENT_RGB = [201, 162, 39] as const
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
@@ -103,15 +103,7 @@ type StaticPeersLike = {
 const staticPeers = (): StaticPeersLike | undefined =>
   ioc<StaticPeersLike>('@diamondcoreprocessor.com/StaticPeersDrone')
 
-const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
-  try {
-    const text = ioc<I18nProvider>(I18N_IOC_KEY)?.t?.(key, params)
-    return text && text !== key ? text : interpolate(fallback, params)
-  } catch { return interpolate(fallback, params) }
-}
-
-const interpolate = (text: string, params?: Record<string, string | number>): string =>
-  params ? text.replace(/\{(\w+)\}/g, (whole, name) => String(params[name] ?? whole)) : text
+const t = translateOr
 
 // ---------------------------------------------------------------------------
 // THE LOCAL ANSWER — the fourth outcome, and the only certain one
@@ -190,7 +182,7 @@ interface FindState {
 
 export class VocabularyFindElement extends HTMLElement {
 
-  #panel: HTMLElement | null = null
+  #window: ToolWindow | null = null
   #generation = 0
   #state: FindState = { word: '', address: null, local: null, horizon: null, horizonFailed: false, search: null, asked: false, asking: false }
   #cleanup: (() => void)[] = []
@@ -294,7 +286,7 @@ export class VocabularyFindElement extends HTMLElement {
     // signal the host directory reads. Redrawing here is what keeps a switch
     // from having to guess whether its own click landed.
     this.#cleanup.push(EffectBus.on('community:offers-render', () => {
-      if (this.#panel) this.#render()
+      if (this.#window) this.#render()
     }))
   }
 
@@ -305,29 +297,33 @@ export class VocabularyFindElement extends HTMLElement {
   }
 
   open(): void {
-    if (this.#panel) return
-    const panel = document.createElement('aside')
-    panel.className = 'hc-find'
-    panel.setAttribute('role', 'dialog')
-    panel.setAttribute('aria-label', t('findword.title', 'Find a word'))
-    panel.tabIndex = -1
-    panel.setAttribute('data-consumes-wheel', '')
-    panel.addEventListener('keydown', this.#onKey)
-    this.appendChild(panel)
-    this.#panel = panel
+    if (this.#window) return
+    // The base layer (core/panels/tool-window.ts) is the shell, the header,
+    // the lane and the session; this window adds the word field, Look, and
+    // what the doors answer.
+    const win = mountToolWindow(this, {
+      id: FIND_WINDOW,
+      title: t('findword.title', 'Find a word'),
+      accent: ACCENT_RGB,
+      className: 'hc-find',
+      defaultWidth: 400,
+      minWidth: 280,
+      onClose: () => this.close(),
+    })
+    win.actions.append(...this.#headControls())
+    this.#window = win
     this.#render()
   }
 
   close(): void {
-    if (!this.#panel) return
+    if (!this.#window) return
     // Any leg still running belongs to a generation nothing will read.
     this.#generation++
-    this.#panel.removeEventListener('keydown', this.#onKey)
-    this.#panel.remove()
-    this.#panel = null
+    this.#window.dispose()
+    this.#window = null
   }
 
-  get open$(): boolean { return !!this.#panel }
+  get open$(): boolean { return !!this.#window }
 
   /**
    * The chips for one publisher: every creation of theirs this reader has seen
@@ -351,12 +347,6 @@ export class VocabularyFindElement extends HTMLElement {
         },
       }
     })
-  }
-
-  readonly #onKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return
-    event.stopPropagation()
-    this.close()
   }
 
   /**
@@ -410,13 +400,11 @@ export class VocabularyFindElement extends HTMLElement {
   // ── the drawing ─────────────────────────────────────────────────────────
 
   #render(): void {
-    const panel = this.#panel
-    if (!panel) return
-    panel.replaceChildren()
-    panel.appendChild(this.#head())
-    const body = document.createElement('div')
-    body.className = 'hc-find-body'
-    panel.appendChild(body)
+    const body = this.#window?.body
+    if (!body) return
+    body.replaceChildren()
+    const input = this.#window?.actions.querySelector('.hc-find-input') as HTMLInputElement | null
+    if (input && input.value !== this.#state.word && document.activeElement !== input) input.value = this.#state.word
 
     const state = this.#state
     if (!state.word) {
@@ -498,14 +486,8 @@ export class VocabularyFindElement extends HTMLElement {
     }
   }
 
-  #head(): HTMLElement {
-    const head = document.createElement('header')
-    head.className = 'hc-find-head'
-    const title = document.createElement('span')
-    title.className = 'hc-find-title'
-    title.textContent = t('findword.title', 'Find a word')
-    head.appendChild(title)
-
+  /** The window's own header controls: the word, and Look. */
+  #headControls(): HTMLElement[] {
     const input = document.createElement('input')
     input.className = 'hc-find-input'
     input.type = 'text'
@@ -518,23 +500,13 @@ export class VocabularyFindElement extends HTMLElement {
       event.preventDefault()
       void this.look(input.value)
     })
-    head.appendChild(input)
 
     const look = document.createElement('button')
     look.type = 'button'
-    look.className = 'hc-find-do'
+    look.className = 'hc-tw-button hc-find-do'
     look.textContent = t('findword.look', 'Look')
     look.addEventListener('click', () => { void this.look(input.value) })
-    head.appendChild(look)
-
-    const close = document.createElement('button')
-    close.type = 'button'
-    close.className = 'hc-find-close'
-    close.textContent = '×'
-    close.setAttribute('aria-label', t('panel.close', 'Close'))
-    close.addEventListener('click', () => this.close())
-    head.appendChild(close)
-    return head
+    return [input, look]
   }
 }
 
@@ -655,118 +627,79 @@ function ensureStyles(): void {
   const style = document.createElement('style')
   style.id = STYLE_ID
   style.textContent = `
+    /* The shell, header, title, close and body are the tool window's base
+       layer (core/panels/tool-window.ts); this is the slice, painted from the
+       theme's roles (its text used to be near-white literals). */
     ${SURFACE} { display: contents; }
     .hc-find {
-      position: fixed;
-      top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
-      right: var(--hc-controls-right, 0px); bottom: 0;
-      width: 400px; min-width: 280px; max-width: calc(100vw - 1.5rem);
-      box-sizing: border-box; display: flex; flex-direction: column;
-      z-index: 100002;
-      background: rgba(13, 15, 21, 0.975);
-      backdrop-filter: blur(14px) saturate(1.04);
-      -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border: 0; border-left: 1px solid rgba(${STEEL}, 0.38); border-radius: 0;
-      box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46);
-      color: #eef2f5;
-      font-family: var(--hc-mono, system-ui);
-      font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
-      line-height: 1.45; overflow: hidden; outline: none;
+      --hc-tw-steel: color-mix(in srgb, rgb(126, 182, 214), rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
     }
-    .hc-find-head {
-      flex: 0 0 auto; box-sizing: border-box; display: flex; align-items: center;
-      gap: 0.4rem; min-height: 2.875rem; padding: 0.4rem 0.75rem; flex-wrap: wrap;
-      background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.006));
-      border-bottom: 1px solid rgba(${STEEL}, 0.25);
-    }
-    .hc-find-title {
-      flex: 1 0 100%; font-weight: 600; font-size: 0.9em; letter-spacing: 0.06em;
-      text-transform: uppercase; color: rgba(${ACCENT}, 0.95);
-    }
+    /* The word field takes the header's free width (the base gives the
+       controls what the title leaves). */
     .hc-find-input {
       flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 0.3rem 0.4rem;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
+      background: rgba(var(--hc-panel-ink), 0.05);
+      border: 1px solid color-mix(in srgb, var(--hc-tw-steel) 30%, transparent); border-radius: var(--hc-radius-control, 2px);
       color: inherit; font: inherit; font-size: 0.95em;
     }
-    .hc-find-input:focus-visible { outline: 1px solid rgba(${ACCENT}, 0.8); outline-offset: -1px; }
-    .hc-find-do {
-      flex: 0 0 auto; padding: 0.3rem 0.7rem;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
-      color: inherit; font: inherit; font-size: 0.85em; cursor: pointer;
-    }
-    .hc-find-do:hover { border-color: rgba(${ACCENT}, 0.8); }
+    .hc-find-input:focus-visible { outline: 1px solid color-mix(in srgb, var(--hc-window-accent) 80%, transparent); outline-offset: -1px; }
     .hc-find-takes {
       display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.4rem;
       margin-top: 0.4rem;
     }
     .hc-find-takes-head {
       font-size: 0.72em; letter-spacing: 0.06em; text-transform: uppercase;
-      color: rgba(${STEEL}, 0.75);
+      color: color-mix(in srgb, var(--hc-tw-steel) 75%, transparent);
     }
     .hc-find-take {
       padding: 0.2rem 0.5rem;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
+      background: rgba(var(--hc-panel-ink), 0.06);
+      border: 1px solid color-mix(in srgb, var(--hc-tw-steel) 30%, transparent); border-radius: var(--hc-radius-control, 2px);
       color: inherit; font: inherit; font-size: 0.78em; cursor: pointer;
     }
-    .hc-find-take:hover { border-color: rgba(${ACCENT}, 0.8); }
-    .hc-find-take:focus-visible { outline: 1px solid rgba(${ACCENT}, 0.8); outline-offset: 1px; }
+    .hc-find-take:hover { border-color: color-mix(in srgb, var(--hc-window-accent) 80%, transparent); }
+    .hc-find-take:focus-visible { outline: 1px solid color-mix(in srgb, var(--hc-window-accent) 80%, transparent); outline-offset: 1px; }
     /* ON IS A STATE, NOT A PRESSED BUTTON — and never a fade: this window may
        not use opacity to say anything, because a dimmed row is how an unknown
        gets read as an absence. */
     .hc-find-take.is-on {
-      border-color: rgba(${ACCENT}, 0.85);
-      background: rgba(${ACCENT}, 0.16);
+      border-color: color-mix(in srgb, var(--hc-window-accent) 85%, transparent);
+      background: color-mix(in srgb, var(--hc-window-accent) 16%, transparent);
     }
-    .hc-find-close {
-      flex: 0 0 auto; display: inline-grid; place-items: center;
-      width: 1.75rem; height: 1.75rem; padding: 0;
-      background: none; border: 0; border-radius: var(--hc-radius-control, 2px);
-      color: rgba(238, 244, 248, 0.62); font: inherit; font-size: 1.125rem;
-      line-height: 1; cursor: pointer;
-    }
-    .hc-find-close:hover { color: #fff; background-color: rgba(255,255,255,0.075); }
 
-    .hc-find-body {
-      flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
-      padding: 0.7rem 0.75rem 1.2rem;
-    }
-    .hc-find-body > p { margin: 0 0 0.5rem; line-height: 1.55; }
     .hc-find-address {
-      font-size: 0.78em; color: rgba(238, 244, 248, 0.45);
+      font-size: 0.78em; color: var(--hc-window-ink-faint);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .hc-find-quiet { color: rgba(238, 244, 248, 0.5); font-size: 0.85em; }
+    .hc-find-quiet { color: var(--hc-window-ink-faint); font-size: 0.85em; }
     .hc-find-local {
       padding: 0.45rem 0.55rem; font-size: 0.92em;
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: 2px;
+      border: 1px solid color-mix(in srgb, var(--hc-tw-steel) 30%, transparent); border-radius: var(--hc-radius-control, 2px);
     }
-    .hc-find-local.is-held { border-color: rgba(${ACCENT}, 0.8); }
+    .hc-find-local.is-held { border-color: color-mix(in srgb, var(--hc-window-accent) 80%, transparent); }
     /* AN UNKNOWN IS NEVER FADED AND NEVER COLLAPSED. Full weight, dashed edge
        — the shape says "a state of the evidence", the opacity says nothing. */
     .hc-find-local.is-unknown, .hc-find-unknown {
-      border: 1px dashed rgba(${STEEL}, 0.65); border-radius: 2px;
-      padding: 0.45rem 0.55rem; color: rgba(238, 244, 248, 0.95);
+      border: 1px dashed color-mix(in srgb, var(--hc-tw-steel) 65%, transparent); border-radius: var(--hc-radius-control, 2px);
+      padding: 0.45rem 0.55rem; color: var(--hc-panel-text);
     }
     .hc-find-count, .hc-find-tally {
       font-size: 0.78em; letter-spacing: 0.08em; text-transform: uppercase;
-      color: rgba(238, 244, 248, 0.55);
+      color: var(--hc-window-ink-faint);
     }
-    .hc-find-tally { color: rgba(${ACCENT}, 0.85); font-variant-numeric: tabular-nums; }
+    .hc-find-tally { color: color-mix(in srgb, var(--hc-window-accent) 85%, transparent); font-variant-numeric: tabular-nums; }
 
     .hc-find-row {
       margin: 0 0 0.55rem; padding: 0.4rem 0.5rem;
-      border: 1px solid rgba(${STEEL}, 0.22); border-radius: 2px;
-      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid color-mix(in srgb, var(--hc-tw-steel) 22%, transparent); border-radius: var(--hc-radius-control, 2px);
+      background: rgba(var(--hc-panel-ink), 0.02);
     }
     /* Same weight as a declared row, deliberately. Only the LEFT EDGE differs,
        and it is a shape (dashed) rather than a dimming. */
-    .hc-find-row.is-unknown { border-left: 3px dashed rgba(${STEEL}, 0.8); }
-    .hc-find-row.is-declared { border-left: 3px solid rgba(${ACCENT}, 0.9); }
-    .hc-find-row.is-absent { border-left: 3px solid rgba(${STEEL}, 0.9); }
-    .hc-find-row.is-asking { border-left: 3px dotted rgba(${STEEL}, 0.6); }
+    .hc-find-row.is-unknown { border-left: 3px dashed color-mix(in srgb, var(--hc-tw-steel) 80%, transparent); }
+    .hc-find-row.is-declared { border-left: 3px solid color-mix(in srgb, var(--hc-window-accent) 90%, transparent); }
+    .hc-find-row.is-absent { border-left: 3px solid color-mix(in srgb, var(--hc-tw-steel) 90%, transparent); }
+    .hc-find-row.is-asking { border-left: 3px dotted color-mix(in srgb, var(--hc-tw-steel) 60%, transparent); }
 
     .hc-find-verdict {
       display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem;
@@ -775,9 +708,9 @@ function ensureStyles(): void {
     .hc-find-mark { font-weight: 600; letter-spacing: 0.08em; }
     .hc-find-key {
       font-family: var(--hc-mono, ui-monospace), monospace;
-      color: rgba(238, 244, 248, 0.55);
+      color: var(--hc-window-ink-faint);
     }
-    .hc-find-why { flex: 1 0 100%; color: rgba(238, 244, 248, 0.8); font-size: 0.95em; }
+    .hc-find-why { flex: 1 0 100%; color: var(--hc-window-ink-quiet); font-size: 0.95em; }
 
     /* The doors, in the shell's two-column list shape. */
     .hc-find-doors {
@@ -788,15 +721,15 @@ function ensureStyles(): void {
     .hc-find-door { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
     .hc-find-door > :first-child {
       font-family: var(--hc-mono, ui-monospace), monospace;
-      color: rgba(238, 244, 248, 0.7);
+      color: var(--hc-window-ink-quiet);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .hc-find-door > :last-child { color: rgba(238, 244, 248, 0.55); }
+    .hc-find-door > :last-child { color: var(--hc-window-ink-faint); }
 
     .hc-find-footer {
       margin-top: 0.6rem; padding-top: 0.5rem; font-size: 0.88em;
-      border-top: 1px solid rgba(${STEEL}, 0.25);
-      color: rgba(238, 244, 248, 0.9);
+      border-top: 1px solid color-mix(in srgb, var(--hc-tw-steel) 25%, transparent);
+      color: var(--hc-panel-text);
     }
   `
   document.head.appendChild(style)

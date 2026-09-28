@@ -6,6 +6,48 @@ button and the same rollovers. Colour is covered by
 GEOMETRY and the CONTROLS. A window that departs from any line here is a bug,
 not a style.
 
+## The tree
+
+Every tool window is one molecule, built from the top down. A window takes
+the base and whichever branch layers it needs; layers compose rather than
+inherit, so a leaf can sit under several branches at once, and where two
+offer the same thing the crossing chooses one explicitly.
+
+```
+tool window                          base layer — core/panels (framework-free)
+│   shell · header (title → own controls → gear → ×) · body · session
+│   (park / unpark / dismiss / close, reached by the Escape policy)
+│   docked: lane · width · grip · gear · reserved edge (DockedPanel, DockInset)
+│   floating: placed by the window, still in the session
+│   Angular adapters: _toolwindow.scss, hcDockedPanel, hcDockInset → the same core
+│
+├── searchable list                  branch: query, normaliser, clear-query dismiss step
+│     aggregate-index · features · tags · aliases · tutorials · notes · host-directory
+├── sectioned (accordion)            branch: one section open, dismiss closes it
+│     aliases · backgrounds · publish · tutorials
+├── drone-rendered                   branch: a behaviour renders it (`X:render {open}`)
+│     observe · aliases · comfy · publish · host-directory · layout-targets · tile-editor
+├── self-owned                       branch: `X:open` / `X:close` / `X:toggle` + `X:state`
+│     tutorials · backgrounds · clipboard · chat · history
+├── framework-free, on the base      mounted with `mountToolWindow` (a behaviour from the hive)
+│     offers · brood · vocabulary · vocabulary-find · sandbox-change · layout-targets
+│     (tile-editor and host-directory dock through `attachDockedPanel` and take its reserved edge)
+└── embedded in another window       branch: waits for its host window's migration
+      providers (inside the chat window, a recorded holdout)
+```
+
+Floating is a placement the base supports (`placement: 'floating'`: outside
+the lane and the one-window rule, still in the session); no window uses it
+today — the five framework-free windows that looked docked but stood outside
+the lane now take their place in it.
+
+A new window starts by finding its branch. If none fits, the new branch is
+drawn here before any window is built on it.
+
+Framework-free windows mount the base with `mountToolWindow(host, options)`
+from `@hypercomb/core` and add only their slice; they never restate the
+shell, the header, the close button or Escape.
+
 ## The shell
 
 - Docked: `<aside hcDockInset="right" hcDockedPanel="<id>" dockSide="right"

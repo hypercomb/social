@@ -62,8 +62,8 @@
 // the same hole.
 
 import {
-  EffectBus, I18N_IOC_KEY, attachDockedPanel, isPhoneViewport,
-  type DockedPanel, type I18nProvider,
+  EffectBus, I18N_IOC_KEY, mountToolWindow,
+  type I18nProvider, type ToolWindow,
 } from '@hypercomb/core'
 import { TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE } from './template-author-effects.js'
 import type { HoleState, TargetsState } from './template-author.drone.js'
@@ -72,16 +72,11 @@ const SURFACE = 'hc-layout-targets'
 const STYLE_ID = 'hc-layout-targets-style'
 const OWNER = '@diamondcoreprocessor.com/LayoutTargetsView'
 
-/** The steel the shell's docked windows are edged in. Restated, not imported —
- *  a module cannot `@use` a shared stylesheet. */
-const STEEL = '126, 182, 214'
-/** The same steel taken deep for a bright theme — what `identity.deepen()`
- *  computes for #7eb6d6, restated for the same reason the steel is. */
-const STEEL_DEEP = '39, 93, 124'
+/** The steel the shell's docked windows are edged in; the base layer takes it
+ *  deep on a bright theme. */
+const STEEL_RGB = [126, 182, 214] as const
 /** The designer's second colour: what is picked, named, or dropped on. */
 const ACCENT = '201, 162, 39'
-/** Whose edge reservation this is — see `#reserve`. */
-const INSET_OWNER = 'layout-targets'
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
@@ -109,7 +104,7 @@ const interpolate = (text: string, params?: Record<string, string | number>): st
 
 export class LayoutTargetsElement extends HTMLElement {
 
-  #panel: HTMLElement | null = null
+  #window: ToolWindow | null = null
   /** The part of the window a render redraws. The header is NOT in it — the
    *  docked-panel primitive pins its gear into the header and its grip onto
    *  the panel, and a render that rebuilt the whole window threw both away on
@@ -121,7 +116,6 @@ export class LayoutTargetsElement extends HTMLElement {
   #state: TargetsState | null = null
   /** The docked-panel primitive behind this window: its lane place, its grip
    *  and its gear. */
-  #dock: DockedPanel | null = null
 
   /** Which hole is being named, as its path joined. Participant-local: what
    *  you are pointing at is not part of the design. */
@@ -134,12 +128,6 @@ export class LayoutTargetsElement extends HTMLElement {
   #draft = ''
 
   #cleanup: (() => void)[] = []
-
-  // What this window reserves of the right edge — see `#reserve`.
-  #observer: ResizeObserver | null = null
-  #offPoll: (() => void) | null = null
-  #frame = 0
-  #timer = 0
 
   connectedCallback(): void {
     ensureStyles()
@@ -178,116 +166,44 @@ export class LayoutTargetsElement extends HTMLElement {
   }
 
   open(): void {
-    if (this.#panel) return
-    const panel = document.createElement('aside')
-    panel.className = 'hc-targets'
-    panel.setAttribute('role', 'dialog')
-    panel.setAttribute('aria-label', t('targets.title', 'Targets'))
-    panel.tabIndex = -1
-    // The hive must not pan or zoom under a window being read.
-    panel.setAttribute('data-consumes-wheel', '')
-    panel.addEventListener('keydown', this.#onKey)
-    panel.appendChild(this.#head())
-    const body = document.createElement('div')
-    body.className = 'hc-targets-body'
-    panel.appendChild(body)
-    this.appendChild(panel)
-    this.#panel = panel
-    this.#body = body
-
-    // A DOCKED TOOL WINDOW, LIKE EVERY OTHER ONE. It was a fixed box pinned
-    // just inboard of whatever else was docked on the right, which is how the
-    // properties, the flex gallery and this window came to stack into one
-    // another. Now it takes a place in the right-hand lane like its siblings,
-    // resizes from its inner edge, carries the same gear, and says what it
-    // takes of the edge so the design pane centres beside it rather than
-    // under it.
-    this.#dock = attachDockedPanel(panel, {
+    if (this.#window) return
+    // A DOCKED TOOL WINDOW, LIKE EVERY OTHER ONE: the base layer
+    // (core/panels/tool-window.ts) gives it the shell, the header, the lane,
+    // the gear, the reserved edge and the session; this window adds its slice.
+    // One Escape step inside it — drop the selection — is its `dismiss`; the
+    // shell's Escape policy does the rest.
+    const win = mountToolWindow(this, {
       id: 'layout-targets',
-      dockSide: 'right',
+      title: t('targets.title', 'Targets'),
+      accent: STEEL_RGB,
+      className: 'hc-targets',
       minWidth: 260,
       maxWidth: 520,
       defaultWidth: 340,
+      dismiss: () => { if (!this.#picked) return false; this.#pick(''); return true },
       onClose: () => this.close(),
     })
-    this.#reserve()
+    // Always present, empty until there is a container to name: the header is
+    // built once, so the subject is a node the render writes into.
+    const subject = face('hc-targets-subject', this.#state?.cell ?? '')
+    win.actions.append(subject)
+    this.#subject = subject
+    this.#window = win
+    this.#body = win.body
 
     EffectBus.emit(TARGETS_VIEW_STATE, { open: true })
     this.#render()
   }
 
   close(): void {
-    if (!this.#panel) return
-    this.#panel.removeEventListener('keydown', this.#onKey)
-    this.#dock?.dispose()
-    this.#dock = null
-    this.#release()
-    this.#panel.remove()
-    this.#panel = null
+    if (!this.#window) return
+    this.#window.dispose()
+    this.#window = null
     this.#body = null
     this.#subject = null
     this.#stage = null
     this.#props = null
     EffectBus.emit(TARGETS_VIEW_STATE, { open: false })
-  }
-
-  /**
-   * WHAT THIS WINDOW TAKES OF THE RIGHT EDGE — the job `hcDockInset` does for
-   * the Angular windows, which a module cannot import.
-   *
-   * The same two rules that directive keeps: a timer races the frame, so a
-   * window opened in a document that is not rendering still reserves; and a
-   * box spanning the viewport (a phone sheet) reserves nothing at all, or the
-   * canvas would be squeezed to zero behind it.
-   */
-  #reserve(): void {
-    const panel = this.#panel
-    if (!panel) return
-    this.#observer = new ResizeObserver(this.#schedule)
-    this.#observer.observe(panel)
-    window.addEventListener('resize', this.#schedule)
-    this.#offPoll = EffectBus.on('viewport:inset-poll', this.#schedule)
-    this.#schedule()
-  }
-
-  readonly #schedule = (): void => {
-    if (this.#frame || this.#timer) return
-    this.#frame = requestAnimationFrame(this.#measure)
-    this.#timer = window.setTimeout(this.#measure, 60)
-  }
-
-  readonly #measure = (): void => {
-    if (this.#frame) { cancelAnimationFrame(this.#frame); this.#frame = 0 }
-    if (this.#timer) { clearTimeout(this.#timer); this.#timer = 0 }
-    const rect = this.#panel?.getBoundingClientRect()
-    const spans = !rect || rect.width <= 0
-      || (rect.left <= 1 && rect.right >= window.innerWidth - 1)
-    const size = !rect || spans || isPhoneViewport()
-      ? 0
-      : Math.max(0, Math.round(window.innerWidth - rect.left))
-    EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'right', size })
-  }
-
-  #release(): void {
-    this.#observer?.disconnect()
-    this.#observer = null
-    window.removeEventListener('resize', this.#schedule)
-    this.#offPoll?.()
-    this.#offPoll = null
-    if (this.#frame) cancelAnimationFrame(this.#frame)
-    if (this.#timer) clearTimeout(this.#timer)
-    this.#frame = 0
-    this.#timer = 0
-    EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'right', size: 0 })
-  }
-
-  /** One level back per press: drop the selection, then close. The same
-   *  cascade every other window in the shell walks. */
-  readonly #onKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return
-    event.stopPropagation()
-    if (this.#picked) { this.#pick(''); return }
-    this.close()
   }
 
   // ── the drawing ─────────────────────────────────────────────────────────
@@ -334,24 +250,6 @@ export class LayoutTargetsElement extends HTMLElement {
     // look like a property of that hole, and hidden it entirely while nothing
     // was selected, which is exactly when you want to see what you have built.
     this.#renderGrow(body)
-  }
-
-  #head(): HTMLElement {
-    const head = document.createElement('header')
-    head.className = 'hc-targets-head'
-    const title = face('hc-targets-title', t('targets.title', 'Targets'))
-    // Always present, empty until there is a container to name: the header is
-    // built once, so the subject is a node the render writes into.
-    const subject = face('hc-targets-subject', this.#state?.cell ?? '')
-    const close = document.createElement('button')
-    close.type = 'button'
-    close.className = 'hc-targets-close'
-    close.textContent = '×'
-    close.setAttribute('aria-label', t('panel.close', 'Close'))
-    close.addEventListener('click', () => this.close())
-    head.append(title, subject, close)
-    this.#subject = subject
-    return head
   }
 
   /**
@@ -731,78 +629,22 @@ function ensureStyles(): void {
   const style = document.createElement('style')
   style.id = STYLE_ID
   style.textContent = `
-    /* THE SAME MATERIAL AS EVERY OTHER TOOL WINDOW, NAMED BY ROLE. A module
-       cannot @use the shared stylesheet, so the recipe is restated — and it
-       names ROLES, never colours. It used to paint from dark literals (a
-       near-black pane, near-white ink), which read on the dark theme and
-       vanished on every bright one. The pane, the ink and the grounds come from
-       the themed tokens on :root now, and the identity is declared here the way
-       tw.panel() declares it: the steel, taken deep under a bright look. */
+    /* The shell, the header, the title, the close and the body are the tool
+       window's base layer (core/panels/tool-window.ts); only this window's
+       slice is here. */
     ${SURFACE} { display: contents; }
     .hc-targets {
-      --acc: ${STEEL};
-      --hc-window-accent: rgb(var(--acc));
-      --hc-window-accent-quiet: rgb(var(--acc));
-      --hc-window-wash: rgba(var(--acc), 0.10);
-      --hc-window-wash-strong: rgba(var(--acc), 0.20);
-      --hc-window-edge: rgba(var(--acc), 0.28);
-      --hc-window-edge-firm: rgba(var(--acc), 0.62);
-      --hc-window-on-accent: rgb(var(--hc-panel-pane));
       /* The designer's second colour — what is picked, named, or dropped on —
          brought down to this ground the way tw.ink() brings a colour down. */
       --hc-targets-mark: color-mix(in srgb, rgb(${ACCENT}), rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
-      position: fixed;
-      top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
-      /* The lane writes the real edge inline — beside the control bar, and
-         inboard of whatever else is docked on this side. */
-      right: 0;
-      bottom: 0;
-      width: 340px; min-width: 260px; max-width: calc(100vw - 1.5rem);
-      box-sizing: border-box; display: flex; flex-direction: column;
-      z-index: 100002;
-      background: rgba(var(--hc-panel-pane), 0.975);
-      backdrop-filter: blur(14px) saturate(1.04);
-      -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border: 0; border-left: 1px solid rgba(var(--acc), 0.38); border-radius: 0;
-      box-shadow: -14px 0 44px rgba(var(--hc-panel-shadow), 0.46);
-      color: var(--hc-panel-text);
-      font-family: var(--hc-mono, system-ui);
-      font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
-      line-height: 1.45; overflow: hidden; outline: none;
-    }
-    :is([data-theme="light"],[data-theme="honey"],[data-theme="bloom"],[data-theme="sherbet"]) .hc-targets { --acc: ${STEEL_DEEP}; }
-    @media (prefers-color-scheme: light) { :root:not([data-theme]) .hc-targets { --acc: ${STEEL_DEEP}; } }
-
-    /* The shared header BAND — the same 2.875rem every docked window uses, so
-       a row of them has one horizon. rem, not em: chrome height must not move
-       when panel content scales. */
-    .hc-targets-head {
-      flex: 0 0 auto; box-sizing: border-box; display: flex; align-items: center;
-      gap: 0.5rem; height: 2.875rem; min-height: 2.875rem; padding: 0 0.75rem;
-      line-height: 1;
-      background: linear-gradient(180deg, rgba(var(--hc-panel-sheen), 0.018), rgba(var(--hc-panel-sheen), 0.006));
-      border-bottom: 1px solid var(--hc-window-edge);
-    }
-    .hc-targets-title {
-      font-weight: 600; font-size: 0.9em; letter-spacing: 0.06em;
-      text-transform: uppercase; color: var(--hc-window-accent);
     }
     .hc-targets-subject {
-      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      min-width: 0; max-width: 12rem; overflow: hidden; text-overflow: ellipsis;
       white-space: nowrap; color: var(--hc-window-ink-quiet);
     }
-    .hc-targets-close {
-      display: inline-grid; place-items: center;
-      width: 1.75rem; height: 1.75rem; padding: 0;
-      background: none; border: 0; border-radius: var(--hc-radius-control, 2px);
-      color: var(--hc-window-ink-faint); font: inherit; font-size: 1.125rem;
-      line-height: 1; cursor: pointer;
-    }
-    .hc-targets-close:hover { color: var(--hc-panel-text); background-color: rgba(var(--hc-panel-ink), 0.075); }
-    .hc-targets-close:focus-visible { outline: 1px solid var(--hc-window-edge-firm); outline-offset: 1px; }
-
-    .hc-targets-body {
-      flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+    /* The stage keeps its place while the properties below it scroll. */
+    .hc-targets > .hc-tw-body {
+      display: flex; flex-direction: column; overflow: hidden; padding: 0;
     }
 
     .hc-targets-quiet {
