@@ -7,7 +7,11 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const SRC = readFileSync(join(__dirname, 'show-cell.drone.ts'), 'utf8')
+// The renderer: show-cell and the branch that reads each tile's face
+// (tile-faces.ts). A rule holds wherever in the renderer its code lives.
+const DRONE = readFileSync(join(__dirname, 'show-cell.drone.ts'), 'utf8')
+const FACES = readFileSync(join(__dirname, 'tile-faces.ts'), 'utf8')
+const SRC = DRONE + '\n' + FACES
 
 const memberBody = (marker: string): string => {
   const lines = SRC.split('\n')
@@ -25,10 +29,10 @@ const memberBody = (marker: string): string => {
 
 describe('show-cell same name across lineages', () => {
   it('restores every label-derived cache from the incoming lineage', () => {
-    const body = memberBody('#enterDerivedLocation = (locationKey: string): void =>')
-    expect(body).toMatch(/locationKey === this\.#derivedLocationKey/)
-    expect(body).toMatch(/#derivedStateByLocation\.set\(this\.#derivedLocationKey/)
-    expect(body).toMatch(/this\.#derivedLocationKey = locationKey/)
+    const body = memberBody('enter = (locationKey: string, restorable: boolean): void =>')
+    expect(body).toMatch(/locationKey === this\.#locationKey/)
+    expect(body).toMatch(/#derivedStateByLocation\.set\(this\.#locationKey/)
+    expect(body).toMatch(/this\.#locationKey = locationKey/)
     expect(body).toMatch(/#derivedStateByLocation\.get\(locationKey\)/)
     expect(body).toMatch(/state\.images/)
     expect(body).toMatch(/state\.external/)
@@ -36,8 +40,8 @@ describe('show-cell same name across lineages', () => {
   })
 
   it('resets before the back-navigation cache can reuse a raw jaime key', () => {
-    const reset = SRC.indexOf('this.#enterDerivedLocation(locationKey)')
-    const backNav = SRC.indexOf('// ── back-nav fast path')
+    const reset = DRONE.indexOf('this.#faces.enter(locationKey, this.#layerCellsCache.has(locationKey))')
+    const backNav = DRONE.indexOf('// ── back-nav fast path')
     expect(reset).toBeGreaterThan(-1)
     expect(backNav).toBeGreaterThan(reset)
   })
@@ -55,7 +59,7 @@ describe('show-cell same name across lineages', () => {
   })
 
   it('uses a recoverable picture projection for legacy large-only tiles', () => {
-    expect(SRC).toMatch(/recoverableTileImageSig\(props, this\.#flat\)/)
+    expect(SRC).toMatch(/recoverableTileImageSig\(props, this\.host\.flat\(\)\)/)
     expect(SRC).not.toMatch(/const smallSig = \(this\.#flat && props\?\.flat\?\.small\?\.image\)/)
   })
 
@@ -65,7 +69,7 @@ describe('show-cell same name across lineages', () => {
   })
 
   it('composes root defaults with outer lineage overrides without indexing the merge', () => {
-    expect(SRC).toMatch(/effectiveProps = this\.#cursorPropsOverride\?\.has\(cell\.label\)[\s\S]*readTilePropertiesAt\(/)
+    expect(SRC).toMatch(/effectiveProps = this\.host\.cursorPropsOverride\(\)\?\.has\(cell\.label\)[\s\S]*readTilePropertiesAt\(/)
     expect(SRC).toMatch(/const props: any = Object\.keys\(effectiveProps\)\.length > 0[\s\S]*effectiveProps[\s\S]*outerProps/)
     expect(SRC).not.toMatch(/seedLayerKeyedEntries\(\[\[headSig, effective/)
     expect(SRC).not.toMatch(/freshIndex\[locationKey\] = effective/)
@@ -73,7 +77,8 @@ describe('show-cell same name across lineages', () => {
 
   it('invalidates prepared lineage projections when a root default changes', () => {
     expect(SRC).toMatch(/onEffect<\{ cell: string \}>\('tile:root-default-changed'/)
-    expect(SRC).toMatch(/#derivedStateByLocation\.values\(\)/)
+    expect(DRONE).toMatch(/this\.#faces\.invalidateEverywhere\(label\)/)
+    expect(FACES).toMatch(/#derivedStateByLocation\.values\(\)/)
     expect(SRC).toMatch(/#layerCellsCache\.clear\(\)/)
   })
 
@@ -111,22 +116,22 @@ describe('show-cell same name across lineages', () => {
   })
 
   it('isolates off-screen and stale async image derivations from the live lineage cache', () => {
-    expect(SRC).toMatch(/const cacheOwner = this\.#derivedLocationKey/)
-    expect(SRC).toMatch(/prepareOnly \? new Map<string, string \| null>\(\) : new Map\(this\.cellImageCache\)/)
+    expect(SRC).toMatch(/const cacheOwner = this\.#locationKey/)
+    expect(SRC).toMatch(/prepareOnly \? new Map<string, string \| null>\(\) : new Map\(this\.images\)/)
     expect(SRC).toMatch(/publishOwnedProjection\(\{/)
-    expect(SRC).toMatch(/commit\(imageCache, this\.cellImageCache, true\)/)
-    expect(SRC).toMatch(/served !== canonical && cacheOwner === this\.#derivedLocationKey/)
+    expect(SRC).toMatch(/commit\(imageCache, this\.images, true\)/)
+    expect(SRC).toMatch(/served !== canonical && cacheOwner === this\.#locationKey/)
   })
 
   it('pins resolved foreground images before geometry can yield to background atlas work', () => {
-    const load = memberBody('private loadCellImages = async (')
+    const load = memberBody('  load = async (')
     const decoded = load.indexOf('await Promise.all(cells.map(loadOne))')
     const pinned = load.indexOf('imageAtlas.setPinned(pins)')
-    const published = load.indexOf('commit(imageCache, this.cellImageCache, true)')
+    const published = load.indexOf('commit(imageCache, this.images, true)')
     expect(decoded).toBeGreaterThan(-1)
     expect(pinned).toBeGreaterThan(decoded)
     expect(published).toBeGreaterThan(pinned)
-    expect(load).toMatch(/if \(!prepareOnly && cacheOwner === this\.#derivedLocationKey\)/)
-    expect(load).toMatch(/this\.renderedCells\.values\(\)/)
+    expect(load).toMatch(/if \(!prepareOnly && cacheOwner === this\.#locationKey\)/)
+    expect(load).toMatch(/this\.host\.renderedCells\(\)/)
   })
 })

@@ -30,7 +30,9 @@ show-cell                          the render pass: synchronize → member names
 │                                           destination prepared, names and images resident), the per-location
 │                                           memo, the warm and bake queues, repair after an atlas eviction.
 │                                           Painting the shade stays with the renderer.
-├── images          ○ inside                per-cell image, border, link and substrate reads; decode
+├── faces           ✓ tile-faces.ts         what each tile shows: its picture and its properties' facts (border,
+│                                           tags, link, substrate, hidden name), cached by label per location;
+│                                           host fills detached, never awaited; a peer's tile from its projection
 ├── fill geometry   ○ inside                cells → the fill quad buffers (buildFillQuadGeometry)
 ├── hover and dive  ○ inside                hover reveal, tile preview, dive into a branch, mark preview
 └── landing         ○ inside                quiet landing: held renders and the pending badge
