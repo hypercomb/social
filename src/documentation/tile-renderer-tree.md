@@ -41,7 +41,9 @@ show-cell                          the render pass: synchronize → member names
 ├── previews        ✓ tile-previews.ts      looks not yet true: the marks' carriers (hover ANY, in hand or dragged
 │                                           ALL) and the tile editor's edit, painted in place, never persisted
 ├── hover           ○ inside                the hovered tile's reveal and opacity (single-cell writes)
-└── landing         ○ inside                quiet landing: held renders and the pending badge
+└── landing         ✓ tile-landing.ts       quiet landing: a background write lands as truth, the paint waits —
+                                            held and counted (writes, not paints) until the tap or the next
+                                            thing the participant does; the write's aftershocks measured, not guessed
 ```
 
 ✓ is a module beside the drone, with its own spec; ○ is still inside
