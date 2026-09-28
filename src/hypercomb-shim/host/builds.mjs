@@ -66,7 +66,9 @@ export const BUILD_SIGNATURE_KIND = 30567
 export const DEFAULT_LABEL = 'host'
 export const STAGED = 'staged'
 /** runtime host-zones.ts DEFAULT_HOST_ZONES: where pools are pulled from. */
-export const DEFAULT_HOSTS = ['jwize.com', 'hypercomb.com']
+export const DEFAULT_HOSTS = (process.env.HYPERCOMB_SEED_HOSTS ?? '').split(',').map(h => h.trim()).filter(Boolean).length
+  ? (process.env.HYPERCOMB_SEED_HOSTS ?? '').split(',').map(h => h.trim()).filter(Boolean)
+  : ['jwize.com', 'hypercomb.com']
 const SIG = /^[a-f0-9]{64}$/
 const OUTPUT_PARTS = ['install', 'host', 'library', 'hostPackage', 'atoms']
 const PARTS = ['install', 'host', 'library', 'hostPackage', 'source']
@@ -493,7 +495,7 @@ export const carryPools = async (dir, { atoms = false } = {}) => {
  * `<pool>/<member>`, and the atoms flat at `<sig>`. What `via` already
  * answers is skipped.
  */
-export const pushToR2 = async ({ bucket = 'hypercomb-content', via = 'https://content.jwize.com', put, fetch: get = fetch, dryRun = false } = {}) => {
+export const pushToR2 = async ({ bucket = process.env.HYPERCOMB_R2_BUCKET || 'hypercomb-content', via = process.env.HYPERCOMB_R2_VIA || 'https://content.jwize.com', put, fetch: get = fetch, dryRun = false } = {}) => {
   const report = { uploaded: 0, present: 0, failed: 0 }
   const upload = async (key, path, name) => {
     const first = (await readFile(path)).subarray(0, 1).toString()

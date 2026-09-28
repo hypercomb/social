@@ -43,6 +43,13 @@ const withAssets = !pure && process.argv.includes('--assets')
 const minify = pure || process.argv.includes('--minify')
 
 const SIG_NAME = /^[0-9a-f]{64}$/i
+// THE SEED HOSTS — who a fresh copy asks first for what it does not hold.
+// The operator's choice, not the code's: `--hosts a.example,b.example` or
+// HYPERCOMB_SEED_HOSTS. A build that names none seeds from Hypercomb's own.
+const hostsAt = process.argv.indexOf('--hosts')
+const seedHosts = String(hostsAt >= 0 ? process.argv[hostsAt + 1] ?? '' : process.env.HYPERCOMB_SEED_HOSTS ?? '')
+  .split(',').map(host => host.trim().toLowerCase()).filter(Boolean)
+if (!seedHosts.length) seedHosts.push('hypercomb.com', 'jwize.com')
 // A real newline, held in a template literal — this file generates JSON and
 // text, and an escape sequence here has been mangled by a shell heredoc once
 // already.
@@ -595,7 +602,7 @@ const result = await build({
   metafile: true,
   define: {
     __HC_BARREL_ENTRIES__: String(barrelEntries), __HC_PURE__: String(pure), __HC_KERNEL__: String(pure),
-    ...(pure ? { __HC_HOST_PACKAGE__: JSON.stringify(hostPackageRoot) } : {}),
+    ...(pure ? { __HC_HOST_PACKAGE__: JSON.stringify(hostPackageRoot), __HC_SEED_HOSTS__: JSON.stringify(seedHosts) } : {}),
   },
   // Bees and their dependencies are fetched at runtime by signature, never
   // bundled. Anything that resolves to an /opfs or bare module specifier is
@@ -678,7 +685,7 @@ if (pure) {
     minify: true,
     logLevel: 'warning',
     metafile: true,
-    define: { __HC_HOST_SIG__: JSON.stringify(hostSig), __HC_LIBRARY_SIG__: JSON.stringify(librarySig) },
+    define: { __HC_HOST_SIG__: JSON.stringify(hostSig), __HC_LIBRARY_SIG__: JSON.stringify(librarySig), __HC_SEED_HOSTS__: JSON.stringify(seedHosts) },
   })
   const kernelBytes = (await stat(resolve(dist, 'main.js'))).size
   const processorBytes = (await stat(resolve(dist, 'hypercomb-core.runtime.js'))).size

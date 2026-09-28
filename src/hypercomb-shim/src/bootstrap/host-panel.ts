@@ -907,7 +907,7 @@ class HostPanelElement extends HTMLElement {
     const search = document.createElement('input')
     search.className = 'gallery-search'
     search.type = 'search'
-    search.placeholder = 'Search creations or a domain · jwize.com camel'
+    search.placeholder = 'Search creations or a domain'
     search.setAttribute('aria-label', 'Search domains and creations')
     search.addEventListener('input', () => { limit = 36; paint() })
     const sources = document.createElement('details')

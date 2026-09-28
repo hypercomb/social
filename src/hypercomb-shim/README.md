@@ -25,6 +25,23 @@ dependencies. It serves bytes that were signed elsewhere.
 
 ## Pure install
 
+**A generic release names its own seed hosts.** Nothing in the minimal host
+depends on GitHub or on any one domain: a fresh copy fetches what it does not
+hold, by signature, from its own origin first and then from its seed hosts,
+and replication (hosts, devices, a disk: `builds.mjs push`, `pull`,
+`backup`) is the backup strategy. The seed hosts are one build setting,
+baked into the kernel and the host bundle like the host package is:
+
+```bash
+node build.mjs --pure --hosts hive.example.org,mirror.example.net
+HYPERCOMB_SEED_HOSTS=hive.example.org node build.mjs --pure   # the same
+```
+
+A build that names none seeds from `hypercomb.com` and `jwize.com`. The
+operator tools read the same `HYPERCOMB_SEED_HOSTS` (and `HYPERCOMB_R2_BUCKET`,
+`HYPERCOMB_R2_VIA` for `push --r2`). The welcome card's footer links are
+defaults an operator replaces by staging their own.
+
 `npm run build:pure` (or `npm run build:shim:pure` from `src/`) builds the cold
 harness: core, the signature fetcher, the runner, and one pinned ESM host UI.
 The root shows square creation tiles from the `host:offerings` meaning pool;

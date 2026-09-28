@@ -17,8 +17,12 @@
 
 declare const __HC_HOST_SIG__: string
 declare const __HC_LIBRARY_SIG__: string
+/** The hosts a fresh copy asks first — the operator's choice, baked in at
+ *  build (`--hosts` / HYPERCOMB_SEED_HOSTS). Hypercomb's own only when the
+ *  build names none. */
+declare const __HC_SEED_HOSTS__: readonly string[] | undefined
 
-const DEFAULT_HOSTS = ['hypercomb.com', 'jwize.com']
+const DEFAULT_HOSTS: readonly string[] = typeof __HC_SEED_HOSTS__ !== 'undefined' ? __HC_SEED_HOSTS__ : ['hypercomb.com', 'jwize.com']
 const PROCESSOR = '/hypercomb-core.runtime.js'
 // Verified atoms, served by the service worker at a stable address so the
 // browser keeps their compiled code (public/hypercomb.worker.js, same name).

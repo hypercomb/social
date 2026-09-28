@@ -54,7 +54,8 @@ export type RuntimeInitializerOptions = {
 // HYPERCOMB_DEV_HOST still overrides the host; an explicit clear still empties
 // the secret. The mesh relay's own loopback default (nostr-mesh.drone) lands
 // on the same jwize.com relay.
-const DEV_DEFAULT_HOST = 'jwize.com'
+declare const __HC_SEED_HOSTS__: readonly string[] | undefined
+const DEV_DEFAULT_HOST = typeof __HC_SEED_HOSTS__ !== 'undefined' && __HC_SEED_HOSTS__[0] ? __HC_SEED_HOSTS__[0] : 'jwize.com'
 const DEV_DEFAULT_SECRET = 'downtown'
 
 // Reset the former flat-top rollout once, then preserve every explicit

@@ -62,7 +62,13 @@ const COMMUNITY_HOSTS_POOL = 'community:hosts'
 // minimal install resolves everything else from — packages and their
 // decorations (fonts, locales, UI) by signature — so the GitHub install can
 // stay a loader and nothing more.
-export const DEFAULT_HOST_ZONES: readonly string[] = ['jwize.com', 'hypercomb.com']
+//
+// A GENERIC RELEASE CHOOSES ITS OWN. The minimal host bakes the operator's
+// seed hosts in at build (`--hosts` / HYPERCOMB_SEED_HOSTS → __HC_SEED_HOSTS__);
+// the list above is only the fallback for a build that names none.
+declare const __HC_SEED_HOSTS__: readonly string[] | undefined
+export const DEFAULT_HOST_ZONES: readonly string[] =
+  typeof __HC_SEED_HOSTS__ !== 'undefined' ? __HC_SEED_HOSTS__ : ['jwize.com', 'hypercomb.com']
 
 export const hostZone = (raw: unknown): string => {
   const text = String(raw ?? '').trim().toLowerCase()
