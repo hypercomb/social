@@ -26,7 +26,10 @@ show-cell                          the render pass: synchronize → member names
 │                                           (session only, never persisted) → frame; placing a new tile
 ├── mesh            ✓ tile-mesh.ts          the kind-29010 path: this page's public tiles out, the peers'
 │                                           tiles in (newest snapshot wins), sync requests; gated by room + secret
-├── readiness       ○ inside                the children-readiness shade, child warms, bakes, repair
+├── readiness       ✓ tile-readiness.ts     is the inside of a branch ready: the verdict (children local,
+│                                           destination prepared, names and images resident), the per-location
+│                                           memo, the warm and bake queues, repair after an atlas eviction.
+│                                           Painting the shade stays with the renderer.
 ├── images          ○ inside                per-cell image, border, link and substrate reads; decode
 ├── fill geometry   ○ inside                cells → the fill quad buffers (buildFillQuadGeometry)
 ├── hover and dive  ○ inside                hover reveal, tile preview, dive into a branch, mark preview
