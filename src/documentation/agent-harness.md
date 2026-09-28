@@ -106,7 +106,7 @@ policy; the loop reads the record; nothing in the loop is a constant any more.
 
 ### Where it lives
 
-- Pool of meaning **`sign('harness')`** at the OPFS root, one sig-named file
+- Pool of meaning **`sign('agent:harness')`** at the OPFS root, one sig-named file
   per harness, addressed only through `Store.poolSignature('harness')`.
 - **The active harness is a pointer**, two levels: the device default
   (`hc:harness`, a signature) and a per-conversation mark on the thread
@@ -116,7 +116,7 @@ policy; the loop reads the record; nothing in the loop is a constant any more.
   shipped default changes (new content, new signature; the old one stays).
 - **Arrives from the network like a theme**: `registerPublishedPool({meaning:
   'harness'})` — every host the participant learns is probed once at
-  `<origin>/<sign('harness')>`, members are sig-verified, and a third-party
+  `<origin>/<sign('agent:harness')>`, members are sig-verified, and a third-party
   record is HELD (visible, off) until the participant turns it on
   ([llm-provider plug-in: the hold](model-mediation-and-the-training-prompt.md)).
 
@@ -185,7 +185,7 @@ by its receipts, not its description.
 ## 8. Execution order
 
 1. **Lift the constants into the record.** Mint `default` from today's
-   values into `sign('harness')` at boot (seed like themes); the chat window
+   values into `sign('agent:harness')` at boot (seed like themes); the chat window
    reads `leg`, `budget`, `reads`, `handover`, `review` from it. No behaviour
    change; the harness exists.
 2. **Announce every stage.** The seven `agent:*` effects with their facts;

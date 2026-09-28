@@ -61,12 +61,12 @@ export type WorkBudget = { readonly rounds: number; readonly tokens: number }
 
 export const workBudget = (read: (key: string) => string | null = key => {
   try { return globalThis.localStorage?.getItem(key) ?? null } catch { return null }
-}): WorkBudget => {
+}, base: WorkBudget = WORK_BUDGET): WorkBudget => {
   const of = (key: string, fallback: number): number => {
     const n = Number(read(key))
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
   }
-  return { rounds: of(WORK_BUDGET_ROUNDS_KEY, WORK_BUDGET.rounds), tokens: of(WORK_BUDGET_TOKENS_KEY, WORK_BUDGET.tokens) }
+  return { rounds: of(WORK_BUDGET_ROUNDS_KEY, base.rounds), tokens: of(WORK_BUDGET_TOKENS_KEY, base.tokens) }
 }
 
 /** Tokens a text costs a model, near enough to fit a window by. */

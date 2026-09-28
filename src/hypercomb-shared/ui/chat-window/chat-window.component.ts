@@ -168,6 +168,7 @@ import {
   leftFromProse,
   LEG_ROUNDS,
   workBudget,
+  WORK_BUDGET,
   type WorkBudget,
   MAX_HANDOFFS,
   MAX_WORK_ROUNDS,
@@ -1250,6 +1251,31 @@ const MAX_OBSERVATION_CONTEXT_CHARS = 24_000
 /** How old a stored handover may be and still resume by itself when the
  *  conversation is reopened. Older, the participant says continue. */
 const RESUME_LEFT_MS = 60 * 60 * 1000
+
+// THE HARNESS (documentation/agent-harness.md). The loop's policy is a
+// `harness@1` record essentials keeps in the `harness` pool; the window
+// reads the ACTIVE one at each send. The constants above are the fallback
+// for an older essentials build with no harness, and they MUST equal the
+// shipped default record — step 1 changes where the numbers live, not
+// what they are.
+const HARNESS_IOC_KEY = '@hypercomb.social/Harness'
+type HarnessRecordLike = {
+  readonly name: string
+  readonly leg: { readonly rounds: number; readonly reserveTokens: number; readonly keepVerbatim: number }
+  readonly budget: { readonly rounds: number; readonly tokens: number }
+  readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number }
+  readonly handover: { readonly fence: string; readonly resumeSeconds: number; readonly proseFallback: boolean }
+}
+type HarnessLike = { readonly active?: HarnessRecordLike }
+const SHIPPED_HARNESS: HarnessRecordLike = {
+  name: 'default',
+  leg: { rounds: LEG_ROUNDS, reserveTokens: 8_000, keepVerbatim: 4 },
+  budget: WORK_BUDGET,
+  reads: { pageChars: READ_PAGE_CHARS, roundsWhenAsked: MAX_OBSERVATION_ROUNDS, charsWhenAsked: MAX_OBSERVATION_CONTEXT_CHARS },
+  handover: { fence: 'hypercomb-continue', resumeSeconds: RESUME_LEFT_MS / 1000, proseFallback: true },
+}
+const activeHarness = (): HarnessRecordLike =>
+  (ioc()?.get(HARNESS_IOC_KEY) as HarnessLike | undefined)?.active ?? SHIPPED_HARNESS
 const hypercombPlanQueue = new HypercombPlanQueue()
 
 /** How far back a pending ask record may reach and still be shown as waiting.
@@ -6046,7 +6072,7 @@ export class ChatWindowComponent implements OnDestroy {
   #resumeLeft(convoId: string, turns: readonly { readonly role: string; readonly at: number; readonly left?: string; readonly spent?: { readonly rounds: number; readonly tokens: number } }[]): void {
     const last = turns[turns.length - 1]
     if (!last || last.role !== 'assistant' || !last.left) return
-    if (Date.now() - last.at > RESUME_LEFT_MS || this.#outstanding.has(convoId)) return
+    if (Date.now() - last.at > activeHarness().handover.resumeSeconds * 1000 || this.#outstanding.has(convoId)) return
     // The running total rides on the handover, so a reload does not hand
     // the request a fresh purse.
     if (last.spent && !this.#task.has(convoId)) this.#task.set(convoId, { ...last.spent, legs: 0 })
@@ -6329,7 +6355,11 @@ export class ChatWindowComponent implements OnDestroy {
       let readChars = 0
       let lastRound = false
       let budgetSpent = false
-      const budget = workBudget()
+      // The record says the policy; a number the participant typed on this
+      // device (hc:chat:budget:*) still overrides it — their device, their
+      // purse.
+      const harnessNow = activeHarness()
+      const budget = workBudget(undefined, harnessNow.budget)
       const tokensOf = (list: readonly { readonly content: string }[]): number =>
         list.reduce((sum, entry) => sum + estimateTokens(entry.content), 0)
       // THE WORK STAYS WITH WHOEVER STARTED IT. The first round may be routed
@@ -6483,11 +6513,11 @@ export class ChatWindowComponent implements OnDestroy {
         // message" and the model stalled). The refusal marks the leg as its
         // last round, so the model hands over and the next leg reads with a
         // fresh budget from where this one stopped.
-        if (!readsOpen && readRounds >= MAX_OBSERVATION_ROUNDS) {
+        if (!readsOpen && readRounds >= harnessNow.reads.roundsWhenAsked) {
           lastRound = true
           throw new WorkRefused('this stretch has used its reads; hand the work over — say what you found and what is left — and the next stretch reads on with a fresh budget')
         }
-        const budget = hiveAccess?.budget?.(providerId) || (readsOpen ? Number.POSITIVE_INFINITY : MAX_OBSERVATION_CONTEXT_CHARS)
+        const budget = hiveAccess?.budget?.(providerId) || (readsOpen ? Number.POSITIVE_INFINITY : harnessNow.reads.charsWhenAsked)
         const remaining = budget - readChars
         if (remaining < 1_500) {
           lastRound = true
@@ -6519,7 +6549,7 @@ export class ChatWindowComponent implements OnDestroy {
           // reads, and never past a page — so reading never overflows it.
           const windowTokens = (model && router.contextLengthForModel?.(model)) || 128_000
           const room = Math.max(0, windowTokens - 8_000 - estimateTokens(system) - tokensOf(messages)) * 3 / 2
-          const perReadBytes = Math.max(1_024, Math.min(READ_PAGE_CHARS, Math.floor(Math.min(remaining - 512, room) / plan.observations.length)))
+          const perReadBytes = Math.max(1_024, Math.min(harnessNow.reads.pageChars, Math.floor(Math.min(remaining - 512, room) / plan.observations.length)))
           const receipt = await executeHypercombObservationPlan(plan, treeReader, {
             maxDepth: 2,
             maxNodes: 48,
@@ -7021,7 +7051,7 @@ export class ChatWindowComponent implements OnDestroy {
           // would be the old cap wearing a new name.
           const left = work.left
             ?? (work.request ? `carry on from: ${work.request.lines.join(' · ').slice(0, 200)}` : undefined)
-            ?? (lastRound ? leftFromProse(work.prose) : undefined)
+            ?? (lastRound && harnessNow.handover.proseFallback ? leftFromProse(work.prose) : undefined)
           if (left) {
             const task = component.#task.get(convoId)
             component.#turnMeta.set(convoId, {
@@ -7147,9 +7177,9 @@ export class ChatWindowComponent implements OnDestroy {
           estimateTokens(system) + tokensOf(messages), budget,
         )
         const window = (roundModel && router.contextLengthForModel?.(roundModel)) || 128_000
-        const room = (): boolean => estimateTokens(system) + tokensOf(messages) < window - 8_000
-        if (!room()) messages.splice(0, messages.length, ...foldWorkLedger(messages, workStart) as typeof messages)
-        if (spent || lastRound || rounds >= LEG_ROUNDS || !room()) {
+        const room = (): boolean => estimateTokens(system) + tokensOf(messages) < window - harnessNow.leg.reserveTokens
+        if (!room()) messages.splice(0, messages.length, ...foldWorkLedger(messages, workStart, harnessNow.leg.keepVerbatim) as typeof messages)
+        if (spent || lastRound || rounds >= harnessNow.leg.rounds || !room()) {
           messages[messages.length - 1] = { role: 'user', content: `${reply}\n\n${lastRoundMessage(message)}` }
           lastRound = true
           budgetSpent = spent
