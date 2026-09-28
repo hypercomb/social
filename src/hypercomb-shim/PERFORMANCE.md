@@ -36,6 +36,8 @@ comparison holds; the absolute numbers do not transfer.
 | 2026-09-28 | `ee559ce9d6e6` | 7 tiles, drawn in software | 8038 vs 13800 ms | 8310 vs 13800 ms | 6479 vs 12091 ms | 3185 vs 5351 ms | 67 vs 67 ms / 13 vs 18 % | 83 vs 92 MB | 4× — PASS; idle blocking 51 vs 419 ms / 10 s |
 | 2026-09-28 | `4259fd754f88` | 7 tiles, drawn in software | 4129 vs 5461 ms | 4129 vs 5461 ms | 3438 vs 4646 ms | 1385 vs 2355 ms | 33 vs 33 ms / 0.6 vs 0.4 % | 90 vs 98 MB | 1× — PASS |
 | 2026-09-28 | `4259fd754f88` | 7 tiles, drawn in software | 8615 vs 14124 ms | 8615 vs 14124 ms | 6579 vs 11692 ms | 3449 vs 5134 ms | 67 vs 67 ms / 16 vs 17 % | 83 vs 100 MB | 4× — PASS; idle blocking 222 vs 471 ms / 10 s |
+| 2026-09-28 | `33c8d74e7636` | 7 tiles, drawn in software | 4012 vs 5232 ms | 4012 vs 5232 ms | 3316 vs 4412 ms | 1110 vs 1790 ms | 33 vs 33 ms / 0.2 vs 0.7 % | 84 vs 93 MB | 1× — PASS; idle blocking 0 vs 52 ms / 10 s |
+| 2026-09-28 | `33c8d74e7636` | 7 tiles, drawn in software | 8632 vs 14523 ms | 8632 vs 14523 ms | 6729 vs 12079 ms | 3547 vs 5226 ms | 50 vs 67 ms / 12 vs 24 % | 84 vs 88 MB | 4× — PASS; idle blocking 151 vs 725 ms / 10 s |
 
 Minimal first, Angular second.
 
@@ -53,6 +55,7 @@ Minimal first, Angular second.
 | 2026-09-27 | show-cell cleaned (package `427ca7b83744`): 332 dead lines gone, a render lock no longer released early, five timers and two listeners no longer outlive the drone | 3880 ms | 3350 ms | tiles on screen 3891 ms (was 3993 ms for `310e976a049b` in an earlier session, not an A/B in one run) | same or better |
 | 2026-09-28 | the tool-window base layer in core (package `ee559ce9d6e6`): six framework-free windows on one chrome, one stylesheet, one edge reservation in `DockedPanel`; the seed hosts a build setting | 4180 ms (1×), 8038 ms (4×) | 3458 ms (1×), 6479 ms (4×) | 1× tiles on screen +289 ms against the cleanup's quiet run, Angular +288 ms in the same run: machine drift, not the change. 4× tiles 8310 ms (was 8160 ms for `310e976a049b`); idle blocking 51 vs 415 ms before | same |
 | 2026-09-28 | show-cell's first branches drawn out (package `4259fd754f88`): narrowing, membership (+ packed visuals), order, mesh — modules beside the drone, composed through host interfaces | 4129 ms (1×), 8615 ms (4×) | 3438 ms (1×), 6579 ms (4×) | 1× tiles −51 ms against `ee559ce9d6e6`; 4× +305 ms with Angular +324 ms in the same run (machine drift, ratio 0.61 vs 0.60) | same |
+| 2026-09-28 | readiness, faces and fill geometry drawn out of show-cell (package `33c8d74e7636`) | 4012 ms (1×), 8632 ms (4×) | 3316 ms (1×), 6729 ms (4×) | 1× tiles −117 ms against `4259fd754f88`, boot blocking −275 ms; 4× +17 ms (Angular +399 ms in the same run) | same or better |
 
 Adding a row: run the gate (and `--rate 4` when boot or rendering moved),
 then add the change's line here in the same commit.

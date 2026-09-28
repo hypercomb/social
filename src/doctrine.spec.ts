@@ -1564,10 +1564,10 @@ describe('doctrine ratchets', () => {
     // leaving for a module named for what it means, so the hive's drill-down
     // from the \`tiles\` spot reads as the design does
     // (documentation/tile-renderer-tree.md: membership, narrowing, order,
-    // mesh, readiness and faces are out). Until then this file may only get smaller: new tile
+    // mesh, readiness, faces and fill geometry are out). Until then this file may only get smaller: new tile
     // behaviour goes in its own module.
     const SHOW_CELL = join(ROOT, 'hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts')
-    const CEILING = 7997
+    const CEILING = 7758
     const lines = readFileSync(SHOW_CELL, 'utf8').split('\n').length
     expect(lines, `show-cell.drone.ts grew to ${lines} lines (ceiling ${CEILING}). Put the new behaviour in a module of its own.`).toBeLessThanOrEqual(CEILING)
     expect(lines, `show-cell.drone.ts shrank to ${lines} lines. Lower CEILING to ${lines} so the ratchet clicks.`).toBeGreaterThan(CEILING - 50)

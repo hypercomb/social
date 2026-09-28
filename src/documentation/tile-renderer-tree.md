@@ -33,7 +33,9 @@ show-cell                          the render pass: synchronize → member names
 ├── faces           ✓ tile-faces.ts         what each tile shows: its picture and its properties' facts (border,
 │                                           tags, link, substrate, hidden name), cached by label per location;
 │                                           host fills detached, never awaited; a peer's tile from its projection
-├── fill geometry   ○ inside                cells → the fill quad buffers (buildFillQuadGeometry)
+├── fill geometry   ✓ tile-fill-geometry.ts the tiles as the GPU draws them: one quad per tile and every
+│                                           attribute the hex shader reads, asked of the renderer's look;
+│                                           pure — and the key that says when a bake is stale
 ├── hover and dive  ○ inside                hover reveal, tile preview, dive into a branch, mark preview
 └── landing         ○ inside                quiet landing: held renders and the pending badge
 ```

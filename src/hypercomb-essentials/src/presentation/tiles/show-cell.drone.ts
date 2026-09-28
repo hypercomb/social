@@ -1,6 +1,7 @@
 // pixi/show-cell.drone.ts — the tile renderer's root. It runs the render
 // pass and composes the branches drawn out beside it (membership, narrowing,
-// order, mesh, readiness, faces — documentation/tile-renderer-tree.md). A new tile behaviour
+// order, mesh, readiness, faces, fill geometry —
+// documentation/tile-renderer-tree.md). A new tile behaviour
 // is a branch of its own, never more lines here.
 import { Drone, EffectBus, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
 import type { I18nProvider, UsageRanker } from '@hypercomb/core'
@@ -42,6 +43,7 @@ import { resolveChildNames } from './layer-membership.js'
 import { TileMesh, type MeshApi } from './tile-mesh.js'
 import { CHILD_SHADE, TileReadiness } from './tile-readiness.js'
 import { TileFaces } from './tile-faces.js'
+import { buildFillQuad, fillKey, type TileLook } from './tile-fill-geometry.js'
 import { TileOrder, type ReferenceDraftPreview } from './tile-order.js'
 import { adoptPackedVisual, packedVisual, type PackedVisualEntry } from './packed-visuals.js'
 
@@ -172,16 +174,6 @@ function isLauncherLocation(segs: readonly unknown[]): boolean {
   return !!group && group.openDirectly !== true
 }
 
-/** Map a launch group's shape id (from its `launch:target` decoration) to the
- *  shader's aShapeMode value: 0 = hexagon · 2 = Space Invader (games).
- *  Unknown / empty → hexagon, so a normal hive tile (no launch decoration) and
- *  any future group default to the plain shape.
- *  (Help tiles carry no shape — hexagons. RETIRED silhouettes fall through to
- *  hexagon here, no migration needed: 'keycap', and 'flower-pot' — the
- *  websites cloud, phased out; 2 stays put so games' decorations keep working.) */
-function launchShapeToMode(shape: string): number {
-  return shape === 'space-invader' ? 2 : 0
-}
 
 /** Cold-steel border (126,182,214 → 0..1) for the clustered-help category
  *  TITLE tiles, so a header reads as a header without any new tile shape —
@@ -203,15 +195,6 @@ const WITNESSED_BORDER: [number, number, number] = [0.302, 0.365, 0.447]
  *  the COLLECTED green. Prominent by design: taking must read as taking
  *  at the moment of the gesture, not a beat later. */
 const WAND_TAKING_BORDER: [number, number, number] = [1.0, 0.83, 0.42]
-/** Cold grey-blue for a tile that more than one participant holds, mixed into
- *  its own border while YOUR version is the one showing. It marks depth, not
- *  ownership — the moment you roll onto a participant the border takes that
- *  publisher's identity hue instead, so the two readings never overlap. */
-const STACK_BORDER: [number, number, number] = [0.62, 0.68, 0.78]
-/** How much of STACK_BORDER a stacked tile takes. Enough to read as "there is
- *  something under this one" across a page, well short of a state change — a
- *  tile you can roll is still an ordinary tile. */
-const STACK_BORDER_MIX = 0.5
 /** How far a launcher tile may wander while drifting, as a fraction of the hex
  *  circumradius. Small on purpose: the drifted tile must stay inside its home
  *  hex's pointer→axial catchment so clicking the floating tile still opens its
@@ -219,29 +202,6 @@ const STACK_BORDER_MIX = 0.5
  *  ~0.87·spacing neighbour boundary. */
 const LAUNCHER_DRIFT_FRACTION = 0.18
 
-/** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
-function labelToRgb(label: string): [number, number, number] {
-  let hash = 5381
-  for (let i = 0; i < label.length; i++) hash = ((hash << 5) + hash + label.charCodeAt(i)) | 0
-  hash = hash >>> 0
-
-  const hue = (hash % 360) / 360
-  const sat = 0.5
-  const lit = 0.6
-
-  const c = (1 - Math.abs(2 * lit - 1)) * sat
-  const x = c * (1 - Math.abs(((hue * 6) % 2) - 1))
-  const m = lit - c / 2
-  let r = 0, g = 0, b = 0
-  const sector = (hue * 6) | 0
-  if (sector === 0)      { r = c; g = x; b = 0 }
-  else if (sector === 1) { r = x; g = c; b = 0 }
-  else if (sector === 2) { r = 0; g = c; b = x }
-  else if (sector === 3) { r = 0; g = x; b = c }
-  else if (sector === 4) { r = x; g = 0; b = c }
-  else                   { r = c; g = 0; b = x }
-  return [r + m, g + m, b + m]
-}
 
 
 type PixiHostApi = {
@@ -7214,256 +7174,57 @@ export class ShowCellDrone extends Drone {
     return true
   }
 
-  private buildCellsKey = (cells: Cell[]): string => {
-    // NO ATLAS EVICTION GENERATIONS IN HERE. Baked UVs do go stale when an
-    // atlas slot is wiped or reused, and that still forces a rebuild — but the
-    // signal lives in #bakedImageAtlasGen / #bakedLabelAtlasGen, checked
-    // separately by applyGeometry. This key describes the CELLS, and it is
-    // recomputed by paths that only touched one attribute
-    // (#repaintReadinessInPlace, #tryInPlaceCellUpdate); a generation folded in
-    // here is a rebake those paths can mark as done without doing it, which is
-    // how tiles ended up with a label band and no name inside it. Keep them apart.
-    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}|`
-    // Fold in whether each cell's image is CURRENTLY resolvable in the
-    // atlas. The sig alone is not enough: an image that arrives late (host
-    // fill, back-nav refill, eviction reload) lands in a FRESH slot, which
-    // bumps no eviction generation — without this bit the key stays
-    // identical and applyGeometry skips the rebuild, leaving hasImage=0
-    // baked in the buffer forever (tile renders label-only although the
-    // atlas holds its image).
-    for (const c of cells) {
-      const ia = c.imageSig && this.imageAtlas?.hasImage(c.imageSig) ? 1 : 0
-      const pf = referenceTargetForLabel(c.label) !== null ? 1 : 0
-      // Readiness-shade bit: shade can flip with an UNCHANGED imageSig/ia
-      // (fill concluded empty → #fillMissedSigs, decode failure) — folding
-      // it in lets the next natural repaint rebake the released shade.
-      const sh = this.#cellIsShaded(c) ? 1 : 0
-      // Dormant-launcher bit: a roster flip changes a tile's face with every
-      // other field unchanged, so without it the dim would never be baked.
-      const dm = this.#dormantLaunchLabels.has(c.label) ? 1 : 0
-      s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${ia}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}:${pf}:${sh}:${dm}|`
-    }
-    return s
+  /** The identity of a baked geometry (tile-fill-geometry.ts fillKey).
+   *  NO ATLAS EVICTION GENERATIONS IN HERE: those live in #bakedImageAtlasGen /
+   *  #bakedLabelAtlasGen, checked separately by applyGeometry — a path that
+   *  recomputes this key after touching one attribute must never be able to
+   *  mark a rebake done without doing it. */
+  private buildCellsKey = (cells: Cell[]): string => fillKey(cells, this.#look)
+
+  /** How each tile looks right now, for the geometry (tile-fill-geometry.ts). */
+  readonly #look: TileLook = {
+    flat: () => this.#flat,
+    pivot: () => this.#pivot,
+    onLauncherPage: () => isLauncherLocation(this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []),
+    revealLabel: () => this.#hoverRevealLabel,
+    hasImage: sig => !!this.imageAtlas?.hasImage(sig),
+    imageUV: sig => this.imageAtlas?.getImageUV(sig) ?? null,
+    labelUV: (label, ownPage) => this.atlas!.getLabelUV(
+      ownPage && this.#pendingCellMutations.has(label) && !this.atlas!.hasLabel(label) ? PENDING_CELL_LABEL : label,
+    ),
+    hidesName: (hideText, hasImage) => this.#hidesName(hideText, hasImage),
+    isHiddenItem: label => (this.#showHiddenItems && this.#currentHiddenSet.has(label)) || this.#dormantLaunchLabels.has(label),
+    isDormant: label => this.#dormantLaunchLabels.has(label),
+    peerPubkey: label => this.#peerPubkeyByLabel.get(label),
+    spotlight: () => this.#spotlightPubkey,
+    stackDepth: label => this.#stackDepthByLabel.get(label) ?? 0,
+    shadeValue: cell => this.#shadeValueFor(cell as Cell),
+    isShaded: cell => this.#cellIsShaded(cell as Cell),
+    isPortal: label => referenceTargetForLabel(label) !== null,
+    shapeOf: label => launchShapeForLabel(label),
   }
 
-  private axialToPixel = (q: number, r: number, s: number, flat = false) => flat
-    ? { x: 1.5 * s * q, y: Math.sqrt(3) * s * (r + q / 2) }
-    : { x: Math.sqrt(3) * s * (q + r / 2), y: s * 1.5 * r }
-
-  /** `foreign` — the cells belong to ANOTHER layer (a dive): read nothing
-   *  location-scoped for them (selection, shade, peers, hidden dimming,
-   *  launcher shapes, the page's hover) and overwrite none of the page's
+  /** Build the page's (or, `foreign`, a dive's) fill geometry
+   *  (tile-fill-geometry.ts). `foreign` — the cells belong to ANOTHER layer:
+   *  read nothing location-scoped for them and overwrite none of the page's
    *  buffer bookkeeping; portals and the hover-reveal come from the caller. */
   private buildFillQuadGeometry(
     cells: Cell[], r: number, gap: number, hw: number, hh: number,
     foreign?: { portals: ReadonlySet<string>; reveal: string | null },
   ): Geometry {
-    const spacing = r + gap
-
-    // Launcher silhouettes exist ONLY on launch-group aggregator pages. The
-    // shape index is keyed by label alone, and a hive tile can share a label
-    // with a launcher cell (the root tile "susan" vs the websites launcher
-    // "susan") — resolving shapes off `agg-` pages leaked the group theme
-    // onto normal hive tiles. Gate here, the one place aShapeMode is baked.
-    const gateSegs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
-    const onLauncherPage = !foreign && isLauncherLocation(gateSegs)
-    const revealLabel = foreign ? foreign.reveal : this.#hoverRevealLabel
-
-    const pos = new Float32Array(cells.length * 8)
-    const uv = new Float32Array(cells.length * 8)
-    const labelUV = new Float32Array(cells.length * 16)
-    const imageUV = new Float32Array(cells.length * 16)
-    const hasImage = new Float32Array(cells.length * 4)
-    const heat = new Float32Array(cells.length * 4)
-    const identityColor = new Float32Array(cells.length * 12)
-    const branch = new Float32Array(cells.length * 4)
-    const borderColor = new Float32Array(cells.length * 12)
-    const cellIndex = new Float32Array(cells.length * 4)
-    const divergence = new Float32Array(cells.length * 4)
-    const unshared = new Float32Array(cells.length * 4)
-    // Readiness shade — 1 while the cell's bytes are still arriving (see
-    // #cellIsShaded). Brightening is an attribute flip on the heal repaint,
-    // never a geometry change, so nothing moves when a tile becomes ready.
-    const shaded = new Float32Array(cells.length * 4)
-    // Per-tile launcher silhouette (0 hex · 2 invader; 1 retired) — lets a
-    // mixed launch-group page render each group's own shape without sharing.
-    const shapeAttr = new Float32Array(cells.length * 4)
-    // Per-tile portal flag — a reference tile (doorway to another lineage) gets
-    // the magical hover shimmer instead of the plain pathway/leaf ring.
-    const portal = new Float32Array(cells.length * 4)
-    const idx = new Uint32Array(cells.length * 6)
-
-    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0, pp = 0
-    let ci = 0
-
-    if (!foreign) this.#shadedLabels.clear()
-
-    for (const c of cells) {
-      const { x, y } = this.axialToPixel(c.q, c.r, spacing, this.#flat)
-
-      const x0 = x - hw, x1 = x + hw
-      const y0 = y - hh, y1 = y + hh
-
-      pos.set([x0, y0, x1, y0, x1, y1, x0, y1], pv)
-      pv += 8
-
-      uv.set([0, 0, 1, 0, 1, 1, 0, 1], uvp)
-      uvp += 8
-
-      const imgUV = c.plain ? null : (c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null)
-
-      // label UV: collapse to [0,0,0,0] when hideText + image present so the
-      // shader samples a transparent corner and the label is effectively
-      // hidden. The hovered tile is exempt — it reveals its name — so a
-      // rebuild mid-hover does not blink the text back off, and TEXT-ONLY mode
-      // exempts every tile (#hidesName): with no image drawn there is nothing
-      // to hide behind, so a hidden name comes back for as long as the mode is on.
-      const atlasLabel = !foreign && this.#pendingCellMutations.has(c.label) && !this.atlas!.hasLabel(c.label)
-        ? PENDING_CELL_LABEL
-        : c.label
-      const ruv = (this.#hidesName(c.hideText, !!imgUV) && c.label !== revealLabel)
-        ? { u0: 0, v0: 0, u1: 0, v1: 0 }
-        : this.atlas!.getLabelUV(atlasLabel)
-      for (let i = 0; i < 4; i++) {
-        labelUV.set([ruv.u0, ruv.v0, ruv.u1, ruv.v1], luvp)
-        luvp += 4
-      }
-
-      const hi = imgUV ? 1 : 0
-      for (let i = 0; i < 4; i++) {
-        imageUV.set(imgUV ? [imgUV.u0, imgUV.v0, imgUV.u1, imgUV.v1] : [0, 0, 0, 0], iuvp)
-        iuvp += 4
-      }
-      hasImage.set([hi, hi, hi, hi], hip)
-      hip += 4
-
-      const h = c.heat ?? 0
-      heat.set([h, h, h, h], hp)
-      hp += 4
-
-      let [cr, cg, cb] = labelToRgb(c.label)
-      // gray out hidden items when show-hidden is active — and a switched-off
-      // launcher member always (it is never filtered, so this is its face)
-      const isHiddenItem = !foreign && ((this.#showHiddenItems && this.#currentHiddenSet.has(c.label)) || this.#dormantLaunchLabels.has(c.label))
-      if (isHiddenItem) {
-        const gray = cr * 0.3 + cg * 0.3 + cb * 0.3
-        cr = gray * 0.5; cg = gray * 0.5; cb = gray * 0.5
-      }
-      identityColor.set([cr, cg, cb, cr, cg, cb, cr, cg, cb, cr, cg, cb], icp)
-      icp += 12
-
-      const b = c.hasBranch ? 1 : 0
-      branch.set([b, b, b, b], bp)
-      bp += 4
-
-      let [bcr, bcg, bcb] = c.borderColor ?? [0.784, 0.592, 0.353]
-      if (isHiddenItem) {
-        const bgray = bcr * 0.3 + bcg * 0.3 + bcb * 0.3
-        bcr = bgray * 0.5; bcg = bgray * 0.5; bcb = bgray * 0.5
-      }
-      // Group accent for peer tiles — every peer-contributed tile gets
-      // the publisher's deterministic pubkey-derived color as its
-      // border, ALWAYS (not just in spotlight mode). Each contributor
-      // is visually identifiable at a glance: Alice's tiles glow one
-      // hue, Bob's another. Same labelToRgb hash used for label-based
-      // identity colors, just keyed on pubkey — uniform "identity
-      // color" architecture across own tiles and peer groups.
-      //
-      // Spotlight emphasis: when a peer's layer is surfaced via the
-      // layer-cycle strip / alt+scroll, their tiles render at full
-      // brightness; other peer groups dim slightly so the active layer
-      // pops without losing the rest. Own tiles keep their normal
-      // borderColor (label or substrate-derived).
-      const cellPubkey = foreign ? undefined : this.#peerPubkeyByLabel.get(c.label)
-      if (cellPubkey) {
-        const [pr, pg, pb] = labelToRgb(cellPubkey)
-        const brightness = this.#spotlightPubkey === null
-          ? 0.85                                          // no spotlight — all groups at uniform group brightness
-          : (this.#spotlightPubkey === cellPubkey ? 1.0   // this peer is active — full intensity
-            : 0.45)                                       // other peer — recede so the active group pops
-        bcr = pr * brightness
-        bcg = pg * brightness
-        bcb = pb * brightness
-      } else if (!foreign && (this.#stackDepthByLabel.get(c.label) ?? 0) > 1) {
-        // Yours is the version showing, but other participants hold
-        // this tile too. Mark the depth on the border so a stacked tile
-        // is findable without hovering every hex — this is the whole
-        // affordance for the wheel roll, and an unmarked stack is a
-        // feature nobody discovers.
-        const m = STACK_BORDER_MIX
-        bcr = bcr * (1 - m) + STACK_BORDER[0] * m
-        bcg = bcg * (1 - m) + STACK_BORDER[1] * m
-        bcb = bcb * (1 - m) + STACK_BORDER[2] * m
-      }
-      borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
-      bcp += 12
-
-      cellIndex.set([ci, ci, ci, ci], cip)
-      cip += 4
-      ci++
-
-      const dv = c.divergence ?? 0
-      divergence.set([dv, dv, dv, dv], dp)
-      // A switched-off launcher member wears the same dim as an unshared tile:
-      // present, plainly not lit, still pressable (its unhide is the way back).
-      const us = c.unshared || (!foreign && this.#dormantLaunchLabels.has(c.label)) ? 1 : 0
-      unshared.set([us, us, us, us], dp)
-      // Continuous 0..1 — a tile mid-fade keeps its current fade value across a
-      // geometry rebuild, so a repaint that happens to land during the fade
-      // never snaps it to full.
-      const sh = foreign ? 0 : this.#shadeValueFor(c)
-      shaded.set([sh, sh, sh, sh], dp)
-      if (!foreign && this.#cellIsShaded(c)) this.#shadedLabels.add(c.label)
-      dp += 4
-
-      // Per-tile launcher silhouette. Only launcher tiles carry a launch:target
-      // `shape`; everything else resolves to 0 (hexagon).
-      const sm = !onLauncherPage ? 0 : launchShapeToMode(launchShapeForLabel(c.label))
-      this.#shapeModeByLabel.set(c.label, sm)
-      shapeAttr.set([sm, sm, sm, sm], sap)
-      sap += 4
-
-      // Reference/portal tiles hover with the magical shimmer (see hex-sdf
-      // fragment). referenceTargetForLabel returns the target segments (or null
-      // for a non-reference) from the same decoration index the click path uses.
-      const pv2 = (foreign ? foreign.portals.has(c.label) : referenceTargetForLabel(c.label) !== null) ? 1 : 0
-      portal.set([pv2, pv2, pv2, pv2], pp)
-      pp += 4
-
-      idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
-      ii += 6
-      base += 4
-    }
-
-    const g = new Geometry()
-      ; (g as any).addAttribute('aPosition', pos, 2)
-      ; (g as any).addAttribute('aUV', uv, 2)
-      ; (g as any).addAttribute('aLabelUV', labelUV, 4)
-      ; (g as any).addAttribute('aImageUV', imageUV, 4)
-      ; (g as any).addAttribute('aHasImage', hasImage, 1)
-      ; (g as any).addAttribute('aHeat', heat, 1)
-      ; (g as any).addAttribute('aIdentityColor', identityColor, 3)
-      ; (g as any).addAttribute('aHasBranch', branch, 1)
-      ; (g as any).addAttribute('aBorderColor', borderColor, 3)
-      ; (g as any).addAttribute('aCellIndex', cellIndex, 1)
-      ; (g as any).addAttribute('aDivergence', divergence, 1)
-      ; (g as any).addAttribute('aUnshared', unshared, 1)
-      ; (g as any).addAttribute('aShaded', shaded, 1)
-      ; (g as any).addAttribute('aShapeMode', shapeAttr, 1)
-      ; (g as any).addAttribute('aIsPortal', portal, 1)
-      ; (g as any).addIndex(idx)
-
-    // save buffer references + label→index map so tile:saved can push
-    // in-place attribute updates to the GPU without rebuilding geometry
-    // A dive's buffers are its own (see #diveLabelToIndex) — the page's
-    // in-place update path must keep pointing at the page's geometry.
+    const built = buildFillQuad(cells, r, gap, hw, hh, this.#look, foreign)
+    for (const [label, mode] of built.shapeModes) this.#shapeModeByLabel.set(label, mode)
     if (!foreign) {
-      this.#buf = { pos, labelUV, imageUV, hasImage, heat, identityColor, branch, borderColor, divergence, shaded }
+      this.#shadedLabels.clear()
+      for (const label of built.shadedLabels) this.#shadedLabels.add(label)
+      // Buffer references + label→index map, so tile:saved can push in-place
+      // attribute updates to the GPU without rebuilding geometry. A dive's
+      // buffers are its own (see #diveLabelToIndex).
+      this.#buf = built.buffers
       this.#labelToIndex.clear()
       for (let i = 0; i < cells.length; i++) this.#labelToIndex.set(cells[i].label, i)
     }
-
-    return g
+    return built.geometry
   }
 
   // ─────────────────────────────────────────────────────────────────────
