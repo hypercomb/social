@@ -108,6 +108,8 @@ import {
   splitQuestion,
   SignatureService,
   type SettledQuestion,
+  AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_RECEIPT, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY,
+  type AgentHandoverEvent, type AgentRoundEvent, type AgentSpent, type AgentStageEffect,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
@@ -4536,6 +4538,10 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
 
+    // THE METER READS THE STAGES, not the loop: the same facts any surface
+    // gets, from the same bus, with replay for a window opened mid-turn.
+    this.#cleanups.push(EffectBus.on<AgentRoundEvent>(AGENT_ROUND, p => this.#meterFrom(p)))
+    this.#cleanups.push(EffectBus.on<AgentHandoverEvent>(AGENT_HANDOVER, p => this.#meterFrom(p)))
     this.#cleanups.push(EffectBus.on('chat:route-flow-changed', () => {
       if (!this.railVisible() && this.listOpen()) void this.#refreshListStandings(this.liveRoster().map(row => row.convoId))
     }))
@@ -6036,11 +6042,10 @@ export class ChatWindowComponent implements OnDestroy {
    *  availability line while it runs. Null when nothing long is under way. */
   readonly legMeter = signal<{ readonly legs: number; readonly rounds: number; readonly ktokens: number } | null>(null)
 
-  #meter(convoId: string): void {
-    if (convoId !== this.activeId()) return
-    const task = this.#task.get(convoId)
-    this.legMeter.set(task && task.rounds > 0
-      ? { legs: task.legs + 1, rounds: task.rounds, ktokens: Math.round(task.tokens / 1000) }
+  #meterFrom(p: { readonly convoId?: string; readonly leg?: number; readonly spent?: AgentSpent } | undefined): void {
+    if (!p?.convoId || p.convoId !== this.activeId() || !p.spent) return
+    this.legMeter.set(p.spent.rounds > 0
+      ? { legs: p.leg ?? 1, rounds: p.spent.rounds, ktokens: Math.round(p.spent.tokens / 1000) }
       : null)
   }
 
@@ -6051,7 +6056,6 @@ export class ChatWindowComponent implements OnDestroy {
     const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
     const next = { ...task, rounds: task.rounds + 1, tokens: task.tokens + (reported || estimated) }
     this.#task.set(convoId, next)
-    this.#meter(convoId)
     return next.rounds >= budget.rounds || next.tokens >= budget.tokens
   }
 
@@ -6063,7 +6067,6 @@ export class ChatWindowComponent implements OnDestroy {
     this.#left.delete(convoId)
     const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
     this.#task.set(convoId, { ...task, legs: task.legs + 1 })
-    this.#meter(convoId)
     await this.send(continueMessage(left), { auto: true })
   }
 
@@ -6360,6 +6363,16 @@ export class ChatWindowComponent implements OnDestroy {
       // purse.
       const harnessNow = activeHarness()
       const budget = workBudget(undefined, harnessNow.budget)
+      // EVERY STAGE IS ANNOUNCED (core agent-effects): facts for whoever
+      // paints them — the meter, the bee panel, the route — never a render.
+      const legOf = (): number => (component.#task.get(convoId)?.legs ?? 0) + 1
+      const spentOf = (): AgentSpent => {
+        const task = component.#task.get(convoId)
+        return { rounds: task?.rounds ?? 0, tokens: task?.tokens ?? 0 }
+      }
+      const stage = (name: AgentStageEffect, facts: Record<string, unknown>): void => {
+        EffectBus.emit(name, { id: component.#beeId(convoId), convoId, leg: legOf(), at: Date.now(), ...facts })
+      }
       const tokensOf = (list: readonly { readonly content: string }[]): number =>
         list.reduce((sum, entry) => sum + estimateTokens(entry.content), 0)
       // THE WORK STAYS WITH WHOEVER STARTED IT. The first round may be routed
@@ -6631,6 +6644,7 @@ export class ChatWindowComponent implements OnDestroy {
         if (receipt) readSigs.push(receipt)
         writeTurnMeta(providerId, continuationModel)
         EffectBus.emit('jev:outcome', { decision: receipt, plan: 'verify', outcome: decision.verified ? 'verified' : 'unverified', at: Date.now() })
+        stage(AGENT_VERIFY, { verified: decision.verified, reason: decision.reason, model: decision.model || JEV_MODEL })
         return decision.verified ? undefined : `\n\nJev could not confirm this answer against what the hive read (${decision.reason}).`
       }
 
@@ -6910,6 +6924,7 @@ export class ChatWindowComponent implements OnDestroy {
         const door = await frontDoor()
         if (door.answer !== undefined) {
           turnPath = 'direct'
+          stage(AGENT_FRONT, { path: turnPath, tier: need.tier, answered: true })
           wrote = true
           yield door.answer
           return ''
@@ -6927,6 +6942,7 @@ export class ChatWindowComponent implements OnDestroy {
           if (tier !== need.tier && router.ready?.({ ...(pinned ? { providerId: pinned } : {}), need: moved }) !== false) routeNeed = moved
         }
         turnWeight = routeNeed.tier
+        stage(AGENT_FRONT, { path: turnPath, tier: routeNeed.tier, answered: false })
         if (door.aside || routeNeed !== need) {
           system = systemFor(namedModel ?? policyForNeed?.designate?.(routeNeed)?.model ?? firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(routeNeed))
         }
@@ -6965,6 +6981,9 @@ export class ChatWindowComponent implements OnDestroy {
           }
           if (pinned && chunk.providerId !== pinned) {
             throw new Error('a different provider answered in the middle of the work')
+          }
+          if (!roundProviderId) {
+            stage(AGENT_ROUTE, { round: rounds + 1, providerId: chunk.providerId, model: chunk.model, tier: routeNeed.tier, handoffs: avoid.length })
           }
           roundProviderId = chunk.providerId
           roundModel = chunk.model
@@ -7005,8 +7024,15 @@ export class ChatWindowComponent implements OnDestroy {
         turnRounds = rounds
         // Updated every round; the last write is what the run stores.
         writeTurnMeta(roundProviderId, roundModel)
+        // THE ROUND IS CHARGED WHEN IT COMES BACK, whatever it asked for —
+        // a round that answers costs the same as one that reads.
+        const spent = component.#spend(
+          convoId, settledAttempts.filter(attempt => attempt.round === rounds),
+          estimateTokens(system) + tokensOf(messages) + estimateTokens(roundText), budget,
+        )
 
         const work = splitWork(roundText)
+        stage(AGENT_ROUND, { round: rounds, request: work.request?.kind ?? 'none', handoff: !!work.handoff, spent: spentOf() })
         // HANDED OFF (hypercomb-work-fence.ts HANDOFF_FENCE_LANG): the model
         // said the work is beyond it. Its reply is dropped, it is not asked
         // again, and the same messages go to the next model the policy ranks
@@ -7059,6 +7085,7 @@ export class ChatWindowComponent implements OnDestroy {
               left,
               ...(task ? { spent: { rounds: task.rounds, tokens: task.tokens } } : {}),
             })
+            stage(AGENT_HANDOVER, { round: rounds, left, budgetSpent, spent: spentOf() })
             wrote = true
             if (budgetSpent) yield budgetSpentMessage(component.#task.get(convoId) ?? { rounds, tokens: 0 })
             else {
@@ -7172,13 +7199,13 @@ export class ChatWindowComponent implements OnDestroy {
         // is the model's own; when the rounds no longer fit, the older ones
         // fold into a ledger first, and only a leg that still cannot fit —
         // or has run its rounds, or spent the request's budget — hands over.
-        const spent = component.#spend(
-          convoId, settledAttempts.filter(attempt => attempt.round === rounds),
-          estimateTokens(system) + tokensOf(messages), budget,
-        )
         const window = (roundModel && router.contextLengthForModel?.(roundModel)) || 128_000
         const room = (): boolean => estimateTokens(system) + tokensOf(messages) < window - harnessNow.leg.reserveTokens
-        if (!room()) messages.splice(0, messages.length, ...foldWorkLedger(messages, workStart, harnessNow.leg.keepVerbatim) as typeof messages)
+        if (!room()) {
+          const before = messages.length
+          messages.splice(0, messages.length, ...foldWorkLedger(messages, workStart, harnessNow.leg.keepVerbatim) as typeof messages)
+          if (messages.length < before) stage(AGENT_FOLD, { round: rounds, folded: before - messages.length + 1, kept: harnessNow.leg.keepVerbatim })
+        }
         if (spent || lastRound || rounds >= harnessNow.leg.rounds || !room()) {
           messages[messages.length - 1] = { role: 'user', content: `${reply}\n\n${lastRoundMessage(message)}` }
           lastRound = true
@@ -7229,13 +7256,22 @@ export class ChatWindowComponent implements OnDestroy {
         console.warn('[chat] the model could not answer:', error)
         yield `\n\nThe model could not answer: ${detail}`
       } finally {
+        const at = Date.now()
         if (answered && !opts?.signal?.aborted) {
-          const at = Date.now()
           EffectBus.emit('jev:turn', {
             path: turnPath, ms: at - startedAt, rounds: turnRounds, weight: turnWeight, at,
             ...(firstAt ? { firstMs: firstAt - startedAt } : {}),
           })
         }
+        // THE RECEIPT, whatever happened: answered, failed, or stopped.
+        const task = component.#task.get(convoId)
+        EffectBus.emit(AGENT_RECEIPT, {
+          id: component.#beeId(convoId), convoId, leg: (task?.legs ?? 0) + 1, at,
+          path: turnPath, rounds: turnRounds, weight: turnWeight, ms: at - startedAt,
+          ...(firstAt ? { firstMs: firstAt - startedAt } : {}),
+          outcome: opts?.signal?.aborted ? 'stopped' : answered ? 'answered' : 'failed',
+          spent: { rounds: task?.rounds ?? 0, tokens: task?.tokens ?? 0 },
+        })
       }
       return ''
     }

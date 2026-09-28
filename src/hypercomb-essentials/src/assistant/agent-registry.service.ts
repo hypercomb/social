@@ -48,7 +48,11 @@
 // Stop markers are swept by the next `seed()` once they are older than an
 // hour — by then either a responder saw it or none was listening.
 
-import { EffectBus, classifyDirectoryEntry } from '@hypercomb/core'
+import {
+  EffectBus, classifyDirectoryEntry,
+  AGENT_FOLD, AGENT_HANDOVER, AGENT_RECEIPT, AGENT_ROUND, AGENT_ROUTE,
+  type AgentFoldEvent, type AgentHandoverEvent, type AgentReceiptEvent, type AgentRoundEvent, type AgentRouteEvent,
+} from '@hypercomb/core'
 import { kindFor, type AgentKind } from '../presentation/avatars/agent-waggle.js'
 import { identifyModel } from '../presentation/avatars/agent-model.js'
 
@@ -248,6 +252,43 @@ export class AgentRegistry extends EventTarget {
       const id = String(p?.id ?? '')
       if (!id) return
       this.#finish(id, p?.ok === false ? 'failed' : 'done', p?.summary)
+    })
+
+    // THE LOOP'S STAGES (core agent-effects, documentation/agent-harness.md
+    // step 2) land in the bee's activity as facts: which provider took the
+    // round, what the round asked for, what folded, how a leg handed over,
+    // what the turn cost. The panel paints the line; nothing here knows the
+    // chat window.
+    const stageNote = (id: string | undefined, text: string): void => {
+      const agent = this.#agents.get(String(id ?? ''))
+      if (!agent) return
+      this.#note(agent, text)
+      agent.stalled = false
+      agent.updatedAt = Date.now()
+      this.#changed()
+    }
+    EffectBus.on<AgentRouteEvent>(AGENT_ROUTE, p => {
+      if (!p?.id) return
+      stageNote(p.id, `leg ${p.leg} · round ${p.round} · ${p.model || p.providerId}${p.handoffs ? ` (after ${p.handoffs} hand-off${p.handoffs === 1 ? '' : 's'})` : ''}`)
+    })
+    EffectBus.on<AgentRoundEvent>(AGENT_ROUND, p => {
+      if (!p?.id) return
+      const asked = p.handoff ? 'handed off' : p.request === 'none' ? 'answered' : `asked to ${p.request}`
+      stageNote(p.id, `round ${p.round}: ${asked} · ${p.spent.rounds} rounds, ${Math.round(p.spent.tokens / 1000)}k tokens so far`)
+    })
+    EffectBus.on<AgentFoldEvent>(AGENT_FOLD, p => {
+      if (!p?.id) return
+      stageNote(p.id, `folded ${p.folded} older rounds into the ledger, kept the newest ${p.kept}`)
+    })
+    EffectBus.on<AgentHandoverEvent>(AGENT_HANDOVER, p => {
+      if (!p?.id) return
+      stageNote(p.id, p.budgetSpent
+        ? `paused after ${p.spent.rounds} rounds: the request's budget is spent`
+        : `handing over to leg ${p.leg + 1}: ${p.left}`)
+    })
+    EffectBus.on<AgentReceiptEvent>(AGENT_RECEIPT, p => {
+      if (!p?.id) return
+      stageNote(p.id, `${p.outcome} after ${p.rounds} round${p.rounds === 1 ? '' : 's'} in ${(p.ms / 1000).toFixed(1)} s`)
     })
 
     // ── the long-op lane — install / resync already emit this ──
