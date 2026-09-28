@@ -9,6 +9,16 @@
 //   story     { name: 'story', label, description, within, at }
 //   revision  { name: 'build', label, version, parent, install, host,
 //               library, hostPackage, atoms, source, conversations? }
+//   package   { name: 'build', label, version, parent, package, tree,
+//               atoms, conversations? }
+//
+// A PACKAGE REVISION CARRIES ITS SOURCE AS ITS TILES (host/package-tree.mjs):
+// `tree` is the package drawn on the living primitive — a tile per folder,
+// bound to the cell the package runs; under it each bee as a beehavior and
+// each compiled dependency as an atom; under those the files they were built
+// from. So the code travels with the tiles it belongs to, by signature, and
+// a device that holds the pool can write the whole package back out
+// (`source`) and build it again — no forge in the middle.
 //
 // STAGE, THEN PROMOTE. A build STAGES: it rewrites its story's one staged
 // revision (version 'staged'), local and unsigned, so work in progress never
@@ -41,6 +51,10 @@
 //   node host/builds.mjs show <version|sig|label> what it changed, who signed it
 //   node host/builds.mjs subscribe <dir|r2[:bucket]> / unsubscribe / sync
 //   node host/builds.mjs out <version|sig> <dir>  write one revision's origin
+//   node host/builds.mjs package [--story <label>] [--dir <package>]
+//                                                 stage a package, its source as its tiles
+//   node host/builds.mjs source <version|sig|label> <dir>
+//                                                 write a revision's source back out
 //   node host/builds.mjs publish <version|sig> [--azure] [-- deploy args]
 //   node host/builds.mjs sign <version|sig> --as author|reviewer|witness
 //   node host/builds.mjs take <origin dir>        bring in a published revision
@@ -58,6 +72,7 @@ import { access, mkdir, mkdtemp, open, readdir, readFile, rm, unlink, writeFile 
 import { homedir, tmpdir } from 'node:os'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { packageTree, walkTree } from './package-tree.mjs'
 
 export const BUILDS_MEANING = 'host:builds'
 export const SIGNATURES_MEANING = 'host:build-signatures'
@@ -66,12 +81,17 @@ export const BUILD_SIGNATURE_KIND = 30567
 export const DEFAULT_LABEL = 'host'
 export const STAGED = 'staged'
 /** runtime host-zones.ts DEFAULT_HOST_ZONES: where pools are pulled from. */
+/** The hosts `pull` asks by default: the operator's seed hosts when set. */
 export const DEFAULT_HOSTS = (process.env.HYPERCOMB_SEED_HOSTS ?? '').split(',').map(h => h.trim()).filter(Boolean).length
   ? (process.env.HYPERCOMB_SEED_HOSTS ?? '').split(',').map(h => h.trim()).filter(Boolean)
   : ['jwize.com', 'hypercomb.com']
 const SIG = /^[a-f0-9]{64}$/
-const OUTPUT_PARTS = ['install', 'host', 'library', 'hostPackage', 'atoms']
-const PARTS = ['install', 'host', 'library', 'hostPackage', 'source']
+const HERE = dirname(fileURLToPath(import.meta.url))
+/** Where source paths are named from — the spots name theirs the same way. */
+const REPO_ROOT = resolve(HERE, '..', '..', '..')
+const ESSENTIALS = resolve(HERE, '..', '..', 'hypercomb-essentials')
+const OUTPUT_PARTS = ['install', 'host', 'library', 'hostPackage', 'package', 'atoms']
+const PARTS = ['install', 'host', 'library', 'hostPackage', 'source', 'package', 'tree']
 
 export const sign = bytes => createHash('sha256').update(bytes).digest('hex')
 const poolsRoot = () => resolve(process.env.HYPERCOMB_POOLS_DIR || resolve(homedir(), '.hypercomb'))
@@ -181,6 +201,11 @@ export const recordBuild = async ({ label, install, source, signed, host, librar
     install: await layer(pool, 'install', install), host, library, hostPackage,
     atoms: atoms.sort(), source: await layer(pool, 'source', source),
   }
+  return stageRecord(pool, story, record, parent)
+}
+
+/** Make a record its story's one staged revision. */
+const stageRecord = async (pool, story, record, parent) => {
   const bytes = Buffer.from(JSON.stringify(record))
   const sig = await keep(pool, bytes)
   const stage = await readStage()
@@ -189,6 +214,31 @@ export const recordBuild = async ({ label, install, source, signed, host, librar
   await collect()
   return { sig, record, bytes, pool, unchanged: !!parent && PARTS.every(k => same(parent[k], record[k])) }
 }
+
+/**
+ * Stage a package (default: hypercomb-essentials, as last built) in its story
+ * (default: its folder's name): the package it runs, every atom of it, and
+ * its source as its tiles. Refused if a source changed since the build.
+ */
+export const recordPackage = async ({ label, packageDir = ESSENTIALS, repoRoot = REPO_ROOT } = {}) => {
+  const pool = poolDir(BUILDS_MEANING)
+  await mkdir(pool, { recursive: true })
+  const story = foldLabel(label ?? packageDir.split(sep).pop())
+  const { root, packageSig, atoms, files } = await packageTree({ packageDir, repoRoot, keep: bytes => keep(pool, bytes) })
+  for (const atom of atoms) {
+    const bytes = await readFile(resolve(packageDir, 'dist', atom))
+    if (sign(bytes) !== atom) throw new Error(`package file ${short(atom)} does not hash to its name — rebuild the package`)
+    await keep(pool, bytes)
+  }
+  const parent = await previousOf(pool, { label: story, version: STAGED })
+  const record = { name: 'build', label: story, version: STAGED, parent: await headOf(pool), package: packageSig, tree: root, atoms }
+  return { ...await stageRecord(pool, story, record, parent), files }
+}
+
+/** The revision a story had before this one: its newest promotion for a
+ *  stage, the promotion before it for a promoted version. */
+const previousOf = async (pool, record) => (await revisions(pool)).find(r => r.record.label === record.label
+  && (record.version === STAGED || order(r.record.version) < order(record.version)))?.record ?? null
 
 /** Keep a conversation that did a story's work; its promotion will name it. */
 export const attachConversation = async (label, file) => {
@@ -247,6 +297,7 @@ const closureOf = async (pool, sigs) => {
       for (const file of Object.values(files)) reach.add(file)
     }
     for (const sig of [...(record.atoms ?? []), ...(record.conversations ?? [])]) reach.add(sig)
+    if (record.tree) for (const sig of (await walkTree(record.tree, s => readJson(pool, s).catch(() => null))).reach) reach.add(sig)
   }
   return reach
 }
@@ -287,7 +338,9 @@ export const collect = async () => {
 export const findRevision = async ref => {
   const all = await revisions(undefined, { staged: true })
   const stage = await readStage()
-  const byLabel = ref && stage[ref]?.record ? all.filter(r => r.sig === stage[ref].record) : []
+  // A story's name is its stage, else its newest promotion.
+  const byLabel = ref && stage[ref]?.record ? all.filter(r => r.sig === stage[ref].record)
+    : all.filter(r => r.record.label === ref && r.record.version !== STAGED).slice(0, 1)
   const hit = byLabel.length ? byLabel : all.filter(r => (r.record.version === ref && ref !== STAGED) || (ref?.length >= 6 && r.sig.startsWith(ref)))
   if (hit.length !== 1) throw new Error(hit.length ? `"${ref}" names ${hit.length} revisions — give more of the signature` : `no revision "${ref}" in ${poolDir(BUILDS_MEANING)}`)
   return hit[0]
@@ -295,13 +348,15 @@ export const findRevision = async ref => {
 
 /** What a revision changed against the build before it: parts, and files by path. */
 export const changesOf = async (pool, record) => {
-  const parent = await readJson(pool, record.parent).catch(() => null)
+  // A host build is measured against the build before it; a package against
+  // its own story's revision before it.
+  const parent = record.tree ? await previousOf(pool, record) : await readJson(pool, record.parent).catch(() => null)
   const parts = PARTS.filter(k => !same(record[k], parent?.[k]))
   const files = {}
-  for (const k of ['install', 'source']) {
-    if (!parts.includes(k)) continue
-    const now = (await readJson(pool, record[k]).catch(() => ({ files: {} }))).files
-    const was = parent ? (await readJson(pool, parent[k]).catch(() => ({ files: {} }))).files : {}
+  for (const k of ['install', 'source', 'tree']) {
+    if (!parts.includes(k) || !record[k]) continue
+    const now = await filesOf(pool, record, k)
+    const was = parent ? await filesOf(pool, parent, k) : {}
     files[k] = [...new Set([...Object.keys(now), ...Object.keys(was)])].sort()
       .filter(p => now[p] !== was[p])
       .map(p => (!was[p] ? '+ ' : !now[p] ? '- ' : '~ ') + p)
@@ -371,10 +426,35 @@ export const signRevision = async (ref, role, now = new Date()) => {
 // ── writing a revision out, and taking one in ────────────────────────────────
 const put = async (path, bytes) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, bytes) }
 
+/** A revision's files of one part, path → signature: a layer's, or a tree's. */
+const filesOf = async (pool, record, part) => {
+  if (!record?.[part]) return {}
+  if (part === 'tree') return Object.fromEntries((await walkTree(record.tree, s => readJson(pool, s).catch(() => null))).files)
+  return (await readJson(pool, record[part]).catch(() => ({ files: {} }))).files
+}
+
+/** Write a revision's source into `dir`, each file at its repo path and
+ *  checked against its signature: a package's from its tiles, a host's from
+ *  its source layer. */
+export const writeSource = async (ref, dir) => {
+  const pool = poolDir(BUILDS_MEANING)
+  const { sig, record } = await findRevision(ref)
+  if ((await readdir(dir).catch(() => [])).length) throw new Error(`${dir} is not empty`)
+  const files = await filesOf(pool, record, record.tree ? 'tree' : 'source')
+  for (const [path, fileSig] of Object.entries(files)) {
+    if (path.split('/').includes('..')) throw new Error(`${path} leaves the directory`)
+    const bytes = await readFile(resolve(pool, fileSig))
+    if (sign(bytes) !== fileSig) throw new Error(`${path} does not hash to ${short(fileSig)}`)
+    await put(resolve(dir, path), bytes)
+  }
+  return { sig, record, files: Object.keys(files).length }
+}
+
 /** Write a revision's origin into `dir`, exactly as it was built, with its signatures. */
 export const writeOut = async (ref, dir) => {
   const pool = poolDir(BUILDS_MEANING)
   const { sig, record } = await findRevision(ref)
+  if (!record.install) throw new Error(`${record.label} ${record.version} is a package, not an origin — its source: builds.mjs source ${record.version} <dir>`)
   if ((await readdir(dir).catch(() => [])).length) throw new Error(`${dir} is not empty`)
   const install = await readJson(pool, record.install)
   for (const [path, fileSig] of Object.entries(install.files)) await put(resolve(dir, path), await readFile(resolve(pool, fileSig)))
@@ -819,6 +899,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const dir = resolve(rest[0])
       const { sig, record } = await writeOut(ref, dir)
       console.log(`${record.label} ${record.version} ${short(sig)} → ${dir}`)
+    } else if (command === 'package') {
+      const args = [ref, ...rest].filter(Boolean)
+      const option = name => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined }
+      const made = await recordPackage({ label: option('--story'), ...(option('--dir') ? { packageDir: resolve(option('--dir')) } : {}) })
+      console.log(`staged ${made.record.label} ${short(made.sig)}…${made.unchanged ? ' (no change from the last promotion)' : ''} · package ${short(made.record.package)} · ${made.files} source files as its tiles · ${made.record.atoms.length} atoms · promote: node host/builds.mjs promote ${made.record.label}`)
+    } else if (command === 'source') {
+      if (!rest[0]) throw new Error('source wants a directory')
+      const dir = resolve(rest[0])
+      const { sig, record, files } = await writeSource(ref, dir)
+      console.log(`${record.label} ${record.version} ${short(sig)} → ${dir} · ${files} source files`)
     } else if (command === 'publish') await publish(ref, rest.filter(a => a !== '--'))
     else if (command === 'sign') {
       const { record, pubkey } = await signRevision(ref, flag('--as'))

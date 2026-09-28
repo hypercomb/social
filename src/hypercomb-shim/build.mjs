@@ -27,7 +27,7 @@ import { createHash } from 'node:crypto'
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { installFilesOf, recordBuild } from './host/builds.mjs'
+import { installFilesOf, recordBuild, recordPackage } from './host/builds.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(here, 'dist'))
@@ -379,6 +379,8 @@ const bootstrapBuild = await build({
 // names it a boot bee. The host bundle knows only the root (baked in below)
 // and resolves the rest the hypercomb way (src/host-package.ts).
 let hostPackageRoot = ''
+/** Whether the spots found the package built (then it is staged beside the host). */
+let packageBuilt = false
 if (pure) {
   const sha = bytes => createHash('sha256').update(bytes).digest('hex')
   const consoleBee = await build({
@@ -480,6 +482,7 @@ if (pure) {
   const packageBehaviour = async (className) => {
     pkg ??= await thePackage()
     if (!pkg) return null
+    packageBuilt = true
     const beeSig = pkg.byClass.get(className)
     if (!beeSig) throw new Error(`[shim] the package names no bee of class ${className}`)
     const bytes = { [beeSig]: await pkg.read(beeSig) }
@@ -718,6 +721,17 @@ if (pure) {
   await writeFile(resolve(dist, made.sig), made.bytes)
   await writeFile(resolve(dist, 'build'), made.sig + '\n', 'utf8')
   console.log(`[shim] staged ${made.record.label} ${made.sig.slice(0, 12)}…${made.unchanged ? ' (no change from the last promotion)' : ''} · ${source.size} source files · promote: node host/builds.mjs promote ${made.record.label}`)
+  // The package the spots draw from is staged beside it, its source as its
+  // tiles (host/package-tree.mjs), so nothing outside the minimal build lives
+  // only in a checkout.
+  if (packageBuilt) {
+    try {
+      const staged = await recordPackage()
+      console.log(`[shim] staged ${staged.record.label} ${staged.sig.slice(0, 12)}…${staged.unchanged ? ' (no change from the last promotion)' : ''} · package ${staged.record.package.slice(0, 12)} · ${staged.files} source files as its tiles`)
+    } catch (e) {
+      console.warn(`[shim] the package is not staged: ${e.message}`)
+    }
+  }
 }
 console.log(
   `[shim] origin ${mib(await dirBytes(dist))} total` +

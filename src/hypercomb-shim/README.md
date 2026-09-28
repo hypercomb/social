@@ -173,6 +173,32 @@ the origin and every source file the build read; `atoms` are its signed files.
 All of it is kept in the pool, so any revision can be written out and
 published again, exactly.
 
+**A package revision carries its source as its tiles**
+(`host/package-tree.mjs`):
+`{ name: 'build', label, version, parent, package, tree, atoms }`. The source
+is never a side list of paths. `tree` is the package drawn on the living
+primitive:
+
+- a tile per folder, naming the cell layer the package runs there;
+- under each tile, every bee as a beehavior (the spots' own shape: its bee,
+  its dependencies) and every compiled dependency as an atom;
+- under each of those, the files it was built from, with the spec that tests
+  it.
+
+Every file is placed exactly once, and a file record is the same record a
+spot draws its code from. A source edited after the package was built is
+refused, never kept as the code that runs. `atoms` are every file of the
+package itself, so the pool alone can run it, write its source back out and
+build it again: no forge, no checkout. `node build.mjs --pure` stages the
+package beside the host build whenever the package is built.
+
+```bash
+node host/builds.mjs package                               # stage hypercomb-essentials as last built
+node host/builds.mjs promote hypercomb-essentials
+node host/builds.mjs source hypercomb-essentials ~/essentials   # its source, from the pool alone
+node host/builds.mjs show hypercomb-essentials             # what changed, file by file
+```
+
 **Stage, then promote.** A build stages: it replaces its story's one staged
 revision, local and unsigned, so work in progress never piles up in the
 lineage. `promote` is the one act that appends: the stage becomes the
