@@ -1442,6 +1442,21 @@ test('a try- door lists every signed assessment of its root, and the host AI ver
 })
 
 // ── the community's translations: who translated, who is missing what ────
+test('writing an index that names agent:harness puts the record it points at into that pool, by signature', async () => {
+  const HIVES = kvMap()
+  const CONTENT = contentBag()
+  const env = { SITE_BINDINGS: '{}', HIVES, CONTENT }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
+  const record = 'b'.repeat(64)
+  const body = JSON.stringify(await indexBy(assessorKey, { 'agent:harness': record, 'agent:other': 'c'.repeat(64), 'i18n:ja': 'f'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
+  assert.equal(response.status, 201)
+  const member = async (meaning, name) => CONTENT.held.has(`${await sha256Hex(meaning)}/${name}`)
+  assert.equal(await member('agent:harness', record), true)
+  assert.equal(await member('agent:harness', assessor), false)
+  assert.equal(await member('agent:other', 'c'.repeat(64)), false)
+})
+
 test('writing an index that names i18n:<locale> lists its signer as a translator, and i18n-missing:<locale> as missing', async () => {
   const HIVES = kvMap()
   const CONTENT = contentBag()

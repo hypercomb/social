@@ -1306,6 +1306,24 @@ async function noteTranslators(env, pubkey, evt) {
   }
 }
 
+/** SHARED POOLS BY RECORD (documentation/agent-harness.md, step 5). A key
+ *  in a signed index whose meaning is one of these puts the RECORD it points
+ *  at into the pool of that meaning — by the record's own signature, so the
+ *  pool listing names what a client fetches directly, and the pool is a
+ *  history that only grows. Served only where the operator lists the
+ *  meaning (`hosts list agent:harness`); the write is an empty marker. */
+const SHARED_RECORD_POOLS = new Set(['agent:harness'])
+async function noteSharedPools(env, pubkey, evt) {
+  let roots = {}
+  try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  for (const [key, value] of Object.entries(roots)) {
+    if (!SHARED_RECORD_POOLS.has(key)) continue
+    const sig = String(value ?? '').toLowerCase()
+    if (!SIG_RE.test(sig)) continue
+    await addPoolMember(env, key, sig)
+  }
+}
+
 /** The keys a locale's pool holds, with the KV list it replaced drained in. */
 async function localeMembers(env, meaning, legacyKey) {
   const keys = new Set([...await drainedList(env, legacyKey), ...await poolMemberNames(env, meaning)])
@@ -2347,6 +2365,7 @@ async function putHive(request, env, pubkey) {
   await holdIndex(env, pubkey, evt)
   await noteTranslators(env, pubkey, evt)
   await noteAssessors(env, pubkey, evt)
+  await noteSharedPools(env, pubkey, evt)
   if (!await advancePublishedLocations(env, pubkey, evt)) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
   }

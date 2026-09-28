@@ -71,7 +71,8 @@ describe('the harness word', () => {
   it('completes the sub-words and the names in the pool', async () => {
     await harness.import({ kind: 'harness@1', name: 'quiet-reader' })
     const queen = new HarnessQueenBee()
-    expect(queen.slashComplete('')).toEqual(['use ', 'here ', 'show ', 'import '])
+    expect(queen.slashComplete('')).toEqual(['use ', 'here ', 'show ', 'import ', 'offer ', 'sync '])
+    expect(queen.slashComplete('offer q')).toEqual(['offer quiet-reader'])
     expect(queen.slashComplete('use q')).toEqual(['use quiet-reader'])
     expect(queen.slashComplete('here d')).toEqual(['here default'])
   })

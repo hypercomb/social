@@ -12,8 +12,51 @@
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { harness, type HarnessRecord } from './harness.js'
+import { publishHarness, syncHarnessesFrom, type HarnessPublishDeps } from './harness-network.js'
+import { setHiveRoot } from '../sharing/hive-pointer.js'
+import { PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+import { listCommunityHosts } from '../sharing/community-hosts.js'
 
 const short = (sig: string): string => sig.slice(0, 12)
+
+const STORE_KEY = '@hypercomb.social/Store'
+const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
+type StoreLike = {
+  putResource?(blob: Blob, options?: { emit?: boolean }): Promise<string>
+  getResourceLocal?(sig: string): Promise<Blob | null>
+  getResource?(sig: string): Promise<Blob | null>
+}
+type HostSyncLike = {
+  publishAtoms?(host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>):
+    Promise<{ ok: true; sent: number; held: number } | { ok: false; error: string }>
+}
+
+/** A host as a URL: loopback on http, everything else https. */
+const hostUrl = (host: string): string => {
+  const bare = host.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  const loopback = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(bare)
+  return `${loopback ? 'http' : 'https'}://${bare}`
+}
+
+/** What this hive publishes with: its store to put, its host service to
+ *  ship, its key to stamp — the same three the language word uses. */
+const publishDeps = (): HarnessPublishDeps | null => {
+  const store = window.ioc?.get?.(STORE_KEY) as StoreLike | undefined
+  const sync = window.ioc?.get?.(HOST_SYNC_KEY) as HostSyncLike | undefined
+  const putResource = store?.putResource?.bind(store)
+  const publishAtoms = sync?.publishAtoms?.bind(sync)
+  if (!putResource || !publishAtoms) return null
+  const bytesOf = async (sig: string): Promise<Uint8Array | null> => {
+    const blob = await (store?.getResourceLocal?.(sig).catch(() => null) ?? Promise.resolve(null))
+      ?? await (store?.getResource?.(sig).catch(() => null) ?? Promise.resolve(null))
+    return blob ? new Uint8Array(await blob.arrayBuffer()) : null
+  }
+  return {
+    put: (text, type) => putResource(new Blob([text], { type }), { emit: false }),
+    publish: async (h, sigs) => { const done = await publishAtoms(h, sigs, bytesOf); return done.ok ? { ok: true } : { ok: false, error: done.error } },
+    stamp: (h, key, sig) => setHiveRoot(h, key, sig),
+  }
+}
 
 export class HarnessQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -21,7 +64,7 @@ export class HarnessQueenBee extends QueenBee {
   readonly command = 'harness'
   override description = 'List the agent harnesses, choose one for the device or this conversation, bring one in'
   override descriptionKey = 'slash.harness'
-  override options = ['use <name or signature>', 'here <name or signature>', 'here default', 'show [name]', 'import <json>']
+  override options = ['use <name or signature>', 'here <name or signature>', 'here default', 'show [name]', 'import <json>', 'offer <name> [@<host>]', 'sync [@<host>]']
   override examples = [
     { input: '/harness', result: 'Lists the harnesses in the pool and which one runs' },
     { input: '/harness use quiet-reader', result: 'The device runs the agent loop under quiet-reader from now on' },
@@ -30,12 +73,12 @@ export class HarnessQueenBee extends QueenBee {
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    const words = ['use ', 'here ', 'show ', 'import ']
+    const words = ['use ', 'here ', 'show ', 'import ', 'offer ', 'sync ']
     if (!typed || words.some(word => word.startsWith(typed) && word.trim() !== typed)) {
       return words.filter(word => word.startsWith(typed))
     }
     const [verb = '', rest = ''] = typed.split(/\s+/, 2)
-    if (verb === 'use' || verb === 'here' || verb === 'show') {
+    if (verb === 'use' || verb === 'here' || verb === 'show' || verb === 'offer') {
       const names = [...new Set([...harness.list().map(entry => entry.record.name), 'default'])]
       return names.filter(name => name.startsWith(rest) && name !== rest).map(name => `${verb} ${name}`)
     }
@@ -50,8 +93,42 @@ export class HarnessQueenBee extends QueenBee {
     }
     const toast = (message: string, type = 'info'): void => { EffectBus.emit('toast:show', { type, message }) }
     const trimmed = args.trim()
-    const [word = '', ...rest] = trimmed.split(/\s+/).filter(Boolean)
+    const [word = '', ...restAll] = trimmed.split(/\s+/).filter(Boolean)
+    const at = restAll.find(part => part.startsWith('@'))?.slice(1).trim() ?? ''
+    const rest = restAll.filter(part => !part.startsWith('@'))
     const target = rest.join(' ').trim()
+
+    if (word === 'offer') {
+      if (!target) { toast(t('harness.usage.offer', 'Say which: harness offer <name> [@<host>]'), 'warning'); return }
+      const found = harness.find(target)
+      if (!found) { toast(t('harness.unknown', 'No harness called "{name}" in the pool.', { name: target }), 'warning'); return }
+      const host = at || PUBLIC_CONTENT_HOSTS[0] || ''
+      const deps = host ? publishDeps() : null
+      if (!deps) { toast(t('harness.unoffered', '{name} was not offered: {reason}', { name: found.record.name, reason: host ? 'the store or the host service is not loaded' : 'no host is configured' }), 'warning'); return }
+      const done = await publishHarness(host, found.record, deps)
+      if (!done.ok) { toast(t('harness.unoffered', '{name} was not offered: {reason}', { name: found.record.name, reason: done.error }), 'warning'); return }
+      toast(t('harness.offered', 'Offered {name} ({sig}) under your key to {host}; the host lists it once its operator says hosts list agent:harness, and anyone who syncs from there holds it until they choose it.', { name: found.record.name, sig: short(done.sig), host }), 'success')
+      EffectBus.emit('harness:offered', { name: found.record.name, sig: done.sig, host })
+      return
+    }
+
+    if (word === 'sync') {
+      const hosts = [...new Set([...(at ? [at] : []), ...PUBLIC_CONTENT_HOSTS, ...(await listCommunityHosts().catch(() => []))].filter(Boolean))]
+      const imported: string[] = []
+      let answered = 0
+      let dropped = 0
+      for (const h of hosts) {
+        const result = await syncHarnessesFrom(hostUrl(h))
+        if (!result.answered) continue
+        answered++
+        dropped += result.dropped
+        imported.push(...result.imported.map(entry => entry.name))
+      }
+      if (!imported.length) { toast(t('harness.nosync', 'No harness found on {hosts} hosts that answered.', { hosts: answered }), answered ? 'info' : 'warning'); return }
+      toast(t('harness.synced', 'Synced {count} harness records from {hosts} hosts, held: {names}. Say harness use <name> or harness here <name> to run one.', { count: imported.length, hosts: answered, names: [...new Set(imported)].join(', ') }), 'success')
+      EffectBus.emit('harness:synced', { imported, hosts: answered, dropped })
+      return
+    }
 
     if (!word || word === 'list') {
       const active = harness.activeSig
