@@ -236,7 +236,11 @@ const _runInitializeRuntime = async (
     EffectBus.on<{ locale: string }>('locale:changed', ({ locale }) => { void loadLocale(locale) })
 
     // Detached idle task for the remaining catalogs — never on the paint path.
-    {
+    // NOT for a published site's visitor: "idle" arrives while the landing
+    // content is still on the wire, and the sweep's catalogs (~50–75 KB each,
+    // compressed) took its bandwidth on a slow link (measured 2026-09-28: four
+    // landed before the cover). A visitor's language still loads on demand.
+    if ((window as { __HC_READONLY__?: boolean }).__HC_READONLY__ !== true) {
       const loadRest = (): void => {
         // With a resolver in play the shell has no list of its own — the host
         // publishes which locales exist, so there is nothing to sweep here.

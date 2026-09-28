@@ -82,6 +82,14 @@
                 {
                   "replace": "../hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts",
                   "with": "../hypercomb-shared/ui/shell-surfaces/shell-surfaces.website.barrel.ts"
+                },
+                {
+                  "replace": "src/app/chrome/controls-bar.slot.ts",
+                  "with": "src/app/chrome/controls-bar.slot.visitor.ts"
+                },
+                {
+                  "replace": "src/app/chrome/header.slot.ts",
+                  "with": "src/app/chrome/header.slot.visitor.ts"
                 }
               ],
               "optimization": {

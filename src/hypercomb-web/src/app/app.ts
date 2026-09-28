@@ -6,9 +6,9 @@ import { addHostZone, listHostZones } from '@hypercomb/runtime/host-zones'
 import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service'
 import { RouterOutlet } from '@angular/router'
-import { Header } from './header/header'
+import { Header } from './chrome/header.slot'
 import { CoreAdapter } from './core-adapter'
-import { ControlsBarComponent } from "@hypercomb/shared/ui/controls-bar/controls-bar.component"
+import { ControlsBarComponent } from "./chrome/controls-bar.slot"
 import { EditActionsComponent } from "@hypercomb/shared/ui/edit-actions/edit-actions.component"
 import { MeshHeaderComponent } from "@hypercomb/shared/ui/mesh-header/mesh-header.component"
 import { ShellSurfacesComponent } from "@hypercomb/shared/ui/shell-surfaces/shell-surfaces.component"

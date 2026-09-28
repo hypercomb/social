@@ -96,7 +96,7 @@ import '@hypercomb/shared/core/header-size'
 
 import { bootstrapApplication } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
-import { Store } from '@hypercomb/shared'
+import { Store } from '@hypercomb/runtime/store'
 import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
 import { ensureInstall, installFromHosts, opfsWritable, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
