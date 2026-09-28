@@ -1350,6 +1350,7 @@
   "mesh-modal.start": "starten",
   "slash.branch": "Pfad oder Signatur für die Befehlsautovervollständigung benennen",
   "slash.chat": "Mehrstufige Konversation mit Claude — erstellt Thread-Kacheln mit Q&A-Unterkacheln",
+  "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.view": "Zwischen Hexagonen und Website-Darstellung umschalten",
   "slash.website": "Website-Ansicht umschalten, Unterbaum exportieren oder Seiten über Claude erstellen",
   "slash.tutor": "Lernspiele — diesen Bienenstock in Wiederholungsspiele verwandeln; on | off | here | build | list",

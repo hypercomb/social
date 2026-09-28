@@ -275,6 +275,14 @@ const GOAL_MARKER = 'chat-goal-reached'
 let archiveNamePromise: Promise<string> | null = null
 const archiveName = (): Promise<string> =>
   (archiveNamePromise ??= sha256(new TextEncoder().encode(ARCHIVE_MARKER).buffer as ArrayBuffer))
+/** THE CONVERSATION'S HARNESS (documentation/agent-harness.md, step 4): a
+ *  marker in the bucket naming the `agent:harness` record this thread runs
+ *  under, which wins over the device's choice while it stands. Absent means
+ *  the device's. One file, replaced whole; removed to fall back. */
+const HARNESS_MARKER = 'chat-harness'
+let harnessNamePromise: Promise<string> | null = null
+const harnessName = (): Promise<string> =>
+  (harnessNamePromise ??= sha256(new TextEncoder().encode(HARNESS_MARKER).buffer as ArrayBuffer))
 let goalNamePromise: Promise<string> | null = null
 const goalName = (): Promise<string> =>
   (goalNamePromise ??= sha256(new TextEncoder().encode(GOAL_MARKER).buffer as ArrayBuffer))
@@ -330,6 +338,8 @@ type BucketRead = {
   readonly turns: RawTurn[]
   readonly archived: boolean
   readonly goal?: ChatGoalReached
+  /** The harness record this conversation runs under, by signature. */
+  readonly harness?: string
 }
 
 /** One conversation, as the chat window lists it. Recovered from the pool —
@@ -347,6 +357,8 @@ export interface ConversationSummary {
   readonly archived: boolean
   /** Set by a bridge responder when the conversation's requested outcome is complete. */
   readonly goal?: ChatGoalReached
+  /** The harness this conversation runs under, by signature; absent = the device's. */
+  readonly harness?: string
   /** HAS ANYTHING COME BACK? A question that has been sent and not yet
    *  answered is a real conversation — it lists, it is enterable, it is the
    *  thread you are watching — but it has no subject yet, only an opening
@@ -612,6 +624,7 @@ const readBucketRaw = async (
   const out: RawTurn[] = []
   let archived = false
   let goal: ChatGoalReached | undefined
+  let harness: string | undefined
   let decided = !humanOnly
   const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
   for await (const [entryName, handle] of entries) {
@@ -623,6 +636,11 @@ const readBucketRaw = async (
       // walk that was already reading every file learns the flag for free —
       // no second pass, no second read per thread.
       if (turn?.kind === ARCHIVE_MARKER) { archived = true; continue }
+      if (turn?.kind === HARNESS_MARKER) {
+        const named = String((turn as { harness?: unknown }).harness ?? '').trim()
+        if (SIG64.test(named)) harness = named
+        continue
+      }
       if (turn?.kind === GOAL_MARKER) {
         const details = typeof turn.text === 'string' ? turn.text : ''
         goal = { details, at: Number(turn.at) || 0 }
@@ -642,7 +660,7 @@ const readBucketRaw = async (
       out.push({ ...turn, sig: entryName })
     } catch { /* one unreadable turn must not hide the thread */ }
   }
-  return { turns: out.sort((a, b) => a.at - b.at), archived, goal }
+  return { turns: out.sort((a, b) => a.at - b.at), archived, goal, ...(harness ? { harness } : {}) }
 }
 
 /**
@@ -837,6 +855,7 @@ export const listConversationsWithLatest = async (): Promise<ConversationList> =
           replied: repliedIn(raw),
           ...(!read.archived && askingIn(raw) ? { asking: true } : {}),
           ...(read.goal ? { goal: read.goal } : {}),
+          ...(read.harness ? { harness: read.harness } : {}),
         })
         // AN ARCHIVED THREAD IS NEVER "where you were". `latestTurns` is what
         // a window opening onto resume will show, and resuming into a
@@ -1127,6 +1146,39 @@ export const setConversationArchived = async (
 }
 
 /** Persist the responder's "goals attained" receipt beside this conversation. */
+/** Run this conversation under a harness (by signature), or under the
+ *  device's again with ''. The mark is one file in the bucket, replaced
+ *  whole; every list repaints off `chat:threads-changed`. */
+export const setConversationHarness = async (
+  convoId: string,
+  sig: string,
+): Promise<boolean> => {
+  const id = String(convoId ?? '').trim()
+  const wanted = String(sig ?? '').trim()
+  if (!id || (wanted && !SIG64.test(wanted))) return false
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(THREADS_POOL)
+  if (!pool) return false
+  try {
+    const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
+    const bucket = await pool.getDirectoryHandle(name, { create: !!wanted })
+    const marker = await harnessName()
+    if (!wanted) {
+      try { await bucket.removeEntry(marker) } catch { /* already the device's */ }
+      EffectBus.emit('chat:threads-changed', { convoId: id, harness: '' })
+      return true
+    }
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({ kind: HARNESS_MARKER, convoId: id, harness: wanted, at: Date.now() }),
+    ).buffer as ArrayBuffer
+    const handle = await bucket.getFileHandle(marker, { create: true })
+    const writable = await handle.createWritable()
+    try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
+    EffectBus.emit('chat:threads-changed', { convoId: id, harness: wanted })
+    return true
+  } catch { return false }
+}
+
 export const setConversationGoalReached = async (
   convoId: string,
   details: string,

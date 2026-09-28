@@ -1350,6 +1350,7 @@
   "mesh-modal.start": "başlat",
   "slash.branch": "Komut otomatik tamamlama için bir yol veya imza belirle",
   "slash.chat": "Claude ile çok turlu sohbet — S&C alt öğeleriyle konu dizisi döşemeleri oluşturur",
+  "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.view": "Altıgenler ve web sitesi görünümü arasında geçiş yap",
   "slash.website": "Web sitesi görünümünü aç/kapat, alt ağacı dışa aktar veya Claude ile sayfalar oluştur",
   "slash.tutor": "Çalışma oyunları — bu kovanı aralıklı tekrar oyunlarına dönüştür; on | off | here | build | list",

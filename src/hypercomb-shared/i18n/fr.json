@@ -1350,6 +1350,7 @@
   "mesh-modal.start": "démarrer",
   "slash.branch": "Nommer un chemin ou une signature pour l'autocomplétion de commande",
   "slash.chat": "Conversation multi-tours avec Claude — crée des tuiles de fil avec des enfants Q&R",
+  "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.view": "Basculer entre hexagones et rendu site web",
   "slash.website": "Basculer la vue site web, exporter le sous-arbre, ou générer des pages via Claude",
   "slash.tutor": "Jeux de révision — transformez cette ruche en jeux de répétition espacée ; on | off | here | build | list",

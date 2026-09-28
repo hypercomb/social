@@ -776,6 +776,8 @@ type ConversationSummary = {
    *  essentials build has no archive at all, and there every thread is live. */
   readonly archived?: boolean
   readonly goal?: { readonly details: string; readonly at: number }
+  /** The harness this conversation runs under, by signature; absent = the device's. */
+  readonly harness?: string
   /** HAS ANYTHING COME BACK? A sent question with no answer yet is a real
    *  conversation with no subject, so it is named by what it is doing rather
    *  than by the line you opened with. Optional because an older essentials
@@ -815,6 +817,8 @@ type ChatThreadsLike = {
    *  build — the control is hidden rather than dead when it is (see
    *  `canArchive`). */
   setConversationArchived?(convoId: string, archived: boolean): Promise<boolean>
+  /** Run a conversation under a harness by signature; '' returns it to the device's. */
+  setConversationHarness?(convoId: string, sig: string): Promise<boolean>
   newConvoId(): string
   /** A tile's conversation id, derived from its path — every tile has one,
    *  dormant until something lands in it. Absent on an older essentials
@@ -1272,7 +1276,11 @@ type HarnessRecordLike = {
   readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number }
   readonly handover: { readonly fence: string; readonly resumeSeconds: number; readonly proseFallback: boolean }
 }
-type HarnessLike = { readonly active?: HarnessRecordLike }
+type HarnessLike = {
+  readonly active?: HarnessRecordLike
+  /** The record a conversation runs under: its own mark, else the device's. */
+  activeFor?(mark: string): HarnessRecordLike
+}
 const SHIPPED_HARNESS: HarnessRecordLike = {
   name: 'default',
   leg: { rounds: LEG_ROUNDS, reserveTokens: 8_000, keepVerbatim: 4 },
@@ -1280,15 +1288,20 @@ const SHIPPED_HARNESS: HarnessRecordLike = {
   reads: { pageChars: READ_PAGE_CHARS, roundsWhenAsked: MAX_OBSERVATION_ROUNDS, charsWhenAsked: MAX_OBSERVATION_CONTEXT_CHARS },
   handover: { fence: 'hypercomb-continue', resumeSeconds: RESUME_LEFT_MS / 1000, proseFallback: true },
 }
-const activeHarness = (): HarnessRecordLike =>
-  (ioc()?.get(HARNESS_IOC_KEY) as HarnessLike | undefined)?.active ?? SHIPPED_HARNESS
+/** The harness a conversation runs under: its own mark when it wears one
+ *  and the pool holds that record, else the device's choice, else shipped. */
+const activeHarness = (mark?: string): HarnessRecordLike => {
+  const store = ioc()?.get(HARNESS_IOC_KEY) as HarnessLike | undefined
+  if (mark && store?.activeFor) return store.activeFor(mark)
+  return store?.active ?? SHIPPED_HARNESS
+}
 /** THE STEPS ARE WORDS (core agent-steps): the registry essentials publishes
  *  resolves each word to the bee the harness names, else the shipped one —
  *  and the shipped one answers directly when there is no registry at all. */
 const stepRegistry = (): AgentStepRegistry | undefined =>
   ioc()?.get(AGENT_STEPS_IOC_KEY) as AgentStepRegistry | undefined
-const handoverStepNow = (): HandoverStep =>
-  stepRegistry()?.resolve('handover', activeHarness().steps) ?? shippedHandoverStep
+const handoverStepNow = (mark?: string): HandoverStep =>
+  stepRegistry()?.resolve('handover', activeHarness(mark).steps) ?? shippedHandoverStep
 const hypercombPlanQueue = new HypercombPlanQueue()
 
 /** How far back a pending ask record may reach and still be shown as waiting.
@@ -4590,6 +4603,14 @@ export class ChatWindowComponent implements OnDestroy {
     // a change to the roster, because a conversation that holds only unsent
     // words is still a conversation you must be able to get back to.
     this.#cleanups.push(EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() }))
+    // `harness here <name>` (the harness word): the open conversation wears
+    // the mark; the list re-reads it and the next send runs under it.
+    this.#cleanups.push(EffectBus.on<{ sig?: string; scope?: string }>('chat:harness', payload => {
+      if (payload?.scope !== 'conversation') return
+      const convoId = this.activeId()
+      if (!convoId) return
+      void this.#threads()?.setConversationHarness?.(convoId, String(payload.sig ?? '')).then(() => this.#refreshList())
+    }))
     this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:goal-reached', payload => {
       this.#scheduleRouteRefresh(String(payload?.convoId ?? ''))
       void this.#refreshList().then(() => {
@@ -6078,7 +6099,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.#left.delete(convoId)
     const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
     this.#task.set(convoId, { ...task, legs: task.legs + 1 })
-    await this.send(handoverStepNow().continueWord(left), { auto: true })
+    await this.send(handoverStepNow(this.#harnessMark(convoId)).continueWord(left), { auto: true })
   }
 
   /** A conversation opened on a stored handover picks the work back up,
@@ -6119,8 +6140,14 @@ export class ChatWindowComponent implements OnDestroy {
     return said.join('\n')
   }
 
+  /** The harness mark a conversation wears, as the list last read it. */
+  #harnessMark(convoId: string): string | undefined {
+    return this.conversations().find(convo => convo.convoId === convoId)?.harness
+  }
+
   async #askProvider(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
     const router = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
+    const harnessMark = this.#harnessMark(convoId)
     // HOW MUCH WORK THIS MESSAGE IS (message-effort.ts), and how much the
     // request must hold — so deep work reaches the most capable model added,
     // and a long conversation never lands on a model too small for it.
@@ -6372,7 +6399,7 @@ export class ChatWindowComponent implements OnDestroy {
       // The record says the policy; a number the participant typed on this
       // device (hc:chat:budget:*) still overrides it — their device, their
       // purse.
-      const harnessNow = activeHarness()
+      const harnessNow = activeHarness(harnessMark)
       const budget = workBudget(undefined, harnessNow.budget)
       const foldStep = stepRegistry()?.resolve('fold', harnessNow.steps) ?? shippedFoldStep
       const handoverStep = stepRegistry()?.resolve('handover', harnessNow.steps) ?? shippedHandoverStep
@@ -7256,7 +7283,7 @@ export class ChatWindowComponent implements OnDestroy {
         // the `receipt` step the harness names, else the shipped one.
         const at = Date.now()
         const task = component.#task.get(convoId)
-        const receiptStep = stepRegistry()?.resolve('receipt', activeHarness().steps)
+        const receiptStep = stepRegistry()?.resolve('receipt', activeHarness(harnessMark).steps)
           ?? shippedReceiptStep((name, payload) => { EffectBus.emit(name, payload) })
         receiptStep.run({
           id: component.#beeId(convoId), convoId, leg: (task?.legs ?? 0) + 1, at,
