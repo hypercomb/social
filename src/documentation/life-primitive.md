@@ -207,6 +207,18 @@ from shared — it can, and shared already does). A ratchet
 11. **One gesture when possible.** The tile's on/off control commits the
     participant's choice through this mechanism. Menus and settings read the
     resulting pool heads; they do not keep independent creation catalogs.
+12. **One write verb: `update(segments, layer)`.** A change is the new layer
+    at its position, committed in one cascade (`LayerCommitter.update`); add
+    and remove are special cases of "the new children list is X", and
+    `importTree` is the same call for many positions. The item-level verbs
+    (`commitSlotSet/Append/Remove/Swap`, `commitChildrenDeltas`) may only
+    shrink (doctrine ratchet). Composition works the same way: a leaf takes on
+    several layers at once, like flexible multiple inheritance, and where two
+    offer the same thing the crossing chooses one flavour explicitly.
+13. **Work from the top down.** Build the highest level first (the molecule,
+    its base layer), then each branch, then the leaves, so every new piece of
+    work has a visible place to fit, and an overlap shows up as two leaves on
+    one branch.
 
 Related: `hypergraph-molecule-lineage.md` (the naming layer),
 `address-syntax.md` (the seven rules), `signature-system.md` (the expansion

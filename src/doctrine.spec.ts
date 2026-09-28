@@ -1558,4 +1558,122 @@ describe('doctrine ratchets', () => {
     ], 'dependency self-registration')
   })
 
+  it('show-cell may only shrink — a new tile behaviour is a module of its own', () => {
+    // The renderer grew to 11,720 lines holding 26 jobs (membership, layout,
+    // images, readiness, swarm, tag filter, viewport, dive…). Each job is
+    // leaving for a module named for what it means, so the hive's drill-down
+    // from the \`tiles\` spot reads as the design does. Until then this file
+    // may only get smaller: new tile behaviour goes in its own module.
+    const SHOW_CELL = join(ROOT, 'hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts')
+    const CEILING = 11389
+    const lines = readFileSync(SHOW_CELL, 'utf8').split('\n').length
+    expect(lines, `show-cell.drone.ts grew to ${lines} lines (ceiling ${CEILING}). Put the new behaviour in a module of its own.`).toBeLessThanOrEqual(CEILING)
+    expect(lines, `show-cell.drone.ts shrank to ${lines} lines. Lower CEILING to ${lines} so the ratchet clicks.`).toBeGreaterThan(CEILING - 50)
+  })
+
+  it('a bee declares every effect it listens to or emits by name', () => {
+    // \`listens\` / \`emits\` are how the hive shows what a behaviour does
+    // (the IoC graph, the layer docs a tile's drill-down reads). A bee that
+    // uses an effect it does not declare is invisible exactly where it
+    // matters. Declaring one it does not use by name is allowed: a helper
+    // may do the emitting.
+    const G = String.raw`(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?`
+    const HEARD = new RegExp(String.raw`(?:this\.onEffect|this\.onceEffect|EffectBus\.on|EffectBus\.once)\s*` + G + String.raw`\s*\(\s*'([^']+)'`, 'g')
+    const SENT = new RegExp(String.raw`(?:this\.emitEffect|EffectBus\.emit|EffectBus\.emitTransient)\s*` + G + String.raw`\s*\(\s*'([^']+)'`, 'g')
+    const offenders: string[] = []
+    for (const file of walk(join(ROOT, 'hypercomb-essentials/src'))) {
+      if (!file.endsWith('.ts') || file.endsWith('.spec.ts')) continue
+      const src = readFileSync(file, 'utf8')
+      const listens = /(?:override\s+)?listens\s*=\s*\[([\s\S]*?)\]/.exec(src)
+      const emits = /(?:override\s+)?emits\s*=\s*\[([\s\S]*?)\]/.exec(src)
+      if (!listens && !emits) continue
+      const declared = (m: RegExpExecArray | null) => new Set([...(m?.[1] ?? '').matchAll(/'([^']+)'/g)].map(x => x[1]))
+      const heard = declared(listens), sent = declared(emits)
+      const undeclared = [...src.matchAll(HEARD)].some(m => !heard.has(m[1]!)) || [...src.matchAll(SENT)].some(m => !sent.has(m[1]!))
+      if (undeclared) offenders.push(relative(ROOT, file).replace(/\\/g, '/'))
+    }
+    assertRatchet(offenders.sort(), [
+      'hypercomb-essentials/src/assistant/break-apart.drone.ts',
+      'hypercomb-essentials/src/assistant/orchestrator.drone.ts',
+      'hypercomb-essentials/src/assistant/organize.drone.ts',
+      'hypercomb-essentials/src/clipboard/clipboard.worker.ts',
+      'hypercomb-essentials/src/clipboard/image-paste.worker.ts',
+      'hypercomb-essentials/src/commands/tag-removal.drone.ts',
+      'hypercomb-essentials/src/computation/computation.drone.ts',
+      'hypercomb-essentials/src/contact/contact.drone.ts',
+      'hypercomb-essentials/src/editor/image-drop.drone.ts',
+      'hypercomb-essentials/src/files/file-drop.drone.ts',
+      'hypercomb-essentials/src/link/link-drop.worker.ts',
+      'hypercomb-essentials/src/link/tile-link-action.drone.ts',
+      'hypercomb-essentials/src/meeting/meeting.drone.ts',
+      'hypercomb-essentials/src/move/move.drone.ts',
+      'hypercomb-essentials/src/move/portable-tile-drop.drone.ts',
+      'hypercomb-essentials/src/navigation/pan/panning.drone.ts',
+      'hypercomb-essentials/src/navigation/zoom/zoom.drone.ts',
+      'hypercomb-essentials/src/presentation/avatars/agent-bee.drone.ts',
+      'hypercomb-essentials/src/presentation/avatars/avatar-swarm.drone.ts',
+      'hypercomb-essentials/src/presentation/screensaver/screensaver.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/layer-list.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/pixi-host.worker.ts',
+      'hypercomb-essentials/src/presentation/tiles/site-view.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/slides-view.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/tile-actions.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/tile-overlay.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/tile-view.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/tree-view.drone.ts',
+      'hypercomb-essentials/src/safety/brood.drone.ts',
+      'hypercomb-essentials/src/selection/select-mode.drone.ts',
+      'hypercomb-essentials/src/selection/selection-input.drone.ts',
+      'hypercomb-essentials/src/sequence/sequence-cycle.drone.ts',
+      'hypercomb-essentials/src/sharing/example-hives.worker.ts',
+      'hypercomb-essentials/src/sharing/hive-visit.boot.drone.ts',
+      'hypercomb-essentials/src/sharing/peer-models.drone.ts',
+      'hypercomb-essentials/src/sharing/sample-swarm.drone.ts',
+      'hypercomb-essentials/src/tutorial/bee-tutorial.drone.ts',
+      'hypercomb-essentials/src/tutorial/tutor-view.drone.ts',
+    ], 'undeclared effect')
+  })
+
+  it('update(segments, layer) is the one write verb — item-level side verbs may only shrink', () => {
+    // THE LIVING PRIMITIVE'S API IS update(new layer). LayerCommitter.update
+    // takes the full new layer at a position and commits it in one cascade;
+    // add and remove are special cases of "the new children list is X", and
+    // importTree is the same call for many positions at once. The item-level
+    // verbs grew beside it and outnumber it; each call site below is frozen
+    // and may only shrink. New code states the new layer.
+    const VERBS = /[.?]\s*(commitSlotSet|commitSlotAppend|commitSlotRemove|commitSlotSwap|commitChildrenDeltas)\s*(?:\?\.)?\s*\(/g
+    const actual: Record<string, number> = {}
+    for (const base of ['hypercomb-essentials/src', 'hypercomb-shared', 'hypercomb-web/src', 'hypercomb-runtime/src', 'hypercomb-shim/src', 'meadowverse']) {
+      if (!existsSync(join(ROOT, base))) continue
+      for (const file of walk(join(ROOT, base))) {
+        if (!file.endsWith('.ts') || file.endsWith('.spec.ts') || file.endsWith('layer-committer.drone.ts')) continue
+        const rel = relative(ROOT, file).replace(/\\/g, '/')
+        for (const m of stripComments(readFileSync(file, 'utf8')).matchAll(VERBS)) {
+          const key = `${rel} → ${m[1]}`
+          actual[key] = (actual[key] ?? 0) + 1
+        }
+      }
+    }
+    const allowed: Record<string, number> = {
+      'hypercomb-essentials/src/assistant/claude-bridge.worker.ts → commitSlotSet': 3,
+      'hypercomb-essentials/src/clipboard/clipboard.worker.ts → commitChildrenDeltas': 2,
+      'hypercomb-essentials/src/commands/canonical-reference.service.ts → commitChildrenDeltas': 1,
+      'hypercomb-essentials/src/commands/snapshot.queen.ts → commitSlotAppend': 1,
+      'hypercomb-essentials/src/history/builds-slot.ts → commitSlotAppend': 1,
+      'hypercomb-essentials/src/move/move.drone.ts → commitChildrenDeltas': 6,
+      'hypercomb-essentials/src/move/portable-tile-drop.drone.ts → commitChildrenDeltas': 1,
+      'hypercomb-essentials/src/references/gather/gather-link.service.ts → commitChildrenDeltas': 1,
+      'hypercomb-shared/core/aggregation-layer.ts → commitSlotSet': 2,
+      'hypercomb-shared/core/mixed-group-bag.ts → commitSlotSet': 1,
+      'hypercomb-shared/ui/aggregate-index/sources/collections.source.ts → commitChildrenDeltas': 1,
+      'hypercomb-shared/ui/command-line/hash-marker.behavior.ts → commitSlotSet': 1,
+    }
+    const grew = Object.entries(actual).filter(([k, n]) => n > (allowed[k] ?? 0)).map(([k, n]) => `${k} ×${n} (allowed ${allowed[k] ?? 0})`)
+    const paid = Object.entries(allowed).filter(([k, n]) => (actual[k] ?? 0) < n).map(([k, n]) => `${k} ×${actual[k] ?? 0} (was ${n})`)
+    const msg =
+      (grew.length ? `\nNEW SIDE-VERB CALLS — state the new layer with update(segments, layer) instead:\n  ${grew.join('\n  ')}\n` : '') +
+      (paid.length ? `\nDEBT PAID — lower these counts so the ratchet clicks:\n  ${paid.join('\n  ')}\n` : '')
+    expect(grew.concat(paid), msg).toEqual([])
+  })
+
 })

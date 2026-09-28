@@ -31,6 +31,7 @@ comparison holds; the absolute numbers do not transfer.
 | 2026-09-27 | `dfdf6eca9eab` | 7 tiles | 479 vs 827 ms | 1513 vs 2220 ms | 1044 vs 1466 ms | 0 vs 68 ms | 17 vs 17 ms / 0 vs 0.1 % | 56 vs 73 MB | 1× — invalid: 7 of 8 boots on each side lost the GPU context (the atlas below) |
 | 2026-09-27 | `310e976a049b` | 7 tiles, drawn in software | 3978 vs 6392 ms | 3993 vs 6392 ms | 3318 vs 5162 ms | 2576 vs 3888 ms | 50 vs 50 ms / 3.8 vs 5.3 % | 84 vs 102 MB | 1× — PASS, every boot drew every tile |
 | 2026-09-27 | `310e976a049b` | 7 tiles, drawn in software | 8160 vs 13845 ms | 8160 vs 13845 ms | 6284 vs 11543 ms | 3868 vs 5630 ms | 67 vs 67 ms / 33 vs 39 % | 84 vs 93 MB | 4× — PASS; idle blocking 415 vs 1013 ms / 10 s |
+| 2026-09-27 | `427ca7b83744` | 7 tiles, drawn in software | 3880 vs 5519 ms | 3891 vs 5519 ms | 3350 vs 4550 ms | 1330 vs 2217 ms | 33 vs 33 ms / 0.3 vs 0.5 % | 87 vs 104 MB | 1× — PASS; idle blocking 0 vs 53 ms / 10 s. A run taken while test suites shared the machine read 4668 vs 6543 ms: gate on a quiet machine |
 
 Minimal first, Angular second.
 
@@ -45,6 +46,7 @@ Minimal first, Angular second.
 | 2026-09-27 | the `lineage` spot (tiles in the pure host) | 557 vs 554 ms | 1316 vs 1326 ms | console 159 vs 150 ms | same |
 | 2026-09-27 | the `tiles` spot (renderers placed, one flavour per class) | +16 / −44 / +17 ms | +8 / −60 / +33 ms | first try was +22 to +85 ms, fixed before commit | same |
 | 2026-09-27 | image atlas without multisampling (package `310e976a049b`) | — | — | GPU memory −1 GiB (an 8192² 4-sample buffer); in the sandbox, boots that draw every tile went from 1 of 8 to 8 of 8; pictures identical inside, only the 1-px border of a letterboxed picture is crisp instead of half-blended | better |
+| 2026-09-27 | show-cell cleaned (package `427ca7b83744`): 332 dead lines gone, a render lock no longer released early, five timers and two listeners no longer outlive the drone | 3880 ms | 3350 ms | tiles on screen 3891 ms (was 3993 ms for `310e976a049b` in an earlier session, not an A/B in one run) | same or better |
 
 Adding a row: run the gate (and `--rate 4` when boot or rendering moved),
 then add the change's line here in the same commit.
