@@ -36,7 +36,11 @@ show-cell                          the render pass: synchronize → member names
 ├── fill geometry   ✓ tile-fill-geometry.ts the tiles as the GPU draws them: one quad per tile and every
 │                                           attribute the hex shader reads, asked of the renderer's look;
 │                                           pure — and the key that says when a bake is stale
-├── hover and dive  ○ inside                hover reveal, tile preview, dive into a branch, mark preview
+├── dive            ✓ tile-dive.ts          another layer's tiles painted in place of this page's, through its
+│                                           own shader and packer; the page hidden, never torn down, given back
+├── previews        ✓ tile-previews.ts      looks not yet true: the marks' carriers (hover ANY, in hand or dragged
+│                                           ALL) and the tile editor's edit, painted in place, never persisted
+├── hover           ○ inside                the hovered tile's reveal and opacity (single-cell writes)
 └── landing         ○ inside                quiet landing: held renders and the pending badge
 ```
 

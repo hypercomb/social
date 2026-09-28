@@ -1,6 +1,6 @@
 // pixi/show-cell.drone.ts — the tile renderer's root. It runs the render
 // pass and composes the branches drawn out beside it (membership, narrowing,
-// order, mesh, readiness, faces, fill geometry —
+// order, mesh, readiness, faces, fill geometry, dive, previews —
 // documentation/tile-renderer-tree.md). A new tile behaviour
 // is a branch of its own, never more lines here.
 import { Drone, EffectBus, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
@@ -44,6 +44,8 @@ import { TileMesh, type MeshApi } from './tile-mesh.js'
 import { CHILD_SHADE, TileReadiness } from './tile-readiness.js'
 import { TileFaces } from './tile-faces.js'
 import { buildFillQuad, fillKey, type TileLook } from './tile-fill-geometry.js'
+import { TileDive, type DiveCell } from './tile-dive.js'
+import { MarkPreview, TilePreview, type TilePreviewPayload } from './tile-previews.js'
 import { TileOrder, type ReferenceDraftPreview } from './tile-order.js'
 import { adoptPackedVisual, packedVisual, type PackedVisualEntry } from './packed-visuals.js'
 
@@ -95,48 +97,18 @@ const PENDING_CELL_LABEL = '\u2026'
 // not on an empty ink field.
 const ARRIVAL_GATE_MS = 2500
 
-/** `#rrggbb` (or bare `rrggbb`) → the [r, g, b] triple in 0–1 the shader
- *  takes, or null if it isn't one. Colours arrive as CSS text (a pheromone
- *  from the registry, a preview border); null, never a guessed colour, so the
- *  caller keeps the last good one instead of flashing a wrong one. */
-const previewRgb = (hex: string | null | undefined): [number, number, number] | null => {
-  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex ?? '').trim())
-  return m ? [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255] : null
-}
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
 type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean }
 
-/** `tile:preview` — the tile editor's edit in progress (editor/tile-editor.view.ts).
- *  `page` is the page the tile sits on, segments joined with '/'. Pictures are
- *  the exact small pictures a save would write, under their real signatures;
- *  absent means "the stored picture", `removed` means "no picture". */
-type TilePreviewPicture = { sig: string; blob: Blob }
-type TilePreviewPayload =
-  | { label: string; clear: true }
-  | { label: string; clear?: false; page: string; point?: TilePreviewPicture | null; flat?: TilePreviewPicture | null; removed?: boolean; border?: string | null; hideText?: boolean }
-type TilePreview = Extract<TilePreviewPayload, { page: string }>
-
-/** The rim a tile wears when it names no colour — as #tryInPlaceCellUpdate paints it. */
-const PREVIEW_DEFAULT_BORDER: [number, number, number] = [0.784, 0.592, 0.353]
 
 /** One tile of a DIVE (`render:dive`, wave-view): what another layer's tile
  *  needs to be painted HERE, in the page's own slots, by the page's own
  *  shader. Only what the packer reads — everything location-scoped
  *  (selection, shade, peer colour, hidden dimming) belongs to the page
  *  underneath and is deliberately absent. */
-export type DiveCell = {
-  q: number
-  r: number
-  label: string
-  imageSig?: string
-  hasBranch: boolean
-  hideText: boolean
-  borderColor?: [number, number, number]
-  /** A reference tile — hovers with the portal shimmer, as on its own page. */
-  portal: boolean
-}
+export type { DiveCell } from './tile-dive.js'
 type PeerSourceProjection = {
   peerIndex?: number
   peerPubkey?: string
@@ -422,7 +394,7 @@ export class ShowCellDrone extends Drone {
     registryProperties: label => this.registryPropertiesByLabel.get(label),
     registryImage: label => this.registryImageByLabel.get(label),
     renderedCells: () => this.renderedCells.values(),
-    previewSigs: () => this.#tilePreviewSigs(),
+    previewSigs: () => this.#tilePreview.sigs(),
     emit: (effect, payload) => this.emitEffect(effect, payload),
     onCleared: () => {
       // A REPLACED atlas restarts its eviction counter at 0, so a remembered
@@ -620,22 +592,30 @@ export class ShowCellDrone extends Drone {
   // circuit so nothing flips it back. Cleared via render:set-hive-visible.
   #hiveHidden = false
 
-  // ── DIVE (wave-view) — another layer's tiles painted IN PLACE of this one ──
-  // The wave view resolves a generation and asks for it with `render:dive`;
-  // this drone paints it through the SAME shader, atlases and geometry packer
-  // the page uses, so a dive IS the tiles underneath rather than a picture of
-  // them. The page's mesh is hidden (never torn down), the atlases pin the
-  // union of page and dive, and synchronize-driven renders are deferred until
-  // the dive ends — which restores the mesh, the pins and the hover exactly.
-  #diveActive = false
-  #diveHidMain = false
-  #diveMesh: any | null = null
-  #diveGeom: Geometry | null = null
-  #diveCells: Cell[] = []
-  #divePortals: ReadonlySet<string> = new Set<string>()
-  readonly #diveLabelToIndex = new Map<string, number>()
-  #diveHoverLabel: string | null = null
-  #diveToken = 0
+  /** Another layer's tiles painted in place of this page (tile-dive.ts). */
+  readonly #dive: TileDive = new TileDive({
+    layer: () => this.layer,
+    pageMesh: () => this.hexMesh,
+    shader: () => this.shader as any,
+    labelAtlas: () => this.atlas as any,
+    imageAtlas: () => this.imageAtlas as any,
+    decode: sig => this.#faces.decode(sig),
+    pageLabels: () => [...this.renderedCells.keys()],
+    pageImageSigs: () => [...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])),
+    pageCount: () => this.renderedCount,
+    pageHoverIndex: () => (this.#hoverRevealLabel ? this.#labelToIndex.get(this.#hoverRevealLabel) : undefined) ?? -1,
+    pendingLabel: PENDING_CELL_LABEL,
+    build: (cells, foreign) => {
+      const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
+      const pointReachPx = circumRadiusPx / 0.8660254
+      const hexHalfW = this.#flat ? pointReachPx : circumRadiusPx
+      const hexHalfH = this.#flat ? circumRadiusPx : pointReachPx
+      return this.buildFillQuadGeometry(cells as Cell[], circumRadiusPx, gapPx, hexHalfW + padPx, hexHalfH + padPx, foreign)
+    },
+    hidesName: (hideText, hasImage) => this.#hidesName(hideText, hasImage),
+    emit: (effect, payload) => this.emitEffect(effect, payload),
+    requestRender: () => this.requestRender(),
+  })
 
   /** A lightweight snapshot of the tiles currently painted at this node —
    *  axial coords, label, image signature, and whether text is suppressed.
@@ -947,42 +927,29 @@ export class ShowCellDrone extends Drone {
    *  Without it painting is blind — the click writes and nothing on the hive
    *  says so. Cleared when the brush is put down. */
   #tagApplyPainted = new Set<string>()
-  /** ── Pheromone preview (hover a mark → its tiles light up) ──────────────
-   *  The marks under the cursor somewhere in the chrome, and the labels on
-   *  THIS page that carry any of them. Wholly transient: the carriers are
-   *  painted straight into the divergence buffer as the value 3 and nothing
-   *  else ever writes or persists that value — no Cell record holds it, so
-   *  clearing the preview is a restore from the records, not a recomputation.
-   *  A hover must not cost a render pass, hence the in-place attribute push. */
-  #markPreviewMarks: string[] = []
-  #markPreviewLabels = new Set<string>()
-  #markPreviewColor: [number, number, number] = [0.55, 0.85, 1.0]
-  /** THE BOUQUET IN HAND (`tags:apply-pending`) — the STANDING sibling of the
-   *  hover preview above, riding the same buffer flag and the same u_markPreview
-   *  ramp. Opposite matching rule, deliberately: a hover asks "who carries ANY
-   *  of these?" and lights them; the armed bouquet asks "who already wears ALL
-   *  of it?" — those stay lit as settled ground, and every tile still missing
-   *  part of the set recedes, which is exactly the set a click will scent
-   *  (TileOverlayDrone's takeover asks the same question). A live hover
-   *  outranks it while it lasts; ending the hover falls back to this. */
-  #armedApplyMarks: string[] = []
-  #armedApplyColor: [number, number, number] | null = null
-  /** A pheromone (or a whole bouquet) is being DRAGGED out of the panel
-   *  (`drop:dragging {marks, color}`). Same treatment and same ALL-match rule
-   *  as the armed bouquet, for the length of the drag: where the drop would DO
-   *  something is shaded before anything is released. Outranks both the hover
-   *  preview and the armed set while it lasts. */
-  #dragShadeMarks: string[] = []
-  #dragShadeColor: [number, number, number] | null = null
-  /** 0..1 ramp — the whole treatment fades in and out (see u_markPreview). */
-  #markPreviewK = 0
-  #markPreviewTarget = 0
-  #markPreviewRaf = 0
-  /** The geometry the carrier flags were painted into. A rebuild (a repaint, a
-   *  navigation, a warm-mesh swap) makes a NEW buffer with the baked values, so
-   *  the preview repaints itself when this stops matching — one reference
-   *  compare per frame, and no hook into the render path. */
-  #markPreviewGeom: unknown = null
+  /** Which tiles wear these marks — hovered, in hand, dragged — painted in
+   *  place, never a render pass (tile-previews.ts). */
+  readonly #marks: MarkPreview = new MarkPreview({
+    pageLabels: () => this.renderedCells.keys(),
+    tagsFor: label => this.#narrow.tagsFor(label),
+    writeDivergence: valueFor => {
+      if (!this.#buf.divergence || !this.geom) return false
+      for (const [label, i] of this.#labelToIndex) {
+        this.#writeCellScalar(this.#buf.divergence, i, valueFor(label, this.renderedCells.get(label)?.divergence ?? 0))
+      }
+      this.#pushBuffer('aDivergence')
+      return true
+    },
+    geom: () => this.geom,
+    shader: () => this.shader,
+    // The breath needs a clock. u_time is frozen on an ordinary hive page and
+    // shared with launcher drift, which owns it whenever it is running.
+    breathe: () => {
+      if (this.#driftActive) return
+      if (!this.#driftStart) this.#driftStart = performance.now()
+      this.shader?.setTime((performance.now() - this.#driftStart) / 1000)
+    },
+  })
   /** When cursor is rewound, holds cell→propertiesSig overrides from content-state ops. */
   #cursorPropsOverride: Map<string, string> | null = null
   /** Cache key for cursor-time reconstruction: `{locationSig}:{position}` — avoids redundant OPFS reads */
@@ -1826,7 +1793,7 @@ export class ShowCellDrone extends Drone {
     // state untouched until the dive ends, which re-requests this pass.
     // Painting now would re-show the mesh under the dive and re-pin the
     // atlases against the page alone.
-    if (this.#diveActive) return
+    if (this.#dive.active) return
     if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
       this.clearMesh("synchronize: pixi not ready")
       return
@@ -4236,7 +4203,7 @@ export class ShowCellDrone extends Drone {
     // slots — the hard display rule: a tile never renders without its
     // image outside text-only mode. Replacing the set wholesale unpins
     // the previous layer's sigs automatically.
-    this.imageAtlas?.setPinned([...cells.flatMap(c => (c.imageSig ? [c.imageSig] : [])), ...this.#tilePreviewSigs()])
+    this.imageAtlas?.setPinned([...cells.flatMap(c => (c.imageSig ? [c.imageSig] : [])), ...this.#tilePreview.sigs()])
 
     // Geometry replacement can change every aCellIndex while the cursor stays
     // still. Hover is label-owned, so rebind that label to the NEW index map
@@ -4254,7 +4221,7 @@ export class ShowCellDrone extends Drone {
     this.#applySwapMode()
     // A full render rebuilt every attribute from the caches; the edit in
     // progress goes back on top of its tile.
-    this.#writeTilePreview()
+    this.#tilePreview.repaint()
     this.#narrow.emitRenderTags(cells)
   }
 
@@ -4546,10 +4513,10 @@ export class ShowCellDrone extends Drone {
     // painted in this page's slots (null = give the page back). Hover rides
     // separately so a pointer move never re-resolves a generation.
     this.onEffect<{ cells?: readonly DiveCell[] | null }>('render:dive', (payload) => {
-      void this.#paintDive(payload?.cells ?? null)
+      void this.#dive.paint(payload?.cells ?? null)
     })
     this.onEffect<{ label?: string | null }>('render:dive-hover', (payload) => {
-      this.#hoverDive(payload?.label ?? null)
+      this.#dive.hover(payload?.label ?? null)
     })
 
     // viewport:persisted — VP just wrote pan/zoom/meshOffset for some
@@ -4580,10 +4547,10 @@ export class ShowCellDrone extends Drone {
     // incremental render so the rest of the grid stays untouched.
     // tile:preview — the tile editor's edit, painted live onto its own tile.
     // Transient (emitTransient): nothing is cached and nothing replays.
-    this.onEffect<TilePreviewPayload>('tile:preview', (payload) => { void this.#applyTilePreview(payload) })
+    this.onEffect<TilePreviewPayload>('tile:preview', (payload) => { void this.#tilePreview.apply(payload) })
 
     this.onEffect<{ cell: string }>('tile:saved', (payload) => {
-      if (payload?.cell) this.#tilePreviewSavedLabel = payload.cell
+      if (payload?.cell) this.#tilePreview.saved(payload.cell)
       if (payload?.cell) {
         const oldSig = this.#faces.images.get(payload.cell)
         this.#faces.images.delete(payload.cell)
@@ -4643,9 +4610,7 @@ export class ShowCellDrone extends Drone {
       // wears the whole set?" — the tile it just landed on must LIGHT. Re-ask
       // now (the tick loop re-asks again after any buffer rebuild, so a lagging
       // index only ever costs a beat, never a stale shade).
-      if (this.#armedApplyMarks.length > 0 || this.#markPreviewMarks.length > 0) {
-        this.#refreshMarkPreview()
-      }
+      if (this.#marks.asking) this.#marks.refresh()
     })
 
     // tags:indexed — the decoration index finished hydrating tags for cells
@@ -5160,22 +5125,14 @@ export class ShowCellDrone extends Drone {
 
     // tags:apply-pending — the bouquet in hand. TWO visual duties from one
     // sticky payload:
-    //   • the ARMED SHADE (#armedApplyMarks): tiles wearing the whole set stay
+    //   • the ARMED SHADE (MarkPreview.arm): tiles wearing the whole set stay
     //     lit in the bouquet's colour, every tile missing part of it recedes —
     //     the standing "click here to scent" readout;
     //   • the staged future-ADD marks (`cells`, the selection one-shot) — same
     //     purely-visual contract as the removal staging above, opposite sign.
     this.onEffect<{ cells?: string[]; active?: boolean; tags?: string[]; color?: string }>(
       'tags:apply-pending', ({ cells, active, tags, color }) => {
-        const armed = active === false
-          ? []
-          : (Array.isArray(tags) ? tags.map(t => String(t ?? '').trim()).filter(Boolean) : [])
-        if (color) this.#armedApplyColor = previewRgb(color)
-        if (armed.length !== this.#armedApplyMarks.length
-          || armed.some((m, i) => m !== this.#armedApplyMarks[i])) {
-          this.#armedApplyMarks = armed
-          this.#refreshMarkPreview()
-        }
+        this.#marks.arm(active, tags, color)
         const next = new Set(active === false ? [] : (Array.isArray(cells) ? cells : []))
         if (next.size === this.#tagApplyPainted.size
           && [...next].every(l => this.#tagApplyPainted.has(l))) return
@@ -5190,13 +5147,7 @@ export class ShowCellDrone extends Drone {
     // it all stay lit. Emitters without marks (file drops, the aggregate
     // index) change nothing here.
     this.onEffect<{ active?: boolean; marks?: string[]; color?: string }>('drop:dragging', ({ active, marks, color }) => {
-      const held = active === true && Array.isArray(marks)
-        ? marks.map(m => String(m ?? '').trim()).filter(Boolean)
-        : []
-      if (held.length === 0 && this.#dragShadeMarks.length === 0) return
-      if (color) this.#dragShadeColor = previewRgb(color)
-      this.#dragShadeMarks = held
-      this.#refreshMarkPreview()
+      this.#marks.drag(active, marks, color)
     })
 
     // ── THE TAKE'S TOUCH ─────────────────────────────────────────────
@@ -5230,13 +5181,7 @@ export class ShowCellDrone extends Drone {
     // look: nothing is written, nothing is staged, nothing is armed, and
     // leaving the mark puts the page back exactly as it was.
     this.onEffect<{ marks?: readonly string[]; color?: string }>('tags:preview', ({ marks, color }) => {
-      const next = (Array.isArray(marks) ? marks : []).map(m => String(m ?? '').trim()).filter(Boolean)
-      const rgb = color ? previewRgb(color) : null
-      if (rgb) this.#markPreviewColor = rgb
-      if (next.length === this.#markPreviewMarks.length
-        && next.every((m, i) => m === this.#markPreviewMarks[i])) return
-      this.#markPreviewMarks = next
-      this.#refreshMarkPreview()
+      this.#marks.hover(marks, color)
     })
 
     // A programmatic mark change (e.g. /mobile sweep) deposits tags via
@@ -5906,7 +5851,7 @@ export class ShowCellDrone extends Drone {
 
     if (this.#flashTimer) { clearTimeout(this.#flashTimer); this.#flashTimer = null }
     if (this.#translationPulseTimer) { clearInterval(this.#translationPulseTimer); this.#translationPulseTimer = null }
-    if (this.#markPreviewRaf) { cancelAnimationFrame(this.#markPreviewRaf); this.#markPreviewRaf = 0 }
+    this.#marks.dispose()
     if (this.#substrateFadeRaf) { cancelAnimationFrame(this.#substrateFadeRaf); this.#substrateFadeRaf = 0 }
     if (this.#shadeFadeFrame !== null) { cancelAnimationFrame(this.#shadeFadeFrame); this.#shadeFadeFrame = null }
     if (this.#clusterRetryTimer) { clearTimeout(this.#clusterRetryTimer); this.#clusterRetryTimer = null }
@@ -6077,118 +6022,6 @@ export class ShowCellDrone extends Drone {
     } else {
       if (this.#portalShimmerRaf) { cancelAnimationFrame(this.#portalShimmerRaf); this.#portalShimmerRaf = 0 }
     }
-  }
-
-  /** Resolve the treatment's marks against this page and paint the answer.
-   *
-   *  TWO askers, one buffer, one ramp — a live hover outranks the standing
-   *  armed bouquet, and each has its own matching rule:
-   *    • hover (`tags:preview`): who carries ANY of these? — the carriers
-   *      light, the rest recede;
-   *    • armed (`tags:apply-pending`): who already wears ALL of it? — those
-   *      stay lit as settled ground, and everything still missing part of the
-   *      set recedes: exactly the tiles a click will scent.
-   *  While armed, the treatment stays ON even with zero matches — a fully
-   *  receded page IS the honest answer ("nothing wears this yet; click tiles
-   *  to scent them"), where the hover with no carriers just stays dark.
-   *
-   *  The carrier set goes STRAIGHT into the divergence buffer and is pushed to
-   *  the GPU — a hover must never cost a render pass, and nothing here belongs
-   *  in one: no geometry moves and no cell record changes. The flag value (3)
-   *  is deliberately outside the divergence vocabulary (0/1/2), so a rebuild
-   *  bakes the tile's REAL divergence and the treatment simply repaints itself
-   *  over the fresh buffer (see #markPreviewGeom). */
-  #refreshMarkPreview(): void {
-    const dragged = this.#dragShadeMarks
-    const hovered = this.#markPreviewMarks
-    const armed = this.#armedApplyMarks
-    // The live drag outranks the hover, the hover outranks the standing armed
-    // set. Drag and armed share the ALL-match rule (what would the landing
-    // change?); the hover keeps ANY-match (who carries this?).
-    const all = dragged.length > 0 ? dragged : (hovered.length > 0 ? null : armed)
-    const next = new Set<string>()
-    if (all === null) {
-      const marks = new Set(hovered)
-      for (const label of this.renderedCells.keys()) {
-        for (const t of this.#narrow.tagsFor(label)) if (marks.has(t)) { next.add(label); break }
-      }
-    } else if (all.length > 0) {
-      for (const label of this.renderedCells.keys()) {
-        const worn = this.#narrow.tagsFor(label)
-        if (all.every(t => worn.includes(t))) next.add(label)
-      }
-      const tint = dragged.length > 0 ? this.#dragShadeColor : this.#armedApplyColor
-      if (tint) this.#markPreviewColor = tint
-    }
-    this.#markPreviewLabels = next
-    const active = all === null ? next.size > 0 : all.length > 0
-    if (active) this.#paintMarkPreviewBuffer()
-    this.#setMarkPreview(active)
-  }
-
-  /** Write the carrier flag for every cell in the current buffer. Non-carriers
-   *  are restored to their BAKED divergence (from the cell record), which is
-   *  what makes moving from one mark to the next a single push rather than a
-   *  clear-then-paint. */
-  #paintMarkPreviewBuffer(): void {
-    if (!this.#buf.divergence || !this.geom) return
-    for (const [label, i] of this.#labelToIndex) {
-      const baked = this.renderedCells.get(label)?.divergence ?? 0
-      this.#writeCellScalar(this.#buf.divergence, i, this.#markPreviewLabels.has(label) ? 3 : baked)
-    }
-    this.#pushBuffer('aDivergence')
-    this.#markPreviewGeom = this.geom
-  }
-
-  /** Put every cell back to its baked divergence. Runs at the END of the fade
-   *  out, not at the moment the cursor leaves: u_markPreview is already ramping
-   *  to 0, so restoring the flags early would snap the lit tiles dark while the
-   *  rest of the page was still fading back. */
-  #restoreMarkPreviewBuffer(): void {
-    this.#markPreviewGeom = null
-    if (!this.#buf.divergence || !this.geom) return
-    for (const [label, i] of this.#labelToIndex) {
-      this.#writeCellScalar(this.#buf.divergence, i, this.renderedCells.get(label)?.divergence ?? 0)
-    }
-    this.#pushBuffer('aDivergence')
-  }
-
-  /** Ramp the preview in or out. The rAF runs for as long as the treatment is
-   *  showing — it owns three things at once: the 0..1 strength ramp, the breath
-   *  clock (u_time, frozen on a normal hive page), and re-pushing the uniforms
-   *  after a shader swap, which is why it reads `this.shader` every frame
-   *  instead of capturing it. */
-  #setMarkPreview = (active: boolean): void => {
-    this.#markPreviewTarget = active ? 1 : 0
-    if (!this.#markPreviewRaf) this.#markPreviewRaf = requestAnimationFrame(this.#markPreviewTick)
-  }
-
-  #markPreviewTick = (): void => {
-    const target = this.#markPreviewTarget
-    const step = 0.11                                   // ≈ 150ms edge to edge
-    const k = target > this.#markPreviewK
-      ? Math.min(target, this.#markPreviewK + step)
-      : Math.max(target, this.#markPreviewK - step)
-    this.#markPreviewK = k
-    const shader = this.shader
-    shader?.setMarkPreview(k)
-    if (k > 0) {
-      shader?.setMarkColor(this.#markPreviewColor[0], this.#markPreviewColor[1], this.#markPreviewColor[2])
-      // The breath needs a clock. u_time is frozen on an ordinary hive page and
-      // shared with launcher drift, which owns it whenever it is running.
-      if (!this.#driftActive) {
-        if (!this.#driftStart) this.#driftStart = performance.now()
-        shader?.setTime((performance.now() - this.#driftStart) / 1000)
-      }
-      // A repaint or a navigation replaced the buffer under us — paint again.
-      if (this.geom !== this.#markPreviewGeom) this.#refreshMarkPreview()
-    }
-    if (k === 0 && target === 0) {
-      this.#markPreviewRaf = 0
-      this.#restoreMarkPreviewBuffer()
-      return
-    }
-    this.#markPreviewRaf = requestAnimationFrame(this.#markPreviewTick)
   }
 
   // settledEmpty: TRUE only when the caller has confirmed the render pipeline
@@ -7219,148 +7052,12 @@ export class ShowCellDrone extends Drone {
       for (const label of built.shadedLabels) this.#shadedLabels.add(label)
       // Buffer references + label→index map, so tile:saved can push in-place
       // attribute updates to the GPU without rebuilding geometry. A dive's
-      // buffers are its own (see #diveLabelToIndex).
+      // buffers are its own (tile-dive.ts).
       this.#buf = built.buffers
       this.#labelToIndex.clear()
       for (let i = 0; i < cells.length; i++) this.#labelToIndex.set(cells[i].label, i)
     }
     return built.geometry
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // DIVE — paint another layer's generation in this page's slots
-  // ─────────────────────────────────────────────────────────────────────
-
-  /** Paint a dive (or, with nothing to paint, give the page back). The
-   *  generation lands WHOLE: every label baked and every picture decoded
-   *  before the page's mesh is hidden, so a dive never trickles in over the
-   *  tiles it replaces. Same slots, same offset, same shader — a dive is
-   *  indistinguishable from the page it previews. */
-  async #paintDive(input: readonly DiveCell[] | null): Promise<void> {
-    const token = ++this.#diveToken
-    if (!input || input.length === 0) { this.#clearDive(); return }
-    const atlas = this.atlas, imageAtlas = this.imageAtlas
-    if (!this.layer || !this.hexMesh || !this.shader || !atlas || !imageAtlas) { this.#clearDive(); return }
-
-    const cells: Cell[] = input.map(d => ({
-      q: d.q, r: d.r, label: d.label, external: false, imageSig: d.imageSig,
-      hasBranch: d.hasBranch, hideText: d.hideText, borderColor: d.borderColor, heat: 0,
-    }))
-    const portals = new Set(input.filter(d => d.portal).map(d => d.label))
-
-    // Pin the UNION of what is on screen and what is about to be: neither the
-    // page underneath nor the dive may lose its glyphs or pixels to the other.
-    const pageSigs = [...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : []))
-    atlas.setPinned([...this.renderedCells.keys(), ...cells.map(c => c.label), PENDING_CELL_LABEL])
-    imageAtlas.setPinned([...pageSigs, ...cells.flatMap(c => (c.imageSig ? [c.imageSig] : []))])
-    for (const c of cells) atlas.getLabelUV(c.label)
-
-    await Promise.all(cells.map(async (c) => {
-      const sig = c.imageSig
-      if (!sig || imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) return
-      try {
-        const blob = await this.#faces.decode(sig)
-        if (blob) await imageAtlas.loadImage(sig, blob)
-      } catch { /* label-only, exactly as the page would paint it */ }
-    }))
-    if (token !== this.#diveToken) return
-    if (!this.layer || !this.hexMesh || !this.shader) { this.#clearDive(); return }
-
-    this.#diveCells = cells
-    this.#divePortals = portals
-    this.#rebuildDiveGeometry()
-    if (!this.#diveHidMain) { this.#diveHidMain = true; this.hexMesh.visible = false }
-    this.#diveActive = true
-    this.#applyDiveHover()
-    this.emitEffect('render:dive-painted', { count: cells.length })
-  }
-
-  /** (Re)pack the dive's geometry through the page's own packer, in FOREIGN
-   *  mode — nothing location-scoped is read and nothing of the page's buffer
-   *  bookkeeping is overwritten — and put it on a mesh that shares the page's
-   *  shader, at the page's own mesh offset. */
-  #rebuildDiveGeometry(): void {
-    if (!this.layer || !this.hexMesh || !this.shader) return
-    const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
-    const pointReachPx = circumRadiusPx / 0.8660254
-    const hexHalfW = this.#flat ? pointReachPx : circumRadiusPx
-    const hexHalfH = this.#flat ? circumRadiusPx : pointReachPx
-    const geom = this.buildFillQuadGeometry(
-      this.#diveCells, circumRadiusPx, gapPx, hexHalfW + padPx, hexHalfH + padPx,
-      { portals: this.#divePortals, reveal: this.#diveHoverLabel },
-    )
-    this.#diveLabelToIndex.clear()
-    this.#diveCells.forEach((c, i) => this.#diveLabelToIndex.set(c.label, i))
-    if (!this.#diveMesh) {
-      this.#diveMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
-      ;(this.#diveMesh as any).blendMode = 'pre-multiply'
-      this.layer.addChild(this.#diveMesh as any)
-    } else {
-      this.#diveMesh.geometry = geom
-      this.#diveMesh.shader = (this.shader as any).shader
-    }
-    if (this.#diveGeom) { try { this.#diveGeom.destroy(true) } catch { /* gone */ } }
-    this.#diveGeom = geom
-    this.#diveMesh.position.set(this.hexMesh.position.x, this.hexMesh.position.y)
-    this.#diveMesh.visible = true
-  }
-
-  /** The dived tile under the pointer. A picture-only tile reveals its name
-   *  while hovered, as on its own page — that is a label-UV change, so the
-   *  geometry is repacked (pure CPU, no I/O) only when the hover leaves or
-   *  lands on such a tile. */
-  #hoverDive(label: string | null): void {
-    if (label === this.#diveHoverLabel) return
-    const hides = (l: string | null): boolean => {
-      const c = l ? this.#diveCells.find(x => x.label === l) : undefined
-      return !!c && this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))
-    }
-    const repack = this.#diveActive && (hides(this.#diveHoverLabel) || hides(label))
-    this.#diveHoverLabel = label
-    if (repack) this.#rebuildDiveGeometry()
-    if (this.#diveActive) this.#applyDiveHover()
-  }
-
-  #applyDiveHover(): void {
-    const i = this.#diveHoverLabel ? this.#diveLabelToIndex.get(this.#diveHoverLabel) : undefined
-    this.shader?.setHoveredIndex(i ?? -1)
-  }
-
-  /** Give the page back exactly as it was: its mesh, its pins, its hover —
-   *  and the render pass a synchronize may have queued while the dive owned
-   *  the surface. Safe to call twice. */
-  #clearDive(): void {
-    this.#diveToken++
-    const wasActive = this.#diveActive
-    this.#diveActive = false
-    if (this.#diveMesh) {
-      try { this.layer?.removeChild(this.#diveMesh) } catch { /* gone */ }
-      try { this.#diveMesh.destroy?.() } catch { /* gone */ }
-      this.#diveMesh = null
-    }
-    if (this.#diveGeom) {
-      try { this.#diveGeom.destroy(true) } catch { /* gone */ }
-      this.#diveGeom = null
-    }
-    this.#diveCells = []
-    this.#divePortals = new Set<string>()
-    this.#diveLabelToIndex.clear()
-    this.#diveHoverLabel = null
-    if (this.#diveHidMain) {
-      this.#diveHidMain = false
-      if (this.hexMesh && this.renderedCount > 0) this.hexMesh.visible = true
-    }
-    // Announced even when nothing was up: a dive that could not be painted
-    // (no mesh yet, no shader) reads as "the page is showing" to the wave
-    // view, which then lets go of the pointer instead of holding a dive that
-    // never landed.
-    this.emitEffect('render:dive-painted', { count: 0 })
-    if (!wasActive) return
-    this.atlas?.setPinned([...this.renderedCells.keys(), PENDING_CELL_LABEL])
-    this.imageAtlas?.setPinned([...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])))
-    const restored = this.#hoverRevealLabel ? this.#labelToIndex.get(this.#hoverRevealLabel) : undefined
-    this.shader?.setHoveredIndex(restored ?? -1)
-    this.requestRender()
   }
 
   // ─────────────────────────────────────────────────────────────────────
@@ -7425,13 +7122,8 @@ export class ShowCellDrone extends Drone {
   #labelIsHidden(label: string): boolean {
     if (label === this.#hoverRevealLabel) return false
     // A tile under a live edit hides its name by the EDIT, not by what is stored.
-    const preview = this.#tilePreview
-    if (preview?.label === label) {
-      if (!preview.hideText || preview.removed) return false
-      const picture = this.#flat ? preview.flat : preview.point
-      const sig = picture?.sig ?? this.#faces.images.get(label)
-      return this.#hidesName(true, !!(sig && this.imageAtlas?.getImageUV(sig)))
-    }
+    const byEdit = this.#tilePreview.hiddenBy(label)
+    if (byEdit !== undefined) return byEdit
     const cell = this.renderedCells.get(label)
     if (!cell?.hideText || cell.plain || !cell.imageSig) return false
     return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
@@ -7478,161 +7170,52 @@ export class ShowCellDrone extends Drone {
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // LIVE PREVIEW — the tile editor's edit, on its own tile
+  // LIVE PREVIEW — the tile editor's edit, on its own tile (tile-previews.ts)
   // ─────────────────────────────────────────────────────────────────────
-  //
-  // While a tile is being edited, its hexagon in the hive shows the edit as it
-  // happens: the framing, a new picture or none, the rim colour, whether the
-  // name shows. It is painted the way #tryInPlaceCellUpdate paints a saved
-  // change — attribute writes on one tile, never a render pass — but from the
-  // editor's payload, and it is NEVER written into a cache: the caches go on
-  // describing what is stored, so ending a preview is a repaint from them.
-  //
-  // The pictures are the exact bytes a save writes (one capture function, one
-  // deterministic output), loaded under their real signatures — so when the
-  // save lands, its new picture is already on the GPU and nothing flashes.
 
-  #tilePreview: TilePreview | null = null
-  #tilePreviewToken = 0
-  /** The tile the newest payload named ('' after a clear). */
-  #tilePreviewLatest = ''
-  /** The tile a save just landed on — its preview's end must not repaint the
-   *  old caches, because the save's own render is about to paint the truth.
-   *  Held until that tile is previewed again. */
-  #tilePreviewSavedLabel = ''
+  readonly #tilePreview: TilePreview = new TilePreview({
+    page: () => ((this.resolve<any>('lineage')?.explorerSegments?.() ?? []) as unknown[])
+      .map(s => String(s ?? '').trim()).filter(Boolean).join('/'),
+    imageAtlas: () => this.imageAtlas,
+    pageImageSigs: () => [...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])),
+    flat: () => this.#flat,
+    stored: label => ({
+      image: this.#faces.images.get(label) ?? null,
+      border: this.#faces.borders.get(label),
+      hideText: this.#faces.hiddenText.get(label) ?? false,
+    }),
+    hasTile: label => this.#labelToIndex.has(label),
+    hidesName: (hideText, hasImage) => this.#hidesName(hideText, hasImage),
+    paintFace: (label, uv, border, hideText) => this.#paintFaceInPlace(label, uv, border, hideText),
+    requestRender: () => this.requestRender(),
+  })
 
-  #tilePreviewSigs(): string[] {
-    const p = this.#tilePreview
-    if (!p || p.removed) return []
-    return [p.point?.sig, p.flat?.sig].filter((sig): sig is string => !!sig)
-  }
-
-  #currentPageKey(): string {
-    return ((this.resolve<any>('lineage')?.explorerSegments?.() ?? []) as unknown[])
-      .map(s => String(s ?? '').trim()).filter(Boolean).join('/')
-  }
-
-  #applyTilePreview = async (payload: TilePreviewPayload | null | undefined): Promise<void> => {
-    if (!payload?.label) return
-    const token = ++this.#tilePreviewToken
-    this.#tilePreviewLatest = payload.clear ? '' : payload.label
-
-    if (payload.clear) {
-      const ended = this.#tilePreview
-      this.#tilePreview = null
-      if (!ended) return
-      // A save announces tile:saved in the same turn it ends the preview — or,
-      // when the docked editor saves and moves to another tile, just before.
-      // Wait the turn out: repaint from the caches only if no save came, and
-      // only if the same tile has not been taken up again meanwhile. A preview
-      // of a DIFFERENT tile arriving in between (the editor moving on) does not
-      // stop this one's tile being put back.
-      setTimeout(() => {
-        if (this.#tilePreviewLatest === ended.label) return
-        if (this.#tilePreviewSavedLabel === ended.label) return
-        this.#restoreTileFromCaches(ended.label)
-      }, 0)
-      return
-    }
-
-    // Previewed again: an earlier save of this tile no longer describes it.
-    if (payload.label === this.#tilePreviewSavedLabel) this.#tilePreviewSavedLabel = ''
-
-    if (payload.page !== this.#currentPageKey()) return
-    const atlas = this.imageAtlas
-    // Decode both orientations before anything is swapped, so the tile never
-    // paints an empty slot mid-edit and an orientation flip finds its picture.
-    if (atlas && !payload.removed) {
-      const pictures = [payload.point, payload.flat].filter((p): p is TilePreviewPicture => !!p)
-      await Promise.all(pictures.map(p => atlas.loadImage(p.sig, p.blob).catch(() => null)))
-    }
-    if (token !== this.#tilePreviewToken) return
-    this.#tilePreview = payload
-    atlas?.setPinned([
-      ...[...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])),
-      ...this.#tilePreviewSigs(),
-    ])
-    this.#writeTilePreview()
-  }
-
-  /** Paint the preview onto its tile. False when there is nothing to paint or
-   *  the tile is not in the current geometry. */
-  #writeTilePreview(): boolean {
-    const preview = this.#tilePreview
-    if (!preview) return false
-    const i = this.#labelToIndex.get(preview.label)
+  /** Write one tile's picture, border and name band in place and push them —
+   *  attribute writes on one tile, never a render pass. False when the tile
+   *  is not in the current geometry or the buffers are not up. */
+  #paintFaceInPlace(
+    label: string,
+    uv: { u0: number; v0: number; u1: number; v1: number } | null,
+    border: [number, number, number],
+    hideText: boolean | undefined,
+  ): boolean {
+    const i = this.#labelToIndex.get(label)
     const { imageUV, hasImage, borderColor, labelUV } = this.#buf
     if (i === undefined || !imageUV || !hasImage || !borderColor || !labelUV) return false
     if (!this.geom || !this.imageAtlas || !this.atlas) return false
-
-    const picture = this.#flat ? preview.flat : preview.point
-    const stored = this.#faces.images.get(preview.label)
-    let uv = preview.removed
-      ? null
-      : picture
-        ? this.imageAtlas.getImageUV(picture.sig)
-        : (stored ? this.imageAtlas.getImageUV(stored) : null)
-    if (!preview.removed && picture && !uv) {
-      // Evicted or not decoded yet: keep what the tile shows and paint again
-      // the moment it lands.
-      uv = stored ? this.imageAtlas.getImageUV(stored) : null
-      void this.imageAtlas.loadImage(picture.sig, picture.blob)
-        .then(() => { if (this.#tilePreview === preview) this.#writeTilePreview() })
-        .catch(() => { /* the stored picture stays */ })
-    }
-
     this.#writeCellVec4(imageUV, i, uv?.u0 ?? 0, uv?.v0 ?? 0, uv?.u1 ?? 0, uv?.v1 ?? 0)
     this.#writeCellScalar(hasImage, i, uv ? 1 : 0)
-
-    const [r, g, b] = previewRgb(preview.border) ?? PREVIEW_DEFAULT_BORDER
-    this.#writeCellRgb(borderColor, i, r, g, b)
-
-    if (this.#hidesName(preview.hideText, !!uv) && preview.label !== this.#hoverRevealLabel) {
-      this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
-    } else {
-      const ruv = this.atlas.getLabelUV(preview.label)
-      this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
-    }
-
-    const pushed = this.#pushBuffer('aImageUV') && this.#pushBuffer('aHasImage')
-      && this.#pushBuffer('aBorderColor') && this.#pushBuffer('aLabelUV')
-    // Tile names are real DOM text (tile-name.drone) — tell them to re-ask.
-    this.emitEffect('render:name-visibility', { label: preview.label })
-    return pushed
-  }
-
-  /** A preview ended with no save: paint the tile from the caches again. */
-  #restoreTileFromCaches(label: string): void {
-    const i = this.#labelToIndex.get(label)
-    const { imageUV, hasImage, borderColor, labelUV } = this.#buf
-    if (i === undefined || !imageUV || !hasImage || !borderColor || !labelUV || !this.geom || !this.imageAtlas || !this.atlas) {
-      this.requestRender()
-      return
-    }
-    const sig = this.#faces.images.get(label) ?? null
-    const uv = sig ? this.imageAtlas.getImageUV(sig) : null
-    if (sig && !uv) { this.requestRender(); return }
-    this.#writeCellVec4(imageUV, i, uv?.u0 ?? 0, uv?.v0 ?? 0, uv?.u1 ?? 0, uv?.v1 ?? 0)
-    this.#writeCellScalar(hasImage, i, uv ? 1 : 0)
-    const [r, g, b] = this.#faces.borders.get(label) ?? PREVIEW_DEFAULT_BORDER
-    this.#writeCellRgb(borderColor, i, r, g, b)
-    const hideText = this.#faces.hiddenText.get(label) ?? false
+    this.#writeCellRgb(borderColor, i, border[0], border[1], border[2])
     if (this.#hidesName(hideText, !!uv) && label !== this.#hoverRevealLabel) {
       this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
     } else {
       const ruv = this.atlas.getLabelUV(label)
       this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
     }
-    // The editor may already be previewing the next tile — keep its pictures.
-    this.imageAtlas.setPinned([
-      ...[...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])),
-      ...this.#tilePreviewSigs(),
-    ])
-    this.#pushBuffer('aImageUV')
-    this.#pushBuffer('aHasImage')
-    this.#pushBuffer('aBorderColor')
-    this.#pushBuffer('aLabelUV')
+    const pushed = [this.#pushBuffer('aImageUV'), this.#pushBuffer('aHasImage'), this.#pushBuffer('aBorderColor'), this.#pushBuffer('aLabelUV')]
+    // Tile names are real DOM text (tile-name.drone) — tell them to re-ask.
     this.emitEffect('render:name-visibility', { label })
+    return pushed.every(Boolean)
   }
 
   readonly #tryInPlaceCellUpdate = async (
