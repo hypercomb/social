@@ -481,6 +481,8 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // credential never enters a content-addressed write (doctrine.spec.ts
   // keeps them in LlmKeyStore), so this pool is safe to replicate.
   'llm:providers',
+  /** The agent loop's policy records (documentation/agent-harness.md). */
+  'agent:harness',
   // Which roots a phone opens into (preferences/mobile-pheromones.ts). It
   // travels with the participant rather than the browser for the same reason
   // `habits:spoken` does: a choice that did not follow you to your other

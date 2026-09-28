@@ -106,7 +106,7 @@ policy; the loop reads the record; nothing in the loop is a constant any more.
 
 ### Where it lives
 
-- Pool of meaning **`sign('harness')`** at the OPFS root, one sig-named file
+- Pool of meaning **`sign('agent:harness')`** at the OPFS root, one sig-named file
   per harness, addressed only through `Store.poolSignature('harness')`.
 - **The active harness is a pointer**, two levels: the device default
   (`hc:harness`, a signature) and a per-conversation mark on the thread
@@ -116,7 +116,7 @@ policy; the loop reads the record; nothing in the loop is a constant any more.
   shipped default changes (new content, new signature; the old one stays).
 - **Arrives from the network like a theme**: `registerPublishedPool({meaning:
   'harness'})` — every host the participant learns is probed once at
-  `<origin>/<sign('harness')>`, members are sig-verified, and a third-party
+  `<origin>/<sign('agent:harness')>`, members are sig-verified, and a third-party
   record is HELD (visible, off) until the participant turns it on
   ([llm-provider plug-in: the hold](model-mediation-and-the-training-prompt.md)).
 
@@ -185,7 +185,7 @@ by its receipts, not its description.
 ## 8. Execution order
 
 1. **Lift the constants into the record.** Mint `default` from today's
-   values into `sign('harness')` at boot (seed like themes); the chat window
+   values into `sign('agent:harness')` at boot (seed like themes); the chat window
    reads `leg`, `budget`, `reads`, `handover`, `review` from it. No behaviour
    change; the harness exists.
 2. **Announce every stage.** The seven `agent:*` effects with their facts;
@@ -203,3 +203,85 @@ by its receipts, not its description.
 
 Each step lands alone, ratcheted, with the previous one still working. Step 1
 is a morning; step 3 is the one that takes care.
+
+## 9. Strategies — composite patterns as content
+
+*jwize, 2026-09-27, on patterns.smithers.sh: "Can we build some of these or
+does it make sense to make these available to our agents as strategies?"*
+
+Smithers is a durable workflow engine: 26 control-flow primitives, some fifty
+composite patterns, sixty use cases, each a JSX component over a gateway. We
+do not build the engine — the processor, the pools and the conversation tree
+ARE the runtime, and a signature makes a step durable and idempotent by
+construction. What is worth taking is the VOCABULARY: a composite pattern is
+a strategy, and a strategy is content.
+
+**Primitives we already have, by another name.** Sequence, branch and loop are
+rounds; human approval and human task are the Execution window and the
+question fence; wait-for-signal and scheduled trigger are local node ticks;
+retry with backoff and timeout-and-fallback are the router's cooling and
+hand-off; continue-as-new IS the leg; try/catch/finally and saga compensation
+are history (every act is an undoable commit); idempotent side effects and
+stage caching are signatures and the optimize phase; checkpoint fork is the
+handover turn plus history; budget propagation is `workBudget`; sandboxed
+execution is the module sandbox; durable memory is the pools; workflow-owned
+UI is the route and the meter; subflow and isolated worktree are a
+conversation per tile.
+
+**Composites worth having as strategies** (the ones a hive can use; the
+GitHub-and-CI use cases are not our domain — hives are our source files):
+
+| Strategy | Shape, in our words | Standing |
+|---|---|---|
+| Review / revise | draft → Jev verify → revise until supported and complete | Jev verify built; the loop condition is a strategy field |
+| Convergence | measure → improve → re-measure until a metric meets its target | `harness try` numbers; the metric is a read |
+| Scan / fix / verify | scan a surface, fix each in parallel, verify, repeat until clean | the break-repair loop IS this |
+| Fan-out / fan-in, map / reduce | break the request into parts, one conversation per tile, merge by reading their signatures | break-apart + expand exist; merge = a read of the parts |
+| Planner / executor | Jev front door weighs; the plan is a table; execution is rounds | built (Jev runs the show) |
+| Supervisor / workers | a conversation delegates to bridge sessions or peers and inspects their turns | delegation exists; the inspection is a strategy step |
+| Escalation chain, model routing, sandwich | cheap first, escalate on hand-off; smart plans, cheap builds, smart polishes | policy + hand-off built; sandwich = tier per step |
+| Panel, debate / judge, parallel second opinion | several providers answer the same round; Jev synthesizes or picks | needs a fan-out over providers in `route` |
+| Ralph loop, notability filter, drift detector | a standing mission on a tick; the agent runs only when something is notable | ticks + break-repair prove the shape |
+| Optimizer loop, eval suite, scorers | generate candidates, score, keep the best; fixed cases with expected outcomes | `harness try` + the ledger keyed by harness |
+| Risk-classified runbook | safe steps auto-run, risky ones gate | the Execution window's per-kind review IS this |
+| Context handoff | bank a brief, drop the residue, hand to a fresh successor | the leg handover, built |
+| Self-authoring delegation | the model authors its own delegation tree under a fuel budget | the interesting one: a table of sub-conversations Jev admits, each with a slice of the budget |
+
+**The hypercomb way to hold them.** A strategy is a signed record in
+`sign('strategies')`: a name, the step shape (which harness steps run, in
+what loop, with what exit condition), what the judge scores, how the budget
+splits across parts, and the words it expands to. A harness may pin one; the
+participant may say `strategy <name>`; otherwise the FRONT DOOR proposes —
+the worker lists candidate strategies as rows of its table and Jev picks, the
+same shape every other decision takes. Community strategies arrive like every
+other pool: by signature, sig-verified, held until turned on. Their receipts
+in the ledger say which ones earn their place.
+
+**Order.** Strategies come after harness steps 1–3 (a strategy composes
+steps, so the steps must be words first). Seed ten from the table above;
+make `route` able to fan out over providers (panel, second opinion); make a
+sub-conversation a first-class part with its own budget slice (fan-out,
+supervisor, self-authoring delegation).
+
+## 10. Standing
+
+What of the order above is built, and where each piece landed.
+
+| Step | Standing | Where |
+|---|---|---|
+| 1 · the record | BUILT 2026-09-27 | `assistant/harness.ts` — `harness@1`, `parseHarness` (narrow only), `HarnessStore` (sweep, seed, import, use), pool `agent:harness` (scoped census in core), device pointer `hc:harness`, published and seeded by `chat.drone`; the window reads `activeHarness()` per send |
+| 2 · the stages | BUILT 2026-09-27 | `core/agent-effects.ts` — the seven `agent:*` effects with typed facts; the window emits; the meter and the bee panel read them |
+| 3 · steps as words | BUILT 2026-09-27, five of seven | `core/agent-steps.ts` the contract, `core/agent-leg.ts` the leg primitives and the shipped `fold`, `handover`, `receipt`, `core/agent-doors.ts` the shipped `front` and `verify` (the judge, the receipt writer and the bus come in as inputs); `assistant/agent-steps.ts` the registry (word → shipped or a bee by signature), published by `chat.drone`; the window resolves each word against the harness's `steps` and falls back to the shipped objects |
+| 3 · the rest | OPEN | `stretch` (the streaming rounds with the fences and the Execution window) and `route` (the provider pick) still run inside the window; each is a seam of the same shape and takes the same door when lifted. What stays with the window even after: listing the census and the tiles a door is shown, and running a direct sentence Jev chose — those are the stretch's acts |
+| 4 · words | OPEN | `harness`, `harness use`, `harness edit`; the per-conversation mark |
+| 5 · network | OPEN | `harness offer`, `harness sync` over the published-pool probe |
+| 6 · evals | OPEN | `harness try`; the ledger keyed by harness |
+
+Why the leg primitives are in core and not essentials: shared may not import
+essentials at compile time (the web shell never bundles modules), and
+essentials may not import shared. A primitive both sides run — the fold, the
+leg-end word, the handover read from prose — has exactly one home that both
+can reach, and that is core, beside the fence regex it already held. The
+step BEES are essentials' (the registry, the registrations, any community
+step); the window's fallback is the same shipped object core exports, so
+nothing is written twice.

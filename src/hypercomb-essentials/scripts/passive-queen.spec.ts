@@ -43,6 +43,8 @@ describe('passive queen', () => {
   it('stays awake when she registers anything else, declares no word, or pulses', () => {
     const two = queen() + "window.ioc.register('@diamondcoreprocessor.com/LayoutService', {})"
     expect(passiveQueen('a/layout.queen.ts', two, new Map())).toMatchObject({ passive: false })
+    const named = queen() + 'window.ioc.register(LAYOUT_SERVICE_KEY, new LayoutService())'
+    expect(passiveQueen('a/layout.queen.ts', named, new Map())).toMatchObject({ passive: false, why: 'registers a service by a named key' })
     const wordless = queen().replace("readonly command = 'layout'", '')
     expect(passiveQueen('a/layout.queen.ts', wordless, new Map())).toMatchObject({ passive: false, why: 'declares no word' })
     const pulsing = queen('').replace('protected execute', 'protected heartbeat(): void {}\n  protected execute')

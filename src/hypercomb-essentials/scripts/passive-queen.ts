@@ -23,6 +23,12 @@ const SIDE_EFFECT = /whenReady\(|\bonEffect\(|EffectBus\.on\(|addEventListener\(
 /** A literal-key IoC registration: `register('@domain.com/Name', …)`. */
 const LITERAL_REGISTER = /register\(\s*['"](@[^'"]+)['"]/g
 
+/** An IoC registration by a NAMED key: `register(SOME_SERVICE_KEY, …)`. Always
+ *  a second service — her own key is a literal — and invisible to the literal
+ *  count, which is how the reference word slept with the create path's landing
+ *  service inside her. */
+const NAMED_REGISTER = /\bregister\(\s*[A-Za-z_$]/
+
 export type PassiveVerdict = { passive: true; key: string } | { passive: false; why: string }
 
 /** Named by key, or imported, by any module other than a namespace barrel
@@ -120,6 +126,7 @@ export const passiveQueen = (
   if (/^\s*(?:(?:public|protected|override|async)\s+)*(?:heartbeat|sense)\s*\(/m.test(source)) return { passive: false, why: 'pulses' }
   const keys = [...source.matchAll(LITERAL_REGISTER)].map(match => match[1]!)
   if (keys.length !== 1) return { passive: false, why: `registers ${keys.length} literal keys` }
+  if (NAMED_REGISTER.test(source)) return { passive: false, why: 'registers a service by a named key' }
   const side = SIDE_EFFECT.exec(source)
   if (side) return { passive: false, why: `acts on load (${side[0]})` }
   if (/listens\s*=\s*\[\s*['"]/.test(source)) return { passive: false, why: 'listens to effects' }

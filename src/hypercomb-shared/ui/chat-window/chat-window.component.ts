@@ -108,6 +108,10 @@ import {
   splitQuestion,
   SignatureService,
   type SettledQuestion,
+  AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY,
+  type AgentHandoverEvent, type AgentRoundEvent, type AgentSpent, type AgentStageEffect,
+  AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedVerifyStep,
+  type AgentStepRegistry, type FrontDecisionLike, type HandoverStep, type VerifyDecisionLike, type WorkMessage,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
@@ -168,6 +172,7 @@ import {
   leftFromProse,
   LEG_ROUNDS,
   workBudget,
+  WORK_BUDGET,
   type WorkBudget,
   MAX_HANDOFFS,
   MAX_WORK_ROUNDS,
@@ -1250,6 +1255,40 @@ const MAX_OBSERVATION_CONTEXT_CHARS = 24_000
 /** How old a stored handover may be and still resume by itself when the
  *  conversation is reopened. Older, the participant says continue. */
 const RESUME_LEFT_MS = 60 * 60 * 1000
+
+// THE HARNESS (documentation/agent-harness.md). The loop's policy is a
+// `harness@1` record essentials keeps in the `harness` pool; the window
+// reads the ACTIVE one at each send. The constants above are the fallback
+// for an older essentials build with no harness, and they MUST equal the
+// shipped default record — step 1 changes where the numbers live, not
+// what they are.
+const HARNESS_IOC_KEY = '@hypercomb.social/Harness'
+type HarnessRecordLike = {
+  readonly name: string
+  /** Step bees by signature, in order; the registry resolves each word. */
+  readonly steps?: readonly string[]
+  readonly leg: { readonly rounds: number; readonly reserveTokens: number; readonly keepVerbatim: number }
+  readonly budget: { readonly rounds: number; readonly tokens: number }
+  readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number }
+  readonly handover: { readonly fence: string; readonly resumeSeconds: number; readonly proseFallback: boolean }
+}
+type HarnessLike = { readonly active?: HarnessRecordLike }
+const SHIPPED_HARNESS: HarnessRecordLike = {
+  name: 'default',
+  leg: { rounds: LEG_ROUNDS, reserveTokens: 8_000, keepVerbatim: 4 },
+  budget: WORK_BUDGET,
+  reads: { pageChars: READ_PAGE_CHARS, roundsWhenAsked: MAX_OBSERVATION_ROUNDS, charsWhenAsked: MAX_OBSERVATION_CONTEXT_CHARS },
+  handover: { fence: 'hypercomb-continue', resumeSeconds: RESUME_LEFT_MS / 1000, proseFallback: true },
+}
+const activeHarness = (): HarnessRecordLike =>
+  (ioc()?.get(HARNESS_IOC_KEY) as HarnessLike | undefined)?.active ?? SHIPPED_HARNESS
+/** THE STEPS ARE WORDS (core agent-steps): the registry essentials publishes
+ *  resolves each word to the bee the harness names, else the shipped one —
+ *  and the shipped one answers directly when there is no registry at all. */
+const stepRegistry = (): AgentStepRegistry | undefined =>
+  ioc()?.get(AGENT_STEPS_IOC_KEY) as AgentStepRegistry | undefined
+const handoverStepNow = (): HandoverStep =>
+  stepRegistry()?.resolve('handover', activeHarness().steps) ?? shippedHandoverStep
 const hypercombPlanQueue = new HypercombPlanQueue()
 
 /** How far back a pending ask record may reach and still be shown as waiting.
@@ -4510,6 +4549,10 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
 
+    // THE METER READS THE STAGES, not the loop: the same facts any surface
+    // gets, from the same bus, with replay for a window opened mid-turn.
+    this.#cleanups.push(EffectBus.on<AgentRoundEvent>(AGENT_ROUND, p => this.#meterFrom(p)))
+    this.#cleanups.push(EffectBus.on<AgentHandoverEvent>(AGENT_HANDOVER, p => this.#meterFrom(p)))
     this.#cleanups.push(EffectBus.on('chat:route-flow-changed', () => {
       if (!this.railVisible() && this.listOpen()) void this.#refreshListStandings(this.liveRoster().map(row => row.convoId))
     }))
@@ -6010,11 +6053,10 @@ export class ChatWindowComponent implements OnDestroy {
    *  availability line while it runs. Null when nothing long is under way. */
   readonly legMeter = signal<{ readonly legs: number; readonly rounds: number; readonly ktokens: number } | null>(null)
 
-  #meter(convoId: string): void {
-    if (convoId !== this.activeId()) return
-    const task = this.#task.get(convoId)
-    this.legMeter.set(task && task.rounds > 0
-      ? { legs: task.legs + 1, rounds: task.rounds, ktokens: Math.round(task.tokens / 1000) }
+  #meterFrom(p: { readonly convoId?: string; readonly leg?: number; readonly spent?: AgentSpent } | undefined): void {
+    if (!p?.convoId || p.convoId !== this.activeId() || !p.spent) return
+    this.legMeter.set(p.spent.rounds > 0
+      ? { legs: p.leg ?? 1, rounds: p.spent.rounds, ktokens: Math.round(p.spent.tokens / 1000) }
       : null)
   }
 
@@ -6025,7 +6067,6 @@ export class ChatWindowComponent implements OnDestroy {
     const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
     const next = { ...task, rounds: task.rounds + 1, tokens: task.tokens + (reported || estimated) }
     this.#task.set(convoId, next)
-    this.#meter(convoId)
     return next.rounds >= budget.rounds || next.tokens >= budget.tokens
   }
 
@@ -6037,8 +6078,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.#left.delete(convoId)
     const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
     this.#task.set(convoId, { ...task, legs: task.legs + 1 })
-    this.#meter(convoId)
-    await this.send(continueMessage(left), { auto: true })
+    await this.send(handoverStepNow().continueWord(left), { auto: true })
   }
 
   /** A conversation opened on a stored handover picks the work back up,
@@ -6046,7 +6086,7 @@ export class ChatWindowComponent implements OnDestroy {
   #resumeLeft(convoId: string, turns: readonly { readonly role: string; readonly at: number; readonly left?: string; readonly spent?: { readonly rounds: number; readonly tokens: number } }[]): void {
     const last = turns[turns.length - 1]
     if (!last || last.role !== 'assistant' || !last.left) return
-    if (Date.now() - last.at > RESUME_LEFT_MS || this.#outstanding.has(convoId)) return
+    if (Date.now() - last.at > activeHarness().handover.resumeSeconds * 1000 || this.#outstanding.has(convoId)) return
     // The running total rides on the handover, so a reload does not hand
     // the request a fresh purse.
     if (last.spent && !this.#task.has(convoId)) this.#task.set(convoId, { ...last.spent, legs: 0 })
@@ -6329,7 +6369,26 @@ export class ChatWindowComponent implements OnDestroy {
       let readChars = 0
       let lastRound = false
       let budgetSpent = false
-      const budget = workBudget()
+      // The record says the policy; a number the participant typed on this
+      // device (hc:chat:budget:*) still overrides it — their device, their
+      // purse.
+      const harnessNow = activeHarness()
+      const budget = workBudget(undefined, harnessNow.budget)
+      const foldStep = stepRegistry()?.resolve('fold', harnessNow.steps) ?? shippedFoldStep
+      const handoverStep = stepRegistry()?.resolve('handover', harnessNow.steps) ?? shippedHandoverStep
+      const frontStep = stepRegistry()?.resolve('front', harnessNow.steps) ?? shippedFrontStep
+      const verifyStep = stepRegistry()?.resolve('verify', harnessNow.steps) ?? shippedVerifyStep
+      const busEmit = (name: string, payload: Record<string, unknown>): void => { EffectBus.emit(name, payload) }
+      // EVERY STAGE IS ANNOUNCED (core agent-effects): facts for whoever
+      // paints them — the meter, the bee panel, the route — never a render.
+      const legOf = (): number => (component.#task.get(convoId)?.legs ?? 0) + 1
+      const spentOf = (): AgentSpent => {
+        const task = component.#task.get(convoId)
+        return { rounds: task?.rounds ?? 0, tokens: task?.tokens ?? 0 }
+      }
+      const stage = (name: AgentStageEffect, facts: Record<string, unknown>): void => {
+        EffectBus.emit(name, { id: component.#beeId(convoId), convoId, leg: legOf(), at: Date.now(), ...facts })
+      }
       const tokensOf = (list: readonly { readonly content: string }[]): number =>
         list.reduce((sum, entry) => sum + estimateTokens(entry.content), 0)
       // THE WORK STAYS WITH WHOEVER STARTED IT. The first round may be routed
@@ -6483,11 +6542,11 @@ export class ChatWindowComponent implements OnDestroy {
         // message" and the model stalled). The refusal marks the leg as its
         // last round, so the model hands over and the next leg reads with a
         // fresh budget from where this one stopped.
-        if (!readsOpen && readRounds >= MAX_OBSERVATION_ROUNDS) {
+        if (!readsOpen && readRounds >= harnessNow.reads.roundsWhenAsked) {
           lastRound = true
           throw new WorkRefused('this stretch has used its reads; hand the work over — say what you found and what is left — and the next stretch reads on with a fresh budget')
         }
-        const budget = hiveAccess?.budget?.(providerId) || (readsOpen ? Number.POSITIVE_INFINITY : MAX_OBSERVATION_CONTEXT_CHARS)
+        const budget = hiveAccess?.budget?.(providerId) || (readsOpen ? Number.POSITIVE_INFINITY : harnessNow.reads.charsWhenAsked)
         const remaining = budget - readChars
         if (remaining < 1_500) {
           lastRound = true
@@ -6519,7 +6578,7 @@ export class ChatWindowComponent implements OnDestroy {
           // reads, and never past a page — so reading never overflows it.
           const windowTokens = (model && router.contextLengthForModel?.(model)) || 128_000
           const room = Math.max(0, windowTokens - 8_000 - estimateTokens(system) - tokensOf(messages)) * 3 / 2
-          const perReadBytes = Math.max(1_024, Math.min(READ_PAGE_CHARS, Math.floor(Math.min(remaining - 512, room) / plan.observations.length)))
+          const perReadBytes = Math.max(1_024, Math.min(harnessNow.reads.pageChars, Math.floor(Math.min(remaining - 512, room) / plan.observations.length)))
           const receipt = await executeHypercombObservationPlan(plan, treeReader, {
             maxDepth: 2,
             maxNodes: 48,
@@ -6581,27 +6640,25 @@ export class ChatWindowComponent implements OnDestroy {
       const verifyAnswer = async (answer: string, spoken: string, providerId: string): Promise<string | undefined> => {
         const said = [...messages, { content: spoken }]
         const read = fitEvidence(evidence.slice(1), part => said.some(entry => entry.content.includes(part)), JEV_STATE_CHARS)
-        if (!jev?.verify || !read.length || !jev.ready(providerId)) return undefined
-        const startedAt = Date.now()
-        let decision: Awaited<ReturnType<NonNullable<JevLike['verify']>>>
-        try {
-          decision = await jev.verify({ request: message, evidence: read, answer },
-            { providerId, system, messages: [...messages, { content: spoken }] }, signal)
-        } catch (error) {
-          if (signal?.aborted) throw error
-          console.warn('[chat] Jev could not check the answer:', error)
-          return undefined
-        }
-        decisionCalls++
-        settledAttempts.push({ round: rounds, attempt: decisionCalls, providerId: 'openrouter', model: decision.model || JEV_MODEL,
-          outcome: 'success', category: 'jev-decision', durationMs: Date.now() - startedAt, outputEmitted: false,
-          ...(decision.usage ? { usage: { inputTokens: decision.usage.inputTokens, outputTokens: decision.usage.outputTokens, estimatedCostUsd: decision.usage.cost } } : {}),
+        // THE VERIFY DOOR is a step (core agent-doors): the judge, the receipt
+        // writer and the bus go in; the verdict and its note come back. The
+        // ledger entry and the stage stay here, where the turn is kept.
+        const checked = await verifyStep.run({
+          request: message, answer, evidence: read, providerId, system, messages: [...messages, { content: spoken }],
+          jev, signal,
+          persist: decision => persistJevVerify(contextStore, answer, decision as VerifyDecisionLike & { answers: Record<string, unknown> }),
+          emit: busEmit,
         })
-        const receipt = await persistJevVerify(contextStore, answer, decision).catch(() => undefined)
-        if (receipt) readSigs.push(receipt)
+        if (!checked) return undefined
+        decisionCalls++
+        settledAttempts.push({ round: rounds, attempt: decisionCalls, providerId: 'openrouter', model: checked.model || JEV_MODEL,
+          outcome: 'success', category: 'jev-decision', durationMs: checked.ms, outputEmitted: false,
+          ...(checked.decision.usage ? { usage: { inputTokens: checked.decision.usage.inputTokens, outputTokens: checked.decision.usage.outputTokens, estimatedCostUsd: checked.decision.usage.cost } } : {}),
+        })
+        if (checked.receipt) readSigs.push(checked.receipt)
         writeTurnMeta(providerId, continuationModel)
-        EffectBus.emit('jev:outcome', { decision: receipt, plan: 'verify', outcome: decision.verified ? 'verified' : 'unverified', at: Date.now() })
-        return decision.verified ? undefined : `\n\nJev could not confirm this answer against what the hive read (${decision.reason}).`
+        stage(AGENT_VERIFY, { verified: checked.verified, reason: checked.reason, model: checked.model || JEV_MODEL })
+        return checked.note
       }
 
       /** THE FRONT DOOR (essentials jev-front.ts): Jev reads the request once,
@@ -6636,37 +6693,31 @@ export class ChatWindowComponent implements OnDestroy {
             }
           } catch (error) { if (signal?.aborted) throw error }
         }
-        const startedAt = Date.now()
-        let decision: FrontDecision
-        try {
-          decision = await jev.front({
-            request: message,
-            behaviours: offered.map(entry => ({
-              name: entry.name, description: entry.description ?? entry.name,
-              forms: entry.machine!.forms, bare: entry.machine!.bare === true, reach: entry.machine!.reach ?? 'editing',
-            })),
-            tiles,
-            carrying: !!previousTier,
-          }, { providerId, system: vocabulary, messages: [{ content: message }, { content: tiles.join('\n') }] }, signal)
-        } catch (error) {
-          if (signal?.aborted) throw error
-          console.warn('[chat] Jev did not answer at the front door; this turn runs on the regular model:', error)
-          return without
-        }
+        // THE FRONT DOOR is a step (core agent-doors): the census and the tiles
+        // are listed here, where the window holds them; the judge answers in
+        // the step; a direct sentence Jev chose is run here, where the stretch
+        // runs everything else.
+        const asked = await frontStep.run({
+          request: message, providerId, carrying: !!previousTier,
+          behaviours: offered.map(entry => ({
+            name: entry.name, description: entry.description ?? entry.name,
+            forms: entry.machine!.forms, bare: entry.machine!.bare === true, reach: entry.machine!.reach ?? 'editing',
+          })),
+          tiles, vocabulary, jev, signal,
+          persist: decision => persistJevFront(contextStore, message, decision as FrontDecision),
+          emit: busEmit,
+        })
+        if (asked.door === 'stay') return stay
+        if (asked.door === 'without' || !asked.decision) return without
+        const decision: FrontDecisionLike = asked.decision
         decisionCalls++
         settledAttempts.push({ round: 0, attempt: decisionCalls, providerId: 'openrouter', model: decision.model || JEV_MODEL,
-          outcome: 'success', category: 'jev-decision', durationMs: Date.now() - startedAt, outputEmitted: false,
+          outcome: 'success', category: 'jev-decision', durationMs: asked.ms, outputEmitted: false,
           ...(decision.usage ? { usage: { inputTokens: decision.usage.inputTokens, outputTokens: decision.usage.outputTokens, estimatedCostUsd: decision.usage.cost } } : {}),
         })
-        const receipt = await persistJevFront(contextStore, message, decision).catch(() => undefined)
-        if (receipt) readSigs.push(receipt)
-        const report = (outcome: string): void => {
-          EffectBus.emit('jev:outcome', {
-            decision: receipt, plan: 'front', outcome, at: Date.now(),
-            ...(decision.weight ? { weight: decision.weight } : {}), ...(decision.direct?.reach ? { reach: decision.direct.reach } : {}),
-          })
-        }
-        const next: Door = { aside: decision.aside, carry: decision.carry, ...(decision.weight ? { weight: decision.weight } : {}) }
+        if (asked.receipt) readSigs.push(asked.receipt)
+        const report = asked.report
+        const next: Door = { aside: asked.aside, carry: asked.carry, ...(asked.weight ? { weight: asked.weight } : {}) }
         const sentence = decision.direct?.sentence
         if (!sentence) { report(decision.aside ? 'aside' : 'passed'); return next }
         // The hive's parser has the last word; a sentence it refuses is a miss.
@@ -6880,6 +6931,7 @@ export class ChatWindowComponent implements OnDestroy {
         const door = await frontDoor()
         if (door.answer !== undefined) {
           turnPath = 'direct'
+          stage(AGENT_FRONT, { path: turnPath, tier: need.tier, answered: true })
           wrote = true
           yield door.answer
           return ''
@@ -6897,6 +6949,7 @@ export class ChatWindowComponent implements OnDestroy {
           if (tier !== need.tier && router.ready?.({ ...(pinned ? { providerId: pinned } : {}), need: moved }) !== false) routeNeed = moved
         }
         turnWeight = routeNeed.tier
+        stage(AGENT_FRONT, { path: turnPath, tier: routeNeed.tier, answered: false })
         if (door.aside || routeNeed !== need) {
           system = systemFor(namedModel ?? policyForNeed?.designate?.(routeNeed)?.model ?? firstModel, component.designated()?.label, pinned ?? router.designatedProviderId?.(routeNeed))
         }
@@ -6935,6 +6988,9 @@ export class ChatWindowComponent implements OnDestroy {
           }
           if (pinned && chunk.providerId !== pinned) {
             throw new Error('a different provider answered in the middle of the work')
+          }
+          if (!roundProviderId) {
+            stage(AGENT_ROUTE, { round: rounds + 1, providerId: chunk.providerId, model: chunk.model, tier: routeNeed.tier, handoffs: avoid.length })
           }
           roundProviderId = chunk.providerId
           roundModel = chunk.model
@@ -6975,8 +7031,15 @@ export class ChatWindowComponent implements OnDestroy {
         turnRounds = rounds
         // Updated every round; the last write is what the run stores.
         writeTurnMeta(roundProviderId, roundModel)
+        // THE ROUND IS CHARGED WHEN IT COMES BACK, whatever it asked for —
+        // a round that answers costs the same as one that reads.
+        const spent = component.#spend(
+          convoId, settledAttempts.filter(attempt => attempt.round === rounds),
+          estimateTokens(system) + tokensOf(messages) + estimateTokens(roundText), budget,
+        )
 
         const work = splitWork(roundText)
+        stage(AGENT_ROUND, { round: rounds, request: work.request?.kind ?? 'none', handoff: !!work.handoff, spent: spentOf() })
         // HANDED OFF (hypercomb-work-fence.ts HANDOFF_FENCE_LANG): the model
         // said the work is beyond it. Its reply is dropped, it is not asked
         // again, and the same messages go to the next model the policy ranks
@@ -7019,9 +7082,11 @@ export class ChatWindowComponent implements OnDestroy {
           // A model that wrote "what is still left" in prose and forgot the
           // fence still handed over; the words say so, and stopping there
           // would be the old cap wearing a new name.
-          const left = work.left
-            ?? (work.request ? `carry on from: ${work.request.lines.join(' · ').slice(0, 200)}` : undefined)
-            ?? (lastRound ? leftFromProse(work.prose) : undefined)
+          const left = handoverStep.left({
+            ...(work.left ? { left: work.left } : {}),
+            ...(work.request ? { requestLines: work.request.lines } : {}),
+            prose: work.prose, lastRound, proseFallback: harnessNow.handover.proseFallback,
+          })
           if (left) {
             const task = component.#task.get(convoId)
             component.#turnMeta.set(convoId, {
@@ -7029,8 +7094,9 @@ export class ChatWindowComponent implements OnDestroy {
               left,
               ...(task ? { spent: { rounds: task.rounds, tokens: task.tokens } } : {}),
             })
+            stage(AGENT_HANDOVER, { round: rounds, left, budgetSpent, spent: spentOf() })
             wrote = true
-            if (budgetSpent) yield budgetSpentMessage(component.#task.get(convoId) ?? { rounds, tokens: 0 })
+            if (budgetSpent) yield handoverStep.pausedNote(component.#task.get(convoId) ?? { rounds, tokens: 0 })
             else {
               component.#left.set(convoId, left)
               yield `\n\n*Continuing: ${left}*`
@@ -7142,15 +7208,20 @@ export class ChatWindowComponent implements OnDestroy {
         // is the model's own; when the rounds no longer fit, the older ones
         // fold into a ledger first, and only a leg that still cannot fit —
         // or has run its rounds, or spent the request's budget — hands over.
-        const spent = component.#spend(
-          convoId, settledAttempts.filter(attempt => attempt.round === rounds),
-          estimateTokens(system) + tokensOf(messages), budget,
-        )
         const window = (roundModel && router.contextLengthForModel?.(roundModel)) || 128_000
-        const room = (): boolean => estimateTokens(system) + tokensOf(messages) < window - 8_000
-        if (!room()) messages.splice(0, messages.length, ...foldWorkLedger(messages, workStart) as typeof messages)
-        if (spent || lastRound || rounds >= LEG_ROUNDS || !room()) {
-          messages[messages.length - 1] = { role: 'user', content: `${reply}\n\n${lastRoundMessage(message)}` }
+        const folded = foldStep.run({
+          messages: messages as WorkMessage[], workStart, keep: harnessNow.leg.keepVerbatim,
+          systemTokens: estimateTokens(system), window, reserve: harnessNow.leg.reserveTokens,
+        })
+        if (folded.folded) {
+          messages.splice(0, messages.length, ...folded.messages as typeof messages)
+          stage(AGENT_FOLD, { round: rounds, folded: folded.folded, kept: harnessNow.leg.keepVerbatim })
+        }
+        const decided = handoverStep.decide({
+          request: message, reply, rounds, legRounds: harnessNow.leg.rounds, spent, lastRound, fits: folded.fits,
+        })
+        if (decided.end) {
+          messages[messages.length - 1] = { role: 'user', content: decided.reply }
           lastRound = true
           budgetSpent = spent
         }
@@ -7199,13 +7270,20 @@ export class ChatWindowComponent implements OnDestroy {
         console.warn('[chat] the model could not answer:', error)
         yield `\n\nThe model could not answer: ${detail}`
       } finally {
-        if (answered && !opts?.signal?.aborted) {
-          const at = Date.now()
-          EffectBus.emit('jev:turn', {
-            path: turnPath, ms: at - startedAt, rounds: turnRounds, weight: turnWeight, at,
-            ...(firstAt ? { firstMs: firstAt - startedAt } : {}),
-          })
-        }
+        // THE RECEIPT, whatever happened: answered, failed, or stopped — by
+        // the `receipt` step the harness names, else the shipped one.
+        const at = Date.now()
+        const task = component.#task.get(convoId)
+        const receiptStep = stepRegistry()?.resolve('receipt', activeHarness().steps)
+          ?? shippedReceiptStep((name, payload) => { EffectBus.emit(name, payload) })
+        receiptStep.run({
+          id: component.#beeId(convoId), convoId, leg: (task?.legs ?? 0) + 1, at,
+          path: turnPath, rounds: turnRounds, weight: turnWeight, ms: at - startedAt,
+          ...(firstAt ? { firstMs: firstAt - startedAt } : {}),
+          outcome: opts?.signal?.aborted ? 'stopped' : answered ? 'answered' : 'failed',
+          answered: answered && !opts?.signal?.aborted,
+          spent: { rounds: task?.rounds ?? 0, tokens: task?.tokens ?? 0 },
+        })
       }
       return ''
     }

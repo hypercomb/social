@@ -16,7 +16,7 @@
 // Framework-free and pure. It names no behaviour: the vocabulary a model is
 // taught is the census the caller passes in.
 
-import { FENCE_RE } from '@hypercomb/core'
+import { CONTINUE_FENCE_LANG, FENCE_RE, LEG_ROUNDS } from '@hypercomb/core'
 
 export const READ_FENCE_LANG = 'hypercomb-read'
 export const DO_FENCE_LANG = 'hypercomb-do'
@@ -35,68 +35,17 @@ export const HANDOFF_FENCE_LANG = 'hypercomb-handoff'
 /** How many times one turn may change hands before it stops. */
 export const MAX_HANDOFFS = 2
 
-/** THE WORK IS NOT CAPPED, IT IS BUDGETED (jwize, 2026-09-26: "sometimes
- *  I see claude sessions go for hours"). A request runs in LEGS — one leg is
- *  one stretch of a model's context window. A leg ends when the window is
- *  full or after `LEG_ROUNDS`; the model then hands the work over to itself
- *  in prose plus a `hypercomb-continue` fence saying what is left, and the
- *  next leg starts from that handover as a fresh context. Legs chain until
- *  the model answers without a continue fence (the goal) or the request's
- *  budget is spent. The transcript IS the checkpoint: every leg's handover
- *  is a stored turn, so a reload resumes from the last one. */
-export const LEG_ROUNDS = 12
+// THE LEG'S PRIMITIVES LIVE IN CORE (core/agent-leg.ts): the stretch length,
+// the budget, the fold, the leg-end word, the handover read from prose and
+// the next leg's opening are shared with the step bees, so they are
+// re-exported here for the window and the specs that grew up on this module.
+export {
+  CONTINUE_FENCE_LANG, LEG_ROUNDS, WORK_BUDGET, WORK_BUDGET_ROUNDS_KEY, WORK_BUDGET_TOKENS_KEY,
+  workBudget, estimateTokens, foldWorkLedger, lastRoundMessage, leftFromProse, continueMessage, budgetSpentMessage,
+} from '@hypercomb/core'
+export type { WorkBudget } from '@hypercomb/core'
 /** Kept for the decision loop, which still counts rounds. */
 export const MAX_WORK_ROUNDS = LEG_ROUNDS
-/** CONTINUING. The model ends a leg's handover with this fence, one line:
- *  what is left. Its absence is the goal predicate — the work is done. */
-export const CONTINUE_FENCE_LANG = 'hypercomb-continue'
-/** What one participant request may spend before it must be asked again.
- *  Rounds and tokens both, because a cheap model can loop on rounds while a
- *  frontier one burns the purse in ten. Device-local overrides by key. */
-export const WORK_BUDGET = { rounds: 400, tokens: 6_000_000 } as const
-export const WORK_BUDGET_ROUNDS_KEY = 'hc:chat:budget:rounds'
-export const WORK_BUDGET_TOKENS_KEY = 'hc:chat:budget:tokens'
-
-export type WorkBudget = { readonly rounds: number; readonly tokens: number }
-
-export const workBudget = (read: (key: string) => string | null = key => {
-  try { return globalThis.localStorage?.getItem(key) ?? null } catch { return null }
-}): WorkBudget => {
-  const of = (key: string, fallback: number): number => {
-    const n = Number(read(key))
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
-  }
-  return { rounds: of(WORK_BUDGET_ROUNDS_KEY, WORK_BUDGET.rounds), tokens: of(WORK_BUDGET_TOKENS_KEY, WORK_BUDGET.tokens) }
-}
-
-/** Tokens a text costs a model, near enough to fit a window by. */
-export const estimateTokens = (text: string): number => Math.ceil(String(text ?? '').length / 4) + 4
-
-/** THE PROGRESS LEDGER. Rounds a leg no longer has room for are folded
- *  into one message that says what each asked and what came back, shortest
- *  first, so the model keeps its own trail without the bytes. Pure: the
- *  caller decides when the window is full. `from` is the first work message
- *  (everything before it is the participant's transcript, never folded),
- *  `keep` how many newest messages stay verbatim. */
-export const foldWorkLedger = (
-  messages: readonly { readonly role: string; readonly content: string }[],
-  from: number,
-  keep = 4,
-): { readonly role: string; readonly content: string }[] => {
-  const end = messages.length - keep
-  if (end - from < 2) return [...messages]
-  const folded = messages.slice(from, end)
-  const lines = folded.map((entry, index) => {
-    const text = String(entry.content ?? '').replace(/\s+/g, ' ').trim()
-    const cut = text.length > 400 ? `${text.slice(0, 400)}…` : text
-    return `${index + 1}. ${entry.role === 'assistant' ? 'you asked' : 'the hive said'}: ${cut}`
-  })
-  const ledger = {
-    role: 'user',
-    content: `PROGRESS LEDGER. Earlier rounds of this work, folded so the window has room; what a signature names never changes, so anything read can be opened again with read <signature>:\n${lines.join('\n')}`,
-  }
-  return [...messages.slice(0, from), ledger, ...messages.slice(end)]
-}
 
 export type WorkKind = 'read' | 'do' | 'table' | 'write'
 
@@ -543,35 +492,6 @@ export class JevGone extends Error {
 
 export const HELD_DO_NOTE = `Your ${DO_FENCE_LANG} block was not run: the same reply also asked to read. Read first; propose changes in a later reply.`
 
-export const lastRoundMessage = (request: string): string =>
-  `This stretch of context is full. Answer now in prose: say what you did, what you found, and what is still left. If the request is not finished, end your reply with exactly this block, its one line saying what is left:\n\n\`\`\`${CONTINUE_FENCE_LANG}\nwhat is left, in one line\n\`\`\`\n\nThe work then continues in a fresh stretch with a fresh read budget. If the request is finished, no block.${carry(request)}`
-
-/** THE HANDOVER SAID IN PROSE. A model that ends a full stretch with "what
- *  is still left: …" or "next step: …" and no fence has handed over all the
- *  same; this reads that line so the next leg starts. Conservative: only a
- *  paragraph that opens with one of the handover phrasings counts, and only
- *  at a stretch's end (the caller checks that). */
-export const leftFromProse = (prose: string): string | undefined => {
-  const paragraphs = String(prose ?? '').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean)
-  const opener = /^(?:\*\*)?(?:what(?:'s| is) (?:still )?left|still left|left to do|remaining|next steps?|what i haven'?t (?:found|done)(?: yet)?|not (?:yet )?done)(?:\*\*)?\s*[:.—-]?\s*/i
-  for (const paragraph of paragraphs) {
-    const match = opener.exec(paragraph)
-    if (!match) continue
-    const rest = paragraph.slice(match[0].length).replace(/\s+/g, ' ').trim()
-    if (rest.length >= 12) return rest.slice(0, 300)
-  }
-  return undefined
-}
-
-/** The next leg's opening word, as the participant's turn. Honest in the
- *  transcript: it reads as what it is, the work continuing. */
-export const continueMessage = (left: string): string =>
-  `Continue. Left: ${String(left ?? '').trim() || 'the rest of the request'}`
-
-/** When the budget is gone the work stops and says so; the participant's
- *  next word starts a fresh budget. */
-export const budgetSpentMessage = (spent: { readonly rounds: number; readonly tokens: number }): string =>
-  `\n\n*Paused: this request has used ${spent.rounds} rounds and about ${Math.round(spent.tokens / 1000)}k tokens, the budget for one request. Say continue to go on.*`
 
 /** The transcript as a model should read it: another model's reply is
  *  marked as that model's, so nobody inherits a stranger's actions. */
