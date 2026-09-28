@@ -2,6 +2,7 @@ import { installMemoryFilesystem } from './setup/memory-filesystem'
 import { installReadonlyNetwork } from './setup/readonly-network'
 import { readArrivalTrial, startArrivalTrial } from './setup/arrival-trial'
 import { fetchContentPack } from './setup/content-pack'
+import type { EarlyInstall } from './setup/ensure-install'
 
 /** What this door is: the newest marker of its own bag, sign(<hostname>)
  *  (blossom-worker locationMeta). Only signatures are queried — no named
@@ -143,6 +144,28 @@ const readDoor = async (): Promise<DoorMeta | null> => {
   return selected && selected !== String(door.pubkey ?? '').toLowerCase() ? null : door
 }
 const siteRead: Promise<DoorMeta | null> = readDoor().catch(() => null)
+// THE INSTALL'S TWO READS, STARTED AT PAGE LOAD. The page carries its package
+// (#hc-install), so the install index and the layers pack it names come down
+// while the shell loads. Started by the install itself they ran one after the
+// other, with nothing else to do (measured 2026-09-27, revolucion ×4: ~200 ms
+// idle). ensure-install.ts installFromIndex takes them for this package only.
+const earlyInstall = async (): Promise<EarlyInstall | null> => {
+  const raw = document.getElementById('hc-install')?.textContent
+  const carried = raw ? JSON.parse(raw) as { text?: unknown } : null
+  const packageSig = typeof carried?.text === 'string' ? (carried.text.split('\n')[0] ?? '').trim().toLowerCase() : ''
+  if (!SIG_RE.test(packageSig)) return null
+  const pool = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('install:index')))]
+    .map(byte => byte.toString(16).padStart(2, '0')).join('')
+  const response = await fetch(`/content/${pool}/${packageSig}`)
+  if (!response.ok || (response.headers.get('content-type') || '').includes('text/html')) return null
+  const index = await response.text()
+  const layersPack = /"layersPack"\s*:\s*"([0-9a-f]{64})"/.exec(index)?.[1] ?? null
+  const pack = layersPack
+    ? fetch(`/content/${layersPack}`).then(res => (res.ok ? res.arrayBuffer() : null)).catch(() => null)
+    : Promise.resolve(null)
+  return { packageSig, index, layersPack, pack }
+}
+;(globalThis as { __hcEarlyInstall?: Promise<EarlyInstall | null> }).__hcEarlyInstall = earlyInstall().catch(() => null)
 // THE LANDING VIEW IN ONE REQUEST (setup/content-pack.ts): the head's pack is
 // fetched beside the boot graph, and the content broker takes its first
 // layers and records from it instead of one round trip each.

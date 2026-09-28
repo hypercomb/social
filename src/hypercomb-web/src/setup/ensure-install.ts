@@ -978,6 +978,15 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   return true
 }
 
+/** The install index and layers pack the visitor page starts fetching before
+ *  the boot graph loads (main.visitor.ts), for the package it carries. */
+export type EarlyInstall = {
+  readonly packageSig: string
+  readonly index: string
+  readonly layersPack: string | null
+  readonly pack: Promise<ArrayBuffer | null>
+}
+
 type Reader = (dirs: (FileSystemDirectoryHandle | undefined)[], namesFor: (sig: string) => string[]) =>
   (sig: string) => Promise<Uint8Array<ArrayBuffer> | null>
 type Writer = (dir: FileSystemDirectoryHandle | undefined, nameFor: (sig: string) => string, cacheUrlFor: (sig: string) => string, contentType: string) =>
@@ -1002,17 +1011,28 @@ const installFromIndex = async (
   writeTo: Writer,
 ): Promise<boolean | null> => {
   const pool = await registerPoolMeaning(INSTALL_INDEX_MEANING)
-  const response = await fetch(`/content/${pool}/${bundled.packageSig}`).catch(() => null)
-  if (!response?.ok || (response.headers.get('content-type') || '').includes('text/html')) return null
-  const index = parseInstallIndex(await response.text(), bundled.packageSig)
+  // Already on its way when the page named this package (main.visitor.ts).
+  const started = await (globalThis as { __hcEarlyInstall?: Promise<EarlyInstall | null> }).__hcEarlyInstall
+  const early = started?.packageSig === bundled.packageSig ? started : null
+  let text = early?.index ?? null
+  if (text === null) {
+    const response = await fetch(`/content/${pool}/${bundled.packageSig}`).catch(() => null)
+    if (!response?.ok || (response.headers.get('content-type') || '').includes('text/html')) return null
+    text = await response.text()
+  }
+  const index = parseInstallIndex(text, bundled.packageSig)
   if (!index) return null
 
   const carried = new Map<string, Uint8Array<ArrayBuffer>>()
   if (index.layersPack) {
     try {
-      const packed = await fetch(`/content/${index.layersPack}`)
-      if (packed.ok) {
-        for (const [sig, bytes] of decodeTransferPack(await gunzipBytes(new Uint8Array(await packed.arrayBuffer()))) ?? []) carried.set(sig, bytes)
+      let packed = early?.layersPack === index.layersPack ? await early.pack : null
+      if (!packed) {
+        const res = await fetch(`/content/${index.layersPack}`)
+        packed = res.ok ? await res.arrayBuffer() : null
+      }
+      if (packed) {
+        for (const [sig, bytes] of decodeTransferPack(await gunzipBytes(new Uint8Array(packed))) ?? []) carried.set(sig, bytes)
       }
     } catch { /* the layers come loose instead */ }
   }
