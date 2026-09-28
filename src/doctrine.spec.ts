@@ -1568,7 +1568,7 @@ describe('doctrine ratchets', () => {
     // hover are out). Until then this file may only get smaller: new tile
     // behaviour goes in its own module.
     const SHOW_CELL = join(ROOT, 'hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts')
-    const CEILING = 7170
+    const CEILING = 7169
     const lines = readFileSync(SHOW_CELL, 'utf8').split('\n').length
     expect(lines, `show-cell.drone.ts grew to ${lines} lines (ceiling ${CEILING}). Put the new behaviour in a module of its own.`).toBeLessThanOrEqual(CEILING)
     expect(lines, `show-cell.drone.ts shrank to ${lines} lines. Lower CEILING to ${lines} so the ratchet clicks.`).toBeGreaterThan(CEILING - 50)

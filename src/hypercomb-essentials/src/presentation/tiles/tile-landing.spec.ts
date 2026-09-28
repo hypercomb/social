@@ -2,7 +2,8 @@
 // the producer's window a render is held and counted; the badge shows WRITES,
 // not paints; the chain of consequences after the window stays held until it
 // has been quiet for a beat; walking somewhere else always paints; the tap
-// releases only what was actually held.
+// releases only what was actually held; and a paint that is not a render
+// request can ask whether it would be held without being counted.
 import { describe, expect, it } from 'vitest'
 
 import { QuietLanding, type LandingHost } from './tile-landing.js'
@@ -65,6 +66,25 @@ describe('quiet landing', () => {
     landing.quiet(false, 0)
     host.here.where = '/garden'
     expect(landing.admit(1100)).toBe('spend')
+  })
+
+  it('answers whether a paint would be held without counting it', () => {
+    const host = hostAt('/home')
+    const landing = new QuietLanding(host)
+    expect(landing.wouldHold(1000)).toBe(false)
+    landing.quiet(true, 1)
+    expect(landing.wouldHold(1000)).toBe(true)
+    expect(host.pending).toEqual([])
+    expect(landing.holding).toBe(false)
+    // The chain after the window: held while cascading at the same place only.
+    landing.admit(1000)
+    landing.quiet(false, 0)
+    expect(landing.wouldHold(1500)).toBe(true)
+    host.here.where = '/garden'
+    expect(landing.wouldHold(1500)).toBe(false)
+    host.here.where = '/home'
+    expect(landing.wouldHold(1000 + 1600)).toBe(false)
+    expect(host.pending).toHaveLength(1)
   })
 
   it('the tap releases only what was held', () => {

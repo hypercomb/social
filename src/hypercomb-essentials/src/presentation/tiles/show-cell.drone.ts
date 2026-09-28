@@ -1431,12 +1431,11 @@ export class ShowCellDrone extends Drone {
    */
   readonly #runIncrementalSync = (change: { added: { name: string; segments: readonly string[] }[]; removed: string[] }): void => {
     const axial = this.resolve<any>('axial')
-    // A FRAMED page has no incremental placement. The frame decides where
-    // every tile sits from the ORDER of the whole set, so adding one tile can
-    // move any of the others — the slot machine's "put the new one in a free
-    // slot" is the wrong answer by construction. Take the full path, which
-    // re-reads the layer through the frame.
-    if (!axial?.items || !this.#slots.seeded || this.#order.isFramed()) {
+    // A FRAMED page has no incremental placement: the frame places every tile
+    // from the ORDER of the whole set, so one add can move any other. A LANDING
+    // holding its paint takes the full path too — its requestRender is held and
+    // counted (tile-landing.ts). Both re-read the layer.
+    if (!axial?.items || !this.#slots.seeded || this.#order.isFramed() || this.#landing.wouldHold()) {
       this.#layerCellsCache.delete(this.renderedLocationKey)
       this.renderedCellsKey = ''
       this.requestRender()

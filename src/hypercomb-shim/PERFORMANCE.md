@@ -44,6 +44,8 @@ comparison holds; the absolute numbers do not transfer.
 | 2026-09-28 | `23711e50169d` | 7 tiles, drawn in software | 8717 vs 14534 ms | 8717 vs 14534 ms | 6984 vs 11759 ms | 3402 vs 5249 ms | 67 vs 67 ms / 15 vs 20 % | 75 vs 90 MB | 4× — PASS; idle blocking 158 vs 259 ms / 10 s |
 | 2026-09-28 | `0f3f26e7669a` | 7 tiles, drawn in software | 4630 vs 6140 ms | 4630 vs 6140 ms | 3866 vs 4956 ms | 1709 vs 2749 ms | 50 vs 50 ms / 1.7 vs 2.5 % | 86 vs 93 MB | 1× — PASS; idle blocking 0 vs 50 ms / 10 s |
 | 2026-09-28 | `0f3f26e7669a` | 7 tiles, drawn in software | 9676 vs 15987 ms | 9676 vs 15987 ms | 7501 vs 13712 ms | 4117 vs 6349 ms | 67 vs 67 ms / 30 vs 33 % | 85 vs 100 MB | 4× — PASS; idle blocking 675 vs 1046 ms / 10 s |
+| 2026-09-28 | `76740098ae8e` | 7 tiles, drawn in software | 4220 vs 6383 ms | 4220 vs 6383 ms | 3531 vs 5222 ms | 1655 vs 2659 ms | 50 vs 50 ms / 1.1 vs 1.2 % | 77 vs 78 MB | 1× — PASS; idle blocking 0 vs 0 ms / 10 s |
+| 2026-09-28 | `76740098ae8e` | 7 tiles, drawn in software | 9363 vs 15807 ms | 9363 vs 15807 ms | 7502 vs 13464 ms | 3926 vs 5942 ms | 67 vs 67 ms / 23 vs 30 % | 85 vs 107 MB | 4× — PASS; idle blocking 527 vs 579 ms / 10 s |
 
 Minimal first, Angular second.
 
@@ -65,6 +67,7 @@ Minimal first, Angular second.
 | 2026-09-28 | dive and previews drawn out of show-cell (package `7057f32c350d`) | 4168 ms (1×), 8392 ms (4×) | 3640 ms (1×), 6738 ms (4×) | 1× tiles +156 ms against `33c8d74e7636`, with Angular +824 ms in the same run (machine drift); 4× −240 ms, idle blocking 62 vs 151 ms before | same |
 | 2026-09-28 | quiet landing and hover drawn out of show-cell (package `23711e50169d`) | 4333 ms (1×), 8717 ms (4×) | 3585 ms (1×), 6984 ms (4×) | 1× tiles +165 ms against `7057f32c350d` while Angular went −470 ms in the same run, but drag p95 33 ms (was 50) and janky frames 0.3 % (was 1.7); 4× +325 ms with idle blocking 158 ms (was 62) — within the gate's noise band, and neither branch touches boot | same |
 | 2026-09-28 | a dive's names drawn by the DOM name layer, after the merge of `development` (package `0f3f26e7669a`) | 4630 ms (1×), 9676 ms (4×) | 3866 ms (1×), 7501 ms (4×) | 1× tiles +297 ms against `23711e50169d` with Angular +554 ms in the same run; 4× +959 ms with Angular +1453 ms (machine drift, ratio 0.61 vs 0.60). The Angular host was rebuilt for the merged core | same |
+| 2026-09-28 | quiet landing holds a same-page add or remove too (package `76740098ae8e`) | 4220 ms (1×), 9363 ms (4×) | 3531 ms (1×), 7502 ms (4×) | 1× tiles −410 ms against `0f3f26e7669a` (Angular +243 ms in the same run); 4× −313 ms (Angular −180 ms). Only a held landing's add takes the full path; the participant's own adds stay incremental | same or better |
 
 Adding a row: run the gate (and `--rate 4` when boot or rendering moved),
 then add the change's line here in the same commit.

@@ -76,10 +76,7 @@ export class QuietLanding {
    *  cascading at a location the participant has not left. Not held: this
    *  pass is about to show them whatever landed, so the badge is spent. */
   admit(now = Date.now()): LandingVerdict {
-    const cascading = this.#held > 0
-      && this.#heldAt === this.host.where()
-      && (now - this.#lastHeldAt) < CASCADE_QUIET_MS
-    if (this.#quiet || cascading) {
+    if (this.wouldHold(now)) {
       if (this.#held === 0) this.#heldAt = this.host.where()
       this.#held++
       this.#lastHeldAt = now
@@ -94,6 +91,17 @@ export class QuietLanding {
       return 'spend'
     }
     return 'run'
+  }
+
+  /** Would a paint be held right now? Asked, never counted — for a paint
+   *  that does not go through a render request (the incremental add and
+   *  remove), which must take the held path instead of drawing the change
+   *  straight onto the surface. */
+  wouldHold(now = Date.now()): boolean {
+    const cascading = this.#held > 0
+      && this.#heldAt === this.host.where()
+      && (now - this.#lastHeldAt) < CASCADE_QUIET_MS
+    return this.#quiet || cascading
   }
 
   /** `landing:quiet` — the producer opened or closed its window. This side is
