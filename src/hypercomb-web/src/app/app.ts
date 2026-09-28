@@ -35,6 +35,13 @@ export class App implements AfterViewInit {
   protected readonly inputOpen = signal(false)
   public showHeader = true
   public readonly viewActive = signal(false)
+  /** THE HIVE'S CHROME WAITS FOR THE HIVE. A published site's visitor lands on
+   *  its page, where the header, controls bar, edit actions and indicators are
+   *  all built and then hidden — Angular's bootstrap spent ~350 ms at ×4
+   *  building them (measured 2026-09-27). They mount the moment the visitor
+   *  is in the hexagons: a site whose arrival is the hexagons, or a step off
+   *  the page (main.visitor.ts `loader:activate`). */
+  protected readonly chrome = signal((window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ !== true)
   /** A canvas-taking view can deliberately preserve the controls rail when it
    *  has reserved that rail's edge, as the chat window does. */
   readonly moveMode = signal(false)
@@ -109,6 +116,10 @@ export class App implements AfterViewInit {
   }
 
   constructor() {
+    if (!this.chrome()) {
+      EffectBus.on<{ view?: string }>('view:arrival', p => { if (!p?.view) this.chrome.set(true) })
+      EffectBus.on<{ reason?: string }>('loader:activate', p => { if (p?.reason === 'hive') this.chrome.set(true) })
+    }
     window.addEventListener('error', e => {
       if ((e as ErrorEvent).message?.includes('ResizeObserver loop')) {
         e.stopImmediatePropagation()
