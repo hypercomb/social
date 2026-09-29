@@ -103,6 +103,22 @@ const registrations = new Map<string, unknown>()
 
 let FolderSyncService: typeof import('./folder-sync.service.js').FolderSyncService
 
+/** Resolves with the report the incremental drain makes when it finishes —
+ *  verified, or failed. The bus replays its last value on subscribe; that is
+ *  the full pass's report, never a drain's, so it is let through. */
+const DRAINED = 'New local bytes drained and verified'
+const drainSettled = (): Promise<{ status: string; copied?: number; error?: string }> =>
+  new Promise(resolve => {
+    const off = EffectBus.on<{ status: string; phase?: string; copied?: number; error?: string }>(
+      'folder-sync:state',
+      state => {
+        if (state?.phase !== DRAINED && state?.status !== 'error') return
+        queueMicrotask(() => off())
+        resolve(state)
+      },
+    )
+  })
+
 beforeAll(async () => {
   ;({ FolderSyncService } = await import('./folder-sync.service.js'))
 })
@@ -152,8 +168,14 @@ describe('incremental drain', () => {
     const drained = new TextEncoder().encode('newly written resource')
     const drainedSig = await SignatureService.sign(drained.buffer as ArrayBuffer)
     await put(opfs, drainedSig, drained)
+    // The drain's timers are fake, its hashing is not: it signs every copy
+    // (WebCrypto, off the event loop), so no amount of fake time guarantees it
+    // has finished — under load it landed after the manifest was read. Wait
+    // for the drain's own word that it is done instead.
+    const settled = drainSettled()
     EffectBus.emit('content:wrote', { sig: drainedSig, bytes: drained.buffer as ArrayBuffer })
     await vi.advanceTimersByTimeAsync(20_000)
+    expect(await settled).toMatchObject({ status: 'backed-up', copied: 1 })
 
     const after = JSON.parse(new TextDecoder().decode(
       await read(chosen, `hypercomb-backup/devices/${deviceId}/manifest.json`),
