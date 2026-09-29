@@ -116,10 +116,16 @@ export class QuietLanding {
 
   /** `landing:apply` — the badge was tapped. True when something was held:
    *  the renderer then runs a forced pass. Guarded on the held count so the
-   *  bus's last-value replay can't fire a stray forced paint at boot. */
+   *  bus's last-value replay can't fire a stray forced paint at boot.
+   *
+   *  The tap ends the aftershocks too, not only the producer's window. It is
+   *  the participant asking to see what landed, so the pass it runs must not
+   *  read as one more link in the chain — a tap within CASCADE_QUIET_MS of
+   *  the last held paint used to be held again, and did visibly nothing. */
   apply(): boolean {
     if (this.#held <= 0) return false
     this.#quiet = false
+    this.#lastHeldAt = -Infinity
     return true
   }
 

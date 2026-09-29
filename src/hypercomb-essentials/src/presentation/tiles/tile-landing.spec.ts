@@ -2,8 +2,9 @@
 // the producer's window a render is held and counted; the badge shows WRITES,
 // not paints; the chain of consequences after the window stays held until it
 // has been quiet for a beat; walking somewhere else always paints; the tap
-// releases only what was actually held; and a paint that is not a render
-// request can ask whether it would be held without being counted.
+// releases only what was actually held — at once, even mid-aftershock; and a
+// paint that is not a render request can ask whether it would be held without
+// being counted.
 import { describe, expect, it } from 'vitest'
 
 import { QuietLanding, type LandingHost } from './tile-landing.js'
@@ -93,7 +94,21 @@ describe('quiet landing', () => {
     landing.quiet(true, 2)
     landing.admit(1000)
     expect(landing.apply()).toBe(true)
-    // The window is closed by the tap; once the chain has been quiet the pass runs and spends.
-    expect(landing.admit(1000 + 2000)).toBe('spend')
+    expect(landing.admit(1001)).toBe('spend')
+  })
+
+  it('a tap in the middle of the aftershocks paints at once, and the badge is spent', () => {
+    const host = hostAt('/home')
+    const landing = new QuietLanding(host)
+    landing.quiet(true, 3)
+    landing.admit(1000)
+    landing.quiet(false, 0)
+    landing.admit(1400)          // an aftershock, held
+    expect(landing.apply()).toBe(true)
+    expect(landing.wouldHold(1500)).toBe(false)
+    expect(landing.admit(1500)).toBe('spend')
+    expect(host.pending.at(-1)).toEqual({ count: 0, where: '/home' })
+    // What follows the tap is the participant's, not the chain's.
+    expect(landing.admit(1600)).toBe('run')
   })
 })
