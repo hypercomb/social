@@ -2,7 +2,11 @@
 
 @font-face {
   font-family: 'Source Sans Pro Light';
-  src: url('./SourceSansPro-Light.ttf') format('truetype');
+  // WOFF2 first: the same font in 38 KB where the TTF costs 58 KB even
+  // compressed on the wire — every visitor downloads it before the page shows
+  // (measured 2026-09-28). The TTF stays for a browser without WOFF2.
+  src: url('./SourceSansPro-Light.woff2') format('woff2'),
+    url('./SourceSansPro-Light.ttf') format('truetype');
   font-weight: 300;
   font-style: normal;
 }

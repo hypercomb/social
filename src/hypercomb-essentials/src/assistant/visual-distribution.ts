@@ -64,7 +64,6 @@ import {
 } from '../commands/decoration-manifest.js'
 import {
   ensureSiteArtifact,
-  siteGroupFor,
   wearEnrollment,
 } from '../pheromones/enrollment-acts.js'
 import { ENROLLMENT_KIND } from '../pheromones/enrollment.js'
@@ -75,6 +74,10 @@ import {
   writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
 import { fetchThroughContentHop } from '../presentation/tiles/artifact-content.js'
+import { divisionRelationName } from '../presentation/tiles/division-group.js'
+// The view's question lives with the views (division-group.ts); re-exported
+// so every caller of this module keeps its import.
+export { divisionGroupOf } from '../presentation/tiles/division-group.js'
 import {
   DIVISION_FAMILY,
   DIVISION_KIND,
@@ -93,10 +96,6 @@ type StoreLike = {
   putResource?: (blob: Blob) => Promise<string>
   getResource?: (sig: string) => Promise<Blob | null>
 }
-type HistoryLike = {
-  sign(lineage: { explorerSegments: () => readonly string[] }): Promise<string>
-}
-
 /** Long edge of a part's picture, in pixels. Big enough to read as a picture
  *  in the tile editor and the lightbox, small enough that seven of them are
  *  not a burden to store or to push. */
@@ -311,24 +310,6 @@ export async function dressParts(opts: {
 // ── the relation ────────────────────────────────────────────────────────
 
 /**
- * The name of the relation a whole's parts enrol in.
- *
- * Derived from the whole's LOCATION, not just its label: two tiles called
- * "engine" in different branches are different wholes and must not share one
- * set. The tail of the location signature makes that so without anyone having
- * to keep a register, and the readable prefix keeps `/enroll` legible.
- */
-async function divisionRelationName(wholeSegments: readonly string[]): Promise<string> {
-  const label = wholeSegments[wholeSegments.length - 1] ?? 'whole'
-  const history = get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
-  try {
-    const sig = await history?.sign({ explorerSegments: () => [...wholeSegments] })
-    if (sig) return `${label}-${sig.slice(0, 12)}`
-  } catch { /* history cold — the label alone still names a relation */ }
-  return label
-}
-
-/**
  * Put this part at position `order` in the division.
  *
  * EXPORTED because seating is not only something a distribution does to parts
@@ -362,17 +343,6 @@ export async function seat(
   } catch (err) {
     console.warn('[visual-distribution] could not seat', partSegments.join('/'), err)
   }
-}
-
-/** The group a whole's division names, for a reader that holds the whole's
- *  path. Exported so a view can ask "what seats into my holes?" without this
- *  module having to tell it. */
-export async function divisionGroupOf(
-  wholeSegments: readonly string[],
-): Promise<{ sig: string; meaning: string } | null> {
-  const relation = await divisionRelationName(wholeSegments)
-  const group = await siteGroupFor(relation, DIVISION_FAMILY)
-  return group ? { sig: group.sig, meaning: group.meaning } : null
 }
 
 // ── the bytes ───────────────────────────────────────────────────────────

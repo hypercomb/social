@@ -32,7 +32,7 @@
 import { SITE_VIEW_IOC_KEY } from '@hypercomb/core'
 import { listDecorations } from '../../commands/decoration-manifest.js'
 import { enrolledCells, ordered, orderIn } from '../../pheromones/enrollment.js'
-import { divisionGroupOf } from '../../assistant/visual-distribution.js'
+import { divisionGroupOf } from './division-group.js'
 import { fetchThroughContentHop } from './artifact-content.js'
 import { assemble, containerFor, type SlotFill } from './division-assembly.js'
 import { readTemplateTarget, resolveTemplateAt } from './template-target.js'
