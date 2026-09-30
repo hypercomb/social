@@ -166,6 +166,22 @@ images and downloadable files arrives intact. hypercomb.com stages the tour at
 their checksums — at `/downloads/`. Routes are one path segment, matched against
 `[a-z0-9-]`, so a route can only ever name a place on this origin.
 
+## Apache — DreamHost and other shared hosting
+
+`public/.htaccess` ships in `dist/` and states the same contract for Apache
+(mod_rewrite + mod_headers). The whole deploy is copying `dist/` — including
+that dotfile — into the site's web directory. Over SSH, from `src/` in Git Bash:
+
+```bash
+tar -czf - -C hypercomb-shim/dist . | ssh user@server "tar -xzf - -C ~/hive.example.com"
+node hypercomb-shim/host/check-host.mjs https://hive.example.com
+```
+
+A graphical SFTP client works too, but most hide dotfiles by default — a copy
+without `.htaccess` fails every rewrite check. Shared hosting runs no
+long-lived process, so an Apache host serves a folder; it cannot accept
+uploads (that is `hypercomb-relay --writers`, on a machine that stays on).
+
 ## A machine that already holds the hive
 
 Everything above serves a *folder*. The Windows, macOS and Linux client serves

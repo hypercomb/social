@@ -1,0 +1,49 @@
+# The host contract for Apache (DreamHost shared hosting, cPanel, any
+# AllowOverride host). Same rules as host/serve.mjs, _headers and
+# staticwebapp.config.json — this file only matters where Apache reads it.
+# Needs mod_rewrite + mod_headers. Verify with host/check-host.mjs, never by eye.
+
+Header always set Access-Control-Allow-Origin "*"
+Header always set X-Content-Type-Options "nosniff"
+Header always set Referrer-Policy "no-referrer"
+
+AddType application/manifest+json .webmanifest
+AddType text/javascript .js .mjs
+AddType font/woff2 .woff2
+
+# The pointers, the service worker and the shell: never hard-cached. A stale
+# pin cannot be repointed; a stale worker strands a client on an old runtime.
+<FilesMatch "^(pin|hypercomb\.worker\.js|main\.js|env\.js|index\.html|manifest\.json|listing\.txt)$">
+  Header set Cache-Control "no-cache, no-store, must-revalidate"
+</FilesMatch>
+
+# Signature-named bytes: the name IS the hash, so they never change.
+<FilesMatch "^[a-f0-9]{64}$">
+  ForceType application/octet-stream
+  Header set Cache-Control "public, max-age=31536000, immutable"
+</FilesMatch>
+
+# A signature-named folder's listing is one entry name per line — text, and
+# never cached, because a pool grows.
+<If "%{REQUEST_FILENAME} =~ m#/[a-f0-9]{64}/index\.html$#">
+  ForceType "text/plain; charset=utf-8"
+</If>
+
+RewriteEngine On
+
+# 1. A real file always wins, before any rewrite. Signature-named files have
+#    no extension; the usual "no extension => route" heuristic would serve the
+#    origin's own heap as HTML.
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+
+# 2. A signature-named folder answers with its listing.
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^((?:.*/)?[a-f0-9]{64})/?$ $1/index.html [L]
+
+# 3. Anything missing at or under a signature is a real 404, never the shell:
+#    a replicating node writes back whatever a marker path answers.
+RewriteRule (^|/)[a-f0-9]{64}(/|$) - [R=404,L]
+
+# 4. Everything else is a location inside the hive: the shell, 200.
+RewriteRule ^ index.html [L]
