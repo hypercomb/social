@@ -1560,7 +1560,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       'lanes:changed',
       ({ active, lanes }) => {
         this.lanesActive.set(!!active)
-        if (Number.isFinite(lanes)) this.laneCount.set(3)
+        if (Number.isFinite(lanes)) this.laneCount.set(lanes as number)
       },
     )
 
