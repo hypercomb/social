@@ -7,7 +7,7 @@
 // to add. That line is reported in `deviations`; nothing in this file depends
 // on it.
 
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -106,7 +106,13 @@ describe('/find-word — free text, and never a rewritten argument', () => {
 // ---------------------------------------------------------------------------
 
 describe('the publish door has exactly one caller', () => {
-  it('no module outside the routine names publishVocabulary except the window', () => {
+  // READ IN A HOOK, WITH ITS OWN BUDGET. This walk reads ~1100 files. Warm
+  // that is well under a second, but on a cold disk — the first run after
+  // the machine boots — it took longer than one test's 5 s, and the ratchet
+  // timed out with nothing wrong. The scan is unchanged; only its reading
+  // moved out of the test's budget (same fix as doctrine.spec.ts).
+  let hits: string[] = []
+  beforeAll(() => {
     const ROOT = process.cwd()
     const allowed = new Set([
       'hypercomb-essentials/src/molecule/vocabulary-publish.ts',
@@ -115,7 +121,6 @@ describe('the publish door has exactly one caller', () => {
       // above it; a second caller is a second place that could stop asking.
       'hypercomb-essentials/src/molecule/vocabulary.view.ts',
     ])
-    const hits: string[] = []
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name)
@@ -138,6 +143,9 @@ describe('the publish door has exactly one caller', () => {
     }
     walk(join(ROOT, 'hypercomb-essentials', 'src'))
     walk(join(ROOT, 'hypercomb-shared'))
+  }, 120_000)
+
+  it('no module outside the routine names publishVocabulary except the window', () => {
     expect(hits).toEqual([])
   })
 

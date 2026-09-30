@@ -9,7 +9,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 
 const SHARING = join(process.cwd(), 'hypercomb-essentials', 'src', 'sharing')
 const read = (file: string): string => readFileSync(join(SHARING, file), 'utf8')
@@ -22,6 +22,14 @@ const tsFiles = (dir: string = ESSENTIALS): string[] => readdirSync(dir).flatMap
   if (!name.endsWith('.ts') || name.endsWith('.spec.ts')) return []
   return [full]
 })
+/** A source file's text, read once — the three whole-tree guards below ask
+ *  the same ~900 files, and the suite's beforeAll reads them all up front. */
+const texts = new Map<string, string>()
+const source = (file: string): string => {
+  let text = texts.get(file)
+  if (text === undefined) texts.set(file, text = readFileSync(file, 'utf8'))
+  return text
+}
 const rel = (f: string): string => f.slice(ESSENTIALS.length + 1).replace(/\\/g, '/')
 
 /** Source with comments removed. These guards read code, not prose — a file
@@ -31,6 +39,13 @@ const code = (src: string): string =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 
 describe('publishing is an act', () => {
+  // READ IN A HOOK, WITH ITS OWN BUDGET. The whole-tree guards read ~900 files. Warm
+  // that is well under a second, but on a cold disk — the first run after
+  // the machine boots — it took longer than one test's 5 s, and the ratchet
+  // timed out with nothing wrong. The scan is unchanged; only its reading
+  // moved out of the test's budget (same fix as doctrine.spec.ts).
+  beforeAll(() => { for (const file of tsFiles()) source(file) }, 120_000)
+
   it('the passive replication queue asks for the host-sync opt-in before any work', () => {
     const src = read('passive-replication-queue.ts')
     // the gate exists, is consulted at dispatch, and the default wiring binds
@@ -64,7 +79,7 @@ describe('publishing is an act', () => {
       return [full]
     })
     const callers = walk(root)
-      .filter(f => /\bplaceOffers\s*\(/.test(readFileSync(f, 'utf8')))
+      .filter(f => /\bplaceOffers\s*\(/.test(source(f)))
       .map(f => f.slice(root.length + 1).replace(/\\/g, '/'))
       .sort()
     // the definition site does not match `placeOffers(` — it is `placeOffers = async (`
@@ -94,7 +109,7 @@ describe('publishing is an act', () => {
   it('the installer push channel is gone — no service, no callers', () => {
     expect(existsSync(join(SHARING, 'push-queue.service.ts'))).toBe(false)
     const referring = tsFiles()
-      .filter(f => /PushQueueService/.test(code(readFileSync(f, 'utf8'))))
+      .filter(f => /PushQueueService/.test(code(source(f))))
       .map(rel)
     expect(referring, 'PushQueueService is retired — nothing may resolve or re-register it').toEqual([])
   })
@@ -126,7 +141,7 @@ describe('publishing is an act', () => {
     // a gate decision; a file leaving it is debt paid. Either way the list
     // moves in the same commit as the code, deliberately.
     const touching = tsFiles()
-      .filter(f => code(readFileSync(f, 'utf8')).includes('content:wrote'))
+      .filter(f => code(source(f)).includes('content:wrote'))
       .map(rel)
       .sort()
     expect(touching).toEqual([

@@ -25,7 +25,7 @@
 // Both are irreversible/off-machine effects of an act the participant may be
 // about to decline, and the existing spec cannot see either.
 
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -105,7 +105,13 @@ describe('ACCIDENTAL PUBLISH — what runs before the participant is asked', () 
   })
 
   // ── HARDENING (passes today; keeps it that way) ──────────────────────────
-  it('NO source file anywhere in essentials or shared imports the publish door', () => {
+  // READ IN A HOOK, WITH ITS OWN BUDGET. This walk reads ~1100 files. Warm
+  // that is well under a second, but on a cold disk — the first run after
+  // the machine boots — it took longer than one test's 5 s, and the ratchet
+  // timed out with nothing wrong. The scan is unchanged; only its reading
+  // moved out of the test's budget (same fix as doctrine.spec.ts).
+  let doorImporters: string[] = []
+  beforeAll(() => {
     const ROOT = process.cwd()
     const hits: string[] = []
     const walk = (dir: string): void => {
@@ -131,7 +137,11 @@ describe('ACCIDENTAL PUBLISH — what runs before the participant is asked', () 
     // — a queen, a drone, a shell component — would not trip it.
     walk(join(ROOT, 'hypercomb-essentials', 'src'))
     walk(join(ROOT, 'hypercomb-shared'))
-    expect(hits).toEqual([])
+    doorImporters = hits
+  }, 120_000)
+
+  it('NO source file anywhere in essentials or shared imports the publish door', () => {
+    expect(doorImporters).toEqual([])
   })
 
   // ── FINDING 4 ────────────────────────────────────────────────────────────
