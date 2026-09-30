@@ -106,6 +106,9 @@ export type LlmCall = {
    *  the rest as it always does. Ignored for an explicit provider or model —
    *  naming one is the participant's word. */
   readonly avoid?: readonly string[]
+  /** Upstream hosts to route around (OpenRouter provider slugs); the router
+   *  fills this on its retry pass from the hosts that answered busy. */
+  readonly ignoreUpstreams?: readonly string[]
   /** Optional, non-persistent lifecycle hook for one routed provider attempt. */
   readonly observeAttempt?: (event: LlmAttemptEvent) => void
 }
@@ -199,6 +202,10 @@ export class LlmDispatchError extends Error {
     readonly status?: number,
     /** How long the vendor asked us to wait before asking again (`Retry-After`). */
     readonly retryAfterMs?: number,
+    /** The upstream host behind a router that named it (OpenRouter's
+     *  `metadata.provider_name`), as a routing slug — so a retry can go
+     *  around it rather than back to it. */
+    readonly upstream?: string,
   ) {
     super(message)
     this.name = 'LlmDispatchError'
@@ -206,6 +213,19 @@ export class LlmDispatchError extends Error {
 }
 
 const MAX_ERROR_BODY = 600
+
+/** THE UPSTREAM THAT WAS BUSY. A router's error names the host it tried
+ *  (`{"error":{"metadata":{"provider_name":"DeepInfra"}}}`); as a slug it
+ *  is what OpenRouter's `provider.ignore` takes. Undefined when the body
+ *  names none. */
+export const upstreamOf = (body: string): string | undefined => {
+  try {
+    const parsed = JSON.parse(body) as { error?: { metadata?: { provider_name?: unknown } } }
+    const name = String(parsed?.error?.metadata?.provider_name ?? '').trim().toLowerCase()
+    const slug = name.split('/')[0].trim()
+    return /^[a-z0-9][a-z0-9._ -]{0,63}$/.test(slug) ? slug.replace(/\s+/g, '-') : undefined
+  } catch { return undefined }
+}
 
 /** `Retry-After` as milliseconds — delay-seconds or an HTTP-date; undefined
  *  when the vendor sent nothing readable. */
@@ -349,6 +369,7 @@ export const buildRequest = (
     ...(call.effort ? { effort: call.effort } : {}),
     ...(call.jsonSchema ? { jsonSchema: call.jsonSchema } : {}),
     ...(call.temperature !== undefined ? { temperature: call.temperature } : {}),
+    ...(call.ignoreUpstreams?.length ? { ignoreUpstreams: [...call.ignoreUpstreams] } : {}),
     stream: options.stream === true,
     apiKey,
   }
@@ -403,6 +424,7 @@ const send = async (
       request.model,
       response.status,
       retryAfterMs(response),
+      upstreamOf(body),
     )
   }
   return response
@@ -733,12 +755,19 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
   const refusedOwners = new Set<string>()
   let attempt = 0
   let lastError: unknown
+  // THE HOST THAT WAS BUSY IS NOT ASKED AGAIN (jwize's Solomon chat,
+  // 2026-09-28: one model, tried twice, the same upstream inside OpenRouter
+  // overloaded both times). A busy answer that names its upstream puts that
+  // host on the retry's ignore list, so the second pass routes the same
+  // model through another host instead of back into the same queue.
+  const busyUpstreams = new Set<string>(call.ignoreUpstreams ?? [])
   for (let pass = 0; pass <= ROUTE_RETRY_PASSES; pass++) {
     // Whether THIS pass failed only in ways worth a second pass, and the
     // longest wait any vendor asked for before it.
     let tried = 0
     let retryWorthy = true
     let retryAfter: number | undefined
+    const passCall: LlmCall = busyUpstreams.size ? { ...call, ignoreUpstreams: [...busyUpstreams] } : call
     for (const provider of candidates) {
       if (refusedOwners.has(credentialOwner(provider))) continue
       tried += 1
@@ -748,7 +777,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
       const startedAt = Date.now()
       let request: LlmRequest
       try {
-        request = buildRequest(provider, call, { stream: !!provider.fromStreamEvent })
+        request = buildRequest(provider, passCall, { stream: !!provider.fromStreamEvent })
       } catch (error) {
         const model = call.model ?? provider.defaultModel
         safeObserve(call, { phase: 'start', attempt, providerId: provider.id, model, durationMs: 0, outputEmitted: false, category: 'start' })
@@ -810,6 +839,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
         retryWorthy &&= isRetryWorthy(error)
         const asked = error instanceof LlmDispatchError ? error.retryAfterMs : undefined
         if (asked !== undefined) retryAfter = Math.max(retryAfter ?? 0, asked)
+        if (error instanceof LlmDispatchError && error.upstream && isRetryWorthy(error)) busyUpstreams.add(error.upstream)
         if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
         if (status === 401 || status === 403) refusedOwners.add(credentialOwner(provider))
         EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
@@ -822,8 +852,13 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
 
   // A named provider's own last failure is the answer — it was the only one asked.
   if (!automatic && lastError) throw lastError
+  // THE REMEDY, NOT ONLY THE FAILURE. One model switched on is one queue to
+  // stand in; say so, so the next act is the right one.
+  const remedy = candidates.length === 1
+    ? ' Only one model is switched on; switch on another in the providers console so the work can move to it.'
+    : ''
   throw new LlmDispatchError(
-    `every eligible AI provider failed: ${failures.join(' | ')}`,
+    `every eligible AI provider failed: ${failures.join(' | ')}${remedy}`,
     candidates[candidates.length - 1]?.id ?? '', call.model ?? '',
   )
 }

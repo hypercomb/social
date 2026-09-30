@@ -154,12 +154,16 @@ const originUrl = (host: string): string => {
 // ── the probe ───────────────────────────────────────────────────────────
 
 /** One index shape, permissively read: a bare array, or `{ members: [...] }`. */
-const membersOf = (parsed: unknown): string[] => {
+/** A pool index as a host serves it: a JSON array, `{ members }`, or —
+ *  the worker's own listing — one signature per line. */
+export const membersOf = (parsed: unknown): string[] => {
   const list = Array.isArray(parsed)
     ? parsed
     : Array.isArray((parsed as { members?: unknown })?.members)
       ? (parsed as { members: unknown[] }).members
-      : []
+      : typeof parsed === 'string'
+        ? parsed.split(/\r?\n/)
+        : []
   return list
     .map(entry => String(entry ?? '').trim().toLowerCase())
     .filter(sig => /^[a-f0-9]{64}$/.test(sig))
@@ -284,7 +288,8 @@ export const probePublishedPool = async (
   try {
     const response = await fetch(`${originUrl(origin)}/${await poolAddress(meaning)}`)
     if (!response.ok) return []              // the normal answer
-    index = await response.json()
+    const text = await response.text()
+    try { index = JSON.parse(text) } catch { index = text }   // a worker lists one signature per line
   } catch { return [] }                      // offline, CORS, not a content host
 
   const members = membersOf(index)

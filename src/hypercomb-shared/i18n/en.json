@@ -1705,6 +1705,7 @@
   "cell.zoom": "zoom",
   "mesh-modal.start": "start",
   "slash.chat": "Open chat — requires your AI host or local bridge",
+  "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.view": "Toggle between hexagons and website rendering",
   "slash.website": "Toggle website view, export subtree, or build pages via Claude",
   "slash.tutor": "Study games — turn this hive into spaced-repetition games; on | off | here | build | list",

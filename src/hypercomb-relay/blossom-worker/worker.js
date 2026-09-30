@@ -1306,6 +1306,24 @@ async function noteTranslators(env, pubkey, evt) {
   }
 }
 
+/** SHARED POOLS BY RECORD (documentation/agent-harness.md, step 5). A key
+ *  in a signed index whose meaning is one of these puts the RECORD it points
+ *  at into the pool of that meaning — by the record's own signature, so the
+ *  pool listing names what a client fetches directly, and the pool is a
+ *  history that only grows. Served only where the operator lists the
+ *  meaning (`hosts list agent:harness`); the write is an empty marker. */
+const SHARED_RECORD_POOLS = new Set(['agent:harness'])
+async function noteSharedPools(env, pubkey, evt) {
+  let roots = {}
+  try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
+  for (const [key, value] of Object.entries(roots)) {
+    if (!SHARED_RECORD_POOLS.has(key)) continue
+    const sig = String(value ?? '').toLowerCase()
+    if (!SIG_RE.test(sig)) continue
+    await addPoolMember(env, key, sig)
+  }
+}
+
 /** The keys a locale's pool holds, with the KV list it replaced drained in. */
 async function localeMembers(env, meaning, legacyKey) {
   const keys = new Set([...await drainedList(env, legacyKey), ...await poolMemberNames(env, meaning)])
@@ -1567,6 +1585,14 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
   // without this header a hive replicating from another origin died as an
   // opaque "Failed to fetch" and the door read as publishing nothing.
   headers.set('Access-Control-Allow-Origin', '*')
+  // The install index is JSON the asset server sends with no type (its name
+  // has no extension), and the edge compresses only what it knows is text:
+  // 221 KB went out raw, the largest thing a visitor loads before the page
+  // shows (measured 2026-09-28, revolucion).
+  if (response.status === 200 && !response.headers.get('content-type')
+      && new URL(request.url).pathname.startsWith(`/content/${await poolAddress(INSTALL_INDEX_MEANING)}/`)) {
+    headers.set('Content-Type', 'application/json; charset=utf-8')
+  }
   if (door && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
     const html = await response.text()
     const at = html.indexOf('</head>')
@@ -2185,6 +2211,8 @@ async function holdIndex(env, pubkey, evt) {
 // together. Measured on revolucion 2026-09-26: every sig a cold visitor
 // fetched sat within four hops, 404 members, 126 KB before gzip.
 const CONTENT_PACKS_MEANING = 'content:packs'
+/** The visitor engine's install index pool (hypercomb-runtime install-index.ts). */
+const INSTALL_INDEX_MEANING = 'install:index'
 const CONTENT_PACK_DEPTH = 4
 const CONTENT_PACK_MEMBER_MAX = 16_384
 const CONTENT_PACK_MAX = 524_288
@@ -2347,6 +2375,7 @@ async function putHive(request, env, pubkey) {
   await holdIndex(env, pubkey, evt)
   await noteTranslators(env, pubkey, evt)
   await noteAssessors(env, pubkey, evt)
+  await noteSharedPools(env, pubkey, evt)
   if (!await advancePublishedLocations(env, pubkey, evt)) {
     return text(503, 'signed index is held but a route location is not current; retry this index')
   }

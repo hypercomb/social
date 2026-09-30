@@ -940,7 +940,9 @@ export class Store extends EventTarget {
     const handle = await this.hypercombRoot.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
     try {
-      await writable.write(blob)
+      // The bytes already read above — handing the writer the Blob made it
+      // read them back a second time.
+      await writable.write(bytes)
     } finally {
       await writable.close()
     }
@@ -1135,13 +1137,25 @@ export class Store extends EventTarget {
     const blob = local ?? (localOnly ? null : await this.#fetchResourceFromHost(signature))
     if (!blob || blob.size > 64 * 1024) return blob
     try {
-      const parsed = JSON.parse(await blob.text())
+      const parsed = await this.#parsedResource(blob)
       if (!isMetaEnvelope(parsed)) return blob
       const payload = metaPayloadOf(parsed)!
       return payload.kind === 'resource'
         ? this.#getResolvedResource(payload.sig, next, localOnly)
         : null
     } catch { return blob }
+  }
+
+  /** A resource Blob's JSON, read once per Blob. The memory cache hands the
+   *  same Blob to every reader, and each resolve used to read it back as text
+   *  to ask whether it is a meta envelope. Undefined when it is not JSON. */
+  readonly #parsedResources = new WeakMap<Blob, unknown>()
+  #parsedResource = async (blob: Blob): Promise<unknown> => {
+    if (this.#parsedResources.has(blob)) return this.#parsedResources.get(blob)
+    let parsed: unknown
+    try { parsed = JSON.parse(await blob.text()) } catch { parsed = undefined }
+    this.#parsedResources.set(blob, parsed)
+    return parsed
   }
 
   /** Prefetch a resource into the in-memory cache. Safe to call concurrently
@@ -1229,7 +1243,12 @@ export class Store extends EventTarget {
         this.#resourceCache.set(signature, blob)
         // Silent write-through: persist for offline + future local hits
         // WITHOUT the content:wrote echo (these are someone else's bytes).
-        try { await this.putResource(blob, { emit: false }) } catch { /* cache-only is acceptable */ }
+        // The broker writes what it fetched (fetchBySig's contract), so this
+        // only runs for a transport that did not — writing it again cost a
+        // second hash and two Blob round trips per record (measured
+        // 2026-09-27: 32 decoration records on a visitor's arrival).
+        const landed = await (async () => { try { await this.hypercombRoot.getFileHandle(signature); return true } catch { return false } })()
+        if (!landed) try { await this.putResource(blob, { emit: false }) } catch { /* cache-only is acceptable */ }
         return blob
       } catch {
         this.#hostFetchMissUntil.set(signature, Date.now() + HOST_MISS_TTL_MS)

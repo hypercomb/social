@@ -182,6 +182,34 @@ export class HarnessStore extends EventTarget {
 
   get defaultSig(): string { return this.#defaultSig }
 
+  /** The record a CONVERSATION runs under: its own mark while that record
+   *  is in the pool, else the device's choice, else the shipped default. */
+  activeFor(mark?: string): HarnessRecord {
+    const wanted = String(mark ?? '').trim()
+    return (wanted ? this.#records.get(wanted) : undefined) ?? this.active
+  }
+
+  /** Its signature, by the same rule — what a receipt is keyed by. */
+  activeSigFor(mark?: string): string {
+    const wanted = String(mark ?? '').trim()
+    return wanted && this.#records.has(wanted) ? wanted : this.activeSig
+  }
+
+  /** A record by name or by signature; a name answers the newest member
+   *  wearing it. 'default' answers the shipped record. */
+  find(nameOrSig: string): { readonly sig: string; readonly record: HarnessRecord } | undefined {
+    const wanted = String(nameOrSig ?? '').trim().toLowerCase()
+    if (!wanted) return undefined
+    if (isSignature(wanted)) {
+      const record = this.#records.get(wanted)
+      return record ? { sig: wanted, record } : undefined
+    }
+    if (wanted === 'default' && this.#defaultSig) return { sig: this.#defaultSig, record: DEFAULT_HARNESS }
+    let found: { sig: string; record: HarnessRecord } | undefined
+    for (const [sig, record] of this.#records) if (record.name === wanted) found = { sig, record }
+    return found
+  }
+
   list(): { readonly sig: string; readonly record: HarnessRecord; readonly active: boolean }[] {
     const active = this.activeSig
     return [...this.#records].map(([sig, record]) => ({ sig, record, active: sig === active }))

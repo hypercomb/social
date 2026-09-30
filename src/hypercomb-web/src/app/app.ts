@@ -6,9 +6,9 @@ import { addHostZone, listHostZones } from '@hypercomb/runtime/host-zones'
 import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service'
 import { RouterOutlet } from '@angular/router'
-import { Header } from './header/header'
+import { Header } from './chrome/header.slot'
 import { CoreAdapter } from './core-adapter'
-import { ControlsBarComponent } from "@hypercomb/shared/ui/controls-bar/controls-bar.component"
+import { ControlsBarComponent } from "./chrome/controls-bar.slot"
 import { EditActionsComponent } from "@hypercomb/shared/ui/edit-actions/edit-actions.component"
 import { MeshHeaderComponent } from "@hypercomb/shared/ui/mesh-header/mesh-header.component"
 import { ShellSurfacesComponent } from "@hypercomb/shared/ui/shell-surfaces/shell-surfaces.component"
@@ -35,6 +35,13 @@ export class App implements AfterViewInit {
   protected readonly inputOpen = signal(false)
   public showHeader = true
   public readonly viewActive = signal(false)
+  /** THE HIVE'S CHROME WAITS FOR THE HIVE. A published site's visitor lands on
+   *  its page, where the header, controls bar, edit actions and indicators are
+   *  all built and then hidden — Angular's bootstrap spent ~350 ms at ×4
+   *  building them (measured 2026-09-27). They mount the moment the visitor
+   *  is in the hexagons: a site whose arrival is the hexagons, or a step off
+   *  the page (main.visitor.ts `loader:activate`). */
+  protected readonly chrome = signal((window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ !== true)
   /** A canvas-taking view can deliberately preserve the controls rail when it
    *  has reserved that rail's edge, as the chat window does. */
   readonly moveMode = signal(false)
@@ -109,6 +116,10 @@ export class App implements AfterViewInit {
   }
 
   constructor() {
+    if (!this.chrome()) {
+      EffectBus.on<{ view?: string }>('view:arrival', p => { if (!p?.view) this.chrome.set(true) })
+      EffectBus.on<{ reason?: string }>('loader:activate', p => { if (p?.reason === 'hive') this.chrome.set(true) })
+    }
     window.addEventListener('error', e => {
       if ((e as ErrorEvent).message?.includes('ResizeObserver loop')) {
         e.stopImmediatePropagation()

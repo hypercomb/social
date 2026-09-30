@@ -9,11 +9,12 @@
 // each step is given and what it answers. The shipped implementations are
 // in core/agent-leg.ts; the registry is essentials' (assistant/agent-steps).
 //
-// Five words are on the contract — front, fold, handover, verify, receipt.
-// Stretch (the streaming rounds with the fences) and route (the provider
-// pick) still run inside the window; they take the same door when lifted.
+// All seven words are on the contract. What the window keeps is what only
+// it holds: the census and the tree a door is shown, the Execution window
+// the fences run through, and the turn's ledger.
 
 import type { AgentReceiptEvent } from './agent-effects.js'
+import type { SplitWork } from './work-fence.js'
 
 export const AGENT_STEPS_IOC_KEY = '@hypercomb.social/AgentSteps'
 
@@ -203,10 +204,96 @@ export interface VerifyStep {
   run(input: VerifyInput): Promise<VerifyOutput | undefined>
 }
 
+// ── route: how the loop asks the router each round ──────────────────────
+
+/** The shape handed to the router for one round; the router owns the pick. */
+export type RouteCall = {
+  readonly providerId?: string
+  readonly model?: string
+  readonly preferModel?: string
+  readonly need: unknown
+  readonly fallbackWithin?: string
+  readonly avoid?: readonly string[]
+  readonly effort?: string
+}
+export type RouteInput<N extends { readonly tier: string }> = {
+  readonly round: number
+  readonly need: N
+  readonly pinned?: string
+  readonly continuationModel?: string
+  readonly namedModel?: string
+  readonly preferModel?: string
+  readonly fallbackWithin?: string
+  readonly avoid: readonly string[]
+}
+export type HandoffInput<N extends { readonly tier: string }> = {
+  readonly avoid: readonly string[]
+  /** The provider that gave the work up. */
+  readonly providerId: string
+  readonly need: N
+  readonly maxHandoffs: number
+  readonly ready: (need: N, avoid: readonly string[]) => boolean
+}
+export type HandoffOutput<N> = {
+  readonly avoid: string[]
+  readonly need: N
+  /** Another model can take it; false ends the turn with a word. */
+  readonly another: boolean
+}
+export interface RouteStep {
+  readonly word: 'route'
+  readonly name: string
+  call<N extends { readonly tier: string }>(input: RouteInput<N>): RouteCall
+  handoff<N extends { readonly tier: string }>(input: HandoffInput<N>): HandoffOutput<N>
+  /** After a round: the provider that answered is the one that continues. */
+  pin(input: { readonly pinned?: string; readonly providerId: string; readonly model: string }): { readonly pinned: string; readonly continuationModel: string }
+}
+
+// ── stretch: one streamed round ─────────────────────────────────────────
+
+export type StretchChunk = {
+  readonly providerId: string
+  readonly model: string
+  readonly providerLabel?: string
+  readonly vendor?: string
+  readonly text?: string
+}
+export type StretchInput = {
+  readonly stream: AsyncIterable<StretchChunk>
+  /** The provider the work is pinned to; another answering is an error. */
+  readonly pinned?: string
+  /** The model the round is expected to continue on. */
+  readonly model?: string
+  /** What goes before the first visible text ('' or a paragraph break). */
+  readonly lead: string
+  /** Hold the prose back (a judge sees it first); the text still accrues. */
+  readonly silent: boolean
+  readonly onProvider?: (chunk: StretchChunk, first: boolean) => void
+  readonly signal?: AbortSignal
+}
+export type StretchOutput = {
+  readonly providerId: string
+  readonly model: string
+  readonly label: string
+  readonly vendor?: string
+  readonly roundText: string
+  /** Visible text was yielded this round. */
+  readonly wrote: boolean
+  readonly work: SplitWork
+}
+export interface StretchStep {
+  readonly word: 'stretch'
+  readonly name: string
+  /** Yields the visible text as it streams; returns the round. */
+  run(input: StretchInput): AsyncGenerator<string, StretchOutput, void>
+}
+
 // ── the registry ────────────────────────────────────────────────────────
 
 export type AgentStepOf = {
   readonly front: FrontStep
+  readonly route: RouteStep
+  readonly stretch: StretchStep
   readonly fold: FoldStep
   readonly handover: HandoverStep
   readonly verify: VerifyStep

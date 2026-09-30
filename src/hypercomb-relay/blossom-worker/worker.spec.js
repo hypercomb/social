@@ -242,6 +242,20 @@ test('a page carries the head of its package pool, and its bundled assets reuse 
   assert.deepEqual(reads, [])
 })
 
+test('the install index goes out as JSON, so the edge compresses it', async () => {
+  const { env } = await fixture()
+  const pool = await sha256Hex('install:index')
+  const other = await sha256Hex('host:packages')
+  // Bytes, not a string: the asset server sends this file with no type at all.
+  env.ASSETS.fetch = async () => new Response(new TextEncoder().encode('{"package":"x"}'))
+  const index = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/${'e'.repeat(64)}`), env)
+  assert.equal(index.headers.get('content-type'), 'application/json; charset=utf-8')
+  assert.equal(await index.text(), '{"package":"x"}')
+  // Only the index's own pool is named JSON; another typeless asset is left alone.
+  const elsewhere = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${other}/00000000`), env)
+  assert.equal(elsewhere.headers.get('content-type'), null)
+})
+
 test('an index is held at the edge a few seconds, and a write drops the copy', async () => {
   const held = new Map()
   const edge = {
@@ -1470,6 +1484,21 @@ test('a try- door lists every signed assessment of its root, and the host AI ver
 })
 
 // ── the community's translations: who translated, who is missing what ────
+test('writing an index that names agent:harness puts the record it points at into that pool, by signature', async () => {
+  const HIVES = kvMap()
+  const CONTENT = contentBag()
+  const env = { SITE_BINDINGS: '{}', HIVES, CONTENT }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
+  const record = 'b'.repeat(64)
+  const body = JSON.stringify(await indexBy(assessorKey, { 'agent:harness': record, 'agent:other': 'c'.repeat(64), 'i18n:ja': 'f'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
+  assert.equal(response.status, 201)
+  const member = async (meaning, name) => CONTENT.held.has(`${await sha256Hex(meaning)}/${name}`)
+  assert.equal(await member('agent:harness', record), true)
+  assert.equal(await member('agent:harness', assessor), false)
+  assert.equal(await member('agent:other', 'c'.repeat(64)), false)
+})
+
 test('writing an index that names i18n:<locale> lists its signer as a translator, and i18n-missing:<locale> as missing', async () => {
   const HIVES = kvMap()
   const CONTENT = contentBag()

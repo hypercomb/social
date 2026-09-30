@@ -110,7 +110,7 @@ import {
   type SettledQuestion,
   AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY,
   type AgentHandoverEvent, type AgentRoundEvent, type AgentSpent, type AgentStageEffect,
-  AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedVerifyStep,
+  AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedRouteStep, shippedStretchStep, shippedVerifyStep,
   type AgentStepRegistry, type FrontDecisionLike, type HandoverStep, type VerifyDecisionLike, type WorkMessage,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -776,6 +776,8 @@ type ConversationSummary = {
    *  essentials build has no archive at all, and there every thread is live. */
   readonly archived?: boolean
   readonly goal?: { readonly details: string; readonly at: number }
+  /** The harness this conversation runs under, by signature; absent = the device's. */
+  readonly harness?: string
   /** HAS ANYTHING COME BACK? A sent question with no answer yet is a real
    *  conversation with no subject, so it is named by what it is doing rather
    *  than by the line you opened with. Optional because an older essentials
@@ -815,6 +817,8 @@ type ChatThreadsLike = {
    *  build — the control is hidden rather than dead when it is (see
    *  `canArchive`). */
   setConversationArchived?(convoId: string, archived: boolean): Promise<boolean>
+  /** Run a conversation under a harness by signature; '' returns it to the device's. */
+  setConversationHarness?(convoId: string, sig: string): Promise<boolean>
   newConvoId(): string
   /** A tile's conversation id, derived from its path — every tile has one,
    *  dormant until something lands in it. Absent on an older essentials
@@ -1272,7 +1276,13 @@ type HarnessRecordLike = {
   readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number }
   readonly handover: { readonly fence: string; readonly resumeSeconds: number; readonly proseFallback: boolean }
 }
-type HarnessLike = { readonly active?: HarnessRecordLike }
+type HarnessLike = {
+  readonly active?: HarnessRecordLike
+  /** The record a conversation runs under: its own mark, else the device's. */
+  activeFor?(mark: string): HarnessRecordLike
+  /** The signature of that record — what a receipt is keyed by. */
+  activeSigFor?(mark: string): string
+}
 const SHIPPED_HARNESS: HarnessRecordLike = {
   name: 'default',
   leg: { rounds: LEG_ROUNDS, reserveTokens: 8_000, keepVerbatim: 4 },
@@ -1280,15 +1290,20 @@ const SHIPPED_HARNESS: HarnessRecordLike = {
   reads: { pageChars: READ_PAGE_CHARS, roundsWhenAsked: MAX_OBSERVATION_ROUNDS, charsWhenAsked: MAX_OBSERVATION_CONTEXT_CHARS },
   handover: { fence: 'hypercomb-continue', resumeSeconds: RESUME_LEFT_MS / 1000, proseFallback: true },
 }
-const activeHarness = (): HarnessRecordLike =>
-  (ioc()?.get(HARNESS_IOC_KEY) as HarnessLike | undefined)?.active ?? SHIPPED_HARNESS
+/** The harness a conversation runs under: its own mark when it wears one
+ *  and the pool holds that record, else the device's choice, else shipped. */
+const activeHarness = (mark?: string): HarnessRecordLike => {
+  const store = ioc()?.get(HARNESS_IOC_KEY) as HarnessLike | undefined
+  if (mark && store?.activeFor) return store.activeFor(mark)
+  return store?.active ?? SHIPPED_HARNESS
+}
 /** THE STEPS ARE WORDS (core agent-steps): the registry essentials publishes
  *  resolves each word to the bee the harness names, else the shipped one —
  *  and the shipped one answers directly when there is no registry at all. */
 const stepRegistry = (): AgentStepRegistry | undefined =>
   ioc()?.get(AGENT_STEPS_IOC_KEY) as AgentStepRegistry | undefined
-const handoverStepNow = (): HandoverStep =>
-  stepRegistry()?.resolve('handover', activeHarness().steps) ?? shippedHandoverStep
+const handoverStepNow = (mark?: string): HandoverStep =>
+  stepRegistry()?.resolve('handover', activeHarness(mark).steps) ?? shippedHandoverStep
 const hypercombPlanQueue = new HypercombPlanQueue()
 
 /** How far back a pending ask record may reach and still be shown as waiting.
@@ -4590,6 +4605,24 @@ export class ChatWindowComponent implements OnDestroy {
     // a change to the roster, because a conversation that holds only unsent
     // words is still a conversation you must be able to get back to.
     this.#cleanups.push(EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() }))
+    // `harness here <name>` (the harness word): the open conversation wears
+    // the mark; the list re-reads it and the next send runs under it.
+    // `harness try <name> <request>`: one turn under another harness, on the
+    // open conversation, filed under that harness's signature.
+    this.#cleanups.push(EffectBus.on<{ sig?: string; request?: string }>('chat:harness-try', payload => {
+      const convoId = this.activeId()
+      const sig = String(payload?.sig ?? '').trim()
+      const request = String(payload?.request ?? '').trim()
+      if (!convoId || !sig || !request) return
+      this.#trial.set(convoId, sig)
+      void this.send(request)
+    }))
+    this.#cleanups.push(EffectBus.on<{ sig?: string; scope?: string }>('chat:harness', payload => {
+      if (payload?.scope !== 'conversation') return
+      const convoId = this.activeId()
+      if (!convoId) return
+      void this.#threads()?.setConversationHarness?.(convoId, String(payload.sig ?? '')).then(() => this.#refreshList())
+    }))
     this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:goal-reached', payload => {
       this.#scheduleRouteRefresh(String(payload?.convoId ?? ''))
       void this.#refreshList().then(() => {
@@ -6078,7 +6111,7 @@ export class ChatWindowComponent implements OnDestroy {
     this.#left.delete(convoId)
     const task = this.#task.get(convoId) ?? { rounds: 0, tokens: 0, legs: 0 }
     this.#task.set(convoId, { ...task, legs: task.legs + 1 })
-    await this.send(handoverStepNow().continueWord(left), { auto: true })
+    await this.send(handoverStepNow(this.#harnessMark(convoId)).continueWord(left), { auto: true })
   }
 
   /** A conversation opened on a stored handover picks the work back up,
@@ -6119,8 +6152,29 @@ export class ChatWindowComponent implements OnDestroy {
     return said.join('\n')
   }
 
+  /** The harness mark a conversation wears, as the list last read it. */
+  #harnessMark(convoId: string): string | undefined {
+    return this.#trial.get(convoId) ?? this.conversations().find(convo => convo.convoId === convoId)?.harness
+  }
+
+  /** `harness try <name> <request>`: the NEXT turn of a conversation runs
+   *  under another harness, once; the receipt is keyed by it, the mark is
+   *  untouched. Taken when the turn starts, so a second send is back to
+   *  the conversation's own. */
+  readonly #trial = new Map<string, string>()
+
+  /** The signature a receipt is keyed by: the trial's, else the mark's,
+   *  else the device's — '' for an older essentials that keeps none. */
+  #harnessSig(convoId: string, mark: string | undefined): string {
+    const store = ioc()?.get(HARNESS_IOC_KEY) as HarnessLike | undefined
+    return store?.activeSigFor?.(mark ?? '') ?? ''
+  }
+
   async #askProvider(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
     const router = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
+    const harnessMark = this.#harnessMark(convoId)
+    this.#trial.delete(convoId)
+    const harnessSig = this.#harnessSig(convoId, harnessMark)
     // HOW MUCH WORK THIS MESSAGE IS (message-effort.ts), and how much the
     // request must hold — so deep work reaches the most capable model added,
     // and a long conversation never lands on a model too small for it.
@@ -6372,12 +6426,14 @@ export class ChatWindowComponent implements OnDestroy {
       // The record says the policy; a number the participant typed on this
       // device (hc:chat:budget:*) still overrides it — their device, their
       // purse.
-      const harnessNow = activeHarness()
+      const harnessNow = activeHarness(harnessMark)
       const budget = workBudget(undefined, harnessNow.budget)
       const foldStep = stepRegistry()?.resolve('fold', harnessNow.steps) ?? shippedFoldStep
       const handoverStep = stepRegistry()?.resolve('handover', harnessNow.steps) ?? shippedHandoverStep
       const frontStep = stepRegistry()?.resolve('front', harnessNow.steps) ?? shippedFrontStep
       const verifyStep = stepRegistry()?.resolve('verify', harnessNow.steps) ?? shippedVerifyStep
+      const routeStep = stepRegistry()?.resolve('route', harnessNow.steps) ?? shippedRouteStep
+      const stretchStep = stepRegistry()?.resolve('stretch', harnessNow.steps) ?? shippedStretchStep
       const busEmit = (name: string, payload: Record<string, unknown>): void => { EffectBus.emit(name, payload) }
       // EVERY STAGE IS ANNOUNCED (core agent-effects): facts for whoever
       // paints them — the meter, the bee panel, the route — never a render.
@@ -6387,7 +6443,7 @@ export class ChatWindowComponent implements OnDestroy {
         return { rounds: task?.rounds ?? 0, tokens: task?.tokens ?? 0 }
       }
       const stage = (name: AgentStageEffect, facts: Record<string, unknown>): void => {
-        EffectBus.emit(name, { id: component.#beeId(convoId), convoId, leg: legOf(), at: Date.now(), ...facts })
+        EffectBus.emit(name, { id: component.#beeId(convoId), convoId, leg: legOf(), at: Date.now(), ...(harnessSig ? { harness: harnessSig } : {}), ...facts })
       }
       const tokensOf = (list: readonly { readonly content: string }[]): number =>
         list.reduce((sum, entry) => sum + estimateTokens(entry.content), 0)
@@ -6962,71 +7018,47 @@ export class ChatWindowComponent implements OnDestroy {
         if (signal?.aborted) throw stopped()
         // Prose streams live; a work block is held back from the first line
         // that opens it — the participant sees it in Execution instead.
-        const guard = new WorkStreamGuard()
+        // ROUTE, then STRETCH (core agent-stretch): the route step shapes the
+        // call and the router owns the pick; the stretch step streams the
+        // round, holds a work block back from the visible text and hands the
+        // round back split. What is the window's own — the designation it
+        // paints, the models it remembers — rides on the provider callback.
+        // Prose streams in every mode: the worker narrates its own steps, and
+        // Jev only judges the changes and the final answer.
         let lead = wrote ? '\n\n' : ''
-        let roundText = ''
-        let roundProviderId = ''
-        let roundModel = continuationModel ?? ''
-        let roundLabel = ''
-
-        for await (const chunk of router.stream!({
-          providerId: pinned,
-          model: continuationModel,
-          preferModel: rounds === 0 ? preferFor(routeNeed.tier) : undefined,
-          need: routeNeed,
-          ...(rounds === 0 && !pinned && fallbackWithin ? { fallbackWithin } : {}),
-          ...(avoid.length ? { avoid } : {}),
-          ...(namedModel ? { effort: routeNeed.tier } : {}),
-          cacheSystem: true,
-          observeAttempt,
-          messages,
-          system,
-          signal,
-        })) {
-          if (roundProviderId && roundProviderId !== chunk.providerId) {
-            throw new Error('a provider changed during one model round')
-          }
-          if (pinned && chunk.providerId !== pinned) {
-            throw new Error('a different provider answered in the middle of the work')
-          }
-          if (!roundProviderId) {
-            stage(AGENT_ROUTE, { round: rounds + 1, providerId: chunk.providerId, model: chunk.model, tier: routeNeed.tier, handoffs: avoid.length })
-          }
-          roundProviderId = chunk.providerId
-          roundModel = chunk.model
-          roundLabel = chunk.providerLabel ?? ''
-
-          // The route that emitted output is the truth.
-          component.designated.set({
-            providerId: chunk.providerId,
-            label: chunk.providerLabel,
-            vendor: chunk.vendor,
-            tier: routeNeed.tier,
-            model: chunk.model,
-            name: chunk.model,
-          })
-          component.model.set(chunk.model)
-          component.modelExplicit.set(false)
-          component.#remember(chunk.model)
-          component.#answeredTier.set(convoId, routeNeed.tier)
-          component.#answeredProvider.set(convoId, chunk.providerId)
-          if (chunk.text) {
-            roundText += chunk.text
-            // Prose streams in every mode: the worker narrates its own steps,
-            // and Jev only judges the changes and the final answer.
-            const visible = guard.push(chunk.text)
-            if (visible) {
-              wrote = true
-              yield `${lead}${visible}`
-              lead = ''
-            }
-          }
-        }
-        const tail = guard.end()
-        if (tail) {
-          wrote = true
-          yield `${lead}${tail}`
-        }
+        const call = routeStep.call({
+          round: rounds, need: routeNeed, pinned, continuationModel, namedModel,
+          preferModel: rounds === 0 ? preferFor(routeNeed.tier) : undefined, fallbackWithin, avoid,
+        })
+        const round = yield* stretchStep.run({
+          stream: router.stream!({
+            ...(call as { providerId?: string; model?: string; preferModel?: string; fallbackWithin?: string; avoid?: string[]; effort?: MessageEffort }),
+            need: routeNeed, cacheSystem: true, observeAttempt, messages, system, signal,
+          }),
+          pinned, model: continuationModel, lead, silent: false, signal,
+          onProvider: (chunk, first) => {
+            if (first) stage(AGENT_ROUTE, { round: rounds + 1, providerId: chunk.providerId, model: chunk.model, tier: routeNeed.tier, handoffs: avoid.length })
+            // The route that emitted output is the truth.
+            component.designated.set({
+              providerId: chunk.providerId,
+              label: chunk.providerLabel ?? '',
+              vendor: chunk.vendor ?? '',
+              tier: routeNeed.tier,
+              model: chunk.model,
+              name: chunk.model,
+            })
+            component.model.set(chunk.model)
+            component.modelExplicit.set(false)
+            component.#remember(chunk.model)
+            component.#answeredTier.set(convoId, routeNeed.tier)
+            component.#answeredProvider.set(convoId, chunk.providerId)
+          },
+        })
+        if (round.wrote) { wrote = true; lead = '' }
+        const roundText = round.roundText
+        const roundProviderId = round.providerId
+        const roundModel = round.model
+        const roundLabel = round.label
         rounds++
         turnRounds = rounds
         // Updated every round; the last write is what the run stores.
@@ -7038,7 +7070,7 @@ export class ChatWindowComponent implements OnDestroy {
           estimateTokens(system) + tokensOf(messages) + estimateTokens(roundText), budget,
         )
 
-        const work = splitWork(roundText)
+        const work = round.work
         stage(AGENT_ROUND, { round: rounds, request: work.request?.kind ?? 'none', handoff: !!work.handoff, spent: spentOf() })
         // HANDED OFF (hypercomb-work-fence.ts HANDOFF_FENCE_LANG): the model
         // said the work is beyond it. Its reply is dropped, it is not asked
@@ -7047,12 +7079,15 @@ export class ChatWindowComponent implements OnDestroy {
         // and is not overruled. Twice at most; then the turn says so.
         if (work.handoff && !namedModel) {
           const gaveUp = roundLabel || roundModel || roundProviderId
-          avoid.push(roundProviderId)
-          routeNeed = { ...routeNeed, tier: 'deep' }
-          const another = avoid.length <= MAX_HANDOFFS && router.ready?.({ need: routeNeed, avoid }) === true
+          const moved = routeStep.handoff({
+            avoid, providerId: roundProviderId, need: routeNeed, maxHandoffs: MAX_HANDOFFS,
+            ready: (need, tried) => router.ready?.({ need, avoid: tried }) === true,
+          })
+          avoid.splice(0, avoid.length, ...moved.avoid)
+          routeNeed = moved.need
           wrote = true
           yield `${lead}*${gaveUp} handed this off: ${work.handoff}*`
-          if (!another) {
+          if (!moved.another) {
             yield `\n\nNo other model switched on can take it. Name one, or switch one on in the providers console.`
             return ''
           }
@@ -7111,11 +7146,12 @@ export class ChatWindowComponent implements OnDestroy {
           return ''
         }
 
+        const pinnedNow = routeStep.pin({ pinned, providerId: roundProviderId, model: roundModel })
         if (!pinned) {
-          pinned = roundProviderId
+          pinned = pinnedNow.pinned
           pinnedEndpoint = router.providerMachineEndpoint?.(pinned)
         }
-        continuationModel = roundModel
+        continuationModel = pinnedNow.continuationModel
         system = systemFor(roundModel, roundLabel, pinned)
         messages.push({ role: 'assistant', content: roundText })
 
@@ -7274,10 +7310,11 @@ export class ChatWindowComponent implements OnDestroy {
         // the `receipt` step the harness names, else the shipped one.
         const at = Date.now()
         const task = component.#task.get(convoId)
-        const receiptStep = stepRegistry()?.resolve('receipt', activeHarness().steps)
+        const receiptStep = stepRegistry()?.resolve('receipt', activeHarness(harnessMark).steps)
           ?? shippedReceiptStep((name, payload) => { EffectBus.emit(name, payload) })
         receiptStep.run({
           id: component.#beeId(convoId), convoId, leg: (task?.legs ?? 0) + 1, at,
+          ...(harnessSig ? { harness: harnessSig } : {}),
           path: turnPath, rounds: turnRounds, weight: turnWeight, ms: at - startedAt,
           ...(firstAt ? { firstMs: firstAt - startedAt } : {}),
           outcome: opts?.signal?.aborted ? 'stopped' : answered ? 'answered' : 'failed',

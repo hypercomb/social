@@ -1350,6 +1350,7 @@
   "mesh-modal.start": "mulai",
   "slash.branch": "Beri nama jalur atau tanda tangan untuk pelengkapan otomatis perintah",
   "slash.chat": "Percakapan multi-giliran dengan Claude — membuat ubin utas dengan anak tanya-jawab",
+  "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.view": "Alihkan antara tampilan heksagon dan situs web",
   "slash.website": "Alihkan tampilan situs web, ekspor subpohon, atau bangun halaman via Claude",
   "slash.tutor": "Permainan belajar — ubah sarang ini menjadi permainan pengulangan berjarak; on | off | here | build | list",

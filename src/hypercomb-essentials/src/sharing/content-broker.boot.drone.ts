@@ -610,7 +610,12 @@ export class ContentBrokerDrone extends Drone {
 
   constructor() {
     super()
-    queueMicrotask(() => this.#resolveMyPubkeyWithRetry(0))
+    // A published site's visitor needs its own key only to skip its own mesh
+    // echoes, and deriving it (secp256k1 tables) held the boot lane ~150 ms
+    // at ×4 before first paint (measured 2026-09-27) — so it waits for idle.
+    const ric = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
+    if ((globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true && ric) ric(() => { void this.#resolveMyPubkeyWithRetry(0) }, { timeout: 5_000 })
+    else queueMicrotask(() => this.#resolveMyPubkeyWithRetry(0))
     queueMicrotask(() => this.#subscribeBroadcastWithRetry(0))
     // Re-seed learned publisher hosts from the persisted list so adopted
     // content keeps resolving across reloads (see #sessionKnownDomains).

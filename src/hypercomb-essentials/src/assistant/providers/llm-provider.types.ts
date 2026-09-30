@@ -164,6 +164,9 @@ export type LlmRequest = {
   readonly jsonSchema?: Readonly<Record<string, unknown>>
   /** Sampling temperature. Honoured by the local provider only. */
   readonly temperature?: number
+  /** Upstream hosts (OpenRouter provider slugs) this request must route
+   *  around — the ones that just said they were overloaded. */
+  readonly ignoreUpstreams?: readonly string[]
   /** The participant's key. `''` for transports that need none. */
   readonly apiKey: string
 }

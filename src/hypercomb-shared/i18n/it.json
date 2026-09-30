@@ -1350,6 +1350,7 @@
   "mesh-modal.start": "avvia",
   "slash.branch": "Assegna un percorso o una firma per l'autocompletamento dei comandi",
   "slash.chat": "Conversazione multi-turno con Claude — crea tessere thread con figli Q&A",
+  "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.view": "Alterna tra esagoni e rendering sito web",
   "slash.website": "Alterna vista sito web, esporta sottoalbero o crea pagine tramite Claude",
   "slash.tutor": "Giochi di studio — trasforma questo alveare in giochi a ripetizione spaziata; on | off | here | build | list",

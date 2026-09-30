@@ -37,6 +37,9 @@ export type AgentStageBase = {
   readonly convoId: string
   readonly leg: number
   readonly at: number
+  /** The harness record the turn ran under, by signature — what makes a
+   *  receipt an eval (documentation/agent-harness.md §7). */
+  readonly harness?: string
 }
 
 /** The front door: Jev read the request and either answered it, weighed the

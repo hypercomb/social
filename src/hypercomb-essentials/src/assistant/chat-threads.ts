@@ -14,7 +14,7 @@ import {
   readTileDraft, saveTileDraft, saveStreamCheckpoint, listStreamCheckpoints,
   recoverStreamCheckpoints, readTurns, deliverTurn, listConversations,
   listConversationsWithLatest, deleteConversation, setConversationArchived,
-  setConversationGoalReached, newConvoId, isHumanConversation,
+  setConversationGoalReached, setConversationHarness, newConvoId, isHumanConversation,
 } from './chat-thread.js'
 import {
   assimilateRouteSelection, flowOpenSteps, organizeRoute, readRoute, readRouteFlow,
@@ -94,6 +94,7 @@ export class ChatThreads {
   readonly deleteConversation = deleteConversation
   readonly setConversationArchived = setConversationArchived
   readonly setConversationGoalReached = setConversationGoalReached
+  readonly setConversationHarness = setConversationHarness
   readonly newConvoId = newConvoId
   readonly isHumanConversation = isHumanConversation
 
