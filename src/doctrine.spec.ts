@@ -12,7 +12,7 @@
 //
 // The lists may only shrink.
 
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, existsSync } from 'fs'
 import { join, relative } from 'path'
 import { spawnSync } from 'child_process'
@@ -84,15 +84,48 @@ const lineCode = (line: string): string => line.replace(/(^|[^:'"`])\/\/.*$/, '$
 
 type Hit = { file: string }
 
+/** One scanned source file: its path, its text, and its text without comments. */
+type Scanned = { file: string; rel: string; raw: string; code: string }
+
+/** THE SCANNED SOURCE, READ ONCE. Every SCAN_DIRS ratchet asks the same files,
+ *  so they are read a single time — in the suite's `beforeAll`, which carries
+ *  its own budget for it (READ_BUDGET_MS) — instead of by each ratchet in turn.
+ *
+ *  Reading them is the one slow thing here, and only on a cold disk: 1770 files
+ *  take ~0.1 s warm, and measured 9.8 s on the first touch after the machine
+ *  boots. Read inside a test, that whole cost fell on whichever ratchet came
+ *  first, which then failed with "Test timed out in 5000ms" while every ratchet
+ *  after it passed on the warmed cache — a flake reading as a failure of the
+ *  synchronize ratchet, with no drift anywhere. The files and what is asked of
+ *  them are unchanged; only when they are read moved.
+ *
+ *  And never read SILENTLY SHORT. A scan dir that is missing is an exit, not a
+ *  pass (see SCAN_DIRS), and an error part-way through a walk is a scan that
+ *  did not happen — both used to be swallowed by a `catch { continue }` that
+ *  dropped the WHOLE dir, which reads as DEBT PAID for every allowlisted file
+ *  in it, or as a clean pass for an empty allowlist. Both now fail, loudly. */
+let SCANNED: readonly Scanned[] | null = null
+const scannedSources = (): readonly Scanned[] => {
+  if (SCANNED) return SCANNED
+  const out: Scanned[] = []
+  for (const dir of SCAN_DIRS) {
+    const root = join(ROOT, dir)
+    if (!existsSync(root)) throw new Error(`SCAN_DIRS entry ${dir} is missing — a ratchet only holds what it can see`)
+    for (const file of walk(root)) {
+      const raw = readFileSync(file, 'utf8')
+      out.push({ file, rel: relative(ROOT, file).replace(/\\/g, '/'), raw, code: stripComments(raw) })
+    }
+  }
+  return (SCANNED = out)
+}
+
+/** Cold-disk budget for reading the scanned source once (see scannedSources). */
+const READ_BUDGET_MS = 120_000
+
 const filesMatching = (pattern: RegExp): string[] => {
   const hits = new Set<string>()
-  for (const dir of SCAN_DIRS) {
-    let files: string[]
-    try { files = walk(join(ROOT, dir)) } catch { continue }
-    for (const file of files) {
-      const code = stripComments(readFileSync(file, 'utf8'))
-      if (pattern.test(code)) hits.add(relative(ROOT, file).replace(/\\/g, '/'))
-    }
+  for (const { rel, code } of scannedSources()) {
+    if (pattern.test(code)) hits.add(rel)
   }
   return [...hits].sort()
 }
@@ -175,9 +208,7 @@ describe('doctrine ratchets', () => {
   const scriptFiles = (): string[] => {
     const out: string[] = []
     const walkScripts = (dir: string): void => {
-      let entries
-      try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
-      for (const entry of entries) {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
         if (entry.isDirectory()) {
           if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) walkScripts(join(dir, entry.name))
         } else if (/\.(ts|cjs|mjs|js)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
@@ -185,18 +216,34 @@ describe('doctrine ratchets', () => {
         }
       }
     }
-    walkScripts(join(ROOT, 'scripts'))
+    // Loud, like scannedSources: an unreadable scripts tree is a scan that
+    // did not happen, never an empty one.
+    const root = join(ROOT, 'scripts')
+    if (!existsSync(root)) throw new Error('scripts/ is missing — a ratchet only holds what it can see')
+    walkScripts(root)
     return out
   }
 
+  /** The scripts, read once — for the same reason as scannedSources. */
+  let SCRIPTS: readonly { rel: string; code: string }[] | null = null
+  const scannedScripts = (): readonly { rel: string; code: string }[] =>
+    SCRIPTS ??= scriptFiles().map(file => ({
+      rel: relative(ROOT, file).replace(/\\/g, '/'),
+      code: stripComments(readFileSync(file, 'utf8')),
+    }))
+
   const scriptsMatching = (pattern: RegExp): string[] => {
     const hits = new Set<string>()
-    for (const file of scriptFiles()) {
-      const code = stripComments(readFileSync(file, 'utf8'))
-      if (pattern.test(code)) hits.add(relative(ROOT, file).replace(/\\/g, '/'))
+    for (const { rel, code } of scannedScripts()) {
+      if (pattern.test(code)) hits.add(rel)
     }
     return [...hits].sort()
   }
+
+  // Both scan surfaces are read here, once, with a budget of their own —
+  // never inside a ratchet's 5 s (see scannedSources). Registered before any
+  // ratchet runs, wherever it sits in the suite.
+  beforeAll(() => { scannedSources(); scannedScripts() }, READ_BUDGET_MS)
 
   it('no bridge script decodes a CHILD signature with get-resource', () => {
     // A `children` entry is a LAYER sig. Resolve it with `layer-by-sig` (one
@@ -485,14 +532,10 @@ describe('doctrine ratchets', () => {
     const hits = new Set<string>()
     // eslint-disable-next-line no-control-regex
     const control = new RegExp('[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]')
-    for (const dir of SCAN_DIRS) {
-      let files: string[]
-      try { files = walk(join(ROOT, dir)) } catch { continue }
-      for (const file of files) {
-        // RAW read — comments included; a control byte anywhere is a hazard.
-        if (control.test(readFileSync(file, 'utf8'))) {
-          hits.add(relative(ROOT, file).replace(/\\/g, '/'))
-        }
+    for (const { file, raw } of scannedSources()) {
+      // RAW read — comments included; a control byte anywhere is a hazard.
+      if (control.test(raw)) {
+        hits.add(relative(ROOT, file).replace(/\\/g, '/'))
       }
     }
     assertRatchet([...hits].sort(), [], 'literal control byte')
@@ -631,24 +674,19 @@ describe('doctrine ratchets', () => {
     const frozen = new Set(BARE_WORD_POOL_MEANINGS)
     const found = new Map<string, string>()  // meaning → first file
     const decl = /(?:^|\b)[A-Z_]*MEANING[A-Z_]*\s*(?::[^=]*)?=\s*'([^']+)'/gm
-    for (const dir of SCAN_DIRS) {
-      let files: string[]
-      try { files = walk(join(ROOT, dir)) } catch { continue }
-      for (const file of files) {
-        const raw = readFileSync(file, 'utf8')
-        // Skip auto-generated facades. `essentials-keys.ts` mirrors EVERY
-        // exported symbol name to its module path, so any export named
-        // `*_MEANING` reappears there as `MEANING = '@domain/path/module'` —
-        // a module path, colon-less, and not a declaration at all. Scanning
-        // it reports a false bare-word meaning for a pool whose real
-        // spelling is perfectly fine. The frozen list is untouched.
-        if (/^\/\/\s*auto-generated/.test(raw)) continue
-        const code = stripComments(raw)
-        for (const m of code.matchAll(decl)) {
-          const meaning = m[1]
-          if (meaning.includes(':')) continue           // collision-proof
-          if (!found.has(meaning)) found.set(meaning, relative(ROOT, file).replace(/\\/g, '/'))
-        }
+    for (const { file, raw } of scannedSources()) {
+      // Skip auto-generated facades. `essentials-keys.ts` mirrors EVERY
+      // exported symbol name to its module path, so any export named
+      // `*_MEANING` reappears there as `MEANING = '@domain/path/module'` —
+      // a module path, colon-less, and not a declaration at all. Scanning
+      // it reports a false bare-word meaning for a pool whose real
+      // spelling is perfectly fine. The frozen list is untouched.
+      if (/^\/\/\s*auto-generated/.test(raw)) continue
+      const code = stripComments(raw)
+      for (const m of code.matchAll(decl)) {
+        const meaning = m[1]
+        if (meaning.includes(':')) continue           // collision-proof
+        if (!found.has(meaning)) found.set(meaning, relative(ROOT, file).replace(/\\/g, '/'))
       }
     }
     const drift = [...found].filter(([meaning]) => !frozen.has(meaning))
@@ -695,21 +733,16 @@ describe('doctrine ratchets', () => {
     // does spell it is covered by the census.
     const ARG = /(?:registerPoolMeaning|poolSignature|getPool)\s*\??\.?\s*\(\s*([^,)]*)/g
     const offenders: string[] = []
-    for (const dir of SCAN_DIRS) {
-      let files: string[]
-      try { files = walk(join(ROOT, dir)) } catch { continue }
-      for (const file of files) {
-        const raw = readFileSync(file, 'utf8')
-        if (/^\/\/\s*auto-generated/.test(raw)) continue
-        for (const line of raw.split(/\r?\n/)) {
-          for (const m of lineCode(line).matchAll(ARG)) {
-            // Strip `Store.` / `#` so a static or private field is judged by
-            // its own name.
-            const token = m[1].trim().replace(/^.*[.#]/, '')
-            if (!/^[A-Z][A-Z0-9_]*$/.test(token)) continue   // literal, dynamic, or a declaration
-            if (/MEANING|POOL/.test(token)) continue
-            offenders.push(`${token}  (${relative(ROOT, file).replace(/\\/g, '/')})`)
-          }
+    for (const { file, raw } of scannedSources()) {
+      if (/^\/\/\s*auto-generated/.test(raw)) continue
+      for (const line of raw.split(/\r?\n/)) {
+        for (const m of lineCode(line).matchAll(ARG)) {
+          // Strip `Store.` / `#` so a static or private field is judged by
+          // its own name.
+          const token = m[1].trim().replace(/^.*[.#]/, '')
+          if (!/^[A-Z][A-Z0-9_]*$/.test(token)) continue   // literal, dynamic, or a declaration
+          if (/MEANING|POOL/.test(token)) continue
+          offenders.push(`${token}  (${relative(ROOT, file).replace(/\\/g, '/')})`)
         }
       }
     }
@@ -750,19 +783,14 @@ describe('doctrine ratchets', () => {
       if (!meaning || /[@/\s]/.test(meaning)) return
       if (!found.has(meaning)) found.set(meaning, file)
     }
-    for (const dir of SCAN_DIRS) {
-      let files: string[]
-      try { files = walk(join(ROOT, dir)) } catch { continue }
-      for (const file of files) {
-        const raw = readFileSync(file, 'utf8')
-        if (/^\/\/\s*auto-generated/.test(raw)) continue
-        const where = relative(ROOT, file).replace(/\\/g, '/')
-        for (const line of raw.split(/\r?\n/)) {
-          const code = lineCode(line)
-          const named = NAMED.exec(code)
-          if (named && /MEANING|POOL/.test(named[1])) note(named[2], where)
-          for (const m of code.matchAll(INLINE)) note(m[1], where)
-        }
+    for (const { file, raw } of scannedSources()) {
+      if (/^\/\/\s*auto-generated/.test(raw)) continue
+      const where = relative(ROOT, file).replace(/\\/g, '/')
+      for (const line of raw.split(/\r?\n/)) {
+        const code = lineCode(line)
+        const named = NAMED.exec(code)
+        if (named && /MEANING|POOL/.test(named[1])) note(named[2], where)
+        for (const m of code.matchAll(INLINE)) note(m[1], where)
       }
     }
     // A floor, so a broken walk reads as a broken ratchet and not as a pass.
@@ -1435,15 +1463,8 @@ describe('doctrine ratchets', () => {
 
     // `.spec` files are excluded from `walk`, which matters here: a test that
     // registers its own stub must not be able to satisfy production's lookup.
-    for (const dir of SCAN_DIRS) {
-      let files: string[]
-      try { files = walk(join(ROOT, dir)) } catch { continue }
-      for (const file of files) {
-        sources.push({
-          rel: relative(ROOT, file).replace(/\\/g, '/'),
-          code: stripComments(readFileSync(file, 'utf8')),
-        })
-      }
+    for (const { rel, code } of scannedSources()) {
+      sources.push({ rel, code })
     }
 
     // A key is very often declared once and shared, so resolve the indirection
