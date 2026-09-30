@@ -48,6 +48,13 @@ const SCAN_DIRS = [
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.angular', '.claude'])
 
+// NO WALKER HERE SWALLOWS A LISTING ERROR. Every tree these ratchets read is
+// one they are meant to see — tracked source, plus the generated barrels that
+// sit in it — so a directory that cannot be listed is a scan that did not
+// happen, and a `catch { continue }` turned that into a smaller scan: DEBT
+// PAID for whatever it hid, or a clean pass for an empty allowlist. Let it
+// throw. (Runtime DATA is not scanned at all; see PRUNE_SKIP.)
+
 /** SOURCE only. `.d.ts` files are EMITTED ARTIFACTS — a declaration file is a
  *  shadow of the source beside it, so scanning one double-counts a file that
  *  is already scanned (and, being gitignored, it may or may not exist on any
@@ -609,8 +616,7 @@ describe('doctrine ratchets', () => {
     for (const file of files) {
       const rel = relative(ROOT, file).replace(/\\/g, '/')
       if (rel === 'scripts/audit-atomicity.cjs') continue        // the auditor names every token
-      let code: string
-      try { code = readFileSync(file, 'utf8') } catch { continue }
+      const code = readFileSync(file, 'utf8')
       const producer = code.includes('put-resource') && (code.includes('decoration-add') || code.includes('bag-set'))
       if (producer && !code.includes('build-record')) unwired.push(rel)
     }
@@ -873,12 +879,10 @@ describe('doctrine ratchets', () => {
     // do is emit somebody else's.
     const UI = join(ROOT, 'hypercomb-shared/ui')
     const offenders: string[] = []
-    let dirs: string[] = []
-    try { dirs = readdirSync(UI, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name) } catch { dirs = [] }
+    const dirs = readdirSync(UI, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
 
     for (const dir of dirs) {
-      let files: string[] = []
-      try { files = walk(join(UI, dir)) } catch { continue }
+      const files = walk(join(UI, dir))
       // Scoped to LANE OCCUPANTS. Free-floating chrome (the controls bar, the
       // format painter) legitimately closes the strip it launches — it is that
       // strip's toggle, not a rival for its edge.
@@ -946,8 +950,7 @@ describe('doctrine ratchets', () => {
 
     const offenders: string[] = []
     for (const dir of SERVER_DIRS) {
-      let files: string[]
-      try { files = walkAll(join(ROOT, dir)) } catch { continue }
+      const files = walkAll(join(ROOT, dir))
       for (const file of files) {
         const code = stripComments(readFileSync(file, 'utf8'))
         if (PORT_NO_HOST.test(code) || listensWide(code)) {
@@ -1041,8 +1044,7 @@ describe('doctrine ratchets', () => {
 
     const offenders: string[] = []
     for (const dir of STYLE_DIRS) {
-      let files: string[]
-      try { files = walkStyles(join(ROOT, dir)) } catch { continue }
+      const files = walkStyles(join(ROOT, dir))
       for (const file of files) {
         const code = stripComments(readFileSync(file, 'utf8'))
         if (overLadder(code)) {
@@ -1129,8 +1131,7 @@ describe('doctrine ratchets', () => {
     }
 
     const offenders: string[] = []
-    let files: string[]
-    try { files = walkStyles(join(ROOT, 'hypercomb-shared/ui')) } catch { files = [] }
+    const files = walkStyles(join(ROOT, 'hypercomb-shared/ui'))
     for (const file of files) {
       const code = stripComments(readFileSync(file, 'utf8'))
       const decl = /(^|[\s;{])(color|fill|stroke)\s*:\s*(#[0-9a-f]{3,6}|rgba?\([\d.,\s]*\))\s*(?=[;}])/gim
@@ -1249,13 +1250,19 @@ describe('doctrine ratchets', () => {
     && !name.endsWith('.spec.ts')
     && !name.endsWith('.test.ts')
 
+  /** Runtime data inside a scanned tree, not source: the relay's content
+   *  store (gitignored) holds what builds publish and what a running relay
+   *  receives — thousands of signature-named entries and copied pages. Its
+   *  contents depend on the last build, and a live relay changes it under a
+   *  run, so it is never walked. */
+  const PRUNE_SKIP = new Set([join(ROOT, 'hypercomb-relay', 'content')])
+
   const pruneWalk = (dir: string, out: string[] = []): string[] => {
-    const entries = (() => {
-      try { return readdirSync(dir, { withFileTypes: true }) } catch { return [] }
-    })()
+    const entries = readdirSync(dir, { withFileTypes: true })
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name)) pruneWalk(join(dir, entry.name), out)
+        const sub = join(dir, entry.name)
+        if (!SKIP_DIRS.has(entry.name) && !PRUNE_SKIP.has(sub)) pruneWalk(sub, out)
       } else if (isPruneScannable(entry.name)) {
         out.push(join(dir, entry.name))
       }
@@ -1277,8 +1284,7 @@ describe('doctrine ratchets', () => {
   const pruneFilesMatching = (pattern: RegExp, exclude: RegExp): string[] => {
     const hits = new Set<string>()
     for (const dir of PRUNE_SCAN_DIRS) {
-      let files: string[]
-      try { files = pruneWalk(join(ROOT, dir)) } catch { continue }
+      const files = pruneWalk(join(ROOT, dir))
       for (const file of files) {
         const code = stripComments(readFileSync(file, 'utf8'))
         if (pattern.test(code) && !exclude.test(code)) {
@@ -1387,8 +1393,7 @@ describe('doctrine ratchets', () => {
     // drift. Empty allowlist: every site was fixed in the same pass.
     const offenders: string[] = []
     for (const dir of PRUNE_SCAN_DIRS) {
-      let files: string[]
-      try { files = pruneWalk(join(ROOT, dir)) } catch { continue }
+      const files = pruneWalk(join(ROOT, dir))
       for (const file of files) {
         const code = stripComments(readFileSync(file, 'utf8'))
         // A directory walk anywhere in the file, and a parseInt over
@@ -1549,8 +1554,7 @@ describe('doctrine ratchets', () => {
     // dependencies — but a bee never holds another bee.
     const over: string[] = []
     const visit = (dir: string): void => {
-      let entries: ReturnType<typeof readdirSync<{ withFileTypes: true }>>
-      try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+      const entries = readdirSync(dir, { withFileTypes: true })
       const bees = entries.filter(e => e.isFile() && isSource(e.name) && isBehaviour(join(dir, e.name))).map(e => e.name)
       if (bees.length > 1) over.push(`${relative(ROOT, dir).replace(/\\/g, '/')}: ${bees.join(', ')}`)
       for (const e of entries) if (e.isDirectory() && !SKIP_DIRS.has(e.name)) visit(join(dir, e.name))
