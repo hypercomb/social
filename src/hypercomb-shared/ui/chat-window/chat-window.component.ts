@@ -3134,11 +3134,62 @@ export class ChatWindowComponent implements OnDestroy {
   setExecMode(mode: ExecutionModeLike): void { this.#execQueue()?.setMode(mode) }
 
   toggleExecAuto(kind: ExecutionKindLike): void {
+    if (this.execMode() !== 'auto') return
     const queue = this.#execQueue()
     queue?.setAuto(kind, !queue.autoKinds().includes(kind))
   }
 
   decideExec(id: string, decision: 'run' | 'skip' | 'always'): void { this.#execQueue()?.decide(id, decision) }
+
+  // ── THE EXECUTION COLUMN'S GLYPHS ─────────────────────────────────────────
+  // Settings and states are icons, each named in words by its title and
+  // label; consent (Run, Allow once, Always, Skip) stays words. Written as
+  // switches with literal returns so scripts/icon-names.cjs ships each glyph.
+  execModeIcon(mode: ExecutionModeLike): string {
+    switch (mode) {
+      case 'manual': return 'pause'
+      case 'auto': return 'play_arrow'
+      default: return 'fast_forward'
+    }
+  }
+
+  execKindIcon(kind: ExecutionKindLike): string {
+    switch (kind) {
+      case 'read': return 'visibility'
+      case 'additive': return 'add_box'
+      case 'editing': return 'edit'
+      default: return 'delete'
+    }
+  }
+
+  execStateIcon(state: ExecutionRequestLike['state']): string {
+    switch (state) {
+      case 'running': return 'hourglass_empty'
+      case 'ran': return 'check'
+      case 'skipped': return 'block'
+      case 'failed': return 'error'
+      default: return ''
+    }
+  }
+
+  /** Lit when this kind runs by itself: every kind in Everything, the chosen
+   *  ones in Auto, none in Manual. Only Auto's are the participant's to press. */
+  execKindOn(kind: ExecutionKindLike): boolean {
+    return this.execMode() === 'everything' || (this.execMode() === 'auto' && this.execAuto().includes(kind))
+  }
+
+  /** Arrow keys walk the mode radios, as a radiogroup should. */
+  onExecModeKey(event: KeyboardEvent, mode: ExecutionModeLike): void {
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+      : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+    if (!step) return
+    event.preventDefault()
+    const modes = this.execModes
+    const next = modes[(modes.indexOf(mode) + step + modes.length) % modes.length]
+    this.setExecMode(next)
+    const group = (event.currentTarget as HTMLElement | null)?.parentElement
+    queueMicrotask(() => (group?.querySelector(`[data-mode='${next}']`) as HTMLElement | null)?.focus())
+  }
 
   #setExecSide(on: boolean): void {
     this.execSideWanted.set(on)

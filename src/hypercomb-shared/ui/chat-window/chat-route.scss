@@ -975,16 +975,49 @@ $jx: calc(#{$pad} + #{$square} / 2);
   }
 }
 
+// The head: the word, the mode named, the three mode icons at the right.
+.chat-exec-col .chat-route-sec {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0 0.5rem 0 0.75rem;
+}
+.chat-exec-now {
+  flex: 1 1 auto;
+  font: 0.68rem var(--hc-code, monospace);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--hc-window-ink-plain);
+}
 .chat-exec-words,
-.chat-exec-auto,
+.chat-exec-kinds {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+// Under it, always present: this conversation's own switch, and the four
+// kinds — lit where they run by themselves, pressable only in Auto.
+.chat-exec-auto {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0.5rem 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--hc-window-line);
+  font-size: 0.72rem;
+}
+.chat-exec-kinds { margin-inline-start: auto; }
+.chat-exec-kind-toggle[aria-disabled='true'] { cursor: default; }
+
+// Consent stays WORDS: Run in the accent, the others quiet until hovered.
 .chat-exec-acts {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.15rem 0.6rem;
+  gap: 0.15rem 0.75rem;
 }
-.chat-exec-auto { padding: 0 0.75rem 0.5rem; font-size: 0.72rem; }
-
 .chat-exec-word {
   padding: 0;
   border: 0;
@@ -998,7 +1031,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
   &:focus-visible { outline: 1px solid var(--hc-window-edge-firm); outline-offset: 2px; }
   &.on { color: var(--hc-window-accent); }
 }
-.chat-exec-go { color: var(--hc-window-accent); }
+.chat-exec-go { color: var(--hc-window-accent); font-weight: 600; }
 
 .chat-exec-quiet { margin: 0; color: var(--hc-window-ink-quiet); }
 
@@ -1007,37 +1040,53 @@ $jx: calc(#{$pad} + #{$square} / 2);
   padding: 0 0 0.75rem;
   list-style: none;
 }
-.chat-exec-empty { padding: 0.4rem 0.75rem; font-size: 0.78rem; }
+.chat-exec-empty { padding: 0.5rem 0.75rem; font-size: 0.78rem; }
 
+// A row: [kind glyph | the request | state glyph]. One line once settled.
 .chat-exec-row {
   display: grid;
-  gap: 0.3rem;
-  padding: 0.55rem 0.75rem;
-  border-block-start: 1px solid var(--hc-window-line);
+  grid-template-columns: 1.75rem minmax(0, 1fr) 1.75rem;
+  column-gap: 0.25rem;
+  align-items: start;
+  padding: 0.25rem 0.5rem 0.25rem 0.25rem;
   font-size: 0.78rem;
   color: var(--hc-window-ink-plain);
 
-  &[data-state='waiting'] { background: var(--hc-window-wash); }
-  &[data-state='ran'],
-  &[data-state='skipped'] { opacity: 0.7; }
+  // HELD: a wash and a bar in the waiting colour, so what needs a hand is
+  // found at a glance; the words under it decide.
+  &[data-state='waiting'] {
+    background: var(--hc-window-wash);
+    box-shadow: inset 2px 0 0 var(--chat-route-wait);
+  }
 }
-
-.chat-exec-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-  min-width: 0;
-}
-.chat-exec-kind { color: var(--hc-window-ink-loud); }
-.chat-exec-row[data-kind='destructive'] .chat-exec-kind { color: var(--hc-window-accent); }
 .chat-exec-model {
+  grid-column: 1 / -1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.7rem;
+  padding: 0.35rem 0 0.1rem 2rem;
+  font: 0.68rem var(--hc-code, monospace);
   color: var(--hc-window-ink-quiet);
+}
+.chat-exec-kind,
+.chat-exec-state {
+  display: inline-grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  color: var(--hc-window-ink-quiet);
+  .mat-sym { font-size: 1.0625rem; }
+}
+.chat-exec-row[data-kind='destructive'] .chat-exec-kind { color: var(--hc-window-accent); }
+.chat-exec-row[data-state='running'] .chat-exec-state { color: var(--chat-route-open); }
+.chat-exec-row[data-state='ran'] .chat-exec-state { color: var(--chat-route-done); }
+.chat-exec-row[data-state='failed'] .chat-exec-state { color: var(--hc-window-accent); }
+.chat-exec-body {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  padding-block: 0.3rem;
 }
 
 .chat-exec-lines { display: grid; gap: 0.1rem; min-width: 0; }
@@ -1051,6 +1100,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
   white-space: nowrap;
   color: var(--hc-window-ink-loud);
 }
+.chat-exec-row[data-state='skipped'] .chat-exec-line { color: var(--hc-window-ink-quiet); }
 
 .chat-exec-sig {
   cursor: help;
@@ -1061,10 +1111,9 @@ $jx: calc(#{$pad} + #{$square} / 2);
 .chat-exec-outcome {
   margin: 0;
   font-size: 0.7rem;
-  color: var(--hc-window-ink-quiet);
+  color: var(--hc-window-accent);
   overflow-wrap: anywhere;
 }
-.chat-exec-row[data-state='failed'] .chat-exec-outcome { color: var(--hc-window-accent); }
 
 // ── the masthead, the step rules, the composer ─────────────────────────────
 //
