@@ -54,7 +54,28 @@ const send = (req, waitMs = 30_000) => new Promise(resolve => {
   ws.on('error', error => { clearTimeout(timer); resolve({ ok: false, error: String(error.message) }) })
 })
 
-const segmentsOf = route => String(route ?? '/').split('/').map(part => part.trim()).filter(Boolean)
+// GIT BASH REWRITES A LEADING SLASH. Under MSYS an argument that starts with
+// "/" is taken for a POSIX path and handed over as "C:/Program Files/Git/…",
+// so `tree /games` asked the hive for a tile named "C:". The shell's own
+// root is taken back off, here, once — a route is never a file path.
+const BACKSLASH = String.fromCharCode(92)
+const posixOf = text => String(text ?? '').split(BACKSLASH).join('/')
+const MSYS_ROOT = (() => {
+  const exe = posixOf(process.env.EXEPATH || '')
+  for (const tail of ['/usr/bin', '/mingw64/bin', '/mingw32/bin', '/bin']) {
+    if (exe.toLowerCase().endsWith(tail)) return exe.slice(0, -tail.length)
+  }
+  return exe || 'C:/Program Files/Git'
+})()
+const unshelled = value => {
+  const text = String(value ?? '')
+  const posix = posixOf(text)
+  if (!posix.toLowerCase().startsWith(MSYS_ROOT.toLowerCase())) return text
+  let rest = posix.slice(MSYS_ROOT.length)
+  while (rest.startsWith('/')) rest = rest.slice(1)
+  return `/${rest}`
+}
+const segmentsOf = route => unshelled(route ?? '/').split('/').map(part => part.trim()).filter(Boolean)
 const convoOf = name => MANAGERS[name] ?? name
 const fail = message => { console.error(message); process.exit(1) }
 const print = value => console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 1))
@@ -131,7 +152,7 @@ const main = async () => {
       return reply.ok ? print(reply.data?.last?.waiting ?? []) : fail(reply.error)
     }
     case 'do': {
-      const line = [first, second].filter(Boolean).join(' ').trim()
+      const line = unshelled([first, second].filter(Boolean).join(' ').trim())
       if (!line) return fail('do needs one behaviour sentence')
       const reply = await send({ op: 'submit', text: line })
       return reply.ok ? print(reply.data?.summary ?? reply.data) : fail(reply.error)

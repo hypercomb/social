@@ -154,3 +154,20 @@ moment it is pasted into a new Sonnet session: it checks the routes against
 the live hive, picks the manager (or adds one), and fills the brief — job,
 where, what done means, how to delegate, limits, the pass. A one-off job gets
 a conversation of its own: `node scripts/bridge/manager.cjs convo`.
+
+## Running the org from one session
+
+One Claude Code session — the frontier one — holds the org. Managers run
+under it as background Sonnet agents (`/hive-task … run it`), a few at a
+time, each in its own area; their reports come back to that session and land
+in their conversations in the hive. A manager gets a session of its own only
+when jwize wants a long back-and-forth with it.
+
+- **Three at once is the ceiling for now.** The hive's models share one
+  upstream pool; more asks at once only buys "busy" answers.
+- **The managing session checks before it repeats.** One "done" claim per
+  report is read against the hive.
+- **A model that invents is taken off the list.** A fast line answered a
+  question about the hive without reading it and named tiles that do not
+  exist (2026-10-01); it was dropped (`models drop`), and the same question
+  then went to a line that read first.
