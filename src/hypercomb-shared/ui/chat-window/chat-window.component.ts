@@ -3116,6 +3116,16 @@ export class ChatWindowComponent implements OnDestroy {
       // SOMETHING NEW WAITS ON THE PARTICIPANT: bring the column forward for
       // now. Not a preference, so nothing is written.
       if (waiting.some(row => !seen.has(row.id))) this.execSideWanted.set(true)
+      // A HOLD IS SAID ALOUD. A turn waiting on a press looked, from outside
+      // the window, exactly like a turn that had hung: no round, no receipt.
+      // Saying what waits decides nothing — the press is still the
+      // participant's.
+      if (waiting.length !== seen.size || waiting.some(row => !seen.has(row.id))) {
+        EffectBus.emit('agent:held', {
+          at: Date.now(),
+          waiting: waiting.map(row => ({ id: row.id, convoId: row.convoId, kind: row.kind, lines: row.lines })),
+        })
+      }
       seen = new Set(waiting.map(row => row.id))
       this.execRows.set([...waiting, ...rows.filter(row => row.state !== 'waiting')])
       this.execMode.set(queue.mode())
