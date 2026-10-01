@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { draftModule, listDrafts, type ModuleDraftDeps } from './module-drafts'
+import { draftModule, listDrafts, parseProblemAsBody, type ModuleDraftDeps } from './module-drafts'
 import type { Picks } from './package-tree'
 import type { ReplicationIo } from './replication-walker'
 
@@ -102,6 +102,30 @@ describe('draftModule', () => {
     expect(outcome).toMatchObject({ ok: false, error: expect.stringContaining('does not parse') })
     expect(seen[0]).toContain('var rooms = (((;')
     expect(w.applied).toHaveLength(0)
+  })
+
+  it('reads a bundled module as parsing, and the open-bracket draft as not', async () => {
+    const before = [
+      '// @hypercomb/essentials/games/bubble/engine',
+      'import { CAVE_LEFT, TILE } from "@hypercomb/essentials/games/bubble/dos-geometry";',
+      'import "./side.js";',
+      'var Engine = class {',
+      '  moveFloatingBubble(bubble) {',
+      '    const blocked = bubble.x < CAVE_LEFT || this.touches({ x: bubble.x, w: TILE }, true);',
+      '    if (blocked) bubble.vy = -30;',
+      '    return import.meta.url;',
+      '  }',
+      '};',
+      'export default Engine;',
+      'export { Engine, Engine as BubbleEngine };',
+    ].join('\n')
+    expect(await parseProblemAsBody(before)).toBeUndefined()
+    const broken = before.replace('const blocked = bubble.x < CAVE_LEFT || this.touches({ x: bubble.x, w: TILE }, true);',
+      'const blocked = bubble.x < CAVE_LEFT || (!this.native && (\n      this.touches({ x: bubble.x, w: TILE }, true);')
+    expect(await parseProblemAsBody(broken, before)).toMatch(/^SyntaxError/)
+    // A module the reading cannot speak for is never the reason a draft fails.
+    const unreadable = `import {\n  A\n} from "x";\n${broken}`
+    expect(await parseProblemAsBody(unreadable, `import {\n  A\n} from "x";\n${before}`)).toBeUndefined()
   })
 
   it('refuses an edit that finds nothing, or finds its text twice', async () => {

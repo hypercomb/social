@@ -160,43 +160,56 @@ export type ModuleDraftDeps = {
   readonly admit?: (draft: DraftAdmission) => Promise<void>
   /** Why the drafted module would not even parse, or undefined. Absent:
    *  nothing is checked. */
-  readonly parseProblem?: (text: string) => Promise<string | undefined>
+  readonly parseProblem?: (text: string, before?: string) => Promise<string | undefined>
 }
 
 /**
  * DOES IT PARSE? A model's edit left a parenthesis open and the draft would
  * have stopped the whole game from loading on the next reload, with nothing
- * said until then (jwize's drive session, 2026-10-01). The browser's own
- * parser answers, in a module worker: a worker has no import map and no
- * window, and the first statement throws before anything else can run, so
- * nothing of the draft executes. Only a SyntaxError refuses; anything the
- * worker cannot tell — a resolution failure, a browser that reports no
- * message, a timeout — lets the draft through as before.
+ * said until then (jwize's drive session, 2026-10-01).
+ *
+ * The browser's own parser answers, without running a line: the module's
+ * import and export statements — one line each in a bundled module — are
+ * blanked or unwrapped, `import.meta` becomes an object, and the rest is
+ * handed to the async-function constructor, which parses and returns a
+ * function that is never called. A module worker cannot answer this:
+ * Chromium reports its parse errors with no message at all.
+ *
+ * The transform is a reading, not a parser, so it is held to the module it
+ * drafts from: when the module running now does not pass the same reading,
+ * the reading cannot speak for this module and the draft goes through as
+ * before. Only a draft of a module that parsed, which no longer parses, is
+ * refused.
  */
-const PARSE_TIMEOUT_MS = 4_000
-export const parseProblemInWorker = (text: string): Promise<string | undefined> => {
-  if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL?.createObjectURL !== 'function') {
-    return Promise.resolve(undefined)
+/** A bundler wraps a long import or export list over several lines; each
+ *  statement becomes as many blank lines, so line numbers hold. */
+const LISTED_STATEMENT = /^[ \t]*(?:import|export)[ \t]*(?:type[ \t]+)?\{[^}]*\}[ \t]*(?:from[ \t]*["'][^"'\n]+["'])?[ \t]*;?[ \t]*$/gm
+const blanked = (statement: string): string => statement.replace(/[^\n]/g, '')
+
+const asFunctionBody = (text: string): string => text.replace(LISTED_STATEMENT, blanked).split('\n').map(line => {
+  if (/^\s*import\s[^;]*\bfrom\s*["'][^"']+["']\s*;?\s*$/.test(line) || /^\s*import\s*["'][^"']+["']\s*;?\s*$/.test(line)) return ''
+  if (/^\s*export\s*\{[^}]*\}\s*(?:from\s*["'][^"']+["'])?\s*;?\s*$/.test(line)) return ''
+  if (/^\s*export\s*\*\s*(?:as\s+\w+\s+)?from\s*["'][^"']+["']\s*;?\s*$/.test(line)) return ''
+  return line
+    .replace(/^(\s*)export\s+default\s+/, '$1void ')
+    .replace(/^(\s*)export\s+(?=(?:var|let|const|function|class|async)\b)/, '$1')
+}).join('\n').replace(/\bimport\.meta\b/g, '({})')
+
+const bodyParseProblem = (text: string): string | undefined => {
+  const AsyncFunction = Object.getPrototypeOf(async function () { /* constructor only */ }).constructor as new (body: string) => unknown
+  try {
+    new AsyncFunction(asFunctionBody(text))
+    return undefined
+  } catch (error) {
+    return error instanceof SyntaxError ? `SyntaxError: ${error.message}` : undefined
   }
-  return new Promise(resolve => {
-    const url = URL.createObjectURL(new Blob([`throw 0;\n${text}`], { type: 'text/javascript' }))
-    let worker: Worker
-    const done = (problem: string | undefined): void => {
-      clearTimeout(timer)
-      try { worker?.terminate() } catch { /* already gone */ }
-      URL.revokeObjectURL(url)
-      resolve(problem)
-    }
-    const timer = setTimeout(() => done(undefined), PARSE_TIMEOUT_MS)
-    try { worker = new Worker(url, { type: 'module' }) } catch { done(undefined); return }
-    worker.onerror = event => {
-      event.preventDefault()
-      const message = String(event.message ?? '')
-      // The draft starts one line below the throw this check put above it.
-      const line = typeof event.lineno === 'number' && event.lineno > 1 ? ` (line ${event.lineno - 1})` : ''
-      done(/SyntaxError/.test(message) ? `${message.replace(/^Uncaught\s+/, '')}${line}` : undefined)
-    }
-  })
+}
+
+export const parseProblemAsBody = async (text: string, before?: string): Promise<string | undefined> => {
+  const problem = bodyParseProblem(text)
+  if (!problem) return undefined
+  if (before !== undefined && bodyParseProblem(before)) return undefined
+  return problem
 }
 
 /** A draft about to be made live, as the brood records it. */
@@ -264,12 +277,12 @@ const liveDeps = (): ModuleDraftDeps => ({
   setOff: paths => writeOffUnits(paths),
   mayRun: sig => mayRunBee(sig),
   admit: admitInBrood,
-  parseProblem: parseProblemInWorker,
+  parseProblem: parseProblemAsBody,
 })
 
 /** The refusal for a draft that does not parse, or null. */
-const unparsable = async (deps: ModuleDraftDeps, text: string, section: string): Promise<string | null> => {
-  const problem = await deps.parseProblem?.(text).catch(() => undefined)
+const unparsable = async (deps: ModuleDraftDeps, text: string, before: string, section: string): Promise<string | null> => {
+  const problem = await deps.parseProblem?.(text, before).catch(() => undefined)
   return problem
     ? `the drafted module does not parse, so nothing was written: ${problem}. Read ${section} again and fix the edit (an unbalanced bracket or a missing comma is the usual cause)`
     : null
@@ -352,7 +365,7 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   request = made
   const nextText = replaceSection(text, request.section, request.body)
   if (nextText === null) return fail('the section could not be replaced')
-  const broken = await unparsable(deps, nextText, request.section)
+  const broken = await unparsable(deps, nextText, text, request.section)
   if (broken) return fail(broken)
   const nextBytes = encode(nextText)
   const nextBeeSig = await sigOf(nextBytes)
@@ -446,7 +459,7 @@ const draftDependency = async (request: ModuleDraftRequest, fromSig: string, con
   request = made
   const nextText = replaceSection(text, request.section, request.body)
   if (nextText === null) return fail('the section could not be replaced')
-  const broken = await unparsable(deps, nextText, request.section)
+  const broken = await unparsable(deps, nextText, text, request.section)
   if (broken) return fail(broken)
   const nextBytes = encode(nextText)
   if (namespaceOf(nextBytes) !== ns) return fail('the draft changed the line that names the dependency')
