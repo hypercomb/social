@@ -3083,6 +3083,8 @@ export class ChatWindowComponent implements OnDestroy {
     else next.delete(convoId)
     this.#autoConvos.set(next)
     try { localStorage.setItem(EXEC_AUTO_CONVOS_KEY, JSON.stringify([...next])) } catch { /* private mode */ }
+    // Said back, so whoever asked can see the switch took.
+    EffectBus.emit('chat:exec-trusted', { at: Date.now(), conversations: [...next] })
     this.#releaseTrusted()
   }
 
@@ -3163,7 +3165,12 @@ export class ChatWindowComponent implements OnDestroy {
       if (waiting.length !== seen.size || waiting.some(row => !seen.has(row.id))) {
         EffectBus.emit('agent:held', {
           at: Date.now(),
-          waiting: waiting.map(row => ({ id: row.id, convoId: row.convoId, kind: row.kind, lines: row.lines })),
+          waiting: waiting.map(row => ({
+            id: row.id, convoId: row.convoId, kind: row.kind, lines: row.lines,
+            ...(row.forceReview ? { review: true } : {}),
+            ...(row.needsGrant ? { needsGrant: true } : {}),
+            ...(this.#autoConvos().has(row.convoId) ? { trusted: true } : {}),
+          })),
         })
       }
       seen = new Set(waiting.map(row => row.id))
