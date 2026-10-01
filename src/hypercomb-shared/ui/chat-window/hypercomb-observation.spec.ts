@@ -200,6 +200,11 @@ describe('Hypercomb native tree observation grammar', () => {
 describe('opening what a signature names', () => {
   const target = 'a'.repeat(64)
 
+  it('names a shortened signature as the mistake', () => {
+    expect(() => parseHypercombObservationGrammars(['/read 33618262568d src/games/bubble/dos-mechanics.ts'], []))
+      .toThrow('33618262568d is a shortened signature')
+  })
+
   it('parses a place to continue from on /read <sig>, and the code listing', () => {
     expect(parseHypercombObservationGrammars([`/read ${target} 8000`, '/code router'], ['here']).observations).toEqual([
       { grammar: `/read ${target} 8000`, verb: 'read', segments: [], sig: target, from: 8000 },
