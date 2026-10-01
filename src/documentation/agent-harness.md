@@ -335,3 +335,53 @@ a dead turn; and a two-reads-per-block ceiling made a twelve-tile survey cost
 nine rounds and 101k tokens (`reads.perBlock`, now eight). `harness compare`
 is where the difference shows.
 
+## 12. Driving it: what a day of minding the hive found
+
+On 2026-09-30 the hive was minded through its own chat on the cheap models
+(DeepSeek V4 Flash through OpenRouter, Jev as judge): ten branches explored,
+a to-do list of 38 items filed as notes on a `housekeeping` tile, and the
+first items delegated. Every turn was run against an expectation, and every
+miss was read as a defect in the loop. None was fixed by a stronger model.
+
+**The model spells the block its own way.** A fence, then
+`<hypercomb-read>` as a tag, then `<block info="hypercomb-read">`. The tag is
+read (block form and inline form; a sentence about the tag stays prose). Any
+other markup that names a work word is sent back ONCE to be written properly
+(`SplitWork.unwritten`), instead of ending the turn with the machinery on the
+screen. The net is what scales; the next spelling costs one round, not a
+dead turn.
+
+**A refusal has to be true, visible and bounded.** A twenty-line change was
+turned back with "send a table of two to eight rows" when the real reason was
+six lines per step; `create` refused a route from the root with "explicit
+names separated by /". Each now says the limit and the way through it. A
+refused block is said on the bee (`agent:progress`), where before it showed
+nowhere, and three refusals running end the turn with the reason.
+
+**A turn must not depend on being watched.** A hidden tab is throttled and
+frozen: a round sat 250 seconds; holding a shared Web Lock for the length of
+the turn (`core/stay-awake.ts`) it took three to six. The bridge renderer
+holds the same lock while its socket is open. A stream silent for ninety
+seconds is given up as busy; a blank completion is asked once more.
+
+**The vocabulary is the ceiling.** Asked to create a tile, the model answered
+that its only change verbs were keyword, accent, copy, paste, undo, redo,
+postit, organism and story: `create`, `title`, `hide` and `file` were asleep,
+and a sleeping queen's stand-in carries no `machine` block. A queen that
+declares one now stays awake (`scripts/passive-queen.ts`). `file on <tile>:
+<text>` and `file on /<route>: <text>` put a note where the model says.
+There is still NO machine word to change or unlink a note; half of ordinary
+housekeeping waits on that word, and the word is the owner's to name.
+
+**What it costs.** Exploring a branch two levels deep: three to six rounds,
+23k to 59k tokens, under a minute when the tab is awake. A branch of
+machine-written game data cost 190k to 260k and is not worth exploring by
+reading. Eight reads per block (`reads.perBlock`) is what made the first
+figure possible; at two it was nine rounds and 101k for a table.
+
+**Open.** A turn that fails after work ran does not tell the next turn what
+ran, so `continue` re-reads and may re-do. The front door takes most of a
+minute on a long request. The transcript says "Queued — waiting for a session
+to pick it up" while a held block is waiting for Run. A model that answers
+"I'll create them" and sends no block ends the turn as answered.
+
