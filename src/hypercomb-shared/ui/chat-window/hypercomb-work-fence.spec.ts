@@ -51,6 +51,14 @@ describe('the work fence', () => {
     expect(parseWriteBlock([`${sig} src/a.ts`])).toHaveProperty('error')
   })
 
+  it('runs a block whose marker stands alone on its line, with no fence', () => {
+    expect(splitWork('`hypercomb-read`\ncode bubble engine').request).toEqual({ kind: 'read', lines: ['/code bubble engine'] })
+    expect(splitWork('I will look.\n\nhypercomb-read\nread here\n\nThat is all.')).toMatchObject({ request: { kind: 'read', lines: ['/read'] } })
+    // The marker named in a sentence, or with nothing under it, is prose.
+    expect(splitWork('A hypercomb-read block reads the hive.').request).toBeUndefined()
+    expect(splitWork('`hypercomb-read`').request).toBeUndefined()
+  })
+
   it('reads SEARCH/REPLACE edits in place of a whole body', () => {
     const sig = 'a'.repeat(64)
     const parsed = parseWriteBlock([

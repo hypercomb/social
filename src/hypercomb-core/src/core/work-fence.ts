@@ -205,6 +205,28 @@ const tagBlock = (lines: string[], index: number): Block | null => {
   return { kind: tag.kind, open: index, end, body: unfenced(body) }
 }
 
+/**
+ * THE MARKER LINE. A model wrote the info string as a line of its own, in
+ * inline code, with no fence at all (jwize's drive session, 2026-10-01):
+ *
+ *   `hypercomb-read`
+ *   code bubble engine
+ *
+ * The marker alone on its line is the same literal opt-in the fence carries;
+ * its block is the lines under it, up to the first blank line after them.
+ */
+const MARKER_LINE = /^\s*`?(hypercomb-[a-z]+)`?\s*:?\s*$/
+
+const markerBlock = (lines: readonly string[], index: number): Block | null => {
+  const marker = MARKER_LINE.exec(lines[index])
+  const kind = marker ? kindOf(marker[1]) : null
+  if (!kind) return null
+  let end = index
+  while (end + 1 < lines.length && lines[end + 1].trim() && !FENCE_RE.test(lines[end + 1])) end++
+  if (end === index) return null
+  return { kind, open: index, end, body: lines.slice(index + 1, end + 1) }
+}
+
 /** Every work block, skipping the inside of any other fence. A tag block
  *  re-cuts `lines` (see tagBlock); the indices are into the array as left. */
 const scan = (lines: string[]): Block[] => {
@@ -213,7 +235,7 @@ const scan = (lines: string[]): Block[] => {
   while (index < lines.length) {
     const open = FENCE_RE.exec(lines[index])
     if (!open) {
-      const tagged = tagBlock(lines, index)
+      const tagged = tagBlock(lines, index) ?? markerBlock(lines, index)
       if (tagged) { blocks.push(tagged); index = tagged.end + 1 } else index++
       continue
     }
