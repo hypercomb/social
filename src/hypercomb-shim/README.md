@@ -232,6 +232,19 @@ bucket behind the worker). Each subscription remembers the head it last
 received; the listing warns when one is behind, and `sync` carries what did
 not arrive.
 
+**The drill proves it.** The code lives only through replication, so a
+follower must be able to stand in for the origin entirely. `node
+host/drill.mjs` tests exactly that, end to end: an origin builds and
+promotes (signed), a subscribed follower receives, the origin is wiped, and
+a fresh device restores from the follower alone. It checks that the follower
+holds everything the origin served, byte for byte; that the history pulls
+verified; that the host restores and passes `check-pure`; that host and
+package source restore byte-identical; that signatures travel and verify;
+that unsigned work never reaches a follower; that a cold visitor to the
+follower can discover the package; and that a restored copy can author the
+next revision. It exits non-zero until every requirement holds — a failing
+line is replication work still owed. `--keep` leaves its folders.
+
 `publish` writes the revision into a temporary directory with the version
 pools, runs `check-pure` on it and deploys that directory (`--azure` for Azure).
 
