@@ -104,6 +104,11 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
   // Priority 0: command line owns Escape when focused (select mode collapse, etc.)
   const focused = document.activeElement
   if (focused instanceof HTMLInputElement && focused.classList.contains('command-input')) return
+  // A FIELD THAT ANSWERS ESCAPE ITSELF. The keymap hears Escape in the
+  // capture phase, before any field can stop it, so a search box that
+  // clears on Escape also closed the whole window around it (the chat
+  // rail's, 2026-10-01). A field that handles its own Escape says so.
+  if (focused instanceof HTMLElement && focused.closest('[data-escape-local]')) return
 
   // Priority 1: close editor
   //
