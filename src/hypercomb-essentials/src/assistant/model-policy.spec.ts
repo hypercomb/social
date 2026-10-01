@@ -108,6 +108,23 @@ describe('choosing without a pin', () => {
     expect(chooseProvider({ tier: 'fast' })?.id).toBe('my-machine')
   })
 
+  it('gives deep work to the line said to be deep, over an unplaced one registered first', () => {
+    const unplacedLine = descriptor({
+      id: 'cheap-unplaced', requiresKey: false,
+      models: (['fast', 'balanced', 'deep'] as const).map(tier => ({ name: 'cheap', id: 'cheap', tier })),
+      defaultModel: 'cheap',
+    })
+    const saidDeep = descriptor({
+      id: 'said-deep', requiresKey: false,
+      models: [{ name: 'strong', id: 'strong', tier: 'deep' }], defaultModel: 'strong',
+    })
+    roster(unplacedLine, saidDeep)
+    llmActivation.setEnabled('cheap-unplaced', true)
+    llmActivation.setEnabled('said-deep', true)
+    expect(chooseProvider({ tier: 'deep' })?.id).toBe('said-deep')
+    expect(chooseProvider({ tier: 'fast' })?.id).toBe('cheap-unplaced')
+  })
+
   it('keeps exact capability ahead of locality in intelligence-first mode', () => {
     const localBalanced = descriptor({
       id: 'local-balanced', vendor: 'local', requiresKey: false,

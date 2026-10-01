@@ -286,6 +286,10 @@ const isReady = (provider: LlmProviderDescriptor): boolean =>
 const hasTier = (provider: LlmProviderDescriptor, tier: LlmTier): boolean =>
   provider.models.some(m => m.tier === tier)
 
+/** One model id standing in every tier: offered, not placed. */
+const unplaced = (provider: LlmProviderDescriptor): boolean =>
+  provider.models.length > 1 && new Set(provider.models.map(m => m.id)).size === 1
+
 /** Hard requirements. Failing one of these means "cannot do this work". */
 const canDo = (provider: LlmProviderDescriptor, need: ModelNeed): boolean => {
   if (provider.decisionOnly) return false
@@ -375,7 +379,12 @@ export const rankProviders = (need: ModelNeed = {}): LlmProviderDescriptor[] => 
     return model?.outputPerMillion !== undefined && median !== undefined ? Math.abs(model.outputPerMillion - median) : UNKNOWN
   }
   const rank = (p: LlmProviderDescriptor): readonly number[] => {
-    const exactTier = hasTier(p, tier) ? 0 : 1
+    // A tier the line DECLARES outranks one it only offers because it could
+    // not be placed (no published price: one model id standing in every
+    // tier). With the catalogue unloaded every price ties, and registration
+    // order handed deep work to a cheap unplaced line over the one the
+    // participant said is deep (jwize's drive session, 2026-10-01).
+    const exactTier = !hasTier(p, tier) ? 2 : unplaced(p) ? 1 : 0
     const availability = availabilityOf(p) === 'available' ? 0
       : availabilityOf(p) === 'unknown' ? 1
       : 2

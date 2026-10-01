@@ -766,6 +766,13 @@ const isTransient = (error: unknown): boolean => {
     || status === 429 || status >= 500
 }
 
+/** Does this provider hold this tier BY DECLARATION? A model with no
+ *  published price offers every tier only because it could not be placed —
+ *  one model id standing in all three — which is a guess, not a weight. */
+const declaresTier = (provider: LlmProviderDescriptor, tier: string): boolean =>
+  provider.models.some(model => model.tier === tier)
+  && !(provider.models.length > 1 && new Set(provider.models.map(model => model.id)).size === 1)
+
 /** The ordered, callable attempt plan. Explicit provider/model choices do not
  * silently change vendor; automatic choices may fall through their policy-
  * ranked alternatives. */
@@ -790,8 +797,12 @@ export const routeCandidates = (
     // A HARDER OR SIMPLER QUESTION MAY CHANGE MODELS: the previous one keeps
     // its place only while it offers the weight of work now asked for, or the
     // provider the policy ranked first does not offer it either.
+    // ...and an unplaced model "offers" every tier only as a guess, so it
+    // does not hold a deep turn against one the participant said is deep
+    // (jwize's drive session, 2026-10-01: a sticky cheap model took the deep
+    // turn, went busy, and the turn died with the deep model never asked).
     const tier = call.need?.tier
-    const offers = (provider: LlmProviderDescriptor): boolean => !tier || provider.models.some(model => model.tier === tier)
+    const offers = (provider: LlmProviderDescriptor): boolean => !tier || declaresTier(provider, tier)
     if (index > 0 && (offers(candidates[index]) || !offers(candidates[0]))) {
       candidates = [candidates[index], ...candidates.slice(0, index), ...candidates.slice(index + 1)]
     }
@@ -874,9 +885,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
     // ...and a model with no published price is not "of that weight": it
     // offers every tier only because it could not be placed (one model id
     // standing in all three), which is a guess, not a declaration.
-    const offersTier = (provider: LlmProviderDescriptor): boolean =>
-      !!askedTier && provider.models.some(model => model.tier === askedTier)
-      && !(provider.models.length > 1 && new Set(provider.models.map(model => model.id)).size === 1)
+    const offersTier = (provider: LlmProviderDescriptor): boolean => !!askedTier && declaresTier(provider, askedTier)
     for (let at = 0; at < candidates.length; at++) {
       const provider = candidates[at]
       if (refusedOwners.has(credentialOwner(provider))) continue
