@@ -18,7 +18,7 @@ import {
   commandRoot, completeCommandPath, commandMembersFor, commandPath, type CommandObject,
   parseBehaviourCall, behaviourCallCursor, BehaviourCallError,
   type BehaviourCall, type CallValue,
-  REMOTE_SUBMIT, canonicalVerbOf,
+  REMOTE_SUBMIT,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type RemoteSubmitAction,
   admitMachineCall, spokenEntry, currentMachineGrant, type AdmissionEntry,
   isReservedPoolWord, CANONICAL_REFERENCE_SERVICE_KEY,
@@ -35,7 +35,8 @@ import { GoParentBehavior } from './go-parent.behavior'
 import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
-import { isSelectOp } from './select-ops'
+import { isSelectOp, BRACKET_CMD_RE, normalizeSelectInput } from './select-ops'
+import { dispatchedVerbsOf } from './remote-verbs'
 import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
 
 const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
@@ -108,32 +109,6 @@ function signatureOf(bee: { view: string; parameters?: readonly BehaviourParamet
 
 const FEATURE_RE = /^([^@:\[\/!#~\s]+)@([^@]*)$/
 const FEATURE_REMOVE_RE = /^~([^@:\[\/!#~\s]+)@([^@]*)$/
-
-/**
- * Brackets `[…]` are THE selection grouping primitive — the one canonical form.
- * `[a,b]` selects; `[a,b]/cut` selects then cuts; `~[a,b]` removes; `[a,b]:tag`
- * tags. Legacy `/select[…]`, `/format[…]`, `/fmt[…]`, `/fp[…]` are still accepted
- * as INPUT (old URLs, muscle memory) but are rewritten to the bare bracket and
- * are never echoed or suggested back.
- */
-const BRACKET_CMD_RE = /^\/(select|format|fmt|fp)\[/i
-/** Normalise any selection-input form to the canonical bare-bracket `[…]`. */
-function normalizeSelectInput(v: string): string {
-  // Already canonical.
-  if (v.startsWith('[')) return v
-
-  // Legacy `/select[…]` → drop the prefix, keep the bracket + any tail.
-  const sel = v.match(/^\/select(\[.*)$/i)
-  if (sel) return sel[1]
-
-  // Legacy `/format[…]` | `/fmt[…]` | `/fp[…]` → `[items]/format`.
-  const m = v.match(/^\/(format|fmt|fp)\[/i)
-  if (!m) return v
-  const rest = v.slice(m[0].length) // everything after the opening bracket
-  const bracketClose = rest.indexOf(']')
-  if (bracketClose < 0) return '[' + rest // bracket still open
-  return '[' + rest.slice(0, bracketClose) + ']/format' + rest.slice(bracketClose + 1)
-}
 
 /** Any `[`-prefixed (or legacy `/select[` / `/format[`) input is a select context. */
 function isSelectInput(v: string): boolean {
@@ -2407,9 +2382,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // typing `cut` sees.
       const spokenVerbs = reading?.actions.length
         ? reading.actions.map(action => action.command)
-        // (A kept line is judged folded, as the reader folded it before:
-        // `Models request …` must not arrive at the gate as no verb at all.)
-        : [canonicalVerbOf(keeps ? lowered(line) : line)]
+        // (Otherwise the line is judged as it will be DISPATCHED: the slash
+        // word folded, the op after a bracket, a `~` removal as `remove` —
+        // each once reached the gate as no verb, and ran. remote-verbs.ts.)
+        : dispatchedVerbsOf(line, v => !!this.#parseFeatureInput(v)?.remove)
       // WHICH IS NOT DECIDED HERE ANY MORE. Deciding it here is how the four
       // surfaces came to disagree in the first place — each door judging for
       // itself, in the order the doors were written. The judgement lives in

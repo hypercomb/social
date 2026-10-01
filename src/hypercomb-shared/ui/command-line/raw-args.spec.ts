@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { slashVerbsOf } from './remote-verbs'
 
 const src = readFileSync(join(process.cwd(), 'hypercomb-shared', 'ui', 'command-line', 'command-line.component.ts'), 'utf8')
 
@@ -90,8 +91,10 @@ describe('a word that keeps its arguments verbatim', () => {
     expect(slashed).toBeLessThan(fork)
     expect(fork).toBeLessThan(read)
     // The slashed line is what is judged and what is run — `models`, and only
-    // `models`, whatever behaviour words its prose happens to say.
-    expect(body).toContain('canonicalVerbOf(keeps ? lowered(line) : line)')
+    // `models`, whatever behaviour words its prose happens to say. Judged
+    // folded, as every slash line now is (remote-verbs.spec.ts runs it).
+    expect(body).toContain(': dispatchedVerbsOf(line,')
+    expect(slashVerbsOf('/Models request a planner that holds forty files')).toEqual(['models'])
     expect(body).toContain('void this.#preprocessTagsThenExecute(line)')
     expect(body).not.toContain('this.#preprocessTagsThenExecute(text)')
   })
