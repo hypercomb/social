@@ -4,6 +4,7 @@
 // each tile naming the cell the package runs. A host: each file a child of
 // the unit its build compiled, each unit naming what it produced, a spot
 // holding its beehaviors. The pool alone writes either back out.
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -232,5 +233,105 @@ describe('the host as its tiles', () => {
     const { parts, files: changed } = await builds.changesOf(pool, made.record)
     expect(parts).toEqual(['source', 'tree'])
     expect(changed.source).toEqual(['~ src/hypercomb-shim/src/main.ts'])
+  })
+})
+
+describe('authoring from a restored copy', () => {
+  const git = (cwd: string, ...args: string[]) => {
+    const r = spawnSync('git', ['-c', 'user.name=spec', '-c', 'user.email=spec@hypercomb.invalid', ...args], { cwd, encoding: 'utf8' })
+    if (r.status !== 0) throw new Error(r.stderr)
+    return r.stdout
+  }
+  /** A repository: what the build reads, tracked; some it does not carry. */
+  const repository = async () => {
+    await build()
+    for (const [path, text] of [
+      ['.gitignore', 'node_modules/\ndist/\n.build-cache.json\n'],
+      ['tsconfig.base.json', '{}\n'],
+      ['src/package.json', '{ "workspaces": [] }\n'],
+      ['src/package-lock.json', '{ "lockfileVersion": 3 }\n'],
+      ['src/hypercomb-core/src/processor.ts', 'export const processor = 1\n'],
+      ['src/hypercomb-web/src/app.component.ts', 'angular\n'],
+      ['src/hypercomb-core/src/gone.ts', 'deleted after it was tracked\n'],
+    ]) await write(resolve(repo, path!), text!)
+    git(repo, 'init', '-q')
+    git(repo, 'add', '-A')
+    await rm(resolve(repo, 'src/hypercomb-core/src/gone.ts'))
+    await write(resolve(repo, 'src/hypercomb-core/src/untracked.ts'), 'never added\n')
+  }
+  const hostBuild = async (repoRoot: string) => {
+    const atom = Buffer.from('atom')
+    await builds.recordBuild({
+      label: 'host', signed: [atom], install: new Map([['main.js', Buffer.from('kernel')]]),
+      units: [{ name: 'kernel', install: 'main.js', files: new Map([['src/hypercomb-shim/src/main.ts', Buffer.from('main')]]) }],
+      host: sha(atom), library: 'l'.repeat(64), hostPackage: 'p'.repeat(64), workspace: await builds.workspaceFiles(repoRoot),
+    })
+    return builds.promote('host', { sync: false, sign: false })
+  }
+
+  it('the workspace is what git tracks under the carried roots, read from disk', async () => {
+    await repository()
+    const files = await builds.workspaceFiles(repo)
+    expect([...files.keys()]).toEqual([
+      'src/hypercomb-core/src/processor.ts', 'src/hypercomb-essentials/package.json',
+      ...Object.keys(SOURCES).filter(p => p !== 'package.json').map(p => `src/hypercomb-essentials/${p}`).sort(),
+      '.gitignore', 'src/package-lock.json', 'src/package.json', 'tsconfig.base.json',
+    ].sort())
+    expect(files.get('tsconfig.base.json')!.toString()).toBe('{}\n')
+    await expect(builds.workspaceFiles(resolve(root, 'nowhere'))).rejects.toThrow(/not a checkout/)
+  })
+
+  it('checks out a host revision as a local repository, every file verified', async () => {
+    await repository()
+    const { record } = await hostBuild(repo)
+    expect(record.workspace).toMatch(/^[a-f0-9]{64}$/)
+    // The pool alone: the repository is gone.
+    await rm(repo, { recursive: true, force: true })
+    const work = resolve(root, 'work')
+    const made = await builds.checkout(undefined, work)
+    expect(made.host.record.version).toBe(record.version)
+    expect(made.pkg).toBeUndefined()
+    expect(await readFile(resolve(work, 'src/hypercomb-core/src/processor.ts'), 'utf8')).toBe('export const processor = 1\n')
+    expect(await readFile(resolve(work, 'src/hypercomb-essentials/src/pan/lift.ts'), 'utf8')).toBe(SOURCES['src/pan/lift.ts'])
+    // A clean repository on the story's branch: the build reads it as a checkout.
+    expect(git(work, 'status', '--porcelain')).toBe('')
+    expect(git(work, 'branch', '--show-current').trim()).toBe('host')
+    // And its own workspace is the one it came from: the next build carries it on.
+    const carried = JSON.parse(await readFile(resolve(builds.poolDir(builds.BUILDS_MEANING), record.workspace), 'utf8')).files
+    const again = await builds.workspaceFiles(work)
+    expect([...again.keys()]).toEqual(Object.keys(carried).sort())
+    for (const [path, bytes] of again) expect(sha(bytes)).toBe(carried[path])
+    await expect(builds.checkout(undefined, work)).rejects.toThrow(/is not empty/)
+  })
+
+  it('lays a package promoted later over the host, and only up to the version asked for', async () => {
+    await repository()
+    const host = await hostBuild(repo)
+    SOURCES['src/pan/lift.ts'] = 'export const lift = 2\n'
+    try {
+      await build()
+      await builds.recordPackage({ packageDir: pkg, repoRoot: repo })
+      const later = await builds.promote('hypercomb-essentials', { sync: false, sign: false })
+      const lift = (dir: string) => readFile(resolve(dir, 'src/hypercomb-essentials/src/pan/lift.ts'), 'utf8')
+
+      const now = resolve(root, 'now')
+      expect((await builds.checkout(undefined, now)).pkg.record.version).toBe(later.record.version)
+      expect(await lift(now)).toBe('export const lift = 2\n')
+      // As it stood at the host: the package that came after is not there yet.
+      const then = resolve(root, 'then')
+      expect((await builds.checkout(host.record.version, then)).pkg).toBeUndefined()
+      expect(await lift(then)).toBe('export const lift = 1\n')
+    } finally {
+      SOURCES['src/pan/lift.ts'] = 'export const lift = 1\n'
+    }
+  })
+
+  it('refuses a workspace file that is not what it is named', async () => {
+    await repository()
+    const { record } = await hostBuild(repo)
+    const pool = builds.poolDir(builds.BUILDS_MEANING)
+    const workspace = JSON.parse(await readFile(resolve(pool, record.workspace), 'utf8'))
+    await writeFile(resolve(pool, workspace.files['tsconfig.base.json']), 'tampered')
+    await expect(builds.checkout(undefined, resolve(root, 'work'))).rejects.toThrow(/tsconfig\.base\.json does not hash/)
   })
 })

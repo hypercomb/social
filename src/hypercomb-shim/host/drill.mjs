@@ -19,10 +19,11 @@
 
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { AUTHOR_SCRIPTS, INSTALL_WORKSPACES } from './builds.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SHIM = resolve(HERE, '..')
@@ -40,6 +41,7 @@ const run = (label, args, env, cwd = SHIM) => {
 }
 const builds = (pools, ...args) => run(`builds.mjs ${args[0]}`, [resolve(HERE, 'builds.mjs'), ...args], { HYPERCOMB_POOLS_DIR: pools })
 const tsx = resolve(SHIM, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs')
+const version = text => /\b(\d{4}\.\d+\.\d+\.\d+)\b/.exec(text)?.[1]
 
 /** Every file under `dir`, path → sha256, so two hosts can be compared exactly. */
 const inventory = async dir => {
@@ -105,7 +107,6 @@ try {
   const signed = { HYPERCOMB_POOLS_DIR: origin.pools, HYPERCOMB_SIGNER_KEY: KEY }
   const promoteHost = run('promote host', [resolve(HERE, 'builds.mjs'), 'promote', 'host', '--no-sync'], signed)
   const promotePkg = run('promote package', [resolve(HERE, 'builds.mjs'), 'promote', 'hypercomb-essentials', '--no-sync'], signed)
-  const version = text => /\b(\d{4}\.\d+\.\d+\.\d+)\b/.exec(text)?.[1]
   const hostVersion = version(promoteHost)
   const pkgVersion = version(promotePkg)
   must(hostVersion && pkgVersion, 'promotion did not report its versions')
@@ -126,6 +127,10 @@ try {
   builds(origin.pools, 'source', hostVersion, at('expected', 'host-src'))
   builds(origin.pools, 'source', pkgVersion, at('expected', 'pkg-src'))
   const originServes = await inventory(origin.host)
+  // The package root the origin offers: its newest host:packages member names it.
+  const packagesPool = resolve(origin.host, poolOf('host:packages'))
+  const newestMember = (await readdir(packagesPool)).filter(n => /^\d{8}$/.test(n)).sort().at(-1)
+  const originPackage = (await readFile(resolve(packagesPool, newestMember), 'utf8')).split('\n')[0].trim()
 
   // ── 2. THE ORIGIN IS LOST ─────────────────────────────────────────────────
   await rm(at('origin'), { recursive: true, force: true })
@@ -225,7 +230,56 @@ try {
   })
 
   await check('a device can author from its restored copy: change, build and promote a revision chained to the one it pulled', async () => {
-    throw new Error('not yet possible — no path builds a package or host from a restored source tree alone')
+    // A workspace from the pulled pools alone: the host revision's own tree
+    // (manifests, lockfile, build tools, every package's source) as a local
+    // repository, its dependencies installed from the lockfile it carries.
+    const work = at('device', 'work')
+    const checkedOut = builds(device, 'checkout', hostVersion, work)
+    const src = resolve(work, 'src')
+    const npm = (args, env = {}) => {
+      const r = spawnSync('npm', args, { cwd: src, env: { ...process.env, ...env }, encoding: 'utf8', maxBuffer: 64 << 20 })
+      must(r.status === 0, `npm ${args.join(' ')} failed in the restored workspace:\n${(r.stderr || r.stdout).trim().split('\n').slice(-6).join('\n')}`)
+      return r.stdout
+    }
+    npm(['ci', '--no-audit', '--no-fund', ...INSTALL_WORKSPACES.flatMap(w => ['-w', w]), '--include-workspace-root'])
+    // The repository's own scripts, as the owner runs them; the content the
+    // package copies lands in the drill, the host stages into the device's pools.
+    const authorEnv = {
+      HYPERCOMB_POOLS_DIR: device, HYPERCOMB_HOST_OUT_DIR: at('device', 'authored-out'),
+      HYPERCOMB_WEB_CONTENT_DIR: at('device', 'authored-web'), HYPERCOMB_RELAY_CONTENT_DIR: at('device', 'authored-relay'),
+      HYPERCOMB_SIGNER_KEY: Buffer.from(generateSecretKey()).toString('hex'),
+    }
+    const buildAll = () => {
+      let root
+      for (const script of AUTHOR_SCRIPTS) root = /root signature: ([0-9a-f]{64})/.exec(npm(['run', script], authorEnv))?.[1] ?? root
+      return root
+    }
+    // Built from nothing but the restored copy, the package is the one the origin served.
+    const rebuilt = buildAll()
+    must(rebuilt === originPackage, `the restored copy builds ${rebuilt?.slice(0, 12)}, the origin served ${originPackage.slice(0, 12)}`)
+    // Now author: change a source file, rebuild, promote under the device's own key.
+    const edited = 'src/hypercomb-essentials/src/presentation/screen-state.ts'
+    const mark = `// authored on a restored device (${Date.now()})\n`
+    await writeFile(resolve(work, edited), (await readFile(resolve(work, edited), 'utf8')) + mark)
+    buildAll()
+    const promote = label => version(run(`promote ${label} (restored)`, [resolve(src, 'hypercomb-shim', 'host', 'builds.mjs'), 'promote', label, '--no-sync'], authorEnv))
+    // One history across stories: each promotion's parent is the head before
+    // it, so the device's first revision continues from the head it pulled.
+    const show = ver => builds(device, 'show', ver)
+    let head = (await readFile(resolve(device, poolOf('host:builds'), 'head'), 'utf8')).trim()
+    for (const label of ['host', 'hypercomb-essentials']) {
+      const authored = promote(label)
+      must(authored && authored !== hostVersion && authored !== pkgVersion, `promoting ${label} from the restored copy produced no new revision`)
+      const shown = show(authored)
+      must(/^\s*parent\s+(\S+)/m.exec(shown)?.[1] === head, `${label} ${authored} does not continue the history it pulled (parent should be ${head.slice(0, 12)})`)
+      must(/^\s*signed\s+author\s/m.test(shown), `${label} ${authored} carries no verifying author signature`)
+      head = /^\S+ \S+\s+([0-9a-f]{64})/.exec(shown)[1]
+      // The host carries the edit in its workspace, the package in its source.
+      const tree = at('device', `authored-${label}`)
+      builds(device, label === 'host' ? 'checkout' : 'source', authored, tree)
+      must((await readFile(resolve(tree, edited), 'utf8')).endsWith(mark), `${label} ${authored} does not carry the edit`)
+    }
+    return `${/(\d+) file/.exec(checkedOut)?.[1] ?? '?'} files checked out; rebuilt ${rebuilt.slice(0, 12)} = origin; the edit promoted on top of ${hostVersion} and ${pkgVersion}`
   })
 } catch (e) {
   results.push({ name: 'the drill ran to the end', ok: false, detail: e.message })

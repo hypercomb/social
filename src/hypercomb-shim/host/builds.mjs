@@ -95,7 +95,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '..', '..', '..')
 const ESSENTIALS = resolve(HERE, '..', '..', 'hypercomb-essentials')
 const OUTPUT_PARTS = ['install', 'host', 'library', 'hostPackage', 'package', 'atoms']
-const PARTS = ['install', 'host', 'library', 'hostPackage', 'source', 'package', 'tree']
+const PARTS = ['install', 'host', 'library', 'hostPackage', 'source', 'package', 'tree', 'workspace']
 
 export const sign = bytes => createHash('sha256').update(bytes).digest('hex')
 const poolsRoot = () => resolve(process.env.HYPERCOMB_POOLS_DIR || resolve(homedir(), '.hypercomb'))
@@ -195,12 +195,56 @@ const nextVersion = async (pool, now) => {
 }
 
 /**
+ * THE WORKSPACE TRAVELS. A copy restored from the pools must be able to
+ * author the next revision — change anything, build, promote — with no
+ * repository and no forge behind it. The trees carry what each build
+ * compiled; the workspace carries everything else a build of the minimal
+ * system reads: the tooling (build.mjs, the host scripts, the essentials
+ * build), every package's manifest and the lockfile that pins npm, the
+ * configs, the host's static assets, core's own entry, and the documentation
+ * the anatomy is built from. Traced (strace) against a full build — core, runtime,
+ * package, host — every tracked file read lies under these roots.
+ *
+ * Read from git (tracked files only), so generated and ignored files never
+ * travel; the build regenerates them. npm dependencies travel as the
+ * lockfile, which pins each one by its integrity hash. Kept file by file, so
+ * an unchanged file costs nothing in the next revision.
+ */
+export const WORKSPACE = [
+  '.gitignore', 'tsconfig.base.json', 'src/.gitignore', 'src/package.json', 'src/package-lock.json', 'src/.npmrc', 'src/tsconfig*.json', 'src/*/package.json',
+  'src/hypercomb-core', 'src/hypercomb-runtime', 'src/hypercomb-shim', 'src/hypercomb-essentials',
+  'src/hypercomb-shared/core', 'src/hypercomb-shared/styles', 'src/hypercomb-shared/package.json', 'src/hypercomb-shared/.gitignore', 'src/hypercomb-shared/tsconfig*.json',
+  'src/scripts/pixi-vendor.mjs', 'src/documentation',
+]
+
+/** The workspaces a checkout installs: the ones WORKSPACE carries. The rest
+ *  of the repository's workspaces (the Angular apps, the relay) do not travel. */
+export const INSTALL_WORKSPACES = ['hypercomb-core', 'hypercomb-runtime', 'hypercomb-essentials', 'hypercomb-shim', 'hypercomb-shared']
+
+/** How a checkout builds, in order, by the repository's own scripts: what the
+ *  host imports (core, runtime), the package, then the host itself. */
+export const AUTHOR_SCRIPTS = ['build:core', 'build:runtime', 'build:module', 'build:shim:pure']
+
+/** The workspace's files, path → bytes, as the checkout at `repoRoot` holds them now. */
+export const workspaceFiles = async (repoRoot = REPO_ROOT) => {
+  const listed = spawnSync('git', ['ls-files', '-z', '--', ...WORKSPACE], { cwd: repoRoot, maxBuffer: 256 << 20 })
+  if (listed.status !== 0) throw new Error(`the workspace is read from git, and ${repoRoot} is not a checkout (builds.mjs checkout <dir> makes one)`)
+  const files = new Map()
+  for (const path of listed.stdout.toString('utf8').split('\0').filter(Boolean).sort()) {
+    const bytes = await readFile(resolve(repoRoot, path)).catch(() => null)   // tracked but deleted here: not part of this build
+    if (bytes) files.set(path, bytes)
+  }
+  return files
+}
+
+/**
  * Stage a build: it becomes its story's one staged revision, replacing the
  * last. `install` maps path → bytes; `units` are what the build compiled,
  * each with the files it read (source-tree.mjs hostTree); `signed` holds the
- * origin's signature-named atoms.
+ * origin's signature-named atoms; `workspace` (workspaceFiles) is everything
+ * else a rebuild reads.
  */
-export const recordBuild = async ({ label, install, units, signed, host, library, hostPackage }) => {
+export const recordBuild = async ({ label, install, units, signed, host, library, hostPackage, workspace }) => {
   const pool = poolDir(BUILDS_MEANING)
   await mkdir(pool, { recursive: true })
   const story = foldLabel(label)
@@ -214,6 +258,7 @@ export const recordBuild = async ({ label, install, units, signed, host, library
     name: 'build', label: story, version: STAGED, parent: parentSig,
     install: await layer(pool, 'install', install), host, library, hostPackage,
     atoms: atoms.sort(), tree: root,
+    ...(workspace ? { workspace: await layer(pool, 'workspace', workspace) } : {}),
   }
   return stageRecord(pool, story, record, parent)
 }
@@ -304,7 +349,7 @@ const closureOf = async (pool, sigs) => {
     reach.add(sig)
     const record = await readJson(pool, sig).catch(() => null)
     if (!record) continue
-    for (const part of ['install', 'source']) {
+    for (const part of ['install', 'source', 'workspace']) {
       if (!record[part]) continue
       reach.add(record[part])
       const files = (await readJson(pool, record[part]).catch(() => null))?.files ?? {}
@@ -507,6 +552,44 @@ export const writeSource = async (ref, dir) => {
     await put(resolve(dir, path), bytes)
   }
   return { sig, record, files: Object.keys(files).length }
+}
+
+/**
+ * A WORKSPACE TO AUTHOR IN, from the pools alone: the tree as it stood at a
+ * version (the newest, when none is named). That is the newest host revision
+ * up to it — its workspace — with the newest package up to it laid over when
+ * that package was promoted later, and a local git repository so the build
+ * reads it as it reads any checkout. Then: npm ci, change anything, build,
+ * promote.
+ */
+export const checkout = async (ref, dir) => {
+  const pool = poolDir(BUILDS_MEANING)
+  const all = await revisions()
+  const target = ref ? await findRevision(ref) : all[0]
+  const upTo = !target || target.record.version === STAGED ? Infinity : order(target.record.version)
+  const host = target?.record.workspace ? target : all.find(r => r.record.workspace && order(r.record.version) <= upTo)
+  if (!host) throw new Error(`no revision${ref ? ` up to ${ref}` : ''} here carries a workspace — it was built before the workspace travelled`)
+  if ((await readdir(dir).catch(() => [])).length) throw new Error(`${dir} is not empty`)
+  const files = { ...(await readJson(pool, host.record.workspace)).files }
+  const later = r => r.record.package && r.record.tree && (r === target || (order(r.record.version) > order(host.record.version) && order(r.record.version) <= upTo))
+  const pkg = target && later(target) ? target : all.find(later)
+  if (pkg) Object.assign(files, await sourceOf(pool, pkg.record))
+  for (const [path, fileSig] of Object.entries(files)) {
+    if (path.split('/').includes('..') || path.startsWith('/')) throw new Error(`${path} leaves the directory`)
+    const bytes = await readFile(resolve(pool, fileSig))
+    if (sign(bytes) !== fileSig) throw new Error(`${path} does not hash to ${short(fileSig)}`)
+    await put(resolve(dir, path), bytes)
+  }
+  const git = (...args) => {
+    const r = spawnSync('git', ['-c', 'user.name=hypercomb', '-c', 'user.email=checkout@hypercomb.invalid', ...args], { cwd: dir, encoding: 'utf8' })
+    if (r.status !== 0) throw new Error(`git ${args[0]}: ${(r.stderr || r.stdout).trim()}`)
+  }
+  git('init', '-q', '-b', host.record.label)
+  // Every file the workspace carries is tracked, even one an ignore rule
+  // matches (tracked by force where it was built): the next build reads it.
+  git('add', '-A', '-f')
+  git('commit', '-q', '-m', `checkout ${host.record.label} ${host.record.version}${pkg ? ` with ${pkg.record.label} ${pkg.record.version}` : ''}`)
+  return { host, pkg, files: Object.keys(files).length }
 }
 
 /** Write a revision's origin into `dir`, exactly as it was built, with its signatures. */
@@ -1066,6 +1149,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const option = name => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined }
       const made = await recordPackage({ label: option('--story'), ...(option('--dir') ? { packageDir: resolve(option('--dir')) } : {}) })
       console.log(`staged ${made.record.label} ${short(made.sig)}…${made.unchanged ? ' (no change from the last promotion)' : ''} · package ${short(made.record.package)} · ${made.files} source files as its tiles · ${made.record.atoms.length} atoms · promote: node host/builds.mjs promote ${made.record.label}`)
+    } else if (command === 'checkout') {
+      const [version, target] = rest[0] ? [ref, rest[0]] : [undefined, ref]
+      if (!target) throw new Error('checkout wants a directory: builds.mjs checkout [version] <dir>')
+      const { host, pkg, files } = await checkout(version, resolve(target))
+      console.log(`${host.record.label} ${host.record.version}${pkg ? ` + ${pkg.record.label} ${pkg.record.version}` : ''} → ${resolve(target)} · ${files} files, a local git repository`)
+      console.log(`next:  cd ${resolve(target)}/src && npm ci ${INSTALL_WORKSPACES.map(w => `-w ${w}`).join(' ')} --include-workspace-root`)
+      console.log(`       then change anything: ${AUTHOR_SCRIPTS.map(script => `npm run ${script}`).join(' && ')} && node hypercomb-shim/host/builds.mjs promote host`)
     } else if (command === 'source') {
       if (!rest[0]) throw new Error('source wants a directory')
       const dir = resolve(rest[0])

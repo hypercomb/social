@@ -27,7 +27,7 @@ import { createHash } from 'node:crypto'
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { installFilesOf, recordBuild, recordPackage } from './host/builds.mjs'
+import { installFilesOf, recordBuild, recordPackage, workspaceFiles } from './host/builds.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const dist = resolve(process.env.HYPERCOMB_HOST_OUT_DIR || resolve(here, 'dist'))
@@ -739,6 +739,8 @@ if (pure) {
     label: nameAt >= 0 ? process.argv[nameAt + 1] : undefined,
     install: await installFilesOf(dist), units: built, signed,
     host: hostSig, library: librarySig, hostPackage: hostPackageRoot,
+    // Everything else a rebuild reads, so a restored copy can author (builds.mjs checkout).
+    workspace: await workspaceFiles(),
   })
   await writeFile(resolve(dist, made.sig), made.bytes)
   await writeFile(resolve(dist, 'build'), made.sig + '\n', 'utf8')

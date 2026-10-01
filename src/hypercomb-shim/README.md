@@ -257,6 +257,28 @@ domain and following someone else's are the same process. (An R2 subscriber
 receives the snapshots in its pools; laying them out in the bucket is still
 to come.)
 
+**Author from what you restored.** A host revision carries its workspace:
+every tracked file a full build reads (the tooling, every travelling
+package's source and manifest, the lockfile that pins npm, the configs, the
+documentation the anatomy is built from). So a device that pulled the pools
+can take the work up where it stands, with nothing else: `checkout` writes
+the tree as it stood at a version (the newest when none is named; a package
+promoted after the host is laid over it), as a local git repository. Install
+from the lockfile it carries, change anything, and build and promote with the
+repository's own scripts — the same process the origin uses. The revision
+continues the history you pulled, signed with your key.
+
+```bash
+node host/builds.mjs checkout ~/hive                     # or: checkout 2026.10.1.2 ~/hive
+cd ~/hive/src && npm ci -w hypercomb-core -w hypercomb-runtime -w hypercomb-essentials -w hypercomb-shim -w hypercomb-shared --include-workspace-root
+npm run build:core && npm run build:runtime && npm run build:module && npm run build:shim:pure
+node hypercomb-shim/host/builds.mjs promote host         # and promote hypercomb-essentials
+```
+
+Untouched, the restored copy builds the very package the origin served,
+byte for byte (the build keys its cache on the lockfiles too, so a new
+install never ships stale bundled dependencies).
+
 **The drill proves it.** The code lives only through replication, so a
 follower must be able to stand in for the origin entirely. `node
 host/drill.mjs` tests exactly that, end to end: an origin builds and
@@ -266,8 +288,9 @@ holds everything the origin served, byte for byte; that the history pulls
 verified; that the host restores and passes `check-pure`; that host and
 package source restore byte-identical; that signatures travel and verify;
 that unsigned work never reaches a follower; that a cold visitor to the
-follower can discover the package; and that a restored copy can author the
-next revision. It exits non-zero until every requirement holds — a failing
+follower can discover the package; and that a restored copy rebuilds the
+origin's package exactly, then authors, builds and promotes the next
+revision on top of the history it pulled. It exits non-zero until every requirement holds — a failing
 line is replication work still owed. `--keep` leaves its folders.
 
 `publish` writes the revision into a temporary directory with the version

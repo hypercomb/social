@@ -635,8 +635,25 @@ const ATOMIZED_ROOTS: readonly string[] =
 const BUILD_SCRIPTS_SIG = createHash('sha256')
   .update(readFileSync(fileURLToPath(import.meta.url)))
   .update(readFileSync(join(__dirname, 'passive-queen.ts')))
+  .update(readFileSync(join(__dirname, '../../scripts/pixi-vendor.mjs')))
   .digest('hex')
-const BUILD_SHAPE = `atomized:${[...ATOMIZED_ROOTS].sort().join(',')}|vendor:${VENDOR_PACKAGES.join(',')}|scripts:${BUILD_SCRIPTS_SIG}`
+
+/** And so do the installed dependencies: the vendor atoms bundle npm code
+ *  that no source file names, so a new lockfile left every unit's mtime
+ *  untouched and the early exit kept shipping the old bundles. Every lockfile
+ *  from this package up to its workspace root, as npm resolves them. */
+const DEPENDENCIES_SIG = (() => {
+  const hash = createHash('sha256')
+  for (let dir = PROJECT_ROOT; ; dir = dirname(dir)) {
+    const lock = join(dir, 'package-lock.json')
+    if (existsSync(lock)) hash.update(`${relative(PROJECT_ROOT, lock)}\0`).update(readFileSync(lock))
+    const manifest = join(dir, 'package.json')
+    if (existsSync(manifest) && JSON.parse(readFileSync(manifest, 'utf8')).workspaces) break
+    if (dirname(dir) === dir) break
+  }
+  return hash.digest('hex')
+})()
+const BUILD_SHAPE = `atomized:${[...ATOMIZED_ROOTS].sort().join(',')}|vendor:${VENDOR_PACKAGES.join(',')}|scripts:${BUILD_SCRIPTS_SIG}|dependencies:${DEPENDENCIES_SIG}`
 
 const isAtomizedRelPath = (relPath: string): boolean =>
   ATOMIZED_ROOTS.some(root => relPath === root || relPath.startsWith(`${root}/`))
