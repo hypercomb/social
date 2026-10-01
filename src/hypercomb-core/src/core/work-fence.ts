@@ -106,13 +106,49 @@ const closes = (line: string, run: string): boolean => {
   return !!match && match[1][0] === run[0] && match[1].length >= run.length && !match[2].trim()
 }
 
+/**
+ * THE TAG SPELLING. Some models write the block as a tag instead of a fence:
+ *
+ *   <hypercomb-read> read / </hypercomb-read>
+ *
+ * The tag name is the same literal marker the fence carries, so it is the
+ * same unambiguous opt-in — and a reply that carries it and is not run ends
+ * the turn with the machinery showing and nothing read (jwize's drive test,
+ * 2026-09-30). Only the exact work words open one; any other tag is prose.
+ */
+const TAG_OPEN_RE = /^\s{0,3}<(hypercomb-[a-z]+)>(.*)$/
+
+const tagBlock = (lines: readonly string[], index: number): Block | null => {
+  const open = TAG_OPEN_RE.exec(lines[index])
+  if (!open) return null
+  const kind = kindOf(open[1])
+  if (!kind) return null
+  const closer = `</${open[1]}>`
+  const body: string[] = []
+  let rest = open[2]
+  let end = index
+  for (;;) {
+    const at = rest.indexOf(closer)
+    if (at >= 0) { if (rest.slice(0, at).trim()) body.push(rest.slice(0, at)); break }
+    if (rest.trim()) body.push(rest)
+    end++
+    if (end >= lines.length) break
+    rest = lines[end]
+  }
+  return { kind, open: index, end, body }
+}
+
 /** Every work block, skipping the inside of any other fence. */
 const scan = (lines: readonly string[]): Block[] => {
   const blocks: Block[] = []
   let index = 0
   while (index < lines.length) {
     const open = FENCE_RE.exec(lines[index])
-    if (!open) { index++; continue }
+    if (!open) {
+      const tagged = tagBlock(lines, index)
+      if (tagged) { blocks.push(tagged); index = tagged.end + 1 } else index++
+      continue
+    }
     let end = index + 1
     while (end < lines.length && !closes(lines[end], open[1])) end++
     const body = lines.slice(index + 1, end)
@@ -202,6 +238,14 @@ export const splitWork = (text: string): SplitWork => {
 
 /** Could a line that has only begun still turn out to be a fence line? */
 const MAY_BE_FENCE = /^\s{0,3}(?:[`~].*)?$/
+const TAG_STEM = '<hypercomb-'
+/** …or a tag line: held while it is still a prefix of the stem, and to the
+ *  end of the line once it carries it. */
+const mayOpenWork = (line: string): boolean => {
+  if (MAY_BE_FENCE.test(line)) return true
+  const text = line.replace(/^\s{0,3}/, '')
+  return TAG_STEM.startsWith(text) || text.startsWith(TAG_STEM)
+}
 
 /**
  * WHAT MAY BE SHOWN WHILE A ROUND STREAMS. Prose goes out as it arrives; from
@@ -237,7 +281,7 @@ export class WorkStreamGuard {
         }
         out += this.#line
         this.#line = ''
-      } else if (!MAY_BE_FENCE.test(this.#line)) {
+      } else if (!mayOpenWork(this.#line)) {
         out += this.#line
         this.#line = ''
         this.#released = true
@@ -260,7 +304,11 @@ export class WorkStreamGuard {
 
   #opensWork(line: string): boolean {
     const match = FENCE_RE.exec(line)
-    if (!match) return false
+    if (!match) {
+      // The tag spelling opens work too, outside any ordinary code block.
+      const tag = this.#fence ? null : TAG_OPEN_RE.exec(line)
+      return !!tag && !!kindOf(tag[1])
+    }
     if (this.#fence) {
       if (closes(line, this.#fence)) this.#fence = null
       return false

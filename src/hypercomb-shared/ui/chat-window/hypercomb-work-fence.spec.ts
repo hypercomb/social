@@ -138,6 +138,45 @@ describe('the stream guard', () => {
     expect(shown).toBe('done\n')
     expect(guard.holding).toBe(true)
   })
+
+  it('holds the tag spelling, whole on one line or opened mid-stream', () => {
+    const inline = run(['<hyper', 'comb-read> read / </hypercomb-read>'])
+    expect(inline.shown).toBe('')
+    expect(inline.guard.holding).toBe(true)
+    const spread = run(['Looking.\n', '<hypercomb-do>\n', 'create notes\n', '</hypercomb-do>'])
+    expect(spread.shown).toBe('Looking.\n')
+    expect(spread.guard.holding).toBe(true)
+  })
+
+  it('lets any other tag through, and a work tag inside a code block', () => {
+    expect(run(['<hypercomb-banner>hi</hypercomb-banner>\n']).shown).toBe('<hypercomb-banner>hi</hypercomb-banner>\n')
+    expect(run(['<b>bold</b> text']).shown).toBe('<b>bold</b> text')
+    const quoted = '```html\n<hypercomb-read> read / </hypercomb-read>\n```\n'
+    const { shown, guard } = run([quoted])
+    expect(shown).toBe(quoted)
+    expect(guard.holding).toBe(false)
+  })
+})
+
+describe('the tag spelling of a work block', () => {
+  it('reads a one-line tag as the read it names', () => {
+    const split = splitWork('<hypercomb-read> read / </hypercomb-read>')
+    expect(split.prose).toBe('')
+    expect(split.request).toEqual({ kind: 'read', lines: ['/read /'] })
+  })
+
+  it('reads a tag spread over lines, keeps the prose, and takes an unclosed one', () => {
+    const split = splitWork(['I will add it.', '<hypercomb-do>', 'create notes', '- create ideas', '</hypercomb-do>', 'Done after that.'].join('\n'))
+    expect(split.prose).toBe('I will add it.\nDone after that.')
+    expect(split.request).toEqual({ kind: 'do', lines: ['/create notes', '/create ideas'] })
+    expect(splitWork('<hypercomb-read>\nread here').request).toEqual({ kind: 'read', lines: ['/read'] })
+  })
+
+  it('carries a handover, and leaves an unknown tag and a quoted one as prose', () => {
+    expect(splitWork('<hypercomb-continue>read the rest of the file</hypercomb-continue>').left).toBe('read the rest of the file')
+    expect(splitWork('<hypercomb-banner>hi</hypercomb-banner>').request).toBeUndefined()
+    expect(splitWork('```html\n<hypercomb-read> read / </hypercomb-read>\n```').request).toBeUndefined()
+  })
 })
 
 describe('what the model is told', () => {
