@@ -2520,7 +2520,7 @@
   "chat.exec.mode.everything": "Her şey",
   "chat.exec.auto-runs": "Otomatik olarak çalışır:",
   "chat.exec.this-conversation": "Bu sohbet kendi kendine çalışır",
-  "chat.exec.this-conversation-why": "Bu sohbetin istediği her şey basmadan çalışır. İzinsiz bir modelin okumaları ve incelemeler yine bekler.",
+  "chat.exec.this-conversation-why": "Bu sohbetin istediği her şey basmadan çalışır. İzinsiz bir modelin okumaları yine bekler.",
   "chat.answering": "Yanıtlayan model",
   "chat.exec.kind.read": "Okur",
   "chat.exec.kind.additive": "Ekler",

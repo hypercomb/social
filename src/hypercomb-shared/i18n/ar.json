@@ -2520,7 +2520,7 @@
   "chat.exec.mode.everything": "كل شيء",
   "chat.exec.auto-runs": "يعمل تلقائيًا:",
   "chat.exec.this-conversation": "هذه المحادثة تعمل تلقائيًا",
-  "chat.exec.this-conversation-why": "كل ما تطلبه هذه المحادثة يعمل دون ضغط. القراءات من نموذج غير مخوّل والمراجعات تنتظر.",
+  "chat.exec.this-conversation-why": "كل ما تطلبه هذه المحادثة يعمل دون ضغط. القراءات من نموذج غير مخوّل تنتظر.",
   "chat.answering": "النموذج الذي يجيب",
   "chat.exec.kind.read": "يقرأ",
   "chat.exec.kind.additive": "يضيف",

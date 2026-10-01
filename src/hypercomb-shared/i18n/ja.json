@@ -1926,7 +1926,7 @@
   "chat.exec.mode.everything": "すべて",
   "chat.exec.auto-runs": "自動で実行:",
   "chat.exec.this-conversation": "この会話は自動で実行",
-  "chat.exec.this-conversation-why": "この会話の依頼はすべて押さずに実行されます。未許可モデルの読み取りとレビューは引き続き待機します。",
+  "chat.exec.this-conversation-why": "この会話の依頼はすべて押さずに実行されます。未許可モデルの読み取りは引き続き待機します。",
   "chat.answering": "応答するモデル",
   "chat.exec.kind.read": "読む",
   "chat.exec.kind.additive": "追加",

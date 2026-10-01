@@ -2520,7 +2520,7 @@
   "chat.exec.mode.everything": "Segalanya",
   "chat.exec.auto-runs": "Berjalan secara otomatis:",
   "chat.exec.this-conversation": "Percakapan ini berjalan sendiri",
-  "chat.exec.this-conversation-why": "Semua yang diminta percakapan ini berjalan tanpa ditekan. Bacaan dari model tanpa izin dan tinjauan tetap menunggu.",
+  "chat.exec.this-conversation-why": "Semua yang diminta percakapan ini berjalan tanpa ditekan. Bacaan dari model tanpa izin tetap menunggu.",
   "chat.answering": "Model yang menjawab",
   "chat.exec.kind.read": "Membaca",
   "chat.exec.kind.additive": "Menambah",

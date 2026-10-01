@@ -2520,7 +2520,7 @@
   "chat.exec.mode.everything": "Tutto",
   "chat.exec.auto-runs": "Si esegue automaticamente:",
   "chat.exec.this-conversation": "Questa conversazione procede da sola",
-  "chat.exec.this-conversation-why": "Tutto ciò che questa conversazione chiede viene eseguito senza clic. Le letture di un modello non autorizzato e le revisioni restano in attesa.",
+  "chat.exec.this-conversation-why": "Tutto ciò che questa conversazione chiede viene eseguito senza clic. Le letture di un modello non autorizzato restano in attesa.",
   "chat.answering": "Il modello che risponde",
   "chat.exec.kind.read": "Legge",
   "chat.exec.kind.additive": "Aggiunge",

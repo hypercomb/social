@@ -3067,8 +3067,9 @@ export class ChatWindowComponent implements OnDestroy {
   /** CONVERSATIONS THAT RUN BY THEMSELVES (jwize, 2026-10-01: "it can be auto
    *  for anything the bubble bobble conversations"). The participant trusts
    *  ONE conversation with everything it asks, without trusting every
-   *  conversation with it. A read from an ungranted provider and a semantic
-   *  review still wait: those are not this conversation's to decide. */
+   *  conversation with it — Jev's "review this one" included, since the
+   *  participant said anything. A read from an ungranted provider still
+   *  waits: that is a grant to a model, not this conversation's to give. */
   readonly #autoConvos = signal<ReadonlySet<string>>(readAutoConversations())
   readonly convoRunsItself = computed(() => this.#autoConvos().has(this.activeId() ?? ''))
 
@@ -3094,7 +3095,7 @@ export class ChatWindowComponent implements OnDestroy {
     const trusted = this.#autoConvos()
     if (!queue?.requests || !trusted.size) return
     for (const row of queue.requests()) {
-      if (row.state === 'waiting' && trusted.has(row.convoId) && !row.needsGrant && !row.forceReview) queue.decide(row.id, 'run')
+      if (row.state === 'waiting' && trusted.has(row.convoId) && !row.needsGrant) queue.decide(row.id, 'run')
     }
   }
   readonly execRows = signal<readonly ExecutionRequestLike[]>([])

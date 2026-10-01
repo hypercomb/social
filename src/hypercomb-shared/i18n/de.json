@@ -2520,7 +2520,7 @@
   "chat.exec.mode.everything": "Alles",
   "chat.exec.auto-runs": "Wird automatisch ausgeführt:",
   "chat.exec.this-conversation": "Dieses Gespräch läuft von selbst",
-  "chat.exec.this-conversation-why": "Alles, was dieses Gespräch anfordert, läuft ohne Klick. Lesezugriffe nicht freigegebener Modelle und Prüfungen warten weiterhin.",
+  "chat.exec.this-conversation-why": "Alles, was dieses Gespräch anfordert, läuft ohne Klick. Lesezugriffe nicht freigegebener Modelle warten weiterhin.",
   "chat.answering": "Das antwortende Modell",
   "chat.exec.kind.read": "Liest",
   "chat.exec.kind.additive": "Fügt hinzu",
