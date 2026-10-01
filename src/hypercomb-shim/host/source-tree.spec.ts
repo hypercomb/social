@@ -55,9 +55,12 @@ beforeEach(async () => {
   repo = resolve(root, 'repo')
   pkg = resolve(repo, 'src', 'hypercomb-essentials')
   process.env.HYPERCOMB_POOLS_DIR = resolve(root, 'pools')
+  // Only an author-signed revision travels (builds.mjs `vouched`).
+  process.env.HYPERCOMB_SIGNER_KEY = '1'.repeat(64)
 })
 afterEach(async () => {
   delete process.env.HYPERCOMB_POOLS_DIR
+  delete process.env.HYPERCOMB_SIGNER_KEY
   await rm(root, { recursive: true, force: true })
 })
 
@@ -131,7 +134,7 @@ describe('a package revision in the version pool', () => {
   it('travels whole: what is published reaches every tile, file and atom', async () => {
     await build()
     await builds.recordPackage({ packageDir: pkg, repoRoot: repo })
-    const { record } = await builds.promote('hypercomb-essentials', { sync: false, sign: false })
+    const { record } = await builds.promote('hypercomb-essentials', { sync: false })
     const pool = builds.poolDir(builds.BUILDS_MEANING)
     const travels = (await builds.published())[builds.BUILDS_MEANING]!
     const held = (await readdir(pool)).filter(n => /^[a-f0-9]{64}$/.test(n))

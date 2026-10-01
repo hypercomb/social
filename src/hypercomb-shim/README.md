@@ -232,6 +232,13 @@ bucket behind the worker). Each subscription remembers the head it last
 received; the listing warns when one is behind, and `sync` carries what did
 not arrive.
 
+**Nothing travels unsigned.** A follower keeps what it receives as history,
+and there an unsigned revision is indistinguishable from a forgery. So a
+promotion with no key at hand still promotes on this device, but `sync`,
+`push` and the R2 push carry only revisions — and served snapshots — that
+carry a verifying author signature, and say what they held back. `builds.mjs
+sign <version> --as author` vouches for it, and the next sync carries it.
+
 **A follower serves what its host serves.** The version pools carry the
 history, but a host serves more than history: the package laid out the way an
 install reads it (the `host:packages` pool, the bags, the transfer pack) and

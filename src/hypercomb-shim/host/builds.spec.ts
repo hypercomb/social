@@ -37,6 +37,12 @@ const record = async (label: string | undefined, main: string, now = DAY) => {
   await stage(label, main)
   return builds.promote(label ?? 'host', { now, sync: false, sign: false })
 }
+/** Promoted and signed by its author: a revision that travels. */
+const released = async (label: string | undefined, main: string, now = DAY) => {
+  const done = await record(label, main, now)
+  await builds.signRevision(done.sig, 'author')
+  return done
+}
 const files = async (dir: string) => (await readdir(dir).catch(() => [])).filter((n: string) => /^[a-f0-9]{64}$/.test(n))
 
 describe('stage, then promote', () => {
@@ -71,7 +77,7 @@ describe('stage, then promote', () => {
   })
 
   it('never lets staged work travel', async () => {
-    const promoted = await record(undefined, 'released')
+    const promoted = await released(undefined, 'released')
     const draft = await stage(undefined, 'unfinished')
     const host = resolve(root, 'host')
     await builds.carryPools(host, { atoms: true })
@@ -91,6 +97,39 @@ describe('stage, then promote', () => {
   })
 })
 
+describe('nothing travels unsigned', () => {
+  it('an unsigned promotion stays home, sync says so, and signing it releases it', async () => {
+    const follower = resolve(root, 'follower')
+    await mkdir(follower)
+    await builds.subscribe(follower)
+    await stage(undefined, 'a')
+    const done = await builds.promote('host', { now: DAY, sign: false })
+    expect(done.signed).toBe(false)
+    expect(done.synced[0].detail).toMatch(/held back, unsigned: 2026\.9\.26\.1/)
+    const pool = resolve(follower, builds.sign(builds.BUILDS_MEANING))
+    expect(await files(pool)).not.toContain(done.sig)
+    expect(await files(follower)).not.toContain(builds.sign(b('atom:a')))
+    await builds.signRevision(done.sig, 'author')
+    expect((await builds.sync())[0].detail).not.toMatch(/held back/)
+    expect(await files(pool)).toContain(done.sig)
+    expect(await files(follower)).toContain(builds.sign(b('atom:a')))
+  })
+
+  it('a served snapshot taken with no key stays home until one is at hand', async () => {
+    const origin = resolve(root, 'origin-host')
+    await mkdir(origin)
+    await writeFile(resolve(origin, 'index.html'), '<html>front</html>')
+    await builds.serves(origin)
+    const key = process.env.HYPERCOMB_SIGNER_KEY
+    delete process.env.HYPERCOMB_SIGNER_KEY
+    const snap = await builds.snapshotServed({ now: DAY })
+    expect((await builds.published())[builds.BUILDS_MEANING].has(snap.sig)).toBe(false)
+    process.env.HYPERCOMB_SIGNER_KEY = key
+    expect((await builds.snapshotServed({ now: DAY })).sig).toBe(snap.sig)   // unchanged, now signed
+    expect((await builds.published())[builds.BUILDS_MEANING].has(snap.sig)).toBe(true)
+  })
+})
+
 describe('stories', () => {
   it('tells a story within a larger one; a retelling is newest', async () => {
     await builds.tellStory('minimal host', 'The platform in two small files', { now: DAY })
@@ -107,7 +146,7 @@ describe('stories', () => {
     await writeFile(transcript, '{"role":"user","text":"make it start offline"}')
     await stage('offline', 'a')
     const { sig: conversation } = await builds.attachConversation('offline', transcript)
-    const done = await builds.promote('offline', { now: DAY, sync: false, sign: false })
+    const done = await builds.promote('offline', { now: DAY, sync: false })
     expect(done.record.conversations).toEqual([conversation])
     const host = resolve(root, 'host')
     await builds.carryPools(host)
@@ -120,7 +159,7 @@ describe('subscriptions', () => {
     const relay = resolve(root, 'relay')
     await builds.subscribe(relay)
     await stage(undefined, 'a')
-    const first = await builds.promote('host', { now: DAY, sign: false })
+    const first = await builds.promote('host', { now: DAY })
     expect(first.synced).toEqual([{ to: relay, ok: false, detail: 'the directory is not there' }])
     expect((await builds.readSubscriptions())[0].synced).toBe(null)
     await mkdir(relay)
@@ -128,7 +167,7 @@ describe('subscriptions', () => {
     expect(retried[0].ok).toBe(true)
     expect(await files(resolve(relay, builds.sign(builds.BUILDS_MEANING)))).toContain(first.sig)
     await stage(undefined, 'b')
-    const second = await builds.promote('host', { now: DAY, sign: false })
+    const second = await builds.promote('host', { now: DAY })
     expect(second.synced[0].ok).toBe(true)
     expect((await builds.readSubscriptions())[0].synced).toBe(second.sig)
     expect(await files(resolve(relay, builds.sign(builds.BUILDS_MEANING)))).toContain(second.sig)
@@ -280,7 +319,7 @@ describe('what a host serves', () => {
 describe('pools on hosts', () => {
   it('pushes both pools to a host and pulls them into another device', async () => {
     const first = await record(undefined, 'a')
-    await record('beta', 'b')
+    await released('beta', 'b')
     const { pubkey } = await builds.signRevision(first.sig, 'author')
     const host = resolve(root, 'host')
     await builds.carryPools(host)
@@ -302,7 +341,7 @@ describe('pools on hosts', () => {
   })
 
   it('refuses a pulled file that does not hash to its name, and keeps the rest', async () => {
-    await record(undefined, 'a')
+    await released(undefined, 'a')
     const host = resolve(root, 'host')
     await builds.carryPools(host)
     const pool = resolve(host, builds.sign(builds.BUILDS_MEANING))
@@ -341,8 +380,8 @@ describe('pools on hosts', () => {
   })
 
   it('carries every revision\'s atoms flat into a host directory, where a kernel asks', async () => {
-    const one = await record(undefined, 'a')
-    const two = await record(undefined, 'b')
+    const one = await released(undefined, 'a')
+    const two = await released(undefined, 'b')
     const host = resolve(root, 'host')
     await builds.carryPools(host, { atoms: true })
     for (const atom of [...one.record.atoms, ...two.record.atoms]) {

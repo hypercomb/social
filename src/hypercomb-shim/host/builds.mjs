@@ -316,21 +316,49 @@ const closureOf = async (pool, sigs) => {
   return reach
 }
 
-/** What may travel: promoted revisions and what they name, every story, and
- *  the signatures of promoted revisions. Staged work never leaves the device. */
+/**
+ * NOTHING TRAVELS UNLESS ITS AUTHOR SIGNED IT. A follower keeps what it is
+ * given as history, so an unsigned revision reaching one is history nobody
+ * vouched for — and indistinguishable, there, from a forgery. A promotion with
+ * no key at hand still promotes HERE; it stays home until `builds.mjs sign
+ * <version> --as author` vouches for it, and the next sync carries it. A
+ * served snapshot is held to the same rule. (A signed revision whose parent is
+ * still unsigned travels without that parent: the unsigned link stays home.)
+ */
+const vouched = async (records, held, versionOf = r => r.record.version) => {
+  const out = []
+  for (const r of records) {
+    if ((await signaturesOf(r.sig, versionOf(r), held)).some(s => s.role === 'author' && s.ok)) out.push(r)
+  }
+  return out
+}
+
+/** Promoted revisions that will not travel: no verifying author signature. */
+export const unvouched = async () => {
+  const { builds } = await scan(poolDir(BUILDS_MEANING))
+  const promoted = builds.filter(r => r.record.version !== STAGED)
+  const ok = new Set((await vouched(promoted, await readSignatures())).map(r => r.sig))
+  return promoted.filter(r => !ok.has(r.sig))
+}
+
+/** What may travel: author-signed promoted revisions and what they name, every
+ *  story, signed served snapshots, and their signatures. Staged work never
+ *  leaves the device. */
 export const published = async () => {
   const pool = poolDir(BUILDS_MEANING)
   const { builds, stories: told, served } = await scan(pool)
-  const promoted = builds.filter(r => r.record.version !== STAGED).map(r => r.sig)
+  const held = await readSignatures()
+  const promoted = (await vouched(builds.filter(r => r.record.version !== STAGED), held)).map(r => r.sig)
   const buildsSet = await closureOf(pool, promoted)
   for (const { sig } of told) buildsSet.add(sig)
-  for (const { sig, record } of served) {
+  const signedServed = await vouched(served, held, r => r.record.at)
+  for (const { sig, record } of signedServed) {
     buildsSet.add(sig)
     buildsSet.add(record.files)
     for (const file of Object.values((await readJson(pool, record.files).catch(() => null))?.files ?? {})) buildsSet.add(file)
   }
-  const promotedSet = new Set(promoted)
-  const signatures = new Set((await readSignatures()).filter(({ event }) => promotedSet.has(tag(event, 'b'))).map(({ file }) => file))
+  const promotedSet = new Set([...promoted, ...signedServed.map(r => r.sig)])
+  const signatures = new Set(held.filter(({ event }) => promotedSet.has(tag(event, 'b'))).map(({ file }) => file))
   return { [BUILDS_MEANING]: buildsSet, [SIGNATURES_MEANING]: signatures }
 }
 
@@ -434,16 +462,21 @@ export const signRevision = async (ref, role, now = new Date()) => {
     const reproduced = (await revisions(undefined, { staged: true })).find(r => r.sig !== sig && OUTPUT_PARTS.every(k => same(r.record[k], record[k])))
     if (!reproduced) throw new Error(`a witness reproduces ${record.version} first: build it here and get the same install, atoms and parts`)
   }
+  return { record, ...await signRecord(sig, record.version, role, now) }
+}
+
+/** Sign a record (a revision, or a served snapshot by its date) in `role`. */
+const signRecord = async (sig, version, role, now = new Date()) => {
   const { finalizeEvent } = await import('nostr-tools/pure')
   const event = finalizeEvent({
     kind: BUILD_SIGNATURE_KIND, created_at: Math.floor(now.getTime() / 1000),
-    tags: [['d', `${sig}:${role}`], ['b', sig], ['r', role], ['v', record.version]],
-    content: signaturePreimage(sig, record.version, role),
+    tags: [['d', `${sig}:${role}`], ['b', sig], ['r', role], ['v', version]],
+    content: signaturePreimage(sig, version, role),
   }, await signerKey())
   const pool = poolDir(SIGNATURES_MEANING)
   await mkdir(pool, { recursive: true })
   const file = await keep(pool, Buffer.from(JSON.stringify(event)))
-  return { sig, record, pubkey: event.pubkey, file }
+  return { sig, pubkey: event.pubkey, file }
 }
 
 // ── writing a revision out, and taking one in ────────────────────────────────
@@ -599,9 +632,15 @@ export const snapshotServed = async ({ now = new Date() } = {}) => {
   const ordered = Object.fromEntries(Object.entries(named).sort(([a], [b]) => a < b ? -1 : 1))
   const files = await keep(pool, Buffer.from(JSON.stringify({ name: SNAPSHOT_LAYER, files: ordered })))
   const [last] = await servedSnapshots(pool)
-  if (last?.record.files === files) return last
-  const record = { name: 'served', label: 'host', at: now.toISOString(), files }
-  return { sig: await keep(pool, Buffer.from(JSON.stringify(record))), record }
+  const snapshot = last?.record.files === files ? last : await (async () => {
+    const record = { name: 'served', label: 'host', at: now.toISOString(), files }
+    return { sig: await keep(pool, Buffer.from(JSON.stringify(record))), record }
+  })()
+  // Vouched for like a revision, or it does not travel (see `vouched`).
+  if (!(await signaturesOf(snapshot.sig, snapshot.record.at)).some(s => s.role === 'author' && s.ok)) {
+    try { await signRecord(snapshot.sig, snapshot.record.at, 'author', now) } catch { /* no key at hand: it stays home */ }
+  }
+  return snapshot
 }
 
 /** Serve what the newest snapshot names into `dir`, each file checked
@@ -634,7 +673,10 @@ export const writeServed = async dir => {
  * `/<sig>` (kernel.ts, host-package.ts). Every promoted revision's atoms, so
  * a kernel baked by any released build still finds its host in the wild.
  */
-export const releaseAtoms = async () => [...new Set((await revisions()).flatMap(r => r.record.atoms))].sort()
+export const releaseAtoms = async () => {
+  const ok = new Set((await published())[BUILDS_MEANING])
+  return [...new Set((await revisions()).filter(r => ok.has(r.sig)).flatMap(r => r.record.atoms))].sort()
+}
 
 /**
  * Carry both pools, promoted work only, into a host directory:
@@ -735,6 +777,7 @@ export const unsubscribe = async to => {
 export const sync = async ({ put = wranglerPut, now = new Date() } = {}) => {
   const subs = await readSubscriptions()
   if (subs.length) await snapshotServed({ now })
+  const unsigned = subs.length ? await unvouched() : []
   // The host's own directory lists its pools as its followers will.
   const own = await serves()
   if (own) await carryPools(own, { atoms: true })
@@ -756,6 +799,7 @@ export const sync = async ({ put = wranglerPut, now = new Date() } = {}) => {
         if (snapshot) detail += ` · serves ${(await writeServed(sub.to)).files} file(s) as the host does`
       }
       sub.synced = head; sub.at = now.toISOString()
+      if (unsigned.length) detail += ` · held back, unsigned: ${unsigned.map(r => r.record.version).join(', ')} (builds.mjs sign <version> --as author)`
       report.push({ to: sub.to, ok: true, detail })
     } catch (e) {
       report.push({ to: sub.to, ok: false, detail: e.message })
@@ -998,7 +1042,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(`${story}: conversation ${short(sig)} attached — it is published with the promotion`)
     } else if (command === 'promote') {
       const { sig, record, signed, synced } = await promote(ref, { sync: !rest.includes('--no-sync') })
-      console.log(`${record.label} ${record.version} ${short(sig)} promoted${signed ? ', signed as author' : ' (no signing key: builds.mjs sign ' + record.version + ' --as author)'}`)
+      console.log(`${record.label} ${record.version} ${short(sig)} promoted${signed ? ', signed as author' : ' — UNSIGNED: it stays on this device until you vouch for it (builds.mjs sign ' + record.version + ' --as author), then sync carries it'}`)
       printSync(synced)
     } else if (command === 'subscribe') console.log(`subscribed: ${await subscribe(ref)} — every promotion is carried there`)
     else if (command === 'unsubscribe') console.log(`unsubscribed: ${await unsubscribe(ref)}`)
