@@ -287,8 +287,15 @@ const NAMED_IN_MARKUP = /<(?!\s*\/?\s*hypercomb-)[^<>\n]*\b(hypercomb-(?:read|do
  */
 const BARE_COMMAND = /^\s*\/[a-z][a-z-]*\s+\S/
 const BARE_COMMANDS_MIN = 2
+/** A REPLY THAT IS ONLY A READ: `read 33618262568d src/…` and nothing else,
+ *  answered and done with nothing read (the same session). The read words
+ *  are written without a slash inside their block, so a whole reply of them
+ *  is a read block never opened. */
+const BARE_READ = /^\s*\/?(?:read|tree|code)\s+\S/
 
 const unwrittenIn = (lines: readonly string[]): string | undefined => {
+  const said = lines.map(line => line.trim()).filter(Boolean)
+  if (said.length && said.length <= 8 && said.every(line => BARE_READ.test(line))) return 'hypercomb-read'
   let fence: string | null = null
   let bare = 0
   for (const line of lines) {

@@ -216,6 +216,8 @@ describe('a block named and not written', () => {
     ].join('\n'))
     expect(bare.request).toBeUndefined()
     expect(bare.unwritten).toBe('hypercomb-do')
+    expect(splitWork('read 33618262568d src/dos-blocks-direction.ts').unwritten).toBe('hypercomb-read')
+    expect(splitWork('I read the engine and the levels; here is the answer.').unwritten).toBeUndefined()
     // One alone may be a sentence about a command; a route has no space.
     expect(splitWork('/create roadmap is what I would run next.').unwritten).toBeUndefined()
     expect(splitWork(['/games/bubble holds the game.', '/bubble-bobble-dos-v1/round-001 holds a round.'].join('\n')).unwritten).toBeUndefined()
