@@ -32,6 +32,12 @@ export class ConversationQueenBee extends QueenBee {
     { input: '/chat What is TypeScript?', result: 'Opens the chat and asks, in a new conversation' },
   ]
 
+  // THE QUESTION IS PROSE, VERBATIM. A question quoting code — 'const
+  // blocked = ...;' — was read as the line's own grammar and never reached
+  // the chat (jwize's drive session, 2026-10-01): no dot is a walk, no colon
+  // a tag, no quote a literal, and no word in it another behaviour's.
+  override rawArgs = true
+
   protected async execute(args: string): Promise<void> {
     const parsed = parseChatArgs(args)
     EffectBus.emit('chat:open', { prefill: parsed.message, ...(parsed.model ? { model: parsed.model } : {}) })
