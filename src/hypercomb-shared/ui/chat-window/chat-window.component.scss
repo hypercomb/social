@@ -136,16 +136,17 @@ $accent: #7eb6d6;
   .chat-rail-grip { display: none; }
 }
 
+// tw.header owns the height, padding, gap and divider; the chat says nothing
+// about them, so this header is every tool window's header.
 .chat-header {
   @include tw.header;
-  gap: 0.4em;
-  border-bottom: 1px solid rgba(var(--acc), 0.25);
   // The clipboard shelf hangs from the header's bottom edge.
   position: relative;
 }
 
-.chat-glyph {
-  font-size: 1.05em;
+// The hive's mark beside its name, at the header's one glyph size.
+.chat-subject-mark {
+  font-size: 1.0625rem;
   color: var(--hc-window-accent-quiet);
 }
 

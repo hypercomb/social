@@ -37,7 +37,6 @@
       (dblclick)="resetRailWidth()"
       (keydown)="onRailGripKey($event)"></div>
     <header class="chat-header">
-      <span class="mat-sym chat-glyph" aria-hidden="true">forum</span>
       <!-- WHOSE CONVERSATION IS THIS. What the next request reads sits under the composer, where dropping happens. -->
       <span class="chat-subject" [title]="subjectPath() || ('chat.subject.none' | t: { tile: '' })">
         @if (subjectName()) {
@@ -54,33 +53,40 @@
         } @else {
           <!-- About no single tile is about the HIVE — the same thing the
                rail's top row says, so the two agree on what you are in. -->
+          <span class="mat-sym chat-subject-mark" aria-hidden="true">hive</span>
           <span class="chat-subject-hive">{{ 'agent.rail-hive' | t }}</span>
         }
       </span>
 
       <span class="chat-header-space"></span>
-      <!-- Show or hide the workflow column: one icon, sticky, lit while shown. -->
-      <button class="chat-close chat-route-toggle" type="button"
-        [class.on]="routeSideWanted() && !execSideWanted()"
-        (click)="toggleRouteSide()"
-        [title]="'chat.route.toggle' | t"
-        [attr.aria-pressed]="routeSideWanted() && !execSideWanted()"
-        [attr.aria-label]="'chat.route.toggle' | t">
-        <span class="mat-sym" aria-hidden="true">account_tree</span>
-      </button>
-      <!-- The Execution column: what models ask to read and change. It shares
-           the workflow's side, so the two icons light one at a time; a count
-           rides it while something waits on you. -->
-      <button class="chat-close chat-route-toggle chat-exec-toggle" type="button"
-        [class.on]="execSideWanted()"
-        (click)="toggleExecSide()"
-        [title]="'chat.exec.toggle' | t"
-        [attr.aria-pressed]="execSideWanted()"
-        [attr.aria-label]="'chat.exec.toggle' | t">
-        <span class="mat-sym" aria-hidden="true">terminal</span>
-        @if (execWaiting()) { <span class="chat-exec-badge">{{ execWaiting() }}</span> }
-      </button>
+      <div class="chat-head-actions">
+        <!-- Show or hide the workflow column: one icon, sticky, lit while shown.
+             Every icon button in the window is a .chat-tool — one box, one
+             glyph size, one lit state. These two wore .chat-close once, and the
+             close rule out-ranked their lit colour, so it never showed. -->
+        <button class="chat-tool chat-route-toggle" type="button"
+          [class.on]="routeSideWanted() && !execSideWanted()"
+          (click)="toggleRouteSide()"
+          [title]="'chat.route.toggle' | t"
+          [attr.aria-pressed]="routeSideWanted() && !execSideWanted()"
+          [attr.aria-label]="'chat.route.toggle' | t">
+          <span class="mat-sym" aria-hidden="true">account_tree</span>
+        </button>
+        <!-- The Execution column: what models ask to read and change. It shares
+             the workflow's side, so the two icons light one at a time; a count
+             rides it while something waits on you. -->
+        <button class="chat-tool chat-route-toggle chat-exec-toggle" type="button"
+          [class.on]="execSideWanted()"
+          (click)="toggleExecSide()"
+          [title]="'chat.exec.toggle' | t"
+          [attr.aria-pressed]="execSideWanted()"
+          [attr.aria-label]="'chat.exec.toggle' | t">
+          <span class="mat-sym" aria-hidden="true">terminal</span>
+          @if (execWaiting()) { <span class="chat-exec-badge">{{ execWaiting() }}</span> }
+        </button>
+      </div>
       <button class="chat-close" type="button" (click)="close()"
+        [title]="'chat.close' | t"
         [attr.aria-label]="'chat.close' | t">×</button>
     </header>
 

@@ -931,14 +931,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
 .chat-route-state-open .chat-route-piece { color: var(--chat-route-open); }
 .chat-route-state-decided .chat-route-piece { color: var(--chat-route-decided); border-color: var(--chat-route-decided); }
 
-// The header's workflow toggle: the close button's shape, the accent while
-// the column is shown.
-.chat-route-toggle {
-  display: inline-grid;
-  place-items: center;
-  .mat-sym { font-size: 1.05em; }
-  &.on { color: var(--hc-window-accent); }
-}
+// The header's workflow and Execution toggles are .chat-tool (chat-peek.scss).
 
 // ── the Execution column (documentation/hive-read-fence.md §3) ────────────
 //
@@ -954,7 +947,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
   inset-inline-end: 0.05rem;
   min-width: 0.9rem;
   padding: 0 0.2rem;
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   line-height: 0.9rem;
   border-radius: var(--hc-window-radius-control, 2px);
   color: var(--hc-window-on-accent);
