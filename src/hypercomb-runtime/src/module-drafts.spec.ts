@@ -124,8 +124,10 @@ describe('draftModule', () => {
       'const blocked = bubble.x < CAVE_LEFT || (!this.native && (\n      this.touches({ x: bubble.x, w: TILE }, true);')
     expect(await parseProblemAsBody(broken, before)).toMatch(/^SyntaxError/)
     // A module the reading cannot speak for is never the reason a draft fails.
-    const unreadable = `import {\n  A\n} from "x";\n${broken}`
-    expect(await parseProblemAsBody(unreadable, `import {\n  A\n} from "x";\n${before}`)).toBeUndefined()
+    const wrapped = `import {\n  A\n} from "x";\n${before}`
+    expect(await parseProblemAsBody(wrapped)).toBeUndefined()
+    const unreadable = `import D, {\n  A\n} from "x";\n${broken}`
+    expect(await parseProblemAsBody(unreadable, `import D, {\n  A\n} from "x";\n${before}`)).toBeUndefined()
   })
 
   it('refuses an edit that finds nothing, or finds its text twice', async () => {
