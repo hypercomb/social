@@ -1195,6 +1195,12 @@ type AnatomyDoctrineLike = {
 const LLM_HIVE_ACCESS_IOC_KEY = '@hypercomb.social/LlmHiveAccess'
 /** assistant/execution-queue.ts — what models ask to read and change. */
 const EXECUTION_QUEUE_IOC_KEY = '@hypercomb.social/ExecutionQueue'
+/** A request handed to one conversation from outside the window. */
+type OutsideAsk = { readonly askId: string; readonly convoId: string; readonly text: string; readonly trust?: boolean }
+/** How long a turn may take to reach its first round before the next ask
+ *  starts anyway — Jev's front door and the route, with room. */
+const OUTSIDE_ASK_BEGIN_MS = 90_000
+
 const EXEC_SIDE_WANTED_KEY = 'hc:chat-exec-side'
 const EXEC_AUTO_CONVOS_KEY = 'hc:chat-exec-auto-conversations'
 const readAutoConversations = (): ReadonlySet<string> => {
@@ -3078,6 +3084,78 @@ export class ChatWindowComponent implements OnDestroy {
     if (convoId) this.#trustConversation(convoId, !this.#autoConvos().has(convoId))
   }
 
+  // ── ASKED FROM OUTSIDE THE WINDOW ─────────────────────────────────────────
+  //
+  // A manager (documentation/hive-management-org.md) hands a request to ONE
+  // named conversation and gets that conversation's own result back, by the
+  // ask's id — never by "the last receipt", which two managers at once would
+  // read off each other.
+  //
+  // The loop reads the open conversation's transcript only while a turn is
+  // being put together; from the first word of the first round it works from
+  // its own copy, and everything it paints is guarded by the conversation
+  // being the open one. So asks START one at a time — the conversation is
+  // opened, the turn begins, and the conversation that was open before is put
+  // back — and then RUN side by side. The window need not be showing.
+  readonly #askQueue: OutsideAsk[] = []
+  readonly #asksSeen = new Set<string>()
+  #askStarting = false
+
+  async #drainAsks(): Promise<void> {
+    if (this.#askStarting) return
+    this.#askStarting = true
+    try {
+      for (let ask = this.#askQueue.shift(); ask; ask = this.#askQueue.shift()) await this.#startAsk(ask)
+    } finally { this.#askStarting = false }
+  }
+
+  async #startAsk(ask: OutsideAsk): Promise<void> {
+    const before = this.activeId()
+    const since = Date.now()
+    let receipt: { outcome?: string; rounds?: number; spent?: { tokens?: number } } | undefined
+    const offs: (() => void)[] = []
+    // BEGUN: the first round has a model (agent:route), or the turn ended
+    // without ever reaching one. Either way the transcript has been read.
+    const begun = new Promise<void>(resolve => {
+      const timer = setTimeout(resolve, OUTSIDE_ASK_BEGIN_MS)
+      const done = (): void => { clearTimeout(timer); resolve() }
+      offs.push(EffectBus.on<{ convoId?: string; at?: number }>('agent:route', payload => {
+        if (payload?.convoId === ask.convoId && (payload.at ?? 0) >= since) done()
+      }))
+      offs.push(EffectBus.on<{ convoId?: string; at?: number; outcome?: string; rounds?: number; spent?: { tokens?: number } }>('agent:receipt', payload => {
+        if (payload?.convoId !== ask.convoId || (payload.at ?? 0) < since) return
+        receipt = payload
+        done()
+      }))
+    })
+    if (ask.trust) this.#trustConversation(ask.convoId, true)
+    let failure = ''
+    await this.#load(ask.convoId)
+    const turn = this.send(ask.text).catch(error => { failure = error instanceof Error ? error.message : String(error) })
+    await Promise.race([begun, turn])
+    // Put back what the participant was looking at, unless they moved on
+    // themselves while the turn was starting.
+    if (before && before !== ask.convoId && this.activeId() === ask.convoId) await this.#load(before)
+
+    // The rest happens beside whatever starts next.
+    void turn.then(async () => {
+      for (const off of offs) off()
+      const turns = await this.#threads()?.readTurns(ask.convoId).catch(() => []) ?? []
+      const last = [...turns].reverse().find(entry => entry.role === 'assistant' && entry.at >= since)
+      EffectBus.emit('chat:asked', {
+        askId: ask.askId, convoId: ask.convoId, at: Date.now(),
+        ok: !failure && !!last,
+        outcome: failure ? 'failed' : receipt?.outcome ?? (last ? 'answered' : 'unanswered'),
+        ...(failure ? { error: failure } : {}),
+        rounds: receipt?.rounds ?? 0,
+        tokens: receipt?.spent?.tokens ?? 0,
+        answer: last?.text ?? '',
+        // Long work stopped at a leg's end: ask again to carry it on.
+        ...(last?.left ? { left: true } : {}),
+      })
+    })
+  }
+
   #trustConversation(convoId: string, on: boolean): void {
     const next = new Set(this.#autoConvos())
     if (on) next.add(convoId)
@@ -4739,6 +4817,17 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ convoId?: string; on?: boolean }>('chat:exec-trust', payload => {
       const convoId = payload?.convoId === 'active' ? this.activeId() : String(payload?.convoId ?? '')
       if (convoId) this.#trustConversation(convoId, payload?.on !== false)
+    }))
+    // A MANAGER'S ASK (documentation/hive-management-org.md): a request for
+    // one named conversation, from outside the window. See #startAsk.
+    this.#cleanups.push(EffectBus.on<OutsideAsk>('chat:ask', payload => {
+      const askId = String(payload?.askId ?? '').trim()
+      const convoId = String(payload?.convoId ?? '').trim()
+      const text = String(payload?.text ?? '').trim()
+      if (!askId || !convoId || !text || this.#asksSeen.has(askId)) return
+      this.#asksSeen.add(askId)
+      this.#askQueue.push({ askId, convoId, text, trust: payload?.trust === true })
+      void this.#drainAsks()
     }))
     this.#cleanups.push(EffectBus.on<{ sig?: string; scope?: string }>('chat:harness', payload => {
       if (payload?.scope !== 'conversation') return

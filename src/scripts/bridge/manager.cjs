@@ -12,6 +12,7 @@
 //   node scripts/bridge/manager.cjs note /route "<text>"     add a note to a tile
 //   node scripts/bridge/manager.cjs thread <manager|convoId> [n]   the last n turns
 //   node scripts/bridge/manager.cjs report <manager> "<text>"      write into the manager's own conversation
+//   node scripts/bridge/manager.cjs ask <manager|convoId> "<request>"   hand work to the hive's own models, wait, print the result
 //   node scripts/bridge/manager.cjs held                     what waits on the participant in Execution
 //   node scripts/bridge/manager.cjs do "<behaviour sentence>"      one line through the command line
 //   node scripts/bridge/manager.cjs op '<request json>'      a raw bridge request
@@ -97,6 +98,29 @@ const main = async () => {
       const reply = await send({ op: 'chat-reply', cell: MANAGERS[first], text: second })
       return reply.ok ? print(`reported in ${MANAGERS[first]}`) : fail(reply.error)
     }
+    case 'ask': {
+      // DELEGATE. The request runs in that conversation on the hive's own
+      // models (DeepSeek and whatever else is on the list), which read and
+      // change the hive themselves; this waits and prints that ask's result.
+      // The conversation runs what it asks for without a press: the manager
+      // is the one who answers for it.
+      if (!first || !second.trim()) return fail('ask needs a manager or convoId, and the request')
+      const convoId = convoOf(first)
+      const asked = await send({ op: 'chat-ask', cell: convoId, text: second, payload: { trust: process.env.MANAGER_NO_TRUST ? false : true } })
+      if (!asked.ok) return fail(asked.error)
+      const askId = asked.data.askId
+      const deadline = Date.now() + Number(process.env.MANAGER_ASK_MS || 900_000)
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 4_000))
+        const reply = await send({ op: 'chat-asked', cell: askId })
+        if (!reply.ok) return fail(reply.error)
+        if (reply.data?.done) {
+          const { outcome, rounds, tokens, answer, left, error } = reply.data
+          return print({ convoId, outcome, rounds, tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
+        }
+      }
+      return fail(`no result for ${askId} in time; the turn may still be running — manager.cjs thread ${first} shows where it got to`)
+    }
     case 'held': {
       const reply = await send({ op: 'effect-last', cell: 'agent:held' })
       return reply.ok ? print(reply.data?.last?.waiting ?? []) : fail(reply.error)
@@ -113,7 +137,7 @@ const main = async () => {
       return print(await send(request))
     }
     default:
-      return fail('usage: manager.cjs tree|read|notes|note|thread|report|held|do|op — see the header of this file')
+      return fail('usage: manager.cjs tree|read|notes|note|thread|report|ask|held|do|op — see the header of this file')
   }
 }
 

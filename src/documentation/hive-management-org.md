@@ -52,19 +52,62 @@ managers (Sonnet), side by side — one area each
 | Add a note, report in its own conversation | Always, in its area. |
 | Create a tile | Only when its charter or the participant asked for one. |
 | Rename, move, remove, edit another's words | Never on its own. It proposes; the participant or Claude Code decides. |
-| Change code that runs (a module draft) | Never on its own: it describes the defect and the fix, and Claude Code takes it. |
+| Change code that runs (a module draft) | Through `ask`, with the defect and the fix stated, then read back and checked. A draft it cannot verify by reading goes up to Claude Code. |
 | Private tiles (`susan`, `howard`) | Not read, not written, unless the participant names them for that pass. |
 | The participant's data | Never wiped, never "cleaned" by deletion. Hide first, delete second, and both are the participant's. |
 
 A manager that cannot do its job inside these rules says so in its report.
 It does not look for another way.
 
+## Managing conversations: the manager delegates, checks, and changes
+
+jwize, 2026-10-01: *"They need to be managing the conversations directly and
+making changes."*
+
+A manager does not do the bulk of the work with its own hands. It runs
+conversations on the hive's own models and manages them:
+
+```
+node scripts/bridge/manager.cjs ask <manager|convoId> "<request>"
+```
+
+- The request runs in that conversation through the hive's own loop, on the
+  models on the hive's list — DeepSeek flash for light work, the line said to
+  be deep (DeepSeek pro) for deep or code work; the hive routes by the weight
+  of the request. The manager never names a vendor.
+- The model reads and changes the hive itself. The conversation is trusted to
+  run what it asks for without a press, because the manager answers for it.
+- The call waits and prints that ask's own result: outcome, rounds, tokens,
+  the answer. Several managers can ask at once; each gets its own result.
+- A manager may ask in its own conversation or open a new one per job
+  (any id of the form `chat:tile:/::<13 digits>-<6 letters>`); one job per
+  conversation keeps the transcript small and the cost down.
+
+**What goes down, what stays up.**
+
+| Work | Who |
+| --- | --- |
+| Reading many tiles, filing notes, surveying, first drafts, a code change with a stated defect and fix | The hive's models, by `ask`. |
+| Deciding what to ask, checking the result against what the hive now holds, deciding it is done | The manager. |
+| A cheap model failed the same request twice; a small exact step (one note) | The manager, directly (`note`, `do`). |
+| A harness defect, a critical decision, a disagreement | Up to Claude Code. |
+
+**Never take the model's word.** "Done" in an answer is a claim. After every
+`ask` that changes something, the manager reads the tiles or notes itself
+(`read`, `notes`) and reports what is actually there. A model that says it
+filed six notes and filed none is a harness defect: report it, with the
+conversation id.
+
+**Write requests a cheap model can follow:** one job, the exact routes, the
+exact words to file, what not to touch, and what to answer with.
+
 ## A pass
 
 1. `manager.cjs thread <self> 6` — what was last reported, and anything the
    participant wrote since.
 2. Survey the area (`tree`, `read`, `notes`). Compare with the charter.
-3. Do what the rules allow. Keep a list of what was done and what is proposed.
+3. Delegate the work (`ask`), check each result by reading, and do the small
+   exact steps directly. Keep a list of what was done and what is proposed.
 4. `manager.cjs report <self> "<report>"` — short: **done**, **found**,
    **proposed** (each needing a yes), **blocked**. No narration.
 5. Return the same report to whoever started the pass.
@@ -82,7 +125,8 @@ The games on the hive: Bubble Bobble (`/bubble-bobble-dos-v1`, `/games`),
 Solomon (`/solomon-maze-v1`), Arkanoid. Each game's requirements live as notes
 on its tile; the manager keeps those notes true — what is met, what is
 partial, what a draft changed — and reports defects with the evidence. It
-never runs DOS material and never edits game code.
+never runs DOS material. A code fix goes through `ask` with the defect and the
+fix stated, and is read back before it is reported.
 
 ### housekeeping
 The order of the hive outside the games and the private tiles: tiles with no
