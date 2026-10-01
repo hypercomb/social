@@ -210,20 +210,28 @@ describe('one press of Look', () => {
 // ---------------------------------------------------------------------------
 
 describe('the publish-door ratchet', () => {
-  it('walks a generated, gitignored facade and therefore cannot stay green', () => {
+  it('excludes the generated, gitignored keys facade — a ratchet over generated output cannot stay green', () => {
     // `vocabulary.queen.spec.ts` walks every non-spec `.ts` under
     // `hypercomb-essentials/src` and fails if any file outside three named
-    // modules mentions `publishVocabulary`. `essentials-keys.ts` is
-    // auto-generated ("do not edit manually"), is gitignored, and lists EVERY
-    // exported symbol in the package — including `publishVocabulary`. The
-    // ratchet is red the moment the generator runs, which is every
-    // `npm run build:essentials`.
-    const keys = source(join('hypercomb-essentials', 'src', 'essentials-keys.ts'))
-    expect(keys).toContain('auto-generated')
-    expect(keys).toContain('publishVocabulary')
+    // modules mentions `publishVocabulary`. `essentials-keys.ts` is generated
+    // by scripts/prepare.ts on every build, lists EVERY exported symbol in the
+    // package — `publishVocabulary` included — and is gitignored, so it exists
+    // or not depending on whether this checkout has been built.
+    //
+    // Proved from TRACKED sources, never from the generated file: reading it
+    // made this test fail on every fresh clone (ENOENT) — the very
+    // build-state dependence it exists to rule out.
+    const prepare = source(join('hypercomb-essentials', 'scripts', 'prepare.ts'))
+    expect(prepare).toContain("'// auto-generated — single facade for all IoC keys'")
+    expect(prepare).toContain("join(SRC_ROOT, 'essentials-keys.ts')")
+    expect(source(join('hypercomb-essentials', '.gitignore'))).toMatch(/^src\/\*\*\/\*-keys\.ts$/m)
+    // …and the facade WOULD name the door: the generator lists every export.
+    expect(source(join('hypercomb-essentials', 'src', 'molecule', 'vocabulary-publish.ts')))
+      .toMatch(/^export const publishVocabulary\b/m)
 
+    // A ratchet over generated output must exclude it — in CODE, not in a
+    // comment that merely names the file.
     const ratchet = source(join('hypercomb-essentials', 'src', 'molecule', 'vocabulary.queen.spec.ts'))
-    // A ratchet over generated output must exclude it. This one does not.
-    expect(ratchet).toContain('essentials-keys')
+    expect(ratchet).toMatch(/^\s*if \(entry\.name\.endsWith\('-keys\.ts'\)\) continue$/m)
   })
 })

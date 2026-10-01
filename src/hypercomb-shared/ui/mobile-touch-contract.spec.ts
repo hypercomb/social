@@ -68,19 +68,16 @@ describe('mobile touch contracts', () => {
     expect(controlsBar).toMatch(/EffectBus\.on\('viewport:pin-toggle',\s*\(\)\s*=>\s*this\.togglePin\(\)\)/)
   })
 
-  it('the lane count has one owner — the deck and the bar mirror it, neither keeps its own', () => {
+  it('the lane count has one owner — the phone deck mirrors it and keeps none of its own', () => {
     // The rail projection publishes the count on `lanes:changed`; the phone
-    // deck and the controls bar take it from there. (This used to assert a
-    // `LANES_DEFAULT = 2` in the deck and a bar resting at 2 — a design the
-    // code never had: the deck holds no default and the count has been 3.)
-    const lanes = Number(/\bconst LANES = (\d+)/.exec(railProjection)?.[1])
-    expect(lanes).toBeGreaterThan(0)
+    // deck takes it from there. Framework-free on both sides, so this is the
+    // contract the minimal host runs. (This used to assert a `LANES_DEFAULT =
+    // 2` in the deck and an Angular controls bar resting at 2 — a design the
+    // code never had.)
+    expect(railProjection).toMatch(/\bconst LANES = \d+/)
     expect(railProjection).toContain("this.emitEffect('lanes:changed', { active: this.#active, lanes: LANES })")
     expect(layerDeck).toMatch(/onEffect<Lanes>\('lanes:changed'[\s\S]*?lanes: Number\(payload\?\.lanes\)/)
     expect(layerDeck).not.toMatch(/\bLANES(_DEFAULT)?\s*=/)
-    expect(controlsBar).toContain('this.laneCount.set(lanes as number)')
-    // Before the owner's first word arrives, the bar rests where the owner will say.
-    expect(controlsBar).toContain(`readonly laneCount = signal(${lanes})`)
   })
 
   it('keeps view exits thumb-sized and square captions readable on phones', () => {
