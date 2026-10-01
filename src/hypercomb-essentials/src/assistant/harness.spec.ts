@@ -68,6 +68,13 @@ describe('a harness record', () => {
     expect(record.steps).toBeUndefined()
   })
 
+  it('says how many reads a block may carry, never past the ceiling', () => {
+    expect(DEFAULT_HARNESS.reads.perBlock).toBe(8)
+    expect(parseHarness({ kind: 'harness@1', name: 'two-at-a-time', reads: { perBlock: 2 } }).reads.perBlock).toBe(2)
+    expect(parseHarness({ kind: 'harness@1', name: 'greedy', reads: { perBlock: 40 } }).reads.perBlock).toBe(8)
+    expect(parseHarness({ kind: 'harness@1', name: 'unsaid' }).reads.perBlock).toBe(8)
+  })
+
   it('refuses what is not a harness, and a harness that would auto-run a held kind', () => {
     expect(() => parseHarness({ kind: 'theme@1', name: 'x' })).toThrow('not a harness@1')
     expect(() => parseHarness({ kind: 'harness@1', name: '' })).toThrow('needs a name')

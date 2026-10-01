@@ -1273,7 +1273,7 @@ type HarnessRecordLike = {
   readonly steps?: readonly string[]
   readonly leg: { readonly rounds: number; readonly reserveTokens: number; readonly keepVerbatim: number }
   readonly budget: { readonly rounds: number; readonly tokens: number }
-  readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number }
+  readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number; readonly perBlock?: number }
   readonly handover: { readonly fence: string; readonly resumeSeconds: number; readonly proseFallback: boolean }
 }
 type HarnessLike = {
@@ -1287,7 +1287,7 @@ const SHIPPED_HARNESS: HarnessRecordLike = {
   name: 'default',
   leg: { rounds: LEG_ROUNDS, reserveTokens: 8_000, keepVerbatim: 4 },
   budget: WORK_BUDGET,
-  reads: { pageChars: READ_PAGE_CHARS, roundsWhenAsked: MAX_OBSERVATION_ROUNDS, charsWhenAsked: MAX_OBSERVATION_CONTEXT_CHARS },
+  reads: { pageChars: READ_PAGE_CHARS, roundsWhenAsked: MAX_OBSERVATION_ROUNDS, charsWhenAsked: MAX_OBSERVATION_CONTEXT_CHARS, perBlock: MAX_OBSERVATIONS },
   handover: { fence: 'hypercomb-continue', resumeSeconds: RESUME_LEFT_MS / 1000, proseFallback: true },
 }
 /** The harness a conversation runs under: its own mark when it wears one
@@ -6350,6 +6350,9 @@ export class ChatWindowComponent implements OnDestroy {
     const priorReadsText = canRead && knownReads.length
       ? `ALREADY READ in this conversation. Each opens again with read <signature>; what a signature names never changes, so there is no need to walk to it again:\n${knownReads.map(([sig, grammar]) => `${grammar.replace(/^\//, '')} → ${sig}`).join('\n')}`
       : ''
+    // How many reads one block may carry is the harness's to say, under the
+    // parser's own ceiling. Taken once per message, like the system text.
+    const readsPerBlock = Math.max(1, Math.min(MAX_OBSERVATIONS, activeHarness(harnessMark).reads.perBlock ?? MAX_OBSERVATIONS))
     const systemFor = (model: string | undefined, providerLabel: string | undefined, providerId: string | undefined): string => [
       anatomyText,
       identityInstruction(model, providerLabel),
@@ -6357,7 +6360,7 @@ export class ChatWindowComponent implements OnDestroy {
       workInstruction({
         canRead,
         readsRunFreely: readsFreely(providerId),
-        readsPerBlock: MAX_OBSERVATIONS,
+        readsPerBlock: readsPerBlock,
         canChange,
         vocabulary,
         canWrite,
@@ -6608,7 +6611,7 @@ export class ChatWindowComponent implements OnDestroy {
           lastRound = true
           throw new WorkRefused('this stretch has used its read budget; hand the work over — say what you found and what is left — and the next stretch reads on with a fresh budget')
         }
-        const plan = parseHypercombObservationGrammars(readLines, grammarContext.segments)
+        const plan = parseHypercombObservationGrammars(readLines, grammarContext.segments, readsPerBlock)
         const grammars = plan.observations.map(observation => observation.grammar)
         // What each read RESOLVED to — the key an allowed read is remembered
         // by, so "read here" allowed on one page never covers another.

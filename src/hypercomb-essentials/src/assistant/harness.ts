@@ -41,7 +41,7 @@ export type HarnessRecord = {
   readonly doctrine?: readonly string[]
   readonly leg: { readonly rounds: number; readonly reserveTokens: number; readonly keepVerbatim: number }
   readonly budget: { readonly rounds: number; readonly tokens: number }
-  readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number }
+  readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number; readonly perBlock: number }
   readonly handover: { readonly fence: string; readonly resumeSeconds: number; readonly proseFallback: boolean }
   /** The Execution window's default per kind. May only HOLD more, never auto-run more. */
   readonly review: { readonly auto: readonly string[]; readonly held: readonly string[] }
@@ -52,12 +52,16 @@ export type HarnessRecord = {
 
 /** Today's loop, as a record. These ARE the values the chat window shipped
  *  with; the fallback in the window must stay equal to them. */
+/** The most reads one block may carry, whatever a record says — the same
+ *  ceiling the shell's read parser holds (hypercomb-observation.ts). */
+export const READS_PER_BLOCK_MOST = 8
+
 export const DEFAULT_HARNESS: HarnessRecord = Object.freeze({
   kind: 'harness@1',
   name: 'default',
   leg: { rounds: 12, reserveTokens: 8_000, keepVerbatim: 4 },
   budget: { rounds: 400, tokens: 6_000_000 },
-  reads: { pageChars: 48_000, roundsWhenAsked: 6, charsWhenAsked: 24_000 },
+  reads: { pageChars: 48_000, roundsWhenAsked: 6, charsWhenAsked: 24_000, perBlock: READS_PER_BLOCK_MOST },
   handover: { fence: 'hypercomb-continue', resumeSeconds: 3_600, proseFallback: true },
   review: { auto: [], held: ['do', 'write'] },
   vocabulary: { allow: [], deny: [] },
@@ -111,6 +115,7 @@ export const parseHarness = (json: unknown): HarnessRecord => {
       pageChars: num(reads['pageChars'], d.reads.pageChars, 1_024),
       roundsWhenAsked: num(reads['roundsWhenAsked'], d.reads.roundsWhenAsked),
       charsWhenAsked: num(reads['charsWhenAsked'], d.reads.charsWhenAsked, 1_500),
+      perBlock: Math.min(num(reads['perBlock'], d.reads.perBlock), READS_PER_BLOCK_MOST),
     },
     handover: {
       fence: String(handover['fence'] ?? d.handover.fence).trim() || d.handover.fence,
