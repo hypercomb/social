@@ -485,6 +485,8 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'agent:harness',
   /** The turns' receipts, keyed by the harness they ran under (§7). */
   'agent:receipts',
+  /** Work that asked for a stronger model than any switched on (§11). */
+  'agent:model-requests',
   // Which roots a phone opens into (preferences/mobile-pheromones.ts). It
   // travels with the participant rather than the browser for the same reason
   // `habits:spoken` does: a choice that did not follow you to your other

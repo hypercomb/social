@@ -1351,6 +1351,7 @@
   "slash.branch": "Nombrar una ruta o firma para autocompletar comandos",
   "slash.chat": "Conversación de varios turnos con Claude — crea mosaicos de hilo con hijos de preguntas y respuestas",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
+  "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "Alternar entre hexágonos y representación de sitio web",
   "slash.website": "Alternar vista de sitio web, exportar subárbol o construir páginas con Claude",
   "slash.tutor": "Juegos de estudio — convierte esta colmena en juegos de repetición espaciada; on | off | here | build | list",

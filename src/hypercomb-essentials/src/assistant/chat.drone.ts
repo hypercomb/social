@@ -16,6 +16,7 @@ import { HARNESS_IOC_KEY, bootHarness, harness } from './harness.js'
 import { claimHarnessPool } from './harness-network.js'
 import { startReceiptLedger } from './agent-receipts.js'
 import { startHarnessTiles } from './harness-tiles.js'
+import { startModelRequestLedger } from './model-requests.js'
 import { AGENT_STEPS_IOC_KEY, agentSteps, shippedAgentSteps } from './agent-steps.js'
 import { publishService } from './llm-provider-registry.js'
 
@@ -48,5 +49,8 @@ startReceiptLedger()
 // A note that is a harness record is read as one when it is edited: the
 // tile `harness edit` opens is saved by editing it.
 startHarnessTiles()
+// Work that asked for a stronger model than any switched on is filed, so
+// the participant can answer it with `models add <id> deep`.
+startModelRequestLedger()
 
 window.ioc.register('@diamondcoreprocessor.com/ChatDrone', new ChatDrone())

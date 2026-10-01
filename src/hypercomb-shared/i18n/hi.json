@@ -1351,6 +1351,7 @@
   "slash.branch": "कमांड ऑटोकम्प्लीट के लिए पथ या हस्ताक्षर का नाम दें",
   "slash.chat": "Claude के साथ बहु-चरण वार्तालाप — Q&A बच्चों के साथ थ्रेड टाइलें बनाता है",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
+  "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "षट्भुज और वेबसाइट रेंडरिंग के बीच टॉगल करें",
   "slash.website": "वेबसाइट दृश्य टॉगल करें, सबट्री निर्यात करें, या Claude से पेज बनवाएँ",
   "slash.tutor": "अध्ययन गेम — इस हाइव को स्पेस्ड-रिपिटिशन गेम में बदलें; on | off | here | build | list",

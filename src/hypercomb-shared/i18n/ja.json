@@ -1406,6 +1406,7 @@
   "mesh-modal.start": "開始",
   "slash.chat": "チャットを開く — チャットごとに1つの会話、履歴は保持されます",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
+  "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "ヘキサゴンとウェブサイト表示を切替",
   "slash.website": "ウェブサイト表示の切替、サブツリーのエクスポート、Claudeによるページ構築",
   "slash.tutor": "学習ゲーム — このハイブを間隔反復ゲームに変換; on | off | here | build | list",

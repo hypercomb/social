@@ -108,7 +108,7 @@ import {
   splitQuestion,
   SignatureService,
   type SettledQuestion,
-  AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY,
+  AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_MODEL_REQUEST, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY,
   type AgentHandoverEvent, type AgentRoundEvent, type AgentSpent, type AgentStageEffect,
   AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedRouteStep, shippedStretchStep, shippedVerifyStep,
   type AgentStepRegistry, type FrontDecisionLike, type HandoverStep, type VerifyDecisionLike, type WorkMessage,
@@ -7091,7 +7091,17 @@ export class ChatWindowComponent implements OnDestroy {
           wrote = true
           yield `${lead}*${gaveUp} handed this off: ${work.handoff}*`
           if (!moved.another) {
-            yield `\n\nNo other model switched on can take it. Name one, or switch one on in the providers console.`
+            // NOT A DEAD END — A REQUEST (documentation/agent-harness.md
+            // §11). The work asked for a stronger model than any switched
+            // on; that is filed, so the participant can answer it by putting
+            // one on the list for deep work, and the cheap models keep the
+            // everyday questions.
+            EffectBus.emit(AGENT_MODEL_REQUEST, {
+              id: component.#beeId(convoId), convoId, leg: legOf(), at: Date.now(),
+              ...(harnessSig ? { harness: harnessSig } : {}),
+              from: gaveUp, needs: work.handoff, tier: moved.need.tier,
+            })
+            yield '\n\nNo model switched on can take it, so a stronger one is asked for: the request is filed (`models requests` reads them). `models add <model id> deep` puts a model on the list for deep work only; then say continue.'
             return ''
           }
           pinned = undefined

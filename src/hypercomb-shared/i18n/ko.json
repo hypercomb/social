@@ -1351,6 +1351,7 @@
   "slash.branch": "명령 자동완성을 위한 경로 또는 서명 지정",
   "slash.chat": "Claude와 다중 턴 대화 — Q&A 하위 항목이 있는 스레드 타일 생성",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
+  "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "육각형과 웹사이트 렌더링 간 전환",
   "slash.website": "웹사이트 보기 전환, 하위 트리 내보내기 또는 Claude를 통한 페이지 빌드",
   "slash.tutor": "학습 게임 — 하이브를 간격 반복 게임으로 변환; on | off | here | build | list",

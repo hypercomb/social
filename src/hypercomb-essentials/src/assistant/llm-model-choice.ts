@@ -17,6 +17,9 @@ export const LLM_MODEL_CHOICE_IOC_KEY = '@hypercomb.social/LlmModelChoice'
 
 const chosenKey = (providerId: string): string => `hc:llm:${providerId}:model`
 const listKey = (providerId: string): string => `hc:llm:${providerId}:models`
+const tiersKey = (providerId: string): string => `hc:llm:${providerId}:tiers`
+type SaidTier = 'fast' | 'balanced' | 'deep'
+const okTier = (value: unknown): value is SaidTier => value === 'fast' || value === 'balanced' || value === 'deep'
 const clean = (value: unknown): string => String(value ?? '').trim()
 const okModel = (value: string): boolean => !!value && value.length <= 200
 
@@ -57,6 +60,42 @@ export class LlmModelChoiceStore extends EventTarget {
     this.dispatchEvent(new CustomEvent('change', { detail: { providerId: id, modelId: next } }))
   }
 
+  /**
+   * THE WEIGHT OF WORK A LINE WAS ADDED FOR, when the participant said one.
+   * A model's price normally places it (providers/openrouter-stages.ts), and
+   * a model priced above the last stop is left out — which is right for a
+   * search result and wrong for a model the participant put on the list on
+   * purpose because the work asked for it. A said tier is the line's one
+   * tier whatever it costs: a strong model added for `deep` takes only the
+   * work that is handed up to it, and never the everyday questions.
+   */
+  tierOf(providerId: string, modelId: string): SaidTier | undefined {
+    const said = this.#tiers(clean(providerId).toLowerCase())[clean(modelId)]
+    return okTier(said) ? said : undefined
+  }
+
+  /** Say a line's tier, or take the word back with undefined. */
+  setTier(providerId: string, modelId: string, tier: SaidTier | undefined): void {
+    const id = clean(providerId).toLowerCase()
+    const model = clean(modelId)
+    if (!id || !okModel(model)) return
+    const tiers = { ...this.#tiers(id) }
+    if (tier) tiers[model] = tier
+    else delete tiers[model]
+    try {
+      if (Object.keys(tiers).length) globalThis.localStorage?.setItem(tiersKey(id), JSON.stringify(tiers))
+      else globalThis.localStorage?.removeItem(tiersKey(id))
+    } catch { /* session-only */ }
+    this.dispatchEvent(new CustomEvent('change', { detail: { providerId: id, modelId: model } }))
+  }
+
+  #tiers(providerId: string): Record<string, unknown> {
+    try {
+      const raw = JSON.parse(globalThis.localStorage?.getItem(tiersKey(providerId)) ?? '{}')
+      return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
+    } catch { return {} }
+  }
+
   /** Add a model line and put it in use. */
   add(providerId: string, modelId: string, select = true): void {
     const id = clean(providerId).toLowerCase()
@@ -76,6 +115,7 @@ export class LlmModelChoiceStore extends EventTarget {
     if (!id) return
     const rest = this.saved(id).filter(m => m !== model)
     this.#writeList(id, rest)
+    if (this.tierOf(id, model)) this.setTier(id, model, undefined)
     if (this.chosen(id) === model) this.choose(id, rest[0])
     this.dispatchEvent(new CustomEvent('change', { detail: { providerId: id, modelId: undefined } }))
   }

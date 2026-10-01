@@ -85,8 +85,6 @@ window.ioc.whenReady?.('@diamondcoreprocessor.com/SlashBehaviourDrone', (drone: 
     behaviours: [
       { name: 'providers', description: 'Manage AI providers and API keys', descriptionKey: 'slash.providers',
         examples: [{ input: '/providers', result: 'Opens the AI providers console' }] },
-      { name: 'models', description: 'Manage AI providers and API keys', descriptionKey: 'slash.providers',
-        examples: [{ input: '/models', result: 'Opens the AI providers console' }] },
     ],
     execute: () => { EffectBus.emit('providers:open', {}) },
   })

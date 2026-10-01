@@ -101,3 +101,18 @@ export type AgentReceiptEvent = AgentStageBase & {
   readonly outcome: 'answered' | 'failed' | 'stopped'
   readonly spent: AgentSpent
 }
+
+/** A HAND-OFF FOUND NOBODY TO TAKE IT: the work asks for a stronger model
+ *  than any switched on. Not a stage of a turn — a request, filed so the
+ *  participant can answer it by putting a model on the list
+ *  (documentation/agent-harness.md §11). */
+export const AGENT_MODEL_REQUEST = 'agent:model-request'
+
+export type AgentModelRequestEvent = AgentStageBase & {
+  /** The model that handed the work off. */
+  readonly from: string
+  /** What it said the work needs, in its own line. */
+  readonly needs: string
+  /** The weight of work nobody could take. */
+  readonly tier: string
+}

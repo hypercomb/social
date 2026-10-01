@@ -285,3 +285,53 @@ can reach, and that is core, beside the fence regex it already held. The
 step BEES are essentials' (the registry, the registrations, any community
 step); the window's fallback is the same shipped object core exports, so
 nothing is written twice.
+
+## 11. Cheap by default, strong by request
+
+The everyday work belongs to the cheap models. That is where the value of an
+external API is, and a survey, a note, a rename or a reading of a page does not
+need more. The balance is kept by two things the loop already had and one it
+gained on 2026-09-30.
+
+**The hand-off** (`hypercomb-handoff`). A model that meets work beyond it says
+so in one line, and the turn goes up to a model at the `deep` tier. The model
+that handed off is not asked again this turn.
+
+**A line added for a weight of work.** A model line normally takes the tier
+its price falls in (`providers/openrouter-stages.ts`), and a model priced above
+the last stop is left out. A line the participant adds *for* a tier —
+`models add <model id> deep` — offers that one tier whatever it costs
+(`LlmModelChoiceStore.tierOf`). It is on the list and never in use: it answers
+when work is handed up to it and never otherwise, so a frontier model costs
+what the hard turns cost and nothing more.
+
+**The request.** When a hand-off finds no model that can take the work, the
+turn does not end in an apology. It emits `agent:model-request` — who handed
+off, what it said the work needs, the tier nobody could take, the harness the
+turn ran under — and says how to answer it. The chat drone's ledger
+(`assistant/model-requests.ts`) files each one, content-addressed, in the pool
+`agent:model-requests`.
+
+| Word | Does |
+|---|---|
+| `models` | Opens the providers console, where the lines are, and says each line's weight of work, its price, and how many requests stand |
+| `models add <model id> [tier]` | Puts a line on the list — never in use; with a tier (fast, balanced or deep), for that work only. The id is checked against the catalogue when it is loaded |
+| `models drop <model id>` | Takes a line off, and its said tier with it |
+| `models requests` | Reads what the work has asked a stronger model for, newest first |
+| `models request <what the work needs>` | Files a request by hand |
+
+After `models add … deep`, saying `continue` sends the same question round
+again: the cheap model hands off once more, and this time the deep line takes
+it. That is one cheap round spent to keep the rule simple — nothing escalates
+without a model saying the work needs it.
+
+**How the loop is tuned.** A turn is run with an expectation: about how many
+rounds, about how many tokens, what the answer should hold. A turn that
+misses it is a defect in the harness, not a reason to reach for a stronger
+model. The first drive session found three such defects, none of which a
+stronger model would have fixed: a work block written as a tag was shown
+instead of run; a busy host that was the account's only road was ignored into
+a dead turn; and a two-reads-per-block ceiling made a twelve-tile survey cost
+nine rounds and 101k tokens (`reads.perBlock`, now eight). `harness compare`
+is where the difference shows.
+
