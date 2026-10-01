@@ -14,8 +14,22 @@
 // something may ask IoC for her synchronously, and a sleeper would answer
 // nothing.
 //
+// AND SO DOES A QUEEN A MACHINE MAY SAY (jwize's drive session, 2026-09-30).
+// A `machine` block is the hive teaching a model one of its verbs — the
+// forms, how far it reaches, and a `refuse` function that is code. All of
+// that lives in her module and nowhere else, so asleep she was missing from
+// the model's vocabulary entirely: on a deployed hive the chat's AI answered
+// that it could not create a tile, because create, title, hide and file were
+// asleep. Loading her changes what the hive teaches, which is changing the
+// hive, so she stays awake.
+//
 // Deliberately strict and read from the source; a queen that fails it loads
 // exactly as before.
+
+/** Does this queen offer herself to a machine? A false yes only keeps a
+ *  queen awake, which is the safe direction. */
+export const declaresMachine = (source: string): boolean =>
+  /^[ \t]*(?:(?:public|override|readonly)\s+)*machine\s*(?::[^=\n]+)?=/m.test(source)
 
 /** Module-level acts that change the hive by loading. */
 const SIDE_EFFECT = /whenReady\(|\bonEffect\(|EffectBus\.on\(|addEventListener\(|registerTranslations\(|customElements\.define\(|registry\.register\(|\.register\(\{/
@@ -124,6 +138,11 @@ export const passiveQueen = (
   // called. A module that also pulses does work every cycle, so it stays awake.
   if (!/readonly\s+command\s*=\s*['"][^'"]+['"]/.test(source)) return { passive: false, why: 'declares no word' }
   if (/^\s*(?:(?:public|protected|override|async)\s+)*(?:heartbeat|sense)\s*\(/m.test(source)) return { passive: false, why: 'pulses' }
+  if (declaresMachine(source)) return { passive: false, why: 'offers herself to a machine' }
+  // `rawArgs` is the same kind of thing: the command line must know it BEFORE
+  // it reads the line (no tag extraction, no dot walk, no splitting), and a
+  // stand-in built from her word and description cannot say it for her.
+  if (/^[ \t]*(?:(?:public|override|readonly)\s+)*rawArgs\s*(?::\s*boolean\s*)?=\s*true\b/m.test(source)) return { passive: false, why: 'takes her arguments verbatim' }
   const keys = [...source.matchAll(LITERAL_REGISTER)].map(match => match[1]!)
   if (keys.length !== 1) return { passive: false, why: `registers ${keys.length} literal keys` }
   if (NAMED_REGISTER.test(source)) return { passive: false, why: 'registers a service by a named key' }

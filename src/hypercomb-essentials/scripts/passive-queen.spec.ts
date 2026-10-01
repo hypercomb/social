@@ -1,8 +1,11 @@
 // passive-queen.spec.ts — a queen sleeps only when loading her does nothing
 // but make her ready to answer her word.
 
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { effectSleeper, passiveQueen, viewSleeper } from './passive-queen'
+import { declaresMachine, effectSleeper, passiveQueen, viewSleeper } from './passive-queen'
 
 const queen = (body = ''): string => `
 import { QueenBee } from '@hypercomb/core'
@@ -53,6 +56,33 @@ describe('passive queen', () => {
 
   it('is judged by her declaration, never her file name', () => {
     expect(passiveQueen('a/layout.drone.ts', queen(), new Map())).toMatchObject({ passive: true })
+  })
+
+  it('stays awake when a machine may say her word — her module is the only place that says how', () => {
+    const offered = queen().replace("readonly command = 'layout'", "readonly command = 'layout'\n  override machine = { forms: '<name>', example: '/layout grid', reach: 'editing' as const, scope: 'page' as const }")
+    expect(passiveQueen('a/layout.queen.ts', offered, new Map())).toEqual({ passive: false, why: 'offers herself to a machine' })
+    const typed = queen().replace("readonly command = 'layout'", "readonly command = 'layout'\n  public override machine: MachineGrammar = {\n    forms: '<name>',\n  }")
+    expect(passiveQueen('a/layout.queen.ts', typed, new Map())).toMatchObject({ passive: false, why: 'offers herself to a machine' })
+    expect(declaresMachine(queen('const machine = this.machine?.forms'))).toBe(false)
+    expect(declaresMachine('// override machine = {} is how a queen offers herself')).toBe(false)
+  })
+
+  it('stays awake when she takes her arguments verbatim — the command line must know before it reads the line', () => {
+    const raw = queen().replace("readonly command = 'layout'", "readonly command = 'layout'\n  override rawArgs = true")
+    expect(passiveQueen('a/layout.queen.ts', raw, new Map())).toEqual({ passive: false, why: 'takes her arguments verbatim' })
+    const off = queen().replace("readonly command = 'layout'", "readonly command = 'layout'\n  override rawArgs = false")
+    expect(passiveQueen('a/layout.queen.ts', off, new Map())).toMatchObject({ passive: true })
+  })
+
+  it('no queen in the generated sleeping table declares a machine block', () => {
+    // The table is generated from this rule; the guard is what notices a
+    // table that was not regenerated after a queen gained a machine block.
+    const src = join(dirname(fileURLToPath(import.meta.url)), '..', 'src')
+    const table = readFileSync(join(src, 'sleeping-effects.ts'), 'utf8')
+    const asleep = [...table.matchAll(/command: "([^"]+)"[^\n]*import\('\.\/([^']+)'\)/g)].map(match => ({ word: match[1]!, file: join(src, `${match[2]!}.ts`) }))
+    expect(asleep.length).toBeGreaterThan(20)
+    const offered = asleep.filter(row => declaresMachine(readFileSync(row.file, 'utf8'))).map(row => row.word)
+    expect(offered).toEqual([])
   })
 })
 

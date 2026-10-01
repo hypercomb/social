@@ -51,4 +51,13 @@ describe('/create completion contract', () => {
   it('fails rather than reporting success when no create path is mounted', async () => {
     await expect(new CreateQueenBee().invoke('roadmap')).rejects.toThrow('command line is unavailable')
   })
+
+  it('tells a machine that names are relative to the page, when it is handed a route from the root', () => {
+    const refuse = new CreateQueenBee().machine.refuse
+    expect(refuse('/programs/me/song-circle')).toContain('relative to the page you are on')
+    expect(refuse('  /roadmap')).toContain('never a route from the root')
+    expect(refuse('me/song-circle')).toBeUndefined()
+    expect(refuse('roadmap')).toBeUndefined()
+    expect(refuse('me//song-circle')).toBe('/create needs one or more explicit tile names separated by /')
+  })
 })
