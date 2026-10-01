@@ -17,20 +17,34 @@
 //   node scripts/bridge/manager.cjs held                     what waits on the participant in Execution
 //   node scripts/bridge/manager.cjs do "<behaviour sentence>"      one line through the command line
 //   node scripts/bridge/manager.cjs op '<request json>'      a raw bridge request
+//   node scripts/bridge/manager.cjs roster                   the managers, as the hive holds them
+//   node scripts/bridge/manager.cjs install                  put the managers into the hive (idempotent)
+//
+// THE MANAGERS LIVE IN THE HIVE (jwize, 2026-10-01: "They don't show on the
+// root, you just create them and keep a directory somewhere in a common
+// pool"). Each manager is a tile under /managers; its charter and its
+// conversation are notes on that tile. /managers is made by address and
+// nobody enrols it on the home page, so it is a group of its own, reachable
+// at its route and by reference, never on the root (documentation/
+// root-entries.md: "on the root" and "on the home page" are two facts). A
+// tile is committed at its own page only, so adding under /managers never
+// touches the home page. The table below is the seed `install` writes and
+// the fallback while a hive has no /managers yet.
 //
 // A MANAGER'S CONVERSATION is where it reports and where the participant
 // answers it: one per manager, at a fixed id, so the same manager is the same
 // conversation on every hive. `report` creates it on first use.
 //
 // BRIDGE_URL overrides the broker (default ws://localhost:2401).
+const fs = require('fs')
 const WebSocket = require('ws')
 
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
 const WS_OPTS = TOKEN ? { headers: { Authorization: `Bearer ${TOKEN}` } } : undefined
 
-/** The managers, and the conversation each one keeps. Adding a manager is
- *  adding a line here and a charter in the org document. */
+/** The managers, and the conversation each one keeps: the SEED. A hive that
+ *  holds /managers is read instead (`roster`). */
 const MANAGERS = {
   orchestrator: 'chat:tile:/::1790900000001-orches',
   games: 'chat:tile:/::1790900000002-gamesm',
@@ -76,12 +90,47 @@ const unshelled = value => {
   return `/${rest}`
 }
 const segmentsOf = route => unshelled(route ?? '/').split('/').map(part => part.trim()).filter(Boolean)
+const GROUP = 'managers'
+const CONVERSATION_NOTE = 'conversation: '
+const CHARTER_NOTE = 'charter: '
+const ORG_DOC = require('path').join(__dirname, '..', '..', 'documentation', 'hive-management-org.md')
+
+/** A manager's charter, as the org document words it — the seed for the note. */
+const charterOf = name => {
+  const text = fs.readFileSync(ORG_DOC, 'utf8')
+  const at = text.indexOf(`### ${name}\n`)
+  if (at < 0) return ''
+  const body = text.slice(at + name.length + 5)
+  const end = body.search(/\n#{2,3} /)
+  return (end < 0 ? body : body.slice(0, end)).replace(/\s+/g, ' ').trim()
+}
+
+/** The managers as the hive holds them: { name: conversationId }. Null when
+ *  the hive has no /managers yet (or the bridge cannot say). */
+const hiveRoster = async () => {
+  const listed = await send({ op: 'list-at', segments: [GROUP] })
+  if (!listed.ok || !Array.isArray(listed.data) || !listed.data.length) return null
+  const roster = {}
+  for (const name of listed.data) {
+    const notes = await send({ op: 'note-list', segments: [GROUP, name] })
+    const line = (notes.ok ? notes.data : []).map(note => String(note.text ?? '')).find(text => text.startsWith(CONVERSATION_NOTE))
+    roster[name] = line ? line.slice(CONVERSATION_NOTE.length).trim() : MANAGERS[name] ?? ''
+  }
+  return roster
+}
+
+let rosterCache = null
+const roster = async () => (rosterCache ??= (await hiveRoster()) ?? { ...MANAGERS })
 const convoOf = name => MANAGERS[name] ?? name
 const fail = message => { console.error(message); process.exit(1) }
 const print = value => console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 1))
 
 const main = async () => {
   const [verb, first, ...rest] = process.argv.slice(2)
+  if (['thread', 'report', 'ask'].includes(verb) && first && !first.startsWith('chat:')) {
+    const known = await roster()
+    if (known[first]) MANAGERS[first] = known[first]
+  }
   const second = rest.join(' ')
   switch (verb) {
     case 'tree': {
@@ -147,6 +196,42 @@ const main = async () => {
       const letters = Array.from({ length: 6 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('')
       return print(`chat:tile:/::${Date.now()}-${letters}`)
     }
+    case 'roster': {
+      const fromHive = await hiveRoster()
+      return print(fromHive ? { from: `/${GROUP}`, managers: fromHive } : { from: 'the seed table (the hive has no /managers yet; run install)', managers: MANAGERS })
+    }
+    case 'install': {
+      // Idempotent: tiles that are there stay, notes that are there are not
+      // written twice. Adds only.
+      const listed = await send({ op: 'list-at', segments: [GROUP] })
+      if (!listed.ok && /no renderer/.test(String(listed.error))) return fail(listed.error)
+      const have = new Set(listed.ok && Array.isArray(listed.data) ? listed.data : [])
+      const missing = Object.keys(MANAGERS).filter(name => !have.has(name))
+      if (missing.length) {
+        const added = await send({ op: 'add', segments: [GROUP], cells: missing })
+        if (!added.ok) return fail(added.error)
+      }
+      const filed = []
+      for (const [name, convoId] of Object.entries(MANAGERS)) {
+        const notes = await send({ op: 'note-list', segments: [GROUP, name] })
+        const texts = (notes.ok ? notes.data : []).map(note => String(note.text ?? ''))
+        const want = [`${CONVERSATION_NOTE}${convoId}`]
+        const charter = charterOf(name)
+        if (charter) want.push(`${CHARTER_NOTE}${charter}`)
+        for (const text of want) {
+          const prefix = text.slice(0, text.indexOf(': ') + 2)
+          if (texts.some(existing => existing.startsWith(prefix))) continue
+          const reply = await send({ op: 'note-add', segments: [GROUP], cell: name, text })
+          if (!reply.ok) return fail(`${name}: ${reply.error}`)
+          filed.push(`${name} ${prefix.trim()}`)
+        }
+      }
+      const home = await send({ op: 'list-at', segments: [] })
+      return print({
+        added: missing, filed,
+        onHomePage: home.ok && Array.isArray(home.data) ? home.data.includes(GROUP) : 'unknown',
+      })
+    }
     case 'held': {
       const reply = await send({ op: 'effect-last', cell: 'agent:held' })
       return reply.ok ? print(reply.data?.last?.waiting ?? []) : fail(reply.error)
@@ -163,7 +248,7 @@ const main = async () => {
       return print(await send(request))
     }
     default:
-      return fail('usage: manager.cjs tree|read|notes|note|thread|report|ask|convo|held|do|op — see the header of this file')
+      return fail('usage: manager.cjs tree|read|notes|note|thread|report|ask|convo|roster|install|held|do|op — see the header of this file')
   }
 }
 

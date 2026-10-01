@@ -141,10 +141,36 @@ and reports each miss as a harness defect — what was asked, what the model
 did, what the harness should have done. It changes nothing; Claude Code fixes
 the harness.
 
+## Where the managers live
+
+In the hive, not on its home page (jwize, 2026-10-01: *"They don't show on
+the root, you just create them and keep a directory somewhere in a common
+pool. We can also reference them by creating the tile and by adding to the
+portals."*).
+
+- **`/managers` is the directory.** Each manager is a tile under it; its
+  charter and its conversation are notes on that tile (`charter: …`,
+  `conversation: chat:…`). The hive's copy is the one that counts:
+  `manager.cjs roster` reads it, and every verb that takes a manager's name
+  resolves its conversation from it.
+- **Not on the home page.** `/managers` is made by address and nobody enrols
+  it in `root-entries`, so it is a group of its own (`root-entries.md`).
+  Adding a tile commits only the page it is added to, so the home page is
+  never touched. `install` checks and says so.
+- **Reached by reference.** Stand on any page and say `/reference managers`:
+  a reference tile to the directory appears there and clicks through. Pin
+  `managers` in the Portals panel to keep it one click away.
+- **Charters change in the hive.** Edit the `charter:` note on a manager's
+  tile; the org document is the seed `install` writes from, not the truth
+  once a hive holds its managers.
+
 ## Adding a manager
 
-One line in `MANAGERS` in `scripts/bridge/manager.cjs` (its conversation id),
-one charter section above. Nothing else learns its name.
+`node scripts/bridge/manager.cjs install` puts the managers in the seed
+table into the hive — idempotent, adds only. A new manager is a line in
+that table, a charter section above to seed its note, and a run of
+`install`; or, once it is in the hive, simply a new tile under `/managers`
+with its two notes.
 
 ## Making a task
 
