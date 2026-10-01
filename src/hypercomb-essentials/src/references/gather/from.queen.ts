@@ -34,11 +34,14 @@ export class FromQueenBee extends QueenBee {
     { input: '/from people off', result: 'This page stops gathering from people' },
   ]
 
+  /** EDITING, not additive (declarations audit, 2026-10-01): `<group> off`
+   *  detaches an existing link. Not destructive: nothing gathered is touched,
+   *  and saying `/from <group>` again restores the link exactly. */
   override machine = {
     forms: '[<group>] | <group> off',
     bare: true,
     example: '/from people',
-    reach: 'additive' as const,
+    reach: 'editing' as const,
     scope: 'page' as const,
     refuse: (): string | undefined => undefined,
   }

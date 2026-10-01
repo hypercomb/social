@@ -1,8 +1,9 @@
 // clipboard.service.spec.ts — the clipboard's entry semantics, especially
 // the source layer SIG captured at cut/copy intent (the cut+paste-elsewhere
 // fix): captureEntries must PRESERVE sigs, and the restore path depends on
-// that. What the clipboard holds is op-less — cut vs copy is a property of
-// the capture gesture, not of the held record. The module self-registers in
+// that. What the clipboard holds is the same sig reference for a cut or a
+// copy; the one fact kept from the gesture is `cut` — the source page no
+// longer lists the tile, so the entry is its only easy handle. The module self-registers in
 // window.ioc at load, so it is imported dynamically after stubbing the
 // registry.
 
@@ -48,6 +49,17 @@ describe('ClipboardService', () => {
     expect(svc.items[0].sig).toBe(SIG)
     svc.appendEntries([{ label: 'a', sourceSegments: ['elsewhere'] }])
     expect(svc.count).toBe(2)
+  })
+
+  it('keeps the cut mark through a capture, and an upsert never erases it', () => {
+    // A held cut is the tile's only easy handle (its page no longer lists it);
+    // the mark is what lets a machine be refused a copy over it.
+    svc.captureEntries([{ label: 'a', sourceSegments: ['page'], cut: true }, { label: 'b', sourceSegments: ['page'] }])
+    expect(svc.items.map(i => [i.label, i.cut === true])).toEqual([['a', true], ['b', false]])
+    svc.appendEntries([{ label: 'a', sourceSegments: ['page'], sig: SIG }])
+    expect(svc.items.find(i => i.label === 'a')).toEqual({ label: 'a', sourceSegments: ['page'], sig: SIG, cut: true })
+    // A copy entry carries no mark at all, so a held copy is never mistaken for one.
+    expect(svc.items.find(i => i.label === 'b')).not.toHaveProperty('cut')
   })
 
   it('removeItems filters by label without disturbing other entries', () => {

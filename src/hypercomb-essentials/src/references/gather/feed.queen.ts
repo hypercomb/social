@@ -34,11 +34,14 @@ export class FeedQueenBee extends QueenBee {
     { input: '/feed friends off', result: 'friends stops receiving what you add here' },
   ]
 
+  /** EDITING, not additive (declarations audit, 2026-10-01): `<page> off`
+   *  switches an existing target off — a standing setting changed in place,
+   *  nothing gathered touched, the same word turning it back on. */
   override machine = {
     forms: '[<page>] | <page> off',
     bare: true,
     example: '/feed friends',
-    reach: 'additive' as const,
+    reach: 'editing' as const,
     scope: 'page' as const,
     refuse: (): string | undefined => undefined,
   }

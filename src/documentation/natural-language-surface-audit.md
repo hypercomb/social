@@ -450,9 +450,26 @@ three doors inherit it, and to grow a principal.
    then `/copy y` IS `/remove x`, and a lower reach would let a machine say it
    in two steps. A machine's gentle move is `/copy`, `/paste`, `/hide` (hide
    first, delete second). Its catalogue entry now states that consequence, and
-   `MachineReach` names `/hide` and `/cut` as the deliberate cases. **Still
-   owed:** audit the other eleven declarations before `reach` is ever read as
-   a tier.
+   `MachineReach` names `/hide` and `/cut` as the deliberate cases.
+
+   **The declarations audit — done 2026-10-01.** `reach` already WAS read as a
+   tier (the gate compares it with the grant), so every declaration was checked
+   against what its admitted forms do. Twenty, not twelve, now declare; fifteen
+   held. Five were wrong, and `commands/machine-declarations.spec.ts` pins all
+   twenty through the live census:
+
+   | verb | was | now | why |
+   |---|---|---|---|
+   | `/module` | editing / network | additive / local, `list` only | `drop` deletes the participant's pick and nothing lists the draft after; it joined the participant-only words. The bare word, which `bare: true` calls real, was also refused by its own rule |
+   | `/postit here` | additive | editing | replaces an existing note's text |
+   | `/feed` | additive | editing | `<page> off` switches an existing target off |
+   | `/from` | additive | editing | `<group> off` detaches an existing link (the same word restores it, so not destructive) |
+   | `/references` | page | local | opens two panels, writes nothing |
+   | `/copy` | additive | additive, now TRUE | a fresh copy replaced a tile the participant cut and had not placed; the clipboard now marks a held cut, and a machine is refused a copy over one |
+
+   Found on the way: the clipboard's `validate()` rewrote its record without
+   the entries' sigs, so a restored cut whose page no longer lists it could
+   not be pasted — it now writes through `#persistMeta`, the one writer.
 4. ~~**Fix `/undo N`** — the repair verb, silently broken.~~ **Resolved
    2026-09-04** by `44f720d3f`: the cursor serializes its own walks, so N steps
    land regardless of caller. Still owed on top — `undo.queen.ts` reports the
@@ -501,3 +518,12 @@ three doors inherit it, and to grow a principal.
     word, and read ONLY after a door's lookup missed. Live always wins: a word
     given back, or aliased by the participant, runs; its old record is never
     read. A record can explain a missing word and cannot hide a present one.
+11. **The bridge does not run a behaviour's own `refuse`** (found by the
+    declarations audit, 2026-10-01). Only the model channel's parser calls it,
+    so over the bridge the rules a behaviour states for machines do not apply:
+    `/module commit` ("publishes; only the participant says it"), `/language
+    offer`, clearing a title with `/title x =`, `/copy` over a held cut. The
+    gate there reads reach and scope alone. Declarations bound the forms their
+    `refuse` admits — their contract — so the fix belongs at the door: run the
+    resolved entry's `refuse` on the slash head's arguments, as the model
+    channel does. Owed.

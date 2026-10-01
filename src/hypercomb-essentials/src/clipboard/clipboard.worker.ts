@@ -1,19 +1,8 @@
 // core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
-import { ClipboardService, type ClipboardOp } from './clipboard.service.js'
+import { ClipboardService, type ClipboardEntry, type ClipboardOp } from './clipboard.service.js'
 import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig } from '../history/layer-placement.js'
 import { seedLayerKeyedEntries } from '../editor/tile-properties.js'
-
-interface ClipboardEntry {
-  label: string
-  sourceSegments: readonly string[]
-  /** The COLLECTION sig, captured at cut/copy intent: a merkle fold of
-   *  the cell's live subtree (sealSubtree), falling back to the parent's
-   *  stored child sig. One sig carries the whole subtree — paste appends
-   *  it to the destination's children and nothing else. History is
-   *  append-only, so it resolves at any destination, forever. */
-  sig?: string
-}
 
 interface SelectionLike {
   readonly selected: ReadonlySet<string>
@@ -368,7 +357,7 @@ export class ClipboardWorker extends Worker {
         const group = groups.get(key) ?? { parentSegs, leaves: new Set<string>() }
         group.leaves.add(leaf)
         groups.set(key, group)
-        const entry: ClipboardEntry = { label: leaf, sourceSegments: parentSegs }
+        const entry: ClipboardEntry = { label: leaf, sourceSegments: parentSegs, cut: true }
         moved.push(entry)
         movedByKey.set(`${key}/${leaf}`, entry)
       }
@@ -523,6 +512,7 @@ export class ClipboardWorker extends Worker {
         label: i.label,
         sourceSegments: [...i.sourceSegments],
         ...(i.sig ? { sig: i.sig } : {}),
+        ...(i.cut ? { cut: true } : {}),
       })),
     })
   }
@@ -928,16 +918,11 @@ export class ClipboardWorker extends Worker {
 
     svc.removeItems(invalid)
 
-    if (svc.isEmpty) {
-      await clearClipboard(store)
-    } else {
-      await writeMeta(store, {
-        items: svc.items.map(i => ({
-          label: i.label,
-          sourceSegments: [...i.sourceSegments],
-        })),
-      })
-    }
+    // The ONE writer, so the survivors keep their sealed sigs. This used to
+    // write label + path only — the very strip #persistMeta exists to end — and
+    // a restored CUT item whose parent no longer lists it then had nothing to
+    // paste from.
+    await this.#persistMeta()
   }
 
   // ── hierarchy: child count at a location ──────────────
@@ -1052,7 +1037,7 @@ export class ClipboardWorker extends Worker {
 // drains, removed after the first pool-doc write.
 
 interface ClipboardMeta {
-  items: { label: string; sourceSegments: string[]; sig?: string }[]
+  items: { label: string; sourceSegments: string[]; sig?: string; cut?: boolean }[]
 }
 
 const META_SUBKEY = 'clipboard-meta'

@@ -246,8 +246,8 @@ export const admitMachineCall = (
   }
 
   // SCOPE IS DECLARED AS A CEILING, and a MISSING scope is UNKNOWN rather than
-  // a default. The twelve values that exist were each traced to their commit;
-  // a thirteenth that declares none has not been judged, so it passes only
+  // a default. Every value that exists was traced to its code (the 2026-10-01
+  // declarations audit); one that declares none has not been judged, so it passes only
   // while the grant is at its widest, and drops out the moment a participant
   // tightens anything. Refusing what has not been judged is the safe
   // direction — and it is the direction that makes declaring a scope worth

@@ -60,6 +60,19 @@ const refuseTargets = (verb: string, bare: boolean) => (args: string): string | 
   return undefined
 }
 
+/** A fresh `/copy` REPLACES what the clipboard holds. A tile the participant
+ *  CUT and has not placed is held nowhere else — its page no longer lists it —
+ *  so a machine's copy over it would leave it reachable by undo alone: the end
+ *  state of `/remove`, from a verb declared additive (declarations audit,
+ *  2026-10-01). So while such a tile is held, a machine may not copy over it;
+ *  the participant's own copy is untouched, and so is everything else held. */
+const refuseOverHeldCut = (verb: string): string | undefined => {
+  const held = get<{ items?: readonly { cut?: boolean }[] }>('@diamondcoreprocessor.com/ClipboardService')?.items ?? []
+  return held.some(item => item.cut)
+    ? `${verb} would replace a tile the participant cut and has not placed yet; leave the clipboard to them`
+    : undefined
+}
+
 abstract class ClipboardVerbQueen extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
 
@@ -144,7 +157,7 @@ export class CopyQueenBee extends ClipboardVerbQueen {
     example: '/copy drafts',
     reach: 'additive' as const,
     scope: 'hive' as const,
-    refuse: refuseTargets('/copy', false),
+    refuse: (args: string): string | undefined => refuseTargets('/copy', false)(args) ?? refuseOverHeldCut('/copy'),
   }
 
   protected readonly action = 'copy'

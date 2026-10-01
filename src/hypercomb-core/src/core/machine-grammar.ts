@@ -121,9 +121,10 @@ export interface MachineGrammar {
    * must bound the worst case, not describe the common one.
    *
    * Unstated defaults to `'hive'` in meaning, but a gate should treat a MISSING
-   * scope as unknown rather than as `'hive'`: the twelve values that exist were
-   * each traced to their commit, and a thirteenth that declares none has not
-   * been. Refusing what has not been judged is the safe direction.
+   * scope as unknown rather than as `'hive'`: every value that exists was
+   * traced to its code (twenty of them, audited 2026-10-01 — commands/
+   * machine-declarations.spec.ts pins each), and one that declares none has
+   * not been. Refusing what has not been judged is the safe direction.
    */
   readonly scope?: MachineScope
 
