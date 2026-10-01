@@ -134,22 +134,24 @@ const layer = async (pool, name, files) => {
 
 /** Every record the pool holds, found by its first bytes: revisions and stories. */
 const scan = async (pool = poolDir(BUILDS_MEANING)) => {
-  const builds = [], stories = []
-  const isBuild = Buffer.from('{"name":"build",'), isStory = Buffer.from('{"name":"story",')
+  const builds = [], stories = [], served = []
+  const isBuild = Buffer.from('{"name":"build",'), isStory = Buffer.from('{"name":"story",'), isServed = Buffer.from('{"name":"served",')
   for (const name of await readdir(pool).catch(() => [])) {
     if (!SIG.test(name)) continue
     const handle = await open(resolve(pool, name))
-    const head = Buffer.alloc(isBuild.length)
+    const head = Buffer.alloc(isServed.length)
     await handle.read(head, 0, head.length, 0).finally(() => handle.close())
-    if (!head.equals(isBuild) && !head.equals(isStory)) continue
+    const kind = head.equals(isServed) ? 'served' : head.subarray(0, isBuild.length).equals(isBuild) ? 'build' : head.subarray(0, isStory.length).equals(isStory) ? 'story' : null
+    if (!kind) continue
     // The first bytes only sort; a tile named "build" or "story" (a unit, a
     // folder) starts the same way, so a record must also be one.
     const record = await readJson(pool, name).catch(() => null)
     if (typeof record?.label !== 'string') continue
-    if (head.equals(isBuild) && typeof record.version === 'string') builds.push({ sig: name, record })
-    else if (head.equals(isStory)) stories.push({ sig: name, record })
+    if (kind === 'build' && typeof record.version === 'string') builds.push({ sig: name, record })
+    else if (kind === 'story') stories.push({ sig: name, record })
+    else if (kind === 'served' && typeof record.at === 'string' && SIG.test(record.files ?? '')) served.push({ sig: name, record })
   }
-  return { builds, stories }
+  return { builds, stories, served }
 }
 const order = version => version.split('.').map(Number).reduce((n, part, i) => n + part * [1e8, 1e6, 1e4, 1][i], 0)
 
@@ -318,10 +320,15 @@ const closureOf = async (pool, sigs) => {
  *  the signatures of promoted revisions. Staged work never leaves the device. */
 export const published = async () => {
   const pool = poolDir(BUILDS_MEANING)
-  const { builds, stories: told } = await scan(pool)
+  const { builds, stories: told, served } = await scan(pool)
   const promoted = builds.filter(r => r.record.version !== STAGED).map(r => r.sig)
   const buildsSet = await closureOf(pool, promoted)
   for (const { sig } of told) buildsSet.add(sig)
+  for (const { sig, record } of served) {
+    buildsSet.add(sig)
+    buildsSet.add(record.files)
+    for (const file of Object.values((await readJson(pool, record.files).catch(() => null))?.files ?? {})) buildsSet.add(file)
+  }
   const promotedSet = new Set(promoted)
   const signatures = new Set((await readSignatures()).filter(({ event }) => promotedSet.has(tag(event, 'b'))).map(({ file }) => file))
   return { [BUILDS_MEANING]: buildsSet, [SIGNATURES_MEANING]: signatures }
@@ -339,6 +346,8 @@ export const collect = async () => {
   ]
   const reach = await closureOf(pool, live)
   for (const { sig } of told) reach.add(sig)
+  // What a host served is history too: snapshots and every file they name.
+  for (const name of (await published())[BUILDS_MEANING]) reach.add(name)
   for (const entry of Object.values(stage)) for (const sig of entry.conversations ?? []) reach.add(sig)
   let removed = 0
   for (const name of await readdir(pool).catch(() => [])) {
@@ -541,6 +550,83 @@ const takePools = async dir => {
   return taken
 }
 
+// ── what a host serves ───────────────────────────────────────────────────────
+/**
+ * A FOLLOWER MUST BE ABLE TO STAND IN FOR ITS HOST. The version pools carry
+ * the history — every revision, its source and its atoms — but a host serves
+ * more than its history: the package laid out the way an install reads it
+ * (the host:packages pool, the bags, the transfer pack), the minimal host's
+ * own front files. None of that is a revision, so none of it travelled, and a
+ * follower could rebuild the code but not serve it (host/drill.mjs).
+ *
+ * So a host names the directory it serves (`serves <dir>`), and every sync
+ * records what that directory holds: a snapshot, `{ name: 'served', label,
+ * at, files }`, whose `files` layer names each file by path and signature, the
+ * bytes kept in the pool beside everything else. Snapshots are appended,
+ * never edited, and travel like revisions, so a follower — or any device that
+ * pulled one — serves exactly what the host served with one command
+ * (`host <dir>`). Hosting your own domain and following someone else's are
+ * the same process: the tools write into the directory you serve, and the
+ * pool carries it. The version pools are left out of a snapshot; they travel
+ * on their own and `host` writes them beside it.
+ */
+export const serves = async dir => {
+  if (dir) await writeLocal('serves.json', { dir: resolve(dir) })
+  return (await readLocal('serves.json', null))?.dir ?? null
+}
+
+const SNAPSHOT_LAYER = 'served-files'
+const servedSnapshots = async (pool = poolDir(BUILDS_MEANING)) =>
+  (await scan(pool)).served.sort((a, b) => a.record.at < b.record.at ? 1 : a.record.at > b.record.at ? -1 : (a.sig < b.sig ? -1 : 1))
+
+/** Record what the served directory holds now; appended only when it changed. */
+export const snapshotServed = async ({ now = new Date() } = {}) => {
+  const dir = await serves()
+  if (!dir) return null
+  const pool = poolDir(BUILDS_MEANING)
+  await mkdir(pool, { recursive: true })
+  const skip = new Set([sign(BUILDS_MEANING), sign(SIGNATURES_MEANING)])
+  const named = {}
+  const walk = async from => {
+    for (const entry of await readdir(from, { withFileTypes: true })) {
+      const path = resolve(from, entry.name)
+      if (from === dir && skip.has(entry.name)) continue
+      if (entry.isDirectory()) await walk(path)
+      else if (entry.isFile()) named[relative(dir, path).split(sep).join('/')] = await keep(pool, await readFile(path))
+    }
+  }
+  await walk(dir)
+  const ordered = Object.fromEntries(Object.entries(named).sort(([a], [b]) => a < b ? -1 : 1))
+  const files = await keep(pool, Buffer.from(JSON.stringify({ name: SNAPSHOT_LAYER, files: ordered })))
+  const [last] = await servedSnapshots(pool)
+  if (last?.record.files === files) return last
+  const record = { name: 'served', label: 'host', at: now.toISOString(), files }
+  return { sig: await keep(pool, Buffer.from(JSON.stringify(record))), record }
+}
+
+/** Serve what the newest snapshot names into `dir`, each file checked
+ *  against its signature, with the version pools beside it. Additive: a file
+ *  already holding the right bytes is left alone; nothing else is removed. */
+export const writeServed = async dir => {
+  const pool = poolDir(BUILDS_MEANING)
+  const [newest] = await servedSnapshots(pool)
+  if (!newest) throw new Error('this pool holds no served snapshot — the host it came from never declared what it serves (builds.mjs serves <dir>)')
+  const { files } = await readJson(pool, newest.record.files)
+  let written = 0
+  for (const [path, fileSig] of Object.entries(files)) {
+    if (path.split('/').includes('..') || path.startsWith('/')) throw new Error(`${path} leaves the directory`)
+    const bytes = await readFile(resolve(pool, fileSig))
+    if (sign(bytes) !== fileSig) throw new Error(`${path} does not hash to ${short(fileSig)}`)
+    const to = resolve(dir, path)
+    const have = await readFile(to).catch(() => null)
+    if (have && sign(have) === fileSig) continue
+    await put(to, bytes)
+    written++
+  }
+  const carried = await carryPools(dir, { atoms: true })
+  return { ...newest, files: Object.keys(files).length, written, carried }
+}
+
 // ── the pools on hosts ───────────────────────────────────────────────────────
 /**
  * THE ATOMS A KERNEL ASKS FOR. A pure install whose origin lacks its host
@@ -648,6 +734,10 @@ export const unsubscribe = async to => {
 /** Carry promoted work to every subscription: [{ to, ok, detail }]. */
 export const sync = async ({ put = wranglerPut, now = new Date() } = {}) => {
   const subs = await readSubscriptions()
+  if (subs.length) await snapshotServed({ now })
+  // The host's own directory lists its pools as its followers will.
+  const own = await serves()
+  if (own) await carryPools(own, { atoms: true })
   const head = await headOf(poolDir(BUILDS_MEANING))
   const report = []
   for (const sub of subs) {
@@ -660,7 +750,10 @@ export const sync = async ({ put = wranglerPut, now = new Date() } = {}) => {
         detail = `${r.uploaded} uploaded, ${r.present} already there`
       } else {
         await access(sub.to).catch(() => { throw new Error('the directory is not there') })
-        detail = `${await carryPools(sub.to, { atoms: true })} new file(s)`
+        const carried = await carryPools(sub.to, { atoms: true })
+        const [snapshot] = await servedSnapshots()
+        detail = `${carried} new file(s)`
+        if (snapshot) detail += ` · serves ${(await writeServed(sub.to)).files} file(s) as the host does`
       }
       sub.synced = head; sub.at = now.toISOString()
       report.push({ to: sub.to, ok: true, detail })
@@ -910,6 +1003,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     } else if (command === 'subscribe') console.log(`subscribed: ${await subscribe(ref)} — every promotion is carried there`)
     else if (command === 'unsubscribe') console.log(`unsubscribed: ${await unsubscribe(ref)}`)
     else if (command === 'sync') printSync(await sync())
+    else if (command === 'serves') {
+      const dir = await serves(ref)
+      console.log(dir ? `serves ${dir} — every sync records what it holds, so followers serve it too` : 'serves nothing yet: builds.mjs serves <the directory this host serves>')
+    } else if (command === 'host') {
+      if (!ref) throw new Error('host wants a directory')
+      const r = await writeServed(resolve(ref))
+      console.log(`serving the host's snapshot of ${r.record.at} in ${resolve(ref)}: ${r.files} file(s), ${r.written} written, ${r.carried} pool file(s) carried`)
+    }
     else if (command === 'show') await show(ref)
     else if (command === 'out') {
       if (!rest[0]) throw new Error('out wants a directory')

@@ -232,6 +232,24 @@ bucket behind the worker). Each subscription remembers the head it last
 received; the listing warns when one is behind, and `sync` carries what did
 not arrive.
 
+**A follower serves what its host serves.** The version pools carry the
+history, but a host serves more than history: the package laid out the way an
+install reads it (the `host:packages` pool, the bags, the transfer pack) and
+the minimal host's own front files. So a host names the directory it serves,
+once, and every `sync` records a snapshot of it into the pool — each file by
+path and signature, appended only when something changed:
+
+```bash
+node host/builds.mjs serves ../hypercomb-relay/content   # what this host serves
+node host/builds.mjs host ~/mirror                       # serve it from the pool alone
+```
+
+A directory subscriber is written as the host's double on every sync; any
+device that pulled the pools serves the same with `host`. Hosting your own
+domain and following someone else's are the same process. (An R2 subscriber
+receives the snapshots in its pools; laying them out in the bucket is still
+to come.)
+
 **The drill proves it.** The code lives only through replication, so a
 follower must be able to stand in for the origin entirely. `node
 host/drill.mjs` tests exactly that, end to end: an origin builds and

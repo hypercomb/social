@@ -90,9 +90,11 @@ try {
   const origin = { pools: at('origin', 'pools'), out: at('origin', 'out'), host: at('origin', 'host') }
 
   // ── 1. THE ORIGIN AUTHORS ─────────────────────────────────────────────────
-  // The package as a host serves it: copy-content into the origin's content
-  // directory (the relay's, additive) — the same step every build ships with.
-  run('copy-content', [tsx, resolve(ESSENTIALS, 'scripts', 'copy-content.ts')], {
+  // The package as a host serves it, PUBLISHED: copy-content --publish into
+  // the origin's content directory (the relay's, additive) — the ship a host
+  // offering the package runs. Without --publish it is a working build, which
+  // no host offers and no follower could discover.
+  run('copy-content --publish', [tsx, resolve(ESSENTIALS, 'scripts', 'copy-content.ts'), '--publish', '--name', 'essentials'], {
     HYPERCOMB_WEB_CONTENT_DIR: at('origin', 'web-feed'), HYPERCOMB_RELAY_CONTENT_DIR: origin.host,
   }, ESSENTIALS)
   // The minimal host, built pure; it stages itself and the package.
@@ -101,8 +103,8 @@ try {
   await mkdir(follower, { recursive: true })
   builds(origin.pools, 'subscribe', follower)
   const signed = { HYPERCOMB_POOLS_DIR: origin.pools, HYPERCOMB_SIGNER_KEY: KEY }
-  const promoteHost = run('promote host', [resolve(HERE, 'builds.mjs'), 'promote', 'host'], signed)
-  const promotePkg = run('promote package', [resolve(HERE, 'builds.mjs'), 'promote', 'hypercomb-essentials'], signed)
+  const promoteHost = run('promote host', [resolve(HERE, 'builds.mjs'), 'promote', 'host', '--no-sync'], signed)
+  const promotePkg = run('promote package', [resolve(HERE, 'builds.mjs'), 'promote', 'hypercomb-essentials', '--no-sync'], signed)
   const version = text => /\b(\d{4}\.\d+\.\d+\.\d+)\b/.exec(text)?.[1]
   const hostVersion = version(promoteHost)
   const pkgVersion = version(promotePkg)
@@ -116,6 +118,10 @@ try {
     await mkdir(dirname(to), { recursive: true })
     await readFile(to).catch(async () => (await import('node:fs/promises')).copyFile(at('origin', 'origin-out', path), to))
   }
+  // The origin declares what it serves, and syncs: its followers receive it.
+  builds(origin.pools, 'serves', origin.host)
+  const synced = run('sync', [resolve(HERE, 'builds.mjs'), 'sync'], signed)
+  must(!/NOT SYNCED/.test(synced), synced)
   // What the origin knew, before it is lost: the source it recorded.
   builds(origin.pools, 'source', hostVersion, at('expected', 'host-src'))
   builds(origin.pools, 'source', pkgVersion, at('expected', 'pkg-src'))
@@ -145,6 +151,15 @@ try {
     const listing = builds(device)
     must(listing.includes(hostVersion) && listing.includes(pkgVersion), `the device does not list ${hostVersion} and ${pkgVersion}`)
     return pulled.trim().replace(/\s+/g, ' ')
+  })
+
+  await check('the device serves exactly what the origin served, from the pulled pools alone', async () => {
+    builds(device, 'host', at('device', 'host'))
+    const has = await inventory(at('device', 'host'))
+    const missing = [...originServes].filter(([p]) => !has.has(p))
+    const differ = [...originServes].filter(([p, h]) => has.has(p) && has.get(p) !== h)
+    must(!differ.length && !missing.length, `${missing.length} missing, ${differ.length} different: ${[...missing, ...differ].slice(0, 5).map(([p]) => p).join(', ')}`)
+    return `${originServes.size} files`
   })
 
   await check('the minimal host restores from the device alone and passes check-pure', async () => {
@@ -192,9 +207,21 @@ try {
   })
 
   await check('a cold visitor to the follower discovers the package (host:packages names it)', async () => {
-    const listing = await fetch(`${live.url}/${poolOf('host:packages')}/`).then(r => r.ok ? r.text() : '')
-    must(listing.trim(), `the follower serves no ${poolOf('host:packages').slice(0, 12)}… (host:packages) pool — its front door would offer nothing`)
-    return 'host:packages served'
+    // The way the runtime discovers (host-pool.ts): members 00000000… under
+    // the pool, the newest naming the package root on its first line.
+    const pool = poolOf('host:packages')
+    const members = []
+    for (let i = 0; ; i++) {
+      const r = await fetch(`${live.url}/${pool}/${String(i).padStart(8, '0')}`)
+      if (!r.ok) break
+      members.push(await r.text())
+    }
+    must(members.length, `the follower serves no ${pool.slice(0, 12)}… (host:packages) member — its front door would offer nothing`)
+    const root = members.at(-1).split('\n')[0].trim()
+    must(SIG.test(root), `the newest member names no package root: ${members.at(-1).slice(0, 80)}`)
+    const bytes = Buffer.from(await (await fetch(`${live.url}/${root}`)).arrayBuffer())
+    must(sign(bytes) === root, `the package root ${root.slice(0, 12)} is not served, or not what it is named`)
+    return `${members.length} member(s), head ${root.slice(0, 12)} served and verified`
   })
 
   await check('a device can author from its restored copy: change, build and promote a revision chained to the one it pulled', async () => {

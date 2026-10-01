@@ -192,6 +192,91 @@ describe('participant signatures', () => {
   })
 })
 
+describe('what a host serves', () => {
+  // A host's directory beyond its history: a package laid out for installs,
+  // a discovery pool member, front files. Written as a host's tools would.
+  const hostDir = async (dir: string, extra: Record<string, string> = {}) => {
+    const all: Record<string, string> = {
+      'index.html': '<html>front</html>', '.htaccess': 'Header set X 1',
+      ['a'.repeat(64)]: 'leaf', [`${'b'.repeat(64)}/00000000`]: `${'a'.repeat(64)}\nessentials`, ...extra,
+    }
+    for (const [path, text] of Object.entries(all)) {
+      await mkdir(resolve(dir, path, '..'), { recursive: true })
+      await writeFile(resolve(dir, path), text)
+    }
+    return all
+  }
+  const tree = async (dir: string, out: Record<string, string> = {}, at = dir): Promise<Record<string, string>> => {
+    for (const e of await readdir(at, { withFileTypes: true })) {
+      const p = resolve(at, e.name)
+      if (e.isDirectory()) await tree(dir, out, p)
+      else out[p.slice(dir.length + 1)] = (await readFile(p)).toString()
+    }
+    return out
+  }
+
+  it('a follower serves everything its host serves, and so does any device that pulls it', async () => {
+    const origin = resolve(root, 'origin-host')
+    const want = await hostDir(origin)
+    await builds.serves(origin)
+    const follower = resolve(root, 'follower')
+    await mkdir(follower)
+    await builds.subscribe(follower)
+    await record(undefined, 'a')
+    const [report] = await builds.sync()
+    expect(report.ok).toBe(true)
+    expect(report.detail).toMatch(/serves 4 file\(s\) as the host does/)
+    const held = await tree(follower)
+    for (const [path, text] of Object.entries(want)) expect(held[path]).toBe(text)
+
+    // A device with nothing pulls the follower and serves the same.
+    const served = async (url: string) => {
+      const path = new URL(url).pathname.replace(/^\/content/, '')
+      const file = resolve(follower, '.' + (path.endsWith('/') ? path + 'index.html' : path))
+      try { return new Response(await readFile(file)) } catch { return new Response('', { status: 404 }) }
+    }
+    process.env.HYPERCOMB_POOLS_DIR = resolve(root, 'device')
+    await builds.pullPools(['https://follower.test'], { fetch: served })
+    const device = resolve(root, 'device-host')
+    const r = await builds.writeServed(device)
+    expect(r.files).toBe(4)
+    const again = await tree(device)
+    for (const [path, text] of Object.entries(want)) expect(again[path]).toBe(text)
+  })
+
+  it('records a snapshot only when what is served changed, and keeps every one through collection', async () => {
+    const origin = resolve(root, 'origin-host')
+    await hostDir(origin)
+    await builds.serves(origin)
+    const first = await builds.snapshotServed({ now: DAY })
+    expect((await builds.snapshotServed({ now: new Date('2026-09-27T00:00:00Z') })).sig).toBe(first.sig)
+    await writeFile(resolve(origin, 'index.html'), '<html>new front</html>')
+    const second = await builds.snapshotServed({ now: new Date('2026-09-28T00:00:00Z') })
+    expect(second.sig).not.toBe(first.sig)
+    await stage(undefined, 'a')
+    await stage(undefined, 'b')          // replaces the stage: collection runs
+    await builds.collect()
+    const pool = resolve(root, 'pools', builds.sign(builds.BUILDS_MEANING))
+    expect(await files(pool)).toEqual(expect.arrayContaining([first.sig, second.sig, first.record.files, second.record.files]))
+  })
+
+  it('refuses to serve a file that is not what the snapshot names', async () => {
+    const origin = resolve(root, 'origin-host')
+    await hostDir(origin)
+    await builds.serves(origin)
+    const { record: snap } = await builds.snapshotServed({ now: DAY })
+    const pool = resolve(root, 'pools', builds.sign(builds.BUILDS_MEANING))
+    const front = JSON.parse((await readFile(resolve(pool, snap.files))).toString()).files['index.html']
+    await writeFile(resolve(pool, front), '<html>tampered</html>')
+    await expect(builds.writeServed(resolve(root, 'out'))).rejects.toThrow(/does not hash/)
+  })
+
+  it('says plainly when a pool holds no snapshot to serve', async () => {
+    await record(undefined, 'a')
+    await expect(builds.writeServed(resolve(root, 'out'))).rejects.toThrow(/never declared what it serves/)
+  })
+})
+
 describe('pools on hosts', () => {
   it('pushes both pools to a host and pulls them into another device', async () => {
     const first = await record(undefined, 'a')
