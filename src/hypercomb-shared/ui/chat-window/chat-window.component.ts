@@ -6396,6 +6396,19 @@ export class ChatWindowComponent implements OnDestroy {
       contextWindowTokens: firstModel ? router.contextLengthForModel?.(firstModel) : undefined,
     })
     const messages: LlmMessageLike[] = transcriptForModel(compiledContext.turns, firstModel)
+    // THE QUESTION ALWAYS REACHES THE MODEL. The transcript is read from the
+    // window's thread in hand, and "open the chat and ask" (the `chat` word,
+    // the remote door) starts a new conversation and sends in the same breath
+    // — the rail mints that conversation a moment later, so the thread in
+    // hand was empty and the worker was sent the system text and NOTHING
+    // ELSE. It answered with an end-of-sentence token, or by continuing the
+    // doctrine, and the receipt said "answered" (jwize's 4250 session,
+    // 2026-10-01). Whatever the thread holds, the message being asked is the
+    // last thing the model reads.
+    const asked = messages.at(-1)
+    if (asked?.role !== 'user' || !String(asked.content ?? '').includes(message.trim().slice(0, 200))) {
+      messages.push({ role: 'user', content: message })
+    }
 
     // PROVENANCE FOR THE TURN (anatomy-context-need §6): the anatomy this
     // answer will be framed by, and the page/selection it was asked from —
