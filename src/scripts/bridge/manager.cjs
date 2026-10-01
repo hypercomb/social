@@ -13,6 +13,7 @@
 //   node scripts/bridge/manager.cjs thread <manager|convoId> [n]   the last n turns
 //   node scripts/bridge/manager.cjs report <manager> "<text>"      write into the manager's own conversation
 //   node scripts/bridge/manager.cjs ask <manager|convoId> "<request>"   hand work to the hive's own models, wait, print the result
+//   node scripts/bridge/manager.cjs convo                    a fresh conversation id, for one job of its own
 //   node scripts/bridge/manager.cjs held                     what waits on the participant in Execution
 //   node scripts/bridge/manager.cjs do "<behaviour sentence>"      one line through the command line
 //   node scripts/bridge/manager.cjs op '<request json>'      a raw bridge request
@@ -121,6 +122,10 @@ const main = async () => {
       }
       return fail(`no result for ${askId} in time; the turn may still be running — manager.cjs thread ${first} shows where it got to`)
     }
+    case 'convo': {
+      const letters = Array.from({ length: 6 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('')
+      return print(`chat:tile:/::${Date.now()}-${letters}`)
+    }
     case 'held': {
       const reply = await send({ op: 'effect-last', cell: 'agent:held' })
       return reply.ok ? print(reply.data?.last?.waiting ?? []) : fail(reply.error)
@@ -137,7 +142,7 @@ const main = async () => {
       return print(await send(request))
     }
     default:
-      return fail('usage: manager.cjs tree|read|notes|note|thread|report|ask|held|do|op — see the header of this file')
+      return fail('usage: manager.cjs tree|read|notes|note|thread|report|ask|convo|held|do|op — see the header of this file')
   }
 }
 

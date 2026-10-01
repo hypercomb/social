@@ -145,3 +145,12 @@ the harness.
 
 One line in `MANAGERS` in `scripts/bridge/manager.cjs` (its conversation id),
 one charter section above. Nothing else learns its name.
+
+## Making a task
+
+`/hive-task <what should be done or looked after>` (the skill in
+`.claude/skills/hive-task/`) turns a request into a task that works the
+moment it is pasted into a new Sonnet session: it checks the routes against
+the live hive, picks the manager (or adds one), and fills the brief — job,
+where, what done means, how to delegate, limits, the pass. A one-off job gets
+a conversation of its own: `node scripts/bridge/manager.cjs convo`.
