@@ -158,16 +158,17 @@ describe('streamRoutedModel', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
-  it('a named provider still busy after the retry fails with its own error', async () => {
+  it('a named provider still busy after every retry fails with its own error', async () => {
     registry.register(descriptor('named-stuck', 'unused'))
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"engine_overloaded"}', { status: 429 })))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"engine_overloaded"}', { status: 429, headers: { 'retry-after': '0' } })))
     await expect((async () => {
       for await (const _chunk of streamRoutedModel({
         providerId: 'named-stuck',
         messages: [{ role: 'user', content: 'hello' }],
       })) { /* consume */ }
     })()).rejects.toThrow(/named-stuck API 429/)
-    expect(fetch).toHaveBeenCalledTimes(2)
+    // The first ask and three patient passes after it.
+    expect(fetch).toHaveBeenCalledTimes(4)
   })
 
   it('does not ask again when the failure was not a busy vendor', async () => {
@@ -647,7 +648,7 @@ describe('the participant\'s own local chat', () => {
     const { LOCAL_MODEL_STORAGE_KEY, participantLocalChoice } = await import('./llm-dispatch.js')
     const { llmKeyStore } = await import('@hypercomb/core')
     registry.register(localish('down-local'))
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('model not loaded', { status: 500 })))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('model not loaded', { status: 500, headers: { 'retry-after': '0' } })))
     await expect(drainStream({ providerId: 'down-local', messages: [{ role: 'user', content: 'hello' }] })).rejects.toThrow('500')
     expect(localStorage.getItem(LOCAL_MODEL_STORAGE_KEY)).toBeNull()
 
@@ -709,6 +710,38 @@ describe('a busy upstream is routed around, not asked again', () => {
     expect(chunks.map(chunk => chunk.text).join('')).toBe('made it')
     expect(JSON.parse(bodies[0])).toEqual({ ignore: [] })
     expect(JSON.parse(bodies[1])).toEqual({ ignore: ['deepinfra'] })
+  })
+
+  it('a router that cannot honour the ignore list is asked again plainly, at once', async () => {
+    const bodies: string[] = []
+    registry.register({
+      ...descriptor('one-road', 'made it'),
+      toRequest: request => ({
+        url: 'https://one-road.example.test',
+        init: { method: 'POST', body: JSON.stringify({ ignore: request.ignoreUpstreams ?? [] }) },
+      }),
+    })
+    const ignoredAll = JSON.stringify({ error: { message: 'All providers have been ignored. To change your default ignored providers, visit your settings', code: 404 } })
+    let calls = 0
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      calls += 1
+      bodies.push(String(init?.body ?? ''))
+      if (calls === 1) return new Response(overloaded, { status: 429, headers: { 'retry-after': '0' } })
+      if (calls === 2) return new Response(ignoredAll, { status: 404 })
+      if (calls === 3) return new Response(overloaded, { status: 429, headers: { 'retry-after': '0' } })
+      return new Response('{}', { status: 200 })
+    }))
+
+    const chunks: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({
+      providerId: 'one-road',
+      messages: [{ role: 'user', content: 'survey the root' }],
+    })) chunks.push(chunk)
+
+    expect(chunks.map(chunk => chunk.text).join('')).toBe('made it')
+    // Busy; then the ignore list empties the route; then plainly, and the
+    // host that is busy again is waited for, never ignored a second time.
+    expect(bodies.map(body => JSON.parse(body).ignore)).toEqual([[], ['deepinfra'], [], []])
   })
 
   it('when the only model fails twice, the word says to switch on another', async () => {

@@ -652,11 +652,15 @@ const coolingUntil = new Map<string, number>()
 
 // A VENDOR THAT SAYS "RETRY SHORTLY" IS TAKEN AT ITS WORD. When every choice
 // fails busy — rate-limited or overloaded — before a word is out, the whole
-// plan is tried once more after a short wait: the longest Retry-After any of
-// them sent, else ROUTE_RETRY_DELAY_MS, never past ROUTE_RETRY_MAX_WAIT_MS.
-// Two free models sharing one upstream pool both answered 429 in the same
-// second and the question was lost to it.
-const ROUTE_RETRY_PASSES = 1
+// plan is tried again after a short wait: the longest Retry-After any of
+// them sent, else ROUTE_RETRY_DELAY_MS doubling each pass, never past
+// ROUTE_RETRY_MAX_WAIT_MS. Two free models sharing one upstream pool both
+// answered 429 in the same second and the question was lost to it.
+//
+// THREE PASSES, NOT ONE (jwize's drive session, 2026-09-30): the long work
+// asks a model a dozen times in a row, and one busy second in the middle of
+// it must cost a few seconds of waiting, not the whole task.
+const ROUTE_RETRY_PASSES = 3
 const ROUTE_RETRY_DELAY_MS = 1_500
 const ROUTE_RETRY_MAX_WAIT_MS = 8_000
 
@@ -669,6 +673,12 @@ const isRetryWorthy = (error: unknown): boolean => {
   const status = error.status
   return status === 429 || status === 408 || (status !== undefined && status >= 500)
 }
+
+/** A router told to skip every host it may use: the ignore list emptied the
+ *  route. OpenRouter says so with a 404 that names the step. */
+const ignoredEveryHost = (error: unknown): boolean =>
+  error instanceof LlmDispatchError && error.status === 404
+  && /providers have been ignored|Filter by Ignored Providers/i.test(error.message)
 
 const waitFor = (ms: number, signal?: AbortSignal): Promise<void> => new Promise(resolve => {
   if (ms <= 0 || signal?.aborted) { resolve(); return }
@@ -761,15 +771,24 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
   // host on the retry's ignore list, so the second pass routes the same
   // model through another host instead of back into the same queue.
   const busyUpstreams = new Set<string>(call.ignoreUpstreams ?? [])
+  // ...UNLESS IT IS THE ONLY ROAD (the same drive session): an account that
+  // allows one host for a model answers "all providers have been ignored"
+  // when that host is skipped — a busy second turned into a dead turn. The
+  // router said the ignore list cannot be honoured, so the same provider is
+  // asked again plainly, at once, and nothing is ignored for the rest of
+  // this call; a busy host is then simply waited for.
+  let ignoreRefused = false
   for (let pass = 0; pass <= ROUTE_RETRY_PASSES; pass++) {
     // Whether THIS pass failed only in ways worth a second pass, and the
     // longest wait any vendor asked for before it.
     let tried = 0
     let retryWorthy = true
     let retryAfter: number | undefined
-    const passCall: LlmCall = busyUpstreams.size ? { ...call, ignoreUpstreams: [...busyUpstreams] } : call
-    for (const provider of candidates) {
+    for (let at = 0; at < candidates.length; at++) {
+      const provider = candidates[at]
       if (refusedOwners.has(credentialOwner(provider))) continue
+      const passCall: LlmCall = ignoreRefused ? { ...call, ignoreUpstreams: [] }
+        : busyUpstreams.size ? { ...call, ignoreUpstreams: [...busyUpstreams] } : call
       tried += 1
       attempt += 1
       let emitted = false
@@ -828,6 +847,13 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
         const status = error instanceof LlmDispatchError ? error.status : undefined
         safeObserve(call, { phase: 'failure', attempt, providerId: provider.id, model: answeredModel, durationMs: Date.now() - startedAt, outputEmitted: emitted, category: attemptCategory(error, status), ...(status !== undefined ? { status } : {}), ...(usage ? { usage } : {}) })
         if (isAbort(error, call.signal) || emitted) throw error
+        if (!ignoreRefused && passCall.ignoreUpstreams?.length && ignoredEveryHost(error)) {
+          ignoreRefused = true
+          busyUpstreams.clear()
+          tried -= 1
+          at -= 1
+          continue
+        }
         // A NAMED provider never changes vendor — but a busy one is asked
         // again like any other, since that is the same vendor a moment
         // later. The chat names its granted provider on every turn, so
@@ -839,14 +865,14 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
         retryWorthy &&= isRetryWorthy(error)
         const asked = error instanceof LlmDispatchError ? error.retryAfterMs : undefined
         if (asked !== undefined) retryAfter = Math.max(retryAfter ?? 0, asked)
-        if (error instanceof LlmDispatchError && error.upstream && isRetryWorthy(error)) busyUpstreams.add(error.upstream)
+        if (!ignoreRefused && error instanceof LlmDispatchError && error.upstream && isRetryWorthy(error)) busyUpstreams.add(error.upstream)
         if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
         if (status === 401 || status === 403) refusedOwners.add(credentialOwner(provider))
         EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
       }
     }
     if (!tried || !retryWorthy || pass === ROUTE_RETRY_PASSES) break
-    await waitFor(Math.min(retryAfter ?? ROUTE_RETRY_DELAY_MS, ROUTE_RETRY_MAX_WAIT_MS), call.signal)
+    await waitFor(Math.min(retryAfter ?? ROUTE_RETRY_DELAY_MS * 2 ** pass, ROUTE_RETRY_MAX_WAIT_MS), call.signal)
     if (call.signal?.aborted) throw new DOMException('The model request was aborted', 'AbortError')
   }
 
