@@ -22,7 +22,7 @@ class TextBlob {
 }
 
 const harness = (
-  root: Record<string, unknown>,
+  root: Record<string, unknown> | null,
   outer: Record<string, unknown>,
 ): { written: Blob[]; commitSlotSet: ReturnType<typeof vi.fn> } => {
   vi.stubGlobal('Blob', TextBlob)
@@ -39,7 +39,8 @@ const harness = (
   }
   const store = {
     getResource: vi.fn(async (sig: string) => {
-      if (sig === ROOT_PROPS) return new Blob([JSON.stringify(root)], { type: 'application/json' })
+      // `root: null` = the repo's bytes are not readable yet (a cold read).
+      if (sig === ROOT_PROPS) return root ? new Blob([JSON.stringify(root)], { type: 'application/json' }) : null
       if (sig === OUTER_PROPS) return new Blob([JSON.stringify(outer)], { type: 'application/json' })
       return null
     }),
@@ -183,5 +184,60 @@ describe('canonical tile property inheritance', () => {
     })
 
     await expect(written[0].text().then(JSON.parse)).resolves.toEqual({ index: 8 })
+  })
+
+  // WRITES SINK (documentation/alias-properties.md): a key the alias does not
+  // already override goes to the repo — the root tile of the name.
+  describe('writes sink to the repo', () => {
+    const parse = (blob: Blob): Promise<unknown> => blob.text().then(JSON.parse)
+
+    it('sends a key the alias does not override to the repo, and keeps place keys here', async () => {
+      const { written, commitSlotSet } = harness({ tags: ['root'] }, { index: 8 })
+
+      await writeTilePropertiesAt(['team'], 'howard', { link: 'https://example.com', index: 8 })
+
+      expect(commitSlotSet.mock.calls.map(call => call[0])).toEqual([['howard'], ['team', 'howard']])
+      await expect(parse(written[0])).resolves.toEqual({ link: 'https://example.com', tags: ['root'] })
+      await expect(parse(written[1])).resolves.toEqual({ index: 8 })
+    })
+
+    it('keeps the write at the alias when the caller says only here', async () => {
+      const { written, commitSlotSet } = harness({ tags: ['root'] }, { index: 8 })
+
+      await writeTilePropertiesAt(['team'], 'howard', { link: 'https://example.com', index: 8 }, { onlyHere: true })
+
+      expect(commitSlotSet).toHaveBeenCalledOnce()
+      await expect(parse(written[0])).resolves.toEqual({ link: 'https://example.com', index: 8 })
+    })
+
+    it('changes an override the alias already holds in place, never the repo', async () => {
+      const { written, commitSlotSet } = harness(
+        { border: { color: '#112233' } },
+        { border: { color: '#abcdef' }, index: 8 },
+      )
+
+      await writeTilePropertiesAt(['team'], 'howard', { border: { color: '#000000' }, index: 8 })
+
+      expect(commitSlotSet).toHaveBeenCalledOnce()
+      await expect(parse(written[0])).resolves.toEqual({ border: { color: '#000000' }, index: 8 })
+    })
+
+    it('never sinks a theme default picture to the repo', async () => {
+      const { written, commitSlotSet } = harness({ imageSig: ROOT_IMAGE, participant: true }, { index: 8 })
+
+      await writeTilePropertiesAt(['team'], 'howard', { imageSig: 'e'.repeat(64), substrate: true, index: 8 })
+
+      expect(commitSlotSet.mock.calls.map(call => call[0])).toEqual([['team', 'howard']])
+      await expect(parse(written[0])).resolves.toMatchObject({ imageSig: 'e'.repeat(64), substrate: true })
+    })
+
+    it('sinks nothing while the repo cannot be read', async () => {
+      const { written, commitSlotSet } = harness(null, { index: 8 })
+
+      await writeTilePropertiesAt(['team'], 'howard', { link: 'https://example.com', index: 8 })
+
+      expect(commitSlotSet.mock.calls.map(call => call[0])).toEqual([['team', 'howard']])
+      await expect(parse(written[0])).resolves.toEqual({ link: 'https://example.com', index: 8 })
+    })
   })
 })

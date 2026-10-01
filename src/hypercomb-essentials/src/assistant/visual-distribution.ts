@@ -237,7 +237,8 @@ export async function distributeVisual(opts: {
     if (opts.place !== false) updates['index'] = k
 
     try {
-      await writeTilePropertiesAt(wholeSegments, part, updates)
+      // A part's picture is a piece of THIS whole — never the name's picture.
+      await writeTilePropertiesAt(wholeSegments, part, updates, { onlyHere: true })
       EffectBus.emit('tile:saved', { cell: part, segments: wholeSegments })
       if (source && slot) divided++
       else derived++
@@ -296,7 +297,7 @@ export async function dressParts(opts: {
         small: { image: small.point },
         flat: { small: { image: small.flat } },
         substrate: undefined,
-      })
+      }, { onlyHere: true })
       EffectBus.emit('tile:saved', { cell: part, segments })
       dressed++
     } catch (err) {
