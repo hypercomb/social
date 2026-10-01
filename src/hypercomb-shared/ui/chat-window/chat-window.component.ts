@@ -152,7 +152,7 @@ import {
   READ_PAGE_CHARS,
   type HypercombTreeReader,
 } from './hypercomb-observation'
-import { contextNeedFor, effortForWork, effortFromJev, effortInThread, type MessageEffort } from './message-effort'
+import { contextNeedFor, effortForWork, effortFromJev, effortInThread, isCodeMessage, type MessageEffort } from './message-effort'
 import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-compiler'
 import { executionLineParts } from './execution-line'
 import {
@@ -6280,7 +6280,7 @@ export class ChatWindowComponent implements OnDestroy {
       if (restored.size) this.#readSignatures.set(convoId, restored)
     }
     // A CONVERSATION THAT HAS READ CODE IS CODE WORK, and code work is deep.
-    const codeThread = this.#codeThreads.has(convoId)
+    const codeThread = this.#codeThreads.has(convoId) || isCodeMessage(message)
       || [...(this.#readSignatures.get(convoId)?.values() ?? [])].some(grammar => /^\/?code\s/.test(grammar))
     const namedModel = this.modelExplicit() ? this.model() || undefined : undefined
     // …and only on the provider that gave it. The name a vendor reports back

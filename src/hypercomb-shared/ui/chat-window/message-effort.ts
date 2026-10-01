@@ -52,6 +52,13 @@ export const effortInThread = (message: string, previous: MessageEffort | undefi
  */
 export const effortForWork = (tier: MessageEffort, codeWork: boolean): MessageEffort => codeWork ? 'deep' : tier
 
+/** A message that is itself about code. Jev's weight replaces the word list
+ *  when Jev is sure, and it weighed "fix these two bugs in the engine draft"
+ *  as lighter work — so the cheap line took it, went busy, and the turn died
+ *  with the deep line never asked (jwize's drive session, 2026-10-01). Code
+ *  named in the message keeps the work deep, whatever the weight says. */
+export const isCodeMessage = (message: string): boolean => CODE_WORDS.test(String(message ?? ''))
+
 /**
  * THE WEIGHT JEV READ (essentials jev-front.ts). When Jev is on, it weighs the
  * request in any language, and when it is sure its weight replaces the word
