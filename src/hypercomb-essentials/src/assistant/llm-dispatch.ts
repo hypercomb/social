@@ -871,8 +871,12 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
     // first's.
     let busyAtTier = false
     const askedTier = call.need?.tier
+    // ...and a model with no published price is not "of that weight": it
+    // offers every tier only because it could not be placed (one model id
+    // standing in all three), which is a guess, not a declaration.
     const offersTier = (provider: LlmProviderDescriptor): boolean =>
       !!askedTier && provider.models.some(model => model.tier === askedTier)
+      && !(provider.models.length > 1 && new Set(provider.models.map(model => model.id)).size === 1)
     for (let at = 0; at < candidates.length; at++) {
       const provider = candidates[at]
       if (refusedOwners.has(credentialOwner(provider))) continue

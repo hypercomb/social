@@ -151,7 +151,8 @@ describe('streamRoutedModel', () => {
 
   it('waits for a busy model of the weight asked for before stepping down to a lesser one', async () => {
     registry.register({ ...descriptor('deep-busy', 'worked'), models: [{ name: 'deep-busy', id: 'deep-busy-model', tier: 'deep' }], defaultModel: 'deep-busy-model' })
-    registry.register(descriptor('small-ready', 'chatted'))
+    // Unplaced: no price, so one model id stands in every tier.
+    registry.register({ ...descriptor('small-ready', 'chatted'), models: (['fast', 'balanced', 'deep'] as const).map(tier => ({ name: 'small-ready', id: 'small-ready-model', tier })) })
     let deepCalls = 0
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('small-ready')) return new Response('{}', { status: 200 })
