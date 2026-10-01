@@ -220,7 +220,7 @@ export const blockRefusedMessage = (kind: WorkKind, reason: string, request: str
 /** The reply named a work block inside markup the hive does not read as one
  *  (core/work-fence.ts `unwritten`): say so once, and say the one spelling. */
 export const blockUnwrittenMessage = (lang: string, request: string): string =>
-  `Your reply named ${lang} but not as a block the hive can run, so nothing happened. Write it again as a fenced block: a line of three backticks followed by ${lang}, then one line per request, then a line of three backticks. If you were only describing the block and your answer is finished, give the answer again without it.${carry(request)}`
+  `Your reply carried ${lang} work but not as a block the hive can run, so nothing happened. Write it again as a fenced block: a line of three backticks followed by ${lang}, then one line per request, then a line of three backticks. If you were only describing the block and your answer is finished, give the answer again without it.${carry(request)}`
 
 export const writeRanMessage = (draft: { section: string; beeSig: string; path: string; held?: string }, request: string): string =>
   draft.held

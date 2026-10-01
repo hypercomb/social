@@ -209,6 +209,18 @@ describe('a block named and not written', () => {
     expect(splitWork(['I will add it now.', '<tool name="hypercomb-do">create notes</tool>'].join('\n')).unwritten).toBe('hypercomb-do')
   })
 
+  it('reads bare command lines, written with no block, as a do block never opened', () => {
+    const bare = splitWork([
+      '/file on /bubble-bobble-dos-v1: REQUIREMENT 7 (partial): ordinary fruit.',
+      '/file on /bubble-bobble-dos-v1: REQUIREMENT 8 (partial): progression.',
+    ].join('\n'))
+    expect(bare.request).toBeUndefined()
+    expect(bare.unwritten).toBe('hypercomb-do')
+    // One alone may be a sentence about a command; a route has no space.
+    expect(splitWork('/create roadmap is what I would run next.').unwritten).toBeUndefined()
+    expect(splitWork(['/games/bubble holds the game.', '/bubble-bobble-dos-v1/round-001 holds a round.'].join('\n')).unwritten).toBeUndefined()
+  })
+
   it('says nothing for a sentence, inline code, a quoted example, or a reply that carries a real block', () => {
     expect(splitWork('I ask the hive with a hypercomb-read block when I need to look.').unwritten).toBeUndefined()
     expect(splitWork('The tag is `<block info="hypercomb-read">` in that dialect.').unwritten).toBeUndefined()

@@ -276,8 +276,21 @@ export const workLineGrammar = (raw: string, kind: WorkKind): string => {
  */
 const NAMED_IN_MARKUP = /<(?!\s*\/?\s*hypercomb-)[^<>\n]*\b(hypercomb-(?:read|do|table|write|handoff|continue))\b[^<>\n]*>/g
 
+/**
+ * ...AND WORK WRITTEN WITH NO BLOCK AT ALL. A reply that was nothing but
+ * `/file on /bubble-bobble-dos-v1: …` lines, bare, ended as "answered" with
+ * six notes owed and none filed (jwize's drive session, 2026-10-01). A line
+ * that opens with a slash, a word, and a space is a command line the hive
+ * would run — a route never has the space (`/games/bubble is …` reads as a
+ * route) — so two or more of them outside any fence are a hypercomb-do block
+ * that was never opened. One alone may be a sentence about a command.
+ */
+const BARE_COMMAND = /^\s*\/[a-z][a-z-]*\s+\S/
+const BARE_COMMANDS_MIN = 2
+
 const unwrittenIn = (lines: readonly string[]): string | undefined => {
   let fence: string | null = null
+  let bare = 0
   for (const line of lines) {
     const mark = FENCE_RE.exec(line)
     if (mark) {
@@ -289,8 +302,9 @@ const unwrittenIn = (lines: readonly string[]): string | undefined => {
     for (const named of line.matchAll(NAMED_IN_MARKUP)) {
       if (!inCode(line.slice(0, named.index))) return named[1]
     }
+    if (BARE_COMMAND.test(line)) bare += 1
   }
-  return undefined
+  return bare >= BARE_COMMANDS_MIN ? 'hypercomb-do' : undefined
 }
 
 /** Split a finished round into what the model said and what it asked for. */
