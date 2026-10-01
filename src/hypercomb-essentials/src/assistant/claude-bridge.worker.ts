@@ -549,6 +549,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'inflate':      return this.#inflate(req)
       case 'layer-at':     return this.#layerAt(req)
       case 'layer-by-sig': return this.#layerBySig(req)
+      case 'layers-at':    return this.#layersAt(req)
       case 'slice-create': return this.#sliceCreate(req)
       case 'put-resource': return this.#putResource(req)
       case 'get-resource': return this.#getResource(req)
@@ -1524,6 +1525,19 @@ export class ClaudeBridgeWorker extends Worker {
     const layer = await history.currentLayerAt(locationSig)
     if (!layer) return { id: req.id, ok: false, error: `no layer at /${segments.join('/')}` }
     return { id: req.id, ok: true, data: layer }
+  }
+
+  // EVERY revision a location has held, oldest first — `layer-at` answers only
+  // the head. A repair needs the earlier ones: a tile whose head went wrong is
+  // put right by committing an earlier layer again (read it with
+  // `layer-by-sig`), never by deleting the marker that went wrong.
+  async #layersAt(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
+    const locationSig = await history.sign({ explorerSegments: () => segments })
+    const layers = await history.listLayers(locationSig)
+    return { id: req.id, ok: true, data: layers.map(entry => ({ index: entry.index, layerSig: entry.layerSig, at: entry.at })) }
   }
 
   // Raw layer read BY SIGNATURE — the sig-addressed twin of `layer-at`.

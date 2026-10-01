@@ -219,4 +219,60 @@ describe('CanonicalReferenceService', () => {
       name: 'people', notes: ['1'.repeat(64)],
     })
   })
+
+  describe('doorways', () => {
+    // A store that can READ its records back, and a tile at /nest/<name> that
+    // wears one reference mark pointing at `target`.
+    const records = new Map<string, string>()
+    const doorway = async (name: string, target: readonly string[]): Promise<string> => {
+      const markSig = hex('mark:' + name)
+      records.set(markSig, JSON.stringify({ kind: 'reference', appliesTo: [], payload: { targetSegments: target } }))
+      const sig = await history.commitLayer(await history.sign({ explorerSegments: () => ['nest', name] }), {
+        name, decorations: [markSig, '5'.repeat(64)],
+      })
+      const nestLocation = await history.sign({ explorerSegments: () => ['nest'] })
+      const nest = await history.currentLayerAt(nestLocation)
+      const nestSig = await history.commitLayer(nestLocation, { ...nest, children: [...(nest?.children ?? []), sig] })
+      await history.commitLayer(await history.sign({ explorerSegments: () => [] }), { name: '', children: [nestSig] })
+      return markSig
+    }
+
+    beforeEach(() => {
+      records.clear()
+      const store = services.get('@hypercomb.social/Store') as Record<string, unknown>
+      // The real store: a slot holds an ENVELOPE's sig. `getResourceLocal` hands
+      // back the envelope itself; only `getResource` follows it to the record.
+      const blobOf = (text: string) => ({ text: async () => text }) as unknown as Blob
+      store['getResourceLocal'] = async (sig: string) => records.has(sig)
+        ? blobOf(JSON.stringify({ meta: 1, resource: hex('wrapped:' + sig), relation: 'decorations' })) : null
+      store['getResource'] = async (sig: string) => records.has(sig) ? blobOf(records.get(sig)!) : null
+    })
+
+    it('points a reference to a doorway at the tile the doorway points at, without its mark', async () => {
+      const mark = await doorway('link', ['nest', 'people'])
+      const service = new CanonicalReferenceServiceImpl()
+
+      expect(await service.place({ name: 'link', sourceSegments: ['nest', 'link'], parentSegments: ['shelf'] })).toBe('link')
+
+      const placed = await at(['shelf', 'link'])
+      expect(written.at(-1)?.payload?.['targetSegments']).toEqual(['nest', 'people'])
+      expect(placed?.['decorations']).not.toContain(mark)
+      expect(placed?.['properties']).toEqual(['3'.repeat(64)])
+    })
+
+    it('refuses a doorway that leads back round to itself', async () => {
+      await doorway('there', ['nest', 'back'])
+      await doorway('back', ['nest', 'there'])
+      const service = new CanonicalReferenceServiceImpl()
+
+      expect(await service.place({ name: 'there', sourceSegments: ['nest', 'there'], parentSegments: ['shelf'] })).toBeNull()
+    })
+
+    it('refuses a reference that would end up pointing at the place it stands', async () => {
+      await doorway('home', ['shelf', 'home'])
+      const service = new CanonicalReferenceServiceImpl()
+
+      expect(await service.place({ name: 'home', sourceSegments: ['nest', 'home'], parentSegments: ['shelf'] })).toBeNull()
+    })
+  })
 })

@@ -46,6 +46,7 @@ const CANONICAL_VARIANTS_MEANING = 'canonical:variants'
 
 type StoreLike = {
   putResource(blob: Blob, options?: { emit?: boolean }): Promise<string>
+  getResource?(sig: string): Promise<Blob | null>
   getPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
 }
 type LineageLike = { readonly domain?: unknown }
@@ -61,6 +62,36 @@ const get = <T,>(key: string): T | undefined =>
 
 const sameSegments = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((segment, index) => segment === b[index])
+
+/** The reference marks a layer WEARS, read from its own decorations — never
+ *  from the label index, which answers for a page and can lag a commit. A
+ *  layer is a reference when one of these names a target. */
+const referenceMarksOf = async (
+  layer: PlacementLayer | null,
+  store: StoreLike,
+): Promise<{ sigs: Set<string>; target: string[] | null }> => {
+  const sigs = new Set<string>()
+  let target: string[] | null = null
+  const decorations = Array.isArray(layer?.['decorations']) ? layer!['decorations'] as unknown[] : []
+  for (const sig of decorations) {
+    if (typeof sig !== 'string') continue
+    // `getResource`, never `getResourceLocal`: a slot holds the sig of a META
+    // ENVELOPE, and only `getResource` follows it to the record it wraps.
+    const blob = await store.getResource?.(sig).catch(() => null) ?? null
+    if (!blob) continue
+    try {
+      const record = JSON.parse(await blob.text()) as { kind?: unknown; payload?: { targetSegments?: unknown } }
+      if (record?.kind !== 'reference') continue
+      sigs.add(sig)
+      const segments = record.payload?.targetSegments
+      if (!target && Array.isArray(segments)) target = canonicalReferenceRoute(segments.map(String))
+    } catch { /* not a JSON record — not a reference mark */ }
+  }
+  return { sigs, target }
+}
+
+/** How many doorways a reference may pass through before it is refused. */
+const MAX_REFERENCE_HOPS = 8
 
 export class CanonicalReferenceServiceImpl implements CanonicalReferenceService {
   /** Retain the target's current meaning as an immutable same-name candidate. */
@@ -103,7 +134,7 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
   async place(options: PlaceCanonicalReferenceOptions): Promise<string | null> {
     const name = canonicalReferenceName(options.name)
     if (!name) return null
-    const sourceSegments = canonicalReferenceRoute(options.sourceSegments ?? [])
+    let sourceSegments = canonicalReferenceRoute(options.sourceSegments ?? [])
     // The hive itself is never an item to point at.
     if (sourceSegments.length === 0) return null
     const parentSegments = canonicalReferenceRoute(options.parentSegments ?? [])
@@ -118,8 +149,26 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     if (!history || !committer?.commitChildrenDeltas || !store?.putResource) return null
 
     // The target must exist where the route says. Nothing is minted for it.
-    const sourceLayer = await resolveLayerAt(history, lineage?.domain, sourceSegments)
+    let sourceLayer = await resolveLayerAt(history, lineage?.domain, sourceSegments)
     if (!sourceLayer) return null
+
+    // A REFERENCE TO A REFERENCE IS A REFERENCE TO WHAT IT POINTS AT. Pointing
+    // at a doorway made a chain, and a chain that came back round made a tile
+    // that pointed at itself (`/howard/team/susan` → `/people/susan` →
+    // `/howard/team/susan`, 2026-09-30). Walk to the tile that is not a
+    // doorway; refuse a walk that returns to where it started or to the very
+    // place this reference would stand.
+    let marks = await referenceMarksOf(sourceLayer, store)
+    for (let hop = 0; marks.target; hop++) {
+      const onward: string[] = marks.target
+      if (hop >= MAX_REFERENCE_HOPS || sameSegments(onward, sourceSegments)) return null
+      if (sameSegments(onward, childSegments)) return null
+      sourceSegments = onward
+      sourceLayer = await resolveLayerAt(history, lineage?.domain, sourceSegments)
+      if (!sourceLayer) return null
+      marks = await referenceMarksOf(sourceLayer, store)
+    }
+    if (sameSegments(childSegments, sourceSegments)) return null
 
     // A doorway is not a holder: a reference tile's children live behind its
     // pointer, so nothing may be gathered under it.
@@ -163,8 +212,11 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
         if (slot === 'name' || (CHILD_SLOTS as readonly string[]).includes(slot)) continue
         details[slot] = value
       }
+      // The target's own doorway marks never ride along: a reference wears
+      // exactly one, its own. (The walk above means the source wears none —
+      // this keeps that true whatever the walk is changed to later.)
       const inheritedDecorations = Array.isArray(details['decorations'])
-        ? details['decorations'].filter((sig): sig is string => typeof sig === 'string')
+        ? details['decorations'].filter((sig): sig is string => typeof sig === 'string' && !marks.sigs.has(sig))
         : []
       childLayer = {
         ...details,
