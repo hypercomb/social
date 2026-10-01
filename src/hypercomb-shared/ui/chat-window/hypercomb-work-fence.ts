@@ -217,6 +217,11 @@ const fenceLangOf = (kind: WorkKind): string =>
 export const blockRefusedMessage = (kind: WorkKind, reason: string, request: string): string =>
   `Your ${fenceLangOf(kind)} block was not used: ${reason}. Send a corrected block, or answer.${carry(request)}`
 
+/** The reply named a work block inside markup the hive does not read as one
+ *  (core/work-fence.ts `unwritten`): say so once, and say the one spelling. */
+export const blockUnwrittenMessage = (lang: string, request: string): string =>
+  `Your reply named ${lang} but not as a block the hive can run, so nothing happened. Write it again as a fenced block: a line of three backticks followed by ${lang}, then one line per request, then a line of three backticks. If you were only describing the block and your answer is finished, give the answer again without it.${carry(request)}`
+
 export const writeRanMessage = (draft: { section: string; beeSig: string; path: string; held?: string }, request: string): string =>
   draft.held
     ? `The participant ran your ${WRITE_FENCE_LANG} block. The hive drafted the module — ${draft.section} was written into a new module ${draft.beeSig}, picked at ${draft.path} — and HELD it: the new code newly reaches ${draft.held}, so it does not run until the participant reads it and accepts it themselves (brood, then brood accept). Do not try to get around the hold. If the change did not need that reach, write the section again without it; if it did, tell the participant why.\n\nContinue, or answer.${carry(request)}`

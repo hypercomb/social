@@ -20,7 +20,7 @@ describe('Hypercomb native tree observation grammar', () => {
 
   it.each([
     ['empty sequence', []],
-    ['too many reads', ['/tree', '/tree /a', '/tree /b']],
+    ['too many reads', ['/tree', '/tree /a', '/tree /b', '/tree /c', '/tree /d', '/tree /e', '/tree /f', '/tree /g', '/tree /h']],
     ['non-string read', [42]],
     ['raw signature root', [`/tree ${'a'.repeat(64)}`]],
     ['relative path', ['/tree projects']],
@@ -33,6 +33,14 @@ describe('Hypercomb native tree observation grammar', () => {
     ['duplicate branch', ['/tree /projects', '/tree /projects']],
   ])('rejects %s before any read', (_label, lines) => {
     expect(() => parseHypercombObservationGrammars(lines as readonly unknown[], ['current'])).toThrow()
+  })
+
+  it('takes as many reads per block as the harness says, never past the ceiling', () => {
+    const three = ['/tree /a', '/tree /b', '/tree /c']
+    expect(parseHypercombObservationGrammars(three, ['current']).observations).toHaveLength(3)
+    expect(() => parseHypercombObservationGrammars(three, ['current'], 2)).toThrow(/between 1 and 2/)
+    const nine = Array.from({ length: 9 }, (_, at) => `/tree /t${at}`)
+    expect(() => parseHypercombObservationGrammars(nine, ['current'], 99)).toThrow(/between 1 and 8/)
   })
 
   it('executes reads in grammar order and returns only the safe projection to the model', async () => {

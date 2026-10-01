@@ -1351,6 +1351,7 @@
   "slash.branch": "Задать путь или подпись для автодополнения команд",
   "slash.chat": "Многоходовая беседа с Claude — создаёт плитки-потоки с дочерними вопросами и ответами",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
+  "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "Переключить между шестиугольниками и отображением веб-сайта",
   "slash.website": "Переключить вид веб-сайта, экспорт поддерева или сборка страниц через Claude",
   "slash.tutor": "Обучающие игры — превратить улей в игры с интервальным повторением; on | off | here | build | list",

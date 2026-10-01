@@ -49,6 +49,9 @@ export type SplitWork = {
   readonly handoff?: string
   /** The model handed the work to its next leg: what is left, one line. */
   readonly left?: string
+  /** The reply NAMES a work block inside markup and carries none that can be
+   *  run: the block's word, so the loop can send it back to be written. */
+  readonly unwritten?: string
 }
 
 type BlockKind = WorkKind | 'handoff' | 'continue'
@@ -106,13 +109,114 @@ const closes = (line: string, run: string): boolean => {
   return !!match && match[1][0] === run[0] && match[1].length >= run.length && !match[2].trim()
 }
 
-/** Every work block, skipping the inside of any other fence. */
-const scan = (lines: readonly string[]): Block[] => {
+/**
+ * THE TAG SPELLING. Some models write the block as a tag instead of a fence:
+ *
+ *   <hypercomb-read> read / </hypercomb-read>
+ *
+ * The tag name is the same literal marker the fence carries, so it is the
+ * same unambiguous opt-in — and a reply that carries it and is not run ends
+ * the turn with the machinery showing and nothing read (jwize's drive test,
+ * 2026-09-30). Only the exact work words open one; any other tag is prose.
+ *
+ * It may open anywhere on a line outside a code fence — what stands before it
+ * stays prose — but a model also MENTIONS the tag in a sentence, so only two
+ * shapes are a block: the BLOCK form (nothing after the opener on its line,
+ * the body on the lines below, the closer later; never closed still counts,
+ * as an unclosed fence does) and the INLINE form (the closer on the opener's
+ * own line). An opener followed by words and no closer on that line is a
+ * sentence about the tag, and so is one written inside inline code.
+ */
+const TAG_STEM = '<hypercomb-'
+const TAG_OPEN_RE = /^<(hypercomb-[a-z]+)>/
+/** The closer as a model spells it: any case, spaces inside the brackets. */
+const tagCloser = (name: string): RegExp => new RegExp(`<\\s*/\\s*${name}\\s*>`, 'i')
+/** Inside inline code: an odd number of ticks before it on the line. */
+const inCode = (lead: string): boolean => lead.split('`').length % 2 === 0
+
+type Tag = {
+  readonly kind: BlockKind
+  /** What stands before the opener on its line. It stays prose. */
+  readonly lead: string
+  /** What follows the opener on its line. */
+  readonly after: string
+  readonly closer: RegExp
+}
+
+/** The first work tag a line opens, in one of the two shapes. */
+const tagAt = (line: string): Tag | null => {
+  for (let at = line.indexOf(TAG_STEM); at >= 0; at = line.indexOf(TAG_STEM, at + 1)) {
+    const open = TAG_OPEN_RE.exec(line.slice(at))
+    const kind = open ? kindOf(open[1]) : null
+    if (!open || !kind) continue
+    const lead = line.slice(0, at)
+    if (inCode(lead)) continue
+    const after = line.slice(at + open[0].length)
+    const closer = tagCloser(open[1])
+    if (after.trim() && !closer.test(after)) continue
+    return { kind, lead, after, closer }
+  }
+  return null
+}
+
+/**
+ * A model mixing the two spellings wraps a fence in the tag. The outer fence
+ * pair is wrapping, not body: left in, its lines are read as commands and the
+ * whole block is refused. Only that pair goes; the rest stays as written.
+ */
+const unfenced = (body: readonly string[]): readonly string[] => {
+  const first = body.findIndex(line => line.trim().length > 0)
+  const fence = first < 0 ? null : FENCE_RE.exec(body[first])
+  if (!fence) return body
+  let last = body.length - 1
+  while (last > first && !body[last].trim()) last--
+  return body.slice(first + 1, last > first && closes(body[last], fence[1]) ? last : undefined)
+}
+
+/**
+ * The tag block a line opens. The lines are the scanner's own and are re-cut
+ * here, so the words around a block survive it: what stands before the opener
+ * becomes its own line above, and what follows the closer its own line below
+ * — where the scanner reads it next, as prose or as a further block.
+ */
+const tagBlock = (lines: string[], index: number): Block | null => {
+  const tag = tagAt(lines[index])
+  if (!tag) return null
+  if (tag.lead.trim()) lines.splice(index++, 0, tag.lead.trimEnd())
+  const body: string[] = []
+  let rest = tag.after
+  let end = index
+  for (;;) {
+    const close = tag.closer.exec(rest)
+    if (close) {
+      if (rest.slice(0, close.index).trim()) body.push(rest.slice(0, close.index))
+      const tail = rest.slice(close.index + close[0].length).trimStart()
+      if (tail) lines.splice(end + 1, 0, tail)
+      break
+    }
+    // Interior lines are kept as written, blank ones too, exactly as the
+    // fence path keeps them: a write block is code and a doctrine write is
+    // markdown. Only the empty remainder of the opener's line falls away.
+    if (end > index) body.push(rest)
+    end++
+    if (end >= lines.length) break
+    rest = lines[end]
+  }
+  return { kind: tag.kind, open: index, end, body: unfenced(body) }
+}
+
+/** Every work block, skipping the inside of any other fence. A tag block
+ *  re-cuts `lines` (see tagBlock); the indices are into the array as left. */
+const scan = (lines: string[]): Block[] => {
   const blocks: Block[] = []
   let index = 0
   while (index < lines.length) {
     const open = FENCE_RE.exec(lines[index])
-    if (!open) { index++; continue }
+    if (!open) {
+      const tagged = tagBlock(lines, index)
+      if (tagged) { blocks.push(tagged); index = tagged.end + 1 } else index++
+      continue
+    }
     let end = index + 1
     while (end < lines.length && !closes(lines[end], open[1])) end++
     const body = lines.slice(index + 1, end)
@@ -155,6 +259,40 @@ export const workLineGrammar = (raw: string, kind: WorkKind): string => {
   return `/${line}`
 }
 
+/**
+ * A BLOCK NAMED AND NOT WRITTEN. The fence, the tag, the info string on a
+ * text fence's first line — each spelling was learned from a turn that ended
+ * with the machinery on the screen and nothing done, and a model will find a
+ * fourth: `<block info="hypercomb-read">` came next (jwize's drive session,
+ * 2026-09-30). Rather than learn spellings one dead turn at a time, a reply
+ * that names a work block's word INSIDE MARKUP — angle brackets — and carries
+ * no block the hive can run says which word it was, so the loop sends it back
+ * to be written properly. A sentence that merely mentions the word, a word in
+ * inline code, and anything inside an ordinary code fence are not markup and
+ * say nothing. Nor does the hive's own tag (`<hypercomb-read>`): the scanner
+ * above already weighed that one, and an opener it left as prose is a
+ * sentence about the tag — only a word carried by SOME OTHER markup is the
+ * unread spelling this is for.
+ */
+const NAMED_IN_MARKUP = /<(?!\s*\/?\s*hypercomb-)[^<>\n]*\b(hypercomb-(?:read|do|table|write|handoff|continue))\b[^<>\n]*>/g
+
+const unwrittenIn = (lines: readonly string[]): string | undefined => {
+  let fence: string | null = null
+  for (const line of lines) {
+    const mark = FENCE_RE.exec(line)
+    if (mark) {
+      if (!fence) fence = mark[1]
+      else if (closes(line, fence)) fence = null
+      continue
+    }
+    if (fence) continue
+    for (const named of line.matchAll(NAMED_IN_MARKUP)) {
+      if (!inCode(line.slice(0, named.index))) return named[1]
+    }
+  }
+  return undefined
+}
+
 /** Split a finished round into what the model said and what it asked for. */
 export const splitWork = (text: string): SplitWork => {
   const lines = String(text ?? '').split('\n')
@@ -162,7 +300,8 @@ export const splitWork = (text: string): SplitWork => {
   if (!blocks.length) {
     // The whole reply is the table, with no fence at all.
     if (looksLikeTable(lines)) return { prose: '', request: { kind: 'table', lines } }
-    return { prose: String(text ?? '') }
+    const unwritten = unwrittenIn(lines)
+    return { prose: String(text ?? ''), ...(unwritten ? { unwritten } : {}) }
   }
   const removed = new Set<number>()
   for (const block of blocks) {
@@ -202,18 +341,39 @@ export const splitWork = (text: string): SplitWork => {
 
 /** Could a line that has only begun still turn out to be a fence line? */
 const MAY_BE_FENCE = /^\s{0,3}(?:[`~].*)?$/
+/** …or an opener that is still being written? */
+const MAY_BE_TAG = /^<hypercomb-[a-z]*$/
+
+/**
+ * Where a line that is still arriving must wait from: the first `<` at or
+ * after `from` that may yet open a work tag — a prefix of the stem, an opener
+ * still being written, or a whole work opener, whose shape only the end of
+ * its line settles. The line's length when nothing has to wait.
+ */
+const tagHold = (line: string, from: number): number => {
+  for (let at = line.indexOf('<', from); at >= 0; at = line.indexOf('<', at + 1)) {
+    const text = line.slice(at)
+    const open = TAG_OPEN_RE.exec(text)
+    const may = open ? !!kindOf(open[1]) : TAG_STEM.startsWith(text) || MAY_BE_TAG.test(text)
+    if (may && !inCode(line.slice(0, at))) return at
+  }
+  return line.length
+}
 
 /**
  * WHAT MAY BE SHOWN WHILE A ROUND STREAMS. Prose goes out as it arrives; from
- * the first line that opens a work block everything is held, because the
- * block is machinery the participant sees in the Execution window instead. A
- * line that has only begun is held while it could still become a fence line,
- * and released the moment it cannot. Ordinary code blocks pass straight
+ * the first work block on, everything is held, because the block is machinery
+ * the participant sees in the Execution window instead. A line that has only
+ * begun is held while it could still become a fence line, and released the
+ * moment it cannot. A tag may open anywhere on a line, so the words before it
+ * are shown and the line waits from its `<` on, until it is settled whether
+ * that opens work or is a sentence. Ordinary code blocks pass straight
  * through, and nothing inside one is mistaken for a work block.
  */
 export class WorkStreamGuard {
+  /** The line being written, whole, and how much of it has been shown. */
   #line = ''
-  #released = false
+  #shown = 0
   #fence: string | null = null
   #holding = false
 
@@ -223,25 +383,24 @@ export class WorkStreamGuard {
     if (this.#holding) return ''
     let out = ''
     for (const char of chunk) {
-      if (this.#released) {
-        out += char
-        if (char === '\n') this.#released = false
+      if (char !== '\n') {
+        this.#line += char
+        const hold = this.#holdFrom()
+        out += this.#line.slice(this.#shown, hold)
+        this.#shown = hold
         continue
       }
-      this.#line += char
-      if (char === '\n') {
-        if (this.#opensWork(this.#line.slice(0, -1))) {
-          this.#holding = true
-          this.#line = ''
-          return out
-        }
-        out += this.#line
+      const work = this.#opensWork(this.#line)
+      if (work >= 0) {
+        out += this.#line.slice(this.#shown, work)
+        this.#holding = true
         this.#line = ''
-      } else if (!MAY_BE_FENCE.test(this.#line)) {
-        out += this.#line
-        this.#line = ''
-        this.#released = true
+        this.#shown = 0
+        return out
       }
+      out += `${this.#line.slice(this.#shown)}\n`
+      this.#line = ''
+      this.#shown = 0
     }
     return out
   }
@@ -249,25 +408,43 @@ export class WorkStreamGuard {
   /** The held tail at the end of a round, unless a work block took it. */
   end(): string {
     if (this.#holding) return ''
-    const rest = this.#line
+    const line = this.#line
+    const shown = this.#shown
     this.#line = ''
-    if (rest && this.#opensWork(rest)) {
-      this.#holding = true
-      return ''
-    }
-    return rest
+    this.#shown = 0
+    const work = line ? this.#opensWork(line) : -1
+    if (work < 0) return line.slice(shown)
+    this.#holding = true
+    return line.slice(shown, work)
   }
 
-  #opensWork(line: string): boolean {
+  /** How much of the line so far may be shown. */
+  #holdFrom(): number {
+    const line = this.#line
+    if (MAY_BE_FENCE.test(line)) return 0
+    if (this.#fence) return line.length
+    const at = tagHold(line, this.#shown)
+    // An indent is not prose: it waits with the tag it stands before.
+    return at < line.length && !line.slice(0, at).trim() ? this.#shown : at
+  }
+
+  /** Where on a finished line the held work begins, or -1 when it opens none. */
+  #opensWork(line: string): number {
     const match = FENCE_RE.exec(line)
-    if (!match) return false
+    if (!match) {
+      // The tag spelling opens work too, outside any ordinary code block; the
+      // words before it on the line are prose, and are shown.
+      const tag = this.#fence ? null : tagAt(line)
+      if (!tag) return -1
+      return tag.lead.trim() ? tag.lead.length : 0
+    }
     if (this.#fence) {
       if (closes(line, this.#fence)) this.#fence = null
-      return false
+      return -1
     }
-    if (kindOf(match[2])) return true
+    if (kindOf(match[2])) return 0
     this.#fence = match[1]
-    return false
+    return -1
   }
 }
 

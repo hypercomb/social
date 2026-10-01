@@ -1351,6 +1351,7 @@
   "slash.branch": "تسمية مسار أو توقيع للإكمال التلقائي للأوامر",
   "slash.chat": "محادثة متعددة الأدوار مع Claude — ينشئ بلاطات محادثة مع أبناء أسئلة وأجوبة",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
+  "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "التبديل بين عرض السداسيات وعرض الموقع",
   "slash.website": "تبديل عرض الموقع أو تصدير الفرع أو بناء الصفحات عبر Claude",
   "slash.tutor": "ألعاب دراسية — حوّل هذه الخلية إلى ألعاب تكرار متباعد؛ on | off | here | build | list",

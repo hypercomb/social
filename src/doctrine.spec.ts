@@ -1690,7 +1690,8 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/history/builds-slot.ts → commitSlotAppend': 1,
       'hypercomb-essentials/src/move/move.drone.ts → commitChildrenDeltas': 6,
       'hypercomb-essentials/src/move/portable-tile-drop.drone.ts → commitChildrenDeltas': 1,
-      'hypercomb-essentials/src/references/gather/gather-link.service.ts → commitChildrenDeltas': 1,
+      // 2: the second puts a tile back when its reference is refused (development, 9143fbad).
+      'hypercomb-essentials/src/references/gather/gather-link.service.ts → commitChildrenDeltas': 2,
       'hypercomb-shared/core/aggregation-layer.ts → commitSlotSet': 2,
       'hypercomb-shared/core/mixed-group-bag.ts → commitSlotSet': 1,
       'hypercomb-shared/ui/aggregate-index/sources/collections.source.ts → commitChildrenDeltas': 1,

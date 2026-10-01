@@ -21,7 +21,7 @@ import {
   moleculeAddress,
   type CanonicalReferenceService,
 } from '@hypercomb/core'
-import { childNamesOf, flattenLayerTree, resolveLayerAt, type PlacementHistory } from '../../history/layer-placement.js'
+import { childLayerOf, childNamesOf, flattenLayerTree, resolveLayerAt, type PlacementHistory } from '../../history/layer-placement.js'
 import { listDecorations, removeDecorationAndWait, writeDecoration } from '../../commands/decoration-manifest.js'
 import { ensureDecorationsIndexed, referenceTargetAt } from '../../commands/decoration-kind-index.js'
 import {
@@ -60,7 +60,7 @@ export type OwnReview = { readonly group: readonly string[]; readonly tiles: rea
 
 type CommitterLike = {
   importTree?(updates: { segments: readonly string[]; layer: { name?: string; [slot: string]: unknown } }[]): Promise<void>
-  commitChildrenDeltas?(segments: readonly string[], changes: { removes?: readonly { sig?: string; label?: string }[] }): Promise<string>
+  commitChildrenDeltas?(segments: readonly string[], changes: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[] }): Promise<string>
   settled?(): Promise<void>
 }
 
@@ -84,6 +84,33 @@ const molecule = async (route: readonly string[]): Promise<string | null> => {
   const leaf = route[route.length - 1]
   if (!leaf) return null
   try { return await moleculeAddress(leaf) } catch { return null }
+}
+
+/** A MOVE REPLACES WHAT THE DESTINATION HELD. `importTree` starts from the
+ *  location's stored head and lays the update over it — right for a paste or an
+ *  adopt, which must never publish less over a live tile. A tile the group does
+ *  not LIST can still have a head at that location: the doorway a participant
+ *  took off the page, kept one step back as everything is. Gathering over it
+ *  kept that doorway's slots (2026-09-30: `/people/susan` came back as the old
+ *  pointer to `/howard/team/susan`, with no picture). Every slot the stale head
+ *  wears and the moved tile does not is cleared — empty for a list, dropped for
+ *  a scalar — so what lands is exactly the tile that moved. */
+const replacingWhatWasThere = async (
+  history: PlacementHistory,
+  domain: unknown,
+  updates: { segments: string[]; layer: { name?: string; [slot: string]: unknown } }[],
+): Promise<{ segments: string[]; layer: { name?: string; [slot: string]: unknown } }[]> => {
+  const out: { segments: string[]; layer: { name?: string; [slot: string]: unknown } }[] = []
+  for (const update of updates) {
+    const stale = await history.currentLayerAt(await history.sign({ domain, explorerSegments: () => update.segments }))
+    const layer: { name?: string; [slot: string]: unknown } = { ...update.layer }
+    for (const [slot, value] of Object.entries(stale ?? {})) {
+      if (slot === 'name' || slot in layer) continue
+      layer[slot] = Array.isArray(value) ? [] : null
+    }
+    out.push({ segments: update.segments, layer })
+  }
+  return out
 }
 
 export class GatherLinkService {
@@ -257,20 +284,41 @@ export class GatherLinkService {
     if (!review || !history || !committer?.importTree || !committer.commitChildrenDeltas || !refs) return []
     const wanted = new Set(names)
     const gathered: string[] = []
+    const pageLayer = await resolveLayerAt(history, lineage?.domain, pageRoute)
     for (const tile of review.tiles) {
       if (!wanted.has(tile.name)) continue
-      if (!tile.inGroup) {
-        const copy = await resolveLayerAt(history, lineage?.domain, [...pageRoute, tile.name])
-        if (!copy) continue
-        await committer.importTree(await flattenLayerTree(history, copy, [...review.group, tile.name]))
+      const tileRoute = [...pageRoute, tile.name]
+      const memberRoute = [...review.group, tile.name]
+      // The group's tile can be a DOORWAY BACK to this one — the swap this
+      // gather exists for (the real tile here, a pointer to it there). Pointing
+      // this tile at that one would point it at itself, so it is gathered as a
+      // tile the group lacks: the real one moves over the doorway.
+      let inGroup = tile.inGroup
+      if (inGroup) {
+        await ensureDecorationsIndexed([tile.name], review.group)
+        const back = referenceTargetAt(memberRoute)
+        if (back && back.join('/') === tileRoute.join('/')) inGroup = false
       }
-      // The page stops listing its own copy, then gathers the group's.
+      if (!inGroup) {
+        const copy = await resolveLayerAt(history, lineage?.domain, tileRoute)
+        if (!copy) continue
+        const moved = await flattenLayerTree(history, copy, memberRoute)
+        await committer.importTree(await replacingWhatWasThere(history, lineage?.domain, moved))
+      }
+      // The page stops listing its own copy, then gathers the group's. Its
+      // copy is remembered so a refused reference puts it straight back — a
+      // gather never leaves a tile listed nowhere.
+      const own = await childLayerOf(history, pageLayer, tile.name)
       await committer.commitChildrenDeltas(pageRoute, { removes: [{ label: tile.name }] })
       await committer.settled?.()
       const placed = await refs.place({
-        name: tile.name, sourceSegments: [...review.group, tile.name], parentSegments: pageRoute,
+        name: tile.name, sourceSegments: memberRoute, parentSegments: pageRoute,
       }).catch(() => null)
-      if (placed) gathered.push(tile.name)
+      if (placed) { gathered.push(tile.name); continue }
+      if (own) {
+        await committer.commitChildrenDeltas(pageRoute, { appends: [own.sig] })
+        await committer.settled?.()
+      }
     }
     if (gathered.length) EffectBus.emit('gather:links-changed', { page: pageRoute, group: [...review.group] })
     return gathered

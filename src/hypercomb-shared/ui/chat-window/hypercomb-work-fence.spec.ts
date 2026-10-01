@@ -15,6 +15,7 @@ import {
   lastRoundMessage,
   leftFromProse,
   workBudget,
+  blockUnwrittenMessage,
 } from './hypercomb-work-fence'
 
 describe('the work fence', () => {
@@ -137,6 +138,186 @@ describe('the stream guard', () => {
     const { shown, guard } = run(['done\n', '```hypercomb-do'])
     expect(shown).toBe('done\n')
     expect(guard.holding).toBe(true)
+  })
+
+  it('holds the tag spelling, whole on one line or opened mid-stream', () => {
+    const inline = run(['<hyper', 'comb-read> read / </hypercomb-read>'])
+    expect(inline.shown).toBe('')
+    expect(inline.guard.holding).toBe(true)
+    const spread = run(['Looking.\n', '<hypercomb-do>\n', 'create notes\n', '</hypercomb-do>'])
+    expect(spread.shown).toBe('Looking.\n')
+    expect(spread.guard.holding).toBe(true)
+  })
+
+  it('lets any other tag through, and a work tag inside a code block', () => {
+    expect(run(['<hypercomb-banner>hi</hypercomb-banner>\n']).shown).toBe('<hypercomb-banner>hi</hypercomb-banner>\n')
+    expect(run(['<b>bold</b> text']).shown).toBe('<b>bold</b> text')
+    const quoted = '```html\n<hypercomb-read> read / </hypercomb-read>\n```\n'
+    const { shown, guard } = run([quoted])
+    expect(shown).toBe(quoted)
+    expect(guard.holding).toBe(false)
+  })
+
+  it('shows the words before a tag on its line and holds from the tag on', () => {
+    // The tag arrives split across chunks, after prose on the same line.
+    const inline = run(['Let me ', 'look. <hyper', 'comb-read> read / </hypercomb-read>'])
+    expect(inline.shown).toBe('Let me look. ')
+    expect(inline.guard.holding).toBe(true)
+    const block = run(['Let me look. <hypercomb-do>', '\ncreate notes\n', '</hypercomb-do>'])
+    expect(block.shown).toBe('Let me look. ')
+    expect(block.guard.holding).toBe(true)
+    // An indent is not prose, and a tag inside inline code is.
+    expect(run(['  <hypercomb-read>\n', 'read /']).shown).toBe('')
+    const quoted = 'Write `<hypercomb-read> read / </hypercomb-read>` to read.\n'
+    const code = run([quoted.slice(0, 12), quoted.slice(12)])
+    expect(code.shown).toBe(quoted)
+    expect(code.guard.holding).toBe(false)
+  })
+
+  it('lets a sentence that names the tag through — only the two shapes hold', () => {
+    const mention = 'The hive has two spellings.\n<hypercomb-read> is the tag form, which I should not use.\nHere is your answer: 42.'
+    const said = run([mention.slice(0, 40), mention.slice(40, 70), mention.slice(70)])
+    expect(said.shown).toBe(mention)
+    expect(said.guard.holding).toBe(false)
+    const last = run(['Sure. <hypercomb-handoff> is not', ' needed here'])
+    expect(last.shown).toBe('Sure. <hypercomb-handoff> is not needed here')
+    expect(last.guard.holding).toBe(false)
+    // A closer spelled loosely still makes the inline form.
+    const loose = run(['Looking. <hypercomb-read> read / </ Hypercomb-Read >'])
+    expect(loose.shown).toBe('Looking. ')
+    expect(loose.guard.holding).toBe(true)
+  })
+
+  it('holds a tag body whole — blank lines, a wrapped fence, and what follows the closer', () => {
+    const write = run(['Here it is.\n', '<hypercomb-write>\n', 'a\n\nb\n', '</hypercomb-write>\n'])
+    expect(write.shown).toBe('Here it is.\n')
+    expect(write.guard.holding).toBe(true)
+    const wrapped = run(['Looking.\n<hypercomb-read>\n```\n', 'read /\n```\n</hypercomb-read>'])
+    expect(wrapped.shown).toBe('Looking.\n')
+    expect(wrapped.guard.holding).toBe(true)
+    const tail = run(['<hypercomb-read>read /a</hypercomb-read> That reads it.\n', 'More prose.'])
+    expect(tail.shown).toBe('')
+    expect(tail.guard.holding).toBe(true)
+  })
+})
+
+describe('a block named and not written', () => {
+  it('says which block a reply named inside markup the hive cannot run', () => {
+    const split = splitWork(['<block info="hypercomb-read">', 'read here', 'read /games', 'tree /games', '</block>'].join('\n'))
+    expect(split.request).toBeUndefined()
+    expect(split.unwritten).toBe('hypercomb-read')
+    expect(splitWork(['I will add it now.', '<tool name="hypercomb-do">create notes</tool>'].join('\n')).unwritten).toBe('hypercomb-do')
+  })
+
+  it('says nothing for a sentence, inline code, a quoted example, or a reply that carries a real block', () => {
+    expect(splitWork('I ask the hive with a hypercomb-read block when I need to look.').unwritten).toBeUndefined()
+    expect(splitWork('The tag is `<block info="hypercomb-read">` in that dialect.').unwritten).toBeUndefined()
+    expect(splitWork(['An example:', '```xml', '<block info="hypercomb-read">', 'read here', '</block>', '```', 'That is all.'].join('\n')).unwritten).toBeUndefined()
+    const real = splitWork(['<block info="hypercomb-read"> is wrong, so:', '```hypercomb-read', 'read here', '```'].join('\n'))
+    expect(real.request).toEqual({ kind: 'read', lines: ['/read'] })
+    expect(real.unwritten).toBeUndefined()
+  })
+
+  it('the correction names the block and the one spelling, and carries the request', () => {
+    const said = blockUnwrittenMessage('hypercomb-read', 'survey the games')
+    expect(said).toContain('hypercomb-read')
+    expect(said).toContain('three backticks')
+    expect(said).toContain('survey the games')
+  })
+})
+
+describe('the tag spelling of a work block', () => {
+  it('reads a one-line tag as the read it names', () => {
+    const split = splitWork('<hypercomb-read> read / </hypercomb-read>')
+    expect(split.prose).toBe('')
+    expect(split.request).toEqual({ kind: 'read', lines: ['/read /'] })
+  })
+
+  it('reads a tag spread over lines, keeps the prose, and takes an unclosed one', () => {
+    const split = splitWork(['I will add it.', '<hypercomb-do>', 'create notes', '- create ideas', '</hypercomb-do>', 'Done after that.'].join('\n'))
+    expect(split.prose).toBe('I will add it.\nDone after that.')
+    expect(split.request).toEqual({ kind: 'do', lines: ['/create notes', '/create ideas'] })
+    expect(splitWork('<hypercomb-read>\nread here').request).toEqual({ kind: 'read', lines: ['/read'] })
+  })
+
+  it('carries a handover, and leaves an unknown tag and a quoted one as prose', () => {
+    expect(splitWork('<hypercomb-continue>read the rest of the file</hypercomb-continue>').left).toBe('read the rest of the file')
+    expect(splitWork('<hypercomb-banner>hi</hypercomb-banner>').request).toBeUndefined()
+    expect(splitWork('```html\n<hypercomb-read> read / </hypercomb-read>\n```').request).toBeUndefined()
+  })
+
+  it('takes a write tag as written, blank lines and all, equal to the fence spelling', () => {
+    const sig = 'a'.repeat(64)
+    const code = [`${sig} src/a.ts`, 'const a = `line one', '', 'line three`', '', '  export const b = 2']
+    const tag = splitWork(['Here is the section.', '<hypercomb-write>', ...code, '</hypercomb-write>'].join('\n'))
+    const fence = splitWork(['Here is the section.', '```hypercomb-write', ...code, '```'].join('\n'))
+    expect(tag.request).toEqual({ kind: 'write', lines: code })
+    expect(tag).toEqual(fence)
+    expect(parseWriteBlock(tag.request!.lines)).toEqual({ beeSig: sig, section: 'src/a.ts', body: code.slice(1).join('\n') })
+    // Markdown keeps its paragraphs too.
+    const doctrine = ['doctrine The rule', 'First paragraph.', '', 'Second paragraph.']
+    expect(splitWork(['<hypercomb-write>', ...doctrine, '</hypercomb-write>'].join('\n')).request?.lines).toEqual(doctrine)
+    // Only the empty rest of the opener line and empty text before the closer fall away.
+    expect(splitWork(`<hypercomb-write>  \n${sig} src/a.ts\n\nx  </hypercomb-write>`).request?.lines).toEqual([`${sig} src/a.ts`, '', 'x  '])
+    // An unclosed write is still not code to run.
+    expect(splitWork(['<hypercomb-write>', ...code].join('\n')).request).toEqual({ kind: 'write', lines: [] })
+  })
+
+  it('opens after prose on the same line, and the prose stays', () => {
+    const split = splitWork('Let me look. <hypercomb-read> read / </hypercomb-read>')
+    expect(split.prose).toBe('Let me look.')
+    expect(split.request).toEqual({ kind: 'read', lines: ['/read /'] })
+    expect(splitWork('Read the three tiles; two are done. <hypercomb-continue>finish the third</hypercomb-continue>'))
+      .toEqual({ prose: 'Read the three tiles; two are done.', left: 'finish the third' })
+    expect(splitWork('Let me look. <hypercomb-read>\nread /\n</hypercomb-read>'))
+      .toEqual({ prose: 'Let me look.', request: { kind: 'read', lines: ['/read /'] } })
+    // Inside inline code it is a mention, wherever it stands on the line.
+    for (const quoted of ['Write `<hypercomb-read> read / </hypercomb-read>` to read.', '`<hypercomb-read>`\nread /']) {
+      expect(splitWork(quoted)).toEqual({ prose: quoted })
+    }
+    // A quoted mention does not hide a real tag later on the line.
+    expect(splitWork('Not `<hypercomb-read>` but <hypercomb-read>read /a</hypercomb-read>'))
+      .toEqual({ prose: 'Not `<hypercomb-read>` but', request: { kind: 'read', lines: ['/read /a'] } })
+  })
+
+  it('takes only the block form and the inline form — a sentence that names the tag is prose', () => {
+    const mention = 'The hive has two spellings.\n<hypercomb-read> is the tag form, which I should not use.\nThe fence is the right one.\n\nHere is your answer: 42.'
+    expect(splitWork(mention)).toEqual({ prose: mention })
+    const handoff = 'Sure.\n<hypercomb-handoff> is not needed here, I can do this myself.\nThe answer is 42.'
+    expect(splitWork(handoff)).toEqual({ prose: handoff })
+    // The closer is matched as a model spells it.
+    expect(splitWork('<hypercomb-read>\nread /\n</hypercomb-read >\nAfter.'))
+      .toEqual({ prose: 'After.', request: { kind: 'read', lines: ['/read /'] } })
+    expect(splitWork('<hypercomb-read>\nread /\n</Hypercomb-Read>\nAfter.'))
+      .toEqual({ prose: 'After.', request: { kind: 'read', lines: ['/read /'] } })
+    expect(splitWork('<hypercomb-read> read / < / HYPERCOMB-READ >').request).toEqual({ kind: 'read', lines: ['/read /'] })
+    // The block form never closed still counts, as an unclosed fence does.
+    expect(splitWork('ok\n<hypercomb-read>  \nfind cigar').request).toEqual({ kind: 'read', lines: ['/find cigar'] })
+  })
+
+  it('unwraps a fence written inside the tag', () => {
+    for (const info of ['', 'hypercomb-read', 'text']) {
+      expect(splitWork(`<hypercomb-read>\n\`\`\`${info}\nread /\n\`\`\`\n</hypercomb-read>`).request)
+        .toEqual({ kind: 'read', lines: ['/read /'] })
+    }
+    // Only the outer pair goes: a write keeps its own lines, a fence among them.
+    const sig = 'a'.repeat(64)
+    const code = [`${sig} src/a.md`, 'Text.', '', '```ts', 'const a = 1', '```']
+    expect(splitWork(['<hypercomb-write>', '', '```', ...code, '```', '', '</hypercomb-write>'].join('\n')).request)
+      .toEqual({ kind: 'write', lines: code })
+    expect(splitWork(['<hypercomb-write>', ...code, '</hypercomb-write>'].join('\n')).request)
+      .toEqual({ kind: 'write', lines: code })
+  })
+
+  it('keeps what follows the closer on its line — as prose, or as a further block', () => {
+    expect(splitWork('<hypercomb-read>read /a</hypercomb-read> <hypercomb-read>read /b</hypercomb-read>'))
+      .toEqual({ prose: '', request: { kind: 'read', lines: ['/read /a', '/read /b'] } })
+    expect(splitWork('<hypercomb-read>read /a</hypercomb-read><hypercomb-continue>rest</hypercomb-continue>'))
+      .toEqual({ prose: '', request: { kind: 'read', lines: ['/read /a'] }, left: 'rest' })
+    expect(splitWork('<hypercomb-do>\ncreate notes\n</hypercomb-do> That adds the tile.\nMore prose.'))
+      .toEqual({ prose: 'That adds the tile.\nMore prose.', request: { kind: 'do', lines: ['/create notes'] } })
+    expect(splitWork('First. <hypercomb-read>read /a</hypercomb-read> Then I answer.'))
+      .toEqual({ prose: 'First.\nThen I answer.', request: { kind: 'read', lines: ['/read /a'] } })
   })
 })
 

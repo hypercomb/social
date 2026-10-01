@@ -41,7 +41,7 @@ export type HarnessRecord = {
   readonly doctrine?: readonly string[]
   readonly leg: { readonly rounds: number; readonly reserveTokens: number; readonly keepVerbatim: number }
   readonly budget: { readonly rounds: number; readonly tokens: number }
-  readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number }
+  readonly reads: { readonly pageChars: number; readonly roundsWhenAsked: number; readonly charsWhenAsked: number; readonly perBlock: number }
   readonly handover: { readonly fence: string; readonly resumeSeconds: number; readonly proseFallback: boolean }
   /** The Execution window's default per kind. May only HOLD more, never auto-run more. */
   readonly review: { readonly auto: readonly string[]; readonly held: readonly string[] }
@@ -52,12 +52,16 @@ export type HarnessRecord = {
 
 /** Today's loop, as a record. These ARE the values the chat window shipped
  *  with; the fallback in the window must stay equal to them. */
+/** The most reads one block may carry, whatever a record says — the same
+ *  ceiling the shell's read parser holds (hypercomb-observation.ts). */
+export const READS_PER_BLOCK_MOST = 8
+
 export const DEFAULT_HARNESS: HarnessRecord = Object.freeze({
   kind: 'harness@1',
   name: 'default',
   leg: { rounds: 12, reserveTokens: 8_000, keepVerbatim: 4 },
   budget: { rounds: 400, tokens: 6_000_000 },
-  reads: { pageChars: 48_000, roundsWhenAsked: 6, charsWhenAsked: 24_000 },
+  reads: { pageChars: 48_000, roundsWhenAsked: 6, charsWhenAsked: 24_000, perBlock: READS_PER_BLOCK_MOST },
   handover: { fence: 'hypercomb-continue', resumeSeconds: 3_600, proseFallback: true },
   review: { auto: [], held: ['do', 'write'] },
   vocabulary: { allow: [], deny: [] },
@@ -111,6 +115,7 @@ export const parseHarness = (json: unknown): HarnessRecord => {
       pageChars: num(reads['pageChars'], d.reads.pageChars, 1_024),
       roundsWhenAsked: num(reads['roundsWhenAsked'], d.reads.roundsWhenAsked),
       charsWhenAsked: num(reads['charsWhenAsked'], d.reads.charsWhenAsked, 1_500),
+      perBlock: Math.min(num(reads['perBlock'], d.reads.perBlock), READS_PER_BLOCK_MOST),
     },
     handover: {
       fence: String(handover['fence'] ?? d.handover.fence).trim() || d.handover.fence,
@@ -128,7 +133,7 @@ export const parseHarness = (json: unknown): HarnessRecord => {
 export const harnessBytes = (record: HarnessRecord): ArrayBuffer =>
   new TextEncoder().encode(JSON.stringify(record, null, 2)).buffer as ArrayBuffer
 
-type FileLike = { readonly size: number; text(): Promise<string> }
+type FileLike = { readonly size: number; readonly lastModified?: number; text(): Promise<string> }
 type WritableLike = { write(chunk: ArrayBuffer): Promise<void>; close(): Promise<void> }
 type FileHandleLike = {
   readonly kind: string
@@ -205,8 +210,18 @@ export class HarnessStore extends EventTarget {
       return record ? { sig: wanted, record } : undefined
     }
     if (wanted === 'default' && this.#defaultSig) return { sig: this.#defaultSig, record: DEFAULT_HARNESS }
-    let found: { sig: string; record: HarnessRecord } | undefined
-    for (const [sig, record] of this.#records) if (record.name === wanted) found = { sig, record }
+    const sig = this.#newest(wanted)
+    const record = sig ? this.#records.get(sig) : undefined
+    return sig && record ? { sig, record } : undefined
+  }
+
+  /** The newest member wearing a name. The roster is kept oldest first —
+   *  `import` puts a new record, or a held one saved again, last; `sweep`
+   *  orders the pool by when each file was written — so the last one of a
+   *  name is its latest save. */
+  #newest(name: string): string | undefined {
+    let found: string | undefined
+    for (const [sig, record] of this.#records) if (record.name === name) found = sig
     return found
   }
 
@@ -237,22 +252,35 @@ export class HarnessStore extends EventTarget {
   async sweep(): Promise<number> {
     const dir = await this.#pool()
     if (!dir) return 0
-    let read = 0
+    const read: { sig: string; record: HarnessRecord; at: number }[] = []
     try {
       for await (const [name, handle] of dir.entries()) {
         if (handle.kind !== 'file' || !isSignature(name) || !handle.getFile) continue
         try {
           const file = await handle.getFile()
           if (!file.size) continue
-          this.#records.set(name, parseHarness(await file.text()))
-          read++
+          read.push({ sig: name, record: parseHarness(await file.text()), at: Number(file.lastModified) || 0 })
         } catch (error) {
           console.warn(`[harness] skipping pool member ${name.slice(0, 12)}…:`, error)
         }
       }
     } catch { /* pool unreadable — the shipped default answers */ }
-    if (read) this.dispatchEvent(new Event('change'))
-    return read
+    // A NAME ANSWERS ITS LATEST SAVE, AND A DIRECTORY LISTS BY SIGNATURE. Left
+    // in directory order, which of several records of one name answered after
+    // a reload was an accident of their hashes. Every save writes its file —
+    // a record saved again is written again (`import`, `again`) — so the
+    // file's own time is when the record was last said: oldest first, newest
+    // last. A handle that tells no time keeps directory order — the native
+    // and packed stores answer 0 for every file, so there a reload still
+    // answers by hash until they tell a time or the name keeps a pointer of
+    // its own. What this session brought in that the listing did not see
+    // stays newer than everything it did.
+    read.sort((a, b) => a.at - b.at)
+    const unseen = [...this.#records].filter(([sig]) => !read.some(entry => entry.sig === sig))
+    for (const { sig, record } of read) { this.#records.delete(sig); this.#records.set(sig, record) }
+    for (const [sig, record] of unseen) { this.#records.delete(sig); this.#records.set(sig, record) }
+    if (read.length) this.dispatchEvent(new Event('change'))
+    return read.length
   }
 
   /** Mint the shipped default into the pool when it is not there. Content-
@@ -283,25 +311,36 @@ export class HarnessStore extends EventTarget {
     return sig
   }
 
-  /** Bring a record in: parse, sign, persist, and answer its signature. */
-  async import(json: unknown): Promise<string> {
+  /** Bring a record in: parse, sign, persist, and answer its signature. A
+   *  record the pool already holds is answered as it stands — a host listing
+   *  it again on a sync, an offer accepted twice, is not a new saying, and
+   *  must not take the name back from the participant's own later edit.
+   *
+   *  THE NAME FOLLOWS THE LATEST SAVE, so a SAVE says `again`. A note put
+   *  back to what it read before is a record the pool holds being said once
+   *  more: it becomes the newest for its name — it moves to the end of the
+   *  roster and its file is written again, the same bytes under the same
+   *  signature, so the time `sweep` orders by moves with it. Already the
+   *  newest of its name: nothing moves and nothing is written. Only the tile
+   *  (harness-tiles.ts) asks for it. */
+  async import(json: unknown, again = false): Promise<string> {
     const record = parseHarness(json)
     const bytes = harnessBytes(record)
     const sig = await SignatureService.sign(bytes)
-    if (!this.#records.has(sig)) {
-      this.#records.set(sig, record)
-      const dir = await this.#pool()
-      if (dir) {
-        try {
-          const handle = await dir.getFileHandle(sig, { create: true })
-          const writable = await handle.createWritable?.()
-          if (writable) { try { await writable.write(bytes) } finally { await writable.close() } }
-        } catch (error) {
-          console.warn(`[harness] "${record.name}" read but not persisted:`, error)
-        }
+    if (this.#records.has(sig) && (!again || this.#newest(record.name) === sig)) return sig
+    this.#records.delete(sig)
+    this.#records.set(sig, record)
+    const dir = await this.#pool()
+    if (dir) {
+      try {
+        const handle = await dir.getFileHandle(sig, { create: true })
+        const writable = await handle.createWritable?.()
+        if (writable) { try { await writable.write(bytes) } finally { await writable.close() } }
+      } catch (error) {
+        console.warn(`[harness] "${record.name}" read but not persisted:`, error)
       }
-      this.dispatchEvent(new Event('change'))
     }
+    this.dispatchEvent(new Event('change'))
     return sig
   }
 }

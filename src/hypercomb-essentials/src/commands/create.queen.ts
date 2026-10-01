@@ -54,6 +54,13 @@ export class CreateQueenBee extends QueenBee {
     reach: 'additive' as const,
     scope: 'page' as const,
     refuse: (args: string): string | undefined => {
+      // A ROUTE FROM THE ROOT IS THE MISTAKE A MODEL MAKES: it reads by
+      // route, so it creates by route, and "explicit names separated by /"
+      // told it nothing it could act on — nine rounds, nothing made (jwize's
+      // drive session, 2026-09-30). Say what the names are relative to.
+      if (args.trim().startsWith('/')) {
+        return '/create takes names relative to the page you are on, never a route from the root: write me/song-circle, not /programs/me/song-circle'
+      }
       const parts = args.split('/').map(part => part.trim())
       if (args.includes(BACKSLASH) || parts.some(part => !part || part === '.' || part === '..')) {
         return '/create needs one or more explicit tile names separated by /'

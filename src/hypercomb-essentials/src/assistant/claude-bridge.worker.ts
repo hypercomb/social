@@ -1,7 +1,7 @@
 // bridge/claude-bridge.worker.ts
 import {
   Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService,
-  isLocalClaudeBridgeConfigured,
+  isLocalClaudeBridgeConfigured, holdAwake,
   REMOTE_SUBMIT, formatRemoteSubmitOutcome,
   type RemoteSubmitRequest, type RemoteSubmitOutcome,
 } from '@hypercomb/core'
@@ -167,6 +167,14 @@ export class ClaudeBridgeWorker extends Worker {
   public override effects = [] as const
 
   #ws: WebSocket | null = null
+  /** THE RENDERER STAYS AWAKE. This tab is the only thing that can answer
+   *  the broker — read the hive, write a note, sign the install stamp — and
+   *  the participant is usually looking at another tab while a session works.
+   *  A hidden tab is slowed and frozen, so the socket flapped and every op
+   *  timed out: a published revision sat with its stamp owed for hours
+   *  (jwize's drive session, 2026-09-30). While the socket is open the tab
+   *  holds the shared lock a browser does not freeze (core/stay-awake.ts). */
+  #letSleep: (() => void) | null = null
   #timer: ReturnType<typeof setTimeout> | null = null
   #checkingHealth = false
   /** Consecutive attempts that did not reach an open socket. Reset by a
@@ -278,6 +286,8 @@ export class ClaudeBridgeWorker extends Worker {
         this.#connected = true
         this.#attempts = 0
         ws.send(JSON.stringify({ type: 'renderer' }))
+        this.#letSleep?.()
+        this.#letSleep = holdAwake('hypercomb:bridge-renderer')
         console.log('[claude-bridge] connected')
         this.#announce()
       }
@@ -290,6 +300,8 @@ export class ClaudeBridgeWorker extends Worker {
         const wasConnected = this.#connected
         this.#ws = null
         this.#connected = false
+        this.#letSleep?.()
+        this.#letSleep = null
         // Announced even when we never connected: "no Claude is listening" is
         // the state a chat surface most needs to be told, and a failed FIRST
         // attempt is precisely when nobody is. Staying silent here is what
@@ -549,6 +561,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'inflate':      return this.#inflate(req)
       case 'layer-at':     return this.#layerAt(req)
       case 'layer-by-sig': return this.#layerBySig(req)
+      case 'layers-at':    return this.#layersAt(req)
       case 'slice-create': return this.#sliceCreate(req)
       case 'put-resource': return this.#putResource(req)
       case 'get-resource': return this.#getResource(req)
@@ -1524,6 +1537,19 @@ export class ClaudeBridgeWorker extends Worker {
     const layer = await history.currentLayerAt(locationSig)
     if (!layer) return { id: req.id, ok: false, error: `no layer at /${segments.join('/')}` }
     return { id: req.id, ok: true, data: layer }
+  }
+
+  // EVERY revision a location has held, oldest first — `layer-at` answers only
+  // the head. A repair needs the earlier ones: a tile whose head went wrong is
+  // put right by committing an earlier layer again (read it with
+  // `layer-by-sig`), never by deleting the marker that went wrong.
+  async #layersAt(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
+    const locationSig = await history.sign({ explorerSegments: () => segments })
+    const layers = await history.listLayers(locationSig)
+    return { id: req.id, ok: true, data: layers.map(entry => ({ index: entry.index, layerSig: entry.layerSig, at: entry.at })) }
   }
 
   // Raw layer read BY SIGNATURE — the sig-addressed twin of `layer-at`.

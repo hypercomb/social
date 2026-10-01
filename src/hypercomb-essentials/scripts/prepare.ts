@@ -542,8 +542,9 @@ const computeTreeSignature = (): string => {
 
 /** Bump with any change to what prepare generates. sleepers:1 = the
  *  sleeping-effects lane (queens, views, effect sleepers load on demand).
- *  sleepers:2 = a queen registering a service by a named key stays awake. */
-const GENERATOR_SHAPE = 'sleepers:2'
+ *  sleepers:2 = a queen registering a service by a named key stays awake.
+ *  sleepers:3 = a queen that declares a machine block stays awake. */
+const GENERATOR_SHAPE = 'sleepers:3'
 
 const treeSignature = computeTreeSignature()
 

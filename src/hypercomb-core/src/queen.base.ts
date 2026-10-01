@@ -88,6 +88,21 @@ export abstract class QueenBee extends Bee {
    */
   public slashPrototype: boolean = false
 
+  /**
+   * EVERYTHING AFTER MY WORD IS MINE, VERBATIM. The command line reads a
+   * line before the queen does: a ':' in it is tag grammar, a '.' between
+   * words it offers is a walk turned back into spaces, and in plain language
+   * every behaviour word runs as its own action. That is right for words
+   * whose arguments are words — and wrong for one whose arguments are
+   * identifiers or prose (`anthropic/claude-sonnet-4.5`, `x/y:free`, a
+   * sentence that happens to say `files`). A queen that sets this is handed
+   * the rest of the line exactly as typed: no tag is taken from it, no dot
+   * walk is derived or undone (her `slashComplete` is asked with the real
+   * arguments instead), and nothing after her word is read as another
+   * behaviour. Off by default, and nothing changes for a word that leaves it off.
+   */
+  public rawArgs: boolean = false
+
   /** Real-time execution — called immediately when `/behaviour` is invoked */
   protected abstract execute(args: string): void | Promise<void>
 

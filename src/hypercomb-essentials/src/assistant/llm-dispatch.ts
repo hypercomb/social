@@ -467,19 +467,48 @@ export const callModel = async (call: LlmCall): Promise<LlmCallResult> => {
 }
 
 /**
+ * A STREAM THAT GOES SILENT IS NOT STILL ANSWERING. Nothing bounded a model
+ * call: a host that accepted the request and then sent nothing held the turn
+ * until the participant pressed stop — in the middle of a delegated task on
+ * hypercomb.io one sat mid-sentence for minutes (jwize's drive session,
+ * 2026-09-30). Long work is unattended work, so silence has a limit: no bytes
+ * for STREAM_IDLE_MS and the read is given up, the stream cancelled, and the
+ * caller told — which makes it a busy answer the plan may ask again. Any byte
+ * counts, a router's keep-alive comment included, so a model thinking behind
+ * one is never cut off. A model on this machine is exempt: loading one is
+ * silent for as long as it takes.
+ */
+export const STREAM_IDLE_MS = 90_000
+
+export class StreamStalledError extends Error {
+  constructor(readonly idleMs: number) {
+    super(`no bytes for ${Math.round(idleMs / 1000)} seconds`)
+    this.name = 'StreamStalledError'
+  }
+}
+
+/** One read, given up after `idleMs` of nothing; 0 waits for ever. */
+export const readWithIdle = async <T>(read: () => Promise<T>, idleMs: number): Promise<T> => {
+  if (!(idleMs > 0)) return read()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const silent = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new StreamStalledError(idleMs)), idleMs) })
+  try { return await Promise.race([read(), silent]) } finally { clearTimeout(timer) }
+}
+
+/**
  * SSE line framing. One `data:` payload per event; `[DONE]` ends the stream
  * (OpenAI's convention, which the shape-sharers inherited). Frames that fail
  * to parse are skipped rather than fatal — a keep-alive comment or a partial
  * flush must not kill a running answer.
  */
-async function* sseFrames(response: Response, signal?: AbortSignal): AsyncGenerator<unknown> {
+async function* sseFrames(response: Response, signal?: AbortSignal, idleMs = 0): AsyncGenerator<unknown> {
   const reader = response.body?.getReader()
   if (!reader) return
   const decoder = new TextDecoder()
   let buffer = ''
   try {
     while (!signal?.aborted) {
-      const { done, value } = await reader.read()
+      const { done, value } = await readWithIdle(() => reader.read(), idleMs)
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       let cut = buffer.indexOf('\n')
@@ -554,7 +583,17 @@ async function* streamProvider(
     arguments: string
   }>()
   let toolStreamFinished = false
-  for await (const frame of sseFrames(response, call.signal)) {
+  const idleMs = machineLocalEndpoint(provider) ? 0 : STREAM_IDLE_MS
+  const frames = sseFrames(response, call.signal, idleMs)
+  const nextFrame = async (): Promise<IteratorResult<unknown>> => {
+    try { return await frames.next() } catch (error) {
+      if (!(error instanceof StreamStalledError)) throw error
+      // 408: the host timed out on us — busy, in the plan's terms.
+      throw new LlmDispatchError(`${provider.label} went silent: ${error.message}`, provider.id, request.model, 408)
+    }
+  }
+  for (let step = await nextFrame(); !step.done; step = await nextFrame()) {
+    const frame = step.value
     const decoded = provider.fromStreamEvent(frame)
     if (typeof decoded === 'string') {
       if (decoded) yield { text: decoded, model: request.model }
@@ -652,11 +691,24 @@ const coolingUntil = new Map<string, number>()
 
 // A VENDOR THAT SAYS "RETRY SHORTLY" IS TAKEN AT ITS WORD. When every choice
 // fails busy — rate-limited or overloaded — before a word is out, the whole
-// plan is tried once more after a short wait: the longest Retry-After any of
-// them sent, else ROUTE_RETRY_DELAY_MS, never past ROUTE_RETRY_MAX_WAIT_MS.
-// Two free models sharing one upstream pool both answered 429 in the same
-// second and the question was lost to it.
-const ROUTE_RETRY_PASSES = 1
+// plan is tried again after a short wait: the longest Retry-After any of
+// them sent, else ROUTE_RETRY_DELAY_MS doubling each pass, never past
+// ROUTE_RETRY_MAX_WAIT_MS. Two free models sharing one upstream pool both
+// answered 429 in the same second and the question was lost to it.
+//
+// THREE PASSES, NOT ONE (jwize's drive session, 2026-09-30): the long work
+// asks a model a dozen times in a row, and one busy second in the middle of
+// it must cost a few seconds of waiting, not the whole task.
+//
+// ...FOR A VENDOR THAT IS BUSY, NOT ONE THAT IS BROKEN (the review of that
+// session's commits): three passes also turned a local model that cannot
+// load — a 500 that says the same thing every time — into four asks and ten
+// seconds before the participant saw the error. The busy answers keep the
+// three; any other 5xx keeps the single retry it had before them
+// (`retryPassesFor`). And a vendor that asks for longer than
+// ROUTE_RETRY_MAX_WAIT_MS is not asked again inside the window it named:
+// its own error is the answer, at once.
+const ROUTE_RETRY_PASSES = 3
 const ROUTE_RETRY_DELAY_MS = 1_500
 const ROUTE_RETRY_MAX_WAIT_MS = 8_000
 
@@ -666,9 +718,36 @@ const ROUTE_RETRY_MAX_WAIT_MS = 8_000
  *  asking again for. */
 const isRetryWorthy = (error: unknown): boolean => {
   if (!(error instanceof LlmDispatchError)) return false
+  if (isEmptyAnswer(error)) return true
   const status = error.status
   return status === 429 || status === 408 || (status !== undefined && status >= 500)
 }
+
+/** A REPLY WITH NO WORDS IN IT. Mid-work, a model sometimes comes back blank
+ *  — four rounds into a task on hypercomb.io the fifth returned nothing and
+ *  the whole turn ended with it (jwize's drive session, 2026-09-30). A blank
+ *  is not an answer and not a refusal: the same question a moment later is a
+ *  different roll, so it is asked once more, and only once. */
+const EMPTY_ANSWER = 'returned no visible text'
+const isEmptyAnswer = (error: unknown): boolean =>
+  error instanceof LlmDispatchError && error.status === undefined && error.message.endsWith(EMPTY_ANSWER)
+
+/** How many more passes a failure is worth. Rate-limited, timed out,
+ *  unavailable, overloaded — the vendor said "busy", and earns every patient
+ *  pass. Any other 5xx is asked once more and no further; nothing else is
+ *  asked again at all. */
+const retryPassesFor = (error: unknown): number => {
+  if (!isRetryWorthy(error)) return 0
+  if (isEmptyAnswer(error)) return 1
+  const status = (error as LlmDispatchError).status
+  return status === 429 || status === 408 || status === 503 || status === 529 ? ROUTE_RETRY_PASSES : 1
+}
+
+/** A router told to skip every host it may use: the ignore list emptied the
+ *  route. OpenRouter says so with a 404 that names the step. */
+const ignoredEveryHost = (error: unknown): boolean =>
+  error instanceof LlmDispatchError && error.status === 404
+  && /providers have been ignored|Filter by Ignored Providers/i.test(error.message)
 
 const waitFor = (ms: number, signal?: AbortSignal): Promise<void> => new Promise(resolve => {
   if (ms <= 0 || signal?.aborted) { resolve(); return }
@@ -761,15 +840,33 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
   // host on the retry's ignore list, so the second pass routes the same
   // model through another host instead of back into the same queue.
   const busyUpstreams = new Set<string>(call.ignoreUpstreams ?? [])
+  // ...UNLESS IT IS THE ONLY ROAD (the same drive session): an account that
+  // allows one host for a model answers "all providers have been ignored"
+  // when that host is skipped — a busy second turned into a dead turn. The
+  // router said the ignore list cannot be honoured, so the same provider is
+  // asked again plainly, at once, and is sent no ignore list for the rest
+  // of this call; its busy host is then simply waited for.
+  //
+  // THE REFUSAL IS THAT CANDIDATE'S OWN. As one flag for the whole call it
+  // switched route-around off for every other candidate too: a model with
+  // several hosts, ranked beside a one-road model, went back into the busy
+  // queue pass after pass. The busy list is shared and never cleared; who
+  // may not be sent it is remembered by provider id.
+  const ignoreRefusedBy = new Set<string>()
   for (let pass = 0; pass <= ROUTE_RETRY_PASSES; pass++) {
-    // Whether THIS pass failed only in ways worth a second pass, and the
-    // longest wait any vendor asked for before it.
+    // How many more passes THIS pass's failures are worth — the least any of
+    // them earned, none once one cannot be helped by asking again — the
+    // longest wait any vendor asked for before the next, and whether every
+    // one of them asked for a wait past the cap with no other host to try.
     let tried = 0
-    let retryWorthy = true
+    let patience = ROUTE_RETRY_PASSES
     let retryAfter: number | undefined
-    const passCall: LlmCall = busyUpstreams.size ? { ...call, ignoreUpstreams: [...busyUpstreams] } : call
-    for (const provider of candidates) {
+    let outOfReach = true
+    for (let at = 0; at < candidates.length; at++) {
+      const provider = candidates[at]
       if (refusedOwners.has(credentialOwner(provider))) continue
+      const passCall: LlmCall = ignoreRefusedBy.has(provider.id) ? { ...call, ignoreUpstreams: [] }
+        : busyUpstreams.size ? { ...call, ignoreUpstreams: [...busyUpstreams] } : call
       tried += 1
       attempt += 1
       let emitted = false
@@ -787,7 +884,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
         const message = error instanceof Error ? error.message : String(error)
         failures.push(`${provider.label}: ${message}`)
         // A request that could not be built will not build next time either.
-        retryWorthy = false
+        patience = 0
         if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
         if (dispatch?.status === 401 || dispatch?.status === 403) refusedOwners.add(credentialOwner(provider))
         EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
@@ -818,7 +915,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
         }
         if (!emitted) {
           throw new LlmDispatchError(
-            `${provider.label} returned no visible text`, provider.id,
+            `${provider.label} ${EMPTY_ANSWER}`, provider.id,
             call.model ?? modelForTier(provider, call.need?.tier ?? 'balanced'),
           )
         }
@@ -828,25 +925,44 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
         const status = error instanceof LlmDispatchError ? error.status : undefined
         safeObserve(call, { phase: 'failure', attempt, providerId: provider.id, model: answeredModel, durationMs: Date.now() - startedAt, outputEmitted: emitted, category: attemptCategory(error, status), ...(status !== undefined ? { status } : {}), ...(usage ? { usage } : {}) })
         if (isAbort(error, call.signal) || emitted) throw error
+        if (!ignoreRefusedBy.has(provider.id) && passCall.ignoreUpstreams?.length && ignoredEveryHost(error)) {
+          ignoreRefusedBy.add(provider.id)
+          tried -= 1
+          at -= 1
+          continue
+        }
         // A NAMED provider never changes vendor — but a busy one is asked
         // again like any other, since that is the same vendor a moment
         // later. The chat names its granted provider on every turn, so
         // without this the retry only ever covered the route nobody takes.
-        if (!automatic && !(isRetryWorthy(error) && pass < ROUTE_RETRY_PASSES)) throw error
+        const worth = retryPassesFor(error)
+        if (!automatic && pass >= worth) throw error
         lastError = error
         const message = error instanceof Error ? error.message : String(error)
         failures.push(`${provider.label}: ${message}`)
-        retryWorthy &&= isRetryWorthy(error)
-        const asked = error instanceof LlmDispatchError ? error.retryAfterMs : undefined
+        patience = Math.min(patience, worth)
+        const dispatch = error instanceof LlmDispatchError ? error : undefined
+        const asked = dispatch?.retryAfterMs
         if (asked !== undefined) retryAfter = Math.max(retryAfter ?? 0, asked)
-        if (error instanceof LlmDispatchError && error.upstream && isRetryWorthy(error)) busyUpstreams.add(error.upstream)
+        const busyHost = worth ? dispatch?.upstream : undefined
+        if (busyHost) busyUpstreams.add(busyHost)
+        // A wait past the cap is out of reach — unless the next pass takes
+        // this provider around the host that asked for it.
+        outOfReach &&= asked !== undefined && asked > ROUTE_RETRY_MAX_WAIT_MS
+          && !(busyHost && !ignoreRefusedBy.has(provider.id))
         if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
         if (status === 401 || status === 403) refusedOwners.add(credentialOwner(provider))
         EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
       }
     }
-    if (!tried || !retryWorthy || pass === ROUTE_RETRY_PASSES) break
-    await waitFor(Math.min(retryAfter ?? ROUTE_RETRY_DELAY_MS, ROUTE_RETRY_MAX_WAIT_MS), call.signal)
+    if (!tried || pass >= patience) break
+    // EVERY CHOICE ASKED FOR LONGER THAN WE WILL WAIT. Waiting the cap and
+    // asking again lands inside the window each vendor named — a near-certain
+    // second refusal, eight seconds later, three times over. The failure is
+    // the answer now. One choice that asked for less, or for nothing, keeps
+    // the plan alive: it may well answer after the capped wait.
+    if (outOfReach) break
+    await waitFor(Math.min(retryAfter ?? ROUTE_RETRY_DELAY_MS * 2 ** pass, ROUTE_RETRY_MAX_WAIT_MS), call.signal)
     if (call.signal?.aborted) throw new DOMException('The model request was aborted', 'AbortError')
   }
 

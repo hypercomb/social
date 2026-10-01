@@ -189,7 +189,51 @@ export class SlashBehaviourDrone extends EventTarget {
     }
     return false
   }
+
+  /** Does this word keep everything after it verbatim (`QueenBee.rawArgs`)?
+   *  The command line asks before it reads a line as anything else — tag
+   *  grammar, a sentence — because that reading happens before the behaviour
+   *  is handed a thing. False for every word that never said so. A queen
+   *  still asleep answers what her stand-in was told: true when the sleeper
+   *  table carried the flag, false when it carried her word and description
+   *  only — a caller that can wait asks `rawArgsAwake` instead. */
+  rawArgs(behaviourName: string): boolean {
+    const name = behaviourName.toLowerCase().trim()
+    for (const provider of this.#providers) {
+      for (const behaviour of provider.behaviours) {
+        if (this.#names(behaviour).includes(name)) return (behaviour as RawArgsBehaviour).rawArgs === true
+      }
+    }
+    return false
+  }
+
+  /** The same question, for a caller that can wait. A line that arrives whole
+   *  — the phone's add sheet, the bridge, a recalled line — never ran a
+   *  completion, so nothing woke the queen it names, and her stand-in may not
+   *  know the answer: the tag extractor then read `/models add x/y:free` as
+   *  `label:tag` on the first such line of every session. So a queen still
+   *  asleep is woken before she is asked. That only moves earlier the wake
+   *  the slash dispatch performs a moment later for the same word; a word
+   *  that is awake, or was never asleep, is answered without a wake. */
+  async rawArgsAwake(behaviourName: string): Promise<boolean> {
+    const name = behaviourName.toLowerCase().trim()
+    if (this.rawArgs(name)) return true
+    for (const provider of this.#providers) {
+      for (const behaviour of provider.behaviours) {
+        if (!this.#names(behaviour).includes(name)) continue
+        if (sleepers.get(behaviour.name) !== provider) return false
+        // A wake that fails leaves her asleep, and the answer her stand-in gave.
+        try { await wakeQueenFor(behaviour.name) } catch { /* still asleep */ }
+        return this.rawArgs(name)
+      }
+    }
+    return false
+  }
 }
+
+/** A behaviour as the auto-wrap carries it: the queen's `rawArgs` rides beside
+ *  the declared fields. */
+type RawArgsBehaviour = SlashBehaviour & { readonly rawArgs?: boolean }
 
 // ── starter providers ───────────────────────────────────
 
@@ -935,6 +979,7 @@ const isQueen = (value: unknown): value is {
   descriptionKey?: string
   slashHidden?: boolean
   slashPrototype?: boolean
+  rawArgs?: boolean
   machine?: SlashBehaviour['machine']
   invoke: (args: string) => Promise<void> | void
   slashComplete?: (args: string) => readonly string[]
@@ -966,6 +1011,10 @@ const wrapQueen = (queen: ReturnType<typeof isQueen> extends true ? never : any)
     // authoring surface on the queen, every reader downstream — the model
     // census included — reading what the author actually wrote.
     machine: queen.machine,
+    // "Everything after my word is mine, verbatim" — asked of the census by
+    // the command line (`rawArgs()` above) before it reads the line itself.
+    // Present only on a word that said so; every other row is as it was.
+    ...(queen.rawArgs === true ? { rawArgs: true } : {}),
   }],
   execute(_behaviourName: string, args: string): Promise<void> | void {
     // The walk hands back a dotted path; the behaviour parses spaces. This is
@@ -1044,6 +1093,12 @@ const derivedMembers = (queen: any, path: readonly string[]): CommandMember[] =>
 const deriveCommandRoot = (queen: any): void => {
   const name = String(queen.command ?? '').trim().toLowerCase()
   if (!name || commandRoot(name)) return
+  // A word that keeps its arguments verbatim is not walked: the walk splits
+  // on dots, and a dot is PART of what such a word is handed (a model id ends
+  // `-4.5`, so its completion was cut to `-4` and then rejected on arrival).
+  // With no root the command line asks her `slashComplete` with the real
+  // arguments, which is the completer she wrote.
+  if (queen.rawArgs === true) return
   registerCommandRoot(name, { members: path => derivedMembers(queen, path) } as CommandObject)
 }
 
@@ -1060,6 +1115,8 @@ const deriveCommandRoot = (queen: any): void => {
  * segment the behaviour does not offer is passed through exactly as typed.
  */
 const dottedToSpaced = (queen: any, args: string): string => {
+  // Verbatim means verbatim: no walk was offered, so no dot is a walk.
+  if (queen.rawArgs === true) return args
   if (!args.includes('.')) return args
   const segments = args.trim().split('.')
   if (segments.length < 2) return args
@@ -1095,10 +1152,16 @@ const wakeQueenFor = async (command: string): Promise<any | null> => {
   return null
 }
 
-const wrapSleeper = (entry: { command: string; description: string }): SlashBehaviourProvider => ({
+const wrapSleeper = (entry: { command: string; description: string; rawArgs?: boolean }): SlashBehaviourProvider => ({
   name: `asleep-${entry.command}`,
   priority: 50,
-  behaviours: [{ name: entry.command, description: entry.description, aliases: [] }],
+  behaviours: [{
+    name: entry.command, description: entry.description, aliases: [],
+    // A table that says she keeps her arguments verbatim lets her stand-in
+    // answer `rawArgs()` while she sleeps — the same row her own provider
+    // carries once she wakes. A table that does not say is the row it was.
+    ...(entry.rawArgs === true ? { rawArgs: true } : {}),
+  }],
   async execute(_behaviourName: string, args: string): Promise<void> {
     const queen = await wakeQueenFor(entry.command)
     if (queen) await queen.invoke(dottedToSpaced(queen, args))
@@ -1109,11 +1172,11 @@ const wrapSleeper = (entry: { command: string; description: string }): SlashBeha
   },
 } as SlashBehaviourProvider)
 
-EffectBus.on<{ words?: Array<{ command?: string; description?: string }> }>('loader:sleeping', (payload) => {
+EffectBus.on<{ words?: Array<{ command?: string; description?: string; rawArgs?: boolean }> }>('loader:sleeping', (payload) => {
   for (const entry of payload?.words ?? []) {
     const command = String(entry?.command ?? '')
     if (!command || sleepers.has(command) || autoWrappedCommands.has(command) || alreadyDeclared(command)) continue
-    const provider = wrapSleeper({ command, description: String(entry?.description ?? command) })
+    const provider = wrapSleeper({ command, description: String(entry?.description ?? command), rawArgs: entry?.rawArgs === true })
     sleepers.set(command, provider)
     _slashBehaviours.addProvider(provider)
   }

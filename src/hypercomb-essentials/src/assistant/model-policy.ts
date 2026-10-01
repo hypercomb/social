@@ -290,6 +290,14 @@ const hasTier = (provider: LlmProviderDescriptor, tier: LlmTier): boolean =>
 const canDo = (provider: LlmProviderDescriptor, need: ModelNeed): boolean => {
   if (provider.decisionOnly) return false
   if (provider.vendor === 'openrouter' && isOpenRouterBatchModel(provider.defaultModel)) return false
+  // A line the participant added FOR a weight of work (`models add <id> deep`)
+  // takes that weight and no other. Offering a tier only ranks, so without
+  // this a strong line beside one cheap line won every balanced and unstated
+  // call on the price tiebreak — the opposite of answering only what is
+  // handed up to it. Unstated work is balanced, as everywhere in this file.
+  // A model the participant NAMES never passes through here (llm-dispatch.ts
+  // `resolveProvider`), so saying its name still reaches it.
+  if (provider.onlyTier && provider.onlyTier !== (need.tier ?? 'balanced')) return false
   if (need.minContext) {
     // Only a PUBLISHED window can rule a provider out; an unknown one might fit.
     const model = provider.models.find(m => m.id === modelForTier(provider, need.tier ?? 'balanced'))

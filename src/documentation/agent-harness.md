@@ -168,7 +168,7 @@ is refused at import the way a provider spec that smuggles an endpoint is:
 |---|---|
 | `harness` | Lists the pool: name, signature, on/held, which is the device default and which this conversation uses |
 | `harness use <name or sig>` | Sets the conversation's harness (with `default` scope, the device default) |
-| `harness edit` | Opens the active record as a tile whose body is the JSON — hives are our source files; saving mints a new signature |
+| `harness edit [name]` | Opens the record as a tile (`harness-<name>`) on the current page whose note is the JSON — hives are our source files; editing the note is the save and mints a new signature, held until named |
 | `harness offer <name>` | Signs the record and lists it on the participant's host (`harness` index key), as `language offer` does for catalogs |
 | `harness sync` | Heals from followed hosts: records the pool lacks, held until turned on |
 | `harness try <sig> <request>` | Runs one request under another harness on the same conversation and files both receipts, so Jev and the ledger can compare |
@@ -273,7 +273,7 @@ What of the order above is built, and where each piece landed.
 | 2 · the stages | BUILT 2026-09-27 | `core/agent-effects.ts` — the seven `agent:*` effects with typed facts; the window emits; the meter and the bee panel read them |
 | 3 · steps as words | BUILT 2026-09-27, all seven | `core/agent-steps.ts` the contract; `core/agent-leg.ts` the leg primitives and the shipped `fold`, `handover`, `receipt`; `core/agent-doors.ts` the shipped `front` and `verify` (the judge, the receipt writer and the bus come in as inputs); `core/work-fence.ts` the fence primitives (the langs, the split, the line grammar, the stream guard) moved down from shared; `core/agent-stretch.ts` the shipped `route` (the call shape, the hand-off reaction, the pin) and `stretch` (one streamed round as an async generator the window delegates to with `yield*`); `assistant/agent-steps.ts` the registry (word → shipped or a bee by signature), published by `chat.drone`; the window resolves each word against the harness's `steps` and falls back to the shipped objects |
 | 3 · what the window keeps | BY DESIGN | Listing the census and the tiles a door is shown; running the fences through the Execution window (`runRead`, `runDo`, `runWrite`, the Jev table round); the turn's ledger of attempts; the designation it paints. Each is the window's own or essentials' service already, reached by the loop as a caller — not a policy a harness swaps |
-| 4 · words | BUILT 2026-09-28, edit open | `assistant/harness.queen.ts` — `harness` lists the pool and says which record the device runs under; `harness use <name or sig>` chooses for the device; `harness here <name or sig>` marks the open conversation (a `chat-harness` marker in its bucket, `ConversationSummary.harness`, wins over the device's while it stands; `harness here default` takes it off); `harness show [name]`; `harness import <json>` brings a record in by its bytes and refuses one that widens. `harness edit` (the record as a tile whose body is the JSON) waits on the tile editor's write path |
+| 4 · words | BUILT 2026-09-28, edit 2026-09-30 | `assistant/harness.queen.ts` — `harness` lists the pool and says which record the device runs under; `harness use <name or sig>` chooses for the device; `harness here <name or sig>` marks the open conversation (a `chat-harness` marker in its bucket, `ConversationSummary.harness`, wins over the device's while it stands; `harness here default` takes it off); `harness show [name]`; `harness import <json>` brings a record in by its bytes and refuses one that widens. `harness edit [name]` (`assistant/harness-tiles.ts`) puts the record on the current page as the tile `harness-<name>` whose note is its JSON and opens the notes; A NOTE IS A HARNESS WHEN ITS TEXT IS A `harness@1` RECORD, so on every `notes:changed` the chat drone's listener reads such notes and imports each new one under its own signature, held, saying so once — a note that widens or does not parse is refused aloud. The shipped default opens as a copy named `custom`, since `default` always answers the shipped record |
 | 5 · network | BUILT 2026-09-28 | `assistant/harness-network.ts` — `harness offer <name> [@host]` puts the record's canonical bytes on the host under the participant's key and stamps `agent:harness` in their signed index; the worker (`noteSharedPools`) puts the record into the host's `agent:harness` pool by its own signature, served at `<origin>/<sign('agent:harness')>` once the operator says `hosts list agent:harness`; `harness sync [@host]` reads the hosts the participant follows (and `@host`), verifies each member's bytes against its name, and brings it into the local pool HELD — nothing runs it until `harness use` or `harness here` names it; the published-pool probe is claimed for the meaning too (a worker's one-signature-per-line listing now reads as an index) |
 | 6 · evals | BUILT 2026-09-28 | `assistant/agent-receipts.ts` — every `agent:receipt` (now carrying the harness signature the turn ran under) is filed content-addressed in the `agent:receipts` pool by the ledger the chat drone starts; `summarizeReceipts` groups them by harness (runs, answered, failed, stopped; rounds, tokens, seconds and legs averaged over answered turns). `harness try <name> <request>` runs the next turn of the open conversation under another harness once, the mark untouched, and files its receipt under it; `harness compare [name]` reads the standings side by side (a console table and one line per harness). A trials page as a surface is the next surface, not this step |
 
@@ -285,3 +285,103 @@ can reach, and that is core, beside the fence regex it already held. The
 step BEES are essentials' (the registry, the registrations, any community
 step); the window's fallback is the same shipped object core exports, so
 nothing is written twice.
+
+## 11. Cheap by default, strong by request
+
+The everyday work belongs to the cheap models. That is where the value of an
+external API is, and a survey, a note, a rename or a reading of a page does not
+need more. The balance is kept by two things the loop already had and one it
+gained on 2026-09-30.
+
+**The hand-off** (`hypercomb-handoff`). A model that meets work beyond it says
+so in one line, and the turn goes up to a model at the `deep` tier. The model
+that handed off is not asked again this turn.
+
+**A line added for a weight of work.** A model line normally takes the tier
+its price falls in (`providers/openrouter-stages.ts`), and a model priced above
+the last stop is left out. A line the participant adds *for* a tier —
+`models add <model id> deep` — offers that one tier whatever it costs
+(`LlmModelChoiceStore.tierOf`). It is on the list and never in use: it answers
+when work is handed up to it and never otherwise, so a frontier model costs
+what the hard turns cost and nothing more.
+
+**The request.** When a hand-off finds no model that can take the work, the
+turn does not end in an apology. It emits `agent:model-request` — who handed
+off, what it said the work needs, the tier nobody could take, the harness the
+turn ran under — and says how to answer it. The chat drone's ledger
+(`assistant/model-requests.ts`) files each one, content-addressed, in the pool
+`agent:model-requests`.
+
+| Word | Does |
+|---|---|
+| `models` | Opens the providers console, where the lines are, and says each line's weight of work, its price, and how many requests stand |
+| `models add <model id> [tier]` | Puts a line on the list — never in use; with a tier (fast, balanced or deep), for that work only. The id is checked against the catalogue when it is loaded |
+| `models drop <model id>` | Takes a line off, and its said tier with it |
+| `models requests` | Reads what the work has asked a stronger model for, newest first |
+| `models request <what the work needs>` | Files a request by hand |
+
+After `models add … deep`, saying `continue` sends the same question round
+again: the cheap model hands off once more, and this time the deep line takes
+it. That is one cheap round spent to keep the rule simple — nothing escalates
+without a model saying the work needs it.
+
+**How the loop is tuned.** A turn is run with an expectation: about how many
+rounds, about how many tokens, what the answer should hold. A turn that
+misses it is a defect in the harness, not a reason to reach for a stronger
+model. The first drive session found three such defects, none of which a
+stronger model would have fixed: a work block written as a tag was shown
+instead of run; a busy host that was the account's only road was ignored into
+a dead turn; and a two-reads-per-block ceiling made a twelve-tile survey cost
+nine rounds and 101k tokens (`reads.perBlock`, now eight). `harness compare`
+is where the difference shows.
+
+## 12. Driving it: what a day of minding the hive found
+
+On 2026-09-30 the hive was minded through its own chat on the cheap models
+(DeepSeek V4 Flash through OpenRouter, Jev as judge): ten branches explored,
+a to-do list of 38 items filed as notes on a `housekeeping` tile, and the
+first items delegated. Every turn was run against an expectation, and every
+miss was read as a defect in the loop. None was fixed by a stronger model.
+
+**The model spells the block its own way.** A fence, then
+`<hypercomb-read>` as a tag, then `<block info="hypercomb-read">`. The tag is
+read (block form and inline form; a sentence about the tag stays prose). Any
+other markup that names a work word is sent back ONCE to be written properly
+(`SplitWork.unwritten`), instead of ending the turn with the machinery on the
+screen. The net is what scales; the next spelling costs one round, not a
+dead turn.
+
+**A refusal has to be true, visible and bounded.** A twenty-line change was
+turned back with "send a table of two to eight rows" when the real reason was
+six lines per step; `create` refused a route from the root with "explicit
+names separated by /". Each now says the limit and the way through it. A
+refused block is said on the bee (`agent:progress`), where before it showed
+nowhere, and three refusals running end the turn with the reason.
+
+**A turn must not depend on being watched.** A hidden tab is throttled and
+frozen: a round sat 250 seconds; holding a shared Web Lock for the length of
+the turn (`core/stay-awake.ts`) it took three to six. The bridge renderer
+holds the same lock while its socket is open. A stream silent for ninety
+seconds is given up as busy; a blank completion is asked once more.
+
+**The vocabulary is the ceiling.** Asked to create a tile, the model answered
+that its only change verbs were keyword, accent, copy, paste, undo, redo,
+postit, organism and story: `create`, `title`, `hide` and `file` were asleep,
+and a sleeping queen's stand-in carries no `machine` block. A queen that
+declares one now stays awake (`scripts/passive-queen.ts`). `file on <tile>:
+<text>` and `file on /<route>: <text>` put a note where the model says.
+There is still NO machine word to change or unlink a note; half of ordinary
+housekeeping waits on that word, and the word is the owner's to name.
+
+**What it costs.** Exploring a branch two levels deep: three to six rounds,
+23k to 59k tokens, under a minute when the tab is awake. A branch of
+machine-written game data cost 190k to 260k and is not worth exploring by
+reading. Eight reads per block (`reads.perBlock`) is what made the first
+figure possible; at two it was nine rounds and 101k for a table.
+
+**Open.** A turn that fails after work ran does not tell the next turn what
+ran, so `continue` re-reads and may re-do. The front door takes most of a
+minute on a long request. The transcript says "Queued — waiting for a session
+to pick it up" while a held block is waiting for Run. A model that answers
+"I'll create them" and sends no block ends the turn as answered.
+

@@ -8,8 +8,14 @@
 // which is why the function-calling envelope could be shed without touching
 // them.
 
-/** Reads per request — also what the work fence teaches a model. */
-export const MAX_OBSERVATIONS = 2
+/** THE MOST READS ONE BLOCK MAY CARRY — the structural ceiling; a harness
+ *  says how many it teaches and takes (`reads.perBlock`). It was 2, and a
+ *  survey of twelve small tiles took six read rounds, each re-sending the
+ *  whole growing conversation: nine rounds and 101k tokens for a table
+ *  (jwize's drive session, 2026-09-30). The SIZE of a block is bounded
+ *  separately — the stretch's read budget is shared out among its reads —
+ *  so more reads per block spends no more context, only fewer rounds. */
+export const MAX_OBSERVATIONS = 8
 /** The most one read may return: a whole source file of a module at once
  *  (the reader's own page limit). The shell asks for less when the model's
  *  window has less room. */
@@ -351,9 +357,11 @@ const parseObservation = (
 export const parseHypercombObservationGrammars = (
   grammars: readonly unknown[],
   currentSegments: readonly string[],
+  perBlock: number = MAX_OBSERVATIONS,
 ): HypercombObservationPlan => {
-  if (grammars.length < 1 || grammars.length > MAX_OBSERVATIONS) {
-    throw new HypercombObservationError(`grammars must contain between 1 and ${MAX_OBSERVATIONS} observations`)
+  const most = Math.max(1, Math.min(MAX_OBSERVATIONS, Math.floor(perBlock) || MAX_OBSERVATIONS))
+  if (grammars.length < 1 || grammars.length > most) {
+    throw new HypercombObservationError(`grammars must contain between 1 and ${most} observations`)
   }
   const observations = grammars.map((grammar, index) =>
     parseObservation(grammar, currentSegments, index))

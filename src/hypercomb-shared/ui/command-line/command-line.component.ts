@@ -2373,8 +2373,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // is, for prose. A line that already carries its slash is exact by
       // construction and must not be re-routed through the Tongue; `/create x`
       // over the bridge is measured working on the legacy path and stays there.
+      //
+      // A WORD THAT KEEPS ITS ARGUMENTS VERBATIM (`QueenBee.rawArgs`) IS
+      // CANONICAL WITH OR WITHOUT ITS SLASH. This door enters the reader
+      // directly, so the guard in `#commitUtterance` never saw a bridge line:
+      // `models request … a planner that holds forty files` was read as two
+      // actions here, the need filed half and lowercased, and `files` run.
+      // Such a line is given its slash before the fork — the reader is
+      // skipped exactly as it is for a typed `/models request …`, the prose
+      // keeps its case, and admission below judges `models` and only `models`.
       const trimmed = text.trimStart()
-      const prose = !trimmed.startsWith('/')
+      const keeps = !trimmed.startsWith('/') && this.#keepsRawArgs(text)
+      const line = keeps ? '/' + trimmed : text
+      const prose = !line.trimStart().startsWith('/')
       const reading = prose ? this.#utteranceReader()?.read(lowered(text)) : null
 
       // ONE DESTRUCTIVE DECISION, WHICHEVER WAY THE VERB ARRIVED.
@@ -2396,7 +2407,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // typing `cut` sees.
       const spokenVerbs = reading?.actions.length
         ? reading.actions.map(action => action.command)
-        : [canonicalVerbOf(trimmed)]
+        // (A kept line is judged folded, as the reader folded it before:
+        // `Models request …` must not arrive at the gate as no verb at all.)
+        : [canonicalVerbOf(keeps ? lowered(line) : line)]
       // WHICH IS NOT DECIDED HERE ANY MORE. Deciding it here is how the four
       // surfaces came to disagree in the first place — each door judging for
       // itself, in the order the doors were written. The judgement lives in
@@ -2461,7 +2474,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // Rather than mint a fake receipt it answers UNKNOWN — the same law the
       // pool reader is owed: never answer from anything but a positive,
       // complete result.
-      void this.#preprocessTagsThenExecute(text)
+      void this.#preprocessTagsThenExecute(line)
       settle({
         kind: 'unknown',
         reason: prose
@@ -3155,6 +3168,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const raw = this.value()
     if (!raw.trim()) return null
     if (this.#toRegister(raw) === raw) return null   // its own register, not plain language
+    if (this.#keepsRawArgs(raw)) return null         // the rest is that word's, verbatim — nothing in it lights
     return this.#utteranceReader()?.read(lowered(raw), this.#utteranceResolutions()) ?? null
   })
 
@@ -3183,6 +3197,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * its second Enter, or the actions executed in word order.
    */
   #commitUtterance(text: string): boolean {
+    // A word that keeps its arguments verbatim (`QueenBee.rawArgs`) is not a
+    // sentence. Read as one, `models request … a planner that holds forty
+    // files` filed half the need and ran `files`; prose saying `undo` would
+    // have acted on the hive. The reading does not own this commit: the
+    // register line goes to the slash pipeline whole, as a typed `/word …`
+    // always has.
+    if (this.#keepsRawArgs(text)) return false
     text = lowered(text)
     const reading = this.#utteranceReader()?.read(text, this.#utteranceResolutions())
     if (!reading) return false
@@ -3946,9 +3967,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // The message is content, not grammar: nothing inside the parentheses may
     // be reinterpreted. Narrow on purpose — only a line that already parses as
     // a CALLED behaviour on a registered view skips extraction.
-    const cleaned = this.#isBehaviourCallLine(original)
-      ? original
-      : await this.#extractAndPersistTags(original)
+    //
+    // Nor is a slash line whose word KEEPS ITS ARGUMENTS VERBATIM
+    // (`QueenBee.rawArgs`): `/models add deepseek/deepseek-r1:free` is a model
+    // id with a colon in it, and the extractor read the whole line as
+    // `label:tag` — a junk tag persisted, the slash gone, the queen never
+    // called. Only a word that said so; every other slash line is extracted
+    // exactly as before.
+    //
+    // THE QUESTION WAITS FOR THE QUEEN. A line that arrives whole — the
+    // phone's add sheet, the bridge, a recalled `/models …` — ran no
+    // completion, so she may still be asleep, and her stand-in answered "no"
+    // on the first such line of every session. Waking her here only moves
+    // earlier the wake the slash dispatch below performs for the same word.
+    const verbatim = this.#isBehaviourCallLine(original)
+      || (original.trimStart().startsWith('/') && await this.#keepsRawArgsAwake(original))
+    const cleaned = verbatim ? original : await this.#extractAndPersistTags(original)
 
     // Update the shell value with cleaned value (tags stripped)
     if (cleaned !== original) {
@@ -4883,6 +4917,34 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as
       { get(view: string): unknown } | undefined
     return !!registry?.get(call.view)
+  }
+
+  /** Does the line's FIRST word keep everything after it verbatim
+   *  (`QueenBee.rawArgs`, asked of the census)? Such a line is its own
+   *  register: its colons are not tags and its words are not other
+   *  behaviours. With or without the slash — command stance holds the bare
+   *  text. False for every word that never said so, so nothing else moves. */
+  #keepsRawArgs(line: string): boolean {
+    const word = line.trimStart().replace(/^\//, '').split(/[\s(\[]/, 1)[0]
+    if (!word) return false
+    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+      { rawArgs?(name: string): boolean } | undefined
+    return !!drone?.rawArgs?.(word)
+  }
+
+  /** The same question, asked where the answer can be waited for. A queen
+   *  still asleep is represented by a stand-in that may not know she keeps
+   *  her arguments, and a line that arrives whole (the phone's add sheet, the
+   *  bridge, a recalled line) woke nobody on the way in — so the census wakes
+   *  her before it answers. A census that cannot wait answers as above. */
+  async #keepsRawArgsAwake(line: string): Promise<boolean> {
+    const word = line.trimStart().replace(/^\//, '').split(/[\s(\[]/, 1)[0]
+    if (!word) return false
+    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+      { rawArgsAwake?(name: string): Promise<boolean> } | undefined
+    if (!drone?.rawArgsAwake) return this.#keepsRawArgs(line)
+    // A wake that throws must not strand the line: it is read as it always was.
+    try { return await drone.rawArgsAwake(word) } catch { return this.#keepsRawArgs(line) }
   }
 
   #parseFeatureInput(v: string): {

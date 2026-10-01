@@ -7,13 +7,14 @@
 // mark off); `harness import <json>` brings a record in by its bytes;
 // `harness show [name]` prints one. Every act has a word; a harness is
 // content, so the words act on records by name or signature and never on
-// code. Opening a record as a tile (`harness edit`) waits on the tile
-// editor's write path and is not here yet.
+// code. `harness edit [name]` opens a record as a tile whose note is the
+// JSON; editing the note is the save (assistant/harness-tiles.ts).
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { harness, type HarnessRecord } from './harness.js'
 import { publishHarness, syncHarnessesFrom, type HarnessPublishDeps } from './harness-network.js'
 import { listReceipts, summarizeReceipts } from './agent-receipts.js'
+import { openHarnessTile } from './harness-tiles.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
 import { PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 import { listCommunityHosts } from '../sharing/community-hosts.js'
@@ -65,7 +66,7 @@ export class HarnessQueenBee extends QueenBee {
   readonly command = 'harness'
   override description = 'List the agent harnesses, choose one for the device or this conversation, bring one in'
   override descriptionKey = 'slash.harness'
-  override options = ['use <name or signature>', 'here <name or signature>', 'here default', 'show [name]', 'import <json>', 'offer <name> [@<host>]', 'sync [@<host>]', 'try <name> <request>', 'compare [name]']
+  override options = ['use <name or signature>', 'here <name or signature>', 'here default', 'show [name]', 'edit [name]', 'import <json>', 'offer <name> [@<host>]', 'sync [@<host>]', 'try <name> <request>', 'compare [name]']
   override examples = [
     { input: '/harness', result: 'Lists the harnesses in the pool and which one runs' },
     { input: '/harness use quiet-reader', result: 'The device runs the agent loop under quiet-reader from now on' },
@@ -74,12 +75,12 @@ export class HarnessQueenBee extends QueenBee {
 
   override slashComplete(args: string): readonly string[] {
     const typed = args.trim().toLowerCase()
-    const words = ['use ', 'here ', 'show ', 'import ', 'offer ', 'sync ', 'try ', 'compare ']
+    const words = ['use ', 'here ', 'show ', 'edit ', 'import ', 'offer ', 'sync ', 'try ', 'compare ']
     if (!typed || words.some(word => word.startsWith(typed) && word.trim() !== typed)) {
       return words.filter(word => word.startsWith(typed))
     }
     const [verb = '', rest = ''] = typed.split(/\s+/, 2)
-    if (verb === 'use' || verb === 'here' || verb === 'show' || verb === 'offer' || verb === 'try' || verb === 'compare') {
+    if (verb === 'use' || verb === 'here' || verb === 'show' || verb === 'edit' || verb === 'offer' || verb === 'try' || verb === 'compare') {
       const names = [...new Set([...harness.list().map(entry => entry.record.name), 'default'])]
       return names.filter(name => name.startsWith(rest) && name !== rest).map(name => `${verb} ${name}`)
     }
@@ -199,6 +200,18 @@ export class HarnessQueenBee extends QueenBee {
       return
     }
 
+    if (word === 'edit') {
+      // THE RECORD AS A TILE: its note is the JSON, and editing the note is
+      // the save — the changed record lands in the pool under its own
+      // signature, held until it is named (assistant/harness-tiles.ts).
+      const found = target ? harness.find(target) : { sig: harness.activeSig, record: harness.active }
+      if (!found) { toast(t('harness.unknown', 'No harness called "{name}" in the pool.', { name: target }), 'warning'); return }
+      const opened = await openHarnessTile(found.record)
+      if (!opened.ok) { toast(t('harness.unopened', '{name} was not opened as a tile: {reason}', { name: found.record.name, reason: opened.error }), 'warning'); return }
+      toast(t('harness.opened', '{name} is the tile {tile} on this page; its note is the record. Edit the note and the changed record lands in the pool under its own signature — harness use {name} runs it.', { name: opened.name, tile: opened.tile }), 'success')
+      return
+    }
+
     if (word === 'import') {
       const json = trimmed.slice(word.length).trim()
       if (!json) { toast(t('harness.usage.import', 'Paste the record: harness import {"kind":"harness@1", ...}'), 'warning'); return }
@@ -212,7 +225,7 @@ export class HarnessQueenBee extends QueenBee {
       return
     }
 
-    toast(t('harness.usage', 'harness · harness use <name> · harness here <name|default> · harness show [name] · harness import <json>'), 'warning')
+    toast(t('harness.usage', 'harness · harness use <name> · harness here <name|default> · harness show [name] · harness edit [name] · harness import <json>'), 'warning')
   }
 }
 

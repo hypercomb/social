@@ -16,7 +16,7 @@
 // run a line, so this module names no behaviour and keeps no vocabulary.
 
 import { splitQuestion } from '@hypercomb/core'
-import { JEV_ANSWER_NOW, parseTable, SENTENCE_JOIN, tableChoiceNote, tableQuestion, QUESTION_WORDS, type Decision, type QuestionWords, type Reach, type Row } from './hypercomb-jev'
+import { JEV_ANSWER_NOW, JEV_ROW_CHARS, JEV_ROW_LINES, parseTable, ROW_OVER_BUDGET, SENTENCE_JOIN, tableChoiceNote, tableQuestion, QUESTION_WORDS, type Decision, type QuestionWords, type Reach, type Row } from './hypercomb-jev'
 import { parseWriteBlock, WorkRefused, writeHeaderOf, type WorkRequest } from './hypercomb-work-fence'
 
 /** The live census, as the loop reads it. Both throw on a line the hive refuses. */
@@ -49,7 +49,11 @@ export type RoundStep =
   | { readonly kind: 'write'; readonly lines: readonly string[]; readonly review: boolean; readonly note: string }
 
 export const TABLE_REFUSAL = 'send one closed hypercomb-table JSON block with two to eight distinct rows of kind read, do, answer or ask'
-export const WRITE_ROW_REFUSAL = 'a write row carries no code; send the hypercomb-write block alone and it is judged as a one-row table'
+/** A change the worker sent on its own, longer than one step may be. */
+export const BLOCK_TOO_LONG = `a change block may carry at most ${JEV_ROW_LINES} lines and ${JEV_ROW_CHARS} characters in one round: send the first ${JEV_ROW_LINES} lines now, and the rest in the rounds that follow, ${JEV_ROW_LINES} at a time`
+/** The same limit, for a row inside a table the worker listed. */
+export const ROW_TOO_LONG = `a row may carry at most ${JEV_ROW_LINES} lines and ${JEV_ROW_CHARS} characters (a read or an ask row, one line): split the long row into several steps and send the table again`
+export const WRITE_ROW_REFUSAL ='a write row carries no code; send the hypercomb-write block alone and it is judged as a one-row table'
 
 /** What a round hands Jev: the table's JSON lines, and — when the reply was a
  *  write block — that block, so the code never has to fit in a row. */
@@ -97,7 +101,17 @@ export const tableFor = (request: WorkRequest, jevMode: boolean): RoundTable | u
  *  row is what Jev judges. */
 export const prepareTable = (table: RoundTable, census: RoundCensus): PreparedTable => {
   let parsed: readonly Row[]
-  try { parsed = parseTable(table.lines) } catch { throw new WorkRefused(table.write ? blockRefusal(table.write) : TABLE_REFUSAL) }
+  try { parsed = parseTable(table.lines) } catch (error) {
+    if (table.write) throw new WorkRefused(blockRefusal(table.write))
+    // THE REASON THAT IS TRUE. A change block of twenty lines was turned back
+    // with "send a table of two to eight rows" — the block was too LONG, the
+    // model could not know it, and nine rounds made nothing (jwize's drive
+    // session, 2026-09-30). A refusal a model can act on says the limit and
+    // the way through it.
+    const reason = error instanceof Error ? error.message : ''
+    if (reason === ROW_OVER_BUDGET) throw new WorkRefused(table.bare ? BLOCK_TOO_LONG : ROW_TOO_LONG)
+    throw new WorkRefused(TABLE_REFUSAL)
+  }
   const dropped: { id: string; reason: string; sentence: string }[] = []
   const grammarOf = new Map<string, readonly string[]>()
   const writeOf = new Map<string, readonly string[]>()
