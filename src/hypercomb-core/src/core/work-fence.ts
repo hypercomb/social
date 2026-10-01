@@ -293,9 +293,26 @@ const BARE_COMMANDS_MIN = 2
  *  is a read block never opened. */
 const BARE_READ = /^\s*\/?(?:read|tree|code)\s+\S/
 
+/** A SHORT REPLY THAT ONLY PROMISES. "I'll read the module and both sections
+ *  first." and nothing after it — the turn ended answered, nothing read (the
+ *  same session; an open item since 09-30). A brief reply whose last line
+ *  announces the next step is that step's block, never written. */
+const PROMISE = /^(?:(?:ok(?:ay)?|first|now|next|then)[,:]?\s+)*(?:i(?:'|’)ll|i will|let me|i(?:'|’)m going to|i am going to)\s+(.+)$/i
+const READ_STEP = /\b(?:read|look|check|open|search|find|inspect|examine|review|list)\b/i
+const PROMISE_MAX = 400
+
+const promisedIn = (said: readonly string[]): string | undefined => {
+  if (!said.length || said.join('\n').length > PROMISE_MAX) return undefined
+  const step = PROMISE.exec(said[said.length - 1])
+  if (!step) return undefined
+  return READ_STEP.test(step[1]) ? 'hypercomb-read' : 'hypercomb-do'
+}
+
 const unwrittenIn = (lines: readonly string[]): string | undefined => {
   const said = lines.map(line => line.trim()).filter(Boolean)
   if (said.length && said.length <= 8 && said.every(line => BARE_READ.test(line))) return 'hypercomb-read'
+  const promised = promisedIn(said)
+  if (promised) return promised
   let fence: string | null = null
   let bare = 0
   for (const line of lines) {

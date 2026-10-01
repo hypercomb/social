@@ -243,6 +243,11 @@ describe('a block named and not written', () => {
     expect(bare.request).toBeUndefined()
     expect(bare.unwritten).toBe('hypercomb-do')
     expect(splitWork('read 33618262568d src/dos-blocks-direction.ts').unwritten).toBe('hypercomb-read')
+    expect(splitWork("I'll read the module and both sections first.").unwritten).toBe('hypercomb-read')
+    expect(splitWork('Let me file the six notes now.').unwritten).toBe('hypercomb-do')
+    // A finished answer that ends on a courtesy is long, and says nothing.
+    expect(splitWork(`${'The game meets the data requirement. '.repeat(15)}\nI'll check back if you need more.`).unwritten).toBeUndefined()
+    expect(splitWork('Both notes are filed on /bubble-bobble-dos-v1.').unwritten).toBeUndefined()
     expect(splitWork('I read the engine and the levels; here is the answer.').unwritten).toBeUndefined()
     // One alone may be a sentence about a command; a route has no space.
     expect(splitWork('/create roadmap is what I would run next.').unwritten).toBeUndefined()
