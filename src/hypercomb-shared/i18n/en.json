@@ -3152,7 +3152,7 @@
   "hosts.up": "Up one level",
   "hosts.update-all": "Update all",
   "hosts.update-one": "Take the update to {name}",
-  "hosts.updating": "Updating — {count} files in",
+  "hosts.updating": "Updating — {count} changed files in",
   "hosts.updating-short": "Updating…",
   "hosts.update-in": "in",
   "hosts.update-progress": "Updating {name}",

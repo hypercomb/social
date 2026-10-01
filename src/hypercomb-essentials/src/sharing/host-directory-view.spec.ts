@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { InstallNode, InstallRevision } from '@hypercomb/core'
-import { directoryRows, domainRows, isOlder, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
+import { directoryRows, domainRows, filesOf, isOlder, updateProgress, offAbove, replacedBeneath, revisionDate, revisionGroups, rootsFor, type ServedTree } from './host-directory.view'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..', '..', '..')
@@ -88,6 +88,26 @@ describe('the host directory', () => {
 
     const picked = rows({ running, at: 'games', picks: { 'games/arkanoid': { hides: true } }, eclipsed: ['games/arkanoid/themes'] })
     expect(picked.find(r => r.path === 'games/arkanoid')).toMatchObject({ picked: true, hidden: 1 })
+  })
+
+  it('Update all counts only what changed — a file read back from what runs here is not the update', () => {
+    // jwize 2026-10-01: "It should only show the tiles that are changed, not
+    // the whole amount every time."
+    const withBees = (n: InstallNode, ...bees: string[]): InstallNode => ({ ...n, bees })
+    const now = [withBees(node('games', 'g1', ['games/arkanoid', 'games/bubble']), 'gb.js'), node('games/arkanoid', 'a1'), withBees(node('games/bubble', 'b1'), 'bb')]
+    const next = [withBees(node('games', 'g2', ['games/arkanoid', 'games/bubble']), 'gb'), node('games/arkanoid', 'a2'), withBees(node('games/bubble', 'b1'), 'bb', 'nb')]
+    const had = filesOf(now)
+    expect([...had].sort()).toEqual(['a1', 'b1', 'bb', 'g1', 'gb'])
+
+    expect(updateProgress('games', next, had, new Set())).toEqual({ done: 0, total: 3 })
+    expect(updateProgress('games', next, had, new Set(['g2', 'a2']))).toEqual({ done: 2, total: 3 })
+    expect(updateProgress('games/bubble', next, had, new Set(['nb']))).toEqual({ done: 1, total: 1 })
+    expect(updateProgress('notes', next, had, new Set())).toEqual({ done: 0, total: 0 })
+
+    // The window: held files are filtered against what ran, and the list is only what changes.
+    expect(VIEW).toMatch(/if \(had\.has\(bare\)\) return/)
+    expect(VIEW).toMatch(/const changing = moving \? rows\.filter\(row => row\.update\) : \[\]/)
+    expect(EN['hosts.updating']).toContain('changed')
   })
 
   it('an older revision is placed by the list, names the newer parts it replaces, and is taken from the trunk first', () => {
