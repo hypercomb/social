@@ -13,6 +13,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { harness, type HarnessRecord } from './harness.js'
+import { childNamesOfStrict, resolveCurrentLayer, type PlacementHistory } from '../history/layer-placement.js'
 
 export const HARNESS_TILE_PREFIX = 'harness-'
 
@@ -48,6 +49,9 @@ const readRecord = (text: string): unknown => {
 export type HarnessTileDeps = {
   /** The page the participant stands on. */
   segments(): readonly string[]
+  /** Is the tile on this page? The PAGE answers, by its children — never
+   *  the notes, which outlive a tile and are shared by its word. */
+  standsHere(parent: readonly string[], tile: string): Promise<boolean>
   notesAt(segments: readonly string[]): Promise<readonly NoteLike[]>
   /** Make the tile on the current page; rejects when it cannot. */
   create(name: string): Promise<void>
@@ -62,10 +66,23 @@ const liveDeps = (): HarnessTileDeps | null => {
     getNotesAtSegments?(segments: readonly string[]): Promise<readonly NoteLike[]>
     addAtSegments?(parent: readonly string[], cell: string, text: string): Promise<void>
   } | undefined
-  const lineage = ioc?.get?.('@hypercomb.social/Lineage') as { explorerSegments?(): readonly string[] } | undefined
+  const lineage = ioc?.get?.('@hypercomb.social/Lineage') as
+    { explorerSegments?(): readonly string[]; domain?: unknown } | undefined
   if (!notes?.getNotesAtSegments || !notes.addAtSegments) return null
   return {
     segments: () => [...(lineage?.explorerSegments?.() ?? [])],
+    standsHere: async (parent, tile) => {
+      const history = ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as PlacementHistory | undefined
+      if (!history) return false
+      // The page's layer the way remove and layout resolve it: the parent
+      // chain, then the cursor the renderer warmed for where we stand.
+      const cursor = ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as { currentLayerSig?: string } | undefined
+      const page = await resolveCurrentLayer(history, lineage?.domain, parent, cursor?.currentLayerSig)
+      // A child this read could not see counts as not standing: create links
+      // a name that already stands back to its own head, so asking twice is
+      // safe and guessing "it is there" is not.
+      return (await childNamesOfStrict(history, page)).names.includes(tile)
+    },
     notesAt: segments => notes.getNotesAtSegments!(segments),
     create: name => new Promise<void>((resolve, reject) => {
       let accepted = false
@@ -86,10 +103,37 @@ export type OpenedHarnessTile =
   | { readonly ok: true; readonly tile: string; readonly name: string; readonly sig: string; readonly made: boolean }
   | { readonly ok: false; readonly error: string }
 
+const reasonOf = (error: unknown): string => error instanceof Error ? error.message : String(error)
+
+/** Why the tile was not made, in words the participant can act on. The
+ *  committer names its refusal of a write made while viewing the past
+ *  (history/layer-committer.drone.ts); it is read by that name here, because
+ *  a bee is never imported for a value. */
+const whyNotMade = (error: unknown): string =>
+  (error as { name?: unknown } | null)?.name === 'RewoundCommitError'
+    ? 'you are viewing the past, so nothing can be written; step forward, then run harness edit again'
+    : `the tile could not be made on this page (${reasonOf(error)})`
+
+// WHAT STOOD ON A TILE AT ITS LAST READ, by where the tile is. A save tells
+// which tile changed, never which note: the record that was already there
+// was not said again by a save that touched something else, and must not
+// take its name back from a later save on another tile. Only a text that
+// was not on THIS tile at its last read is the save. A tile not read yet
+// this session has no last read, so what it holds is taken as said now.
+const stood = new Map<string, Set<string>>()
+const whereOf = (segments: readonly string[]): string => segments.join('/')
+
 /**
  * Put a record in front of the participant as a tile on the page they stand
- * on. The tile is made once: a tile that already carries a harness note is
- * opened as it stands, because what is in it may be newer than the pool.
+ * on. The tile is made once, and its note is added once: a tile that already
+ * carries a harness note is opened as it stands, because what is in it may be
+ * newer than the pool.
+ *
+ * TWO QUESTIONS, ASKED APART. Whether the tile stands is asked of the page;
+ * whether it carries a record is asked of the notes. Notes outlive a tile
+ * and are shared by its word, so a note found at this address says nothing
+ * about the page — a removed tile, or the same word on another page, has the
+ * note and no tile.
  */
 export const openHarnessTile = async (
   source: HarnessRecord,
@@ -100,31 +144,40 @@ export const openHarnessTile = async (
   const record: HarnessRecord = { ...source, name }
   const tile = `${HARNESS_TILE_PREFIX}${name}`
   const parent = [...deps.segments()]
-  const standing = harnessTexts(await deps.notesAt([...parent, tile]).catch(() => []))
   let made = false
-  let sig: string
-  try {
-    // The copy is a record in its own right the moment it is opened.
-    sig = await harness.import(record)
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  if (!(await deps.standsHere(parent, tile).catch(() => false))) {
+    // A refused create ends it, and says why: no note is ever added for a
+    // tile that is not there, and nothing is reported as opened.
+    try { await deps.create(tile); made = true } catch (error) { return { ok: false, error: whyNotMade(error) } }
   }
-  if (!standing.length) {
-    // A tile of that name may already stand here without a record in it;
-    // the note is what makes it a harness, so a refused create is not fatal.
-    try { await deps.create(tile); made = true } catch { /* it stands already, or the note says so below */ }
-    try {
-      await deps.addNote(parent, tile, harnessNoteText(record))
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) }
-    }
+  const standing = harnessTexts(await deps.notesAt([...parent, tile]).catch(() => []))
+  stood.set(whereOf([...parent, tile]), new Set(standing))
+  let sig = ''
+  // THE NAME FOLLOWS THE NOTE. What already stands in the tile is what the
+  // participant will read, so it — not the copy that was asked for — is the
+  // newest for its name: opening the tile says it again. A note that is
+  // refused was said when it was saved.
+  for (const text of standing) {
+    try { sig = await harness.import(readRecord(text), true) } catch { /* refused; the tile is opened to be mended */ }
+  }
+  try {
+    // No record of the tile's own: the copy is a record in its own right the
+    // moment it is opened, and it becomes the note unless one stands. It is
+    // not said again here — the note landing is the save, and the read that
+    // save wakes (`takeHarnessNotes`) gives it the name.
+    if (!sig) sig = await harness.import(record)
+    if (!standing.length) await deps.addNote(parent, tile, harnessNoteText(record))
+  } catch (error) {
+    return { ok: false, error: reasonOf(error) }
   }
   deps.open(tile)
   return { ok: true, tile, name, sig, made }
 }
 
-// A note is read once per text: the same bytes say the same thing, and a
-// refusal repeated on every keystroke elsewhere on the tile is noise.
+// A note is SAID once per text: the same bytes say the same thing, and a
+// refusal repeated on every keystroke elsewhere on the tile is noise. It
+// quiets the toast only — the record is brought in every time, and whether
+// it takes its name is `stood`'s to answer, tile by tile.
 const read = new Set<string>()
 
 export type TakenHarnessNotes = {
@@ -132,7 +185,18 @@ export type TakenHarnessNotes = {
   readonly refused: readonly string[]
 }
 
-/** Read the harness notes on one tile and bring each new record in, held. */
+/**
+ * Read the harness notes on one tile and bring each record in, held.
+ *
+ * THE NAME FOLLOWS THE LATEST SAVE. Every save of the tile brings its
+ * records in again, and the text that was not on the tile at its last read
+ * is brought in as SAID AGAIN (`HarnessStore.import`), the newest for its
+ * name — so a note put back to what it read before is the named one again,
+ * though nothing new is minted and nothing is said. Skipping a text already
+ * read left `harness use <name>` running the edit the note no longer showed.
+ * A record that was already on the tile is brought in without that: a save
+ * that touched another note is not a saying of it.
+ */
 export const takeHarnessNotes = async (
   segments: readonly string[],
   deps: Pick<HarnessTileDeps, 'notesAt' | 'say'> | null = liveDeps(),
@@ -141,20 +205,27 @@ export const takeHarnessNotes = async (
   const refused: string[] = []
   if (!deps || !segments.length) return { imported, refused }
   const texts = harnessTexts(await deps.notesAt(segments).catch(() => []))
-  for (const text of texts) {
-    if (read.has(text)) continue
+  const before = stood.get(whereOf(segments))
+  stood.set(whereOf(segments), new Set(texts))
+  const saved = (text: string): boolean => !before?.has(text)
+  // The text that was not here before is the save that woke this read. It
+  // goes last, so a tile keeping an older copy of the same name beside it
+  // still answers the edit.
+  const ordered = [...texts.filter(text => !saved(text)), ...texts.filter(saved)]
+  for (const text of ordered) {
+    const said = read.has(text)
     read.add(text)
     const held = new Set(harness.list().map(entry => entry.sig))
     try {
-      const sig = await harness.import(readRecord(text))
+      const sig = await harness.import(readRecord(text), saved(text))
       if (held.has(sig) || sig === harness.defaultSig) continue
       const name = harness.find(sig)?.record.name ?? 'the record'
       imported.push({ name, sig })
-      deps.say(`${name} (${sig.slice(0, 12)}) is in the pool under its new signature; harness use ${name} or harness here ${name} runs it.`, 'success')
+      if (!said) deps.say(`${name} (${sig.slice(0, 12)}) is in the pool under its new signature; harness use ${name} or harness here ${name} runs it.`, 'success')
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
+      const reason = reasonOf(error)
       refused.push(reason)
-      deps.say(`That harness note was refused: ${reason}`, 'warning')
+      if (!said) deps.say(`That harness note was refused: ${reason}`, 'warning')
     }
   }
   return { imported, refused }
@@ -171,4 +242,4 @@ export const startHarnessTiles = (): void => {
   })
 }
 
-export const stopHarnessTiles = (): void => { stop?.(); stop = null; read.clear() }
+export const stopHarnessTiles = (): void => { stop?.(); stop = null; read.clear(); stood.clear() }

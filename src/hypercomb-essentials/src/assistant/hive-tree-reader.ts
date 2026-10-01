@@ -32,7 +32,12 @@ const MAX_BYTES = 12_000
 const MAX_PAGE_BYTES = 48_000
 const MAX_READ_MS = 5_000
 const SNAPSHOT_TTL_MS = 2 * 60_000
-const SNAPSHOT_LIMIT = 32
+/** Snapshots kept for revalidation; the oldest falls out first. One leg
+ *  alone mints twelve rounds of eight reads and a front-door listing (97),
+ *  and every conversation shares this one reader — at 32 a leg evicted its
+ *  own earlier reads and was told the tree had changed when nothing had.
+ *  An entry is an epoch and a few head pairs, so the room is cheap. */
+const SNAPSHOT_LIMIT = 256
 /** Read results kept for reuse; the oldest falls out first. */
 const CACHE_LIMIT = 64
 

@@ -43,8 +43,10 @@ const { llmModelChoice } = await import('./llm-model-choice.js')
 const { llmProviderRegistry } = await import('./llm-provider-registry.js')
 ;(await import('./providers/builtin-providers.js')).startBuiltinLlmProviders()
 const { instanceId } = await import('./providers/openrouter-instances.js')
-const { candidatesFor } = await import('./model-policy.js')
-const { ModelQueenBee } = await import('./models.queen.js')
+const { CHAT_NEED, candidatesFor, rankProviders } = await import('./model-policy.js')
+const { routeCandidates } = await import('./llm-dispatch.js')
+const { clearOpenRouterCatalogCache, fetchOpenRouterCatalog } = await import('./providers/openrouter-catalog.js')
+const { ModelQueenBee, catalogueCheck } = await import('./models.queen.js')
 const { MODEL_REQUESTS_POOL, listModelRequests, modelRequestRecord, startModelRequestLedger, stopModelRequestLedger } = await import('./model-requests.js')
 
 type Runnable = { execute(args: string): Promise<void> }
@@ -66,7 +68,15 @@ beforeEach(() => {
   llmKeyStore.set('openrouter', KEY)
   requests.files.clear()
 })
-afterEach(() => { stopModelRequestLedger(); llmKeyStore.clear('openrouter') })
+afterEach(() => { stopModelRequestLedger(); llmKeyStore.clear('openrouter'); clearOpenRouterCatalogCache() })
+
+/** A priced catalogue, as the providers console loads it. Dollars per token. */
+const loadCatalogue = async (rows: readonly { id: string; out: string }[]): Promise<void> => {
+  const data = rows.map(row => ({ id: row.id, name: row.id, pricing: { prompt: row.out, completion: row.out }, context_length: 200_000 }))
+  ;(globalThis as unknown as { fetch: unknown }).fetch = async () => ({ ok: true, status: 200, json: async () => ({ data }) })
+  clearOpenRouterCatalogCache()
+  await fetchOpenRouterCatalog()
+}
 
 describe('a model line added for a weight of work', () => {
   it('takes only that weight, and the everyday model stays in use', async () => {
@@ -79,11 +89,55 @@ describe('a model line added for a weight of work', () => {
     const line = llmProviderRegistry().get(instanceId(SONNET))
     expect(line?.models.map(model => model.tier)).toEqual(['deep'])
 
-    // Everyday work never reaches the strong line first; deep work can.
-    const fast = candidatesFor({ tier: 'fast' }).map(provider => provider.id)
-    expect(fast.indexOf(instanceId(FLASH))).toBeGreaterThanOrEqual(0)
-    expect(fast.indexOf(instanceId(FLASH))).toBeLessThan(fast.indexOf(instanceId(SONNET)) < 0 ? Infinity : fast.indexOf(instanceId(SONNET)))
+    // Everyday work never reaches the strong line at all; deep work can. The
+    // said tier is a requirement, not a rank: fast, balanced and work that
+    // states no weight (balanced) are never the strong line's to take.
+    expect(line?.onlyTier).toBe('deep')
+    for (const need of [{ tier: 'fast' as const }, { tier: 'balanced' as const }, {}, CHAT_NEED]) {
+      const ids = candidatesFor(need).map(provider => provider.id)
+      expect(ids).toContain(instanceId(FLASH))
+      expect(ids).not.toContain(instanceId(SONNET))
+    }
     expect(candidatesFor({ tier: 'deep' }).map(provider => provider.id)).toContain(instanceId(SONNET))
+  })
+
+  it('never wins everyday work on price, and is still reached by name', async () => {
+    // One cheap line and one strong line said deep, both priced: the state in
+    // which the strong line used to be the middle price, and so the balanced pick.
+    await loadCatalogue([{ id: FLASH, out: '0.00000008' }, { id: SONNET, out: '0.000015' }])
+    llmModelChoice.add('openrouter', FLASH)
+    await queen().execute(`add ${SONNET} deep`)
+    expect(llmProviderRegistry().get(instanceId(FLASH))?.models.map(model => model.tier)).toEqual(['fast'])
+
+    const lines = (need: Parameters<typeof rankProviders>[0]): string[] =>
+      rankProviders(need).filter(provider => provider.credentialsFrom === 'openrouter').map(provider => provider.id)
+    for (const need of [{}, { tier: 'balanced' as const }, { tier: 'fast' as const }, CHAT_NEED]) {
+      expect(lines(need)).toEqual([instanceId(FLASH)])
+    }
+    expect(lines({ tier: 'deep' })[0]).toBe(instanceId(SONNET))
+    // The last model does not keep its place for lighter work either…
+    expect(routeCandidates({ need: { tier: 'balanced' }, preferModel: SONNET, fallbackWithin: 'openrouter' }).map(provider => provider.id)).toEqual([instanceId(FLASH)])
+    // …but the participant saying its name is not the policy picking it.
+    expect(routeCandidates({ model: SONNET, need: { tier: 'balanced' } }).map(provider => provider.id)).toEqual([instanceId(SONNET)])
+    expect(routeCandidates({ providerId: instanceId(SONNET), need: {} }).map(provider => provider.id)).toEqual([instanceId(SONNET)])
+  })
+
+  it('is confined even when its price already placed it in the tier it was said for', async () => {
+    const { openRouterStages } = await import('./providers/openrouter-stages.js')
+    await loadCatalogue([{ id: FLASH, out: '0.00000008' }, { id: SONNET, out: '0.000015' }])
+    openRouterStages.set({ fast: 0.1, balanced: 1, deep: 20 }) // Sonnet's price is the deep stage
+    try {
+      llmModelChoice.add('openrouter', FLASH)
+      llmModelChoice.add('openrouter', SONNET, false)
+      expect(llmProviderRegistry().get(instanceId(SONNET))?.onlyTier).toBeUndefined()
+      expect(candidatesFor({}).map(provider => provider.id)).toContain(instanceId(SONNET))
+      // Saying the tier changes no model on the line — only what it may take.
+      await queen().execute(`add ${SONNET} deep`)
+      expect(llmProviderRegistry().get(instanceId(SONNET))?.onlyTier).toBe('deep')
+      expect(candidatesFor({}).map(provider => provider.id)).not.toContain(instanceId(SONNET))
+    } finally {
+      localStorage.removeItem('hc:llm:openrouter:stages')
+    }
   })
 
   it('goes with its said tier when it is dropped', async () => {
@@ -118,11 +172,77 @@ describe('the model word', () => {
     expect(lastToast(toasts)).toContain('not on the list')
   })
 
-  it('completes its words and the lines it can drop', () => {
+  it('completes its words, the lines it can drop, the catalogue and the tiers — each offer the word being typed', async () => {
+    const THINKING = `${SONNET}:thinking`
+    await loadCatalogue([{ id: FLASH, out: '0.00000008' }, { id: SONNET, out: '0.000015' }, { id: THINKING, out: '0.000015' }])
     llmModelChoice.add('openrouter', FLASH)
+    llmModelChoice.add('openrouter', SONNET, false)
+    llmModelChoice.add('openrouter', THINKING, false)
     const bee = new ModelQueenBee()
     expect(bee.slashComplete('')).toEqual(['add ', 'drop ', 'requests', 'request '])
-    expect(bee.slashComplete('drop deep')).toEqual([`drop ${FLASH}`])
+    expect(bee.slashComplete('dr')).toEqual(['drop '])
+    // The command line writes an offer over the last word of the line, so an
+    // offer is the id alone — whole, dots and all — never `drop <id>`.
+    expect(bee.slashComplete('drop deep')).toEqual([FLASH])
+    expect(bee.slashComplete('drop anth')).toEqual([SONNET, THINKING])
+    expect(bee.slashComplete('drop ')).toEqual([FLASH, SONNET, THINKING])
+    expect(bee.slashComplete('add sonnet')).toEqual([SONNET, THINKING])
+    // An id typed whole is finished: Enter must not turn it into its variant.
+    expect(bee.slashComplete(`drop ${SONNET}`)).toEqual([])
+    expect(bee.slashComplete(`add ${SONNET}`)).toEqual([])
+    expect(bee.slashComplete(`add ${SONNET} de`)).toEqual(['deep'])
+    expect(bee.slashComplete('request a planner that can drop a')).toEqual([])
+  })
+
+  it('keeps everything after the word verbatim', () => {
+    expect(new ModelQueenBee().rawArgs).toBe(true)
+  })
+})
+
+describe('a spelling the catalogue forgives', () => {
+  const OPUS = 'anthropic/claude-opus-4.1'
+  const LATEST = '~anthropic/claude-opus-latest'
+
+  it('is saved as the catalogue spells it, so its price still places the line', async () => {
+    await loadCatalogue([{ id: OPUS, out: '0.000075' }, { id: LATEST, out: '0.000075' }])
+    expect(catalogueCheck(OPUS)).toEqual({ known: true, loaded: true, near: [], id: OPUS })
+    expect(catalogueCheck('Anthropic/Claude-Opus-4.1').id).toBe(OPUS)
+    expect(catalogueCheck('anthropic/claude-opus-latest').id).toBe(LATEST)
+    expect(catalogueCheck('anthropic/claude-nothing')).toMatchObject({ known: false, loaded: true })
+    expect(catalogueCheck('anthropic/claude-nothing').id).toBeUndefined()
+
+    const added = heard('model:added')
+    await queen().execute('add Anthropic/Claude-Opus-4.1')
+    await queen().execute('add anthropic/claude-opus-latest')
+    expect(llmModelChoice.saved('openrouter')).toEqual([OPUS, LATEST])
+    // (The bus replays its last value to a late listener, hence the tail.)
+    expect(added.slice(-2)).toEqual([{ model: OPUS }, { model: LATEST }])
+    // Priced above the last stage: held back exactly as the exact id is,
+    // where the typed spelling was an unpriced line offering every tier.
+    expect(llmProviderRegistry().get(instanceId(OPUS))).toBeUndefined()
+    expect(llmProviderRegistry().get(instanceId(LATEST))).toBeUndefined()
+    expect(llmProviderRegistry().get(instanceId('Anthropic/Claude-Opus-4.1'))).toBeUndefined()
+
+    // Said for a tier, the same spelling carries the tier to the saved id.
+    await queen().execute('add Anthropic/Claude-Opus-4.1 deep')
+    expect(llmModelChoice.tierOf('openrouter', OPUS)).toBe('deep')
+    const held = llmProviderRegistry().get(instanceId(OPUS))?.models[0]
+    expect(held).toMatchObject({ id: OPUS, tier: 'deep' })
+    expect(held?.outputPerMillion).toBeCloseTo(75)
+  })
+
+  it('drops the line by the same spelling', async () => {
+    await loadCatalogue([{ id: LATEST, out: '0.000075' }])
+    await queen().execute('add anthropic/claude-opus-latest')
+    expect(llmModelChoice.saved('openrouter')).toEqual([LATEST])
+    await queen().execute('drop Anthropic/Claude-Opus-Latest')
+    expect(llmModelChoice.saved('openrouter')).toEqual([])
+  })
+
+  it('keeps the id as typed when there is no catalogue to ask', async () => {
+    expect(catalogueCheck(SONNET)).toEqual({ known: false, loaded: false, near: [] })
+    await queen().execute(`add ${SONNET}`)
+    expect(llmModelChoice.saved('openrouter')).toEqual([SONNET])
   })
 })
 

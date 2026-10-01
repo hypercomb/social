@@ -68,6 +68,7 @@ export const aboveStages = (modelId: string): boolean =>
 
 export const openRouterInstance = (modelId: string): LlmProviderDescriptor => {
   const { configurator: _configurator, ...base } = OPENROUTER_PROVIDER
+  const said = saidTier(modelId)
   return {
     ...base,
     ...(modelId === JEV_MODEL ? {
@@ -86,6 +87,11 @@ export const openRouterInstance = (modelId: string): LlmProviderDescriptor => {
     // participant added FOR a tier offers that one, whatever it costs.
     models: tiersFor(modelId).map(tier => ({ name: modelId, id: modelId, tier, ...metaFor(modelId) })),
     defaultModel: modelId,
+    // OFFERING one tier only ranks (a provider with no model at the weight
+    // asked for can still answer), so a said tier is also stamped as the one
+    // weight the policy may pick this line for: with one cheap line beside
+    // it, a strong line otherwise won balanced work on the price tiebreak.
+    ...(said ? { onlyTier: said } : {}),
   }
 }
 
@@ -100,7 +106,9 @@ export const syncOpenRouterInstances = (): void => {
   for (const [id, model] of wanted) {
     const next = openRouterInstance(model)
     const existing = registry.get(id)
-    if (existing && existing.label === next.label && existing.decisionOnly === next.decisionOnly && JSON.stringify(existing.models) === JSON.stringify(next.models)) continue
+    // `onlyTier` is compared on its own: a line whose price already placed it
+    // in the tier the participant then says has the same models either way.
+    if (existing && existing.label === next.label && existing.decisionOnly === next.decisionOnly && existing.onlyTier === next.onlyTier && JSON.stringify(existing.models) === JSON.stringify(next.models)) continue
     if (existing) registry.unregister(id)
     registry.register(next)
   }

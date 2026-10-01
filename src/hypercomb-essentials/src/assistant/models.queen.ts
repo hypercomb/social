@@ -46,15 +46,31 @@ export const modelLine = (modelId: string): string => {
   return `${modelId} (${provider.decisionOnly ? 'judge' : tiers}${said}${price !== undefined ? `, $${Number(price.toPrecision(3))}/M out` : ''})`
 }
 
-/** The catalogue's word on an id: known, unknown with near names, or not loaded. */
-export const catalogueCheck = (modelId: string): { readonly known: boolean; readonly loaded: boolean; readonly near: readonly string[] } => {
+/** The spelling the word forgives: case, and a leading '~'. */
+const sameModel = (left: string, right: string): boolean =>
+  left.replace(/^~/, '').toLowerCase() === right.replace(/^~/, '').toLowerCase()
+
+/**
+ * The catalogue's word on an id: known, unknown with near names, or not loaded.
+ *
+ * A known id comes back AS THE CATALOGUE SPELLS IT (`id`), and that is the
+ * spelling to save: price, label and the price stages are all found by the
+ * exact id (providers/openrouter-instances.ts), so a line saved as typed —
+ * other capitals, the '~' left off — was a line with no price, which offers
+ * every tier and slips past the stage that holds the exact id back.
+ */
+export const catalogueCheck = (modelId: string): { readonly known: boolean; readonly loaded: boolean; readonly near: readonly string[]; readonly id?: string } => {
   const catalogue = cachedOpenRouterCatalog()
   if (!catalogue) return { known: false, loaded: false, near: [] }
+  // Nearest spelling first, so `x/y` typed in capitals is never taken for `~x/y`.
+  const match = catalogue.find(entry => entry.id === modelId)
+    ?? catalogue.find(entry => entry.id.toLowerCase() === modelId.toLowerCase())
+    ?? catalogue.find(entry => sameModel(entry.id, modelId))
+  if (match) return { known: true, loaded: true, near: [], id: match.id }
   const bare = modelId.replace(/^~/, '').toLowerCase()
-  const known = catalogue.some(entry => entry.id.toLowerCase() === modelId.toLowerCase() || entry.id.replace(/^~/, '').toLowerCase() === bare)
   const tail = bare.split('/').pop() ?? bare
-  const near = known ? [] : catalogue.map(entry => entry.id).filter(id => id.toLowerCase().includes(tail) || tail.includes(id.split('/').pop()?.toLowerCase() ?? '\u0000')).slice(0, 4)
-  return { known, loaded: true, near }
+  const near = catalogue.map(entry => entry.id).filter(id => id.toLowerCase().includes(tail) || tail.includes(id.split('/').pop()?.toLowerCase() ?? '\u0000')).slice(0, 4)
+  return { known: false, loaded: true, near }
 }
 
 export class ModelQueenBee extends QueenBee {
@@ -70,15 +86,27 @@ export class ModelQueenBee extends QueenBee {
     { input: '/models requests', result: 'Reads what the work has asked a stronger model for' },
   ]
 
+  // EVERYTHING AFTER THE WORD IS THIS WORD'S, VERBATIM. A model id carries
+  // '.' and ':' (`anthropic/claude-sonnet-4.5`, `deepseek/deepseek-r1:free`)
+  // and a request is prose, so no dot is a walk, no colon a tag, and no word
+  // in the prose another behaviour's.
+  override rawArgs = true
+
+  // Each offer is the word being typed, completed — the command line writes
+  // it over the last word of the line, after the real arguments it handed in.
   override slashComplete(args: string): readonly string[] {
-    const typed = args.trimStart().toLowerCase()
-    const words = ['add ', 'drop ', 'requests', 'request ']
-    const [verb = '', rest = ''] = typed.split(/\s+/, 2)
-    if (!typed.includes(' ')) return words.filter(word => word.startsWith(typed) && word.trim() !== typed)
-    if (verb === 'drop') return llmModelChoice.saved(OWNER).filter(model => model.toLowerCase().startsWith(rest) && model.toLowerCase() !== rest).map(model => `drop ${model}`)
-    if (verb === 'add' && rest.length >= 2) {
-      return (cachedOpenRouterCatalog() ?? []).map(entry => entry.id).filter(id => id.toLowerCase().includes(rest) && id.toLowerCase() !== rest).slice(0, 8).map(id => `add ${id}`)
+    const words = args.trimStart().toLowerCase().split(/\s+/)
+    const [verb = '', rest = '', tier = ''] = words
+    if (words.length === 1) return ['add ', 'drop ', 'requests', 'request '].filter(word => word.startsWith(verb) && word.trim() !== verb)
+    // An id typed whole offers nothing. Enter takes what is on offer, and
+    // `x/y` in full must never become `x/y:free` — another model, another line.
+    const from = (ids: readonly string[], fits: (id: string) => boolean): readonly string[] =>
+      ids.some(id => id.toLowerCase() === rest) ? [] : ids.filter(id => fits(id.toLowerCase()))
+    if (words.length === 2 && verb === 'drop') return from(llmModelChoice.saved(OWNER), id => id.startsWith(rest))
+    if (words.length === 2 && verb === 'add' && rest.length >= 2) {
+      return from((cachedOpenRouterCatalog() ?? []).map(entry => entry.id), id => id.includes(rest)).slice(0, 8)
     }
+    if (words.length === 3 && verb === 'add') return TIERS.filter(word => word.startsWith(tier) && word !== tier)
     return []
   }
 
@@ -108,14 +136,16 @@ export class ModelQueenBee extends QueenBee {
 
     if (verb === 'add') {
       const tier = rest.length > 1 && isTier(rest[rest.length - 1].toLowerCase()) ? rest[rest.length - 1].toLowerCase() as Tier : undefined
-      const modelId = (tier ? rest.slice(0, -1) : rest).join('').trim()
-      if (!modelId) { toast(t('model.usage.add', 'Say which: models add <model id> [fast|balanced|deep]'), 'warning'); return }
-      if (isOpenRouterBatchModel(modelId)) { toast(t('model.batch', '{model} is a batch model: it answers in hours, not in a chat.', { model: modelId }), 'warning'); return }
-      const check = catalogueCheck(modelId)
+      const typed = (tier ? rest.slice(0, -1) : rest).join('').trim()
+      if (!typed) { toast(t('model.usage.add', 'Say which: models add <model id> [fast|balanced|deep]'), 'warning'); return }
+      if (isOpenRouterBatchModel(typed)) { toast(t('model.batch', '{model} is a batch model: it answers in hours, not in a chat.', { model: typed }), 'warning'); return }
+      const check = catalogueCheck(typed)
       if (check.loaded && !check.known) {
-        toast(t('model.unknown', 'No model called {model} in the catalogue.{near}', { model: modelId, near: check.near.length ? ` Near: ${check.near.join(', ')}` : '' }), 'warning')
+        toast(t('model.unknown', 'No model called {model} in the catalogue.{near}', { model: typed, near: check.near.length ? ` Near: ${check.near.join(', ')}` : '' }), 'warning')
         return
       }
+      // The catalogue's own spelling is the line: the price is found by it.
+      const modelId = check.id ?? typed
       // On the list, never in use: the cheap model stays the everyday one.
       llmModelChoice.add(OWNER, modelId, false)
       if (tier) llmModelChoice.setTier(OWNER, modelId, tier)
@@ -129,9 +159,12 @@ export class ModelQueenBee extends QueenBee {
     }
 
     if (verb === 'drop') {
-      const modelId = rest.join('').trim()
-      if (!modelId) { toast(t('model.usage.drop', 'Say which: models drop <model id>'), 'warning'); return }
-      if (!llmModelChoice.saved(OWNER).includes(modelId)) { toast(t('model.notlisted', '{model} is not on the list.', { model: modelId }), 'warning'); return }
+      const typed = rest.join('').trim()
+      if (!typed) { toast(t('model.usage.drop', 'Say which: models drop <model id>'), 'warning'); return }
+      // The line as it was saved, found by the same spelling `add` forgives.
+      const saved = llmModelChoice.saved(OWNER)
+      const modelId = saved.find(model => model === typed) ?? saved.find(model => sameModel(model, typed))
+      if (!modelId) { toast(t('model.notlisted', '{model} is not on the list.', { model: typed }), 'warning'); return }
       llmModelChoice.drop(OWNER, modelId)
       toast(t('model.dropped', '{model} is off the list.', { model: modelId }), 'success')
       EffectBus.emit('model:dropped', { model: modelId })

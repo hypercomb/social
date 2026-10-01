@@ -108,7 +108,7 @@ import {
   splitQuestion,
   SignatureService,
   type SettledQuestion,
-  AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_MODEL_REQUEST, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY,
+  AGENT_FOLD, AGENT_FRONT, AGENT_HANDOVER, AGENT_MODEL_REQUEST, AGENT_ROUND, AGENT_ROUTE, AGENT_VERIFY, holdAwake,
   type AgentHandoverEvent, type AgentRoundEvent, type AgentSpent, type AgentStageEffect,
   AGENT_STEPS_IOC_KEY, shippedFoldStep, shippedFrontStep, shippedHandoverStep, shippedReceiptStep, shippedRouteStep, shippedStretchStep, shippedVerifyStep,
   type AgentStepRegistry, type FrontDecisionLike, type HandoverStep, type VerifyDecisionLike, type WorkMessage,
@@ -157,6 +157,7 @@ import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-comp
 import { executionLineParts } from './execution-line'
 import {
   blockRefusedMessage,
+  blockUnwrittenMessage,
   doFailedMessage,
   JevGone,
   doRanMessage,
@@ -1256,6 +1257,13 @@ const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeRea
 /** Reads one message may make: enough for a model to find its way in. */
 const MAX_OBSERVATION_ROUNDS = 6
 const MAX_OBSERVATION_CONTEXT_CHARS = 24_000
+/** Snapshot ids a leg keeps to revalidate: its newest reads, eight blocks'
+ *  worth. The tree reader's table is bounded (256, shared by every
+ *  conversation) and a harness may run legs of any length, so a leg that
+ *  kept every id it ever collected would outlive the oldest and be told the
+ *  tree changed when nothing had. The newest are enough: each carries the
+ *  tree epoch, and any head that moves bumps it. */
+const LEG_SNAPSHOTS_KEPT = 64
 /** How old a stored handover may be and still resume by itself when the
  *  conversation is reopened. Older, the participant says continue. */
 const RESUME_LEFT_MS = 60 * 60 * 1000
@@ -6425,6 +6433,9 @@ export class ChatWindowComponent implements OnDestroy {
       let readRounds = 0
       let readChars = 0
       let lastRound = false
+      let unwrittenSaid = false
+      let refusedInARow = 0
+      const MAX_REFUSALS_IN_A_ROW = 3
       let budgetSpent = false
       // The record says the policy; a number the participant typed on this
       // device (hc:chat:budget:*) still overrides it — their device, their
@@ -6464,6 +6475,12 @@ export class ChatWindowComponent implements OnDestroy {
       // The weight the worker is routed at; the front door may change it.
       let routeNeed = need
       const snapshotIds: string[] = []
+      // The newest reads stay; the oldest fall out before the reader drops
+      // them itself (LEG_SNAPSHOTS_KEPT says why).
+      const keepSnapshots = (ids: readonly string[]): void => {
+        snapshotIds.push(...ids)
+        if (snapshotIds.length > LEG_SNAPSHOTS_KEPT) snapshotIds.splice(0, snapshotIds.length - LEG_SNAPSHOTS_KEPT)
+      }
       const ran: string[] = []
       // How the last read or change settled — what jev:outcome reports.
       let lastRun: 'ran' | 'skipped' | 'failed' = 'failed'
@@ -6646,6 +6663,19 @@ export class ChatWindowComponent implements OnDestroy {
           })
           const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt)
           if (content.length > remaining) {
+            // A BLOCK LARGER THAN A WHOLE FRESH STRETCH IS NOT HANDED OVER.
+            // Nothing has been read in this stretch, so the next one opens
+            // with the same budget and would refuse the same block — on
+            // every stretch, until the request's budget is gone. What a
+            // read's size limit shares out is its content; a tile's
+            // projection and its children list ride on top, so eight reads
+            // can pass a budget that two of them fit. The leg stays open
+            // and the model is told what it can act on: fewer per block.
+            const asked = plan.observations.length
+            if (readChars === 0 && asked > 1) {
+              const fewer = Math.floor(asked / 2)
+              throw new WorkRefused(`those ${asked} reads together are larger than a whole stretch's read budget, so a fresh stretch could not hold them either; ask for fewer in one block — half as many fit, ${fewer} at a time — and the rest in the next block`)
+            }
             lastRound = true
             throw new WorkRefused('those reads are larger than what is left of this stretch\'s read budget; hand the work over — say what you found and what is left — and ask for them first thing in the next stretch')
           }
@@ -6661,7 +6691,7 @@ export class ChatWindowComponent implements OnDestroy {
           }
           if (!evidence.includes(content)) evidence.push(content)
           needsVerification = false
-          snapshotIds.push(...receipt.snapshots)
+          keepSnapshots(receipt.snapshots)
           observed.push(...grammars)
           const known = component.#readSignatures.get(convoId) ?? new Map<string, string>()
           for (const { grammar, sig } of receipt.signatures ?? []) {
@@ -6748,7 +6778,7 @@ export class ChatWindowComponent implements OnDestroy {
             const listed = await treeReader.readNode(grammarContext.segments, { maxBytes: 8_000, withContent: false, signal })
             if (listed.ok) {
               tiles = listed.children.map(child => child.name).filter(Boolean).slice(0, 48)
-              if (listed.snapshot) snapshotIds.push(listed.snapshot)
+              if (listed.snapshot) keepSnapshots([listed.snapshot])
             }
           } catch (error) { if (signal?.aborted) throw error }
         }
@@ -7111,6 +7141,18 @@ export class ChatWindowComponent implements OnDestroy {
           EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `handed off by ${gaveUp}; routing again` })
           continue
         }
+        // A BLOCK NAMED AND NOT WRITTEN (core/work-fence.ts): the model meant
+        // to ask the hive and spelled the block in a way nothing reads. Shown
+        // as the answer, that is a turn that ends with the machinery on the
+        // screen and nothing done; so it goes back once, with the one
+        // spelling, and the work carries on. Once per message: a model that
+        // does it twice is answered as it stands.
+        if (work.unwritten && !work.request && !lastRound && !unwrittenSaid) {
+          unwrittenSaid = true
+          messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: blockUnwrittenMessage(work.unwritten, message) })
+          EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `asked again: ${work.unwritten} was not written as a block` })
+          continue
+        }
         if (!work.request || lastRound) {
           if (jevTurn && work.prose) {
             // The prose already streamed.
@@ -7221,8 +7263,13 @@ export class ChatWindowComponent implements OnDestroy {
             } else {
               lastRun = 'failed'
               try {
+                // JEV'S BATCH IS ITS OWN NUMBER; THE BLOCK'S IS THE HARNESS'S.
+                // A harness may allow fewer reads per block than Jev composes,
+                // and the model must not be refused for a plan it never wrote.
+                // The rows come best first, so the trim keeps Jev's first
+                // choice and the next round can ask for the rest.
                 reply = step.kind === 'read'
-                  ? `${step.note}\n\n${await runRead(step.grammars, pinned, roundModel)}`
+                  ? `${step.note}\n\n${await runRead(step.grammars.slice(0, readsPerBlock), pinned, roundModel)}`
                   : step.kind === 'write'
                     ? `${step.note}\n\n${await runWrite(step.lines, pinned, roundModel, step.review)}`
                     : `${step.note}\n\n${await runDo(step.grammars, pinned, roundModel, step.review)}`
@@ -7237,6 +7284,7 @@ export class ChatWindowComponent implements OnDestroy {
                 ? await runWrite(work.request.lines, pinned, roundModel)
                 : await runDo(work.request.lines, pinned, roundModel)
           }
+          refusedInARow = 0
         } catch (error) {
           // Stop belongs to the participant: never turn it into a message.
           if (signal?.aborted) throw error
@@ -7250,6 +7298,26 @@ export class ChatWindowComponent implements OnDestroy {
           // can correct the block rather than guess. Jev gone says so, and
           // the model carries on without it.
           reply = error instanceof JevGone ? error.message : blockRefusedMessage(work.request.kind, (error as Error).message, message)
+          // A REFUSAL IS SAID ON THE BEE, NOT ONLY TO THE MODEL. A block the
+          // gate turns back shows nowhere — not in the transcript, not in the
+          // Execution column — so a model refused five rounds running looks,
+          // from the outside, like a turn that is merely slow (jwize's drive
+          // session, 2026-09-30).
+          if (!(error instanceof JevGone)) {
+            const reason = String((error as Error).message)
+            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `${work.request.kind} block not used: ${reason.slice(0, 160)}` })
+            // THREE REFUSALS RUNNING IS NOT WORK. Each one re-sends the whole
+            // conversation; a model that cannot correct its block spent nine
+            // rounds and 82k tokens creating nothing, in silence. The third
+            // refusal ends the turn and says why, so the next act is the
+            // participant's — or a model that can.
+            refusedInARow += 1
+            if (refusedInARow >= MAX_REFUSALS_IN_A_ROW) {
+              wrote = true
+              yield `\n\nThe hive turned back ${refusedInARow} blocks in a row and stopped asking. The last reason: ${reason}`
+              return ''
+            }
+          }
         }
         if (work.heldDo) reply = `${HELD_DO_NOTE}\n\n${reply}`
         messages.push({ role: 'user', content: reply })
@@ -7303,6 +7371,9 @@ export class ChatWindowComponent implements OnDestroy {
       const startedAt = Date.now()
       let firstAt = 0
       let answered = true
+      // The turn holds the page awake: a hidden tab is slowed and may be
+      // frozen, and long work must not depend on being watched.
+      const letSleep = holdAwake()
       try {
         for await (const chunk of ask(question, opts)) {
           if (!firstAt && chunk) firstAt = Date.now()
@@ -7319,6 +7390,7 @@ export class ChatWindowComponent implements OnDestroy {
         console.warn('[chat] the model could not answer:', error)
         yield `\n\nThe model could not answer: ${detail}`
       } finally {
+        letSleep()
         // THE RECEIPT, whatever happened: answered, failed, or stopped — by
         // the `receipt` step the harness names, else the shipped one.
         const at = Date.now()

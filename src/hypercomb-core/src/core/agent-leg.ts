@@ -114,9 +114,28 @@ export const continueMessage = (left: string): string =>
 export const budgetSpentMessage = (spent: { readonly rounds: number; readonly tokens: number }): string =>
   `\n\n*Paused: this request has used ${spent.rounds} rounds and about ${Math.round(spent.tokens / 1000)}k tokens, the budget for one request. Say continue to go on.*`
 
+/** AN OPEN REQUEST IS CARRIED IN WHOLE LINES. A full block is eight reads,
+ *  and by signature that is 581 characters; a cut at a character count ends
+ *  mid-signature, which names nothing and is refused when the next leg asks
+ *  for it. So a line goes over whole or not at all: up to a block's worth,
+ *  and no further than the bound, which holds eight by-signature reads with
+ *  a path and a position each (a write block's code lines stop at it). */
+const CARRY_LINES = 8
+const CARRY_CHARS = 1_200
+const carryLines = (lines: readonly string[] | undefined): string | undefined => {
+  const kept: string[] = []
+  let size = 0
+  for (const line of (lines ?? []).slice(0, CARRY_LINES)) {
+    size += line.length + 3
+    if (size > CARRY_CHARS) break
+    kept.push(line)
+  }
+  return kept.length ? `carry on from: ${kept.join(' · ')}` : undefined
+}
+
 // ── THE SHIPPED STEPS ────────────────────────────────────────────────────
 
-const tokensOf = (list: readonly WorkMessage[]): number =>
+const tokensOf =(list: readonly WorkMessage[]): number =>
   list.reduce((sum, entry) => sum + estimateTokens(entry.content), 0)
 
 /** `fold`: when the stretch no longer fits, fold the older rounds into the
@@ -145,8 +164,11 @@ export const shippedHandoverStep: HandoverStep = {
   },
   left(input: HandoverLeftInput): string | undefined {
     return input.left
-      ?? (input.requestLines?.length ? `carry on from: ${input.requestLines.join(' · ').slice(0, 200)}` : undefined)
+      ?? carryLines(input.requestLines)
       ?? (input.lastRound && input.proseFallback ? leftFromProse(input.prose) : undefined)
+      // No line of the open request could go over whole: the request is
+      // still handed over, in words, rather than dropped or cut.
+      ?? (input.requestLines?.length ? 'carry on with the request that was still open' : undefined)
   },
   continueWord: continueMessage,
   pausedNote: budgetSpentMessage,

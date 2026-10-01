@@ -41,6 +41,19 @@ beforeEach(() => {
   vi.restoreAllMocks()
 })
 
+describe('a stream that goes silent', () => {
+  it('gives a read up after the idle limit, and never when the limit is zero', async () => {
+    const { readWithIdle, StreamStalledError } = await import('./llm-dispatch.js')
+    await expect(readWithIdle(() => new Promise<string>(() => { /* never */ }), 20)).rejects.toBeInstanceOf(StreamStalledError)
+    expect(await readWithIdle(async () => 'bytes', 20)).toBe('bytes')
+    let settle: (value: string) => void = () => { /* set below */ }
+    const slow = readWithIdle(() => new Promise<string>(resolve => { settle = resolve }), 0)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    settle('late but whole')
+    expect(await slow).toBe('late but whole')
+  })
+})
+
 describe('streamRoutedModel', () => {
   it('resolves model ownership for shells without exposing the registry', () => {
     registry.register({
@@ -171,6 +184,88 @@ describe('streamRoutedModel', () => {
     expect(fetch).toHaveBeenCalledTimes(4)
   })
 
+  it('a named provider that is broken, not busy, is asked once more and no further', async () => {
+    registry.register(descriptor('named-broken', 'unused'))
+    const ask = async (): Promise<void> => {
+      for await (const _chunk of streamRoutedModel({
+        providerId: 'named-broken',
+        messages: [{ role: 'user', content: 'hello' }],
+      })) { /* consume */ }
+    }
+    // A model that cannot load says the same 500 every time it is asked.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('model failed to load', { status: 500, headers: { 'retry-after': '0' } })))
+    await expect(ask()).rejects.toThrow(/named-broken API 500/)
+    // The first ask and the one retry it had before the three passes.
+    expect(fetch).toHaveBeenCalledTimes(2)
+
+    // "Unavailable" is the vendor saying busy: it keeps every patient pass.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('service unavailable', { status: 503, headers: { 'retry-after': '0' } })))
+    await expect(ask()).rejects.toThrow(/named-broken API 503/)
+    expect(fetch).toHaveBeenCalledTimes(4)
+  })
+
+  it('a vendor that asks for a longer wait than the cap fails at once, with its own error', async () => {
+    registry.register(descriptor('named-long-wait', 'unused'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"rate limited"}', { status: 429, headers: { 'retry-after': '60' } })))
+    const timers = vi.spyOn(globalThis, 'setTimeout')
+    await expect((async () => {
+      for await (const _chunk of streamRoutedModel({
+        providerId: 'named-long-wait',
+        messages: [{ role: 'user', content: 'hello' }],
+      })) { /* consume */ }
+    })()).rejects.toThrow(/named-long-wait API 429/)
+    // Never asked again inside the minute it named, and nothing was waited for.
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(timers.mock.calls.some(([, ms]) => Number(ms) >= 1_000)).toBe(false)
+  })
+
+  it('every automatic choice asking for longer than the cap ends the plan at once', async () => {
+    registry.register(descriptor('long-wait-first', 'unused'))
+    registry.register(descriptor('long-wait-second', 'unused'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"rate limited"}', { status: 429, headers: { 'retry-after': '60' } })))
+    const timers = vi.spyOn(globalThis, 'setTimeout')
+    await expect((async () => {
+      for await (const _chunk of streamRoutedModel({
+        need: { tier: 'fast', streaming: true },
+        messages: [{ role: 'user', content: 'hello' }],
+      })) { /* consume */ }
+    })()).rejects.toThrow(/every eligible AI provider failed: long-wait-first: long-wait-first API 429/)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(timers.mock.calls.some(([, ms]) => Number(ms) >= 1_000)).toBe(false)
+  })
+
+  it('one choice asking for a long wait does not end the plan while another may answer sooner', async () => {
+    registry.register(descriptor('patient-long', 'unused'))
+    registry.register(descriptor('patient-short', 'made it'))
+    let shortAsks = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('patient-long')) return new Response('{"error":"rate limited"}', { status: 429, headers: { 'retry-after': '60' } })
+      shortAsks += 1
+      return shortAsks === 1
+        ? new Response('{"error":"engine_overloaded"}', { status: 429 })
+        : new Response('{}', { status: 200 })
+    }))
+
+    // The capped wait is real time; the clock is stepped, never slept through.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const chunks: RoutedChunk[] = []
+      let settled = false
+      const answered = (async () => {
+        for await (const chunk of streamRoutedModel({
+          need: { tier: 'fast', streaming: true },
+          messages: [{ role: 'user', content: 'hello' }],
+        })) chunks.push(chunk)
+      })().finally(() => { settled = true })
+      for (let step = 0; step < 20 && !settled; step++) await vi.advanceTimersByTimeAsync(1_000)
+      await answered
+
+      expect(chunks.map(chunk => chunk.text).join('')).toBe('made it')
+      expect(chunks[0]?.providerId).toBe('patient-short')
+      expect(fetch).toHaveBeenCalledTimes(4)
+    } finally { vi.useRealTimers() }
+  })
+
   it('does not ask again when the failure was not a busy vendor', async () => {
     registry.register(descriptor('bad-first', 'unused'))
     registry.register(descriptor('bad-second', 'unused'))
@@ -278,6 +373,36 @@ describe('streamRoutedModel', () => {
 
     expect(chunks[0]?.providerId).toBe('visible-second')
     expect(chunks[0]?.text).toBe('visible')
+  })
+
+  it('asks a NAMED provider once more when it came back blank, and takes the words it then says', async () => {
+    let asked = 0
+    registry.register({
+      ...descriptor('blank-once', 'unused'),
+      fromResponse: () => ({ text: asked++ === 0 ? '' : 'here now', stopReason: 'stop', inputTokens: 1, outputTokens: 1, model: 'blank-once-model' }),
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+
+    const chunks: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({
+      providerId: 'blank-once',
+      messages: [{ role: 'user', content: 'scaffold the programs' }],
+    })) chunks.push(chunk)
+
+    expect(chunks.map(chunk => chunk.text).join('')).toBe('here now')
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('a provider that stays blank is asked twice and no more, and says so', async () => {
+    registry.register(descriptor('always-blank', ''))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    await expect((async () => {
+      for await (const _chunk of streamRoutedModel({
+        providerId: 'always-blank',
+        messages: [{ role: 'user', content: 'hello' }],
+      })) { /* consume */ }
+    })()).rejects.toThrow(/always-blank returned no visible text/)
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it('routes a non-streaming tool-only response without falling back', async () => {
@@ -742,6 +867,48 @@ describe('a busy upstream is routed around, not asked again', () => {
     // Busy; then the ignore list empties the route; then plainly, and the
     // host that is busy again is waited for, never ignored a second time.
     expect(bodies.map(body => JSON.parse(body).ignore)).toEqual([[], ['deepinfra'], [], []])
+  })
+
+  it('a one-road model beside it does not cost another model its way around', async () => {
+    const routed = (id: string, text: string): Descriptor => ({
+      ...descriptor(id, text),
+      toRequest: request => ({
+        url: `https://${id}.example.test`,
+        init: { method: 'POST', body: JSON.stringify({ ignore: request.ignoreUpstreams ?? [] }) },
+      }),
+    })
+    registry.register(routed('many-roads', 'made it'))
+    registry.register(routed('single-road', 'unused'))
+    const ignoredAll = JSON.stringify({ error: { message: 'All providers have been ignored. To change your default ignored providers, visit your settings', code: 404 } })
+    const asks: Array<{ who: string; ignore: string[] }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const who = url.includes('many-roads') ? 'many-roads' : 'single-road'
+      const ignore = JSON.parse(String(init?.body)).ignore as string[]
+      asks.push({ who, ignore })
+      // The shared pool stays busy the whole turn. Skipping it leaves
+      // many-roads another host to answer from, and single-road none.
+      if (!ignore.includes('deepinfra')) return new Response(overloaded, { status: 429, headers: { 'retry-after': '0' } })
+      return who === 'many-roads'
+        ? new Response('{}', { status: 200 })
+        : new Response(ignoredAll, { status: 404 })
+    }))
+
+    const chunks: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({
+      need: { tier: 'fast', streaming: true },
+      messages: [{ role: 'user', content: 'survey the root' }],
+    })) chunks.push(chunk)
+
+    expect(chunks.map(chunk => chunk.text).join('')).toBe('made it')
+    expect(chunks[0]?.providerId).toBe('many-roads')
+    // single-road's refusal is its own: it is asked plainly, and many-roads
+    // still carries the busy host on its ignore list in the next pass.
+    expect(asks).toEqual([
+      { who: 'many-roads', ignore: [] },
+      { who: 'single-road', ignore: ['deepinfra'] },
+      { who: 'single-road', ignore: [] },
+      { who: 'many-roads', ignore: ['deepinfra'] },
+    ])
   })
 
   it('when the only model fails twice, the word says to switch on another', async () => {

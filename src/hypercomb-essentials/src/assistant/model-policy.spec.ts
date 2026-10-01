@@ -285,6 +285,68 @@ describe('the tier actually asked for', () => {
   })
 })
 
+// ── a provider said for one weight of work ────────────────────────────────
+//
+// `models add <id> deep` puts a strong model on the list FOR deep work. The
+// rule worth guarding is the bill: offering a tier only ranks, and beside one
+// cheap line the strong one was the middle price — so it took every balanced
+// and unstated call. Said for a tier, a provider is not a candidate for any
+// other; the policy cannot pick what it was told to keep for heavier work.
+
+describe('a provider said for one weight of work', () => {
+  // Shaped as the lines `models add` makes: one priced model each, both
+  // paying with the same key. The cheap one offers fast; the strong one was
+  // said deep.
+  const CHEAP = descriptor({
+    id: 'cheap-line', credentialsFrom: 'keyed-vendor',
+    models: [{ name: 'cheap', id: 'cheap-1', tier: 'fast', inputPerMillion: 0.04, outputPerMillion: 0.08 }],
+    defaultModel: 'cheap-1',
+  })
+  const STRONG = descriptor({
+    id: 'strong-line', credentialsFrom: 'keyed-vendor', onlyTier: 'deep',
+    models: [{ name: 'strong', id: 'strong-1', tier: 'deep', inputPerMillion: 15, outputPerMillion: 75 }],
+    defaultModel: 'strong-1',
+  })
+
+  it('is never a candidate for another weight — stated, or unstated and so balanced', () => {
+    roster(CHEAP, STRONG)
+    for (const need of [{ tier: 'fast' as const }, { tier: 'balanced' as const }, {}, CHAT_NEED]) {
+      expect(candidatesFor(need).map(p => p.id)).toEqual(['cheap-line'])
+      expect(rankProviders(need).map(p => p.id)).toEqual(['cheap-line'])
+      expect(designate(need)?.providerId).toBe('cheap-line')
+    }
+  })
+
+  it('takes the weight it was said for', () => {
+    roster(CHEAP, STRONG)
+    expect(candidatesFor({ tier: 'deep' }).map(p => p.id)).toEqual(['cheap-line', 'strong-line'])
+    expect(chooseProvider({ tier: 'deep' })?.id).toBe('strong-line')
+    expect(designate({ tier: 'deep' })?.model).toBe('strong-1')
+  })
+
+  it('holds under every usage plan', () => {
+    roster(CHEAP, STRONG)
+    for (const plan of ['intelligence', 'balanced', 'fast', 'private', 'economy'] as const) {
+      llmPolicy.usagePlan = plan
+      expect(chooseProvider({})?.id).toBe('cheap-line')
+      expect(chooseProvider({ tier: 'balanced' })?.id).toBe('cheap-line')
+    }
+  })
+
+  it('is not put back by a pin for another tier — the pin falls through', () => {
+    roster(CHEAP, STRONG)
+    llmPolicy.setPin('balanced', 'strong-line')
+    expect(chooseProvider({ tier: 'balanced' })?.id).toBe('cheap-line')
+  })
+
+  it('leaves a provider that said no tier exactly where the ranking puts it', () => {
+    const { onlyTier: _said, ...unsaid } = STRONG
+    roster(CHEAP, unsaid as Descriptor)
+    expect(candidatesFor({}).map(p => p.id)).toEqual(['cheap-line', 'strong-line'])
+    expect(candidatesFor({ tier: 'fast' }).map(p => p.id)).toEqual(['cheap-line', 'strong-line'])
+  })
+})
+
 // ── the designation ───────────────────────────────────────────────────────
 //
 // One provider, one model, in the words a bee is branded from. The rule worth

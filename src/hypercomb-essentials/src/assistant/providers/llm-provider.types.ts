@@ -241,6 +241,12 @@ export type LlmProviderDescriptor = {
   /** Structured decision service, never a text worker or a chat-completions call. */
   readonly decisionOnly?: boolean
 
+  /** THE ONE WEIGHT OF WORK THIS PROVIDER TAKES, when the participant said
+   *  one (`models add <id> deep`). A requirement, not a ranking signal: the
+   *  policy never picks it for work of another weight (model-policy.ts
+   *  `canDo`). Still callable when named. */
+  readonly onlyTier?: LlmTier
+
   /**
    * HONESTY FLAG. Only `agent-bridge` responders can walk the participant's
    * tree; a browser-http key answers from the prompt plus whatever context
