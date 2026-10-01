@@ -8,6 +8,7 @@
 //   `/Remove drafts`, `/ remove drafts`   the registry folds, the executor trims
 //   `[drafts]/remove`, `/select[x]/prune` the op after a bracket is a verb too
 //   `~drafts`, `[~drafts]`                the sigil removes with no word at all
+//   `meetup@postit`                       a view that is not attachable runs its own word
 //
 // The gate's own rule is asserted in core (machine-admission.spec.ts) and the
 // declarations it reads in essentials (commands/remote-refusal.spec.ts). This
@@ -20,7 +21,7 @@ import {
   admitMachineCall, spokenEntry, canonicalVerbOf, DEFAULT_MACHINE_GRANT,
   type AdmissionEntry, type MachineAdmission,
 } from '@hypercomb/core'
-import { dispatchedVerbsOf, slashVerbsOf } from './remote-verbs'
+import { dispatchedVerbsOf, slashVerbsOf, viewCommandOf, type FeatureReading } from './remote-verbs'
 
 const read = (...p: string[]): string => readFileSync(join(process.cwd(), ...p), 'utf8')
 const component = read('hypercomb-shared', 'ui', 'command-line', 'command-line.component.ts')
@@ -36,7 +37,8 @@ const member = (start: string): string => {
 }
 
 /** Census rows shaped as the shipped ones are: `/remove` and `/cut`
- *  destructive on the page, `rm` a name a participant gave, `/prune` concealed. */
+ *  destructive on the page, `rm` a name a participant gave, `/prune` concealed,
+ *  `/postit` a view's word an operator may say, `/lounge` a view still a prototype. */
 const census: readonly AdmissionEntry[] = [
   { name: 'create', machine: { reach: 'additive', scope: 'page' } },
   { name: 'copy' },
@@ -44,11 +46,13 @@ const census: readonly AdmissionEntry[] = [
   { name: 'cut', machine: { reach: 'destructive', scope: 'page' } },
   { name: 'remove', aliases: ['rm'], machine: { reach: 'destructive', scope: 'page' } },
   { name: 'prune', hidden: true },
+  { name: 'postit', machine: { reach: 'editing', scope: 'tile' } },
+  { name: 'lounge', prototype: true },
 ]
 
 /** The door's own loop: every verb judged, the first refusal answers. */
-const door = (line: string, detachesView?: (line: string) => boolean): MachineAdmission | null => {
-  for (const verb of dispatchedVerbsOf(line, detachesView)) {
+const door = (line: string, featureOf?: (line: string) => FeatureReading | null): MachineAdmission | null => {
+  for (const verb of dispatchedVerbsOf(line, featureOf)) {
     const verdict = admitMachineCall(verb, spokenEntry(verb, census), 'operator', DEFAULT_MACHINE_GRANT)
     if (!verdict.admit) return verdict
   }
@@ -237,17 +241,17 @@ describe('a `~` removal is `remove`', () => {
 
   it('except a view coming off a tile, which only the live registry can tell', () => {
     const asked: string[] = []
-    const detaches = (line: string): boolean => { asked.push(line); return true }
+    const detaches = (line: string): FeatureReading => { asked.push(line); return { remove: true, command: '' } }
     expect(dispatchedVerbsOf('~meetup@postit', detaches)).toEqual([])
     expect(door('~meetup@postit', detaches)).toBeNull()
-    // Asked with the line as the pipeline will see it — and only for a line
-    // the answer could change.
+    // Asked with the line as the pipeline will see it, once per reading — and
+    // only of a line that could be a call.
     expect(asked).toEqual(['~meetup@postit', '~meetup@postit'])
     asked.length = 0
-    for (const line of ['meetup@postit', '/remove drafts', '[~a]', '~drafts:stale', 'drafts']) dispatchedVerbsOf(line, detaches)
+    for (const line of ['/remove drafts', '[~a]', '~drafts:stale', 'drafts']) dispatchedVerbsOf(line, detaches)
     expect(asked).toEqual([])
     // A view the registry does not know is a tile's name, and the tile goes.
-    expect(dispatchedVerbsOf('~meetup@nonsense', () => false)).toEqual(['remove'])
+    expect(dispatchedVerbsOf('~meetup@nonsense', () => null)).toEqual(['remove'])
     expect(dispatchedVerbsOf('~meetup@postit')).toEqual(['remove'])
   })
 
@@ -255,6 +259,51 @@ describe('a `~` removal is `remove`', () => {
     expect(dispatchedVerbsOf('[+roadmap, +tasks]')).toEqual([])
     expect(dispatchedVerbsOf('drafts:stale')).toEqual([])
     expect(dispatchedVerbsOf('tilde~inside')).toEqual([])
+  })
+})
+
+describe('the word a `tile@view` line runs is judged like any other', () => {
+  const runs = (command: string) => (): FeatureReading => ({ remove: false, command })
+
+  it("is the view's own slash command, for a view that still needs it", () => {
+    expect(viewCommandOf({ remove: false, called: false }, { slashCommand: '/postit' })).toBe('postit')
+    expect(viewCommandOf({ remove: false }, { slashCommand: 'postit', attachable: false })).toBe('postit')
+  })
+
+  it('and nothing for a view the emit already finished', () => {
+    const bee = { slashCommand: '/postit' }
+    expect(viewCommandOf({ remove: true }, bee)).toBe('')
+    expect(viewCommandOf({ remove: false, called: true }, bee)).toBe('')
+    expect(viewCommandOf({ remove: false }, { ...bee, attachable: true })).toBe('')
+    expect(viewCommandOf({ remove: false }, undefined)).toBe('')
+  })
+
+  it('reaches the gate as that word, folded', () => {
+    expect(dispatchedVerbsOf('meetup@postit', runs('postit'))).toEqual(['postit'])
+    expect(dispatchedVerbsOf('Meetup@Postit', runs('Postit'))).toEqual(['postit'])
+    expect(dispatchedVerbsOf('diagram@slides', runs(''))).toEqual([])
+    expect(dispatchedVerbsOf('meetup@postit')).toEqual([])
+  })
+
+  it('so a concealed view word is refused as its slash form is, and an open one admitted', () => {
+    expect(door('bar@lounge', runs('lounge'))).toEqual(door('/lounge'))
+    expect(door('bar@lounge', runs('lounge'))?.admit).toBe(false)
+    expect(door('meetup@postit', runs('postit'))).toBeNull()
+  })
+
+  it('the pipeline runs exactly the word viewCommandOf names, and the door asks the same parse quietly', () => {
+    const apply = member('async #applyFeatureOps(op: {')
+    expect(apply).toContain('const slash = viewCommandOf(op, bee)')
+    expect(apply).toContain("await drone?.execute(slash, '')")
+    expect(apply).not.toContain('bee.slashCommand')
+    const asked = member('#featureOf(v: string): FeatureReading | null {')
+    expect(asked).toContain('this.#parseFeatureInput(v, true)')
+    expect(asked).toContain('viewCommandOf(feat, registry?.get(feat.view))')
+    // Quiet means quiet: a malformed call is the pipeline's to report, once.
+    const parse = member('#parseFeatureInput(v: string, quiet = false): {')
+    expect(parse).toContain("if (!quiet) EffectBus.emit('activity:log'")
+    // Every other caller still reports.
+    expect(component.split('this.#parseFeatureInput(v)').length - 1).toBe(1)
   })
 })
 
@@ -333,7 +382,7 @@ describe('the remote door asks through this reading, and only the remote door', 
     const body = component.slice(from, to)
     // The view question is the pipeline's own: the parse it will make, of the
     // line it will be handed.
-    const readAt = body.indexOf(': dispatchedVerbsOf(line, v => !!this.#parseFeatureInput(v)?.remove)')
+    const readAt = body.indexOf(': dispatchedVerbsOf(line, v => this.#featureOf(v))')
     const judged = body.indexOf('for (const verb of spokenVerbs)')
     const run = body.indexOf('void this.#preprocessTagsThenExecute(line)')
     expect(readAt).toBeGreaterThan(-1)

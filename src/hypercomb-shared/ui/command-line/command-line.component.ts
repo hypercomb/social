@@ -36,7 +36,7 @@ import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { isSelectOp, BRACKET_CMD_RE, normalizeSelectInput } from './select-ops'
-import { dispatchedVerbsOf } from './remote-verbs'
+import { dispatchedVerbsOf, viewCommandOf, type FeatureReading } from './remote-verbs'
 import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
 
 const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
@@ -2383,9 +2383,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const spokenVerbs = reading?.actions.length
         ? reading.actions.map(action => action.command)
         // (Otherwise the line is judged as it will be DISPATCHED: the slash
-        // word folded, the op after a bracket, a `~` removal as `remove` —
-        // each once reached the gate as no verb, and ran. remote-verbs.ts.)
-        : dispatchedVerbsOf(line, v => !!this.#parseFeatureInput(v)?.remove)
+        // word folded, the op after a bracket, a `~` removal as `remove`, the
+        // word `tile@view` runs — each reached the gate as no verb, and ran.)
+        : dispatchedVerbsOf(line, v => this.#featureOf(v))
       // WHICH IS NOT DECIDED HERE ANY MORE. Deciding it here is how the four
       // surfaces came to disagree in the first place — each door judging for
       // itself, in the order the doors were written. The judgement lives in
@@ -4923,7 +4923,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     try { return await drone.rawArgsAwake(word) } catch { return this.#keepsRawArgs(line) }
   }
 
-  #parseFeatureInput(v: string): {
+  #parseFeatureInput(v: string, quiet = false): {
     target: string; view: string; remove: boolean
     args: readonly CallValue[]; named: Readonly<Record<string, CallValue>>; called: boolean
   } | null {
@@ -4933,8 +4933,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     } catch (err) {
       // It IS a call, and a malformed one — say where, rather than letting the
       // line fall through and silently become a tile named `t@postit("hi`.
+      // (Quietly when only asked ahead of the pipeline, which says it once.)
       const message = err instanceof BehaviourCallError ? err.message : 'this call could not be read'
-      EffectBus.emit('activity:log', { message, icon: 'error' })
+      if (!quiet) EffectBus.emit('activity:log', { message, icon: 'error' })
       return null
     }
     if (!call) return null
@@ -4947,6 +4948,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       target, view: call.view, remove: call.remove,
       args: call.args, named: call.named, called: call.called,
     }
+  }
+
+  /** What a `tile@view` line will make the pipeline do, for the remote door:
+   *  take a view off a tile, or run the view's own word. The same parse and
+   *  the same answer the pipeline uses, read quietly. */
+  #featureOf(v: string): FeatureReading | null {
+    const feat = this.#parseFeatureInput(v, true)
+    if (!feat) return null
+    const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as
+      { get(view: string): { slashCommand?: string; attachable?: boolean } | undefined } | undefined
+    return { remove: feat.remove, command: viewCommandOf(feat, registry?.get(feat.view)) }
   }
 
   /**
@@ -4988,22 +5000,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       ...(op.called ? { args: [...(op.args ?? [])], named: { ...(op.named ?? {}) }, called: true } : {}),
     })
 
-    if (op.remove) return
-
-    // A CALLED behaviour has been handed its content by `feature:apply` above.
-    // Falling through to its bare slash command would toggle a view rather
-    // than author anything — the same trap `attachable` already dodges.
-    if (op.called) return
-
-    // An ATTACHABLE behaviour is fully installed by the `feature:apply` above
-    // (its decoration written at the target). Running its slash command here
-    // would be actively wrong: a view bee's bare command TOGGLES the view, so
-    // `diagram@slides` flipped the cell you're standing on into slides instead
-    // of making `diagram` a deck. The slash fallback is only for behaviours
-    // that still need their own authoring pass.
-    if (bee.attachable) return
-
-    const slash = (bee.slashCommand ?? '').replace(/^\//, '')
+    // A remove, a called behaviour and an attachable one are finished by the
+    // emit above; anything else runs its own word. Which, and why, is
+    // viewCommandOf's to say (remote-verbs.ts) — the remote door asks it too,
+    // so the word judged there is the word run here.
+    const slash = viewCommandOf(op, bee)
     if (slash) {
       const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
         { execute(name: string, args: string): Promise<void> | void } | undefined

@@ -460,13 +460,15 @@ three doors inherit it, and to grow a principal.
    after a bracket, and the `~` removal sigil.~~ **Resolved 2026-10-01**:
    `dispatchedVerbsOf`
    ([remote-verbs.ts](../hypercomb-shared/ui/command-line/remote-verbs.ts)),
-   with `~` judged as `remove`. Two things it does NOT cover, both traced and
-   neither run:
-   - **`tile@view` runs the view's own slash command**
-     (`#applyFeatureOps` → `SlashBehaviourDrone.execute(bee.slashCommand)`,
-     for a view that is neither attachable nor called) without the gate being
-     asked about that word.
-   - **Grammar that names no verb is not judged at all** — a bare name mints
+   with `~` judged as `remove`.
+   - ~~**`tile@view` runs the view's own slash command** without the gate being
+     asked about that word.~~ **Resolved 2026-10-01**: `viewCommandOf` names
+     the word `#applyFeatureOps` runs (a view that is neither attachable nor
+     called, not a remove) and the door judges that same word. Measured on the
+     real modules: `bar@lounge` ran `/lounge` — a concealed prototype the gate
+     already refused in its slash form — and is now refused the same way;
+     `meetup@postit` is still admitted.
+   - **Still open: grammar that names no verb is not judged at all** — a bare name mints
      a tile in tiles stance, `name:tag` writes a tag, `[+a]` creates. So a
      grant of `none` stops every verb and none of these. Whether the off
      switch should stop them is a decision about the grant, not about a parse.

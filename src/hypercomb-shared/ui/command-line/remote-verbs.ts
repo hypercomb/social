@@ -14,6 +14,7 @@
 //   `[drafts]/remove`  the op after a bracket runs in `#executeSelectCommand`,
 //                      which hands any registered word to the registry
 //   `~drafts`          the sigil removes with no verb word at all
+//   `meetup@postit`    a view that is not attachable runs its own word
 //
 // Each read as NO VERB at the door, so the gate was never asked, and each ran.
 // Found by reading 2026-09-30, confirmed by running the registry and the
@@ -72,23 +73,64 @@ const bracketVerbsOf = (line: string): readonly string[] => {
   return [...ops, ...(removes ? ['remove'] : [])].filter((verb): verb is string => !!verb)
 }
 
+/** What a `tile@view` line will do, as far as admission cares: take a view
+ *  off a tile, or run a word. Only the live view registry can say, so the
+ *  door reads it (`#featureOf` in the component) and hands it in. */
+export type FeatureReading = { readonly remove: boolean; readonly command: string }
+
+/** THE WORD A `tile@view` LINE RUNS beyond the `feature:apply` it emits —
+ *  the view's own slash command, handed to the registry — or `''` when the
+ *  emit is the whole of it. ONE ANSWER, asked by `#applyFeatureOps` before it
+ *  runs the word and by the remote door before it lets the line through, so
+ *  the word judged is the word run.
+ *
+ *  Nothing runs after the emit for:
+ *   - a REMOVE: `feature:apply` takes the view off, and that is all;
+ *   - a CALLED behaviour, which has been handed its content by the emit.
+ *     Falling through to its bare slash command would toggle a view rather
+ *     than author anything — the same trap `attachable` already dodges;
+ *   - an ATTACHABLE behaviour, fully installed by the emit (its decoration
+ *     written at the target). Running its slash command would be actively
+ *     wrong: a view bee's bare command TOGGLES the view, so `diagram@slides`
+ *     flipped the cell you're standing on into slides instead of making
+ *     `diagram` a deck. The slash fallback is only for behaviours that still
+ *     need their own authoring pass. */
+export const viewCommandOf = (
+  op: { readonly remove: boolean; readonly called?: boolean },
+  bee: { readonly slashCommand?: string; readonly attachable?: boolean } | undefined,
+): string => {
+  if (!bee || op.remove || op.called || bee.attachable) return ''
+  return (bee.slashCommand ?? '').replace(/^\//, '')
+}
+
 /** A LEADING `~` IS `remove` (jwize, 2026-10-01) — `~drafts`, `~[a, b]` — in
  *  all but two readings, neither of which takes a tile away: a tag coming off
- *  (`~label:tag`), and a view coming off a tile (`~tile@view`), which only the
- *  live view registry can tell apart from a tile's name, so the door is asked. */
-const tildeVerbsOf = (line: string, detachesView: (line: string) => boolean): readonly string[] => {
+ *  (`~label:tag`), and a view coming off a tile (`~tile@view`). */
+const tildeVerbsOf = (line: string, feature: FeatureReading | null): readonly string[] => {
   const trimmed = line.trim()
-  if (!trimmed.startsWith('~') || takesTagOff(trimmed) || detachesView(line)) return []
+  if (!trimmed.startsWith('~') || takesTagOff(trimmed) || feature?.remove) return []
   return ['remove']
 }
 
+/** `tile@view` RUNS THE VIEW'S WORD, and that word is judged like any other —
+ *  folded, as the registry folds it. */
+const viewVerbsOf = (feature: FeatureReading | null): readonly string[] => {
+  const word = feature && !feature.remove ? feature.command.trim().toLowerCase() : ''
+  return word ? [word] : []
+}
+
 /** Every verb the legacy pipeline will act on in a line the reader matched
- *  nothing in. Empty for plain prose, which names no behaviour at all. */
+ *  nothing in. Empty for plain prose, which names no behaviour at all. The
+ *  feature reading is asked once, and only of a line that could be a call. */
 export const dispatchedVerbsOf = (
   line: string,
-  detachesView: (line: string) => boolean = () => false,
-): readonly string[] => [...new Set([
-  ...slashVerbsOf(line),
-  ...bracketVerbsOf(line),
-  ...tildeVerbsOf(line, detachesView),
-])]
+  featureOf: (line: string) => FeatureReading | null = () => null,
+): readonly string[] => {
+  const feature = line.includes('@') ? featureOf(line) : null
+  return [...new Set([
+    ...slashVerbsOf(line),
+    ...bracketVerbsOf(line),
+    ...tildeVerbsOf(line, feature),
+    ...viewVerbsOf(feature),
+  ])]
+}
