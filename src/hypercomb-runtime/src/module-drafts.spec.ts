@@ -84,6 +84,25 @@ describe('draftModule', () => {
     ])
   })
 
+  it('makes edits to the section as it runs now instead of a whole new body', async () => {
+    const w = await world()
+    const outcome = await draftModule({
+      beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: 'ignored',
+      edits: [{ find: '"remembered"', replace: '"edited"' }],
+    }, w.deps)
+    if (!outcome.ok) throw new Error(outcome.error)
+    expect(decode(w.bees.get(outcome.beeSig)!)).toBe(BEE.replace('"remembered"', '"edited"'))
+  })
+
+  it('refuses an edit that finds nothing, or finds its text twice', async () => {
+    const w = await world()
+    const missing = await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: '', edits: [{ find: 'nowhere', replace: 'x' }] }, w.deps)
+    expect(missing).toMatchObject({ ok: false, error: expect.stringContaining('not in the section') })
+    const twice = await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: '', edits: [{ find: 'e', replace: 'x' }] }, w.deps)
+    expect(twice).toMatchObject({ ok: false, error: expect.stringContaining('more than once') })
+    expect(w.applied).toHaveLength(0)
+  })
+
   it('drafts on top of an earlier draft of the same module', async () => {
     const w = await world()
     const first = await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: 'var rooms = "fresh";' }, w.deps)

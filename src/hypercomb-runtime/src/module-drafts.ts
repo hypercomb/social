@@ -62,6 +62,44 @@ export type ModuleDraftRequest = {
   readonly section: string
   /** The section's new body, header line excluded. */
   readonly body: string
+  /** OR the changes to make to the body as it runs now, each found exactly
+   *  once. A model asked to change one line of a long section wrote the whole
+   *  file, ran out of room, and left the block unclosed three times (jwize's
+   *  drive session, 2026-10-01). When present, `body` is ignored. */
+  readonly edits?: readonly SectionEdit[]
+}
+
+export type SectionEdit = { readonly find: string; readonly replace: string }
+
+/** The section body with every edit made, or why it cannot be. Each `find`
+ *  must occur exactly once in the body as it stands after the edits before
+ *  it — an edit that matches twice is ambiguous, and one that matches
+ *  nothing was written against code that is not running. */
+export const applySectionEdits = (current: string, edits: readonly SectionEdit[]): { readonly body: string } | { readonly error: string } => {
+  if (!edits.length) return { error: 'the write block has no edits' }
+  let body = current
+  for (const [index, edit] of edits.entries()) {
+    const find = String(edit.find ?? '')
+    if (!find.trim()) return { error: `edit ${index + 1} has nothing to find` }
+    const at = body.indexOf(find)
+    if (at < 0) return { error: `edit ${index + 1}: the text to find is not in the section as it runs now; read the section again and copy it exactly` }
+    if (body.indexOf(find, at + 1) >= 0) return { error: `edit ${index + 1}: the text to find occurs more than once; include more of the lines around it` }
+    body = body.slice(0, at) + String(edit.replace ?? '') + body.slice(at + find.length)
+  }
+  return { body }
+}
+
+/** A section's body as `replaceSection` takes it: the header line excluded. */
+const bodyOf = (text: string, section: { readonly from: number; readonly to: number }): string =>
+  text.slice(text.indexOf('\n', section.from) + 1, section.to)
+
+/** The request with its body made, whichever way it was written. */
+const withBody = (request: ModuleDraftRequest, current: string): ModuleDraftRequest | { readonly error: string } => {
+  if (!request.edits) return request
+  const made = applySectionEdits(current, request.edits)
+  if ('error' in made) return made
+  if (made.body.length > MAX_DRAFT_BODY) return { error: `the section body must be text under ${MAX_DRAFT_BODY} characters` }
+  return { ...request, body: made.body }
 }
 
 export type ModuleDraftOutcome =
@@ -224,7 +262,7 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   const beeSig = String(request.beeSig ?? '').trim().toLowerCase()
   if (!SIG_RE.test(beeSig)) return fail('a draft names the module by its 64-character signature')
   if (!isSectionPath(request.section)) return fail('a draft names one source section, like src/games/solomon/labyrinth.ts')
-  if (typeof request.body !== 'string' || request.body.length > MAX_DRAFT_BODY) return fail(`the section body must be text under ${MAX_DRAFT_BODY} characters`)
+  if (!request.edits && (typeof request.body !== 'string' || request.body.length > MAX_DRAFT_BODY)) return fail(`the section body must be text under ${MAX_DRAFT_BODY} characters`)
 
   const trunk = deps.trunk()
   if (!trunk) return fail('nothing is installed here to draft onto — the dev shell imports modules directly and cannot take a draft')
@@ -261,6 +299,9 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   const text = decode(held)
   const replaced = sectionOf(text, request.section)
   if (!replaced) return fail(`the module has no section ${request.section}; list <sig> names its sections`)
+  const made = withBody(request, bodyOf(text, replaced))
+  if ('error' in made) return fail(made.error)
+  request = made
   const nextText = replaceSection(text, request.section, request.body)
   if (nextText === null) return fail('the section could not be replaced')
   const nextBytes = encode(nextText)
@@ -350,6 +391,9 @@ const draftDependency = async (request: ModuleDraftRequest, fromSig: string, con
   const text = decode(held)
   const replaced = sectionOf(text, request.section)
   if (!replaced) return fail(`the module has no section ${request.section}; list <sig> names its sections`)
+  const made = withBody(request, bodyOf(text, replaced))
+  if ('error' in made) return fail(made.error)
+  request = made
   const nextText = replaceSection(text, request.section, request.body)
   if (nextText === null) return fail('the section could not be replaced')
   const nextBytes = encode(nextText)

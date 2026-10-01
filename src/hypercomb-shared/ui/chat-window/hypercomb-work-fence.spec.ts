@@ -51,6 +51,32 @@ describe('the work fence', () => {
     expect(parseWriteBlock([`${sig} src/a.ts`])).toHaveProperty('error')
   })
 
+  it('reads SEARCH/REPLACE edits in place of a whole body', () => {
+    const sig = 'a'.repeat(64)
+    const parsed = parseWriteBlock([
+      `${sig} src/games/bubble/overlay.ts`,
+      '<<<<<<< SEARCH',
+      "if (state === 'clear') {",
+      '=======',
+      "if (state === 'clear' && !error) {",
+      '>>>>>>> REPLACE',
+      '',
+      '<<<<<<< SEARCH',
+      'slice(-4)',
+      '=======',
+      'slice(-5)',
+      '>>>>>>> REPLACE',
+    ])
+    expect(parsed).toMatchObject({
+      beeSig: sig, section: 'src/games/bubble/overlay.ts',
+      edits: [
+        { find: "if (state === 'clear') {", replace: "if (state === 'clear' && !error) {" },
+        { find: 'slice(-4)', replace: 'slice(-5)' },
+      ],
+    })
+    expect(parseWriteBlock([`${sig} src/a.ts`, '<<<<<<< SEARCH', 'x', '=======', 'y'])).toMatchObject({ error: expect.stringContaining('>>>>>>> REPLACE') })
+  })
+
   it('a hand-off fence gives the turn up with its reason, over any work in the reply', () => {
     const reply = 'I can try.\n\n```hypercomb-handoff\nneeds to read and refactor twelve modules at once\n```\n```hypercomb-read\nread here\n```'
     const work = splitWork(reply)
