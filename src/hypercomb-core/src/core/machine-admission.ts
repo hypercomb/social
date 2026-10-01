@@ -119,6 +119,15 @@ export interface AdmissionEntry {
     readonly reach?: MachineReach
     readonly scope?: MachineScope
   }
+  /** A WORD THAT NO LONGER RUNS, as the module that retired it declared it —
+   *  never a census row of its own. A door hands one in only when its lookup
+   *  MISSED, so a live word is never answered as retired: live always wins. */
+  readonly retired?: {
+    /** The behaviour that does this now, when one does. */
+    readonly by?: string
+    /** Why it went, when nothing replaced it. */
+    readonly note?: string
+  }
 }
 
 export type MachineAdmission =
@@ -193,6 +202,15 @@ export const admitMachineCall = (
     return caller === 'operator'
       ? { admit: true, name }
       : refuse(`/${name} is not a behaviour in this hive`)
+  }
+
+  // A RETIRED WORD RUNS NOTHING, for either caller, and says why — so a caller
+  // working from an older vocabulary can correct itself instead of guessing.
+  // Before this, `/delete drafts` was an unknown word the operator was
+  // admitted to say, and the pipeline laid it as a tile named delete-drafts.
+  if (entry.retired) {
+    const { by, note } = entry.retired
+    return refuse(`/${name} was retired${by ? ` — /${by} does this now` : note ? ` — ${note}` : ''}`)
   }
 
   // HIDDEN IS A DISCOVERABILITY FLAG BEING READ AS AN AUTHORIZATION ONE.

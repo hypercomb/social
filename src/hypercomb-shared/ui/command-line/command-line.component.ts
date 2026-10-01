@@ -2413,12 +2413,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // prose reading can carry several actions; admitting a prefix and
       // refusing a tail would leave the hive half-changed with a refusal on
       // the receipt.
-      const census = (get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
-        entries?(): readonly AdmissionEntry[]
-      } | undefined)?.entries?.() ?? []
+      const slash = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
+        entries?(): readonly AdmissionEntry[]; retired?(name: string): AdmissionEntry['retired']
+      } | undefined
+      const census = slash?.entries?.() ?? []
+      // A word nothing live claims may be retired: asked only on a miss.
+      const entryOf = (verb: string): AdmissionEntry | undefined => {
+        const live = spokenEntry(verb, census)
+        const retired = live || !verb ? undefined : slash?.retired?.(verb)
+        return live ?? (retired ? { name: verb, retired } : undefined)
+      }
       const grant = currentMachineGrant()
       for (const verb of spokenVerbs) {
-        const verdict = admitMachineCall(verb, spokenEntry(verb, census), 'operator', grant)
+        const verdict = admitMachineCall(verb, entryOf(verb), 'operator', grant)
         if (verdict.admit) continue
         settle({ kind: 'refused', reason: verdict.reason })
         return
@@ -4343,6 +4350,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // it was not asked to create — say so instead, and name the word that
     // would. Tiles stance keeps the built-in: laying tiles IS its job.
     if (drone?.has && !drone.has(commandName)) {
+      // A WORD THAT NO LONGER RUNS says what to say instead, in either stance,
+      // rather than becoming a tile named after it — and keeps the line, so
+      // the word can be changed (the reserved-name gate's rule).
+      const retired = drone.retired?.(commandName) as { by?: string; note?: string } | undefined
+      if (retired) {
+        EffectBus.emit('activity:log', {
+          message: `/${commandName.toLowerCase()} was retired${retired.by ? ` — /${retired.by} does this now`
+            : retired.note ? ` — ${retired.note}` : ''}`,
+          icon: '⬡',
+        })
+        return
+      }
       if (this.#stance() === 'command') {
         EffectBus.emit('activity:log', {
           message: `"${commandName}" is not a behaviour — to make a tile say: create ${commandName}`,

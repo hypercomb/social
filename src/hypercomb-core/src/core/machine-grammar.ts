@@ -41,9 +41,13 @@
 export type MachineReach =
   /** Mints or sets something that was not there. */
   | 'additive'
-  /** Changes something that exists, in place. */
+  /** Changes something that exists, in place. `/hide` is here on purpose,
+   *  though it takes a tile from view: HIDE FIRST, DELETE SECOND needs the
+   *  gentle verb reachable before the harsh one. */
   | 'editing'
-  /** Moves, hides, or takes something away. */
+  /** Moves something, or takes it off where it is listed. `/cut` is here, not
+   *  in editing: the tile leaves its page at once, and the next fresh copy or
+   *  cut drops what the clipboard held — the end state of `/remove`. */
   | 'destructive'
 
 /**

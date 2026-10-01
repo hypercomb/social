@@ -159,12 +159,19 @@ export class CutQueenBee extends ClipboardVerbQueen {
     { input: '/cut drafts', result: 'Holds "drafts" to place somewhere else' },
     { input: '/cut', result: 'Holds whatever is picked right now' },
   ]
-  /** A cut does not delete: the tile is HELD, and stays held until it lands. */
+  /** A cut deletes nothing — but it is not only a held reference either. The
+   *  tile leaves its page at once (the same children commit `/remove` makes),
+   *  and the clipboard holds it only until the next fresh copy or cut replaces
+   *  what is held; after that only undo brings it back. So it is DESTRUCTIVE,
+   *  like `/remove`: were it less, `/cut x` then `/copy y` would be a remove a
+   *  machine could say under the default grant. The gentle move a machine has
+   *  is `/copy`, `/paste` and `/hide` — hide first, delete second. */
   override machine = {
     forms: '<tile> | [<tile>, <tile>, ...]',
     example: '/cut drafts',
     reach: 'destructive' as const,
     scope: 'hive' as const,
+    consequence: 'Takes tiles off this page now and holds them until /paste places them; the next /copy or /cut replaces what is held, and then only /undo brings them back.',
     refuse: refuseTargets('/cut', false),
   }
 

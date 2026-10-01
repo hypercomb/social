@@ -195,6 +195,36 @@ describe('a stored grant', () => {
   })
 })
 
+describe('a retired word', () => {
+  // The census declares retirements beside the behaviours (SlashBehaviourDrone
+  // `retire`); a door hands one in only after its own lookup missed.
+  const retired = (name: string, record: AdmissionEntry['retired']): AdmissionEntry => ({ name, retired: record })
+
+  it('runs nothing for either caller, and says what to say instead', () => {
+    for (const caller of ['operator', 'model'] as const) {
+      expect(admitMachineCall('delete', retired('delete', { by: 'remove' }), caller)).toEqual({
+        admit: false, reason: '/delete was retired — /remove does this now',
+      })
+      expect(admitMachineCall('Flatten', retired('flatten', { note: 'archiving the middle of a history publishes less than you had' }), caller)).toEqual({
+        admit: false, reason: '/flatten was retired — archiving the middle of a history publishes less than you had',
+      })
+      expect(admitMachineCall('gone', retired('gone', {}), caller)).toEqual({
+        admit: false, reason: '/gone was retired',
+      })
+    }
+  })
+
+  it('is told before concealment, and after the off switch', () => {
+    const hiddenToo: AdmissionEntry = { name: 'delete', hidden: true, retired: { by: 'remove' } }
+    expect(admitMachineCall('delete', hiddenToo, 'operator')).toEqual({
+      admit: false, reason: '/delete was retired — /remove does this now',
+    })
+    expect(admitMachineCall('delete', hiddenToo, 'operator', { reach: 'none', scope: 'network' })).toEqual({
+      admit: false, reason: 'this hive grants a machine nothing at present, so /delete cannot be run from here',
+    })
+  })
+})
+
 describe('a line that names no behaviour', () => {
   // MachineCaller has no 'participant' member on purpose: the day it gains one
   // is the day somebody starts gating the owner of the hive. A bare name laid
