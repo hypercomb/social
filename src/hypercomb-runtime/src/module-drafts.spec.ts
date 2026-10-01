@@ -94,6 +94,16 @@ describe('draftModule', () => {
     expect(decode(w.bees.get(outcome.beeSig)!)).toBe(BEE.replace('"remembered"', '"edited"'))
   })
 
+  it('refuses a draft that does not parse, and writes nothing', async () => {
+    const w = await world()
+    const seen: string[] = []
+    const deps = { ...w.deps, parseProblem: async (text: string) => { seen.push(text); return text.includes('(((') ? 'SyntaxError: Unexpected end of input (line 3)' : undefined } }
+    const outcome = await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: 'var rooms = (((;' }, deps)
+    expect(outcome).toMatchObject({ ok: false, error: expect.stringContaining('does not parse') })
+    expect(seen[0]).toContain('var rooms = (((;')
+    expect(w.applied).toHaveLength(0)
+  })
+
   it('refuses an edit that finds nothing, or finds its text twice', async () => {
     const w = await world()
     const missing = await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: '', edits: [{ find: 'nowhere', replace: 'x' }] }, w.deps)

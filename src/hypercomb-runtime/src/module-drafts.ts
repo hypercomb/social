@@ -158,6 +158,45 @@ export type ModuleDraftDeps = {
    *  newly reaches anything. Throws when a hold cannot be recorded. Absent: a
    *  draft that reaches nothing new applies, and one that does is refused. */
   readonly admit?: (draft: DraftAdmission) => Promise<void>
+  /** Why the drafted module would not even parse, or undefined. Absent:
+   *  nothing is checked. */
+  readonly parseProblem?: (text: string) => Promise<string | undefined>
+}
+
+/**
+ * DOES IT PARSE? A model's edit left a parenthesis open and the draft would
+ * have stopped the whole game from loading on the next reload, with nothing
+ * said until then (jwize's drive session, 2026-10-01). The browser's own
+ * parser answers, in a module worker: a worker has no import map and no
+ * window, and the first statement throws before anything else can run, so
+ * nothing of the draft executes. Only a SyntaxError refuses; anything the
+ * worker cannot tell — a resolution failure, a browser that reports no
+ * message, a timeout — lets the draft through as before.
+ */
+const PARSE_TIMEOUT_MS = 4_000
+export const parseProblemInWorker = (text: string): Promise<string | undefined> => {
+  if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL?.createObjectURL !== 'function') {
+    return Promise.resolve(undefined)
+  }
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(new Blob([`throw 0;\n${text}`], { type: 'text/javascript' }))
+    let worker: Worker
+    const done = (problem: string | undefined): void => {
+      clearTimeout(timer)
+      try { worker?.terminate() } catch { /* already gone */ }
+      URL.revokeObjectURL(url)
+      resolve(problem)
+    }
+    const timer = setTimeout(() => done(undefined), PARSE_TIMEOUT_MS)
+    try { worker = new Worker(url, { type: 'module' }) } catch { done(undefined); return }
+    worker.onerror = event => {
+      event.preventDefault()
+      const message = String(event.message ?? '')
+      // The draft starts one line below the throw this check put above it.
+      const line = typeof event.lineno === 'number' && event.lineno > 1 ? ` (line ${event.lineno - 1})` : ''
+      done(/SyntaxError/.test(message) ? `${message.replace(/^Uncaught\s+/, '')}${line}` : undefined)
+    }
+  })
 }
 
 /** A draft about to be made live, as the brood records it. */
@@ -225,7 +264,16 @@ const liveDeps = (): ModuleDraftDeps => ({
   setOff: paths => writeOffUnits(paths),
   mayRun: sig => mayRunBee(sig),
   admit: admitInBrood,
+  parseProblem: parseProblemInWorker,
 })
+
+/** The refusal for a draft that does not parse, or null. */
+const unparsable = async (deps: ModuleDraftDeps, text: string, section: string): Promise<string | null> => {
+  const problem = await deps.parseProblem?.(text).catch(() => undefined)
+  return problem
+    ? `the drafted module does not parse, so nothing was written: ${problem}. Read ${section} again and fix the edit (an unbalanced bracket or a missing comma is the usual cause)`
+    : null
+}
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
@@ -304,6 +352,8 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   request = made
   const nextText = replaceSection(text, request.section, request.body)
   if (nextText === null) return fail('the section could not be replaced')
+  const broken = await unparsable(deps, nextText, request.section)
+  if (broken) return fail(broken)
   const nextBytes = encode(nextText)
   const nextBeeSig = await sigOf(nextBytes)
   if (nextBeeSig === beeSig) return fail('the draft is byte-identical to the module it drafts from')
@@ -396,6 +446,8 @@ const draftDependency = async (request: ModuleDraftRequest, fromSig: string, con
   request = made
   const nextText = replaceSection(text, request.section, request.body)
   if (nextText === null) return fail('the section could not be replaced')
+  const broken = await unparsable(deps, nextText, request.section)
+  if (broken) return fail(broken)
   const nextBytes = encode(nextText)
   if (namespaceOf(nextBytes) !== ns) return fail('the draft changed the line that names the dependency')
   const nextSig = await sigOf(nextBytes)
