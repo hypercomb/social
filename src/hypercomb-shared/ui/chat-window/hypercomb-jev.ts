@@ -8,6 +8,13 @@
 export const JEV_IOC_KEY = '@hypercomb.social/JevDecision'
 export const JEV_MODEL = '~typesafe/jev-latest'
 export const JEV_MAX_ROWS = 8
+/** The most lines one change row may carry, and the most characters. */
+export const JEV_ROW_LINES = 6
+export const JEV_ROW_CHARS = 2_000
+/** What parseTable says when a row is over either: named, so a caller can
+ *  tell THAT refusal from a malformed table and say something a model can
+ *  act on. */
+export const ROW_OVER_BUDGET = 'A row exceeds its budget'
 /** Mirrors JEV_RUBRIC in essentials jev-decision.ts, which replay admits;
  *  stamped on receipts. The shell may not import a module, so the two are
  *  kept equal by jev-rubric-parity.spec.ts. */
@@ -224,7 +231,7 @@ export const parseTable = (lines: readonly string[]): readonly Row[] => {
     if (!Array.isArray(raw_lines) || raw_lines.some(line => typeof line !== 'string' || !line.trim() || line.length > 1_000)) throw new Error('Invalid row line')
     const lines = (raw_lines as string[]).map(line => line.trim())
     if (kind === 'answer' ? lines.length : !lines.length) throw new Error('Invalid row line')
-    if ((kind !== 'do' && lines.length > 1) || lines.length > 6 || lines.join('\n').length > 2_000) throw new Error('A row exceeds its budget')
+    if ((kind !== 'do' && lines.length > 1) || lines.length > JEV_ROW_LINES || lines.join('\n').length > JEV_ROW_CHARS) throw new Error(ROW_OVER_BUDGET)
     const why = typeof row['why'] === 'string' && row['why'].trim() && row['why'].length <= 200 ? row['why'].trim() : undefined
     return { id: row['id'], kind, label: row['label'].trim(), lines, ...(why ? { why } : {}) }
   })

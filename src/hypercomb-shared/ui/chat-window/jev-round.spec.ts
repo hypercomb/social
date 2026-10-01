@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { splitQuestion } from '@hypercomb/core'
-import { offeredSentence, prepareTable, stepFor, tableFor, TABLE_REFUSAL, type RoundCensus } from './jev-round'
+import { BLOCK_TOO_LONG, offeredSentence, prepareTable, ROW_TOO_LONG, stepFor, tableFor, TABLE_REFUSAL, type RoundCensus } from './jev-round'
 import { tableQuestion, type Decision, type Row } from './hypercomb-jev'
 
 /** A census that knows `create` (additive), `move` (editing), `remove`
@@ -62,6 +62,18 @@ describe('the hive’s parsers go first', () => {
   it('refuses a malformed table, and a table where nothing can run', () => {
     expect(() => prepareTable({ lines: ['not json'] }, census)).toThrow(TABLE_REFUSAL)
     expect(() => prepareTable(table([rows[4]]), census)).toThrow('no row can run: x: /frobnicate is not a behaviour in this hive')
+  })
+  it('says the true reason when a change is too long, and the way through it', () => {
+    const twenty = Array.from({ length: 20 }, (_, at) => `create me/program-${at}`)
+    // A change block the worker sent on its own, wrapped as one row.
+    const bare = tableFor({ kind: 'do', lines: twenty }, true)!
+    expect(() => prepareTable(bare, census)).toThrow(BLOCK_TOO_LONG)
+    expect(BLOCK_TOO_LONG).toContain('at most 6 lines')
+    expect(BLOCK_TOO_LONG).toContain('the rest in the rounds that follow')
+    // The same limit met inside a table the worker listed.
+    expect(() => prepareTable(table([{ id: 'm', kind: 'do', label: 'Make them all', lines: twenty }]), census)).toThrow(ROW_TOO_LONG)
+    // Six lines is a step.
+    expect(prepareTable(tableFor({ kind: 'do', lines: twenty.slice(0, 6) }, true)!, census).rows[0].lines).toHaveLength(6)
   })
 })
 
