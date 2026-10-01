@@ -468,7 +468,12 @@ three doors inherit it, and to grow a principal.
      real modules: `bar@lounge` ran `/lounge` — a concealed prototype the gate
      already refused in its slash form — and is now refused the same way;
      `meetup@postit` is still admitted.
-   - **Still open: grammar that names no verb is not judged at all** — a bare name mints
+   - ~~**Grammar that names no verb is not judged at all**~~ **Resolved
+     2026-10-01**: `/grant none` now means none. Core answers the off switch
+     before any rung (a word with no census row and the empty verb included),
+     and the door asks about a line that names nothing as the empty verb —
+     admitted for an operator past the off switch, refused for a model. The
+     original finding, for the record — a bare name mints
      a tile in tiles stance, `name:tag` writes a tag, `[+a]` creates. So a
      grant of `none` stops every verb and none of these. Whether the off
      switch should stop them is a decision about the grant, not about a parse.

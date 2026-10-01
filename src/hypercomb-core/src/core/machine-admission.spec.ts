@@ -124,6 +124,34 @@ describe('the participant tightens it', () => {
     })
   })
 
+  it('and on every word that is not a verb — `none` means none', () => {
+    // `/grant none` promises "a machine may say nothing here". The rungs read a
+    // census row, so a word with no row (the operator's create-goto) and a
+    // line that names nothing at all used to walk past the off switch.
+    const closed: MachineGrant = { reach: 'none', scope: 'network' }
+    for (const caller of ['operator', 'model'] as const) {
+      expect(admit('roadmap', caller, closed)).toEqual({
+        admit: false,
+        reason: 'this hive grants a machine nothing at present, so /roadmap cannot be run from here',
+      })
+      expect(admitMachineCall('', undefined, caller, closed)).toEqual({
+        admit: false,
+        reason: 'this hive grants a machine nothing at present, so a line that names no behaviour cannot be run from here',
+      })
+      // The reason that applies is the closed door, not the concealment.
+      expect(admit('flatten', caller, closed)).toEqual({
+        admit: false,
+        reason: 'this hive grants a machine nothing at present, so /flatten cannot be run from here',
+      })
+    }
+  })
+
+  it('and one rung up, the operator has its words back', () => {
+    const additive: MachineGrant = { reach: 'additive', scope: 'network' }
+    expect(admit('roadmap', 'operator', additive)).toEqual({ admit: true, name: 'roadmap' })
+    expect(admitMachineCall('', undefined, 'operator', additive)).toEqual({ admit: true, name: '' })
+  })
+
   it('and a narrowed scope refuses on its own axis, independently of reach', () => {
     // /hide is only 'editing' and still leaves the machine. Neither axis can be
     // inferred from the other, which is why there are two.
@@ -167,11 +195,18 @@ describe('a stored grant', () => {
   })
 })
 
-describe('nothing here judges the participant', () => {
-  it('there is no caller for a person, and a verb with no name is not one', () => {
-    // MachineCaller has no 'participant' member on purpose: the day it gains
-    // one is the day somebody starts gating the owner of the hive.
-    expect(admitMachineCall('', undefined, 'operator')).toEqual({
+describe('a line that names no behaviour', () => {
+  // MachineCaller has no 'participant' member on purpose: the day it gains one
+  // is the day somebody starts gating the owner of the hive. A bare name laid
+  // as a tile, `name:tag`, `[+a]` — what a person may type, the operator's
+  // tool may send. The door asks about such a line as the empty verb.
+  it('may be said by an operator, past the off switch', () => {
+    expect(admitMachineCall('', undefined, 'operator')).toEqual({ admit: true, name: '' })
+    expect(admitMachineCall('   ', undefined, 'operator')).toEqual({ admit: true, name: '' })
+  })
+
+  it('may not be said by a model — no declaration, no call', () => {
+    expect(admitMachineCall('', undefined, 'model')).toEqual({
       admit: false, reason: 'no behaviour was named',
     })
   })

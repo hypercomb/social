@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   admitMachineCall, spokenEntry, canonicalVerbOf, DEFAULT_MACHINE_GRANT,
-  type AdmissionEntry, type MachineAdmission,
+  type AdmissionEntry, type MachineAdmission, type MachineGrant,
 } from '@hypercomb/core'
 import { dispatchedVerbsOf, slashVerbsOf, viewCommandOf, type FeatureReading } from './remote-verbs'
 
@@ -50,10 +50,16 @@ const census: readonly AdmissionEntry[] = [
   { name: 'lounge', prototype: true },
 ]
 
-/** The door's own loop: every verb judged, the first refusal answers. */
-const door = (line: string, featureOf?: (line: string) => FeatureReading | null): MachineAdmission | null => {
-  for (const verb of dispatchedVerbsOf(line, featureOf)) {
-    const verdict = admitMachineCall(verb, spokenEntry(verb, census), 'operator', DEFAULT_MACHINE_GRANT)
+/** The door's own loop: every verb judged, the first refusal answers, and a
+ *  line that names nothing asked about as the empty verb. */
+const door = (
+  line: string,
+  featureOf?: (line: string) => FeatureReading | null,
+  grant: MachineGrant = DEFAULT_MACHINE_GRANT,
+): MachineAdmission | null => {
+  const named = dispatchedVerbsOf(line, featureOf)
+  for (const verb of named.length ? named : ['']) {
+    const verdict = admitMachineCall(verb, spokenEntry(verb, census), 'operator', grant)
     if (!verdict.admit) return verdict
   }
   return null
@@ -304,6 +310,45 @@ describe('the word a `tile@view` line runs is judged like any other', () => {
     expect(parse).toContain("if (!quiet) EffectBus.emit('activity:log'")
     // Every other caller still reports.
     expect(component.split('this.#parseFeatureInput(v)').length - 1).toBe(1)
+  })
+})
+
+describe('`/grant none` refuses every line the door is sent', () => {
+  const closed: MachineGrant = { reach: 'none', scope: 'network' }
+  const runs = (command: string) => (): FeatureReading => ({ remove: false, command })
+
+  it('the verbs, as it always did', () => {
+    for (const line of ['/create roadmap', '[a]/copy', '~drafts', '/remove drafts']) {
+      expect(door(line, undefined, closed)?.admit, line).toBe(false)
+    }
+    expect(door('meetup@postit', runs('postit'), closed)?.admit).toBe(false)
+  })
+
+  it('and the lines that name no verb, which walked past it', () => {
+    // A bare name (a tile, in tiles stance), a tag, a create inside a bracket,
+    // a word the census does not hold (create-goto), a called view.
+    for (const line of ['roadmap', 'drafts:stale', '[+roadmap]', '/roadmap', 'meetup@postit Doors at 7']) {
+      expect(door(line, runs(''), closed), line).toEqual({
+        admit: false,
+        reason: line === '/roadmap'
+          ? 'this hive grants a machine nothing at present, so /roadmap cannot be run from here'
+          : 'this hive grants a machine nothing at present, so a line that names no behaviour cannot be run from here',
+      })
+    }
+  })
+
+  it("while one rung up those lines are the operator's again, as they always were", () => {
+    for (const line of ['roadmap', 'drafts:stale', '[+roadmap]', '/roadmap']) {
+      expect(door(line), line).toBeNull()
+    }
+  })
+
+  it('the door asks about the empty verb rather than skipping it', () => {
+    const from = component.indexOf('EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {')
+    const body = component.slice(from, component.indexOf('\n    // voice active state sync', from))
+    expect(body).toContain("const spokenVerbs = named.length ? named : ['']")
+    expect(body).not.toContain('if (!verb) continue')
+    expect(body).not.toContain("grant.reach === 'none'")   // core decides, the door asks
   })
 })
 

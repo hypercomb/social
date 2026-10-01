@@ -167,7 +167,23 @@ export const admitMachineCall = (
   grant: MachineGrant = DEFAULT_MACHINE_GRANT,
 ): MachineAdmission => {
   const name = verb.trim().toLowerCase()
-  if (!name) return refuse('no behaviour was named')
+
+  // THE OFF SWITCH IS OFF, before anything else is asked. `/grant none`
+  // promises "a machine may say nothing here", and the rungs below only ever
+  // read a census row — so a word with no row (the create-goto convenience)
+  // and a line that names no behaviour at all (a bare name laid as a tile,
+  // `name:tag`, `[+a]`) both walked past it while every verb was refused.
+  if (grant.reach === 'none') {
+    return refuse(`this hive grants a machine nothing at present, so ${
+      name ? `/${name}` : 'a line that names no behaviour'} cannot be run from here`)
+  }
+
+  // A LINE THAT NAMES NO BEHAVIOUR arrives as the empty verb. There is no
+  // census row to read, so past the off switch an operator may say it, as a
+  // person at the keyboard may; a model may not — no declaration, no call.
+  if (!name) {
+    return caller === 'operator' ? { admit: true, name: '' } : refuse('no behaviour was named')
+  }
 
   // AN UNRESOLVED WORD IS NOT AUTOMATICALLY A REFUSAL. The bridge hands
   // unknown `/words` to the create-goto built-in, which is a participant
@@ -206,10 +222,9 @@ export const admitMachineCall = (
 
   // Unstated reach means 'editing' — the documented default on MachineGrammar.
   const reach = entry.machine?.reach ?? 'editing'
+  // (`none` never reaches here — the off switch answered first.)
   if (REACH_ORDER.indexOf(reach) > REACH_ORDER.indexOf(grant.reach)) {
-    return refuse(grant.reach === 'none'
-      ? `this hive grants a machine nothing at present, so /${name} cannot be run from here`
-      : `/${name} is ${reach}, and this hive grants a machine no further than ${grant.reach}`)
+    return refuse(`/${name} is ${reach}, and this hive grants a machine no further than ${grant.reach}`)
   }
 
   // SCOPE IS DECLARED AS A CEILING, and a MISSING scope is UNKNOWN rather than
