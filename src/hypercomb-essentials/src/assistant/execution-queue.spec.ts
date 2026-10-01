@@ -80,6 +80,17 @@ describe('the execution queue', () => {
     expect(queue.requests()[0].state).toBe('skipped')
   })
 
+  it('a row decided the moment it is announced still runs', async () => {
+    const queue = new ExecutionQueueStore()
+    queue.setMode('manual')
+    queue.addEventListener('change', () => {
+      for (const row of queue.requests()) if (row.state === 'waiting') queue.decide(row.id, 'run')
+    })
+    const change = queue.request(ask())
+    expect(await change.decision).toBe('run')
+    expect(queue.requests()[0].state).toBe('running')
+  })
+
   it('settles with an outcome, and a waiting row cannot be settled past', () => {
     const queue = new ExecutionQueueStore()
     const change = queue.request(ask())

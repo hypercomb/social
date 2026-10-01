@@ -72,3 +72,12 @@ describe('code work is deep work', () => {
     expect(effortForWork('fast', false)).toBe('fast')
   })
 })
+
+describe('a message about code', () => {
+  it('is code work, whatever weight Jev gives it', async () => {
+    const { isCodeMessage } = await import('./message-effort')
+    expect(isCodeMessage('Your engine draft has two bugs that stop the game. Fix both.')).toBe(true)
+    expect(effortForWork(effortFromJev('deep', { weight: 'balanced', carry: false }, undefined), isCodeMessage('fix the module'))).toBe('deep')
+    expect(isCodeMessage('File each line below as its own note on the tile.')).toBe(false)
+  })
+})

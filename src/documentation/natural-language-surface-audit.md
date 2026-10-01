@@ -157,6 +157,28 @@ into core as `canonicalVerbOf`, with six regression specs covering the
 leading-whitespace smuggle and the head-verb-only rule (`/create /remove` names
 `create`). Still keyed on the four-name set — see `/cut` below; that is owed.
 
+**And the reading was narrower than the dispatch (found 2026-09-30).**
+`canonicalVerbOf` is the model channel's shape — lowercase, hard against the
+slash — and the door skipped the gate when it read nothing. The dispatch behind
+it folds case (`SlashBehaviourDrone.has` / `.execute`) and trims after the
+slash, so `/Remove drafts` and `/ remove drafts` were never asked about and ran
+`remove`. The door now judges the word as it will be dispatched
+(`slashVerbsOf`, [remote-verbs.ts](../hypercomb-shared/ui/command-line/remote-verbs.ts)),
+with the canonical reading kept beside it; the keyboard path is untouched.
+
+**Nor was a verb judged anywhere but the head of a slash line (closed
+2026-10-01).** The op after a bracket (`[x]/remove`, `/select[x]/prune` —
+`#executeSelectCommand` hands any registered word to
+`SlashBehaviourDrone.execute`) and the `~` removal sigil (`~drafts`,
+`[~drafts]`) both ran unasked: the utterance reader finds no action in them.
+`dispatchedVerbsOf` now reads all three — the slash head, the bracket op
+through the dispatch's own `normalizeSelectInput`, and a `~` removal **as
+`remove`** (jwize's decision). Two `~` readings take no tile away and are not
+judged: a tag coming off (`~label:tag`) and a view coming off a tile
+(`~tile@view`, asked of the pipeline's own parse). Where the reading and the
+dispatch could differ it reads wide — a refusal a caller can read, never a
+removal nobody was asked about.
+
 ### And the receipt was dead code for the only production caller — *fixed (`453bafd98`)*
 
 `#submit` passed neither `accept` nor `complete` and returned `{ok:true}`
@@ -434,3 +456,19 @@ three doors inherit it, and to grow a principal.
    author pheromone", and state `/keyword`'s global registry write.
 7. **Order the catalogue by reach**, so `/hide` precedes `/remove`.
 8. **Render the catalogue to the participant** before any grant exists to give.
+9. ~~**Judge the verbs the remote door does not read as a head** — the op
+   after a bracket, and the `~` removal sigil.~~ **Resolved 2026-10-01**:
+   `dispatchedVerbsOf`
+   ([remote-verbs.ts](../hypercomb-shared/ui/command-line/remote-verbs.ts)),
+   with `~` judged as `remove`.
+   - ~~**`tile@view` runs the view's own slash command** without the gate being
+     asked about that word.~~ **Resolved 2026-10-01**: `viewCommandOf` names
+     the word `#applyFeatureOps` runs (a view that is neither attachable nor
+     called, not a remove) and the door judges that same word. Measured on the
+     real modules: `bar@lounge` ran `/lounge` — a concealed prototype the gate
+     already refused in its slash form — and is now refused the same way;
+     `meetup@postit` is still admitted.
+   - **Still open: grammar that names no verb is not judged at all** — a bare name mints
+     a tile in tiles stance, `name:tag` writes a tag, `[+a]` creates. So a
+     grant of `none` stops every verb and none of these. Whether the off
+     switch should stop them is a decision about the grant, not about a parse.

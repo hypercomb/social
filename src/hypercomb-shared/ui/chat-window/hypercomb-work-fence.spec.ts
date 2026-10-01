@@ -51,6 +51,40 @@ describe('the work fence', () => {
     expect(parseWriteBlock([`${sig} src/a.ts`])).toHaveProperty('error')
   })
 
+  it('runs a block whose marker stands alone on its line, with no fence', () => {
+    expect(splitWork('`hypercomb-read`\ncode bubble engine').request).toEqual({ kind: 'read', lines: ['/code bubble engine'] })
+    expect(splitWork('I will look.\n\nhypercomb-read\nread here\n\nThat is all.')).toMatchObject({ request: { kind: 'read', lines: ['/read'] } })
+    // The marker named in a sentence, or with nothing under it, is prose.
+    expect(splitWork('A hypercomb-read block reads the hive.').request).toBeUndefined()
+    expect(splitWork('`hypercomb-read`').request).toBeUndefined()
+  })
+
+  it('reads SEARCH/REPLACE edits in place of a whole body', () => {
+    const sig = 'a'.repeat(64)
+    const parsed = parseWriteBlock([
+      `${sig} src/games/bubble/overlay.ts`,
+      '<<<<<<< SEARCH',
+      "if (state === 'clear') {",
+      '=======',
+      "if (state === 'clear' && !error) {",
+      '>>>>>>> REPLACE',
+      '',
+      '<<<<<<< SEARCH',
+      'slice(-4)',
+      '=======',
+      'slice(-5)',
+      '>>>>>>> REPLACE',
+    ])
+    expect(parsed).toMatchObject({
+      beeSig: sig, section: 'src/games/bubble/overlay.ts',
+      edits: [
+        { find: "if (state === 'clear') {", replace: "if (state === 'clear' && !error) {" },
+        { find: 'slice(-4)', replace: 'slice(-5)' },
+      ],
+    })
+    expect(parseWriteBlock([`${sig} src/a.ts`, '<<<<<<< SEARCH', 'x', '=======', 'y'])).toMatchObject({ error: expect.stringContaining('>>>>>>> REPLACE') })
+  })
+
   it('a hand-off fence gives the turn up with its reason, over any work in the reply', () => {
     const reply = 'I can try.\n\n```hypercomb-handoff\nneeds to read and refactor twelve modules at once\n```\n```hypercomb-read\nread here\n```'
     const work = splitWork(reply)
@@ -207,6 +241,25 @@ describe('a block named and not written', () => {
     expect(split.request).toBeUndefined()
     expect(split.unwritten).toBe('hypercomb-read')
     expect(splitWork(['I will add it now.', '<tool name="hypercomb-do">create notes</tool>'].join('\n')).unwritten).toBe('hypercomb-do')
+  })
+
+  it('reads bare command lines, written with no block, as a do block never opened', () => {
+    const bare = splitWork([
+      '/file on /bubble-bobble-dos-v1: REQUIREMENT 7 (partial): ordinary fruit.',
+      '/file on /bubble-bobble-dos-v1: REQUIREMENT 8 (partial): progression.',
+    ].join('\n'))
+    expect(bare.request).toBeUndefined()
+    expect(bare.unwritten).toBe('hypercomb-do')
+    expect(splitWork('read 33618262568d src/dos-blocks-direction.ts').unwritten).toBe('hypercomb-read')
+    expect(splitWork("I'll read the module and both sections first.").unwritten).toBe('hypercomb-read')
+    expect(splitWork('Let me file the six notes now.').unwritten).toBe('hypercomb-do')
+    // A finished answer that ends on a courtesy is long, and says nothing.
+    expect(splitWork(`${'The game meets the data requirement. '.repeat(15)}\nI'll check back if you need more.`).unwritten).toBeUndefined()
+    expect(splitWork('Both notes are filed on /bubble-bobble-dos-v1.').unwritten).toBeUndefined()
+    expect(splitWork('I read the engine and the levels; here is the answer.').unwritten).toBeUndefined()
+    // One alone may be a sentence about a command; a route has no space.
+    expect(splitWork('/create roadmap is what I would run next.').unwritten).toBeUndefined()
+    expect(splitWork(['/games/bubble holds the game.', '/bubble-bobble-dos-v1/round-001 holds a round.'].join('\n')).unwritten).toBeUndefined()
   })
 
   it('says nothing for a sentence, inline code, a quoted example, or a reply that carries a real block', () => {

@@ -176,9 +176,15 @@ export class ExecutionQueueStore extends EventTarget {
     }
     if (keys.length) this.#keysById.set(id, keys)
     this.#requests = this.#trim([entry, ...this.#requests])
+    // THE WAITER BEFORE THE NEWS: a listener may decide the row the moment
+    // it hears of it (a trusted conversation does), and a decision that
+    // arrives before its waiter is lost — the row ran nowhere and the turn
+    // waited forever.
+    const decision = auto
+      ? Promise.resolve<ExecutionDecision>('run')
+      : new Promise<ExecutionDecision>(resolve => { this.#waiters.set(id, resolve) })
     this.#changed()
-    if (auto) return { id, decision: Promise.resolve('run') }
-    const decision = new Promise<ExecutionDecision>(resolve => { this.#waiters.set(id, resolve) })
+    if (auto) return { id, decision }
     const signal = ask.signal
     if (signal) {
       if (signal.aborted) this.decide(id, 'skip')

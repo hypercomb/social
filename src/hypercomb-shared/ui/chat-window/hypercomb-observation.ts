@@ -327,6 +327,13 @@ const parseObservation = (
       ...(bySig[3] ? { section: bySig[3] } : {}), ...(from > 0 ? { from } : {}),
     }
   }
+  // A SHORTENED SIGNATURE. Receipts print twelve characters and a model
+  // copies them back — three turned-back blocks in a row and a stopped turn
+  // (jwize's drive session, 2026-10-01). Name the mistake, not the grammar.
+  const short = /^\/(read|list)\s+([0-9a-f]{8,63})(?:\s|$)/.exec(grammar)
+  if (short) {
+    throw new HypercombObservationError(`${short[2]} is a shortened signature; /${short[1]} takes all 64 hex characters — copy the full one from the receipt or the earlier read`)
+  }
   // /find <word>: names under the current page.
   const find = /^\/find\s+(\S.*)$/.exec(grammar)
   if (find) {
@@ -339,7 +346,7 @@ const parseObservation = (
   }
   const match = /^\/(tree|read|list|history|summary)\s+(\/.*)$/.exec(grammar)
   if (!match || !VERBS.includes(match[1] as HypercombObservationVerb)) {
-    throw new HypercombObservationError('hive observations use /tree, /read, /list, /history or /summary (alone or followed by /absolute/path), /read <sig> [from], /list <sig>, /find <word>, or /code [word]')
+    throw new HypercombObservationError('hive observations use /tree, /read, /list, /history or /summary (alone or followed by /absolute/path), /read <sig> [src/path.ts] [from], /list <sig>, /find <word>, or /code [word]')
   }
   const verb = match[1] as HypercombObservationVerb
   const absolute = match[2]

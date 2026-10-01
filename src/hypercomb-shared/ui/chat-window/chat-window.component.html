@@ -37,7 +37,6 @@
       (dblclick)="resetRailWidth()"
       (keydown)="onRailGripKey($event)"></div>
     <header class="chat-header">
-      <span class="mat-sym chat-glyph" aria-hidden="true">forum</span>
       <!-- WHOSE CONVERSATION IS THIS. What the next request reads sits under the composer, where dropping happens. -->
       <span class="chat-subject" [title]="subjectPath() || ('chat.subject.none' | t: { tile: '' })">
         @if (subjectName()) {
@@ -54,33 +53,40 @@
         } @else {
           <!-- About no single tile is about the HIVE — the same thing the
                rail's top row says, so the two agree on what you are in. -->
+          <span class="mat-sym chat-subject-mark" aria-hidden="true">hive</span>
           <span class="chat-subject-hive">{{ 'agent.rail-hive' | t }}</span>
         }
       </span>
 
       <span class="chat-header-space"></span>
-      <!-- Show or hide the workflow column: one icon, sticky, lit while shown. -->
-      <button class="chat-close chat-route-toggle" type="button"
-        [class.on]="routeSideWanted() && !execSideWanted()"
-        (click)="toggleRouteSide()"
-        [title]="'chat.route.toggle' | t"
-        [attr.aria-pressed]="routeSideWanted() && !execSideWanted()"
-        [attr.aria-label]="'chat.route.toggle' | t">
-        <span class="mat-sym" aria-hidden="true">account_tree</span>
-      </button>
-      <!-- The Execution column: what models ask to read and change. It shares
-           the workflow's side, so the two icons light one at a time; a count
-           rides it while something waits on you. -->
-      <button class="chat-close chat-route-toggle chat-exec-toggle" type="button"
-        [class.on]="execSideWanted()"
-        (click)="toggleExecSide()"
-        [title]="'chat.exec.toggle' | t"
-        [attr.aria-pressed]="execSideWanted()"
-        [attr.aria-label]="'chat.exec.toggle' | t">
-        <span class="mat-sym" aria-hidden="true">terminal</span>
-        @if (execWaiting()) { <span class="chat-exec-badge">{{ execWaiting() }}</span> }
-      </button>
+      <div class="chat-head-actions">
+        <!-- Show or hide the workflow column: one icon, sticky, lit while shown.
+             Every icon button in the window is a .chat-tool — one box, one
+             glyph size, one lit state. These two wore .chat-close once, and the
+             close rule out-ranked their lit colour, so it never showed. -->
+        <button class="chat-tool chat-route-toggle" type="button"
+          [class.on]="routeSideWanted() && !execSideWanted()"
+          (click)="toggleRouteSide()"
+          [title]="'chat.route.toggle' | t"
+          [attr.aria-pressed]="routeSideWanted() && !execSideWanted()"
+          [attr.aria-label]="'chat.route.toggle' | t">
+          <span class="mat-sym" aria-hidden="true">account_tree</span>
+        </button>
+        <!-- The Execution column: what models ask to read and change. It shares
+             the workflow's side, so the two icons light one at a time; a count
+             rides it while something waits on you. -->
+        <button class="chat-tool chat-route-toggle chat-exec-toggle" type="button"
+          [class.on]="execSideWanted()"
+          (click)="toggleExecSide()"
+          [title]="'chat.exec.toggle' | t"
+          [attr.aria-pressed]="execSideWanted()"
+          [attr.aria-label]="'chat.exec.toggle' | t">
+          <span class="mat-sym" aria-hidden="true">terminal</span>
+          @if (execWaiting()) { <span class="chat-exec-badge">{{ execWaiting() }}</span> }
+        </button>
+      </div>
       <button class="chat-close" type="button" (click)="close()"
+        [title]="'chat.close' | t"
         [attr.aria-label]="'chat.close' | t">×</button>
     </header>
 
@@ -1091,35 +1097,57 @@
          one at a time; on a phone it covers the thread until put away. -->
     @if (execSideWanted()) {
       <aside class="chat-exec-col" [attr.aria-label]="'chat.exec.side' | t">
+        <!-- The policy at the head: the mode NAMED in words, then the three
+             modes as icons; under it the four kinds, always present so the
+             list never moves when the mode changes. -->
         <div class="chat-route-sec">
           <span>{{ 'chat.exec.sec' | t }}</span>
+          <span class="chat-exec-now">{{ ('chat.exec.mode.' + execMode()) | t }}</span>
           <span class="chat-exec-words" role="radiogroup" [attr.aria-label]="'chat.exec.sec' | t">
             @for (mode of execModes; track mode) {
-              <button type="button" class="chat-exec-word" role="radio"
+              <button type="button" class="chat-tool chat-exec-mode" role="radio"
+                [attr.data-mode]="mode"
                 [class.on]="execMode() === mode"
                 [attr.aria-checked]="execMode() === mode"
-                (click)="setExecMode(mode)">{{ ('chat.exec.mode.' + mode) | t }}</button>
+                [attr.tabindex]="execMode() === mode ? 0 : -1"
+                [title]="('chat.exec.mode.' + mode) | t"
+                [attr.aria-label]="('chat.exec.mode.' + mode) | t"
+                (keydown)="onExecModeKey($event, mode)"
+                (click)="setExecMode(mode)"><span class="mat-sym" aria-hidden="true">{{ execModeIcon(mode) }}</span></button>
             }
           </span>
         </div>
-        @if (execMode() === 'auto') {
-          <div class="chat-exec-auto">
-            <span class="chat-exec-quiet">{{ 'chat.exec.auto-runs' | t }}</span>
+        <div class="chat-exec-auto" role="group" [attr.aria-label]="'chat.exec.auto-runs' | t">
+          @if (activeId()) {
+            <button type="button" class="chat-exec-word chat-exec-trust" role="switch"
+              [class.on]="convoRunsItself()"
+              [attr.aria-checked]="convoRunsItself()"
+              [title]="'chat.exec.this-conversation-why' | t"
+              (click)="toggleConvoRunsItself()">{{ 'chat.exec.this-conversation' | t }}</button>
+          }
+          <span class="chat-exec-kinds">
             @for (kind of execKinds; track kind) {
-              <button type="button" class="chat-exec-word" role="checkbox"
-                [class.on]="execAuto().includes(kind)"
-                [attr.aria-checked]="execAuto().includes(kind)"
-                (click)="toggleExecAuto(kind)">{{ ('chat.exec.kind.' + kind) | t }}</button>
+              <button type="button" class="chat-tool chat-exec-kind-toggle" role="checkbox"
+                [class.on]="execKindOn(kind)"
+                [attr.aria-checked]="execKindOn(kind)"
+                [attr.aria-disabled]="execMode() !== 'auto'"
+                [title]="('chat.exec.auto-runs' | t) + ' ' + (('chat.exec.kind.' + kind) | t)"
+                [attr.aria-label]="('chat.exec.kind.' + kind) | t"
+                (click)="toggleExecAuto(kind)"><span class="mat-sym" aria-hidden="true">{{ execKindIcon(kind) }}</span></button>
             }
-          </div>
-        }
+          </span>
+        </div>
         <ol class="chat-exec-list">
-          @for (row of execRows(); track row.id) {
+          @for (row of execRows(); track row.id; let i = $index) {
             <li class="chat-exec-row" [attr.data-state]="row.state" [attr.data-kind]="row.kind">
-              <div class="chat-exec-head">
-                <span class="chat-exec-kind">{{ ('chat.exec.kind.' + row.kind) | t }}</span>
+              <!-- The asking model, once, and again only where it changes. -->
+              @if (i === 0 || execRows()[i - 1].model !== row.model) {
                 <span class="chat-exec-model" [title]="row.model">{{ row.model }}</span>
-              </div>
+              }
+              <span class="chat-exec-kind" role="img"
+                [title]="('chat.exec.kind.' + row.kind) | t"
+                [attr.aria-label]="('chat.exec.kind.' + row.kind) | t"><span class="mat-sym" aria-hidden="true">{{ execKindIcon(row.kind) }}</span></span>
+              <div class="chat-exec-body">
               @if (row.needsGrant && row.state === 'waiting') {
                 <p class="chat-exec-quiet">{{ 'chat.exec.needs-grant' | t }}</p>
               }
@@ -1142,8 +1170,14 @@
                   }
                   <button type="button" class="chat-exec-word" (click)="decideExec(row.id, 'skip')">{{ 'chat.exec.skip' | t }}</button>
                 </div>
-              } @else {
-                <p class="chat-exec-outcome">{{ ('chat.exec.state.' + row.state) | t }}@if (row.auto) { · {{ 'chat.exec.auto' | t }} }@if (row.outcome) { — {{ row.outcome }} }</p>
+              } @else if (row.state === 'failed' && row.outcome) {
+                <p class="chat-exec-outcome">{{ row.outcome }}</p>
+              }
+              </div>
+              @if (row.state !== 'waiting') {
+                <span class="chat-exec-state" role="img"
+                  [title]="(('chat.exec.state.' + row.state) | t) + (row.auto ? ' · ' + ('chat.exec.auto' | t) : '') + (row.outcome ? ' — ' + row.outcome : '')"
+                  [attr.aria-label]="(('chat.exec.state.' + row.state) | t) + (row.auto ? ' · ' + ('chat.exec.auto' | t) : '') + (row.outcome ? ' — ' + row.outcome : '')"><span class="mat-sym" aria-hidden="true">{{ execStateIcon(row.state) }}</span></span>
               }
             </li>
           } @empty {

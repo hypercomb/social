@@ -30,6 +30,36 @@ export const isSelectOp = (op: string): boolean => {
   return slash?.has?.(name) ?? false
 }
 
+/**
+ * Brackets `[…]` are THE selection grouping primitive — the one canonical form.
+ * `[a,b]` selects; `[a,b]/cut` selects then cuts; `~[a,b]` removes; `[a,b]:tag`
+ * tags. Legacy `/select[…]`, `/format[…]`, `/fmt[…]`, `/fp[…]` are still accepted
+ * as INPUT (old URLs, muscle memory) but are rewritten to the bare bracket and
+ * are never echoed or suggested back.
+ *
+ * Here rather than in the component so the remote door reads a bracket line
+ * through the SAME normaliser the dispatch does (remote-verbs.ts) — a second
+ * copy would be a second parser.
+ */
+export const BRACKET_CMD_RE = /^\/(select|format|fmt|fp)\[/i
+/** Normalise any selection-input form to the canonical bare-bracket `[…]`. */
+export function normalizeSelectInput(v: string): string {
+  // Already canonical.
+  if (v.startsWith('[')) return v
+
+  // Legacy `/select[…]` → drop the prefix, keep the bracket + any tail.
+  const sel = v.match(/^\/select(\[.*)$/i)
+  if (sel) return sel[1]
+
+  // Legacy `/format[…]` | `/fmt[…]` | `/fp[…]` → `[items]/format`.
+  const m = v.match(/^\/(format|fmt|fp)\[/i)
+  if (!m) return v
+  const rest = v.slice(m[0].length) // everything after the opening bracket
+  const bracketClose = rest.indexOf(']')
+  if (bracketClose < 0) return '[' + rest // bracket still open
+  return '[' + rest.slice(0, bracketClose) + ']/format' + rest.slice(bracketClose + 1)
+}
+
 /** @deprecated Ask {@link isSelectOp} — it consults the live behaviour
  *  registry. Kept only so a caller mid-migration still compiles. */
 export const SELECT_OPS = BUILTIN_SELECT_OPS

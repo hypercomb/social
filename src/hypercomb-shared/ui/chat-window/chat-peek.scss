@@ -117,20 +117,33 @@ $accent: #7eb6d6;
 // the same glyph (1.0625rem at the 16px root). Rem, never px — chrome in a
 // tool-window sheet is never px — and rem, never em: the glyph used to be
 // `1.05em` and drifted with the panel's text size while the gear did not.
-.chat-peek,
-.chat-providers {
+//
+// The header's toggles, one group at the toolbar's tight gap; the gear and
+// close keep the header's own spacing after it.
+.chat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+// EVERY ICON BUTTON IN THE WINDOW IS THIS ONE (jwize, 2026-10-01: "icon and
+// minimal"): the header toggles, fold-away, providers, the conversation's own
+// controls — one box, one glyph, one lit state, no border at rest or lit.
+.chat-tool {
+  position: relative;
   flex: 0 0 auto;
   @include tw.icon-button;
   width: tw.$header-action-size;
   height: tw.$header-action-size;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
+  padding: 0;
+  border: 0;
   background: none;
   color: var(--hc-window-ink-quiet);
   cursor: pointer;
-  transition: color 0.14s ease, background 0.14s ease, border-color 0.14s ease;
+  transition: color 0.12s ease, background-color 0.12s ease;
 
   .mat-sym {
     font-size: 1.0625rem;
@@ -138,13 +151,13 @@ $accent: #7eb6d6;
 
   &:hover,
   &:focus-visible {
-    color: var(--hc-window-accent);
-    background: rgba(var(--acc), 0.12);
+    color: var(--hc-window-ink-loud);
+    background: var(--hc-window-tint);
   }
 
-  &.on {
+  &.on,
+  &[aria-pressed='true'] {
     color: var(--hc-window-accent);
-    background: rgba(var(--acc), 0.16);
-    border-color: rgba(var(--acc), 0.4);
+    background: var(--hc-window-wash);
   }
 }

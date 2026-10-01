@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { draftModule, listDrafts, type ModuleDraftDeps } from './module-drafts'
+import { draftModule, listDrafts, parseProblemAsBody, type ModuleDraftDeps } from './module-drafts'
 import type { Picks } from './package-tree'
 import type { ReplicationIo } from './replication-walker'
 
@@ -82,6 +82,61 @@ describe('draftModule', () => {
     expect(await listDrafts(w.deps)).toEqual([
       { path: 'games/solomon', layerSig: outcome.layerSig, rootSig: outcome.rootSig, section: 'src/games/solomon/labyrinth.ts', from: w.beeSig, at: 1_700_000_000_000 },
     ])
+  })
+
+  it('makes edits to the section as it runs now instead of a whole new body', async () => {
+    const w = await world()
+    const outcome = await draftModule({
+      beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: 'ignored',
+      edits: [{ find: '"remembered"', replace: '"edited"' }],
+    }, w.deps)
+    if (!outcome.ok) throw new Error(outcome.error)
+    expect(decode(w.bees.get(outcome.beeSig)!)).toBe(BEE.replace('"remembered"', '"edited"'))
+  })
+
+  it('refuses a draft that does not parse, and writes nothing', async () => {
+    const w = await world()
+    const seen: string[] = []
+    const deps = { ...w.deps, parseProblem: async (text: string) => { seen.push(text); return text.includes('(((') ? 'SyntaxError: Unexpected end of input (line 3)' : undefined } }
+    const outcome = await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: 'var rooms = (((;' }, deps)
+    expect(outcome).toMatchObject({ ok: false, error: expect.stringContaining('does not parse') })
+    expect(seen[0]).toContain('var rooms = (((;')
+    expect(w.applied).toHaveLength(0)
+  })
+
+  it('reads a bundled module as parsing, and the open-bracket draft as not', async () => {
+    const before = [
+      '// @hypercomb/essentials/games/bubble/engine',
+      'import { CAVE_LEFT, TILE } from "@hypercomb/essentials/games/bubble/dos-geometry";',
+      'import "./side.js";',
+      'var Engine = class {',
+      '  moveFloatingBubble(bubble) {',
+      '    const blocked = bubble.x < CAVE_LEFT || this.touches({ x: bubble.x, w: TILE }, true);',
+      '    if (blocked) bubble.vy = -30;',
+      '    return import.meta.url;',
+      '  }',
+      '};',
+      'export default Engine;',
+      'export { Engine, Engine as BubbleEngine };',
+    ].join('\n')
+    expect(await parseProblemAsBody(before)).toBeUndefined()
+    const broken = before.replace('const blocked = bubble.x < CAVE_LEFT || this.touches({ x: bubble.x, w: TILE }, true);',
+      'const blocked = bubble.x < CAVE_LEFT || (!this.native && (\n      this.touches({ x: bubble.x, w: TILE }, true);')
+    expect(await parseProblemAsBody(broken, before)).toMatch(/^SyntaxError/)
+    // A module the reading cannot speak for is never the reason a draft fails.
+    const wrapped = `import {\n  A\n} from "x";\n${before}`
+    expect(await parseProblemAsBody(wrapped)).toBeUndefined()
+    const unreadable = `import D, {\n  A\n} from "x";\n${broken}`
+    expect(await parseProblemAsBody(unreadable, `import D, {\n  A\n} from "x";\n${before}`)).toBeUndefined()
+  })
+
+  it('refuses an edit that finds nothing, or finds its text twice', async () => {
+    const w = await world()
+    const missing = await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: '', edits: [{ find: 'nowhere', replace: 'x' }] }, w.deps)
+    expect(missing).toMatchObject({ ok: false, error: expect.stringContaining('not in the section') })
+    const twice = await draftModule({ beeSig: w.beeSig, section: 'src/games/solomon/labyrinth.ts', body: '', edits: [{ find: 'e', replace: 'x' }] }, w.deps)
+    expect(twice).toMatchObject({ ok: false, error: expect.stringContaining('more than once') })
+    expect(w.applied).toHaveLength(0)
   })
 
   it('drafts on top of an earlier draft of the same module', async () => {

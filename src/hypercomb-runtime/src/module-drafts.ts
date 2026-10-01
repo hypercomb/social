@@ -62,6 +62,44 @@ export type ModuleDraftRequest = {
   readonly section: string
   /** The section's new body, header line excluded. */
   readonly body: string
+  /** OR the changes to make to the body as it runs now, each found exactly
+   *  once. A model asked to change one line of a long section wrote the whole
+   *  file, ran out of room, and left the block unclosed three times (jwize's
+   *  drive session, 2026-10-01). When present, `body` is ignored. */
+  readonly edits?: readonly SectionEdit[]
+}
+
+export type SectionEdit = { readonly find: string; readonly replace: string }
+
+/** The section body with every edit made, or why it cannot be. Each `find`
+ *  must occur exactly once in the body as it stands after the edits before
+ *  it — an edit that matches twice is ambiguous, and one that matches
+ *  nothing was written against code that is not running. */
+export const applySectionEdits = (current: string, edits: readonly SectionEdit[]): { readonly body: string } | { readonly error: string } => {
+  if (!edits.length) return { error: 'the write block has no edits' }
+  let body = current
+  for (const [index, edit] of edits.entries()) {
+    const find = String(edit.find ?? '')
+    if (!find.trim()) return { error: `edit ${index + 1} has nothing to find` }
+    const at = body.indexOf(find)
+    if (at < 0) return { error: `edit ${index + 1}: the text to find is not in the section as it runs now; read the section again and copy it exactly` }
+    if (body.indexOf(find, at + 1) >= 0) return { error: `edit ${index + 1}: the text to find occurs more than once; include more of the lines around it` }
+    body = body.slice(0, at) + String(edit.replace ?? '') + body.slice(at + find.length)
+  }
+  return { body }
+}
+
+/** A section's body as `replaceSection` takes it: the header line excluded. */
+const bodyOf = (text: string, section: { readonly from: number; readonly to: number }): string =>
+  text.slice(text.indexOf('\n', section.from) + 1, section.to)
+
+/** The request with its body made, whichever way it was written. */
+const withBody = (request: ModuleDraftRequest, current: string): ModuleDraftRequest | { readonly error: string } => {
+  if (!request.edits) return request
+  const made = applySectionEdits(current, request.edits)
+  if ('error' in made) return made
+  if (made.body.length > MAX_DRAFT_BODY) return { error: `the section body must be text under ${MAX_DRAFT_BODY} characters` }
+  return { ...request, body: made.body }
 }
 
 export type ModuleDraftOutcome =
@@ -120,6 +158,58 @@ export type ModuleDraftDeps = {
    *  newly reaches anything. Throws when a hold cannot be recorded. Absent: a
    *  draft that reaches nothing new applies, and one that does is refused. */
   readonly admit?: (draft: DraftAdmission) => Promise<void>
+  /** Why the drafted module would not even parse, or undefined. Absent:
+   *  nothing is checked. */
+  readonly parseProblem?: (text: string, before?: string) => Promise<string | undefined>
+}
+
+/**
+ * DOES IT PARSE? A model's edit left a parenthesis open and the draft would
+ * have stopped the whole game from loading on the next reload, with nothing
+ * said until then (jwize's drive session, 2026-10-01).
+ *
+ * The browser's own parser answers, without running a line: the module's
+ * import and export statements — one line each in a bundled module — are
+ * blanked or unwrapped, `import.meta` becomes an object, and the rest is
+ * handed to the async-function constructor, which parses and returns a
+ * function that is never called. A module worker cannot answer this:
+ * Chromium reports its parse errors with no message at all.
+ *
+ * The transform is a reading, not a parser, so it is held to the module it
+ * drafts from: when the module running now does not pass the same reading,
+ * the reading cannot speak for this module and the draft goes through as
+ * before. Only a draft of a module that parsed, which no longer parses, is
+ * refused.
+ */
+/** A bundler wraps a long import or export list over several lines; each
+ *  statement becomes as many blank lines, so line numbers hold. */
+const LISTED_STATEMENT = /^[ \t]*(?:import|export)[ \t]*(?:type[ \t]+)?\{[^}]*\}[ \t]*(?:from[ \t]*["'][^"'\n]+["'])?[ \t]*;?[ \t]*$/gm
+const blanked = (statement: string): string => statement.replace(/[^\n]/g, '')
+
+const asFunctionBody = (text: string): string => text.replace(LISTED_STATEMENT, blanked).split('\n').map(line => {
+  if (/^\s*import\s[^;]*\bfrom\s*["'][^"']+["']\s*;?\s*$/.test(line) || /^\s*import\s*["'][^"']+["']\s*;?\s*$/.test(line)) return ''
+  if (/^\s*export\s*\{[^}]*\}\s*(?:from\s*["'][^"']+["'])?\s*;?\s*$/.test(line)) return ''
+  if (/^\s*export\s*\*\s*(?:as\s+\w+\s+)?from\s*["'][^"']+["']\s*;?\s*$/.test(line)) return ''
+  return line
+    .replace(/^(\s*)export\s+default\s+/, '$1void ')
+    .replace(/^(\s*)export\s+(?=(?:var|let|const|function|class|async)\b)/, '$1')
+}).join('\n').replace(/\bimport\.meta\b/g, '({})')
+
+const bodyParseProblem = (text: string): string | undefined => {
+  const AsyncFunction = Object.getPrototypeOf(async function () { /* constructor only */ }).constructor as new (body: string) => unknown
+  try {
+    new AsyncFunction(asFunctionBody(text))
+    return undefined
+  } catch (error) {
+    return error instanceof SyntaxError ? `SyntaxError: ${error.message}` : undefined
+  }
+}
+
+export const parseProblemAsBody = async (text: string, before?: string): Promise<string | undefined> => {
+  const problem = bodyParseProblem(text)
+  if (!problem) return undefined
+  if (before !== undefined && bodyParseProblem(before)) return undefined
+  return problem
 }
 
 /** A draft about to be made live, as the brood records it. */
@@ -187,7 +277,16 @@ const liveDeps = (): ModuleDraftDeps => ({
   setOff: paths => writeOffUnits(paths),
   mayRun: sig => mayRunBee(sig),
   admit: admitInBrood,
+  parseProblem: parseProblemAsBody,
 })
+
+/** The refusal for a draft that does not parse, or null. */
+const unparsable = async (deps: ModuleDraftDeps, text: string, before: string, section: string): Promise<string | null> => {
+  const problem = await deps.parseProblem?.(text, before).catch(() => undefined)
+  return problem
+    ? `the drafted module does not parse, so nothing was written: ${problem}. Read ${section} again and fix the edit (an unbalanced bracket or a missing comma is the usual cause)`
+    : null
+}
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
@@ -224,7 +323,7 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   const beeSig = String(request.beeSig ?? '').trim().toLowerCase()
   if (!SIG_RE.test(beeSig)) return fail('a draft names the module by its 64-character signature')
   if (!isSectionPath(request.section)) return fail('a draft names one source section, like src/games/solomon/labyrinth.ts')
-  if (typeof request.body !== 'string' || request.body.length > MAX_DRAFT_BODY) return fail(`the section body must be text under ${MAX_DRAFT_BODY} characters`)
+  if (!request.edits && (typeof request.body !== 'string' || request.body.length > MAX_DRAFT_BODY)) return fail(`the section body must be text under ${MAX_DRAFT_BODY} characters`)
 
   const trunk = deps.trunk()
   if (!trunk) return fail('nothing is installed here to draft onto — the dev shell imports modules directly and cannot take a draft')
@@ -261,8 +360,13 @@ export const draftModule = async (request: ModuleDraftRequest, deps: ModuleDraft
   const text = decode(held)
   const replaced = sectionOf(text, request.section)
   if (!replaced) return fail(`the module has no section ${request.section}; list <sig> names its sections`)
+  const made = withBody(request, bodyOf(text, replaced))
+  if ('error' in made) return fail(made.error)
+  request = made
   const nextText = replaceSection(text, request.section, request.body)
   if (nextText === null) return fail('the section could not be replaced')
+  const broken = await unparsable(deps, nextText, text, request.section)
+  if (broken) return fail(broken)
   const nextBytes = encode(nextText)
   const nextBeeSig = await sigOf(nextBytes)
   if (nextBeeSig === beeSig) return fail('the draft is byte-identical to the module it drafts from')
@@ -350,8 +454,13 @@ const draftDependency = async (request: ModuleDraftRequest, fromSig: string, con
   const text = decode(held)
   const replaced = sectionOf(text, request.section)
   if (!replaced) return fail(`the module has no section ${request.section}; list <sig> names its sections`)
+  const made = withBody(request, bodyOf(text, replaced))
+  if ('error' in made) return fail(made.error)
+  request = made
   const nextText = replaceSection(text, request.section, request.body)
   if (nextText === null) return fail('the section could not be replaced')
+  const broken = await unparsable(deps, nextText, text, request.section)
+  if (broken) return fail(broken)
   const nextBytes = encode(nextText)
   if (namespaceOf(nextBytes) !== ns) return fail('the draft changed the line that names the dependency')
   const nextSig = await sigOf(nextBytes)

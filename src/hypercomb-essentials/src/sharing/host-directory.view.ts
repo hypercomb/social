@@ -248,6 +248,35 @@ export const replacedBeneath = (path: string, running: readonly InstallNode[], r
     .sort()
 }
 
+/** Every file a tree names, by bare signature: its layers and the bees they declare. */
+export const filesOf = (nodes: readonly InstallNode[]): Set<string> => {
+  const files = new Set<string>()
+  for (const node of nodes) {
+    if (node.layerSig) files.add(bareSig(node.layerSig))
+    for (const bee of node.bees) files.add(bareSig(bee))
+  }
+  return files
+}
+
+/** How far one path's CHANGE has come: only the files of its subtree in the
+ *  new tree that this hive did not already run. Update all reads back every
+ *  file it already holds, and those are not the update. */
+export const updateProgress = (
+  path: string,
+  next: readonly InstallNode[],
+  had: ReadonlySet<string>,
+  held: ReadonlySet<string>,
+): { done: number; total: number } => {
+  let done = 0
+  let total = 0
+  for (const sig of filesOf(next.filter(node => within(node.path, path)))) {
+    if (had.has(sig)) continue
+    total++
+    if (held.has(sig)) done++
+  }
+  return { done, total }
+}
+
 /** Is a revision older than the one running? Only when both are listed —
  *  a revision is never called older than something the list cannot place. */
 export const isOlder = (revisions: readonly InstallRevision[], chosen: string, running: string): boolean => {
@@ -413,9 +442,11 @@ export class HostDirectoryElement extends HTMLElement {
   #busy = ''
   #error = ''
   #restarting = false
-  /** UPDATE ALL, MOVING: every file held here since it was pressed, as the
-   *  install port reports it. Null when no Update all is running. */
+  /** UPDATE ALL, MOVING: every CHANGED file held here since it was pressed, as
+   *  the install port reports it. Null when no Update all is running. */
   #held: Set<string> | null = null
+  /** What already ran here when Update all was pressed — never counted as the update. */
+  #had: ReadonlySet<string> = new Set()
   #heldPaint = 0
 
   /** The domain this app runs on: never offered a Visit — a second tab on
@@ -831,7 +862,7 @@ export class HostDirectoryElement extends HTMLElement {
       bar.setAttribute('role', 'status')
       const moving = this.#held
       bar.append(make('span', '', moving
-        ? t('hosts.updating', 'Updating — {count} files in', { count: moving.size })
+        ? t('hosts.updating', 'Updating — {count} changed files in', { count: moving.size })
         : t('packages.updates.shared', 'An update is ready')))
       const take = button('hd-primary', moving ? t('hosts.updating-short', 'Updating…') : t('hosts.update-all', 'Update all'))
       take.disabled = !!this.#busy
@@ -897,13 +928,15 @@ export class HostDirectoryElement extends HTMLElement {
     const acts = !!reach && !!trunk
     const recursive = !!reach?.recursive
     const list = make('ul', 'hd-list')
-    // WHILE UPDATE ALL RUNS, what it is changing rises to the top, each row
-    // filling as its files are held here.
+    // WHILE UPDATE ALL RUNS, the list is only what it is changing, each row
+    // filling as its changed files arrive — never the whole package.
     const moving = this.#held
-    const ordered = moving ? [...rows.filter(row => row.update), ...rows.filter(row => !row.update)] : rows
-    for (const row of ordered) {
+    const changing = moving ? rows.filter(row => row.update) : []
+    for (const row of changing.length ? changing : rows) {
       const li = make('li', 'hd-row')
-      const progress = moving && row.update ? this.#progressOf(row.path, moving) : null
+      const measured = moving && row.update ? updateProgress(row.path, this.#next?.nodes ?? [], this.#had, moving) : null
+      // A change only in a namespace bundle has no file of its own to fill.
+      const progress = measured?.total ? measured : null
       if (!row.on) li.classList.add('off')
       if (this.#busy === row.path) li.classList.add('busy')
 
@@ -1193,8 +1226,15 @@ export class HostDirectoryElement extends HTMLElement {
     this.#held = held
     this.#renderBody()
     try {
+      const had = await this.#runningFiles(reach)
+      this.#had = had
       const outcome = await reach.install.acquire(next.root, [...new Set([...this.#sources(), ...this.#channelSources()])], {
-        onHeld: sig => { held.add(bareSig(sig)); this.#paintHeld() },
+        onHeld: sig => {
+          const bare = bareSig(sig)
+          if (had.has(bare)) return
+          held.add(bare)
+          this.#paintHeld()
+        },
       })
       if (!outcome.ok) { this.#error = outcome.error ?? 'package incomplete'; return }
       this.#restart()
@@ -1205,18 +1245,14 @@ export class HostDirectoryElement extends HTMLElement {
     }
   }
 
-  /** How far one path is: the layers of its subtree in the new root, and the
-   *  bees they declare, against what is held here so far. */
-  #progressOf(path: string, held: ReadonlySet<string>): { done: number; total: number } {
-    const wanted = new Set<string>()
-    for (const node of this.#next?.nodes ?? []) {
-      if (!within(node.path, path)) continue
-      if (node.layerSig) wanted.add(bareSig(node.layerSig))
-      for (const bee of node.bees) wanted.add(bareSig(bee))
-    }
-    let done = 0
-    for (const sig of wanted) if (held.has(sig)) done++
-    return { done, total: wanted.size }
+  /** Every file what runs here already holds: its layers, its bees, and its
+   *  namespace bundles — so a file read back is never counted as the update. */
+  async #runningFiles(reach: Port): Promise<Set<string>> {
+    const files = filesOf(this.#selection?.nodes ?? [])
+    const modules = await reach.install.modulesOf?.(null, []).catch(() => null) ?? null
+    for (const bee of modules?.bees ?? []) files.add(bareSig(bee.sig))
+    for (const dependency of modules?.dependencies ?? []) files.add(bareSig(dependency.sig))
+    return files
   }
 
   /** Files arrive by the hundred — paint at most every tenth of a second. A

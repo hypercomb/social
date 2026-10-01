@@ -205,6 +205,28 @@ const tagBlock = (lines: string[], index: number): Block | null => {
   return { kind: tag.kind, open: index, end, body: unfenced(body) }
 }
 
+/**
+ * THE MARKER LINE. A model wrote the info string as a line of its own, in
+ * inline code, with no fence at all (jwize's drive session, 2026-10-01):
+ *
+ *   `hypercomb-read`
+ *   code bubble engine
+ *
+ * The marker alone on its line is the same literal opt-in the fence carries;
+ * its block is the lines under it, up to the first blank line after them.
+ */
+const MARKER_LINE = /^\s*`?(hypercomb-[a-z]+)`?\s*:?\s*$/
+
+const markerBlock = (lines: readonly string[], index: number): Block | null => {
+  const marker = MARKER_LINE.exec(lines[index])
+  const kind = marker ? kindOf(marker[1]) : null
+  if (!kind) return null
+  let end = index
+  while (end + 1 < lines.length && lines[end + 1].trim() && !FENCE_RE.test(lines[end + 1])) end++
+  if (end === index) return null
+  return { kind, open: index, end, body: lines.slice(index + 1, end + 1) }
+}
+
 /** Every work block, skipping the inside of any other fence. A tag block
  *  re-cuts `lines` (see tagBlock); the indices are into the array as left. */
 const scan = (lines: string[]): Block[] => {
@@ -213,7 +235,7 @@ const scan = (lines: string[]): Block[] => {
   while (index < lines.length) {
     const open = FENCE_RE.exec(lines[index])
     if (!open) {
-      const tagged = tagBlock(lines, index)
+      const tagged = tagBlock(lines, index) ?? markerBlock(lines, index)
       if (tagged) { blocks.push(tagged); index = tagged.end + 1 } else index++
       continue
     }
@@ -276,8 +298,45 @@ export const workLineGrammar = (raw: string, kind: WorkKind): string => {
  */
 const NAMED_IN_MARKUP = /<(?!\s*\/?\s*hypercomb-)[^<>\n]*\b(hypercomb-(?:read|do|table|write|handoff|continue))\b[^<>\n]*>/g
 
+/**
+ * ...AND WORK WRITTEN WITH NO BLOCK AT ALL. A reply that was nothing but
+ * `/file on /bubble-bobble-dos-v1: …` lines, bare, ended as "answered" with
+ * six notes owed and none filed (jwize's drive session, 2026-10-01). A line
+ * that opens with a slash, a word, and a space is a command line the hive
+ * would run — a route never has the space (`/games/bubble is …` reads as a
+ * route) — so two or more of them outside any fence are a hypercomb-do block
+ * that was never opened. One alone may be a sentence about a command.
+ */
+const BARE_COMMAND = /^\s*\/[a-z][a-z-]*\s+\S/
+const BARE_COMMANDS_MIN = 2
+/** A REPLY THAT IS ONLY A READ: `read 33618262568d src/…` and nothing else,
+ *  answered and done with nothing read (the same session). The read words
+ *  are written without a slash inside their block, so a whole reply of them
+ *  is a read block never opened. */
+const BARE_READ = /^\s*\/?(?:read|tree|code)\s+\S/
+
+/** A SHORT REPLY THAT ONLY PROMISES. "I'll read the module and both sections
+ *  first." and nothing after it — the turn ended answered, nothing read (the
+ *  same session; an open item since 09-30). A brief reply whose last line
+ *  announces the next step is that step's block, never written. */
+const PROMISE = /^(?:(?:ok(?:ay)?|first|now|next|then)[,:]?\s+)*(?:i(?:'|’)ll|i will|let me|i(?:'|’)m going to|i am going to)\s+(.+)$/i
+const READ_STEP = /\b(?:read|look|check|open|search|find|inspect|examine|review|list)\b/i
+const PROMISE_MAX = 400
+
+const promisedIn = (said: readonly string[]): string | undefined => {
+  if (!said.length || said.join('\n').length > PROMISE_MAX) return undefined
+  const step = PROMISE.exec(said[said.length - 1])
+  if (!step) return undefined
+  return READ_STEP.test(step[1]) ? 'hypercomb-read' : 'hypercomb-do'
+}
+
 const unwrittenIn = (lines: readonly string[]): string | undefined => {
+  const said = lines.map(line => line.trim()).filter(Boolean)
+  if (said.length && said.length <= 8 && said.every(line => BARE_READ.test(line))) return 'hypercomb-read'
+  const promised = promisedIn(said)
+  if (promised) return promised
   let fence: string | null = null
+  let bare = 0
   for (const line of lines) {
     const mark = FENCE_RE.exec(line)
     if (mark) {
@@ -289,8 +348,9 @@ const unwrittenIn = (lines: readonly string[]): string | undefined => {
     for (const named of line.matchAll(NAMED_IN_MARKUP)) {
       if (!inCode(line.slice(0, named.index))) return named[1]
     }
+    if (BARE_COMMAND.test(line)) bare += 1
   }
-  return undefined
+  return bare >= BARE_COMMANDS_MIN ? 'hypercomb-do' : undefined
 }
 
 /** Split a finished round into what the model said and what it asked for. */

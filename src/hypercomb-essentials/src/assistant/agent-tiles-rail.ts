@@ -203,8 +203,21 @@ const HIVE_KEY = ''
 /** Which chat you were last in, per tile. */
 const STICKY_KEY = 'hc:rail-chat'
 
-/** GO INSIDE. The row talks; this chevron is the separate control that walks. */
-const WALK_GLYPH = 'chevron_right'
+/** THE RAIL'S GLYPHS, lowercase so scripts/icon-names.cjs ships each one.
+ *  Arrows walk (in, back); the hive's mark is home; search opens the field. */
+const walkIcon = 'arrow_forward'
+const backIcon = 'arrow_back'
+const rootIcon = 'hive'
+const findIcon = 'search'
+
+/** A glyph as the shell draws one: the ligature in a .mat-sym span. */
+const glyphSpan = (name: string): HTMLSpanElement => {
+  const span = document.createElement('span')
+  span.className = 'mat-sym'
+  span.setAttribute('aria-hidden', 'true')
+  span.textContent = name
+  return span
+}
 
 /** What a dragged row carries. Shared with the chat window's header boxes —
  *  the shell may not import this module, so the CONTRACT is the mime type and
@@ -242,27 +255,35 @@ const RAIL_CSS = `
    right edge. One line, and the whole class of it cannot come back. */
 .hc-rail-list,.hc-rail-list *,.hc-rail-list *::before,.hc-rail-list *::after{
   box-sizing:border-box;}
-.hc-rail-head{display:flex;align-items:center;gap:0.35rem;flex:0 0 auto;
-  padding:0.8rem 0.85rem 0.5rem;}
-.hc-rail-back{width:1.7rem;height:1.9rem;flex:0 0 auto;border:none;background:none;
-  color:var(--hc-window-accent-quiet, rgb(${STEEL}));font-size:1.4rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
-.hc-rail-back:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
+/* ONE BAND, the window header's height, so the rail and the window share
+   one divider line: [home or back] [where you are] [search]. Searching puts
+   the field in the title's place. */
+.hc-rail-head{display:flex;align-items:center;gap:0.25rem;flex:0 0 auto;
+  height:2.875rem;padding:0 0.5rem;
+  border-bottom:1px solid var(--hc-window-edge, rgba(${STEEL},0.28));}
+.hc-rail-back,.hc-rail-find-toggle{display:inline-grid;place-items:center;flex:0 0 auto;
+  width:1.75rem;height:1.75rem;padding:0;border:0;background:none;cursor:pointer;
+  color:var(--hc-window-ink-quiet);border-radius:var(--hc-radius-control, 2px);
+  transition:color 0.12s ease,background-color 0.12s ease;}
+.hc-rail-back:hover:not(:disabled),.hc-rail-find-toggle:hover{
+  color:var(--hc-window-ink-loud);background:var(--hc-window-tint, rgba(${STEEL},0.06));}
+.hc-rail-find-toggle[aria-pressed='true']{color:var(--hc-window-accent, rgb(${STEEL}));
+  background:var(--hc-window-wash, rgba(${STEEL},0.1));}
+.hc-rail-back.root{cursor:default;color:rgb(${AMBER});}
 .hc-rail-back[hidden]{display:none;}
-.hc-rail-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+.hc-rail-head .mat-sym,.hc-rail-list .mat-sym{font-size:1.0625rem;line-height:1;}
+.hc-rail-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font-family:var(--hc-mono,monospace);font-size:0.72rem;font-weight:600;letter-spacing:0.12em;
   text-transform:uppercase;color:var(--hc-window-accent, rgb(${STEEL}));}
-.hc-rail-find{flex:0 0 auto;padding:0 0.85rem 0.5rem;}
-.hc-rail-find input{width:100%;box-sizing:border-box;padding:0.33rem 0.55rem;border-radius:var(--hc-radius-control, 2px);
-  border:1px solid rgba(${STEEL},0.22);background:rgba(255,255,255,0.04);
+.hc-rail-find{display:none;flex:1 1 auto;min-width:0;}
+.hc-rail-head.finding .hc-rail-title{display:none;}
+.hc-rail-head.finding .hc-rail-find{display:block;}
+.hc-rail-find input{width:100%;box-sizing:border-box;padding:0.25rem 0.125rem;border:0;border-radius:0;
+  border-bottom:1px solid var(--hc-window-edge-firm, rgba(${STEEL},0.4));background:none;
   color:var(--hc-window-ink-loud);font:inherit;font-size:0.8rem;}
 .hc-rail-find input::placeholder{color:var(--hc-window-ink-quiet);}
-.hc-rail-find input:focus{outline:none;border-color:var(--hc-window-accent-quiet, rgb(${STEEL}));
-  background:rgba(255,255,255,0.06);}
-.hc-rail-find input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;
-  width:0.7rem;height:0.7rem;cursor:pointer;background:rgba(${STEEL},0.7);
-  mask:conic-gradient(from 45deg,#000 0 100%) 50%/0.16rem 100%,
-    conic-gradient(from 45deg,#000 0 100%) 50%/100% 0.16rem;
-  mask-repeat:no-repeat;transform:rotate(45deg);}
+.hc-rail-find input:focus{outline:none;border-bottom-color:var(--hc-window-accent, rgb(${STEEL}));}
+.hc-rail-find input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;}
 /* UP AND DOWN ONLY. A sideways scrollbar under a list of names is never
    the answer to anything — the names ellipsise and the rows fit, so a bar
    there means something is overflowing and the participant is being asked
@@ -651,6 +672,10 @@ export class AgentTilesRail {
   #back: HTMLButtonElement | null = null
   #title: HTMLSpanElement | null = null
   #find: HTMLInputElement | null = null
+  #findToggle: HTMLButtonElement | null = null
+  #head: HTMLDivElement | null = null
+  /** The search field stands in the title's place while this is on. */
+  #finding = false
   #list: HTMLDivElement | null = null
   /** What the search box holds — a filter over THIS level's names, kept
    *  across re-mounts like the trail, dropped whenever the level changes. */
@@ -785,19 +810,19 @@ export class AgentTilesRail {
     const back = document.createElement('button')
     back.type = 'button'
     back.className = 'hc-rail-back'
-    back.textContent = '‹'
     back.hidden = !this.#profile.walk
     back.addEventListener('click', () => this.#up())
     const title = document.createElement('span')
     title.className = 'hc-rail-title'
-    head.append(back, title)
     this.#back = back
     this.#title = title
+    this.#head = head
 
-    // Search sits under the title, above the rows: a level of a real hive
-    // runs to dozens of tiles, and typing two letters is faster than
-    // scrolling for one. It filters the level in the hand — no walk, no
-    // wait — and Escape empties it before the escape cascade sees the key.
+    // ONE BAND (jwize, 2026-10-01: "minimal"): the way back, where you are,
+    // and search as an icon that opens the field in the title's place — the
+    // rail's head is the window header's height, so the two share one line.
+    // Search filters the level in the hand — no walk, no wait — and Escape
+    // empties it, then closes it, before the escape cascade sees the key.
     const find = document.createElement('div')
     find.className = 'hc-rail-find'
     const search = document.createElement('input')
@@ -805,25 +830,40 @@ export class AgentTilesRail {
     search.value = this.#query
     search.autocomplete = 'off'
     search.spellcheck = false
+    // Escape here clears, then closes the field — never the window round it.
+    search.setAttribute('data-escape-local', '')
     const findLabel = this.#profile.findLabel ?? this.#t('agent.rail-find', 'Search this level')
     search.placeholder = findLabel
     search.setAttribute('aria-label', findLabel)
     search.addEventListener('input', () => this.#setQuery(search.value))
     search.addEventListener('keydown', event => {
-      if (event.key !== 'Escape' || !this.#query) return
+      if (event.key !== 'Escape') return
       event.stopPropagation()
       event.preventDefault()
-      this.#setQuery('')
+      if (this.#query || search.value) this.#setQuery('')
+      else this.#setFinding(false)
     })
+    search.addEventListener('blur', () => { if (!search.value.trim()) this.#setFinding(false) })
     find.appendChild(search)
     this.#find = search
+
+    const findToggle = document.createElement('button')
+    findToggle.type = 'button'
+    findToggle.className = 'hc-rail-find-toggle'
+    findToggle.title = findLabel
+    findToggle.setAttribute('aria-label', findLabel)
+    findToggle.append(glyphSpan(findIcon))
+    findToggle.addEventListener('click', () => this.#setFinding(!this.#finding || !!this.#query))
+    this.#findToggle = findToggle
+    head.append(back, title, find, findToggle)
+    this.#setFinding(!!this.#query)
 
     const list = document.createElement('div')
     list.className = 'hc-rail-list'
     list.setAttribute('role', 'list')
     this.#list = list
 
-    host.append(head, find, list)
+    host.append(head, list)
 
     // Open on the level the participant is standing on, with the whole way
     // up already in the trail — back climbs toward the root from move one.
@@ -1044,6 +1084,16 @@ export class AgentTilesRail {
     void this.#load(-1)
   }
 
+  /** Open or close the search field in the head band. A standing query keeps
+   *  it open: the filter is never hidden while it is narrowing the list. */
+  #setFinding(on: boolean): void {
+    const open = on || !!this.#query
+    this.#finding = open
+    this.#head?.classList.toggle('finding', open)
+    this.#findToggle?.setAttribute('aria-pressed', open ? 'true' : 'false')
+    if (on && this.#find && document.activeElement !== this.#find) queueMicrotask(() => this.#find?.focus())
+  }
+
   /** Repaint the level in hand through the new filter — the rows are already
    *  resolved, so searching never re-walks and never waits. */
   #setQuery(raw: string): void {
@@ -1121,14 +1171,25 @@ export class AgentTilesRail {
     const list = this.#list
     if (!list) return
 
-    if (this.#title) this.#title.textContent = path[path.length - 1] ?? this.#t('agent.rail-root', 'hive')
-    if (this.#back) {
-      this.#back.hidden = this.#trail.length <= 1
+    if (this.#title) {
+      this.#title.textContent = path[path.length - 1] ?? this.#t('agent.rail-root', 'hive')
+      this.#title.title = ['', ...path].join(' / ') || '/'
+    }
+    if (this.#back && this.#profile.walk) {
+      // HOME OR BACK, in one place: at the root the hive's mark stands still
+      // (nothing above it), inside a level the arrow climbs one.
+      const atRoot = this.#trail.length <= 1
+      this.#back.hidden = false
+      this.#back.disabled = atRoot
+      this.#back.classList.toggle('root', atRoot)
+      this.#back.replaceChildren(glyphSpan(atRoot ? rootIcon : backIcon))
       const parent = this.#trail[this.#trail.length - 2]
-      const label = this.#t('agent.rail-back', 'Back to {name}')
+      const label = atRoot ? '' : this.#t('agent.rail-back', 'Back to {name}')
         .replace('{name}', parent?.[parent.length - 1] ?? this.#t('agent.rail-root', 'hive'))
       this.#back.title = label
-      this.#back.setAttribute('aria-label', label)
+      if (label) this.#back.setAttribute('aria-label', label)
+      else this.#back.removeAttribute('aria-label')
+      this.#back.setAttribute('aria-hidden', atRoot ? 'true' : 'false')
     }
 
     list.textContent = ''
@@ -1320,7 +1381,7 @@ export class AgentTilesRail {
       walk.type = 'button'
       walk.className = 'hc-rail-walk'
       walk.hidden = !(row.childCount > 0 && this.#profile.walk)
-      walk.textContent = WALK_GLYPH
+      walk.replaceChildren(glyphSpan(walkIcon))
       const walkLabel = this.#t('agent.rail-go', 'Go inside {name}').replace('{name}', row.name)
       walk.title = walkLabel
       walk.setAttribute('aria-label', walkLabel)

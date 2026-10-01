@@ -152,7 +152,7 @@ import {
   READ_PAGE_CHARS,
   type HypercombTreeReader,
 } from './hypercomb-observation'
-import { contextNeedFor, effortForWork, effortFromJev, effortInThread, type MessageEffort } from './message-effort'
+import { contextNeedFor, effortForWork, effortFromJev, effortInThread, isCodeMessage, type MessageEffort } from './message-effort'
 import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-compiler'
 import { executionLineParts } from './execution-line'
 import {
@@ -1196,6 +1196,13 @@ const LLM_HIVE_ACCESS_IOC_KEY = '@hypercomb.social/LlmHiveAccess'
 /** assistant/execution-queue.ts — what models ask to read and change. */
 const EXECUTION_QUEUE_IOC_KEY = '@hypercomb.social/ExecutionQueue'
 const EXEC_SIDE_WANTED_KEY = 'hc:chat-exec-side'
+const EXEC_AUTO_CONVOS_KEY = 'hc:chat-exec-auto-conversations'
+const readAutoConversations = (): ReadonlySet<string> => {
+  try {
+    const list = JSON.parse(localStorage.getItem(EXEC_AUTO_CONVOS_KEY) ?? '[]')
+    return new Set(Array.isArray(list) ? list.map(String) : [])
+  } catch { return new Set() }
+}
 
 type ExecutionKindLike = 'read' | 'additive' | 'editing' | 'destructive'
 type ExecutionModeLike = 'manual' | 'auto' | 'everything'
@@ -1212,6 +1219,7 @@ type ExecutionRequestLike = {
   readonly auto: boolean
   /** Ran on arrival because these exact reads were allowed before. */
   readonly remembered?: boolean
+  readonly forceReview?: boolean
   readonly outcome?: string
 }
 type ExecutionQueueLike = {
@@ -3056,6 +3064,40 @@ export class ChatWindowComponent implements OnDestroy {
   readonly execSideWanted = signal(readExecSideWanted())
   readonly execMode = signal<ExecutionModeLike>('auto')
   readonly execAuto = signal<readonly ExecutionKindLike[]>(['read'])
+  /** CONVERSATIONS THAT RUN BY THEMSELVES (jwize, 2026-10-01: "it can be auto
+   *  for anything the bubble bobble conversations"). The participant trusts
+   *  ONE conversation with everything it asks, without trusting every
+   *  conversation with it — Jev's "review this one" included, since the
+   *  participant said anything. A read from an ungranted provider still
+   *  waits: that is a grant to a model, not this conversation's to give. */
+  readonly #autoConvos = signal<ReadonlySet<string>>(readAutoConversations())
+  readonly convoRunsItself = computed(() => this.#autoConvos().has(this.activeId() ?? ''))
+
+  toggleConvoRunsItself(): void {
+    const convoId = this.activeId()
+    if (convoId) this.#trustConversation(convoId, !this.#autoConvos().has(convoId))
+  }
+
+  #trustConversation(convoId: string, on: boolean): void {
+    const next = new Set(this.#autoConvos())
+    if (on) next.add(convoId)
+    else next.delete(convoId)
+    this.#autoConvos.set(next)
+    try { localStorage.setItem(EXEC_AUTO_CONVOS_KEY, JSON.stringify([...next])) } catch { /* private mode */ }
+    // Said back, so whoever asked can see the switch took.
+    EffectBus.emit('chat:exec-trusted', { at: Date.now(), conversations: [...next] })
+    this.#releaseTrusted()
+  }
+
+  /** Every waiting row of a trusted conversation runs, as a press would. */
+  #releaseTrusted(): void {
+    const queue = this.#execQueue()
+    const trusted = this.#autoConvos()
+    if (!queue?.requests || !trusted.size) return
+    for (const row of queue.requests()) {
+      if (row.state === 'waiting' && trusted.has(row.convoId) && !row.needsGrant) queue.decide(row.id, 'run')
+    }
+  }
   readonly execRows = signal<readonly ExecutionRequestLike[]>([])
   readonly executionLineParts = executionLineParts
 
@@ -3092,11 +3134,62 @@ export class ChatWindowComponent implements OnDestroy {
   setExecMode(mode: ExecutionModeLike): void { this.#execQueue()?.setMode(mode) }
 
   toggleExecAuto(kind: ExecutionKindLike): void {
+    if (this.execMode() !== 'auto') return
     const queue = this.#execQueue()
     queue?.setAuto(kind, !queue.autoKinds().includes(kind))
   }
 
   decideExec(id: string, decision: 'run' | 'skip' | 'always'): void { this.#execQueue()?.decide(id, decision) }
+
+  // ── THE EXECUTION COLUMN'S GLYPHS ─────────────────────────────────────────
+  // Settings and states are icons, each named in words by its title and
+  // label; consent (Run, Allow once, Always, Skip) stays words. Written as
+  // switches with literal returns so scripts/icon-names.cjs ships each glyph.
+  execModeIcon(mode: ExecutionModeLike): string {
+    switch (mode) {
+      case 'manual': return 'pause'
+      case 'auto': return 'play_arrow'
+      default: return 'fast_forward'
+    }
+  }
+
+  execKindIcon(kind: ExecutionKindLike): string {
+    switch (kind) {
+      case 'read': return 'visibility'
+      case 'additive': return 'add_box'
+      case 'editing': return 'edit'
+      default: return 'delete'
+    }
+  }
+
+  execStateIcon(state: ExecutionRequestLike['state']): string {
+    switch (state) {
+      case 'running': return 'hourglass_empty'
+      case 'ran': return 'check'
+      case 'skipped': return 'block'
+      case 'failed': return 'error'
+      default: return ''
+    }
+  }
+
+  /** Lit when this kind runs by itself: every kind in Everything, the chosen
+   *  ones in Auto, none in Manual. Only Auto's are the participant's to press. */
+  execKindOn(kind: ExecutionKindLike): boolean {
+    return this.execMode() === 'everything' || (this.execMode() === 'auto' && this.execAuto().includes(kind))
+  }
+
+  /** Arrow keys walk the mode radios, as a radiogroup should. */
+  onExecModeKey(event: KeyboardEvent, mode: ExecutionModeLike): void {
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+      : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+    if (!step) return
+    event.preventDefault()
+    const modes = this.execModes
+    const next = modes[(modes.indexOf(mode) + step + modes.length) % modes.length]
+    this.setExecMode(next)
+    const group = (event.currentTarget as HTMLElement | null)?.parentElement
+    queueMicrotask(() => (group?.querySelector(`[data-mode='${next}']`) as HTMLElement | null)?.focus())
+  }
 
   #setExecSide(on: boolean): void {
     this.execSideWanted.set(on)
@@ -3111,11 +3204,27 @@ export class ChatWindowComponent implements OnDestroy {
     if (!queue?.requests) return
     let seen = new Set<string>()
     const pull = (): void => {
+      this.#releaseTrusted()
       const rows = queue.requests()
       const waiting = rows.filter(row => row.state === 'waiting')
       // SOMETHING NEW WAITS ON THE PARTICIPANT: bring the column forward for
       // now. Not a preference, so nothing is written.
       if (waiting.some(row => !seen.has(row.id))) this.execSideWanted.set(true)
+      // A HOLD IS SAID ALOUD. A turn waiting on a press looked, from outside
+      // the window, exactly like a turn that had hung: no round, no receipt.
+      // Saying what waits decides nothing — the press is still the
+      // participant's.
+      if (waiting.length !== seen.size || waiting.some(row => !seen.has(row.id))) {
+        EffectBus.emit('agent:held', {
+          at: Date.now(),
+          waiting: waiting.map(row => ({
+            id: row.id, convoId: row.convoId, kind: row.kind, lines: row.lines,
+            ...(row.forceReview ? { review: true } : {}),
+            ...(row.needsGrant ? { needsGrant: true } : {}),
+            ...(this.#autoConvos().has(row.convoId) ? { trusted: true } : {}),
+          })),
+        })
+      }
       seen = new Set(waiting.map(row => row.id))
       this.execRows.set([...waiting, ...rows.filter(row => row.state !== 'waiting')])
       this.execMode.set(queue.mode())
@@ -4624,6 +4733,12 @@ export class ChatWindowComponent implements OnDestroy {
       if (!convoId || !sig || !request) return
       this.#trial.set(convoId, sig)
       void this.send(request)
+    }))
+    // The bridge operator's way to the same switch (claude-bridge.worker.ts
+    // allowlists it). `active` names the conversation open now.
+    this.#cleanups.push(EffectBus.on<{ convoId?: string; on?: boolean }>('chat:exec-trust', payload => {
+      const convoId = payload?.convoId === 'active' ? this.activeId() : String(payload?.convoId ?? '')
+      if (convoId) this.#trustConversation(convoId, payload?.on !== false)
     }))
     this.#cleanups.push(EffectBus.on<{ sig?: string; scope?: string }>('chat:harness', payload => {
       if (payload?.scope !== 'conversation') return
@@ -6216,7 +6331,7 @@ export class ChatWindowComponent implements OnDestroy {
       if (restored.size) this.#readSignatures.set(convoId, restored)
     }
     // A CONVERSATION THAT HAS READ CODE IS CODE WORK, and code work is deep.
-    const codeThread = this.#codeThreads.has(convoId)
+    const codeThread = this.#codeThreads.has(convoId) || isCodeMessage(message)
       || [...(this.#readSignatures.get(convoId)?.values() ?? [])].some(grammar => /^\/?code\s/.test(grammar))
     const namedModel = this.modelExplicit() ? this.model() || undefined : undefined
     // …and only on the provider that gave it. The name a vendor reports back
@@ -6396,6 +6511,19 @@ export class ChatWindowComponent implements OnDestroy {
       contextWindowTokens: firstModel ? router.contextLengthForModel?.(firstModel) : undefined,
     })
     const messages: LlmMessageLike[] = transcriptForModel(compiledContext.turns, firstModel)
+    // THE QUESTION ALWAYS REACHES THE MODEL. The transcript is read from the
+    // window's thread in hand, and "open the chat and ask" (the `chat` word,
+    // the remote door) starts a new conversation and sends in the same breath
+    // — the rail mints that conversation a moment later, so the thread in
+    // hand was empty and the worker was sent the system text and NOTHING
+    // ELSE. It answered with an end-of-sentence token, or by continuing the
+    // doctrine, and the receipt said "answered" (jwize's 4250 session,
+    // 2026-10-01). Whatever the thread holds, the message being asked is the
+    // last thing the model reads.
+    const asked = messages.at(-1)
+    if (asked?.role !== 'user' || !String(asked.content ?? '').includes(message.trim().slice(0, 200))) {
+      messages.push({ role: 'user', content: message })
+    }
 
     // PROVENANCE FOR THE TURN (anatomy-context-need §6): the anatomy this
     // answer will be framed by, and the page/selection it was asked from —

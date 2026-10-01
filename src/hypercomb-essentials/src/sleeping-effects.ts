@@ -13,7 +13,6 @@ export type Sleeper = {
 }
 
 export const sleepers: readonly Sleeper[] = [
-  { command: "chat", description: "Open the chat — one conversation per chat, history kept", load: () => import('./assistant/conversation.queen') },
   { wakesOn: ["expand:layer"], load: () => import('./assistant/expand.drone') },
   { command: "harness", description: "List the agent harnesses, choose one for the device or this conversation, bring one in", load: () => import('./assistant/harness.queen') },
   { wakesOn: ["parts:distribute-visual"], load: () => import('./assistant/visual-distribution.drone') },
