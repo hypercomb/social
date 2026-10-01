@@ -5,16 +5,41 @@
     <title>Published website</title>
     <base href="/" />
 
-    <!-- NO cached import map on a published site.
-         The visitor resolves dependencies to blob: URLs so the site runs on
-         any static host without the host having to type extensionless sig
-         files (see resolve-import-map.ts). Blob URLs die with the session, so
-         a replayed map can only ever be a map of DEAD specifiers — and the
-         first map wins, so it would poison the boot it was meant to speed up.
-         A visitor re-derives from scratch every load by design; there is
-         nothing durable here to cache. Participants keep the cache. -->
+    <!-- A VISITOR KEEPS NOTHING. Its hive already lives in memory for the
+         length of the page (memory-filesystem.ts); its settings now do too.
+         Before this, every visit left a dozen hive settings in the browser —
+         a generated signing key among them — and the next visit read them
+         back, so a reader who knows nothing of Hypercomb carried a stable
+         identity and leftovers between refreshes (jwize, 2026-09-30: visitors
+         are transparent and reset on refresh). Both storages are replaced
+         here, before any script runs, with ones that end with the page.
+         What earlier visits left in the real storage is never read again.
+
+         Two consequences, both by design: no cached import map (the visitor
+         resolves dependencies to blob: URLs that die with the page, so a
+         replayed map was a map of dead specifiers — the old reason this
+         script existed), and `hc:verbose` is the one key carried in, read
+         from the real storage, so a published site can still be debugged. -->
     <script>
-      try { localStorage.removeItem('hc:importmap'); } catch (error) {}
+      (function () {
+        var verbose = null;
+        try { verbose = window.localStorage.getItem('hc:verbose'); } catch (error) {}
+        function pageStorage(seed) {
+          var data = new Map(seed);
+          return {
+            get length() { return data.size; },
+            key: function (index) { var keys = Array.from(data.keys()); return index < keys.length ? keys[index] : null; },
+            getItem: function (key) { key = String(key); return data.has(key) ? data.get(key) : null; },
+            setItem: function (key, value) { data.set(String(key), String(value)); },
+            removeItem: function (key) { data.delete(String(key)); },
+            clear: function () { data.clear(); }
+          };
+        }
+        try {
+          Object.defineProperty(window, 'localStorage', { configurable: true, value: pageStorage(verbose ? [['hc:verbose', verbose]] : []) });
+          Object.defineProperty(window, 'sessionStorage', { configurable: true, value: pageStorage([]) });
+        } catch (error) {}
+      })();
     </script>
     <!-- ONE CORE: the shell imports the same @hypercomb/core module every bee
          imports (angular.json externalDependencies), mapped before any module
