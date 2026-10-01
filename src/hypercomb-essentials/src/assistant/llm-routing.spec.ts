@@ -149,6 +149,46 @@ describe('streamRoutedModel', () => {
     expect(fetch).toHaveBeenCalledTimes(3)
   })
 
+  it('waits for a busy model of the weight asked for before stepping down to a lesser one', async () => {
+    registry.register({ ...descriptor('deep-busy', 'worked'), models: [{ name: 'deep-busy', id: 'deep-busy-model', tier: 'deep' }], defaultModel: 'deep-busy-model' })
+    registry.register(descriptor('small-ready', 'chatted'))
+    let deepCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('small-ready')) return new Response('{}', { status: 200 })
+      deepCalls += 1
+      return deepCalls === 1
+        ? new Response('{"error":"temporarily rate-limited upstream"}', { status: 429, headers: { 'retry-after': '0' } })
+        : new Response('{}', { status: 200 })
+    }))
+
+    const chunks: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({
+      need: { tier: 'deep', streaming: true },
+      messages: [{ role: 'user', content: 'hello' }],
+    })) chunks.push(chunk)
+
+    expect(chunks.map(chunk => chunk.text).join('')).toBe('worked')
+    expect(chunks[0]?.providerId).toBe('deep-busy')
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('steps down on the last pass when the weight asked for stays busy', async () => {
+    registry.register({ ...descriptor('deep-stuck', 'unused'), models: [{ name: 'deep-stuck', id: 'deep-stuck-model', tier: 'deep' }], defaultModel: 'deep-stuck-model' })
+    registry.register(descriptor('small-last', 'stepped down'))
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.includes('small-last')
+      ? new Response('{}', { status: 200 })
+      : new Response('{"error":"rate limited"}', { status: 429, headers: { 'retry-after': '0' } })))
+
+    const chunks: RoutedChunk[] = []
+    for await (const chunk of streamRoutedModel({
+      need: { tier: 'deep', streaming: true },
+      messages: [{ role: 'user', content: 'hello' }],
+    })) chunks.push(chunk)
+
+    expect(chunks.map(chunk => chunk.text).join('')).toBe('stepped down')
+    expect(chunks[0]?.providerId).toBe('small-last')
+  })
+
   it('asks a NAMED provider again when it was busy, and never another vendor', async () => {
     registry.register(descriptor('named-busy', 'here now'))
     registry.register(descriptor('other-vendor', 'unused'))

@@ -862,9 +862,21 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
     let patience = ROUTE_RETRY_PASSES
     let retryAfter: number | undefined
     let outOfReach = true
+    // A BUSY SECOND IS NOT A REASON TO ASK A LESSER MODEL (jwize's drive
+    // session, 2026-10-01): deepseek answered 429 "retry shortly" on a deep
+    // turn, the next ranked choice was a 12B model that holds no deep tier,
+    // and it chatted instead of working — a turn spent and called answered.
+    // While passes remain, a model that offers the weight asked for and was
+    // only busy is waited for; the step down is the last pass's, not the
+    // first's.
+    let busyAtTier = false
+    const askedTier = call.need?.tier
+    const offersTier = (provider: LlmProviderDescriptor): boolean =>
+      !!askedTier && provider.models.some(model => model.tier === askedTier)
     for (let at = 0; at < candidates.length; at++) {
       const provider = candidates[at]
       if (refusedOwners.has(credentialOwner(provider))) continue
+      if (automatic && busyAtTier && pass < ROUTE_RETRY_PASSES && !offersTier(provider)) break
       const passCall: LlmCall = ignoreRefusedBy.has(provider.id) ? { ...call, ignoreUpstreams: [] }
         : busyUpstreams.size ? { ...call, ignoreUpstreams: [...busyUpstreams] } : call
       tried += 1
@@ -941,6 +953,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
         const message = error instanceof Error ? error.message : String(error)
         failures.push(`${provider.label}: ${message}`)
         patience = Math.min(patience, worth)
+        if (worth && offersTier(provider)) busyAtTier = true
         const dispatch = error instanceof LlmDispatchError ? error : undefined
         const asked = dispatch?.retryAfterMs
         if (asked !== undefined) retryAfter = Math.max(retryAfter ?? 0, asked)
