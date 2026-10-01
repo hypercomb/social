@@ -1962,6 +1962,11 @@ export class ClaudeBridgeWorker extends Worker {
     // again under candidate thresholds and reports. Reads receipts, writes
     // nothing, decides nothing live. scripts/jev-golden.cjs asks for it.
     'jev:replay',
+    // One conversation trusted to run what it asks without a press (jwize,
+    // 2026-10-01: "it can be auto for anything the bubble bobble
+    // conversations"). The operator names the conversation; the chat window
+    // still holds ungranted reads and reviews. See chat-window, #autoConvos.
+    'chat:exec-trust',
   ])
 
   async #effectEmit(req: BridgeRequest): Promise<BridgeResponse> {

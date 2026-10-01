@@ -1102,6 +1102,15 @@
             }
           </span>
         </div>
+        @if (activeId()) {
+          <div class="chat-exec-auto">
+            <button type="button" class="chat-exec-word" role="switch"
+              [class.on]="convoRunsItself()"
+              [attr.aria-checked]="convoRunsItself()"
+              [title]="'chat.exec.this-conversation-why' | t"
+              (click)="toggleConvoRunsItself()">{{ 'chat.exec.this-conversation' | t }}</button>
+          </div>
+        }
         @if (execMode() === 'auto') {
           <div class="chat-exec-auto">
             <span class="chat-exec-quiet">{{ 'chat.exec.auto-runs' | t }}</span>

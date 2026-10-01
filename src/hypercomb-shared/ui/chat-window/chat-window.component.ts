@@ -1196,6 +1196,13 @@ const LLM_HIVE_ACCESS_IOC_KEY = '@hypercomb.social/LlmHiveAccess'
 /** assistant/execution-queue.ts — what models ask to read and change. */
 const EXECUTION_QUEUE_IOC_KEY = '@hypercomb.social/ExecutionQueue'
 const EXEC_SIDE_WANTED_KEY = 'hc:chat-exec-side'
+const EXEC_AUTO_CONVOS_KEY = 'hc:chat-exec-auto-conversations'
+const readAutoConversations = (): ReadonlySet<string> => {
+  try {
+    const list = JSON.parse(localStorage.getItem(EXEC_AUTO_CONVOS_KEY) ?? '[]')
+    return new Set(Array.isArray(list) ? list.map(String) : [])
+  } catch { return new Set() }
+}
 
 type ExecutionKindLike = 'read' | 'additive' | 'editing' | 'destructive'
 type ExecutionModeLike = 'manual' | 'auto' | 'everything'
@@ -1212,6 +1219,7 @@ type ExecutionRequestLike = {
   readonly auto: boolean
   /** Ran on arrival because these exact reads were allowed before. */
   readonly remembered?: boolean
+  readonly forceReview?: boolean
   readonly outcome?: string
 }
 type ExecutionQueueLike = {
@@ -3056,6 +3064,37 @@ export class ChatWindowComponent implements OnDestroy {
   readonly execSideWanted = signal(readExecSideWanted())
   readonly execMode = signal<ExecutionModeLike>('auto')
   readonly execAuto = signal<readonly ExecutionKindLike[]>(['read'])
+  /** CONVERSATIONS THAT RUN BY THEMSELVES (jwize, 2026-10-01: "it can be auto
+   *  for anything the bubble bobble conversations"). The participant trusts
+   *  ONE conversation with everything it asks, without trusting every
+   *  conversation with it. A read from an ungranted provider and a semantic
+   *  review still wait: those are not this conversation's to decide. */
+  readonly #autoConvos = signal<ReadonlySet<string>>(readAutoConversations())
+  readonly convoRunsItself = computed(() => this.#autoConvos().has(this.activeId() ?? ''))
+
+  toggleConvoRunsItself(): void {
+    const convoId = this.activeId()
+    if (convoId) this.#trustConversation(convoId, !this.#autoConvos().has(convoId))
+  }
+
+  #trustConversation(convoId: string, on: boolean): void {
+    const next = new Set(this.#autoConvos())
+    if (on) next.add(convoId)
+    else next.delete(convoId)
+    this.#autoConvos.set(next)
+    try { localStorage.setItem(EXEC_AUTO_CONVOS_KEY, JSON.stringify([...next])) } catch { /* private mode */ }
+    this.#releaseTrusted()
+  }
+
+  /** Every waiting row of a trusted conversation runs, as a press would. */
+  #releaseTrusted(): void {
+    const queue = this.#execQueue()
+    const trusted = this.#autoConvos()
+    if (!queue?.requests || !trusted.size) return
+    for (const row of queue.requests()) {
+      if (row.state === 'waiting' && trusted.has(row.convoId) && !row.needsGrant && !row.forceReview) queue.decide(row.id, 'run')
+    }
+  }
   readonly execRows = signal<readonly ExecutionRequestLike[]>([])
   readonly executionLineParts = executionLineParts
 
@@ -3111,6 +3150,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (!queue?.requests) return
     let seen = new Set<string>()
     const pull = (): void => {
+      this.#releaseTrusted()
       const rows = queue.requests()
       const waiting = rows.filter(row => row.state === 'waiting')
       // SOMETHING NEW WAITS ON THE PARTICIPANT: bring the column forward for
@@ -4634,6 +4674,12 @@ export class ChatWindowComponent implements OnDestroy {
       if (!convoId || !sig || !request) return
       this.#trial.set(convoId, sig)
       void this.send(request)
+    }))
+    // The bridge operator's way to the same switch (claude-bridge.worker.ts
+    // allowlists it). `active` names the conversation open now.
+    this.#cleanups.push(EffectBus.on<{ convoId?: string; on?: boolean }>('chat:exec-trust', payload => {
+      const convoId = payload?.convoId === 'active' ? this.activeId() : String(payload?.convoId ?? '')
+      if (convoId) this.#trustConversation(convoId, payload?.on !== false)
     }))
     this.#cleanups.push(EffectBus.on<{ sig?: string; scope?: string }>('chat:harness', payload => {
       if (payload?.scope !== 'conversation') return
