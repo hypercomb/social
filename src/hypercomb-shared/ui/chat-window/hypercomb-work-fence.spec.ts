@@ -156,6 +156,16 @@ describe('the stream guard', () => {
     expect(guard.holding).toBe(true)
   })
 
+  it('holds a block whose marker stands alone on its line, as the parser runs it', () => {
+    const { shown, guard } = run(['I will look.\n', 'hyper', 'comb-read\ntree /\nlist /games\n'])
+    expect(shown).toBe('I will look.\n')
+    expect(guard.holding).toBe(true)
+    const backticked = run(['`hypercomb-read`\n', 'code bubble engine\n'])
+    expect(backticked.shown).toBe('')
+    // A word that only starts the same way is prose, and shows.
+    expect(run(['hyperlinks work here.\n']).shown).toBe('hyperlinks work here.\n')
+  })
+
   it('passes an ordinary code block through whole', () => {
     const text = '```ts\nconst a = 1\n```\ndone'
     const { shown, guard } = run([text.slice(0, 7), text.slice(7)])
