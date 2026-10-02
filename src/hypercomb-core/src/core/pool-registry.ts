@@ -337,6 +337,12 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // named route (jwize 2026-09-25): its publications and its open trials.
   'host:publications',
   'host:trials',
+  // The minimal build's own history: every revision of the host and its
+  // package, and the participants' signatures on them (hypercomb-shim
+  // host/builds.mjs; essentials sharing/version-pools.ts holds them in the
+  // browser). A device that pulls them is a backup of the code itself.
+  'host:builds',
+  'host:build-signatures',
   // Every publisher's signed index, the member named by their key.
   'hive:indexes',
   // A door's landing view as one transfer pack, the member named by the head

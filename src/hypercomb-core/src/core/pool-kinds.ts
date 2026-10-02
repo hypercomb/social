@@ -155,6 +155,10 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // undeclared to `registerPublishedPool`.
   ['host:packages', 'set'],
   ['host:offerings', 'set'],
+  // Content-addressed and append-only: a member is a revision, a layer, a
+  // file or a signature event, named by its own hash.
+  ['host:builds', 'set'],
+  ['host:build-signatures', 'set'],
   ['host:adoptions', 'set'],
   ['themes:text', 'set'],
   ['menus:quick', 'set'],

@@ -323,6 +323,16 @@ byte for byte (the build keys its cache on the lockfiles too, so a new
 install never ships stale bundled dependencies). Its tests run there too
 (`npx vitest run` from `src/`).
 
+**The browser holds the pools too.** `/versions pull [host]` (essentials
+`sharing/version-pools.ts`) takes both version pools a host serves into the
+browser's own storage, every file kept only if it hashes to its name, after
+asking for persistent storage; `/versions` lists the revisions held, newest
+first, each signature checked. Same addresses and file names as the Node
+pools, so a browser and a host hold one set: a device with nothing but a
+browser is a backup of the code. Measured against a local follower: 10,058
+files in 76 s the first time, nothing fetched the second, still there after
+a reload.
+
 **Porting the Angular shell's surfaces, from inside.** The 49 panels in
 `hypercomb-shared/ui` are being moved into the package one at a time, each
 as a drone and a framework-free element on the base layer, so they reach a
