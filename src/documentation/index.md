@@ -102,6 +102,7 @@ Forward-looking proposals and migration plans — not yet built. Retained so the
 - [security.md](security.md) — Presence-first security model: no accounts, expiring data
 - [social-governance.md](social-governance.md) — Presence-based permission, consent, and content-addressed identity
 - [code-admission.md](code-admission.md) — From their domain to your hive through one gate: the boundaries, the rules you tune, the accept screen (DESIGNED)
+- [sealed-audiences.md](sealed-audiences.md) — One branch, a version per key: public, link or audience, sealed with Nostr's NIP-44 over the core cipher; hosts stay dumb (DESIGNED)
 - [code-of-conduct.md](code-of-conduct.md) — Community expectations for presence, consent, and recognition
 - [meetings-and-quorum.md](meetings-and-quorum.md) — 1+6 Cascade template, quorum gathering, WebRTC signaling
 
