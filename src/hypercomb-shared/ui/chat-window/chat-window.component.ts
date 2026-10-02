@@ -6691,6 +6691,13 @@ export class ChatWindowComponent implements OnDestroy {
       let lastRound = false
       let unwrittenSaid = false
       let unreadSaid = false
+      // A READ THE PARTICIPANT WROTE OUT (`find arkanoid` in a read block):
+      // until something is read, what the model says is not shown. Asked to
+      // paste a read back, a model streamed 3 KB of invented module paths
+      // and THEN sent the read (2026-10-02); words on screen are never taken
+      // back, so they must not reach it before the read does.
+      const askedRead = splitWork(message).request
+      const readAsked = askedRead?.kind === 'read' && askedRead.lines.length > 0
       let refusedInARow = 0
       const MAX_REFUSALS_IN_A_ROW = 3
       let budgetSpent = false
@@ -7346,7 +7353,7 @@ export class ChatWindowComponent implements OnDestroy {
             ...(call as { providerId?: string; model?: string; preferModel?: string; fallbackWithin?: string; avoid?: string[]; effort?: MessageEffort }),
             need: routeNeed, cacheSystem: true, observeAttempt, messages, system, signal,
           }),
-          pinned, model: continuationModel, lead, silent: false, signal,
+          pinned, model: continuationModel, lead, silent: readAsked && readRounds === 0, signal,
           onProvider: (chunk, first) => {
             if (first) stage(AGENT_ROUTE, { round: rounds + 1, providerId: chunk.providerId, model: chunk.model, tier: routeNeed.tier, handoffs: avoid.length })
             // The route that emitted output is the truth.
@@ -7439,11 +7446,10 @@ export class ChatWindowComponent implements OnDestroy {
         if (!work.request && !lastRound && !unreadSaid && canRead && readRounds === 0) {
           // A read the participant wrote out themselves names no route
           // (`find arkanoid`): it is asked for all the same.
-          const asked = splitWork(message).request
-          if (asked?.kind === 'read' && asked.lines.length) {
+          if (readAsked) {
             unreadSaid = true
-            messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: unreadAskedMessage(asked.lines.slice(0, 6), message) })
-            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `asked again: answered ${asked.lines[0]} without running it` })
+            messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: unreadAskedMessage(askedRead.lines.slice(0, 6), message) })
+            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `asked again: answered ${askedRead.lines[0]} without running it` })
             continue
           }
           const named = routesNamedIn(message)
@@ -7455,6 +7461,12 @@ export class ChatWindowComponent implements OnDestroy {
           }
         }
         if (!work.request || lastRound) {
+          // A round held back until a read (readAsked) that is the answer
+          // after all: now it is shown.
+          if (readAsked && readRounds === 0 && work.prose) {
+            wrote = true
+            yield `${lead}${work.prose}`
+          }
           if (jevTurn && work.prose) {
             // The prose already streamed.
             // JEV CHECKS THE ANSWER (jev-creative-plan.md §2.1) against what
