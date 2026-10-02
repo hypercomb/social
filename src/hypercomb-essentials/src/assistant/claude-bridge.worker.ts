@@ -1551,7 +1551,11 @@ export class ClaudeBridgeWorker extends Worker {
     if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
     const locationSig = await history.sign({ explorerSegments: () => segments })
     const layers = await history.listLayers(locationSig)
-    return { id: req.id, ok: true, data: layers.map(entry => ({ index: entry.index, layerSig: entry.layerSig, at: entry.at })) }
+    // A REVISION'S TIME IS ITS FILE'S, AND SOME STORES DO NOT KEEP ONE. On
+    // the packed store every marker reports 0, which read as 1970 and made
+    // a restore impossible to choose by date (the housekeeping manager,
+    // 2026-10-01). Unknown is said as null, never as a date.
+    return { id: req.id, ok: true, data: layers.map(entry => ({ index: entry.index, layerSig: entry.layerSig, at: entry.at > 0 ? entry.at : null })) }
   }
 
   // Raw layer read BY SIGNATURE — the sig-addressed twin of `layer-at`.
