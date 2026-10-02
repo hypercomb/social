@@ -7133,6 +7133,9 @@ export class ChatWindowComponent implements OnDestroy {
         const parsed = parseWriteBlock(lines)
         if ('error' in parsed) throw new WorkRefused(parsed.error)
         if ('doctrine' in parsed) return runDoctrine(parsed.doctrine, parsed.body, providerId, model)
+        // The build's own source is drafted by the minimal build's runner
+        // (essentials assistant/agent-turn.ts); this shell does not teach it.
+        if ('version' in parsed) throw new WorkRefused('the build\'s own source is not written from this window')
         if (!canWrite || !queue) throw new WorkRefused('writing code is not available here: nothing is installed to draft onto')
         const grammar = `write ${parsed.beeSig.slice(0, 12)}… ${parsed.section}`
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })

@@ -36,7 +36,7 @@ const host = (served: Record<string, Map<string, Uint8Array>>, tamper = new Set<
     fetched.push(name)
     const bytes = served[meaning]!.get(name)
     if (!bytes) return new Response('', { status: 404 })
-    return new Response(tamper.has(name) ? enc('not these bytes') : bytes)
+    return new Response((tamper.has(name) ? enc('not these bytes') : bytes) as unknown as BodyInit)
   }) as unknown as typeof fetch
   return { get, fetched }
 }

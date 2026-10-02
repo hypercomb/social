@@ -40,6 +40,10 @@ const SNAPSHOT_TTL_MS = 2 * 60_000
 const SNAPSHOT_LIMIT = 256
 /** Read results kept for reuse; the oldest falls out first. */
 const CACHE_LIMIT = 64
+/** The version pool a revision's tree is read from (sharing/version-pools.ts). */
+const VERSION_POOL = 'host:builds'
+/** A revision or draft record is small; anything larger is a file. */
+const MAX_RECORD_BYTES = 64_000
 
 type HiveHistory = {
   sign(lineage: { explorerSegments: () => readonly string[] }): Promise<string>
@@ -60,6 +64,10 @@ type HiveStore = {
   getBeeBytes?(sig: string): Promise<Uint8Array | null>
   /** Verified dependency bytes from the `sign('dependencies')` pool. */
   getDependencyBytes?(sig: string): Promise<Uint8Array | null>
+  /** A pool's directory without creating it (core pool-registry.ts) — here,
+   *  the version pools (essentials sharing/version-pools.ts). */
+  openPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
+  getPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
 }
 type LayerCommitter = { settled(): Promise<void> }
 type CodeArtifactEntry = { readonly name: string; readonly sig: string; readonly of?: 'bee' | 'dependency'; readonly type?: string }
@@ -810,9 +818,20 @@ export class HypercombHiveTreeReader {
       if (!bytes) {
         of = 'resource'
         const blob = await store.getResource(sig).catch(() => null)
-        if (!blob) return { ok: false, root, code: 'not-found' }
-        type = blob.type
-        bytes = await blobBytes(blob)
+        if (blob) {
+          type = blob.type
+          bytes = await blobBytes(blob)
+        }
+      }
+      if (!bytes) {
+        // THE BUILD'S OWN HISTORY (essentials sharing/version-pools.ts): a
+        // revision, a draft, a layer or a file the version pools hold.
+        bytes = await this.#versionBytes(sig)
+        if (!bytes) return { ok: false, root, code: 'not-found' }
+        const tree = await this.#versionTree(bytes)
+        if (tree) return this.#readVersion(sig, bytes, tree, from, maxBytes, options.section)
+        if (options.section) return { ok: false, root, code: 'not-found' }
+        type = 'text/plain'
       }
       if (options.signal?.aborted) throw stopped()
       const whole = textOf(bytes)
@@ -840,6 +859,86 @@ export class HypercombHiveTreeReader {
       if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error
       return { ok: false, root, code: 'incomplete-read' }
     }
+  }
+
+  /** Bytes the version pools hold by signature, or null. */
+  async #versionBytes(sig: string): Promise<Uint8Array | null> {
+    const store = this.#store()
+    const open = store?.openPool ?? store?.getPool
+    const dir = await open?.call(store, VERSION_POOL).catch(() => null)
+    if (!dir) return null
+    try {
+      return new Uint8Array(await (await (await dir.getFileHandle(sig)).getFile()).arrayBuffer())
+    } catch { return null }
+  }
+
+  /** The tree a revision or a draft names, path → file signature: a
+   *  revision's workspace; a draft's base with its files laid over it. Null
+   *  for anything else. */
+  async #versionTree(bytes: Uint8Array, depth = 0): Promise<Record<string, string> | null> {
+    if (depth > 2 || bytes.byteLength > MAX_RECORD_BYTES) return null
+    const json = <T>(b: Uint8Array | null): T | null => { try { return b ? JSON.parse(new TextDecoder().decode(b)) as T : null } catch { return null } }
+    const record = json<{ name?: string; workspace?: string; base?: string; files?: string }>(bytes)
+    const layerFiles = async (sig: string | undefined): Promise<Record<string, string | null> | null> => {
+      if (!sig || !SIG.test(sig)) return null
+      const files = json<{ files?: Record<string, string | null> }>(await this.#versionBytes(sig))?.files
+      return files && typeof files === 'object' ? files : null
+    }
+    if (record?.name === 'build') {
+      const files = await layerFiles(record.workspace)
+      return files ? Object.fromEntries(Object.entries(files).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : null
+    }
+    if (record?.name === 'draft') {
+      const over = await layerFiles(record.files)
+      if (!over || !record.base || !SIG.test(record.base)) return null
+      const base = await this.#versionBytes(record.base)
+      const tree = { ...(base ? await this.#versionTree(base, depth + 1) ?? {} : {}) }
+      for (const [path, sig] of Object.entries(over)) {
+        if (typeof sig === 'string') tree[path] = sig
+        else delete tree[path]
+      }
+      return tree
+    }
+    return null
+  }
+
+  /** A revision or draft read as a tree: no path → the record and the top of
+   *  the tree; a file's path → that file, paged; a folder's → what is in it. */
+  async #readVersion(
+    sig: string, bytes: Uint8Array, tree: Record<string, string>, from: number, maxBytes: number, path?: string,
+  ): Promise<HypercombBytesRead> {
+    const page = (text: string, type: string, size: number, of = sig): HypercombBytesRead => {
+      const slice = text.slice(from, from + maxBytes)
+      const end = from + slice.length
+      const more = end < text.length
+      return {
+        ok: true, root: sig, sig: of, of: 'resource', type, size, from, text: slice,
+        truncated: more, ...(more ? { next: end } : {}), ...(path ? { section: path } : {}),
+      }
+    }
+    const fileSig = path ? tree[path] : undefined
+    if (path && fileSig) {
+      const file = await this.#versionBytes(fileSig)
+      const text = file ? textOf(file) : undefined
+      if (!file) return { ok: false, root: sig, code: 'not-found' }
+      if (text === undefined) return { ok: true, root: sig, sig: fileSig, of: 'resource', type: 'application/octet-stream', size: file.byteLength, from: 0, truncated: false }
+      return page(`${path} · ${fileSig}\n\n${text}`, 'text/plain', file.byteLength, fileSig)
+    }
+    const folder = path ? `${path.replace(/\/+$/, '')}/` : ''
+    const inside = Object.keys(tree).filter(name => name.startsWith(folder))
+    if (!inside.length) return { ok: false, root: sig, code: 'not-found' }
+    const entries = new Map<string, number>()
+    for (const name of inside) {
+      const rest = name.slice(folder.length)
+      const cut = rest.indexOf('/')
+      const entry = cut < 0 ? rest : rest.slice(0, cut + 1)
+      entries.set(entry, (entries.get(entry) ?? 0) + 1)
+    }
+    const listing = [...entries].sort(([a], [b]) => (a.endsWith('/') === b.endsWith('/') ? (a < b ? -1 : 1) : a.endsWith('/') ? -1 : 1))
+      .map(([entry, count]) => entry.endsWith('/') ? `${folder}${entry}  (${count} files)` : `${folder}${entry}  ${tree[folder + entry]}`)
+      .join('\n')
+    const head = path ? `${folder} in ${sig}` : `${new TextDecoder().decode(bytes)}\n\nThe tree (${inside.length} files); read ${sig} <path> opens a file or a folder:`
+    return page(`${head}\n${listing}`, 'text/plain', bytes.byteLength)
   }
 
   /**

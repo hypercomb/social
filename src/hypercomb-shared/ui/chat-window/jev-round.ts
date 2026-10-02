@@ -70,7 +70,7 @@ export interface RoundTable {
 export const writeLabelOf = (lines: readonly string[]): string => {
   const parsed = parseWriteBlock(lines)
   if ('error' in parsed) return ''
-  const named = 'doctrine' in parsed ? parsed.doctrine : parsed.section
+  const named = 'doctrine' in parsed ? parsed.doctrine : 'version' in parsed ? parsed.path : parsed.section
   return named.length > 70 ? named.slice(-70) : named
 }
 

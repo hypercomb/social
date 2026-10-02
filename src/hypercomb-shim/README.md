@@ -358,6 +358,28 @@ in the newest host revision. `/versions drafts` and `/versions ask <host>`
 are the same acts by word, and `@diamondcoreprocessor.com/VersionDrafts` is
 the same acts for the harness (a model acting for the participant).
 
+**A model writes it too: the loop without a window.** The chat window's
+model loop — reads, changes and writes in rounds until the request is done
+(`documentation/agent-harness.md`) — runs in the minimal build as
+`/agent <request>` (essentials `assistant/agent-turn.ts`; `/agent continue`
+carries on from what the model said is left). Its words are core's, so every
+shell teaches one dialect: `core/work-words.ts` (what a model is taught and
+told), `core/hive-reads.ts` (the read grammar) and `core/hive-grammar.ts`
+(the do grammar). Where the browser holds revisions, the model is told which,
+reads one as a tree — `read <revision> <path>` opens a file or lists a folder,
+straight from the version pools — and writes a file of it with a
+`hypercomb-write` block headed `version <revision> <path>` (the whole file, or
+SEARCH/REPLACE edits). Every file it writes over one revision goes into ONE
+draft, which reads like a revision (`read <draft> <path>`). The write waits in
+Execution like any change; nothing runs and nothing leaves the browser until
+the participant sends the draft to a builder (`/versions ask <host>`). Any
+model the router reaches drives it — a local server, OpenRouter, a frontier
+key — and so does a participant's own code, through
+`@diamondcoreprocessor.com/AgentTurn` (`run` or `stream`). Proven in Chromium
+against a scripted local model, no Angular in the page: four rounds read the
+newest host revision's folder and one file, staged the edit as a draft after
+the check approved it in Execution, and the draft read back with the edit.
+
 **Porting the Angular shell's surfaces, from inside.** The 49 panels in
 `hypercomb-shared/ui` are being moved into the package one at a time, each
 as a drone and a framework-free element on the base layer, so they reach a

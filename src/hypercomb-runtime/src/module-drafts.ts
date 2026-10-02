@@ -41,7 +41,7 @@
 // that reading may hold it too. Only the participant's hand lets held code
 // run, and a commit never folds it.
 
-import { EffectBus, MODULE_DRAFTS_IOC_KEY, SignatureService, flagInBrood, holdInBrood, isSectionPath, mayRunBee, newReaches, reachPhrase, registerPoolMeaning, replaceSection, sectionOf, type CodeReach, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
+import { EffectBus, MODULE_DRAFTS_IOC_KEY, applySectionEdits, type SectionEdit, SignatureService, flagInBrood, holdInBrood, isSectionPath, mayRunBee, newReaches, reachPhrase, registerPoolMeaning, replaceSection, sectionOf, type CodeReach, type ModuleCommitOutcome, type ModuleDraftsProvider } from '@hypercomb/core'
 import { applySelection, installedPackageSig, layersIoFor, unpickRevision, type SelectionOutcome } from './acquire.js'
 import { HOST_PACKAGES_MEANING, formatMember, markerIndices, poolEntryName } from './host-pool.js'
 import { composeDependencies, isOff, namespaceOf, ownerOf, readPicks, sigsOf, walkTree, within, type Picks, type TreeWalk } from './package-tree.js'
@@ -69,25 +69,9 @@ export type ModuleDraftRequest = {
   readonly edits?: readonly SectionEdit[]
 }
 
-export type SectionEdit = { readonly find: string; readonly replace: string }
-
-/** The section body with every edit made, or why it cannot be. Each `find`
- *  must occur exactly once in the body as it stands after the edits before
- *  it — an edit that matches twice is ambiguous, and one that matches
- *  nothing was written against code that is not running. */
-export const applySectionEdits = (current: string, edits: readonly SectionEdit[]): { readonly body: string } | { readonly error: string } => {
-  if (!edits.length) return { error: 'the write block has no edits' }
-  let body = current
-  for (const [index, edit] of edits.entries()) {
-    const find = String(edit.find ?? '')
-    if (!find.trim()) return { error: `edit ${index + 1} has nothing to find` }
-    const at = body.indexOf(find)
-    if (at < 0) return { error: `edit ${index + 1}: the text to find is not in the section as it runs now; read the section again and copy it exactly` }
-    if (body.indexOf(find, at + 1) >= 0) return { error: `edit ${index + 1}: the text to find occurs more than once; include more of the lines around it` }
-    body = body.slice(0, at) + String(edit.replace ?? '') + body.slice(at + find.length)
-  }
-  return { body }
-}
+// The edits themselves are the loop's words (core work-words.ts): every
+// shell that takes a write block makes them the same way.
+export { applySectionEdits, type SectionEdit } from '@hypercomb/core'
 
 /** A section's body as `replaceSection` takes it: the header line excluded. */
 const bodyOf = (text: string, section: { readonly from: number; readonly to: number }): string =>
