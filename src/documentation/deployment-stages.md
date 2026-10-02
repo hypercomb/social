@@ -1,7 +1,7 @@
 # Deployment stages are molecules — CONVENTIONS (2026-09-25)
 
 **Status:** doctrine direction from the owner; conventions defined by the
-agent at the owner's invitation, then reviewed against the code and the
+agent at the owner's invitation (R12 and §4 steps 7–9 added 2026-10-02), then reviewed against the code and the
 molecule doctrine by a 90-agent panel (37 findings folded in). Section 6
 holds the items only the owner decides. Built: the first ruling (63cb9b515)
 and §4 steps 1–3 (`stage-succession.ts`, `publish-branch.ts`,
@@ -18,6 +18,10 @@ and §4 steps 1–3 (`stage-succession.ts`, `publish-branch.ts`,
 - "Hypergraph layers can be part of the lifecycle… a hypergraph molecule can
   become first stage of deployment and then another stage or another stage
   or however you wanna organize it."
+- (2026-10-02) A non-host shares only through a host that lends its surface:
+  "they should have to ask hosts to borrow their data surface… That way you
+  won't flood the hosts with tile uploads… you can join as ask and then get
+  accepted later." Ruled R12; the conventions below it are the agent's.
 
 **Built already (63cb9b515):** the host is the truth — the drain asks a host
 before it sends (`host-sync.service.ts`), and the availability gate stands on
@@ -183,6 +187,49 @@ you published. It is put to the owner in §6.2. Colon meanings stay reserved
 for system pools; the pointer key `stage:<word>` in the index is a pointer's
 name, not a molecule address.
 
+**R12 — A non-host shares through a lease on a host's surface: ask, then
+grant; bytes move only after the grant.** Sharing requires hosting (the
+first ruling) and this is the one door through it. A participant with no
+host of their own joins a swarm as a WATCHER (read, bring things in, follow
+— what non-hosts can do today) and may **ask**: a small signed record,
+never bytes, naming their key, the head signature they would share, the
+closure's size and count, and the zone. Nothing uploads on an ask: the host
+receives only what it has granted, and it takes those bytes by signature
+after the grant (its `pull`, or the asker's push against the lease), so an
+unaccepted asker cannot put one tile on a host. Asks are cheap to drop and
+are rate-limited per key; a host may ignore them.
+
+A **grant** is the host's signed answer, and it is a **lease**: a scope
+(which zones or pools), a quota (bytes and tile count), an expiry, and it is
+revocable. While the lease holds, the leaseholder's `shared` and `published`
+stages are satisfied by the HOST's receipts (R5 asks the host whether the
+closure is served; under a lease it is the host serving), and every byte
+keeps the author's signature — the host lends space, never authorship
+(nothing travels unsigned). Acceptance is **by rule or by hand**, the brood's
+shape: a host's rule may accept followed communities up to a quota and hold
+strangers for a hand; a held ask sits in the host's list until a hand or a
+rule grants it, which is "accepted later". Before a hand, the ask shows the
+same risk line the brood shows for code: who, how much, what it reaches.
+
+**Revoke stops new pushes and deletes nothing** (R4): bytes already served
+stay readable by signature wherever they were replicated, but the host may
+stop serving that lineage's door, so the leaseholder's `live` stage ends
+while their history stays whole. There is no `preswarm` state: an ask IS
+joining as a watcher with a grant pending, one word and one state fewer.
+The lock button therefore has three faces: a host → `join`; a non-host →
+`ask`; a leaseholder → share within the lease (R7: no new behaviour word is
+added; `ask` is the share control's face for a non-host, and the grant
+is the host's act in the hosts list).
+
+The records are life-primitive atoms, so the harness reads and writes them
+like any other: an ask is `{ask:1, signer, host, head, bytes, count, zone,
+at}` signed by the asker, kept at `sign('ask')/<asker>/` on the host it was
+sent to; a grant is `{grant:1, signer:<host>, to:<asker>, scope, quota,
+until, prev}` signed by the host, the head of the host's succession at
+`sign('grant')/<host>/`; a revoke is the next grant with `until` in the
+past. A reader verifies a grant exactly as a stage claim (R5):
+`acceptHeadClaim` for the address asked for, the signer checked.
+
 ## 4. What changes in the code, in order
 
 1. **`publishBranch` mints the `published` list BEFORE the index PUT** —
@@ -224,6 +271,25 @@ name, not a molecule address.
    atoms; a relay keeps the kind-30565 claim per `(pubkey, molecule)` d-tag.
    No worker change is required for steps 1–5.
 
+7. **The ask (R12).** The share control on a hive whose standing layer is
+   not hosted shows `ask` instead of `join`; pressing it signs the ask atom
+   and sends it to the hosts the layer names (else the zone's hosts). The
+   gate (`swarm.drone.ts`) keeps refusing to announce what no host serves:
+   an ask changes nothing until a grant answers it.
+8. **The grant.** The hosts list gains the asks a host received (who, how
+   much, what it reaches, the risk line), with Accept · Hold · Refuse by
+   hand, and a rule per host: `followed: accept up to <quota>`, `stranger:
+   hold`. Accept mints the grant succession; the host then pulls the
+   closure by signature and receipts it as its own served bytes.
+9. **The lease in the stage checks.** `isClosureAvailable` counts a host's
+   receipts for a leaseholder's closure while an unexpired grant names them;
+   `publish here` under a lease is the same act as a host's, against the
+   lending host; revoke is the next grant with `until` passed, and the
+   leaseholder's `live` list is minted without the doors it opened there.
+
+Steps 7–9 land after the authoring harness, which writes and reads these
+atoms like any other.
+
 Each step is a forward commit with read-fallback and ships behind proof on
 4250 (`scripts/drive-swarm-connectivity.cjs`, `scripts/drive-swarm-join-word.cjs`).
 
@@ -243,6 +309,9 @@ Each step is a forward commit with read-fallback and ships behind proof on
   readers keep the chain with the higher `seq` until the buckets meet. That
   is the molecule model's multi-device story, not a stage-specific one, and
   it is solved where buckets replicate, not here.
+- A lease makes the host responsible for what it serves: a granted closure
+  counts against the host's own storage and its reputation, which is why a
+  grant is never a default and shows the risk line first.
 - A stage writer replaces the whole list. When a tile-succession writer for
   a molecule of the same word lands (numbered markers are still the live
   convention), the two share one bucket and one ledger (R11) and must
@@ -268,6 +337,10 @@ Each step is a forward commit with read-fallback and ships behind proof on
    host until it is withdrawn in the panel, and the root is never a swarm.
    Under that model the built `leaveBranches` (leave withdraws `shared`)
    comes out. Say which.
+
+5. **The lease's defaults (R12).** The quota a rule grants a followed
+   community without a hand (bytes, tiles), the default expiry of a grant,
+   and whether a host's rule may accept strangers at all. Say which.
 
 ## 7. The template — the cadence of a place (decided 2026-09-25)
 
