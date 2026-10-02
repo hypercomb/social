@@ -1637,6 +1637,29 @@ export class ClaudeBridgeWorker extends Worker {
   // lineage's current explorerDir) so segments are interpreted as a
   // path from root, identical regardless of where the user is.
   async #listAt(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+
+    // A tile is not a named directory in the flat-root model: its children are
+    // the sigs in its LAYER's `children` slot, and each child's NAME is in that
+    // child's own layer. So resolve the location through its layer — the same
+    // door `layer-at`, `inspect` and `note-list` already use — and answer the
+    // child names. Only when no layer exists at the location does the old
+    // named-directory walk below run.
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (history) {
+      const locationSig = await history.sign({ explorerSegments: () => segments })
+      const layer = await history.currentLayerAt(locationSig)
+      if (layer) {
+        const childSigs = Array.isArray(layer.children) ? layer.children.filter(isSignature) : []
+        const childLayers = await Promise.all(childSigs.map(sig => history.getLayerBySig(sig).catch(() => null)))
+        const names = new Set<string>()
+        for (const child of childLayers) {
+          if (typeof child?.name === 'string' && child.name) names.add(child.name)
+        }
+        return { id: req.id, ok: true, data: [...names].sort((a, b) => a.localeCompare(b)) }
+      }
+    }
+
     const store = get<{
       hypercombRoot?: FileSystemDirectoryHandle | null
       legacyHive?: FileSystemDirectoryHandle | null
@@ -1644,7 +1667,6 @@ export class ClaudeBridgeWorker extends Worker {
     }>('@hypercomb.social/Store')
     if (!store?.hypercombRoot) return { id: req.id, ok: false, error: 'no hypercombRoot' }
 
-    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
     // Named tile dirs live in the (still-undrained) legacy content roots as
     // well as the flat root — resolve the path root-first, then through the
     // legacy roots (union rule), so a partially-drained boot still lists cells.
