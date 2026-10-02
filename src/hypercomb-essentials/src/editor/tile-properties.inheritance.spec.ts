@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { aliasPropertiesFor, readTilePropertiesAt, writeTilePropertiesAt, TILE_PROPERTY_PINS } from './tile-properties.js'
+import { aliasPropertiesFor, gatheredRepo, readTilePropertiesAt, writeTilePropertiesAt, TILE_PROPERTY_PINS } from './tile-properties.js'
 
 const ROOT_LOCATION = '1'.repeat(64)
 const OUTER_LOCATION = '2'.repeat(64)
@@ -275,5 +275,30 @@ describe('aliasPropertiesFor', () => {
   it('hides what the repo has that the tile does not show', () => {
     expect(aliasPropertiesFor({ link: 'L' }, { link: 'L', accent: 'red', ...picture('b') }))
       .toEqual({ fill: {}, override: { [TILE_PROPERTY_PINS]: ['accent', 'flat', 'participant', 'small'] } })
+  })
+})
+
+// A GATHER MEETS TWO COPIES (alias-properties.md, step 3): the newer copy's
+// values go to the repo, keys only the older copy has fill it.
+describe('gatheredRepo', () => {
+  const picture = (sig: string) => ({ small: { image: sig }, participant: true })
+
+  it('takes the newer copy values and fills with what only the older has', () => {
+    expect(gatheredRepo({ link: 'repo' }, { link: 'new', accent: 'red' }, { link: 'old', notes: 'n', index: 4 }))
+      .toEqual({ link: 'new', accent: 'red', notes: 'n' })
+  })
+
+  it('moves the newer picture in whole, replacing the repo picture', () => {
+    expect(gatheredRepo({ ...picture('r'), large: { image: 'R' } }, picture('n'), picture('o')))
+      .toEqual(picture('n'))
+  })
+
+  it('fills the older picture only when the repo and the newer copy have none', () => {
+    expect(gatheredRepo({}, { link: 'L' }, picture('o'))).toEqual({ link: 'L', ...picture('o') })
+    expect(gatheredRepo(picture('r'), { link: 'L' }, picture('o'))).toEqual({ link: 'L', ...picture('r') })
+  })
+
+  it('never lets a theme default picture into the repo', () => {
+    expect(gatheredRepo({}, { small: { image: 't' }, substrate: true }, picture('o'))).toEqual(picture('o'))
   })
 })

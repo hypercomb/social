@@ -748,11 +748,15 @@ export type TilePropertiesWriteOptions = {
   /** Keep every key at this alias as an override — the explicit *only here*.
    *  Without it, keys the alias does not already override sink to the repo. */
   readonly onlyHere?: boolean
+  /** The update IS this location's whole own record — replace, never merge.
+   *  For a gather that sets an alias's overrides exactly (alias-properties.md,
+   *  step 3); with it, a key absent from the update is gone from the record. */
+  readonly replace?: boolean
 }
 
 /** Keys that belong to the PLACE, never to the name: where the tile sits on
  *  this page, and this alias's own tombstones. They never sink. */
-const PLACE_KEYS: ReadonlySet<string> = new Set(['index', 'point', TILE_PROPERTY_PINS])
+export const PLACE_KEYS: ReadonlySet<string> = new Set(['index', 'point', TILE_PROPERTY_PINS])
 
 /** One picture is ONE value: its sizes and its ownership marks travel
  *  together, so an alias either overrides the picture or inherits it whole. */
@@ -812,6 +816,37 @@ export const aliasPropertiesFor = (
 
   if (hide.size > 0) override[TILE_PROPERTY_PINS] = [...hide].sort()
   return { fill, override }
+}
+
+/**
+ * The repo after a GATHER meets two copies of one name (alias-properties.md,
+ * step 3). The `newer` copy's values go to the repo; keys only the `older`
+ * copy has fill it (filling never overwrites). A picture is one value, and a
+ * theme default (`substrate: true`) never enters the repo. Each copy then
+ * keeps `aliasPropertiesFor(itsLook, gatheredRepo(...)).override`, so both
+ * places look exactly as they did.
+ */
+export const gatheredRepo = (
+  repo: Readonly<Record<string, unknown>>,
+  newer: Readonly<Record<string, unknown>>,
+  older: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => {
+  const next: Record<string, unknown> = { ...repo }
+  const take = (props: Readonly<Record<string, unknown>>, overwrite: boolean): void => {
+    for (const [key, value] of Object.entries(props)) {
+      if (PLACE_KEYS.has(key) || PICTURE_KEYS.has(key)) continue
+      if (overwrite || !(key in next)) next[key] = value
+    }
+    const picture = pictureOf(props)
+    const nextHasPicture = Object.keys(pictureOf(next)).length > 0
+    if (Object.keys(picture).length > 0 && picture[SUBSTRATE_MARK] !== true && (overwrite || !nextHasPicture)) {
+      for (const key of PICTURE_KEYS) delete next[key]
+      Object.assign(next, picture)
+    }
+  }
+  take(newer, true)
+  take(older, false)
+  return next
 }
 
 /**
@@ -939,7 +974,7 @@ export const writeTilePropertiesAt = async (
     const inheritedDefaults = parentSegments.length > 0
       ? await readOwnTilePropertiesAt([], cellName, rootStats)
       : {}
-    const merged: Record<string, unknown> = { ...existing, ...updates }
+    const merged: Record<string, unknown> = options.replace ? { ...updates } : { ...existing, ...updates }
 
     // A key present in `updates` with `undefined` is an explicit REMOVAL — the
     // only channel a merge has for expressing a delete, since an ABSENT key

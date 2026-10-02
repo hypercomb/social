@@ -54,8 +54,12 @@ The read and the sparse write are already built, for the properties record:
      time of its latest revision) goes to the repo;
    - where the other copy differed, its value becomes **that alias's
      override** — so both places look exactly as they did;
-   - both copies' layers are kept in `canonical:variants`, so the losing value
-     is a picture you can go back to, not a loss.
+   - the losing value is never lost: it stays the other alias's override, and
+     the replaced copy stays one step back in that place's history.
+
+   Built (`gatheredRepo` + `mergeCopies` in `gather-link.service.ts`): keys only
+   the older copy has also fill the repo, and the page's copy, once replaced by
+   a reference, gets exactly its overrides (the writer's `replace` option).
 
 4. **The history reader.** A read over `canonical:variants/<sign(name)>` plus
    the repo's and aliases' revisions lists every picture and properties set
@@ -102,9 +106,12 @@ they always read.
 
 ## Decisions to make while building
 
-- **File time.** Revision markers carry `at`, but it is `0` on much of the
-  existing data. Proposal: the marker file's own modified time as the
-  fallback, and `at` stamped on every new marker. Decide before gather lands.
+- **File time — DECIDED (step 3).** A copy's time is when its CURRENT head was
+  written (the leaf — earlier positions belong to history mode), read from
+  history's marker list, which reports the marker file's modified time. Where
+  the store keeps no time (`0`, as a packed store can), or the two are equal,
+  the **group's copy wins** the repo. Marker bytes are not changed to carry
+  `at`: their shape is read in several places, and the gather does not need it.
 - **Granularity.** Per key inside the properties record (picture separately
   from border) — this matches the existing cascade. Slots outside
   `properties` (notes, contacts, decorations) stay per place for now.
