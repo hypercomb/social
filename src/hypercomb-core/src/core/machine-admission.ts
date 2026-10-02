@@ -72,6 +72,25 @@ export type MachineCaller =
 export interface MachineGrant {
   readonly reach: GrantedReach
   readonly scope: MachineScope
+  /**
+   * THE VERBS THE PARTICIPANT HAS GRANTED TO MODELS, each as it was declared
+   * when granted (jwize, 2026-10-02: "secure by default"). A behaviour that
+   * declares a `machine` block only OFFERS itself; a model may say it once
+   * the participant grants it. A grant read from storage always carries this,
+   * and an empty one grants nothing. Absent only on a grant built by hand
+   * (a test, a caller describing a ceiling) — then no roster is consulted.
+   */
+  readonly granted?: readonly GrantedVerb[]
+}
+
+/** One verb as the participant granted it: its name, and the declaration
+ *  they saw. A module update that widens the declaration has not been
+ *  granted, so the grant lapses until it is given again. */
+export interface GrantedVerb {
+  readonly name: string
+  readonly reach: string
+  readonly scope: string
+  readonly forms: string
 }
 
 /**
@@ -118,6 +137,7 @@ export interface AdmissionEntry {
   readonly machine?: {
     readonly reach?: MachineReach
     readonly scope?: MachineScope
+    readonly forms?: string
   }
   /** A WORD THAT NO LONGER RUNS, as the module that retired it declared it —
    *  never a census row of its own. A door hands one in only when its lookup
@@ -238,6 +258,23 @@ export const admitMachineCall = (
     return refuse(`/${name} is not available for model actions`)
   }
 
+  // THE BEHAVIOUR OFFERS, THE OWNER GRANTS (surface audit: "nobody is asked
+  // when a behaviour arrives" — a replicated bee that declared `machine` was
+  // callable by every trusted model the moment it loaded). Secure by default:
+  // nothing is granted until the participant grants it, per verb, as declared
+  // when they did. The operator is not asked this — the bridge is the
+  // participant's own tool, and requires no declaration at all.
+  if (caller === 'model' && grant.granted) {
+    const offered = grantedVerbOf(entry)
+    const held = grant.granted.find(verb => verb.name === offered.name)
+    if (!held) {
+      return refuse(`/${offered.name} is offered to models but not granted — the participant grants it with /grant allow ${offered.name}`)
+    }
+    if (held.reach !== offered.reach || held.scope !== offered.scope || held.forms !== offered.forms) {
+      return refuse(`/${offered.name} has changed since it was granted — the participant grants it again with /grant allow ${offered.name}`)
+    }
+  }
+
   // Unstated reach means 'editing' — the documented default on MachineGrammar.
   const reach = entry.machine?.reach ?? 'editing'
   // (`none` never reaches here — the off switch answered first.)
@@ -302,6 +339,36 @@ export const MACHINE_GRANT_KEY = 'hc:machine-grant'
 export const currentMachineGrant = (): MachineGrant => {
   try {
     const store = (globalThis as { localStorage?: { getItem(k: string): string | null } }).localStorage
-    return readMachineGrant(store?.getItem(MACHINE_GRANT_KEY))
-  } catch { return DEFAULT_MACHINE_GRANT }
+    return { ...readMachineGrant(store?.getItem(MACHINE_GRANT_KEY)), granted: readMachineRoster(store?.getItem(MACHINE_ROSTER_KEY)) }
+  } catch { return { ...DEFAULT_MACHINE_GRANT, granted: [] } }
 }
+
+/** Where the granted verbs are kept, beside the ceiling. Written only by the
+ *  participant's own word for it (`/grant allow`). */
+export const MACHINE_ROSTER_KEY = 'hc:machine-roster'
+
+/** A behaviour's declaration as a grant records it. One reader, so the gate
+ *  and the word that grants can never disagree about what was granted. */
+export const grantedVerbOf = (entry: AdmissionEntry): GrantedVerb => ({
+  name: entry.name.trim().toLowerCase(),
+  reach: entry.machine?.reach ?? 'editing',
+  scope: entry.machine?.scope ?? '',
+  forms: (entry.machine?.forms ?? '').trim(),
+})
+
+/** The stored roster. Anything unreadable grants NOTHING — a corrupt value
+ *  must never grant more than an absent one. */
+export const readMachineRoster = (raw: unknown): readonly GrantedVerb[] => {
+  try {
+    const parsed = JSON.parse(String(raw ?? '[]')) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is GrantedVerb =>
+      !!item && typeof item === 'object'
+      && ['name', 'reach', 'scope', 'forms'].every(key => typeof (item as Record<string, unknown>)[key] === 'string')
+      && !!(item as GrantedVerb).name)
+  } catch { return [] }
+}
+
+/** The stored form of a roster. One writer, so the reader has one shape to know. */
+export const writeMachineRoster = (roster: readonly GrantedVerb[]): string =>
+  JSON.stringify(roster.map(({ name, reach, scope, forms }) => ({ name, reach, scope, forms })))

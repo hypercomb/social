@@ -375,7 +375,7 @@ provider id `'local'` when it is machine-local, has an endpoint, and is ready;
 the bridge trusts any loopback page carrying the opt-in. Per-provider activation
 defaults to ON.
 
-**Nobody is asked when a behaviour arrives.** A bee replicated into a hive
+**Nobody is asked when a behaviour arrives.** *(Resolved 2026-10-02 — see Owed item 12.)* A bee replicated into a hive
 self-registers, and if its queen declares `machine` the verb becomes callable by
 every trusted local model. There is no roster gate between "installed" and
 "machine-callable". The old `CALLABLE_FORMS` drifted toward less than exists —
@@ -552,3 +552,15 @@ three doors inherit it, and to grow a principal.
     runs that behaviour's `refuse` on them. Where a verb is handed no argument
     language of its own — a built-in bracket op acting on the bracket's names,
     a `~` sigil — it is judged for reach and scope alone, as before.
+12. ~~**Nobody is asked when a behaviour arrives.**~~ **Resolved 2026-10-02 —
+    secure by default (jwize).** A `machine` block now only OFFERS a verb to
+    models; a model may say it once the participant grants it, per verb, as
+    declared when granted (`MachineGrant.granted`, stored beside the ceiling
+    under `hc:machine-roster`). Nothing is granted until they do — including
+    verbs already installed — and a module update that widens a declaration
+    lapses its grant until it is given again. `admitMachineCall` asks this for
+    caller `model` only: the bridge is the participant's own tool. The words:
+    `/grant allow <verb>… | all`, `/grant deny <verb>… | all`; `/grant verbs`
+    names what is offered but not taught. Every model path reads the grant
+    through `currentMachineGrant()`, so the model channel, the catalogue, the
+    chat window's checks and the bridge-tier ask all follow it.

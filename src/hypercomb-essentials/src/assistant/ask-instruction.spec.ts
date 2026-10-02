@@ -117,6 +117,11 @@ describe('an ask carries what this hive can do', () => {
   })
 
   it('the signature expands to the live, grant-filtered census', async () => {
+    // Secure by default (jwize, 2026-10-02): a verb is taught once the
+    // participant has GRANTED it. Granted here, as /grant allow postit would.
+    const { MACHINE_ROSTER_KEY, grantedVerbOf, writeMachineRoster } = await import('@hypercomb/core')
+    const postit = (behaviours.entries() as { name: string; machine?: object }[]).find(entry => entry.name === 'postit')!
+    localStorage.setItem(MACHINE_ROSTER_KEY, writeMachineRoster([grantedVerbOf(postit as Parameters<typeof grantedVerbOf>[0])]))
     const queen = new LlmQueenBee()
     await queen.submitChat('c1', 'what is here?', [], [])
 
@@ -128,6 +133,7 @@ describe('an ask carries what this hive can do', () => {
     // And the reading half: a bridged model is told how to expand a signature.
     expect(text).toContain('get-resource')
     expect(text).toContain('behaviors-list')
+    localStorage.removeItem(MACHINE_ROSTER_KEY)
   })
 
   it('teaches the responder how to ask the participant a direction', async () => {

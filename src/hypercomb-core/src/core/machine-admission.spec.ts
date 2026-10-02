@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import {
   admitMachineCall, primaryEntry, spokenEntry,
   readMachineGrant, writeMachineGrant, DEFAULT_MACHINE_GRANT,
+  MACHINE_ROSTER_KEY, currentMachineGrant, grantedVerbOf, readMachineRoster, writeMachineRoster,
   type AdmissionEntry, type MachineGrant,
 } from './machine-admission.js'
 
@@ -239,5 +240,51 @@ describe('a line that names no behaviour', () => {
     expect(admitMachineCall('', undefined, 'model')).toEqual({
       admit: false, reason: 'no behaviour was named',
     })
+  })
+})
+
+describe('the behaviour offers, the owner grants', () => {
+  // SECURE BY DEFAULT (jwize, 2026-10-02). A `machine` block only OFFERS a verb
+  // to models; it is callable once the participant grants it, as declared
+  // when they did. The surface audit: "nobody is asked when a behaviour
+  // arrives" — a replicated bee was callable the moment it loaded.
+  const create = census.find(entry => entry.name === 'create')!
+  const granting = (...verbs: AdmissionEntry[]): MachineGrant =>
+    ({ ...DEFAULT_MACHINE_GRANT, granted: verbs.map(grantedVerbOf) })
+
+  it('nothing granted, nothing a model may say', () => {
+    expect(admit('create', 'model', { ...DEFAULT_MACHINE_GRANT, granted: [] })).toEqual({
+      admit: false,
+      reason: '/create is offered to models but not granted — the participant grants it with /grant allow create',
+    })
+  })
+
+  it('granted, admitted — under the same ceilings as before', () => {
+    expect(admit('create', 'model', granting(create))).toEqual({ admit: true, name: 'create' })
+    // A grant does not lift the ceiling: /remove granted is still destructive.
+    expect(admit('remove', 'model', granting(census.find(entry => entry.name === 'remove')!)).admit).toBe(false)
+  })
+
+  it('a grant lapses when the behaviour widens what it declares', () => {
+    const widened: AdmissionEntry = { ...create, machine: { ...create.machine, reach: 'editing' } }
+    expect(admitMachineCall('create', widened, 'model', granting(create))).toEqual({
+      admit: false,
+      reason: '/create has changed since it was granted — the participant grants it again with /grant allow create',
+    })
+  })
+
+  it('the operator is not asked — the bridge is the participant\'s own tool', () => {
+    expect(admit('files', 'operator', { ...DEFAULT_MACHINE_GRANT, granted: [] }).admit).toBe(true)
+  })
+
+  it('a grant read from storage always carries a roster, and an unreadable one grants nothing', () => {
+    localStorage.removeItem(MACHINE_ROSTER_KEY)
+    expect(currentMachineGrant().granted).toEqual([])
+    for (const raw of ['not json', '{}', '[{"name":"create"}]', '[1,2]']) {
+      expect(readMachineRoster(raw)).toEqual([])
+    }
+    localStorage.setItem(MACHINE_ROSTER_KEY, writeMachineRoster([grantedVerbOf(create)]))
+    expect(currentMachineGrant().granted).toEqual([{ name: 'create', reach: 'additive', scope: 'page', forms: '' }])
+    localStorage.removeItem(MACHINE_ROSTER_KEY)
   })
 })
