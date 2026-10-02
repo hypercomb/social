@@ -106,10 +106,16 @@ exact words to file, what not to touch, and what to answer with.
 Checked by Claude Code against the live 4250 hive, 2026-10-01. Managers had
 reported several of these the other way round.
 
-- **Source changes are live on 4250 after its reload.** The dev shell imports
-  essentials straight from source (`hypercomb-dev/src/app/app.ts`), so a
-  change there needs no `build:essentials` and no publish to reach the 4250
-  tab. A build and a publish are what reach hypercomb.io.
+- **Source changes reach 4250 only where source registers first.** The dev
+  shell imports essentials from source (`hypercomb-dev/src/app/app.ts`) AND
+  runs the installed package, and a service key keeps its FIRST instance
+  (`hypercomb-runtime/src/ioc.web.ts`). Shell code (`hypercomb-shared`) and
+  some essentials changes were live after a reload (the bridge's list fix,
+  the execution queue); the hive tree reader was not — a fix to `find` built
+  and served, and the tab still answered with the installed copy. Prove a
+  change live by its behaviour on the tab, never by "the source changed".
+  A published revision is what makes the installed copy carry it, on 4250
+  and on hypercomb.io.
 - **Module drafts write on 4250.** The tab has an installed package to draft
   onto; Bubble Bobble drafts were written and picked there.
 - **Managers can work at the same time.** The broker serves parallel requests.
