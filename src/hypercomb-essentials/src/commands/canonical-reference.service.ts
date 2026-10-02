@@ -155,25 +155,36 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
   }
 
   async place(options: PlaceCanonicalReferenceOptions): Promise<string | null> {
+    // A refusal SAYS WHY — a gather that puts a tile back, or a window that
+    // made nothing, reads the reason here instead of guessing.
+    const refused = (reason: string): null => {
+      EffectBus.emit('reference:refused', {
+        name: String(options.name ?? ''),
+        source: [...(options.sourceSegments ?? [])],
+        parent: [...(options.parentSegments ?? [])],
+        reason,
+      })
+      return null
+    }
     const name = canonicalReferenceName(options.name)
-    if (!name) return null
+    if (!name) return refused('the name is empty')
     let sourceSegments = canonicalReferenceRoute(options.sourceSegments ?? [])
     // The hive itself is never an item to point at.
-    if (sourceSegments.length === 0) return null
+    if (sourceSegments.length === 0) return refused('the hive itself is never a target')
     const parentSegments = canonicalReferenceRoute(options.parentSegments ?? [])
     const childSegments = [...parentSegments, name]
     // Never reference yourself.
-    if (sameSegments(childSegments, sourceSegments)) return null
+    if (sameSegments(childSegments, sourceSegments)) return refused('it would point at itself')
 
     const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
     const committer = get<CommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
     const store = get<StoreLike>('@hypercomb.social/Store')
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
-    if (!history || !committer?.commitChildrenDeltas || !store?.putResource) return null
+    if (!history || !committer?.commitChildrenDeltas || !store?.putResource) return refused('the hive is still starting')
 
     // The target must exist where the route says. Nothing is minted for it.
     let sourceLayer = await resolveLayerAt(history, lineage?.domain, sourceSegments)
-    if (!sourceLayer) return null
+    if (!sourceLayer) return refused('the target does not exist where the route says')
 
     // A REFERENCE TO A REFERENCE IS A REFERENCE TO WHAT IT POINTS AT. Pointing
     // at a doorway made a chain, and a chain that came back round made a tile
@@ -184,20 +195,20 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     let marks = await referenceMarksOf(sourceLayer, store)
     for (let hop = 0; marks.target; hop++) {
       const onward: string[] = marks.target
-      if (hop >= MAX_REFERENCE_HOPS || sameSegments(onward, sourceSegments)) return null
-      if (sameSegments(onward, childSegments)) return null
+      if (hop >= MAX_REFERENCE_HOPS || sameSegments(onward, sourceSegments)) return refused('its doorways go round in a loop')
+      if (sameSegments(onward, childSegments)) return refused('its doorway leads back to the place it would stand')
       sourceSegments = onward
       sourceLayer = await resolveLayerAt(history, lineage?.domain, sourceSegments)
-      if (!sourceLayer) return null
+      if (!sourceLayer) return refused('a doorway on the way points at nothing')
       marks = await referenceMarksOf(sourceLayer, store)
     }
-    if (sameSegments(childSegments, sourceSegments)) return null
+    if (sameSegments(childSegments, sourceSegments)) return refused('it would point at itself')
 
     // A doorway is not a holder: a reference tile's children live behind its
     // pointer, so nothing may be gathered under it.
-    if (parentSegments.length > 0 && referenceTargetAt(parentSegments) !== null) return null
+    if (parentSegments.length > 0 && referenceTargetAt(parentSegments) !== null) return refused('the page is itself a doorway')
     const parent = await resolveLayerAt(history, lineage?.domain, parentSegments)
-    if (await childLayerOf(history, parent, name)) return null
+    if (await childLayerOf(history, parent, name)) return refused('the page already lists a tile by that name')
 
     // IDENTITY = the target's molecule, `sign(fold(canon(name)))`. Not the
     // path-keyed bag of a root child — the route is the fallback, not the name.

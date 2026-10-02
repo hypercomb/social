@@ -387,7 +387,11 @@ export class GatherLinkService {
       await committer.settled?.()
       const placed = await refs.place({
         name: tile.name, sourceSegments: memberRoute, parentSegments: pageRoute,
-      }).catch(() => null)
+      }).catch((error: unknown) => {
+        // A throw is a refusal too, and says so — never a silent put-back.
+        EffectBus.emit('reference:refused', { name: tile.name, source: memberRoute, parent: pageRoute, reason: `it failed: ${error instanceof Error ? error.message : String(error)}` })
+        return null
+      })
       if (placed) {
         // The reference now stands where the page's copy was: give it exactly
         // the overrides that keep it looking as that copy did.
