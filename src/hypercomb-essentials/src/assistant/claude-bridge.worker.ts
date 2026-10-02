@@ -562,6 +562,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'layer-at':     return this.#layerAt(req)
       case 'layer-by-sig': return this.#layerBySig(req)
       case 'layers-at':    return this.#layersAt(req)
+      case 'gather-own':   return this.#gatherOwn(req)
       case 'slice-create': return this.#sliceCreate(req)
       case 'put-resource': return this.#putResource(req)
       case 'get-resource': return this.#getResource(req)
@@ -1539,6 +1540,20 @@ export class ClaudeBridgeWorker extends Worker {
     const layer = await history.currentLayerAt(locationSig)
     if (!layer) return { id: req.id, ok: false, error: `no layer at /${segments.join('/')}` }
     return { id: req.id, ok: true, data: layer }
+  }
+
+  // GATHER a page's own tiles into the group it is linked to — the same act as
+  // the references window's Review (GatherLinkService.gatherOwn), for the named
+  // tiles only. `segments` = the page, `cells` = the tile names. Answers the
+  // names actually gathered.
+  async #gatherOwn(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const names = (req.cells ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segments.length === 0 || names.length === 0) return { id: req.id, ok: false, error: 'gather-own requires `segments` and `cells`' }
+    const link = get<{ gatherOwn?(page: readonly string[], names: readonly string[]): Promise<string[]> }>('@diamondcoreprocessor.com/GatherLinkService')
+    if (!link?.gatherOwn) return { id: req.id, ok: false, error: 'GatherLinkService not available' }
+    const gathered = await link.gatherOwn(segments, names)
+    return { id: req.id, ok: true, data: { gathered } }
   }
 
   // EVERY revision a location has held, oldest first — `layer-at` answers only
