@@ -41,9 +41,13 @@
 export type MachineReach =
   /** Mints or sets something that was not there. */
   | 'additive'
-  /** Changes something that exists, in place. */
+  /** Changes something that exists, in place. `/hide` is here on purpose,
+   *  though it takes a tile from view: HIDE FIRST, DELETE SECOND needs the
+   *  gentle verb reachable before the harsh one. */
   | 'editing'
-  /** Moves, hides, or takes something away. */
+  /** Moves something, or takes it off where it is listed. `/cut` is here, not
+   *  in editing: the tile leaves its page at once, and the next fresh copy or
+   *  cut drops what the clipboard held — the end state of `/remove`. */
   | 'destructive'
 
 /**
@@ -117,9 +121,10 @@ export interface MachineGrammar {
    * must bound the worst case, not describe the common one.
    *
    * Unstated defaults to `'hive'` in meaning, but a gate should treat a MISSING
-   * scope as unknown rather than as `'hive'`: the twelve values that exist were
-   * each traced to their commit, and a thirteenth that declares none has not
-   * been. Refusing what has not been judged is the safe direction.
+   * scope as unknown rather than as `'hive'`: every value that exists was
+   * traced to its code (twenty of them, audited 2026-10-01 — commands/
+   * machine-declarations.spec.ts pins each), and one that declares none has
+   * not been. Refusing what has not been judged is the safe direction.
    */
   readonly scope?: MachineScope
 

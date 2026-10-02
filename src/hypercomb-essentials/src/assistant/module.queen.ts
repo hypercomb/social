@@ -316,18 +316,29 @@ export class ModuleQueenBee extends QueenBee {
     { input: '/module promote fresh-rooms', result: 'fresh-rooms.hypercomb.com runs what try-fresh-rooms ran' },
     { input: '/module promote fresh-rooms essentials', result: 'The live channel moves to the sandbox — followers are told' },
   ]
+  /** A MACHINE MAY LOOK, AND NOTHING ELSE (declarations audit, 2026-10-01).
+   *  `drop` used to be offered too, declared editing at the network — wrong on
+   *  both axes. It deletes the participant's pick (this browser's selection),
+   *  after which nothing lists the draft: its bytes survive, findable only by
+   *  a signature nobody is shown. That is taking a thing off where it is
+   *  listed — destructive — so it joins the words only the participant says,
+   *  and what is left writes nothing and never leaves this browser. */
   override machine = {
-    forms: 'list | drop <path>',
+    forms: 'list',
     example: '/module list',
     bare: true,
-    reach: 'editing' as const,
-    scope: 'network' as const,
+    reach: 'additive' as const,
+    scope: 'local' as const,
     refuse: (args: string): string | undefined => {
-      const [word = 'list'] = args.trim().split(/\s+/)
+      // `|| 'list'`, not a destructuring default: ''.split() yields [''], so the
+      // default never applied and the bare word this block calls a real call
+      // (`bare: true`) was refused.
+      const word = args.trim().split(/\s+/)[0] || 'list'
       if (PUBLISHING.has(word)) return `/module ${word} publishes; only the participant says it`
       if (word === 'take') return '/module take brings somebody else\'s code into this hive; only the participant says it'
       if (word === 'audit') return '/module audit spends the participant\'s model; only the participant says it'
-      return ['list', 'drop'].includes(word) ? undefined : '/module takes list or drop <path>'
+      if (word === 'drop') return '/module drop takes the participant\'s draft off what runs; only the participant says it'
+      return word === 'list' ? undefined : '/module takes list'
     },
   }
 

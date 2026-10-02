@@ -20,12 +20,15 @@ export class ReferencesQueenBee extends QueenBee {
     { input: '/references', result: 'Portals opens on the left, References on the right, both about this page' },
   ]
 
+  /** LOCAL (declarations audit, 2026-10-01): it opens two panels and writes
+   *  nothing, so a grant narrowed to this browser must still let it. The
+   *  links it shows are changed by `/from` and `/feed`, not by this word. */
   override machine = {
     forms: '',
     example: '/references',
     bare: true,
     reach: 'additive' as const,
-    scope: 'page' as const,
+    scope: 'local' as const,
     refuse: (): string | undefined => undefined,
   }
 

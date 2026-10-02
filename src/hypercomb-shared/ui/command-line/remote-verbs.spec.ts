@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   admitMachineCall, spokenEntry, canonicalVerbOf, DEFAULT_MACHINE_GRANT,
-  type AdmissionEntry, type MachineAdmission,
+  type AdmissionEntry, type MachineAdmission, type MachineGrant,
 } from '@hypercomb/core'
 import { dispatchedVerbsOf, slashVerbsOf, viewCommandOf, type FeatureReading } from './remote-verbs'
 
@@ -50,10 +50,23 @@ const census: readonly AdmissionEntry[] = [
   { name: 'lounge', prototype: true },
 ]
 
-/** The door's own loop: every verb judged, the first refusal answers. */
-const door = (line: string, featureOf?: (line: string) => FeatureReading | null): MachineAdmission | null => {
-  for (const verb of dispatchedVerbsOf(line, featureOf)) {
-    const verdict = admitMachineCall(verb, spokenEntry(verb, census), 'operator', DEFAULT_MACHINE_GRANT)
+/** The door's own loop: every verb judged, the first refusal answers, and a
+ *  line that names nothing asked about as the empty verb. */
+const door = (
+  line: string,
+  featureOf?: (line: string) => FeatureReading | null,
+  grant: MachineGrant = DEFAULT_MACHINE_GRANT,
+  retiredOf: (verb: string) => AdmissionEntry['retired'] = () => undefined,
+): MachineAdmission | null => {
+  // The door's entryOf: the census first, a retired word only on a miss.
+  const entryOf = (verb: string): AdmissionEntry | undefined => {
+    const live = spokenEntry(verb, census)
+    const retired = live || !verb ? undefined : retiredOf(verb)
+    return live ?? (retired ? { name: verb, retired } : undefined)
+  }
+  const named = dispatchedVerbsOf(line, featureOf)
+  for (const verb of named.length ? named : ['']) {
+    const verdict = admitMachineCall(verb, entryOf(verb), 'operator', grant)
     if (!verdict.admit) return verdict
   }
   return null
@@ -304,6 +317,103 @@ describe('the word a `tile@view` line runs is judged like any other', () => {
     expect(parse).toContain("if (!quiet) EffectBus.emit('activity:log'")
     // Every other caller still reports.
     expect(component.split('this.#parseFeatureInput(v)').length - 1).toBe(1)
+  })
+})
+
+describe('`/grant none` refuses every line the door is sent', () => {
+  const closed: MachineGrant = { reach: 'none', scope: 'network' }
+  const runs = (command: string) => (): FeatureReading => ({ remove: false, command })
+
+  it('the verbs, as it always did', () => {
+    for (const line of ['/create roadmap', '[a]/copy', '~drafts', '/remove drafts']) {
+      expect(door(line, undefined, closed)?.admit, line).toBe(false)
+    }
+    expect(door('meetup@postit', runs('postit'), closed)?.admit).toBe(false)
+  })
+
+  it('and the lines that name no verb, which walked past it', () => {
+    // A bare name (a tile, in tiles stance), a tag, a create inside a bracket,
+    // a word the census does not hold (create-goto), a called view.
+    for (const line of ['roadmap', 'drafts:stale', '[+roadmap]', '/roadmap', 'meetup@postit Doors at 7']) {
+      expect(door(line, runs(''), closed), line).toEqual({
+        admit: false,
+        reason: line === '/roadmap'
+          ? 'this hive grants a machine nothing at present, so /roadmap cannot be run from here'
+          : 'this hive grants a machine nothing at present, so a line that names no behaviour cannot be run from here',
+      })
+    }
+  })
+
+  it("while one rung up those lines are the operator's again, as they always were", () => {
+    for (const line of ['roadmap', 'drafts:stale', '[+roadmap]', '/roadmap']) {
+      expect(door(line), line).toBeNull()
+    }
+  })
+
+  it('the door asks about the empty verb rather than skipping it', () => {
+    const from = component.indexOf('EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {')
+    const body = component.slice(from, component.indexOf('\n    // voice active state sync', from))
+    expect(body).toContain("const spokenVerbs = named.length ? named : ['']")
+    expect(body).not.toContain('if (!verb) continue')
+    expect(body).not.toContain("grant.reach === 'none'")   // core decides, the door asks
+  })
+})
+
+describe('a retired word over the bridge is refused with what to say instead', () => {
+  const retiredWords: Record<string, AdmissionEntry['retired']> = {
+    delete: { by: 'remove' },
+    flatten: { note: 'archiving the middle of a history publishes less than you had' },
+    // Records for LIVE words, which must never be read.
+    remove: { note: 'never read' },
+    rm: { note: 'never read' },
+  }
+  const retiredOf = (verb: string) => retiredWords[verb]
+
+  it('in every place a verb can sit', () => {
+    const delete_ = { admit: false, reason: '/delete was retired — /remove does this now' }
+    expect(door('/delete drafts', undefined, undefined, retiredOf)).toEqual(delete_)
+    expect(door('/Delete drafts', undefined, undefined, retiredOf)).toEqual(delete_)
+    expect(door('[drafts]/delete', undefined, undefined, retiredOf)).toEqual(delete_)
+    expect(door('/flatten', undefined, undefined, retiredOf)).toEqual({
+      admit: false, reason: '/flatten was retired — archiving the middle of a history publishes less than you had',
+    })
+  })
+
+  it('where before it was an unknown word the operator was admitted to say', () => {
+    expect(door('/delete drafts')).toBeNull()
+  })
+
+  it('and a live word, or a participant alias of one, is answered as itself', () => {
+    expect(door('/remove drafts', undefined, undefined, retiredOf)).toEqual(refusedRemove)
+    // Answered exactly as it would be with no records at all.
+    expect(door('/rm drafts', undefined, undefined, retiredOf)).toEqual(door('/rm drafts'))
+    expect(door('/rm drafts')?.admit).toBe(false)
+    expect(door('/create roadmap', undefined, undefined, retiredOf)).toBeNull()
+  })
+
+  it('the door asks the census on a miss only, as this helper does', () => {
+    const from = component.indexOf('EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {')
+    const body = component.slice(from, component.indexOf('\n    // voice active state sync', from))
+    expect(body).toContain('const live = spokenEntry(verb, census)')
+    expect(body).toContain('const retired = live || !verb ? undefined : slash?.retired?.(verb)')
+    expect(body).toContain("admitMachineCall(verb, entryOf(verb), 'operator', grant)")
+  })
+
+  it('the keyboard says the same instead of minting a tile, and keeps the line', () => {
+    const body = component.slice(
+      component.indexOf('readonly #executeSlashBehaviour = async'),
+      component.indexOf('// /select[...] command execution'))
+    const unknown = body.indexOf('if (drone?.has && !drone.has(commandName)) {')
+    const asked = body.indexOf('const retired = drone.retired?.(commandName)')
+    const stance = body.indexOf("if (this.#stance() === 'command') {")
+    const mint = body.indexOf('await this.commitCreateCellInPlace()')
+    expect(unknown).toBeGreaterThan(-1)
+    expect(asked).toBeGreaterThan(unknown)
+    expect(asked).toBeLessThan(stance)
+    expect(stance).toBeLessThan(mint)
+    const block = body.slice(asked, stance)
+    expect(block).toContain('was retired')
+    expect(block).not.toContain('this.clear()')
   })
 })
 

@@ -60,6 +60,19 @@ const refuseTargets = (verb: string, bare: boolean) => (args: string): string | 
   return undefined
 }
 
+/** A fresh `/copy` REPLACES what the clipboard holds. A tile the participant
+ *  CUT and has not placed is held nowhere else — its page no longer lists it —
+ *  so a machine's copy over it would leave it reachable by undo alone: the end
+ *  state of `/remove`, from a verb declared additive (declarations audit,
+ *  2026-10-01). So while such a tile is held, a machine may not copy over it;
+ *  the participant's own copy is untouched, and so is everything else held. */
+const refuseOverHeldCut = (verb: string): string | undefined => {
+  const held = get<{ items?: readonly { cut?: boolean }[] }>('@diamondcoreprocessor.com/ClipboardService')?.items ?? []
+  return held.some(item => item.cut)
+    ? `${verb} would replace a tile the participant cut and has not placed yet; leave the clipboard to them`
+    : undefined
+}
+
 abstract class ClipboardVerbQueen extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
 
@@ -144,7 +157,7 @@ export class CopyQueenBee extends ClipboardVerbQueen {
     example: '/copy drafts',
     reach: 'additive' as const,
     scope: 'hive' as const,
-    refuse: refuseTargets('/copy', false),
+    refuse: (args: string): string | undefined => refuseTargets('/copy', false)(args) ?? refuseOverHeldCut('/copy'),
   }
 
   protected readonly action = 'copy'
@@ -159,12 +172,19 @@ export class CutQueenBee extends ClipboardVerbQueen {
     { input: '/cut drafts', result: 'Holds "drafts" to place somewhere else' },
     { input: '/cut', result: 'Holds whatever is picked right now' },
   ]
-  /** A cut does not delete: the tile is HELD, and stays held until it lands. */
+  /** A cut deletes nothing — but it is not only a held reference either. The
+   *  tile leaves its page at once (the same children commit `/remove` makes),
+   *  and the clipboard holds it only until the next fresh copy or cut replaces
+   *  what is held; after that only undo brings it back. So it is DESTRUCTIVE,
+   *  like `/remove`: were it less, `/cut x` then `/copy y` would be a remove a
+   *  machine could say under the default grant. The gentle move a machine has
+   *  is `/copy`, `/paste` and `/hide` — hide first, delete second. */
   override machine = {
     forms: '<tile> | [<tile>, <tile>, ...]',
     example: '/cut drafts',
     reach: 'destructive' as const,
     scope: 'hive' as const,
+    consequence: 'Takes tiles off this page now and holds them until /paste places them; the next /copy or /cut replaces what is held, and then only /undo brings them back.',
     refuse: refuseTargets('/cut', false),
   }
 

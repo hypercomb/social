@@ -62,7 +62,7 @@
 
 import { EffectBus, type MetaPayloadKind } from '@hypercomb/core'
 import { canonicalPropertyLifeReferences } from './property-life-references.js'
-import { inheritTileProperties, sparseTileOverrides, TILE_PROPERTY_PINS } from './tile-property-inheritance.js'
+import { inheritTileProperties, sameJsonValue, sparseTileOverrides, TILE_PROPERTY_PINS } from './tile-property-inheritance.js'
 export { TILE_PROPERTY_PINS } from './tile-property-inheritance.js'
 
 export const TILE_PROPERTIES_FILE = '0000'
@@ -744,6 +744,72 @@ const withClearedInheritedKeysPinned = (
   return next
 }
 
+export type TilePropertiesWriteOptions = {
+  /** Keep every key at this alias as an override — the explicit *only here*.
+   *  Without it, keys the alias does not already override sink to the repo. */
+  readonly onlyHere?: boolean
+}
+
+/** Keys that belong to the PLACE, never to the name: where the tile sits on
+ *  this page, and this alias's own tombstones. They never sink. */
+const PLACE_KEYS: ReadonlySet<string> = new Set(['index', 'point', TILE_PROPERTY_PINS])
+
+/** One picture is ONE value: its sizes and its ownership marks travel
+ *  together, so an alias either overrides the picture or inherits it whole. */
+const PICTURE_KEYS: ReadonlySet<string> = new Set(['small', 'flat', 'large', 'imageSig', PARTICIPANT_MARK, SUBSTRATE_MARK])
+
+/**
+ * Split an alias's write into what SINKS to the repo and what stays LOCAL.
+ *
+ * Stays local:
+ *  - a key this alias already overrides, or hides with a pin;
+ *  - a cleared key (`undefined`) — at an alias, clearing is *hide here*, a pin,
+ *    never a removal from the repo that every other alias reads;
+ *  - a place key (`index`, `point`, pins);
+ *  - the picture, when this alias already overrides it — or when the picture
+ *    is a theme default (`substrate: true`): an automatic default must never
+ *    land on the repo, where it could stand over a picture a person chose.
+ *
+ * Nothing sinks while either record is unread (cold): a repo write merges
+ * over the repo's current keys, and merging over an unread repo would drop
+ * them. A cold split keeps the whole write at the alias, exactly as before.
+ */
+const sinkingSplit = async (
+  parentSegments: readonly string[],
+  cellName: string,
+  updates: Readonly<Record<string, unknown>>,
+): Promise<{ sinking: Record<string, unknown>; local: Record<string, unknown> }> => {
+  const ownStats = { cold: false }
+  const repoStats = { cold: false }
+  const [own, repo] = await Promise.all([
+    readOwnTilePropertiesAt(parentSegments, cellName, ownStats),
+    readOwnTilePropertiesAt([], cellName, repoStats),
+  ])
+  if (ownStats.cold || repoStats.cold) return { sinking: {}, local: { ...updates } }
+
+  const hidden = new Set(pinListOf(own))
+  const locked = new Set(pinListOf(repo))
+  const ownsPicture = [...PICTURE_KEYS].some(key => key in own)
+  const automaticPicture = updates[SUBSTRATE_MARK] === true
+  const sinking: Record<string, unknown> = {}
+  const local: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(updates)) {
+    const stays = value === undefined
+      || PLACE_KEYS.has(key)
+      || key in own
+      || hidden.has(key)
+      // The repo LOCKED this key: no alias may change it, here or there. The
+      // local path already refuses the write; it must not reach the repo.
+      || locked.has(key)
+      || (PICTURE_KEYS.has(key) && (ownsPicture || automaticPicture))
+    if (stays) local[key] = value
+    // Already the repo's value — inherited, nothing to write anywhere. (An
+    // editor submits the COMPLETE form, inherited values included.)
+    else if (!sameJsonValue(repo[key], value)) sinking[key] = value
+  }
+  return { sinking, local }
+}
+
 /**
  * Write tile properties to the tile's layer.
  *
@@ -771,7 +837,20 @@ export const writeTilePropertiesAt = async (
   parentSegments: readonly string[],
   cellName: string,
   updates: Record<string, unknown>,
+  options: TilePropertiesWriteOptions = {},
 ): Promise<void> => {
+  // WRITES SINK (documentation/alias-properties.md). At an alias, a key the
+  // alias does not already override goes to the REPO — the root tile of the
+  // name — so every alias of the name sees it. Only what this alias already
+  // overrides, what belongs to the place, or what the caller says is *only
+  // here* stays at the alias.
+  if (parentSegments.length > 0 && options.onlyHere !== true) {
+    const { sinking, local } = await sinkingSplit(parentSegments, cellName, updates)
+    if (Object.keys(sinking).length > 0) await writeTilePropertiesAt([], cellName, sinking)
+    if (Object.keys(local).length === 0) return
+    updates = local
+  }
+
   const history   = iocGet<HistoryServiceLike>(HISTORY_KEY)
   const store     = iocGet<StoreLike>(STORE_KEY)
   const committer = iocGet<LayerCommitterLike>(COMMITTER_KEY)

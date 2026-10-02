@@ -2380,12 +2380,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // for the KEYBOARD path, where it gates a rendered confirmation rather
       // than a refusal, and where widening it would change what a person
       // typing `cut` sees.
-      const spokenVerbs = reading?.actions.length
+      const named = reading?.actions.length
         ? reading.actions.map(action => action.command)
         // (Otherwise the line is judged as it will be DISPATCHED: the slash
         // word folded, the op after a bracket, a `~` removal as `remove`, the
         // word `tile@view` runs — each reached the gate as no verb, and ran.)
         : dispatchedVerbsOf(line, v => this.#featureOf(v))
+      // A line that names nothing is asked about too, as the empty verb, so
+      // `/grant none` refuses it like everything else.
+      const spokenVerbs = named.length ? named : ['']
       // WHICH IS NOT DECIDED HERE ANY MORE. Deciding it here is how the four
       // surfaces came to disagree in the first place — each door judging for
       // itself, in the order the doors were written. The judgement lives in
@@ -2410,13 +2413,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // prose reading can carry several actions; admitting a prefix and
       // refusing a tail would leave the hive half-changed with a refusal on
       // the receipt.
-      const census = (get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
-        entries?(): readonly AdmissionEntry[]
-      } | undefined)?.entries?.() ?? []
+      const slash = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
+        entries?(): readonly AdmissionEntry[]; retired?(name: string): AdmissionEntry['retired']
+      } | undefined
+      const census = slash?.entries?.() ?? []
+      // A word nothing live claims may be retired: asked only on a miss.
+      const entryOf = (verb: string): AdmissionEntry | undefined => {
+        const live = spokenEntry(verb, census)
+        const retired = live || !verb ? undefined : slash?.retired?.(verb)
+        return live ?? (retired ? { name: verb, retired } : undefined)
+      }
       const grant = currentMachineGrant()
       for (const verb of spokenVerbs) {
-        if (!verb) continue
-        const verdict = admitMachineCall(verb, spokenEntry(verb, census), 'operator', grant)
+        const verdict = admitMachineCall(verb, entryOf(verb), 'operator', grant)
         if (verdict.admit) continue
         settle({ kind: 'refused', reason: verdict.reason })
         return
@@ -4341,6 +4350,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // it was not asked to create — say so instead, and name the word that
     // would. Tiles stance keeps the built-in: laying tiles IS its job.
     if (drone?.has && !drone.has(commandName)) {
+      // A WORD THAT NO LONGER RUNS says what to say instead, in either stance,
+      // rather than becoming a tile named after it — and keeps the line, so
+      // the word can be changed (the reserved-name gate's rule).
+      const retired = drone.retired?.(commandName) as { by?: string; note?: string } | undefined
+      if (retired) {
+        EffectBus.emit('activity:log', {
+          message: `/${commandName.toLowerCase()} was retired${retired.by ? ` — /${retired.by} does this now`
+            : retired.note ? ` — ${retired.note}` : ''}`,
+          icon: '⬡',
+        })
+        return
+      }
       if (this.#stance() === 'command') {
         EffectBus.emit('activity:log', {
           message: `"${commandName}" is not a behaviour — to make a tile say: create ${commandName}`,

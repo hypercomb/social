@@ -2,18 +2,28 @@
 import { EffectBus } from '@hypercomb/core'
 
 /** Capture-time verb: did the gesture also remove the source (cut) or leave
- *  it in place (copy)? It is a property of the GESTURE, not of the clipboard —
- *  what the clipboard holds is identical either way: sig references. */
+ *  it in place (copy)? It is a property of the GESTURE — what the clipboard
+ *  holds is the same sig reference either way. The one fact a held entry keeps
+ *  from it is `cut`: whether its source page still lists it, which decides
+ *  whether replacing the entry loses the only easy handle on the tile. */
 export type ClipboardOp = 'copy' | 'cut'
 
 export interface ClipboardEntry {
   label: string
   sourceSegments: readonly string[]
-  /** The source cell's LAYER SIG, captured at cut/copy intent. History is
-   *  append-only, so this stays resolvable forever — a cut child is gone
-   *  from its parent's head, but its layer bytes remain sig-addressed.
-   *  Paste resolves by sig FIRST; path resolution is the fallback. */
+  /** The COLLECTION sig, captured at cut/copy intent: a merkle fold of the
+   *  cell's live subtree (sealSubtree), falling back to the parent's stored
+   *  child sig. One sig carries the whole subtree — paste appends it to the
+   *  destination's children and nothing else. History is append-only, so it
+   *  stays resolvable forever: a cut child is gone from its parent's head,
+   *  but its bytes remain sig-addressed. Paste resolves by sig FIRST; path
+   *  resolution is the fallback. (The worker kept its own copy of this type
+   *  until the `cut` mark drifted between the two; this is the one.) */
   sig?: string
+  /** Set when a CUT put this entry here. Its source page no longer lists it,
+   *  so until it is placed the clipboard is the only easy handle on it — a
+   *  fresh capture that replaced it would leave it reachable by undo alone. */
+  cut?: boolean
 }
 
 export class ClipboardService extends EventTarget {
@@ -27,7 +37,9 @@ export class ClipboardService extends EventTarget {
    *  spans multiple parent dirs (path syntax like `[a, b/c]/cut`). */
   captureEntries(entries: readonly ClipboardEntry[]): void {
     if (entries.length === 0) return
-    this.#items = entries.map(e => ({ label: e.label, sourceSegments: [...e.sourceSegments], sig: e.sig }))
+    this.#items = entries.map(e => ({
+      label: e.label, sourceSegments: [...e.sourceSegments], sig: e.sig, ...(e.cut ? { cut: true } : {}),
+    }))
     this.#notify()
   }
 
@@ -43,10 +55,12 @@ export class ClipboardService extends EventTarget {
     const byKey = new Map(this.#items.map(i => [keyOf(i), i]))
     for (const e of entries) {
       const key = keyOf(e)
+      const held = byKey.get(key)
       byKey.set(key, {
         label: e.label,
         sourceSegments: [...e.sourceSegments],
-        sig: e.sig ?? byKey.get(key)?.sig,
+        sig: e.sig ?? held?.sig,
+        ...(e.cut || held?.cut ? { cut: true } : {}),
       })
     }
     this.#items = [...byKey.values()]

@@ -687,7 +687,9 @@ export class SwarmAdoptDrone extends Drone {
       } else if (propSig) {
         // Already linked (a racing create) — carry the wire props onto it
         // through the canonical writer instead.
-        try { await writeTilePropertiesAt(parentSegments, name, props) } catch { /* best-effort */ }
+        // A peer's properties are this place's copy — never sunk into the
+        // name's repo, where they would reach every same-named tile here.
+        try { await writeTilePropertiesAt(parentSegments, name, props, { onlyHere: true }) } catch { /* best-effort */ }
       }
     } catch (err) { this.#visitStage('import-threw', { name, err: String(err).slice(0, 120) }); return false }
 
@@ -1433,7 +1435,7 @@ export class SwarmAdoptDrone extends Drone {
     const props: Record<string, unknown> = {}
     for (const key of VISIT_PROP_KEYS) if (entry[key] !== undefined) props[key] = entry[key]
     if (Object.keys(props).length > 0) {
-      try { await writeTilePropertiesAt([...at], label, props) } catch { /* the receipt still moves; props catch up on the next refresh */ }
+      try { await writeTilePropertiesAt([...at], label, props, { onlyHere: true }) } catch { /* the receipt still moves; props catch up on the next refresh */ }
     }
     if (SIG_RE.test(layerSig)) this.#recordSyncReceipt([...at, label], layerSig)
     forgetDecorationLabel(label)

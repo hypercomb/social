@@ -37,7 +37,7 @@
 
 import {
   admitMachineCall, callableBehaviours, currentMachineGrant, machineCatalogue, primaryEntry,
-  type MachineGrant, type MachineReach, type MachineScope,
+  type AdmissionEntry, type MachineGrant, type MachineReach, type MachineScope,
 } from '@hypercomb/core'
 
 // THE CATALOGUE MOVED DOWN TO CORE. It is not shell knowledge: the bridge tier
@@ -247,6 +247,17 @@ export class HypercombActionExecutionError extends Error {
  * The grant is read live rather than captured, so tightening it takes effect on
  * the next turn without a reload. Tests pass one explicitly.
  */
+/** A word the census does not hold may have been RETIRED, and then the module
+ *  that retired it says what to say instead (`/delete` → `/remove`). Asked
+ *  only after the census missed, so a live word is never answered as retired. */
+const retiredEntry = (verb: string): AdmissionEntry | undefined => {
+  const slash = (globalThis as { ioc?: { get?(key: string): unknown } }).ioc
+    ?.get?.('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+    { retired?(name: string): AdmissionEntry['retired'] } | undefined
+  const retired = slash?.retired?.(verb)
+  return retired ? { name: verb, retired } : undefined
+}
+
 /**
  * WHY A LINE WAS NOT ACCEPTED, in the gate's own words rather than a flat
  * "not available". A model that is told `/remove is destructive, and this hive
@@ -258,7 +269,7 @@ const refusalFor = (
   entries: readonly HypercombBehaviour[],
   grant: MachineGrant,
 ): string => {
-  const verdict = admitMachineCall(verb, primaryEntry(verb, entries), 'model', grant)
+  const verdict = admitMachineCall(verb, primaryEntry(verb, entries) ?? retiredEntry(verb), 'model', grant)
   // Admitted but absent from the callable set means the declaration itself is
   // unusable — a malformed `machine` block, which is a defect rather than a
   // boundary, and must not be described to a model as one.

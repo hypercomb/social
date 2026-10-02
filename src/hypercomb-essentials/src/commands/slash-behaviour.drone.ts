@@ -190,6 +190,28 @@ export class SlashBehaviourDrone extends EventTarget {
     return false
   }
 
+  #retired = new Map<string, RetiredWord>()
+
+  /** RETIRE A WORD — said in code by the module that retired it, the way a
+   *  view keeps its `legacyKinds`. Not a pool and not a list anyone can add to
+   *  at runtime: a record a stranger could append would be a record that could
+   *  switch off a live word, and here nothing can (see `retired`). */
+  retire(record: RetiredWord): void {
+    const word = record.word.toLowerCase().trim()
+    if (word) this.#retired.set(word, { ...record, word })
+  }
+
+  /** What a word that no longer runs used to be, or undefined. For a door
+   *  whose lookup MISSED, and only then: a word any live provider claims — a
+   *  primary name, a declared alias, a participant's own — answers undefined,
+   *  so live always wins. A retired word given back, or aliased by the
+   *  participant, simply runs again; its old record is never read. */
+  retired(behaviourName: string): RetiredWord | undefined {
+    const name = behaviourName.toLowerCase().trim()
+    if (!name || this.has(name)) return undefined
+    return this.#retired.get(name)
+  }
+
   /** Does this word keep everything after it verbatim (`QueenBee.rawArgs`)?
    *  The command line asks before it reads a line as anything else — tag
    *  grammar, a sentence — because that reading happens before the behaviour
@@ -230,6 +252,10 @@ export class SlashBehaviourDrone extends EventTarget {
     return false
   }
 }
+
+/** A word that no longer runs: what does it now (`by`), or why nothing does
+ *  (`note`). Read by the doors only after their own lookup missed. */
+export type RetiredWord = { readonly word: string; readonly by?: string; readonly note?: string }
 
 /** A behaviour as the auto-wrap carries it: the queen's `rawArgs` rides beside
  *  the declared fields. */
@@ -958,6 +984,20 @@ _slashBehaviours.addProvider(new TextOnlyProvider())
 _slashBehaviours.addProvider(new DocsProvider())
 _slashBehaviours.addProvider(new DomainProvider())
 _slashBehaviours.addProvider(new ObserveProvider())
+
+// WORDS THAT NO LONGER RUN, and what to say instead. Each was sayable after
+// it went — over the bridge as an unknown word the operator may say, at the
+// keyboard in tiles stance as a tile minted after it (`/delete drafts` made
+// delete-drafts and walked in). Read only on a miss; any live claim wins.
+//
+// Renamed to /remove (52539a37f). Not an alias: no code may declare one, and
+// a participant who wants the old word back gives it in the aliases window.
+_slashBehaviours.retire({ word: 'delete', by: 'remove' })
+_slashBehaviours.retire({ word: 'del', by: 'remove' })
+// Retired with their act (ed034fc5c, 2026-09-04) — /flatten was born /compact.
+for (const word of ['flatten', 'compact', 'collapse-history']) {
+  _slashBehaviours.retire({ word, note: 'archiving the middle of a history publishes less than you had' })
+}
 
 // ── auto-discovery of QueenBees ─────────────────────────
 //

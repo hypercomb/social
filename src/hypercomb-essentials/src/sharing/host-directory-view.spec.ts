@@ -107,7 +107,9 @@ describe('the host directory', () => {
     // The window: held files are filtered against what ran, and the list is only what changes.
     expect(VIEW).toMatch(/if \(had\.has\(bare\)\) return/)
     expect(VIEW).toMatch(/const changing = moving \? rows\.filter\(row => row\.update\) : \[\]/)
-    expect(EN['hosts.updating']).toContain('changed')
+    // One whole sentence over the changed files — never "931 files in".
+    expect(updateProgress('', next, had, new Set(['nb']))).toEqual({ done: 1, total: 3 })
+    expect(EN['hosts.updating']).toBe('Updating — {done} of {total} changed files')
   })
 
   it('an older revision is placed by the list, names the newer parts it replaces, and is taken from the trunk first', () => {

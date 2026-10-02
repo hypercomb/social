@@ -88,11 +88,15 @@ export class PostitQueenBee extends QueenBee {
   override options = ['here <text>', 'tile', 'sticky', 'remove', 'on', 'off']
 
   /** The bare forms toggle a VIEW, which a speaker cannot see the result of.
-   *  Only the form that writes something is offered. */
+   *  Only the form that writes something is offered.
+   *
+   *  EDITING, not additive (declarations audit, 2026-10-01): on a tile that
+   *  already wears a note, `here <text>` REPLACES that note's text. A grant of
+   *  `additive` — "a machine may add, never change" — must not let it. */
   override machine = {
     forms: 'here <text>',
     example: '/postit here First draft',
-    reach: 'additive' as const,
+    reach: 'editing' as const,
     scope: 'tile' as const,
     refuse: (args: string): string | undefined =>
       /^here[ ]+[^ ]/i.test(args) ? undefined : '/postit needs the form: /postit here <text>',

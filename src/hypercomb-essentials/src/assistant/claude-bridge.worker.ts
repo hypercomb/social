@@ -598,6 +598,8 @@ export class ClaudeBridgeWorker extends Worker {
       case 'history':      return this.#history(req)
       case 'submit':       return this.#submit(req)
       case 'effect-emit':  return this.#effectEmit(req)
+      case 'chat-ask':     return this.#chatAsk(req)
+      case 'chat-asked':   return this.#chatAsked(req)
       case 'branch-public': return this.#branchPublic(req)
       case 'redrain':      return this.#redrain(req)
       case 'closure-gaps': return this.#closureGaps(req)
@@ -1968,6 +1970,50 @@ export class ClaudeBridgeWorker extends Worker {
     // still holds ungranted reads and reviews. See chat-window, #autoConvos.
     'chat:exec-trust',
   ])
+
+  // ─── a manager's ask (documentation/hive-management-org.md) ────────
+  //
+  // `chat-ask` hands a request to ONE named conversation, to be answered
+  // by the hive's own models through the same loop a typed question takes,
+  // and answers at once with the ask's id. `chat-asked` reads that ask's
+  // result back by the id. Two steps, because a turn runs for minutes and
+  // a bridge request must not: the caller looks again until it is done.
+  // Nothing here opens or shows the chat window, and the result is this
+  // ask's own — never "the last receipt" — so any number of managers can
+  // ask at the same time.
+  //
+  // `payload.trust` lets that conversation run what it asks for without a
+  // press (the chat window's per-conversation switch). It is the operator
+  // who says so, and an ungranted model's reads still wait.
+  static readonly #ASK_RESULTS_MAX = 64
+  readonly #askResults = new Map<string, unknown>()
+  #askWatch: (() => void) | null = null
+
+  async #chatAsk(req: BridgeRequest): Promise<BridgeResponse> {
+    const convoId = typeof req.cell === 'string' ? req.cell.trim() : ''
+    const text = typeof req.text === 'string' ? req.text.trim().slice(0, 20_000) : ''
+    if (!convoId) return { id: req.id, ok: false, error: 'chat-ask requires `cell` (the convoId)' }
+    if (!text) return { id: req.id, ok: false, error: 'chat-ask requires `text`' }
+    this.#askWatch ??= EffectBus.on<{ askId?: string }>('chat:asked', result => {
+      const askId = String(result?.askId ?? '')
+      if (!askId) return
+      this.#askResults.set(askId, result)
+      while (this.#askResults.size > ClaudeBridgeWorker.#ASK_RESULTS_MAX) {
+        this.#askResults.delete(this.#askResults.keys().next().value as string)
+      }
+    })
+    const askId = `ask-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    const trust = (req.payload as { trust?: unknown } | undefined)?.trust === true
+    EffectBus.emit('chat:ask', { askId, convoId, text, trust })
+    return { id: req.id, ok: true, data: { askId, convoId } }
+  }
+
+  async #chatAsked(req: BridgeRequest): Promise<BridgeResponse> {
+    const askId = typeof req.cell === 'string' ? req.cell.trim() : ''
+    if (!askId) return { id: req.id, ok: false, error: 'chat-asked requires `cell` (the askId)' }
+    const result = this.#askResults.get(askId)
+    return { id: req.id, ok: true, data: result ? { done: true, ...(result as object) } : { done: false, askId } }
+  }
 
   async #effectEmit(req: BridgeRequest): Promise<BridgeResponse> {
     const name = typeof req.cell === 'string' ? req.cell : ''

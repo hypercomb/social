@@ -52,19 +52,62 @@ managers (Sonnet), side by side — one area each
 | Add a note, report in its own conversation | Always, in its area. |
 | Create a tile | Only when its charter or the participant asked for one. |
 | Rename, move, remove, edit another's words | Never on its own. It proposes; the participant or Claude Code decides. |
-| Change code that runs (a module draft) | Never on its own: it describes the defect and the fix, and Claude Code takes it. |
+| Change code that runs (a module draft) | Through `ask`, with the defect and the fix stated, then read back and checked. A draft it cannot verify by reading goes up to Claude Code. |
 | Private tiles (`susan`, `howard`) | Not read, not written, unless the participant names them for that pass. |
 | The participant's data | Never wiped, never "cleaned" by deletion. Hide first, delete second, and both are the participant's. |
 
 A manager that cannot do its job inside these rules says so in its report.
 It does not look for another way.
 
+## Managing conversations: the manager delegates, checks, and changes
+
+jwize, 2026-10-01: *"They need to be managing the conversations directly and
+making changes."*
+
+A manager does not do the bulk of the work with its own hands. It runs
+conversations on the hive's own models and manages them:
+
+```
+node scripts/bridge/manager.cjs ask <manager|convoId> "<request>"
+```
+
+- The request runs in that conversation through the hive's own loop, on the
+  models on the hive's list — DeepSeek flash for light work, the line said to
+  be deep (DeepSeek pro) for deep or code work; the hive routes by the weight
+  of the request. The manager never names a vendor.
+- The model reads and changes the hive itself. The conversation is trusted to
+  run what it asks for without a press, because the manager answers for it.
+- The call waits and prints that ask's own result: outcome, rounds, tokens,
+  the answer. Several managers can ask at once; each gets its own result.
+- A manager may ask in its own conversation or open a new one per job
+  (any id of the form `chat:tile:/::<13 digits>-<6 letters>`); one job per
+  conversation keeps the transcript small and the cost down.
+
+**What goes down, what stays up.**
+
+| Work | Who |
+| --- | --- |
+| Reading many tiles, filing notes, surveying, first drafts, a code change with a stated defect and fix | The hive's models, by `ask`. |
+| Deciding what to ask, checking the result against what the hive now holds, deciding it is done | The manager. |
+| A cheap model failed the same request twice; a small exact step (one note) | The manager, directly (`note`, `do`). |
+| A harness defect, a critical decision, a disagreement | Up to Claude Code. |
+
+**Never take the model's word.** "Done" in an answer is a claim. After every
+`ask` that changes something, the manager reads the tiles or notes itself
+(`read`, `notes`) and reports what is actually there. A model that says it
+filed six notes and filed none is a harness defect: report it, with the
+conversation id.
+
+**Write requests a cheap model can follow:** one job, the exact routes, the
+exact words to file, what not to touch, and what to answer with.
+
 ## A pass
 
 1. `manager.cjs thread <self> 6` — what was last reported, and anything the
    participant wrote since.
 2. Survey the area (`tree`, `read`, `notes`). Compare with the charter.
-3. Do what the rules allow. Keep a list of what was done and what is proposed.
+3. Delegate the work (`ask`), check each result by reading, and do the small
+   exact steps directly. Keep a list of what was done and what is proposed.
 4. `manager.cjs report <self> "<report>"` — short: **done**, **found**,
    **proposed** (each needing a yes), **blocked**. No narration.
 5. Return the same report to whoever started the pass.
@@ -82,7 +125,8 @@ The games on the hive: Bubble Bobble (`/bubble-bobble-dos-v1`, `/games`),
 Solomon (`/solomon-maze-v1`), Arkanoid. Each game's requirements live as notes
 on its tile; the manager keeps those notes true — what is met, what is
 partial, what a draft changed — and reports defects with the evidence. It
-never runs DOS material and never edits game code.
+never runs DOS material. A code fix goes through `ask` with the defect and the
+fix stated, and is read back before it is reported.
 
 ### housekeeping
 The order of the hive outside the games and the private tiles: tiles with no
@@ -97,7 +141,59 @@ and reports each miss as a harness defect — what was asked, what the model
 did, what the harness should have done. It changes nothing; Claude Code fixes
 the harness.
 
+## Where the managers live
+
+In the hive, not on its home page (jwize, 2026-10-01: *"They don't show on
+the root, you just create them and keep a directory somewhere in a common
+pool. We can also reference them by creating the tile and by adding to the
+portals."*).
+
+- **`/managers` is the directory.** Each manager is a tile under it; its
+  charter and its conversation are notes on that tile (`charter: …`,
+  `conversation: chat:…`). The hive's copy is the one that counts:
+  `manager.cjs roster` reads it, and every verb that takes a manager's name
+  resolves its conversation from it.
+- **Not on the home page.** `/managers` is made by address and nobody enrols
+  it in `root-entries`, so it is a group of its own (`root-entries.md`).
+  Adding a tile commits only the page it is added to, so the home page is
+  never touched. `install` checks and says so.
+- **Reached by reference.** Stand on any page and say `/reference managers`:
+  a reference tile to the directory appears there and clicks through. Pin
+  `managers` in the Portals panel to keep it one click away.
+- **Charters change in the hive.** Edit the `charter:` note on a manager's
+  tile; the org document is the seed `install` writes from, not the truth
+  once a hive holds its managers.
+
 ## Adding a manager
 
-One line in `MANAGERS` in `scripts/bridge/manager.cjs` (its conversation id),
-one charter section above. Nothing else learns its name.
+`node scripts/bridge/manager.cjs install` puts the managers in the seed
+table into the hive — idempotent, adds only. A new manager is a line in
+that table, a charter section above to seed its note, and a run of
+`install`; or, once it is in the hive, simply a new tile under `/managers`
+with its two notes.
+
+## Making a task
+
+`/hive-task <what should be done or looked after>` (the skill in
+`.claude/skills/hive-task/`) turns a request into a task that works the
+moment it is pasted into a new Sonnet session: it checks the routes against
+the live hive, picks the manager (or adds one), and fills the brief — job,
+where, what done means, how to delegate, limits, the pass. A one-off job gets
+a conversation of its own: `node scripts/bridge/manager.cjs convo`.
+
+## Running the org from one session
+
+One Claude Code session — the frontier one — holds the org. Managers run
+under it as background Sonnet agents (`/hive-task … run it`), a few at a
+time, each in its own area; their reports come back to that session and land
+in their conversations in the hive. A manager gets a session of its own only
+when jwize wants a long back-and-forth with it.
+
+- **Three at once is the ceiling for now.** The hive's models share one
+  upstream pool; more asks at once only buys "busy" answers.
+- **The managing session checks before it repeats.** One "done" claim per
+  report is read against the hive.
+- **A model that invents is taken off the list.** A fast line answered a
+  question about the hive without reading it and named tiles that do not
+  exist (2026-10-01); it was dropped (`models drop`), and the same question
+  then went to a line that read first.

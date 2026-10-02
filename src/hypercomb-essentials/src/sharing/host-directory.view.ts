@@ -860,14 +860,21 @@ export class HostDirectoryElement extends HTMLElement {
     if (!zone && (trunk || runsSource()) && this.#next && this.#next.root !== trunk) {
       const bar = make('div', 'hd-updates')
       bar.setAttribute('role', 'status')
+      // While it moves, the bar is one whole sentence — a done-of-total over the
+      // changed files, the same count the rows fill against — and no button.
       const moving = this.#held
-      bar.append(make('span', '', moving
-        ? t('hosts.updating', 'Updating — {count} changed files in', { count: moving.size })
-        : t('packages.updates.shared', 'An update is ready')))
-      const take = button('hd-primary', moving ? t('hosts.updating-short', 'Updating…') : t('hosts.update-all', 'Update all'))
-      take.disabled = !!this.#busy
-      take.addEventListener('click', () => { void this.#updateAll() })
-      bar.append(take)
+      const overall = moving ? updateProgress('', this.#next.nodes, this.#had, moving) : null
+      bar.append(make('span', '', !moving
+        ? t('packages.updates.shared', 'An update is ready')
+        : overall?.total
+          ? t('hosts.updating', 'Updating — {done} of {total} changed files', { done: overall.done, total: overall.total })
+          : t('hosts.updating-short', 'Updating…')))
+      if (!moving) {
+        const take = button('hd-primary', t('hosts.update-all', 'Update all'))
+        take.disabled = !!this.#busy
+        take.addEventListener('click', () => { void this.#updateAll() })
+        bar.append(take)
+      }
       section.append(bar)
     }
     if (reach && !trunk) {

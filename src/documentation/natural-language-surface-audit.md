@@ -443,8 +443,33 @@ three doors inherit it, and to grow a principal.
    attempt was left uncommitted because that file carried another session's
    work, and it was **reverted when that session committed** — uncommitted work
    in a contested file does not survive.
-3. **Correct `/cut`'s `reach`** to `destructive`, and audit the other eleven
-   declarations before `reach` is ever read as a tier.
+3. ~~**Correct `/cut`'s `reach`** to `destructive`~~ **Decided 2026-10-01**:
+   it stays destructive. It looks like arranging references, but the tile
+   leaves its page at cut time (the same children commit `/remove` makes) and
+   the next fresh copy or cut drops what the clipboard held — so `/cut x`
+   then `/copy y` IS `/remove x`, and a lower reach would let a machine say it
+   in two steps. A machine's gentle move is `/copy`, `/paste`, `/hide` (hide
+   first, delete second). Its catalogue entry now states that consequence, and
+   `MachineReach` names `/hide` and `/cut` as the deliberate cases.
+
+   **The declarations audit — done 2026-10-01.** `reach` already WAS read as a
+   tier (the gate compares it with the grant), so every declaration was checked
+   against what its admitted forms do. Twenty, not twelve, now declare; fifteen
+   held. Five were wrong, and `commands/machine-declarations.spec.ts` pins all
+   twenty through the live census:
+
+   | verb | was | now | why |
+   |---|---|---|---|
+   | `/module` | editing / network | additive / local, `list` only | `drop` deletes the participant's pick and nothing lists the draft after; it joined the participant-only words. The bare word, which `bare: true` calls real, was also refused by its own rule |
+   | `/postit here` | additive | editing | replaces an existing note's text |
+   | `/feed` | additive | editing | `<page> off` switches an existing target off |
+   | `/from` | additive | editing | `<group> off` detaches an existing link (the same word restores it, so not destructive) |
+   | `/references` | page | local | opens two panels, writes nothing |
+   | `/copy` | additive | additive, now TRUE | a fresh copy replaced a tile the participant cut and had not placed; the clipboard now marks a held cut, and a machine is refused a copy over one |
+
+   Found on the way: the clipboard's `validate()` rewrote its record without
+   the entries' sigs, so a restored cut whose page no longer lists it could
+   not be pasted — it now writes through `#persistMeta`, the one writer.
 4. ~~**Fix `/undo N`** — the repair verb, silently broken.~~ **Resolved
    2026-09-04** by `44f720d3f`: the cursor serializes its own walks, so N steps
    land regardless of caller. Still owed on top — `undo.queen.ts` reports the
@@ -468,7 +493,37 @@ three doors inherit it, and to grow a principal.
      real modules: `bar@lounge` ran `/lounge` — a concealed prototype the gate
      already refused in its slash form — and is now refused the same way;
      `meetup@postit` is still admitted.
-   - **Still open: grammar that names no verb is not judged at all** — a bare name mints
+   - ~~**Grammar that names no verb is not judged at all**~~ **Resolved
+     2026-10-01**: `/grant none` now means none. Core answers the off switch
+     before any rung (a word with no census row and the empty verb included),
+     and the door asks about a line that names nothing as the empty verb —
+     admitted for an operator past the off switch, refused for a model. The
+     original finding, for the record — a bare name mints
      a tile in tiles stance, `name:tag` writes a tag, `[+a]` creates. So a
      grant of `none` stops every verb and none of these. Whether the off
      switch should stop them is a decision about the grant, not about a parse.
+10. ~~**A retired word ran as an unknown one.**~~ **Resolved 2026-10-01.**
+    `/delete` (renamed `/remove`), `/flatten` (born `/compact`) and
+    `/collapse-history` (retired with their act) were still sayable: over the
+    bridge an unknown word the operator may say, at the keyboard in tiles
+    stance a tile minted after it (`/delete drafts` made `delete-drafts` and
+    walked in). Now the census declares them (`SlashBehaviourDrone.retire`)
+    and every door answers with what to say instead — the keyboard keeping the
+    line, the bridge and the model channel refusing in the gate's words.
+
+    **Why not a deprecated pool** (asked for, then doubted, 2026-10-01): a pool
+    anyone can append to is a record that can switch off a live word, and the
+    pool is a union across hosts. So the rule is the one `legacyKinds` already
+    follows — a retirement is declared in code by the module that retired the
+    word, and read ONLY after a door's lookup missed. Live always wins: a word
+    given back, or aliased by the participant, runs; its old record is never
+    read. A record can explain a missing word and cannot hide a present one.
+11. **The bridge does not run a behaviour's own `refuse`** (found by the
+    declarations audit, 2026-10-01). Only the model channel's parser calls it,
+    so over the bridge the rules a behaviour states for machines do not apply:
+    `/module commit` ("publishes; only the participant says it"), `/language
+    offer`, clearing a title with `/title x =`, `/copy` over a held cut. The
+    gate there reads reach and scope alone. Declarations bound the forms their
+    `refuse` admits — their contract — so the fix belongs at the door: run the
+    resolved entry's `refuse` on the slash head's arguments, as the model
+    channel does. Owed.
