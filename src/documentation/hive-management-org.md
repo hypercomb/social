@@ -101,6 +101,26 @@ conversation id.
 **Write requests a cheap model can follow:** one job, the exact routes, the
 exact words to file, what not to touch, and what to answer with.
 
+## Facts a manager can rely on
+
+Checked by Claude Code against the live 4250 hive, 2026-10-01. Managers had
+reported several of these the other way round.
+
+- **Source changes are live on 4250 after its reload.** The dev shell imports
+  essentials straight from source (`hypercomb-dev/src/app/app.ts`), so a
+  change there needs no `build:essentials` and no publish to reach the 4250
+  tab. A build and a publish are what reach hypercomb.io.
+- **Module drafts write on 4250.** The tab has an installed package to draft
+  onto; Bubble Bobble drafts were written and picked there.
+- **Managers can work at the same time.** The broker serves parallel requests.
+  "no renderer connected" means the tab is reloading or detached;
+  `manager.cjs` waits up to a minute for it to return before it reports that.
+- **`ask` prints `reads`.** `reads: 0` on an answer about the hive means
+  nothing was read; such an answer is also sent back once to read first.
+  Treat any claim from a 0-read answer as unverified.
+- **Removing a note is a list change** (`manager.cjs unnote`): the note leaves
+  the tile's list as a new layer, its bytes stay, history restores it.
+
 ## A pass
 
 1. `manager.cjs thread <self> 6` — what was last reported, and anything the
