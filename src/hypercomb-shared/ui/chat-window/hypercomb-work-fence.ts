@@ -274,7 +274,14 @@ export const routesNamedIn = (text: string): readonly string[] => {
 export const unreadClaimMessage = (routes: readonly string[], request: string): string =>
   `You answered about ${routes.join(', ')} without reading ${routes.length === 1 ? 'it' : 'them'} in this turn, so nothing in that answer is known from the hive. Read ${routes.length === 1 ? 'it' : 'them'} first with a hypercomb-read block, then answer from what the read returns.${carry(request)}`
 
-export const blockUnwrittenMessage = (lang: string, request: string): string =>
+/** A READ THE PARTICIPANT ASKED FOR, ANSWERED UNRUN. Asked to run
+ *  `find arkanoid`, a model answered "No results found." in five tokens
+ *  with no read at all (2026-10-02): the request names no route, so the
+ *  guard above never saw it. Said back once: run it, then answer. */
+export const unreadAskedMessage = (lines: readonly string[], request: string): string =>
+  `The participant asked for ${lines.length === 1 ? 'this read' : 'these reads'}: ${lines.join('; ')}. You answered without running ${lines.length === 1 ? 'it' : 'them'}, so nothing in that answer is known from the hive. Send ${lines.length === 1 ? 'it' : 'them'} as a hypercomb-read block, then answer from what the read returns.${carry(request)}`
+
+export const blockUnwrittenMessage =(lang: string, request: string): string =>
   `Your reply carried ${lang} work but not as a block the hive can run, so nothing happened. Write it again as a fenced block: a line of three backticks followed by ${lang}, then one line per request, then a line of three backticks. If you were only describing the block and your answer is finished, give the answer again without it.${carry(request)}`
 
 export const writeRanMessage = (draft: { section: string; beeSig: string; path: string; held?: string }, request: string): string =>

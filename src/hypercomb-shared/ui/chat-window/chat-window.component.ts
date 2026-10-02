@@ -120,7 +120,7 @@ import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 // module"; runtime module-drafts.ts).
 import { draftModule } from '@hypercomb/runtime/module-drafts'
 import { installedPackageSig } from '@hypercomb/runtime/installed-package'
-import { doctrineFailedMessage, doctrineRanMessage, parseWriteBlock, routesNamedIn, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage } from './hypercomb-work-fence'
+import { doctrineFailedMessage, doctrineRanMessage, parseWriteBlock, routesNamedIn, unreadAskedMessage, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage } from './hypercomb-work-fence'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
@@ -3111,6 +3111,10 @@ export class ChatWindowComponent implements OnDestroy {
   // opened, the turn begins, and the conversation that was open before is put
   // back — and then RUN side by side. The window need not be showing.
   readonly #askQueue: OutsideAsk[] = []
+  // Why a turn ended with no words, by conversation: a turn handed to the
+  // bridge session says nothing on screen, and an outside ask would
+  // otherwise come back "failed" with no reason (2026-10-02).
+  readonly #turnFailures = new Map<string, string>()
   readonly #asksSeen = new Set<string>()
   #askStarting = false
 
@@ -3155,6 +3159,8 @@ export class ChatWindowComponent implements OnDestroy {
       for (const off of offs) off()
       const turns = await this.#threads()?.readTurns(ask.convoId).catch(() => []) ?? []
       const last = [...turns].reverse().find(entry => entry.role === 'assistant' && entry.at >= since)
+      if (!failure && receipt?.outcome === 'failed') failure = this.#turnFailures.get(ask.convoId) ?? ''
+      this.#turnFailures.delete(ask.convoId)
       EffectBus.emit('chat:asked', {
         askId: ask.askId, convoId: ask.convoId, at: Date.now(),
         ok: !failure && !!last,
@@ -7431,6 +7437,15 @@ export class ChatWindowComponent implements OnDestroy {
         // that answers unread twice is answered as it stands, and its
         // receipt says reads: 0.
         if (!work.request && !lastRound && !unreadSaid && canRead && readRounds === 0) {
+          // A read the participant wrote out themselves names no route
+          // (`find arkanoid`): it is asked for all the same.
+          const asked = splitWork(message).request
+          if (asked?.kind === 'read' && asked.lines.length) {
+            unreadSaid = true
+            messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: unreadAskedMessage(asked.lines.slice(0, 6), message) })
+            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `asked again: answered ${asked.lines[0]} without running it` })
+            continue
+          }
           const named = routesNamedIn(message)
           if (named.length) {
             unreadSaid = true
@@ -7669,6 +7684,7 @@ export class ChatWindowComponent implements OnDestroy {
         answered = false
         if (opts?.signal?.aborted) throw error
         const detail = error instanceof Error ? error.message : String(error)
+        component.#turnFailures.set(convoId, detail)
         if (!firstAt && listening()) {
           console.warn('[chat] no model took the question — the bridge session takes it:', detail)
           return ''
