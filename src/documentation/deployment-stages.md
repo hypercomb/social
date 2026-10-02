@@ -221,14 +221,26 @@ The lock button therefore has three faces: a host → `join`; a non-host →
 added; `ask` is the share control's face for a non-host, and the grant
 is the host's act in the hosts list).
 
-The records are life-primitive atoms, so the harness reads and writes them
-like any other: an ask is `{ask:1, signer, host, head, bytes, count, zone,
-at}` signed by the asker, kept at `sign('ask')/<asker>/` on the host it was
-sent to; a grant is `{grant:1, signer:<host>, to:<asker>, scope, quota,
-until, prev}` signed by the host, the head of the host's succession at
-`sign('grant')/<host>/`; a revoke is the next grant with `until` in the
-past. A reader verifies a grant exactly as a stage claim (R5):
-`acceptHeadClaim` for the address asked for, the signer checked.
+**The lease already exists; the change is its default.** The content worker
+(`hypercomb-relay/blossom-worker/worker.js`) meters every signed write
+against a per-key grant, `sign('host:grants')/<pubkey>` →
+`{ quotaBytes, usedBytes, expiresAt }`, readable by its key alone at
+`GET /grant`. That row IS the lease: one host's surface, a quota, an
+expiry. What R12 changes is how a row comes to be: today `AUTO_GRANT=1`
+mints 100 MB for any key on its first upload, which is the flood R12 is
+against. Under R12 a host runs with auto-grants off for strangers, and a
+row is minted by a rule (followed communities, up to a quota) or by a hand
+answering an ask. Revoke is setting `expiresAt` to now.
+
+**The ask, as built for drafts (2026-10-02).** An ask is a nostr event,
+kind 30568, content `hc:ask:v1\n<head>`, tags `d=<head>`, `h=<host>`,
+`bytes`, `count`, signed by the asker and stored on the host by its own
+signature like any byte (essentials `sharing/version-drafts.ts`). The first
+thing asked for is a BUILD: a draft of the minimal build's source, which a
+builder participant verifies, builds and promotes
+(`hypercomb-shim/host/builder.mjs`); the revisions it promotes name the
+draft and the ask, so the author is known wherever they travel. The same
+event shape asks for a lease: `d` names the closure's head instead.
 
 ## 4. What changes in the code, in order
 
@@ -279,8 +291,9 @@ past. A reader verifies a grant exactly as a stage claim (R5):
 8. **The grant.** The hosts list gains the asks a host received (who, how
    much, what it reaches, the risk line), with Accept · Hold · Refuse by
    hand, and a rule per host: `followed: accept up to <quota>`, `stranger:
-   hold`. Accept mints the grant succession; the host then pulls the
-   closure by signature and receipts it as its own served bytes.
+   hold`. Accept writes the key's `host:grants` row (quota, expiry); the
+   worker's `AUTO_GRANT` default becomes off for keys no rule accepts
+   (the operator's act: the worker is deployed by its operator).
 9. **The lease in the stage checks.** `isClosureAvailable` counts a host's
    receipts for a leaseholder's closure while an unexpired grant names them;
    `publish here` under a lease is the same act as a host's, against the

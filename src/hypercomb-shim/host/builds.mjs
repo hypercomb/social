@@ -322,7 +322,7 @@ export const attachConversation = async (label, file) => {
  * the last promoted build, signed by its author when a key is at hand, and
  * carried to every subscribed host unless `sync` is false.
  */
-export const promote = async (label, { now = new Date(), sync: carry = true, put, sign: signIt = true } = {}) => {
+export const promote = async (label, { now = new Date(), sync: carry = true, put, sign: signIt = true, from = null } = {}) => {
   const pool = poolDir(BUILDS_MEANING)
   const story = foldLabel(label)
   const stage = await readStage()
@@ -334,6 +334,10 @@ export const promote = async (label, { now = new Date(), sync: carry = true, put
     version: await nextVersion(pool, now),
     parent: await headOf(pool),
     ...(entry.conversations?.length ? { conversations: [...entry.conversations] } : {}),
+    // Built from a participant's draft (host/builder.mjs): the draft and the
+    // author's signed ask travel with the revision, so who wrote it is known
+    // wherever it goes, beside who built it.
+    ...(from?.draft && from?.ask ? { draft: from.draft, ask: from.ask } : {}),
   }
   const sig = await keep(pool, Buffer.from(JSON.stringify(record)))
   await writeFile(resolve(pool, 'head'), sig + '\n', 'utf8')
@@ -361,6 +365,13 @@ const closureOf = async (pool, sigs) => {
     }
     for (const sig of [...(record.atoms ?? []), ...(record.conversations ?? [])]) reach.add(sig)
     if (record.tree) for (const sig of (await walkTree(record.tree, s => readJson(pool, s).catch(() => null))).reach) reach.add(sig)
+    // The draft it was built from: the record, its files layer and the files.
+    const draft = record.draft ? await readJson(pool, record.draft).catch(() => null) : null
+    if (draft?.files) {
+      reach.add(record.draft)
+      reach.add(draft.files)
+      for (const file of Object.values((await readJson(pool, draft.files).catch(() => null))?.files ?? {})) if (file) reach.add(file)
+    }
   }
   return reach
 }
@@ -408,6 +419,11 @@ export const published = async () => {
   }
   const promotedSet = new Set([...promoted, ...signedServed.map(r => r.sig)])
   const signatures = new Set(held.filter(({ event }) => promotedSet.has(tag(event, 'b'))).map(({ file }) => file))
+  // The author's ask behind a revision built from a draft travels with it.
+  for (const sig of promoted) {
+    const ask = (await readJson(pool, sig).catch(() => null))?.ask
+    if (ask && held.some(({ file }) => file === ask)) signatures.add(ask)
+  }
   return { [BUILDS_MEANING]: buildsSet, [SIGNATURES_MEANING]: signatures }
 }
 
@@ -1194,6 +1210,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(`${command}: ${r.pools} pool(s), ${r.copied} file(s) copied, ${r.present} already there${r.refused.length ? `, ${r.refused.length} REFUSED (not what they are named): ${r.refused.join(', ')}` : ''}`)
       for (const line of r.local ?? []) console.log(`  ${line}`)
       if (r.refused.length) process.exitCode = 1
+    } else if (command === 'build-draft') {
+      // Its own process: builder.mjs imports this module, which is still
+      // evaluating while its command line runs.
+      const r = spawnSync(process.execPath, [resolve(HERE, 'builder.mjs'), ref, ...rest], { stdio: 'inherit' })
+      if (r.status !== 0) process.exitCode = r.status ?? 1
     } else if (command === 'pull') {
       for (const { host, answered, taken, refused } of await pullPools([ref, ...rest].filter(Boolean).length ? [ref, ...rest].filter(Boolean) : DEFAULT_HOSTS)) {
         console.log(`${host.padEnd(24)} ${answered ? `${taken} new file(s)${refused ? `, ${refused} refused (not what they are named)` : ''}` : 'holds no version pools'}`)

@@ -134,7 +134,14 @@ export type Revision = {
   /** What the revision carries, by part: install, tree, workspace, package… */
   parts: string[]
   signers: { role: string; pubkey: string; ok: boolean }[]
+  /** Built from a participant's draft (sharing/version-drafts.ts): its author,
+   *  by the signed ask that names it — null when the ask does not verify. */
+  from: { draft: string; ask: string; author: string | null } | null
 }
+
+/** The ask a draft was sent with (version-drafts.ts, the same constants). */
+const ASK_KIND = 30568
+const askPreimage = (draftSig: string): string => `hc:ask:v1\n${draftSig}`
 
 const order = (version: string): number =>
   version.split('.').map(Number).reduce((n, part, i) => n + part * ([1e8, 1e6, 1e4, 1][i] ?? 0), 0)
@@ -177,11 +184,23 @@ export const versionRevisions = async (io: PoolIo = opfsPools()): Promise<Revisi
       const key = `${role}\n${event.pubkey}`
       seen.set(key, { role, pubkey: String(event.pubkey ?? ''), ok: ok || seen.get(key)?.ok === true })
     }
+    let from: Revision['from'] = null
+    const draft = record['draft'], ask = record['ask']
+    if (typeof draft === 'string' && typeof ask === 'string') {
+      let author: string | null = null
+      const bytes = await io.read(SIGNATURES_MEANING, ask)
+      try {
+        const event = bytes ? JSON.parse(decode(bytes)) as SignatureEvent : null
+        if (event && event.kind === ASK_KIND && tag(event, 'd') === draft && event.content === askPreimage(draft) && verifyEvent(event as never)) author = String(event.pubkey)
+      } catch { author = null }
+      from = { draft, ask, author }
+    }
     out.push({
       sig: name, label, version,
       parent: typeof record['parent'] === 'string' ? record['parent'] : null,
       parts: PARTS.filter(part => record[part] !== undefined && record[part] !== null),
       signers: [...seen.values()],
+      from,
     })
   }
   return out.sort((a, b) => order(b.version) - order(a.version) || (a.sig < b.sig ? -1 : 1))

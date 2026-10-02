@@ -333,6 +333,31 @@ browser is a backup of the code. Measured against a local follower: 10,058
 files in 76 s the first time, nothing fetched the second, still there after
 a reload.
 
+**Write in the browser, build with a participant.** The browser carries no
+compiler, so a change is built by a BUILDER — any participant with the
+tooling, which every host restored from the pools has. The browser stages a
+draft over a revision it holds (`VersionDrafts.stage`: the base and the
+changed files, each by its signature), signs an ASK for it (a nostr event,
+kind 30568), and sends both to a host under its grant: the same signed
+`PUT /<sig>` every backup upload uses, metered by the host's quota. The
+builder takes it from there:
+
+```bash
+HYPERCOMB_SIGNER_KEY=<builder key> node host/builds.mjs build-draft <host> <ask> [--to <dir>] [--test]
+```
+
+It verifies the ask and every file, checks the base out of its pools, lays
+the files over it, installs from the base's own lockfile, builds with the
+base's own scripts (`--test` runs its tests first), and promotes the package
+and the host under its key, each naming the draft and the author's ask; the
+browser pulls them back and `/versions` says whose draft each came from.
+Proven end to end against the real content worker (`scripts/local-content-host.mjs`):
+the browser pulled 10,058 files, drafted one edit, sent 4 files; the builder
+promoted two revisions; the browser pulled 15 files back and read its edit
+in the newest host revision. `/versions drafts` and `/versions ask <host>`
+are the same acts by word, and `@diamondcoreprocessor.com/VersionDrafts` is
+the same acts for the harness (a model acting for the participant).
+
 **Porting the Angular shell's surfaces, from inside.** The 49 panels in
 `hypercomb-shared/ui` are being moved into the package one at a time, each
 as a drone and a framework-free element on the base layer, so they reach a

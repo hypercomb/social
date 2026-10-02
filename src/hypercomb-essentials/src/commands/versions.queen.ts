@@ -7,6 +7,11 @@
 //   /versions pull [host]   → take the version pools a host serves (this
 //                             origin when none is named), every file verified,
 //                             into this browser's storage, kept persistently
+//   /versions drafts        → the drafts staged here (sharing/version-drafts.ts)
+//   /versions ask <host> [draft]
+//                           → sign the ask for a draft (the newest when none is
+//                             named) and send it with its files to a host under
+//                             this key's grant; a builder there builds it
 //
 // The code of the minimal build lives only through replication
 // (sharing/version-pools.ts): pulling makes this device a backup of it, with
@@ -14,6 +19,7 @@
 
 import { EffectBus, I18N_IOC_KEY, QueenBee, get, type I18nProvider } from '@hypercomb/core'
 import { keepPools, pullVersionPools, versionRevisions } from '../sharing/version-pools.js'
+import { askBuild, draftClosure, listDrafts, readRevisionFile, revisionFiles, stageDraft } from '../sharing/version-drafts.js'
 
 const SHOWN = 12
 
@@ -24,7 +30,7 @@ export class VersionsQueenBee extends QueenBee {
   override description =
     'The minimal build’s own history: pull the version pools from a host into this browser, verified, and list the revisions with who signed them'
   override descriptionKey = 'slash.versions'
-  override options = ['pull [host]', 'list']
+  override options = ['pull [host]', 'list', 'drafts', 'ask <host> [draft]']
   override examples = [
     { input: '/versions', result: 'Lists the revisions this browser holds, with their signatures' },
     { input: '/versions pull', result: 'Takes the version pools this origin serves into this browser' },
@@ -36,12 +42,14 @@ export class VersionsQueenBee extends QueenBee {
 
   public override slashComplete(args: string): readonly string[] {
     const q = String(args ?? '').trim().toLowerCase()
-    return ['pull', 'list'].filter(option => !q || option.startsWith(q))
+    return ['pull', 'list', 'drafts', 'ask'].filter(option => !q || option.startsWith(q))
   }
 
   protected async execute(args: string): Promise<void> {
-    const [verb = '', host = ''] = String(args ?? '').trim().split(/\s+/)
+    const [verb = '', host = '', which = ''] = String(args ?? '').trim().split(/\s+/)
     if (verb.toLowerCase() === 'pull') return this.#pull(host || location.origin)
+    if (verb.toLowerCase() === 'drafts') return this.#drafts()
+    if (verb.toLowerCase() === 'ask') return this.#ask(host, which)
     return this.#list()
   }
 
@@ -60,6 +68,39 @@ export class VersionsQueenBee extends QueenBee {
     await this.#list()
   }
 
+  async #drafts(): Promise<void> {
+    const drafts = await listDrafts()
+    if (!drafts.length) {
+      this.#toast('info', this.#t('versions.nodrafts', 'No drafts are staged here.'))
+      return
+    }
+    for (const draft of drafts.slice(0, SHOWN)) {
+      this.#activity(`${draft.sig.slice(0, 12)} ${draft.label} over ${draft.base.slice(0, 12)} · ${draft.paths.join(', ')}`, '✎')
+    }
+    this.#toast('info', this.#t('versions.drafts', '{count} draft(s) staged here.', { count: drafts.length }))
+  }
+
+  async #ask(host: string, which: string): Promise<void> {
+    if (!host) {
+      this.#toast('info', this.#t('versions.askwhere', 'Name the host to send it to: /versions ask <host>.'))
+      return
+    }
+    const drafts = await listDrafts()
+    const draft = which ? drafts.find(d => d.sig.startsWith(which.toLowerCase())) : drafts[0]
+    if (!draft) {
+      this.#toast('info', this.#t('versions.nodraft', 'No such draft is staged here.'))
+      return
+    }
+    const outcome = await askBuild(draft.sig, host)
+    if (!outcome.ok) {
+      this.#toast('warning', outcome.error)
+      return
+    }
+    this.#activity(`ask ${outcome.ask} for draft ${outcome.draft.slice(0, 12)} — a builder there: builds.mjs build-draft ${host} ${outcome.ask}`, '✉')
+    this.#toast('success', this.#t('versions.asked', 'Sent to {host}: {sent} new file(s), {held} already there. The ask is {ask}.',
+      { host, sent: outcome.sent, held: outcome.held, ask: outcome.ask.slice(0, 12) }))
+  }
+
   async #list(): Promise<void> {
     const all = await versionRevisions()
     if (!all.length) {
@@ -70,7 +111,8 @@ export class VersionsQueenBee extends QueenBee {
       const signed = revision.signers.filter(s => s.ok).map(s => s.role)
       const unsigned = revision.signers.some(s => !s.ok)
       this.#activity(`${revision.label} ${revision.version} ${revision.sig.slice(0, 12)} · ${revision.parts.join(' ')}`
-        + (signed.length ? ` · signed: ${signed.join(', ')}` : ' · unsigned') + (unsigned ? ' · a signature does not verify' : ''), '◆')
+        + (signed.length ? ` · signed: ${signed.join(', ')}` : ' · unsigned') + (unsigned ? ' · a signature does not verify' : '')
+        + (revision.from ? (revision.from.author ? ` · from ${revision.from.author.slice(0, 12)}'s draft` : ' · from a draft whose ask does not verify') : ''), '◆')
     }
     this.#toast('info', this.#t('versions.listed', '{count} revision(s) held here — the newest in the activity log.', { count: all.length }))
   }
@@ -86,3 +128,17 @@ export class VersionsQueenBee extends QueenBee {
 }
 
 window.ioc.register('@diamondcoreprocessor.com/VersionsQueenBee', new VersionsQueenBee())
+
+// THE SAME ACTS, FOR A HAND THAT IS NOT TYPING: the harness (a model acting
+// for the participant) reads a revision's files, stages a draft and asks a
+// builder through these, exactly as the words above do.
+window.ioc.register('@diamondcoreprocessor.com/VersionDrafts', {
+  revisions: () => versionRevisions(),
+  pull: (host: string) => pullVersionPools(host),
+  files: (revision: string) => revisionFiles(revision),
+  read: (revision: string, path: string) => readRevisionFile(revision, path),
+  stage: (request: Parameters<typeof stageDraft>[0]) => stageDraft(request),
+  closure: (draft: string) => draftClosure(draft),
+  drafts: () => listDrafts(),
+  ask: (draft: string, host: string) => askBuild(draft, host),
+})
