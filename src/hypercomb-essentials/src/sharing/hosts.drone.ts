@@ -80,16 +80,17 @@ const reopening = (): boolean => {
  * anything, so one known host is seeded on the first read of an empty pool —
  * the first thread, from which the rest is pulled.
  *
- * jwize.com because it is the origin we have actually proven: it serves a
- * manifest, its atoms hash to their names, and it answers cross-origin.
- * hypercomb.com cannot be it while the apex still serves a marketing page.
+ * hypercomb.com, the same seed as the shell's DEFAULT_HOST_ZONES (jwize,
+ * 2026-09-30: "jwize.com is personal so drop that as a default"). The apex
+ * serves the host and lists the publisher's signed package, its atoms hash to
+ * their names, and it answers cross-origin.
  *
  * BE CLEAR ABOUT WHAT THIS COSTS: every fresh client contacts this domain on
  * its first run. That is a real, deliberate phone-home, and it is the whole
  * reason it is ONE named constant in one place rather than a list that could
  * quietly grow.
  */
-const SEED_HOST = 'jwize.com'
+const SEED_HOST = 'hypercomb.com'
 
 /** Seeded once, ever. Without this the seed would come BACK after a removal,
  *  which is precisely the bug the community/marks split was built to kill: a

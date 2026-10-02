@@ -56,8 +56,12 @@ const COMMUNITY_HOSTS_POOL = 'community:hosts'
  * ONE constant, deliberately not a list that could quietly grow — every fresh
  * client contacts this domain on its first run, and that should stay a fact
  * someone decided rather than one that accumulated.
+ *
+ * hypercomb.com (jwize, 2026-09-30: "jwize.com is personal so drop that as a
+ * default"). The apex now serves the host and lists the publisher's signed
+ * package, which is what a first thread has to be.
  */
-export const DEFAULT_HOST_ZONES: readonly string[] = ['jwize.com']
+export const DEFAULT_HOST_ZONES: readonly string[] = ['hypercomb.com']
 
 export const hostZone = (raw: unknown): string => {
   const text = String(raw ?? '').trim().toLowerCase()
