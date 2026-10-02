@@ -4389,9 +4389,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     if (drone?.execute) {
-      await drone.execute(commandName, args)
+      try { await drone.execute(commandName, args) }
+      catch (error) { this.#behaviourDidNotRun(commandName, error) }
     }
     this.clear()
+  }
+
+  /** A BEHAVIOUR THAT COULD NOT ACT says so, and nothing more. A queen throws
+   *  when nothing happened (`/remove` on a dialog you cancelled, `/hide` with
+   *  no surface listening) so a machine's receipt cannot read as success; at
+   *  the keyboard that is a line in the activity strip, not an unhandled
+   *  rejection — which the break-repair loop would file as a crash. */
+  #behaviourDidNotRun(word: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[command-line] /${word.toLowerCase()} did not run:`, message)
+    EffectBus.emit('activity:log', { message, icon: 'error' })
   }
 
   // -------------------------------------------------
@@ -4561,7 +4573,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         // The tiles are already selected above, which is the contract a
         // selection-driven behaviour reads (BreakApartProvider, etc.).
         const args = afterBracket.slice(opMatch![0].length).trim()
-        await slash.execute(op, args)
+        try { await slash.execute(op, args) }
+        catch (error) { this.#behaviourDidNotRun(op, error) }
         this.#collapseToSelect(labels)
         return
       }

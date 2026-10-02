@@ -586,3 +586,20 @@ describe('the remote door asks through this reading, and only the remote door', 
     expect(component).not.toContain('slashVerbsOf(')
   })
 })
+
+describe('a behaviour that could not act, at the keyboard', () => {
+  // Queens throw when nothing happened (honest-receipts.spec.ts), so a
+  // machine's receipt cannot read as success. At the keyboard that must be a
+  // line in the activity strip — an unhandled rejection would be filed by the
+  // break-repair loop as a crash, for a dialog the participant cancelled.
+  it('both places the command line hands a word to the registry catch, and say why', () => {
+    const slash = component.slice(component.indexOf('readonly #executeSlashBehaviour = async'), component.indexOf('// /select[...] command execution'))
+    expect(slash).toContain('try { await drone.execute(commandName, args) }')
+    expect(slash).toContain('catch (error) { this.#behaviourDidNotRun(commandName, error) }')
+    const select = component.slice(component.indexOf('readonly #executeSelectCommand = async'), component.indexOf('// per-item bracket operators'))
+    expect(select).toContain('try { await slash.execute(op, args) }')
+    expect(select).toContain('catch (error) { this.#behaviourDidNotRun(op, error) }')
+    const report = component.slice(component.indexOf('#behaviourDidNotRun(word: string, error: unknown): void {'))
+    expect(report.slice(0, 400)).toContain("EffectBus.emit('activity:log', { message, icon: 'error' })")
+  })
+})

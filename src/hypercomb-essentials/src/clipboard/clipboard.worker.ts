@@ -103,7 +103,11 @@ export class ClipboardWorker extends Worker {
       switch (payload.action) {
         case 'copy': settle(this.#capture('copy')); break
         case 'cut': settle(this.#capture('cut')); break
-        case 'paste': settle(this.#paste(this.#boundTarget(payload.targetSegments))); break
+        // A paste that placed nothing must not complete clean: the receipt
+        // of the word that asked would read as a move that never happened.
+        case 'paste': settle(this.#paste(this.#boundTarget(payload.targetSegments)).then(placed => {
+          if (placed === 0) throw new Error('paste — nothing was placed here; each held tile was already on this page or could not be found')
+        })); break
         case 'clear-clipboard': settle(this.#clearClipboard()); break
       }
     })
@@ -521,12 +525,12 @@ export class ClipboardWorker extends Worker {
   // cut:  move folders from store.clipboard back to current explorer dir.
   // copy: copy folders from sourceSegments to current explorer dir.
 
-  async #paste(boundTarget: readonly string[]): Promise<void> {
+  async #paste(boundTarget: readonly string[]): Promise<number> {
     const clipboardSvc = this.#clipboardSvc
-    if (!clipboardSvc || clipboardSvc.isEmpty) return
+    if (!clipboardSvc || clipboardSvc.isEmpty) return 0
     // Paste = place EVERY clipboard tile at the BOUND location (captured at
     // intent, not re-read here).
-    await this.#placeLabels(clipboardSvc.items.map(i => i.label), undefined, boundTarget)
+    return await this.#placeLabels(clipboardSvc.items.map(i => i.label), undefined, boundTarget)
   }
 
   // Place explicit (label + sourceSegments) entries at the current location.
@@ -555,20 +559,22 @@ export class ClipboardWorker extends Worker {
   // `#paste` (all labels) and the side panel's per-item place
   // (`clipboard:place-items`). Mirrors paste's consume semantics: cut drops
   // the items that landed; copy keeps them for repeat placement.
-  async #placeLabels(labels: readonly string[], targets?: Record<string, number>, boundTarget?: readonly string[]): Promise<void> {
+  /** Answers how many tiles LANDED — the one number a caller that must not
+   *  report a paste that placed nothing needs (the queen path, via settle). */
+  async #placeLabels(labels: readonly string[], targets?: Record<string, number>, boundTarget?: readonly string[]): Promise<number> {
     const clipboardSvc = this.#clipboardSvc
     const lineage = this.#lineage
     const store = this.#store
     const history = this.#history
     const committer = this.#committer
-    if (!clipboardSvc || !lineage || !store || !history || !committer) return
-    if (clipboardSvc.isEmpty || labels.length === 0) return
+    if (!clipboardSvc || !lineage || !store || !history || !committer) return 0
+    if (clipboardSvc.isEmpty || labels.length === 0) return 0
     // Commits at the target; refused while rewound. Feedback, don't half-run.
-    if (this.#blockedByRewound('paste')) return
+    if (this.#blockedByRewound('paste')) return 0
 
     const wanted = new Set(labels)
     const items = clipboardSvc.items.filter(i => wanted.has(i.label))
-    if (items.length === 0) return
+    if (items.length === 0) return 0
     const targetSegments = boundTarget ? [...boundTarget] : [...lineage.explorerSegments()]
 
     EffectBus.emit('clipboard:paste-start', { count: items.length })
@@ -590,6 +596,7 @@ export class ClipboardWorker extends Worker {
     }
 
     EffectBus.emit('clipboard:paste-done', { count: placedLabels.length, failed })
+    return placedLabels.length
   }
 
   // ── shared placement (paste + place) ──────────────────

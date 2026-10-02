@@ -77,6 +77,22 @@ export const callableBehaviours = <T extends CensusEntry>(
 }
 
 /**
+ * GENTLEST FIRST. Census order put the three manual providers (priority 100)
+ * ahead of every queen (50), so `/remove` was the second line a model read
+ * and `/hide` sat far below it — HIDE FIRST, DELETE SECOND was doctrine the
+ * participant held and the model was never shown (surface audit, item 7).
+ * Order is the one lever that costs nothing: additive, then editing, then
+ * destructive, census order kept within each rung. An unstated reach reads
+ * as editing, its documented default.
+ */
+const REACH_RANK: Readonly<Record<string, number>> = { additive: 0, editing: 1, destructive: 2 }
+const byReach = <T extends CensusEntry>(entries: readonly T[]): readonly T[] =>
+  entries
+    .map((entry, at) => ({ entry, at, rank: REACH_RANK[entry.machine?.reach ?? 'editing'] ?? 1 }))
+    .sort((a, b) => a.rank - b.rank || a.at - b.at)
+    .map(({ entry }) => entry)
+
+/**
  * The callable census as lines a model can read.
  *
  * The consequence is QUOTED, never composed. This module knows how far a verb
@@ -89,7 +105,7 @@ export const machineCatalogue = (
   entries: readonly CensusEntry[],
   grant: MachineGrant = currentMachineGrant(),
 ): string =>
-  callableBehaviours(entries, grant).map(entry => {
+  byReach(callableBehaviours(entries, grant)).map(entry => {
     const machine = entry.machine!
     const forms = machine.forms.trim()
     const note = machine.consequence?.trim() ? ` ${machine.consequence.trim()}` : ''

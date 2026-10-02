@@ -88,10 +88,11 @@ abstract class CursorStepQueen extends QueenBee {
       stepped++
     }
 
-    this.#log(
-      stepped === 0 ? `${this.command} — nothing left to step`
-      : stepped === 1 ? `${this.command} — stepped one action`
-      : `${this.command} — stepped ${stepped} actions`)
+    // Nothing moved is not a step, and a receipt must not call it one. A walk
+    // that stopped short of the number asked still did real work, and says
+    // how much.
+    if (stepped === 0) throw new Error(`${this.command} — nothing left to step`)
+    this.#log(stepped === 1 ? `${this.command} — stepped one action` : `${this.command} — stepped ${stepped} actions`)
 
     // STEPPING BACK CHANGES WHAT THE HIVE WILL ACCEPT, not just what it shows.
     // While the cursor is rewound `LayerCommitter` refuses every commit, so the

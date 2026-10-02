@@ -385,11 +385,17 @@ class KeywordProvider implements SlashBehaviourProvider {
       // states the rule; these two broke it while inheriting it from the old
       // five-name table. The participant keeps every form.
       machine: {
-        forms: '<cell> = <tag> | <cell> = <tag>(#hexcolor)',
+        forms: '<cell> = <tag> | <cell> = <tag>(#hexcolor) | <cell> = ~<tag>',
         example: '/keyword roadmap = urgent',
         reach: 'editing',
         scope: 'hive',
-        consequence: 'Tags the named tile; ~ before a tag removes it.',
+        // THE PARTICIPANT'S NOUNS, AND THE WRITE THE OLD TEXT HID (surface
+        // audit, items 6). A model asked for a pheromone read "keywords (tags)",
+        // said it could not, and told a participant the hive has none. A tag
+        // is not a pheromone (documentation/pheromones.md) — so say so, and
+        // say where pheromones are; and say that adding a tag also lists it
+        // hive-wide, which a per-tile reading of "tags the tile" concealed.
+        consequence: 'Tags the named tile, and adds the tag to the hive-wide tag list the participant sees; ~ before a tag takes it off the tile (the list keeps it). A tag is a keyword, not a pheromone: pheromones are signed interest-signals the participant deposits with /deposit.',
         refuse: refuseNamedKeyword,
       } }
   ]

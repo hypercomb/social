@@ -89,11 +89,23 @@ abstract class ClipboardVerbQueen extends QueenBee {
   protected async execute(args: string): Promise<void> {
     const targets = parseTargets(args)
 
+    // A NAME THIS PAGE DOES NOT HOLD IS NOTHING TO TAKE. The selection takes
+    // any label, so a copy of a phantom staged an entry that could never be
+    // placed, and a cut "succeeded" while no tile moved (surface audit, false
+    // success). Checked only when the page can say what it holds.
+    const page = get<{ suggestions(): string[] }>('@hypercomb.social/CellSuggestionProvider')?.suggestions?.() ?? []
+    const absent = page.length ? targets.filter(name => !page.some(tile => tile.toLowerCase() === name.toLowerCase())) : []
+    if (absent.length) throw new Error(`${this.command} — no tile named ${absent.map(name => `"${name}"`).join(', ')} on this page`)
+    // Nothing held is nothing to place — said, not resolved clean.
+    if (this.action === 'paste' && get<{ isEmpty?: boolean }>('@diamondcoreprocessor.com/ClipboardService')?.isEmpty) {
+      throw new Error('paste — the clipboard is holding nothing')
+    }
+
     // Named tiles BECOME the selection, because the worker's contract is "act
     // on what is picked" and a speaker's names are how they pick.
     if (targets.length) {
       const selection = get<SelectionLike>('@diamondcoreprocessor.com/SelectionService')
-      if (!selection) { this.#log(`${this.command} — selection is not ready yet`); return }
+      if (!selection) throw new Error(`${this.command} — selection is not ready yet`)
       selection.clear()
       for (const label of targets) selection.add(label)
     }
@@ -125,10 +137,9 @@ abstract class ClipboardVerbQueen extends QueenBee {
     })
 
     if (!accepted) {
-      // No worker is listening, so nothing will ever happen. Saying so beats
-      // logging a success nobody earned.
-      this.#log(`${this.command} — the clipboard is not ready yet`)
-      return
+      // No worker is listening, so nothing will ever happen — and returning
+      // would still be read as a success by a machine's receipt.
+      throw new Error(`${this.command} — the clipboard is not ready yet`)
     }
     await completed
 

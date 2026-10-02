@@ -475,12 +475,34 @@ three doors inherit it, and to grow a principal.
    land regardless of caller. Still owed on top — `undo.queen.ts` reports the
    number ASKED FOR rather than the number that moved, so it overstates when
    the walk hits the floor; that file is untracked work from another session.
-5. **Make the fire-and-forget six honest**, using `create.queen`'s
-   accept/complete pattern. Six verbs, one known-good template.
-6. **Teach the catalogue the participant's nouns** — say "keyword / tag /
-   author pheromone", and state `/keyword`'s global registry write.
-7. **Order the catalogue by reach**, so `/hide` precedes `/remove`.
-8. **Render the catalogue to the participant** before any grant exists to give.
+5. ~~**Make the fire-and-forget six honest**~~ **Resolved 2026-10-02.** The
+   acknowledgement half had landed piecemeal (copy, cut, paste, hide await the
+   worker's `complete`; undo and redo await the cursor). What remained was the
+   receipt itself: a word that did NOTHING still resolved clean, so a machine
+   read "ran". Now each throws when nothing happened — `/paste` of an empty
+   clipboard or with every item skipped, `/hide` with nothing hidden, `/copy`
+   and `/cut` of a name the page does not hold (or with no worker listening),
+   `/undo`/`/redo` with nothing left to step, `/keyword` whose named tile got
+   no tag, and `/remove` of a name the page never held or whose commit was
+   refused (`removeTilesAt` had discarded both). At the keyboard the throw is
+   an activity line (`#behaviourDidNotRun`), not an unhandled rejection the
+   break-repair loop would file as a crash — which `/remove` already caused
+   for a cancelled confirm. `commands/honest-receipts.spec.ts`.
+6. ~~**Teach the catalogue the participant's nouns**~~ **Resolved 2026-10-02,
+   corrected.** The audit asked to call tags pheromones; doctrine since says
+   they are not (`pheromones.md`: an authored, signed interest-signal, the
+   `/deposit` word). So `/keyword`'s catalogue entry now says the true thing a
+   model needs: a tag is a keyword, NOT a pheromone, pheromones are the
+   participant's to deposit with `/deposit` — enough that "you asked for a
+   pheromone" no longer ends in "the hive has none". It also states the
+   hive-wide tag-list write, and its forms show the `~` removal.
+7. ~~**Order the catalogue by reach**~~ **Resolved 2026-10-02.**
+   `machineCatalogue` lists additive, then editing, then destructive, census
+   order kept within a rung, so `/hide` is read before `/remove`.
+8. ~~**Render the catalogue to the participant**~~ **Resolved 2026-10-02.**
+   `/grant verbs` shows, one activity line each, the very catalogue a model is
+   taught under the current ceiling — the same renderer, so what is read
+   cannot drift from what is taught. A fuller surface (a panel) is not built.
 9. ~~**Judge the verbs the remote door does not read as a head** — the op
    after a bracket, and the `~` removal sigil.~~ **Resolved 2026-10-01**:
    `dispatchedVerbsOf`

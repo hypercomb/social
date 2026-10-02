@@ -88,6 +88,11 @@ export async function removeTilesAt(
     survivorSigs.push(String(sig))
   }
 
+  // NOTHING MATCHED, NOTHING HAPPENED — and it must not say otherwise. The
+  // survivors were then every child, the commit a no-op, and the receipt read
+  // "removed" for a name this page never held (surface audit, false success).
+  if (survivorSigs.length === childSigs.length) return false
+
   // Notify downstream UI subscribers (activity log, substrate, slot
   // machine, tile-overlay) BEFORE awaiting the commit so the visual
   // unmount runs immediately. LayerCommitter.update is O(siblings)
@@ -106,6 +111,8 @@ export async function removeTilesAt(
   // Empty nameSlots → the committer SETs `children` to these exact sigs (no
   // name→sig re-resolution, no auto-mint). Other slots (decorations, notes,
   // properties) are preserved — #commit hydrates them from the previous layer.
-  await committer.update(segments, { children: survivorSigs }, new Set<string>())
-  return true
+  // A refused commit answers '' (it logs "update refused — no address
+  // resolvable"); that is a removal that did not land.
+  const landed = await committer.update(segments, { children: survivorSigs }, new Set<string>())
+  return typeof landed === 'string' ? landed !== '' : true
 }

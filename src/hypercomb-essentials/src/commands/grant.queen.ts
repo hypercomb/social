@@ -27,9 +27,10 @@
 //   /grant additive         — lower it
 //   /grant page             — narrow how FAR a change may travel
 //   /grant none             — a machine may say nothing here
+//   /grant verbs            — the catalogue a model is taught under it, line by line
 
 import {
-  QueenBee, EffectBus, admitMachineCall,
+  QueenBee, EffectBus, admitMachineCall, machineCatalogue,
   DEFAULT_MACHINE_GRANT, GRANTED_REACHES, GRANTED_SCOPES,
   MACHINE_GRANT_KEY, currentMachineGrant, writeMachineGrant,
   type AdmissionEntry, type MachineGrant, type GrantedReach, type MachineScope,
@@ -86,11 +87,12 @@ export class GrantQueenBee extends QueenBee {
   readonly command = 'grant'
   override description = 'Set how far a machine may go in this hive'
   override descriptionKey = 'slash.grant'
-  override options = ['none', ...GRANTED_REACHES.filter(r => r !== 'none'), ...GRANTED_SCOPES]
+  override options = ['none', ...GRANTED_REACHES.filter(r => r !== 'none'), ...GRANTED_SCOPES, 'verbs']
   override examples = [
     { input: '/grant', result: 'Shows what a machine may currently do here' },
     { input: '/grant none', result: 'A machine may say nothing in this hive' },
     { input: '/grant destructive', result: 'A machine may also use verbs that take things away' },
+    { input: '/grant verbs', result: 'Shows, line by line, exactly what a model is taught it may say here' },
   ]
 
   // DELIBERATELY NO `machine` BLOCK, and here the absence is a security
@@ -102,12 +104,13 @@ export class GrantQueenBee extends QueenBee {
 
   override slashComplete(args: string): readonly string[] {
     const query = args.trim().toLowerCase()
-    const rungs = [...GRANTED_REACHES, ...GRANTED_SCOPES]
+    const rungs = [...GRANTED_REACHES, ...GRANTED_SCOPES, 'verbs']
     return query ? rungs.filter(rung => rung.startsWith(query)) : rungs
   }
 
   protected async execute(args: string): Promise<void> {
     const current = currentMachineGrant()
+    if (args.trim().toLowerCase() === 'verbs') { this.#showCatalogue(current); return }
     const reading = readGrant(args, current)
 
     if ('refuse' in reading) { this.#log(`Grant — ${reading.refuse}`); return }
@@ -138,6 +141,19 @@ export class GrantQueenBee extends QueenBee {
     const standard = grant.reach === DEFAULT_MACHINE_GRANT.reach
       && grant.scope === DEFAULT_MACHINE_GRANT.scope
     return `${grant.reach} at the ${grant.scope}${standard ? ' (the standing default)' : ''} — ${listed}`
+  }
+
+  /** A GRANT IS A THING A PARTICIPANT MUST BE ABLE TO READ BEFORE GIVING IT
+   *  (surface audit, item 8): no surface rendered the catalogue at all. This
+   *  shows the very text a model is taught under the current ceiling — the
+   *  same renderer, so what is read here cannot drift from what is taught —
+   *  gentlest verb first, one line each. */
+  #showCatalogue(grant: MachineGrant): void {
+    if (grant.reach === 'none') { this.#log('Grant — a machine may say nothing here, so a model is taught no verbs'); return }
+    const entries = get<{ entries?(): Parameters<typeof machineCatalogue>[0] }>('@diamondcoreprocessor.com/SlashBehaviourDrone')?.entries?.() ?? []
+    const lines = machineCatalogue(entries, grant).split('\n').filter(Boolean)
+    this.#log(`Grant — under ${grant.reach} at the ${grant.scope}, a model is taught ${lines.length} ${lines.length === 1 ? 'verb' : 'verbs'}${lines.length ? ':' : ''}`)
+    for (const line of lines) this.#log(line)
   }
 
   #log(message: string): void {
