@@ -1350,6 +1350,7 @@
   "mesh-modal.start": "starten",
   "slash.branch": "Pfad oder Signatur für die Befehlsautovervollständigung benennen",
   "slash.chat": "Mehrstufige Konversation mit Claude — erstellt Thread-Kacheln mit Q&A-Unterkacheln",
+  "slash.withhold": "Eine Kachel vor externen Modellen verbergen — nur dein lokales Modell darf sie lesen",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "Zwischen Hexagonen und Website-Darstellung umschalten",

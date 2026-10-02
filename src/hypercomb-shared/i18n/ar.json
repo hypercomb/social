@@ -1350,6 +1350,7 @@
   "mesh-modal.start": "بدء",
   "slash.branch": "تسمية مسار أو توقيع للإكمال التلقائي للأوامر",
   "slash.chat": "محادثة متعددة الأدوار مع Claude — ينشئ بلاطات محادثة مع أبناء أسئلة وأجوبة",
+  "slash.withhold": "إبقاء بلاطة بعيدًا عن النماذج الخارجية — نموذجك المحلي وحده يقرؤها",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "التبديل بين عرض السداسيات وعرض الموقع",

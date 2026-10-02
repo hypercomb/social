@@ -313,6 +313,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'icons:overrides',
   'locations:saved',
   'portals:recent',
+  // The routes the participant withholds from outside models: what a model
+  // other than their own may not read (hypercomb-shared/core/ai-withheld.store.ts).
+  // DOCUMENT, per participant, never replicated.
+  'ai:withheld',
   // What participants make that is theirs alone, moved out of localStorage the
   // same way (essentials preferences/participant-document.ts): saved sequences
   // and patterns, Arkanoid and Solomon levels (Solomon's creations and designer

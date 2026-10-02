@@ -1350,6 +1350,7 @@
   "mesh-modal.start": "başlat",
   "slash.branch": "Komut otomatik tamamlama için bir yol veya imza belirle",
   "slash.chat": "Claude ile çok turlu sohbet — S&C alt öğeleriyle konu dizisi döşemeleri oluşturur",
+  "slash.withhold": "Bir kutucuğu dış modellerden sakla — yalnızca yerel modelin okuyabilir",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "Altıgenler ve web sitesi görünümü arasında geçiş yap",

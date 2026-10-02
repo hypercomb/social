@@ -183,6 +183,9 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['icons:overrides', 'document'],
   ['locations:saved', 'document'],
   ['portals:recent', 'document'],
+  // Routes the participant withholds from outside models (hypercomb-shared/
+  // core/ai-withheld.store.ts): one current list, never replicated.
+  ['ai:withheld', 'document'],
   // What participants make, moved out of localStorage the same way
   // (essentials preferences/participant-document.ts).
   ['sequences:palette', 'document'],

@@ -1350,6 +1350,7 @@
   "mesh-modal.start": "시작",
   "slash.branch": "명령 자동완성을 위한 경로 또는 서명 지정",
   "slash.chat": "Claude와 다중 턴 대화 — Q&A 하위 항목이 있는 스레드 타일 생성",
+  "slash.withhold": "타일을 외부 모델로부터 숨기기 — 로컬 모델만 읽을 수 있음",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "육각형과 웹사이트 렌더링 간 전환",

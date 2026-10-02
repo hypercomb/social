@@ -155,6 +155,8 @@ import {
 import { contextNeedFor, effortForWork, effortFromJev, effortInThread, isCodeMessage, type MessageEffort } from './message-effort'
 import { CHAT_CONTEXT_COMPILER, compileChatContext } from './context-window-compiler'
 import { executionLineParts } from './execution-line'
+import { withheldMessage, withheldObservation, withoutWithheld } from './withheld-reads'
+import { aiWithheld } from '../../core/ai-withheld.store'
 import {
   blockRefusedMessage,
   blockUnwrittenMessage,
@@ -6851,6 +6853,12 @@ export class ChatWindowComponent implements OnDestroy {
           throw new WorkRefused('this stretch has used its read budget; hand the work over — say what you found and what is left — and the next stretch reads on with a fresh budget')
         }
         const plan = parseHypercombObservationGrammars(readLines, grammarContext.segments, readsPerBlock)
+        // WITHHELD TILES (core/ai-withheld.store.ts): only the participant's
+        // own local model may read them. Refused before anything runs.
+        const ownModel = providerId === 'local' && localReadyAndTrusted
+        const covers = ownModel ? () => false : (segments: readonly string[]) => aiWithheld.covers(segments)
+        const withheld = withheldObservation(plan.observations, covers)
+        if (withheld) throw new WorkRefused(withheldMessage(withheld.grammar))
         const grammars = plan.observations.map(observation => observation.grammar)
         // What each read RESOLVED to — the key an allowed read is remembered
         // by, so "read here" allowed on one page never covers another.
@@ -6877,12 +6885,12 @@ export class ChatWindowComponent implements OnDestroy {
           const windowTokens = (model && router.contextLengthForModel?.(model)) || 128_000
           const room = Math.max(0, windowTokens - 8_000 - estimateTokens(system) - tokensOf(messages)) * 3 / 2
           const perReadBytes = Math.max(1_024, Math.min(harnessNow.reads.pageChars, Math.floor(Math.min(remaining - 512, room) / plan.observations.length)))
-          const receipt = await executeHypercombObservationPlan(plan, treeReader, {
+          const receipt = withoutWithheld(await executeHypercombObservationPlan(plan, treeReader, {
             maxDepth: 2,
             maxNodes: 48,
             maxBytes: perReadBytes,
             signal,
-          })
+          }), covers)
           const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt)
           if (content.length > remaining) {
             // A BLOCK LARGER THAN A WHOLE FRESH STRETCH IS NOT HANDED OVER.
