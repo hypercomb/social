@@ -161,7 +161,7 @@ import { withheldMessage, withheldObservation, withoutWithheld } from './withhel
 import { aiWithheld } from '../../core/ai-withheld.store'
 import {
   blockRefusedMessage,
-  blockUnwrittenMessage,
+  blockUnwrittenMessage, claimsUnranChange, unranChangeMessage,
   doFailedMessage,
   JevGone,
   doRanMessage,
@@ -6691,6 +6691,7 @@ export class ChatWindowComponent implements OnDestroy {
       let lastRound = false
       let unwrittenSaid = false
       let unreadSaid = false
+      let unranSaid = false
       // A READ THE PARTICIPANT WROTE OUT (`find arkanoid` in a read block):
       // until something is read, what the model says is not shown. Asked to
       // paste a read back, a model streamed 3 KB of invented module paths
@@ -7436,6 +7437,16 @@ export class ChatWindowComponent implements OnDestroy {
           unwrittenSaid = true
           messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: blockUnwrittenMessage(work.unwritten, message) })
           EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `asked again: ${work.unwritten} was not written as a block` })
+          continue
+        }
+        // AN ANSWER THAT CLAIMS A CHANGE NOTHING RAN (hypercomb-work-fence.ts
+        // claimsUnranChange): asked to make a tile, a model said "the tile is
+        // now created" with nothing run this turn. Sent back once with the
+        // truth; a model that claims it twice is answered as it stands.
+        if (!work.request && !lastRound && !unranSaid && ran.length === 0 && claimsUnranChange(roundText, message)) {
+          unranSaid = true
+          messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: unranChangeMessage(message) })
+          EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'asked again: claimed a change nothing ran' })
           continue
         }
         // AN ANSWER ABOUT TILES NOTHING READ (hypercomb-work-fence.ts
