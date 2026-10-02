@@ -93,7 +93,7 @@ describe('a word that keeps its arguments verbatim', () => {
     // The slashed line is what is judged and what is run — `models`, and only
     // `models`, whatever behaviour words its prose happens to say. Judged
     // folded, as every slash line now is (remote-verbs.spec.ts runs it).
-    expect(body).toContain(': dispatchedVerbsOf(line,')
+    expect(body).toContain(': dispatchedCallsOf(line,')
     expect(slashVerbsOf('/Models request a planner that holds forty files')).toEqual(['models'])
     expect(body).toContain('void this.#preprocessTagsThenExecute(line)')
     expect(body).not.toContain('this.#preprocessTagsThenExecute(text)')

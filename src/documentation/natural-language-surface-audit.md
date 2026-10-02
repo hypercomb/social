@@ -518,12 +518,15 @@ three doors inherit it, and to grow a principal.
     word, and read ONLY after a door's lookup missed. Live always wins: a word
     given back, or aliased by the participant, runs; its old record is never
     read. A record can explain a missing word and cannot hide a present one.
-11. **The bridge does not run a behaviour's own `refuse`** (found by the
-    declarations audit, 2026-10-01). Only the model channel's parser calls it,
-    so over the bridge the rules a behaviour states for machines do not apply:
-    `/module commit` ("publishes; only the participant says it"), `/language
-    offer`, clearing a title with `/title x =`, `/copy` over a held cut. The
-    gate there reads reach and scope alone. Declarations bound the forms their
-    `refuse` admits — their contract — so the fix belongs at the door: run the
-    resolved entry's `refuse` on the slash head's arguments, as the model
-    channel does. Owed.
+11. ~~**The bridge does not run a behaviour's own `refuse`**~~ (found by the
+    declarations audit) **Resolved 2026-10-01.** Only the model channel's
+    parser called it, so over the bridge `/module commit` ("publishes; only the
+    participant says it"), `/language offer`, clearing a title with
+    `/title x =` and `/copy` over a held cut all ran on reach and scope alone.
+    The door now reads each call with the arguments its behaviour will be
+    handed (`dispatchedCallsOf` in remote-verbs.ts: the executor's split for a
+    slash head, the words after a registry-bound bracket op, nothing for a
+    view word, the reading's own args for prose) and, once the gate admits,
+    runs that behaviour's `refuse` on them. Where a verb is handed no argument
+    language of its own — a built-in bracket op acting on the bracket's names,
+    a `~` sigil — it is judged for reach and scope alone, as before.

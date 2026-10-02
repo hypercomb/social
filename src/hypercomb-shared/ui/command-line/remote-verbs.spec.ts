@@ -21,7 +21,10 @@ import {
   admitMachineCall, spokenEntry, canonicalVerbOf, DEFAULT_MACHINE_GRANT,
   type AdmissionEntry, type MachineAdmission, type MachineGrant,
 } from '@hypercomb/core'
-import { dispatchedVerbsOf, slashVerbsOf, viewCommandOf, type FeatureReading } from './remote-verbs'
+import {
+  SELECT_BUILTIN_OPS, dispatchedCallsOf, dispatchedVerbsOf, slashVerbsOf, viewCommandOf,
+  type FeatureReading, type SpokenCall,
+} from './remote-verbs'
 
 const read = (...p: string[]): string => readFileSync(join(process.cwd(), ...p), 'utf8')
 const component = read('hypercomb-shared', 'ui', 'command-line', 'command-line.component.ts')
@@ -36,10 +39,12 @@ const member = (start: string): string => {
   return component.slice(from, to)
 }
 
+type CensusRow = AdmissionEntry & { machine?: AdmissionEntry['machine'] & { refuse?: (args: string) => string | undefined } }
+
 /** Census rows shaped as the shipped ones are: `/remove` and `/cut`
  *  destructive on the page, `rm` a name a participant gave, `/prune` concealed,
  *  `/postit` a view's word an operator may say, `/lounge` a view still a prototype. */
-const census: readonly AdmissionEntry[] = [
+const census: readonly CensusRow[] = [
   { name: 'create', machine: { reach: 'additive', scope: 'page' } },
   { name: 'copy' },
   { name: 'move' },
@@ -48,6 +53,15 @@ const census: readonly AdmissionEntry[] = [
   { name: 'prune', hidden: true },
   { name: 'postit', machine: { reach: 'editing', scope: 'tile' } },
   { name: 'lounge', prototype: true },
+  // Two rows carrying their own argument rule, shaped as the shipped ones are.
+  { name: 'module', machine: { reach: 'additive', scope: 'local', refuse: (args: string) => {
+    const word = args.trim().split(/\s+/)[0] || 'list'
+    return word === 'list' ? undefined : `/module ${word} is the participant's`
+  } } },
+  { name: 'title', machine: { reach: 'editing', scope: 'tile', refuse: (args: string) => {
+    const equals = args.indexOf('=')
+    return equals !== -1 && !args.slice(equals + 1).trim() ? "clearing a title is a participant's to do" : undefined
+  } } },
 ]
 
 /** The door's own loop: every verb judged, the first refusal answers, and a
@@ -59,14 +73,17 @@ const door = (
   retiredOf: (verb: string) => AdmissionEntry['retired'] = () => undefined,
 ): MachineAdmission | null => {
   // The door's entryOf: the census first, a retired word only on a miss.
-  const entryOf = (verb: string): AdmissionEntry | undefined => {
+  const entryOf = (verb: string): CensusRow | undefined => {
     const live = spokenEntry(verb, census)
     const retired = live || !verb ? undefined : retiredOf(verb)
     return live ?? (retired ? { name: verb, retired } : undefined)
   }
-  const named = dispatchedVerbsOf(line, featureOf)
-  for (const verb of named.length ? named : ['']) {
-    const verdict = admitMachineCall(verb, entryOf(verb), 'operator', grant)
+  const named: readonly SpokenCall[] = dispatchedCallsOf(line, featureOf)
+  for (const { verb, args } of named.length ? named : [{ verb: '' }]) {
+    const entry = entryOf(verb)
+    const verdict = admitMachineCall(verb, entry, 'operator', grant)
+    const refused = verdict.admit && args !== undefined ? entry?.machine?.refuse?.(args) : undefined
+    if (refused) return { admit: false, reason: refused }
     if (!verdict.admit) return verdict
   }
   return null
@@ -353,7 +370,7 @@ describe('`/grant none` refuses every line the door is sent', () => {
   it('the door asks about the empty verb rather than skipping it', () => {
     const from = component.indexOf('EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {')
     const body = component.slice(from, component.indexOf('\n    // voice active state sync', from))
-    expect(body).toContain("const spokenVerbs = named.length ? named : ['']")
+    expect(body).toContain("const spokenCalls = named.length ? named : [{ verb: '' }]")
     expect(body).not.toContain('if (!verb) continue')
     expect(body).not.toContain("grant.reach === 'none'")   // core decides, the door asks
   })
@@ -396,7 +413,8 @@ describe('a retired word over the bridge is refused with what to say instead', (
     const body = component.slice(from, component.indexOf('\n    // voice active state sync', from))
     expect(body).toContain('const live = spokenEntry(verb, census)')
     expect(body).toContain('const retired = live || !verb ? undefined : slash?.retired?.(verb)')
-    expect(body).toContain("admitMachineCall(verb, entryOf(verb), 'operator', grant)")
+    expect(body).toContain('const entry = entryOf(verb)')
+    expect(body).toContain("admitMachineCall(verb, entry, 'operator', grant)")
   })
 
   it('the keyboard says the same instead of minting a tile, and keeps the line', () => {
@@ -414,6 +432,56 @@ describe('a retired word over the bridge is refused with what to say instead', (
     const block = body.slice(asked, stance)
     expect(block).toContain('was retired')
     expect(block).not.toContain('this.clear()')
+  })
+})
+
+describe("each call carries what its behaviour will be handed, so the door can run the behaviour's refuse", () => {
+  it('a slash head carries the executor\'s args, as typed', () => {
+    expect(dispatchedCallsOf('/Title roadmap = Road map')).toEqual([{ verb: 'title', args: 'roadmap = Road map' }])
+    expect(dispatchedCallsOf('/move(3)')).toEqual([{ verb: 'move', args: '(3)' }])
+    expect(dispatchedCallsOf('/module')).toEqual([{ verb: 'module', args: '' }])
+    expect(dispatchedCallsOf('/ module commit fresh')).toEqual([{ verb: 'module', args: 'commit fresh' }])
+  })
+
+  it('a reading the registry will not run carries none — judged for reach alone', () => {
+    // The executor asks for "remove.drafts"; the canonical reading names remove.
+    expect(dispatchedCallsOf('/remove.drafts')).toEqual([{ verb: 'remove.drafts', args: '' }, { verb: 'remove' }])
+    // The executor cuts "select[a," at the space; the head reads select.
+    expect(dispatchedCallsOf('/select[a, b]/remove')).toEqual([{ verb: 'select' }, { verb: 'remove' }])
+  })
+
+  it('a bracket op handed to the registry carries the words after it; a built-in carries none', () => {
+    expect(dispatchedCallsOf('[x]/module commit fresh')).toEqual([{ verb: 'module', args: 'commit fresh' }])
+    expect(dispatchedCallsOf('[a, b]/copy')).toEqual([{ verb: 'copy' }])
+    expect(dispatchedCallsOf('[a]/keyword work')).toEqual([{ verb: 'keyword' }])
+  })
+
+  it('a view word is handed nothing; a sigil carries no arguments', () => {
+    expect(dispatchedCallsOf('meetup@postit', () => ({ remove: false, command: 'postit' }))).toEqual([{ verb: 'postit', args: '' }])
+    expect(dispatchedCallsOf('~drafts')).toEqual([{ verb: 'remove' }])
+  })
+})
+
+describe("the door runs the behaviour's own refuse, after the gate admits", () => {
+  it('a participant-only word is refused over the bridge, as for a model', () => {
+    expect(door('/module commit fresh')).toEqual({ admit: false, reason: "/module commit is the participant's" })
+    expect(door('/Module drop games/solomon')).toEqual({ admit: false, reason: "/module drop is the participant's" })
+    expect(door('[x]/module commit fresh')).toEqual({ admit: false, reason: "/module commit is the participant's" })
+  })
+
+  it('and what the rule admits still runs', () => {
+    expect(door('/module')).toBeNull()
+    expect(door('/module list')).toBeNull()
+    expect(door('/title roadmap = Road map')).toBeNull()
+    expect(door('/title roadmap =')).toEqual({ admit: false, reason: "clearing a title is a participant's to do" })
+  })
+
+  it('the gate answers first: a refused verb is refused for its reach, not its arguments', () => {
+    expect(door('/remove drafts')).toEqual(refusedRemove)
+  })
+
+  it('a built-in bracket op names its targets in the bracket, so no argument rule is asked', () => {
+    expect(door('[a, b]/copy')).toBeNull()
   })
 })
 
@@ -458,6 +526,16 @@ describe('the reading and the dispatch cannot disagree', () => {
     expect(body).toContain('await slash.execute(op, args)')
   })
 
+  it('the built-in bracket ops are exactly the ones the select dispatch carries out itself', () => {
+    const body = component.slice(component.indexOf('readonly #executeSelectCommand = async'), component.indexOf('// per-item bracket operators'))
+    const named = new Set<string>()
+    for (const match of body.matchAll(/op === '([a-z]+)'/g)) named.add(match[1])
+    for (const match of body.matchAll(/\[('[a-z]+'(?:, '[a-z]+')+)\]\.includes\(op\)/g)) {
+      for (const word of match[1].split(', ')) named.add(word.slice(1, -1))
+    }
+    expect([...SELECT_BUILTIN_OPS].sort()).toEqual([...named].sort())
+  })
+
   it('one normaliser for a bracket line, shared and not restated', () => {
     expect(component).toContain("import { isSelectOp, BRACKET_CMD_RE, normalizeSelectInput } from './select-ops'")
     expect(component).not.toContain('function normalizeSelectInput')
@@ -484,7 +562,7 @@ describe('the reading and the dispatch cannot disagree', () => {
 })
 
 describe('the remote door asks through this reading, and only the remote door', () => {
-  it('judges a line the reader matched nothing in by dispatchedVerbsOf', () => {
+  it('judges a line the reader matched nothing in by dispatchedCallsOf', () => {
     const from = component.indexOf('EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {')
     const to = component.indexOf('\n    // voice active state sync', from)
     expect(from).toBeGreaterThan(-1)
@@ -492,8 +570,8 @@ describe('the remote door asks through this reading, and only the remote door', 
     const body = component.slice(from, to)
     // The view question is the pipeline's own: the parse it will make, of the
     // line it will be handed.
-    const readAt = body.indexOf(': dispatchedVerbsOf(line, v => this.#featureOf(v))')
-    const judged = body.indexOf('for (const verb of spokenVerbs)')
+    const readAt = body.indexOf(': dispatchedCallsOf(line, v => this.#featureOf(v))')
+    const judged = body.indexOf('for (const { verb, args } of spokenCalls)')
     const run = body.indexOf('void this.#preprocessTagsThenExecute(line)')
     expect(readAt).toBeGreaterThan(-1)
     expect(readAt).toBeLessThan(judged)
@@ -503,7 +581,8 @@ describe('the remote door asks through this reading, and only the remote door', 
 
   it('leaves the keyboard path alone', () => {
     // One call in the component, and it is the door's.
-    expect(component.split('dispatchedVerbsOf(').length - 1).toBe(1)
+    expect(component.split('dispatchedCallsOf(').length - 1).toBe(1)
+    expect(component).not.toContain('dispatchedVerbsOf(')
     expect(component).not.toContain('slashVerbsOf(')
   })
 })
