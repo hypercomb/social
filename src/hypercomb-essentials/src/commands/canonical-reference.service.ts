@@ -61,6 +61,7 @@ type CommitterLike = {
     segments: readonly string[],
     changes: { appends?: readonly string[] },
   ): Promise<string>
+  update?(segments: readonly string[], layer: PlacementLayer): Promise<string>
 }
 
 const get = <T,>(key: string): T | undefined =>
@@ -271,7 +272,28 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
         decorations: [...new Set([...inheritedDecorations, decorationSig])],
       }
     }
-    const childMarkerSig = await history.commitLayer(childLocationSig, childLayer)
+    // THROUGH THE COMMIT QUEUE, never around it. A direct history.commitLayer
+    // here raced the property writes already queued for this location (a
+    // gather's repo write fires root-default-changed, and the renderer and the
+    // theme re-dress write every alias of the name): they had read the head
+    // BEFORE the doorway, landed AFTER it, and committed the old tile back —
+    // the doorway lost its mark at the head (/howard/team, 2026-10-02). Queued,
+    // the doorway lands after them, and anything later hydrates from it.
+    // The queue starts from the location's head and sets only the slots it is
+    // given, so every slot the old head wears and the doorway does not is named
+    // empty: the doorway is exactly `childLayer`, as a direct commit made it.
+    let childMarkerSig: string
+    if (committer.update) {
+      const head = await history.currentLayerAt(childLocationSig).catch(() => null)
+      const exact: PlacementLayer = { ...childLayer }
+      for (const [slot, value] of Object.entries(head ?? {})) {
+        if (slot === 'name' || slot in exact) continue
+        exact[slot] = Array.isArray(value) ? [] : null
+      }
+      childMarkerSig = await committer.update(childSegments, exact)
+    } else {
+      childMarkerSig = await history.commitLayer(childLocationSig, childLayer)
+    }
     await committer.commitChildrenDeltas(parentSegments, { appends: [childMarkerSig] })
     if (plan && Object.keys(plan.override).length > 0) {
       await writeTilePropertiesAt(parentSegments, name, plan.override, { onlyHere: true })
