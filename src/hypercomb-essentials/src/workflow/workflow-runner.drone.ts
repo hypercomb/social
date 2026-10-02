@@ -38,7 +38,8 @@
 // the bare-word collision space (known-location-pools.md) — and never in a
 // slot.
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, admitMachineCall, currentMachineGrant, primaryEntry, type AdmissionEntry } from '@hypercomb/core'
+import { isWithinAdoptedRoot } from '../sharing/adopted-roots.js'
 import { WORKFLOW_SLOT_DECLARATION, readWorkflow } from './workflow-slot.js'
 import { readSteps, type WorkflowStep, type WorkflowStepView } from './workflow-step.js'
 import {
@@ -77,7 +78,31 @@ export interface WorkflowRunState {
 }
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
-type SlashLike = { execute?: (name: string, args: string) => Promise<void> | void }
+type SlashLike = {
+  execute?: (name: string, args: string) => Promise<void> | void
+  entries?: () => readonly (AdmissionEntry & { machine?: { refuse?: (args: string) => string | undefined } })[]
+}
+
+/** WHO CHOSE A STEP'S WORDS decides who judges it (core machine-admission:
+ *  "who chose the words, not which surface they arrived on"). A step tile in
+ *  the participant's own tree is their words, run by their own Run — as the
+ *  keyboard, asked of nobody. A step inside a branch adopted from a PEER is a
+ *  stranger's words, run unattended: judged as a model's line is — a
+ *  declaration required, the participant's grant, their ceiling, and the
+ *  behaviour's own refuse. Answers the refusal, or undefined to run. */
+export const peerStepRefusal = (
+  stepSegments: readonly string[],
+  command: string,
+  args: string,
+  slash: SlashLike | undefined,
+): string | undefined => {
+  if (!isWithinAdoptedRoot(stepSegments)) return undefined
+  const entry = primaryEntry(command, slash?.entries?.() ?? [])
+  const verdict = admitMachineCall(command, entry, 'model', currentMachineGrant())
+  if (!verdict.admit) return `a peer's step: ${verdict.reason}`
+  const refused = entry?.machine?.refuse?.(args)
+  return refused ? `a peer's step: ${refused}` : undefined
+}
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: <U>(k: string) => U | undefined } }).ioc?.get?.<T>(key)
@@ -271,6 +296,8 @@ export class WorkflowRunnerDrone extends Drone {
     if (!slash?.execute) return { status: 'failed', detail: 'slash behaviours not available' }
 
     const args = ctx.interpolate(ctx.step.args ?? '')
+    const refusal = peerStepRefusal(ctx.segments, command, args, slash)
+    if (refusal) return { status: 'failed', detail: refusal.slice(0, 200) }
     await slash.execute(command, args)
     return { status: 'done', detail: `/${command}${args ? ' ' + args : ''}`.slice(0, 120) }
   }

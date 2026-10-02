@@ -564,3 +564,25 @@ three doors inherit it, and to grow a principal.
     names what is offered but not taught. Every model path reads the grant
     through `currentMachineGrant()`, so the model channel, the catalogue, the
     chat window's checks and the bridge-tier ask all follow it.
+13. **The rest of the grant-layer list, checked against the code (2026-10-02).**
+    - *Abort does not stop work already launched* — **covered.** The plan
+      runner never starts the next line after Stop, and since item 5 every
+      machine verb awaits its own work, so no detached continuation outlives
+      its action. The line in flight finishes: cutting a commit in half would
+      be worse than letting it land.
+    - *Reads need separate scoping* — **covered by later work**
+      (`llm-hive-access.ts`, anatomy-context-need.md §4): every keyed provider
+      is off until granted per provider, with a character budget; only the
+      participant's own local model reads freely. The existence oracle a
+      granted additive verb offers stays, now bounded by the roster.
+    - *The unit of authorization is not the unit of atomicity* — **open, by
+      size.** A failure stops the tail and the receipt names the completed
+      prefix; a true rollback is a forward-commit revert across pages.
+    - *There is no single seam* — **one door was found and closed.** Every
+      caller that runs a behaviour was traced: keyboard and bridge (command
+      line), model channel (chat window), quick menu (the participant's hand),
+      and the WORKFLOW RUNNER, which ran each step "as if typed" with nobody
+      asked. Right for the participant's own workflow; wrong for a step inside
+      a branch adopted from a peer — a stranger's words, run unattended. Such a
+      step is now judged as a model's line (`peerStepRefusal`,
+      workflow-runner.drone.ts): declaration, grant, ceiling, own refuse.
