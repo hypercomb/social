@@ -2,7 +2,7 @@
 //
 // THE KERNEL — the whole of what a minimal install runs by itself.
 //
-// The install ships this and the processor (/hypercomb-core.runtime.js). The
+// The install ships this and the processor (hypercomb-core.runtime.js). The
 // kernel knows TWO signatures, baked in at build time (build.mjs computes
 // them; none is written in source): the host bundle and the core library.
 // It finds their bytes — this device first, then this origin, then the
@@ -23,7 +23,15 @@ declare const __HC_LIBRARY_SIG__: string
 declare const __HC_SEED_HOSTS__: readonly string[] | undefined
 
 const DEFAULT_HOSTS: readonly string[] = typeof __HC_SEED_HOSTS__ !== 'undefined' ? __HC_SEED_HOSTS__ : ['hypercomb.com', 'jwize.com']
-const PROCESSOR = '/hypercomb-core.runtime.js'
+// Where this host is served from (src/here.ts, repeated: the kernel imports
+// nothing). Named files resolve here; signature-named files are origin-wide.
+const HERE = new URL('./', document.baseURI)
+const WORKER = new URL('hypercomb.worker.js', HERE).href
+const controlledHere = (): boolean => navigator.serviceWorker?.controller?.scriptURL?.split('?')[0] === WORKER
+const PROCESSOR = new URL('hypercomb-core.runtime.js', HERE).pathname
+// This host's own import-map hint (src/import-map.ts, same name): another
+// build on the origin caches a map of its own and replays it before it starts.
+const IMPORT_MAP_KEY = 'hc:host:importmap'
 // Verified atoms, served by the service worker at a stable address so the
 // browser keeps their compiled code (public/hypercomb.worker.js, same name).
 const SIG_CACHE = 'hypercomb-sig-v1'
@@ -76,7 +84,7 @@ const sigCache = async (): Promise<Cache | null> => {
  *  worker's stable address, nothing read here at all. */
 const resolveSig = async (sig: string): Promise<string | null> => {
   const cache = await sigCache()
-  const served = !!navigator.serviceWorker?.controller
+  const served = controlledHere()
   if (served && await cache?.match(stable(sig))) return stable(sig)
   const local = await fromDevice(sig)
   const bytes = local ?? await fromNetwork(sig)
@@ -106,9 +114,9 @@ const declareImports = (library: string): void => {
     '@hypercomb/core/processor': PROCESSOR,
   }
   let cached: Record<string, string> = {}
-  // The cached entries point at /opfs/, which only the worker answers: an
-  // uncontrolled page replays none (the host appends its blob map late).
-  if (navigator.serviceWorker?.controller) try { cached = JSON.parse(localStorage.getItem('hc:importmap') ?? '{}').imports ?? {} } catch { /* none */ }
+  // The cached entries point at /opfs/, which only our worker answers: a page
+  // it does not control replays none (the host appends its blob map late).
+  if (controlledHere()) try { cached = JSON.parse(localStorage.getItem(IMPORT_MAP_KEY) ?? '{}').imports ?? {} } catch { /* none */ }
   const imports = { ...core, ...Object.fromEntries(Object.entries(cached).filter(([key]) => !(key in core))) }
   const json = JSON.stringify({ imports })
   const map = document.createElement('script')

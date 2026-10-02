@@ -13,6 +13,8 @@
 // sharing/meeting-invite.ts (PENDING_INVITE_KEY).
 // Keep the two literals in sync.
 
+import { folderPath, hivePathname } from './url-folder'
+
 const PENDING_INVITE_KEY = 'hc:pending-invite' // mirror of essentials meeting-invite.ts
 const PENDING_DOOR_KEY = 'hc:pending-door'     // mirror of essentials hive-link.ts
 const SIG_RE = /^[0-9a-f]{64}$/
@@ -20,7 +22,7 @@ const DOOR_PARAM = 'hive'                      // mirror of HIVE_DOOR_PARAM
 
 ;(function captureInviteLink(): void {
   try {
-    const segments = window.location.pathname.split('/').filter(Boolean)
+    const segments = hivePathname().split('/').filter(Boolean)
     // A lone 64-hex path component is unambiguous — real tile paths aren't
     // hashes, and multi-segment / bracket-selection paths have length > 1.
     if (segments.length !== 1) return
@@ -30,7 +32,7 @@ const DOOR_PARAM = 'hive'                      // mirror of HIVE_DOOR_PARAM
     try { sessionStorage.setItem(PENDING_INVITE_KEY, sig) } catch { /* ignore */ }
 
     // Strip the signature so the URL is a clean root; preserve any query/hash.
-    const clean = '/' + (window.location.search ?? '') + (window.location.hash ?? '')
+    const clean = folderPath('/') + (window.location.search ?? '') + (window.location.hash ?? '')
     window.history.replaceState(window.history.state, '', clean)
   } catch { /* ignore — never block boot on capture */ }
 })()

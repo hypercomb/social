@@ -27,6 +27,7 @@
 // not.
 
 import { registerPoolMeaning, SignatureService } from '@hypercomb/core'
+import { here } from './here'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -35,7 +36,7 @@ const SIG_RE = /^[a-f0-9]{64}$/
 const TRANSLATIONS_MEANING = 'translations'
 
 /** locale → signature. A pointer, like /pin: everything it names is verified. */
-const LOCALES_INDEX = '/locales.json'
+const LOCALES_INDEX = here('locales.json')
 
 type PoolStore = {
   getPool(meaning: string): Promise<FileSystemDirectoryHandle | null>

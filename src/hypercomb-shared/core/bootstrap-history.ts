@@ -4,6 +4,7 @@
 import { EffectBus } from '@hypercomb/core'
 import { CompletionUtility } from './completion-utility'
 import { awaitFirstTilePaint } from './first-tile-paint'
+import { folderPath, hivePathname } from './url-folder'
 
 type BootstrapStep = {
   index: number
@@ -30,7 +31,8 @@ export class BootstrapHistory {
     // even though the navigation parser handles both. Decode per
     // segment so a stray `%2F` inside a segment doesn't get turned
     // into a directory separator.
-    const rawPath = window.location.pathname || '/'
+    // The hive path: the URL path under the host's folder (url-folder.ts).
+    const rawPath = hivePathname() || '/'
     const inputPath = '/' + rawPath
       .split('/')
       .filter(Boolean)
@@ -70,14 +72,14 @@ export class BootstrapHistory {
         ? lineageSegments
         : urlSegments
 
-    const finalUrl = inputPath + inputSuffix
+    const finalUrl = folderPath(inputPath) + inputSuffix
 
     // Phase 1: synchronous URL restoration. Return control as soon as
     // the URL is right; bee loading runs in Phase 2 so first paint
     // never waits on preloader.find().
     const segments: string[] = []
     try {
-      window.history.replaceState({ i: 0, steps: [] as BootstrapStep[] }, '', '/')
+      window.history.replaceState({ i: 0, steps: [] as BootstrapStep[] }, '', folderPath('/'))
 
       let path = ''
       let index = 0
@@ -90,7 +92,7 @@ export class BootstrapHistory {
         path += `/${seg}`
         index++
 
-        window.history.pushState({ i: index }, '', path)
+        window.history.pushState({ i: index }, '', folderPath(path))
         steps.push({ index, segment: seg, path })
         segments.push(seg)
       }

@@ -108,13 +108,49 @@ jobs:
       - name: Ship the shell without a package pool
         run: rm -rf src/hypercomb-web/dist/hypercomb-web/browser/content
 
+      # THE MINIMAL HOST BESIDE IT (src/hypercomb-shim/host/start-points.mjs).
+      # One origin serves the build people use today at its root and the
+      # minimal host at /minimal/, so both read the same device storage.
+      # `?start=minimal` enters the minimal host and keeps the choice;
+      # `?start=current` returns. Its signature-named files land at the root,
+      # which also makes this origin a seed host the minimal kernel fetches
+      # from. START_POINT_DEFAULT is the railroad switch: where a person who
+      # never chose starts.
+      - name: Build the minimal host
+        working-directory: src
+        env:
+          HYPERCOMB_HOST_OUT_DIR: ${{ runner.temp }}/minimal-host
+          HYPERCOMB_POOLS_DIR: ${{ runner.temp }}/version-pools
+        run: |
+          npm run build:runtime
+          npm run build:shim:pure
+          node hypercomb-shim/host/check-pure.mjs
+
+      - name: Serve both start points from one origin
+        env:
+          START_POINT_DEFAULT: current
+        run: |
+          set -euo pipefail
+          ROOT=src/hypercomb-web/dist/hypercomb-origin
+          node src/hypercomb-shim/host/start-points.mjs \
+            --current src/hypercomb-web/dist/hypercomb-web/browser \
+            --minimal "${{ runner.temp }}/minimal-host" \
+            --out "$ROOT" \
+            --default "$START_POINT_DEFAULT"
+          for f in index.html minimal/index.html minimal/main.js minimal/hypercomb.worker.js minimal/hypercomb-core.runtime.js minimal/pin; do
+            if [ ! -f "$ROOT/$f" ]; then echo "Missing $f in the composed origin"; exit 1; fi
+          done
+          if [ ! -f "$ROOT/$(cat "$ROOT/minimal/pin")" ]; then echo "The minimal host's bundle is not at the origin root"; exit 1; fi
+          grep -q 'hc:start-point' "$ROOT/index.html"
+          grep -q 'hc:start-point' "$ROOT/minimal/index.html"
+
       - name: Upload to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: upload
           skip_app_build: true
-          app_location: src/hypercomb-web/dist/hypercomb-web/browser
+          app_location: src/hypercomb-web/dist/hypercomb-origin
           output_location: ""
           api_location: ""
 

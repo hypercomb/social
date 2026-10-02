@@ -107,7 +107,8 @@ export const parseWelcome = (raw: unknown): Welcome | null => {
  */
 export const readWelcome = async (): Promise<Welcome | null> => {
   try {
-    const response = await fetch('/welcome.json', { cache: 'no-store' })
+    // Next to the shell: the folder this host's page is served from.
+    const response = await fetch(new URL('welcome.json', document.baseURI), { cache: 'no-store' })
     if (!response.ok) return null
     if (!(response.headers.get('content-type') ?? '').toLowerCase().includes('json')) return null
     return parseWelcome(await response.json())

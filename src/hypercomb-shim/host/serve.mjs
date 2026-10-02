@@ -19,7 +19,9 @@
 //      atoms fail their hash, and the host looks corrupt rather than
 //      misconfigured. `serve --single` fails exactly here.
 //   2. Fall back to index.html with 200 for anything genuinely missing —
-//      a hive location is not a file.
+//      a hive location is not a file. The NEAREST folder's index.html: a host
+//      may run in a folder beside another build on the same origin
+//      (host/start-points.mjs), and its locations are its own.
 //   3. Access-Control-Allow-Origin — a host exists to be pulled FROM.
 //   4. Never hard-cache /pin, the service worker, or main.js; a signature
 //      path may be cached forever, because its name IS its hash.
@@ -48,7 +50,7 @@ const TYPES = {
  *  a stale pointer is the one failure with no way out. */
 const cacheFor = (urlPath, name) => {
   if (SIG_RE.test(name)) return 'public, max-age=31536000, immutable'
-  if (urlPath === '/pin' || name === 'hypercomb.worker.js' || name === 'main.js' || name === 'env.js') {
+  if (name === 'pin' || name === 'hypercomb.worker.js' || name === 'main.js' || name === 'env.js') {
     return 'no-cache, no-store, must-revalidate'
   }
   return 'public, max-age=0, must-revalidate'
@@ -100,6 +102,11 @@ createServer(async (req, res) => {
     return send(res, 200, headers, req.method === 'HEAD' ? null : createReadStream(target))
   }
 
+  // A folder named without its slash is the folder: relative names in its
+  // page resolve against the slash, so send the browser there.
+  if (!urlPath.endsWith('/') && !SIG_RE.test(name) && await fileAt(join(target, 'index.html'))) {
+    return send(res, 301, { ...cors, location: `${urlPath}/` }, null)
+  }
   // A pool on a static host is a directory whose index.html contains the same
   // newline listing a live host would produce with readdir. Serve that file as
   // text, not as a document: clients parse entry names from the response.
@@ -127,8 +134,10 @@ createServer(async (req, res) => {
   const inSignature = urlPath.split('/').filter(Boolean).some(segment => SIG_RE.test(segment))
   if (SIG_RE.test(name) || inSignature) return send(res, 404, cors, null)
 
-  const shell = join(root, 'index.html')
-  if (await fileAt(shell)) {
+  const segments = urlPath.split('/').filter(Boolean)
+  for (let depth = segments.length; depth >= 0; depth--) {
+    const shell = join(root, ...segments.slice(0, depth), 'index.html')
+    if (!await fileAt(shell)) continue
     return send(res, 200, { ...cors, 'content-type': TYPES['.html'], 'cache-control': 'no-cache' },
       req.method === 'HEAD' ? null : createReadStream(shell))
   }

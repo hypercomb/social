@@ -2,6 +2,7 @@
 
 import { hypercomb } from '@hypercomb/core'
 import { CompletionUtility } from '../core/completion-utility'
+import { folderPath, hivePathname } from './url-folder'
 
 // global get/register/list available via ioc.web.ts
 
@@ -101,7 +102,9 @@ export class Navigation extends hypercomb {
     // The base is host-implied, never present in the pathname — prepend it
     // so every reader sees the full lineage. Bracket detection still works:
     // a bracket tail stays the LAST element after the prefix.
-    const raw = [...this.#urlBase, ...window.location.pathname.split('/').filter(Boolean)]
+    // The host's folder (url-folder.ts) is where the page is served, not a
+    // place in the hive.
+    const raw = [...this.#urlBase, ...hivePathname().split('/').filter(Boolean)]
 
     // Query-string form: pathname stays as-is, bracket comes from `?[...]`.
     const queryBracket = this.parseQueryBracket()
@@ -188,14 +191,14 @@ export class Navigation extends hypercomb {
     const hash = window.location.hash ?? ''
 
     if (!clean.length) {
-      const newUrl = (basePath || '/') + search + hash
+      const newUrl = folderPath(basePath || '/') + search + hash
       window.history.replaceState(window.history.state, '', newUrl)
       this.dispatchSelection([])
       return
     }
 
     const bracket = `/[${clean.join(',')}]`
-    window.history.replaceState(window.history.state, '', basePath + bracket + search + hash)
+    window.history.replaceState(window.history.state, '', folderPath(basePath + bracket) + search + hash)
     this.dispatchSelection(clean)
   }
 
@@ -243,7 +246,7 @@ export class Navigation extends hypercomb {
     const path = '/' + this.#stripUrlBase(clean).join('/')
     const hash = window.location.hash ?? ''
 
-    window.history.pushState({}, '', path + hash)
+    window.history.pushState({}, '', folderPath(path) + hash)
     this.dispatch()
   }
 
@@ -252,7 +255,7 @@ export class Navigation extends hypercomb {
     const path = '/' + this.#stripUrlBase(clean).join('/')
     const hash = window.location.hash ?? ''
 
-    window.history.replaceState({}, '', path + hash)
+    window.history.replaceState({}, '', folderPath(path) + hash)
     this.dispatch()
   }
 
@@ -265,7 +268,7 @@ export class Navigation extends hypercomb {
     const path = '/' + this.#stripUrlBase(clean).map(encodeURIComponent).join('/')
     const hash = window.location.hash ?? ''
 
-    window.history.pushState({}, '', path + hash)
+    window.history.pushState({}, '', folderPath(path) + hash)
     this.dispatch()
   }
 
@@ -274,7 +277,7 @@ export class Navigation extends hypercomb {
     const path = '/' + this.#stripUrlBase(clean).map(encodeURIComponent).join('/')
     const hash = window.location.hash ?? ''
 
-    window.history.replaceState({}, '', path + hash)
+    window.history.replaceState({}, '', folderPath(path) + hash)
     this.dispatch()
   }
 

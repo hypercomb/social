@@ -22,6 +22,7 @@
 // guarantee that its bytes are what its name says.
 
 import { SignatureService } from '@hypercomb/core'
+import { here } from './here'
 import type { Acquisition, BootstrapContext } from './bootstrap/index'
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -30,7 +31,7 @@ const SIG_RE = /^[a-f0-9]{64}$/
  *  location-addressed read in the chain — a pin has to be mutable or it could
  *  never be repointed, and that is precisely what a pin is for. Everything it
  *  names is content-addressed and verified. */
-const PIN_PATH = '/pin'
+const PIN_PATH = here('pin')
 
 /** Last pin that verified and ran. Lets a boot proceed offline, and lets a
  *  fetched pin whose bytes do not resolve fall back to one that did. */

@@ -42,7 +42,7 @@ describe('resolveImportMap', () => {
   // page mints blob URLs instead — uncontrolled-page.spec.ts).
   beforeEach(() => {
     localStorage.clear(); bagReads = 0
-    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { controller: {} } })
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { controller: { scriptURL: new URL('hypercomb.worker.js', document.baseURI).href } } })
   })
 
   it('reads a bag once, then maps it from its name alone', async () => {

@@ -139,6 +139,45 @@ themselves; everything else is resolved.
   package's render-critical lane, where it is fastest. Warm boots, 3 × 12
   alternating: first frame +16/−44/+17 ms, bees +8/−60/+33 ms (noise ≈ 40 ms).
 
+**Beside the current build, on one origin.** A host runs from the folder its
+page declares as `<base href>` (`src/here.ts`): `/` at a domain's root, or its
+own folder beside another build. A hive location is the URL path, so the page
+names its folder rather than reading it off the address, and navigation keeps
+the hive path under it (`hypercomb-shared/core/url-folder.ts`). Its named files (the page, kernel, processor,
+worker, `pin`, locales, `welcome.json`) resolve in that folder, and its worker
+is scoped to it; signature-named files stay origin-wide, because their name is
+their content. hypercomb.com uses this to serve the build people use today at
+`/` and the minimal host at `/minimal/`, so both read the same device storage
+and switching arrives in your own hive. `host/start-points.mjs` composes that
+origin from the two builds (the live and development deploys run it):
+
+```bash
+node host/start-points.mjs --current ../hypercomb-web/dist/hypercomb-web/browser \
+  --minimal dist --out <dir> [--default current|minimal]
+```
+
+- `?start=minimal` on any page enters the minimal host and keeps the choice
+  on the device (`hc:start`); `?start=current` returns. The hive location
+  comes along (`/garden/kitchen` ↔ `/minimal/garden/kitchen`), with the rest
+  of the query and the hash.
+- The front door, the build at `/`, sends a person to the start point they
+  kept. A link into a folder is honored as asked and changes nothing kept.
+- **The railroad switch** is `--default`: where a person who never chose
+  starts. Moving everyone over is one deploy with `--default minimal`; anyone
+  who chose keeps their choice, and a rollback is the same line back.
+- The minimal host's signature-named files land at the origin root, so the
+  origin is also a seed host its kernel fetches from (`https://<seed>/<sig>`),
+  with `Access-Control-Allow-Origin: *`.
+- The two builds keep out of each other's way: each worker answers only its
+  own folder's pages and on activation clears only older versions of its own
+  caches (the origin's cache storage is shared), and the minimal host keeps its
+  import-map hint under its own key (`hc:host:importmap`), because the current
+  build replays `hc:importmap` before it starts.
+
+`node scripts/check-start-points.mjs <origin>` (from `src/`) walks a person
+through both builds in Chromium, switching each way, against a local composed
+folder or the live site.
+
 **The porting gate.** Moving code from the Angular build here must not cost
 performance. `node scripts/bench-minimal-host.mjs --pure <url> --web <url>
 --root <sig>` (from `src/`) runs both hosts on the same package and fails when
@@ -502,7 +541,8 @@ SPA-fallback page can only ever cost a 404.
 
 > This copy of `hypercomb.worker.js` is deliberately **diverged** from
 > `hypercomb-web/public/hypercomb.worker.js`, which stays frozen for the live
-> deploy. Do not resync them — the shim is the survivor.
+> deploy except where the two must share an origin (each clears only its own
+> caches). Do not resync them — the shim is the survivor.
 
 ## Root portal and diagnostic console
 
@@ -620,13 +660,15 @@ The 47 are components in `hypercomb-shared/ui` that have not become drones yet.
 
 ## Deploy safety
 
-`build.mjs` writes only into `hypercomb-shim/dist`. The shim is not under
-`hypercomb-web/src` (so `ng build` cannot type-check it), not under
-`hypercomb-web/public` (so it cannot enter the deploy artifact), and named by
-no `angular.json` configuration or GitHub workflow.
+`build.mjs` writes only into `hypercomb-shim/dist` (or `HYPERCOMB_HOST_OUT_DIR`).
+The shim is not under `hypercomb-web/src` (so `ng build` cannot type-check it)
+and not under `hypercomb-web/public` (so it cannot enter the Angular build).
 
-The live artifact is still `hypercomb-web/dist/hypercomb-web/browser`, built by
-a push to `main`. Nothing here can reach it.
+The live and development deploys build it into the runner's temp folder and
+compose the uploaded origin with `host/start-points.mjs`
+(`hypercomb-web/dist/hypercomb-origin`): the Angular build unchanged at `/`
+apart from the start-point switch at the top of its page, the minimal host at
+`/minimal/`. A person who never asks for it never leaves the current build.
 
 Phase 5 of [everything-is-a-beehavior](../documentation/everything-is-a-beehavior.md),
 stood up **first** so the lean shell can be grown into rather than arrived at.

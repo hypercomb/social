@@ -18,6 +18,7 @@ import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
 import { hostRouteName } from '@hypercomb/runtime/host-activation'
 import { acquire, askHostPackages, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
 import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
+import { HERE } from '../here'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
   listRevisionCandidates, publicCreationOrigin, readOfferings, readPublicCreations, rememberRevisionCandidate,
@@ -400,7 +401,7 @@ const localRouteFor = (offer: Offering, home: string): string => {
 const visitHref = (route: string, source: string): string => {
   const url = new URL(route)
   const native = (window as unknown as { __TAURI__?: unknown }).__TAURI__
-  url.searchParams.set('home', returnHome()?.href ?? (native ? 'hypercomb://offering/' : location.origin))
+  url.searchParams.set('home', returnHome()?.href ?? (native ? 'hypercomb://offering/' : HERE.href))
   url.searchParams.set('source', source)
   return url.href
 }
@@ -420,13 +421,15 @@ const returnHome = (): URL | null => {
     if (home.href === 'hypercomb://offering/') return home
     const loopback = home.hostname === 'localhost' || home.hostname.endsWith('.localhost')
     if ((home.protocol !== 'https:' && !(loopback && home.protocol === 'http:'))
-      || home.pathname !== '/' || home.search || home.hash || home.username || home.password) return null
+      // A host's folder: '/' at a domain's root, or its own folder beside
+      // another build on the same origin (src/here.ts).
+      || !home.pathname.endsWith('/') || home.search || home.hash || home.username || home.password) return null
     return home
   } catch { return null }
 }
 
 const returnHref = (home: URL, source: string, choices: RemoteChoice[]): string => {
-  const url = home.protocol === 'hypercomb:' ? new URL(home) : new URL('/hosts', home)
+  const url = home.protocol === 'hypercomb:' ? new URL(home) : new URL('hosts', home)
   url.searchParams.set('source', source)
   url.searchParams.set('select', JSON.stringify(choices))
   return url.href
@@ -436,7 +439,7 @@ const domainVisitHref = (zone: string, self: string): string => {
   const visit = new URL(publicCreationOrigin(zone))
   if (zone !== self) {
     const native = (window as unknown as { __TAURI__?: unknown }).__TAURI__
-    visit.searchParams.set('home', native ? 'hypercomb://offering/' : `${location.origin}/`)
+    visit.searchParams.set('home', native ? 'hypercomb://offering/' : HERE.href)
   }
   return visit.href
 }

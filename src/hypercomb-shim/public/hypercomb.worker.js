@@ -43,8 +43,20 @@ const BOOT_PACK_CACHE = 'hypercomb-boot-pack-v1'
 // the network fails the kept copy answers, so an installed hive (whose atoms
 // and packages are already held on the device) starts offline.
 const SHELL_CACHE = 'hypercomb-shell-v1'
-const SHELL_FILES = new Set(['/main.js', '/hypercomb-core.runtime.js', '/theme.css', '/fonts/fonts.css'])
-const isShellFile = (pathname) => SHELL_FILES.has(pathname) || /^\/fonts\/[\w.-]+\.woff2$/.test(pathname)
+// WHERE THIS HOST IS SERVED FROM (src/here.ts): the folder of this script,
+// which is also its scope. '/' at a domain's root; beside another build on the
+// same origin, its own folder, so each start point's pages and shell files
+// are answered by its own worker and kept under its own keys.
+const HERE = new URL('./', self.location.href).pathname
+const SHELL_FILES = new Set(['main.js', 'hypercomb-core.runtime.js', 'theme.css', 'fonts/fonts.css'].map(name => HERE + name))
+const isShellFile = (pathname) => SHELL_FILES.has(pathname)
+  || (pathname.startsWith(HERE + 'fonts/') && /^[\w.-]+\.woff2$/.test(pathname.slice(HERE.length + 'fonts/'.length)))
+// THE CACHES THIS WORKER OWNS. Cache storage is the ORIGIN's, shared with any
+// other build served beside this one, so activation clears only older versions
+// of these (same name, another -v<n>), never a cache it does not name.
+const OWN_CACHES = [CACHE_NAME, SIG_CACHE, BOOT_PACK_CACHE, SHELL_CACHE]
+const family = (name) => name.replace(/-v\d+$/, '')
+const staleOwn = (name) => !OWN_CACHES.includes(name) && OWN_CACHES.some(own => family(own) === family(name))
 
 // Pools of meaning: install-cache dirs at the OPFS root named by
 // sign(<meaning>) — sha256 of the UTF-8 bytes of the meaning string.
@@ -93,7 +105,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then(names => Promise.all(
-        names.filter(n => n !== CACHE_NAME && n !== SIG_CACHE && n !== BOOT_PACK_CACHE && n !== SHELL_CACHE).map(n => caches.delete(n))
+        names.filter(staleOwn).map(n => caches.delete(n))
       ))
       .then(() => loadDomains())
       .then(domains => { if (domains.length) KNOWN_DOMAINS = domains })
@@ -166,9 +178,10 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Any page of the hive is the one page (the host's SPA fallback): kept as '/'.
+  // Any page of the hive is the one page (the host's SPA fallback): kept
+  // under this host's folder.
   if (event.request.mode === 'navigate' && method === 'GET') {
-    event.respondWith(networkThenShell(event.request, '/'))
+    event.respondWith(networkThenShell(event.request, HERE))
     return
   }
   if (method === 'GET' && isShellFile(url.pathname)) {

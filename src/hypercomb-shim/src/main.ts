@@ -115,6 +115,7 @@ import { postCommunityDomainsToServiceWorker } from '@hypercomb/runtime/sw-domai
 // `get()` globals the narrow modules expect at their module scope, which is
 // why narrowing is safe here and the import ORDER is not cosmetic.
 import { IMPORT_MAP_STORAGE_KEY, liveAlready, resolveImportMap, sessionBound } from './import-map'
+import { controlledHere, HERE, WORKER } from './here'
 // Only the LOADER is compiled in — the acquisition it loads is not. That
 // bundle is fetched by signature at boot and verified before it runs, so
 // nothing below imports it and the type is the only thing that crosses.
@@ -152,14 +153,18 @@ const ensureSwControl = async (): Promise<void> => {
     // settles; the host then boots uncontrolled, on its blob map
     // (import-map.ts), instead of waiting forever.
     const reg = await Promise.race([
-      navigator.serviceWorker.register('/hypercomb.worker.js', { scope: '/' }).then(() => navigator.serviceWorker.ready),
+      // Our worker, scoped to our folder: beside another build on the same
+      // origin, each start point's pages are answered by its own worker.
+      navigator.serviceWorker.register(WORKER, { scope: HERE.pathname }).then(() => navigator.serviceWorker.ready),
       new Promise<null>(resolve => setTimeout(() => resolve(null), SW_READY_MS)),
     ])
     if (!reg) { workerBlocked = true; console.warn('[shim] no service worker became ready — booting uncontrolled'); return }
-    if (navigator.serviceWorker.controller) return
-    // Hard-reload state: active worker, nothing installing/waiting —
-    // controllerchange can never fire, so waiting buys nothing.
-    if (reg.active && !reg.installing && !reg.waiting) return
+    if (controlledHere()) return
+    // Hard-reload state: active worker, nothing installing/waiting, and the
+    // page under no worker at all — controllerchange can never fire, so
+    // waiting buys nothing. (A page still under another build's worker is
+    // claimed by ours as it activates.)
+    if (reg.active && !reg.installing && !reg.waiting && !navigator.serviceWorker.controller) return
     await new Promise<void>(resolve => {
       navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true })
       setTimeout(resolve, 1500)
@@ -393,7 +398,7 @@ const boot = async (): Promise<void> => {
   // empty in the way that matters however confident the marker is. Anything
   // that reached a surface boots straight past the automatic cold-host prompt,
   // but remains manageable through the explicit route.
-  const managerPath = location.pathname.replace(/\/+$/, '')
+  const managerPath = '/' + location.pathname.slice(HERE.pathname.length).replace(/\/+$/, '')
   const managerRequested = managerPath === '/hosts' || managerPath === '/@hypercomb'
   if (managerRequested || (live.mounted === 0 && live.angular === 0)) {
     console.log(managerRequested

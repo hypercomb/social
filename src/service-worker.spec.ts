@@ -96,6 +96,39 @@ describe('service worker copies', () => {
   })
 })
 
+// THE ORIGIN'S CACHE STORAGE IS SHARED. hypercomb.com serves the minimal host
+// at /minimal/ beside the Angular shell, each with its own worker; a worker
+// that cleared every cache it does not name on activation would wipe the other
+// build's (the minimal host's verified atoms and offline shell went with every
+// Angular deploy). Each clears only older versions of its own.
+describe('service workers beside each other', () => {
+  const line = (code: string, name: string): string => {
+    const found = new RegExp(`^const ${name} = .*$`, 'm').exec(code)?.[0]
+    expect(found, `harness: ${name} not found`).toBeTruthy()
+    return found!
+  }
+
+  it('the web worker clears only older versions of its own cache', () => {
+    const code = readFileSync(WEB, 'utf8')
+    expect(code).toMatch(/names\.filter\(staleOwn\)\.map/)
+    const staleOwn = new Function('CACHE_NAME', `${line(code, 'staleOwn')}; return staleOwn`)('hypercomb-modules-v2')
+    expect(staleOwn('hypercomb-modules-v1')).toBe(true)
+    expect(staleOwn('hypercomb-modules-v2')).toBe(false)
+    for (const other of ['hypercomb-sig-v1', 'hypercomb-shell-v1', 'hypercomb-boot-pack-v1']) expect(staleOwn(other)).toBe(false)
+  })
+
+  it('the minimal host\'s worker clears only older versions of its own caches', () => {
+    const code = readFileSync(at('./hypercomb-shim/public/hypercomb.worker.js'), 'utf8')
+    expect(code).toMatch(/names\.filter\(staleOwn\)\.map/)
+    const body = ['OWN_CACHES', 'family', 'staleOwn'].map(name => line(code, name)).join('\n')
+    const staleOwn = new Function('CACHE_NAME', 'SIG_CACHE', 'BOOT_PACK_CACHE', 'SHELL_CACHE', `${body}; return staleOwn`)(
+      'hypercomb-modules-v2', 'hypercomb-sig-v1', 'hypercomb-boot-pack-v1', 'hypercomb-shell-v1')
+    expect(staleOwn('hypercomb-sig-v0')).toBe(true)
+    expect(staleOwn('hypercomb-shell-v1')).toBe(false)
+    expect(staleOwn('some-other-build-v3')).toBe(false)
+  })
+})
+
 describe('sniffBinaryContentType', () => {
   it.each([
     ['png',   bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a), 'image/png'],

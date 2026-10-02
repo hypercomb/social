@@ -3,13 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <title>Hypercomb (shim)</title>
+    <!-- THE HOST'S FOLDER. A hive location is the URL path (/garden/kitchen),
+         so the page cannot read its folder from its own address: it declares
+         it here. '/' at a domain's root; host/start-points.mjs writes the
+         folder when the host is served beside another build (/minimal/).
+         Named files resolve against it (src/here.ts) and navigation keeps
+         the hive path under it (hypercomb-shared/core/url-folder.ts). -->
     <base href="/" />
 
     <!-- Import map pre-apply. MUST run before any module script loads: a map
          appended from inside main.ts is "late", and while Chrome/Edge 133+
          merge late maps, Safari and older Chrome DROP them — every bare
          specifier a bee imports then throws. The map is derived from OPFS
-         (async), so main.ts caches the resolved JSON under 'hc:importmap' and
+         (async), so main.ts caches the resolved JSON under 'hc:host:importmap' and
          this synchronous classic script replays it on the NEXT boot, before
          the module graph starts. Retires in Phase 4 when deps import by
          signature URL and there is no map at all. -->
@@ -22,16 +28,20 @@
         // text/html — and an early entry can never be overridden by a later
         // map. So an uncontrolled page replays nothing: main.ts derives a
         // self-typed blob map for it (import-map.ts) and appends it.
-        var controlled = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+        // Controlled by OUR worker (src/here.ts): another build on this
+        // origin may control a first visit, and answers none of our addresses.
+        var worker = new URL('hypercomb.worker.js', document.baseURI).href;
+        var controller = navigator.serviceWorker && navigator.serviceWorker.controller;
+        var controlled = !!controller && controller.scriptURL.split('?')[0] === worker;
         try {
           // `@hypercomb/core` never moves and is a real file, so it is
           // declared even on the coldest or an uncontrolled boot; only the
           // cached /opfs/ entries wait for a controlled page. The pure build
           // drops this script: its kernel declares the one map once it holds
           // the core library.
-          var CORE = '/hypercomb-core.runtime.js';
+          var CORE = new URL('hypercomb-core.runtime.js', document.baseURI).pathname;
           var raw = null, parsed = null;
-          try { raw = controlled ? localStorage.getItem('hc:importmap') : null; parsed = raw && JSON.parse(raw); } catch (e) {}
+          try { raw = controlled ? localStorage.getItem('hc:host:importmap') : null; parsed = raw && JSON.parse(raw); } catch (e) {}
           if (!parsed || typeof parsed.imports !== 'object' || !parsed.imports) { parsed = { imports: {} }; raw = null; }
           if (!parsed.imports['@hypercomb/core']) { parsed.imports['@hypercomb/core'] = CORE; raw = null; }
           if (!raw) raw = JSON.stringify(parsed);

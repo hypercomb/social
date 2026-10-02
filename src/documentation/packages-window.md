@@ -149,7 +149,11 @@ sandbox before you bring them into hypercomb.io."*
   install remains only where the origin IS the host: a published visitor door,
   and the native shell's bundle.
 - **The web deploy publishes no package pool** — each web workflow strips
-  `content/` before upload.
+  `content/` before upload. The live and development deploys do serve the
+  minimal host beside the shell (`hypercomb-shim/host/start-points.mjs`):
+  its own install, whose signature-named files sit at the origin root so the
+  origin is a seed host for the minimal kernel. That is the host's install,
+  not a package pool.
 
 ## Ratchets
 

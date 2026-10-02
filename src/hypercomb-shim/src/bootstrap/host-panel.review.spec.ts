@@ -399,3 +399,36 @@ it('shows a turned-on offering replicating on its own review tile', async () => 
   finish(true)
   await vi.waitFor(() => expect(effects.clearPending).toHaveBeenCalledOnce())
 })
+
+it('a host in a folder is its own return address, and selections return to that folder', async () => {
+  // hypercomb.com serves the minimal host at /minimal/ beside another build
+  // (src/here.ts): a visit hands that folder as home, and the return lands in it.
+  const offer = { kind: 'host:offering', title: 'Garden', route: 'https://garden.example.com/',
+    lineage: 'garden', pubkey: 'a'.repeat(64), head: 'c'.repeat(64),
+    location: 'd'.repeat(64), doors: ['example.com'], index: { created_at: 1 } }
+  effects.offers.mockResolvedValue([offer])
+  const base = Object.assign(document.createElement('base'), { href: '/minimal/' })
+  document.head.prepend(base)
+  history.replaceState(null, '', '/minimal/hosts?home=https%3A%2F%2Fmy.example.com%2Fminimal%2F')
+  vi.resetModules()
+  const { showHostPanel } = await import('./host-panel')
+  showHostPanel()
+  const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
+  await vi.waitFor(() => expect(root.querySelectorAll('.offer-select')).toHaveLength(1))
+  root.querySelector<HTMLButtonElement>('.offer-select')!.click()
+  const handoff = new URL(root.querySelector<HTMLAnchorElement>('.selection-return a')!.href)
+  expect(handoff.origin + handoff.pathname).toBe('https://my.example.com/minimal/hosts')
+
+  // A home that names a file, not a folder, is no home at all: the visit
+  // offers nothing to select and carry back.
+  document.querySelector('hc-shim-hosts')!.remove()
+  effects.offers.mockClear()
+  history.replaceState(null, '', '/minimal/hosts?home=https%3A%2F%2Fmy.example.com%2Fminimal')
+  showHostPanel()
+  const refused = document.querySelector('hc-shim-hosts')!.shadowRoot!
+  await vi.waitFor(() => expect(effects.offers).toHaveBeenCalled())
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(refused.querySelectorAll('.offer-select')).toHaveLength(0)
+  base.remove()
+  vi.resetModules()
+})

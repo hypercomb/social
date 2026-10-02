@@ -61,11 +61,17 @@ self.addEventListener('install', () => {
   if (self.location.hostname === 'tauri.localhost') self.skipWaiting()
 })
 
+// Cache storage is the ORIGIN's, shared with any other build served beside
+// this one (hypercomb.com serves the minimal host at /minimal/), so activation
+// clears only older versions of this worker's own cache, never one it does not
+// name.
+const staleOwn = (name) => name !== CACHE_NAME && name.replace(/-v\d+$/, '') === CACHE_NAME.replace(/-v\d+$/, '')
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then(names => Promise.all(
-        names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n))
+        names.filter(staleOwn).map(n => caches.delete(n))
       ))
       .then(() => loadDomains())
       .then(domains => { if (domains.length) KNOWN_DOMAINS = domains })

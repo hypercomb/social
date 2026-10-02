@@ -16,10 +16,12 @@ const shim = join(dirname(fileURLToPath(import.meta.url)), '..')
 describe('an uncontrolled shim page', () => {
   it('replays no cached /opfs/ map before the module graph loads', () => {
     const html = readFileSync(join(shim, 'index.html'), 'utf8')
-    const at = html.indexOf("localStorage.getItem('hc:importmap')")
-    const early = html.slice(at - 800, at + 100)
+    const at = html.indexOf("localStorage.getItem('hc:host:importmap')")
+    const early = html.slice(at - 1000, at + 100)
     expect(early).toContain('navigator.serviceWorker.controller')
-    expect(early).toMatch(/controlled \? localStorage\.getItem\('hc:importmap'\) : null/)
+    // Only OUR worker counts: another build's worker answers no /opfs/ of ours.
+    expect(early).toContain("controller.scriptURL.split('?')[0] === worker")
+    expect(early).toMatch(/controlled \? localStorage\.getItem\('hc:host:importmap'\) : null/)
   })
 
   it('reloads once on the state, never on the blob map, and a visitor never reloads', () => {
@@ -77,7 +79,7 @@ describe('an uncontrolled shim page', () => {
     expect(localStorage.getItem(IMPORT_MAP_STORAGE_KEY)).toBeNull()
 
     // Controlled again: the worker-served map, and it is cached.
-    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { controller: {} } })
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { controller: { scriptURL: new URL('hypercomb.worker.js', document.baseURI).href } } })
     const served = await resolveImportMap()
     expect(served['@x.com/atom']).toBe(`/opfs/${'c'.repeat(64)}/${sig}`)
     await cacheImportMap()

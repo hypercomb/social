@@ -9,6 +9,7 @@
 // rather than a dependency; the two are expected to die, not to converge.
 
 import { Store } from '@hypercomb/runtime/store'
+import { controlledHere, here } from './here'
 
 declare const __HC_PURE__: boolean
 
@@ -80,8 +81,12 @@ export const liveAlready = (imports: ResolvedImports): boolean => {
  * the bridge: written here, replayed synchronously by index.html on the next
  * boot. It is a HINT, never truth — every boot still re-derives from OPFS and
  * corrects the cache (main.ts reloads once when the two disagree).
+ *
+ * This host's own key (the kernel reads the same name): another build on the
+ * same origin caches its own map under 'hc:importmap' and replays it before
+ * it starts, so a map written here under that name would break it.
  */
-export const IMPORT_MAP_STORAGE_KEY = 'hc:importmap'
+export const IMPORT_MAP_STORAGE_KEY = 'hc:host:importmap'
 
 /**
  * Re-derive the import map and cache it for the next boot's pre-module
@@ -140,9 +145,9 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   // Under the kernel, core is what the kernel declared (processor + the
   // signed library); re-deriving must keep it, or the map would disagree.
   const core = (window as Window & { __hcCoreImports?: ResolvedImports }).__hcCoreImports
-  Object.assign(imports, core ?? { '@hypercomb/core': '/hypercomb-core.runtime.js' })
+  Object.assign(imports, core ?? { '@hypercomb/core': here('hypercomb-core.runtime.js') })
   if (typeof __HC_PURE__ !== 'boolean' || !__HC_PURE__) {
-    imports['pixi.js'] = '/vendor/pixi.runtime.js'
+    imports['pixi.js'] = here('vendor/pixi.runtime.js')
   }
 
   const store = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
@@ -283,8 +288,9 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   // NOT consulted on the next boot — every cold boot re-derives from OPFS.
   ;(globalThis as any).__hypercombAliasMap = aliasSource
 
-  // A PAGE THE WORKER DOES NOT CONTROL — a hard reload, DevTools "bypass for
-  // network", a browser without service workers. Nothing answers `/opfs/`
+  // A PAGE OUR WORKER DOES NOT CONTROL — a hard reload, DevTools "bypass for
+  // network", a browser without service workers, or a first visit still
+  // controlled by another build's worker on this origin. Nothing answers `/opfs/`
   // there: the request reaches the host, whose SPA catch-all answers
   // text/html, and the browser refuses the module. Bees already import from
   // verified OPFS bytes (Store.getBee), and so do the boot dependencies
@@ -293,7 +299,7 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   // every bee that names one. Read the bytes ourselves and let the map carry
   // self-typed blob URLs, as the visitor's does. Session-bound: main.ts never
   // caches such a map (`sessionBound`).
-  if (!readonlyVisitor && !navigator.serviceWorker?.controller && aliasSource.size > 0) {
+  if (!readonlyVisitor && !controlledHere() && aliasSource.size > 0) {
     await Promise.all([...aliasSource].map(async ([alias, sig]) => {
       const bytes = await store.getDependencyBytes(sig.replace(/\.js$/i, ''))
       if (!bytes) return
