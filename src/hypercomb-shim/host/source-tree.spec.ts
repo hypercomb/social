@@ -242,7 +242,7 @@ describe('authoring from a restored copy', () => {
     if (r.status !== 0) throw new Error(r.stderr)
     return r.stdout
   }
-  /** A repository: what the build reads, tracked; some it does not carry. */
+  /** A repository: what the build reads, tracked or newly made; some it does not carry. */
   const repository = async () => {
     await build()
     for (const [path, text] of [
@@ -257,7 +257,10 @@ describe('authoring from a restored copy', () => {
     git(repo, 'init', '-q')
     git(repo, 'add', '-A')
     await rm(resolve(repo, 'src/hypercomb-core/src/gone.ts'))
+    // A file the author made and never told git about is still theirs to
+    // carry; what .gitignore hides (a build's output) is not.
     await write(resolve(repo, 'src/hypercomb-core/src/untracked.ts'), 'never added\n')
+    await write(resolve(repo, 'src/hypercomb-core/dist/built.js'), 'ignored output\n')
   }
   const hostBuild = async (repoRoot: string) => {
     const atom = Buffer.from('atom')
@@ -269,11 +272,11 @@ describe('authoring from a restored copy', () => {
     return builds.promote('host', { sync: false, sign: false })
   }
 
-  it('the workspace is what git tracks under the carried roots, read from disk', async () => {
+  it('the workspace is what the author has under the carried roots, tracked or new, read from disk', async () => {
     await repository()
     const files = await builds.workspaceFiles(repo)
     expect([...files.keys()]).toEqual([
-      'src/hypercomb-core/src/processor.ts', 'src/hypercomb-essentials/package.json',
+      'src/hypercomb-core/src/processor.ts', 'src/hypercomb-core/src/untracked.ts', 'src/hypercomb-essentials/package.json',
       ...Object.keys(SOURCES).filter(p => p !== 'package.json').map(p => `src/hypercomb-essentials/${p}`).sort(),
       '.gitignore', 'src/package-lock.json', 'src/package.json', 'tsconfig.base.json',
     ].sort())

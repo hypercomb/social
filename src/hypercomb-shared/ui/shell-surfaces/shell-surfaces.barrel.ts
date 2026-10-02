@@ -64,7 +64,9 @@ import '../portal/portal-overlay.component'
 // standing surface, opened from anywhere: the command line's rail, the word
 // `/annotate`, or the `d` key (markup-overlay.component.ts).
 import '../markup-overlay/markup-overlay.component'
-import '../confirm-dialog/confirm-dialog.component'
+// The confirm dialog is the package's now (hypercomb-essentials
+// presentation/confirm): the first Angular surface ported, mounted here as an
+// element through the same registry.
 import '../icon-picker/icon-picker.component'
 import '../mesh-modal/mesh-modal.component'
 import '../trust-prompt/trust-prompt.component'

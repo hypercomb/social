@@ -428,7 +428,6 @@ describe('doctrine ratchets', () => {
       "clipboard-panel/clipboard-panel.component",
       "comfy-panel/comfy-panel.component",
       "command-palette/command-palette.component",
-      "confirm-dialog/confirm-dialog.component",
       "contact-card/contact-form.component",
       "contact-card/contact-hover.component",
       "context-window/context-window.component",

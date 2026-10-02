@@ -261,6 +261,10 @@ try {
     const edited = 'src/hypercomb-essentials/src/presentation/screen-state.ts'
     const mark = `// authored on a restored device (${Date.now()})\n`
     await writeFile(resolve(work, edited), (await readFile(resolve(work, edited), 'utf8')) + mark)
+    // And a file that did not exist, never added to git: the author's, so the
+    // host's workspace carries it (builds.mjs workspaceFiles).
+    const made = 'src/documentation/authored-on-a-restored-device.md'
+    await writeFile(resolve(work, made), mark)
     buildAll()
     const promote = label => version(run(`promote ${label} (restored)`, [resolve(src, 'hypercomb-shim', 'host', 'builds.mjs'), 'promote', label, '--no-sync'], authorEnv))
     // One history across stories: each promotion's parent is the head before
@@ -278,6 +282,7 @@ try {
       const tree = at('device', `authored-${label}`)
       builds(device, label === 'host' ? 'checkout' : 'source', authored, tree)
       must((await readFile(resolve(tree, edited), 'utf8')).endsWith(mark), `${label} ${authored} does not carry the edit`)
+      if (label === 'host') must((await readFile(resolve(tree, made), 'utf8').catch(() => '')) === mark, `${label} ${authored} does not carry the new file ${made}`)
     }
     return `${/(\d+) file/.exec(checkedOut)?.[1] ?? '?'} files checked out; rebuilt ${rebuilt.slice(0, 12)} = origin; the edit promoted on top of ${hostVersion} and ${pkgVersion}`
   })

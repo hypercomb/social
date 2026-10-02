@@ -297,9 +297,13 @@ receives the snapshots in its pools; laying them out in the bucket is still
 to come.)
 
 **Author from what you restored.** A host revision carries its workspace:
-every tracked file a full build reads (the tooling, every travelling
-package's source and manifest, the lockfile that pins npm, the configs, the
-documentation the anatomy is built from). So a device that pulled the pools
+every file a full build reads under the carried roots (the tooling, every
+travelling package's source and manifest, the lockfile that pins npm, the
+configs, the test runner's config, the documentation the anatomy is built
+from) — what the author has in the tree, tracked or newly made, never what
+`.gitignore` hides. The pools are the source control: a file made in a
+restored copy is in the next revision whether or not git was told. So a
+device that pulled the pools
 can take the work up where it stands, with nothing else: `checkout` writes
 the tree as it stood at a version (the newest when none is named; a package
 promoted after the host is laid over it), as a local git repository. Install
@@ -316,7 +320,22 @@ node hypercomb-shim/host/builds.mjs promote host         # and promote hypercomb
 
 Untouched, the restored copy builds the very package the origin served,
 byte for byte (the build keys its cache on the lockfiles too, so a new
-install never ships stale bundled dependencies).
+install never ships stale bundled dependencies). Its tests run there too
+(`npx vitest run` from `src/`).
+
+**Porting the Angular shell's surfaces, from inside.** The 49 panels in
+`hypercomb-shared/ui` are being moved into the package one at a time, each
+as a drone and a framework-free element on the base layer, so they reach a
+hive by replication like every other beehavior and the Angular shell mounts
+the same element through the same registry. A port is authored the way above:
+from a copy restored from the pools, promoted under the author's key, pulled
+by another device. The first is the confirm dialog
+(`hypercomb-essentials/src/presentation/confirm`): `confirm:request` is
+answered by the element every way it can close — the act, the cancel, the ×,
+the backdrop, Escape, or the cascade putting the screen away (a question
+cannot wait off screen: `onPark` on the base layer answers no). Each port
+deletes its Angular component in the same change, so the scoreboard's
+barrel count only goes down, and runs the gate at 1× and 4×.
 
 **The drill proves it.** The code lives only through replication, so a
 follower must be able to stand in for the origin entirely. `node

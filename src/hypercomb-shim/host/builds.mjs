@@ -211,7 +211,7 @@ const nextVersion = async (pool, now) => {
  * an unchanged file costs nothing in the next revision.
  */
 export const WORKSPACE = [
-  '.gitignore', 'tsconfig.base.json', 'src/.gitignore', 'src/package.json', 'src/package-lock.json', 'src/.npmrc', 'src/tsconfig*.json', 'src/*/package.json',
+  '.gitignore', 'tsconfig.base.json', 'src/.gitignore', 'src/package.json', 'src/package-lock.json', 'src/.npmrc', 'src/tsconfig*.json', 'src/vitest.config.ts', 'src/*/package.json',
   'src/hypercomb-core', 'src/hypercomb-runtime', 'src/hypercomb-shim', 'src/hypercomb-essentials',
   'src/hypercomb-shared/core', 'src/hypercomb-shared/styles', 'src/hypercomb-shared/package.json', 'src/hypercomb-shared/.gitignore', 'src/hypercomb-shared/tsconfig*.json',
   'src/scripts/pixi-vendor.mjs', 'src/documentation',
@@ -227,7 +227,11 @@ export const AUTHOR_SCRIPTS = ['build:core', 'build:runtime', 'build:module', 'b
 
 /** The workspace's files, path → bytes, as the checkout at `repoRoot` holds them now. */
 export const workspaceFiles = async (repoRoot = REPO_ROOT) => {
-  const listed = spawnSync('git', ['ls-files', '-z', '--', ...WORKSPACE], { cwd: repoRoot, maxBuffer: 256 << 20 })
+  // What the author has in the tree under the roots: tracked, and new files
+  // not yet added (never what .gitignore hides). A restored copy is a fresh
+  // repository, and a file created there is part of the next revision
+  // whether or not git was told — the pools are the source control.
+  const listed = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...WORKSPACE], { cwd: repoRoot, maxBuffer: 256 << 20 })
   if (listed.status !== 0) throw new Error(`the workspace is read from git, and ${repoRoot} is not a checkout (builds.mjs checkout <dir> makes one)`)
   const files = new Map()
   for (const path of listed.stdout.toString('utf8').split('\0').filter(Boolean).sort()) {

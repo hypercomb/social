@@ -468,7 +468,10 @@ already build imperative DOM — the muscle exists.
 - [ ] Prove the pattern on the small ones: `website-nav` (67),
   `sequence-viewer` (120), `sensitivity-bar` (136), `landing-badge` (186),
   `preview-banner` (191)
-- [ ] Utility band: `toast`, `confirm-dialog`, `trust-prompt`, `action-card`,
+- [ ] Utility band: `toast`, ~~`confirm-dialog`~~ (ported 2026-10-02:
+  `hypercomb-essentials/src/presentation/confirm`, a drone and an element on
+  the base layer, authored and promoted from a copy restored from the pools),
+  `trust-prompt`, `action-card`,
   `camera-capture`, `format-painter`, `icon-picker`, `shortcut-sheet`,
   `activity-log`, `layer-cycle-strip`, `command-palette`, `context-window`
 - [ ] Viewer band: `files-viewer`, `observe-viewer`, `notes-viewer`,

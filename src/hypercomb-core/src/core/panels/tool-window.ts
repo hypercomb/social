@@ -237,6 +237,10 @@ export interface ToolWindowOptions {
   dismiss?: () => boolean
   /** The window's close verb: the × and the policy's close both call it. */
   onClose: () => void
+  /** What the cascade's sweep means for this window. Default: hide and keep
+   *  everything, to be shown again as it was. A question waiting on its answer
+   *  cannot be put away: it answers instead. */
+  onPark?: () => void
   /** Acts on whatever else is open, so the one-window rule lets it stay. */
   companion?: boolean
   /** Anything else `DockedPanel` takes (launcher, own settings, pairing). */
@@ -334,7 +338,7 @@ export function mountToolWindow(host: HTMLElement, options: ToolWindowOptions): 
   }
 
   const session: WindowSession = {
-    park: hide,
+    park: options.onPark ?? hide,
     unpark: () => { if (root.hidden) show() },
     ...(options.dismiss ? { dismiss: options.dismiss } : {}),
     close: () => options.onClose(),
