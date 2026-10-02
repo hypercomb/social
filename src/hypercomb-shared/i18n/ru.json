@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "Редактирует",
   "chat.exec.kind.destructive": "Удаляет",
   "chat.exec.needs-grant": "Хочет читать твой улей",
+  "chat.exec.leaves": "Выходит за пределы твоего улья",
+  "chat.exec.foreign": "Запрошено после чтения чужих слов",
   "chat.exec.run": "Выполнить",
   "chat.exec.allow-once": "Разрешить один раз",
   "chat.exec.always": "Всегда",

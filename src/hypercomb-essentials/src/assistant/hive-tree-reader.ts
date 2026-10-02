@@ -15,6 +15,7 @@
 
 import { CHILD_SLOTS, childSigsOfLayer, sectionIndex, sectionOf } from '@hypercomb/core'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
+import { isWithinAdoptedRoot } from '../sharing/adopted-roots.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 
@@ -1182,6 +1183,15 @@ export class HypercombHiveTreeReader {
     const read = await this.#readNodeBySigLive(sig, options)
     this.#cacheSet(key, null, read)
     return read
+  }
+
+  /** True when the route lies in a branch folded in from a peer (sharing/
+   *  adopted-roots.ts) — what is read there is someone else's words, and the
+   *  chat holds a change that follows it for the participant's hand. The one
+   *  record of authorship a route has today: a name gathered from a host is
+   *  not marked, and does not count. */
+  foreign(segments: readonly string[]): boolean {
+    return isWithinAdoptedRoot(segments)
   }
 
   /** Revalidate the union of every bounded head vector the current model turn

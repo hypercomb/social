@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "编辑",
   "chat.exec.kind.destructive": "删除",
   "chat.exec.needs-grant": "想要读取您的蜂巢",
+  "chat.exec.leaves": "超出您的蜂巢",
+  "chat.exec.foreign": "在读取他人的文字之后提出",
   "chat.exec.run": "运行",
   "chat.exec.allow-once": "允许一次",
   "chat.exec.always": "始终",

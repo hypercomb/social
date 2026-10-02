@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "Modifica",
   "chat.exec.kind.destructive": "Rimuove",
   "chat.exec.needs-grant": "Vuole leggere il tuo alveare",
+  "chat.exec.leaves": "Va oltre il tuo alveare",
+  "chat.exec.foreign": "Chiesto dopo aver letto le parole di qualcun altro",
   "chat.exec.run": "Esegui",
   "chat.exec.allow-once": "Consenti una volta",
   "chat.exec.always": "Sempre",

@@ -1151,6 +1151,12 @@
               @if (row.needsGrant && row.state === 'waiting') {
                 <p class="chat-exec-quiet">{{ 'chat.exec.needs-grant' | t }}</p>
               }
+              @if (row.leaves && row.state === 'waiting') {
+                <p class="chat-exec-quiet">{{ 'chat.exec.leaves' | t }}</p>
+              }
+              @if (row.foreign && row.state === 'waiting') {
+                <p class="chat-exec-quiet">{{ 'chat.exec.foreign' | t }}</p>
+              }
               <div class="chat-exec-lines">
                 @for (line of row.lines; track $index) {
                   <code class="chat-exec-line"><span class="hc-sentence" [style.--hc-sentence-accent]="sentenceAccent(sentenceParts(line))">@for (part of sentenceParts(line); track $index) {<span

@@ -66,6 +66,11 @@ export interface ChatTurn {
    *  message — or a reload — opens it again without searching: each entry is
    *  `<sig> <the read that found it>`. Lookup keys, never content. */
   readonly known?: readonly string[]
+  /** Signatures this conversation's reads surfaced from someone else's
+   *  words — a branch folded in from a peer. A later read of one by
+   *  signature is still theirs, so a change that follows it waits for the
+   *  participant's hand. Lookup keys, never content. */
+  readonly foreign?: readonly string[]
 }
 
 export type TurnAttemptUsage = {
@@ -135,6 +140,11 @@ type TurnManifest = {
    *  message — or a reload — opens it again without searching: each entry is
    *  `<sig> <the read that found it>`. Lookup keys, never content. */
   readonly known?: readonly string[]
+  /** Signatures this conversation's reads surfaced from someone else's
+   *  words — a branch folded in from a peer. A later read of one by
+   *  signature is still theirs, so a change that follows it waits for the
+   *  participant's hand. Lookup keys, never content. */
+  readonly foreign?: readonly string[]
 }
 
 /** The optional provenance a caller attaches to a model-produced turn. */
@@ -159,6 +169,11 @@ export type TurnMeta = {
    *  message — or a reload — opens it again without searching: each entry is
    *  `<sig> <the read that found it>`. Lookup keys, never content. */
   readonly known?: readonly string[]
+  /** Signatures this conversation's reads surfaced from someone else's
+   *  words — a branch folded in from a peer. A later read of one by
+   *  signature is still theirs, so a change that follows it waits for the
+   *  participant's hand. Lookup keys, never content. */
+  readonly foreign?: readonly string[]
 }
 
 const SIG64 = /^[0-9a-f]{64}$/
@@ -166,6 +181,9 @@ const SIG64 = /^[0-9a-f]{64}$/
 const KNOWN_ENTRY = /^[0-9a-f]{64} [^\u0000-\u001f\u007f]{1,200}$/
 const cleanKnown = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && KNOWN_ENTRY.test(entry)).slice(-64) : []
+/** Foreign signatures: well-formed, unique, the newest kept. */
+const cleanForeign = (value: unknown): string[] =>
+  Array.isArray(value) ? [...new Set(value.filter((sig): sig is string => typeof sig === 'string' && SIG64.test(sig)))].slice(-256) : []
 const finiteNonNegative = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
 
@@ -236,6 +254,8 @@ const cleanMeta = (meta: TurnMeta | undefined): Partial<TurnMeta> => {
   }
   const known = cleanKnown(meta.known)
   if (known.length) out['known'] = known
+  const foreign = cleanForeign(meta.foreign)
+  if (foreign.length) out['foreign'] = foreign
   if (Array.isArray(meta.attempts) && meta.attempts.length) {
     const attempts = cleanAttempts(meta.attempts)
     if (attempts.length) out['attempts'] = attempts
@@ -328,6 +348,11 @@ type RawTurn = {
    *  message — or a reload — opens it again without searching: each entry is
    *  `<sig> <the read that found it>`. Lookup keys, never content. */
   readonly known?: readonly string[]
+  /** Signatures this conversation's reads surfaced from someone else's
+   *  words — a branch folded in from a peer. A later read of one by
+   *  signature is still theirs, so a change that follows it waits for the
+   *  participant's hand. Lookup keys, never content. */
+  readonly foreign?: readonly string[]
   /** The entry's file name — set by the walk, never read from the bytes. */
   readonly sig?: string
 }
@@ -716,6 +741,7 @@ export const readTurnsStrict = async (
       ...(raw.sig ? { sig: raw.sig } : {}),
       ...(typeof raw.left === 'string' && raw.left.trim() ? { left: raw.left.trim().slice(0, 300) } : {}),
       ...(cleanKnown(raw.known).length ? { known: cleanKnown(raw.known) } : {}),
+      ...(cleanForeign(raw.foreign).length ? { foreign: cleanForeign(raw.foreign) } : {}),
       ...(typeof raw.prompt === 'string' && SIG64.test(raw.prompt) ? { prompt: raw.prompt } : {}),
       ...(attempts.length ? { attempts } : {}),
     }
@@ -767,6 +793,7 @@ const materializeTurns = async (
       ...(r.spent && Number.isFinite(r.spent.rounds) && Number.isFinite(r.spent.tokens)
         ? { spent: { rounds: r.spent.rounds, tokens: r.spent.tokens } } : {}),
       ...(cleanKnown(r.known).length ? { known: cleanKnown(r.known) } : {}),
+      ...(cleanForeign(r.foreign).length ? { foreign: cleanForeign(r.foreign) } : {}),
       ...(typeof r.prompt === 'string' && SIG64.test(r.prompt) ? { prompt: r.prompt } : {}),
       ...(attempts.length ? { attempts } : {}),
     }

@@ -171,8 +171,36 @@ work on Hypercomb via DeepSeek."*
 - **Policy at the column's head:** **Manual** (everything waits) · **Auto**
   (the ticked kinds run on arrival: Reads · Adds · Edits · Removes, from core
   `MachineReach`) · **Everything**. Default: Auto with Reads — a granted
-  provider reads freely, changes wait. No policy ever runs an ungranted read:
+  provider reads freely, changes wait (superseded 2026-10-02, next point:
+  every kind runs). No policy ever runs an ungranted read:
   the policy is how much to watch, the grant is what may leave the machine.
+- **Your own domain runs; what leaves it or isn't your words waits (jwize,
+  2026-10-02).** *"The natural language should be safe because you are
+  actively in your own domain when you are running it … even publishing
+  would need another to accept the dodgy code."* Everything is client-side
+  save the deployed replications, so the default is now Auto with **every**
+  kind ticked (a device that already chose its kinds keeps them). Two holds
+  join the ungranted read, and no policy and no trusted conversation lifts
+  any of the three — only a hand:
+  - **leaves** — a change carrying a line whose behaviour declares
+    `scope: 'network'` (a signed publish, a peer, a host), or never declared
+    a scope (`hypercombPlanLeaves`). Approval downstream protects the reader,
+    never the participant's key. Today that is `/hide`, which signs a mesh
+    event under the participant's pubkey.
+  - **foreign** — a change asked for in a turn that read someone else's
+    words (`foreignReads`): a tile's content or summary from a branch folded
+    in from a peer (sharing/adopted-roots.ts, the one authorship record a
+    route has), or a resource or layer reached by a signature such a read
+    surfaced (kept on the turn as `foreign`). Names — list, tree, find,
+    history — do not count, and neither does running code: it already
+    executes with the participant's full authority. Per turn: the
+    participant's next message is their words again. A sentence the
+    participant picked from the model's table is their hand, so neither hold
+    applies to it.
+  - **Gap:** a name gathered from a host (`from`/`feed`) carries no
+    authorship mark on the route, so it is not yet read as foreign. The
+    machine grant still keeps `/remove` and `/cut` from models by default
+    (`grant destructive` raises it).
 - **One side, two occupants.** The Execution column and the workflow column
   share the chat's right side, one at a time; a new waiting request brings
   Execution forward. On a phone it covers the thread until put away.

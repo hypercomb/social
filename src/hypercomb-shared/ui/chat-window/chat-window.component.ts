@@ -133,6 +133,7 @@ import {
   callableBehaviours,
   hypercombActionProviderId,
   hypercombContextKey,
+  hypercombPlanLeaves,
   hypercombPlanReach,
   hypercombVocabulary,
   parseHypercombGrammars,
@@ -145,6 +146,7 @@ import {
 } from './hypercomb-grammar'
 import {
   executeHypercombObservationPlan,
+  foreignReads,
   formatHypercombObservationReceipt,
   MAX_OBSERVATIONS,
   OBSERVATION_VERBS,
@@ -211,6 +213,8 @@ type ChatTurn = {
   /** What the conversation's reads found, as `<sig> <read>` entries — the
    *  signatures the next message opens again without searching. */
   readonly known?: readonly string[]
+  /** Signatures those reads surfaced from someone else's words. */
+  readonly foreign?: readonly string[]
   /** The turn's manifest signature — its file name in the bucket. Present
    *  on a turn read back from disk, absent on one this window appended in
    *  memory and has not re-read yet. It is the ONLY join between a drawn
@@ -1222,6 +1226,10 @@ type ExecutionRequestLike = {
   readonly kind: ExecutionKindLike
   readonly lines: readonly string[]
   readonly needsGrant: boolean
+  /** A change that leaves the machine — waits for a hand, whatever the policy. */
+  readonly leaves?: boolean
+  /** A change after the turn read someone else's words — waits likewise. */
+  readonly foreign?: boolean
   readonly at: number
   readonly state: 'waiting' | 'running' | 'ran' | 'skipped' | 'failed'
   readonly auto: boolean
@@ -1245,6 +1253,8 @@ type ExecutionQueueLike = {
     /** What each read resolved to; an allowed read is remembered by these. */
     readonly keys?: readonly string[]
     readonly needsGrant: boolean
+    readonly leaves?: boolean
+    readonly foreign?: boolean
     readonly forceReview?: boolean
     readonly signal?: AbortSignal
   }): { readonly id: string; readonly decision: Promise<'run' | 'skip'> }
@@ -1260,6 +1270,7 @@ type TurnMetaLike = {
   readonly left?: string
   readonly spent?: { readonly rounds: number; readonly tokens: number }
   readonly known?: readonly string[]
+  readonly foreign?: readonly string[]
   readonly anatomy?: string
   readonly context?: string
   readonly observed?: readonly string[]
@@ -3170,13 +3181,15 @@ export class ChatWindowComponent implements OnDestroy {
     this.#releaseTrusted()
   }
 
-  /** Every waiting row of a trusted conversation runs, as a press would. */
+  /** Every waiting row of a trusted conversation runs, as a press would —
+   *  except the holds (execution-queue.ts): what leaves the machine, or
+   *  follows someone else's words, was never the trust's to give. */
   #releaseTrusted(): void {
     const queue = this.#execQueue()
     const trusted = this.#autoConvos()
     if (!queue?.requests || !trusted.size) return
     for (const row of queue.requests()) {
-      if (row.state === 'waiting' && trusted.has(row.convoId) && !row.needsGrant) queue.decide(row.id, 'run')
+      if (row.state === 'waiting' && trusted.has(row.convoId) && !row.needsGrant && !row.leaves && !row.foreign) queue.decide(row.id, 'run')
     }
   }
   readonly execRows = signal<readonly ExecutionRequestLike[]>([])
@@ -3302,6 +3315,8 @@ export class ChatWindowComponent implements OnDestroy {
             id: row.id, convoId: row.convoId, kind: row.kind, lines: row.lines,
             ...(row.forceReview ? { review: true } : {}),
             ...(row.needsGrant ? { needsGrant: true } : {}),
+            ...(row.leaves ? { leaves: true } : {}),
+            ...(row.foreign ? { foreign: true } : {}),
             ...(this.#autoConvos().has(row.convoId) ? { trusted: true } : {}),
           })),
         })
@@ -6271,6 +6286,10 @@ export class ChatWindowComponent implements OnDestroy {
    *  read that found each. Told to the model on the next message, so content
    *  already found opens again by signature instead of by walking to it. */
   readonly #readSignatures = new Map<string, Map<string, string>>()
+  /** Per conversation: the signatures its reads surfaced from someone else's
+   *  words (hypercomb-observation.ts `foreignReads`). A later read of one by
+   *  signature is still theirs. Kept on the turn as `foreign`. */
+  readonly #foreignSigs = new Map<string, Set<string>>()
   /** Conversations whose work has opened the hive's code this session. */
   readonly #codeThreads = new Set<string>()
 
@@ -6422,6 +6441,10 @@ export class ChatWindowComponent implements OnDestroy {
       for (const entry of stored) restored.set(entry.slice(0, 64), entry.slice(65))
       if (restored.size) this.#readSignatures.set(convoId, restored)
     }
+    if (!this.#foreignSigs.has(convoId)) {
+      const stored = [...this.turns()].reverse().find(turn => turn.foreign?.length)?.foreign ?? []
+      if (stored.length) this.#foreignSigs.set(convoId, new Set(stored))
+    }
     // A CONVERSATION THAT HAS READ CODE IS CODE WORK, and code work is deep.
     const codeThread = this.#codeThreads.has(convoId) || isCodeMessage(message)
       || [...(this.#readSignatures.get(convoId)?.values() ?? [])].some(grammar => /^\/?code\s/.test(grammar))
@@ -6554,6 +6577,10 @@ export class ChatWindowComponent implements OnDestroy {
     // Read blocks that ran in this turn, for the receipt: an answer about the
     // hive with none behind it is said, not trusted.
     let turnReads = 0
+    // WHAT THIS TURN READ OF SOMEONE ELSE'S WORDS (execution-queue.ts,
+    // `foreign`): a change asked for after it waits for the participant's
+    // hand. Per turn — the participant's next message is their words again.
+    const turnForeign: string[] = []
     let turnWeight: MessageEffort = need.tier
     // THE ANATOMY GOES FIRST, TO EVERY PROVIDER. It is the stable protocol +
     // doctrine (documentation/anatomy-context-need.md): identical bytes on
@@ -6786,6 +6813,7 @@ export class ChatWindowComponent implements OnDestroy {
           observed: [...observed],
           read: [...readSigs],
           known: [...(component.#readSignatures.get(convoId) ?? new Map<string, string>())].map(([sig, grammar]) => `${sig} ${grammar.replace(/[\r\n]/g, ' ').slice(0, 200)}`),
+          foreign: [...(component.#foreignSigs.get(convoId) ?? [])],
           attempts: [...settledAttempts],
           providerId,
           model,
@@ -6924,6 +6952,13 @@ export class ChatWindowComponent implements OnDestroy {
           needsVerification = false
           keepSnapshots(receipt.snapshots)
           observed.push(...grammars)
+          const theirSigs = component.#foreignSigs.get(convoId) ?? new Set<string>()
+          const theirs = foreignReads(plan, receipt, segments => treeReader.foreign?.(segments) === true, theirSigs)
+          if (theirs.grammars.length) {
+            turnForeign.push(...theirs.grammars)
+            for (const sig of theirs.sigs) theirSigs.add(sig)
+            component.#foreignSigs.set(convoId, theirSigs)
+          }
           const known = component.#readSignatures.get(convoId) ?? new Map<string, string>()
           for (const { grammar, sig } of receipt.signatures ?? []) {
             known.delete(sig) // newest last
@@ -7068,7 +7103,7 @@ export class ChatWindowComponent implements OnDestroy {
             : `\n\nThe hive stopped while running ${line}.\n\n${formatJevUsage(settledAttempts)}` }
       }
 
-      const runDo = async (lines: readonly string[], providerId: string, model: string, review = false): Promise<string> => {
+      const runDo = async (lines: readonly string[], providerId: string, model: string, review = false, own = false): Promise<string> => {
         if (!canChange || !slash?.executePublicCanonical || !queue) throw new WorkRefused('changing the hive is not available here')
         // Parse EVERY line before anything is queued, let alone run: one bad
         // tail can never leave a half-run prefix.
@@ -7080,10 +7115,15 @@ export class ChatWindowComponent implements OnDestroy {
           throw error
         }
         const grammars = plan.actions.map(action => action.grammar)
+        // THE HOLDS (execution-queue.ts): a line that leaves the machine, or a
+        // change following someone else's words, waits for a hand — unless the
+        // participant chose this very sentence, which is the hand.
+        const leaves = !own && hypercombPlanLeaves(plan, behaviourEntries).length > 0
+        const foreign = !own && turnForeign.length > 0
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: hypercombPlanReach(plan, behaviourEntries), lines: grammars, needsGrant: false, signal,
-          forceReview: review,
+          forceReview: review, leaves, foreign,
         })
         if (!review) waitingOn(entry.id)
         if (await entry.decision === 'skip') {
@@ -7152,7 +7192,7 @@ export class ChatWindowComponent implements OnDestroy {
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal,
-          forceReview: review,
+          forceReview: review, foreign: turnForeign.length > 0,
         })
         if (!review) waitingOn(entry.id)
         if (await entry.decision === 'skip') {
@@ -7192,6 +7232,7 @@ export class ChatWindowComponent implements OnDestroy {
         EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal, forceReview: true,
+          foreign: turnForeign.length > 0,
         })
         if (await entry.decision === 'skip') {
           if (signal?.aborted) throw stopped()
@@ -7226,7 +7267,7 @@ export class ChatWindowComponent implements OnDestroy {
         let receipt: string
         try {
           receipt = spoken.kind === 'do'
-            ? await runDo(spoken.grammars, providerId, continuationModel ?? '')
+            ? await runDo(spoken.grammars, providerId, continuationModel ?? '', false, true)
             : await runRead(spoken.grammars, providerId, continuationModel ?? '')
         } catch (error) {
           if (signal?.aborted) throw error

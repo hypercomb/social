@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "संपादित करता है",
   "chat.exec.kind.destructive": "हटाता है",
   "chat.exec.needs-grant": "आपके छत्ते को पढ़ना चाहता है",
+  "chat.exec.leaves": "आपके छत्ते से आगे जाता है",
+  "chat.exec.foreign": "किसी और के शब्द पढ़ने के बाद माँगा गया",
   "chat.exec.run": "चलाएं",
   "chat.exec.allow-once": "एक बार अनुमति दें",
   "chat.exec.always": "हमेशा",

@@ -2290,6 +2290,8 @@
   "chat.exec.kind.editing": "Edits",
   "chat.exec.kind.destructive": "Removes",
   "chat.exec.needs-grant": "Wants to read your hive",
+  "chat.exec.leaves": "Reaches past your hive",
+  "chat.exec.foreign": "Asked after reading someone else's words",
   "chat.exec.run": "Run",
   "chat.exec.allow-once": "Allow once",
   "chat.exec.always": "Always",

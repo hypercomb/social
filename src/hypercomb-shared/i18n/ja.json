@@ -1948,6 +1948,8 @@
   "chat.exec.kind.editing": "編集",
   "chat.exec.kind.destructive": "削除",
   "chat.exec.needs-grant": "あなたのハイブを読みたい",
+  "chat.exec.leaves": "あなたのハイブの外に届く",
+  "chat.exec.foreign": "他の人の言葉を読んだ後の依頼",
   "chat.exec.run": "実行",
   "chat.exec.allow-once": "1回許可",
   "chat.exec.always": "常に",

@@ -300,6 +300,26 @@ export const hypercombPlanReach = (
   }, 'additive')
 }
 
+/** The lines of a validated plan that LEAVE THIS MACHINE: a behaviour that
+ *  declared `scope: 'network'` (a signed publish, a peer, a host), or one that
+ *  never said how far it travels — unjudged is read as the far end, never as
+ *  home. Inside the participant's own domain a change runs; one of these
+ *  carries their key outward, and a reader downstream accepting it protects
+ *  the reader, not the key — so it waits for a hand whatever the policy. */
+export const hypercombPlanLeaves = (
+  plan: HypercombActionPlan,
+  entries: readonly HypercombBehaviour[],
+  grant: MachineGrant = currentMachineGrant(),
+): readonly string[] => {
+  const scopeOf = new Map(callableBehaviours(entries, grant).map(entry => [entry.name, entry.machine?.scope] as const))
+  return plan.actions
+    .filter(action => {
+      const scope = scopeOf.get(action.command)
+      return scope === undefined || scope === 'network'
+    })
+    .map(action => action.grammar)
+}
+
 const parseLine = (
   raw: unknown,
   allowed: ReadonlyMap<string, HypercombMachineGrammar>,

@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "Mengedit",
   "chat.exec.kind.destructive": "Menghapus",
   "chat.exec.needs-grant": "Ingin membaca sarang lebah Anda",
+  "chat.exec.leaves": "Menjangkau ke luar sarang lebah Anda",
+  "chat.exec.foreign": "Diminta setelah membaca kata-kata orang lain",
   "chat.exec.run": "Jalankan",
   "chat.exec.allow-once": "Izinkan sekali",
   "chat.exec.always": "Selalu",

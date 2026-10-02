@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "Edita",
   "chat.exec.kind.destructive": "Remove",
   "chat.exec.needs-grant": "Quer ler sua colmeia",
+  "chat.exec.leaves": "Vai além da sua colmeia",
+  "chat.exec.foreign": "Pedido depois de ler palavras de outra pessoa",
   "chat.exec.run": "Executar",
   "chat.exec.allow-once": "Permitir uma vez",
   "chat.exec.always": "Sempre",

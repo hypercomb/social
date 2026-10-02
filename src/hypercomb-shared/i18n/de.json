@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "Bearbeitet",
   "chat.exec.kind.destructive": "Entfernt",
   "chat.exec.needs-grant": "Möchte deinen Bienenstock lesen",
+  "chat.exec.leaves": "Reicht über deinen Bienenstock hinaus",
+  "chat.exec.foreign": "Erbeten, nachdem Worte von jemand anderem gelesen wurden",
   "chat.exec.run": "Ausführen",
   "chat.exec.allow-once": "Einmal zulassen",
   "chat.exec.always": "Immer",

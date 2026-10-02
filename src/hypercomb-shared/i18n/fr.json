@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "Modifie",
   "chat.exec.kind.destructive": "Supprime",
   "chat.exec.needs-grant": "Veut lire ta ruche",
+  "chat.exec.leaves": "Va au-delà de ta ruche",
+  "chat.exec.foreign": "Demandé après avoir lu les mots de quelqu'un d'autre",
   "chat.exec.run": "Exécuter",
   "chat.exec.allow-once": "Autoriser une fois",
   "chat.exec.always": "Toujours",

@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "편집",
   "chat.exec.kind.destructive": "제거",
   "chat.exec.needs-grant": "당신의 벌집을 읽고 싶어합니다",
+  "chat.exec.leaves": "당신의 벌집 밖으로 나갑니다",
+  "chat.exec.foreign": "다른 사람의 글을 읽은 뒤 요청됨",
   "chat.exec.run": "실행",
   "chat.exec.allow-once": "한 번만 허용",
   "chat.exec.always": "항상",

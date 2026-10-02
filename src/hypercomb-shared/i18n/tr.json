@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "Düzenler",
   "chat.exec.kind.destructive": "Kaldırır",
   "chat.exec.needs-grant": "Senin arı kovanını okumak istiyor",
+  "chat.exec.leaves": "Senin arı kovanının ötesine uzanıyor",
+  "chat.exec.foreign": "Başkasının sözleri okunduktan sonra istendi",
   "chat.exec.run": "Çalıştır",
   "chat.exec.allow-once": "Bir kez izin ver",
   "chat.exec.always": "Her zaman",

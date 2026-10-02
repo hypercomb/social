@@ -2542,6 +2542,8 @@
   "chat.exec.kind.editing": "يعدل",
   "chat.exec.kind.destructive": "يزيل",
   "chat.exec.needs-grant": "يريد قراءة خليتك",
+  "chat.exec.leaves": "يتجاوز خليتك",
+  "chat.exec.foreign": "طُلب بعد قراءة كلمات شخص آخر",
   "chat.exec.run": "تشغيل",
   "chat.exec.allow-once": "السماح مرة واحدة",
   "chat.exec.always": "دائمًا",
