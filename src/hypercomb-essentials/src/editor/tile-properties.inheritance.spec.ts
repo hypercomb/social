@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { readTilePropertiesAt, writeTilePropertiesAt, TILE_PROPERTY_PINS } from './tile-properties.js'
+import { aliasPropertiesFor, readTilePropertiesAt, writeTilePropertiesAt, TILE_PROPERTY_PINS } from './tile-properties.js'
 
 const ROOT_LOCATION = '1'.repeat(64)
 const OUTER_LOCATION = '2'.repeat(64)
@@ -239,5 +239,41 @@ describe('canonical tile property inheritance', () => {
       expect(commitSlotSet.mock.calls.map(call => call[0])).toEqual([['team', 'howard']])
       await expect(parse(written[0])).resolves.toEqual({ link: 'https://example.com', index: 8 })
     })
+  })
+})
+
+// A NEW ALIAS (alias-properties.md, step 2): what the tile it is made from
+// shows, split into what fills the repo and what the alias must override.
+describe('aliasPropertiesFor', () => {
+  const picture = (sig: string) => ({ small: { image: sig }, flat: { small: { image: sig } }, participant: true })
+
+  it('fills an empty repo with everything but place keys, and overrides nothing', () => {
+    expect(aliasPropertiesFor({ ...picture('a'), link: 'L', index: 3, point: [1, 2] }, {}))
+      .toEqual({ fill: { ...picture('a'), link: 'L' }, override: {} })
+  })
+
+  it('needs nothing when the repo already shows the same', () => {
+    expect(aliasPropertiesFor({ ...picture('a'), link: 'L' }, { ...picture('a'), link: 'L' }))
+      .toEqual({ fill: {}, override: {} })
+  })
+
+  it('never overwrites the repo: a differing value becomes the alias override', () => {
+    expect(aliasPropertiesFor({ link: 'mine', accent: 'red' }, { link: 'theirs' }))
+      .toEqual({ fill: { accent: 'red' }, override: { link: 'mine' } })
+  })
+
+  it('overrides a different picture as one value', () => {
+    expect(aliasPropertiesFor(picture('a'), picture('b')))
+      .toEqual({ fill: {}, override: picture('a') })
+  })
+
+  it('keeps a theme default picture as the alias own, never in the repo', () => {
+    const themed = { small: { image: 'a' }, substrate: true }
+    expect(aliasPropertiesFor(themed, {})).toEqual({ fill: {}, override: themed })
+  })
+
+  it('hides what the repo has that the tile does not show', () => {
+    expect(aliasPropertiesFor({ link: 'L' }, { link: 'L', accent: 'red', ...picture('b') }))
+      .toEqual({ fill: {}, override: { [TILE_PROPERTY_PINS]: ['accent', 'flat', 'participant', 'small'] } })
   })
 })

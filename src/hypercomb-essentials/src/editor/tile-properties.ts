@@ -758,6 +758,62 @@ const PLACE_KEYS: ReadonlySet<string> = new Set(['index', 'point', TILE_PROPERTY
  *  together, so an alias either overrides the picture or inherits it whole. */
 const PICTURE_KEYS: ReadonlySet<string> = new Set(['small', 'flat', 'large', 'imageSig', PARTICIPANT_MARK, SUBSTRATE_MARK])
 
+const pictureOf = (props: Readonly<Record<string, unknown>>): Record<string, unknown> => {
+  const picture: Record<string, unknown> = {}
+  for (const key of PICTURE_KEYS) if (key in props) picture[key] = props[key]
+  return picture
+}
+
+/**
+ * What a NEW alias of a name stores so it shows exactly `shown` — the
+ * properties of the tile it is made from — against the name's `repo`
+ * (documentation/alias-properties.md, step 2).
+ *
+ *  - `fill`: keys the repo does not have yet. They go TO the repo, so this
+ *    alias, the tile it came from, and every later alias inherit them. A repo
+ *    value is never overwritten here — filling only adds.
+ *  - `override`: keys where the alias must still differ from the repo after
+ *    the fill, plus a pin for every repo key the tile does not show. For a
+ *    name whose repo was empty this is empty: the alias follows the repo live.
+ *
+ * A picture is one value (its sizes and marks together). A theme default
+ * (`substrate: true`) is never filled into the repo — it stays the alias's
+ * own, exactly as a sinking write would keep it. Place keys (`index`, `point`,
+ * pins) belong to the place the tile came FROM and are never carried.
+ */
+export const aliasPropertiesFor = (
+  shown: Readonly<Record<string, unknown>>,
+  repo: Readonly<Record<string, unknown>>,
+): { fill: Record<string, unknown>; override: Record<string, unknown> } => {
+  const fill: Record<string, unknown> = {}
+  const override: Record<string, unknown> = {}
+  const hide = new Set<string>()
+  for (const [key, value] of Object.entries(shown)) {
+    if (PLACE_KEYS.has(key) || PICTURE_KEYS.has(key)) continue
+    if (!(key in repo)) fill[key] = value
+    else if (!sameJsonValue(repo[key], value)) override[key] = value
+  }
+  for (const key of Object.keys(repo)) {
+    if (PLACE_KEYS.has(key) || PICTURE_KEYS.has(key)) continue
+    if (!(key in shown)) hide.add(key)
+  }
+
+  const shownPicture = pictureOf(shown)
+  const repoPicture = pictureOf(repo)
+  const shownHasPicture = Object.keys(shownPicture).length > 0
+  const repoHasPicture = Object.keys(repoPicture).length > 0
+  if (shownHasPicture && shownPicture[SUBSTRATE_MARK] !== true && !repoHasPicture) {
+    Object.assign(fill, shownPicture)
+  } else if (shownHasPicture && !sameJsonValue(shownPicture, repoPicture)) {
+    Object.assign(override, shownPicture)
+  } else if (!shownHasPicture && repoHasPicture) {
+    for (const key of Object.keys(repoPicture)) hide.add(key)
+  }
+
+  if (hide.size > 0) override[TILE_PROPERTY_PINS] = [...hide].sort()
+  return { fill, override }
+}
+
 /**
  * Split an alias's write into what SINKS to the repo and what stays LOCAL.
  *

@@ -36,6 +36,12 @@ import {
 } from '../history/layer-placement.js'
 import { ensureDecorationsIndexed, referenceTargetAt } from './decoration-kind-index.js'
 import { createLanding, type CreateLanding } from './create-landing.js'
+import {
+  aliasPropertiesFor,
+  readOwnTilePropertiesAt,
+  readTilePropertiesAt,
+  writeTilePropertiesAt,
+} from '../editor/tile-properties.js'
 
 /** The link service's IoC key — resolved at call time, so the reference door
  *  and the link door never import each other. */
@@ -88,6 +94,23 @@ const referenceMarksOf = async (
     } catch { /* not a JSON record — not a reference mark */ }
   }
   return { sigs, target }
+}
+
+/** The properties a new alias of `name` needs, made from the tile at
+ *  `targetParent`/`name`. Null when either side cannot be read yet — the
+ *  caller then keeps the snapshot, never guesses from a cold read. */
+const planAliasProperties = async (
+  targetParent: readonly string[],
+  name: string,
+): Promise<{ fill: Record<string, unknown>; override: Record<string, unknown> } | null> => {
+  const shownStats = { cold: false }
+  const repoStats = { cold: false }
+  const [shown, repo] = await Promise.all([
+    readTilePropertiesAt(targetParent, name, shownStats),
+    readOwnTilePropertiesAt([], name, repoStats),
+  ])
+  if (shownStats.cold || repoStats.cold) return null
+  return aliasPropertiesFor(shown, repo)
 }
 
 /** How many doorways a reference may pass through before it is refused. */
@@ -205,11 +228,25 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     // The Portal inventory row is the exception. It is the explicit default-
     // authoring surface, so it remains a slim live pointer and its editor is
     // routed to the target. Changing the target seeds FUTURE activations only.
+    //
+    // PROPERTIES ARE THE EXCEPTION TO THE SNAPSHOT (alias-properties.md, step
+    // 2): a reference named as its target is an ALIAS of the name. What the
+    // target shows that the name's repo lacks is filled INTO the repo, and the
+    // reference keeps only where it must still differ — so it looks exactly as
+    // a snapshot would, yet follows the repo from now on. Unreadable (cold)
+    // properties, or a reference named apart from its target, keep the
+    // snapshot as before.
+    const plan = options.editsRootDefault !== true && name === targetName
+      ? await planAliasProperties(sourceSegments.slice(0, -1), name)
+      : null
+    if (plan && Object.keys(plan.fill).length > 0) await writeTilePropertiesAt([], name, plan.fill)
+
     let childLayer: PlacementLayer = { name, decorations: [decorationSig] }
     if (options.editsRootDefault !== true) {
       const details: PlacementLayer = { name }
       for (const [slot, value] of Object.entries(sourceLayer)) {
         if (slot === 'name' || (CHILD_SLOTS as readonly string[]).includes(slot)) continue
+        if (plan && slot === 'properties') continue
         details[slot] = value
       }
       // The target's own doorway marks never ride along: a reference wears
@@ -225,6 +262,9 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     }
     const childMarkerSig = await history.commitLayer(childLocationSig, childLayer)
     await committer.commitChildrenDeltas(parentSegments, { appends: [childMarkerSig] })
+    if (plan && Object.keys(plan.override).length > 0) {
+      await writeTilePropertiesAt(parentSegments, name, plan.override, { onlyHere: true })
+    }
 
     // Retain what the target meant at the moment it was referenced — a record
     // in a colon pool, never a membership anywhere.
