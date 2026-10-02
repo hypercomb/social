@@ -213,8 +213,8 @@ const main = async () => {
         const reply = await send({ op: 'chat-asked', cell: askId })
         if (!reply.ok) return fail(reply.error)
         if (reply.data?.done) {
-          const { outcome, rounds, tokens, answer, left, error } = reply.data
-          return print({ convoId, outcome, rounds, tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
+          const { outcome, rounds, reads, tokens, answer, left, error } = reply.data
+          return print({ convoId, outcome, rounds, reads, ...(reads === 0 ? { warning: 'nothing was read in this turn: check every claim about the hive yourself' } : {}), tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
         }
       }
       return fail(`no result for ${askId} in time; the turn may still be running — manager.cjs thread ${first} shows where it got to`)

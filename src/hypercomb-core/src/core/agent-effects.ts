@@ -100,6 +100,9 @@ export type AgentReceiptEvent = AgentStageBase & {
   readonly firstMs?: number
   readonly outcome: 'answered' | 'failed' | 'stopped'
   readonly spent: AgentSpent
+  /** Read blocks that ran in the turn. 0 on an answer about the hive means
+   *  nothing behind it was read. Absent on receipts from older builds. */
+  readonly reads?: number
 }
 
 /** A HAND-OFF FOUND NOBODY TO TAKE IT: the work asks for a stronger model

@@ -120,7 +120,7 @@ import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 // module"; runtime module-drafts.ts).
 import { draftModule } from '@hypercomb/runtime/module-drafts'
 import { installedPackageSig } from '@hypercomb/runtime/installed-package'
-import { doctrineFailedMessage, doctrineRanMessage, parseWriteBlock, writeFailedMessage, writeRanMessage, writeSkippedMessage } from './hypercomb-work-fence'
+import { doctrineFailedMessage, doctrineRanMessage, parseWriteBlock, routesNamedIn, unreadClaimMessage, writeFailedMessage, writeRanMessage, writeSkippedMessage } from './hypercomb-work-fence'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'
@@ -3112,7 +3112,7 @@ export class ChatWindowComponent implements OnDestroy {
   async #startAsk(ask: OutsideAsk): Promise<void> {
     const before = this.activeId()
     const since = Date.now()
-    let receipt: { outcome?: string; rounds?: number; spent?: { tokens?: number } } | undefined
+    let receipt: { outcome?: string; rounds?: number; reads?: number; spent?: { tokens?: number } } | undefined
     const offs: (() => void)[] = []
     // BEGUN: the first round has a model (agent:route), or the turn ended
     // without ever reaching one. Either way the transcript has been read.
@@ -3122,7 +3122,7 @@ export class ChatWindowComponent implements OnDestroy {
       offs.push(EffectBus.on<{ convoId?: string; at?: number }>('agent:route', payload => {
         if (payload?.convoId === ask.convoId && (payload.at ?? 0) >= since) done()
       }))
-      offs.push(EffectBus.on<{ convoId?: string; at?: number; outcome?: string; rounds?: number; spent?: { tokens?: number } }>('agent:receipt', payload => {
+      offs.push(EffectBus.on<{ convoId?: string; at?: number; outcome?: string; rounds?: number; reads?: number; spent?: { tokens?: number } }>('agent:receipt', payload => {
         if (payload?.convoId !== ask.convoId || (payload.at ?? 0) < since) return
         receipt = payload
         done()
@@ -3148,6 +3148,7 @@ export class ChatWindowComponent implements OnDestroy {
         outcome: failure ? 'failed' : receipt?.outcome ?? (last ? 'answered' : 'unanswered'),
         ...(failure ? { error: failure } : {}),
         rounds: receipt?.rounds ?? 0,
+        reads: receipt?.reads ?? 0,
         tokens: receipt?.spent?.tokens ?? 0,
         answer: last?.text ?? '',
         // Long work stopped at a leg's end: ask again to carry it on.
@@ -6548,6 +6549,9 @@ export class ChatWindowComponent implements OnDestroy {
     // the way it took, the worker calls it made, the weight it was routed at.
     let turnPath: 'direct' | 'judged' | 'aside' | 'down' | 'gone' | 'off' = jevMode ? 'judged' : 'off'
     let turnRounds = 0
+    // Read blocks that ran in this turn, for the receipt: an answer about the
+    // hive with none behind it is said, not trusted.
+    let turnReads = 0
     let turnWeight: MessageEffort = need.tier
     // THE ANATOMY GOES FIRST, TO EVERY PROVIDER. It is the stable protocol +
     // doctrine (documentation/anatomy-context-need.md): identical bytes on
@@ -6651,6 +6655,7 @@ export class ChatWindowComponent implements OnDestroy {
       let readChars = 0
       let lastRound = false
       let unwrittenSaid = false
+      let unreadSaid = false
       let refusedInARow = 0
       const MAX_REFUSALS_IN_A_ROW = 3
       let budgetSpent = false
@@ -6902,6 +6907,7 @@ export class ChatWindowComponent implements OnDestroy {
             throw new WorkRefused('the tree changed while it was being read; read it again')
           }
           readRounds++
+          turnReads++
           readChars += content.length
           if (receipt.results.some(result => result.kind === 'code' || (result.kind === 'bytes' && result.read.ok && result.read.of !== 'resource'))) {
             component.#codeThreads.add(convoId)
@@ -7370,6 +7376,20 @@ export class ChatWindowComponent implements OnDestroy {
           EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `asked again: ${work.unwritten} was not written as a block` })
           continue
         }
+        // AN ANSWER ABOUT TILES NOTHING READ (hypercomb-work-fence.ts
+        // unreadClaimMessage): the request names routes, the model answered
+        // without one read this turn. Sent back once to read first; a model
+        // that answers unread twice is answered as it stands, and its
+        // receipt says reads: 0.
+        if (!work.request && !lastRound && !unreadSaid && canRead && readRounds === 0) {
+          const named = routesNamedIn(message)
+          if (named.length) {
+            unreadSaid = true
+            messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: unreadClaimMessage(named.slice(0, 6), message) })
+            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `asked again: answered about ${named[0]} without reading it` })
+            continue
+          }
+        }
         if (!work.request || lastRound) {
           if (jevTurn && work.prose) {
             // The prose already streamed.
@@ -7622,6 +7642,7 @@ export class ChatWindowComponent implements OnDestroy {
           outcome: opts?.signal?.aborted ? 'stopped' : answered ? 'answered' : 'failed',
           answered: answered && !opts?.signal?.aborted,
           spent: { rounds: task?.rounds ?? 0, tokens: task?.tokens ?? 0 },
+          reads: turnReads,
         })
       }
       return ''

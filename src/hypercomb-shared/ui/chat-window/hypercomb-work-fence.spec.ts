@@ -499,3 +499,19 @@ describe('a handover said in prose', () => {
     expect(leftFromProse('Remaining: none')).toBeUndefined()
   })
 })
+
+describe('an answer about tiles nothing read', () => {
+  it('finds the routes a request names, and nothing that only looks like one', async () => {
+    const { routesNamedIn } = await import('./hypercomb-work-fence')
+    expect(routesNamedIn('How many notes are on /bubble-bobble-dos-v1? Number only.')).toEqual(['/bubble-bobble-dos-v1'])
+    expect(routesNamedIn('Compare /games/arkanoid with /solomon-maze-v1, then /games.')).toEqual(['/games/arkanoid', '/solomon-maze-v1', '/games'])
+    expect(routesNamedIn('See https://example.com/a/b and 3/4 of it, dated 2026/10/01.')).toEqual([])
+  })
+
+  it('says which routes went unread and carries the request', async () => {
+    const { unreadClaimMessage } = await import('./hypercomb-work-fence')
+    const said = unreadClaimMessage(['/games'], 'how many tiles are under /games')
+    expect(said).toContain('/games')
+    expect(said).toContain('hypercomb-read')
+  })
+})
