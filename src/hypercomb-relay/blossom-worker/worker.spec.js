@@ -110,7 +110,14 @@ function contentBag(held = new Map()) {
       held.set(key, new Uint8Array(await new Response(body).arrayBuffer()))
       return { key }
     },
-    list: async ({ prefix }) => ({ objects: [...held.keys()].filter(key => key.startsWith(prefix)).map(key => ({ key })), truncated: false }),
+    // Each object's etag is a digest of its bytes, as R2's is: a record
+    // rewritten by hand is a new etag, the same bytes are the same one.
+    list: async ({ prefix }) => ({
+      objects: await Promise.all([...held.keys()].filter(key => key.startsWith(prefix)).map(async key =>
+        ({ key, etag: hex(new Uint8Array(await crypto.subtle.digest('SHA-256', held.get(key)))) }))),
+      truncated: false,
+    }),
+    delete: async key => { held.delete(key) },
   }
 }
 
@@ -1811,4 +1818,826 @@ test('a door packs its head\'s landing view, keeps it, and builds nothing else',
   // Only the door's own head is ever built.
   assert.equal((await ask(childSig)).status, 404)
   assert.ok(!held.has(`${PACKS}/${childSig}`))
+})
+
+// ── claiming a domain (documentation/domain-claim.md) ─────────────────────
+// `domain claim <name>`: the worker makes the zone, the participant moves the
+// nameservers, the first active reading wires the domain to the forwarder,
+// and an active claim is a binding exactly as an operator would write it.
+const CLAIMS = await sha256Hex('host:claims')
+const DOMAIN = 'inspiredbyhumans.org'
+const NAMESERVERS = ['ada.ns.cloudflare.com', 'bob.ns.cloudflare.com']
+const DAY = 86_400
+const keyOf = (n) => Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? n : 0)
+const pubOf = (key) => hex(schnorr.getPublicKey(key))
+const enc = (text) => new TextEncoder().encode(text)
+const ago = (secs) => Math.floor(Date.now() / 1000) - secs
+
+/** The Cloudflare API, as much of it as a claim uses — zones, their DNS
+ *  records, their worker routes — held in memory, and the public resolver
+ *  (DoH) that says where a domain is delegated. Every API call is logged. */
+function fakeCloudflare({ zones = [] } = {}) {
+  const cf = { zones: new Map(), records: [], routes: [], calls: [], created: [], deleted: [], lookups: [], elsewhere: [],
+    dns: [], delegated: new Set(), dnsDown: false, fail: null, next: 1 }
+  const id = () => (cf.next++).toString(16).padStart(32, '0')
+  for (const name of zones) cf.zones.set(id(), { name, status: 'active', name_servers: ['x.ns.cloudflare.com'] })
+  const ok = (result) => Response.json({ success: true, errors: [], result })
+  const no = (status, code) => Response.json({ success: false, errors: [{ code, message: 'secret upstream detail' }], result: null }, { status })
+  cf.zoneOf = (name) => [...cf.zones].find(([, zone]) => zone.name === name)?.[0]
+  cf.activate = (name) => { cf.zones.get(cf.zoneOf(name)).status = 'active' }
+  cf.fetch = async (input, init = {}) => {
+    const url = new URL(String(input))
+    const method = String(init.method || 'GET').toUpperCase()
+    if (url.origin === 'https://cloudflare-dns.com') {
+      const name = url.searchParams.get('name')
+      assert.equal(url.searchParams.get('type'), 'NS')
+      cf.dns.push(name)
+      if (cf.dnsDown) return new Response('resolver down', { status: 502 })
+      const servers = cf.delegated.has(name) ? NAMESERVERS : ['ns1.registrar.example']
+      return Response.json({ Status: 0, Answer: servers.map((ns) => ({ name: `${name}.`, type: 2, data: `${ns}.` })) })
+    }
+    if (url.origin !== 'https://api.cloudflare.com') {
+      cf.elsewhere.push(url.href)
+      return new Response('host card', { headers: { 'content-type': 'text/html' } })
+    }
+    assert.ok(url.pathname.startsWith('/client/v4/'))
+    const path = url.pathname.slice('/client/v4'.length)
+    cf.calls.push(`${method} ${path}`)
+    if (new Headers(init.headers).get('authorization') !== 'Bearer cf-token') return no(403, 10000)
+    if (cf.fail && cf.fail(method, path)) return no(500, 9999)
+    const body = init.body ? JSON.parse(init.body) : null
+    const [, zid, kind, sub, rid] = path.split('/').filter(Boolean)
+    if (!zid) {
+      if (method === 'GET') {
+        cf.lookups.push(Object.fromEntries(url.searchParams))
+        return ok([...cf.zones].filter(([, z]) => z.name === url.searchParams.get('name')).map(([id, z]) => ({ id, ...z })))
+      }
+      if (cf.zoneOf(body.name)) return no(400, 1061)
+      cf.created.push(body)
+      const zone = { name: body.name, status: 'pending', name_servers: NAMESERVERS }
+      const zoneId = id()
+      cf.zones.set(zoneId, zone)
+      return ok({ id: zoneId, ...zone })
+    }
+    if (!cf.zones.has(zid)) return no(404, 1001)
+    if (!kind) {
+      if (method === 'DELETE') { cf.zones.delete(zid); cf.deleted.push(zid); return ok({ id: zid }) }
+      return ok({ id: zid, ...cf.zones.get(zid) })
+    }
+    if (kind === 'activation_check') return ok({ id: zid })
+    if (kind === 'dns_records') {
+      if (method === 'GET') return ok(cf.records.filter((r) => r.zone === zid && r.name === url.searchParams.get('name')))
+      if (method === 'POST') { cf.records.push({ id: id(), zone: zid, ...body }); return ok(cf.records.at(-1)) }
+      const record = cf.records.find((r) => r.id === sub)
+      Object.assign(record, body)
+      return ok(record)
+    }
+    if (kind === 'workers' && sub === 'routes') {
+      if (method === 'GET') return ok(cf.routes.filter((r) => r.zone === zid).map(({ zone, ...r }) => r))
+      if (method === 'POST') { cf.routes.push({ id: id(), zone: zid, ...body }); return ok(cf.routes.at(-1)) }
+      Object.assign(cf.routes.find((r) => r.id === rid), body)
+      return ok({ id: rid })
+    }
+    return no(404, 7000)
+  }
+  return cf
+}
+
+const claimEnv = (extra = {}) => ({
+  SITE_BINDINGS: JSON.stringify(ONE_ZONE),
+  CF_ACCOUNT_ID: 'acct', CLAIM_API_TOKEN: 'cf-token', CLAIM_SCRIPT: 'hypercomb-hosts',
+  CONTENT: contentBag(),
+  ...extra,
+})
+const CLAIM_URL = 'https://content.pluginthematrix.com/claim'
+/** NIP-98 as the hive signs it: the method, the URL and — for a body — the
+ *  body's sha256 in a `payload` tag. */
+async function signedAuth(url, method, key = sk, body) {
+  const tags = [['u', url], ['method', method], ...(typeof body === 'string' ? [['payload', await sha256Hex(body)]] : [])]
+  const event = { pubkey: pubOf(key), created_at: Math.floor(Date.now() / 1000), kind: 27235, tags, content: '' }
+  event.id = await sha256Hex(JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]))
+  event.sig = hex(schnorr.sign(event.id, key))
+  return 'Nostr ' + btoa(JSON.stringify(event))
+}
+/** A claim. `signed` is the body the signature names (null: no payload tag). */
+async function claim(env, domain, key = sk, { method = 'POST', body, signed, ctx } = {}) {
+  const sent = body ?? JSON.stringify({ domain })
+  return worker.fetch(new Request(CLAIM_URL, { method: 'POST',
+    headers: { authorization: await signedAuth(CLAIM_URL, method, key, signed === undefined ? sent : signed), 'content-type': 'application/json' },
+    body: sent }), env, ctx)
+}
+/** A claim's public reading — signed (NIP-98, GET) when a key is given. */
+async function lookAt(env, domain, key) {
+  const url = `https://content.pluginthematrix.com/claim/${domain}`
+  return worker.fetch(new Request(url, key ? { headers: { authorization: await signedAuth(url, 'GET', key) } } : {}), env)
+}
+const statusOf = async (response) => (await response.json()).status
+async function onCloudflare(cf, run) {
+  const original = globalThis.fetch
+  globalThis.fetch = cf.fetch
+  try { return await run() } finally { globalThis.fetch = original }
+}
+/** Run as if `ms` had passed: every isolate-held view has gone stale. */
+async function later(ms, run) {
+  const real = Date.now
+  Date.now = () => real() + ms
+  try { return await run() } finally { Date.now = real }
+}
+const claimAt = async (domain) => `${CLAIMS}/${await sha256Hex(domain)}`
+const claimRecordOf = async (env, domain) => {
+  const bytes = env.CONTENT.held.get(await claimAt(domain))
+  return bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null
+}
+/** A record as the operator (or an older run) left it in the pool. */
+const keepClaim = async (env, record) => env.CONTENT.held.set(await claimAt(record.domain), enc(JSON.stringify({
+  v: 1, zoneId: '0'.repeat(32), nameservers: NAMESERVERS, status: 'active', claimedAt: 1, activatedAt: 2, ...record })))
+/** A record's fields set by hand — its clocks moved back, or an operator's edit. */
+const rewind = async (env, domain, fields) => env.CONTENT.held.set(await claimAt(domain),
+  enc(JSON.stringify({ ...await claimRecordOf(env, domain), ...fields })))
+const holdIndex = (env, event) => env.CONTENT.held.set(`${INDEXES}/${event.pubkey}`, enc(JSON.stringify(event)))
+const publicationsAt = async (env, host) => (await worker.fetch(new Request(`https://${host}/${PUBLICATIONS}`), env)).text()
+
+test('a claim makes the zone, keeps the record in host:claims, and answers the two nameservers', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    const first = await claim(env, 'InspiredByHumans.org')
+    assert.equal(first.status, 200)
+    assert.deepEqual(await first.json(), { domain: DOMAIN, status: 'pending', nameservers: NAMESERVERS })
+    // The same key asking again is the claim as it stands: no second zone.
+    const again = await claim(env, DOMAIN)
+    assert.equal(again.status, 200)
+    assert.deepEqual(await again.json(), { domain: DOMAIN, status: 'pending', nameservers: NAMESERVERS })
+  })
+  assert.deepEqual(cf.created, [{ name: DOMAIN, account: { id: 'acct' }, type: 'full', jump_start: true }])
+  assert.deepEqual(cf.lookups, [{ name: DOMAIN, 'account.id': 'acct' }])
+  const record = await claimRecordOf(env, DOMAIN)
+  assert.deepEqual({ ...record, claimedAt: 0 }, { v: 1, domain: DOMAIN, pubkey, zoneId: cf.zoneOf(DOMAIN),
+    nameservers: NAMESERVERS, status: 'pending', claimedAt: 0 })
+  assert.ok(Math.abs(record.claimedAt - Date.now() / 1000) < 60)
+})
+
+test('a claim names a domain, strictly, before any call or write', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  const bad = ['org', 'https://inspiredbyhumans.org', 'inspiredbyhumans.org:443', 'inspiredbyhumans.org/x',
+    'inspiredbyhumans.org.', '-x.org', 'x_y.org', 'x..org', ' x.org', 'x .org', '10.0.0.1',
+    `${'a'.repeat(64)}.org`, `${'a.'.repeat(126)}org`, 'x.o', 'x.org\n', 42, null]
+  await onCloudflare(cf, async () => {
+    for (const domain of bad) assert.equal((await claim(env, domain)).status, 400, String(domain))
+    assert.equal((await claim(env, DOMAIN, sk, { body: 'not json' })).status, 400)
+    for (const path of ['org', 'x_y.org', '%2Fx.org', '%E0%A4%A']) assert.equal((await lookAt(env, path)).status, 400, path)
+  })
+  assert.deepEqual(cf.calls, [])
+  assert.equal(env.CONTENT.held.size, 0)
+})
+
+test('a claim\'s signature covers its body: a header lifted from one claim never names another domain', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    // Signed for one body, sent with another.
+    const lifted = await claim(env, 'attacker-choice.com', sk, { signed: JSON.stringify({ domain: DOMAIN }) })
+    assert.equal(lifted.status, 401)
+    assert.match(await lifted.text(), /payload/)
+    // No payload tag at all: refused the same way.
+    assert.equal((await claim(env, DOMAIN, sk, { signed: null })).status, 401)
+  })
+  assert.deepEqual(cf.calls, [])
+  assert.equal(env.CONTENT.held.size, 0)
+})
+
+test('a domain served here is refused — equal to, under, or holding a bound zone or an operated one', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv({
+    SITE_BINDINGS: JSON.stringify({ ...ONE_ZONE, 'shop.held.org': { title: 'Shop', lineage: 'shop', publishers: [{ pubkey, primary: true }] } }),
+    SITE_OPERATORS: JSON.stringify({ 'operated.org': pubkey }),
+  })
+  await onCloudflare(cf, async () => {
+    for (const domain of ['pluginthematrix.com', 'blog.pluginthematrix.com', 'revolucion.pluginthematrix.com', 'held.org', 'operated.org', 'www.operated.org']) {
+      const refused = await claim(env, domain)
+      assert.equal(refused.status, 409, domain)
+      assert.match(await refused.text(), /already served here/)
+    }
+  })
+  assert.deepEqual(cf.calls, [])
+})
+
+test('a claim on a domain the operator came to serve by hand never activates, and asks Cloudflare nothing', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    // Afterwards the operator binds the domain by hand, and its owner moves the nameservers.
+    const served = { ...env, SITE_BINDINGS: JSON.stringify({ ...ONE_ZONE,
+      [DOMAIN]: { title: 'By hand', lineage: 'ibh', publishers: [{ pubkey, primary: true }] } }) }
+    cf.activate(DOMAIN)
+    const from = cf.calls.length
+    const read = await lookAt(served, DOMAIN)
+    assert.equal(read.status, 409)
+    assert.match(await read.text(), /already served here/)
+    assert.deepEqual(cf.calls.slice(from), [])
+  })
+  assert.equal((await claimRecordOf(env, DOMAIN)).status, 'pending')
+  assert.deepEqual([cf.routes, cf.records], [[], []])
+})
+
+test('a zone whose routes another worker holds is never wired, and a claim never takes its route', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    // The operator ran `connect` on the claim's zone: its route goes to the main worker.
+    cf.routes.push({ id: 'by-hand', zone: cf.zoneOf(DOMAIN), pattern: `*.${DOMAIN}/*`, script: 'pluginthematrix-core' })
+    cf.activate(DOMAIN)
+    const from = cf.calls.length
+    const read = await lookAt(env, DOMAIN)
+    assert.equal(read.status, 409)
+    assert.match(await read.text(), /routes belong to another worker/)
+    const z = cf.zoneOf(DOMAIN)
+    assert.deepEqual(cf.calls.slice(from), [`GET /zones/${z}`, `GET /zones/${z}/workers/routes`])
+  })
+  assert.deepEqual(cf.routes.map(({ pattern, script }) => ({ pattern, script })), [{ pattern: `*.${DOMAIN}/*`, script: 'pluginthematrix-core' }])
+  assert.deepEqual(cf.records, [])
+  assert.equal((await claimRecordOf(env, DOMAIN)).status, 'pending')
+})
+
+test('a zone the account already holds is never adopted by a claim', async () => {
+  const cf = fakeCloudflare({ zones: ['taken.org'] })
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    const refused = await claim(env, 'taken.org')
+    assert.equal(refused.status, 409)
+    assert.match(await refused.text(), /ask this host's operator/)
+  })
+  assert.deepEqual(cf.created, [])
+  assert.equal(await claimRecordOf(env, 'taken.org'), null)
+})
+
+test('without the token or the account the host takes no claims, and an unsigned claim is refused', async () => {
+  const cf = fakeCloudflare()
+  await onCloudflare(cf, async () => {
+    assert.equal((await claim(claimEnv({ CLAIM_API_TOKEN: undefined }), DOMAIN)).status, 503)
+    assert.equal((await claim(claimEnv({ CF_ACCOUNT_ID: undefined }), DOMAIN)).status, 503)
+    const env = claimEnv()
+    const unsigned = await worker.fetch(new Request(CLAIM_URL, { method: 'POST', body: JSON.stringify({ domain: DOMAIN }) }), env)
+    assert.equal(unsigned.status, 401)
+    assert.equal((await claim(env, DOMAIN, sk, { method: 'PUT' })).status, 401)
+    // A claim is taken on the write face, never on a published site.
+    const onSite = 'https://revolucion.pluginthematrix.com/claim'
+    assert.equal((await worker.fetch(new Request(onSite, { method: 'POST',
+      headers: { authorization: await nip98(onSite, 'POST') }, body: JSON.stringify({ domain: DOMAIN }) }), env)).status, 405)
+  })
+  assert.deepEqual(cf.calls, [])
+})
+
+test('a Cloudflare refusal is a short 502 — never the token, never the upstream body', async () => {
+  const cf = fakeCloudflare()
+  cf.fail = (method, path) => method === 'POST' && path === '/zones'
+  const env = claimEnv()
+  const refused = await onCloudflare(cf, () => claim(env, DOMAIN))
+  assert.equal(refused.status, 502)
+  const said = await refused.text() + refused.headers.get('x-reason')
+  assert.match(said, /create the zone \(500, code 9999\)/)
+  assert.doesNotMatch(said, /cf-token|secret upstream detail/)
+  assert.equal(await claimRecordOf(env, DOMAIN), null)
+})
+
+test('a zone whose record cannot be written is taken back, and the act outlives a dropped connection', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  const put = env.CONTENT.put
+  env.CONTENT.put = async (key, ...rest) => {
+    if (key.startsWith(`${CLAIMS}/`)) throw new Error('R2 put failed')
+    return put(key, ...rest)
+  }
+  const kept = []
+  const answer = await onCloudflare(cf, () => claim(env, DOMAIN, sk, { ctx: { waitUntil: (promise) => kept.push(promise) } }))
+  assert.equal(answer.status, 502)
+  assert.match(await answer.text(), /could not be recorded/)
+  assert.equal(cf.created.length, 1)
+  assert.equal(cf.deleted.length, 1)
+  assert.equal(cf.zoneOf(DOMAIN), undefined)
+  assert.equal(kept.length, 1)
+})
+
+test('an active claim is refused to every other key', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    cf.activate(DOMAIN)
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'active')
+    const other = await claim(env, DOMAIN, keyOf(3))
+    assert.equal(other.status, 409)
+    assert.match(await other.text(), /claimed/)
+    assert.deepEqual(await (await claim(env, DOMAIN)).json(), { domain: DOMAIN, status: 'active', nameservers: NAMESERVERS })
+  })
+  assert.equal((await claimRecordOf(env, DOMAIN)).pubkey, pubkey)
+})
+
+test('a second key on a pending claim contests it, and nobody is bound until the operator decides', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv({ HOST_DOOR_ORIGIN: 'https://door.example' })
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    const contest = await claim(env, DOMAIN, keyOf(3))
+    assert.equal(contest.status, 200)
+    assert.deepEqual(await contest.json(), { domain: DOMAIN, status: 'contested', nameservers: NAMESERVERS })
+    // Each side asking again reads the claim as it stands.
+    assert.equal(await statusOf(await claim(env, DOMAIN)), 'contested')
+    assert.equal(await statusOf(await claim(env, DOMAIN, keyOf(3))), 'contested')
+    // The nameservers moving binds nobody and wires nothing.
+    cf.activate(DOMAIN)
+    const before = cf.calls.length
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'contested')
+    assert.equal(cf.calls.length, before)
+    const apex = await worker.fetch(new Request(`https://${DOMAIN}/`), env)
+    assert.match(await apex.text(), /public content endpoint/)
+    assert.deepEqual(cf.elsewhere, [])
+  })
+  const record = await claimRecordOf(env, DOMAIN)
+  assert.equal(record.pubkey, pubkey)
+  assert.deepEqual(record.contested, [pubOf(keyOf(3))])
+})
+
+test('a contest records a handful of keys, never a growing list', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    for (let n = 3; n < 43; n++) assert.equal(await statusOf(await claim(env, DOMAIN, keyOf(n))), 'contested')
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'contested')
+  })
+  assert.equal((await claimRecordOf(env, DOMAIN)).contested.length, 8)
+  assert.ok(env.CONTENT.held.get(await claimAt(DOMAIN)).byteLength < 2_048)
+})
+
+test('a contest lapses too: its keys are free again, and a domain nobody delegated can be taken', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    await claim(env, DOMAIN, keyOf(3))
+    // While it is fresh — counted from the contest, not the claim — both sides wait on it.
+    await rewind(env, DOMAIN, { claimedAt: ago(20 * DAY), contestedAt: ago(DAY) })
+    assert.equal((await claim(env, 'other.org')).status, 409)
+    assert.equal((await claim(env, 'other.org', keyOf(3))).status, 409)
+    await rewind(env, DOMAIN, { contestedAt: ago(8 * DAY) })
+    assert.equal((await claim(env, 'other.org')).status, 200)
+    assert.equal((await claim(env, 'another.org', keyOf(3))).status, 200)
+    // Nobody moved the nameservers: a third key takes the domain and its zone.
+    assert.equal(await statusOf(await claim(env, DOMAIN, keyOf(4))), 'pending')
+  })
+  const record = await claimRecordOf(env, DOMAIN)
+  assert.deepEqual([record.pubkey, record.contested, record.zoneId], [pubOf(keyOf(4)), undefined, cf.zoneOf(DOMAIN)])
+})
+
+test('a contested domain whose nameservers moved stays the operator\'s to decide, however old', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    await claim(env, DOMAIN, keyOf(3))
+    await rewind(env, DOMAIN, { claimedAt: ago(400 * DAY), contestedAt: ago(400 * DAY) })
+    cf.activate(DOMAIN)
+    const third = await claim(env, DOMAIN, keyOf(4))
+    assert.equal(third.status, 409)
+    assert.match(await third.text(), /contested/)
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'contested')
+    // A lapsed contest bars neither side from claiming elsewhere.
+    assert.equal((await claim(env, 'other.org', keyOf(3))).status, 200)
+  })
+  assert.deepEqual(cf.routes, [])
+  assert.deepEqual((await claimRecordOf(env, DOMAIN)).contested, [pubOf(keyOf(3))])
+})
+
+test('a pending claim lapses after seven days, and the next key takes it with its zone', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    await rewind(env, DOMAIN, { claimedAt: ago(8 * DAY) })
+    const taken = await claim(env, DOMAIN, keyOf(3))
+    assert.equal(taken.status, 200)
+    assert.deepEqual(await taken.json(), { domain: DOMAIN, status: 'pending', nameservers: NAMESERVERS })
+  })
+  const record = await claimRecordOf(env, DOMAIN)
+  assert.equal(record.pubkey, pubOf(keyOf(3)))
+  assert.equal(record.zoneId, cf.zoneOf(DOMAIN))
+  assert.equal(record.contested, undefined)
+  assert.equal(cf.created.length, 1)
+  // The public DNS was asked first, and showed the domain delegated elsewhere.
+  assert.deepEqual(cf.dns, [DOMAIN])
+})
+
+test('a lapsed claim whose holder already moved the nameservers is never taken', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    await rewind(env, DOMAIN, { claimedAt: ago(7 * DAY + 60) })
+    // The registrar change landed; Cloudflare has not looked, so the zone still reads pending.
+    cf.delegated.add(DOMAIN)
+    const taken = await claim(env, DOMAIN, keyOf(3))
+    assert.equal(taken.status, 409)
+    assert.match(await taken.text(), /already points at this host/)
+    // A resolver that does not answer hands nothing over either.
+    cf.delegated.delete(DOMAIN)
+    cf.dnsDown = true
+    assert.equal((await claim(env, DOMAIN, keyOf(3))).status, 502)
+  })
+  const record = await claimRecordOf(env, DOMAIN)
+  assert.deepEqual([record.pubkey, record.status], [pubkey, 'pending'])
+})
+
+test('a lapsed claim whose nameservers moved stays its holder\'s', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    await rewind(env, DOMAIN, { claimedAt: 1 })
+    cf.activate(DOMAIN)
+    assert.equal((await claim(env, DOMAIN, keyOf(3))).status, 409)
+  })
+  const record = await claimRecordOf(env, DOMAIN)
+  assert.deepEqual([record.pubkey, record.status], [pubkey, 'active'])
+  assert.equal(cf.routes.length, 2)
+})
+
+test('one pending claim per key, and a cap on the claims waiting', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv({ CLAIM_PENDING_MAX: '2' })
+  await onCloudflare(cf, async () => {
+    assert.equal((await claim(env, 'first.org')).status, 200)
+    const second = await claim(env, 'second.org')
+    assert.equal(second.status, 409)
+    assert.match(await second.text(), /already has a claim pending/)
+    assert.equal((await claim(env, 'other.org', keyOf(3))).status, 200)
+    const capped = await claim(env, 'third.org', keyOf(4))
+    assert.equal(capped.status, 429)
+    // A settled claim frees its key, and its place under the cap.
+    cf.activate('first.org')
+    assert.equal(await statusOf(await lookAt(env, 'first.org')), 'active')
+    assert.equal((await claim(env, 'second.org')).status, 200)
+  })
+  assert.deepEqual(cf.created.map((zone) => zone.name), ['first.org', 'other.org', 'second.org'])
+})
+
+test('every claim still waiting counts against the cap — a contest frees no room', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv({ CLAIM_PENDING_MAX: '1' })
+  await onCloudflare(cf, async () => {
+    assert.equal((await claim(env, 'spam0.com', keyOf(10))).status, 200)
+    assert.equal(await statusOf(await claim(env, 'spam0.com', keyOf(11))), 'contested')
+    assert.equal((await claim(env, 'spam1.com', keyOf(12))).status, 429)
+    assert.equal((await claim(env, 'spam1.com', keyOf(13))).status, 429)
+  })
+  assert.deepEqual(cf.created.map((zone) => zone.name), ['spam0.com'])
+})
+
+test('a lapsed claim that never went live makes room under the cap, its zone deleted with it', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv({ CLAIM_PENDING_MAX: '1' })
+  await onCloudflare(cf, async () => {
+    await claim(env, 'abandoned.org', keyOf(10))
+    const zone = cf.zoneOf('abandoned.org')
+    await rewind(env, 'abandoned.org', { claimedAt: ago(8 * DAY) })
+    assert.equal((await claim(env, DOMAIN, keyOf(11))).status, 200)
+    assert.deepEqual(cf.deleted, [zone])
+    assert.deepEqual(cf.dns, ['abandoned.org'])
+  })
+  assert.equal(await claimRecordOf(env, 'abandoned.org'), null)
+  assert.equal((await claimRecordOf(env, DOMAIN)).status, 'pending')
+  assert.deepEqual(cf.created.map((zone) => zone.name), ['abandoned.org', DOMAIN])
+})
+
+test('a lapsed claim whose domain points here, or whose zone went live, is never pruned', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv({ CLAIM_PENDING_MAX: '2' })
+  await onCloudflare(cf, async () => {
+    await claim(env, 'slow.org', keyOf(10))
+    await claim(env, 'live.org', keyOf(11))
+    await rewind(env, 'slow.org', { claimedAt: ago(8 * DAY) })
+    await rewind(env, 'live.org', { claimedAt: ago(9 * DAY) })
+    cf.delegated.add('slow.org')
+    cf.activate('live.org')
+    assert.equal((await claim(env, DOMAIN, keyOf(12))).status, 429)
+    // Each was looked at once: another claim inside five minutes asks Cloudflare nothing.
+    const calls = cf.calls.length
+    assert.equal((await claim(env, 'other.org', keyOf(13))).status, 429)
+    assert.equal(cf.calls.length, calls)
+  })
+  assert.deepEqual(cf.deleted, [])
+  assert.equal((await claimRecordOf(env, 'slow.org')).pubkey, pubOf(keyOf(10)))
+  assert.equal((await claimRecordOf(env, 'live.org')).pubkey, pubOf(keyOf(11)))
+})
+
+test('reading a claim never says who claimed it', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    const read = await lookAt(env, DOMAIN)
+    assert.equal(read.status, 200)
+    assert.equal(read.headers.get('cache-control'), 'no-store')
+    const body = await read.text()
+    assert.deepEqual(Object.keys(JSON.parse(body)), ['domain', 'status', 'nameservers'])
+    assert.ok(!body.includes(pubkey) && !body.includes(cf.zoneOf(DOMAIN)))
+    assert.equal((await lookAt(env, 'nobody.org')).status, 404)
+  })
+})
+
+test('a reader who signs is told whether the claim is theirs — and still never whose it is', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    assert.deepEqual(await (await lookAt(env, DOMAIN, sk)).json(), { domain: DOMAIN, status: 'pending', nameservers: NAMESERVERS, mine: true })
+    const theirs = await (await lookAt(env, DOMAIN, keyOf(3))).text()
+    assert.deepEqual(JSON.parse(theirs), { domain: DOMAIN, status: 'pending', nameservers: NAMESERVERS, mine: false })
+    assert.ok(!theirs.includes(pubkey))
+    // A signature for another method, or none that verifies, is refused — never read as anonymous.
+    const url = `https://content.pluginthematrix.com/claim/${DOMAIN}`
+    assert.equal((await worker.fetch(new Request(url, { headers: { authorization: await signedAuth(url, 'POST') } }), env)).status, 401)
+    assert.equal((await worker.fetch(new Request(url, { headers: { authorization: 'Nostr bm9wZQ==' } }), env)).status, 401)
+  })
+})
+
+test('a public reading asks Cloudflare once per look, however many read it', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    const z = cf.zoneOf(DOMAIN)
+    const from = cf.calls.length
+    for (let i = 0; i < 20; i++) assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'pending')
+    assert.deepEqual(cf.calls.slice(from), [`GET /zones/${z}`, `PUT /zones/${z}/activation_check`])
+    // Five minutes on, one more look — and no second activation check inside the hour.
+    await rewind(env, DOMAIN, { lookedAt: ago(301) })
+    for (let i = 0; i < 20; i++) await lookAt(env, DOMAIN)
+    assert.deepEqual(cf.calls.slice(from + 2), [`GET /zones/${z}`])
+    // Active: twenty readings inside the hour ask nothing at all.
+    cf.activate(DOMAIN)
+    await rewind(env, DOMAIN, { lookedAt: ago(301) })
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'active')
+    const wired = cf.calls.length
+    for (let i = 0; i < 20; i++) assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'active')
+    assert.equal(cf.calls.length, wired)
+
+    // A failing API is asked once per look too; between looks the record answers.
+    await claim(env, 'failing.org', keyOf(5))
+    const failing = cf.zoneOf('failing.org')
+    cf.fail = (method, path) => path === `/zones/${failing}`
+    const before = cf.calls.length
+    assert.equal((await lookAt(env, 'failing.org')).status, 502)
+    for (let i = 0; i < 19; i++) assert.equal(await statusOf(await lookAt(env, 'failing.org')), 'pending')
+    assert.deepEqual(cf.calls.slice(before), [`GET /zones/${failing}`])
+  })
+})
+
+test('the first active reading wires the domain; a later look puts back what went missing, and never takes a route', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  const shape = () => cf.routes.map(({ pattern, script }) => ({ pattern, script }))
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN)
+    const z = cf.zoneOf(DOMAIN)
+    // jump_start kept the apex's own record (unproxied) and its mail.
+    cf.records.push({ id: 'apex-a', zone: z, type: 'A', name: DOMAIN, content: '192.0.2.10', proxied: false },
+      { id: 'apex-mx', zone: z, type: 'MX', name: DOMAIN, content: `mail.${DOMAIN}` })
+    // Pending: Cloudflare is asked to check at most once an hour, whatever the looks.
+    const checks = () => cf.calls.filter((call) => call.endsWith('/activation_check')).length
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'pending')
+    await rewind(env, DOMAIN, { lookedAt: ago(301) })
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'pending')
+    assert.equal(checks(), 1)
+    await rewind(env, DOMAIN, { lookedAt: ago(301), checkedAt: ago(7200) })
+    await lookAt(env, DOMAIN)
+    assert.equal(checks(), 2)
+    assert.equal(cf.routes.length, 0)
+
+    cf.activate(DOMAIN)
+    await rewind(env, DOMAIN, { lookedAt: ago(301) })
+    const from = cf.calls.length
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'active')
+    assert.deepEqual(cf.calls.slice(from), [
+      `GET /zones/${z}`,
+      `GET /zones/${z}/workers/routes`,
+      `GET /zones/${z}/dns_records`, `PATCH /zones/${z}/dns_records/apex-a`,
+      `GET /zones/${z}/dns_records`, `POST /zones/${z}/dns_records`,
+      `POST /zones/${z}/workers/routes`, `POST /zones/${z}/workers/routes`,
+    ])
+    assert.equal(cf.records.find((r) => r.id === 'apex-a').proxied, true)
+    assert.deepEqual(cf.records.filter((r) => r.type === 'AAAA').map(({ name, content, proxied }) => ({ name, content, proxied })),
+      [{ name: `*.${DOMAIN}`, content: '100::', proxied: true }])
+    assert.deepEqual(shape(), [{ pattern: `${DOMAIN}/*`, script: 'hypercomb-hosts' }, { pattern: `*.${DOMAIN}/*`, script: 'hypercomb-hosts' }])
+    assert.equal(typeof (await claimRecordOf(env, DOMAIN)).activatedAt, 'number')
+
+    // Inside the hour a reading asks nothing.
+    const quiet = cf.calls.length
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'active')
+    assert.equal(cf.calls.length, quiet)
+
+    // An hour on, everything lost comes back: a route, the `*` record, the apex's proxy.
+    cf.routes.splice(1, 1)
+    cf.records.splice(cf.records.findIndex((r) => r.name === `*.${DOMAIN}`), 1)
+    cf.records.find((r) => r.id === 'apex-a').proxied = false
+    await rewind(env, DOMAIN, { lookedAt: ago(3601) })
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'active')
+    assert.deepEqual(shape(), [{ pattern: `${DOMAIN}/*`, script: 'hypercomb-hosts' }, { pattern: `*.${DOMAIN}/*`, script: 'hypercomb-hosts' }])
+    assert.equal(cf.records.find((r) => r.id === 'apex-a').proxied, true)
+    assert.deepEqual(cf.records.filter((r) => r.type === 'AAAA').map(({ name, proxied }) => [name, proxied]), [[`*.${DOMAIN}`, true]])
+    assert.equal(cf.records.length, 3)
+
+    // A route another script holds is never taken: the look stops there.
+    cf.routes[0].script = 'someone-else'
+    cf.routes.splice(1, 1)
+    await rewind(env, DOMAIN, { lookedAt: ago(3601) })
+    const held = cf.calls.length
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'active')
+    assert.deepEqual(cf.calls.slice(held), [`GET /zones/${z}/workers/routes`])
+    assert.deepEqual(shape(), [{ pattern: `${DOMAIN}/*`, script: 'someone-else' }])
+  })
+})
+
+test('a claimed apex is its claimant\'s front door, and every name under it is a site only the claimant publishes', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv({ HOST_DOOR_ORIGIN: 'https://door.example' })
+  const claimant = assessor
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN, assessorKey)
+    cf.activate(DOMAIN)
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'active')
+    // Both keys sign `blog` open on the domain; only the claimant's is its publisher.
+    holdIndex(env, await indexBy(assessorKey, { blog: head }, 1_800_000_100, { blog: [DOMAIN] }))
+    holdIndex(env, await signedIndex({ blog: 'b'.repeat(64) }, 1_800_000_200, { blog: [DOMAIN] }))
+
+    await worker.fetch(page(`https://${DOMAIN}/`), env)
+    const missing = 'c'.repeat(64)
+    await worker.fetch(new Request(`https://${DOMAIN}/${missing}`), env)
+    // The apex is the shim host card — its page, and its own bytes the heap lacks.
+    assert.deepEqual(cf.elsewhere, ['https://door.example/', `https://door.example/${missing}`])
+
+    const { record } = await doorMeta(`https://blog.${DOMAIN}/`, env)
+    assert.deepEqual({ layer: record.layer, pubkey: record.pubkey, lineage: record.lineage }, { layer: head, pubkey: claimant, lineage: 'blog' })
+
+    // The domain's own directory lists it ...
+    const sites = JSON.parse(await publicationsAt(env, DOMAIN)).sites
+    const blog = sites.find((site) => site.host === `blog.${DOMAIN}`)
+    assert.deepEqual(blog.publishers.map((p) => [p.pubkey, p.head]), [[claimant, head]])
+    // ... and the operator's never does: a claim is not the operator's to advertise.
+    const operators = await publicationsAt(env, 'pluginthematrix.com')
+    assert.ok(JSON.parse(operators).sites.length)
+    assert.ok(!operators.includes(DOMAIN) && !operators.includes(claimant))
+    // content.<domain> is the write face, never a site.
+    assert.match(await (await worker.fetch(new Request(`https://content.${DOMAIN}/`), env)).text(), /public content endpoint/)
+  })
+})
+
+test('the operator moves a claim to a new key by editing its pubkey; a deleted record fails closed', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv()
+  const lost = keyOf(7)
+  await onCloudflare(cf, async () => {
+    await claim(env, DOMAIN, lost)
+    cf.activate(DOMAIN)
+    assert.equal(await statusOf(await lookAt(env, DOMAIN)), 'active')
+    // The participant lost that key. The operator edits the record — never deletes it.
+    await rewind(env, DOMAIN, { pubkey: assessor })
+    assert.equal(await statusOf(await claim(env, DOMAIN, assessorKey)), 'active')
+    assert.equal((await claim(env, DOMAIN, lost)).status, 409)
+    holdIndex(env, await indexBy(assessorKey, { blog: head }, 1_800_000_100, { blog: [DOMAIN] }))
+    const { record } = await later(120_000, () => doorMeta(`https://blog.${DOMAIN}/`, env))
+    assert.equal(record.pubkey, assessor)
+
+    // Deleted instead, the record leaves its zone behind: the domain is refused, never handed out.
+    env.CONTENT.held.delete(await claimAt(DOMAIN))
+    const again = await claim(env, DOMAIN, keyOf(8))
+    assert.equal(again.status, 409)
+    assert.match(await again.text(), /ask this host's operator/)
+  })
+  assert.equal(cf.created.length, 1)
+})
+
+test('the var and the operators always win over a claim', async () => {
+  const cf = fakeCloudflare()
+  const env = claimEnv({
+    HOST_DOOR_ORIGIN: 'https://door.example',
+    SITE_BINDINGS: JSON.stringify({ ...ONE_ZONE, [DOMAIN]: { title: 'Bound by hand', lineage: 'ibh', publishers: [{ pubkey, label: 'Jaime', primary: true }] } }),
+  })
+  // Records an older rule, or a hand, left behind: the var binds both names.
+  await keepClaim(env, { domain: DOMAIN, pubkey: assessor })
+  await keepClaim(env, { domain: 'shop.pluginthematrix.com', pubkey: assessor })
+  holdIndex(env, await indexBy(assessorKey, { blog: 'b'.repeat(64) }, 1_800_000_100, { blog: [DOMAIN] }))
+  holdIndex(env, await signedIndex({ blog: head }, 1_800_000_200, { blog: [DOMAIN] }))
+  await onCloudflare(cf, async () => {
+    const bound = (await sitesOf(env)).find((site) => site.host === DOMAIN)
+    assert.deepEqual([bound.title, bound.publishers.map((p) => p.pubkey)], ['Bound by hand', [pubkey]])
+    assert.equal((await doorMeta(`https://blog.${DOMAIN}/`, env)).record.pubkey, pubkey)
+    // A claim inside a bound zone is no front door there: the zone's rule answers.
+    const shop = await worker.fetch(page('https://shop.pluginthematrix.com/'), env)
+    assert.equal(shop.status, 404)
+    assert.match(await shop.text(), /nothing published at shop/)
+    assert.deepEqual(cf.elsewhere, [])
+  })
+})
+
+test('a routed request never fails for want of the claims, and a refresh fetches only the records that changed', async () => {
+  const env = claimEnv()
+  for (const domain of ['a-claim.org', 'b-claim.org', 'c-claim.org']) await keepClaim(env, { domain, pubkey: assessor })
+  const write = () => worker.fetch(new Request('https://revolucion.pluginthematrix.com/x', { method: 'PUT' }), env)
+  // The bucket's listing fails: the site still answers as a site.
+  const list = env.CONTENT.list
+  env.CONTENT.list = async () => { throw new Error('R2 list failed') }
+  assert.equal((await write()).status, 405)
+  env.CONTENT.list = list
+  const reads = []
+  const get = env.CONTENT.get
+  env.CONTENT.get = async (key) => { if (key.startsWith(`${CLAIMS}/`)) reads.push(key); return get(key) }
+  await later(61_000, write)
+  assert.equal(reads.length, 3)
+  // A minute on, nothing changed: one listing, no record fetched again.
+  await later(122_000, write)
+  assert.equal(reads.length, 3)
+  await rewind(env, 'b-claim.org', { activatedAt: 3 })
+  await later(183_000, write)
+  assert.deepEqual(reads.slice(3), [await claimAt('b-claim.org')])
+})
+
+test('a claimant may publish on the claimed domain, but the host AI stays the operator\'s to give', async () => {
+  const env = claimEnv({ ANTHROPIC_API_KEY: 'test' })
+  await keepClaim(env, { domain: DOMAIN, pubkey: assessor })
+  const url = 'https://content.pluginthematrix.com/ai/ask'
+  const upstream = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (target) => { upstream.push(String(target)); return Response.json({ content: [] }) }
+  try {
+    const asked = await worker.fetch(new Request(url, { method: 'POST',
+      headers: { authorization: await nip98(url, 'POST', assessorKey), 'content-type': 'application/json' },
+      body: JSON.stringify({ question: 'what is here?', stream: false }) }), env)
+    assert.equal(asked.status, 429)
+    assert.deepEqual(upstream, [])
+  } finally { globalThis.fetch = original }
+})
+
+test('the claims pool is never listed, even when declared, and its members are never served', async () => {
+  const windows = await sha256('hypercomb:windows')
+  const { env } = await operated({ roots: BOUND_ROOTS, objects: { [VECTOR.recordSig]: VECTOR.record },
+    extra: { listed: ['host:claims', 'hypercomb:windows'] } })
+  env.CF_ACCOUNT_ID = 'acct'
+  await keepClaim(env, { domain: DOMAIN, pubkey: assessor })
+  await env.CONTENT.put(`${windows}/${'d'.repeat(64)}`, '{}')
+  const at = (path) => worker.fetch(new Request(`https://content.pluginthematrix.com${path}`), env)
+  // The declaration is honored for an ordinary pool, and refused for this one.
+  assert.equal((await at(`/${windows}/`)).status, 200)
+  const listing = await at(`/${CLAIMS}/`)
+  assert.equal(listing.status, 404)
+  assert.match(await listing.text(), /no pool at this address/)
+  const member = await sha256Hex(DOMAIN)
+  for (const path of [`/${CLAIMS}/${member}`, `/content/${CLAIMS}/${member}`, `/@resource/${CLAIMS}/${member}`, `/content/${CLAIMS}/`]) {
+    const read = await at(path)
+    assert.notEqual(read.status, 200, path)
+    assert.ok(!(await read.text()).includes(assessor), path)
+  }
+})
+
+test('the forwarder hands every request on unchanged, and its config declares no routes', async () => {
+  const { default: forwarder } = await import('./hosts-forwarder.js')
+  const seen = []
+  const request = new Request(`https://blog.${DOMAIN}/x?y=1`, { method: 'POST', body: 'z' })
+  const answer = await forwarder.fetch(request, { HOST: { fetch: async (r) => { seen.push(r); return new Response('main worker') } } })
+  assert.equal(seen[0], request)
+  assert.equal(await answer.text(), 'main worker')
+  // Declaring one route there would delete every claimed domain on its next deploy.
+  const config = (name) => readFileSync(new URL(name, import.meta.url), 'utf8').split('\n').filter((line) => !line.trim().startsWith('#')).join('\n')
+  const hosts = config('./wrangler.hosts.toml')
+  assert.doesNotMatch(hosts, /^\s*routes?\s*=/m)
+  assert.doesNotMatch(hosts, /\[\[routes\]\]/)
+  const main = /^name\s*=\s*"([^"]+)"/m.exec(config('./wrangler.pluginthematrix.toml'))[1]
+  assert.match(hosts, new RegExp(`\\[\\[services\\]\\]\\s*binding\\s*=\\s*"HOST"\\s*service\\s*=\\s*"${main}"`))
+  assert.match(config('./wrangler.pluginthematrix.toml'), /^CLAIM_SCRIPT\s*=\s*"hypercomb-hosts"/m)
+  assert.match(hosts, /^name\s*=\s*"hypercomb-hosts"/m)
+})
+
+// ── a claimant hosts its domain here ───────────────────────────────────────
+// The shared hives a claimed domain serves live in this bucket, replicated up
+// from the claimant's own hive: an active claim stands its key on the claim
+// allowance, and a stranger stays on the guest list.
+test('an active claim lifts its key past the guest allowance; a stranger stays on it', async () => {
+  const env = claimEnv({ DEFAULT_QUOTA_BYTES: '8', CLAIM_QUOTA_BYTES: '4096' })
+  await keepClaim(env, { domain: DOMAIN, pubkey })
+  const upload = async (bytes, key) => {
+    const url = `https://content.${DOMAIN}/${await sha256Hex(bytes)}`
+    return worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', key) }, body: bytes }), env)
+  }
+  assert.equal((await upload('a hive the claimant shares', sk)).status, 201)
+  const stranger = await upload('a stranger past the guest list', assessorKey)
+  assert.equal(stranger.status, 403)
+  assert.match(await stranger.text(), /quota used up/)
+  // Contested, the claim binds nobody — and lifts nobody.
+  await keepClaim(env, { domain: DOMAIN, pubkey, contested: [pubkey, pubOf(assessorKey)] })
+  const contested = await later(61_000, () => upload('after the contest', sk))
+  assert.equal(contested.status, 403)
+  assert.match(await contested.text(), /quota used up/)
 })

@@ -80,6 +80,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [publishing.md](publishing.md) — How to publish today: content, modules, and apps — three rails and their gotchas
 - [infrastructure.md](infrastructure.md) — Decentralized design: two relays, no centralized hosting
 - [hosting-from-a-machine.md](hosting-from-a-machine.md) — Being a host: the desktop client and the headless `hypercomb-serve` answer the host contract live out of the store, with no export step
+- [domain-claim.md](domain-claim.md) — `domain claim <domain>`: one word and a nameserver change make a domain yours to publish to, with nothing for the operator to do per participant
 - [host-packages-pool.md](host-packages-pool.md) — Retiring `manifest.json`: a host's packages as a living primitive, with the measurement showing every inventory field is derivable from signed content
 - [lets-discover-meadowverse-pipeline.md](lets-discover-meadowverse-pipeline.md) — Authoring-runtime split: hypercomb.io → meadowverse.ca
 - [feedback-channel.md](feedback-channel.md) — Durable feedback transport — the loop routed through jwize.com
@@ -100,6 +101,7 @@ Forward-looking proposals and migration plans — not yet built. Retained so the
 
 - [security.md](security.md) — Presence-first security model: no accounts, expiring data
 - [social-governance.md](social-governance.md) — Presence-based permission, consent, and content-addressed identity
+- [code-admission.md](code-admission.md) — From their domain to your hive through one gate: the boundaries, the rules you tune, the accept screen (DESIGNED)
 - [code-of-conduct.md](code-of-conduct.md) — Community expectations for presence, consent, and recognition
 - [meetings-and-quorum.md](meetings-and-quorum.md) — 1+6 Cascade template, quorum gathering, WebRTC signaling
 

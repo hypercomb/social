@@ -882,28 +882,47 @@ class DocsProvider implements SlashBehaviourProvider {
   }
 }
 
+// The domain queen (commands/domain.queen.ts) is the source of truth for her
+// word — its forms, examples and completions. This provider still holds the
+// name (a manual provider wins the tie, so her auto-wrap never runs), and it
+// reads all three from her live rather than keeping a copy: the copy that
+// was here offered only the relay forms, so `domain cl` completed to `clear`
+// (wipe every relay) and never to `claim`.
+type DomainQueenLike = {
+  description?: string
+  options?: readonly string[]
+  examples?: SlashBehaviour['examples']
+  invoke?: (args: string) => Promise<void> | void
+  slashComplete?: (args: string) => readonly string[]
+}
+const domainQueen = (): DomainQueenLike | undefined =>
+  get('@diamondcoreprocessor.com/DomainQueenBee') as DomainQueenLike | undefined
+
 class DomainProvider implements SlashBehaviourProvider {
   readonly name = 'domain-provider'
   readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'domain', description: 'Add, remove, or list mesh relay domains', descriptionKey: 'slash.domain',
-      options: ['<ws:// or wss:// url>', 'remove <url>', 'list', 'clear'],
-      examples: [
-        { input: '/domain wss://relay.example.com', result: 'Adds the relay domain' },
-        { input: '/domain list', result: 'Lists configured relay domains' },
-      ] }
-  ]
+
+  get behaviours(): SlashBehaviour[] {
+    const queen = domainQueen()
+    return [{
+      name: 'domain',
+      description: queen?.description ?? 'Claim a domain with one word, or add, remove, or list mesh relay domains',
+      descriptionKey: 'slash.domain',
+      options: [...(queen?.options ?? ['claim <domain> [@<host>]', '<ws:// or wss:// url>', 'remove <url>', 'list', 'clear'])],
+      examples: queen?.examples ?? [{ input: '/domain claim example.org', result: 'Claims the domain: set the two nameservers it names at your registrar' }],
+    }]
+  }
 
   async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/DomainQueenBee') as any
+    const queen = domainQueen()
     if (queen?.invoke) await queen.invoke(args)
   }
 
   complete(_behaviourName: string, args: string): readonly string[] {
-    const subcommands = ['list', 'remove', 'clear']
+    const queen = domainQueen()
+    if (queen?.slashComplete) return queen.slashComplete(args)
     const q = args.toLowerCase().trim()
-    if (!q) return subcommands
-    return subcommands.filter(s => s.startsWith(q))
+    return ['claim ', 'list', 'remove ', 'clear'].filter(word => !q || (word.startsWith(q) && word.trim() !== q))
   }
 }
 

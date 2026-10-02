@@ -163,6 +163,20 @@ AI_MODEL = "claude-haiku-4-5"
 AI_MAX_TOKENS = "1024"
 AI_DAILY_TOKENS = "100000"
 AI_WRITERS = ""
+# ── claiming a domain (documentation/domain-claim.md) ──
+# The account a claimed domain's zone is created in, and the script its routes
+# go to: the forwarder (wrangler.hosts.toml), never this worker, whose deploys
+# replace every route it has. The API token is a SECRET, never a var:
+#   npx wrangler secret put CLAIM_API_TOKEN --config wrangler.pluginthematrix.toml
+# Until that secret exists POST /claim answers 503 and calls nothing.
+# CLAIM_PENDING_MAX (default 25) caps the claims waiting on nameservers —
+# pending or contested, lapsed or not: each holds a zone in this account. A new
+# claim makes room by deleting a lapsed claim's zone that never went live, so
+# the token's Zone Edit is also what deletes a zone.
+# A domain onboarded by hand (`npm run connect`) is never wired by a claim: a
+# zone with a route to this worker is the operator's, and a claim stops there.
+CF_ACCOUNT_ID = "5bc6089d4172ca3782a8735fb0d8c261"
+CLAIM_SCRIPT = "hypercomb-hosts"
 
 # The relay hostname is deliberately absent: it must retain signed PUT routes.
 #
