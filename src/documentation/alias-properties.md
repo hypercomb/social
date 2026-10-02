@@ -87,6 +87,15 @@ alias may override it. A pin on an alias hides; a pin on the repo locks.
 
 ### Seeing the layers
 
+**Built (step 4):** `propertyLayers` / `editorWrites` / `ownAfterInherit` in
+`editor/tile-properties.ts`; the session holds `layers` and pending `choices`
+(`tile-editor.service.ts`); the drone reads the layers on open (never from a
+cold read; none on a top-level tile, which IS its repo) and saves the choices
+— *only here* through `{ onlyHere }`, which keeps a value even when it equals
+the repo's; *inherit again* by replacing the alias's own record without those
+keys and pins; *hide here* as a cleared key. Fields: picture, border, name
+(hideText), fill, link. Strings `editor.layer.*` in all fourteen catalogs.
+
 The editor shows, per property, where its value comes from — **inherited**
 (from the repo), **overridden here**, **hidden here**, or **locked** by the repo
 — each in its own colour role (tool windows name roles, never colours), with

@@ -40,6 +40,20 @@ import { scaleLimits, scaleOfSlider, sliderOf, zoomPercent, zoomToward, type Hex
 import { installTileEditorStyles, TILE_EDITOR_SURFACE } from './tile-editor.styles.js'
 import type { EditorSurfaceKind, TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
+import { EDITOR_FIELD_NAMES, layerAfterChoice, type EditorField, type PropertyChoice, type PropertyLayer } from './tile-properties.js'
+
+/** What each layer reads as, and which choices it offers (alias-properties.md,
+ *  step 4). A locked field offers none — the repo's lock is absolute. */
+const LAYER_FALLBACK: Record<PropertyLayer, string> = {
+  inherited: 'inherited', here: 'only here', hidden: 'hidden here', locked: 'locked',
+}
+const CHOICE_FALLBACK: Record<PropertyChoice, string> = {
+  here: 'keep only here', inherit: 'inherit again', hide: 'hide here',
+}
+const OFFERED: Record<PropertyLayer, readonly PropertyChoice[]> = {
+  inherited: ['here', 'hide'], here: ['inherit', 'hide'], hidden: ['inherit', 'here'], locked: [],
+}
+const CHOICES: readonly PropertyChoice[] = ['here', 'inherit', 'hide']
 
 /** The view's IoC key — tile-editor.drone.ts registers the facade under it. */
 export const TILE_EDITOR_VIEW_KEY = '@diamondcoreprocessor.com/TileEditorView'
@@ -686,7 +700,9 @@ export class TileEditorElement extends HTMLElement {
 
     section.append(stage)
     const pictureTools = make('div', 'te-picture-tools')
-    pictureTools.append(toolbar, row2, noOriginal)
+    const pictureLayer = make('div', 'te-layer-row')
+    pictureLayer.append(document.createTextNode(t('editor.picture', 'picture')), this.#layerChip('picture'))
+    pictureTools.append(pictureLayer, toolbar, row2, noOriginal)
     return [section, pictureTools]
   }
 
@@ -698,12 +714,13 @@ export class TileEditorElement extends HTMLElement {
     // Rim colour
     const border = this.#colourField('border', 'border_color', t('editor.border', 'border'), DEFAULT_BORDER,
       value => service.setBorderColor(value), t('editor.default', 'default'))
+    border.querySelector('.te-label')?.append(this.#layerChip('border'))
     section.append(border)
 
     // Show the name over the picture
     const nameRow = make('div', 'te-field')
     const nameLabel = make('span', 'te-label')
-    nameLabel.append(glyph('text_fields'), document.createTextNode(t('editor.show-name', 'name')))
+    nameLabel.append(glyph('text_fields'), document.createTextNode(t('editor.show-name', 'name')), this.#layerChip('text'))
     const toggle = this.#keep('show-name', make('button', 'te-switch'))
     toggle.type = 'button'
     toggle.setAttribute('role', 'switch')
@@ -721,8 +738,79 @@ export class TileEditorElement extends HTMLElement {
     const fill = this.#colourField('background', 'palette', t('editor.fill-behind', 'fill behind'), '',
       value => service.setBackgroundColor(value), t('editor.none', 'none'))
     this.#keep('background-row', fill)
+    fill.querySelector('.te-label')?.append(this.#layerChip('fill'))
     section.append(fill)
     return section
+  }
+
+  /** Where this field's value comes from at an alias, and the choices that
+   *  move it (alias-properties.md, step 4). Hidden on a top-level tile, which
+   *  IS its name's repo — there is nothing to inherit from. */
+  #layerChip(field: EditorField): HTMLElement {
+    const wrap = this.#keep(`layer-${field}`, make('span', 'te-layer'))
+    wrap.hidden = true
+    const chip = this.#keep(`layer-${field}-chip`, make('button', 'te-layer-chip'))
+    chip.type = 'button'
+    chip.setAttribute('aria-haspopup', 'menu')
+    chip.setAttribute('aria-expanded', 'false')
+    const menu = this.#keep(`layer-${field}-menu`, make('span', 'te-layer-menu'))
+    menu.hidden = true
+    menu.setAttribute('role', 'menu')
+    const close = (): void => { menu.hidden = true; chip.setAttribute('aria-expanded', 'false') }
+    for (const choice of CHOICES) {
+      const option = this.#keep(`layer-${field}-${choice}`,
+        make('button', 'te-layer-option', t(`editor.layer.do.${choice}`, CHOICE_FALLBACK[choice])))
+      option.type = 'button'
+      option.setAttribute('role', 'menuitemradio')
+      option.addEventListener('click', event => {
+        event.stopPropagation()
+        const service = this.#service
+        if (!service) return
+        // Choosing the pending choice again takes it back.
+        service.choose(field, service.choices.get(field) === choice ? null : choice)
+        close()
+      })
+      menu.append(option)
+    }
+    chip.addEventListener('click', event => {
+      event.stopPropagation()
+      if (chip.disabled) return
+      const open = menu.hidden
+      for (const other of EDITOR_FIELD_NAMES) {
+        const otherMenu = this.#ref(`layer-${other}-menu`)
+        if (otherMenu && other !== field) otherMenu.hidden = true
+      }
+      menu.hidden = !open
+      chip.setAttribute('aria-expanded', String(open))
+    })
+    wrap.append(chip, menu)
+    return wrap
+  }
+
+  #syncLayers(): void {
+    const service = this.#service
+    const layers = service?.layers ?? null
+    for (const field of EDITOR_FIELD_NAMES) {
+      const wrap = this.#ref(`layer-${field}`)
+      const chip = this.#ref<HTMLButtonElement>(`layer-${field}-chip`)
+      if (!wrap || !chip) continue
+      wrap.hidden = !layers
+      if (!layers || !service) continue
+      const base = layers[field]
+      const choice = service.choices.get(field)
+      const shown = layerAfterChoice(base, choice)
+      chip.textContent = t(`editor.layer.${shown}`, LAYER_FALLBACK[shown])
+      chip.dataset['layer'] = shown
+      chip.dataset['pending'] = String(!!choice)
+      chip.disabled = base === 'locked'
+      chip.title = base === 'locked' ? t('editor.layer.locked-why', "locked by the name — it can't be changed here") : ''
+      for (const option of CHOICES) {
+        const button = this.#ref(`layer-${field}-${option}`)
+        if (!button) continue
+        button.hidden = !OFFERED[base].includes(option) && choice !== option
+        button.setAttribute('aria-checked', String(choice === option))
+      }
+    }
   }
 
   /** A colour row: swatch (the native picker under it), the hex text, and a
@@ -776,7 +864,9 @@ export class TileEditorElement extends HTMLElement {
   #buildLink(): HTMLElement {
     const service = this.#service!
     const section = make('section', 'te-section')
-    section.append(make('h4', 'te-section-head', t('editor.link', 'link')))
+    const head = make('h4', 'te-section-head', t('editor.link', 'link'))
+    head.append(this.#layerChip('link'))
+    section.append(head)
     const input = this.#keep('link', make('input', 'te-input te-link'))
     input.type = 'url'
     input.name = 'tile-link'
@@ -873,6 +963,7 @@ export class TileEditorElement extends HTMLElement {
 
     this.#syncLook()
     this.#syncPicture()
+    this.#syncLayers()
     this.#syncActions()
     this.#emitPreview()
   }

@@ -818,6 +818,108 @@ export const aliasPropertiesFor = (
   return { fill, override }
 }
 
+// ── Layers, as the editor shows them (alias-properties.md, step 4) ──────────
+
+/** The editor's fields, each with the property keys it edits. The picture is
+ *  one value: its sizes and its ownership marks travel together. */
+export const EDITOR_FIELDS = {
+  picture: ['small', 'flat', 'large', 'imageSig', PARTICIPANT_MARK, SUBSTRATE_MARK],
+  border: ['border'],
+  text: ['hideText'],
+  fill: ['background'],
+  link: ['link'],
+} as const satisfies Record<string, readonly string[]>
+export type EditorField = keyof typeof EDITOR_FIELDS
+export const EDITOR_FIELD_NAMES = Object.keys(EDITOR_FIELDS) as EditorField[]
+
+/** Where an alias's value for a field comes from:
+ *  - `inherited`: from the name's repo (or unset there too);
+ *  - `here`: this alias overrides it;
+ *  - `hidden`: this alias hides the repo's value (a pin);
+ *  - `locked`: the repo locks it — no alias may change it. */
+export type PropertyLayer = 'inherited' | 'here' | 'hidden' | 'locked'
+
+/** A participant's choice for one field at an alias. */
+export type PropertyChoice = 'here' | 'inherit' | 'hide'
+
+/** The layer of every editor field at an alias, from the alias's own record and
+ *  the repo's. Locked outranks everything — the repo's lock is absolute. */
+export const propertyLayers = (
+  own: Readonly<Record<string, unknown>>,
+  repo: Readonly<Record<string, unknown>>,
+): Record<EditorField, PropertyLayer> => {
+  const hidden = new Set(pinListOf(own))
+  const locked = new Set(pinListOf(repo))
+  const layers = {} as Record<EditorField, PropertyLayer>
+  for (const field of EDITOR_FIELD_NAMES) {
+    const keys: readonly string[] = EDITOR_FIELDS[field]
+    layers[field] = keys.some(key => locked.has(key)) ? 'locked'
+      : keys.some(key => hidden.has(key)) ? 'hidden'
+      : keys.some(key => key in own) ? 'here'
+      : 'inherited'
+  }
+  return layers
+}
+
+/** The layer a field shows once a pending choice is applied. */
+export const layerAfterChoice = (layer: PropertyLayer, choice: PropertyChoice | undefined): PropertyLayer =>
+  layer === 'locked' || !choice ? layer
+    : choice === 'here' ? 'here'
+    : choice === 'hide' ? 'hidden'
+    : 'inherited'
+
+/**
+ * Turn an editor save into the writes that carry out the participant's choices
+ * at an alias. `props` is the complete form. Returns:
+ *  - `shared`: the ordinary write — keys the alias does not override sink to
+ *    the repo, a field chosen *hide here* is cleared (a pin at the alias);
+ *  - `onlyHere`: the fields chosen *only here*, written with { onlyHere };
+ *  - `inherit`: the fields chosen *inherit again* — their keys and pins leave
+ *    the alias's own record, so it follows the repo again.
+ * A locked field takes no choice.
+ */
+export const editorWrites = (
+  props: Readonly<Record<string, unknown>>,
+  layers: Readonly<Record<EditorField, PropertyLayer>>,
+  choices: ReadonlyMap<EditorField, PropertyChoice>,
+): { shared: Record<string, unknown>; onlyHere: Record<string, unknown>; inherit: string[] } => {
+  const shared: Record<string, unknown> = { ...props }
+  const onlyHere: Record<string, unknown> = {}
+  const inherit: string[] = []
+  for (const [field, choice] of choices) {
+    if (layers[field] === 'locked') continue
+    const keys: readonly string[] = EDITOR_FIELDS[field]
+    for (const key of keys) {
+      if (choice === 'here') {
+        if (key in shared) onlyHere[key] = shared[key]
+        delete shared[key]
+      } else if (choice === 'inherit') {
+        delete shared[key]
+        inherit.push(key)
+      } else if (key !== PARTICIPANT_MARK && key !== SUBSTRATE_MARK) {
+        // Hide clears the VALUE keys (a pin each, at the alias); the ownership
+        // marks are not values and are never pinned.
+        shared[key] = undefined
+      }
+    }
+  }
+  return { shared, onlyHere, inherit }
+}
+
+/** An alias's own record once the named keys inherit again: the keys leave,
+ *  and so do their pins. */
+export const ownAfterInherit = (
+  own: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): Record<string, unknown> => {
+  const next: Record<string, unknown> = { ...own }
+  for (const key of keys) delete next[key]
+  const pins = pinListOf(own).filter(key => !keys.includes(key))
+  if (pins.length > 0) next[TILE_PROPERTY_PINS] = pins
+  else delete next[TILE_PROPERTY_PINS]
+  return next
+}
+
 /**
  * The repo after a GATHER meets two copies of one name (alias-properties.md,
  * step 3). The `newer` copy's values go to the repo; keys only the `older`
@@ -1005,7 +1107,9 @@ export const writeTilePropertiesAt = async (
     // so the lineage keeps following that default. A cold root is unknown,
     // never evidence that a value is redundant, so skip the collapse then.
     if (parentSegments.length > 0 && !rootStats.cold) {
-      withLifeReferences = sparseTileOverrides(inheritedDefaults, withLifeReferences)
+      // *Only here* keeps its values as given: an override equal to the repo
+      // today is still this alias's own, and must not start following the repo.
+      if (options.onlyHere !== true) withLifeReferences = sparseTileOverrides(inheritedDefaults, withLifeReferences)
       withLifeReferences = withClearedInheritedKeysPinned(
         inheritedDefaults,
         withLifeReferences,

@@ -1,5 +1,6 @@
 // editor/tile-editor.service.ts
 import { EffectBus } from '@hypercomb/core'
+import type { EditorField, PropertyChoice, PropertyLayer } from './tile-properties.js'
 
 /** Where an editing session is shown. `dock` sits beside the hive, which
  *  stays visible; `page` is a full-height page on a phone. A payload with no
@@ -46,6 +47,11 @@ export class TileEditorService extends EventTarget {
   #saving = false
   #error = ''
   #stash: EditorDraftStash | null = null
+  // Where each field's value comes from at an alias, and what the participant
+  // chose for it this session (alias-properties.md, step 4). Null layers = the
+  // tile is a repo itself (a top-level tile): there is nothing to inherit from.
+  #layers: Readonly<Record<EditorField, PropertyLayer>> | null = null
+  #choices = new Map<EditorField, PropertyChoice>()
 
   // ── getters ────────────────────────────────────────────────────
 
@@ -59,13 +65,15 @@ export class TileEditorService extends EventTarget {
   get surface(): EditorSurfaceKind { return this.#surface }
   get saving(): boolean { return this.#saving }
   get error(): string { return this.#error }
+  get layers(): Readonly<Record<EditorField, PropertyLayer>> | null { return this.#layers }
+  get choices(): ReadonlyMap<EditorField, PropertyChoice> { return this.#choices }
 
   /** The properties exactly as they were when the session opened. */
   get baseline(): Record<string, unknown> { return JSON.parse(this.#baseline) as Record<string, unknown> }
 
   /** Have the properties moved since the session opened? (The picture and its
    *  framing are the ImageEditorService's to answer.) */
-  get dirty(): boolean { return JSON.stringify(this.#properties) !== this.#baseline }
+  get dirty(): boolean { return this.#choices.size > 0 || JSON.stringify(this.#properties) !== this.#baseline }
 
   // ── specific property accessors (object notation) ──────────────
 
@@ -102,6 +110,8 @@ export class TileEditorService extends EventTarget {
     this.#surface = surface
     this.#saving = false
     this.#error = ''
+    this.#layers = null
+    this.#choices = new Map()
     this.#mode = 'editing'
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', {
@@ -121,6 +131,8 @@ export class TileEditorService extends EventTarget {
     this.#largeBlob = null
     this.#saving = false
     this.#error = ''
+    this.#layers = null
+    this.#choices = new Map()
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', payload)
   }
@@ -138,6 +150,21 @@ export class TileEditorService extends EventTarget {
     if (saving === this.#saving) return
     this.#saving = saving
     if (saving) this.#error = ''
+    this.#emit()
+  }
+
+  /** The fields' layers at this alias, read when the tile opened. */
+  readonly setLayers = (layers: Readonly<Record<EditorField, PropertyLayer>> | null): void => {
+    this.#layers = layers
+    this.#emit()
+  }
+
+  /** Choose for one field — or null to take the choice back. A locked field
+   *  takes no choice. */
+  readonly choose = (field: EditorField, choice: PropertyChoice | null): void => {
+    if (this.#layers?.[field] === 'locked') return
+    if (choice) this.#choices.set(field, choice)
+    else this.#choices.delete(field)
     this.#emit()
   }
 
