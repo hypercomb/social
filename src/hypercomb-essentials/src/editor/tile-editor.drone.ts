@@ -233,7 +233,8 @@ export class TileEditorDrone {
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
     imageEditor?.reset?.(hiveOrientation())
     service.open(targetCell, properties, largeBlob, target.segments, editorSurface())
-    void this.#readLayers(parentSegments, targetCell)
+    // Fire and forget: a failed read shows no layers, never an error.
+    void this.#readLayers(parentSegments, targetCell).catch(() => undefined)
     if (largeBlob && imageEditor?.loadOriginal) {
       void imageEditor.loadOriginal(largeBlob, {
         point: (properties as any).large,
@@ -257,7 +258,7 @@ export class TileEditorDrone {
     if (ownStats.cold || repoStats.cold) return
     // The session may have moved on while this read ran.
     if (service?.mode !== 'editing' || service.cell !== cell) return
-    service.setLayers(propertyLayers(own, repo))
+    service.setLayers(propertyLayers(own, repo), repo)
   }
 
   /** True once the panel can present the session — at once on an older shell,

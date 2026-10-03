@@ -1,6 +1,6 @@
 // editor/tile-editor.service.ts
 import { EffectBus } from '@hypercomb/core'
-import type { EditorField, PropertyChoice, PropertyLayer } from './tile-properties.js'
+import { EDITOR_FIELDS, type EditorField, type PropertyChoice, type PropertyLayer } from './tile-properties.js'
 
 /** Where an editing session is shown. `dock` sits beside the hive, which
  *  stays visible; `page` is a full-height page on a phone. A payload with no
@@ -52,6 +52,11 @@ export class TileEditorService extends EventTarget {
   // tile is a repo itself (a top-level tile): there is nothing to inherit from.
   #layers: Readonly<Record<EditorField, PropertyLayer>> | null = null
   #choices = new Map<EditorField, PropertyChoice>()
+  // The repo's record when the tile opened, and each field's values from
+  // before a choice previewed over them — so taking the choice back restores
+  // exactly what the participant had.
+  #repo: Readonly<Record<string, unknown>> = {}
+  #beforeChoice = new Map<EditorField, Record<string, unknown>>()
 
   // ── getters ────────────────────────────────────────────────────
 
@@ -112,6 +117,8 @@ export class TileEditorService extends EventTarget {
     this.#error = ''
     this.#layers = null
     this.#choices = new Map()
+    this.#repo = {}
+    this.#beforeChoice = new Map()
     this.#mode = 'editing'
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', {
@@ -133,6 +140,8 @@ export class TileEditorService extends EventTarget {
     this.#error = ''
     this.#layers = null
     this.#choices = new Map()
+    this.#repo = {}
+    this.#beforeChoice = new Map()
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', payload)
   }
@@ -154,8 +163,12 @@ export class TileEditorService extends EventTarget {
   }
 
   /** The fields' layers at this alias, read when the tile opened. */
-  readonly setLayers = (layers: Readonly<Record<EditorField, PropertyLayer>> | null): void => {
+  readonly setLayers = (
+    layers: Readonly<Record<EditorField, PropertyLayer>> | null,
+    repo: Readonly<Record<string, unknown>> = {},
+  ): void => {
     this.#layers = layers
+    this.#repo = clone(repo)
     this.#emit()
   }
 
@@ -163,8 +176,26 @@ export class TileEditorService extends EventTarget {
    *  takes no choice. */
   readonly choose = (field: EditorField, choice: PropertyChoice | null): void => {
     if (this.#layers?.[field] === 'locked') return
+    // Undo any earlier preview first, so choices never stack.
+    const before = this.#beforeChoice.get(field)
+    if (before) {
+      for (const [key, value] of Object.entries(before)) this.#properties[key] = clone(value)
+      this.#beforeChoice.delete(field)
+    }
     if (choice) this.#choices.set(field, choice)
     else this.#choices.delete(field)
+    // PREVIEW what the save will make of the field: the repo's value for
+    // inherit again, nothing for hide here. The picture is the image model's
+    // to show, so its form keys are left alone.
+    if ((choice === 'inherit' || choice === 'hide') && field !== 'picture') {
+      const keys: readonly string[] = EDITOR_FIELDS[field]
+      const saved: Record<string, unknown> = {}
+      for (const key of keys) saved[key] = this.#properties[key]
+      this.#beforeChoice.set(field, saved)
+      for (const key of keys) {
+        this.#properties[key] = choice === 'inherit' && key in this.#repo ? clone(this.#repo[key]) : undefined
+      }
+    }
     this.#emit()
   }
 

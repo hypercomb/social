@@ -66,6 +66,14 @@ The read and the sparse write are already built, for the properties record:
    the name has had, newest first. Choosing one writes it to the repo, or —
    with *only here* — as an override.
 
+   Built (step 5, pictures): `editor/picture-history.ts` lists this alias's
+   revisions, then the repo's, then the kept variants — newest first, one entry
+   per picture, read only (`openPool`, never creating a pool). The editor's
+   **earlier pictures** source shows them as thumbnails; choosing one loads it
+   as a new picture, and the save follows the ordinary rule — it sinks to the
+   repo, or stays at the alias when the alias owns its picture or the picture
+   is set to *only here*.
+
 ## Turning things off — three gestures, none of them a wipe
 
 An alias never changes the repo by turning something off. There are three

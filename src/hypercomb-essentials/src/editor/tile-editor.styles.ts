@@ -323,6 +323,14 @@ ${S} .te-layer-option{font:inherit;font-size:0.78rem;text-align:left;padding:0.3
 ${S} .te-layer-option[hidden]{display:none;}
 ${S} .te-layer-option:hover,${S} .te-layer-option[aria-checked="true"]{background:var(--hc-window-wash);color:var(--hc-window-accent);}
 ${S} .te-layer-row{display:flex;align-items:center;gap:0.5rem;color:var(--te-ink-quiet);font-size:0.78rem;}
+/* EARLIER PICTURES (alias-properties.md, step 5) — every picture the name has
+   worn; choosing one loads it as a new picture. */
+${S} .te-history{display:flex;flex-wrap:wrap;gap:6px;padding:6px 0;}
+${S} .te-history[hidden]{display:none;}
+${S} .te-history-item{width:52px;height:52px;padding:0;border:1px solid var(--hc-window-edge);border-radius:var(--hc-radius-control,2px);background:var(--te-raise);cursor:pointer;overflow:hidden;}
+${S} .te-history-item:hover{border-color:var(--hc-window-edge-firm);}
+${S} .te-history-item[data-from="here"]{box-shadow:inset 0 0 0 1px var(--hc-window-accent);}
+${S} .te-history-item img{width:100%;height:100%;object-fit:cover;display:block;}
 ${S} .te-panel[data-surface="page"] .te-layer-chip,${S} .te-panel[data-surface="page"] .te-layer-option{min-height:44px;}
 
 @media (prefers-reduced-motion: reduce){
