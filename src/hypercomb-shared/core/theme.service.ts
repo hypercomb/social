@@ -22,8 +22,8 @@
 // before first paint to avoid a flash; this service is the authoritative
 // runtime owner thereafter.
 
-import { EffectBus, THEME_IOC_KEY } from '@hypercomb/core'
-import type { ThemeProvider, ThemeTokens } from '@hypercomb/core'
+import { EffectBus, THEME_IOC_KEY, I18N_IOC_KEY } from '@hypercomb/core'
+import type { ThemeProvider, ThemeTokens, ThemeWords, I18nProvider } from '@hypercomb/core'
 
 const STORAGE_KEY = 'hc:theme'
 // Default when the participant has never chosen. `honey` — the bright warm
@@ -39,7 +39,7 @@ const SYSTEM = 'system'
 // light/dark are the two ends of one dimmer; honey/bloom/sherbet are LOOKS —
 // bright value-sets with their own accent chord, coloured elevation and a
 // livelier motion curve. Order is the order `/theme` offers them.
-const BUILTINS = ['light', 'dark', 'honey', 'bloom', 'sherbet'] as const
+const BUILTINS = ['light', 'dark', 'honey', 'bloom', 'sherbet', 'beehive'] as const
 
 // id of the managed <style> that holds runtime-registered theme blocks
 const REGISTRY_STYLE_ID = 'hc-theme-registry'
@@ -63,6 +63,9 @@ export class ThemeService extends EventTarget implements ThemeProvider {
   #theme: string
   // name → token map, for runtime-registered themes only
   #registered = new Map<string, ThemeTokens>()
+  // name → the words a theme carries (registerThemeWords). Any theme may
+  // have them, built-in or registered; the active one's are handed to i18n.
+  #words = new Map<string, ThemeWords>()
   // theme name → the `--md-*` values it would put on the document, and the
   // per-block reading of the live stylesheets they are merged from. Both are
   // caches of something recomputable — cleared when a theme is registered,
@@ -80,6 +83,10 @@ export class ThemeService extends EventTarget implements ThemeProvider {
     this.#theme = urlTheme ?? stored ?? DEFAULT_THEME
 
     this.#apply(this.#theme)
+    // The localization service may register after this one; its words are
+    // handed over the moment it does.
+    ;(window as { ioc?: { whenReady?: (key: string, cb: () => void) => void } }).ioc
+      ?.whenReady?.(I18N_IOC_KEY, () => this.#pushWords())
   }
 
   // -----------------------------------------------
@@ -101,6 +108,7 @@ export class ThemeService extends EventTarget implements ThemeProvider {
     this.#theme = name
     localStorage.setItem(STORAGE_KEY, name)
     this.#apply(name)
+    this.#pushWords()
     EffectBus.emit('theme:changed', { theme: name })
     this.dispatchEvent(new CustomEvent('change'))
   }
@@ -124,6 +132,14 @@ export class ThemeService extends EventTarget implements ThemeProvider {
     EffectBus.emit('theme:changed', { theme: this.#theme })
     this.dispatchEvent(new CustomEvent('change'))
     return true
+  }
+
+  /** A THEME CARRIES WORDS as well as colours (jwize, 2026-10-02). While the
+   *  theme is active its words shadow the shipped catalog — never the
+   *  participant's own overrides, which always win. Re-registering replaces. */
+  registerThemeWords(name: string, words: ThemeWords): void {
+    this.#words.set(name, words)
+    if (name === this.#theme) this.#pushWords()
   }
 
   registerTheme(name: string, tokens: ThemeTokens): void {
@@ -248,6 +264,13 @@ export class ThemeService extends EventTarget implements ThemeProvider {
 
   // Reflect the chosen theme onto <html>. 'system' clears the attribute so the
   // `prefers-color-scheme` media query in _material-tokens.scss takes over.
+  /** Hand the active theme's words to the localization service — or clear
+   *  them, when the active theme carries none. */
+  #pushWords(): void {
+    const i18n = (window as { ioc?: { get?: (key: string) => unknown } }).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
+    i18n?.setThemeWords?.(this.#words.get(this.#theme))
+  }
+
   #apply(name: string): void {
     const root = document.documentElement
     if (name === SYSTEM) root.removeAttribute('data-theme')

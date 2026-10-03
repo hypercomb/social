@@ -14,6 +14,12 @@ export interface I18nProvider {
    */
   registerOverrides(namespace: string, locale: string, catalog: Record<string, string>): void
   /**
+   * The active theme's words, keyed by locale (see ThemeProvider.registerThemeWords).
+   * Resolved after the participant's overrides and before the catalog.
+   * Optional so an older shell's provider still satisfies the contract.
+   */
+  setThemeWords?(words: Record<string, Record<string, string>> | undefined): void
+  /**
    * Resolve a cell's display label for the current locale.
    * Resolution order: overrides → catalog → labelSig resource → raw directory name.
    * The key convention is `cell.{directoryName}` within the given namespace.
