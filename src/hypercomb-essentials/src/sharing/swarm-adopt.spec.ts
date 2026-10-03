@@ -67,7 +67,7 @@ const iocRegistry = (): Record<string, unknown> => ({
   get: (key: string) => iocRegistry()[key],
 }
 
-const { SwarmAdoptDrone } = await import('./swarm-adopt.drone.js')
+const { MAX_BRANCH_ADOPT_TILES, SwarmAdoptDrone } = await import('./swarm-adopt.drone.js')
 
 // One shared instance for the direct-call tests (module import already
 // registered another; both are inert without tile:action emissions).
@@ -98,6 +98,19 @@ const landOnImport = (label: string) => {
   committer.importTree = vi.fn(async () => {
     history.headByLoc.set('loc:' + label, { name: label, children: [] })
   })
+}
+
+const offerLinearBranch = (label: string, count: number): string => {
+  const sigs = Array.from({ length: count }, (_, i) => (i + 16).toString(16).padStart(64, '0'))
+  offerBranch(label, sigs[0])
+  for (let i = 0; i < sigs.length; i++) {
+    history.layersBySig.set(sigs[i], {
+      name: i === 0 ? label : `node-${i}`,
+      children: i + 1 < sigs.length ? [sigs[i + 1]] : [],
+    })
+  }
+  broker.adopt = vi.fn(async () => ({ layers: count, leaves: 0, failed: 0 }))
+  return sigs[0]
 }
 
 beforeEach(() => {
@@ -144,6 +157,28 @@ describe('swarm-adopt fold — landed-or-owed', () => {
 
     expect(res).toBe('committed')
     expect(committer.importTree).toHaveBeenCalledTimes(1)
+    expect(pendingFolds()).toHaveLength(0)
+  })
+
+  it('adopts every tile when the complete branch fits the atomic limit', async () => {
+    const sig = offerLinearBranch('fits', MAX_BRANCH_ADOPT_TILES)
+    landOnImport('fits')
+
+    const res = await drone.adoptResolvedBranch({ layerSig: sig, at: [], label: 'fits' })
+
+    expect(res).toBe('committed')
+    const updates = committer.importTree.mock.calls[0][0] as unknown[]
+    // The destination parent is the one update outside the adopted branch.
+    expect(updates).toHaveLength(MAX_BRANCH_ADOPT_TILES + 1)
+  })
+
+  it('refuses an oversized branch before import instead of adopting a subset', async () => {
+    const sig = offerLinearBranch('too-big', MAX_BRANCH_ADOPT_TILES + 1)
+
+    const res = await drone.adoptResolvedBranch({ layerSig: sig, at: [], label: 'too-big' })
+
+    expect(res).toBe('too-large')
+    expect(committer.importTree).not.toHaveBeenCalled()
     expect(pendingFolds()).toHaveLength(0)
   })
 
