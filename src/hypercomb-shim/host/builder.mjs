@@ -17,17 +17,24 @@
 //      against its name and kept in this builder's pools.
 //   3. the base: the revision the draft starts from, from this builder's own
 //      pools (pulled from the host when it is not held yet).
-//   4. checkout, the draft's files laid over it, `npm ci` from the base's own
-//      lockfile, the base's own build scripts — the same process an author on
-//      their own machine runs (builds.mjs checkout). `--test` runs the
-//      checked-out tree's tests before anything is promoted.
+//   4. checkout, the draft's files laid over it, then `npm ci` and the build
+//      scripts of the tree as the draft leaves it — the same process an
+//      author on their own machine runs (builds.mjs checkout). `--test` runs
+//      the checked-out tree's tests before anything is promoted.
 //   5. promote: the package and the host, signed by this builder's key, each
 //      naming the draft and the author's ask (builds.mjs promote `from`).
 //      `--to <dir>` carries the result to a host directory for followers.
 //
-// Nothing the draft brings runs on this machine except through the build and
-// the tests it asked for: a builder is lending its tooling, so a builder that
-// does not trust an author does not take the ask.
+// BUILDING A DRAFT RUNS THE AUTHOR'S CODE. The draft's files are laid over
+// the base before anything runs, so `npm ci` installs from the DRAFT's
+// lockfile and the build runs the draft's scripts and configs (and its tests
+// with --test), as this machine's user. A builder is lending its tooling: a
+// builder that does not trust an author does not take the ask. What the
+// build is never handed is this builder's key — every step runs with an
+// environment of its own (buildEnv), and the key is read only afterwards, by
+// promote, outside the build. A key kept in a FILE is still a file this user
+// can read: until the build runs as another user or in a container, run a
+// builder only for authors you would let run code on this machine.
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -60,6 +67,22 @@ const fetchSig = async (host, sig, get = fetch) => {
   }
   throw new Error(`${host} does not serve ${sig.slice(0, 12)}`)
 }
+
+/** WHAT A DRAFT'S BUILD MAY SEE of this machine's environment: enough to
+ *  find its tools and its own output directories, never a signing key or
+ *  any other secret the operator keeps in the environment. */
+const BUILD_ENV_KEPT = ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'TERM', 'CI',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy',
+  'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'npm_config_cache', 'NPM_CONFIG_CACHE', 'npm_config_registry',
+  'PLAYWRIGHT_BROWSERS_PATH', 'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD', 'NODE_OPTIONS', 'HYPERCOMB_SEED_HOSTS', 'SYSTEMROOT', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'PATHEXT', 'COMSPEC']
+export const buildEnv = (work, from = process.env) => ({
+  ...Object.fromEntries(BUILD_ENV_KEPT.filter(name => from[name] !== undefined).map(name => [name, from[name]])),
+  // The build stages into this builder's pools (promote reads the stage).
+  ...(from.HYPERCOMB_POOLS_DIR ? { HYPERCOMB_POOLS_DIR: from.HYPERCOMB_POOLS_DIR } : {}),
+  HYPERCOMB_HOST_OUT_DIR: resolve(work, 'out'),
+  HYPERCOMB_WEB_CONTENT_DIR: resolve(work, 'web-content'),
+  HYPERCOMB_RELAY_CONTENT_DIR: resolve(work, 'relay-content'),
+})
 
 const keepIn = async (meaning, sig, bytes) => {
   const pool = poolDir(meaning)
@@ -122,15 +145,14 @@ export const buildDraft = async (host, ask, { to = null, test = false, keepWork 
     const src = resolve(work, 'src')
     const run = (args, label) => {
       log(`[builder] ${label}`)
-      const r = spawnSync('npm', args, { cwd: src, encoding: 'utf8', env: { ...process.env, HYPERCOMB_HOST_OUT_DIR: resolve(work, 'out'),
-        HYPERCOMB_WEB_CONTENT_DIR: resolve(work, 'web-content'), HYPERCOMB_RELAY_CONTENT_DIR: resolve(work, 'relay-content') }, maxBuffer: 256 << 20 })
+      const r = spawnSync('npm', args, { cwd: src, encoding: 'utf8', env: buildEnv(work), maxBuffer: 256 << 20 })
       if (r.status !== 0) throw new Error(`${label} failed:\n${(r.stderr || r.stdout || '').split('\n').slice(-25).join('\n')}`)
       return r.stdout
     }
-    run(['ci', ...INSTALL_WORKSPACES.flatMap(w => ['-w', w]), '--include-workspace-root', '--no-audit', '--no-fund'], 'npm ci from the base\'s lockfile')
+    run(['ci', ...INSTALL_WORKSPACES.flatMap(w => ['-w', w]), '--include-workspace-root', '--no-audit', '--no-fund'], 'npm ci from the draft\'s tree (its lockfile, if it changed one)')
     for (const script of AUTHOR_SCRIPTS) run(['run', script], `npm run ${script}`)
     if (test) {
-      const r = spawnSync('npx', ['vitest', 'run'], { cwd: src, encoding: 'utf8', maxBuffer: 256 << 20 })
+      const r = spawnSync('npx', ['vitest', 'run'], { cwd: src, encoding: 'utf8', env: buildEnv(work), maxBuffer: 256 << 20 })
       if (r.status !== 0) throw new Error(`the draft's tests fail:\n${(r.stdout || '').split('\n').filter(l => /×|FAIL|Test Files|Tests /.test(l)).slice(-20).join('\n')}`)
       log(`[builder] tests: ${(r.stdout.match(/Test Files .*/) ?? ['pass'])[0].trim()}`)
     }

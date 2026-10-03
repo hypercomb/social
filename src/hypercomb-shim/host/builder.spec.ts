@@ -68,3 +68,17 @@ describe('the builder takes an ask', () => {
     await expect(takeAsk('http://h.test', 'nope', { get: h.get })).rejects.toThrow(/named by its signature/)
   })
 })
+
+describe('a draft\'s build', () => {
+  it('is never handed the builder\'s key or any other secret in the environment', async () => {
+    const { buildEnv } = await import('./builder.mjs')
+    const env = buildEnv('/work', {
+      PATH: '/usr/bin', HOME: '/home/b', HYPERCOMB_POOLS_DIR: '/pools',
+      HYPERCOMB_SIGNER_KEY: 'a'.repeat(64), HYPERCOMB_SIGNER_KEY_FILE: '/secret/key', AWS_SECRET_ACCESS_KEY: 'x', GITHUB_TOKEN: 'y',
+    })
+    expect(env).toEqual({
+      PATH: '/usr/bin', HOME: '/home/b', HYPERCOMB_POOLS_DIR: '/pools',
+      HYPERCOMB_HOST_OUT_DIR: resolve('/work', 'out'), HYPERCOMB_WEB_CONTENT_DIR: resolve('/work', 'web-content'), HYPERCOMB_RELAY_CONTENT_DIR: resolve('/work', 'relay-content'),
+    })
+  })
+})
