@@ -138,9 +138,9 @@ function worm_roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: 
 // ───────────────── ROPE helpers ─────────────────
 // --- NINJA ROPE + HOOK helpers (prefix: rope_) ---
 
-// Build the rope centreline as an array of points. When attached and slack,
-// we apply a catenary-style sag; when taut we keep it nearly straight with a
-// tiny tension shimmer. While extending/retracting it's a straight live line.
+// Build the rope centreline as an array of points. The rope has NO slack: the
+// engine holds the worm exactly one rope-length from the anchor, so the line is
+// always one straight segment — attached, extending or retracting alike.
 function rope_path(
   ox: number, oy: number, tx: number, ty: number,
   attached: boolean, length: number, time: number,
@@ -152,28 +152,17 @@ function rope_path(
   let nx = -uy, ny = ux
   if (ny < 0) { nx = -nx; ny = -ny } // bias perpendicular downward so sag droops
 
-  // tautness: 1 = fully taut (worm at full rope length), 0 = lots of slack.
-  let taut = 1
-  if (attached) {
-    const slack = Math.max(0, length - dist)
-    taut = Math.max(0, Math.min(1, 1 - slack / Math.max(40, length * 0.5)))
-  }
+  // The rope is never slack (see the engine), so it is always drawn taut.
+  const taut = 1
+  void attached; void length; void time
 
   const segs = 18
   const pts: { x: number; y: number }[] = []
-  // sag magnitude: big when slack, near-zero when taut. plus tension shimmer.
-  const sagBase = attached ? (1 - taut) * Math.min(46, dist * 0.18) : 0
-  const shimmer = attached
-    ? Math.sin(time * 9) * (0.6 + taut * 1.4) // taut rope hums a little
-    : 0
 
   for (let i = 0; i <= segs; i++) {
     const f = i / segs
-    // parabolic sag profile (0 at ends, max in middle)
-    const sag = sagBase * Math.sin(f * Math.PI)
-    const hum = shimmer * Math.sin(f * Math.PI)
-    const px = ox + dx * f + nx * (sag + hum)
-    const py = oy + dy * f + ny * (sag + hum)
+    const px = ox + dx * f
+    const py = oy + dy * f
     pts.push({ x: px, y: py })
   }
   return { pts, taut, nx, ny }
@@ -246,16 +235,6 @@ function rope_drawCord(
       ctx.stroke()
     }
 
-    // taut tension glow: faint blue sheen down the rope when near full length
-    if (taut > 0.55) {
-      ctx.save()
-      ctx.globalCompositeOperation = 'lighter'
-      ctx.globalAlpha = (taut - 0.55) / 0.45 * (0.18 + 0.1 * (0.5 + 0.5 * Math.sin(time * 12)))
-      ctx.strokeStyle = '#4ea8ff'
-      ctx.lineWidth = 0.6
-      rope_strokePolyline(ctx, pts)
-      ctx.restore()
-    }
   } else {
     // flying / retracting: thinner, lighter live line with a faint shadow
     ctx.save()
@@ -1482,9 +1461,10 @@ function drawRope(ctx: CanvasRenderingContext2D, engine: RoperEngine, time: numb
   if (!rope || !worm) return
 
   const attached = rope.phase === 'attached'
-  // origin = the active worm's hand (just above centre, biased to facing side)
-  const ox = worm.x + worm.facing * 2
-  const oy = worm.y - 2
+  // origin: when attached, the point the engine constrains (the worm centre) so the
+  // line is exactly one rope-length; while flying, the worm's hand
+  const ox = attached ? worm.x : worm.x + worm.facing * 2
+  const oy = attached ? worm.y : worm.y - 2
   // tip = locked anchor when attached, else the live flying/retracting hook tip
   const tx = attached ? rope.ax : rope.hx
   const ty = attached ? rope.ay : rope.hy
