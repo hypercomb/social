@@ -9,7 +9,7 @@
   "references.feed-selected": "Добавить выбранные ({count}) в {pages}",
   "references.own-tiles": "Собственные плитки {page}",
   "references.own-same": "есть и в {group} — станет ссылкой",
-  "references.own-differs": "отличается от версии {group} — эта копия останется в истории:",
+  "references.own-differs": "отличается от версии {group} — это останется здесь:",
   "references.own-new": "нет в {group} — переедет туда, здесь останется ссылка",
   "references.gather-own": "Собрать {count} в {group}",
   "references.slot.picture": "картинка",

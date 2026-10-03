@@ -9,7 +9,7 @@
   "references.feed-selected": "選択した{count}件を{pages}に追加",
   "references.own-tiles": "{page}自身のタイル",
   "references.own-same": "{group}にもあり — 参照になります",
-  "references.own-differs": "{group}のものと異なる — このコピーは履歴に残ります:",
+  "references.own-differs": "{group}のものと異なる — これはここに残ります:",
   "references.own-new": "{group}にない — そちらへ移り、ここには参照が残ります",
   "references.gather-own": "{count}件を{group}に集める",
   "references.slot.picture": "画像",

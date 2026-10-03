@@ -82,7 +82,7 @@ export class ReferencesWindowComponent implements OnDestroy {
   readonly feedingOn = computed(() => this.targets().filter(t => t.on))
   readonly feedingNames = computed(() => this.feedingOn().map(t => t.label).join(', '))
   /** REVIEW — the page's own tiles read against its group, and which are
-   *  ticked to gather. Ticked from the start only where nothing is lost. */
+   *  ticked to gather. Nothing is ticked at the start: you choose. */
   readonly review = signal<OwnReview | null>(null)
   readonly ticked = signal<ReadonlySet<string>>(new Set())
   readonly gathering = signal(false)
@@ -274,7 +274,7 @@ export class ReferencesWindowComponent implements OnDestroy {
     const review = page ? await gatherLink()?.review?.(page).catch(() => null) ?? null : null
     if (generation !== this.#reviewGeneration) return
     this.review.set(review)
-    this.ticked.set(new Set((review?.tiles ?? []).filter(t => t.inGroup && t.differs.length === 0).map(t => t.name)))
+    this.ticked.set(new Set())
   }
 
   toggleOwn(name: string): void {

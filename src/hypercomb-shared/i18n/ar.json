@@ -9,7 +9,7 @@
   "references.feed-selected": "أضف {count} محددة إلى {pages}",
   "references.own-tiles": "بلاطات {page} الخاصة",
   "references.own-same": "موجودة في {group} أيضًا — تصبح مرجعًا",
-  "references.own-differs": "تختلف عن نسخة {group} — تبقى هذه النسخة في السجل:",
+  "references.own-differs": "تختلف عن نسخة {group} — يبقى هذا هنا:",
   "references.own-new": "ليست في {group} — تنتقل إليها ويبقى مرجع هنا",
   "references.gather-own": "اجمع {count} في {group}",
   "references.slot.picture": "الصورة",

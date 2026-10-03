@@ -2076,7 +2076,7 @@
   "references.feed-selected": "Add {count} selected to {pages}",
   "references.own-tiles": "{page}'s own tiles",
   "references.own-same": "in {group} too — becomes a reference",
-  "references.own-differs": "differs from {group}'s — this copy stays in history:",
+  "references.own-differs": "differs from {group}'s — these stay here:",
   "references.own-new": "not in {group} — moves there, a reference stays here",
   "references.gather-own": "Gather {count} into {group}",
   "references.slot.picture": "picture",

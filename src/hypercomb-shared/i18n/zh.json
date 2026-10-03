@@ -9,7 +9,7 @@
   "references.feed-selected": "将所选{count}项添加到{pages}",
   "references.own-tiles": "{page}自己的图块",
   "references.own-same": "{group}中也有——将成为引用",
-  "references.own-differs": "与{group}中的不同——此副本保留在历史中：",
+  "references.own-differs": "与{group}中的不同——这些保留在此处：",
   "references.own-new": "不在{group}中——将移到那里，此处保留引用",
   "references.gather-own": "将{count}项收集到{group}",
   "references.slot.picture": "图片",

@@ -9,7 +9,7 @@
   "references.feed-selected": "선택한 {count}개를 {pages}에 추가",
   "references.own-tiles": "{page}의 자체 타일",
   "references.own-same": "{group}에도 있음 — 참조가 됩니다",
-  "references.own-differs": "{group}의 것과 다름 — 이 사본은 기록에 남습니다:",
+  "references.own-differs": "{group}의 것과 다름 — 이것은 여기에 남습니다:",
   "references.own-new": "{group}에 없음 — 그곳으로 옮기고 여기에는 참조가 남습니다",
   "references.gather-own": "{count}개를 {group}에 모으기",
   "references.slot.picture": "그림",

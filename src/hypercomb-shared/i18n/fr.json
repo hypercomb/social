@@ -9,7 +9,7 @@
   "references.feed-selected": "Ajouter {count} sélectionnés à {pages}",
   "references.own-tiles": "Tuiles propres à {page}",
   "references.own-same": "aussi dans {group} — devient une référence",
-  "references.own-differs": "diffère de celle de {group} — cette copie reste dans l’historique :",
+  "references.own-differs": "diffère de celle de {group} — ceci reste ici :",
   "references.own-new": "absente de {group} — y est déplacée, une référence reste ici",
   "references.gather-own": "Rassembler {count} dans {group}",
   "references.slot.picture": "image",
