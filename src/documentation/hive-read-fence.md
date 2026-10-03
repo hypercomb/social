@@ -193,8 +193,12 @@ work on Hypercomb via DeepSeek."*
     question, never the lists), or a resource or layer reached by a
     signature such a read surfaced (kept on the turn as `foreign`). Names —
     list, tree, find, history — do not count, and neither does running
-    code: it already executes with the participant's full authority. Per
-    turn: the participant's next message is their words again. A sentence
+    code: it already executes with the participant's full authority. For
+    the rest of the conversation (jwize, 2026-10-03: "hold all
+    conversation"): what the model read stays in what it is sent, so a "go
+    ahead" next turn is not a hand over words the participant may never
+    have read; the surfaced signatures are kept on the turn, so the hold
+    survives a reload. (Until 2026-10-03 it was per turn.) A sentence
     the participant picked from the model's table is their hand, so neither
     hold applies to it.
   - **Where a peer's words can be (2026-10-02, every landing channel

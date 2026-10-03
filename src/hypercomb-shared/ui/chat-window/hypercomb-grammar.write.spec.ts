@@ -48,6 +48,14 @@ describe('the chat window', () => {
     expect(release).toContain('!row.forceReview')
   })
 
+  it("holds a change for the rest of a conversation that read a peer's words, at every door", () => {
+    expect(source).toContain('const conversationForeign = (): boolean =>')
+    expect(source).toContain("(component.#foreignSigs.get(convoId)?.size ?? 0) > 0")
+    expect(source).toContain('const foreign = !own && conversationForeign()')
+    expect(source.split('foreign: conversationForeign()').length - 1).toBe(2)   // write, doctrine
+    expect(source).not.toMatch(/foreign:?\s*=?\s*(!own && )?turnForeign\.length > 0/)
+  })
+
   it('asks the grant before a write is queued and again after the wait, for code and doctrine alike', () => {
     for (const door of ['const runWrite = async', 'const runDoctrine = async']) {
       const at = source.indexOf(door)

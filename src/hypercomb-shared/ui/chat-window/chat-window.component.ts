@@ -6588,8 +6588,16 @@ export class ChatWindowComponent implements OnDestroy {
     let turnReads = 0
     // WHAT THIS TURN READ OF SOMEONE ELSE'S WORDS (execution-queue.ts,
     // `foreign`): a change asked for after it waits for the participant's
-    // hand. Per turn — the participant's next message is their words again.
+    // hand.
     const turnForeign: string[] = []
+    // FOR THE REST OF THE CONVERSATION (jwize, 2026-10-03: "hold all
+    // conversation"). What the model read stays in what it is sent, so the
+    // words do not become the participant's because a turn ended — a "go
+    // ahead" next turn is not a hand over text they may never have read. The
+    // signatures a foreign read surfaced are kept on the turn and restored on
+    // reload, so the hold outlives both.
+    const conversationForeign = (): boolean =>
+      turnForeign.length > 0 || (component.#foreignSigs.get(convoId)?.size ?? 0) > 0
     let turnWeight: MessageEffort = need.tier
     // THE ANATOMY GOES FIRST, TO EVERY PROVIDER. It is the stable protocol +
     // doctrine (documentation/anatomy-context-need.md): identical bytes on
@@ -7136,7 +7144,7 @@ export class ChatWindowComponent implements OnDestroy {
         // change following someone else's words, waits for a hand — unless the
         // participant chose this very sentence, which is the hand.
         const leaves = !own && hypercombPlanLeaves(plan, behaviourEntries).length > 0
-        const foreign = !own && turnForeign.length > 0
+        const foreign = !own && conversationForeign()
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: hypercombPlanReach(plan, behaviourEntries), lines: grammars, needsGrant: false, signal,
@@ -7213,7 +7221,7 @@ export class ChatWindowComponent implements OnDestroy {
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal,
-          forceReview: review, foreign: turnForeign.length > 0,
+          forceReview: review, foreign: conversationForeign(),
         })
         if (!review) waitingOn(entry.id)
         if (await entry.decision === 'skip') {
@@ -7260,7 +7268,7 @@ export class ChatWindowComponent implements OnDestroy {
         EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal, forceReview: true,
-          foreign: turnForeign.length > 0,
+          foreign: conversationForeign(),
         })
         if (await entry.decision === 'skip') {
           if (signal?.aborted) throw stopped()

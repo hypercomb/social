@@ -609,10 +609,14 @@ three doors inherit it, and to grow a principal.
       doctrine section, which "always waits for their hand", was written with
       no hand, and a decision Jev handed back was taken unseen. Trust is a
       policy, and the queue's own rule is that no policy lifts review.
-    - *A peer's words, read one turn and acted on the next* — **open, by
-      decision.** `foreign` is per turn ("the participant's next message is
-      their words again"); what the model read stays in the conversation, and
-      a later read of the same signatures is still foreign, but a change asked
-      for in the next turn without re-reading runs unheld. Whether a
-      participant's "go ahead" is a hand over words they may not have read is
-      the owner's call.
+    - *A peer's words, read one turn and acted on the next* — **resolved
+      (jwize: "hold all conversation").** `foreign` was per turn ("the
+      participant's next message is their words again"), but what the model
+      read stays in the conversation, so a change asked for the next turn
+      without re-reading ran unheld. Now once a conversation has read a peer's
+      words, every later change in it waits for a press — kept with the
+      surfaced signatures on the turn, so a reload does not lift it.
+    - *Other doors* — **none.** Only the command line, the chat window, the
+      workflow runner and the census itself run a behaviour. A peer-lent
+      model cannot act at all: `llm-hive-access` refuses every `peer:`
+      provider, and only a provider granted the hive is offered changes.
