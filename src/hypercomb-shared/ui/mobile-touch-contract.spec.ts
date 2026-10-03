@@ -24,6 +24,7 @@ const postitView = tiles('postit-view.drone.ts')
 const publicationsView = tiles('publications-view.drone.ts')
 const squareTileView = tiles('square-tile-view.drone.ts')
 const slidesView = tiles('slides-view.drone.ts')
+const railProjection = read('..', '..', 'hypercomb-essentials', 'src', 'sequence', 'rail-projection.drone.ts')
 
 const phoneBlock = (source: string): string => {
   const marker = '@media (max-width: 599px), (max-height: 449px)'
@@ -65,8 +66,15 @@ describe('mobile touch contracts', () => {
   it('exposes pin/unpin from the phone layer deck through the single persisted-state owner', () => {
     expect(layerDeck).toMatch(/action:\s*'pin'[\s\S]*EffectBus\.emitTransient\('viewport:pin-toggle'/)
     expect(controlsBar).toMatch(/EffectBus\.on\('viewport:pin-toggle',\s*\(\)\s*=>\s*this\.togglePin\(\)\)/)
-    expect(layerDeck).toContain('const LANES_DEFAULT = 2')
-    expect(controlsBar).toContain('readonly laneCount = signal(2)')
+    // 25484a3a0 (2026-09-13) retired the 3·2·1 rung: lanes are one on/off
+    // state the rail projection owns at a fixed count. The deck keeps no
+    // count of its own — it reads the replay and asks the owner to toggle.
+    expect(layerDeck).toMatch(/onEffect<Lanes>\('lanes:changed'/)
+    expect(layerDeck).toMatch(/action:\s*'lanes'[\s\S]*?EffectBus\.emit\('lanes:toggle'/)
+    expect(layerDeck).not.toMatch(/LANES_DEFAULT|LANES_FULL|'lanes:set'|'lanes:step'/)
+    const lanes = railProjection.match(/const LANES = (\d+)/)?.[1]
+    expect(lanes).toBeDefined()
+    expect(controlsBar).toContain(`readonly laneCount = signal(${lanes})`)
   })
 
   it('keeps view exits thumb-sized and square captions readable on phones', () => {
