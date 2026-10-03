@@ -39,7 +39,7 @@
 // slot.
 
 import { Drone, EffectBus, admitMachineCall, currentMachineGrant, primaryEntry, type AdmissionEntry } from '@hypercomb/core'
-import { isWithinAdoptedRoot } from '../sharing/adopted-roots.js'
+import { isPeerContentAt } from '../sharing/adopted-roots.js'
 import { WORKFLOW_SLOT_DECLARATION, readWorkflow } from './workflow-slot.js'
 import { readSteps, type WorkflowStep, type WorkflowStepView } from './workflow-step.js'
 import {
@@ -86,7 +86,8 @@ type SlashLike = {
 /** WHO CHOSE A STEP'S WORDS decides who judges it (core machine-admission:
  *  "who chose the words, not which surface they arrived on"). A step tile in
  *  the participant's own tree is their words, run by their own Run — as the
- *  keyboard, asked of nobody. A step inside a branch adopted from a PEER is a
+ *  keyboard, asked of nobody. A step inside a branch adopted from a PEER, or
+ *  under a peer's tile the participant carried onto their own page, is a
  *  stranger's words, run unattended: judged as a model's line is — a
  *  declaration required, the participant's grant, their ceiling, and the
  *  behaviour's own refuse. Answers the refusal, or undefined to run. */
@@ -96,7 +97,7 @@ export const peerStepRefusal = (
   args: string,
   slash: SlashLike | undefined,
 ): string | undefined => {
-  if (!isWithinAdoptedRoot(stepSegments)) return undefined
+  if (!isPeerContentAt(stepSegments)) return undefined
   const entry = primaryEntry(command, slash?.entries?.() ?? [])
   const verdict = admitMachineCall(command, entry, 'model', currentMachineGrant())
   if (!verdict.admit) return `a peer's step: ${verdict.reason}`

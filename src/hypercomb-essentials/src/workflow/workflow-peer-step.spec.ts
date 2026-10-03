@@ -15,7 +15,7 @@ import { DEFAULT_MACHINE_GRANT, MACHINE_GRANT_KEY, MACHINE_ROSTER_KEY, grantedVe
 ;(window as unknown as { ioc: unknown }).ioc = { register: () => {}, get: () => undefined, whenReady: () => {}, list: () => [] }
 
 const { peerStepRefusal } = await import('./workflow-runner.drone.js')
-const { markAdoptedRoot, _resetAdoptedRootsCache } = await import('../sharing/adopted-roots.js')
+const { markAdoptedRoot, markCarriedRoot, _resetAdoptedRootsCache } = await import('../sharing/adopted-roots.js')
 
 const create = { name: 'create', machine: { forms: '<name>', example: '/create a', reach: 'additive' as const, scope: 'page' as const } }
 const remove = { name: 'remove', machine: { forms: '<tile>', example: '/remove a', reach: 'destructive' as const, scope: 'page' as const } }
@@ -68,5 +68,17 @@ describe("a peer's workflow, adopted", () => {
   it("runs the behaviour's own refuse on the step's arguments", () => {
     expect(peerStepRefusal(step, 'title', 'roadmap =', slash)).toBe("a peer's step: clearing a title is a participant's to do")
     expect(peerStepRefusal(step, 'title', 'roadmap = Road map', slash)).toBeUndefined()
+  })
+})
+
+describe("a peer's tile the participant carried onto their own page", () => {
+  // Cut or copied out of the adopted branch, the record keyed by path stays
+  // behind — but the words are still the peer's (adopted-roots.ts
+  // isPeerContentAt), so its steps are still judged as a stranger's.
+  it("is still judged as a peer's step", () => {
+    markCarriedRoot(['mine', 'alices-chores'])
+    expect(peerStepRefusal(['mine', 'alices-chores', 'step-1'], 'remove', 'drafts', slash))
+      .toBe("a peer's step: /remove is destructive, and this hive grants a machine no further than editing")
+    expect(peerStepRefusal(['mine', 'my-chores', 'step-1'], 'remove', 'drafts', slash)).toBeUndefined()
   })
 })
