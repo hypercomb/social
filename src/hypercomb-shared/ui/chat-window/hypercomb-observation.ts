@@ -266,8 +266,9 @@ export type HypercombTreeReader = {
   codeNaming?(name: string, options: {
     readonly signal?: AbortSignal
   }): Promise<readonly HypercombCodeHit[]>
-  /** True when the route lies in a branch folded in from a peer — what is
-   *  read there is someone else's words. Absent: nothing is known foreign. */
+  /** True when the route holds a peer's words — a branch folded in from a
+   *  peer, or a peer's tile carried elsewhere. Absent: nothing is known
+   *  foreign. */
   foreign?(segments: readonly string[]): boolean
 }
 
@@ -547,8 +548,8 @@ const SIGNATURES = /[0-9a-f]{64}/g
  * follows such a read for their hand (execution-queue.ts, `foreign`).
  *
  * CONTENT COUNTS, NAMES DO NOT. A tile read with its content, its summary,
- * or a resource is someone else's words when it came from a branch folded in
- * from a peer (`foreign(segments)`), or — addressed by signature — when an
+ * or a resource is someone else's words when its route holds a peer's words
+ * (`foreign(segments)`), or — addressed by signature — when an
  * earlier foreign read surfaced that signature (`known`). Listings, trees,
  * finds and histories carry names only; code already runs with the
  * participant's full authority, so reading its text grants it nothing more.

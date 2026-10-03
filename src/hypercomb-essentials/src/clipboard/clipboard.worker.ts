@@ -3,6 +3,7 @@ import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import { ClipboardService, type ClipboardEntry, type ClipboardOp } from './clipboard.service.js'
 import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig } from '../history/layer-placement.js'
 import { seedLayerKeyedEntries } from '../editor/tile-properties.js'
+import { isPeerContentAt, markCarriedRoot } from '../sharing/adopted-roots.js'
 
 interface SelectionLike {
   readonly selected: ReadonlySet<string>
@@ -361,7 +362,11 @@ export class ClipboardWorker extends Worker {
         const group = groups.get(key) ?? { parentSegs, leaves: new Set<string>() }
         group.leaves.add(leaf)
         groups.set(key, group)
-        const entry: ClipboardEntry = { label: leaf, sourceSegments: parentSegs, cut: true }
+        // Whose words, decided NOW: the cut below unsubscribes an adopted root.
+        const entry: ClipboardEntry = {
+          label: leaf, sourceSegments: parentSegs, cut: true,
+          ...(isPeerContentAt([...parentSegs, leaf]) ? { fromPeer: true } : {}),
+        }
         moved.push(entry)
         movedByKey.set(`${key}/${leaf}`, entry)
       }
@@ -437,9 +442,11 @@ export class ClipboardWorker extends Worker {
       const pathSegs = label.split('/').filter(Boolean)
       if (pathSegs.length === 0) continue
       const leaf = pathSegs[pathSegs.length - 1]
+      const sourceSegments = [...baseSegments, ...pathSegs.slice(0, -1)]
       copyEntries.push({
         label: leaf,
-        sourceSegments: [...baseSegments, ...pathSegs.slice(0, -1)],
+        sourceSegments,
+        ...(isPeerContentAt([...sourceSegments, leaf]) ? { fromPeer: true } : {}),
       })
     }
     if (copyEntries.length === 0) return
@@ -486,6 +493,9 @@ export class ClipboardWorker extends Worker {
    *  source tile is untouched, which is what makes this the reference-gather
    *  path rather than a move. */
   async #takeEntries(entries: ClipboardEntry[]): Promise<void> {
+    for (const entry of entries) {
+      if (isPeerContentAt([...entry.sourceSegments, entry.label])) entry.fromPeer = true
+    }
     const history = this.#history
     if (history) {
       for (const entry of entries) {
@@ -517,6 +527,7 @@ export class ClipboardWorker extends Worker {
         sourceSegments: [...i.sourceSegments],
         ...(i.sig ? { sig: i.sig } : {}),
         ...(i.cut ? { cut: true } : {}),
+        ...(i.fromPeer ? { fromPeer: true } : {}),
       })),
     })
   }
@@ -641,6 +652,8 @@ export class ClipboardWorker extends Worker {
     const placed: ClipboardEntry[] = []
     const appends: string[] = []
     const failed: string[] = []
+    // A peer's tile landing outside any peer branch: marked once it commits.
+    const carried: string[][] = []
     for (const entry of items) {
       if (taken.has(entry.label)) {
         console.warn(`[clipboard] target already has '${entry.label}'; skipping`)
@@ -711,6 +724,7 @@ export class ClipboardWorker extends Worker {
       appends.push(sig)
       placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
       taken.add(entry.label)
+      if ((entry.fromPeer === true || isPeerContentAt(srcPath)) && !isPeerContentAt(dstPath)) carried.push(dstPath)
     }
 
     if (placed.length === 0) return { placed, failed }
@@ -741,6 +755,8 @@ export class ClipboardWorker extends Worker {
     const tCommit0 = performance.now()
     await committer.commitChildrenDeltas(targetSegments, { appends })
     tCommit = performance.now() - tCommit0
+    // THE WORDS STAY THEIRS where they land (adopted-roots.ts, carried roots).
+    for (const path of carried) markCarriedRoot(path)
     console.log(
       `[clipboard] paste: total=${Math.round(performance.now() - tStart)}ms ` +
       `parent=${Math.round(tParent)}ms capture=${Math.round(tCapture)}ms prep=${Math.round(tPrep)}ms ` +
@@ -1044,7 +1060,7 @@ export class ClipboardWorker extends Worker {
 // drains, removed after the first pool-doc write.
 
 interface ClipboardMeta {
-  items: { label: string; sourceSegments: string[]; sig?: string; cut?: boolean }[]
+  items: { label: string; sourceSegments: string[]; sig?: string; cut?: boolean; fromPeer?: boolean }[]
 }
 
 const META_SUBKEY = 'clipboard-meta'

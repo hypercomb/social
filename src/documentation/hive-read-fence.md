@@ -188,19 +188,30 @@ work on Hypercomb via DeepSeek."*
     never the participant's key. Today that is `/hide`, which signs a mesh
     event under the participant's pubkey.
   - **foreign** — a change asked for in a turn that read someone else's
-    words (`foreignReads`): a tile's content or summary from a branch folded
-    in from a peer (sharing/adopted-roots.ts, the one authorship record a
-    route has), or a resource or layer reached by a signature such a read
-    surfaced (kept on the turn as `foreign`). Names — list, tree, find,
-    history — do not count, and neither does running code: it already
-    executes with the participant's full authority. Per turn: the
-    participant's next message is their words again. A sentence the
-    participant picked from the model's table is their hand, so neither hold
-    applies to it.
-  - **Gap:** a name gathered from a host (`from`/`feed`) carries no
-    authorship mark on the route, so it is not yet read as foreign. The
-    machine grant still keeps `/remove` and `/cut` from models by default
-    (`grant destructive` raises it).
+    words (`foreignReads`): a tile's content or summary at a route that holds
+    a peer's words (sharing/adopted-roots.ts `isPeerContentAt` — the one
+    question, never the lists), or a resource or layer reached by a
+    signature such a read surfaced (kept on the turn as `foreign`). Names —
+    list, tree, find, history — do not count, and neither does running
+    code: it already executes with the participant's full authority. Per
+    turn: the participant's next message is their words again. A sentence
+    the participant picked from the model's table is their hand, so neither
+    hold applies to it.
+  - **Where a peer's words can be (2026-10-02, every landing channel
+    traced).** Every swarm landing — the one-level fold, a branch adopt, a
+    sync of a held tile — lands inside an ADOPTED root, which the fold marks
+    at the topmost foreign tile. Route-keyed, so a peer's tile cut or
+    copied onto the participant's own page would have escaped it (and a cut
+    of an adopted root unsubscribes it outright): the clipboard now decides
+    "from a peer" at the take (`ClipboardEntry.fromPeer`) and placement
+    marks a CARRIED root where it lands — provenance only, it drives
+    nothing in the swarm; deleting the tile drops it. `/from` and `/feed`
+    link the participant's own pages and are not a channel. The notes
+    FACET unions every author's bucket for a word, but no code lands
+    another author's bucket locally yet; the day one does, the note sigs
+    it surfaces must count as foreign (`readSuccessionMembers` already
+    knows each member's author). The machine grant still keeps `/remove`
+    and `/cut` from models by default (`grant destructive` raises it).
 - **One side, two occupants.** The Execution column and the workflow column
   share the chat's right side, one at a time; a new waiting request brings
   Execution forward. On a phone it covers the thread until put away.

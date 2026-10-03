@@ -53,6 +53,7 @@ import {
   markAdoptTombstone,
   clearAdoptTombstone,
   isAdoptTombstoned,
+  unmarkCarriedRoot,
 } from './adopted-roots.js'
 import { setDivergedLabels, clearPeerDivergence } from './peer-divergence.js'
 import { publisherHoldsUnheldBelow } from './branch-difference.js'
@@ -276,6 +277,9 @@ export class SwarmAdoptDrone extends Drone {
       const cell = String(p?.cell ?? '').trim()
       if (!cell || !Array.isArray(p?.segments)) return
       const target = [...p.segments.map(s => String(s ?? '').trim()).filter(Boolean), cell]
+      // A peer's tile carried here goes with its record (a cut carries the
+      // mark onward on its clipboard entry).
+      unmarkCarriedRoot(target)
       if (!isWithinAdoptedRoot(target)) return
       markAdoptTombstone(target)
       unmarkAdoptedRoot(target)

@@ -24,6 +24,11 @@ export interface ClipboardEntry {
    *  so until it is placed the clipboard is the only easy handle on it — a
    *  fresh capture that replaced it would leave it reachable by undo alone. */
   cut?: boolean
+  /** Set when the tile was someone else's words when it was taken — inside a
+   *  branch folded in from a peer (sharing/adopted-roots.ts `isPeerContentAt`).
+   *  Decided at the take, because cutting an adopted root unsubscribes it;
+   *  placing the entry marks where it lands, so the words stay theirs there. */
+  fromPeer?: boolean
 }
 
 export class ClipboardService extends EventTarget {
@@ -39,6 +44,7 @@ export class ClipboardService extends EventTarget {
     if (entries.length === 0) return
     this.#items = entries.map(e => ({
       label: e.label, sourceSegments: [...e.sourceSegments], sig: e.sig, ...(e.cut ? { cut: true } : {}),
+      ...(e.fromPeer ? { fromPeer: true } : {}),
     }))
     this.#notify()
   }
@@ -61,6 +67,7 @@ export class ClipboardService extends EventTarget {
         sourceSegments: [...e.sourceSegments],
         sig: e.sig ?? held?.sig,
         ...(e.cut || held?.cut ? { cut: true } : {}),
+        ...(e.fromPeer || held?.fromPeer ? { fromPeer: true } : {}),
       })
     }
     this.#items = [...byKey.values()]

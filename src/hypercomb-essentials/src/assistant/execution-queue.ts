@@ -26,7 +26,7 @@
 //               that never said. Approval downstream protects the reader,
 //               never the participant's key.
 //   foreign     a CHANGE asked for in a turn that read someone else's words —
-//               a tile from a branch folded in from a peer. The model acts
+//               a tile from a peer's branch, or one carried out of it. The model acts
 //               with the participant's authority; the words it acts on were
 //               not theirs to give.
 //
