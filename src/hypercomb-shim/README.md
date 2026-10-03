@@ -351,9 +351,9 @@ HYPERCOMB_SIGNER_KEY=<builder key> node host/builds.mjs build-draft <host> <ask>
 ```
 
 It verifies the ask and every file, checks the base out of its pools, lays
-the files over it, installs from the base's own lockfile, builds with the
-base's own scripts (`--test` runs its tests first), and promotes the package
-and the host under its key, each naming the draft and the author's ask; the
+the files over it, installs and builds the tree as the draft leaves it
+(`--test` runs its tests first), and promotes the package and the host under
+its key, each naming the draft and the author's ask; the
 browser pulls them back and `/versions` says whose draft each came from.
 Proven end to end against the real content worker (`scripts/local-content-host.mjs`):
 the browser pulled 10,058 files, drafted one edit, sent 4 files; the builder
@@ -361,6 +361,14 @@ promoted two revisions; the browser pulled 15 files back and read its edit
 in the newest host revision. `/versions drafts` and `/versions ask <host>`
 are the same acts by word, and `@diamondcoreprocessor.com/VersionDrafts` is
 the same acts for the harness (a model acting for the participant).
+
+**A builder runs the author's code.** The draft's lockfile, scripts, configs
+and tests are what install and build, as the builder's user. The build is
+never handed the signing key (each step gets an environment of its own,
+without it, and promote reads the key afterwards), but a key kept in a file
+is still a file that user can read. Until a draft builds as another user or
+in a container, run `build-draft` only for authors you would let run code on
+the machine.
 
 **A model writes it too: the loop without a window.** The chat window's
 model loop — reads, changes and writes in rounds until the request is done
