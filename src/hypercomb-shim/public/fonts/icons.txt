@@ -265,7 +265,6 @@ qr_code
 qr_code_scanner
 question_answer
 queue_music
-quiz
 radio
 receipt
 receipt_long
