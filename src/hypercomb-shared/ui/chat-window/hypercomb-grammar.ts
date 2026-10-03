@@ -320,6 +320,18 @@ export const hypercombPlanLeaves = (
     .map(action => action.grammar)
 }
 
+/** WHY A WRITE MAY NOT RUN, or undefined. A module section or a doctrine
+ *  section written back is a change no census row declares, so no rung of the
+ *  gate ever read it: a hive that granted a machine only additive verbs, or
+ *  kept it within one page, still had its running code rewritten. It is judged
+ *  as what it is — an edit that reaches the whole hive — against the
+ *  participant's ceiling and off switch. The roster is not asked: there is no
+ *  behaviour to grant, and the write waits in Execution as its own row. */
+export const hypercombWriteRefusal = (grant: MachineGrant = currentMachineGrant()): string | undefined => {
+  const verdict = admitMachineCall('write', { name: 'write', machine: { reach: 'editing', scope: 'hive' } }, 'model', { reach: grant.reach, scope: grant.scope })
+  return verdict.admit ? undefined : verdict.reason
+}
+
 const parseLine = (
   raw: unknown,
   allowed: ReadonlyMap<string, HypercombMachineGrammar>,
