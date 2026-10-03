@@ -33,6 +33,8 @@ export class BubbleOverlay {
   #livingReady = false
   #livingError = ''
   #wantedRound = 0
+  /** The round whose successor has been read ahead — once per round played. */
+  #aheadOf = -1
   #audio = new GameAudio()
   #abort: AbortController | null = null
   #resize: ResizeObserver | null = null
@@ -183,6 +185,7 @@ export class BubbleOverlay {
     this.#livingReady = false
     this.#livingError = ''
     this.#wantedRound = 0
+    this.#aheadOf = -1
     this.#engine.useLivingLevels()
     this.#keys.clear()
     this.#touch.clear()
@@ -264,6 +267,19 @@ export class BubbleOverlay {
     this.#roundLoads.set(index, pending)
   }
 
+  /** Quiet: nothing on the cover, and a failure is dropped — the visible load
+   *  when the round before it clears retries it and reports what went wrong. */
+  #loadAhead(index: number): void {
+    const source = this.#roundSource
+    if (!this.#root || !source || index >= this.#engine.levels.length
+      || this.#loadedRounds.has(index) || this.#roundLoads.has(index)) return
+    Promise.resolve().then(() => source.ensureRound(index)).then(loaded => {
+      if (!this.#root || this.#roundSource !== source || this.#loadedRounds.has(index)) return
+      this.#engine.installLevel(index, loaded.level)
+      this.#loadedRounds.add(index)
+    }).catch(() => {})
+  }
+
   #livingFailure(error: unknown): void {
     if (!this.#root) return
     this.#livingError = error instanceof Error ? error.message : 'The living round could not be read.'
@@ -327,6 +343,14 @@ export class BubbleOverlay {
         }
       }
       this.#sounds()
+    }
+    // Within range: once the round being played is installed, the next one is
+    // read ahead — and seeded into the hive the first time it is reached — so
+    // clearing this round does not wait on its 801 tiles being written.
+    const playing = this.#engine.levelIndex
+    if (this.#aheadOf !== playing && this.#loadedRounds.has(playing)) {
+      this.#aheadOf = playing
+      this.#loadAhead(playing + 1)
     }
     if (this.#engine.state === 'clear' && this.#engine.levelIndex + 1 < this.#engine.levels.length) {
       this.#loadLivingRound(this.#engine.levelIndex + 1)
