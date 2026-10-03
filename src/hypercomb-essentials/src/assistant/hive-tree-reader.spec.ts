@@ -464,6 +464,23 @@ describe('a page history cannot pin to one signature', () => {
     expect(await fx.reader.find('legacy', [])).toMatchObject({ ok: true, matches: [{ name: 'legacy', path: '/projects/legacy' }] })
   })
 
+  it('finds a name past what a tree would show, in a hive wider than one tree read', async () => {
+    // /find walked on /tree's output budget — 64 names — and on a real hive
+    // never reached /games/Arkanoid. It returns only matches, so it walks wider.
+    const fx = fixture()
+    const wide = Array.from({ length: 90 }, (_, i) => sig(1_000 + i))
+    const layers = new Map<string, LayerContent>(wide.map((s, i) => [s, { name: `tile-${i}`, children: [] }]))
+    layers.set(sig(2_000), { name: 'games', children: [sig(2_001)] })
+    layers.set(sig(2_001), { name: 'Arkanoid', children: [] })
+    const rootLayer: LayerContent = { name: 'hive', children: [...wide, sig(2_000)] }
+    fx.refs.set(sig(101), { locationSig: sig(101), layerSig: sig(1), layer: rootLayer })
+    fx.getLayerBySig.mockImplementation(async (signature: string) => layers.get(signature) ?? null)
+
+    const tree = await fx.reader.readTree([], { maxDepth: 2 })
+    expect(tree.ok && tree.nodes.some(node => node.name === 'Arkanoid')).toBe(false)
+    expect(await fx.reader.find('arkanoid', [])).toMatchObject({ ok: true, matches: [{ name: 'Arkanoid', path: '/games/Arkanoid' }] })
+  })
+
   it('keeps a fallback route and its signature content in memory for the next read', async () => {
     const fx = fixture()
     fx.refs.delete(sig(102))

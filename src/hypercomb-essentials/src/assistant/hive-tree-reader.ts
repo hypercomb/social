@@ -32,6 +32,14 @@ const MAX_BYTES = 12_000
  *  once where the model's window has room — the shell sizes each ask. */
 const MAX_PAGE_BYTES = 48_000
 const MAX_READ_MS = 5_000
+/** How far a walk may go. `/tree` returns every node it visits, so its walk
+ *  is its output budget. `/find` returns only the matches, and on that budget
+ *  it saw the first 64 names of a real hive and never reached
+ *  /games/Arkanoid (2026-10-03): it walks wider, and when its time is up it
+ *  answers with what it found, marked partial, instead of failing. */
+type WalkCeiling = { readonly nodes: number; readonly bytes: number; readonly ms: number; readonly partial: boolean }
+const TREE_WALK: WalkCeiling = { nodes: MAX_NODES, bytes: MAX_BYTES, ms: MAX_READ_MS, partial: false }
+const FIND_WALK: WalkCeiling = { nodes: 2_000, bytes: 400_000, ms: 12_000, partial: true }
 const SNAPSHOT_TTL_MS = 2 * 60_000
 /** Snapshots kept for revalidation; the oldest falls out first. One leg
  *  alone mints twelve rounds of eight reads and a front-door listing (97),
@@ -395,6 +403,7 @@ export class HypercombHiveTreeReader {
     options: HypercombTreeReadOptions = {},
     /** The cache already waited for pending commits: wait exactly once. */
     settled = false,
+    ceiling: WalkCeiling = TREE_WALK,
   ): Promise<HypercombTreeRead> {
     const root = rootLabel(segments)
     const history = this.#history()
@@ -405,9 +414,11 @@ export class HypercombHiveTreeReader {
     }
 
     const maxDepth = boundedInteger(options.maxDepth, 2, MAX_DEPTH)
-    const maxNodes = Math.max(1, boundedInteger(options.maxNodes, 48, MAX_NODES))
-    const maxBytes = Math.max(1_024, boundedInteger(options.maxBytes, 8_000, MAX_BYTES))
-    const deadline = Date.now() + MAX_READ_MS
+    const maxNodes = Math.max(1, boundedInteger(options.maxNodes, 48, ceiling.nodes))
+    const maxBytes = Math.max(1_024, boundedInteger(options.maxBytes, 8_000, ceiling.bytes))
+    const deadline = Date.now() + ceiling.ms
+    // A partial walk stops itself short of the deadline, between pages.
+    const stopAt = ceiling.partial ? deadline - 1_500 : Number.POSITIVE_INFINITY
     const signal = options.signal
 
     try {
@@ -483,7 +494,7 @@ export class HypercombHiveTreeReader {
 
         for (const carried of parent.children) {
           guard()
-          if (nodes.length >= maxNodes) { truncated = true; exhausted = true; break }
+          if (nodes.length >= maxNodes || Date.now() > stopAt) { truncated = true; exhausted = true; break }
           const path = [...parent.path, carried.name]
           let ref: (CurrentLayerRef & { readonly live: boolean }) | null
           try { ref = await currentRef(path, carried.sig) } catch (error) {
@@ -760,9 +771,10 @@ export class HypercombHiveTreeReader {
     const root = rootLabel(segments)
     const needle = String(query ?? '').trim().toLowerCase()
     if (!needle) return { ok: false, root, code: 'not-found' }
-    const walk = await this.readTree(segments, {
-      maxDepth: MAX_DEPTH, maxNodes: MAX_NODES, maxBytes: MAX_BYTES, signal: options.signal,
-    })
+    const epoch = await this.#settledEpoch(options.signal)
+    const walk = await this.#readTreeLive(segments, {
+      maxDepth: MAX_DEPTH, maxNodes: FIND_WALK.nodes, maxBytes: FIND_WALK.bytes, signal: options.signal,
+    }, epoch !== undefined, FIND_WALK)
     if (!walk.ok) return { ok: false, root, code: walk.code }
     const limit = Math.max(1, boundedInteger(options.maxNodes, 48, MAX_NODES))
     const hits = walk.nodes.filter(node => node.depth > 0 && node.name.toLowerCase().includes(needle))
