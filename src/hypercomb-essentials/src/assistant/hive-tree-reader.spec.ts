@@ -443,6 +443,27 @@ describe('a page history cannot pin to one signature', () => {
       .toMatchObject({ ok: true, name: 'projects', layerSig: sig(2) })
   })
 
+  it('walks a tree whose heads cannot be pinned, the way /read reads each page', async () => {
+    // /tree /games and /find answered incomplete-read for a whole hive whose
+    // pages /read opened: the walk asked the pinned head alone, and one that
+    // threw or came back cold failed everything.
+    const fx = fixture()
+    const current = fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>
+    current.mockImplementation(async (location: string, stats?: { cold?: boolean }) => {
+      if (location === sig(102)) throw new Error('cold head')
+      if (location === sig(101)) { if (stats) stats.cold = true; return null }
+      return fx.refs.get(location) ?? null
+    })
+    fx.history['listLayers'] = vi.fn(async (location: string) => location === sig(101) ? [{ index: 3, layerSig: sig(1) }] : [])
+
+    const tree = await fx.reader.readTree([], { maxDepth: 2 })
+    expect(tree.ok).toBe(true)
+    if (!tree.ok) return
+    // /projects is the copy the root carries (sig 2), so its child is legacy.
+    expect(tree.nodes.map(node => node.path)).toEqual(['/', '/projects', '/notes', '/projects/legacy'])
+    expect(await fx.reader.find('legacy', [])).toMatchObject({ ok: true, matches: [{ name: 'legacy', path: '/projects/legacy' }] })
+  })
+
   it('keeps a fallback route and its signature content in memory for the next read', async () => {
     const fx = fixture()
     fx.refs.delete(sig(102))

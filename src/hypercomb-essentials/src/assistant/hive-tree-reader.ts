@@ -421,15 +421,34 @@ export class HypercombHiveTreeReader {
         if (Date.now() > deadline) throw new ReadBudgetError()
         if (history.treeEpoch() !== epoch) throw new StaleReadError()
       }
-      const currentRef = async (path: readonly string[]): Promise<CurrentLayerRef | null> => {
+      // A PAGE IS FOUND THE WAY /read FINDS IT (#resolvePage). The walk
+      // asked history's pinned head alone, and a head lookup that threw or
+      // came back cold failed the whole walk, so /tree /games and /find
+      // answered "incomplete-read" while /read of the same routes worked
+      // (2026-10-03, after the fix for unreadable children was installed).
+      // A child falls back to the copy its parent carries — the one the
+      // canvas shows; the root to the bag's latest marker, then its parent's
+      // copy. Only a live head goes into the snapshot: a fallback has
+      // nothing to revalidate.
+      const currentRef = async (path: readonly string[], carriedSig?: string): Promise<(CurrentLayerRef & { readonly live: boolean }) | null> => {
         guard()
         const locationSig = await history.sign({ explorerSegments: () => [...path] })
         guard()
         const stats: { cold?: boolean } = {}
-        const ref = await history.currentLayerRefAt(locationSig, stats)
+        const head = await history.currentLayerRefAt(locationSig, stats).catch(() => null)
         guard()
-        if (!ref && stats.cold) throw new IncompleteReadError()
-        return ref
+        if (head) return { ...head, live: true }
+        if (carriedSig) {
+          const layer = await history.getLayerBySig(carriedSig).catch(() => null)
+          guard()
+          if (layer) return { locationSig, layerSig: carriedSig, layer, live: false }
+        } else {
+          const page = await this.#resolvePage(path, locationSig, history, stats)
+          guard()
+          if (page) return page
+        }
+        if (stats.cold) throw new IncompleteReadError()
+        return null
       }
 
       const rootRef = await currentRef(segments)
@@ -438,7 +457,7 @@ export class HypercombHiveTreeReader {
       guard()
 
       const nodes: HypercombTreeNode[] = []
-      const heads: SnapshotHead[] = [{ locationSig: rootRef.locationSig, layerSig: rootRef.layerSig }]
+      const heads: SnapshotHead[] = rootRef.live ? [{ locationSig: rootRef.locationSig, layerSig: rootRef.layerSig }] : []
       const first: HypercombTreeNode = {
         path: root,
         name: rootRef.layer.name || (segments[segments.length - 1] ?? 'hive'),
@@ -466,8 +485,8 @@ export class HypercombHiveTreeReader {
           guard()
           if (nodes.length >= maxNodes) { truncated = true; exhausted = true; break }
           const path = [...parent.path, carried.name]
-          let ref: CurrentLayerRef | null
-          try { ref = await currentRef(path) } catch (error) {
+          let ref: (CurrentLayerRef & { readonly live: boolean }) | null
+          try { ref = await currentRef(path, carried.sig) } catch (error) {
             if (!(error instanceof IncompleteReadError)) throw error
             truncated = true
             continue
@@ -499,7 +518,7 @@ export class HypercombHiveTreeReader {
           if (bytes + cost > maxBytes) { truncated = true; exhausted = true; break }
           bytes += cost
           nodes.push(node)
-          heads.push({ locationSig: ref.locationSig, layerSig: ref.layerSig })
+          if (ref.live) heads.push({ locationSig: ref.locationSig, layerSig: ref.layerSig })
           queue.push({ path, depth: node.depth, children })
         }
       }
