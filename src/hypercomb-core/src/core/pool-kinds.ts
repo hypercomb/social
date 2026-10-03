@@ -10,7 +10,8 @@
 //   set         | sig-named items            | remove only your own member | yes
 //   index       | member named by the sig    | never delete; recompute     | no (derived)
 //               | it describes               |                             |
-//   document    | one current record         | replaces siblings BY DESIGN | no (per-participant)
+//   document    | one CURRENT record         | keeps every version; the    | no (per-participant)
+//               |                            | max 000x marker is current  |
 //   succession  | per-author buckets of      | never touch another         | yes
 //               | signed claims              | author's bucket             |
 //
@@ -50,8 +51,10 @@ export type PoolKind = 'set' | 'index' | 'document' | 'succession'
 export interface PoolKindFacts {
   readonly kind: PoolKind
   /** How a member leaves — a description of intent, never an authorisation.
-   *  `directory-safety.ts` decides what may actually be unlinked. */
-  readonly deletion: 'own-member' | 'never-recompute' | 'replaces-siblings' | 'own-bucket'
+   *  `directory-safety.ts` decides what may actually be unlinked. A document
+   *  pool's `keeps-versions` means NO member leaves on a write: each save adds
+   *  an atom and a marker, and history keeps every earlier one. */
+  readonly deletion: 'own-member' | 'never-recompute' | 'keeps-versions' | 'own-bucket'
   /** May the whole pool be dropped and rebuilt from what remains? */
   readonly wipeSafe: boolean
   /** Does it travel to a peer? */
@@ -61,7 +64,7 @@ export interface PoolKindFacts {
 const FACTS: Readonly<Record<PoolKind, PoolKindFacts>> = Object.freeze({
   set: Object.freeze({ kind: 'set', deletion: 'own-member', wipeSafe: false, replicates: true }),
   index: Object.freeze({ kind: 'index', deletion: 'never-recompute', wipeSafe: true, replicates: false }),
-  document: Object.freeze({ kind: 'document', deletion: 'replaces-siblings', wipeSafe: false, replicates: false }),
+  document: Object.freeze({ kind: 'document', deletion: 'keeps-versions', wipeSafe: false, replicates: false }),
   succession: Object.freeze({ kind: 'succession', deletion: 'own-bucket', wipeSafe: false, replicates: true }),
 })
 
@@ -113,7 +116,7 @@ const kindByMeaning = new Map<string, PoolKind>()
  * winner is whoever imports earliest: a module declaring at import time would
  * see an empty map, take the slot, and `ensureSeeded` would then decline to
  * overwrite it — turning `roots` (succession, "never touch another author's
- * bucket") into a `document` ("replaces siblings") by module-graph accident.
+ * bucket") into a `document` ("one current record") by module-graph accident.
  */
 export const declarePoolKind = (meaning: string, kind: PoolKind): PoolKindFacts | undefined => {
   const key = String(meaning ?? '').trim()
@@ -170,7 +173,10 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['substrate:references', 'set'],
   ['substrate:sources', 'set'],
   ['websites:menu', 'set'],
-  // DOCUMENTS — one current record, per-participant, replaced in place.
+  // DOCUMENTS — one CURRENT record, per-participant. Every earlier version is
+  // kept and a numbered marker names the current one (Store.putPoolDoc). They
+  // are declared never to replicate: only the genome (current state, no
+  // history) travels.
   ['backgrounds:screen', 'document'],
   ['history:marker-meta', 'document'],
   ['facet:minted', 'document'],

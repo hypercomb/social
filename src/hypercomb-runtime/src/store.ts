@@ -6,15 +6,19 @@ import {
   PACKED_STORE_FLAG_KEY,
   SignatureService,
   classifyDirectoryEntry,
-  documentSweepVetoFor,
+  documentSweepVeto,
   isMetaEnvelope,
   isSignature,
+  latestLayerMarker,
+  markerName,
   metaPayloadOf,
   mintMetaEnvelope,
   poolMeaningOf,
   registerPoolMeaning,
   resolveMetaArtifact,
+  writeLayerMarker,
   type ArtifactResolutionKind,
+  type DirectoryEntry,
   type MetaPayloadKind,
   type ResolvedMetaArtifact,
 } from '@hypercomb/core'
@@ -294,23 +298,65 @@ export class Store extends EventTarget {
   // content-addressed document pools
   // -------------------------------------------------
   //
-  // A "document pool" holds a single CURRENT mutable document as a member
-  // named by sign(its bytes) — never a human filename. Config that used
-  // to live under a fixed label (`overrides/i18n.json`, `translations/
-  // <locale>.json`) is content-addressed like everything else: the
-  // signature IS the address, identical content dedupes, and a stale
-  // reader can't be poisoned by a name. Editing the document writes a new
-  // sig member and drops the old one, so the pool holds exactly one. An
-  // optional `subKey` selects a sign(subKey) sub-bucket so one pool can
-  // hold several independent documents (translations keys by locale).
+  // A "document pool" holds a participant's CURRENT document and every
+  // earlier version of it. Anything saved is a list item with history behind
+  // it: a change adds a new item in place of the old one, and history keeps
+  // every earlier one so it can be restored (jwize, 2026-10-01;
+  // documentation/layer-pattern-audit.md, finding A1).
+  //
+  //   <pool>[/<sign(subKey)>]/<sign(bytes)>   one version — an immutable atom
+  //   <pool>[/<sign(subKey)>]/0000000x        a marker naming one atom
+  //
+  // The directory is the document's sigbag. Its MAX marker names the current
+  // document and the earlier markers are its history. The markers come from
+  // the one shared marker writer (core `writeLayerMarker`: the same immutable
+  // `{ layer: <sig> }` record every location bag carries; here the sig names
+  // an atom held in this same directory). NOTHING IS EVER REMOVED.
+  //
+  // A directory with no marker holds a document written before 2026-10-01.
+  // It reads exactly as it always did (the first non-empty member), and its
+  // next write lays the first marker beside it. Forward only: nothing is
+  // migrated, nothing heals.
+  //
+  // Content-addressed, never a human filename: config that used to live under
+  // a fixed label (`overrides/i18n.json`, `translations/<locale>.json`) is
+  // addressed by its signature like everything else, and identical content
+  // dedupes. An optional `subKey` selects a sign(subKey) sub-bucket so one
+  // pool can hold several independent documents, each with its own markers
+  // (translations keys by locale).
 
-  /** Write `bytes` as the current member of a document pool: sign the
-   *  bytes, write `<pool>[/<sign(subKey)>]/<sign(bytes)>`, then remove
-   *  every other sig-named member so exactly one current document
-   *  remains. New member is fully written BEFORE the old is dropped, so
-   *  a concurrent read never sees zero members. Returns the content sig,
-   *  or null on failure. */
-  public putPoolDoc = async (
+  /** Write `bytes` as the CURRENT document of a document pool and keep every
+   *  earlier one. Signs the bytes, writes the atom at
+   *  `<pool>[/<sign(subKey)>]/<sign(bytes)>` exactly as before, then appends
+   *  the next marker naming it. The atom is fully written BEFORE any marker
+   *  names it, so a reader never follows a marker to nothing. Writing the
+   *  bytes that are already current adds no marker. Nothing is removed.
+   *
+   *  Returns the content sig. Null when the atom could not be written, or
+   *  when this is the caller's document space and the marker that makes the
+   *  atom current could not be appended.
+   *
+   *  Writes to ONE document run one at a time in this tab: the marker writer
+   *  refuses a name that is already taken, but its check and its create are
+   *  two steps, so two saves racing in lockstep would otherwise claim the
+   *  same name and one version would never be marked. */
+  public putPoolDoc = (
+    pool: FileSystemDirectoryHandle,
+    bytes: ArrayBuffer,
+    subKey?: string,
+  ): Promise<string | null> => {
+    const key = `${pool?.name ?? ''}/${subKey ?? ''}`
+    const run = (this.#documentWrites.get(key) ?? Promise.resolve(null))
+      .then(() => this.#writePoolDoc(pool, bytes, subKey))
+    this.#documentWrites.set(key, run)
+    void run.then(() => { if (this.#documentWrites.get(key) === run) this.#documentWrites.delete(key) })
+    return run
+  }
+
+  /** The tail of each document's write queue, keyed by pool address + subKey. */
+  readonly #documentWrites = new Map<string, Promise<string | null>>()
+
+  #writePoolDoc = async (
     pool: FileSystemDirectoryHandle,
     bytes: ArrayBuffer,
     subKey?: string,
@@ -323,11 +369,12 @@ export class Store extends EventTarget {
       const handle = await target.getFileHandle(sig, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
-      // THE SWEEP RUNS ONLY ON POSITIVE PROOF THAT THIS IS THE CALLER'S OWN
-      // DOCUMENT SPACE. `kind === 'file'` is NOT a shape guard: a molecule's
-      // succession atoms and gathered members are exactly 64-hex FILES, so
-      // the old sweep erased another participant's set on every write to a
-      // bare-word address.
+      // A MARKER IS ADDED ONLY ON POSITIVE PROOF THAT THIS IS THE CALLER'S OWN
+      // DOCUMENT SPACE. These two proofs once guarded the sibling sweep; they
+      // now guard the marker, because a marker at a molecule address would
+      // push a stranger's lineage forward. `kind === 'file'` is NOT a shape
+      // guard: a molecule's succession atoms and gathered members are exactly
+      // 64-hex FILES.
       //
       // Two forms are proof, because a tile name can produce neither:
       //   1. a `subKey` — the target is a sign(subKey) sub-bucket THIS code
@@ -335,34 +382,33 @@ export class Store extends EventTarget {
       //   2. a colon-carrying meaning — `lineageKey` folds every
       //      non-letter/digit to `-`, so no tile name reaches a colon.
       // A bare word, or a meaning the registry has never derived, is NOT
-      // proof and the sweep does not run. The registry is consulted only to
+      // proof and no marker is written. The registry is consulted only to
       // GRANT permission, never to deny it: it fails closed on the unknown.
       const meaning = subKey ? undefined : await poolMeaningOf(pool.name)
       const proven = !!subKey || /[\p{L}\p{N}]:[\p{L}\p{N}]/u.test(meaning ?? '')
-      // And the STRUCTURE must independently agree: any marker, any author
-      // bucket, any foreign name and the whole sweep is refused.
-      const veto = proven
-        ? await documentSweepVetoFor(target)
-        : `the pool address ${pool.name.slice(0, 8)}… is a bare word or unregistered meaning`
-      if (veto) {
-        // Not fatal: the new document is already on disk, and `getPoolDoc`
-        // returns the first non-empty member. A refused sweep costs a stale
-        // read; proceeding would cost another participant's molecule.
-        console.warn(`[pool] not sweeping ${target.name.slice(0, 8)}… — ${veto}`)
+      // And the STRUCTURE must independently agree (`#documentSpace`).
+      const space = proven
+        ? await Store.#documentSpace(target)
+        : { veto: `the pool address ${pool.name.slice(0, 8)}… is a bare word or unregistered meaning`, head: null }
+      if (space.veto) {
+        // Not fatal: the new atom is on disk and nothing was removed. With no
+        // marker of ours here, `getPoolDoc` returns the first non-empty
+        // member, so a refusal costs a stale read; writing would cost another
+        // participant's lineage.
+        console.warn(`[pool] no history marker in ${target.name.slice(0, 8)}… — ${space.veto}`)
         return sig
       }
-      for await (const [name, h] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
-        if (h.kind === 'file' && name !== sig && isSignature(name)) {
-          try { await target.removeEntry(name) } catch { /* raced; harmless */ }
-        }
-      }
-      return sig
+      return await Store.#appendDocumentMarker(target, sig, space.head) ? sig : null
     } catch { return null }
   }
 
-  /** Read the current member of a document pool. Enumerates
-   *  `<pool>[/<sign(subKey)>]` and returns the (single) sig-named
-   *  member's bytes, or null when the pool/sub-bucket is absent or empty. */
+  /** Read the CURRENT document of a document pool: the atom the max marker
+   *  of `<pool>[/<sign(subKey)>]` names. With no marker (every document
+   *  written before markers existed, and every pool this path may not mark)
+   *  it is the first non-empty sig-named member, exactly as before. A marker
+   *  whose atom is not held in this directory (a tile's lineage sharing a
+   *  bare-word address) is not a document head and falls back the same way.
+   *  Null when the pool/sub-bucket is absent or empty. */
   public getPoolDoc = async (
     pool: FileSystemDirectoryHandle | undefined,
     subKey?: string,
@@ -372,6 +418,8 @@ export class Store extends EventTarget {
       const target = subKey
         ? await pool.getDirectoryHandle(await Store.poolSignature(subKey), { create: false })
         : pool
+      const current = await Store.#currentPoolDoc(target)
+      if (current) return current
       for await (const [name, handle] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
         if (handle.kind !== 'file' || !isSignature(name)) continue
         const file = await (handle as FileSystemFileHandle).getFile()
@@ -379,6 +427,85 @@ export class Store extends EventTarget {
       }
       return null
     } catch { return null }
+  }
+
+  /** The bytes of the atom the head marker names, or null when there is no
+   *  marker, the head is unreadable, or its atom is not held beside it. */
+  static #currentPoolDoc = async (target: FileSystemDirectoryHandle): Promise<ArrayBuffer | null> => {
+    try {
+      const head = await latestLayerMarker(target)
+      if (!head) return null
+      const file = await (await target.getFileHandle(head.layer, { create: false })).getFile()
+      return file.size > 0 ? await file.arrayBuffer() : null
+    } catch { return null }
+  }
+
+  /** May `putPoolDoc` add a marker to `target`? `veto` null means yes, and
+   *  `head` is the current marker then (null before the first). Fails CLOSED:
+   *  an unreadable directory or head is a refusal.
+   *
+   *  Every non-marker entry faces core's structural rule unchanged
+   *  (`documentSweepVeto`): one author bucket or one foreign name and the
+   *  directory is not this caller's. A marker is no longer a refusal by
+   *  itself, because this path now writes them; one is accepted only when
+   *  the CURRENT marker names a document atom held in this same directory. A
+   *  location bag's head names a layer at the root, never a file beside it,
+   *  so a tile's lineage still refuses. An 8-digit DIRECTORY is not one of
+   *  our markers and stays with the structural rule, which refuses it. */
+  static #documentSpace = async (
+    target: FileSystemDirectoryHandle,
+  ): Promise<{ veto: string | null; head: { name: string; layer: string } | null }> => {
+    const others: DirectoryEntry[] = []
+    let markers = 0
+    try {
+      for await (const [name, handle] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        const isDirectory = handle?.kind === 'directory'
+        if (!isDirectory && classifyDirectoryEntry(name) === 'marker') { markers++; continue }
+        others.push({ name, isDirectory })
+      }
+    } catch (err) {
+      return { veto: `the directory could not be read (${String((err as Error)?.message ?? err)})`, head: null }
+    }
+    const structural = documentSweepVeto(others)
+    if (structural) return { veto: structural, head: null }
+    if (markers === 0) return { veto: null, head: null }
+    let head: { name: string; layer: string } | null
+    try { head = await latestLayerMarker(target) } catch (err) {
+      return { veto: `its current marker is unreadable (${String((err as Error)?.message ?? err)})`, head: null }
+    }
+    const layer = head?.layer
+    if (layer && others.some(entry => !entry.isDirectory && entry.name === layer)) return { veto: null, head }
+    return {
+      veto: `holds ${markers} lineage marker${markers === 1 ? '' : 's'} whose current one names no document held here — it is not this caller's document space`,
+      head: null,
+    }
+  }
+
+  /** Append the next marker naming `sig` through core's one marker writer,
+   *  which never replaces an existing marker. A racing writer that took the
+   *  name first is answered by re-reading the head and taking the next name;
+   *  the bytes that are already current are never marked twice. */
+  static #appendDocumentMarker = async (
+    target: FileSystemDirectoryHandle,
+    sig: string,
+    head: { name: string; layer: string } | null,
+  ): Promise<boolean> => {
+    let current = head
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (current?.layer === sig) return true
+      const next = markerName(current ? Number(current.name) + 1 : 0)
+      if (!next) {
+        console.warn(`[pool] ${target.name.slice(0, 8)}… is at the marker ceiling — the document was kept but is not current`)
+        return false
+      }
+      try {
+        await writeLayerMarker(target, sig, next)
+        return true
+      } catch { /* the name was taken by a racing write — read the head again */ }
+      try { current = await latestLayerMarker(target) } catch { return false }
+    }
+    console.warn(`[pool] could not append a marker in ${target.name.slice(0, 8)}… — the document was kept but is not current`)
+    return false
   }
 
   #initPromise: Promise<void> | null = null

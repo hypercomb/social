@@ -147,7 +147,7 @@ describe('hives:names — the entry shape uses no lineage sigbags', () => {
     }
   })
 
-  it('entry = name → head via the real document-pool helpers; update keeps ONE current', async () => {
+  it('entry = name → head via the real document-pool helpers; update keeps ONE current, history behind it', async () => {
     const name = "Dylan's Cigar hive"
     const sig1 = await store.putPoolDoc(pool, encode({ name, head: HEAD_A }), name)
     expect(sig1).toMatch(/^[a-f0-9]{64}$/)
@@ -155,14 +155,16 @@ describe('hives:names — the entry shape uses no lineage sigbags', () => {
     let entry = decode((await store.getPoolDoc(pool, name))!)
     expect(entry).toEqual({ name, head: HEAD_A })
 
-    // Head moves (new seal) — same name, replaced record.
-    await store.putPoolDoc(pool, encode({ name, head: HEAD_B }), name)
+    // Head moves (new seal) — same name, a new record in place of the old.
+    const sig2 = await store.putPoolDoc(pool, encode({ name, head: HEAD_B }), name)
     entry = decode((await store.getPoolDoc(pool, name))!)
     expect(entry.head).toBe(HEAD_B)
 
-    // Exactly one current member in the bucket.
+    // One current record (the max marker names it); the earlier one is kept
+    // as history behind it (layer-pattern-audit.md A1) — nothing is swept.
     const bucket = await pool.getDirectoryHandle(await StoreClass.poolSignature(name), { create: false })
-    expect([...bucket.files.keys()]).toHaveLength(1)
+    expect([...bucket.files.keys()].filter(n => /^[a-f0-9]{64}$/.test(n)).sort()).toEqual([sig1, sig2].sort())
+    expect([...bucket.files.keys()].filter(n => /^\d{8}$/.test(n)).sort()).toEqual(['00000000', '00000001'])
   })
 
   it("a hive named 'clipboard' cannot collide with the root sign('clipboard') pool", async () => {
@@ -186,8 +188,7 @@ describe('hives:names — the entry shape uses no lineage sigbags', () => {
     const viaHivesList = decode((await store.getPoolDoc(pool, dylan))!)
     expect(viaFriends).toEqual(viaHivesList)
 
-    // The current-member drop is file-scoped: writing one hive never
-    // removed the other's sub-bucket.
+    // Writing one hive never touches the other's sub-bucket.
     expect(decode((await store.getPoolDoc(pool, 'Revolucion'))!).head).toBe(HEAD_B)
     expect(pool.dirs.size).toBe(2)
   })

@@ -46,7 +46,7 @@ const fake = () => {
 }
 
 describe('the pool', () => {
-  it('is a DOCUMENT — per-participant, replaced in place, never wipe-safe', () => {
+  it('is a DOCUMENT — per-participant, one current record with every version kept, never wipe-safe', () => {
     expect(poolKindOfMeaning(MARKER_META_MEANING)?.kind).toBe('document')
     expect(poolKindOfMeaning(MARKER_META_MEANING)?.wipeSafe).toBe(false)
   })
@@ -94,6 +94,36 @@ describe('listMarkerMetaRecords', () => {
     const rows = await listMarkerMetaRecords(store)
     expect(rows.map(r => r.layer).sort()).toEqual([LAYER, OTHER].sort())
     expect(rows.find(r => r.layer === LAYER)?.marked).toBe(true)
+  })
+
+  it('lists the CURRENT version when a bucket keeps its history — never the first member it meets', async () => {
+    // putPoolDoc keeps every version; the bucket lists the OLD one first.
+    const json = (record: object): ArrayBuffer => new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
+    const older = json({ layer: LAYER, location: OTHER, marker: '00000001', marked: true, at: 1 })
+    const current = json({ layer: LAYER, location: OTHER, marker: '00000001', at: 2 })
+    const file = (bytes: ArrayBuffer) => ({ kind: 'file', getFile: async () => ({ arrayBuffer: async () => bytes }) })
+    const pool = {
+      kind: 'directory',
+      async *entries() {
+        yield ['bucket', {
+          kind: 'directory',
+          async *entries() {
+            yield ['e'.repeat(64), file(older)]
+            yield ['f'.repeat(64), file(current)]
+            yield ['00000000', file(json({ layer: 'e'.repeat(64) }))]
+            yield ['00000001', file(json({ layer: 'f'.repeat(64) }))]
+          },
+        }]
+      },
+    } as unknown as FileSystemDirectoryHandle
+    const store: MarkerMetaStore = {
+      getPool: async () => pool,
+      getPoolDoc: async (_p, subKey) => (subKey === LAYER ? current : null),
+    }
+    const rows = await listMarkerMetaRecords(store)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].at).toBe(2)
+    expect(rows[0]).not.toHaveProperty('marked')
   })
 })
 

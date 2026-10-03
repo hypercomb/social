@@ -210,7 +210,7 @@ would have signed different answers to the same question.
 `declarePoolKind` seeds before it checks. Without that the winner was whoever
 imported earliest: a module declaring at import time saw an empty map, took the
 slot, and the seed then declined to overwrite it — turning `roots` (succession,
-"never touch another author's bucket") into a `document` ("replaces siblings") by
+"never touch another author's bucket") into a `document` ("one current record") by
 module-graph accident. The destruction verdicts never moved either way, because
 `directory-safety.ts` does not know kinds exist, but a reader would have been
 wrong about a participant's own history bag.
