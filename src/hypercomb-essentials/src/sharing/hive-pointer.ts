@@ -416,13 +416,15 @@ export async function ownHiveRoot(host: string, key: string, deps: Pick<SetHiveR
 }
 
 /** NIP-98 Authorization header — same envelope HostSyncService signs for
- *  byte PUTs: a kind-27235 event binding method + url, base64'd. */
-export async function nip98Header(signer: SignerLike, url: string, method: string): Promise<string | null> {
+ *  byte PUTs: a kind-27235 event binding method + url, base64'd. With
+ *  `payload` (the sha256 hex of the exact body sent) it binds the body too,
+ *  so a lifted header cannot carry another request. */
+export async function nip98Header(signer: SignerLike, url: string, method: string, payload?: string): Promise<string | null> {
   try {
     const signed = await signer.signEvent({
       kind: NIP98_KIND,
       created_at: Math.floor(Date.now() / 1000),
-      tags: [['u', url], ['method', method]],
+      tags: [['u', url], ['method', method], ...(payload ? [['payload', payload]] : [])],
       content: '',
     })
     return 'Nostr ' + btoa(unescape(encodeURIComponent(JSON.stringify(signed))))

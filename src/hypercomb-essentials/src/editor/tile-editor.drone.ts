@@ -1,6 +1,6 @@
 // editor/tile-editor.drone.ts
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from './tile-properties.js'
+import { readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig, readOwnTilePropertiesAt, propertyLayers, editorWrites, ownAfterInherit } from './tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { portalEditTarget } from './portal-edit-target.js'
 import { parseHexColour } from './hex-capture.js'
@@ -233,12 +233,32 @@ export class TileEditorDrone {
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
     imageEditor?.reset?.(hiveOrientation())
     service.open(targetCell, properties, largeBlob, target.segments, editorSurface())
+    // Fire and forget: a failed read shows no layers, never an error.
+    void this.#readLayers(parentSegments, targetCell).catch(() => undefined)
     if (largeBlob && imageEditor?.loadOriginal) {
       void imageEditor.loadOriginal(largeBlob, {
         point: (properties as any).large,
         flat: (properties as any).flat?.large,
       })
     }
+  }
+
+  /** Where each field's value comes from at this alias (alias-properties.md,
+   *  step 4). A top-level tile IS its name's repo — no layers to show. Nothing
+   *  is shown from a cold read: a guessed layer would offer the wrong choices. */
+  async #readLayers(parentSegments: readonly string[], cell: string): Promise<void> {
+    if (parentSegments.length === 0) return
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    const ownStats = { cold: false }
+    const repoStats = { cold: false }
+    const [own, repo] = await Promise.all([
+      readOwnTilePropertiesAt(parentSegments, cell, ownStats),
+      readOwnTilePropertiesAt([], cell, repoStats),
+    ])
+    if (ownStats.cold || repoStats.cold) return
+    // The session may have moved on while this read ran.
+    if (service?.mode !== 'editing' || service.cell !== cell) return
+    service.setLayers(propertyLayers(own, repo), repo)
   }
 
   /** True once the panel can present the session — at once on an older shell,
@@ -355,10 +375,25 @@ export class TileEditorDrone {
       }
 
       const baseline = (service as { baseline?: Record<string, unknown> }).baseline
-      const unchanged = !!baseline && !pictureChanged && sameProps(props, baseline)
+      const choices = service.choices
+      const layers = service.layers
+      const unchanged = !!baseline && !pictureChanged && choices.size === 0 && sameProps(props, baseline)
       if (!unchanged) {
         // segmentsForSave was bound at gesture start — never re-read here.
-        await writeTilePropertiesAt(segmentsForSave, savedCell, props)
+        if (layers && choices.size > 0 && segmentsForSave.length > 0) {
+          // The participant chose per field (alias-properties.md, step 4).
+          const writes = editorWrites(props, layers, choices)
+          await writeTilePropertiesAt(segmentsForSave, savedCell, writes.shared)
+          if (Object.keys(writes.onlyHere).length > 0) {
+            await writeTilePropertiesAt(segmentsForSave, savedCell, writes.onlyHere, { onlyHere: true })
+          }
+          if (writes.inherit.length > 0) {
+            const own = await readOwnTilePropertiesAt(segmentsForSave, savedCell)
+            await writeTilePropertiesAt(segmentsForSave, savedCell, ownAfterInherit(own, writes.inherit), { onlyHere: true, replace: true })
+          }
+        } else {
+          await writeTilePropertiesAt(segmentsForSave, savedCell, props)
+        }
         wrote = true
       }
       saved = true

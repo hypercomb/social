@@ -20,6 +20,7 @@
 
 const KEY = 'hc:adopted-roots'
 const TOMBSTONE_KEY = 'hc:adopt-tombstones'
+const CARRIED_KEY = 'hc:carried-roots'
 const SEP = ''
 
 // Parse cache — these predicates run in hot paths now (the render loop's
@@ -131,4 +132,45 @@ export const isAdoptTombstoned = (segments: readonly string[]): boolean => {
   if (segments.length === 0) return false
   const segs = segments.map(s => String(s ?? ''))
   return readPaths(TOMBSTONE_KEY).some(t => isPrefixOf(t, segs))
+}
+
+// ── carried roots — a peer's tile the participant moved ──────────────
+//
+// An adopted root is keyed by its PATH, so a peer's tile cut or copied out
+// of its branch and pasted onto one of the participant's own pages leaves the
+// record behind — and cutting an adopted root unsubscribes it outright. The
+// words inside are still the peer's. The clipboard decides "from a peer" when
+// the tile is taken (`ClipboardEntry.fromPeer`) and marks where it lands
+// here. A carried root drives NOTHING in the swarm — no sync, no receipt, no
+// first-visit fit — it is provenance alone, for whoever asks whose words a
+// route holds (the chat's foreign hold, hive-tree-reader.ts `foreign`).
+
+/** Record a route where a peer's tile was placed. Idempotent; a path already
+ *  covered by a carried root above it is a no-op. */
+export const markCarriedRoot = (segments: readonly string[]): void => {
+  const segs = normalize(segments)
+  if (segs.length === 0) return
+  const roots = readPaths(CARRIED_KEY)
+  if (roots.some(r => isPrefixOf(r, segs))) return
+  writePaths(CARRIED_KEY, [...roots, segs])
+}
+
+/** Forget carried roots at or beneath `segments` — the tile went (deleted, or
+ *  cut, which carries its own mark onward). Ancestors stay. */
+export const unmarkCarriedRoot = (segments: readonly string[]): void => {
+  const segs = normalize(segments)
+  if (segs.length === 0) return
+  const roots = readPaths(CARRIED_KEY)
+  const kept = roots.filter(r => !isPrefixOf(segs, r))
+  if (kept.length !== roots.length) writePaths(CARRIED_KEY, kept)
+}
+
+/** WHOSE WORDS A ROUTE HOLDS — true when it lies in a branch folded in from a
+ *  peer (an adopted root) or under a peer's tile the participant carried
+ *  elsewhere (a carried root). The one question; ask it, never the lists. */
+export const isPeerContentAt = (segments: readonly string[]): boolean => {
+  if (segments.length === 0) return false
+  if (isWithinAdoptedRoot(segments)) return true
+  const segs = segments.map(s => String(s ?? ''))
+  return readPaths(CARRIED_KEY).some(root => isPrefixOf(root, segs))
 }

@@ -25,7 +25,11 @@
 //           browser; the participant sends a draft to a builder.
 //
 // Every read and change waits in the Execution column (execution-queue.ts)
-// when the participant's policy says so — the same door the window uses.
+// when the participant's policy says so — the same door the window uses —
+// and the holds no policy lifts hold here too: a change that leaves the
+// machine, or one asked for after the turn read someone else's words, waits
+// for a hand. An answer that claims a change nothing ran, or speaks of tiles
+// nothing read, goes back once with the truth, as in the window.
 // Jev's doors (front, table round, verify) are the window's still; a turn
 // here is answered by the worker alone.
 
@@ -35,9 +39,10 @@ import {
   HypercombActionExecutionError, HypercombPlanQueue,
   applySectionEdits, blockRefusedMessage, blockUnwrittenMessage, callableBehaviours, doFailedMessage, doRanMessage,
   doSkippedMessage, estimateTokens, executeHypercombObservationPlan, formatHypercombObservationReceipt,
-  HELD_DO_NOTE, hypercombPlanReach, hypercombVocabulary, identityInstruction, isWorkRefusal, parseHypercombGrammars,
+  HELD_DO_NOTE, claimsUnranChange, foreignReads, hypercombPlanLeaves, hypercombPlanReach, hypercombVocabulary, identityInstruction, isWorkRefusal, parseHypercombGrammars,
   parseHypercombObservationGrammars, parseWriteBlock, readResultMessage, readSkippedMessage, shippedFoldStep,
   shippedHandoverStep, shippedRouteStep, shippedStretchStep, transcriptForModel, versionWriteRanMessage,
+  routesNamedIn, unranChangeMessage, unreadClaimMessage,
   workInstruction, WorkRefused, writeFailedMessage, writeSkippedMessage,
   type HypercombBehaviour, type AgentStepRegistry, type HypercombTreeReader, type StretchChunk, type WorkMessage,
 } from '@hypercomb/core'
@@ -74,6 +79,11 @@ export type AgentQueue = {
   request(ask: {
     convoId: string; providerId: string; model: string; kind: 'read' | 'additive' | 'editing' | 'destructive'
     lines: readonly string[]; keys?: readonly string[]; needsGrant: boolean; signal?: AbortSignal
+    /** A change that leaves the machine: never runs by policy. */
+    leaves?: boolean
+    /** A change asked for after the turn read someone else's words: never
+     *  runs by policy. */
+    foreign?: boolean
   }): { readonly id: string; readonly decision: Promise<'run' | 'skip'> }
   settle(id: string, state: 'ran' | 'skipped' | 'failed', outcome?: string): void
 }
@@ -216,6 +226,13 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
   let tokens = 0
   let lastRound = false
   let unwrittenSaid = false
+  let unranSaid = false
+  let unreadSaid = false
+  let readRounds = 0
+  // Someone else's words read this turn (core hive-reads.ts foreignReads):
+  // every change after them waits for a hand.
+  const turnForeign: string[] = []
+  const theirSigs = new Set<string>()
   let refusedInARow = 0
   let answer = ''
   let wrote = false
@@ -232,9 +249,15 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
   })
   const say = (text: string): string => { answer += text; wrote = true; return text }
   /** Wait for the participant's hand (or their policy) in Execution. */
-  const ask = async (kind: 'read' | 'additive' | 'editing', lines: readonly string[], providerId: string, model: string, keys?: readonly string[]) => {
+  const ask = async (
+    kind: 'read' | 'additive' | 'editing', lines: readonly string[], providerId: string, model: string,
+    holds: { keys?: readonly string[]; leaves?: boolean; foreign?: boolean } = {},
+  ) => {
     if (!queue) return { id: '', run: true }
-    const entry = queue.request({ convoId, providerId, model, kind, lines, ...(keys ? { keys } : {}), needsGrant: kind === 'read' && !readsFreely(providerId), signal })
+    const entry = queue.request({
+      convoId, providerId, model, kind, lines, needsGrant: kind === 'read' && !readsFreely(providerId), signal,
+      ...(holds.keys ? { keys: holds.keys } : {}), ...(holds.leaves ? { leaves: true } : {}), ...(holds.foreign ? { foreign: true } : {}),
+    })
     const run = await entry.decision === 'run'
     if (!run && signal?.aborted) throw stopped()
     return { id: entry.id, run }
@@ -249,7 +272,7 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
     const keys = plan.observations.map(o => o.verb === 'code' ? `code ${o.query ?? ''}`.trim()
       : o.sig ? `${o.verb} ${o.sig}${o.section ? ` ${o.section}` : ''}${o.from ? ` ${o.from}` : ''}`
         : o.query !== undefined ? `find ${o.query} /${o.segments.join('/')}` : `${o.verb} /${o.segments.join('/')}`)
-    const gate = await ask('read', grammars, providerId, model, keys)
+    const gate = await ask('read', grammars, providerId, model, { keys })
     if (!gate.run) return readSkippedMessage(grammars, turn.request)
     try {
       // Each read may take up to half of what is left of the window, shared
@@ -265,6 +288,12 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
       }
       snapshots = all.slice(-64)
       observed.push(...grammars)
+      readRounds++
+      const theirs = foreignReads(plan, receipt, segments => reader.foreign?.(segments) === true, theirSigs)
+      if (theirs.grammars.length) {
+        turnForeign.push(...theirs.grammars)
+        for (const sig of theirs.sigs) theirSigs.add(sig)
+      }
       const content = formatHypercombObservationReceipt(receipt)
       settle(gate.id, 'ran', `${content.length} characters`)
       return readResultMessage(content, turn.request)
@@ -278,7 +307,9 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
     if (!canChange || !queue || !doer) throw new WorkRefused('changing the hive is not available here')
     const plan = parseHypercombGrammars(lines, entries)
     const grammars = plan.actions.map(action => action.grammar)
-    const gate = await ask(hypercombPlanReach(plan, entries) as 'additive' | 'editing', grammars, providerId, model)
+    const gate = await ask(hypercombPlanReach(plan, entries) as 'additive' | 'editing', grammars, providerId, model, {
+      leaves: hypercombPlanLeaves(plan, entries).length > 0, foreign: turnForeign.length > 0,
+    })
     if (!gate.run) return doSkippedMessage(grammars, turn.request)
     let admitted = snapshots.length === 0
     try {
@@ -317,7 +348,7 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
     if (!('version' in parsed)) throw new WorkRefused('only the build\'s own source is written here: version <revision signature> <path>')
     if (!canWriteVersion || !versions) throw new WorkRefused('no revision is held here to draft over')
     const grammar = `write version ${parsed.version.slice(0, 12)}… ${parsed.path}`
-    const gate = await ask('additive', [grammar], providerId, model)
+    const gate = await ask('additive', [grammar], providerId, model, { foreign: turnForeign.length > 0 })
     if (!gate.run) return writeSkippedMessage(parsed.path, turn.request)
     const open = drafts.get(parsed.version) ?? { files: {}, draft: '' }
     try {
@@ -376,6 +407,22 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
       unwrittenSaid = true
       messages.push({ role: 'assistant', content: round.roundText }, { role: 'user', content: blockUnwrittenMessage(work.unwritten, turn.request) })
       continue
+    }
+    // AN ANSWER THAT CLAIMS A CHANGE NOTHING RAN, or speaks of tiles nothing
+    // read: back once with the truth (core work-words.ts); a model that does
+    // it twice is answered as it stands.
+    if (!work.request && !lastRound && !unranSaid && ran.length === 0 && claimsUnranChange(round.roundText, turn.request)) {
+      unranSaid = true
+      messages.push({ role: 'assistant', content: round.roundText }, { role: 'user', content: unranChangeMessage(turn.request) })
+      continue
+    }
+    if (!work.request && !lastRound && !unreadSaid && canRead && readRounds === 0) {
+      const named = routesNamedIn(turn.request)
+      if (named.length) {
+        unreadSaid = true
+        messages.push({ role: 'assistant', content: round.roundText }, { role: 'user', content: unreadClaimMessage(named.slice(0, 6), turn.request) })
+        continue
+      }
     }
     const pin = routeStep.pin({ pinned, providerId: round.providerId, model: round.model })
     pinned = pinned ?? pin.pinned

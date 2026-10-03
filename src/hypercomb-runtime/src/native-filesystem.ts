@@ -64,6 +64,8 @@ type Invoke = (
 interface RawEntry {
   name: string
   directory: boolean
+  /** A marker's create date, epoch ms, when the store kept one. */
+  at?: number
 }
 
 const SIG = /^[0-9a-f]{64}$/i
@@ -274,15 +276,19 @@ class NativeFileHandle {
     readonly name: string,
     private readonly read: () => Promise<Uint8Array | null>,
     private readonly commit: (bytes: Uint8Array) => Promise<void>,
+    /** A marker's create date, when the store kept one. */
+    private readonly createdAt?: number,
   ) {}
 
   async getFile(): Promise<File> {
     const bytes = (await this.read()) ?? new Uint8Array()
     // A File, not a Blob — callers read `.name`, `.lastModified` and `.size`.
-    // lastModified is 0: content is immutable and addressed by signature, so
-    // there is no modification time to report and inventing one would be a lie
-    // that some cache could come to depend on.
-    return new File([bytes as BlobPart], this.name, { lastModified: 0 })
+    // Content is immutable and addressed by signature: it has no time, and
+    // inventing one would be a lie some cache could come to depend on, so it
+    // reports 0. A MARKER is immutable too, but its create date is part of
+    // what it is — the store keeps it (packed-store-engine.ts, marker-time
+    // records) and it is reported here. A marker the store never timed: 0.
+    return new File([bytes as BlobPart], this.name, { lastModified: this.createdAt ?? 0 })
   }
 
   async createWritable(): Promise<NativeWritable> {
@@ -312,13 +318,14 @@ class NativeFileHandle {
  *
  * Listing collapses correctly: a member whose key contains the prefix and no
  * further `/` is a FILE; a deeper key contributes its next segment once, as a
- * DIRECTORY. That distinction is load-bearing for `putPoolDoc`'s prune of
- * prior members — but `kind === 'file'` is NOT its shape guard (store.ts,
- * putPoolDoc): a molecule's succession atoms are 64-hex files too. The prune
- * runs only on positive proof that the target is the caller's own document
- * space — a `subKey` sub-bucket, or a pool the registry declares a document
- * — and never on a bare-word address. Reporting a sub-bucket as a directory
- * still matters: a stale-member sweep must never see one as a member.
+ * DIRECTORY. That distinction is load-bearing for `putPoolDoc`'s check of the
+ * space it writes into — but `kind === 'file'` is NOT its shape guard
+ * (store.ts, putPoolDoc): a molecule's succession atoms are 64-hex files too.
+ * `putPoolDoc` removes nothing; it keeps every version and adds the next
+ * marker, and only on positive proof that the target is the caller's own
+ * document space — a `subKey` sub-bucket, or a colon-carrying meaning — never
+ * on a bare-word address. Reporting a sub-bucket as a directory still
+ * matters: a sub-bucket must never be read as a member.
  */
 class NativeSigDirectory {
   readonly kind = 'directory' as const
@@ -372,7 +379,7 @@ class NativeSigDirectory {
    * synthetic bags stayed fast enough to look healthy. An entry we are handing
    * out mid-iteration was just listed; it exists by construction.
    */
-  #fileHandle(name: string, prefetched?: Uint8Array): NativeFileHandle {
+  #fileHandle(name: string, prefetched?: Uint8Array, createdAt?: number): NativeFileHandle {
     const key = this.#key(name)
     // Bytes the existence check already paid for. Served ONCE — a handle kept
     // across a write must still read through to the store afterwards.
@@ -398,6 +405,7 @@ class NativeSigDirectory {
           headers: { 'x-hc-sig': this.name, 'x-hc-name': encodeURIComponent(key) },
         })
       },
+      createdAt,
     )
   }
 
@@ -450,7 +458,7 @@ class NativeSigDirectory {
       if (!rest) continue
       const slash = rest.indexOf('/')
       if (slash === -1) {
-        out.push({ name: rest, directory: false })
+        out.push({ name: rest, directory: false, ...(entry.at ? { at: entry.at } : {}) })
       } else {
         const bucket = rest.slice(0, slash)
         if (!seen.has(bucket)) {
@@ -476,7 +484,7 @@ class NativeSigDirectory {
   async #handleFor(entry: RawEntry): Promise<NativeFileHandle | NativeSigDirectory> {
     return entry.directory
       ? new NativeSigDirectory(this.name, this.bridge, `${this.#key(entry.name)}/`)
-      : this.#fileHandle(entry.name)
+      : this.#fileHandle(entry.name, undefined, entry.at)
   }
 
   async *entries(): AsyncGenerator<[string, NativeFileHandle | NativeSigDirectory]> {

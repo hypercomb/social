@@ -338,7 +338,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   readonly pheromonePanelOpen = input<boolean>(false)
 
   /** Aria-label / tooltip for the pheromones button. */
-  readonly pheromonesLabel = input<string>('pheromones')
+  readonly pheromonesLabel = input<string>('tags')
 
   /** Show the MIC on the rail. Mobile only: dictation used to live on the
    *  mobile control bar, but the words it produces land in this text box, so

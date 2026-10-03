@@ -381,3 +381,40 @@ describe('packed store: cold open at hive scale', () => {
     expect(best).toBeLessThan(250)
   }, 30_000)
 })
+
+describe('a marker keeps its create date', () => {
+  const bag = 'a'.repeat(64)
+  const marker = new TextEncoder().encode(JSON.stringify({ layer: 'b'.repeat(64) }))
+
+  it('records the first write, survives reopen and compaction, and never moves', () => {
+    const file = new MemorySyncFile()
+    const engine = PackedStoreEngine.open(file)
+    expect(engine.putMarkerAt(bag, 1, marker, 1_790_000_000_000)).toBe(true)
+    engine.setMarker(bag, 2, marker)
+    const second = engine.markerTime(bag, 2)!
+    expect(second).toBeGreaterThan(1_790_000_000_000)
+    // A rewrite of the same marker never moves its create date.
+    engine.setMarker(bag, 1, new TextEncoder().encode(JSON.stringify({ layer: 'c'.repeat(64) })))
+    expect(engine.markerTime(bag, 1)).toBe(1_790_000_000_000)
+    // The marker's own bytes are untouched by the time.
+    expect(new TextDecoder().decode(PackedStoreEngine.open(file).getMarker(bag, 2)!)).toBe(JSON.stringify({ layer: 'b'.repeat(64) }))
+    // The listing carries it; a reopen reads it back.
+    const reopened = PackedStoreEngine.open(file)
+    expect(reopened.dirEntries(bag)).toEqual([
+      { name: '00000001', directory: false, at: 1_790_000_000_000 },
+      { name: '00000002', directory: false, at: second },
+    ])
+    const compacted = reopened.compactInto(new MemorySyncFile())
+    expect(compacted.markerTime(bag, 1)).toBe(1_790_000_000_000)
+    expect(compacted.markerTime(bag, 2)).toBe(second)
+  })
+
+  it('a marker removed and written again is a new marker with a new date', () => {
+    const engine = PackedStoreEngine.open(new MemorySyncFile())
+    engine.putMarkerAt(bag, 1, marker, 1_000)
+    engine.removeMarker(bag, 1)
+    expect(engine.markerTime(bag, 1)).toBeUndefined()
+    engine.putMarkerAt(bag, 1, marker, 2_000)
+    expect(engine.markerTime(bag, 1)).toBe(2_000)
+  })
+})

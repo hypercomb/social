@@ -16,6 +16,10 @@
 /** The map of `--md-*` token names → CSS values that defines a theme. */
 export type ThemeTokens = Record<string, string>
 
+/** A theme's WORDS: locale → key → text. A theme can change what things are
+ *  called as well as how they look; the participant's own overrides still win. */
+export type ThemeWords = Record<string, Record<string, string>>
+
 export interface ThemeProvider {
   /** The active theme name, or 'system' when following the OS preference. */
   readonly theme: string
@@ -34,6 +38,13 @@ export interface ThemeProvider {
    * replaces its tokens.
    */
   registerTheme(name: string, tokens: ThemeTokens): void
+  /**
+   * Give a theme its own words. While that theme is active they shadow the
+   * shipped catalog (never the participant's overrides); switching away
+   * takes them off. Re-registering replaces them. Optional so an older
+   * shell's provider still satisfies the contract.
+   */
+  registerThemeWords?(name: string, words: ThemeWords): void
   /**
    * Re-apply the participant's theme onto `<html data-theme>` and report whether
    * it had to CORRECT a drift (true) or found it already right (false).

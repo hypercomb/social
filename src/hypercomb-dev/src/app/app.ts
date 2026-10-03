@@ -7,6 +7,7 @@ import {
 import { RouterOutlet } from '@angular/router';
 import { awaitFirstTilePaint } from '@hypercomb/shared/core/first-tile-paint';
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service';
+import { meshResumed, rememberMeshSession } from '@hypercomb/shared/core/mesh-session';
 import { CommandLineComponent } from '@hypercomb/shared/ui/command-line/command-line.component';
 import { ControlsBarComponent } from '@hypercomb/shared/ui/controls-bar/controls-bar.component';
 import { EditActionsComponent } from '@hypercomb/shared/ui/edit-actions/edit-actions.component';
@@ -63,9 +64,9 @@ export class App implements AfterViewInit {
   @HostBinding('class.view-website')
   get viewWebsiteClass() { return this.viewMode() === 'website'; }
 
-  // Always boots false — REFRESH → PRIVATE (the constructor force-writes
-  // the flag off before bee startup; membership never survives a reload).
-  public readonly meshPublic = signal(false);
+  // Boots from this tab's session — REFRESH KEEPS THE SWARM, closing the tab
+  // leaves it (main.ts imports mesh-session first, before any drone).
+  public readonly meshPublic = signal(meshResumed);
   public readonly inputOpen = signal(false);
   public readonly viewActive = signal(false);
   public readonly orientation = signal<HexOrientation>(
@@ -73,12 +74,6 @@ export class App implements AfterViewInit {
   );
 
   constructor() {
-    // REFRESH → PRIVATE. Force swarm membership off FIRST, synchronously,
-    // so every live localStorage sampler (nostr-mesh gate, swarm broadcast,
-    // show-cell privacy reads) sees solo from the first moment of this
-    // session. Parity with hypercomb-web's core-adapter module-scope write.
-    try { localStorage.setItem('hc:mesh-public', 'false') } catch { /* no storage — default is off anyway */ }
-
     // Parity with hypercomb-web (app.ts): swallow the benign "ResizeObserver
     // loop completed with undelivered notifications" warning. It fires on
     // routine layout frames; without this it surfaces as a red ERROR AND runs
@@ -91,8 +86,11 @@ export class App implements AfterViewInit {
       }
     })
 
+    // Every join and leave path announces here, so this is the one place the
+    // tab's session is written.
     EffectBus.on<{ public: boolean }>('mesh:public-changed', ({ public: pub }) => {
       this.meshPublic.set(pub)
+      rememberMeshSession(pub)
     })
 
     EffectBus.on<{ active: boolean }>('view:shell-hidden', ({ active }) => {
@@ -185,15 +183,15 @@ export class App implements AfterViewInit {
 
     // Runtime already initialized by main.ts — go straight to bee startup.
     //
-    // REFRESH → PRIVATE, dev exactly like production: the constructor
-    // force-wrote `hc:mesh-public` off, and here the mesh network starts
-    // disconnected to match. (The old dev-only default-ON is retired.)
+    // REFRESH KEEPS THE SWARM, dev exactly like production: mesh-session.ts
+    // rewrote `hc:mesh-public` from the tab's session before any drone, and
+    // here the mesh network starts to match. (The old dev-only default-ON is retired.)
     // Joining stays a one-gesture act — the dev relay (ws://localhost:7777)
     // is still in the relay-list defaults (loadRelays in
     // nostr-mesh.drone.ts), so a join needs zero extra setup.
     queueMicrotask(() => {
       const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
-      mesh?.setNetworkEnabled?.(false, true)
+      mesh?.setNetworkEnabled?.(meshResumed, true)
       void this.startRegisteredBees()
     })
   }

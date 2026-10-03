@@ -15,7 +15,7 @@
 
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { access, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer as createTcpServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
@@ -183,9 +183,47 @@ const validateAzureConfig = async (root) => {
   if (!index.equals(listing)) throw new Error('the Azure package-pool listing differs from its canonical index')
 }
 
+const hashedFile = async (content, sig) => {
+  if (!SIG_RE.test(sig)) throw new Error(`the package names an invalid signature: ${sig}`)
+  const bytes = await readFile(resolve(content, sig)).catch(() => null)
+  if (!bytes || createHash('sha256').update(bytes).digest('hex') !== sig) {
+    throw new Error(`staged content ${sig} is missing or does not hash to its name`)
+  }
+  return bytes
+}
+
+// A heap staged by replication carries no legacy manifest: the packages pool
+// names each root, and a root's own layers name everything it needs — child
+// layers in `cells`, leaves in `bees` and `dependencies`.
+const validatePackagePool = async (content) => {
+  const poolDirectory = resolve(content, PACKAGES_POOL)
+  const members = (await readdir(poolDirectory)).filter(name => /^[0-9]{8}$/.test(name))
+  if (members.length === 0) throw new Error('the staged host does not publish any packages')
+  const bare = value => String((value && typeof value === 'object') ? value.sig : value ?? '').replace(/\.(?:js|json)$/, '')
+  const seen = new Set()
+  for (const member of members) {
+    const layers = [(await readFile(resolve(poolDirectory, member), 'utf8')).split('\n')[0].trim()]
+    while (layers.length) {
+      const sig = layers.pop()
+      if (seen.has(sig)) continue
+      seen.add(sig)
+      const layer = JSON.parse(new TextDecoder().decode(await hashedFile(content, sig)))
+      for (const child of layer.cells ?? []) layers.push(bare(child))
+      for (const leaf of [...(layer.bees ?? []), ...(layer.dependencies ?? [])].map(bare)) {
+        if (seen.has(leaf)) continue
+        seen.add(leaf)
+        await hashedFile(content, leaf)
+      }
+    }
+  }
+  console.log(`[deploy] verified ${members.length} pooled package closure(s) (${seen.size} content-addressed files)`)
+}
+
 const validatePackageClosure = async (root) => {
   const content = resolve(root, 'content')
-  const manifest = JSON.parse(await readFile(resolve(content, 'manifest.json'), 'utf8'))
+  const manifestText = await readFile(resolve(content, 'manifest.json'), 'utf8').catch(() => null)
+  if (manifestText === null) return validatePackagePool(content)
+  const manifest = JSON.parse(manifestText)
   const packages = Object.entries(manifest.packages ?? {})
   if (packages.length === 0) throw new Error('the staged host does not publish any packages')
 

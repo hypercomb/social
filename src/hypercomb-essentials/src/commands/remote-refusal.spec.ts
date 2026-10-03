@@ -52,10 +52,12 @@ const guard = readFileSync(
 const remoteBlock = (): string => {
   const at = guard.indexOf('REMOTE_SUBMIT, ({ text, accept, complete })')
   expect(at).toBeGreaterThan(-1)
-  // Wide enough to reach both refusals (~4.6k in) and stop before the next
-  // listener. Measured rather than guessed — a window that silently falls
-  // short would make these assertions pass for the wrong reason.
-  return guard.slice(at, at + 6000)
+  // Wide enough to reach the gate AND the behaviour's own refuse (~6.3k in,
+  // widened from 6000 on purpose when the door began running refuse,
+  // 2026-10-01) and stop before the next listener (~7.9k). Measured rather
+  // than guessed — a window that silently falls short would make these
+  // assertions pass for the wrong reason.
+  return guard.slice(at, at + 6600)
 }
 
 describe('the remote door asks the gate, and does not judge for itself', () => {
@@ -84,7 +86,16 @@ describe('the remote door asks the gate, and does not judge for itself', () => {
   it('judges EVERY verb in the line, and the first refusal answers', () => {
     // A prose reading can carry several actions. Admitting a prefix and
     // refusing a tail would leave the hive half-changed under a refusal.
-    expect(remoteBlock()).toMatch(/for \(const verb of spokenVerbs\)/)
+    expect(remoteBlock()).toMatch(/for \(const \{ verb, args \} of spokenCalls\)/)
+  })
+
+  it("runs the behaviour's OWN refuse on what it will be handed, as the model channel does", () => {
+    // A declaration bounds the forms its refuse admits. A machine door that
+    // skipped the rule let `/module commit` publish though the word says only
+    // the participant may (declarations audit, 2026-10-01).
+    const block = remoteBlock()
+    expect(block).toContain('entry?.machine?.refuse?.(args)')
+    expect(block.indexOf('admitMachineCall(')).toBeLessThan(block.indexOf('entry?.machine?.refuse?.(args)'))
   })
 
   it('leaves the keyboard path alone — typing still gets a confirmation', () => {

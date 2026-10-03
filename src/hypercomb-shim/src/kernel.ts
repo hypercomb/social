@@ -6,7 +6,7 @@
 // kernel knows TWO signatures, baked in at build time (build.mjs computes
 // them; none is written in source): the host bundle and the core library.
 // It finds their bytes — this device first, then this origin, then the
-// default hosts (hypercomb.com, jwize.com) — refuses any that do not hash to
+// default host (hypercomb.com) — refuses any that do not hash to
 // their signature, keeps them on this device (OPFS, and the service worker's
 // cache for a stable address), declares `@hypercomb/core` as processor +
 // library, and runs the host. Everything else a host does
@@ -22,7 +22,7 @@ declare const __HC_LIBRARY_SIG__: string
  *  build names none. */
 declare const __HC_SEED_HOSTS__: readonly string[] | undefined
 
-const DEFAULT_HOSTS: readonly string[] = typeof __HC_SEED_HOSTS__ !== 'undefined' ? __HC_SEED_HOSTS__ : ['hypercomb.com', 'jwize.com']
+const DEFAULT_HOSTS: readonly string[] = typeof __HC_SEED_HOSTS__ !== 'undefined' ? __HC_SEED_HOSTS__ : ['hypercomb.com']
 // Where this host is served from (src/here.ts, repeated: the kernel imports
 // nothing). Named files resolve here; signature-named files are origin-wide.
 const HERE = new URL('./', document.baseURI)

@@ -25,6 +25,14 @@ import { childLayerOf, childNamesOf, flattenLayerTree, resolveLayerAt, type Plac
 import { listDecorations, removeDecorationAndWait, writeDecoration } from '../../commands/decoration-manifest.js'
 import { ensureDecorationsIndexed, referenceTargetAt } from '../../commands/decoration-kind-index.js'
 import {
+  aliasPropertiesFor,
+  gatheredRepo,
+  readOwnTilePropertiesAt,
+  readTilePropertiesAt,
+  writeTilePropertiesAt,
+} from '../../editor/tile-properties.js'
+import { sameJsonValue } from '../../editor/tile-property-inheritance.js'
+import {
   GATHERS_KIND,
   GATHERS_POOL_MEANING,
   GATHER_TARGETS_STORAGE_KEY,
@@ -84,6 +92,68 @@ const molecule = async (route: readonly string[]): Promise<string | null> => {
   const leaf = route[route.length - 1]
   if (!leaf) return null
   try { return await moleculeAddress(leaf) } catch { return null }
+}
+
+/** When a location's CURRENT head was written — the leaf, never an earlier
+ *  position (those belong to history mode). 0 when the store keeps no time. */
+const headTimeAt = async (history: PlacementHistory, domain: unknown, segments: readonly string[]): Promise<number> => {
+  const full = history as PlacementHistory & { listLayers?(sig: string): Promise<Array<{ at?: number }>> }
+  if (!full.listLayers) return 0
+  const list = await full.listLayers(await history.sign({ domain, explorerSegments: () => segments })).catch(() => [])
+  return Number(list.at(-1)?.at) || 0
+}
+
+/** The keys that belong to the place a tile sits in, kept with that place. */
+const placeKeysOf = (props: Readonly<Record<string, unknown>>): Record<string, unknown> => {
+  const out: Record<string, unknown> = {}
+  for (const key of ['index', 'point']) if (key in props) out[key] = props[key]
+  return out
+}
+
+/**
+ * TWO COPIES OF ONE NAME MEET (alias-properties.md, step 3). Read on the leaf:
+ * how each copy looks now and when its head was written. The newer copy's
+ * values go to the name's repo (ties and unknown times favour the GROUP's
+ * copy); keys only the older one has fill the repo. The group's own record
+ * becomes exactly its overrides against that repo, and the page's overrides
+ * are returned for the reference that replaces its copy — so both places look
+ * exactly as they did. Null when anything is unread (cold): the gather then
+ * proceeds as before, never on a guess.
+ */
+const mergeCopies = async (
+  history: PlacementHistory,
+  domain: unknown,
+  pageRoute: readonly string[],
+  groupRoute: readonly string[],
+  name: string,
+): Promise<Record<string, unknown> | null> => {
+  const stats = [{ cold: false }, { cold: false }, { cold: false }, { cold: false }, { cold: false }]
+  const [pageLook, groupLook, pageOwn, groupOwn, repo] = await Promise.all([
+    readTilePropertiesAt(pageRoute, name, stats[0]),
+    readTilePropertiesAt(groupRoute, name, stats[1]),
+    readOwnTilePropertiesAt(pageRoute, name, stats[2]),
+    readOwnTilePropertiesAt(groupRoute, name, stats[3]),
+    readOwnTilePropertiesAt([], name, stats[4]),
+  ])
+  if (stats.some(stat => stat.cold)) return null
+  const [pageAt, groupAt] = await Promise.all([
+    headTimeAt(history, domain, [...pageRoute, name]),
+    headTimeAt(history, domain, [...groupRoute, name]),
+  ])
+  const pageNewer = pageAt > groupAt
+  const nextRepo = gatheredRepo(repo, pageNewer ? pageLook : groupLook, pageNewer ? groupLook : pageLook)
+
+  const repoChange: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(nextRepo)) if (!sameJsonValue(repo[key], value)) repoChange[key] = value
+  for (const key of Object.keys(repo)) if (!(key in nextRepo)) repoChange[key] = undefined
+  if (Object.keys(repoChange).length > 0) await writeTilePropertiesAt([], name, repoChange)
+
+  const overridesFor = (look: Record<string, unknown>, own: Record<string, unknown>): Record<string, unknown> => {
+    const { fill, override } = aliasPropertiesFor(look, nextRepo)
+    return { ...fill, ...override, ...placeKeysOf(own) }
+  }
+  await writeTilePropertiesAt(groupRoute, name, overridesFor(groupLook, groupOwn), { onlyHere: true, replace: true })
+  return overridesFor(pageLook, pageOwn)
 }
 
 /** A MOVE REPLACES WHAT THE DESTINATION HELD. `importTree` starts from the
@@ -299,6 +369,10 @@ export class GatherLinkService {
         const back = referenceTargetAt(memberRoute)
         if (back && back.join('/') === tileRoute.join('/')) inGroup = false
       }
+      // Both sides hold the name: merge the two copies into the repo first.
+      const pageOverrides = inGroup
+        ? await mergeCopies(history, lineage?.domain, pageRoute, review.group, tile.name)
+        : null
       if (!inGroup) {
         const copy = await resolveLayerAt(history, lineage?.domain, tileRoute)
         if (!copy) continue
@@ -313,8 +387,20 @@ export class GatherLinkService {
       await committer.settled?.()
       const placed = await refs.place({
         name: tile.name, sourceSegments: memberRoute, parentSegments: pageRoute,
-      }).catch(() => null)
-      if (placed) { gathered.push(tile.name); continue }
+      }).catch((error: unknown) => {
+        // A throw is a refusal too, and says so — never a silent put-back.
+        EffectBus.emit('reference:refused', { name: tile.name, source: memberRoute, parent: pageRoute, reason: `it failed: ${error instanceof Error ? error.message : String(error)}` })
+        return null
+      })
+      if (placed) {
+        // The reference now stands where the page's copy was: give it exactly
+        // the overrides that keep it looking as that copy did.
+        if (pageOverrides) {
+          await writeTilePropertiesAt(pageRoute, tile.name, pageOverrides, { onlyHere: true, replace: true })
+        }
+        gathered.push(tile.name)
+        continue
+      }
       if (own) {
         await committer.commitChildrenDeltas(pageRoute, { appends: [own.sig] })
         await committer.settled?.()

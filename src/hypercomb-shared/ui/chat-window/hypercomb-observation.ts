@@ -11,6 +11,7 @@ export {
   HypercombObservationError,
   parseHypercombObservationGrammars,
   executeHypercombObservationPlan,
+  foreignReads,
   formatHypercombObservationReceipt,
 } from '@hypercomb/core'
 export type {

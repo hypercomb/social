@@ -283,6 +283,7 @@ if (!contentOnly) {
 // The interesting failure is the SPA fallback again (checks 4 and 9): a
 // redirect to / or a 200 of text/html means the rewrite ate the address.
 // An honest 404 is a host that has no packages yet — a warning, not a fail.
+let floorListed = false   // check 11 reads it: does this host list at all?
 {
   const meaning = 'host:packages'
   const poolSig = await sha256(new TextEncoder().encode(meaning))
@@ -300,6 +301,7 @@ if (!contentOnly) {
     const body = await res.text()
     const entries = body.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
     const wellFormed = entries.length > 0 && entries.every(e => /^\d{8}$/.test(e) || SIG_RE.test(e))
+    floorListed = wellFormed
     record(wellFormed, 'serves the packages pool at its address',
       `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} at ${path}, ${type || '(no content-type)'}`,
       'the listing is one entry name per line — 8-digit marker names or 64-hex members — and nothing else')
@@ -391,7 +393,7 @@ for (const meaning of ['host:builds', 'host:build-signatures']) {
   }
   if (!found) {
     record(null, name, 'no listing at / or /content',
-      'optional — `node host/builds.mjs push` (a relay) or deploy with the pools (deploy-azure carries them)')
+      `optional — \`node host/builds.mjs push\` (a relay) or deploy with the pools (deploy-azure carries them); a relay, worker or hypercomb-serve host lists them only once its operator says \`hosts list ${meaning}\``)
     continue
   }
   const cache = String(found.res.headers.get('cache-control') ?? '').toLowerCase()
@@ -405,6 +407,92 @@ for (const meaning of ['host:builds', 'host:build-signatures']) {
     'every member must be served byte-for-byte under its own signature')
   if (!/no-store|no-cache|max-age=0/.test(cache)) {
     record(null, `the ${meaning} listing is not hard-cached`, cache || '(no cache-control)', 'the set grows — serve the listing no-store')
+  }
+}
+
+// ── 11. only the genome leaves ───────────────────────────────────────────────
+// documentation/layer-pattern-audit.md, rule 6 (jwize 2026-10-01): a host gives
+// out the participant's CURRENT state and nothing else — no earlier version, no
+// history marker but a bag's head, and no listing of anything personal. A host
+// lists a FLOOR of pools (hypercomb-relay/host-listing.floor.json) plus what its
+// operator declares, and every other directory answers as if nothing were held.
+// The addresses probed here are ones any client can derive: a participant's
+// document pool, a per-participant derived pool, and two history bags.
+//
+// A refusal proves a gate only on a host that lists at all. A host that holds
+// nothing answers 404 everywhere and passes these VACUOUSLY; the summary line
+// says so rather than counting it as proof.
+{
+  const addressOf = (text) => sha256(new TextEncoder().encode(text))
+  const typeOf = (res) => (res.headers?.get?.('content-type') ?? '').toLowerCase()
+  let hostname = ''
+  try { hostname = new URL(origin).hostname } catch { /* fetch already failed above */ }
+  const privates = [
+    ['journal:entries', 'a participant document pool'],
+    ['computed:genome', 'a per-participant derived pool'],
+    ['', 'the root history bag'],
+    ...(hostname ? [[hostname, "this host name's bag"]] : []),
+  ]
+  let refused = 0
+  for (const [text, what] of privates) {
+    const address = await addressOf(text)
+    const name = `${what} is not listed${text ? ` (${text})` : ''}`
+    const probes = []
+    for (const base of ['/content', '']) {
+      const path = `${base}/${address}/`
+      const res = await get(path, { cache: 'no-store', redirect: 'manual' })
+      probes.push({ path, res, type: typeOf(res) })
+    }
+    const network = probes.find(p => p.res.error)
+    const listing = probes.find(p => !p.res.error && p.res.status === 200 && !p.type.includes('text/html'))
+    const shell = probes.find(p => !p.res.error && p.res.status === 200 && p.type.includes('text/html'))
+    if (network) {
+      record(false, name, String(network.res.error), 'unexpected network failure')
+    } else if (listing) {
+      const count = (await listing.res.text()).split(/\r?\n/).map(l => l.trim()).filter(Boolean).length
+      record(false, name, `${listing.path} answered a listing of ${count} entr${count === 1 ? 'y' : 'ies'}`,
+        'list only the floor pools and operator-declared ones; every other directory must answer ' +
+        'exactly as an absent one (404) — a listing here hands out personal data or history')
+    } else if (shell) {
+      record(null, name, `${shell.path} answered text/html — the shell, not a listing`,
+        'nothing leaked, but a machine path should answer 404, never the SPA fallback')
+    } else {
+      refused++
+      record(true, name, probes.map(p => `HTTP ${p.res.status} at ${p.path.startsWith('/content/') ? '/content' : '/'}`).join(', '))
+    }
+  }
+  if (refused === privates.length) {
+    record(floorListed ? true : null, 'private refusals come from a host that lists',
+      floorListed
+        ? `the packages pool lists, and all ${refused} private addresses were refused`
+        : 'VACUOUS — this host listed no pool, so its 404s above prove no gate',
+      'nothing to fix on a host that holds nothing; re-run once it publishes its packages pool')
+  }
+
+  // A DOCUMENT floor pool lists its current version only: the head marker and
+  // the atom it names. An earlier marker is history and is never served.
+  const offers = await addressOf('community:offers')
+  for (const base of ['/content', '']) {
+    const path = `${base}/${offers}/`
+    const res = await get(path, { cache: 'no-store', redirect: 'manual' })
+    if (res.error || res.status !== 200 || typeOf(res).includes('text/html')) continue
+    const entries = (await res.text()).split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    if (!entries.length || !entries.every(e => /^\d{8}$/.test(e) || SIG_RE.test(e))) continue
+    const markers = entries.filter(e => /^\d{8}$/.test(e)).sort()
+    const atoms = entries.filter(e => SIG_RE.test(e))
+    record(markers.length <= 1 && atoms.length <= 1, 'a document pool lists only its current version',
+      `${markers.length} marker(s), ${atoms.length} atom(s) at ${path}`,
+      'list the head marker and the atom it names — every earlier version is history, and history never leaves')
+    const head = markers.length ? Number(markers[markers.length - 1]) : 0
+    if (head > 0) {
+      const earlier = `${path}${String(head - 1).padStart(8, '0')}`
+      const old = await get(earlier, { cache: 'no-store', redirect: 'manual' })
+      const served = !old.error && old.status === 200 && !typeOf(old).includes('text/html')
+      record(old.error ? false : !served, 'an earlier document version is not served',
+        old.error ? String(old.error) : `${earlier} returned HTTP ${old.status}`,
+        'serve a document pool\'s head marker and current atom only')
+    }
+    break
   }
 }
 

@@ -110,6 +110,20 @@ export class LocalizationService extends EventTarget implements I18nProvider {
     return [...(this.#missing.get(locale) ?? [])].sort()
   }
 
+  /** THE ACTIVE THEME'S WORDS, keyed by locale — a vocabulary that travels
+   *  with a theme, so a skin can change what things are CALLED as well as how
+   *  they look (jwize, 2026-10-02: "it should be part of a theme"; "we need to
+   *  be able to change them around to our own liking"). Sits between the
+   *  participant's own overrides and the shipped catalog: what the
+   *  participant set always wins, the theme's words come next, the default
+   *  last. Undefined clears it. App namespace only — a module's own strings
+   *  are its own. */
+  #themeWords = new Map<string, Record<string, string>>()
+  setThemeWords(words: Record<string, Record<string, string>> | undefined): void {
+    this.#themeWords = new Map(Object.entries(words ?? {}))
+    this.#emitChange()
+  }
+
   registerOverrides(namespace: string, locale: string, catalog: Record<string, string>): void {
     let localeMap = this.#overrides.get(namespace)
     if (!localeMap) {
@@ -170,6 +184,13 @@ export class LocalizationService extends EventTarget implements I18nProvider {
       if (overrideTemplate !== undefined) {
         return params ? this.#interpolate(overrideTemplate, params) : overrideTemplate
       }
+    }
+
+    // Then the active theme's words (app namespace only).
+    if (namespace === 'app' && this.#themeWords.size) {
+      const themed = this.#lookup(this.#themeWords, this.#locale, key, params)
+        ?? this.#lookup(this.#themeWords, this.#fallback, key, params)
+      if (themed !== undefined) return params ? this.#interpolate(themed, params) : themed
     }
 
     // Fall back to catalog translations

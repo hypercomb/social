@@ -10,6 +10,7 @@
 //   node scripts/bridge/manager.cjs read /route              one tile: properties and notes
 //   node scripts/bridge/manager.cjs notes /route             the notes on a tile
 //   node scripts/bridge/manager.cjs note /route "<text>"     add a note to a tile
+//   node scripts/bridge/manager.cjs unnote /route <noteId>   take a note off a tile (a list change; history keeps it)
 //   node scripts/bridge/manager.cjs thread <manager|convoId> [n]   the last n turns
 //   node scripts/bridge/manager.cjs report <manager> "<text>"      write into the manager's own conversation
 //   node scripts/bridge/manager.cjs ask <manager|convoId> "<request>"   hand work to the hive's own models, wait, print the result
@@ -52,7 +53,23 @@ const MANAGERS = {
   harness: 'chat:tile:/::1790900000004-harnes',
 }
 
-const send = (req, waitMs = 30_000) => new Promise(resolve => {
+/** One bridge request, ridden through a reload. The hive's tab drops off the
+ *  bridge for a few seconds whenever the dev build reloads it, and a manager
+ *  that took that for "the hive is gone" stopped its whole pass (housekeeping,
+ *  2026-10-01: three asks at once all answered "no renderer connected"; the
+ *  broker serves parallel requests fine). So "no renderer" is waited out —
+ *  up to MANAGER_ATTACH_MS (default 60 s) — and only then reported. */
+const ATTACH_WAIT_MS = Number(process.env.MANAGER_ATTACH_MS || 60_000)
+const send = async (req, waitMs = 30_000) => {
+  const until = Date.now() + ATTACH_WAIT_MS
+  for (;;) {
+    const reply = await sendOnce(req, waitMs)
+    if (reply.ok || !/no renderer connected/.test(String(reply.error)) || Date.now() > until) return reply
+    await new Promise(resolve => setTimeout(resolve, 3_000))
+  }
+}
+
+const sendOnce = (req, waitMs) => new Promise(resolve => {
   const id = `mgr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const ws = new WebSocket(BRIDGE, WS_OPTS)
   const timer = setTimeout(() => { try { ws.close() } catch { /* gone */ } resolve({ ok: false, error: 'bridge timeout' }) }, waitMs)
@@ -156,6 +173,16 @@ const main = async () => {
       const reply = await send({ op: 'note-add', segments: segments.slice(0, -1), cell: segments.at(-1), text: second })
       return reply.ok ? print(reply.data ?? 'filed') : fail(reply.error)
     }
+    case 'unnote': {
+      // A LIST CHANGE, never a deletion: the note leaves the tile's notes
+      // list as a new layer; its bytes stay and history holds the list it
+      // left, so undo puts it back. Only on a yes, per the rules.
+      const segments = segmentsOf(first)
+      const noteId = second.trim()
+      if (!segments.length || !/^[0-9a-f]{64}$/.test(noteId)) return fail('unnote needs a tile route and the note id (64 hex, from notes)')
+      const reply = await send({ op: 'note-delete', segments: segments.slice(0, -1), cell: segments.at(-1), sig: noteId })
+      return reply.ok ? print(`unlinked from /${segments.join('/')}; history keeps it`) : fail(reply.error)
+    }
     case 'thread': {
       if (!first) return fail(`thread needs a manager (${Object.keys(MANAGERS).join(', ')}) or a convoId`)
       const reply = await send({ op: 'thread-read', cell: convoOf(first) })
@@ -186,8 +213,8 @@ const main = async () => {
         const reply = await send({ op: 'chat-asked', cell: askId })
         if (!reply.ok) return fail(reply.error)
         if (reply.data?.done) {
-          const { outcome, rounds, tokens, answer, left, error } = reply.data
-          return print({ convoId, outcome, rounds, tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
+          const { outcome, rounds, reads, tokens, answer, left, error } = reply.data
+          return print({ convoId, outcome, rounds, reads, ...(reads === 0 ? { warning: 'nothing was read in this turn: check every claim about the hive yourself' } : {}), tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
         }
       }
       return fail(`no result for ${askId} in time; the turn may still be running — manager.cjs thread ${first} shows where it got to`)
@@ -248,7 +275,7 @@ const main = async () => {
       return print(await send(request))
     }
     default:
-      return fail('usage: manager.cjs tree|read|notes|note|thread|report|ask|convo|roster|install|held|do|op — see the header of this file')
+      return fail('usage: manager.cjs tree|read|notes|note|unnote|thread|report|ask|convo|roster|install|held|do|op — see the header of this file')
   }
 }
 

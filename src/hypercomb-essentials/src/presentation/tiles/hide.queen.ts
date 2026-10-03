@@ -150,9 +150,11 @@ export class HideQueenBee extends QueenBee {
       catch (error) { console.warn('[hide] tile action failed:', label, error) }
     }
 
+    // NOTHING HIDDEN MUST NOT RESOLVE CLEAN (surface audit, false success): a
+    // machine's receipt would read "ran /hide" over a tile still in view. The
+    // keyboard shows this sentence in the activity strip; a plan stops on it.
     if (claimedLabels.length === 0) {
-      this.#log('Hide — nothing was hidden; the tile surface is not listening')
-      return
+      throw new Error('Hide — nothing was hidden; the tile surface is not listening')
     }
     // Name the tile that actually landed, not the first one asked for.
     const noun = claimedLabels.length === 1

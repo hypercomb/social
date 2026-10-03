@@ -11,6 +11,9 @@ import {
   markAdoptTombstone,
   clearAdoptTombstone,
   isAdoptTombstoned,
+  markCarriedRoot,
+  unmarkCarriedRoot,
+  isPeerContentAt,
   _resetAdoptedRootsCache,
 } from './adopted-roots.js'
 
@@ -100,5 +103,40 @@ describe('adopt tombstones — delete is the unsubscribe', () => {
     markAdoptTombstone(['', '  '])
     expect(localStorage.getItem('hc:adopt-tombstones')).toBeNull()
     expect(isAdoptTombstoned([])).toBe(false)
+  })
+})
+
+describe('whose words a route holds', () => {
+  it('a branch folded in from a peer is peer content, top to bottom', () => {
+    markAdoptedRoot(['theirs'])
+    expect(isPeerContentAt(['theirs'])).toBe(true)
+    expect(isPeerContentAt(['theirs', 'deep'])).toBe(true)
+    expect(isPeerContentAt(['mine'])).toBe(false)
+    expect(isPeerContentAt([])).toBe(false)
+  })
+
+  it("a peer's tile carried onto the participant's own page stays peer content there", () => {
+    markCarriedRoot(['mine', 'their-note'])
+    expect(isPeerContentAt(['mine', 'their-note'])).toBe(true)
+    expect(isPeerContentAt(['mine', 'their-note', 'inside'])).toBe(true)
+    expect(isPeerContentAt(['mine'])).toBe(false)
+    expect(isPeerContentAt(['mine', 'my-note'])).toBe(false)
+  })
+
+  it('a carried root drives nothing in the swarm: it is not an adopted root', () => {
+    markCarriedRoot(['mine', 'their-note'])
+    expect(isWithinAdoptedRoot(['mine', 'their-note'])).toBe(false)
+  })
+
+  it('a carried root goes when its tile goes, ancestors stay; a covered path is not repeated', () => {
+    markCarriedRoot(['a', 'b'])
+    markCarriedRoot(['a', 'b', 'c'])
+    expect(JSON.parse(localStorage.getItem('hc:carried-roots') ?? '[]')).toEqual([['a', 'b']])
+    markCarriedRoot(['x'])
+    unmarkCarriedRoot(['a', 'b', 'c'])
+    expect(isPeerContentAt(['a', 'b'])).toBe(true)
+    unmarkCarriedRoot(['a'])
+    expect(isPeerContentAt(['a', 'b'])).toBe(false)
+    expect(isPeerContentAt(['x'])).toBe(true)
   })
 })

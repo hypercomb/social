@@ -80,3 +80,24 @@ describe('machineCatalogue', () => {
     expect(machineCatalogue([], ANY)).toBe('')
   })
 })
+
+describe('the catalogue order', () => {
+  // HIDE FIRST, DELETE SECOND, where a model can see it (surface audit, item
+  // 7): census order put the manual providers — /remove among them — ahead of
+  // every queen, so the harsh verb was the second line read and /hide far
+  // below. Gentlest first; census order within a rung.
+  const at = (name: string, reach: 'additive' | 'editing' | 'destructive') =>
+    entry({ name, machine: { forms: '<tile>', example: `/${name} drafts`, reach, scope: 'page' } })
+
+  it('lists additive, then editing, then destructive', () => {
+    const census = [at('remove', 'destructive'), at('keyword', 'editing'), at('create', 'additive'), at('hide', 'editing')]
+    const names = machineCatalogue(census, ANY).split('\n').map(line => line.split(' ')[0])
+    expect(names).toEqual(['/create', '/keyword', '/hide', '/remove'])
+  })
+
+  it('reads an unstated reach as editing, its documented default', () => {
+    const unstated = entry({ name: 'title', machine: { forms: '<text>', example: '/title x', scope: 'tile' } })
+    const names = machineCatalogue([at('cut', 'destructive'), unstated, at('copy', 'additive')], ANY).split('\n').map(line => line.split(' ')[0])
+    expect(names).toEqual(['/copy', '/title', '/cut'])
+  })
+})

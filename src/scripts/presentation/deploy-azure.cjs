@@ -18,7 +18,6 @@ const root = __dirname
 const sourceRoot = path.join(root, '..', '..')
 const core = path.join(sourceRoot, 'hypercomb-core')
 const runtime = path.join(sourceRoot, 'hypercomb-runtime')
-const essentials = path.join(sourceRoot, 'hypercomb-essentials')
 const shim = path.join(sourceRoot, 'hypercomb-shim')
 const tour = path.join(root, 'dist', 'hypercomb-presentation.html')
 const tourOg = path.join(root, 'og.png')
@@ -48,9 +47,18 @@ const build = (cwd, script) => execFileSync(npm.program, [...npm.prefix, 'run', 
 // local run (or fail only after production deployment has started).
 build(core, 'build')
 build(runtime, 'build')
-build(essentials, 'build:module')
 build(shim, 'build:vendor')
-build(shim, 'build')
+// The shell only — no heap from this machine's module build. The packages the
+// apex offers are the PUBLISHED ones: the publisher's signed install root,
+// replicated in (every atom verified against its name) and listed in the
+// host's packages pool. A root minted here would be one nobody signed, and a
+// client following the publisher refuses it.
+execFileSync(npm.program, [...npm.prefix, 'run', 'build', '--', '--no-content'], { cwd: shim, stdio: 'inherit' })
+execFileSync(process.execPath, [
+  path.join(root, 'stage-signed-package.mjs'), path.join(shim, 'dist'),
+  // The host that holds published revisions today.
+  '--from', 'https://jwize.com',
+], { cwd: sourceRoot, stdio: 'inherit' })
 
 // Written after the builds, from the directory the last presentation build
 // proved — the same doors the splash bakes in.

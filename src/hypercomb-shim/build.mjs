@@ -49,7 +49,7 @@ const SIG_NAME = /^[0-9a-f]{64}$/i
 const hostsAt = process.argv.indexOf('--hosts')
 const seedHosts = String(hostsAt >= 0 ? process.argv[hostsAt + 1] ?? '' : process.env.HYPERCOMB_SEED_HOSTS ?? '')
   .split(',').map(host => host.trim().toLowerCase()).filter(Boolean)
-if (!seedHosts.length) seedHosts.push('hypercomb.com', 'jwize.com')
+if (!seedHosts.length) seedHosts.push('hypercomb.com')
 // A real newline, held in a template literal — this file generates JSON and
 // text, and an escape sequence here has been mangled by a shell heredoc once
 // already.

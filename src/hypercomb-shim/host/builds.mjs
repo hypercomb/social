@@ -88,7 +88,7 @@ export const STAGED = 'staged'
 /** The hosts `pull` asks by default: the operator's seed hosts when set. */
 export const DEFAULT_HOSTS = (process.env.HYPERCOMB_SEED_HOSTS ?? '').split(',').map(h => h.trim()).filter(Boolean).length
   ? (process.env.HYPERCOMB_SEED_HOSTS ?? '').split(',').map(h => h.trim()).filter(Boolean)
-  : ['jwize.com', 'hypercomb.com']
+  : ['hypercomb.com']
 const SIG = /^[a-f0-9]{64}$/
 const HERE = dirname(fileURLToPath(import.meta.url))
 /** Where source paths are named from — the spots name theirs the same way. */

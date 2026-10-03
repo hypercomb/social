@@ -3,6 +3,7 @@ import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import { ClipboardService, type ClipboardEntry, type ClipboardOp } from './clipboard.service.js'
 import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig } from '../history/layer-placement.js'
 import { seedLayerKeyedEntries } from '../editor/tile-properties.js'
+import { isPeerContentAt, markCarriedRoot } from '../sharing/adopted-roots.js'
 
 interface SelectionLike {
   readonly selected: ReadonlySet<string>
@@ -103,7 +104,11 @@ export class ClipboardWorker extends Worker {
       switch (payload.action) {
         case 'copy': settle(this.#capture('copy')); break
         case 'cut': settle(this.#capture('cut')); break
-        case 'paste': settle(this.#paste(this.#boundTarget(payload.targetSegments))); break
+        // A paste that placed nothing must not complete clean: the receipt
+        // of the word that asked would read as a move that never happened.
+        case 'paste': settle(this.#paste(this.#boundTarget(payload.targetSegments)).then(placed => {
+          if (placed === 0) throw new Error('paste — nothing was placed here; each held tile was already on this page or could not be found')
+        })); break
         case 'clear-clipboard': settle(this.#clearClipboard()); break
       }
     })
@@ -357,7 +362,11 @@ export class ClipboardWorker extends Worker {
         const group = groups.get(key) ?? { parentSegs, leaves: new Set<string>() }
         group.leaves.add(leaf)
         groups.set(key, group)
-        const entry: ClipboardEntry = { label: leaf, sourceSegments: parentSegs, cut: true }
+        // Whose words, decided NOW: the cut below unsubscribes an adopted root.
+        const entry: ClipboardEntry = {
+          label: leaf, sourceSegments: parentSegs, cut: true,
+          ...(isPeerContentAt([...parentSegs, leaf]) ? { fromPeer: true } : {}),
+        }
         moved.push(entry)
         movedByKey.set(`${key}/${leaf}`, entry)
       }
@@ -433,9 +442,11 @@ export class ClipboardWorker extends Worker {
       const pathSegs = label.split('/').filter(Boolean)
       if (pathSegs.length === 0) continue
       const leaf = pathSegs[pathSegs.length - 1]
+      const sourceSegments = [...baseSegments, ...pathSegs.slice(0, -1)]
       copyEntries.push({
         label: leaf,
-        sourceSegments: [...baseSegments, ...pathSegs.slice(0, -1)],
+        sourceSegments,
+        ...(isPeerContentAt([...sourceSegments, leaf]) ? { fromPeer: true } : {}),
       })
     }
     if (copyEntries.length === 0) return
@@ -482,6 +493,9 @@ export class ClipboardWorker extends Worker {
    *  source tile is untouched, which is what makes this the reference-gather
    *  path rather than a move. */
   async #takeEntries(entries: ClipboardEntry[]): Promise<void> {
+    for (const entry of entries) {
+      if (isPeerContentAt([...entry.sourceSegments, entry.label])) entry.fromPeer = true
+    }
     const history = this.#history
     if (history) {
       for (const entry of entries) {
@@ -513,6 +527,7 @@ export class ClipboardWorker extends Worker {
         sourceSegments: [...i.sourceSegments],
         ...(i.sig ? { sig: i.sig } : {}),
         ...(i.cut ? { cut: true } : {}),
+        ...(i.fromPeer ? { fromPeer: true } : {}),
       })),
     })
   }
@@ -521,12 +536,12 @@ export class ClipboardWorker extends Worker {
   // cut:  move folders from store.clipboard back to current explorer dir.
   // copy: copy folders from sourceSegments to current explorer dir.
 
-  async #paste(boundTarget: readonly string[]): Promise<void> {
+  async #paste(boundTarget: readonly string[]): Promise<number> {
     const clipboardSvc = this.#clipboardSvc
-    if (!clipboardSvc || clipboardSvc.isEmpty) return
+    if (!clipboardSvc || clipboardSvc.isEmpty) return 0
     // Paste = place EVERY clipboard tile at the BOUND location (captured at
     // intent, not re-read here).
-    await this.#placeLabels(clipboardSvc.items.map(i => i.label), undefined, boundTarget)
+    return await this.#placeLabels(clipboardSvc.items.map(i => i.label), undefined, boundTarget)
   }
 
   // Place explicit (label + sourceSegments) entries at the current location.
@@ -555,20 +570,22 @@ export class ClipboardWorker extends Worker {
   // `#paste` (all labels) and the side panel's per-item place
   // (`clipboard:place-items`). Mirrors paste's consume semantics: cut drops
   // the items that landed; copy keeps them for repeat placement.
-  async #placeLabels(labels: readonly string[], targets?: Record<string, number>, boundTarget?: readonly string[]): Promise<void> {
+  /** Answers how many tiles LANDED — the one number a caller that must not
+   *  report a paste that placed nothing needs (the queen path, via settle). */
+  async #placeLabels(labels: readonly string[], targets?: Record<string, number>, boundTarget?: readonly string[]): Promise<number> {
     const clipboardSvc = this.#clipboardSvc
     const lineage = this.#lineage
     const store = this.#store
     const history = this.#history
     const committer = this.#committer
-    if (!clipboardSvc || !lineage || !store || !history || !committer) return
-    if (clipboardSvc.isEmpty || labels.length === 0) return
+    if (!clipboardSvc || !lineage || !store || !history || !committer) return 0
+    if (clipboardSvc.isEmpty || labels.length === 0) return 0
     // Commits at the target; refused while rewound. Feedback, don't half-run.
-    if (this.#blockedByRewound('paste')) return
+    if (this.#blockedByRewound('paste')) return 0
 
     const wanted = new Set(labels)
     const items = clipboardSvc.items.filter(i => wanted.has(i.label))
-    if (items.length === 0) return
+    if (items.length === 0) return 0
     const targetSegments = boundTarget ? [...boundTarget] : [...lineage.explorerSegments()]
 
     EffectBus.emit('clipboard:paste-start', { count: items.length })
@@ -590,6 +607,7 @@ export class ClipboardWorker extends Worker {
     }
 
     EffectBus.emit('clipboard:paste-done', { count: placedLabels.length, failed })
+    return placedLabels.length
   }
 
   // ── shared placement (paste + place) ──────────────────
@@ -634,6 +652,8 @@ export class ClipboardWorker extends Worker {
     const placed: ClipboardEntry[] = []
     const appends: string[] = []
     const failed: string[] = []
+    // A peer's tile landing outside any peer branch: marked once it commits.
+    const carried: string[][] = []
     for (const entry of items) {
       if (taken.has(entry.label)) {
         console.warn(`[clipboard] target already has '${entry.label}'; skipping`)
@@ -704,6 +724,7 @@ export class ClipboardWorker extends Worker {
       appends.push(sig)
       placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
       taken.add(entry.label)
+      if ((entry.fromPeer === true || isPeerContentAt(srcPath)) && !isPeerContentAt(dstPath)) carried.push(dstPath)
     }
 
     if (placed.length === 0) return { placed, failed }
@@ -734,6 +755,8 @@ export class ClipboardWorker extends Worker {
     const tCommit0 = performance.now()
     await committer.commitChildrenDeltas(targetSegments, { appends })
     tCommit = performance.now() - tCommit0
+    // THE WORDS STAY THEIRS where they land (adopted-roots.ts, carried roots).
+    for (const path of carried) markCarriedRoot(path)
     console.log(
       `[clipboard] paste: total=${Math.round(performance.now() - tStart)}ms ` +
       `parent=${Math.round(tParent)}ms capture=${Math.round(tCapture)}ms prep=${Math.round(tPrep)}ms ` +
@@ -1037,7 +1060,7 @@ export class ClipboardWorker extends Worker {
 // drains, removed after the first pool-doc write.
 
 interface ClipboardMeta {
-  items: { label: string; sourceSegments: string[]; sig?: string; cut?: boolean }[]
+  items: { label: string; sourceSegments: string[]; sig?: string; cut?: boolean; fromPeer?: boolean }[]
 }
 
 const META_SUBKEY = 'clipboard-meta'

@@ -72,3 +72,23 @@ describe('ClipboardService', () => {
     expect(svc.items[0].sig).toBe(SIG)
   })
 })
+
+describe("a peer's tile keeps its mark on the clipboard", () => {
+  beforeEach(() => svc.clear())
+
+  it('captureEntries keeps fromPeer, and an entry without it carries none', () => {
+    svc.captureEntries([
+      { label: 'theirs', sourceSegments: ['peer-branch'], fromPeer: true },
+      { label: 'mine', sourceSegments: ['page'] },
+    ])
+    expect(svc.items.find(i => i.label === 'theirs')?.fromPeer).toBe(true)
+    expect(svc.items.find(i => i.label === 'mine')).not.toHaveProperty('fromPeer')
+  })
+
+  it('an append upsert never erases a mark the first pass took', () => {
+    svc.appendEntries([{ label: 'theirs', sourceSegments: ['peer-branch'], cut: true, fromPeer: true }])
+    svc.appendEntries([{ label: 'theirs', sourceSegments: ['peer-branch'], sig: SIG }])
+    expect(svc.items).toHaveLength(1)
+    expect(svc.items[0]).toMatchObject({ sig: SIG, cut: true, fromPeer: true })
+  })
+})

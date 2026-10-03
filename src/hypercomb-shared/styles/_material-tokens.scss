@@ -632,6 +632,10 @@
 }
 
 [data-theme="honey"]   { @include md-honey-tokens; }
+// The beehive theme: honey's colours for now, and the hive's own words — the
+// pheromone vocabulary the default calls tags (essentials theme.queen
+// registers them). A skin of its own will give it its own colours.
+[data-theme="beehive"] { @include md-honey-tokens; }
 [data-theme="bloom"]   { @include md-bloom-tokens; }
 [data-theme="sherbet"] { @include md-sherbet-tokens; }
 

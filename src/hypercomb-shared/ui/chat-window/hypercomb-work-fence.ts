@@ -13,6 +13,7 @@ export {
 export type { WorkKind, WorkRequest, SplitWork, WorkBudget } from '@hypercomb/core'
 export {
   MAX_WORK_ROUNDS,
+  applySectionEdits,
   writeHeaderOf,
   parseWriteBlock,
   WorkRefused,
@@ -27,8 +28,14 @@ export {
   doSkippedMessage,
   doFailedMessage,
   blockRefusedMessage,
+  routesNamedIn,
+  unreadClaimMessage,
+  unreadAskedMessage,
+  claimsUnranChange,
+  unranChangeMessage,
   blockUnwrittenMessage,
   writeRanMessage,
+  versionWriteRanMessage,
   writeSkippedMessage,
   doctrineRanMessage,
   doctrineFailedMessage,
@@ -39,6 +46,8 @@ export {
 } from '@hypercomb/core'
 export type {
   WriteRequest,
+  VersionWriteRequest,
+  SectionEdit,
   DoctrineWriteRequest,
   WorkPowers,
 } from '@hypercomb/core'

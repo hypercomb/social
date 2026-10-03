@@ -171,8 +171,47 @@ work on Hypercomb via DeepSeek."*
 - **Policy at the column's head:** **Manual** (everything waits) · **Auto**
   (the ticked kinds run on arrival: Reads · Adds · Edits · Removes, from core
   `MachineReach`) · **Everything**. Default: Auto with Reads — a granted
-  provider reads freely, changes wait. No policy ever runs an ungranted read:
+  provider reads freely, changes wait (superseded 2026-10-02, next point:
+  every kind runs). No policy ever runs an ungranted read:
   the policy is how much to watch, the grant is what may leave the machine.
+- **Your own domain runs; what leaves it or isn't your words waits (jwize,
+  2026-10-02).** *"The natural language should be safe because you are
+  actively in your own domain when you are running it … even publishing
+  would need another to accept the dodgy code."* Everything is client-side
+  save the deployed replications, so the default is now Auto with **every**
+  kind ticked (a device that already chose its kinds keeps them). Two holds
+  join the ungranted read, and no policy and no trusted conversation lifts
+  any of the three — only a hand:
+  - **leaves** — a change carrying a line whose behaviour declares
+    `scope: 'network'` (a signed publish, a peer, a host), or never declared
+    a scope (`hypercombPlanLeaves`). Approval downstream protects the reader,
+    never the participant's key. Today that is `/hide`, which signs a mesh
+    event under the participant's pubkey.
+  - **foreign** — a change asked for in a turn that read someone else's
+    words (`foreignReads`): a tile's content or summary at a route that holds
+    a peer's words (sharing/adopted-roots.ts `isPeerContentAt` — the one
+    question, never the lists), or a resource or layer reached by a
+    signature such a read surfaced (kept on the turn as `foreign`). Names —
+    list, tree, find, history — do not count, and neither does running
+    code: it already executes with the participant's full authority. Per
+    turn: the participant's next message is their words again. A sentence
+    the participant picked from the model's table is their hand, so neither
+    hold applies to it.
+  - **Where a peer's words can be (2026-10-02, every landing channel
+    traced).** Every swarm landing — the one-level fold, a branch adopt, a
+    sync of a held tile — lands inside an ADOPTED root, which the fold marks
+    at the topmost foreign tile. Route-keyed, so a peer's tile cut or
+    copied onto the participant's own page would have escaped it (and a cut
+    of an adopted root unsubscribes it outright): the clipboard now decides
+    "from a peer" at the take (`ClipboardEntry.fromPeer`) and placement
+    marks a CARRIED root where it lands — provenance only, it drives
+    nothing in the swarm; deleting the tile drops it. `/from` and `/feed`
+    link the participant's own pages and are not a channel. The notes
+    FACET unions every author's bucket for a word, but no code lands
+    another author's bucket locally yet; the day one does, the note sigs
+    it surfaces must count as foreign (`readSuccessionMembers` already
+    knows each member's author). The machine grant still keeps `/remove`
+    and `/cut` from models by default (`grant destructive` raises it).
 - **One side, two occupants.** The Execution column and the workflow column
   share the chat's right side, one at a time; a new waiting request brings
   Execution forward. On a phone it covers the thread until put away.

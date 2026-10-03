@@ -1,5 +1,6 @@
 // commands/theme.queen.ts
 
+import BEEHIVE_WORDS from './beehive.words.json'
 import {
   QueenBee, type ThemeProvider, THEME_IOC_KEY,
   registerCommandRoot, completeCommandPath,
@@ -100,3 +101,12 @@ export class ThemeQueenBee extends QueenBee {
 
 const _theme = new ThemeQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/ThemeQueenBee', _theme)
+
+// THE BEEHIVE THEME'S WORDS (jwize, 2026-10-02: "doctrine wins, rename to
+// tags" — "it should be part of a theme"). The default calls a tile's marks
+// TAGS; the hive vocabulary that called them pheromones lives here instead,
+// as the beehive theme's words, every key exactly as it read before the
+// rename. `/theme beehive` brings it back; the participant's own
+// `/i18n-override` still outranks any theme.
+;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc
+  ?.whenReady?.<ThemeProvider>(THEME_IOC_KEY, theme => theme.registerThemeWords?.('beehive', BEEHIVE_WORDS))

@@ -292,7 +292,47 @@ export const blockRefusedMessage = (kind: WorkKind, reason: string, request: str
 
 /** The reply named a work block inside markup the hive does not read as one
  *  (core/work-fence.ts `unwritten`): say so once, and say the one spelling. */
-export const blockUnwrittenMessage = (lang: string, request: string): string =>
+/** The routes a request names: `/games`, `/bubble-bobble-dos-v1/round-001`.
+ *  A slash that starts a word and is followed by a name — not a URL's path,
+ *  not a fraction, not a date. */
+export const routesNamedIn = (text: string): readonly string[] => {
+  const found = new Set<string>()
+  for (const match of String(text ?? '').matchAll(/(?:^|[\s("'`])(\/[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._'-]*)*)/gi)) {
+    found.add(match[1].replace(/[.,;:]+$/, ''))
+  }
+  return [...found]
+}
+
+/** AN ANSWER ABOUT TILES NOTHING READ. A model asked how many notes a tile
+ *  holds answered "2" in one round with no read; the tile held 13. Another
+ *  described ~140 children that do not exist (the games manager's reports,
+ *  2026-10-01). Said back once: read them, then answer. */
+export const unreadClaimMessage = (routes: readonly string[], request: string): string =>
+  `You answered about ${routes.join(', ')} without reading ${routes.length === 1 ? 'it' : 'them'} in this turn, so nothing in that answer is known from the hive. Read ${routes.length === 1 ? 'it' : 'them'} first with a hypercomb-read block, then answer from what the read returns.${carry(request)}`
+
+/** A READ THE PARTICIPANT ASKED FOR, ANSWERED UNRUN. Asked to run
+ *  `find arkanoid`, a model answered "No results found." in five tokens
+ *  with no read at all (2026-10-02): the request names no route, so the
+ *  guard above never saw it. Said back once: run it, then answer. */
+export const unreadAskedMessage = (lines: readonly string[], request: string): string =>
+  `The participant asked for ${lines.length === 1 ? 'this read' : 'these reads'}: ${lines.join('; ')}. You answered without running ${lines.length === 1 ? 'it' : 'them'}, so nothing in that answer is known from the hive. Send ${lines.length === 1 ? 'it' : 'them'} as a hypercomb-read block, then answer from what the read returns.${carry(request)}`
+
+/** AN ANSWER THAT CLAIMS A CHANGE NOTHING RAN (2026-10-02, the live grant
+ *  check). Asked to make a tile, a model answered "the tile is now created"
+ *  in one round with no block and no read — nothing ran, nothing was held,
+ *  and the participant was told it had happened. The text guard
+ *  (`splitWork`) lets a claim of completion through on purpose, because after
+ *  a round that RAN it is an honest summary; only the loop knows that nothing
+ *  ran, so the loop asks this — and only when the request asked for a change. */
+const ASKED_CHANGE = /\b(?:make|create|add|put|file|title|rename|tag|hide|move|copy|paste|cut|remove|delete|write|set|change)\b/i
+const CLAIMED_CHANGE = /\b(?:is now (?:created|made|on|there|in place|named|titled|tagged|hidden)|now exists|(?:have|has|i've|i have|was|were|is|are)\s+(?:now\s+)?(?:been\s+)?(?:created|made|added|filed|renamed|tagged|titled|hidden|moved|placed|pasted|copied|written|removed|changed))\b/i
+export const claimsUnranChange = (answer: string, request: string): boolean =>
+  ASKED_CHANGE.test(request) && CLAIMED_CHANGE.test(answer)
+
+export const unranChangeMessage = (request: string): string =>
+  `Nothing ran in this turn, so the hive did not change — but your answer says it did. If the change should happen, write it as a ${DO_FENCE_LANG} block and the hive will run it; if it did not happen, say so plainly.${carry(request)}`
+
+export const blockUnwrittenMessage =(lang: string, request: string): string =>
   `Your reply carried ${lang} work but not as a block the hive can run, so nothing happened. Write it again as a fenced block: a line of three backticks followed by ${lang}, then one line per request, then a line of three backticks. If you were only describing the block and your answer is finished, give the answer again without it.${carry(request)}`
 
 export const writeRanMessage = (draft: { section: string; beeSig: string; path: string; held?: string }, request: string): string =>

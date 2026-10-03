@@ -106,7 +106,7 @@ never re-addresses anything. It answers three questions at once:
 |---|---|---|---|
 | **set** | sig-named items | remove only your own member | travels |
 | **index** | member named by the sig it describes | never delete; recompute | never send — derived |
-| **document** | one current record, replaced | replaces siblings BY DESIGN | never send — per-participant |
+| **document** | one current record; every earlier version kept, the max `000x` marker names the current one | keeps every version (nothing is swept) | never send — per-participant; only the genome (current state, no history) travels |
 | **succession** | per-author buckets of signed claims | never touch another author's bucket | must travel |
 
 **The kind is advisory for reading and NEVER authoritative for a delete.** A

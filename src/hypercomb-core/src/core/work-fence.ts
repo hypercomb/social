@@ -401,6 +401,8 @@ export const splitWork = (text: string): SplitWork => {
 
 /** Could a line that has only begun still turn out to be a fence line? */
 const MAY_BE_FENCE = /^\s{0,3}(?:[`~].*)?$/
+/** A line so far that could still become `hypercomb-<word>` alone. */
+const MAY_BE_MARKER = /^\s*h(?:y(?:p(?:e(?:r(?:c(?:o(?:m(?:b(?:-[a-z]*\s*:?\s*)?)?)?)?)?)?)?)?)?$/
 /** …or an opener that is still being written? */
 const MAY_BE_TAG = /^<hypercomb-[a-z]*$/
 
@@ -482,6 +484,9 @@ export class WorkStreamGuard {
   #holdFrom(): number {
     const line = this.#line
     if (MAY_BE_FENCE.test(line)) return 0
+    // A line that may yet be a block's marker alone (`hypercomb-read`) waits
+    // until it is one or is not.
+    if (!this.#fence && MAY_BE_MARKER.test(line)) return this.#shown
     if (this.#fence) return line.length
     const at = tagHold(line, this.#shown)
     // An indent is not prose: it waits with the tag it stands before.
@@ -492,6 +497,13 @@ export class WorkStreamGuard {
   #opensWork(line: string): number {
     const match = FENCE_RE.exec(line)
     if (!match) {
+      // THE MARKER ALONE ON ITS LINE opens work too (markerBlock): what
+      // follows is the block, never prose. Shown, it left "hypercomb-read /
+      // tree / list …" at the head of an answer (housekeeping, 2026-10-01).
+      if (!this.#fence) {
+        const marker = MARKER_LINE.exec(line)
+        if (marker && kindOf(marker[1])) return 0
+      }
       // The tag spelling opens work too, outside any ordinary code block; the
       // words before it on the line are prose, and are shown.
       const tag = this.#fence ? null : tagAt(line)

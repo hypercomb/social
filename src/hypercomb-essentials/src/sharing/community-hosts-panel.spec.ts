@@ -158,7 +158,8 @@ describe('the host directory — the set, apart from the publishing', () => {
   })
 
   it('seeds ONE known host into an empty pool, and only ever once', () => {
-    expect(HOSTS_DRONE).toMatch(/const SEED_HOST = 'jwize\.com'/)
+    // b99e6770e (2026-10-01): hypercomb.com, not jwize.com — jwize.com is personal.
+    expect(HOSTS_DRONE).toMatch(/const SEED_HOST = 'hypercomb\.com'/)
     expect(HOSTS_DRONE).toMatch(/if \(this\.#zones\.length === 0\) await this\.#seedOnce\(\)/)
     expect(HOSTS_DRONE).toMatch(/localStorage\.getItem\(SEEDED_KEY\) === '1'\) return/)
   })

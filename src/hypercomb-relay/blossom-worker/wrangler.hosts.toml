@@ -1,0 +1,27 @@
+# hypercomb-hosts — the forwarder every CLAIMED domain routes to
+# (documentation/domain-claim.md, hosts-forwarder.js).
+#
+# Deploy once:  npm run deploy:hosts
+#
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ NEVER ADD `routes` OR `route` TO THIS FILE.                              │
+# │                                                                          │
+# │ `wrangler deploy` REPLACES every route this script has with the ones     │
+# │ declared here. Every claimed domain's routes live on this script, added  │
+# │ by the main worker through the Cloudflare API — none of them is in this  │
+# │ file. Declare even ONE route here and the next deploy DELETES EVERY      │
+# │ CLAIMED DOMAIN at once. A route of your own belongs on the main worker   │
+# │ (wrangler.pluginthematrix.toml), never here.                             │
+# └──────────────────────────────────────────────────────────────────────────┘
+
+name = "hypercomb-hosts"
+main = "hosts-forwarder.js"
+compatibility_date = "2026-06-01"
+# No workers.dev address: this script is reached only by the claimed routes.
+workers_dev = false
+
+# The main worker — its `name` in wrangler.pluginthematrix.toml. A claim's
+# routes name THIS script (CLAIM_SCRIPT there); the request goes on to that one.
+[[services]]
+binding = "HOST"
+service = "pluginthematrix-core"

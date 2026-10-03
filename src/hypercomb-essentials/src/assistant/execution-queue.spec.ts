@@ -30,14 +30,41 @@ describe('the execution queue', () => {
     llmHiveAccess.setMayRead('openrouter', false)
   })
 
-  it('by default runs reads on arrival and holds changes for the participant', async () => {
+  it("by default runs every kind on arrival — the participant's own domain", async () => {
     const queue = new ExecutionQueueStore()
-    const read = queue.request(ask({ kind: 'read', lines: ['/read'] }))
-    expect(await read.decision).toBe('run')
-    const change = queue.request(ask())
-    expect(queue.requests().find(r => r.id === change.id)?.state).toBe('waiting')
-    queue.decide(change.id, 'run')
-    expect(await change.decision).toBe('run')
+    expect(queue.autoKinds()).toEqual(['read', 'additive', 'editing', 'destructive'])
+    for (const kind of ['read', 'additive', 'editing', 'destructive'] as const) {
+      const entry = queue.request(ask({ kind }))
+      expect(await entry.decision).toBe('run')
+    }
+  })
+
+  it('a change that leaves the machine waits, whatever the policy', async () => {
+    const queue = new ExecutionQueueStore()
+    queue.setMode('everything')
+    const entry = queue.request(ask({ kind: 'editing', lines: ['/hide drafts'], leaves: true }))
+    expect(queue.requests()[0]).toMatchObject({ state: 'waiting', leaves: true, auto: false })
+    queue.setMode('auto')
+    queue.setMode('everything')
+    expect(queue.requests()[0].state).toBe('waiting')
+    queue.decide(entry.id, 'run')
+    expect(await entry.decision).toBe('run')
+  })
+
+  it("a change after someone else's words waits, whatever the policy", async () => {
+    const queue = new ExecutionQueueStore()
+    queue.setMode('everything')
+    const entry = queue.request(ask({ foreign: true }))
+    expect(queue.requests()[0]).toMatchObject({ state: 'waiting', foreign: true })
+    queue.decide(entry.id, 'skip')
+    expect(await entry.decision).toBe('skip')
+  })
+
+  it('a change with neither hold carries neither mark', () => {
+    const queue = new ExecutionQueueStore()
+    queue.request(ask())
+    expect(queue.requests()[0]).not.toHaveProperty('leaves')
+    expect(queue.requests()[0]).not.toHaveProperty('foreign')
   })
 
   it('never runs an ungranted read by policy, even on everything', async () => {
@@ -63,16 +90,20 @@ describe('the execution queue', () => {
     const queue = new ExecutionQueueStore()
     queue.setMode('manual')
     const change = queue.request(ask({ kind: 'editing' }))
+    queue.setAuto('editing', false)
+    queue.setAuto('destructive', false)
     queue.setMode('auto')
+    expect(queue.requests()[0].state).toBe('waiting')
     queue.setAuto('editing', true)
     expect(await change.decision).toBe('run')
     const again = new ExecutionQueueStore()
     expect(again.mode()).toBe('auto')
-    expect(again.autoKinds()).toEqual(['read', 'editing'])
+    expect(again.autoKinds()).toEqual(['read', 'additive', 'editing'])
   })
 
   it('stopping the conversation skips what is still waiting', async () => {
     const queue = new ExecutionQueueStore()
+    queue.setMode('manual')
     const stop = new AbortController()
     const change = queue.request(ask({ signal: stop.signal }))
     stop.abort()
@@ -93,6 +124,7 @@ describe('the execution queue', () => {
 
   it('settles with an outcome, and a waiting row cannot be settled past', () => {
     const queue = new ExecutionQueueStore()
+    queue.setMode('manual')
     const change = queue.request(ask())
     queue.settle(change.id, 'ran', 'done')
     expect(queue.requests()[0].state).toBe('waiting')

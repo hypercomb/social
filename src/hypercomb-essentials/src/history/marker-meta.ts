@@ -117,7 +117,15 @@ export const writeMarkerMetaRecord = async (
   } catch { return null }
 }
 
-/** Every current record in the pool — one per sub-bucket. Never throws. */
+/** Every current record in the pool — one per sub-bucket. Never throws.
+ *
+ *  A bucket keeps EVERY version of its record (`putPoolDoc` appends a marker
+ *  and removes nothing), so the first member found is any version, not the
+ *  current one. It is read only to learn the bucket's key — every version
+ *  carries the same `layer`, the sub-key the bucket is named by — and the
+ *  current record is then asked of `getPoolDoc`, which follows the head
+ *  marker and falls back to the first member for a bucket written before
+ *  markers existed. */
 export const listMarkerMetaRecords = async (store: MarkerMetaStore | undefined): Promise<MarkerMetaRecord[]> => {
   if (!store?.getPool) return []
   let pool: FileSystemDirectoryHandle | undefined
@@ -131,7 +139,12 @@ export const listMarkerMetaRecords = async (store: MarkerMetaStore | undefined):
         for await (const [name, handle] of (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
           if (handle.kind !== 'file' || !SIG_RE.test(name)) continue
           const record = parse(await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer())
-          if (record) { out.push(record); break }
+          if (!record) continue
+          const current = store.getPoolDoc
+            ? parse(await store.getPoolDoc(pool, record.layer).catch(() => null))
+            : null
+          out.push(current ?? record)
+          break
         }
       } catch { /* one unreadable bucket hides only itself */ }
     }

@@ -75,7 +75,7 @@ describe('a bare-word address answers for a directory it cannot see', () => {
   // lookup confidently describes a participant's own history bag as a pool
   // whose sanctioned behaviour is replacing its siblings, with no caveat
   // anywhere in the module and no way for a caller to tell the two apart.
-  it("reports 'overrides' as a replaces-siblings document even when the directory is a tile's bag", async () => {
+  it("reports 'overrides' as a keeps-versions document even when the directory is a tile's bag", async () => {
     // The two preimages really are the same string.
     expect(canonicalizeLineageSegment('overrides')).toBe('overrides')
     const poolAddress = await registerPoolMeaning('overrides')
@@ -87,7 +87,7 @@ describe('a bare-word address answers for a directory it cannot see', () => {
     const facts = await poolKindOfAddress(bagAddress)
     // CHARACTERISATION: this is what it says today about a user's lineage bag.
     expect(facts?.kind).toBe('document')
-    expect(facts?.deletion).toBe('replaces-siblings')
+    expect(facts?.deletion).toBe('keeps-versions')
     expect(facts?.wipeSafe).toBe(false)
 
     // And the property that saves it: the ENTRY still decides.

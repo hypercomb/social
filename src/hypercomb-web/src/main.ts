@@ -6,6 +6,10 @@
 // localStorage turns the trail back on. See quiet-console.ts.
 import { announce } from '@hypercomb/shared/core/quiet-console'
 
+// SECOND: swarm membership resumes from THIS tab's session (a reload keeps the
+// join, a new tab boots private) before any drone samples the flag.
+import '@hypercomb/shared/core/mesh-session'
+
 // A SANDBOX DOOR HAS NO SIGNER. At `try-<change>.<zone>` the package that runs
 // is a publisher's, with full page power — and a NIP-07 extension's
 // `window.nostr` would hand that code your key's signature on a single

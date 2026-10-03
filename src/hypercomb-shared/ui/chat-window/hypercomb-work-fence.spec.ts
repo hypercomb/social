@@ -17,6 +17,9 @@ import {
   workBudget,
   blockUnwrittenMessage,
 } from './hypercomb-work-fence'
+import { claimsUnranChange, unranChangeMessage } from './hypercomb-work-fence'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 describe('the work fence', () => {
   it('finds a read block at the end of a reply and turns its lines into grammar', () => {
@@ -154,6 +157,16 @@ describe('the stream guard', () => {
     const { shown, guard } = run(['Let me ', 'look.\n', '``', '`hypercomb-read\nread here\n', '```'])
     expect(shown).toBe('Let me look.\n')
     expect(guard.holding).toBe(true)
+  })
+
+  it('holds a block whose marker stands alone on its line, as the parser runs it', () => {
+    const { shown, guard } = run(['I will look.\n', 'hyper', 'comb-read\ntree /\nlist /games\n'])
+    expect(shown).toBe('I will look.\n')
+    expect(guard.holding).toBe(true)
+    const backticked = run(['`hypercomb-read`\n', 'code bubble engine\n'])
+    expect(backticked.shown).toBe('')
+    // A word that only starts the same way is prose, and shows.
+    expect(run(['hyperlinks work here.\n']).shown).toBe('hyperlinks work here.\n')
   })
 
   it('passes an ordinary code block through whole', () => {
@@ -497,5 +510,50 @@ describe('a handover said in prose', () => {
     expect(leftFromProse(['Done.', '', 'Next step: read the rest of tile-surface.ts from offset 8000.'].join('\n'))).toBe('read the rest of tile-surface.ts from offset 8000.')
     expect(leftFromProse('All three tiles are rewritten and verified.')).toBeUndefined()
     expect(leftFromProse('Remaining: none')).toBeUndefined()
+  })
+})
+
+describe('an answer about tiles nothing read', () => {
+  it('finds the routes a request names, and nothing that only looks like one', async () => {
+    const { routesNamedIn } = await import('./hypercomb-work-fence')
+    expect(routesNamedIn('How many notes are on /bubble-bobble-dos-v1? Number only.')).toEqual(['/bubble-bobble-dos-v1'])
+    expect(routesNamedIn('Compare /games/arkanoid with /solomon-maze-v1, then /games.')).toEqual(['/games/arkanoid', '/solomon-maze-v1', '/games'])
+    expect(routesNamedIn('See https://example.com/a/b and 3/4 of it, dated 2026/10/01.')).toEqual([])
+  })
+
+  it('says which routes went unread and carries the request', async () => {
+    const { unreadClaimMessage } = await import('./hypercomb-work-fence')
+    const said = unreadClaimMessage(['/games'], 'how many tiles are under /games')
+    expect(said).toContain('/games')
+    expect(said).toContain('hypercomb-read')
+  })
+})
+
+describe('an answer that claims a change nothing ran', () => {
+  // Found driving the hive 2026-10-02: asked to make a tile after the grant,
+  // a model answered this in one round, with no block — and no tile existed.
+  const live = 'As expected — the grant took effect and the tile is now created on `/`.\n\nTile `gate-probe` exists on your root page.'
+
+  it('is caught when the request asked for a change', () => {
+    expect(claimsUnranChange(live, 'done — create is granted now. Please make the tile gate-probe.')).toBe(true)
+    expect(claimsUnranChange('I have added the note to roadmap.', 'add a note on roadmap')).toBe(true)
+    expect(claimsUnranChange('The title has been changed to Road map.', 'rename roadmap')).toBe(true)
+  })
+
+  it('is let through when nothing was asked to change, or nothing is claimed', () => {
+    // A read-only question can mention history without being a claim.
+    expect(claimsUnranChange('That tile was created last week.', 'when was arkanoid started?')).toBe(false)
+    expect(claimsUnranChange('I cannot create it — /create is not granted.', 'make a tile named x')).toBe(false)
+  })
+
+  it('goes back with the truth, and the way to do it', () => {
+    expect(unranChangeMessage('make x')).toContain('Nothing ran in this turn, so the hive did not change')
+    expect(unranChangeMessage('make x')).toContain('hypercomb-do')
+  })
+
+  it('the loop asks it only when nothing ran this turn, once per message', () => {
+    const loop = readFileSync(join(process.cwd(), 'hypercomb-shared', 'ui', 'chat-window', 'chat-window.component.ts'), 'utf8')
+    expect(loop).toContain('if (!work.request && !lastRound && !unranSaid && ran.length === 0 && claimsUnranChange(roundText, message)) {')
+    expect(loop).toContain("content: unranChangeMessage(message) }")
   })
 })

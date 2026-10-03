@@ -119,13 +119,23 @@ const SETTLE_SPEED = 42                // below this, a grounded worm stops boun
 // Rope
 const ROPE_MAX = 600                   // longest cast / longest rope
 const ROPE_MIN_LEN = 24
-const ROPE_FIRE_SPEED = 1700           // how fast the hook flies out (units/s)
-const ROPE_RETRACT_SPEED = 2600        // faster pull-back on a miss
+// A re-rope has no timeout and almost no flight time: a full cast crosses ROPE_MAX in about
+// 0.07 s. The hook marches in 3-unit steps, so it still locks onto the first solid and can
+// never tunnel through a thin wall.
+const ROPE_FIRE_SPEED = 9000           // how fast the hook flies out (units/s)
+const ROPE_RETRACT_SPEED = 12000       // pull-back on a miss (a re-fire mid-flight is always allowed)
 const REEL_SPEED = 200                 // reel in/out units/s
+const ROPE_SUBSTEP = 1 / 120           // the rope is stepped in fixed slices: no frame-rate dependence
+// What shortening does to the swing. Which invariant the original Worms rope keeps is
+// UNKNOWN (angular momentum, or tangential speed kept); one switch, never claimed exact.
+const REEL_KEEPS: 'angular' | 'tangential' = 'angular'
 const SWING_ACCEL = 1500               // horizontal push from left/right while roped
 const ROPE_AIR_DRAG = 0.08             // barely any drag — momentum is the point of a rope
 const ROPE_MAX_SPEED = 1300            // cap on total roped speed (keeps swings controllable)
-const ROPE_MIN_UP = 0.16              // min upward component — the rope only fires above horizontal (Team17)
+// The rope never fires flatter than this above horizontal, however low you aim: a re-rope
+// is always a steep cast. 45 degrees is jwize's call; a forum recollection puts the
+// original Worms 2 limit at 45 degrees too (low confidence, not measured).
+const ROPE_MIN_ELEVATION = Math.PI / 4
 
 // Weapons
 const CHARGE_MIN = 260                 // throw speed at a tap
@@ -260,20 +270,20 @@ export class RoperEngine {
   }
 
   /** The direction the rope will ACTUALLY launch from the current aim, applying
-   *  the two Team17 rules: (1) it only fires in the upper hemisphere — you can't
-   *  rope below horizontal; (2) it can't come out the same horizontal side as the
+   *  the two Team17 rules: (1) it only fires in the upper hemisphere, never flatter
+   *  than ROPE_MIN_ELEVATION (45 degrees) above horizontal; (2) it can't come out the same horizontal side as the
    *  last rope this turn, so a right cast is followed by a left one (you re-aim
    *  the steepness in the air, the side flips). Shared by fireRope and the aim
    *  preview so what you see is what fires. */
   ropeLaunchDir(): { dx: number; dy: number; sign: 1 | -1 } {
-    let dx = Math.cos(this.aimAngle)
-    let dy = -Math.abs(Math.sin(this.aimAngle))     // upper hemisphere only
-    if (dy > -ROPE_MIN_UP) dy = -ROPE_MIN_UP
-    let sign: 1 | -1 = dx >= 0 ? 1 : -1
+    const cx = Math.cos(this.aimAngle)
+    // elevation above horizontal, upper hemisphere only, floored at ROPE_MIN_ELEVATION
+    const elev = Math.max(ROPE_MIN_ELEVATION, Math.atan2(Math.abs(Math.sin(this.aimAngle)), Math.abs(cx)))
+    let sign: 1 | -1 = cx >= 0 ? 1 : -1
     if (this.#lastRopeSign !== 0 && sign === this.#lastRopeSign) sign = sign === 1 ? -1 : 1
-    dx = sign * Math.abs(dx)
-    const m = Math.hypot(dx, dy) || 1
-    return { dx: dx / m, dy: dy / m, sign }
+    const dx = sign * Math.cos(elev)
+    const dy = -Math.sin(elev)
+    return { dx, dy, sign }          // already a unit vector
   }
 
   /** Fire the rope: the hook shoots OUT along the launch direction. It locks onto
@@ -328,6 +338,28 @@ export class RoperEngine {
     this.retreatTime = RETREAT_TIME
   }
 
+  /** Drop the selected weapon where you stand. It leaves with the worm's own
+   *  velocity and no throw, so a rope swing carries it along. Like a throw it
+   *  spends the turn's one weapon; unlike a throw the rope stays attached. */
+  dropWeapon(): void {
+    const w = this.active
+    if (!w || !w.alive || this.state !== 'aim') return
+    const isBomb = this.weapon === 'bomb'
+    this.projectiles.push({
+      kind: this.weapon,
+      x: w.x, y: w.y,
+      vx: w.vx, vy: w.vy,
+      fuse: isBomb ? Infinity : GRENADE_FUSE,
+      r: isBomb ? BOMB_R : GRENADE_R,
+      owner: w.index,
+      armed: false,
+    })
+    this.charging = false
+    this.power = 0
+    this.state = 'fired'
+    this.retreatTime = RETREAT_TIME
+  }
+
   jump(): void {
     const w = this.active
     if (!w || !w.alive || this.rope || !w.onGround || this.state === 'over') return
@@ -362,7 +394,7 @@ export class RoperEngine {
         if (this.solidAt(hx, hy)) {
           r.reach = d; r.hx = hx; r.hy = hy
           r.ax = hx; r.ay = hy
-          r.length = Math.max(ROPE_MIN_LEN, Math.hypot(w.x - r.ax, w.y - r.ay))
+          r.length = Math.min(ROPE_MAX, Math.max(1, Math.hypot(w.x - r.ax, w.y - r.ay)))
           r.phase = 'attached'
           return
         }
@@ -404,67 +436,85 @@ export class RoperEngine {
     this.#clampToBox(w)
   }
 
-  /** Swing on a taut, inextensible, pull-only rope. Left/right pump the swing;
-   *  up/down reel the line, and reeling CONSERVES ANGULAR MOMENTUM — shorten to
-   *  speed up, lengthen to slow down (v_tangential ∝ 1/length). Swinging into
-   *  terrain bounces off it. This is the roper's whole toolkit. */
+  /** Swing on a taut, inextensible rope with NO slack — a rod the worm hangs
+   *  from. After every step the worm is exactly `length` from the anchor; the
+   *  only thing that changes `length` is up/down (and a wall that blocks the
+   *  rope, which shortens it to the gap rather than leaving it loose). Left/right
+   *  pump the swing; reeling moves the worm in the same step, and shortening
+   *  speeds the swing (REEL_KEEPS). Momentum comes only from swing input,
+   *  reeling and gravity. Stepped in fixed small slices so it does not depend on
+   *  the frame rate. */
   #stepRoped(w: Worm, dt: number): void {
     const r = this.rope!
+    // The anchor is rock. If a blast removed it the hook has nothing to hold.
+    if (!this.solidAt(r.ax, r.ay)) { this.rope = null; return }
+    const n = Math.max(1, Math.ceil(dt / ROPE_SUBSTEP))
+    const h = dt / n
+    for (let i = 0; i < n && this.rope === r; i++) this.#stepRopedOnce(w, r, h)
+  }
 
-    // Reel + angular-momentum transfer: pulling in at speed whips you faster.
-    if (this.input.up || this.input.down) {
-      const oldLen = r.length
-      const newLen = this.input.up
-        ? Math.max(ROPE_MIN_LEN, r.length - REEL_SPEED * dt)
-        : Math.min(ROPE_MAX, r.length + REEL_SPEED * dt)
-      if (newLen !== oldLen) {
-        const dxr = w.x - r.ax, dyr = w.y - r.ay
-        const dd = Math.hypot(dxr, dyr) || 1
-        const nx = dxr / dd, ny = dyr / dd, tx = -ny, ty = nx
-        let vt = w.vx * tx + w.vy * ty            // tangential speed
-        const vr = w.vx * nx + w.vy * ny          // radial speed
-        vt *= oldLen / newLen                      // conserve L = length·v_tangential
-        vt = Math.max(-ROPE_MAX_SPEED, Math.min(ROPE_MAX_SPEED, vt))
-        w.vx = tx * vt + nx * vr
-        w.vy = ty * vt + ny * vr
-        r.length = newLen
-      }
-    }
+  #stepRopedOnce(w: Worm, r: Rope, h: number): void {
+    // 1. Reel: the only thing that changes the length. The floor applies to
+    //    reeling IN only, so a close grab is not stretched to ROPE_MIN_LEN.
+    const oldLen = r.length
+    let newLen = oldLen
+    if (this.input.up) newLen = Math.max(Math.min(oldLen, ROPE_MIN_LEN), oldLen - REEL_SPEED * h)
+    else if (this.input.down) newLen = Math.min(ROPE_MAX, oldLen + REEL_SPEED * h)
+    const rate = (newLen - oldLen) / h          // radial speed the reel imposes
 
-    // Gravity + light drag
-    w.vy += GRAVITY * dt
-    const drag = Math.exp(-ROPE_AIR_DRAG * dt)
+    // 2. Forces act on the velocity; only its tangential part survives a rod.
+    let dx = w.x - r.ax, dy = w.y - r.ay
+    let d = Math.hypot(dx, dy) || 1
+    const nx = dx / d, ny = dy / d, tx = -ny, ty = nx
+    w.vy += GRAVITY * h
+    const drag = Math.exp(-ROPE_AIR_DRAG * h)
     w.vx *= drag; w.vy *= drag
+    // Swing input is a HORIZONTAL push (a Hedgewars/Wormux choice, not a measured
+    // Worms value): right nudges you right, left left; the rod and gravity turn
+    // that into a swing that always reads right.
+    if (this.input.right) { w.vx += SWING_ACCEL * h; w.facing = 1 }
+    if (this.input.left) { w.vx -= SWING_ACCEL * h; w.facing = -1 }
+    let vt = w.vx * tx + w.vy * ty
+    if (newLen !== oldLen && REEL_KEEPS === 'angular') vt *= oldLen / newLen
+    vt = Math.max(-ROPE_MAX_SPEED, Math.min(ROPE_MAX_SPEED, vt))
+    r.length = newLen
 
-    // Swing input is a HORIZONTAL push (the Hedgewars model): right always nudges
-    // you rightward, left leftward, and the rope + gravity turn that into a swing
-    // that always reads right. A tangent-based push reverses on the far side of
-    // the arc and fights you — it "holds you out there" instead of letting gravity
-    // drop you into the swing, which is the thing that felt wrong.
-    if (this.input.right) { w.vx += SWING_ACCEL * dt; w.facing = 1 }
-    if (this.input.left) { w.vx -= SWING_ACCEL * dt; w.facing = -1 }
+    // 3. Move along the tangent and the reel, then seat the worm ON the circle
+    //    (both ways: closer than the rope is as impossible as farther). The
+    //    velocity is rotated onto the new tangent, so the projection loses no energy.
+    w.x += (tx * vt + nx * rate) * h
+    w.y += (ty * vt + ny * rate) * h
+    this.#seatOnRope(w, r)
+    dx = w.x - r.ax; dy = w.y - r.ay; d = Math.hypot(dx, dy) || 1
+    const mx = dx / d, my = dy / d
+    w.vx = -my * vt + mx * rate
+    w.vy = mx * vt + my * rate
 
-    // Integrate
-    w.x += w.vx * dt; w.y += w.vy * dt
-
-    // Inextensible, pull-only constraint: clamp to the circle, kill outward speed.
-    let dx = w.x - r.ax, dy = w.y - r.ay, d = Math.hypot(dx, dy) || 1
-    if (d > r.length) {
-      const nx = dx / d, ny = dy / d
-      w.x = r.ax + nx * r.length
-      w.y = r.ay + ny * r.length
-      const vr = w.vx * nx + w.vy * ny
-      if (vr > 0) { w.vx -= vr * nx; w.vy -= vr * ny }
-    }
-
-    // Keep the swing controllable (and stable) without bleeding the momentum that
-    // makes roping fun: cap total speed rather than damping it every frame.
-    const sp = Math.hypot(w.vx, w.vy)
-    if (sp > ROPE_MAX_SPEED) { const k = ROPE_MAX_SPEED / sp; w.vx *= k; w.vy *= k }
-
-    // Swing into terrain → bounce off it (off ceilings going up, off walls).
+    // 4. Collide first, then re-seat, so a bounce can never leave the rope loose.
     if (this.#wormSolid(w)) this.#bounceWorm(w, ROPE_RESTITUTION, false)
     this.#clampToBox(w)
+    this.#reseatAfterContact(w, r)
+  }
+
+  /** Put the worm exactly `length` from the anchor, along the line it is on. */
+  #seatOnRope(w: Worm, r: Rope): void {
+    const dx = w.x - r.ax, dy = w.y - r.ay
+    const d = Math.hypot(dx, dy) || 1
+    w.x = r.ax + (dx / d) * r.length
+    w.y = r.ay + (dy / d) * r.length
+  }
+
+  /** After a bounce or the arena clamp: if the worm is off the circle, put it back;
+   *  if the rock blocks that, the rope is as long as the gap — never loose. */
+  #reseatAfterContact(w: Worm, r: Rope): void {
+    const d = Math.hypot(w.x - r.ax, w.y - r.ay)
+    if (Math.abs(d - r.length) < 0.01) return
+    const sx = w.x, sy = w.y
+    this.#seatOnRope(w, r)
+    if (this.#wormSolid(w) || w.x < WORM_R || w.x > this.width - WORM_R || w.y < WORM_R || w.y > this.height - WORM_R) {
+      w.x = sx; w.y = sy
+      r.length = Math.max(1, d)
+    }
   }
 
   /** Hard backstop: a worm can never leave the sealed arena, whatever the

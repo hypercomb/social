@@ -20,7 +20,7 @@
 // files are skipped, and conflicting files are reported but NEVER overwritten.
 // Root-level sig-named content is sha256-verified before import.
 
-import { EffectBus, SignatureService, classifyDirectoryEntry, poolKindOfMeaning, poolMeanings } from '@hypercomb/core'
+import { EffectBus, SignatureService, classifyDirectoryEntry, poolKindOfMeaning, poolMeaningOf, poolMeanings } from '@hypercomb/core'
 import { extractLayerSigFromMarker } from '../history/history.service.js'
 // TYPE ONLY — erased at compile time, so this stays an IoC relationship at
 // runtime and no bundle edge is created between the two drones.
@@ -391,6 +391,16 @@ const readFileBytes = async (
     return await (await (await dir.getFileHandle(name, { create: false })).getFile()).arrayBuffer()
   } catch {
     return null
+  }
+}
+
+/** Does `dir` hold a FILE named `name`? Never creates. */
+const holdsFile = async (dir: FileSystemDirectoryHandle, name: string): Promise<boolean> => {
+  try {
+    await dir.getFileHandle(name, { create: false })
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -1329,13 +1339,27 @@ export class FolderSyncService {
       // be a pool (a molecule anyone mints by typing a word), and a registered
       // one may still hold markers.
       await this.#collectPoolReferences(handle as FileSystemDirectoryHandle, poolReferenced)
+      // A DOCUMENT POOL'S OWN MARKERS are not closure roots. `Store.putPoolDoc`
+      // keeps every version of a document and marks the current one, and its
+      // markers name the document atom held BESIDE them, never a layer at the
+      // root — so adopting that sig would ask hosts for a private document and
+      // count it missing. The atom's bytes are copied verbatim by the OPFS
+      // walk, and what it names was just collected above. Only a colon-carrying
+      // meaning can be such a space at the root (a tile name never reaches a
+      // colon — the same proof putPoolDoc requires), and only an atom actually
+      // held here is skipped: a location bag's head names root content and is
+      // walked as before.
+      const documentSpace = /[\p{L}\p{N}]:[\p{L}\p{N}]/u.test((await poolMeaningOf(name).catch(() => undefined)) ?? '')
       for await (const [markerName, markerHandle] of (handle as any).entries()) {
         if (markerHandle.kind !== 'file' || !MARKER_RE.test(markerName)) continue
         markers++
         try {
           const marker = await (markerHandle as FileSystemFileHandle).getFile()
           const extracted = await extractLayerSigFromMarker(await marker.arrayBuffer())
-          if (SIG_RE.test(extracted.layerSig)) roots.add(extracted.layerSig.toLowerCase())
+          if (!SIG_RE.test(extracted.layerSig)) continue
+          const named = extracted.layerSig.toLowerCase()
+          if (documentSpace && await holdsFile(handle as FileSystemDirectoryHandle, named)) continue
+          roots.add(named)
         } catch {
           // Extraction itself does not throw (a legacy marker falls back to
           // hashing its own bytes), so this is only reached when the marker

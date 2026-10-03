@@ -62,6 +62,13 @@ export class KeywordQueenBee extends QueenBee {
     // stated target is never ambiguous the way a picked one is.
     const selectedLabels = named ? [named.cell] : selection ? Array.from(selection.selected) : []
 
+    // A NAMED TILE THAT GOT NOTHING MUST NOT RESOLVE CLEAN (surface audit,
+    // false success): with no decoration service the write block was skipped,
+    // and a failed write was only warned — partial was indistinguishable from
+    // full, and a machine's receipt read "ran /keyword" either way.
+    if (named && !decorations) throw new Error(`keyword — tags cannot be written here yet; "${named.cell}" was not tagged`)
+    const failed: string[] = []
+
     if (selectedLabels.length > 0 && decorations) {
       const parentSegments = lineage?.explorerSegments?.() ?? []
       const updates: { cell: string; tag: string; color?: string }[] = []
@@ -73,7 +80,7 @@ export class KeywordQueenBee extends QueenBee {
             if (op.remove) await decorations.removeTag(segments, op.tag)
             else await decorations.addTag(segments, op.tag)
             updates.push({ cell: label, tag: op.tag, color: op.color })
-          } catch (err) { console.warn('[keyword] update failed for', label, err) }
+          } catch (err) { console.warn('[keyword] update failed for', label, err); failed.push(`${op.remove ? '~' : ''}${op.tag} on "${label}"`) }
         }
       }
 
@@ -90,6 +97,8 @@ export class KeywordQueenBee extends QueenBee {
 
     // Trigger processor to sync visual state
     void new hypercomb().act()
+
+    if (named && failed.length) throw new Error(`keyword — not written: ${failed.join(', ')}`)
   }
 
   #log(message: string): void {

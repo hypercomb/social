@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { readTilePropertiesAt, writeTilePropertiesAt, TILE_PROPERTY_PINS } from './tile-properties.js'
+import { aliasPropertiesFor, editorWrites, gatheredRepo, layerAfterChoice, ownAfterInherit, propertyLayers, readTilePropertiesAt, writeTilePropertiesAt, TILE_PROPERTY_PINS } from './tile-properties.js'
 
 const ROOT_LOCATION = '1'.repeat(64)
 const OUTER_LOCATION = '2'.repeat(64)
@@ -239,5 +239,122 @@ describe('canonical tile property inheritance', () => {
       expect(commitSlotSet.mock.calls.map(call => call[0])).toEqual([['team', 'howard']])
       await expect(parse(written[0])).resolves.toEqual({ link: 'https://example.com', index: 8 })
     })
+  })
+})
+
+// A NEW ALIAS (alias-properties.md, step 2): what the tile it is made from
+// shows, split into what fills the repo and what the alias must override.
+describe('aliasPropertiesFor', () => {
+  const picture = (sig: string) => ({ small: { image: sig }, flat: { small: { image: sig } }, participant: true })
+
+  it('fills an empty repo with everything but place keys, and overrides nothing', () => {
+    expect(aliasPropertiesFor({ ...picture('a'), link: 'L', index: 3, point: [1, 2] }, {}))
+      .toEqual({ fill: { ...picture('a'), link: 'L' }, override: {} })
+  })
+
+  it('needs nothing when the repo already shows the same', () => {
+    expect(aliasPropertiesFor({ ...picture('a'), link: 'L' }, { ...picture('a'), link: 'L' }))
+      .toEqual({ fill: {}, override: {} })
+  })
+
+  it('never overwrites the repo: a differing value becomes the alias override', () => {
+    expect(aliasPropertiesFor({ link: 'mine', accent: 'red' }, { link: 'theirs' }))
+      .toEqual({ fill: { accent: 'red' }, override: { link: 'mine' } })
+  })
+
+  it('overrides a different picture as one value', () => {
+    expect(aliasPropertiesFor(picture('a'), picture('b')))
+      .toEqual({ fill: {}, override: picture('a') })
+  })
+
+  it('keeps a theme default picture as the alias own, never in the repo', () => {
+    const themed = { small: { image: 'a' }, substrate: true }
+    expect(aliasPropertiesFor(themed, {})).toEqual({ fill: {}, override: themed })
+  })
+
+  it('hides what the repo has that the tile does not show', () => {
+    expect(aliasPropertiesFor({ link: 'L' }, { link: 'L', accent: 'red', ...picture('b') }))
+      .toEqual({ fill: {}, override: { [TILE_PROPERTY_PINS]: ['accent', 'flat', 'participant', 'small'] } })
+  })
+})
+
+// A GATHER MEETS TWO COPIES (alias-properties.md, step 3): the newer copy's
+// values go to the repo, keys only the older copy has fill it.
+describe('gatheredRepo', () => {
+  const picture = (sig: string) => ({ small: { image: sig }, participant: true })
+
+  it('takes the newer copy values and fills with what only the older has', () => {
+    expect(gatheredRepo({ link: 'repo' }, { link: 'new', accent: 'red' }, { link: 'old', notes: 'n', index: 4 }))
+      .toEqual({ link: 'new', accent: 'red', notes: 'n' })
+  })
+
+  it('moves the newer picture in whole, replacing the repo picture', () => {
+    expect(gatheredRepo({ ...picture('r'), large: { image: 'R' } }, picture('n'), picture('o')))
+      .toEqual(picture('n'))
+  })
+
+  it('fills the older picture only when the repo and the newer copy have none', () => {
+    expect(gatheredRepo({}, { link: 'L' }, picture('o'))).toEqual({ link: 'L', ...picture('o') })
+    expect(gatheredRepo(picture('r'), { link: 'L' }, picture('o'))).toEqual({ link: 'L', ...picture('r') })
+  })
+
+  it('never lets a theme default picture into the repo', () => {
+    expect(gatheredRepo({}, { small: { image: 't' }, substrate: true }, picture('o'))).toEqual(picture('o'))
+  })
+})
+
+// THE EDITOR'S LAYERS (alias-properties.md, step 4).
+describe('propertyLayers', () => {
+  it('reads each field as inherited, here, hidden or locked', () => {
+    const own = { small: { image: 'a' }, link: 'L', [TILE_PROPERTY_PINS]: ['background'], index: 3 }
+    const repo = { border: { color: '#123456' }, [TILE_PROPERTY_PINS]: ['hideText'] }
+    expect(propertyLayers(own, repo)).toEqual({
+      picture: 'here', border: 'inherited', text: 'locked', fill: 'hidden', link: 'here',
+    })
+  })
+
+  it('lets the repo lock outrank an override', () => {
+    expect(propertyLayers({ link: 'mine' }, { [TILE_PROPERTY_PINS]: ['link'] }).link).toBe('locked')
+  })
+
+  it('shows a pending choice, never on a locked field', () => {
+    expect(layerAfterChoice('inherited', 'here')).toBe('here')
+    expect(layerAfterChoice('here', 'inherit')).toBe('inherited')
+    expect(layerAfterChoice('here', 'hide')).toBe('hidden')
+    expect(layerAfterChoice('locked', 'here')).toBe('locked')
+  })
+})
+
+describe('editorWrites', () => {
+  const layers = { picture: 'inherited', border: 'here', text: 'inherited', fill: 'inherited', link: 'locked' } as const
+  const form = { small: { image: 's' }, participant: true, border: { color: '#000000' }, hideText: true, link: 'L', index: 2 }
+
+  it('sends an only-here field apart, keeps the rest for the ordinary write', () => {
+    const out = editorWrites(form, layers, new Map([['picture', 'here']]))
+    expect(out.onlyHere).toEqual({ small: { image: 's' }, participant: true })
+    expect(out.shared).toEqual({ border: { color: '#000000' }, hideText: true, link: 'L', index: 2 })
+    expect(out.inherit).toEqual([])
+  })
+
+  it('takes an inherited-again field out of the write and names its keys', () => {
+    const out = editorWrites(form, layers, new Map([['border', 'inherit']]))
+    expect(out.shared).not.toHaveProperty('border')
+    expect(out.inherit).toEqual(['border'])
+  })
+
+  it('clears a hidden field (a pin at the alias), never its ownership marks', () => {
+    const out = editorWrites(form, layers, new Map([['picture', 'hide']]))
+    expect(out.shared).toMatchObject({ small: undefined, flat: undefined, large: undefined, imageSig: undefined, participant: true })
+  })
+
+  it('ignores a choice on a locked field', () => {
+    expect(editorWrites(form, layers, new Map([['link', 'here']])).onlyHere).toEqual({})
+  })
+})
+
+describe('ownAfterInherit', () => {
+  it('drops the keys and their pins from the alias', () => {
+    expect(ownAfterInherit({ link: 'L', index: 1, [TILE_PROPERTY_PINS]: ['link', 'accent'] }, ['link']))
+      .toEqual({ index: 1, [TILE_PROPERTY_PINS]: ['accent'] })
   })
 })

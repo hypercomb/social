@@ -34,18 +34,52 @@
 import { canonicalVerbOf, normalizeCell } from '@hypercomb/core'
 import { normalizeSelectInput } from './select-ops'
 
+/** ONE VERB A LINE WILL BE DISPATCHED ON — and, where its behaviour is handed
+ *  its own argument language, exactly the arguments it will be handed, so the
+ *  door can run the behaviour's own `refuse` on them as the model channel
+ *  does. `args` is absent where the verb acts on something else — a bracket's
+ *  selection, a `~` sigil, a reading the registry will not run — and then the
+ *  verb is judged for reach and scope alone. */
+export type SpokenCall = { readonly verb: string; readonly args?: string }
+
+/** The name and arguments `#executeSlashBehaviour` splits a slash line into:
+ *  after the slash, trimmed, cut at the first space or `(` — the args start
+ *  AT a paren and AFTER a space — exactly as typed. */
+const executorCall = (raw: string): { name: string; args: string } => {
+  const spaceIdx = raw.indexOf(' ')
+  const parenIdx = raw.indexOf('(')
+  const delimIdx = spaceIdx >= 0 && (parenIdx < 0 || spaceIdx < parenIdx) ? spaceIdx
+    : parenIdx >= 0 ? parenIdx
+    : -1
+  return delimIdx === -1
+    ? { name: raw, args: '' }
+    : { name: raw.slice(0, delimIdx), args: raw.slice(delimIdx === parenIdx ? delimIdx : delimIdx + 1).trim() }
+}
+
 /** THE HEAD OF A SLASH LINE: after the slash, trimmed, up to the first
  *  whitespace, `(` or `[` — the union of what `#executeSlashBehaviour` (space,
  *  paren) and `SlashBehaviourBehavior` (space, bracket) split on — folded as
- *  the registry folds it. The canonical reading is kept beside it, folded, so
- *  nothing this door refused before is admitted now (`/remove.drafts` names
- *  `remove` to one reading and nothing the registry holds to the other). */
-export const slashVerbsOf = (line: string): readonly string[] => {
-  const folded = line.trimStart().toLowerCase()
-  if (!folded.startsWith('/')) return []
-  const dispatched = folded.slice(1).trim().split(/[\s(\[]/, 1)[0]
-  return [...new Set([canonicalVerbOf(folded), dispatched])].filter(Boolean)
+ *  the registry folds it. It carries the executor's args when the executor
+ *  would ask the registry for that same word. The canonical reading is kept
+ *  beside it, folded, so nothing this door refused before is admitted now
+ *  (`/remove.drafts` names `remove` to one reading and nothing the registry
+ *  holds to the other). */
+const slashCallsOf = (line: string): readonly SpokenCall[] => {
+  const trimmed = line.trimStart()
+  if (!trimmed.startsWith('/')) return []
+  const raw = trimmed.slice(1).trim()
+  const head = raw.toLowerCase().split(/[\s(\[]/, 1)[0]
+  const handed = executorCall(raw)
+  const canonical = canonicalVerbOf(trimmed.toLowerCase())
+  return [
+    ...(head ? [handed.name.toLowerCase().trim() === head ? { verb: head, args: handed.args } : { verb: head }] : []),
+    ...(canonical && canonical !== head ? [{ verb: canonical }] : []),
+  ]
 }
+
+/** The verbs alone, for a reader that needs no arguments. */
+export const slashVerbsOf = (line: string): readonly string[] =>
+  [...new Set(slashCallsOf(line).map(call => call.verb))]
 
 /** `~label:tag` takes a TAG off and touches no tile: the tag extractor's own
  *  shape for it, consumed whole before any routing. A line carrying `@` is not
@@ -56,21 +90,38 @@ const takesTagOff = (item: string): boolean => {
   return !!match && !!normalizeCell(match[1]) && !!match[2].trim()
 }
 
+/** The ops `#executeSelectCommand` carries out itself, on the bracket's
+ *  names as a selection, before it hands any other word to the registry. Such
+ *  an op is handed no argument language of its own — its targets are the
+ *  names the bracket already gives — so it is judged for reach and scope only.
+ *  Mirrors that method's branches; remote-verbs.spec.ts holds the two together. */
+export const SELECT_BUILTIN_OPS: ReadonlySet<string> = new Set([
+  'cut', 'copy', 'move', 'keyword', 'kw', 'tag', 'remove', 'rm', 'delete', 'del',
+  'format', 'fmt', 'fp', 'opus', 'sonnet', 'haiku', 'o', 's', 'h',
+])
+
 /** THE OP AFTER A LEADING BRACKET, and any `~item` inside it. The op is found
  *  as `#executeSelectCommand` finds it — legacy `/select[…]` normalised, the
  *  first `]`, then `/word` — and a `~item` is the per-item remove that
- *  `#applyBracketItemOps` (and `CutPasteBehavior`) carry out. The dispatch
- *  stops the word at a hyphen (`\w+`); the hyphenated word is judged as well,
- *  so the day it reads `[x]/break-apart` whole the door already does. */
-const bracketVerbsOf = (line: string): readonly string[] => {
+ *  `#applyBracketItemOps` (and `CutPasteBehavior`) carry out. Any other op is
+ *  handed to the registry with the words after it, so it carries them. The
+ *  dispatch stops the word at a hyphen (`\w+`); the hyphenated word is judged
+ *  as well, so the day it reads `[x]/break-apart` whole the door already does. */
+const bracketCallsOf = (line: string): readonly SpokenCall[] => {
   const v = normalizeSelectInput(line.trim())
   const close = v.indexOf(']')
   if (!v.startsWith('[') || close < 0) return []
-  const tail = v.slice(close + 1).toLowerCase()
-  const ops = [tail.match(/^\/(\w+)/)?.[1], tail.match(/^\/([\w-]+)/)?.[1]]
+  const tail = v.slice(close + 1)
+  const word = tail.match(/^\/(\w+)/)
+  const op = word?.[1].toLowerCase()
+  const hyphenated = tail.toLowerCase().match(/^\/([\w-]+)/)?.[1]
   const removes = v.slice(1, close).split(',').map(item => item.trim())
     .some(item => item.startsWith('~') && !takesTagOff(item))
-  return [...ops, ...(removes ? ['remove'] : [])].filter((verb): verb is string => !!verb)
+  return [
+    ...(op && word ? [SELECT_BUILTIN_OPS.has(op) ? { verb: op } : { verb: op, args: tail.slice(word[0].length).trim() }] : []),
+    ...(hyphenated && hyphenated !== op ? [{ verb: hyphenated }] : []),
+    ...(removes ? [{ verb: 'remove' }] : []),
+  ]
 }
 
 /** What a `tile@view` line will do, as far as admission cares: take a view
@@ -106,31 +157,41 @@ export const viewCommandOf = (
 /** A LEADING `~` IS `remove` (jwize, 2026-10-01) — `~drafts`, `~[a, b]` — in
  *  all but two readings, neither of which takes a tile away: a tag coming off
  *  (`~label:tag`), and a view coming off a tile (`~tile@view`). */
-const tildeVerbsOf = (line: string, feature: FeatureReading | null): readonly string[] => {
+const tildeCallsOf = (line: string, feature: FeatureReading | null): readonly SpokenCall[] => {
   const trimmed = line.trim()
   if (!trimmed.startsWith('~') || takesTagOff(trimmed) || feature?.remove) return []
-  return ['remove']
+  return [{ verb: 'remove' }]
 }
 
 /** `tile@view` RUNS THE VIEW'S WORD, and that word is judged like any other —
- *  folded, as the registry folds it. */
-const viewVerbsOf = (feature: FeatureReading | null): readonly string[] => {
+ *  folded, as the registry folds it, and handed nothing (`#applyFeatureOps`
+ *  runs it with no arguments). */
+const viewCallsOf = (feature: FeatureReading | null): readonly SpokenCall[] => {
   const word = feature && !feature.remove ? feature.command.trim().toLowerCase() : ''
-  return word ? [word] : []
+  return word ? [{ verb: word, args: '' }] : []
 }
 
-/** Every verb the legacy pipeline will act on in a line the reader matched
+/** Every call the legacy pipeline will make in a line the reader matched
  *  nothing in. Empty for plain prose, which names no behaviour at all. The
- *  feature reading is asked once, and only of a line that could be a call. */
+ *  feature reading is asked once, and only of a line that could be a call.
+ *  The same verb said two ways is judged both ways; an exact repeat once. */
+export const dispatchedCallsOf = (
+  line: string,
+  featureOf: (line: string) => FeatureReading | null = () => null,
+): readonly SpokenCall[] => {
+  const feature = line.includes('@') ? featureOf(line) : null
+  const calls = [...slashCallsOf(line), ...bracketCallsOf(line), ...tildeCallsOf(line, feature), ...viewCallsOf(feature)]
+  const seen = new Set<string>()
+  return calls.filter(call => {
+    const key = call.args === undefined ? call.verb : call.verb + ' ' + JSON.stringify(call.args)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/** The verbs alone, for a reader that needs no arguments. */
 export const dispatchedVerbsOf = (
   line: string,
   featureOf: (line: string) => FeatureReading | null = () => null,
-): readonly string[] => {
-  const feature = line.includes('@') ? featureOf(line) : null
-  return [...new Set([
-    ...slashVerbsOf(line),
-    ...bracketVerbsOf(line),
-    ...tildeVerbsOf(line, feature),
-    ...viewVerbsOf(feature),
-  ])]
-}
+): readonly string[] => [...new Set(dispatchedCallsOf(line, featureOf).map(call => call.verb))]

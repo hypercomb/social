@@ -266,6 +266,10 @@ export type HypercombTreeReader = {
   codeNaming?(name: string, options: {
     readonly signal?: AbortSignal
   }): Promise<readonly HypercombCodeHit[]>
+  /** True when the route holds a peer's words — a branch folded in from a
+   *  peer, or a peer's tile carried elsewhere. Absent: nothing is known
+   *  foreign. */
+  foreign?(segments: readonly string[]): boolean
 }
 
 export type HypercombObservationReceipt = {
@@ -535,6 +539,58 @@ export const executeHypercombObservationPlan = async (
     }
   }
   return { results, snapshots, signatures }
+}
+
+const SIGNATURES = /[0-9a-f]{64}/g
+
+/**
+ * WHICH READS CARRIED SOMEONE ELSE'S WORDS. A model acts with the
+ * participant's authority, so text it read from another author can steer a
+ * change the participant never asked for; the chat holds any change that
+ * follows such a read for their hand (execution-queue.ts, `foreign`).
+ *
+ * CONTENT COUNTS, NAMES DO NOT. A tile read with its content, its summary,
+ * or a resource is someone else's words when its route holds a peer's words
+ * (`foreign(segments)`), or — addressed by signature — when an
+ * earlier foreign read surfaced that signature (`known`). Listings, trees,
+ * finds and histories carry names only; code already runs with the
+ * participant's full authority, so reading its text grants it nothing more.
+ *
+ * `sigs` is everything a foreign read surfaced — its layer, children, and
+ * the resources its content names — so the same words reached again by
+ * signature are still foreign. The running code naming a tile is left out.
+ */
+export const foreignReads = (
+  plan: HypercombObservationPlan,
+  receipt: HypercombObservationReceipt,
+  foreign: ((segments: readonly string[]) => boolean) | undefined,
+  known: ReadonlySet<string>,
+): { readonly grammars: readonly string[]; readonly sigs: readonly string[] } => {
+  const grammars: string[] = []
+  const sigs = new Set<string>()
+  receipt.results.forEach((result, index) => {
+    const observation = plan.observations[index]
+    if (!observation || observation.grammar !== result.grammar || !result.read.ok) return
+    const from = (sig: string): boolean => known.has(sig)
+    const at = (): boolean => !!foreign?.(observation.segments)
+    let carried: unknown
+    if (result.kind === 'node' && observation.verb === 'read') {
+      if (!(observation.sig ? from(observation.sig) : at())) return
+      const { layerSig, children, content, projection, unresolved } = result.read
+      carried = { layerSig, children, content, projection, unresolved }
+    } else if (result.kind === 'summary') {
+      if (!at()) return
+      carried = { layerSig: result.read.layerSig, text: result.read.text }
+    } else if (result.kind === 'bytes' && result.read.of === 'resource') {
+      if (!from(result.read.sig)) return
+      carried = { sig: result.read.sig, text: result.read.text }
+    } else {
+      return
+    }
+    grammars.push(result.grammar)
+    for (const sig of JSON.stringify(carried).match(SIGNATURES) ?? []) sigs.add(sig)
+  })
+  return { grammars, sigs: [...sigs] }
 }
 
 const safeFind = (read: HypercombFindRead, expectedRoot: string, maxMatches: number): HypercombFindRead => {

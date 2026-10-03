@@ -36,7 +36,7 @@ import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { isSelectOp, BRACKET_CMD_RE, normalizeSelectInput } from './select-ops'
-import { dispatchedVerbsOf, viewCommandOf, type FeatureReading } from './remote-verbs'
+import { dispatchedCallsOf, viewCommandOf, type FeatureReading, type SpokenCall } from './remote-verbs'
 import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
 
 const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
@@ -165,6 +165,12 @@ const COMMAND_HISTORY_MAX = 100
  * glyphs on screen.
  */
 const lowered = (text: string): string => text.toLowerCase()
+
+/** A census row as the remote door reads it: what the gate needs, plus the
+ *  behaviour's own argument rule (`MachineGrammar.refuse`). */
+type CensusRow = AdmissionEntry & {
+  readonly machine?: AdmissionEntry['machine'] & { readonly refuse?: (args: string) => string | undefined }
+}
 
 const STANCE_STORAGE_KEY = 'hc:command-line-stance'
 
@@ -2380,15 +2386,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // for the KEYBOARD path, where it gates a rendered confirmation rather
       // than a refusal, and where widening it would change what a person
       // typing `cut` sees.
-      const named = reading?.actions.length
-        ? reading.actions.map(action => action.command)
+      const named: readonly SpokenCall[] = reading?.actions.length
+        ? reading.actions.map(action => ({ verb: action.command, args: action.args }))
         // (Otherwise the line is judged as it will be DISPATCHED: the slash
         // word folded, the op after a bracket, a `~` removal as `remove`, the
         // word `tile@view` runs — each reached the gate as no verb, and ran.)
-        : dispatchedVerbsOf(line, v => this.#featureOf(v))
+        : dispatchedCallsOf(line, v => this.#featureOf(v))
       // A line that names nothing is asked about too, as the empty verb, so
       // `/grant none` refuses it like everything else.
-      const spokenVerbs = named.length ? named : ['']
+      const spokenCalls = named.length ? named : [{ verb: '' }]
       // WHICH IS NOT DECIDED HERE ANY MORE. Deciding it here is how the four
       // surfaces came to disagree in the first place — each door judging for
       // itself, in the order the doors were written. The judgement lives in
@@ -2414,20 +2420,26 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // refusing a tail would leave the hive half-changed with a refusal on
       // the receipt.
       const slash = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
-        entries?(): readonly AdmissionEntry[]; retired?(name: string): AdmissionEntry['retired']
+        entries?(): readonly CensusRow[]; retired?(name: string): AdmissionEntry['retired']
       } | undefined
       const census = slash?.entries?.() ?? []
       // A word nothing live claims may be retired: asked only on a miss.
-      const entryOf = (verb: string): AdmissionEntry | undefined => {
+      const entryOf = (verb: string): CensusRow | undefined => {
         const live = spokenEntry(verb, census)
         const retired = live || !verb ? undefined : slash?.retired?.(verb)
         return live ?? (retired ? { name: verb, retired } : undefined)
       }
       const grant = currentMachineGrant()
-      for (const verb of spokenVerbs) {
-        const verdict = admitMachineCall(verb, entryOf(verb), 'operator', grant)
-        if (verdict.admit) continue
-        settle({ kind: 'refused', reason: verdict.reason })
+      for (const { verb, args } of spokenCalls) {
+        const entry = entryOf(verb)
+        const verdict = admitMachineCall(verb, entry, 'operator', grant)
+        // Then the behaviour's OWN argument rule, on exactly what it will be
+        // handed, as the model channel runs it. Skipped, `/module commit`
+        // published from here though the word says only the participant may.
+        const refused = !verdict.admit ? verdict.reason
+          : args === undefined ? undefined : entry?.machine?.refuse?.(args)
+        if (!refused) continue
+        settle({ kind: 'refused', reason: refused })
         return
       }
 
@@ -4377,9 +4389,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     if (drone?.execute) {
-      await drone.execute(commandName, args)
+      try { await drone.execute(commandName, args) }
+      catch (error) { this.#behaviourDidNotRun(commandName, error) }
     }
     this.clear()
+  }
+
+  /** A BEHAVIOUR THAT COULD NOT ACT says so, and nothing more. A queen throws
+   *  when nothing happened (`/remove` on a dialog you cancelled, `/hide` with
+   *  no surface listening) so a machine's receipt cannot read as success; at
+   *  the keyboard that is a line in the activity strip, not an unhandled
+   *  rejection — which the break-repair loop would file as a crash. */
+  #behaviourDidNotRun(word: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[command-line] /${word.toLowerCase()} did not run:`, message)
+    EffectBus.emit('activity:log', { message, icon: 'error' })
   }
 
   // -------------------------------------------------
@@ -4549,7 +4573,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         // The tiles are already selected above, which is the contract a
         // selection-driven behaviour reads (BreakApartProvider, etc.).
         const args = afterBracket.slice(opMatch![0].length).trim()
-        await slash.execute(op, args)
+        try { await slash.execute(op, args) }
+        catch (error) { this.#behaviourDidNotRun(op, error) }
         this.#collapseToSelect(labels)
         return
       }

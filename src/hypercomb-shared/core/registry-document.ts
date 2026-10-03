@@ -16,10 +16,11 @@
 // THE RECORD IS THE DOCUMENT. There is no pointer any more. The master JSON
 // is written with `putPoolDoc` into a DOCUMENT pool of its own — colon-scoped
 // (`registry:names`), so no tile can name it — as a member addressed by the
-// signature of its own bytes. A document pool holds exactly one current
-// member by design (address-syntax.md: "replaces siblings BY DESIGN"), which
-// is precisely the semantics a per-participant master record wants, and the
-// sweep proves the space is its own before it removes anything.
+// signature of its own bytes. A document pool has one CURRENT member and keeps
+// every earlier version (address-syntax.md: the max 000x marker names the
+// current one), which is precisely the semantics a per-participant master
+// record wants, and putPoolDoc proves the space is its own before it adds a
+// marker.
 //
 // READS WALK BACK, WRITES NEVER DO. Data never heals: an existing hive has
 // its record behind the old pointer, so a read tries the document pool, then

@@ -15,6 +15,7 @@
 
 import { CHILD_SLOTS, childSigsOfLayer, sectionIndex, sectionOf } from '@hypercomb/core'
 import type { CurrentLayerRef, LayerContent } from '../history/history.service.js'
+import { isPeerContentAt } from '../sharing/adopted-roots.js'
 
 export const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 
@@ -305,13 +306,21 @@ const carriedChildren = async (
   for (const sig of sigs) {
     const child = manifestBySig?.get(sig) ?? await history.getLayerBySig(sig).catch(() => null)
     const name = typeof child?.name === 'string' ? child.name : ''
-    if (!child || !name || name.length > 256 || UNSAFE_NAME.test(name)) throw new IncompleteReadError()
+    // A CHILD THAT CANNOT BE NAMED IS LEFT OUT, AND THE LIST SAYS SO
+    // (unopened). One unreadable child used to fail the whole walk, so /find
+    // and /tree answered "incomplete-read" for an entire page while /read of
+    // the same routes worked (the games manager, 2026-10-01).
+    if (!child || !name || name.length > 256 || UNSAFE_NAME.test(name)) { unopened.add(children); continue }
     if (seen.has(name)) continue
     seen.add(name)
     children.push({ name, sig })
   }
   return children
 }
+
+/** Child lists that left a child out. A list is never presented as whole
+ *  when it is not: the walk marks its result truncated. */
+const unopened = new WeakSet<readonly CarriedChild[]>()
 
 /**
  * ONE TILE'S CHILDREN, READ THE WAY THE CANVAS READS THEM (core level-roster
@@ -446,7 +455,7 @@ export class HypercombHiveTreeReader {
       }
       nodes.push(first)
       let bytes = outputBytes(first)
-      let truncated = false
+      let truncated = unopened.has(rootChildren)
       let exhausted = false
       const queue: Array<{
         readonly path: readonly string[]
@@ -465,11 +474,28 @@ export class HypercombHiveTreeReader {
           guard()
           if (nodes.length >= maxNodes) { truncated = true; exhausted = true; break }
           const path = [...parent.path, carried.name]
-          const ref = await currentRef(path)
-          // The live location disappearing while its live parent still names
-          // it is an incomplete read, not an authoritative partial tree.
-          if (!ref || ref.layer.name !== carried.name) throw new IncompleteReadError()
-          const children = await carriedChildren(ref.layer, history, store)
+          let ref: CurrentLayerRef | null
+          try { ref = await currentRef(path) } catch (error) {
+            if (!(error instanceof IncompleteReadError)) throw error
+            truncated = true
+            continue
+          }
+          // A CHILD THAT CANNOT BE OPENED IS LEFT OUT, AND THE TREE SAYS SO.
+          // The parent names it but its own location has no layer by that
+          // name — a launcher entry under its display name, a child whose
+          // bag never drained. Failing the whole walk for it made /find and
+          // /tree answer "incomplete-read" for an entire hive while /read of
+          // the same routes worked (the games manager, 2026-10-01). The rest
+          // of the tree is still true; `truncated` tells the model it is not
+          // all of it.
+          if (!ref || ref.layer.name !== carried.name) { truncated = true; continue }
+          let children: readonly CarriedChild[]
+          try { children = await carriedChildren(ref.layer, history, store) } catch (error) {
+            if (!(error instanceof IncompleteReadError)) throw error
+            truncated = true
+            children = []
+          }
+          if (unopened.has(children)) truncated = true
           guard()
           const node: HypercombTreeNode = {
             path: rootLabel(path),
@@ -1256,6 +1282,14 @@ export class HypercombHiveTreeReader {
     const read = await this.#readNodeBySigLive(sig, options)
     this.#cacheSet(key, null, read)
     return read
+  }
+
+  /** True when the route holds someone else's words — a branch folded in
+   *  from a peer, or a peer's tile the participant carried elsewhere
+   *  (sharing/adopted-roots.ts `isPeerContentAt`). The chat holds a change
+   *  that follows such a read for the participant's hand. */
+  foreign(segments: readonly string[]): boolean {
+    return isPeerContentAt(segments)
   }
 
   /** Revalidate the union of every bounded head vector the current model turn

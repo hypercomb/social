@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_MACHINE_GRANT } from '@hypercomb/core'
+import { DEFAULT_MACHINE_GRANT, MACHINE_ROSTER_KEY, grantedVerbOf, writeMachineRoster } from '@hypercomb/core'
 import {
   callableBehaviours,
   executeHypercombPlan,
@@ -52,6 +52,32 @@ const entries: HypercombBehaviour[] = [
   { name: 'debug', description: 'Debug', hidden: true, machine: { forms: '<flag>', example: '/debug on' } },
   { name: 'workbench', description: 'Prototype', prototype: true, machine: { forms: '<x>', example: '/workbench x' } },
 ]
+
+// SECURE BY DEFAULT (jwize, 2026-10-02): a behaviour only OFFERS itself to
+// models; the participant grants it. This contract is the parser's, so it is
+// read in a hive whose participant has granted every verb these rows offer —
+// what an ungranted hive answers is asserted on its own, at the end.
+const grantEveryOfferedVerb = (): void =>
+  localStorage.setItem(MACHINE_ROSTER_KEY, writeMachineRoster(entries.filter(entry => entry.machine).map(entry => grantedVerbOf(entry))))
+grantEveryOfferedVerb()
+
+describe('a hive whose participant has granted nothing', () => {
+  it('teaches a model no verb, and refuses each by naming the grant it lacks', () => {
+    localStorage.setItem(MACHINE_ROSTER_KEY, '[]')
+    try {
+      expect(callableBehaviours(entries).map(entry => entry.name)).toEqual([])
+      expect(() => parseHypercombGrammars(['/create roadmap'], entries))
+        .toThrow('/create is offered to models but not granted — the participant grants it with /grant allow create')
+    } finally { grantEveryOfferedVerb() }
+  })
+
+  it('and a grant lapses when the behaviour widens what it declares', () => {
+    const widened = entries.map(entry => entry.name === 'create' && entry.machine
+      ? { ...entry, machine: { ...entry.machine, reach: 'editing' as const } } : entry)
+    expect(() => parseHypercombGrammars(['/create roadmap'], widened))
+      .toThrow('/create has changed since it was granted — the participant grants it again with /grant allow create')
+  })
+})
 
 describe('Hypercomb model grammar contract', () => {
   it('grants action transport to the local model only when it is named or designated', () => {

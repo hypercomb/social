@@ -1,5 +1,6 @@
 // editor/tile-editor.service.ts
 import { EffectBus } from '@hypercomb/core'
+import { EDITOR_FIELDS, type EditorField, type PropertyChoice, type PropertyLayer } from './tile-properties.js'
 
 /** Where an editing session is shown. `dock` sits beside the hive, which
  *  stays visible; `page` is a full-height page on a phone. A payload with no
@@ -46,6 +47,16 @@ export class TileEditorService extends EventTarget {
   #saving = false
   #error = ''
   #stash: EditorDraftStash | null = null
+  // Where each field's value comes from at an alias, and what the participant
+  // chose for it this session (alias-properties.md, step 4). Null layers = the
+  // tile is a repo itself (a top-level tile): there is nothing to inherit from.
+  #layers: Readonly<Record<EditorField, PropertyLayer>> | null = null
+  #choices = new Map<EditorField, PropertyChoice>()
+  // The repo's record when the tile opened, and each field's values from
+  // before a choice previewed over them — so taking the choice back restores
+  // exactly what the participant had.
+  #repo: Readonly<Record<string, unknown>> = {}
+  #beforeChoice = new Map<EditorField, Record<string, unknown>>()
 
   // ── getters ────────────────────────────────────────────────────
 
@@ -59,13 +70,15 @@ export class TileEditorService extends EventTarget {
   get surface(): EditorSurfaceKind { return this.#surface }
   get saving(): boolean { return this.#saving }
   get error(): string { return this.#error }
+  get layers(): Readonly<Record<EditorField, PropertyLayer>> | null { return this.#layers }
+  get choices(): ReadonlyMap<EditorField, PropertyChoice> { return this.#choices }
 
   /** The properties exactly as they were when the session opened. */
   get baseline(): Record<string, unknown> { return JSON.parse(this.#baseline) as Record<string, unknown> }
 
   /** Have the properties moved since the session opened? (The picture and its
    *  framing are the ImageEditorService's to answer.) */
-  get dirty(): boolean { return JSON.stringify(this.#properties) !== this.#baseline }
+  get dirty(): boolean { return this.#choices.size > 0 || JSON.stringify(this.#properties) !== this.#baseline }
 
   // ── specific property accessors (object notation) ──────────────
 
@@ -102,6 +115,10 @@ export class TileEditorService extends EventTarget {
     this.#surface = surface
     this.#saving = false
     this.#error = ''
+    this.#layers = null
+    this.#choices = new Map()
+    this.#repo = {}
+    this.#beforeChoice = new Map()
     this.#mode = 'editing'
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', {
@@ -121,6 +138,10 @@ export class TileEditorService extends EventTarget {
     this.#largeBlob = null
     this.#saving = false
     this.#error = ''
+    this.#layers = null
+    this.#choices = new Map()
+    this.#repo = {}
+    this.#beforeChoice = new Map()
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', payload)
   }
@@ -138,6 +159,43 @@ export class TileEditorService extends EventTarget {
     if (saving === this.#saving) return
     this.#saving = saving
     if (saving) this.#error = ''
+    this.#emit()
+  }
+
+  /** The fields' layers at this alias, read when the tile opened. */
+  readonly setLayers = (
+    layers: Readonly<Record<EditorField, PropertyLayer>> | null,
+    repo: Readonly<Record<string, unknown>> = {},
+  ): void => {
+    this.#layers = layers
+    this.#repo = clone(repo)
+    this.#emit()
+  }
+
+  /** Choose for one field — or null to take the choice back. A locked field
+   *  takes no choice. */
+  readonly choose = (field: EditorField, choice: PropertyChoice | null): void => {
+    if (this.#layers?.[field] === 'locked') return
+    // Undo any earlier preview first, so choices never stack.
+    const before = this.#beforeChoice.get(field)
+    if (before) {
+      for (const [key, value] of Object.entries(before)) this.#properties[key] = clone(value)
+      this.#beforeChoice.delete(field)
+    }
+    if (choice) this.#choices.set(field, choice)
+    else this.#choices.delete(field)
+    // PREVIEW what the save will make of the field: the repo's value for
+    // inherit again, nothing for hide here. The picture is the image model's
+    // to show, so its form keys are left alone.
+    if ((choice === 'inherit' || choice === 'hide') && field !== 'picture') {
+      const keys: readonly string[] = EDITOR_FIELDS[field]
+      const saved: Record<string, unknown> = {}
+      for (const key of keys) saved[key] = this.#properties[key]
+      this.#beforeChoice.set(field, saved)
+      for (const key of keys) {
+        this.#properties[key] = choice === 'inherit' && key in this.#repo ? clone(this.#repo[key]) : undefined
+      }
+    }
     this.#emit()
   }
 

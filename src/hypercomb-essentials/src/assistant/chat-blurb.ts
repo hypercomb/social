@@ -151,8 +151,11 @@ const putBlurb = async (blurb: ChatBlurb): Promise<boolean> => {
     const held = await blurbPool()
     if (!held?.store.putPoolDoc) return false
     const bytes = new TextEncoder().encode(JSON.stringify(blurb)).buffer as ArrayBuffer
-    // subKey = the conversation, so putPoolDoc's own "exactly one current
-    // member" rule IS the recycling. No sweep, no GC pass, nothing to forget.
+    // subKey = the conversation, so each conversation keeps its own thread of
+    // blurbs and the max marker is the current one. putPoolDoc keeps EVERY
+    // version, so this grows by one small atom per distinct save; pruning it is
+    // an open policy decision (documentation/layer-pattern-audit.md), not
+    // something this call does.
     return !!(await held.store.putPoolDoc(held.pool, bytes, blurb.convoId))
   } catch { return false }
 }

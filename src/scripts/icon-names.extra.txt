@@ -31,10 +31,10 @@
 # Blank lines and # comments are ignored.
 
 add_box
-# tile editor's border swatch — #colourField(name, ICON, …) takes the ligature
-# as a positional argument, so no extractor rule can see it (tile-editor.view.ts)
-border_color
 article_person
+# the tile editor's border field — #colourField() hands its icon argument to
+# glyph(), and a call argument is never read as an icon
+border_color
 # notes-strip #listMark() mints a 'checklist' mark when the palette is empty
 checklist
 bubble_chart

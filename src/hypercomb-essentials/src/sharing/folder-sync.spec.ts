@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus, SignatureService, registerPoolMeaning } from '@hypercomb/core'
 
 class MemoryFile {
   readonly kind = 'file'
@@ -265,6 +265,52 @@ describe('FolderSyncService', () => {
       deviceId,
       manifestSha256: manifestSig,
     })
+  })
+
+  it("never adopts a document pool's own markers as closure roots — their atoms sit beside them", async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Hard copy with documents')
+    const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
+    const layer = encode(JSON.stringify({ name: 'portable' }))
+    const layerSig = await SignatureService.sign(layer.buffer as ArrayBuffer)
+    await put(opfs, `${'c'.repeat(64)}/00000000`, encode(JSON.stringify({ layer: layerSig })))
+    // A colon-scoped document pool as Store.putPoolDoc now leaves it: two
+    // versions kept as atoms, and the markers that name them.
+    const pool = await registerPoolMeaning('spec:hard-copy-journal')
+    const first = encode('{"entries":1}')
+    const second = encode('{"entries":2}')
+    const firstSig = await SignatureService.sign(first.buffer as ArrayBuffer)
+    const secondSig = await SignatureService.sign(second.buffer as ArrayBuffer)
+    await put(opfs, `${pool}/${firstSig}`, first)
+    await put(opfs, `${pool}/${secondSig}`, second)
+    await put(opfs, `${pool}/00000000`, encode(JSON.stringify({ layer: firstSig })))
+    await put(opfs, `${pool}/00000001`, encode(JSON.stringify({ layer: secondSig })))
+
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => opfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+    const adopt = vi.fn(async () => {
+      await put(opfs, layerSig, layer)
+      return { layers: 1, leaves: 0, failed: 0 }
+    })
+    registrations.set('@diamondcoreprocessor.com/ContentBrokerDrone', { adopt })
+
+    const service = new FolderSyncService()
+    expect(await service.connect('hard-copy')).toBe(true)
+    // Only the location bag's head is a root; the document's versions are
+    // never asked of a host.
+    expect(adopt.mock.calls.map(call => (call as unknown[])[0])).toEqual([layerSig])
+    expect(service.state()).toMatchObject({ status: 'backed-up', mode: 'hard-copy', missingReferences: 0 })
+    // And the document is still copied whole: both versions and both markers.
+    const deviceId = service.state().deviceId
+    for (const name of [firstSig, secondSig, '00000000', '00000001']) {
+      expect((await read(chosen, `hypercomb-backup/devices/${deviceId}/opfs/${pool}/${name}`)).byteLength).toBeGreaterThan(0)
+    }
   })
 
   it('re-hashes every backed-up file on demand and catches damage', async () => {

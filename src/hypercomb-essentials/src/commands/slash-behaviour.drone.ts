@@ -385,11 +385,17 @@ class KeywordProvider implements SlashBehaviourProvider {
       // states the rule; these two broke it while inheriting it from the old
       // five-name table. The participant keeps every form.
       machine: {
-        forms: '<cell> = <tag> | <cell> = <tag>(#hexcolor)',
+        forms: '<cell> = <tag> | <cell> = <tag>(#hexcolor) | <cell> = ~<tag>',
         example: '/keyword roadmap = urgent',
         reach: 'editing',
         scope: 'hive',
-        consequence: 'Tags the named tile; ~ before a tag removes it.',
+        // THE PARTICIPANT'S NOUNS, AND THE WRITE THE OLD TEXT HID (surface
+        // audit, items 6). A model asked for a pheromone read "keywords (tags)",
+        // said it could not, and told a participant the hive has none. A tag
+        // is not a pheromone (documentation/pheromones.md) — so say so, and
+        // say where pheromones are; and say that adding a tag also lists it
+        // hive-wide, which a per-tile reading of "tags the tile" concealed.
+        consequence: 'Tags the named tile, and adds the tag to the hive-wide tag list the participant sees; ~ before a tag takes it off the tile (the list keeps it). A tag is a keyword, not a pheromone: pheromones are signed interest-signals the participant deposits with /deposit.',
         refuse: refuseNamedKeyword,
       } }
   ]
@@ -882,28 +888,47 @@ class DocsProvider implements SlashBehaviourProvider {
   }
 }
 
+// The domain queen (commands/domain.queen.ts) is the source of truth for her
+// word — its forms, examples and completions. This provider still holds the
+// name (a manual provider wins the tie, so her auto-wrap never runs), and it
+// reads all three from her live rather than keeping a copy: the copy that
+// was here offered only the relay forms, so `domain cl` completed to `clear`
+// (wipe every relay) and never to `claim`.
+type DomainQueenLike = {
+  description?: string
+  options?: readonly string[]
+  examples?: SlashBehaviour['examples']
+  invoke?: (args: string) => Promise<void> | void
+  slashComplete?: (args: string) => readonly string[]
+}
+const domainQueen = (): DomainQueenLike | undefined =>
+  get('@diamondcoreprocessor.com/DomainQueenBee') as DomainQueenLike | undefined
+
 class DomainProvider implements SlashBehaviourProvider {
   readonly name = 'domain-provider'
   readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'domain', description: 'Add, remove, or list mesh relay domains', descriptionKey: 'slash.domain',
-      options: ['<ws:// or wss:// url>', 'remove <url>', 'list', 'clear'],
-      examples: [
-        { input: '/domain wss://relay.example.com', result: 'Adds the relay domain' },
-        { input: '/domain list', result: 'Lists configured relay domains' },
-      ] }
-  ]
+
+  get behaviours(): SlashBehaviour[] {
+    const queen = domainQueen()
+    return [{
+      name: 'domain',
+      description: queen?.description ?? 'Claim a domain with one word, or add, remove, or list mesh relay domains',
+      descriptionKey: 'slash.domain',
+      options: [...(queen?.options ?? ['claim <domain> [@<host>]', '<ws:// or wss:// url>', 'remove <url>', 'list', 'clear'])],
+      examples: queen?.examples ?? [{ input: '/domain claim example.org', result: 'Claims the domain: set the two nameservers it names at your registrar' }],
+    }]
+  }
 
   async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/DomainQueenBee') as any
+    const queen = domainQueen()
     if (queen?.invoke) await queen.invoke(args)
   }
 
   complete(_behaviourName: string, args: string): readonly string[] {
-    const subcommands = ['list', 'remove', 'clear']
+    const queen = domainQueen()
+    if (queen?.slashComplete) return queen.slashComplete(args)
     const q = args.toLowerCase().trim()
-    if (!q) return subcommands
-    return subcommands.filter(s => s.startsWith(q))
+    return ['claim ', 'list', 'remove ', 'clear'].filter(word => !q || (word.startsWith(q) && word.trim() !== q))
   }
 }
 

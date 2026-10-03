@@ -167,38 +167,45 @@ export const markerName = (index: number): string | null => {
 }
 
 // ---------------------------------------------------------------------------
-// DOCUMENT-POOL SWEEPS
+// DOCUMENT-POOL SPACE — may a document marker be ADDED here?
 // ---------------------------------------------------------------------------
 //
-// A "one current document" pool holds exactly one member: writing a new
-// document drops the old one. That sweep is correct there and CATASTROPHIC at
-// a molecule address, where the succession atoms and gathered members are
-// exactly the same shape — 64-hex FILES. `kind === 'file'` is not a shape
-// guard.
+// A document pool keeps EVERY version of a document: each save is an immutable
+// 64-hex atom, and a numbered 000x marker beside it names the current one
+// (Store.putPoolDoc). Nothing is removed on that path. The old sweep, which
+// dropped the previous version on every write, is gone (jwize, 2026-10-01:
+// anything saved is a list item with history behind it).
 //
-// Two independent conditions must agree before a byte is unlinked:
+// What stays dangerous is writing a marker at a MOLECULE address, where the
+// succession atoms and gathered members are exactly the same shape — 64-hex
+// FILES — and a marker would push a stranger's lineage forward.
+// `kind === 'file'` is not a shape guard.
+//
+// Two independent conditions must agree before a marker is added:
 //
 //   1. THE ADDRESS IS PROVABLY THE CALLER'S. Positive proof, never a caller's
 //      assertion: either a `subKey` sub-bucket (a molecule address only ever
 //      exists at the ROOT, so one level down is space this caller minted), or
 //      a colon-carrying meaning (`lineageKey` folds every non-letter/digit to
 //      `-`, so no tile name reaches it). A bare word — or a meaning no
-//      registry has heard of — is NOT proof, and the sweep does not run. The
+//      registry has heard of — is NOT proof, and no marker is added. The
 //      registry is consulted only to GRANT permission, never to deny it.
 //
-//   2. THE STRUCTURE AGREES. `documentSweepVeto` refuses the WHOLE sweep on
-//      ANY marker, ANY author bucket, ANY foreign name.
+//   2. THE STRUCTURE AGREES. `documentSweepVeto` refuses on ANY marker, ANY
+//      author bucket and ANY foreign name. Store hands it only the non-marker
+//      entries and judges the markers itself (see `#documentSpace`). The name
+//      kept its old spelling; renaming it would touch every caller.
 //
-// Neither alone may destroy anything. And deleting is never REQUIRED for
-// correctness: `getPoolDoc` returns the first non-empty member, so a refused
-// sweep costs a stale read, while proceeding costs another participant's
-// molecule irreversibly. Every refusal carries its reason.
+// Neither alone may write a marker. A refusal costs a stale read — `getPoolDoc`
+// falls back to the first non-empty member — while proceeding would cost
+// another participant's molecule. Every refusal carries its reason.
 
 /**
- * Why a document sweep must NOT run here — or `null` when every entry is a
- * member FILE (or the directory is empty). Stricter than `hardDeleteVeto`:
+ * Why a document marker must NOT be added here — or `null` when every entry is
+ * a member FILE (or the directory is empty). Stricter than `hardDeleteVeto`:
  * markers veto too, because a marker is positive proof that someone's lineage
- * lives at this address.
+ * lives at this address. (Store's `#documentSpace` accepts a marker only after
+ * checking that the CURRENT one names an atom held in this same directory.)
  */
 export const documentSweepVeto = (entries: Iterable<DirectoryEntry>): string | null => {
   let markers = 0

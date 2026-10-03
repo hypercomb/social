@@ -13,6 +13,7 @@ export {
   HypercombActionExecutionError,
   hypercombVocabulary,
   hypercombPlanReach,
+  hypercombPlanLeaves,
   parseHypercombGrammars,
   executeHypercombPlan,
 } from '@hypercomb/core'

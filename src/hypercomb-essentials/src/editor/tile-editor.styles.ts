@@ -306,6 +306,33 @@ ${S} .te-panel[data-surface="page"] .te-icon-btn,${S} .te-panel[data-surface="pa
 ${S} .te-panel[data-surface="page"] .te-input,${S} .te-panel[data-surface="page"] .te-title{font-size:max(16px, 1em);min-height:44px;}
 ${S} .te-panel[data-surface="page"] .te-btn{min-height:48px;}
 
+/* LAYERS (alias-properties.md, step 4): where a field's value comes from at an
+   alias — inherited from the name's repo, only here, hidden here, or locked —
+   and the choice to move it. Roles only, never a named colour. */
+${S} .te-layer{position:relative;display:inline-flex;margin-left:0.5rem;vertical-align:middle;}
+${S} .te-layer[hidden]{display:none;}
+${S} .te-layer-chip{font:inherit;font-size:0.72rem;line-height:1.5;padding:0 0.45rem;border:1px solid var(--hc-window-edge);border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--te-ink-quiet);cursor:pointer;white-space:nowrap;}
+${S} .te-layer-chip:hover:not(:disabled){background:var(--te-raise-strong);}
+${S} .te-layer-chip[data-layer="here"]{color:var(--hc-window-accent);border-color:var(--hc-window-edge-firm);background:var(--hc-window-wash);}
+${S} .te-layer-chip[data-layer="hidden"]{text-decoration:line-through;}
+${S} .te-layer-chip[data-layer="locked"]{color:var(--te-ink-plain);cursor:default;}
+${S} .te-layer-chip[data-pending="true"]{border-style:dashed;}
+${S} .te-layer-menu{position:absolute;top:calc(100% + 2px);left:0;z-index:5;display:flex;flex-direction:column;min-width:9rem;padding:2px;background:var(--md-surface,#0d151e);border:1px solid var(--hc-window-edge-firm);border-radius:var(--hc-radius-floating,4px);}
+${S} .te-layer-menu[hidden]{display:none;}
+${S} .te-layer-option{font:inherit;font-size:0.78rem;text-align:left;padding:0.3rem 0.55rem;border:0;border-radius:var(--hc-radius-control,2px);background:transparent;color:var(--te-ink-plain);cursor:pointer;}
+${S} .te-layer-option[hidden]{display:none;}
+${S} .te-layer-option:hover,${S} .te-layer-option[aria-checked="true"]{background:var(--hc-window-wash);color:var(--hc-window-accent);}
+${S} .te-layer-row{display:flex;align-items:center;gap:0.5rem;color:var(--te-ink-quiet);font-size:0.78rem;}
+/* EARLIER PICTURES (alias-properties.md, step 5) — every picture the name has
+   worn; choosing one loads it as a new picture. */
+${S} .te-history{display:flex;flex-wrap:wrap;gap:6px;padding:6px 0;}
+${S} .te-history[hidden]{display:none;}
+${S} .te-history-item{width:52px;height:52px;padding:0;border:1px solid var(--hc-window-edge);border-radius:var(--hc-radius-control,2px);background:var(--te-raise);cursor:pointer;overflow:hidden;}
+${S} .te-history-item:hover{border-color:var(--hc-window-edge-firm);}
+${S} .te-history-item[data-from="here"]{box-shadow:inset 0 0 0 1px var(--hc-window-accent);}
+${S} .te-history-item img{width:100%;height:100%;object-fit:cover;display:block;}
+${S} .te-panel[data-surface="page"] .te-layer-chip,${S} .te-panel[data-surface="page"] .te-layer-option{min-height:44px;}
+
 @media (prefers-reduced-motion: reduce){
   ${S} .te-panel,${S} .te-panel *{transition:none!important;animation:none!important;}
 }

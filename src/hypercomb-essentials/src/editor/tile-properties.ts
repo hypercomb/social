@@ -748,15 +748,208 @@ export type TilePropertiesWriteOptions = {
   /** Keep every key at this alias as an override — the explicit *only here*.
    *  Without it, keys the alias does not already override sink to the repo. */
   readonly onlyHere?: boolean
+  /** The update IS this location's whole own record — replace, never merge.
+   *  For a gather that sets an alias's overrides exactly (alias-properties.md,
+   *  step 3); with it, a key absent from the update is gone from the record. */
+  readonly replace?: boolean
 }
 
 /** Keys that belong to the PLACE, never to the name: where the tile sits on
  *  this page, and this alias's own tombstones. They never sink. */
-const PLACE_KEYS: ReadonlySet<string> = new Set(['index', 'point', TILE_PROPERTY_PINS])
+export const PLACE_KEYS: ReadonlySet<string> = new Set(['index', 'point', TILE_PROPERTY_PINS])
 
 /** One picture is ONE value: its sizes and its ownership marks travel
  *  together, so an alias either overrides the picture or inherits it whole. */
 const PICTURE_KEYS: ReadonlySet<string> = new Set(['small', 'flat', 'large', 'imageSig', PARTICIPANT_MARK, SUBSTRATE_MARK])
+
+const pictureOf = (props: Readonly<Record<string, unknown>>): Record<string, unknown> => {
+  const picture: Record<string, unknown> = {}
+  for (const key of PICTURE_KEYS) if (key in props) picture[key] = props[key]
+  return picture
+}
+
+/**
+ * What a NEW alias of a name stores so it shows exactly `shown` — the
+ * properties of the tile it is made from — against the name's `repo`
+ * (documentation/alias-properties.md, step 2).
+ *
+ *  - `fill`: keys the repo does not have yet. They go TO the repo, so this
+ *    alias, the tile it came from, and every later alias inherit them. A repo
+ *    value is never overwritten here — filling only adds.
+ *  - `override`: keys where the alias must still differ from the repo after
+ *    the fill, plus a pin for every repo key the tile does not show. For a
+ *    name whose repo was empty this is empty: the alias follows the repo live.
+ *
+ * A picture is one value (its sizes and marks together). A theme default
+ * (`substrate: true`) is never filled into the repo — it stays the alias's
+ * own, exactly as a sinking write would keep it. Place keys (`index`, `point`,
+ * pins) belong to the place the tile came FROM and are never carried.
+ */
+export const aliasPropertiesFor = (
+  shown: Readonly<Record<string, unknown>>,
+  repo: Readonly<Record<string, unknown>>,
+): { fill: Record<string, unknown>; override: Record<string, unknown> } => {
+  const fill: Record<string, unknown> = {}
+  const override: Record<string, unknown> = {}
+  const hide = new Set<string>()
+  for (const [key, value] of Object.entries(shown)) {
+    if (PLACE_KEYS.has(key) || PICTURE_KEYS.has(key)) continue
+    if (!(key in repo)) fill[key] = value
+    else if (!sameJsonValue(repo[key], value)) override[key] = value
+  }
+  for (const key of Object.keys(repo)) {
+    if (PLACE_KEYS.has(key) || PICTURE_KEYS.has(key)) continue
+    if (!(key in shown)) hide.add(key)
+  }
+
+  const shownPicture = pictureOf(shown)
+  const repoPicture = pictureOf(repo)
+  const shownHasPicture = Object.keys(shownPicture).length > 0
+  const repoHasPicture = Object.keys(repoPicture).length > 0
+  if (shownHasPicture && shownPicture[SUBSTRATE_MARK] !== true && !repoHasPicture) {
+    Object.assign(fill, shownPicture)
+  } else if (shownHasPicture && !sameJsonValue(shownPicture, repoPicture)) {
+    Object.assign(override, shownPicture)
+  } else if (!shownHasPicture && repoHasPicture) {
+    for (const key of Object.keys(repoPicture)) hide.add(key)
+  }
+
+  if (hide.size > 0) override[TILE_PROPERTY_PINS] = [...hide].sort()
+  return { fill, override }
+}
+
+// ── Layers, as the editor shows them (alias-properties.md, step 4) ──────────
+
+/** The editor's fields, each with the property keys it edits. The picture is
+ *  one value: its sizes and its ownership marks travel together. */
+export const EDITOR_FIELDS = {
+  picture: ['small', 'flat', 'large', 'imageSig', PARTICIPANT_MARK, SUBSTRATE_MARK],
+  border: ['border'],
+  text: ['hideText'],
+  fill: ['background'],
+  link: ['link'],
+} as const satisfies Record<string, readonly string[]>
+export type EditorField = keyof typeof EDITOR_FIELDS
+export const EDITOR_FIELD_NAMES = Object.keys(EDITOR_FIELDS) as EditorField[]
+
+/** Where an alias's value for a field comes from:
+ *  - `inherited`: from the name's repo (or unset there too);
+ *  - `here`: this alias overrides it;
+ *  - `hidden`: this alias hides the repo's value (a pin);
+ *  - `locked`: the repo locks it — no alias may change it. */
+export type PropertyLayer = 'inherited' | 'here' | 'hidden' | 'locked'
+
+/** A participant's choice for one field at an alias. */
+export type PropertyChoice = 'here' | 'inherit' | 'hide'
+
+/** The layer of every editor field at an alias, from the alias's own record and
+ *  the repo's. Locked outranks everything — the repo's lock is absolute. */
+export const propertyLayers = (
+  own: Readonly<Record<string, unknown>>,
+  repo: Readonly<Record<string, unknown>>,
+): Record<EditorField, PropertyLayer> => {
+  const hidden = new Set(pinListOf(own))
+  const locked = new Set(pinListOf(repo))
+  const layers = {} as Record<EditorField, PropertyLayer>
+  for (const field of EDITOR_FIELD_NAMES) {
+    const keys: readonly string[] = EDITOR_FIELDS[field]
+    layers[field] = keys.some(key => locked.has(key)) ? 'locked'
+      : keys.some(key => hidden.has(key)) ? 'hidden'
+      : keys.some(key => key in own) ? 'here'
+      : 'inherited'
+  }
+  return layers
+}
+
+/** The layer a field shows once a pending choice is applied. */
+export const layerAfterChoice = (layer: PropertyLayer, choice: PropertyChoice | undefined): PropertyLayer =>
+  layer === 'locked' || !choice ? layer
+    : choice === 'here' ? 'here'
+    : choice === 'hide' ? 'hidden'
+    : 'inherited'
+
+/**
+ * Turn an editor save into the writes that carry out the participant's choices
+ * at an alias. `props` is the complete form. Returns:
+ *  - `shared`: the ordinary write — keys the alias does not override sink to
+ *    the repo, a field chosen *hide here* is cleared (a pin at the alias);
+ *  - `onlyHere`: the fields chosen *only here*, written with { onlyHere };
+ *  - `inherit`: the fields chosen *inherit again* — their keys and pins leave
+ *    the alias's own record, so it follows the repo again.
+ * A locked field takes no choice.
+ */
+export const editorWrites = (
+  props: Readonly<Record<string, unknown>>,
+  layers: Readonly<Record<EditorField, PropertyLayer>>,
+  choices: ReadonlyMap<EditorField, PropertyChoice>,
+): { shared: Record<string, unknown>; onlyHere: Record<string, unknown>; inherit: string[] } => {
+  const shared: Record<string, unknown> = { ...props }
+  const onlyHere: Record<string, unknown> = {}
+  const inherit: string[] = []
+  for (const [field, choice] of choices) {
+    if (layers[field] === 'locked') continue
+    const keys: readonly string[] = EDITOR_FIELDS[field]
+    for (const key of keys) {
+      if (choice === 'here') {
+        if (key in shared) onlyHere[key] = shared[key]
+        delete shared[key]
+      } else if (choice === 'inherit') {
+        delete shared[key]
+        inherit.push(key)
+      } else if (key !== PARTICIPANT_MARK && key !== SUBSTRATE_MARK) {
+        // Hide clears the VALUE keys (a pin each, at the alias); the ownership
+        // marks are not values and are never pinned.
+        shared[key] = undefined
+      }
+    }
+  }
+  return { shared, onlyHere, inherit }
+}
+
+/** An alias's own record once the named keys inherit again: the keys leave,
+ *  and so do their pins. */
+export const ownAfterInherit = (
+  own: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): Record<string, unknown> => {
+  const next: Record<string, unknown> = { ...own }
+  for (const key of keys) delete next[key]
+  const pins = pinListOf(own).filter(key => !keys.includes(key))
+  if (pins.length > 0) next[TILE_PROPERTY_PINS] = pins
+  else delete next[TILE_PROPERTY_PINS]
+  return next
+}
+
+/**
+ * The repo after a GATHER meets two copies of one name (alias-properties.md,
+ * step 3). The `newer` copy's values go to the repo; keys only the `older`
+ * copy has fill it (filling never overwrites). A picture is one value, and a
+ * theme default (`substrate: true`) never enters the repo. Each copy then
+ * keeps `aliasPropertiesFor(itsLook, gatheredRepo(...)).override`, so both
+ * places look exactly as they did.
+ */
+export const gatheredRepo = (
+  repo: Readonly<Record<string, unknown>>,
+  newer: Readonly<Record<string, unknown>>,
+  older: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => {
+  const next: Record<string, unknown> = { ...repo }
+  const take = (props: Readonly<Record<string, unknown>>, overwrite: boolean): void => {
+    for (const [key, value] of Object.entries(props)) {
+      if (PLACE_KEYS.has(key) || PICTURE_KEYS.has(key)) continue
+      if (overwrite || !(key in next)) next[key] = value
+    }
+    const picture = pictureOf(props)
+    const nextHasPicture = Object.keys(pictureOf(next)).length > 0
+    if (Object.keys(picture).length > 0 && picture[SUBSTRATE_MARK] !== true && (overwrite || !nextHasPicture)) {
+      for (const key of PICTURE_KEYS) delete next[key]
+      Object.assign(next, picture)
+    }
+  }
+  take(newer, true)
+  take(older, false)
+  return next
+}
 
 /**
  * Split an alias's write into what SINKS to the repo and what stays LOCAL.
@@ -883,7 +1076,7 @@ export const writeTilePropertiesAt = async (
     const inheritedDefaults = parentSegments.length > 0
       ? await readOwnTilePropertiesAt([], cellName, rootStats)
       : {}
-    const merged: Record<string, unknown> = { ...existing, ...updates }
+    const merged: Record<string, unknown> = options.replace ? { ...updates } : { ...existing, ...updates }
 
     // A key present in `updates` with `undefined` is an explicit REMOVAL — the
     // only channel a merge has for expressing a delete, since an ABSENT key
@@ -914,7 +1107,9 @@ export const writeTilePropertiesAt = async (
     // so the lineage keeps following that default. A cold root is unknown,
     // never evidence that a value is redundant, so skip the collapse then.
     if (parentSegments.length > 0 && !rootStats.cold) {
-      withLifeReferences = sparseTileOverrides(inheritedDefaults, withLifeReferences)
+      // *Only here* keeps its values as given: an override equal to the repo
+      // today is still this alias's own, and must not start following the repo.
+      if (options.onlyHere !== true) withLifeReferences = sparseTileOverrides(inheritedDefaults, withLifeReferences)
       withLifeReferences = withClearedInheritedKeysPinned(
         inheritedDefaults,
         withLifeReferences,

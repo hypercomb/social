@@ -36,6 +36,12 @@ import {
 } from '../history/layer-placement.js'
 import { ensureDecorationsIndexed, referenceTargetAt } from './decoration-kind-index.js'
 import { createLanding, type CreateLanding } from './create-landing.js'
+import {
+  aliasPropertiesFor,
+  readOwnTilePropertiesAt,
+  readTilePropertiesAt,
+  writeTilePropertiesAt,
+} from '../editor/tile-properties.js'
 
 /** The link service's IoC key — resolved at call time, so the reference door
  *  and the link door never import each other. */
@@ -55,6 +61,7 @@ type CommitterLike = {
     segments: readonly string[],
     changes: { appends?: readonly string[] },
   ): Promise<string>
+  update?(segments: readonly string[], layer: PlacementLayer): Promise<string>
 }
 
 const get = <T,>(key: string): T | undefined =>
@@ -88,6 +95,23 @@ const referenceMarksOf = async (
     } catch { /* not a JSON record — not a reference mark */ }
   }
   return { sigs, target }
+}
+
+/** The properties a new alias of `name` needs, made from the tile at
+ *  `targetParent`/`name`. Null when either side cannot be read yet — the
+ *  caller then keeps the snapshot, never guesses from a cold read. */
+const planAliasProperties = async (
+  targetParent: readonly string[],
+  name: string,
+): Promise<{ fill: Record<string, unknown>; override: Record<string, unknown> } | null> => {
+  const shownStats = { cold: false }
+  const repoStats = { cold: false }
+  const [shown, repo] = await Promise.all([
+    readTilePropertiesAt(targetParent, name, shownStats),
+    readOwnTilePropertiesAt([], name, repoStats),
+  ])
+  if (shownStats.cold || repoStats.cold) return null
+  return aliasPropertiesFor(shown, repo)
 }
 
 /** How many doorways a reference may pass through before it is refused. */
@@ -132,25 +156,36 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
   }
 
   async place(options: PlaceCanonicalReferenceOptions): Promise<string | null> {
+    // A refusal SAYS WHY — a gather that puts a tile back, or a window that
+    // made nothing, reads the reason here instead of guessing.
+    const refused = (reason: string): null => {
+      EffectBus.emit('reference:refused', {
+        name: String(options.name ?? ''),
+        source: [...(options.sourceSegments ?? [])],
+        parent: [...(options.parentSegments ?? [])],
+        reason,
+      })
+      return null
+    }
     const name = canonicalReferenceName(options.name)
-    if (!name) return null
+    if (!name) return refused('the name is empty')
     let sourceSegments = canonicalReferenceRoute(options.sourceSegments ?? [])
     // The hive itself is never an item to point at.
-    if (sourceSegments.length === 0) return null
+    if (sourceSegments.length === 0) return refused('the hive itself is never a target')
     const parentSegments = canonicalReferenceRoute(options.parentSegments ?? [])
     const childSegments = [...parentSegments, name]
     // Never reference yourself.
-    if (sameSegments(childSegments, sourceSegments)) return null
+    if (sameSegments(childSegments, sourceSegments)) return refused('it would point at itself')
 
     const history = get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
     const committer = get<CommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
     const store = get<StoreLike>('@hypercomb.social/Store')
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
-    if (!history || !committer?.commitChildrenDeltas || !store?.putResource) return null
+    if (!history || !committer?.commitChildrenDeltas || !store?.putResource) return refused('the hive is still starting')
 
     // The target must exist where the route says. Nothing is minted for it.
     let sourceLayer = await resolveLayerAt(history, lineage?.domain, sourceSegments)
-    if (!sourceLayer) return null
+    if (!sourceLayer) return refused('the target does not exist where the route says')
 
     // A REFERENCE TO A REFERENCE IS A REFERENCE TO WHAT IT POINTS AT. Pointing
     // at a doorway made a chain, and a chain that came back round made a tile
@@ -161,20 +196,20 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     let marks = await referenceMarksOf(sourceLayer, store)
     for (let hop = 0; marks.target; hop++) {
       const onward: string[] = marks.target
-      if (hop >= MAX_REFERENCE_HOPS || sameSegments(onward, sourceSegments)) return null
-      if (sameSegments(onward, childSegments)) return null
+      if (hop >= MAX_REFERENCE_HOPS || sameSegments(onward, sourceSegments)) return refused('its doorways go round in a loop')
+      if (sameSegments(onward, childSegments)) return refused('its doorway leads back to the place it would stand')
       sourceSegments = onward
       sourceLayer = await resolveLayerAt(history, lineage?.domain, sourceSegments)
-      if (!sourceLayer) return null
+      if (!sourceLayer) return refused('a doorway on the way points at nothing')
       marks = await referenceMarksOf(sourceLayer, store)
     }
-    if (sameSegments(childSegments, sourceSegments)) return null
+    if (sameSegments(childSegments, sourceSegments)) return refused('it would point at itself')
 
     // A doorway is not a holder: a reference tile's children live behind its
     // pointer, so nothing may be gathered under it.
-    if (parentSegments.length > 0 && referenceTargetAt(parentSegments) !== null) return null
+    if (parentSegments.length > 0 && referenceTargetAt(parentSegments) !== null) return refused('the page is itself a doorway')
     const parent = await resolveLayerAt(history, lineage?.domain, parentSegments)
-    if (await childLayerOf(history, parent, name)) return null
+    if (await childLayerOf(history, parent, name)) return refused('the page already lists a tile by that name')
 
     // IDENTITY = the target's molecule, `sign(fold(canon(name)))`. Not the
     // path-keyed bag of a root child — the route is the fallback, not the name.
@@ -205,11 +240,25 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     // The Portal inventory row is the exception. It is the explicit default-
     // authoring surface, so it remains a slim live pointer and its editor is
     // routed to the target. Changing the target seeds FUTURE activations only.
+    //
+    // PROPERTIES ARE THE EXCEPTION TO THE SNAPSHOT (alias-properties.md, step
+    // 2): a reference named as its target is an ALIAS of the name. What the
+    // target shows that the name's repo lacks is filled INTO the repo, and the
+    // reference keeps only where it must still differ — so it looks exactly as
+    // a snapshot would, yet follows the repo from now on. Unreadable (cold)
+    // properties, or a reference named apart from its target, keep the
+    // snapshot as before.
+    const plan = options.editsRootDefault !== true && name === targetName
+      ? await planAliasProperties(sourceSegments.slice(0, -1), name)
+      : null
+    if (plan && Object.keys(plan.fill).length > 0) await writeTilePropertiesAt([], name, plan.fill)
+
     let childLayer: PlacementLayer = { name, decorations: [decorationSig] }
     if (options.editsRootDefault !== true) {
       const details: PlacementLayer = { name }
       for (const [slot, value] of Object.entries(sourceLayer)) {
         if (slot === 'name' || (CHILD_SLOTS as readonly string[]).includes(slot)) continue
+        if (plan && slot === 'properties') continue
         details[slot] = value
       }
       // The target's own doorway marks never ride along: a reference wears
@@ -223,8 +272,32 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
         decorations: [...new Set([...inheritedDecorations, decorationSig])],
       }
     }
-    const childMarkerSig = await history.commitLayer(childLocationSig, childLayer)
+    // THROUGH THE COMMIT QUEUE, never around it. A direct history.commitLayer
+    // here raced the property writes already queued for this location (a
+    // gather's repo write fires root-default-changed, and the renderer and the
+    // theme re-dress write every alias of the name): they had read the head
+    // BEFORE the doorway, landed AFTER it, and committed the old tile back —
+    // the doorway lost its mark at the head (/howard/team, 2026-10-02). Queued,
+    // the doorway lands after them, and anything later hydrates from it.
+    // The queue starts from the location's head and sets only the slots it is
+    // given, so every slot the old head wears and the doorway does not is named
+    // empty: the doorway is exactly `childLayer`, as a direct commit made it.
+    let childMarkerSig: string
+    if (committer.update) {
+      const head = await history.currentLayerAt(childLocationSig).catch(() => null)
+      const exact: PlacementLayer = { ...childLayer }
+      for (const [slot, value] of Object.entries(head ?? {})) {
+        if (slot === 'name' || slot in exact) continue
+        exact[slot] = Array.isArray(value) ? [] : null
+      }
+      childMarkerSig = await committer.update(childSegments, exact)
+    } else {
+      childMarkerSig = await history.commitLayer(childLocationSig, childLayer)
+    }
     await committer.commitChildrenDeltas(parentSegments, { appends: [childMarkerSig] })
+    if (plan && Object.keys(plan.override).length > 0) {
+      await writeTilePropertiesAt(parentSegments, name, plan.override, { onlyHere: true })
+    }
 
     // Retain what the target meant at the moment it was referenced — a record
     // in a colon pool, never a membership anywhere.

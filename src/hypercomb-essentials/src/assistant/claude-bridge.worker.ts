@@ -562,6 +562,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'layer-at':     return this.#layerAt(req)
       case 'layer-by-sig': return this.#layerBySig(req)
       case 'layers-at':    return this.#layersAt(req)
+      case 'gather-own':   return this.#gatherOwn(req)
       case 'slice-create': return this.#sliceCreate(req)
       case 'put-resource': return this.#putResource(req)
       case 'get-resource': return this.#getResource(req)
@@ -1541,6 +1542,20 @@ export class ClaudeBridgeWorker extends Worker {
     return { id: req.id, ok: true, data: layer }
   }
 
+  // GATHER a page's own tiles into the group it is linked to — the same act as
+  // the references window's Review (GatherLinkService.gatherOwn), for the named
+  // tiles only. `segments` = the page, `cells` = the tile names. Answers the
+  // names actually gathered.
+  async #gatherOwn(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const names = (req.cells ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segments.length === 0 || names.length === 0) return { id: req.id, ok: false, error: 'gather-own requires `segments` and `cells`' }
+    const link = get<{ gatherOwn?(page: readonly string[], names: readonly string[]): Promise<string[]> }>('@diamondcoreprocessor.com/GatherLinkService')
+    if (!link?.gatherOwn) return { id: req.id, ok: false, error: 'GatherLinkService not available' }
+    const gathered = await link.gatherOwn(segments, names)
+    return { id: req.id, ok: true, data: { gathered } }
+  }
+
   // EVERY revision a location has held, oldest first — `layer-at` answers only
   // the head. A repair needs the earlier ones: a tile whose head went wrong is
   // put right by committing an earlier layer again (read it with
@@ -1551,7 +1566,11 @@ export class ClaudeBridgeWorker extends Worker {
     if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
     const locationSig = await history.sign({ explorerSegments: () => segments })
     const layers = await history.listLayers(locationSig)
-    return { id: req.id, ok: true, data: layers.map(entry => ({ index: entry.index, layerSig: entry.layerSig, at: entry.at })) }
+    // A REVISION'S TIME IS ITS FILE'S, AND SOME STORES DO NOT KEEP ONE. On
+    // the packed store every marker reports 0, which read as 1970 and made
+    // a restore impossible to choose by date (the housekeeping manager,
+    // 2026-10-01). Unknown is said as null, never as a date.
+    return { id: req.id, ok: true, data: layers.map(entry => ({ index: entry.index, layerSig: entry.layerSig, at: entry.at > 0 ? entry.at : null })) }
   }
 
   // Raw layer read BY SIGNATURE — the sig-addressed twin of `layer-at`.
@@ -1637,6 +1656,29 @@ export class ClaudeBridgeWorker extends Worker {
   // lineage's current explorerDir) so segments are interpreted as a
   // path from root, identical regardless of where the user is.
   async #listAt(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+
+    // A tile is not a named directory in the flat-root model: its children are
+    // the sigs in its LAYER's `children` slot, and each child's NAME is in that
+    // child's own layer. So resolve the location through its layer — the same
+    // door `layer-at`, `inspect` and `note-list` already use — and answer the
+    // child names. Only when no layer exists at the location does the old
+    // named-directory walk below run.
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (history) {
+      const locationSig = await history.sign({ explorerSegments: () => segments })
+      const layer = await history.currentLayerAt(locationSig)
+      if (layer) {
+        const childSigs = Array.isArray(layer.children) ? layer.children.filter(isSignature) : []
+        const childLayers = await Promise.all(childSigs.map(sig => history.getLayerBySig(sig).catch(() => null)))
+        const names = new Set<string>()
+        for (const child of childLayers) {
+          if (typeof child?.name === 'string' && child.name) names.add(child.name)
+        }
+        return { id: req.id, ok: true, data: [...names].sort((a, b) => a.localeCompare(b)) }
+      }
+    }
+
     const store = get<{
       hypercombRoot?: FileSystemDirectoryHandle | null
       legacyHive?: FileSystemDirectoryHandle | null
@@ -1644,7 +1686,6 @@ export class ClaudeBridgeWorker extends Worker {
     }>('@hypercomb.social/Store')
     if (!store?.hypercombRoot) return { id: req.id, ok: false, error: 'no hypercombRoot' }
 
-    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
     // Named tile dirs live in the (still-undrained) legacy content roots as
     // well as the flat root — resolve the path root-first, then through the
     // legacy roots (union rule), so a partially-drained boot still lists cells.

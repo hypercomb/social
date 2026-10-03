@@ -101,7 +101,7 @@ async function writeCatalog(store: InsightStore, catalog: InsightCatalog): Promi
 
 /** Read-modify-write the catalog. The catalog is one small document and a
  *  insight edit is a deliberate user action, so a full rewrite is honest —
- *  and it keeps the pool at exactly one current member. */
+ *  and the pool keeps every earlier catalog, with one current one. */
 export async function saveInsight(store: InsightStore, insight: Insight): Promise<InsightCatalog> {
   const catalog = await loadInsights(store)
   catalog[insight.name] = insight

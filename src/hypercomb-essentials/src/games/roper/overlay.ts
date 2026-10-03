@@ -24,6 +24,7 @@ const CHARGE_RAMP = 1.25       // seconds from a tap to full power
 const MOVE_KEYS = new Set([
   'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
   'a', 'A', 'd', 'D', 'w', 'W', 's', 'S', ' ',
+  'j', 'J', 'i', 'I', 'k', 'K',
 ])
 
 export class RoperOverlay {
@@ -139,10 +140,10 @@ export class RoperOverlay {
     const help = el('div', { class: 'rp-help' })
     help.innerHTML =
       '<b>Mouse</b> aim &nbsp;·&nbsp; <b>hold left-click</b> charge & throw &nbsp;·&nbsp; ' +
-      '<b>Space</b>/<b>right-click</b> fire / release rope &nbsp;·&nbsp; ' +
+      '<b>Space</b>/<b>J</b>/<b>right-click</b> fire / release rope &nbsp;·&nbsp; ' +
       'roped: <b>← →</b> swing, <b>↑</b> shorten (faster) <b>↓</b> lengthen (slower) &nbsp;·&nbsp; ' +
       'on foot: <b>← →</b> walk, <b>↑</b> jump &nbsp;·&nbsp; ' +
-      '<b>1</b> grenade <b>2</b> bomb &nbsp;·&nbsp; <b>R</b> new arena &nbsp;·&nbsp; <b>Esc</b> close'
+      '<b>1</b> grenade <b>2</b> bomb <b>I</b> swap &nbsp;·&nbsp; <b>K</b> drop it &nbsp;·&nbsp; <b>R</b> new arena &nbsp;·&nbsp; <b>Esc</b> close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -250,10 +251,15 @@ export class RoperOverlay {
       case 'ArrowLeft': case 'a': case 'A': eng.input.left = true; break
       case 'ArrowRight': case 'd': case 'D': eng.input.right = true; break
       case 'ArrowUp': case 'w': case 'W':
-        if (eng.attached) eng.input.up = true; else eng.jump()
+        // Up is always the reel-in key: the engine only reels while attached, so holding it
+        // through an attach reels at once. On the ground it is still the jump.
+        eng.input.up = true
+        if (!eng.attached) eng.jump()
         break
       case 'ArrowDown': case 's': case 'S': eng.input.down = true; break
-      case ' ': eng.toggleRope(); break
+      case ' ': case 'j': case 'J': eng.toggleRope(); break          // J: the second rope key
+      case 'i': case 'I': eng.cycleWeapon(); this.#syncToolbar(true); break   // I: grenade / bomb
+      case 'k': case 'K': eng.dropWeapon(); this.#syncToolbar(true); break    // K: drop it
       case 'Enter': this.#beginCharge(); break
       case '1': eng.selectWeapon('grenade'); this.#syncToolbar(true); break
       case '2': eng.selectWeapon('bomb'); this.#syncToolbar(true); break

@@ -120,14 +120,20 @@ describe('the bounded live hive tree reader', () => {
     if (result.ok) expect(result.nodes).toHaveLength(2)
   })
 
-  it('never turns an unresolved declared child into authoritative partial success', async () => {
+  it('leaves an unresolved declared child out and says the tree is not whole', async () => {
+    // One child that cannot be named used to fail the whole walk, so /find
+    // and /tree refused an entire page that /read could open. The rest is
+    // still true; `truncated` keeps the answer from claiming to be all of it.
     const fx = fixture()
     fx.getLayerBySig.mockImplementation(async (signature: string) => signature === sig(2)
       ? null
       : ({ name: 'notes', children: [] } as LayerContent))
 
-    await expect(fx.reader.readTree([], { maxDepth: 1 }))
-      .resolves.toEqual({ ok: false, root: '/', code: 'incomplete-read' })
+    const read = await fx.reader.readTree([], { maxDepth: 1 })
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.truncated).toBe(true)
+    expect(read.nodes.every(node => node.depth === 0 || node.name === 'notes')).toBe(true)
   })
 
   it('distinguishes an absent path from a cold/incomplete path', async () => {

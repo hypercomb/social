@@ -37,7 +37,7 @@ node build.mjs --pure --hosts hive.example.org,mirror.example.net
 HYPERCOMB_SEED_HOSTS=hive.example.org node build.mjs --pure   # the same
 ```
 
-A build that names none seeds from `hypercomb.com` and `jwize.com`. The
+A build that names none seeds from `hypercomb.com`. The
 operator tools read the same `HYPERCOMB_SEED_HOSTS` (and `HYPERCOMB_R2_BUCKET`,
 `HYPERCOMB_R2_VIA` for `push --r2`). The welcome card's footer links are
 defaults an operator replaces by staging their own.
@@ -75,7 +75,7 @@ themselves; everything else is resolved.
 - `main.js` is `src/kernel.ts`, a classic script. It knows two signatures,
   baked in by the build (no signature lives in source): the host bundle and
   the core library. For each it tries this device, then this origin, then the
-  default hosts (hypercomb.com, jwize.com), refuses bytes that do not hash to
+  default host (hypercomb.com), refuses bytes that do not hash to
   the signature, and keeps what it verified: in OPFS, and in the service
   worker's `hypercomb-sig-v1` cache. That is the one hash: bytes are hashed
   once, when they first arrive, and a held copy never again. Warm boots
@@ -331,7 +331,11 @@ first, each signature checked. Same addresses and file names as the Node
 pools, so a browser and a host hold one set: a device with nothing but a
 browser is a backup of the code. Measured against a local follower: 10,058
 files in 76 s the first time, nothing fetched the second, still there after
-a reload.
+a reload. A host lists only the floor pools plus what its operator declares
+under their own key (`hypercomb-relay/host-listing.js`), so a relay, worker or
+`hypercomb-serve` host offers the version pools once its operator says
+`hosts list host:builds` and `hosts list host:build-signatures`; a host
+deployed with the pools as static files serves them as they are.
 
 **Write in the browser, build with a participant.** The browser carries no
 compiler, so a change is built by a BUILDER — any participant with the
@@ -371,7 +375,8 @@ straight from the version pools — and writes a file of it with a
 `hypercomb-write` block headed `version <revision> <path>` (the whole file, or
 SEARCH/REPLACE edits). Every file it writes over one revision goes into ONE
 draft, which reads like a revision (`read <draft> <path>`). The write waits in
-Execution like any change; nothing runs and nothing leaves the browser until
+Execution like any change (and a change that leaves the machine, or follows
+someone else's words, always waits for a hand); nothing runs and nothing leaves the browser until
 the participant sends the draft to a builder (`/versions ask <host>`). Any
 model the router reaches drives it — a local server, OpenRouter, a frontier
 key — and so does a participant's own code, through
@@ -465,7 +470,7 @@ nothing is ever removed.
 ```bash
 node host/builds.mjs push [host dir]    # default: hypercomb-relay/content
 node host/builds.mjs push --r2          # the R2 bucket behind the worker
-node host/builds.mjs pull               # jwize.com, hypercomb.com (or name hosts)
+node host/builds.mjs pull               # hypercomb.com (or name hosts)
 npm run host:check -- https://hypercomb.com    # reports the version pools
 ```
 

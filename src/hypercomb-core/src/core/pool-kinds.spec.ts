@@ -60,7 +60,7 @@ describe('pool kinds — the four kinds and their facts', () => {
   it('answers deletion, wipe-safety and replication in one lookup', () => {
     expect(poolKindFacts('index')).toEqual({ kind: 'index', deletion: 'never-recompute', wipeSafe: true, replicates: false })
     expect(poolKindFacts('set')?.replicates).toBe(true)
-    expect(poolKindFacts('document')?.deletion).toBe('replaces-siblings')
+    expect(poolKindFacts('document')?.deletion).toBe('keeps-versions')
     expect(poolKindFacts('succession')?.deletion).toBe('own-bucket')
   })
 

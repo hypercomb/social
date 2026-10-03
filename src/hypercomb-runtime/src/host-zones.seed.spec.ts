@@ -19,6 +19,6 @@ describe('seed hosts', () => {
 
   it('fall back to Hypercomb\'s own only when the build names none', async () => {
     const { DEFAULT_HOST_ZONES } = await import('./host-zones')
-    expect(DEFAULT_HOST_ZONES).toEqual(['jwize.com', 'hypercomb.com'])
+    expect(DEFAULT_HOST_ZONES).toEqual(['hypercomb.com'])
   })
 })

@@ -293,7 +293,8 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // label, a prune receipt — one current document per marker LAYER SIG
   // (essentials/history/marker-meta.ts). The marker file itself is never
   // rewritten; before this pool the fields were written into the marker, and
-  // those markers stay readable. Per-participant, replaced in place: DOCUMENT.
+  // those markers stay readable. Per-participant, one current record with every
+  // version kept: DOCUMENT.
   'history:marker-meta',
   // THE LAST HEAD CLAIM THIS DEVICE SIGNED, per facet — the `minted` half of
   // `planHeadClaim`'s anti-rollback rule (core/head-claim.ts). One current
@@ -313,6 +314,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   'icons:overrides',
   'locations:saved',
   'portals:recent',
+  // The routes the participant withholds from outside models: what a model
+  // other than their own may not read (hypercomb-shared/core/ai-withheld.store.ts).
+  // DOCUMENT, per participant, never replicated.
+  'ai:withheld',
   // What participants make that is theirs alone, moved out of localStorage the
   // same way (essentials preferences/participant-document.ts): saved sequences
   // and patterns, Arkanoid and Solomon levels (Solomon's creations and designer

@@ -17,6 +17,8 @@
 //   PUT /<sig>        hypercomb host-sync shape — NIP-98 (kind 27235)
 //   PUT /upload       Blossom BUD-02 — kind 24242, t=upload
 //   HEAD /upload      Blossom BUD-06 preflight — X-SHA-256/X-Content-Length
+//   POST /claim       claim a domain — NIP-98 (documentation/domain-claim.md)
+//   GET /claim/<name> a claim's public reading: {domain, status, nameservers}
 //
 // Two guards on every write, independent (same doctrine as relay.js):
 //   1. content-integrity — sha256(body) MUST equal the declared sig.
@@ -326,7 +328,7 @@ function mergeBindings(fromVar, records) {
 }
 
 /** A per-request view of env whose bindings include the operators' signed
- *  records — or env itself when no zone is operated or none verifies. */
+ *  records and the active claims — or env itself when neither adds one. */
 /** How long one isolate trusts the operators' signed bindings and a site's
  *  open answer. Every request routes through them; a change is seen within
  *  this window (the same bound as the bag's newest marker). */
@@ -335,11 +337,13 @@ const heldBindings = new WeakMap()
 
 async function bindingsEnv(env, read = indexReader(env)) {
   const operators = siteOperators(env)
-  if (!operators.length) return env
+  // Nothing beyond the var to read: no operated zone, and no claims taken here.
+  if (!operators.length && !takesClaims(env)) return env
   const held = heldBindings.get(env)
-  if (held && Date.now() - held.at < SITE_TTL_MS && held.hives === env.HIVES?.get) return held.view
+  if (held && Date.now() - held.at < SITE_TTL_MS && held.hives === env.HIVES?.get
+    && held.claims === claimsWritten) return held.view
   const view = await readBindingsEnv(env, read, operators)
-  heldBindings.set(env, { at: Date.now(), view, hives: env.HIVES?.get })
+  heldBindings.set(env, { at: Date.now(), view, hives: env.HIVES?.get, claims: claimsWritten })
   return view
 }
 
@@ -349,10 +353,118 @@ async function readBindingsEnv(env, read, operators) {
     const entries = await operatorRecord(env, read, zone, pubkey)
     if (entries) records.set(zone, entries)
   }
-  if (!records.size) return env
+  const claims = await claimedBindings(env)
+  if (!records.size && !claims.length) return env
   const view = Object.create(env)
-  view[POOL_BINDINGS] = mergeBindings(siteBindings(env), records)
+  const operated = records.size ? mergeBindings(siteBindings(env), records) : siteBindings(env)
+  view[POOL_BINDINGS] = withClaims(operated, claims, operators.map(([zone]) => zone))
   return view
+}
+
+// ── claimed domains (documentation/domain-claim.md) ─────────────────────────
+//
+// A participant claims a domain with one word; the nameservers they set at
+// their registrar are the proof. An ACTIVE, uncontested claim is a binding
+// exactly as an operator would have written it: the apex is the front door,
+// every first-level name under it is an implicit site whose only publisher is
+// the claimant, and content.<domain> is a write face. The record is the member
+// sign(<domain>) of the PRIVATE pool sign('host:claims') — never listed, never
+// served; GET /claim/<domain> is the only reading of it.
+//
+// Claims come after the var and the operators' signed records and never beat
+// them: a claim that is, is under, or holds a served host is left out. Only a
+// host that takes claims (CF_ACCOUNT_ID) reads them — the bucket is shared
+// with deployments no claimed domain is ever routed to.
+
+const HOST_CLAIMS_MEANING = 'host:claims'
+/** How long one isolate trusts the active claims it read. An activation in
+ *  this isolate is seen at once (claimsWritten); another isolate's within this. */
+const CLAIMS_TTL_MS = 60_000
+const heldClaims = new WeakMap()
+/** Bumped only when the set of bindings changes — an activation. A look, a
+ *  check or a contest leaves every binding as it was, so no view is dropped. */
+let claimsWritten = 0
+/** Marks a binding a claim made, so a policy that admits only what an
+ *  operator chose (the host AI, the host's directory) can tell the two apart.
+ *  Never serialized. */
+const CLAIMED = Symbol('claimed')
+
+const takesClaims = (env) => !!String(env?.CF_ACCOUNT_ID || '').trim()
+
+/** The active claims as `[host, binding]` entries, earliest first. Every
+ *  routed request may ask, so this never throws: a bucket that does not
+ *  answer leaves the last view standing (none, in a fresh isolate) for
+ *  another minute, and the request goes on without the claims. */
+async function claimedBindings(env) {
+  if (!takesClaims(env) || !env.CONTENT?.list) return []
+  const held = heldClaims.get(env.CONTENT)
+  if (held && held.claims === claimsWritten && Date.now() - held.at < CLAIMS_TTL_MS) return held.entries
+  let records
+  try { records = await claimRecords(env) } catch {
+    const entries = held?.entries ?? []
+    heldClaims.set(env.CONTENT, { at: Date.now(), entries, claims: claimsWritten })
+    return entries
+  }
+  const entries = []
+  const active = records
+    .filter((record) => record.status === 'active' && !(record.contested?.length))
+    .sort((a, b) => (Number(a.activatedAt) || 0) - (Number(b.activatedAt) || 0) || (a.domain < b.domain ? -1 : 1))
+  for (const record of active) {
+    const entry = normalizeBinding(record.domain, {
+      title: record.domain, lineage: record.domain,
+      publishers: [{ pubkey: record.pubkey, primary: true }], frontDoor: true,
+    })
+    if (!entry) continue
+    entry[1][CLAIMED] = true
+    entries.push(entry)
+  }
+  heldClaims.set(env.CONTENT, { at: Date.now(), entries, claims: claimsWritten })
+  return entries
+}
+
+/** Does this key hold an active, uncontested claim? Read from the same held
+ *  view the router uses, so an upload pays no extra bucket read. */
+async function holdsActiveClaim(env, pubkey) {
+  const key = String(pubkey || '').toLowerCase()
+  if (!key) return false
+  return (await claimedBindings(env)).some(([, binding]) => binding.publishers.some((p) => p.pubkey === key))
+}
+
+/** The bindings with each claim added after them — unless it is, is under, or
+ *  holds a host already there or an operated zone. A claim never replaces. */
+function withClaims(bindings, claims, operatedZones = []) {
+  if (!claims.length) return bindings
+  const merged = { ...bindings }
+  for (const [host, binding] of claims) {
+    const served = [...Object.keys(merged), ...operatedZones]
+    if (served.some((h) => withinZone(host, h) || withinZone(h, host))) continue
+    merged[host] = binding
+  }
+  return merged
+}
+
+/** The bindings a directory on `host` lists. A claimed domain is its
+ *  claimant's, not the operator's to advertise: it is listed on its own doors
+ *  and nowhere else — never beside the operator's sites on another zone, and
+ *  never as a door of the operator's creations. */
+function directoryEnv(env, host) {
+  const entries = Object.entries(siteBindings(env))
+  const kept = entries.filter(([zone, site]) => !site?.[CLAIMED] || withinZone(host, zone))
+  if (kept.length === entries.length) return env
+  const view = Object.create(env)
+  view[POOL_BINDINGS] = Object.fromEntries(kept)
+  return view
+}
+
+/** Is this host a claimed apex? Asked only where the router deliberately
+ *  skips bindingsEnv (a flat read that missed): a host the var or an operator
+ *  already answers for is never a claim's, so those pay nothing. */
+async function claimedFrontDoor(env, host) {
+  if (!takesClaims(env)) return false
+  const name = String(host || '').toLowerCase()
+  if (Object.keys(siteBindings(env)).some((h) => withinZone(name, h) || withinZone(h, name))) return false
+  if (siteOperators(env).some(([zone]) => withinZone(name, zone) || withinZone(zone, name))) return false
+  return (await claimedBindings(env)).some(([claimed]) => claimed === name)
 }
 
 /** Does this signed index open `lineage` on `host`? An entry WITH doors
@@ -552,8 +664,9 @@ async function hostsOfLineage(env, read, lineage) {
 const HOST_PUBLICATIONS_MEANING = 'host:publications'
 const HOST_TRIALS_MEANING = 'host:trials'
 
-async function servePublications(request, env) {
-  const protocol = new URL(request.url).protocol
+async function servePublications(request, scoped) {
+  const { protocol, hostname } = new URL(request.url)
+  const env = directoryEnv(scoped, hostname.toLowerCase())
   const read = indexReader(env)
   const bindings = siteBindings(env)
   const sites = []
@@ -630,11 +743,17 @@ async function declaredListing(env, read) {
   return addresses
 }
 
+/** The host's own private ledgers. Each member names a key or a domain and
+ *  holds what only its own endpoint may hand out, so no declaration lists
+ *  them — not even an operator's signed `listed`. */
+const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters']
+
 /** Is this pool listed here? The floor answers without an index read — the
  *  addresses every follower asks stay on the hot path; anything else is
  *  listed only while an operator's signed index declares it. */
 async function listedPool(env, sig, read = indexReader(env)) {
   if ((await Promise.all(HOST_LISTING_FLOOR.map(poolAddress))).includes(sig)) return true
+  if ((await Promise.all(PRIVATE_POOL_MEANINGS.map(poolAddress))).includes(sig)) return false
   return (await declaredListing(env, read)).has(sig)
 }
 const ROUTE_MARKER_RE = /^\d{8}$/
@@ -1816,6 +1935,19 @@ async function admit(env, pubkey, size) {
   const now = Math.floor(Date.now() / 1000)
   const held = await readGrant(env, pubkey)
   let grant = held && typeof held === 'object' ? held : null
+  // A DOMAIN'S CLAIMANT HOSTS IT HERE (documentation/domain-claim.md): the
+  // shared hives a claimed domain serves live in this bucket, replicated up
+  // from the claimant's own hive. While the claim is active the key stands on
+  // the claim allowance, its use counted across windows — the guest list's
+  // refilling 90-day window is for strangers.
+  if (await holdsActiveClaim(env, pubkey)) {
+    const allowance = Number(env.CLAIM_QUOTA_BYTES ?? 1_073_741_824)
+    grant = {
+      quotaBytes: Math.max(Number(grant?.quotaBytes || 0), allowance),
+      usedBytes: Number(grant?.usedBytes || 0),
+      expiresAt: now + p.ttlDays * 86_400,
+    }
+  }
   const expired = !!grant && Number(grant.expiresAt || 0) <= now
   if (!grant || expired) {
     if (!p.autoGrant) {
@@ -2287,21 +2419,27 @@ async function serveContentPack(request, env, host, head) {
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers: contentPackHeaders(bytes.byteLength) })
 }
 
-/** The member names of a pool of meaning: the R2 keys under sign(meaning)/. */
-async function poolMemberNames(env, meaning) {
+/** The members of a pool of meaning: the R2 objects under sign(meaning)/, by
+ *  name and etag (R2's digest of the bytes — '' when the store gives none). */
+async function poolMembers(env, meaning) {
   const pool = await poolAddress(meaning)
-  const names = []
-  if (!env.CONTENT?.list) return names
+  const members = []
+  if (!env.CONTENT?.list) return members
   let cursor
   do {
     const page = await env.CONTENT.list({ prefix: `${pool}/`, cursor, limit: 1000 })
     for (const object of page.objects ?? []) {
       const name = String(object.key ?? '').slice(pool.length + 1)
-      if (name && !name.includes('/')) names.push(name)
+      if (name && !name.includes('/')) members.push({ name, etag: typeof object.etag === 'string' ? object.etag : '' })
     }
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
-  return names
+  return members
+}
+
+/** The member names of a pool of meaning: the R2 keys under sign(meaning)/. */
+async function poolMemberNames(env, meaning) {
+  return (await poolMembers(env, meaning)).map(({ name }) => name)
 }
 
 /** Membership only: an empty member named `name` under sign(meaning). */
@@ -2400,6 +2538,497 @@ async function getHive(request, env, pubkey) {
   })
 }
 
+// ── claiming a domain (documentation/domain-claim.md) ────────────────────────
+//
+// POST /claim        NIP-98 (method POST, and a `payload` tag holding the
+//                    sha256 of the body), body {"domain":"<name>"}: create the
+//                    domain's zone in this host's account and answer the two
+//                    nameservers the participant sets at their registrar.
+// GET /claim/<name>  public: {domain, status, nameservers}, never the key. A
+//                    reader who signs (NIP-98, method GET) is also told `mine`.
+//                    Reading a pending claim asks Cloudflare whether the
+//                    nameservers moved; the first active read WIRES the domain
+//                    (apex + `*` records, two routes to CLAIM_SCRIPT), and a
+//                    later read puts back whatever went missing.
+//
+// The reading is public and the token is the operator's, so Cloudflare is asked
+// about one claim at most once per CLAIM_LOOK_SECS while it is pending and once
+// per CLAIM_WIRE_SECS once it is active, however many read it. The look is
+// recorded before it is made; between looks the record answers.
+//
+// The operator's whole part is one secret, CLAIM_API_TOKEN (Zone Edit, DNS
+// Edit, Workers Routes Edit on the account's zones), beside the vars
+// CF_ACCOUNT_ID and CLAIM_SCRIPT. Without the token or the account this host
+// takes no claims (503) and makes no API call.
+//
+// Routes go to CLAIM_SCRIPT — the forwarder, hosts-forwarder.js — never to
+// this worker: a `wrangler deploy` replaces every route a script has, so a
+// claimed domain routed here would be gone on this worker's next deploy. And a
+// claim never TAKES a route: a zone holding a route to any other script is run
+// by hand and is never wired, and a domain served here is never activated.
+//
+// The nameserver proof names the account, not the key: every zone here gets
+// the same pair. So a lapsed claim is taken from its holder only while the
+// public DNS shows the domain not yet delegated here.
+//
+// The operator decides a contested claim, or moves a claim to a participant's
+// new key, by EDITING its record: `pubkey` set to the key that holds it, and
+// `contested` removed. Never by deleting it. The zone stays in the account, so
+// a claim with no record bars its domain for good (409, "ask this host's
+// operator") — and deleting that zone as well would hand a domain whose
+// nameservers already point here to whoever claims it first.
+
+const CLAIM_LAPSE_SECS = 7 * 86_400   // a pending or contested claim another key may take after this
+const CLAIM_CHECK_SECS = 3_600        // at most one activation check an hour per claim
+const CLAIM_LOOK_SECS = 300           // a pending claim's zone is read at most every five minutes
+const CLAIM_WIRE_SECS = 3_600         // an active claim's wiring is re-asserted at most hourly
+const CLAIM_PENDING_DEFAULT = 25
+const CLAIM_CONTESTERS_MAX = 8        // a contest has to be on record, not every key in it
+const CLAIM_PRUNE_LOOKS = 2           // lapsed claims one new claim may look at to make room
+const CLAIM_BODY_MAX = 1_024
+const CLAIM_RECORD_MAX = 16_384
+const CLAIM_STATUSES = new Set(['pending', 'active', 'contested'])
+const ZONE_ID_RE = /^[0-9a-f]{32}$/
+// A top-level label is letters (or an IDN's xn--): an address like 10.0.0.1
+// is four DNS labels and still no domain anyone can claim.
+const TLD_RE = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/
+// What already answers a name: such a record is proxied, never replaced.
+const ANSWER_TYPES = new Set(['A', 'AAAA', 'CNAME'])
+const CF_API = 'https://api.cloudflare.com/client/v4'
+// The public DNS (DoH, JSON), asked whether a domain already delegates here.
+const DNS_JSON = 'https://cloudflare-dns.com/dns-query'
+
+const claimsConfigured = (env) => takesClaims(env) && !!String(env.CLAIM_API_TOKEN || '').trim()
+const claimScript = (env) => String(env.CLAIM_SCRIPT || '').trim() || 'hypercomb-hosts'
+const nowSecs = () => Math.floor(Date.now() / 1000)
+
+/** How many claims may wait at once — pending or contested, lapsed or not:
+ *  each holds a zone in the operator's account. */
+function claimPendingMax(env) {
+  const raw = String(env.CLAIM_PENDING_MAX ?? '').trim()
+  const max = raw ? Number(raw) : CLAIM_PENDING_DEFAULT
+  return Number.isFinite(max) && max >= 0 ? max : CLAIM_PENDING_DEFAULT
+}
+
+/** A claimable domain name, folded to lowercase — or null. Checked before the
+ *  name reaches any API URL or bucket key: DNS labels only, two at least, no
+ *  scheme, port, path, space or trailing dot, 253 characters at most. */
+function claimDomain(raw) {
+  if (typeof raw !== 'string') return null
+  const domain = raw.toLowerCase()
+  if (!domain || domain.length > 253) return null
+  const labels = domain.split('.')
+  if (labels.length < 2 || !labels.every((label) => DNS_LABEL_RE.test(label))) return null
+  return TLD_RE.test(labels.at(-1)) ? domain : null
+}
+
+/** Is this name already served here — is it, is it under, or does it hold a
+ *  host the var binds or a zone an operator signs for? Only those two: a
+ *  claim's own binding must not refuse its claimant's second ask. */
+function servedHere(env, domain) {
+  const served = [...Object.keys(parseBindings(env)), ...siteOperators(env).map(([zone]) => zone)]
+  return served.some((host) => withinZone(domain, host) || withinZone(host, domain))
+}
+
+const claimKey = async (domain) => `${await poolAddress(HOST_CLAIMS_MEANING)}/${await poolAddress(domain)}`
+
+/** A claim record, believed only in its own shape and at its own address: the
+ *  record, null when there is none (or it is not one), undefined when the
+ *  bucket did not answer. `contested` is read as a list of keys, or not at all. */
+async function readClaimAt(env, key, name) {
+  let bytes
+  try {
+    const object = await env.CONTENT?.get?.(key)
+    if (!object || Number(object.size ?? 0) > CLAIM_RECORD_MAX) return null
+    bytes = await object.arrayBuffer()
+  } catch { return undefined }
+  if (bytes.byteLength > CLAIM_RECORD_MAX) return null
+  let record
+  try { record = JSON.parse(new TextDecoder().decode(bytes)) } catch { return null }
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return null
+  if (claimDomain(record.domain) !== record.domain || !SIG_RE.test(String(record.pubkey))
+    || !CLAIM_STATUSES.has(record.status) || typeof record.zoneId !== 'string') return null
+  if (await poolAddress(record.domain) !== name) return null
+  if (record.contested === undefined) return record
+  const contested = (Array.isArray(record.contested) ? record.contested : []).filter((pubkey) => SIG_RE.test(String(pubkey)))
+  return { ...record, contested }
+}
+
+async function claimRecord(env, domain) {
+  return (await readClaimAt(env, await claimKey(domain), await poolAddress(domain))) ?? null
+}
+
+/** This isolate's last reading of each claim record, kept while its etag
+ *  holds: a refresh lists the pool once and fetches only what changed. */
+const claimReadings = new WeakMap()
+
+/** Every claim this host holds. Throws only when the pool cannot be listed;
+ *  a record the bucket does not hand over keeps its last reading. */
+async function claimRecords(env) {
+  const pool = await poolAddress(HOST_CLAIMS_MEANING)
+  const members = (await poolMembers(env, HOST_CLAIMS_MEANING)).filter(({ name }) => SIG_RE.test(name))
+  const before = claimReadings.get(env.CONTENT) ?? new Map()
+  const after = new Map()
+  const records = await Promise.all(members.map(async ({ name, etag }) => {
+    const known = before.get(name)
+    if (etag && known?.etag === etag) { after.set(name, known); return known.record }
+    const record = await readClaimAt(env, `${pool}/${name}`, name)
+    if (record === undefined) {
+      if (known) after.set(name, known)
+      return known?.record ?? null
+    }
+    if (etag) after.set(name, { etag, record })
+    return record
+  }))
+  if (env.CONTENT && typeof env.CONTENT === 'object') claimReadings.set(env.CONTENT, after)
+  return records.filter(Boolean)
+}
+
+/** Write a claim record. False, with nothing written, when the record would be
+ *  too large to read back, when `fresh` finds one already there, or when the
+ *  bucket refuses: a record is never written that cannot be read. */
+async function writeClaim(env, record, { fresh = false } = {}) {
+  const body = JSON.stringify(record)
+  if (new TextEncoder().encode(body).byteLength > CLAIM_RECORD_MAX) return false
+  try {
+    const written = await env.CONTENT.put(await claimKey(record.domain), body, {
+      ...(fresh ? { onlyIf: new Headers({ 'If-None-Match': '*' }) } : {}),
+      httpMetadata: { contentType: 'application/json; charset=utf-8' },
+    })
+    return written !== null
+  } catch { return false }
+}
+
+/** The public reading of a claim: never the key, never the zone. A reader who
+ *  signed is told whether the claim is theirs — `mine` — and nothing more. */
+const claimView = (record, reader) => ({
+  domain: record.domain, status: record.status, nameservers: record.nameservers ?? [],
+  ...(reader ? { mine: record.pubkey === reader } : {}),
+})
+const claimAnswer = (record, reader = null) => json(200, claimView(record, reader), { 'Cache-Control': 'no-store' })
+const unrecorded = () => text(502, 'the claim could not be recorded — ask again')
+const servedAnswer = () => text(409, 'this domain is already served here')
+
+/** Written and answered, or refused when the bucket would not take it. */
+const recorded = async (env, record) => (await writeClaim(env, record)) ? claimAnswer(record) : unrecorded()
+
+/** When a claim began to wait: a contested one from its contest. */
+const waitingSince = (record) =>
+  Number(record.status === 'contested' ? record.contestedAt ?? record.claimedAt : record.claimedAt) || 0
+
+/** A claim nobody settled within CLAIM_LAPSE_SECS, pending or contested. An
+ *  active claim never lapses. */
+const lapsed = (record, now) => record.status !== 'active' && now - waitingSince(record) > CLAIM_LAPSE_SECS
+
+/** Does this key hold a claim that has not settled — pending, or contested on
+ *  either side — and has not lapsed? A lapsed claim frees its keys. */
+const unsettledBy = (record, pubkey, now) => record.status !== 'active' && !lapsed(record, now)
+  && (record.pubkey === pubkey || (record.contested ?? []).includes(pubkey))
+
+const nameserversOf = (zone) => (Array.isArray(zone?.name_servers) ? zone.name_servers : [])
+  .map((ns) => claimDomain(String(ns))).filter(Boolean).slice(0, 8)
+
+/** THE ONE DOOR TO THE CLOUDFLARE API. The token rides only here, and only
+ *  what a caller needs comes back — never the upstream body. */
+async function cloudflare(env, method, path, body) {
+  let response
+  try {
+    response = await fetch(CF_API + path, {
+      method,
+      headers: {
+        authorization: `Bearer ${String(env.CLAIM_API_TOKEN || '').trim()}`,
+        ...(body ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    })
+  } catch { return { ok: false, status: 0, code: null, result: null } }
+  let payload = null
+  try { payload = await response.json() } catch { payload = null }
+  const code = payload?.errors?.[0]?.code
+  return {
+    ok: response.ok && payload?.success === true,
+    status: response.status,
+    code: Number.isInteger(code) ? code : null,
+    result: payload?.result ?? null,
+  }
+}
+
+/** A short reason a participant can read and an operator can act on. */
+const cloudflareFailed = (what, answer) =>
+  text(502, `cloudflare could not ${what} (${answer?.status || 'unreachable'}${answer?.code ? `, code ${answer.code}` : ''})`)
+
+/** Does the public DNS show `domain` delegated to these nameservers already?
+ *  The zone cannot say: it reads pending until Cloudflare next looks, so a
+ *  holder who moved the nameservers yesterday looks like one who never did.
+ *  true, false, or null when the answer could not be read. */
+async function delegatedTo(domain, nameservers) {
+  let answer
+  try {
+    const response = await fetch(`${DNS_JSON}?${new URLSearchParams({ name: domain, type: 'NS' })}`,
+      { headers: { accept: 'application/dns-json' } })
+    if (!response.ok) return null
+    answer = await response.json()
+  } catch { return null }
+  if (answer?.Status === 3) return false   // NXDOMAIN: delegated nowhere
+  if (answer?.Status !== 0) return null
+  const named = new Set((Array.isArray(answer.Answer) ? answer.Answer : [])
+    .filter((record) => Number(record?.type) === 2)
+    .map((record) => String(record?.data || '').toLowerCase().replace(/\.$/, '')))
+  return nameservers.some((ns) => named.has(ns))
+}
+
+/** Point the claimed domain at the forwarder, idempotently. The routes are
+ *  read first: one to any other script means the zone is run by hand (the
+ *  operator onboarded the domain), and a claim never takes a route — moving it
+ *  would break that script's next deploy — so nothing at all is touched. Then
+ *  the records: the apex and `*` each get a proxied AAAA 100:: unless an
+ *  A/AAAA/CNAME already answers that exact name, which is proxied instead.
+ *  Then the routes `<domain>/*` and `*.<domain>/*` to CLAIM_SCRIPT, where
+ *  missing. Null, `{ conflict: true }`, or what failed. */
+async function wireClaim(env, record) {
+  const zone = encodeURIComponent(record.zoneId)
+  const script = claimScript(env)
+  const routes = await cloudflare(env, 'GET', `/zones/${zone}/workers/routes`)
+  if (!routes.ok) return { what: 'read the routes', answer: routes }
+  const held = Array.isArray(routes.result) ? routes.result : []
+  if (held.some((route) => route?.script !== script)) return { conflict: true }
+  for (const name of [record.domain, `*.${record.domain}`]) {
+    const listed = await cloudflare(env, 'GET', `/zones/${zone}/dns_records?${new URLSearchParams({ name, per_page: '100' })}`)
+    if (!listed.ok) return { what: 'read the DNS records', answer: listed }
+    const answering = (Array.isArray(listed.result) ? listed.result : [])
+      .filter((r) => String(r?.name || '').toLowerCase() === name && ANSWER_TYPES.has(r?.type))
+    if (!answering.length) {
+      const added = await cloudflare(env, 'POST', `/zones/${zone}/dns_records`,
+        { type: 'AAAA', name, content: '100::', proxied: true, ttl: 1 })
+      if (!added.ok) return { what: 'add a DNS record', answer: added }
+      continue
+    }
+    for (const r of answering) {
+      if (r.proxied === true) continue
+      const proxied = await cloudflare(env, 'PATCH', `/zones/${zone}/dns_records/${encodeURIComponent(String(r.id))}`, { proxied: true })
+      if (!proxied.ok) return { what: 'proxy a DNS record', answer: proxied }
+    }
+  }
+  for (const pattern of [`${record.domain}/*`, `*.${record.domain}/*`]) {
+    if (held.some((route) => route?.pattern === pattern)) continue
+    const routed = await cloudflare(env, 'POST', `/zones/${zone}/workers/routes`, { pattern, script })
+    if (!routed.ok) return { what: 'route the domain', answer: routed }
+  }
+  return null
+}
+
+const wiringFailed = (failed) => failed.conflict
+  ? text(409, "this domain's routes belong to another worker here — ask this host's operator")
+  : cloudflareFailed(failed.what, failed.answer)
+
+/** The zone reads active: wire it, and only then is the claim active — never
+ *  on a domain served here, and never over a route another script holds. */
+async function activateClaim(env, record) {
+  if (servedHere(env, record.domain)) return { failed: servedAnswer() }
+  const failed = await wireClaim(env, record)
+  if (failed) return { failed: wiringFailed(failed) }
+  const now = nowSecs()
+  const active = { ...record, status: 'active', activatedAt: now, checkedAt: now, lookedAt: now }
+  if (!await writeClaim(env, active)) return { failed: unrecorded() }
+  // The bindings changed: every view this isolate holds is stale now.
+  claimsWritten += 1
+  return { record: active }
+}
+
+/** A new zone for this key — refused if the account already holds one by
+ *  this name that no claim made (a claim never adopts). */
+async function createClaimZone(env, domain) {
+  const found = await cloudflare(env, 'GET', `/zones?${new URLSearchParams({ name: domain, 'account.id': String(env.CF_ACCOUNT_ID).trim() })}`)
+  if (!found.ok) return { failed: cloudflareFailed('look the domain up', found) }
+  if (Array.isArray(found.result) && found.result.length) {
+    return { failed: text(409, "this domain is already a zone on this host — ask this host's operator") }
+  }
+  const created = await cloudflare(env, 'POST', '/zones',
+    { name: domain, account: { id: String(env.CF_ACCOUNT_ID).trim() }, type: 'full', jump_start: true })
+  if (!created.ok) return { failed: cloudflareFailed('create the zone', created) }
+  const zoneId = String(created.result?.id || '')
+  if (!ZONE_ID_RE.test(zoneId)) return { failed: text(502, 'cloudflare answered no zone') }
+  return { zoneId, nameservers: nameserversOf(created.result) }
+}
+
+/** The zone and its record, as one act. A record that cannot be written takes
+ *  its zone back with it: a zone no claim made would bar the domain for good.
+ *  The router holds this open past a dropped connection (waitUntil). */
+async function makeClaim(env, domain, pubkey, now, fresh) {
+  const made = await createClaimZone(env, domain)
+  if (made.failed) return made.failed
+  const record = { v: 1, domain, pubkey, zoneId: made.zoneId, nameservers: made.nameservers, status: 'pending', claimedAt: now }
+  if (await writeClaim(env, record, { fresh })) return claimAnswer(record)
+  await cloudflare(env, 'DELETE', `/zones/${encodeURIComponent(made.zoneId)}`)
+  return unrecorded()
+}
+
+/** Room under the cap: forget the longest-lapsed claim whose zone never went
+ *  live — still pending at Cloudflare (or already gone) and not delegated here
+ *  by the public DNS — and delete that zone with it. No name resolves through
+ *  such a zone, so nothing that answers today stops answering. A claim is
+ *  looked at once per CLAIM_LOOK_SECS at most. True when room was made. */
+async function pruneLapsed(env, waiting, now) {
+  if (!env.CONTENT?.delete) return false
+  const candidates = waiting
+    .filter((record) => lapsed(record, now) && !(now - (Number(record.lookedAt) || 0) < CLAIM_LOOK_SECS))
+    .sort((a, b) => waitingSince(a) - waitingSince(b))
+    .slice(0, CLAIM_PRUNE_LOOKS)
+  for (const record of candidates) {
+    if (!await writeClaim(env, { ...record, lookedAt: now })) continue
+    const zoneId = encodeURIComponent(record.zoneId)
+    const zone = await cloudflare(env, 'GET', `/zones/${zoneId}`)
+    if (!zone.ok && zone.status !== 404) continue
+    if (zone.ok) {
+      if (zone.result?.status !== 'pending') continue
+      if (await delegatedTo(record.domain, record.nameservers ?? []) !== false) continue
+      if (!(await cloudflare(env, 'DELETE', `/zones/${zoneId}`)).ok) continue
+    }
+    try { await env.CONTENT.delete(await claimKey(record.domain)) } catch { continue }
+    return true
+  }
+  return false
+}
+
+// POST /claim — see the table in documentation/domain-claim.md.
+async function postClaim(request, env, ctx) {
+  if (!claimsConfigured(env)) return text(503, 'this host takes no claims')
+  const evt = parseAuthEvent(request)
+  const auth = await verifyNip98(request, evt, 'POST')
+  if (!auth.ok) return text(401, auth.reason)
+  if (!env.CONTENT?.put || !env.CONTENT?.list) return text(503, 'this host holds no pools')
+  const raw = await request.arrayBuffer()
+  if (raw.byteLength > CLAIM_BODY_MAX) return text(413, 'claim body too large')
+  // NIP-98's payload tag: the signature covers THIS body, so a header lifted
+  // from one claim — or coaxed out of an extension — never names another domain.
+  if (String(tagValue(evt, 'payload') || '').toLowerCase() !== await sha256Hex(raw)) {
+    return text(401, 'auth payload tag does not match the body')
+  }
+  let body
+  try { body = JSON.parse(new TextDecoder().decode(raw)) } catch { return text(400, 'body is not JSON') }
+  const domain = claimDomain(body?.domain)
+  if (!domain) return text(400, 'not a domain name')
+  if (servedHere(env, domain)) return servedAnswer()
+
+  const pubkey = auth.pubkey
+  const now = nowSecs()
+  let claims
+  try { claims = await claimRecords(env) } catch { return text(502, 'this host could not read its claims — ask again') }
+  const held = claims.find((record) => record.domain === domain) ?? null
+  const elsewhere = claims.filter((record) => record.domain !== domain)
+  const onePending = () => elsewhere.some((record) => unsettledBy(record, pubkey, now))
+    ? text(409, 'this key already has a claim pending — settle it first') : null
+
+  if (held) {
+    if (held.pubkey === pubkey || (held.contested ?? []).includes(pubkey)) return claimAnswer(held)
+    if (held.status === 'active') return text(409, 'this domain is claimed')
+    const refused = onePending()
+    if (refused) return refused
+    const contested = held.status === 'contested'
+    if (contested && !lapsed(held, now)) {
+      // One more key against it, while the list has room.
+      if ((held.contested ?? []).length >= CLAIM_CONTESTERS_MAX) return claimAnswer(held)
+      return recorded(env, { ...held, contested: [...(held.contested ?? []), pubkey] })
+    }
+    // Its nameservers may already have moved. A pending claim's holder proved
+    // control then, and nobody contests or takes it; whose a contested claim's
+    // nameservers were is the operator's call.
+    const zone = await cloudflare(env, 'GET', `/zones/${encodeURIComponent(held.zoneId)}`)
+    if (zone.ok && zone.result?.status === 'active') {
+      if (contested) return text(409, "this domain is contested — ask this host's operator")
+      const { failed } = await activateClaim(env, held)
+      return failed ?? text(409, 'this domain is claimed')
+    }
+    if (!zone.ok && zone.status !== 404) return cloudflareFailed('read the zone', zone)
+    if (!lapsed(held, now)) {
+      // Neither key is bound until the operator decides.
+      return recorded(env, { ...held, status: 'contested', contested: [pubkey], contestedAt: now })
+    }
+    if (zone.ok) {
+      // Lapsed: this key takes the claim and the zone it made — unless the
+      // holder moved the nameservers before Cloudflare looked. The proof names
+      // the account, not the key, so whoever held the claim then would win it.
+      const listed = nameserversOf(zone.result)
+      const nameservers = listed.length ? listed : held.nameservers ?? []
+      const delegated = await delegatedTo(domain, nameservers)
+      if (delegated === null) return text(502, "this domain's nameservers could not be read — ask again later")
+      if (delegated) return text(409, "this domain already points at this host — the claim stays its holder's")
+      return recorded(env, { v: 1, domain, pubkey, zoneId: held.zoneId, nameservers, status: 'pending', claimedAt: now })
+    }
+    // Lapsed, and its zone is gone: a fresh zone, below.
+  } else {
+    const refused = onePending()
+    if (refused) return refused
+    if (elsewhere.some((record) => withinZone(record.domain, domain) || withinZone(domain, record.domain))) {
+      return text(409, 'a claim already covers this name')
+    }
+  }
+
+  // Every claim still waiting holds a zone in the operator's account, lapsed
+  // or contested alike — so all of them count, and a lapsed one that never
+  // went live makes room.
+  const waiting = claims.filter((record) => record !== held && record.status !== 'active')
+  if (waiting.length >= claimPendingMax(env) && !await pruneLapsed(env, waiting, now)) {
+    return text(429, 'too many claims are pending here — try later')
+  }
+
+  const making = makeClaim(env, domain, pubkey, now, !held)
+  ctx?.waitUntil?.(making.catch(() => null))
+  return making
+}
+
+// GET /claim/<domain> — public; the only reading of the claims pool.
+async function readClaim(request, env, rawDomain) {
+  let decoded
+  try { decoded = decodeURIComponent(rawDomain) } catch { return text(400, 'not a domain name') }
+  const domain = claimDomain(decoded)
+  if (!domain) return text(400, 'not a domain name')
+  // Anyone may read a claim. A reader who signs is told whether it is theirs.
+  let reader = null
+  if (request.headers.has('authorization')) {
+    const auth = await verifyNip98(request, parseAuthEvent(request), 'GET')
+    if (!auth.ok) return text(401, auth.reason)
+    reader = auth.pubkey
+  }
+  let record = await claimRecord(env, domain)
+  if (!record) return text(404, 'no claim for this domain')
+  const answer = (current) => claimAnswer(current, reader)
+  // Served here by hand: the claim can never be bound, so nothing is asked.
+  if (servedHere(env, domain)) return servedAnswer()
+  // A host that takes no claims any more still answers what it holds; a
+  // contested claim waits on the operator.
+  if (!claimsConfigured(env) || record.status === 'contested') return answer(record)
+
+  const now = nowSecs()
+  const every = record.status === 'active' ? CLAIM_WIRE_SECS : CLAIM_LOOK_SECS
+  if (now - (Number(record.lookedAt) || 0) < every) return answer(record)
+  // The look is recorded before it is made; one that cannot be is not made.
+  record = { ...record, lookedAt: now }
+  if (!await writeClaim(env, record)) return answer(record)
+
+  if (record.status === 'active') {
+    // Re-assert the whole wiring. The claim is active whatever this says;
+    // what failed comes back on a later look, and a conflict is the operator's.
+    await wireClaim(env, record)
+    return answer(record)
+  }
+
+  const zone = await cloudflare(env, 'GET', `/zones/${encodeURIComponent(record.zoneId)}`)
+  if (!zone.ok) return cloudflareFailed('read the zone', zone)
+  if (zone.result?.status === 'active') {
+    const { failed, record: active } = await activateClaim(env, record)
+    return failed ?? answer(active)
+  }
+  if (!(now - (Number(record.checkedAt) || 0) < CLAIM_CHECK_SECS)) {
+    // Best effort: Cloudflare refuses a check it was asked for recently.
+    await cloudflare(env, 'PUT', `/zones/${encodeURIComponent(record.zoneId)}/activation_check`)
+    const nameservers = nameserversOf(zone.result)
+    record = { ...record, checkedAt: now, ...(nameservers.length ? { nameservers } : {}) }
+    await writeClaim(env, record)
+  }
+  return answer(record)
+}
+
 // ── host AI (the immediate-answer tier) ──────────────────────────────────────
 //
 // POST /ai/ask — the host FIELDS conversational requests so a participant can
@@ -2476,11 +3105,15 @@ async function aiAdmit(env, pubkey, estimate) {
 }
 
 /** Every key this host admitted: each zone's operator and every publisher
- *  bound to a site on it (the wrangler var and the operators' signed records). */
+ *  bound to a site on it (the wrangler var and the operators' signed records).
+ *  A claimed domain binds its claimant to publish, not to spend the
+ *  operator's AI: a claim is self-service, and this allowance is the
+ *  operator's to give. */
 async function aiAdmitted(env) {
   const scoped = await bindingsEnv(env)
   const keys = new Set(siteOperators(env).map(([, pubkey]) => pubkey))
   for (const site of Object.values(siteBindings(scoped))) {
+    if (site?.[CLAIMED]) continue
     for (const publisher of site?.publishers ?? []) keys.add(String(publisher?.pubkey || '').toLowerCase())
   }
   return keys
@@ -2581,7 +3214,7 @@ async function aiAsk(request, env) {
 // ── router ───────────────────────────────────────────────────────────────────
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const requestUrl = new URL(request.url)
     const { pathname } = requestUrl
     const method = request.method
@@ -2779,8 +3412,11 @@ export default {
         }
         // A front-door apex also serves the shim's OWN bytes (its pinned
         // bootstrap, its packages), which live with the card, not in the heap.
+        // A claimed apex is one too; only a miss on a host the var does not
+        // know asks the claims.
         if (heap.status === 404 && (siteBindings(env)[requestUrl.hostname.toLowerCase()]?.frontDoor
-          || servesHostDoor(env, requestUrl.hostname))) {
+          || servesHostDoor(env, requestUrl.hostname)
+          || await claimedFrontDoor(env, requestUrl.hostname))) {
           return serveFrontDoor(request, env)
         }
         return heap
@@ -2843,6 +3479,18 @@ export default {
     // Host AI — the immediate conversational tier (see aiAsk above).
     if (!site && pathname === '/ai/ask') {
       if (method === 'POST') return aiAsk(request, env)
+      return text(405, 'method not allowed')
+    }
+
+    // Claiming a domain (see postClaim / readClaim above): the claim on the
+    // write face, its public reading beside it.
+    if (!site && pathname === '/claim') {
+      if (method === 'POST') return postClaim(request, env, ctx)
+      return text(405, 'method not allowed')
+    }
+    const claimPath = pathname.match(/^\/claim\/([^/]+)$/)
+    if (!site && claimPath) {
+      if (method === 'GET') return readClaim(request, env, claimPath[1])
       return text(405, 'method not allowed')
     }
 

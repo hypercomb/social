@@ -54,13 +54,25 @@ The read and the sparse write are already built, for the properties record:
      time of its latest revision) goes to the repo;
    - where the other copy differed, its value becomes **that alias's
      override** — so both places look exactly as they did;
-   - both copies' layers are kept in `canonical:variants`, so the losing value
-     is a picture you can go back to, not a loss.
+   - the losing value is never lost: it stays the other alias's override, and
+     the replaced copy stays one step back in that place's history.
+
+   Built (`gatheredRepo` + `mergeCopies` in `gather-link.service.ts`): keys only
+   the older copy has also fill the repo, and the page's copy, once replaced by
+   a reference, gets exactly its overrides (the writer's `replace` option).
 
 4. **The history reader.** A read over `canonical:variants/<sign(name)>` plus
    the repo's and aliases' revisions lists every picture and properties set
    the name has had, newest first. Choosing one writes it to the repo, or —
    with *only here* — as an override.
+
+   Built (step 5, pictures): `editor/picture-history.ts` lists this alias's
+   revisions, then the repo's, then the kept variants — newest first, one entry
+   per picture, read only (`openPool`, never creating a pool). The editor's
+   **earlier pictures** source shows them as thumbnails; choosing one loads it
+   as a new picture, and the save follows the ordinary rule — it sinks to the
+   repo, or stays at the alias when the alias owns its picture or the picture
+   is set to *only here*.
 
 ## Turning things off — three gestures, none of them a wipe
 
@@ -83,6 +95,15 @@ alias may override it. A pin on an alias hides; a pin on the repo locks.
 
 ### Seeing the layers
 
+**Built (step 4):** `propertyLayers` / `editorWrites` / `ownAfterInherit` in
+`editor/tile-properties.ts`; the session holds `layers` and pending `choices`
+(`tile-editor.service.ts`); the drone reads the layers on open (never from a
+cold read; none on a top-level tile, which IS its repo) and saves the choices
+— *only here* through `{ onlyHere }`, which keeps a value even when it equals
+the repo's; *inherit again* by replacing the alias's own record without those
+keys and pins; *hide here* as a cleared key. Fields: picture, border, name
+(hideText), fill, link. Strings `editor.layer.*` in all fourteen catalogs.
+
 The editor shows, per property, where its value comes from — **inherited**
 (from the repo), **overridden here**, **hidden here**, or **locked** by the repo
 — each in its own colour role (tool windows name roles, never colours), with
@@ -102,9 +123,12 @@ they always read.
 
 ## Decisions to make while building
 
-- **File time.** Revision markers carry `at`, but it is `0` on much of the
-  existing data. Proposal: the marker file's own modified time as the
-  fallback, and `at` stamped on every new marker. Decide before gather lands.
+- **File time — DECIDED (step 3).** A copy's time is when its CURRENT head was
+  written (the leaf — earlier positions belong to history mode), read from
+  history's marker list, which reports the marker file's modified time. Where
+  the store keeps no time (`0`, as a packed store can), or the two are equal,
+  the **group's copy wins** the repo. Marker bytes are not changed to carry
+  `at`: their shape is read in several places, and the gather does not need it.
 - **Granularity.** Per key inside the properties record (picture separately
   from border) — this matches the existing cascade. Slots outside
   `properties` (notes, contacts, decorations) stay per place for now.

@@ -375,7 +375,7 @@ provider id `'local'` when it is machine-local, has an endpoint, and is ready;
 the bridge trusts any loopback page carrying the opt-in. Per-provider activation
 defaults to ON.
 
-**Nobody is asked when a behaviour arrives.** A bee replicated into a hive
+**Nobody is asked when a behaviour arrives.** *(Resolved 2026-10-02 — see Owed item 12.)* A bee replicated into a hive
 self-registers, and if its queen declares `machine` the verb becomes callable by
 every trusted local model. There is no roster gate between "installed" and
 "machine-callable". The old `CALLABLE_FORMS` drifted toward less than exists —
@@ -475,12 +475,34 @@ three doors inherit it, and to grow a principal.
    land regardless of caller. Still owed on top — `undo.queen.ts` reports the
    number ASKED FOR rather than the number that moved, so it overstates when
    the walk hits the floor; that file is untracked work from another session.
-5. **Make the fire-and-forget six honest**, using `create.queen`'s
-   accept/complete pattern. Six verbs, one known-good template.
-6. **Teach the catalogue the participant's nouns** — say "keyword / tag /
-   author pheromone", and state `/keyword`'s global registry write.
-7. **Order the catalogue by reach**, so `/hide` precedes `/remove`.
-8. **Render the catalogue to the participant** before any grant exists to give.
+5. ~~**Make the fire-and-forget six honest**~~ **Resolved 2026-10-02.** The
+   acknowledgement half had landed piecemeal (copy, cut, paste, hide await the
+   worker's `complete`; undo and redo await the cursor). What remained was the
+   receipt itself: a word that did NOTHING still resolved clean, so a machine
+   read "ran". Now each throws when nothing happened — `/paste` of an empty
+   clipboard or with every item skipped, `/hide` with nothing hidden, `/copy`
+   and `/cut` of a name the page does not hold (or with no worker listening),
+   `/undo`/`/redo` with nothing left to step, `/keyword` whose named tile got
+   no tag, and `/remove` of a name the page never held or whose commit was
+   refused (`removeTilesAt` had discarded both). At the keyboard the throw is
+   an activity line (`#behaviourDidNotRun`), not an unhandled rejection the
+   break-repair loop would file as a crash — which `/remove` already caused
+   for a cancelled confirm. `commands/honest-receipts.spec.ts`.
+6. ~~**Teach the catalogue the participant's nouns**~~ **Resolved 2026-10-02,
+   corrected.** The audit asked to call tags pheromones; doctrine since says
+   they are not (`pheromones.md`: an authored, signed interest-signal, the
+   `/deposit` word). So `/keyword`'s catalogue entry now says the true thing a
+   model needs: a tag is a keyword, NOT a pheromone, pheromones are the
+   participant's to deposit with `/deposit` — enough that "you asked for a
+   pheromone" no longer ends in "the hive has none". It also states the
+   hive-wide tag-list write, and its forms show the `~` removal.
+7. ~~**Order the catalogue by reach**~~ **Resolved 2026-10-02.**
+   `machineCatalogue` lists additive, then editing, then destructive, census
+   order kept within a rung, so `/hide` is read before `/remove`.
+8. ~~**Render the catalogue to the participant**~~ **Resolved 2026-10-02.**
+   `/grant verbs` shows, one activity line each, the very catalogue a model is
+   taught under the current ceiling — the same renderer, so what is read
+   cannot drift from what is taught. A fuller surface (a panel) is not built.
 9. ~~**Judge the verbs the remote door does not read as a head** — the op
    after a bracket, and the `~` removal sigil.~~ **Resolved 2026-10-01**:
    `dispatchedVerbsOf`
@@ -518,12 +540,49 @@ three doors inherit it, and to grow a principal.
     word, and read ONLY after a door's lookup missed. Live always wins: a word
     given back, or aliased by the participant, runs; its old record is never
     read. A record can explain a missing word and cannot hide a present one.
-11. **The bridge does not run a behaviour's own `refuse`** (found by the
-    declarations audit, 2026-10-01). Only the model channel's parser calls it,
-    so over the bridge the rules a behaviour states for machines do not apply:
-    `/module commit` ("publishes; only the participant says it"), `/language
-    offer`, clearing a title with `/title x =`, `/copy` over a held cut. The
-    gate there reads reach and scope alone. Declarations bound the forms their
-    `refuse` admits — their contract — so the fix belongs at the door: run the
-    resolved entry's `refuse` on the slash head's arguments, as the model
-    channel does. Owed.
+11. ~~**The bridge does not run a behaviour's own `refuse`**~~ (found by the
+    declarations audit) **Resolved 2026-10-01.** Only the model channel's
+    parser called it, so over the bridge `/module commit` ("publishes; only the
+    participant says it"), `/language offer`, clearing a title with
+    `/title x =` and `/copy` over a held cut all ran on reach and scope alone.
+    The door now reads each call with the arguments its behaviour will be
+    handed (`dispatchedCallsOf` in remote-verbs.ts: the executor's split for a
+    slash head, the words after a registry-bound bracket op, nothing for a
+    view word, the reading's own args for prose) and, once the gate admits,
+    runs that behaviour's `refuse` on them. Where a verb is handed no argument
+    language of its own — a built-in bracket op acting on the bracket's names,
+    a `~` sigil — it is judged for reach and scope alone, as before.
+12. ~~**Nobody is asked when a behaviour arrives.**~~ **Resolved 2026-10-02 —
+    secure by default (jwize).** A `machine` block now only OFFERS a verb to
+    models; a model may say it once the participant grants it, per verb, as
+    declared when granted (`MachineGrant.granted`, stored beside the ceiling
+    under `hc:machine-roster`). Nothing is granted until they do — including
+    verbs already installed — and a module update that widens a declaration
+    lapses its grant until it is given again. `admitMachineCall` asks this for
+    caller `model` only: the bridge is the participant's own tool. The words:
+    `/grant allow <verb>… | all`, `/grant deny <verb>… | all`; `/grant verbs`
+    names what is offered but not taught. Every model path reads the grant
+    through `currentMachineGrant()`, so the model channel, the catalogue, the
+    chat window's checks and the bridge-tier ask all follow it.
+13. **The rest of the grant-layer list, checked against the code (2026-10-02).**
+    - *Abort does not stop work already launched* — **covered.** The plan
+      runner never starts the next line after Stop, and since item 5 every
+      machine verb awaits its own work, so no detached continuation outlives
+      its action. The line in flight finishes: cutting a commit in half would
+      be worse than letting it land.
+    - *Reads need separate scoping* — **covered by later work**
+      (`llm-hive-access.ts`, anatomy-context-need.md §4): every keyed provider
+      is off until granted per provider, with a character budget; only the
+      participant's own local model reads freely. The existence oracle a
+      granted additive verb offers stays, now bounded by the roster.
+    - *The unit of authorization is not the unit of atomicity* — **open, by
+      size.** A failure stops the tail and the receipt names the completed
+      prefix; a true rollback is a forward-commit revert across pages.
+    - *There is no single seam* — **one door was found and closed.** Every
+      caller that runs a behaviour was traced: keyboard and bridge (command
+      line), model channel (chat window), quick menu (the participant's hand),
+      and the WORKFLOW RUNNER, which ran each step "as if typed" with nobody
+      asked. Right for the participant's own workflow; wrong for a step inside
+      a branch adopted from a peer — a stranger's words, run unattended. Such a
+      step is now judged as a model's line (`peerStepRefusal`,
+      workflow-runner.drone.ts): declaration, grant, ceiling, own refuse.

@@ -5,9 +5,9 @@
 
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { READ_FENCE_LANG, WRITE_FENCE_LANG, type StretchChunk } from '@hypercomb/core'
+import { DO_FENCE_LANG, MACHINE_ROSTER_KEY, READ_FENCE_LANG, WRITE_FENCE_LANG, grantedVerbOf, writeMachineRoster, type HypercombBehaviour, type StretchChunk } from '@hypercomb/core'
 import { HypercombHiveTreeReader } from './hive-tree-reader.js'
-import { agentTurn, runAgentTurn, type AgentQueue, type AgentRouter, type AgentVersions } from './agent-turn.js'
+import { agentTurn, runAgentTurn, type AgentDoer, type AgentQueue, type AgentRouter, type AgentVersions } from './agent-turn.js'
 
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex')
 
@@ -167,5 +167,50 @@ describe('a turn with no window', () => {
     expect(shown.join('')).not.toContain('```')
     expect(shown.join('').replace(/\s+/g, ' ')).toBe('Reading. All read.')
     expect(step.value.answer).toBe('Reading.\n\nAll read.')
+  })
+
+  it('holds a change that leaves the machine for a hand, whatever the policy', async () => {
+    const h = held()
+    const entries: readonly HypercombBehaviour[] = [
+      { name: 'create', machine: { forms: '<name>', example: '/create roadmap', reach: 'additive', scope: 'page' } },
+      { name: 'hide', machine: { forms: '<tile>', example: '/hide drafts', reach: 'editing', scope: 'network' } },
+    ]
+    // Secure by default: a model may use only the verbs the participant granted.
+    localStorage.setItem(MACHINE_ROSTER_KEY, writeMachineRoster(entries.map(grantedVerbOf)))
+    const ran: string[] = []
+    const doer: AgentDoer = { entries: () => entries, executePublicCanonical: async (command, args) => { ran.push(`${command} ${args}`) } }
+    const asked: { lines: readonly string[]; leaves?: boolean; foreign?: boolean }[] = []
+    const queue: AgentQueue = { request: ask => { asked.push(ask); return { id: String(asked.length), decision: Promise.resolve('run') } }, settle: () => undefined }
+    const { router } = scripted([
+      () => block(DO_FENCE_LANG, 'create roadmap'),
+      () => block(DO_FENCE_LANG, 'hide drafts'),
+      () => 'Both ran.',
+    ])
+    await runAgentTurn({ request: 'make a roadmap and hide the drafts' }, { router, reader: h.reader, versions: h.versions, queue, doer, readsFreely: () => true })
+    expect(asked.map(a => [a.lines.join(' '), a.leaves === true])).toEqual([['/create roadmap', false], ['/hide drafts', true]])
+    expect(ran).toEqual(['create roadmap', 'hide drafts'])
+    localStorage.removeItem(MACHINE_ROSTER_KEY)
+  })
+
+  it('sends back once an answer that claims a change nothing ran', async () => {
+    const h = held()
+    const { router, calls } = scripted([
+      () => 'The tile is now created.',
+      () => 'Nothing ran; I did not create it.',
+    ])
+    const result = await runAgentTurn({ request: 'create a tile called plans' }, { router, reader: h.reader, versions: h.versions, readsFreely: () => true })
+    expect(calls[1]!.messages.at(-1)!.content).toContain('Nothing ran in this turn')
+    expect(result.rounds).toBe(2)
+  })
+
+  it('sends back once an answer about tiles nothing read', async () => {
+    const h = held()
+    const { router, calls } = scripted([
+      () => 'The roadmap tile holds three items.',
+      () => 'I could not read it.',
+    ])
+    await runAgentTurn({ request: 'what is in /projects/roadmap?' }, { router, reader: h.reader, versions: h.versions, readsFreely: () => true })
+    expect(calls[1]!.messages.at(-1)!.content).toContain('/projects/roadmap')
+    expect(calls).toHaveLength(2)
   })
 })

@@ -8,11 +8,29 @@
 //   auto        the kinds the participant ticked run on arrival; the rest wait
 //   everything  all of it runs on arrival
 //
-// ONE EXCEPTION NO POLICY LIFTS: a READ from a provider the participant has
-// not let read the hive (llm-hive-access.ts) always waits, and offers
-// "Always" — which is that same grant, given from where the question arose.
-// Reads leave the machine. The policy is about how much to watch; the grant
-// is about what may leave; only the grant answers a privacy question.
+// IN THE PARTICIPANT'S OWN DOMAIN A CHANGE RUNS (jwize, 2026-10-02: "you are
+// actively in your own domain when you are running it"). Everything here is
+// client-side; history takes any of it back, and nothing reaches another
+// hive unless a host replicates it and a reader follows. So every kind runs
+// on arrival by default — the participant may tick kinds off to watch them.
+//
+// THREE HOLDS NO POLICY LIFTS, and they are one rule: what leaves the
+// machine, or whose words are not the participant's, waits for a hand.
+//
+//   needsGrant  a READ from a provider the participant has not let read the
+//               hive (llm-hive-access.ts). It offers "Always" — that same
+//               grant, given from where the question arose. Reads leave the
+//               machine; only the grant answers a privacy question.
+//   leaves      a CHANGE that leaves the machine — a behaviour declaring
+//               `scope: 'network'` (a signed publish, a peer, a host), or one
+//               that never said. Approval downstream protects the reader,
+//               never the participant's key.
+//   foreign     a CHANGE asked for in a turn that read someone else's words —
+//               a tile from a peer's branch, or one carried out of it. The model acts
+//               with the participant's authority; the words it acts on were
+//               not theirs to give.
+//
+// A trusted conversation (the chat window's) lifts none of the three either.
 //
 // Requests live for the session — the conversation's turns are the record.
 // The policy is device-local and sticky, like the grant it sits beside.
@@ -44,6 +62,11 @@ export type ExecutionRequest = {
   readonly lines: readonly string[]
   /** A read from a provider not granted the hive. Never runs by policy. */
   readonly needsGrant: boolean
+  /** A change that leaves the machine. Never runs by policy. */
+  readonly leaves?: boolean
+  /** A change asked for after the turn read someone else's words. Never
+   *  runs by policy. */
+  readonly foreign?: boolean
   readonly at: number
   readonly state: ExecutionState
   /** Ran on arrival because of the policy, not a press. */
@@ -61,6 +84,10 @@ export type ExecutionAsk = {
   readonly kind: ExecutionKind
   readonly lines: readonly string[]
   readonly needsGrant: boolean
+  /** A change carrying a line that leaves the machine (core MachineScope). */
+  readonly leaves?: boolean
+  /** A change asked for in a turn that read someone else's words. */
+  readonly foreign?: boolean
   /** For a read: what each line RESOLVED to (`read /projects/roadmap`,
    *  `read <sig>`), never the bare relative grammar — "read here" on another
    *  page is a different read. What an allowed read is remembered by. */
@@ -71,9 +98,10 @@ export type ExecutionAsk = {
 
 const MODE_KEY = 'hc:execution:mode'
 const AUTO_KEY = 'hc:execution:auto'
-/** Today's behaviour, kept: a granted provider reads freely, changes wait. */
+/** In the participant's own domain everything runs; the holds still wait. A
+ *  device that ever chose its kinds keeps its choice. */
 const DEFAULT_MODE: ExecutionMode = 'auto'
-const DEFAULT_AUTO: readonly ExecutionKind[] = ['read']
+const DEFAULT_AUTO: readonly ExecutionKind[] = EXECUTION_KINDS
 /** Settled rows kept for the window; waiting rows are never dropped. */
 const KEEP_SETTLED = 40
 const OUTCOME_MAX = 240
@@ -141,9 +169,10 @@ export class ExecutionQueueStore extends EventTarget {
   /** Newest first. */
   requests(): readonly ExecutionRequest[] { return this.#requests }
 
-  /** Would a request of this kind run the moment it arrives? */
-  runsByPolicy(kind: ExecutionKind, needsGrant: boolean): boolean {
-    if (needsGrant) return false
+  /** Would a request of this kind run the moment it arrives? `held` is a
+   *  change that leaves the machine or follows someone else's words. */
+  runsByPolicy(kind: ExecutionKind, needsGrant: boolean, held = false): boolean {
+    if (needsGrant || held) return false
     if (this.#mode === 'everything') return true
     return this.#mode === 'auto' && this.#auto.has(kind)
   }
@@ -159,7 +188,9 @@ export class ExecutionQueueStore extends EventTarget {
     const allowed = this.#allowedFor(providerId)
     const remembered = ask.kind === 'read' && ask.needsGrant && keys.length > 0
       && keys.every(key => allowed.has(key))
-    const auto = !ask.forceReview && (remembered || this.runsByPolicy(ask.kind, ask.needsGrant))
+    const leaves = ask.leaves === true
+    const foreign = ask.foreign === true
+    const auto = !ask.forceReview && (remembered || this.runsByPolicy(ask.kind, ask.needsGrant, leaves || foreign))
     const entry: ExecutionRequest = {
       id,
       convoId: String(ask.convoId ?? ''),
@@ -168,6 +199,8 @@ export class ExecutionQueueStore extends EventTarget {
       kind: ask.kind,
       lines: [...ask.lines],
       needsGrant: ask.needsGrant,
+      ...(leaves ? { leaves: true } : {}),
+      ...(foreign ? { foreign: true } : {}),
       at: Date.now(),
       state: auto ? 'running' : 'waiting',
       auto,
@@ -258,7 +291,8 @@ export class ExecutionQueueStore extends EventTarget {
   /** A looser policy releases what it now covers. */
   #releaseCovered(): void {
     for (const entry of this.#requests) {
-      if (entry.state === 'waiting' && !entry.forceReview && this.runsByPolicy(entry.kind, entry.needsGrant)) this.decide(entry.id, 'run')
+      if (entry.state === 'waiting' && !entry.forceReview
+        && this.runsByPolicy(entry.kind, entry.needsGrant, entry.leaves === true || entry.foreign === true)) this.decide(entry.id, 'run')
     }
   }
 

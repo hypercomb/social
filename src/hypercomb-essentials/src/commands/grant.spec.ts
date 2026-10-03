@@ -78,15 +78,80 @@ describe('the word itself', () => {
   it('writes a ceiling the gate then reads back', async () => {
     const bee = new GrantQueenBee()
     await (bee as unknown as { execute(a: string): Promise<void> }).execute('none')
-    expect(currentMachineGrant()).toEqual({ reach: 'none', scope: DEFAULT_MACHINE_GRANT.scope })
+    expect(currentMachineGrant()).toMatchObject({ reach: 'none', scope: DEFAULT_MACHINE_GRANT.scope })
     await (bee as unknown as { execute(a: string): Promise<void> }).execute('destructive hive')
-    expect(currentMachineGrant()).toEqual({ reach: 'destructive', scope: 'hive' })
+    expect(currentMachineGrant()).toMatchObject({ reach: 'destructive', scope: 'hive' })
   })
 
   it('leaves the ceiling untouched when the line is refused', async () => {
     localStorage.setItem(MACHINE_GRANT_KEY, 'additive/tile')
     const bee = new GrantQueenBee()
     await (bee as unknown as { execute(a: string): Promise<void> }).execute('readonly')
-    expect(currentMachineGrant()).toEqual({ reach: 'additive', scope: 'tile' })
+    expect(currentMachineGrant()).toMatchObject({ reach: 'additive', scope: 'tile' })
+  })
+})
+
+describe('reading what a grant admits, before giving it', () => {
+  // A GRANT IS A THING A PARTICIPANT MUST BE ABLE TO READ (surface audit, item
+  // 8): `/grant verbs` shows the very catalogue a model is taught — the same
+  // renderer — so what is read cannot drift from what is taught.
+  const run = async (args: string): Promise<string[]> => {
+    const lines: string[] = []
+    const { EffectBus } = await import('@hypercomb/core')
+    const off = EffectBus.on<{ message: string }>('activity:log', payload => { lines.push(payload.message) })
+    lines.length = 0   // activity:log replays its last value to a new subscriber
+    try { await (new GrantQueenBee() as unknown as { execute(a: string): Promise<void> }).execute(args) } finally { off() }
+    return lines
+  }
+  const census = [
+    { name: 'remove', description: 'Remove tiles', machine: { forms: '<tile>', example: '/remove drafts', reach: 'destructive', scope: 'page' } },
+    { name: 'hide', description: 'Hide tiles', machine: { forms: '<tile>', example: '/hide drafts', reach: 'editing', scope: 'network' } },
+    { name: 'create', description: 'Make a tile', machine: { forms: '<name>', example: '/create roadmap', reach: 'additive', scope: 'page' } },
+  ]
+  registrations.set('@diamondcoreprocessor.com/SlashBehaviourDrone', { entries: () => census })
+
+  it('secure by default: a behaviour offers, and nothing is taught until it is granted', async () => {
+    localStorage.setItem(MACHINE_GRANT_KEY, 'destructive/network')
+    localStorage.removeItem('hc:machine-roster')
+    const lines = await run('verbs')
+    expect(lines[0]).toBe('Grant — under destructive at the network, a model is taught 0 verbs')
+    expect(lines[1]).toBe('Grant — offered but not taught: /remove /hide /create (/grant allow <verb>, or raise the ceiling)')
+  })
+
+  it('grants verb by verb, as declared now, and takes grants back', async () => {
+    localStorage.setItem(MACHINE_GRANT_KEY, 'destructive/network')
+    localStorage.removeItem('hc:machine-roster')
+    await run('allow create hide')
+    expect(currentMachineGrant().granted?.map(verb => verb.name).sort()).toEqual(['create', 'hide'])
+    expect(currentMachineGrant().granted?.find(verb => verb.name === 'create')).toEqual({ name: 'create', reach: 'additive', scope: 'page', forms: '<name>' })
+    await run('deny hide')
+    expect(currentMachineGrant().granted?.map(verb => verb.name)).toEqual(['create'])
+    // A word no behaviour offers is refused, not recorded for whatever claims it next.
+    expect(await run('allow frobnicate')).toEqual(['Grant — no behaviour offers /frobnicate to models; /grant verbs shows what is offered'])
+    expect(currentMachineGrant().granted?.map(verb => verb.name)).toEqual(['create'])
+    await run('deny all')
+    expect(currentMachineGrant().granted).toEqual([])
+  })
+
+  it('shows the taught lines under the current ceiling, gentlest first', async () => {
+    localStorage.setItem(MACHINE_GRANT_KEY, 'destructive/network')
+    await run('allow all')
+    const lines = await run('verbs')
+    expect(lines[0]).toBe('Grant — under destructive at the network, a model is taught 3 verbs:')
+    expect(lines.slice(1).map(line => line.split(' ')[0])).toEqual(['/create', '/hide', '/remove'])
+    expect(lines[1]).toBe('/create <name> - Make a tile. Example: /create roadmap')
+  })
+
+  it('a verb the ceiling refuses is not shown, because it is not taught', async () => {
+    localStorage.setItem(MACHINE_GRANT_KEY, 'editing/network')
+    const lines = await run('verbs')
+    expect(lines.filter(line => line.startsWith('/')).map(line => line.split(' ')[0])).toEqual(['/create', '/hide'])
+    // Granted, but past the ceiling: named, so the participant knows why.
+    expect(lines[lines.length - 1]).toBe('Grant — offered but not taught: /remove (/grant allow <verb>, or raise the ceiling)')
+  })
+
+  it('under none, there is nothing to show', async () => {
+    localStorage.setItem(MACHINE_GRANT_KEY, 'none/network')
+    expect(await run('verbs')).toEqual(['Grant — a machine may say nothing here, so a model is taught no verbs'])
   })
 })

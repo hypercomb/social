@@ -37,7 +37,8 @@
 //   record*:
 //     u32 LE bodyLen                  (kind + keyLen field + key + value)
 //     body:
-//       u8  kind                      (put/tombstone x content/marker/pool)
+//       u8  kind                      (put/tombstone x content/marker/pool,
+//                                      and marker-time)
 //       u16 LE keyLen
 //       key bytes                     (content: 32 sig bytes;
 //                                      marker: 32 bag + 4 BE index;
@@ -50,6 +51,19 @@
 // torn bytes. Tombstones exist because markers and pool members are REAL
 // deletes (they are not layers and not in the history graph), while content
 // is removed only by explicit sweep from the garbage collector.
+//
+// ## A marker's create date (marker-time records)
+//
+// A marker is immutable: written once, its create date is part of what it is
+// and differs for every revision. The log stored the marker's bytes and index
+// but never the time, so the facade could only report 0 and every revision
+// read as 1970 (the housekeeping manager's report, 2026-10-01). A MarkerTime
+// record — same key as its marker, value = the write time as a little-endian
+// f64 of epoch milliseconds — is appended beside the FIRST write of each
+// marker and never again: a marker's create date does not move. The marker's
+// own bytes are untouched. An older reader skips the kind (unknown kinds are
+// ignored, below); markers written before it existed have no time, and say
+// so. History is never published, so this lives and dies with the local log.
 //
 // ## Internal representation is not the protocol
 //
@@ -120,6 +134,8 @@ const enum Kind {
   Content = 1,
   Marker = 2,
   Pool = 3,
+  /** The create date of the marker with the same key — see the header. */
+  MarkerTime = 4,
   TombMarker = 18,
   TombPool = 19,
   /** Only the garbage collector sweeps content — see `removeContent`. */
@@ -186,6 +202,8 @@ interface ValueRef {
 export interface PackedEntry {
   name: string
   directory: boolean
+  /** A marker's create date, epoch ms — absent when the log never had one. */
+  at?: number
 }
 
 export interface PackedStats {
@@ -210,6 +228,8 @@ export class PackedStoreEngine {
   readonly #content = new Map<string, ValueRef>()
   /** bag sig hex -> (index -> value location). */
   readonly #markers = new Map<string, Map<number, ValueRef>>()
+  /** bag sig hex -> (index -> create date, epoch ms). */
+  readonly #markerTimes = new Map<string, Map<number, number>>()
   /** pool sig hex -> (member name -> value location) */
   readonly #pools = new Map<string, Map<string, ValueRef>>()
 
@@ -261,7 +281,7 @@ export class PackedStoreEngine {
       if (3 + keyLen > bodyLen) break
       const key = body.subarray(3, 3 + keyLen)
       const value: ValueRef = { offset: bodyAt + 3 + keyLen, length: bodyLen - 3 - keyLen }
-      engine.#apply(kind, key, value)
+      engine.#apply(kind, key, value, body.subarray(3 + keyLen))
       at = crcAt + 4
     }
     engine.#end = at
@@ -269,7 +289,7 @@ export class PackedStoreEngine {
   }
 
   /** Route one parsed (or freshly appended) record into the index. */
-  #apply(kind: number, key: Uint8Array, value: ValueRef): void {
+  #apply(kind: number, key: Uint8Array, value: ValueRef, raw?: Uint8Array): void {
     switch (kind) {
       case Kind.Content: {
         const sig = bytesToHex(key)
@@ -296,10 +316,24 @@ export class PackedStoreEngine {
         map.set(index >>> 0, value)
         break
       }
+      case Kind.MarkerTime: {
+        if (key.length !== 36 || value.length !== 8) break
+        const bag = bytesToHex(key.subarray(0, 32))
+        const index = ((key[32] << 24) | (key[33] << 16) | (key[34] << 8) | key[35]) >>> 0
+        const bytes = raw ?? this.#read(value)
+        const at = new DataView(bytes.buffer, bytes.byteOffset, 8).getFloat64(0, true)
+        if (!Number.isFinite(at) || at <= 0) break
+        let times = this.#markerTimes.get(bag)
+        if (!times) this.#markerTimes.set(bag, (times = new Map()))
+        // The FIRST time a marker was written is its create date.
+        if (!times.has(index)) times.set(index, at)
+        break
+      }
       case Kind.TombMarker: {
         const bag = bytesToHex(key.subarray(0, 32))
         const index =
           ((key[32] << 24) | (key[33] << 16) | (key[34] << 8) | key[35]) >>> 0
+        this.#markerTimes.get(bag)?.delete(index)
         const map = this.#markers.get(bag)
         const prior = map?.get(index)
         if (prior) this.#garbageBytes += prior.length
@@ -357,7 +391,7 @@ export class PackedStoreEngine {
 
     const valueAt = this.#end + 4 + 3 + key.length
     this.#end += record.length
-    this.#apply(kind, key, { offset: valueAt, length: value.length })
+    this.#apply(kind, key, { offset: valueAt, length: value.length }, value)
   }
 
   #read(ref: ValueRef): Uint8Array {
@@ -432,9 +466,10 @@ export class PackedStoreEngine {
 
   /** Write a marker at a specific index (restore semantics: preserve, never
    *  renumber). Refuses to overwrite an occupied index. */
-  putMarkerAt(bagHex: string, index: number, bytes: Uint8Array): boolean {
+  putMarkerAt(bagHex: string, index: number, bytes: Uint8Array, at: number = Date.now()): boolean {
     if (this.#markers.get(bagHex)?.has(index)) return false
     this.#append(Kind.Marker, this.#markerKey(bagHex, index), bytes)
+    this.#stampMarker(bagHex, index, at)
     return true
   }
 
@@ -450,6 +485,20 @@ export class PackedStoreEngine {
       if (same) return
     }
     this.#append(Kind.Marker, this.#markerKey(bagHex, index), bytes)
+    this.#stampMarker(bagHex, index, Date.now())
+  }
+
+  /** A marker's create date, epoch ms, or undefined when the log has none. */
+  markerTime(bagHex: string, index: number): number | undefined {
+    return this.#markerTimes.get(bagHex)?.get(index)
+  }
+
+  /** Record a marker's create date once — a rewrite never moves it. */
+  #stampMarker(bagHex: string, index: number, at: number): void {
+    if (!Number.isFinite(at) || at <= 0 || this.#markerTimes.get(bagHex)?.has(index)) return
+    const value = new Uint8Array(8)
+    new DataView(value.buffer).setFloat64(0, at, true)
+    this.#append(Kind.MarkerTime, this.#markerKey(bagHex, index), value)
   }
 
   getMarker(bagHex: string, index: number): Uint8Array | null {
@@ -521,8 +570,10 @@ export class PackedStoreEngine {
    *  together, since a colliding address is a bag and a pool at once. */
   dirEntries(sigHex: string): PackedEntry[] {
     const out: PackedEntry[] = []
+    const times = this.#markerTimes.get(sigHex)
     for (const index of this.markerIndices(sigHex)) {
-      out.push({ name: markerFilename(index), directory: false })
+      const at = times?.get(index)
+      out.push({ name: markerFilename(index), directory: false, ...(at ? { at } : {}) })
     }
     for (const name of this.poolMembers(sigHex)) {
       out.push({ name, directory: false })
@@ -582,6 +633,8 @@ export class PackedStoreEngine {
     for (const [bag, map] of this.#markers) {
       for (const index of [...map.keys()].sort((a, b) => a - b)) {
         fresh.#append(Kind.Marker, fresh.#markerKey(bag, index), this.#read(map.get(index)!))
+        const at = this.#markerTimes.get(bag)?.get(index)
+        if (at) fresh.#stampMarker(bag, index, at)
       }
     }
     for (const [pool, map] of this.#pools) {
