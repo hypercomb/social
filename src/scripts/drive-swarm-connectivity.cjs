@@ -70,8 +70,8 @@ async function newClient(browser, label, zone = { room: ROOM, secret: SECRET, re
   const ctx = await browser.newContext()
   // Never let the dev server's live-reload client into a harness page. The
   // source tree is shared with other live sessions; every rebuild reloads the
-  // page, and a refresh lands PRIVATE — the join evaporates mid-scenario and
-  // reads as a dead swarm. Aborting the module is not an option — the dev
+  // page, and a reload mid-scenario re-runs the boot under the harness's feet
+  // (it used to land PRIVATE and read as a dead swarm). Aborting the module is not an option — the dev
   // bundle's entry imports injectQuery from it — so serve an inert stub.
   await ctx.route('**/@vite/client*', r => r.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const injectQuery = (url) => url; export const createHotContext = () => ({ accept() {}, dispose() {}, prune() {}, on() {}, send() {}, invalidate() {} }); export function updateStyle() {}; export function removeStyle() {}' }))
   // Seed the zone BEFORE any page script runs, on every navigation.
@@ -513,7 +513,8 @@ async function main() {
   check('clients have distinct identities', !!pkA && !!pkB && pkA !== pkB,
     pkA === pkB ? 'same pubkey — contexts are not isolated' : null)
 
-  // A refresh must land private. Measured as SWARM SILENCE — no zone sig,
+  // A fresh tab must land private (a reload keeps the TAB's join, a new tab
+  // never inherits one). Measured as SWARM SILENCE — no zone sig,
   // no subscriptions — not as "no socket": the feedback channel legitimately
   // raises the mesh socket at boot (persist=false, feedback-channel.drone
   // #ensureActive), so an open socket says nothing about whether this hive

@@ -5,6 +5,11 @@
 // served from a real domain. See hypercomb-shared/core/quiet-console.ts.
 import '@hypercomb/shared/core/quiet-console'
 
+// SECOND: swarm membership resumes from THIS tab's session (a reload keeps the
+// join, a new tab boots private) before any drone samples the flag — dev
+// imports its drones at module load, so this must precede them.
+import '@hypercomb/shared/core/mesh-session'
+
 // ── boot perf trail ──────────────────────────────────────────────────────────
 // T0 = the earliest point we can capture inside the module graph. Any
 // shared/essentials code that calls window.__hcBoot('label') from here on
