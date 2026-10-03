@@ -15,6 +15,17 @@ use super::*;
 
 const SIG_A: &str = "ac63c4816532b044965f15d734b18fe4b68a567d63655141c06dbe5755384f1c";
 const SIG_B: &str = "0306efe8336a5887faab3aca7a275eb8b0d6e129c0eea5041ab23133c51fb54d";
+const SIG_C: &str = "5f1b0e7c1f0e4ad3b52a1e4a3c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d";
+
+/// A pool's address: sign(meaning), the derivation every client makes.
+fn pool(meaning: &str) -> String {
+    hypercomb_protocol::sign_str(meaning).to_hex()
+}
+
+/// A marker record naming `sig`, the shape every document head carries.
+fn marker(sig: &str) -> Vec<u8> {
+    format!("{{\"layer\":\"{sig}\"}}").into_bytes()
+}
 
 /// A hive with known contents, so a test asserts the ROUTER rather than a
 /// store. The store's own behaviour is covered by `hypercomb-store`; what is
@@ -142,30 +153,32 @@ fn markers_and_pool_members_come_out_of_the_directory() {
     let mut hive = Stub::default();
     hive.entries.insert(
         (SIG_B.to_string(), "00000007".to_string()),
-        format!("{{\"layer\":\"{SIG_A}\"}}").into_bytes(),
+        marker(SIG_A),
     );
+    let hosts = pool("community:hosts");
     hive.entries
-        .insert((SIG_B.to_string(), "my note".to_string()), b"pool bytes".to_vec());
+        .insert((hosts.clone(), "my note".to_string()), b"pool bytes".to_vec());
 
-    let marker = resolve(&root, &hive, "GET", &format!("/{SIG_B}/00000007"));
-    assert_eq!(marker.status, 200);
-    assert!(String::from_utf8_lossy(&body_of(&marker)).contains(SIG_A));
+    // A bag's HEAD marker is the one entry any directory gives up.
+    let head = resolve(&root, &hive, "GET", &format!("/{SIG_B}/00000007"));
+    assert_eq!(head.status, 200);
+    assert!(String::from_utf8_lossy(&body_of(&head)).contains(SIG_A));
     assert_eq!(
-        marker.header("cache-control"),
+        head.header("cache-control"),
         Some("no-cache, must-revalidate"),
         "history compaction can renumber a bag — a marker is not immutable",
     );
 
     // A user-chosen name arrives percent-encoded and must be decoded before it
-    // reaches the pool.
-    let member = resolve(&root, &hive, "GET", &format!("/{SIG_B}/my%20note"));
+    // reaches the pool — a FLOOR pool, the only kind whose members are served.
+    let member = resolve(&root, &hive, "GET", &format!("/{hosts}/my%20note"));
     assert_eq!(member.status, 200);
     assert_eq!(body_of(&member), b"pool bytes");
 
     // `/content` is the canonical namespace used by static hosts. A machine
     // host accepts it too, so a discovered base works without host-specific
     // branching in the reader.
-    let canonical = resolve(&root, &hive, "GET", &format!("/content/{SIG_B}/my%20note"));
+    let canonical = resolve(&root, &hive, "GET", &format!("/content/{hosts}/my%20note"));
     assert_eq!(canonical.status, 200);
     assert_eq!(body_of(&canonical), b"pool bytes");
 }
@@ -174,16 +187,18 @@ fn markers_and_pool_members_come_out_of_the_directory() {
 fn a_signature_directory_lists_its_members_at_both_bases() {
     let (_dir, root) = shell();
     let mut hive = Stub::default();
+    // A floor `set` pool — the only directories a host lists.
+    let packages = pool("host:packages");
     hive.entries.insert(
-        (SIG_B.to_string(), "00000001".to_string()),
+        (packages.clone(), "00000001".to_string()),
         SIG_A.as_bytes().to_vec(),
     );
     hive.entries.insert(
-        (SIG_B.to_string(), "00000000".to_string()),
+        (packages.clone(), "00000000".to_string()),
         SIG_A.as_bytes().to_vec(),
     );
 
-    for path in [format!("/{SIG_B}/"), format!("/content/{SIG_B}/")] {
+    for path in [format!("/{packages}/"), format!("/content/{packages}/")] {
         let reply = resolve(&root, &hive, "GET", &path);
         assert_eq!(reply.status, 200, "{path}");
         assert_eq!(
@@ -199,26 +214,28 @@ fn a_signature_directory_lists_its_members_at_both_bases() {
 #[test]
 fn staged_and_live_pool_entries_are_one_listing_and_live_bytes_win() {
     let (_dir, root) = shell();
-    let pool = root.join("content").join(SIG_B);
-    std::fs::create_dir_all(&pool).unwrap();
-    std::fs::write(pool.join("index.html"), b"00000000\n00000002").unwrap();
-    std::fs::write(pool.join("listing.txt"), b"00000000\n00000002").unwrap();
-    std::fs::write(pool.join("00000000"), b"staged old bytes").unwrap();
-    std::fs::write(pool.join("00000002"), b"staged package").unwrap();
+    // What a shim build stages: the `host:packages` floor pool.
+    let packages = pool("host:packages");
+    let staged_pool = root.join("content").join(&packages);
+    std::fs::create_dir_all(&staged_pool).unwrap();
+    std::fs::write(staged_pool.join("index.html"), b"00000000\n00000002").unwrap();
+    std::fs::write(staged_pool.join("listing.txt"), b"00000000\n00000002").unwrap();
+    std::fs::write(staged_pool.join("00000000"), b"staged old bytes").unwrap();
+    std::fs::write(staged_pool.join("00000002"), b"staged package").unwrap();
 
     let mut hive = Stub::default();
     hive.entries.insert(
-        (SIG_B.to_string(), "00000000".to_string()),
+        (packages.clone(), "00000000".to_string()),
         b"live current bytes".to_vec(),
     );
 
-    let listing = resolve(&root, &hive, "GET", &format!("/content/{SIG_B}/"));
+    let listing = resolve(&root, &hive, "GET", &format!("/content/{packages}/"));
     assert_eq!(body_of(&listing), b"00000000\n00000002");
 
-    let live = resolve(&root, &hive, "GET", &format!("/content/{SIG_B}/00000000"));
+    let live = resolve(&root, &hive, "GET", &format!("/content/{packages}/00000000"));
     assert_eq!(body_of(&live), b"live current bytes");
 
-    let staged = resolve(&root, &hive, "GET", &format!("/content/{SIG_B}/00000002"));
+    let staged = resolve(&root, &hive, "GET", &format!("/content/{packages}/00000002"));
     assert_eq!(body_of(&staged), b"staged package");
 }
 
@@ -338,6 +355,193 @@ fn a_real_hive_serves_its_own_bytes() {
     let reply = resolve(&root, &host, "GET", &format!("/{sig}"));
     assert_eq!(reply.status, 200);
     assert_eq!(body_of(&reply), b"a resource in the store");
+}
+
+// ── only the genome leaves (layer-pattern-audit.md, rule 6) ─────────────────
+
+/// The floor this host lists is the relay's file, parsed — not a second copy.
+#[test]
+fn the_floor_is_the_shared_file() {
+    let floor = floor();
+    assert_eq!(floor.len(), 4, "{floor:?}");
+    for meaning in ["host:packages", "host:offerings", "community:hosts"] {
+        assert_eq!(floor_policy(&pool(meaning)), Some(Policy::Set), "{meaning}");
+    }
+    assert_eq!(floor_policy(&pool("community:offers")), Some(Policy::Document));
+    assert_eq!(floor_policy(&pool("journal:entries")), None);
+}
+
+#[test]
+fn an_unlisted_directory_answers_exactly_like_an_absent_one() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    // A participant document pool with history, and a tile's bag.
+    let journal = pool("journal:entries");
+    hive.entries.insert((journal.clone(), SIG_A.to_string()), b"old entry".to_vec());
+    hive.entries.insert((journal.clone(), SIG_B.to_string()), b"current entry".to_vec());
+    hive.entries.insert((journal.clone(), "00000000".to_string()), marker(SIG_A));
+    hive.entries.insert((journal.clone(), "00000001".to_string()), marker(SIG_B));
+    hive.entries.insert((SIG_C.to_string(), "00000000".to_string()), marker(SIG_A));
+
+    let absent = resolve(&root, &hive, "GET", &format!("/{}/", pool("never:held")));
+    assert_eq!(absent.status, 404);
+    assert_eq!(body_of(&absent), b"pool not held");
+
+    let genome = pool("computed:genome");
+    for dir in [journal.as_str(), SIG_C, genome.as_str()] {
+        for path in [format!("/{dir}/"), format!("/content/{dir}/")] {
+            let reply = resolve(&root, &hive, "GET", &path);
+            assert_eq!(reply.status, absent.status, "{path}");
+            assert_eq!(reply.headers, absent.headers, "{path}");
+            assert_eq!(body_of(&reply), body_of(&absent), "{path} — a refusal must not differ from a miss");
+        }
+    }
+}
+
+#[test]
+fn a_floor_set_pool_lists_every_member() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let hosts = pool("community:hosts");
+    hive.entries.insert((hosts.clone(), SIG_A.to_string()), b"a host".to_vec());
+    hive.entries.insert((hosts.clone(), SIG_B.to_string()), b"another host".to_vec());
+
+    let listing = resolve(&root, &hive, "GET", &format!("/{hosts}/"));
+    assert_eq!(listing.status, 200);
+    assert_eq!(body_of(&listing), format!("{SIG_B}\n{SIG_A}").into_bytes());
+    for member in [SIG_A, SIG_B] {
+        assert_eq!(resolve(&root, &hive, "GET", &format!("/{hosts}/{member}")).status, 200, "{member}");
+    }
+}
+
+#[test]
+fn a_floor_document_pool_lists_and_serves_only_its_current_version() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let offers = pool("community:offers");
+    // Three versions; the max marker (00000002) names SIG_B.
+    for (atom, bytes) in [(SIG_A, "v0"), (SIG_C, "v1"), (SIG_B, "v2")] {
+        hive.entries.insert((offers.clone(), atom.to_string()), bytes.as_bytes().to_vec());
+    }
+    hive.entries.insert((offers.clone(), "00000000".to_string()), marker(SIG_A));
+    hive.entries.insert((offers.clone(), "00000001".to_string()), marker(SIG_C));
+    hive.entries.insert((offers.clone(), "00000002".to_string()), marker(SIG_B));
+
+    for base in ["", "/content"] {
+        let listing = resolve(&root, &hive, "GET", &format!("{base}/{offers}/"));
+        assert_eq!(listing.status, 200, "{base}");
+        assert_eq!(body_of(&listing), format!("00000002\n{SIG_B}").into_bytes(), "{base}");
+
+        let head = resolve(&root, &hive, "GET", &format!("{base}/{offers}/00000002"));
+        assert_eq!(head.status, 200, "{base}");
+        assert_eq!(body_of(&head), marker(SIG_B));
+        let current = resolve(&root, &hive, "GET", &format!("{base}/{offers}/{SIG_B}"));
+        assert_eq!(body_of(&current), b"v2");
+
+        // Every earlier marker and every earlier version: as if never held.
+        for old in ["00000000", "00000001", SIG_A, SIG_C] {
+            let reply = resolve(&root, &hive, "GET", &format!("{base}/{offers}/{old}"));
+            assert_eq!(reply.status, 404, "{base} {old}");
+            assert!(body_of(&reply).is_empty(), "{base} {old}");
+        }
+    }
+}
+
+#[test]
+fn an_unlisted_bag_gives_up_its_head_marker_and_nothing_older() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    for (index, layer) in [("00000000", SIG_A), ("00000001", SIG_C), ("00000002", SIG_B)] {
+        hive.entries.insert((SIG_C.to_string(), index.to_string()), marker(layer));
+    }
+
+    for base in ["", "/content"] {
+        let head = resolve(&root, &hive, "GET", &format!("{base}/{SIG_C}/00000002"));
+        assert_eq!(head.status, 200, "{base}");
+        assert_eq!(body_of(&head), marker(SIG_B), "{base}");
+        for old in ["00000000", "00000001"] {
+            let reply = resolve(&root, &hive, "GET", &format!("{base}/{SIG_C}/{old}"));
+            assert_eq!(reply.status, 404, "{base} {old} — history never leaves");
+            assert!(body_of(&reply).is_empty());
+        }
+    }
+}
+
+#[test]
+fn a_member_of_an_unlisted_directory_is_never_served() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    let journal = pool("journal:entries");
+    hive.entries.insert((journal.clone(), SIG_A.to_string()), b"personal".to_vec());
+    hive.entries.insert((journal.clone(), "a named member".to_string()), b"personal".to_vec());
+    hive.entries.insert((journal.clone(), "00000000".to_string()), marker(SIG_A));
+
+    for entry in [SIG_A, "a%20named%20member"] {
+        for path in [format!("/{journal}/{entry}"), format!("/content/{journal}/{entry}")] {
+            let reply = resolve(&root, &hive, "GET", &path);
+            assert_eq!(reply.status, 404, "{path}");
+            assert!(body_of(&reply).is_empty(), "{path}");
+        }
+    }
+}
+
+#[test]
+fn content_by_signature_is_untouched_by_the_gate() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    // The same address held as bytes AND as a directory: the bytes are content
+    // (immutable, verified by the reader); the directory is not listed.
+    hive.content.insert(SIG_C.to_string(), b"atom bytes".to_vec());
+    hive.entries.insert((SIG_C.to_string(), "00000000".to_string()), marker(SIG_A));
+    hive.entries.insert((SIG_C.to_string(), "00000001".to_string()), marker(SIG_B));
+
+    for base in ["", "/content"] {
+        let bytes = resolve(&root, &hive, "GET", &format!("{base}/{SIG_C}"));
+        assert_eq!(bytes.status, 200, "{base}");
+        assert_eq!(body_of(&bytes), b"atom bytes");
+        assert_eq!(resolve(&root, &hive, "GET", &format!("{base}/{SIG_C}/")).status, 404, "{base}");
+    }
+}
+
+/// The staged shell is the published build: a real file in a non-floor
+/// directory still wins (a transfer pack, say), but the directory is never
+/// listed.
+#[test]
+fn a_staged_file_is_served_but_its_directory_is_not_listed() {
+    let (_dir, root) = shell();
+    let packs = pool("transfer:packs");
+    let staged = root.join("content").join(&packs);
+    std::fs::create_dir_all(&staged).unwrap();
+    std::fs::write(staged.join(SIG_A), SIG_B.as_bytes()).unwrap();
+    let hive = Stub::default();
+
+    let member = resolve(&root, &hive, "GET", &format!("/content/{packs}/{SIG_A}"));
+    assert_eq!(member.status, 200);
+    assert_eq!(body_of(&member), SIG_B.as_bytes());
+    assert_eq!(resolve(&root, &hive, "GET", &format!("/content/{packs}/")).status, 404);
+}
+
+/// The same gate over the real store the desktop app and `hypercomb-serve`
+/// read through.
+#[test]
+fn a_real_hive_lists_no_bag_and_serves_only_its_head() {
+    let (_dir, root) = shell();
+    let hive_dir = tempfile::tempdir().expect("a temp dir");
+    let host = hypercomb_host::Host::open(hive_dir.path()).expect("a hive");
+    let first = host.put(b"first revision").expect("put");
+    let second = host.put(b"second revision").expect("put");
+    let bag = hypercomb_protocol::sign_str("garden").to_hex();
+    host.raw_dir_put(&bag, "00000000", &marker(&first)).expect("marker");
+    host.raw_dir_put(&bag, "00000001", &marker(&second)).expect("marker");
+
+    assert_eq!(resolve(&root, &host, "GET", &format!("/{bag}/")).status, 404);
+    assert_eq!(resolve(&root, &host, "GET", &format!("/{bag}/00000000")).status, 404);
+    let head = resolve(&root, &host, "GET", &format!("/{bag}/00000001"));
+    assert_eq!(head.status, 200);
+    let named: serde_json::Value = serde_json::from_slice(&body_of(&head)).unwrap();
+    assert_eq!(named["layer"], second);
+    // Every revision's bytes are content, and content is served by signature.
+    assert_eq!(resolve(&root, &host, "GET", &format!("/{first}")).status, 200);
 }
 
 // ── the wire ────────────────────────────────────────────────────────────────

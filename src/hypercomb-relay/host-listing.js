@@ -4,8 +4,12 @@
 // machine relay and the blossom worker both import this file).
 //
 // THE FLOOR is the host contract: every host lists these, because every client
-// derives their addresses and asks every door it follows. They are protocol,
-// so they are code, and this is the only copy.
+// derives their addresses and asks every door it follows. They are protocol.
+// The ONE copy is `host-listing.floor.json`, beside this file: each floor
+// meaning mapped to its listing policy (`set` lists every member; `document`
+// lists only the current version). The native host reads the same file
+// (hypercomb-client/crates/serve, include_str!), so the floor cannot drift
+// between host shapes. Its order is the order of HOST_LISTING_FLOOR.
 //
 // EVERYTHING ELSE IS THE PUBLISHER'S SIGNED WORD. A host lists another pool
 // only while its operator's signed index (kind 30564) names the meaning in
@@ -17,7 +21,9 @@
 // digit to `-`, so a colon meaning can never address a history bag or a bare
 // word's molecule pool — declaring cannot enumerate what a path holds.
 
-export const HOST_LISTING_FLOOR = Object.freeze(['host:packages', 'host:offerings', 'community:hosts', 'community:offers'])
+import FLOOR_POLICIES from './host-listing.floor.json' with { type: 'json' }
+
+export const HOST_LISTING_FLOOR = Object.freeze(Object.keys(FLOOR_POLICIES))
 
 /** A listing is a curated few, not a dump; past this the rest are ignored. */
 export const MAX_LISTED = 32

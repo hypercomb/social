@@ -8,10 +8,36 @@
 //!   GET /                     the shell            (shim dist/)
 //!   GET /pin                  the bootstrap pin    (shim dist/)
 //!   GET /<sig>                content bytes        (THE STORE)
-//!   GET /<bagSig>/00000007    a revision marker    (THE STORE)
-//!   GET /<poolSig>/<member>   a pool member        (THE STORE)
+//!   GET /<floorSig>/          a floor pool listing (THE STORE + shell)
+//!   GET /<floorSig>/<member>  a listed member      (THE STORE + shell)
+//!   GET /<bagSig>/<head>      a bag's HEAD marker  (THE STORE)
 //!   GET /a/deep/hive/location the shell, 200       (a location is not a file)
 //! ```
+//!
+//! ## Only the genome leaves
+//!
+//! (jwize, 2026-10-01; `documentation/layer-pattern-audit.md`, rule 6.) A
+//! host gives out the participant's CURRENT state and nothing else: no earlier
+//! version, no numbered history marker but the head, and no listing of
+//! anything personal. The store behind [`HiveSource`] is the participant's
+//! WHOLE hive, so the gate lives here, in [`resolve`], once for every source:
+//!
+//! - **A directory is listed only when it is a FLOOR pool.** The floor is
+//!   `hypercomb-relay/host-listing.floor.json` — the very file the relay and
+//!   the blossom worker list from. Every other signature directory (a tile's
+//!   bag, any other pool, an address nobody holds) answers exactly what an
+//!   absent directory answers: 404, `pool not held`.
+//! - **A `document` floor pool lists only its current version**: the max
+//!   marker and the atom it names. A `set` floor pool lists its members.
+//! - **A floor pool serves only what its listing shows.**
+//! - **Any other directory serves its head marker and nothing else.** A
+//!   replicating node still reads where a bag is now; every earlier marker and
+//!   every member answers 404.
+//!
+//! The staged shell is the published build — every byte of it is public on
+//! any static host serving the same `dist/` — so a real file there still wins
+//! inside a non-floor directory (a staged transfer pack, say). It is never
+//! LISTED unless its directory is a floor pool.
 //!
 //! ## Why live, and not an exported folder
 //!
@@ -60,7 +86,7 @@ use std::io::BufReader;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -263,6 +289,122 @@ fn cors(reply: Reply) -> Reply {
         .with("referrer-policy", "no-referrer")
 }
 
+/// The host listing floor: the ONE copy every host shape reads (the relay and
+/// the blossom worker import it through `hypercomb-relay/host-listing.js`).
+const FLOOR_JSON: &str = include_str!("../../../../hypercomb-relay/host-listing.floor.json");
+
+/// How a floor pool is listed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Policy {
+    /// Every member: the pool IS the set.
+    Set,
+    /// One current record: the max marker and the atom it names, never an
+    /// earlier version.
+    Document,
+}
+
+/// `(sign(meaning), policy)` for every floor meaning, parsed once.
+///
+/// Fails CLOSED: a floor file that does not parse lists nothing, and a policy
+/// this host does not know drops that meaning rather than guessing one.
+fn floor() -> &'static [(String, Policy)] {
+    static FLOOR: OnceLock<Vec<(String, Policy)>> = OnceLock::new();
+    FLOOR.get_or_init(|| {
+        let Ok(serde_json::Value::Object(meanings)) =
+            serde_json::from_str::<serde_json::Value>(FLOOR_JSON)
+        else {
+            return Vec::new();
+        };
+        meanings
+            .iter()
+            .filter_map(|(meaning, policy)| {
+                let policy = match policy.as_str()? {
+                    "set" => Policy::Set,
+                    "document" => Policy::Document,
+                    _ => return None,
+                };
+                Some((hypercomb_protocol::sign_str(meaning).to_hex(), policy))
+            })
+            .collect()
+    })
+}
+
+/// The policy of a floor pool, or `None` for every other address.
+fn floor_policy(sig: &str) -> Option<Policy> {
+    floor()
+        .iter()
+        .find(|(address, _)| address == sig)
+        .map(|(_, policy)| *policy)
+}
+
+/// The max 8-digit marker among `names` — a bag's head.
+fn head_marker(names: &[String]) -> Option<&String> {
+    names
+        .iter()
+        .filter_map(|name| hypercomb_protocol::marker_index(name).map(|index| (index, name)))
+        .max_by_key(|(index, _)| *index)
+        .map(|(_, name)| name)
+}
+
+/// What a FLOOR pool shows at `dir_segments` (the request's path up to and
+/// including the directory): the staged shell's entries and the hive's, as
+/// one sorted set, cut down to the current version for a `document` pool.
+fn floor_listing(
+    shell: &Path,
+    hive: &dyn HiveSource,
+    dir_segments: &[String],
+    sig: &str,
+    policy: Policy,
+) -> Vec<String> {
+    let mut names = shell_directory_entries(shell, dir_segments);
+    if let Some(mut held) = hive.entries(sig) {
+        names.append(&mut held);
+    }
+    names.sort();
+    names.dedup();
+    if policy == Policy::Set {
+        return names;
+    }
+    // A document: the head marker, and the atom it names when held here.
+    // With no marker there is no CURRENT version to show, so nothing is.
+    let Some(head) = head_marker(&names).cloned() else {
+        return Vec::new();
+    };
+    let bytes = hive.entry(sig, &head).or_else(|| {
+        let mut path = dir_segments.to_vec();
+        path.push(head.clone());
+        shell_file(shell, &path).and_then(|file| std::fs::read(file).ok())
+    });
+    let atom = bytes.and_then(|bytes| match hypercomb_protocol::Marker::parse(&bytes) {
+        hypercomb_protocol::Marker::Pointer { layer, .. } => Some(layer.to_hex()),
+        hypercomb_protocol::Marker::LegacyInline { .. } => None,
+    });
+    let mut current = vec![head];
+    if let Some(atom) = atom.filter(|atom| names.contains(atom)) {
+        current.push(atom);
+    }
+    current.sort();
+    current
+}
+
+/// Is `entry` the head marker of a directory that is NOT a floor pool? The
+/// only entry such a directory gives up.
+fn is_hive_head(hive: &dyn HiveSource, sig: &str, entry: &str) -> bool {
+    hypercomb_protocol::marker_index(entry).is_some()
+        && hive
+            .entries(sig)
+            .is_some_and(|names| head_marker(&names).is_some_and(|head| head == entry))
+}
+
+/// The answer for a directory that is not listed here — byte-identical to the
+/// answer for one that is not held, so a 404 reveals nothing.
+fn pool_not_held() -> Reply {
+    cors(Reply::new(404))
+        .with("content-type", "text/plain; charset=utf-8")
+        .with("cache-control", "no-store")
+        .body(Body::Bytes(b"pool not held".to_vec()))
+}
+
 /// Answer one request.
 ///
 /// Pure in the way that matters: it touches the shell directory and the hive,
@@ -299,6 +441,10 @@ pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) 
     // distinction between immutable bytes at a signature and the mutable set
     // held at that same address. Both canonical `/content` and root aliases
     // are accepted, just like content below.
+    //
+    // ONLY A FLOOR POOL IS LISTED (see the module docs). Every other address —
+    // a tile's bag, any other pool, one nobody holds — gets the answer an
+    // absent directory gets, so the refusal says nothing about what is held.
     let directory_sig = if path.ends_with('/') {
         match segments.as_slice() {
             [only] if is_sig(only) => Some(only.clone()),
@@ -309,14 +455,12 @@ pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) 
         None
     };
     if let Some(sig) = directory_sig {
-        let mut names = shell_directory_entries(shell, &segments);
-        if let Some(mut held) = hive.entries(&sig) {
-            names.append(&mut held);
-        }
-        names.sort();
-        names.dedup();
+        let Some(policy) = floor_policy(&sig) else {
+            return pool_not_held();
+        };
+        let names = floor_listing(shell, hive, &segments, &sig, policy);
         return if names.is_empty() {
-            cors(Reply::new(404))
+            pool_not_held()
         } else {
             cors(Reply::new(200))
                 .with("content-type", "text/plain; charset=utf-8")
@@ -328,17 +472,34 @@ pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) 
     // (2) Mutable directory entries in the live hive take precedence over the
     // staged bootstrap copy at the same path. If absent, the static file branch
     // below still offers packages bundled with the shell.
+    //
+    // THE GATE ON ENTRIES. A floor pool serves only what its listing shows,
+    // from either source. Any other directory gives up its HEAD marker from
+    // the hive and nothing else: no earlier marker, no member — the history
+    // and the personal pools stay where they are.
     let directory_entry = match segments.as_slice() {
         [dir, entry] if is_sig(dir) => Some((dir, entry)),
         [base, dir, entry] if base == "content" && is_sig(dir) => Some((dir, entry)),
         _ => None,
     };
     if let Some((dir, entry)) = directory_entry {
-        if let Some(bytes) = hive.entry(dir, entry) {
-            return cors(Reply::new(200))
-                .with("content-type", "application/octet-stream")
-                .with("cache-control", "no-cache, must-revalidate")
-                .body(Body::Bytes(bytes));
+        let admitted = match floor_policy(dir) {
+            Some(policy) => {
+                let dir_segments = &segments[..segments.len() - 1];
+                if !floor_listing(shell, hive, dir_segments, dir, policy).contains(entry) {
+                    return cors(Reply::new(404));
+                }
+                true
+            }
+            None => is_hive_head(hive, dir, entry),
+        };
+        if admitted {
+            if let Some(bytes) = hive.entry(dir, entry) {
+                return cors(Reply::new(200))
+                    .with("content-type", "application/octet-stream")
+                    .with("cache-control", "no-cache, must-revalidate")
+                    .body(Body::Bytes(bytes));
+            }
         }
     }
 

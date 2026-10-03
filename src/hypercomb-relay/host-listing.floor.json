@@ -1,0 +1,6 @@
+{
+  "host:packages": "set",
+  "host:offerings": "set",
+  "community:hosts": "set",
+  "community:offers": "document"
+}

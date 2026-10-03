@@ -27,10 +27,22 @@ GET /                     the shell               (a staged shim build)
 GET /pin                  the bootstrap pin       (a staged shim build)
 GET /content/<sig>        the bundled packages    (a staged shim build)
 GET /<sig>                content bytes           THE STORE
-GET /<bagSig>/00000007    a revision marker       THE STORE
-GET /<poolSig>/<member>   a pool member           THE STORE
+GET /<floorSig>/          a floor pool listing    THE STORE + staged shell
+GET /<floorSig>/<member>  a member it lists       THE STORE + staged shell
+GET /<bagSig>/<head>      a bag's HEAD marker     THE STORE
 GET /a/deep/hive/location the shell, 200          (a location is not a file)
 ```
+
+**Only the genome leaves** (rule 6 of
+[layer-pattern-audit.md](layer-pattern-audit.md)). The store behind the host is
+the participant's whole hive, so `resolve()` gates it: a directory is listed
+only when it is a floor pool from `hypercomb-relay/host-listing.floor.json` —
+the same file the relay and the blossom worker list from — and a `document`
+floor pool lists only its head marker and the atom it names. Every other
+directory (a tile's bag, any other pool) answers `404 pool not held`, exactly
+as an absent one, and gives up its head marker and nothing else: no earlier
+marker, no member. Operator-declared `listed` pools are not served by this
+host yet.
 
 Nothing is exported first, and there is no second copy to keep current. A hive
 edited a second ago is the hive being served — the question "did I remember to
