@@ -36,6 +36,7 @@
 
 import { schnorr } from '@noble/curves/secp256k1'
 import { HOST_LISTING_FLOOR, listedMeanings } from '../host-listing.js'
+import { nostrJson } from '../nip05-names.js'
 import { encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
 
 const SIG_RE = /^[0-9a-f]{64}$/
@@ -159,21 +160,238 @@ function siteBinding(env, hostname) {
 // IMPLICIT site — lineage = the label, publishers = the zone's allowlist. No
 // per-name configuration; a name goes live the moment an approved publisher's
 // signed index carries a root for it, and says "nothing here" until then.
-// content.<zone> stays the write/relay face and is never a site.
+// content.<zone> is the LEGACY write/relay face and is never a site: every
+// write now lands at the zone root (isZoneRoot), and content.<zone> keeps
+// accepting exactly as before for the installs that have not updated.
+//
+// A publisher's OWN ADDRESS outranks the label rule: when exactly one of the
+// zone's publishers signs `addresses[<host>] = <lineage>` (zonePlaces), the
+// request's view carries that site under ADDRESS_SITES. An operator binding
+// for exactly the host still wins over both.
+const ADDRESS_SITES = Symbol('address-sites')
+
 function resolveSite(env, hostname) {
   const host = String(hostname || '').toLowerCase()
   const bindings = siteBindings(env)
   const exact = bindings[host]
   if (exact) return { site: exact, implicit: false, zone: null }
-  const zone = Object.keys(bindings).find(h => host !== h && host.endsWith('.' + h))
+  const zone = bindingZoneOf(bindings, host)
   if (!zone || host === `content.${zone}`) return { site: null, implicit: false, zone: zone ?? null }
   const label = host.slice(0, -(zone.length + 1))
   if (!DNS_LABEL_RE.test(label)) return { site: null, implicit: false, zone }
+  const addressed = env?.[ADDRESS_SITES]?.get(host)
+  if (addressed) return { site: addressed, implicit: false, zone, address: true }
   return {
     site: { title: label, lineage: label, publishers: bindings[zone].publishers },
     implicit: true,
     zone,
   }
+}
+
+/** The bound host a name hangs off, as resolveSite reads it. */
+function bindingZoneOf(bindings, host) {
+  return Object.keys(bindings).find(h => host !== h && host.endsWith('.' + h))
+}
+
+// ── the zone root (jwize 2026-10-03: "publish to the root domain") ───────────
+//
+// A ZONE ROOT is a bound host no other bound host contains — an apex the var
+// binds (front door or not), a claimed apex, or a zone an operator's signed
+// record speaks for. It is the write face for everything the hive writes:
+// the heap, the signed index, uploads, forget, grants, claims and the host
+// AI. A published SITE under it (an implicit label, an explicit non-apex
+// binding, a try- door) stays read-only, exactly as before.
+
+function isZoneRoot(env, hostname) {
+  const host = String(hostname || '').toLowerCase()
+  if (!host) return false
+  if (siteOperators(env).some(([zone]) => zone === host)) return true
+  const bindings = siteBindings(env)
+  if (!bindings[host]) return false
+  return !Object.keys(bindings).some((h) => h !== host && host.endsWith('.' + h))
+}
+
+// ── own addresses and root paths ─────────────────────────────────────────────
+//
+// Two more ways a published place is reached, both read only from the zone's
+// publishers' VERIFIED signed indexes, so nothing here is configuration:
+//
+//   • an OWN ADDRESS — `addresses: { "<host>": "<lineage>" }` in the index
+//     content. A first-level name under the zone answers that lineage when
+//     exactly one publisher of the zone signs it, the lineage is one of that
+//     publisher's roots and its doors cover the zone. Two publishers naming
+//     one host bind nobody (the label rule answers as before). `content` and
+//     the try- labels keep their meaning and are never an address.
+//   • a ROOT PATH — https://<zone>/<a>/<b> is the place whose lineage key is
+//     `a/b`, on a front-door zone, when a publisher of the zone signs it open
+//     there (opensOn). `/` stays the front door; machine paths win first.
+//
+// Both are read per zone and held for SITE_TTL_MS; a signed index written in
+// this isolate drops the copy at once (indexesWritten).
+
+const ADDRESSES_MAX = 64
+
+/** Root paths are served (and listed) only while ROOT_PATHS = "1". The page
+ *  they serve is the visitor engine under a path prefix, and that engine must
+ *  first ask its own files relative to its document base — until it does, a
+ *  root path would hand a reader a page that cannot boot, and the directory
+ *  would advertise it. Writes at the zone root and own addresses need no
+ *  switch. */
+const rootPathsOn = (env) => String(env?.ROOT_PATHS ?? '').trim() === '1'
+let indexesWritten = 0
+const zonePlacesHeld = new Map()
+
+/** The first segment a root path may never take: the front door's own files
+ *  and the worker's named endpoints, which a lineage must not shadow. */
+const RESERVED_ROOT_SEGMENTS = new Set([
+  'content', 'core', 'pin', 'fonts', 'hive', 'i18n', 'claim', 'upload', 'forget',
+  'grant', 'ai', '.well-known', 'index.html', 'main.js', 'env.js', 'theme.css',
+  'hypercomb.worker.js', 'hypercomb-core.runtime.js', 'locales.json',
+  'manifest.webmanifest', '404.txt', 'publications.json', 'trials.json',
+])
+const RESERVED_ROOT_PREFIX_RE = /^(?:favicon|icon|apple-touch-icon)/
+
+/** A lineage key a root path can name on this zone. */
+function rootPathLineage(lineage, binding) {
+  const key = String(lineage || '')
+  if (!key || key.includes(':') || key === binding?.lineage) return false
+  const segments = key.split('/')
+  if (segments.some((s) => !s || s !== s.trim())) return false
+  const first = segments[0].toLowerCase()
+  return !RESERVED_ROOT_SEGMENTS.has(first) && !RESERVED_ROOT_PREFIX_RE.test(first)
+}
+
+/** One `addresses` entry the index may sign: a lowercase multi-label DNS
+ *  host and a non-empty lineage key. */
+function validAddressEntry(host, lineage) {
+  return typeof host === 'string' && host.length > 0 && host.length <= 253
+    && host === host.toLowerCase() && host.includes('.')
+    && host.split('.').every((label) => DNS_LABEL_RE.test(label))
+    && typeof lineage === 'string' && lineage.trim().length > 0 && lineage.length <= 512
+}
+
+function validAddresses(raw) {
+  if (raw === undefined) return true
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  const entries = Object.entries(raw)
+  return entries.length <= ADDRESSES_MAX && entries.every(([host, lineage]) => validAddressEntry(host, lineage))
+}
+
+/** The entries of a held index's `addresses` this host will read. */
+function readAddresses(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  return Object.fromEntries(Object.entries(raw).slice(0, ADDRESSES_MAX)
+    .filter(([host, lineage]) => validAddressEntry(host, lineage)))
+}
+
+/** Is `host` a name an address may take under `zone`? */
+function addressableHost(bindings, host, zone) {
+  if (!host.endsWith('.' + zone) || bindings[host]) return false
+  if (bindingZoneOf(bindings, host) !== zone) return false
+  const label = host.slice(0, -(zone.length + 1))
+  return DNS_LABEL_RE.test(label) && label !== 'content' && !SANDBOX_LABEL_RE.test(label)
+}
+
+/** A zone's own addresses (`host → site`) and root places (`lineage →
+ *  {publisher}`), from its publishers' verified indexes, primary first. */
+async function zonePlaces(env, zone, read = indexReader(env)) {
+  const bindings = siteBindings(env)
+  const binding = bindings[zone]
+  const empty = { addresses: new Map(), roots: new Map() }
+  if (!binding) return empty
+  const paths = binding.frontDoor === true && rootPathsOn(env)
+  const key = `${zone}\n${paths ? 1 : 0}\n${binding.lineage}\n${binding.publishers.map((p) => p.pubkey).join(',')}`
+  const held = zonePlacesHeld.get(key)
+  if (held && Date.now() - held.at < SITE_TTL_MS && held.content === env.CONTENT
+    && held.hives === env.HIVES?.get && held.written === indexesWritten) return held.value
+  const publishers = [...binding.publishers].sort((a, b) => Number(b.primary) - Number(a.primary))
+  const roots = new Map()
+  const named = new Map()
+  for (const publisher of publishers) {
+    const index = await read(publisher.pubkey)
+    if (!index) continue
+    const selected = { ...publisher, primary: true }
+    const signed = (lineage) => SIG_RE.test(String(index.roots?.[lineage] || '').toLowerCase())
+    if (paths) {
+      for (const lineage of Object.keys(index.roots)) {
+        if (roots.has(lineage) || !rootPathLineage(lineage, binding)) continue
+        if (!signed(lineage) || !opensOn(index, lineage, zone)) continue
+        roots.set(lineage, { publisher: selected })
+      }
+    }
+    for (const [host, lineage] of Object.entries(index.addresses ?? {})) {
+      if (!addressableHost(bindings, host, zone)) continue
+      if (!signed(lineage) || !opensOn(index, lineage, host)) continue
+      const claims = named.get(host) ?? []
+      if (!claims.some((c) => c.publisher.pubkey === publisher.pubkey)) claims.push({ publisher: selected, lineage })
+      named.set(host, claims)
+    }
+  }
+  const addresses = new Map()
+  for (const [host, claims] of named) {
+    // Contested binds nobody.
+    if (claims.length !== 1) continue
+    const [{ publisher, lineage }] = claims
+    addresses.set(host, { title: lineage.split('/').at(-1), lineage, publishers: [publisher] })
+  }
+  const value = { addresses, roots }
+  zonePlacesHeld.set(key, { at: Date.now(), content: env.CONTENT, hives: env.HIVES?.get, written: indexesWritten, value })
+  return value
+}
+
+/** Every own address the zones under `env` carry, `host → site`. */
+async function allAddresses(env, read) {
+  const found = new Map()
+  for (const zone of wildcardZones(siteBindings(env))) {
+    for (const [host, site] of (await zonePlaces(env, zone, read)).addresses) found.set(host, site)
+  }
+  return found
+}
+
+/** A view of env whose resolveSite knows these own addresses. */
+function withAddresses(env, addresses) {
+  if (!addresses?.size) return env
+  const view = Object.create(env)
+  view[ADDRESS_SITES] = addresses
+  return view
+}
+
+/** The root place a path names on this zone root — the longest lineage the
+ *  decoded segments start with — or null. */
+async function rootPlaceAt(env, zone, pathname, read) {
+  const raw = pathname.split('/').filter(Boolean)
+  if (!raw.length) return null
+  let segments
+  try { segments = raw.map((s) => decodeURIComponent(s)) } catch { return null }
+  const { roots } = await zonePlaces(env, zone, read)
+  if (!roots.size) return null
+  for (let n = segments.length; n > 0; n--) {
+    const lineage = segments.slice(0, n).join('/')
+    const place = roots.get(lineage)
+    if (!place) continue
+    return {
+      lineage,
+      publisher: place.publisher,
+      prefix: '/' + raw.slice(0, n).join('/'),
+      rest: '/' + raw.slice(n).join('/') + (n < raw.length && pathname.endsWith('/') ? '/' : ''),
+    }
+  }
+  return null
+}
+
+/** The location a root place's revisions live under: sign(<zone>/<lineage>),
+ *  beside the sign(<host>) bags of the hostname doors. */
+const rootPlaceKey = (zone, lineage) => `${zone}/${lineage}`
+
+/** A root place's head, gated exactly as a hostname door is: the signed index
+ *  authorizes it, and its location bag names the current revision. */
+async function rootPlaceRoot(env, zone, lineage, publisher, read = indexReader(env)) {
+  const index = await read(publisher.pubkey)
+  const head = String(index?.roots?.[lineage] || '').toLowerCase()
+  if (!SIG_RE.test(head) || !opensOn(index, lineage, zone)) return null
+  const meta = locationMeta({ lineage, title: lineage.split('/').at(-1) }, publisher.pubkey, head, index)
+  if (await currentRouteHead(env, rootPlaceKey(zone, lineage), head, meta) !== head) return null
+  return { head, pubkey: publisher.pubkey, publishedAt: index.createdAt }
 }
 
 async function anyPublishedRoot(env, site, read = indexReader(env), host = '') {
@@ -221,7 +439,8 @@ async function verifiedIndex(env, pubkey) {
   if (!content?.roots || typeof content.roots !== 'object' || Array.isArray(content.roots)
     || !validOfferingDeclarations(content.offerings)) return null
   const doors = content.doors && typeof content.doors === 'object' && !Array.isArray(content.doors) ? content.doors : {}
-  return { roots: content.roots, doors, offerings: content.offerings ?? {}, listed: listedMeanings(content), createdAt: Number(evt.created_at || 0) }
+  return { roots: content.roots, doors, offerings: content.offerings ?? {}, listed: listedMeanings(content),
+    addresses: readAddresses(content.addresses), createdAt: Number(evt.created_at || 0) }
 }
 
 /** One request's index reads, memoized by pubkey. The ledger asks the same
@@ -556,13 +775,15 @@ async function publishedRoot(env, publisher, lineage, read = indexReader(env), h
 
 /** One site as the ledger reports it — the same shape for a hand-bound host
  *  and for one the naming rule brought to life. */
-async function ledgerEntry(env, read, protocol, host, site) {
+async function ledgerEntry(env, read, protocol, host, site, address = false) {
   // `host`/`url` stay what they have always been — the primary door — so a
   // reader that never learns about `hosts` keeps working unchanged. The entry's
   // own host leads the list by force rather than by argument: an invariant a
   // consumer can rely on should not depend on two orderings agreeing.
   const doors = await hostsOfLineage(env, read, site.lineage)
-  const ordered = [...doors.filter((d) => d.host === host), ...doors.filter((d) => d.host !== host)]
+  // An own address is a door no structural rule derives; it leads anyway.
+  const own = doors.filter((d) => d.host === host)
+  const ordered = [...(own.length || !address ? own : [{ host, implicit: false }]), ...doors.filter((d) => d.host !== host)]
   return {
     host,
     url: `${protocol}//${host}/`,
@@ -666,8 +887,9 @@ const HOST_TRIALS_MEANING = 'host:trials'
 
 async function servePublications(request, scoped) {
   const { protocol, hostname } = new URL(request.url)
-  const env = directoryEnv(scoped, hostname.toLowerCase())
-  const read = indexReader(env)
+  const directory = directoryEnv(scoped, hostname.toLowerCase())
+  const read = indexReader(directory)
+  const env = withAddresses(directory, await allAddresses(directory, read))
   const bindings = siteBindings(env)
   const sites = []
   // One plate per creation, on BOTH loops. Two bindings naming one lineage used
@@ -681,7 +903,25 @@ async function servePublications(request, scoped) {
   }
 
   // The names publishing brought to life. An explicit binding already claimed
-  // its lineage above; the first zone to name an implicit one keeps it.
+  // its lineage above; the first zone to name one keeps it, at the address
+  // that outranks the others: its OWN ADDRESS, else its ROOT PATH on a
+  // front-door zone, else (top-level, legacy) its label under the zone.
+  for (const zone of wildcardZones(bindings)) {
+    for (const [host, site] of (await zonePlaces(env, zone, read)).addresses) {
+      if (named.has(site.lineage)) continue
+      named.add(site.lineage)
+      sites.push(await ledgerEntry(env, read, protocol, host, site, true))
+    }
+  }
+  for (const zone of wildcardZones(bindings)) {
+    for (const [lineage, place] of (await zonePlaces(env, zone, read)).roots) {
+      if (named.has(lineage)) continue
+      const entry = await rootPlaceEntry(env, read, protocol, zone, lineage, place)
+      if (!entry) continue
+      named.add(lineage)
+      sites.push(entry)
+    }
+  }
   for (const zone of wildcardZones(bindings)) {
     const publisher = bindings[zone].publishers.find(p => p.primary) || bindings[zone].publishers[0]
     if (publisher) {
@@ -703,6 +943,34 @@ async function servePublications(request, scoped) {
     }
   }
   return json(200, { sites }, { 'Cache-Control': 'no-store' })
+}
+
+/** A root place as the ledger reports it: the zone root is its host, its
+ *  path the lineage; the hostname doors that still serve it follow. */
+async function rootPlaceEntry(env, read, protocol, zone, lineage, place) {
+  const publication = await rootPlaceRoot(env, zone, lineage, place.publisher, read)
+  if (!publication) return null
+  const path = '/' + lineage.split('/').map(encodeURIComponent).join('/')
+  const url = `${protocol}//${zone}${path}`
+  const doors = (await hostsOfLineage(env, read, lineage)).filter((d) => d.host !== zone)
+  return {
+    host: zone,
+    url,
+    path,
+    hosts: [
+      { host: zone, url, path, primary: true, implicit: false },
+      ...doors.map((door) => ({ host: door.host, url: `${protocol}//${door.host}/`, primary: false, implicit: door.implicit })),
+    ],
+    title: lineage.split('/').at(-1),
+    lineage,
+    publishers: [{
+      pubkey: place.publisher.pubkey,
+      label: place.publisher.label || place.publisher.pubkey.slice(0, 12) + '…',
+      primary: true,
+      head: publication.head,
+      publishedAt: publication.publishedAt,
+    }],
+  }
 }
 
 // GET /<sig>/ — THE DIRECTORY BRANCH (documentation/host-packages-pool.md).
@@ -1115,11 +1383,30 @@ async function offeredMembers(request, env) {
  *  location marker — the door's meta record (locationMeta), by host.
  *  Private and package pools never pass this route test. */
 async function routeMetaForIndex(env, pubkey, evt) {
-  const scoped = await bindingsEnv(env)
+  const unaddressed = await bindingsEnv(env)
+  const read = indexReader(unaddressed)
+  const addresses = await allAddresses(unaddressed, read)
+  const scoped = withAddresses(unaddressed, addresses)
   const bindings = siteBindings(scoped)
   const zones = wildcardZones(bindings)
   const index = { ...JSON.parse(evt.content), createdAt: Number(evt.created_at || 0) }
   const found = new Map()
+  // Own addresses this key holds: the door's bag is sign(<host>), as for any name.
+  for (const [host, site] of addresses) {
+    if (site.publishers[0]?.pubkey !== pubkey) continue
+    const head = String(index.roots?.[site.lineage] || '').toLowerCase()
+    if (SIG_RE.test(head) && opensOn(index, site.lineage, host)) found.set(host, locationMeta(site, pubkey, head, index))
+  }
+  // Root places this key holds: the bag is sign(<zone>/<lineage>).
+  for (const zone of zones) {
+    for (const [lineage, place] of (await zonePlaces(scoped, zone, read)).roots) {
+      if (place.publisher.pubkey !== pubkey) continue
+      const head = String(index.roots?.[lineage] || '').toLowerCase()
+      if (SIG_RE.test(head) && opensOn(index, lineage, zone)) {
+        found.set(rootPlaceKey(zone, lineage), locationMeta({ lineage, title: lineage.split('/').at(-1) }, pubkey, head, index))
+      }
+    }
+  }
   for (const [host, site] of Object.entries(bindings)) {
     if (!site.routed || site.frontDoor) continue
     const selected = site.publishers.find(p => p.primary) || site.publishers[0]
@@ -1680,7 +1967,7 @@ function indexScript(raw) {
   return `<script id="hc-index" type="application/json">${raw.replace(/</g, '\\u003c')}</script>`
 }
 
-async function serveVisitorAsset(request, env, { spa = true, door = null, install = null, index = null } = {}) {
+async function serveVisitorAsset(request, env, { spa = true, door = null, install = null, index = null, base = null } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   let response = await env.ASSETS.fetch(request)
   // Under /content/ a miss is a miss. The engine walks its package pool by
@@ -1713,7 +2000,10 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
     headers.set('Content-Type', 'application/json; charset=utf-8')
   }
   if (door && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
-    const html = await response.text()
+    let html = await response.text()
+    // A ROOT PLACE's page lives under its path: the document base moves there,
+    // so every relative asset the build names is asked under the same prefix.
+    if (base) html = html.replace(/<base href="\/"\s*\/?>/, `<base href="${base.replace(/"/g, '%22')}" />`)
     const at = html.indexOf('</head>')
     if (at >= 0) {
       headers.delete('Content-Length')
@@ -1728,6 +2018,47 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
     statusText: response.statusText,
     headers,
   })
+}
+
+/** A ROOT PLACE — https://<zone>/<lineage>… — served exactly as a hostname
+ *  door serves its site, with the prefix taken off before the visitor
+ *  engine's assets are asked: the page carries its door (the newest marker of
+ *  sign(<zone>/<lineage>)), its package pointer and its publisher's signed
+ *  index, and its document base names the prefix. */
+async function serveRootPlace(request, env, zone, place) {
+  const url = new URL(request.url)
+  url.pathname = place.rest || '/'
+  const inner = new Request(url, request)
+  const site = { title: place.lineage.split('/').at(-1), lineage: place.lineage, publishers: [place.publisher] }
+  const moduleMatch = url.pathname.match(/^\/content\/([0-9a-f]{64})$/)
+  if (moduleMatch) return serveModule(request, env, moduleMatch[1])
+  const read = indexReader(env)
+  const key = rootPlaceKey(zone, place.lineage)
+  const reuse = url.pathname.startsWith('/content/')
+  const held = openSites.get(key)
+  const opened = reuse && held && Date.now() - held.at < SITE_TTL_MS && held.content === env.CONTENT && held.hives === env.HIVES?.get
+    ? held
+    : await (async () => {
+      const open = !!await rootPlaceRoot(env, zone, place.lineage, place.publisher, read)
+      const answer = { open, promoted: open ? await sitePackage(env, site, read) : null, at: Date.now(), content: env.CONTENT, hives: env.HIVES?.get }
+      openSites.set(key, answer)
+      return answer
+    })()
+  if (!opened.open) return nothingHere(`${zone}${place.prefix}`, null)
+  if (url.pathname.startsWith('/content/')) {
+    const answered = opened.promoted && await answerPackage(inner, url, opened.promoted, site.lineage)
+    if (answered) return answered
+    return serveVisitorAsset(inner, env, { spa: false })
+  }
+  const [located, pointer, signedIndex] = await Promise.all([
+    newestLocation(env, await poolAddress(key.toLowerCase())),
+    installPointer(inner, env, site, opened.promoted),
+    heldIndexRaw(env, place.publisher.pubkey).catch(() => null),
+  ])
+  const door = located?.record ?? null
+  const install = door ? pointer : null
+  const index = door && signedIndex && signedIndex.length <= PAGE_INDEX_MAX ? signedIndex : null
+  return serveVisitorAsset(inner, env, { door, install, index, base: `${place.prefix}/` })
 }
 
 // ── responses ────────────────────────────────────────────────────────────────
@@ -2315,6 +2646,7 @@ async function readHeldIndex(env, pubkey) {
 }
 
 async function holdIndex(env, pubkey, evt) {
+  indexesWritten++
   try { await edgeCache()?.delete(await indexCacheKey(pubkey)) } catch { /* the window closes it */ }
   await env.CONTENT.put(`${await poolAddress(HIVE_INDEXES_MEANING)}/${pubkey}`, JSON.stringify(evt), {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
@@ -2467,7 +2799,9 @@ function validHiveEventContent(evt) {
     if (typeof key !== 'string' || !key.trim()) return false
     if (!SIG_RE.test(String(sig || ''))) return false
   }
-  return validOfferingDeclarations(parsed.offerings)
+  // `addresses` — a publisher's own addresses, host → lineage key. Bounded,
+  // lowercase hosts, non-empty keys; the 64 KB index cap still holds.
+  return validOfferingDeclarations(parsed.offerings) && validAddresses(parsed.addresses)
 }
 
 async function validOfferingLocations(evt) {
@@ -3211,6 +3545,27 @@ async function aiAsk(request, env) {
   })
 }
 
+// ── NIP-05: who a key is, at this host ───────────────────────────────────────
+//
+// `/.well-known/nostr.json` (documentation/sealed-audiences.md, Names), from
+// the keys this host already serves: the site's publishers, each under its
+// binding `label`, the site's primary as `_`. An implicit name answers its
+// zone's; a claimed domain its claimant, as `_` alone (a claim carries no
+// label). A host with no site — content.<zone>, a contested claim — vouches
+// for nobody. Always 200 JSON, CORS `*` as NIP-05 requires; cacheable for a
+// minute, since a binding changes at a deploy or a claim, not per request.
+function serveNostrJson(request, site, asked) {
+  const publishers = site?.publishers ?? []
+  const primary = publishers.find((p) => p.primary) || publishers[0]
+  const body = JSON.stringify(nostrJson(publishers.map((p) => ({
+    pubkey: p.pubkey, primary: p === primary, names: [p.label],
+  })), asked))
+  return new Response(request.method === 'HEAD' ? null : body, {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=60', ...CORS },
+  })
+}
+
 // ── router ───────────────────────────────────────────────────────────────────
 
 export default {
@@ -3225,7 +3580,20 @@ export default {
     const route = async () => {
       if (!routing) {
         const scoped = await bindingsEnv(env)
-        routing = { env: scoped, ...resolveSite(scoped, requestUrl.hostname) }
+        const resolved = resolveSite(scoped, requestUrl.hostname)
+        routing = { env: scoped, ...resolved }
+        // A first-level name may be a publisher's OWN ADDRESS, which outranks
+        // the label rule. Only a name the label rule would answer pays the read.
+        const host = requestUrl.hostname.toLowerCase()
+        const bindings = siteBindings(scoped)
+        if (resolved.implicit && resolved.zone && wildcardZones(bindings).includes(resolved.zone)
+          && addressableHost(bindings, host, resolved.zone)) {
+          const addressed = (await zonePlaces(scoped, resolved.zone)).addresses.get(host)
+          if (addressed) {
+            const view = withAddresses(scoped, new Map([[host, addressed]]))
+            routing = { env: view, ...resolveSite(view, host) }
+          }
+        }
       }
       return routing
     }
@@ -3243,8 +3611,16 @@ export default {
     // The relay host may accept signed writes; a published Core host never
     // does. Keep this boundary above every mutation endpoint so adding another
     // relay feature cannot accidentally grant it to websites.
-    if (method !== 'GET' && method !== 'HEAD' && (await route()).site) {
-      return text(405, 'published Core hosts are read-only')
+    //
+    // THE ZONE ROOT IS THE WRITE FACE (jwize 2026-10-03). An apex — front door
+    // or not, bound, claimed or operated — accepts every write the hive makes;
+    // content.<zone> keeps accepting for the installs that have not updated.
+    // Every site UNDER a zone stays read-only.
+    if (method !== 'GET' && method !== 'HEAD') {
+      const routed = await route()
+      if (routed.site && !isZoneRoot(routed.env, requestUrl.hostname)) {
+        return text(405, 'published Core hosts are read-only')
+      }
     }
 
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: fromDoor ? DOOR_CORS : CORS })
@@ -3434,37 +3810,49 @@ export default {
     const routed = await route()
     const { site, implicit, zone: siteZone } = routed
     env = routed.env
+    // The relay face (no site), or a zone root, which writes for its zone.
+    const writeFace = !site || isZoneRoot(env, requestUrl.hostname)
 
-    if (!site && pathname === '/upload') {
+    // NIP-05 — THE ONE STANDARDS-FIXED NAMED ROUTE. Not a drain route and not
+    // ours to retire: the address is fixed by the standard, and every Nostr
+    // client asks exactly this path. It says who each key this host serves IS
+    // here (`jaime@pluginthematrix.com`), derived from the bindings and never a
+    // second list. Above the front door, the site page and every 404, so no
+    // proxy, SPA page or redirect can answer it.
+    if (pathname === '/.well-known/nostr.json' && (method === 'GET' || method === 'HEAD')) {
+      return serveNostrJson(request, site, requestUrl.searchParams.get('name'))
+    }
+
+    if (writeFace && pathname === '/upload') {
       if (method === 'PUT') return putUpload(request, env)
       if (method === 'HEAD') return headUpload(request, env)
       return text(405, 'method not allowed')
     }
 
-    if (!site && pathname === '/forget') {
+    if (writeFace && pathname === '/forget') {
       if (method === 'POST') return forgetSigs(request, env)
       return text(405, 'method not allowed')
     }
 
-    if (!site && pathname === '/grant') {
+    if (writeFace && pathname === '/grant') {
       if (method === 'GET') return getGrant(request, env)
       return text(405, 'method not allowed')
     }
 
     // Host AI — the immediate conversational tier (see aiAsk above).
-    if (!site && pathname === '/ai/ask') {
+    if (writeFace && pathname === '/ai/ask') {
       if (method === 'POST') return aiAsk(request, env)
       return text(405, 'method not allowed')
     }
 
     // Claiming a domain (see postClaim / readClaim above): the claim on the
     // write face, its public reading beside it.
-    if (!site && pathname === '/claim') {
+    if (writeFace && pathname === '/claim') {
       if (method === 'POST') return postClaim(request, env, ctx)
       return text(405, 'method not allowed')
     }
     const claimPath = pathname.match(/^\/claim\/([^/]+)$/)
-    if (!site && claimPath) {
+    if (writeFace && claimPath) {
       if (method === 'GET') return readClaim(request, env, claimPath[1])
       return text(405, 'method not allowed')
     }
@@ -3476,6 +3864,13 @@ export default {
     // machine read stays on this worker — flat sigs and pools are answered
     // above, the index and the ledger here — so the card reads the one heap.
     if (site?.frontDoor && (method === 'GET' || method === 'HEAD')) {
+      // A ROOT PATH — https://<zone>/<lineage> — is that published place,
+      // served as its own door would be. `/` and everything else stay the card.
+      const host = requestUrl.hostname.toLowerCase()
+      if (pathname !== '/' && isZoneRoot(env, host)) {
+        const place = await rootPlaceAt(env, host, pathname)
+        if (place) return serveRootPlace(request, env, host, place)
+      }
       return serveFrontDoor(request, env)
     }
 
