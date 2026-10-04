@@ -419,7 +419,7 @@ export class Engine {
       p.vy += DOS_PLAYER_JUMP.acceleration * DOS_TICK_RATE / 0x100
     }
     const wasGrounded = p.grounded
-    this.moveBody(p, dt)
+    this.moveBody(p, dt, 'free')
     if (wasGrounded && !p.grounded && !jumpPressed) this.jumpOrigin = p.y
     if (p.grounded) this.jumpOrigin = p.y
     const mayBlow = this.collisionMasks ? this.shotCooldownTicks === 0 : this.shotCooldown <= 0
@@ -551,7 +551,7 @@ export class Engine {
     }
     if (this.collisionMasks && clock.hopActive) {
       enemy.vx = enemy.facing * 60 * (enemy.angry ? 2 : 1)
-      if (this.moveBody(enemy, dt).x) enemy.facing = enemy.facing === 1 ? -1 : 1
+      if (this.moveBody(enemy, dt, 'rise').x) enemy.facing = enemy.facing === 1 ? -1 : 1
       if (enemy.grounded) clock.hopActive = false
       else enemy.vy += DOS_ENEMY_HOP.acceleration * DOS_TICK_RATE / 0x100
       if (this.state === 'playing' && overlaps(enemy, this.player)) this.hurt()
@@ -609,7 +609,7 @@ export class Engine {
     if (!launched && !nativeRising && (!enemy.grounded || !this.collisionMasks)) {
       enemy.vy += DOS_ENEMY_HIGH_JUMP.acceleration * DOS_TICK_RATE / 0x100
     }
-    if (this.moveBody(enemy, dt).x) enemy.facing = enemy.facing === 1 ? -1 : 1
+    if (this.moveBody(enemy, dt, 'rise').x) enemy.facing = enemy.facing === 1 ? -1 : 1
     if (nativeRising) enemy.vy += DOS_ENEMY_HIGH_JUMP.acceleration * DOS_TICK_RATE / 0x100
     this.maybeFireHorizontal(enemy, clock)
     if (this.state === 'playing' && overlaps(enemy, this.player)) this.hurt()
@@ -686,7 +686,7 @@ export class Engine {
       if (clock.airborne) {
         const rising = enemy.vy < 0
         if (!rising) enemy.vy += DOS_ENEMY_HIGH_JUMP.acceleration * DOS_TICK_RATE / 0x100
-        this.moveBody(enemy, dt)
+        this.moveBody(enemy, dt, 'rise')
         if (rising) enemy.vy += DOS_ENEMY_HIGH_JUMP.acceleration * DOS_TICK_RATE / 0x100
         if (enemy.grounded) clock.airborne = false
         return
@@ -711,7 +711,7 @@ export class Engine {
         return
       }
       enemy.vx = enemy.facing * 60 * (enemy.angry ? 2 : 1)
-      if (this.moveBody(enemy, dt).x) enemy.facing = enemy.facing === 1 ? -1 : 1
+      if (this.moveBody(enemy, dt, 'rise').x) enemy.facing = enemy.facing === 1 ? -1 : 1
       if (enemy.grounded) clock.hopActive = false
       else enemy.vy += DOS_ENEMY_HOP.acceleration * DOS_TICK_RATE / 0x100
       return
@@ -1129,9 +1129,13 @@ export class Engine {
     return false
   }
 
-  private moveBody(body: Body, dt: number): { x: boolean; y: boolean } {
+  /** `ledges` matters only to the native mover: 'solid' (the default) keeps
+   * every traced contact — flyers, invader, bubbles, shots, fruit; 'rise' lets
+   * a jumping walker rise up through terrain; 'free' is the player, who also
+   * crosses ledges sideways while in the air. */
+  private moveBody(body: Body, dt: number, ledges: 'solid' | 'rise' | 'free' = 'solid'): { x: boolean; y: boolean } {
     if (this.collisionMasks && Math.abs(dt - DOS_TICK_SECONDS) < Number.EPSILON * 4) {
-      return this.moveNativeBody(body)
+      return this.moveNativeBody(body, ledges)
     }
     const hit = { x: false, y: false }
     const startY = body.y
@@ -1179,7 +1183,7 @@ export class Engine {
   /** CS:1C52/1C87 plus the directional predicates at CS:1FA4..2023. The DOS
    * collision origin has two guard rows above the visible 25-row cave, hence
    * the +16 conversion from renderer coordinates. */
-  private moveNativeBody(body: Body): { x: boolean; y: boolean } {
+  private moveNativeBody(body: Body, ledges: 'solid' | 'rise' | 'free'): { x: boolean; y: boolean } {
     const hit = { x: false, y: false }
     const masks = this.collisionMasks!
     const raw = (velocity: number): number => Math.round(velocity * 0x100 / DOS_TICK_RATE)
@@ -1187,7 +1191,12 @@ export class Engine {
     if (body.vx) {
       body.x = advanceFixedValue(body.x, raw(body.vx))
       const direction = body.vx < 0 ? 'left' : 'right'
-      if (dosBlocksDirection(dosCollisionWord(masks, Math.floor(body.y + 16), Math.floor(body.x)), direction)) {
+      // In the air only the side walls stop the player sideways: passing up
+      // through a ledge keeps its line instead of being held inside it.
+      const leading = Math.floor(((body.vx < 0 ? body.x : body.x + body.w - 1) - CAVE_LEFT) / TILE)
+      const wall = leading < 2 || leading >= CAVE_COLUMNS - 2
+      if ((ledges !== 'free' || body.grounded || wall)
+        && dosBlocksDirection(dosCollisionWord(masks, Math.floor(body.y + 16), Math.floor(body.x)), direction)) {
         body.x = snapDosCoordinate(body.x, body.vx)
         body.vx = 0
         hit.x = true
@@ -1204,11 +1213,11 @@ export class Engine {
       nativeY = wrapDosY(advanceFixedValue(nativeY, raw(body.vy)))
       body.y = nativeY - 16
       const direction = body.vy < 0 ? 'up' : 'down'
-      // A rising body passes up through terrain and only the ceiling row stops
+      // A jumping body rises up through terrain and only the ceiling row stops
       // it: the rounds space their platforms one jump apart (ROUND 01: rows 9,
       // 14, 19, a 42 px jump over 40 px), and the high jump at A99F is taken
       // BECAUSE a platform is above. Falling still lands on top.
-      if ((direction === 'down' || body.y < TILE)
+      if ((ledges === 'solid' || direction === 'down' || body.y < TILE)
         && dosBlocksDirection(dosCollisionWord(masks, Math.floor(nativeY), Math.floor(body.x)), direction)) {
         nativeY = snapDosCoordinate(nativeY, body.vy)
         body.y = nativeY - 16
