@@ -39,7 +39,7 @@ import {
   HypercombActionExecutionError, HypercombPlanQueue,
   applySectionEdits, blockRefusedMessage, blockUnwrittenMessage, callableBehaviours, doFailedMessage, doRanMessage,
   doSkippedMessage, estimateTokens, executeHypercombObservationPlan, formatHypercombObservationReceipt,
-  HELD_DO_NOTE, claimsUnranChange, foreignReads, hypercombPlanLeaves, hypercombPlanReach, hypercombVocabulary, identityInstruction, isWorkRefusal, parseHypercombGrammars,
+  HELD_DO_NOTE, claimsUnranChange, foreignReads, hypercombPlanLeaves, hypercombWriteRefusal, hypercombPlanReach, hypercombVocabulary, identityInstruction, isWorkRefusal, parseHypercombGrammars,
   parseHypercombObservationGrammars, parseWriteBlock, readResultMessage, readSkippedMessage, shippedFoldStep,
   shippedHandoverStep, shippedRouteStep, shippedStretchStep, transcriptForModel, versionWriteRanMessage,
   routesNamedIn, unranChangeMessage, unreadClaimMessage,
@@ -126,6 +126,9 @@ export type AgentTurnRequest = {
   readonly system?: string
   /** A harness's step preferences (core agent-steps.ts `resolve`). */
   readonly prefer?: readonly string[]
+  /** Signatures of someone else's words read earlier in this conversation
+   *  (the last turn's `foreign`): they hold changes for the rest of it. */
+  readonly foreign?: readonly string[]
   readonly signal?: AbortSignal
 }
 
@@ -143,6 +146,9 @@ export type AgentTurnResult = {
   readonly left?: string
   /** Why the turn stopped short, when it did. */
   readonly stopped?: string
+  /** Signatures of someone else's words this conversation has read, to hand
+   *  the next turn: changes keep waiting for a hand. */
+  readonly foreign: readonly string[]
   readonly providerId?: string
   readonly model?: string
 }
@@ -229,10 +235,13 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
   let unranSaid = false
   let unreadSaid = false
   let readRounds = 0
-  // Someone else's words read this turn (core hive-reads.ts foreignReads):
-  // every change after them waits for a hand.
+  // Someone else's words read in this conversation (core hive-reads.ts
+  // foreignReads): every change after them waits for a hand — for the rest
+  // of the conversation, not the turn, so a "go ahead" next turn is not a
+  // hand over words the participant may never have read.
   const turnForeign: string[] = []
-  const theirSigs = new Set<string>()
+  const theirSigs = new Set<string>(turn.foreign ?? [])
+  const conversationForeign = (): boolean => turnForeign.length > 0 || theirSigs.size > 0
   let refusedInARow = 0
   let answer = ''
   let wrote = false
@@ -243,7 +252,7 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
   const drafts = new Map<string, { files: Record<string, string | null>; draft: string }>()
   const stage = (name: string, facts: Record<string, unknown>): void => emit(name, { id: convoId, convoId, leg: 1, at: Date.now(), ...facts })
   const result = (extra: Partial<AgentTurnResult> = {}): AgentTurnResult => ({
-    answer, rounds, ran: [...ran], read: [...observed],
+    answer, rounds, ran: [...ran], read: [...observed], foreign: [...theirSigs],
     drafts: [...drafts].map(([version, d]) => ({ draft: d.draft, version, paths: Object.keys(d.files).sort() })),
     ...(pinned ? { providerId: pinned } : {}), ...(continuationModel ? { model: continuationModel } : {}), ...extra,
   })
@@ -308,7 +317,7 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
     const plan = parseHypercombGrammars(lines, entries)
     const grammars = plan.actions.map(action => action.grammar)
     const gate = await ask(hypercombPlanReach(plan, entries) as 'additive' | 'editing', grammars, providerId, model, {
-      leaves: hypercombPlanLeaves(plan, entries).length > 0, foreign: turnForeign.length > 0,
+      leaves: hypercombPlanLeaves(plan, entries).length > 0, foreign: conversationForeign(),
     })
     if (!gate.run) return doSkippedMessage(grammars, turn.request)
     let admitted = snapshots.length === 0
@@ -348,8 +357,18 @@ export async function* agentTurn(turn: AgentTurnRequest, deps: AgentTurnDeps): A
     if (!('version' in parsed)) throw new WorkRefused('only the build\'s own source is written here: version <revision signature> <path>')
     if (!canWriteVersion || !versions) throw new WorkRefused('no revision is held here to draft over')
     const grammar = `write version ${parsed.version.slice(0, 12)}… ${parsed.path}`
-    const gate = await ask('additive', [grammar], providerId, model, { foreign: turnForeign.length > 0 })
+    // The participant's ceiling answers a write as it answers a line (core
+    // hive-grammar.ts hypercombWriteRefusal) — asked again after the wait, so
+    // a grant taken back meanwhile holds.
+    const refused = hypercombWriteRefusal()
+    if (refused) throw new WorkRefused(refused)
+    const gate = await ask('additive', [grammar], providerId, model, { foreign: conversationForeign() })
     if (!gate.run) return writeSkippedMessage(parsed.path, turn.request)
+    const revoked = hypercombWriteRefusal()
+    if (revoked) {
+      settle(gate.id, 'skipped', revoked)
+      throw new WorkRefused(revoked)
+    }
     const open = drafts.get(parsed.version) ?? { files: {}, draft: '' }
     try {
       let body = parsed.body

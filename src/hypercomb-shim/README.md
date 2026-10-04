@@ -347,7 +347,8 @@ kind 30568), and sends both to a host under its grant: the same signed
 builder takes it from there:
 
 ```bash
-HYPERCOMB_SIGNER_KEY=<builder key> node host/builds.mjs build-draft <host> <ask> [--to <dir>] [--test]
+node host/builds.mjs trust <author pubkey>        # once: whose drafts this builder builds
+HYPERCOMB_SIGNER_KEY=<builder key> node host/builds.mjs build-draft <host> <ask> [--to <dir>] [--test] [--untrusted]
 ```
 
 It verifies the ask and every file, checks the base out of its pools, lays
@@ -369,6 +370,30 @@ without it, and promote reads the key afterwards), but a key kept in a file
 is still a file that user can read. Until a draft builds as another user or
 in a container, run `build-draft` only for authors you would let run code on
 the machine.
+
+**What a builder refuses, and what it signs.** Before anything runs:
+- an author it does not trust (`builds.mjs trust <pubkey>`; `--untrusted`
+  names one build);
+- an ask sent to another host, or older than seven days;
+- an ask it built before;
+- a draft over a revision that is no longer the newest of its channel (a
+  replay would roll back everything after it);
+- a path that is not plain, leaves the tree, or writes into `.git` or
+  `node_modules`.
+
+The build stages into pools of its own, never the operator's stage, and
+nothing is signed until the host revision's tree is exactly the draft over
+its base (the files a build writes itself, `GENERATED_FILES`, aside). What
+it promotes goes into the drafts channel, `<label>-drafts`, chained to the
+draft's base and signed in the role `builder`, which vouches for the build,
+never for the work. It travels so the author can pull it back; followers
+see it but never take it as their channel's next. It joins the channel once
+someone other than its author has reviewed it:
+
+```bash
+HYPERCOMB_SIGNER_KEY=<reviewer key> node host/builds.mjs sign <version> --as reviewer
+node host/builds.mjs adopt <version>             # the channel's next, signed as author, naming the review
+```
 
 **A model writes it too: the loop without a window.** The chat window's
 model loop — reads, changes and writes in rounds until the request is done

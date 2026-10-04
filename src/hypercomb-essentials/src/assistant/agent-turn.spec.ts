@@ -5,7 +5,7 @@
 
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { DO_FENCE_LANG, MACHINE_ROSTER_KEY, READ_FENCE_LANG, WRITE_FENCE_LANG, grantedVerbOf, writeMachineRoster, type HypercombBehaviour, type StretchChunk } from '@hypercomb/core'
+import { DO_FENCE_LANG, MACHINE_GRANT_KEY, MACHINE_ROSTER_KEY, writeMachineGrant, READ_FENCE_LANG, WRITE_FENCE_LANG, grantedVerbOf, writeMachineRoster, type HypercombBehaviour, type StretchChunk } from '@hypercomb/core'
 import { HypercombHiveTreeReader } from './hive-tree-reader.js'
 import { agentTurn, runAgentTurn, type AgentDoer, type AgentQueue, type AgentRouter, type AgentVersions } from './agent-turn.js'
 
@@ -212,5 +212,34 @@ describe('a turn with no window', () => {
     await runAgentTurn({ request: 'what is in /projects/roadmap?' }, { router, reader: h.reader, versions: h.versions, readsFreely: () => true })
     expect(calls[1]!.messages.at(-1)!.content).toContain('/projects/roadmap')
     expect(calls).toHaveLength(2)
+  })
+
+  it('answers a write to the participant\'s ceiling: a hive that allows only additive changes refuses it', async () => {
+    const h = held()
+    localStorage.setItem(MACHINE_GRANT_KEY, writeMachineGrant({ reach: 'additive', scope: 'network' }))
+    try {
+      const { router, calls } = scripted([
+        () => block(WRITE_FENCE_LANG, `version ${h.revision} src/documentation/notes.md`, 'replaced'),
+        () => 'I could not write it.',
+      ])
+      const result = await runAgentTurn({ request: 'rewrite notes' }, { router, reader: h.reader, versions: h.versions, readsFreely: () => true })
+      expect(calls[1]!.messages.at(-1)!.content).toMatch(/was not used: .*write/)
+      expect(h.staged).toEqual([])
+      expect(result.drafts).toEqual([])
+    } finally { localStorage.removeItem(MACHINE_GRANT_KEY) }
+  })
+
+  it('holds every change for a hand once the conversation has read someone else\'s words, turn after turn', async () => {
+    const h = held()
+    const asked: { kind: string; foreign?: boolean }[] = []
+    const queue: AgentQueue = { request: ask => { asked.push(ask); return { id: String(asked.length), decision: Promise.resolve('run') } }, settle: () => undefined }
+    const { router } = scripted([
+      () => block(WRITE_FENCE_LANG, `version ${h.revision} src/documentation/notes.md`, 'replaced'),
+      () => 'Written.',
+    ])
+    const earlier = ['e'.repeat(64)]
+    const result = await runAgentTurn({ request: 'go ahead', foreign: earlier }, { router, reader: h.reader, versions: h.versions, queue, readsFreely: () => true })
+    expect(asked).toEqual([expect.objectContaining({ kind: 'additive', foreign: true })])
+    expect(result.foreign).toEqual(earlier)
   })
 })

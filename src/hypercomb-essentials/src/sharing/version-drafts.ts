@@ -27,7 +27,7 @@
 // Nothing here runs code: a draft is text in a pool until a builder makes it
 // a revision, and a revision runs only through the paths it always did.
 
-import { SignatureService } from '@hypercomb/core'
+import { SignatureService, draftPathRefusal } from '@hypercomb/core'
 import { nip98Header } from './hive-pointer.js'
 import { BUILDS_MEANING, SIGNATURES_MEANING, opfsPools, type PoolIo } from './version-pools.js'
 
@@ -91,7 +91,8 @@ export const stageDraft = async (request: DraftRequest, io: PoolIo = opfsPools()
   const held = await revisionFiles(request.base, io)
   const named: Record<string, string | null> = {}
   for (const path of paths.sort()) {
-    if (path.startsWith('/') || path.split('/').includes('..')) throw new Error(`${path} is not a path inside the tree`)
+    const refusal = draftPathRefusal(path)
+    if (refusal) throw new Error(refusal)
     const text = request.files[path]
     if (text === null) {
       if (!held[path]) throw new Error(`${path} cannot be deleted: the base does not carry it`)

@@ -80,7 +80,9 @@ import { hostTree, packageTree, walkTree } from './source-tree.mjs'
 
 export const BUILDS_MEANING = 'host:builds'
 export const SIGNATURES_MEANING = 'host:build-signatures'
-export const ROLES = ['author', 'reviewer', 'witness']
+// `builder`: a participant that built someone else's draft (host/builder.mjs)
+// vouches only that it built that draft — never that the work is its own.
+export const ROLES = ['author', 'reviewer', 'witness', 'builder']
 export const BUILD_SIGNATURE_KIND = 30567
 export const DEFAULT_LABEL = 'host'
 export const STAGED = 'staged'
@@ -120,6 +122,36 @@ const headOf = async pool => (await readFile(resolve(pool, 'head'), 'utf8').catc
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const readLocal = async (name, fallback) => { try { return JSON.parse(await readFile(localFile(name), 'utf8')) } catch { return fallback } }
 const writeLocal = async (name, value) => { await mkdir(dirname(localFile(name)), { recursive: true }); await writeFile(localFile(name), JSON.stringify(value, null, 2) + '\n') }
+
+/**
+ * A DRAFT'S CHANNEL. A revision a builder makes from someone's draft is
+ * promoted into `<label>-drafts`, chained to the revision the draft started
+ * from and never to the head: followers of a channel see it but never take
+ * it as that channel's next. It joins its channel only when someone other
+ * than its author reviews it (`builds.mjs adopt`).
+ */
+export const DRAFTS_SUFFIX = '-drafts'
+export const draftsLabel = label => `${foldLabel(label).slice(0, 48 - DRAFTS_SUFFIX.length)}${DRAFTS_SUFFIX}`
+export const isDraftsLabel = label => String(label ?? '').endsWith(DRAFTS_SUFFIX)
+
+/**
+ * WHO A BUILDER BUILDS FOR. Authors (nostr pubkeys) whose drafts this builder
+ * takes without being asked each time — the operator's word, local, never
+ * carried. Building a draft runs its code here (host/builder.mjs).
+ */
+export const readTrusted = async () => (await readLocal('trusted-authors.json', [])).filter(k => SIG.test(String(k)))
+export const trustAuthor = async pubkey => {
+  const key = String(pubkey ?? '').trim().toLowerCase()
+  if (!SIG.test(key)) throw new Error('trust wants an author\'s public key (64 hex)')
+  const now = await readTrusted()
+  if (!now.includes(key)) await writeLocal('trusted-authors.json', [...now, key])
+  return key
+}
+export const untrustAuthor = async pubkey => {
+  const key = String(pubkey ?? '').trim().toLowerCase()
+  await writeLocal('trusted-authors.json', (await readTrusted()).filter(k => k !== key))
+  return key
+}
 
 /** The stage: label → { record, conversations }. Local, never carried. */
 export const readStage = () => readLocal('stage.json', {})
@@ -322,33 +354,119 @@ export const attachConversation = async (label, file) => {
  * the last promoted build, signed by its author when a key is at hand, and
  * carried to every subscribed host unless `sync` is false.
  */
-export const promote = async (label, { now = new Date(), sync: carry = true, put, sign: signIt = true, from = null } = {}) => {
+export const promote = async (label, { now = new Date(), sync: carry = true, put, sign: signIt = true, from = null, staged: given = null } = {}) => {
   const pool = poolDir(BUILDS_MEANING)
   const story = foldLabel(label)
   const stage = await readStage()
-  const entry = stage[story]
+  // A builder hands its own staged record (`staged`): the operator's stage is
+  // never read for it, nor touched.
+  const entry = given ? { record: given, conversations: [] } : stage[story]
   if (!entry?.record) throw new Error(`nothing staged for "${story}" — build with --story ${story} first`)
   const staged = await readJson(pool, entry.record)
+  const drafted = !!(from?.draft && from?.ask)
+  if (drafted && !SIG.test(String(from.base ?? ''))) throw new Error('a revision built from a draft names the revision the draft started from')
   const record = {
     ...staged,
+    // Built from a participant's draft (host/builder.mjs): its own channel,
+    // chained to the revision the draft started from — never the head.
+    ...(drafted ? { label: draftsLabel(staged.label ?? story) } : {}),
     version: await nextVersion(pool, now),
-    parent: await headOf(pool),
+    parent: drafted ? from.base : await headOf(pool),
     ...(entry.conversations?.length ? { conversations: [...entry.conversations] } : {}),
-    // Built from a participant's draft (host/builder.mjs): the draft and the
-    // author's signed ask travel with the revision, so who wrote it is known
-    // wherever it goes, beside who built it.
-    ...(from?.draft && from?.ask ? { draft: from.draft, ask: from.ask } : {}),
+    // The draft and the author's signed ask travel with the revision, so who
+    // wrote it is known wherever it goes, beside who built it.
+    ...(drafted ? { draft: from.draft, ask: from.ask } : {}),
   }
   const sig = await keep(pool, Buffer.from(JSON.stringify(record)))
-  await writeFile(resolve(pool, 'head'), sig + '\n', 'utf8')
-  delete stage[story]
-  await writeStage(stage)
-  await collect()
+  if (!drafted) await writeFile(resolve(pool, 'head'), sig + '\n', 'utf8')
+  if (!given) {
+    delete stage[story]
+    await writeStage(stage)
+    await collect()
+  }
+  // A builder promotes several staged records it took in (adoptStaged) and
+  // collects once after the last: collecting between them would drop the
+  // ones not promoted yet.
   let signed = false
-  if (signIt) try { await signRevision(sig, 'author', now); signed = true } catch { /* no key at hand: sign later */ }
+  if (signIt) try { await signRevision(sig, drafted ? 'builder' : 'author', now); signed = true } catch { /* no key at hand: sign later */ }
   const synced = carry ? await sync({ put }) : []
   return { sig, record, signed, synced }
 }
+
+/**
+ * A DRAFT JOINS ITS CHANNEL. A revision built from a draft becomes its
+ * channel's next only once a REVIEWER — not its author — has signed it
+ * (`builds.mjs sign <ref> --as reviewer`). Its parts are kept as they are; it
+ * is chained to the head and vouched for by this operator as author, naming
+ * the draft and the ask it came from.
+ */
+export const adopt = async (ref, { now = new Date(), sync: carry = true, put } = {}) => {
+  const pool = poolDir(BUILDS_MEANING)
+  const { sig, record } = await findRevision(ref)
+  if (!record.ask || !isDraftsLabel(record.label)) throw new Error(`${record.label} ${record.version} was not built from a draft — nothing to adopt`)
+  const held = await readSignatures()
+  const askEvent = held.find(({ file }) => file === record.ask)?.event
+  if (!askEvent?.pubkey) throw new Error(`the ask behind ${record.version} is not held here: pull it first`)
+  const reviewed = (await signaturesOf(sig, record.version, held)).filter(s => s.role === 'reviewer' && s.ok && s.pubkey !== askEvent.pubkey)
+  if (!reviewed.length) throw new Error(`${record.label} ${record.version} has no review by anyone but its author — builds.mjs sign ${record.version} --as reviewer, by someone who read it`)
+  const adopted = {
+    ...record,
+    label: record.label.slice(0, -DRAFTS_SUFFIX.length),
+    version: await nextVersion(pool, now),
+    parent: await headOf(pool),
+    reviewed: sig,
+  }
+  const out = await keep(pool, Buffer.from(JSON.stringify(adopted)))
+  await writeFile(resolve(pool, 'head'), out + '\n', 'utf8')
+  await collect()
+  let signed = false
+  try { await signRevision(out, 'author', now); signed = true } catch { /* no key at hand: sign later */ }
+  const synced = carry ? await sync({ put }) : []
+  return { sig: out, record: adopted, from: sig, reviewers: reviewed.map(s => s.pubkey), signed, synced }
+}
+
+/**
+ * TAKE WHAT A BUILD STAGED IN ITS OWN POOLS. A builder builds a draft with
+ * pools of its own (host/builder.mjs), so the draft's code never writes the
+ * operator's stage or pools. This takes each label's staged record and
+ * everything it names from there — every file kept only if it hashes to its
+ * name — and returns label → record sig, ready for `promote(…, { staged })`.
+ */
+export const adoptStaged = async (fromRoot, labels) => {
+  const from = resolve(fromRoot, sign(BUILDS_MEANING))
+  const into = poolDir(BUILDS_MEANING)
+  await mkdir(into, { recursive: true })
+  let stage = {}
+  try { stage = JSON.parse(await readFile(resolve(fromRoot, 'local', 'stage.json'), 'utf8')) } catch { /* nothing staged */ }
+  const out = {}
+  for (const label of labels) {
+    const record = stage[label]?.record
+    if (!SIG.test(String(record ?? ''))) continue
+    for (const name of await closureOf(from, [record])) {
+      const bytes = await readFile(resolve(from, name)).catch(() => null)
+      if (!bytes) throw new Error(`the build staged ${label} but did not keep ${short(name)} that it names`)
+      if (sign(bytes) !== name) throw new Error(`the build kept ${short(name)} as bytes that are not what it is named`)
+      await writeFile(resolve(into, name), bytes, { flag: 'wx' }).catch(e => { if (e.code !== 'EEXIST') throw e })
+    }
+    out[label] = record
+  }
+  return out
+}
+
+/** A record's workspace as path → file signature (empty when it has none). */
+export const workspaceOf = async (sig, pool = poolDir(BUILDS_MEANING)) => {
+  const record = await readJson(pool, sig).catch(() => null)
+  return record?.workspace ? (await readJson(pool, record.workspace).catch(() => null))?.files ?? {} : {}
+}
+
+/**
+ * FILES A BUILD WRITES INTO THE TREE ITSELF. They are tracked, so a build's
+ * workspace carries them as the build left them; a draft need not bring them.
+ * Any other file that differs from the draft over its base refuses the build.
+ */
+export const GENERATED_FILES = Object.freeze([
+  'src/hypercomb-essentials/src/side-effects.ts',
+])
 
 /** Everything a set of records needs: themselves, their layers, files, atoms, conversations. */
 const closureOf = async (pool, sigs) => {
@@ -388,7 +506,11 @@ const closureOf = async (pool, sigs) => {
 const vouched = async (records, held, versionOf = r => r.record.version) => {
   const out = []
   for (const r of records) {
-    if ((await signaturesOf(r.sig, versionOf(r), held)).some(s => s.role === 'author' && s.ok)) out.push(r)
+    const signers = await signaturesOf(r.sig, versionOf(r), held)
+    // A revision built from a draft travels on its builder's word, in its
+    // drafts channel — so the author can pull back what was made of it.
+    const ok = signers.some(s => s.ok && (s.role === 'author' || (s.role === 'builder' && r.record.ask && isDraftsLabel(r.record.label))))
+    if (ok) out.push(r)
   }
   return out
 }
@@ -666,7 +788,7 @@ export const takeIn = async dir => {
   if (install !== record.install) throw new Error(`the origin's files are not the install ${record.version} recorded`)
   await takePools(dir)
   // A pool with no builds of its own continues from a promoted revision it took.
-  if (!await headOf(pool) && record.version !== STAGED) await writeFile(resolve(pool, 'head'), sig + '\n', 'utf8')
+  if (!await headOf(pool) && record.version !== STAGED && !isDraftsLabel(record.label)) await writeFile(resolve(pool, 'head'), sig + '\n', 'utf8')
   return { sig, record, signatures: await signaturesOf(sig, record.version) }
 }
 
@@ -1036,7 +1158,8 @@ export const pullPools = async (hosts = DEFAULT_HOSTS, { fetch: get = fetch } = 
   }
   const pool = poolDir(BUILDS_MEANING)
   if (!await headOf(pool)) {
-    const newest = (await revisions(pool))[0]
+    // A drafts channel never heads the history (DRAFTS_SUFFIX).
+    const newest = (await revisions(pool)).find(r => !isDraftsLabel(r.record.label))
     if (newest) await writeFile(resolve(pool, 'head'), newest.sig + '\n', 'utf8')
   }
   return report
@@ -1210,6 +1333,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(`${command}: ${r.pools} pool(s), ${r.copied} file(s) copied, ${r.present} already there${r.refused.length ? `, ${r.refused.length} REFUSED (not what they are named): ${r.refused.join(', ')}` : ''}`)
       for (const line of r.local ?? []) console.log(`  ${line}`)
       if (r.refused.length) process.exitCode = 1
+    } else if (command === 'trust') {
+      console.log(`trusted: ${await trustAuthor(ref)} — this builder builds that author's drafts`)
+    } else if (command === 'untrust') {
+      console.log(`no longer trusted: ${await untrustAuthor(ref)}`)
+    } else if (command === 'adopt') {
+      const r = await adopt(ref, { sync: !rest.includes('--no-sync') })
+      console.log(`${r.record.label} ${r.record.version} ${short(r.sig)} adopted from ${short(r.from)} — reviewed by ${r.reviewers.map(short).join(', ')}${r.signed ? ', signed as author' : ' — UNSIGNED: builds.mjs sign ' + r.record.version + ' --as author'}`)
+      printSync(r.synced)
     } else if (command === 'build-draft') {
       // Its own process: builder.mjs imports this module, which is still
       // evaluating while its command line runs.

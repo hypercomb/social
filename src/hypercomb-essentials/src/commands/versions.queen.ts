@@ -112,7 +112,8 @@ export class VersionsQueenBee extends QueenBee {
       const unsigned = revision.signers.some(s => !s.ok)
       this.#activity(`${revision.label} ${revision.version} ${revision.sig.slice(0, 12)} · ${revision.parts.join(' ')}`
         + (signed.length ? ` · signed: ${signed.join(', ')}` : ' · unsigned') + (unsigned ? ' · a signature does not verify' : '')
-        + (revision.from ? (revision.from.author ? ` · from ${revision.from.author.slice(0, 12)}'s draft` : ' · from a draft whose ask does not verify') : ''), '◆')
+        + (revision.from ? (revision.from.author ? ` · from ${revision.from.author.slice(0, 12)}'s draft` : ' · from a draft whose ask does not verify') : '')
+        + (revision.awaitingReview ? ' · awaiting review' : revision.reviewed ? ` · reviewed (${revision.reviewed.slice(0, 12)})` : ''), '◆')
     }
     this.#toast('info', this.#t('versions.listed', '{count} revision(s) held here — the newest in the activity log.', { count: all.length }))
   }

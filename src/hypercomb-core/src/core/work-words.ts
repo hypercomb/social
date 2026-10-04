@@ -50,6 +50,18 @@ export type VersionWriteRequest = {
 
 export type SectionEdit = { readonly find: string; readonly replace: string }
 
+/** A path a draft of the build's own tree may write: inside the tree, plain,
+ *  and never into the repository's machinery or installed dependencies. The
+ *  builder holds the same rule (hypercomb-shim host/builder.mjs). */
+export const draftPathRefusal = (path: string): string | null => {
+  const text = String(path ?? '')
+  if (!text || text.length > 300 || /[\\:\u0000-\u001f\u007f]/.test(text)) return `${text || '(empty)'} is not a plain path`
+  const parts = text.split('/')
+  if (text.startsWith('/') || parts.some(part => part === '' || part === '.' || part === '..')) return `${text} is not a path inside the tree`
+  if (parts.some(part => part === '.git' || part === 'node_modules')) return `${text} writes into .git or node_modules, which a draft never does`
+  return null
+}
+
 /** The text with every edit made, or why it cannot be. Each `find` must
  *  occur exactly once in the text as it stands after the edits before it —
  *  an edit that matches twice is ambiguous, and one that matches nothing was
@@ -131,7 +143,8 @@ export const parseWriteBlock = (lines: readonly string[]): WriteRequest | Doctri
   const version = /^\s*`?\/?(?:write\s+)?version\s+([0-9a-f]{64})\s+([A-Za-z0-9_.@/-]{1,300})`?\s*$/i.exec(lines[first])
   if (version) {
     const path = version[2]
-    if (path.startsWith('/') || path.split('/').some(part => part === '..' || part === '.' || !part)) return { error: `${path} is not a path inside the tree` }
+    const refusal = draftPathRefusal(path)
+    if (refusal) return { error: refusal }
     const edits = parseEdits(lines.slice(first + 1))
     if (edits && 'error' in edits) return { error: edits.error }
     return { version: version[1].toLowerCase(), path, body, ...(edits ? { edits } : {}) }

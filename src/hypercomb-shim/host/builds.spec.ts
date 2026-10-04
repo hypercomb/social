@@ -2,7 +2,7 @@
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { generateSecretKey } from 'nostr-tools/pure'
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // @ts-ignore — plain ESM tooling, no declarations
 import * as builds from './builds.mjs'
@@ -432,5 +432,83 @@ describe('the offline copy', () => {
     expect(back.refused).toEqual([`${pool.slice(0, 12)}/${victim}`])
     expect(await files(resolve(process.env.HYPERCOMB_POOLS_DIR!, pool))).not.toContain(victim)
     expect(back.local).toEqual(['stage.json kept (this device has its own)'])
+  })
+})
+
+describe('a draft\'s channel', () => {
+  /** An author's signed ask for `draft`, kept as a signature file. */
+  const asked = async (author: Uint8Array, draft: string) => {
+    const bytes = b(JSON.stringify(finalizeEvent({ kind: 30568, created_at: 1_790_000_000, content: `hc:ask:v1\n${draft}`, tags: [['d', draft], ['h', 'http://h.test']] }, author)))
+    const pool = builds.poolDir(builds.SIGNATURES_MEANING)
+    await mkdir(pool, { recursive: true })
+    await writeFile(resolve(pool, builds.sign(bytes)), bytes)
+    return builds.sign(bytes)
+  }
+  const head = async () => (await readFile(resolve(builds.poolDir(builds.BUILDS_MEANING), 'head'), 'utf8').catch(() => '')).trim()
+  const as = async <T>(key: Uint8Array, act: () => Promise<T>): Promise<T> => {
+    const operator = process.env.HYPERCOMB_SIGNER_KEY
+    process.env.HYPERCOMB_SIGNER_KEY = hex(key)
+    try { return await act() } finally { process.env.HYPERCOMB_SIGNER_KEY = operator }
+  }
+
+  it('promotes a draft\'s build into its own channel, chained to the base, signed as its builder, never the head', async () => {
+    const base = await released(undefined, 'base')
+    const author = generateSecretKey()
+    const ask = await asked(author, 'd'.repeat(64))
+    const staged = await stage(undefined, 'from the draft')
+    const made = await builds.promote('host', { now: DAY, sync: false, staged: staged.sig, from: { draft: 'd'.repeat(64), ask, base: base.sig } })
+    expect(made.record).toMatchObject({ label: 'host-drafts', parent: base.sig, ask, draft: 'd'.repeat(64) })
+    expect(made.signed).toBe(true)
+    expect(await head()).toBe(base.sig)
+    // The operator's own stage is untouched by a builder's promotion.
+    expect((await builds.readStage()).host?.record).toBe(staged.sig)
+    const signers = await builds.signaturesOf(made.sig, made.record.version)
+    expect(signers.map((s: { role: string; ok: boolean }) => [s.role, s.ok])).toEqual([['builder', true]])
+    // It travels, so its author can pull back what was made of the draft.
+    expect((await builds.published())[builds.BUILDS_MEANING].has(made.sig)).toBe(true)
+  })
+
+  it('joins its channel only once someone other than its author has reviewed it', async () => {
+    const base = await released(undefined, 'base')
+    const author = generateSecretKey()
+    const ask = await asked(author, 'd'.repeat(64))
+    const staged = await stage(undefined, 'from the draft')
+    const made = await builds.promote('host', { now: DAY, sync: false, staged: staged.sig, from: { draft: 'd'.repeat(64), ask, base: base.sig } })
+    await expect(builds.adopt(made.sig, { now: DAY, sync: false })).rejects.toThrow(/no review by anyone but its author/)
+    await as(author, () => builds.signRevision(made.sig, 'reviewer'))
+    await expect(builds.adopt(made.sig, { now: DAY, sync: false })).rejects.toThrow(/no review by anyone but its author/)
+    const reviewer = generateSecretKey()
+    await as(reviewer, () => builds.signRevision(made.sig, 'reviewer'))
+    const adopted = await builds.adopt(made.sig, { now: DAY, sync: false })
+    expect(adopted.record).toMatchObject({ label: 'host', parent: base.sig, reviewed: made.sig, ask })
+    expect(adopted.reviewers).toEqual([getPublicKey(reviewer)])
+    expect(await head()).toBe(adopted.sig)
+    await expect(builds.adopt(base.sig, { now: DAY, sync: false })).rejects.toThrow(/was not built from a draft/)
+  })
+
+  it('takes what a build staged in its own pools, every file checked against its name', async () => {
+    const own = resolve(root, 'build-pools')
+    const real = process.env.HYPERCOMB_POOLS_DIR
+    process.env.HYPERCOMB_POOLS_DIR = own
+    const staged = await stage(undefined, 'built elsewhere')
+    process.env.HYPERCOMB_POOLS_DIR = real
+    const taken = await builds.adoptStaged(own, ['hypercomb-essentials', 'host'])
+    expect(taken).toEqual({ host: staged.sig })
+    expect(await files(builds.poolDir(builds.BUILDS_MEANING))).toContain(builds.sign(b('built elsewhere')))
+    expect(await builds.readStage()).toEqual({})
+    // A file the build kept as other bytes than its name refuses the lot.
+    await writeFile(resolve(own, builds.sign(builds.BUILDS_MEANING), builds.sign(b('built elsewhere'))), 'tampered')
+    await rm(builds.poolDir(builds.BUILDS_MEANING), { recursive: true, force: true })
+    await expect(builds.adoptStaged(own, ['host'])).rejects.toThrow(/not what it is named/)
+  })
+
+  it('keeps the authors a builder trusts, by key', async () => {
+    const key = getPublicKey(generateSecretKey())
+    await builds.trustAuthor(key)
+    await builds.trustAuthor(key)
+    expect(await builds.readTrusted()).toEqual([key])
+    await builds.untrustAuthor(key)
+    expect(await builds.readTrusted()).toEqual([])
+    await expect(builds.trustAuthor('nope')).rejects.toThrow(/public key/)
   })
 })

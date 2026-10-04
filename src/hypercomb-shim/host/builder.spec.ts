@@ -24,12 +24,15 @@ beforeEach(async () => {
 afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }) })
 
 /** A host holding a draft and its ask, flat by signature. */
-const hosting = ({ kind = 30568, path = 'src/a.ts' } = {}) => {
+/** When the specs' asks are taken: a minute after they were signed. */
+const NOW = new Date(1_790_000_060_000)
+
+const hosting = ({ kind = 30568, path = 'src/a.ts', h = 'http://h.test', at = 1_790_000_000 } = {}) => {
   const key = generateSecretKey()
   const file = enc('export const a = 2\n')
   const layer = enc({ name: 'draft-files', files: { [path]: sha(file), 'docs/old.md': null } })
   const draft = enc({ name: 'draft', label: 'hypercomb-essentials', base: 'b'.repeat(64), files: sha(layer), at: '2026-10-02T10:00:00.000Z' })
-  const ask = enc(finalizeEvent({ kind, created_at: 1_790_000_000, content: `hc:ask:v1\n${sha(draft)}`, tags: [['d', sha(draft)], ['h', 'http://h.test']] }, key))
+  const ask = enc(finalizeEvent({ kind, created_at: at, content: `hc:ask:v1\n${sha(draft)}`, tags: [['d', sha(draft)], ['h', h]] }, key))
   const served = new Map([[sha(file), file], [sha(layer), layer], [sha(draft), draft], [sha(ask), ask]])
   const get = (async (url: string) => {
     const sig = url.split('/').pop()!
@@ -45,7 +48,7 @@ describe('the builder takes an ask', () => {
     const { takeAsk } = await import('./builder.mjs')
     const { poolDir } = await import('./builds.mjs')
     const h = hosting()
-    const taken = await takeAsk('http://h.test', h.ask, { get: h.get })
+    const taken = await takeAsk('http://h.test', h.ask, { get: h.get, now: NOW })
     expect(taken.author).toBe(h.author)
     expect(taken.draft).toBe(h.draft)
     expect([...taken.files.keys()].sort()).toEqual(['docs/old.md', 'src/a.ts'])
@@ -60,12 +63,24 @@ describe('the builder takes an ask', () => {
     // A file whose bytes are not what the layer names.
     const h = hosting()
     const tamper = (async (url: string) => url.endsWith(h.file) ? new Response('something else') : h.get(url)) as unknown as typeof fetch
-    await expect(takeAsk('http://h.test', h.ask, { get: tamper })).rejects.toThrow(/not what it is named/)
+    await expect(takeAsk('http://h.test', h.ask, { get: tamper, now: NOW })).rejects.toThrow(/not what it is named/)
     const wrongKind = hosting({ kind: 30567 })
-    await expect(takeAsk('http://h.test', wrongKind.ask, { get: wrongKind.get })).rejects.toThrow(/does not verify/)
+    await expect(takeAsk('http://h.test', wrongKind.ask, { get: wrongKind.get, now: NOW })).rejects.toThrow(/does not verify/)
     const escaping = hosting({ path: '../outside.ts' })
-    await expect(takeAsk('http://h.test', escaping.ask, { get: escaping.get })).rejects.toThrow(/not a path inside the tree/)
-    await expect(takeAsk('http://h.test', 'nope', { get: h.get })).rejects.toThrow(/named by its signature/)
+    await expect(takeAsk('http://h.test', escaping.ask, { get: escaping.get, now: NOW })).rejects.toThrow(/not a path inside the tree/)
+    await expect(takeAsk('http://h.test', 'nope', { get: h.get, now: NOW })).rejects.toThrow(/named by its signature/)
+  })
+
+  it('refuses an ask sent to another host, an old one, and a path into .git, node_modules or out of plain text', async () => {
+    const { takeAsk } = await import('./builder.mjs')
+    const elsewhere = hosting({ h: 'https://other.example' })
+    await expect(takeAsk('http://h.test', elsewhere.ask, { get: elsewhere.get, now: NOW })).rejects.toThrow(/sent to https:\/\/other.example, not http:\/\/h.test/)
+    const old = hosting({ at: 1_790_000_000 - 8 * 86_400 })
+    await expect(takeAsk('http://h.test', old.ask, { get: old.get, now: NOW })).rejects.toThrow(/older than 7 days/)
+    for (const path of ['.git/hooks/post-checkout', 'src/node_modules/x/index.js', 'src\\a.ts', 'C:/a.ts']) {
+      const bad = hosting({ path })
+      await expect(takeAsk('http://h.test', bad.ask, { get: bad.get, now: NOW })).rejects.toThrow(/\.git or node_modules|not a plain path/)
+    }
   })
 })
 

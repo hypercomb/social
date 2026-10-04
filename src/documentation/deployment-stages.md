@@ -242,6 +242,25 @@ builder participant verifies, builds and promotes
 draft and the ask, so the author is known wherever they travel. The same
 event shape asks for a lease: `d` names the closure's head instead.
 
+**A builder's floor (2026-10-04).** Building a draft runs its author's code
+on the builder's machine (its lockfile, scripts, configs, tests), so a
+builder:
+- builds only for authors it trusts (`builds.mjs trust <pubkey>`; a stranger's
+  ask is held);
+- refuses an ask sent to another host, one older than seven days, one it
+  built before, and a draft over anything but its channel's newest revision;
+- runs the build with no signing key or other secret in its environment, and
+  staging into pools of its own;
+- signs nothing until the built tree is exactly the draft over its base.
+
+What it promotes lands in `<label>-drafts`, signed in the role `builder`,
+chained to the draft's base, never the head. Followers see it and never take
+it. It joins the channel (`builds.mjs adopt`) only after someone other than
+its author signs it as `reviewer`. Still owed: building as another user or in
+a container; listing asks to builders only (`host:asks`, read by a builder
+key the operator names); builders watching for asks; the author shown what
+became of each draft.
+
 ## 4. What changes in the code, in order
 
 1. **`publishBranch` mints the `published` list BEFORE the index PUT** —

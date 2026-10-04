@@ -25,7 +25,12 @@ import { verifyEvent } from 'nostr-tools/pure'
 export const BUILDS_MEANING = 'host:builds'
 export const SIGNATURES_MEANING = 'host:build-signatures'
 export const BUILD_SIGNATURE_KIND = 30567
-export const ROLES = ['author', 'reviewer', 'witness'] as const
+// `builder`: someone who built another's draft — vouching for the build,
+// never for the work (hypercomb-shim host/builds.mjs ROLES, the same).
+export const ROLES = ['author', 'reviewer', 'witness', 'builder'] as const
+/** A draft's channel (builds.mjs DRAFTS_SUFFIX): seen, never taken as the
+ *  channel's next until reviewed and adopted. */
+export const DRAFTS_SUFFIX = '-drafts'
 export type Role = typeof ROLES[number]
 
 const SIG = /^[a-f0-9]{64}$/
@@ -137,6 +142,10 @@ export type Revision = {
   /** Built from a participant's draft (sharing/version-drafts.ts): its author,
    *  by the signed ask that names it — null when the ask does not verify. */
   from: { draft: string; ask: string; author: string | null } | null
+  /** Built from a draft and not yet adopted into its channel. */
+  awaitingReview: boolean
+  /** Adopted from the reviewed draft revision this names. */
+  reviewed: string | null
 }
 
 /** The ask a draft was sent with (version-drafts.ts, the same constants). */
@@ -201,6 +210,8 @@ export const versionRevisions = async (io: PoolIo = opfsPools()): Promise<Revisi
       parts: PARTS.filter(part => record[part] !== undefined && record[part] !== null),
       signers: [...seen.values()],
       from,
+      awaitingReview: label.endsWith(DRAFTS_SUFFIX),
+      reviewed: typeof record['reviewed'] === 'string' ? record['reviewed'] : null,
     })
   }
   return out.sort((a, b) => order(b.version) - order(a.version) || (a.sig < b.sig ? -1 : 1))

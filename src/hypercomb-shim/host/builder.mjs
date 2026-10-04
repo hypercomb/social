@@ -43,11 +43,17 @@ import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  AUTHOR_SCRIPTS, BUILDS_MEANING, INSTALL_WORKSPACES, SIGNATURES_MEANING,
-  carryPools, checkout, findRevision, poolDir, promote, pullPools, readStage,
+  AUTHOR_SCRIPTS, BUILDS_MEANING, GENERATED_FILES, INSTALL_WORKSPACES, SIGNATURES_MEANING,
+  adoptStaged, carryPools, checkout, collect, draftsLabel, findRevision, isDraftsLabel, poolDir, promote, pullPools, readTrusted, revisions,
+  sign as signOf, workspaceOf,
 } from './builds.mjs'
 
 export const ASK_KIND = 30568
+/** How long an ask stays good: an old ask is never built (a replay could
+ *  roll a channel back to the base it started from). */
+export const ASK_TTL_DAYS = 7
+/** The labels a draft's build stages, the package before the host. */
+const BUILT_LABELS = ['hypercomb-essentials', 'host']
 export const askPreimage = draft => `hc:ask:v1\n${draft}`
 const SIG = /^[a-f0-9]{64}$/
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -75,14 +81,28 @@ const BUILD_ENV_KEPT = ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy',
   'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'npm_config_cache', 'NPM_CONFIG_CACHE', 'npm_config_registry',
   'PLAYWRIGHT_BROWSERS_PATH', 'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD', 'NODE_OPTIONS', 'HYPERCOMB_SEED_HOSTS', 'SYSTEMROOT', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'PATHEXT', 'COMSPEC']
-export const buildEnv = (work, from = process.env) => ({
+export const buildEnv = (work, from = process.env, { pools } = {}) => ({
   ...Object.fromEntries(BUILD_ENV_KEPT.filter(name => from[name] !== undefined).map(name => [name, from[name]])),
-  // The build stages into this builder's pools (promote reads the stage).
-  ...(from.HYPERCOMB_POOLS_DIR ? { HYPERCOMB_POOLS_DIR: from.HYPERCOMB_POOLS_DIR } : {}),
+  // The build stages into pools of its OWN (buildDraft): the draft's code
+  // never writes the operator's stage or pools, so it cannot choose what
+  // this builder signs.
+  ...(pools ? { HYPERCOMB_POOLS_DIR: pools } : from.HYPERCOMB_POOLS_DIR ? { HYPERCOMB_POOLS_DIR: from.HYPERCOMB_POOLS_DIR } : {}),
   HYPERCOMB_HOST_OUT_DIR: resolve(work, 'out'),
   HYPERCOMB_WEB_CONTENT_DIR: resolve(work, 'web-content'),
   HYPERCOMB_RELAY_CONTENT_DIR: resolve(work, 'relay-content'),
 })
+
+/** A path a draft may write: inside the tree, plain, and never into the
+ *  repository's own machinery or installed dependencies — the same rule as
+ *  core work-words.ts `draftPathRefusal`, which the browser stages under. */
+export const draftPathRefusal = path => {
+  const text = String(path ?? '')
+  if (!text || text.length > 300 || /[\\:\u0000-\u001f\u007f]/.test(text)) return `${text || '(empty)'} is not a plain path`
+  const parts = text.split('/')
+  if (text.startsWith('/') || parts.some(part => part === '' || part === '.' || part === '..')) return `${text} is not a path inside the tree`
+  if (parts.some(part => part === '.git' || part === 'node_modules')) return `${text} writes into .git or node_modules, which a draft never does`
+  return null
+}
 
 const keepIn = async (meaning, sig, bytes) => {
   const pool = poolDir(meaning)
@@ -91,7 +111,7 @@ const keepIn = async (meaning, sig, bytes) => {
 }
 
 /** Read and verify what an ask names: the author, the draft, its files. */
-export const takeAsk = async (host, ask, { get = fetch } = {}) => {
+export const takeAsk = async (host, ask, { get = fetch, now = new Date() } = {}) => {
   if (!SIG.test(ask)) throw new Error('an ask is named by its signature (64 hex)')
   const askBytes = await fetchSig(host, ask, get)
   let event
@@ -101,6 +121,15 @@ export const takeAsk = async (host, ask, { get = fetch } = {}) => {
   if (event.kind !== ASK_KIND || !SIG.test(draft ?? '') || event.content !== askPreimage(draft) || !verifyEvent(event)) {
     throw new Error('the ask does not verify: it is not a signed ask for one draft')
   }
+  // FOR THIS HOST, AND RECENT. An ask names the host it was sent to; one
+  // carried to another host, or kept past its time, is not built.
+  if (originOf(String(tag(event, 'h') ?? '')) !== originOf(host)) {
+    throw new Error(`the ask was sent to ${tag(event, 'h') || 'no host'}, not ${originOf(host)}`)
+  }
+  const at = Number(event.created_at) * 1000
+  if (!(at > now.getTime() - ASK_TTL_DAYS * 86_400_000) || at > now.getTime() + 600_000) {
+    throw new Error(`the ask is from ${new Date(at).toISOString().slice(0, 10)}: older than ${ASK_TTL_DAYS} days (or from the future) — ask again`)
+  }
   const draftBytes = await fetchSig(host, draft, get)
   const record = JSON.parse(draftBytes.toString('utf8'))
   if (record?.name !== 'draft' || !SIG.test(record.base ?? '') || !SIG.test(record.files ?? '')) throw new Error('the ask names something that is not a draft')
@@ -109,7 +138,8 @@ export const takeAsk = async (host, ask, { get = fetch } = {}) => {
   if (layer?.name !== 'draft-files' || typeof layer.files !== 'object') throw new Error('the draft\'s files are not a files layer')
   const files = new Map()
   for (const [path, sig] of Object.entries(layer.files)) {
-    if (path.startsWith('/') || path.split('/').includes('..')) throw new Error(`${path} is not a path inside the tree`)
+    const refusal = draftPathRefusal(path)
+    if (refusal) throw new Error(refusal)
     if (sig === null) { files.set(path, null); continue }
     if (!SIG.test(sig)) throw new Error(`${path} names no file`)
     files.set(path, await fetchSig(host, sig, get))
@@ -123,17 +153,39 @@ export const takeAsk = async (host, ask, { get = fetch } = {}) => {
 }
 
 /** Build a draft into revisions and promote them. Returns what was promoted. */
-export const buildDraft = async (host, ask, { to = null, test = false, keepWork = false, log = console.log, get = fetch } = {}) => {
-  const taken = await takeAsk(host, ask, { get })
+export const buildDraft = async (host, ask, { to = null, test = false, keepWork = false, untrusted = false, log = console.log, get = fetch, now = new Date() } = {}) => {
+  const taken = await takeAsk(host, ask, { get, now })
   log(`[builder] ask ${ask.slice(0, 12)} from ${taken.author.slice(0, 12)}: ${taken.files.size} file(s) over ${taken.record.base.slice(0, 12)}`)
-  let base = await findRevision(taken.record.base).catch(() => null)
-  if (!base) {
-    await pullPools([host], { fetch: get })
-    base = await findRevision(taken.record.base).catch(() => null)
+  // WHOSE CODE RUNS HERE. Building runs the draft's code on this machine:
+  // only an author the operator trusts (builds.mjs trust <pubkey>), or one
+  // named for this build alone (--untrusted).
+  if (!untrusted && !(await readTrusted()).includes(taken.author)) {
+    throw new Error(`${taken.author} is not an author this builder trusts — builds.mjs trust ${taken.author}, or --untrusted for this one build`)
   }
+  // ONCE. An ask built before is not built again: built means its host
+  // revision, promoted last, so a build that stopped after the package can
+  // be run again.
+  const built = (await revisions()).find(r => r.record.ask === ask && r.record.label === draftsLabel('host'))
+  if (built) throw new Error(`that ask was built already: ${built.record.label} ${built.record.version} ${built.sig.slice(0, 12)}`)
+  // FROM THE HEAD. What the host holds now, so the base is judged against
+  // the newest history; a draft over an older revision would roll back
+  // everything after it.
+  await pullPools([host], { fetch: get })
+  const base = await findRevision(taken.record.base).catch(() => null)
   if (!base) throw new Error(`the draft starts from ${taken.record.base.slice(0, 12)}, which neither this builder nor ${host} holds`)
+  const head = (await revisions()).find(r => r.record.label === base.record.label && !isDraftsLabel(r.record.label))
+  if (head && head.sig !== base.sig) {
+    throw new Error(`the draft starts from ${base.record.label} ${base.record.version}, but the newest is ${head.record.version} — draft again over it`)
+  }
+  // What the build must leave: the base's tree with the draft's files over it.
+  const expected = { ...await workspaceOf(base.sig) }
+  for (const [path, bytes] of taken.files) {
+    if (bytes === null) delete expected[path]
+    else expected[path] = sha(bytes)
+  }
 
   const work = await mkdtemp(resolve(tmpdir(), 'hc-builder-'))
+  const pools = await mkdtemp(resolve(tmpdir(), 'hc-builder-pools-'))
   try {
     await rm(work, { recursive: true, force: true })
     await checkout(base.sig, work)
@@ -145,31 +197,44 @@ export const buildDraft = async (host, ask, { to = null, test = false, keepWork 
     const src = resolve(work, 'src')
     const run = (args, label) => {
       log(`[builder] ${label}`)
-      const r = spawnSync('npm', args, { cwd: src, encoding: 'utf8', env: buildEnv(work), maxBuffer: 256 << 20 })
+      const r = spawnSync('npm', args, { cwd: src, encoding: 'utf8', env: buildEnv(work, process.env, { pools }), maxBuffer: 256 << 20 })
       if (r.status !== 0) throw new Error(`${label} failed:\n${(r.stderr || r.stdout || '').split('\n').slice(-25).join('\n')}`)
       return r.stdout
     }
     run(['ci', ...INSTALL_WORKSPACES.flatMap(w => ['-w', w]), '--include-workspace-root', '--no-audit', '--no-fund'], 'npm ci from the draft\'s tree (its lockfile, if it changed one)')
     for (const script of AUTHOR_SCRIPTS) run(['run', script], `npm run ${script}`)
     if (test) {
-      const r = spawnSync('npx', ['vitest', 'run'], { cwd: src, encoding: 'utf8', env: buildEnv(work), maxBuffer: 256 << 20 })
+      const r = spawnSync('npx', ['vitest', 'run'], { cwd: src, encoding: 'utf8', env: buildEnv(work, process.env, { pools }), maxBuffer: 256 << 20 })
       if (r.status !== 0) throw new Error(`the draft's tests fail:\n${(r.stdout || '').split('\n').filter(l => /×|FAIL|Test Files|Tests /.test(l)).slice(-20).join('\n')}`)
       log(`[builder] tests: ${(r.stdout.match(/Test Files .*/) ?? ['pass'])[0].trim()}`)
     }
-    const stage = await readStage()
+    // VERIFY, THEN SIGN. The build's own pools hold what it staged; nothing
+    // is taken from them, let alone signed, unless the host revision's tree
+    // is the draft over its base (and the files a build writes itself).
+    const stagedIn = JSON.parse(await readFile(resolve(pools, 'local', 'stage.json'), 'utf8').catch(() => '{}'))
+    if (!stagedIn.host?.record) throw new Error('the build staged no host revision')
+    const builtTree = await workspaceOf(stagedIn.host.record, resolve(pools, signOf(BUILDS_MEANING)))
+    const differs = [...new Set([...Object.keys(expected), ...Object.keys(builtTree)])]
+      .filter(path => expected[path] !== builtTree[path] && !GENERATED_FILES.includes(path)).sort()
+    if (differs.length) {
+      throw new Error(`the build's tree is not the draft over its base: ${differs.slice(0, 6).join(', ')}${differs.length > 6 ? ` and ${differs.length - 6} more` : ''}`)
+    }
+    const stagedSigs = await adoptStaged(pools, BUILT_LABELS)
     const promoted = []
-    // The package first, then the host: one history, each parent the head before it.
-    for (const label of ['hypercomb-essentials', 'host']) {
-      if (!stage[label]?.record) continue
-      const made = await promote(label, { sync: false, from: { draft: taken.draft, ask } })
+    // The package first, then the host, each in its drafts channel.
+    for (const label of BUILT_LABELS) {
+      if (!stagedSigs[label]) continue
+      const made = await promote(label, { sync: false, staged: stagedSigs[label], from: { draft: taken.draft, ask, base: base.sig } })
       if (!made.signed) throw new Error(`${label} ${made.record.version} was promoted but not signed: set HYPERCOMB_SIGNER_KEY to this builder's key`)
       promoted.push({ label, version: made.record.version, sig: made.sig })
-      log(`[builder] promoted ${label} ${made.record.version} ${made.sig.slice(0, 12)} — from ${taken.author.slice(0, 12)}'s draft`)
+      log(`[builder] promoted ${made.record.label} ${made.record.version} ${made.sig.slice(0, 12)} — from ${taken.author.slice(0, 12)}'s draft, signed as its builder`)
     }
+    await collect()
     if (to) log(`[builder] carried ${await carryPools(resolve(to), { atoms: true })} file(s) into ${to}`)
     return { ...taken, promoted, work: keepWork ? work : null }
   } finally {
     if (!keepWork) await rm(work, { recursive: true, force: true })
+    await rm(pools, { recursive: true, force: true })
   }
 }
 
@@ -177,9 +242,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const at = process.argv.indexOf('--to')
   const [host, ask] = process.argv.slice(2).filter((a, i) => !a.startsWith('--') && !(at >= 0 && i + 2 === at + 1))
   if (!host || !ask) {
-    console.error('usage: node host/builder.mjs <host> <ask sig> [--to <dir>] [--test] [--keep]')
+    console.error('usage: node host/builder.mjs <host> <ask sig> [--to <dir>] [--test] [--keep] [--untrusted]')
     process.exit(2)
   }
-  buildDraft(host, ask, { to: at >= 0 ? process.argv[at + 1] : null, test: process.argv.includes('--test'), keepWork: process.argv.includes('--keep') })
+  buildDraft(host, ask, { to: at >= 0 ? process.argv[at + 1] : null, test: process.argv.includes('--test'), keepWork: process.argv.includes('--keep'), untrusted: process.argv.includes('--untrusted') })
     .catch(e => { console.error(`[builder] ${e.message}`); process.exit(1) })
 }

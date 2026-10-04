@@ -39,6 +39,8 @@ export class AgentQueenBee extends QueenBee {
 
   #turns: Turn[] = []
   #left = ''
+  /** Someone else's words this conversation read: they hold its changes. */
+  #foreign: readonly string[] = []
   #running: AbortController | null = null
 
   public override slashComplete(args: string): readonly string[] {
@@ -56,6 +58,7 @@ export class AgentQueenBee extends QueenBee {
       this.#running?.abort()
       this.#turns = []
       this.#left = ''
+      this.#foreign = []
       this.#toast('info', this.#t('agent.new', 'A new conversation.'))
       return
     }
@@ -69,7 +72,7 @@ export class AgentQueenBee extends QueenBee {
     this.#activity(`› ${said}`, '✦')
     let result: AgentTurnResult
     try {
-      result = await runAgentTurn({ request, transcript: this.#turns, convoId: 'agent:queen', signal: running.signal })
+      result = await runAgentTurn({ request, transcript: this.#turns, convoId: 'agent:queen', foreign: this.#foreign, signal: running.signal })
     } catch (error) {
       if (running.signal.aborted) return
       this.#toast('warning', error instanceof Error ? error.message : String(error))
@@ -80,6 +83,7 @@ export class AgentQueenBee extends QueenBee {
     this.#turns.push({ role: 'user', text: request }, { role: 'assistant', text: result.answer, ...(result.model ? { model: result.model } : {}) })
     this.#turns = this.#turns.slice(-KEPT)
     this.#left = result.left ?? ''
+    this.#foreign = result.foreign
     for (const line of result.ran) this.#activity(`ran ${line}`, '▸')
     for (const draft of result.drafts) this.#activity(`draft ${draft.draft.slice(0, 12)} over ${draft.version.slice(0, 12)} · ${draft.paths.join(', ')}`, '✎')
     this.#activity(result.answer || this.#t('agent.silent', '(no answer)'), '✦')
