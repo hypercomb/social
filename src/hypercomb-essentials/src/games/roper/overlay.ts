@@ -1,8 +1,8 @@
 // games/roper/overlay.ts
 //
 // The full-screen Roper shell. Owns the DOM (backdrop, toolbar, canvas, banner),
-// the requestAnimationFrame loop, and input (keyboard for moving/roping, mouse
-// for aiming + charging the throw). Self-contained mini-app: it never touches
+// the requestAnimationFrame loop, and input (the keyboard steers one shared aim
+// and does everything; the mouse only clicks — it never moves the aim). Self-contained mini-app: it never touches
 // the hex grid or Pixi — it mounts above everything as a fixed overlay and tears
 // itself fully down on close. RoperDrone owns its lifecycle. Sibling in shape to
 // the arkanoid / bubble / solomon overlays.
@@ -24,7 +24,7 @@ const CHARGE_RAMP = 1.25       // seconds from a tap to full power
 const MOVE_KEYS = new Set([
   'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
   'a', 'A', 'd', 'D', 'w', 'W', 's', 'S', ' ',
-  'j', 'J', 'i', 'I', 'k', 'K',
+  'j', 'J', 'i', 'I', 'k', 'K', 'l', 'L',
 ])
 
 export class RoperOverlay {
@@ -66,7 +66,6 @@ export class RoperOverlay {
     window.addEventListener('keydown', this.#onKeyDown, true)
     window.addEventListener('keyup', this.#onKeyUp, true)
     window.addEventListener('resize', this.#fit)
-    window.addEventListener('pointermove', this.#onPointerMove)
     window.addEventListener('pointerup', this.#onPointerUp)
     this.#ro = new ResizeObserver(() => this.#fit())
     if (this.#stage) this.#ro.observe(this.#stage)
@@ -80,7 +79,6 @@ export class RoperOverlay {
     window.removeEventListener('keydown', this.#onKeyDown, true)
     window.removeEventListener('keyup', this.#onKeyUp, true)
     window.removeEventListener('resize', this.#fit)
-    window.removeEventListener('pointermove', this.#onPointerMove)
     window.removeEventListener('pointerup', this.#onPointerUp)
     this.#ro?.disconnect()
     this.#ro = null
@@ -139,11 +137,10 @@ export class RoperOverlay {
 
     const help = el('div', { class: 'rp-help' })
     help.innerHTML =
-      '<b>Mouse</b> aim &nbsp;·&nbsp; <b>hold left-click</b> charge & throw &nbsp;·&nbsp; ' +
-      '<b>Space</b>/<b>J</b>/<b>right-click</b> fire / release rope &nbsp;·&nbsp; ' +
-      'roped: <b>← →</b> swing, <b>↑</b> shorten (faster) <b>↓</b> lengthen (slower) &nbsp;·&nbsp; ' +
-      'on foot: <b>← →</b> walk, <b>↑</b> jump &nbsp;·&nbsp; ' +
-      '<b>1</b> grenade <b>2</b> bomb <b>I</b> swap &nbsp;·&nbsp; <b>K</b> drop it &nbsp;·&nbsp; <b>R</b> new arena &nbsp;·&nbsp; <b>Esc</b> close'
+      '<b>A D</b> walk &nbsp;·&nbsp; <b>W S</b> raise / lower the aim (rope and weapon share it) &nbsp;·&nbsp; ' +
+      '<b>Space</b> jump &nbsp;·&nbsp; <b>J</b> fire / release rope &nbsp;·&nbsp; <b>hold K</b> charge & throw &nbsp;·&nbsp; ' +
+      'roped: <b>A D</b> swing, <b>W</b> shorten (faster) <b>S</b> lengthen (slower) &nbsp;·&nbsp; ' +
+      '<b>I</b> change weapon (<b>1</b> grenade <b>2</b> bomb) &nbsp;·&nbsp; <b>L</b> drop it &nbsp;·&nbsp; <b>R</b> new arena &nbsp;·&nbsp; <b>Esc</b> close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -250,17 +247,14 @@ export class RoperOverlay {
     switch (k) {
       case 'ArrowLeft': case 'a': case 'A': eng.input.left = true; break
       case 'ArrowRight': case 'd': case 'D': eng.input.right = true; break
-      case 'ArrowUp': case 'w': case 'W':
-        // Up is always the reel-in key: the engine only reels while attached, so holding it
-        // through an attach reels at once. On the ground it is still the jump.
-        eng.input.up = true
-        if (!eng.attached) eng.jump()
-        break
+      // W/S: off the rope they raise and lower the one aim; on it they reel.
+      case 'ArrowUp': case 'w': case 'W': eng.input.up = true; break
       case 'ArrowDown': case 's': case 'S': eng.input.down = true; break
-      case ' ': case 'j': case 'J': eng.toggleRope(); break          // J: the second rope key
+      case ' ': eng.jump(); break
+      case 'j': case 'J': eng.toggleRope(); break
       case 'i': case 'I': eng.cycleWeapon(); this.#syncToolbar(true); break   // I: grenade / bomb
-      case 'k': case 'K': eng.dropWeapon(); this.#syncToolbar(true); break    // K: drop it
-      case 'Enter': this.#beginCharge(); break
+      case 'k': case 'K': case 'Enter': this.#beginCharge(); break           // K: hold, release throws
+      case 'l': case 'L': eng.dropWeapon(); this.#syncToolbar(true); break    // L: drop it
       case '1': eng.selectWeapon('grenade'); this.#syncToolbar(true); break
       case '2': eng.selectWeapon('bomb'); this.#syncToolbar(true); break
       case 'Tab': eng.cycleWeapon(); this.#syncToolbar(true); break
@@ -278,39 +272,13 @@ export class RoperOverlay {
       case 'ArrowRight': case 'd': case 'D': eng.input.right = false; break
       case 'ArrowUp': case 'w': case 'W': eng.input.up = false; break
       case 'ArrowDown': case 's': case 'S': eng.input.down = false; break
-      case 'Enter': this.#releaseCharge(); break
+      case 'k': case 'K': case 'Enter': this.#releaseCharge(); break
     }
   }
 
-  // ── input: mouse ─────────────────────────────────────────
-  #worldFromEvent(e: PointerEvent): { x: number; y: number } | null {
-    const c = this.#canvas, eng = this.#engine
-    if (!c || !eng) return null
-    const rect = c.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) return null
-    return {
-      x: ((e.clientX - rect.left) / rect.width) * eng.width,
-      y: ((e.clientY - rect.top) / rect.height) * eng.height,
-    }
-  }
-
-  #aimAt(p: { x: number; y: number }): void {
-    const eng = this.#engine
-    const w = eng?.active
-    if (!eng || !w) return
-    eng.aimAngle = Math.atan2(p.y - w.y, p.x - w.x)
-    eng.facingFromAim()
-  }
-
-  #onPointerMove = (e: PointerEvent): void => {
-    const p = this.#worldFromEvent(e)
-    if (p) this.#aimAt(p)
-  }
-
+  // ── input: mouse — clicks only; the aim is the keyboard's ──
   #onPointerDown = (e: PointerEvent): void => {
     e.preventDefault()
-    const p = this.#worldFromEvent(e)
-    if (p) this.#aimAt(p)
     const eng = this.#engine
     if (!eng) return
     if (e.button === 2) { eng.toggleRope(); return }    // right-click → rope

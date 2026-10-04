@@ -168,37 +168,68 @@ describe('roper rope: momentum', () => {
   })
 })
 
-describe('roper rope: launch angle', () => {
-  const elevationDeg = (e: RoperEngine): number => {
-    const d = e.ropeLaunchDir()
-    return (Math.atan2(-d.dy, Math.abs(d.dx)) * 180) / Math.PI
-  }
+describe('roper aim: one aim for the rope and the weapon', () => {
+  const elevationDeg = (e: RoperEngine): number =>
+    (Math.atan2(-Math.sin(e.aimAngle), Math.abs(Math.cos(e.aimAngle))) * 180) / Math.PI
 
-  it('never fires flatter than 45 degrees, however low you aim', () => {
-    for (const deg of [0, 5, 20, 44, 180, 175, -10, 200, 359]) {
+  it('fires the rope exactly along the aim, low or high, either side, and again on a re-rope', () => {
+    for (const deg of [20, -10, -45, -80, -100, -170]) {
       const e = arena()
       e.aimAngle = (deg * Math.PI) / 180
-      expect(elevationDeg(e)).toBeGreaterThanOrEqual(45 - 1e-9)
+      for (let shot = 0; shot < 2; shot++) {
+        e.fireRope()
+        expect(e.rope!.dx).toBeCloseTo(Math.cos(e.aimAngle), 9)
+        expect(e.rope!.dy).toBeCloseTo(Math.sin(e.aimAngle), 9)
+        e.releaseRope()
+      }
     }
   })
 
-  it('leaves a steeper aim alone', () => {
+  it('throws the weapon along the same aim', () => {
     const e = arena()
-    e.aimAngle = (-70 * Math.PI) / 180
-    expect(elevationDeg(e)).toBeCloseTo(70, 6)
-    expect(Math.hypot(e.ropeLaunchDir().dx, e.ropeLaunchDir().dy)).toBeCloseTo(1, 9)
+    const w = e.active!
+    w.vx = 0; w.vy = 0
+    e.aimAngle = (-30 * Math.PI) / 180
+    e.throwWeapon(0.5)
+    const shot = e.projectiles.at(-1)!
+    expect(Math.atan2(shot.vy, shot.vx)).toBeCloseTo(e.aimAngle, 9)
   })
 
-  it('still flips to the other side on a re-rope, at the same 45 degree floor', () => {
+  it('W raises and S lowers the aim off the rope, stopping at straight up and down', () => {
     const e = arena()
-    e.aimAngle = (-20 * Math.PI) / 180            // low, to the right
-    const first = e.ropeLaunchDir()
-    expect(first.sign).toBe(1)
-    e.fireRope()
-    e.releaseRope()
-    const again = e.ropeLaunchDir()
-    expect(again.sign).toBe(-1)
-    expect(elevationDeg(e)).toBeGreaterThanOrEqual(45 - 1e-9)
+    e.active!.facing = 1
+    e.aimAngle = 0
+    e.input.up = true
+    for (let i = 0; i < 30; i++) e.update(1 / 60)          // half a second
+    expect(elevationDeg(e)).toBeCloseTo((0.5 * 1.6 * 180) / Math.PI, 1)
+    for (let i = 0; i < 120; i++) e.update(1 / 60)
+    expect(elevationDeg(e)).toBeCloseTo(90, 6)
+    e.input.up = false; e.input.down = true
+    for (let i = 0; i < 240; i++) e.update(1 / 60)
+    expect(elevationDeg(e)).toBeCloseTo(-90, 6)
+  })
+
+  it('keeps its elevation and turns with the worm', () => {
+    const e = arena()
+    const w = e.active!
+    w.facing = 1
+    e.aimAngle = (-30 * Math.PI) / 180                     // 30 degrees up, to the right
+    w.facing = -1
+    e.update(1 / 60)
+    expect(Math.cos(e.aimAngle)).toBeLessThan(0)
+    expect(elevationDeg(e)).toBeCloseTo(30, 6)
+  })
+
+  it('on the rope W/S reel and leave the aim alone', () => {
+    const e = arena()
+    const rope = attach(e, 450 + 100, 40 + 300)
+    e.aimAngle = (-30 * Math.PI) / 180
+    e.active!.facing = 1
+    const length = rope.length
+    e.input.up = true
+    for (let i = 0; i < 20; i++) e.update(1 / 60)
+    expect(e.rope!.length).toBeLessThan(length)
+    expect(elevationDeg(e)).toBeCloseTo(30, 6)
   })
 })
 
