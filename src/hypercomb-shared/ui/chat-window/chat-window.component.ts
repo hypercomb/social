@@ -101,6 +101,7 @@ import {
   PARTICIPANT_AI_HOST_STORAGE_KEY,
   QUESTION_ASKING_INSTRUCTION,
   hostWireText,
+  hypercomb,
   isLocalClaudeBridgeConfigured,
   isParticipantAiHostConfigured,
   reachPhrase,
@@ -133,6 +134,7 @@ import {
   callableBehaviours,
   hypercombActionProviderId,
   hypercombContextKey,
+  hypercombLinesBeyondPages,
   hypercombPlanLeaves,
   hypercombPlanReach,
   hypercombVocabulary,
@@ -145,6 +147,7 @@ import {
   type HypercombFunctionTool,
   type HypercombToolCall,
 } from './hypercomb-grammar'
+import { PlanTransaction, type PlanHistory } from './hypercomb-plan-transaction'
 import {
   executeHypercombObservationPlan,
   foreignReads,
@@ -164,6 +167,7 @@ import {
   blockRefusedMessage,
   blockUnwrittenMessage, claimsUnranChange, unranChangeMessage,
   doFailedMessage,
+  type DoRollback,
   JevGone,
   doRanMessage,
   doSkippedMessage,
@@ -7160,8 +7164,15 @@ export class ChatWindowComponent implements OnDestroy {
         // before the first action, so waiting behind another plan — or behind
         // the participant's hand — cannot stale a read unnoticed.
         let snapshotAdmitted = snapshotIds.length === 0
+        // ONE RUN, ONE UNIT (hypercomb-plan-transaction.ts): every page the
+        // plan moves is recorded from its first line, IN the lane — a plan
+        // waiting behind another records nothing of the other's — so a line
+        // that fails can put the earlier ones back.
+        const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as Partial<PlanHistory> | undefined
+        const transaction = history?.warmHeadSigFor && history.promoteToHead ? new PlanTransaction(history as PlanHistory) : undefined
         const executor: HypercombBehaviourExecutor = {
           execute: async (command, args) => {
+            transaction?.begin(EffectBus)
             stillHere()
             if (!snapshotAdmitted) {
               if (!treeReader || !await treeReader.validateSnapshots(snapshotIds, signal)) {
@@ -7177,6 +7188,7 @@ export class ChatWindowComponent implements OnDestroy {
         }
         try {
           const receipt = await hypercombPlanQueue.run(plan, executor, signal)
+          transaction?.end()
           ran.push(...receipt.grammars)
           needsVerification = true
           evidence.splice(1)
@@ -7186,18 +7198,34 @@ export class ChatWindowComponent implements OnDestroy {
           lastRun = 'ran'
           return doRanMessage(receipt.grammars, message)
         } catch (error) {
+          // Stop is the participant's hand: what ran before it stays.
+          transaction?.end()
           if (signal?.aborted) {
             queue.settle(entry.id, 'skipped')
             throw error
           }
           if (error instanceof HypercombActionExecutionError) {
-            ran.push(...error.completed)
+            // A FAILURE UNDOES THE PREFIX: the participant ran the block as
+            // one thing. Its pages go back as forward commits once the commit
+            // lane has settled; a hive left rewound takes no writes.
+            let rollback: DoRollback | undefined
+            if (error.completed.length && transaction) {
+              const committer = ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as { settled?: () => Promise<void> } | undefined
+              const cursor = ioc()?.get('@diamondcoreprocessor.com/HistoryCursorService') as { state?: { rewound?: boolean } } | undefined
+              await committer?.settled?.().catch(() => undefined)
+              const undone = await transaction.rollback({ rewound: cursor?.state?.rewound === true })
+              rollback = { ...undone, beyond: hypercombLinesBeyondPages(plan, behaviourEntries, error.completed) }
+              if (undone.restored) await new hypercomb().act()
+            }
+            const standing = !rollback || rollback.refused || rollback.kept || rollback.failed || rollback.beyond.length
+            ran.push(...(standing ? error.completed : []))
             if (error.completed.length) needsVerification = true
             if (error.completed.length) evidence.splice(1)
             if (error.completed.length) snapshotIds.length = 0
             const reason = error.cause instanceof Error ? error.cause.message : 'it could not run'
-            queue.settle(entry.id, 'failed', `${error.grammar}: ${reason}`)
-            return doFailedMessage(error.completed, error.grammar, reason, message)
+            const putBack = rollback?.restored ? ` — ${rollback.restored} page${rollback.restored === 1 ? '' : 's'} put back` : ''
+            queue.settle(entry.id, 'failed', `${error.grammar}: ${reason}${putBack}`)
+            return doFailedMessage(error.completed, error.grammar, reason, message, rollback)
           }
           queue.settle(entry.id, 'failed', error instanceof Error ? error.message : undefined)
           throw error

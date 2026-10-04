@@ -36,7 +36,7 @@
 // a trap.
 
 import {
-  admitMachineCall, callableBehaviours, currentMachineGrant, machineCatalogue, primaryEntry,
+  admitMachineCall, callableBehaviours, currentMachineGrant, machineCatalogue, MACHINE_WRITE, primaryEntry,
   type AdmissionEntry, type MachineGrant, type MachineReach, type MachineScope,
 } from '@hypercomb/core'
 
@@ -328,8 +328,30 @@ export const hypercombPlanLeaves = (
  *  participant's ceiling and off switch. The roster is not asked: there is no
  *  behaviour to grant, and the write waits in Execution as its own row. */
 export const hypercombWriteRefusal = (grant: MachineGrant = currentMachineGrant()): string | undefined => {
-  const verdict = admitMachineCall('write', { name: 'write', machine: { reach: 'editing', scope: 'hive' } }, 'model', { reach: grant.reach, scope: grant.scope })
+  const verdict = admitMachineCall(MACHINE_WRITE.name, MACHINE_WRITE, 'model', { reach: grant.reach, scope: grant.scope })
   return verdict.admit ? undefined : verdict.reason
+}
+
+/** Of `lines` (a plan's completed prefix), the ones whose behaviour reaches
+ *  PAST THE PAGES — a hive-wide document, this browser's own state, the
+ *  network, or a scope never declared. A stopped plan puts its pages back
+ *  (hypercomb-plan-transaction.ts); these it cannot reach, so the receipt
+ *  names them rather than claim them undone. */
+export const hypercombLinesBeyondPages = (
+  plan: HypercombActionPlan,
+  entries: readonly HypercombBehaviour[],
+  lines: readonly string[],
+  grant: MachineGrant = currentMachineGrant(),
+): readonly string[] => {
+  const scopeOf = new Map(callableBehaviours(entries, grant).map(entry => [entry.name, entry.machine?.scope] as const))
+  const ran = new Set(lines)
+  return plan.actions
+    .filter(action => ran.has(action.grammar))
+    .filter(action => {
+      const scope = scopeOf.get(action.command)
+      return scope !== 'tile' && scope !== 'page'
+    })
+    .map(action => action.grammar)
 }
 
 const parseLine = (

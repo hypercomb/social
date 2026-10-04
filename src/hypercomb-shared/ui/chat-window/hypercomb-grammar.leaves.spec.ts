@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { MachineGrant } from '@hypercomb/core'
-import { hypercombPlanLeaves, parseHypercombGrammars, type HypercombBehaviour } from './hypercomb-grammar'
+import { hypercombLinesBeyondPages, hypercombPlanLeaves, parseHypercombGrammars, type HypercombBehaviour } from './hypercomb-grammar'
 
 const ANY: MachineGrant = { reach: 'destructive', scope: 'network' }
 
@@ -38,5 +38,21 @@ describe('the lines of a plan that leave the machine', () => {
   it('names exactly the lines that leave, in order', () => {
     expect(leaves('/create roadmap', '/hide drafts', '/title a = b', '/unjudged notes'))
       .toEqual(['/hide drafts', '/unjudged notes'])
+  })
+})
+
+describe('the lines a roll back of pages cannot reach', () => {
+  const hive: HypercombBehaviour = { name: 'keyword', machine: { forms: '<tile> = <tag>', example: '/keyword a = b', reach: 'editing', scope: 'hive' } }
+  const local: HypercombBehaviour = { name: 'language', machine: { forms: '<locale>', example: '/language ja', reach: 'editing', scope: 'local' } }
+  const all = [...entries, hive, local]
+  const plan = parseHypercombGrammars(['/create a', '/title a = b', '/keyword a = c', '/language ja', '/hide a', '/unjudged a'], all, ANY)
+
+  it('tile and page lines are pages; hive, local, network and unjudged lines are not', () => {
+    expect(hypercombLinesBeyondPages(plan, all, plan.actions.map(action => action.grammar), ANY))
+      .toEqual(['/keyword a = c', '/language ja', '/hide a', '/unjudged a'])
+  })
+
+  it('only the lines that ran are named', () => {
+    expect(hypercombLinesBeyondPages(plan, all, ['/create a', '/keyword a = c'], ANY)).toEqual(['/keyword a = c'])
   })
 })

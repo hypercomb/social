@@ -245,8 +245,40 @@ export const doRanMessage = (ran: readonly string[], request: string): string =>
 export const doSkippedMessage = (lines: readonly string[], request: string): string =>
   `The participant skipped your ${DO_FENCE_LANG} block; nothing changed:\n${bullets(lines)}\n\nDo not propose it again unless they ask. Continue, or answer.${carry(request)}`
 
-export const doFailedMessage = (ran: readonly string[], stoppedAt: string, reason: string, request: string): string =>
-  `Your ${DO_FENCE_LANG} block stopped at ${stoppedAt}: ${reason}.${ran.length ? `\nIt ran before stopping:\n${bullets(ran)}` : ' Nothing ran.'}\n\nContinue: correct it, or tell the participant what went wrong.${carry(request)}`
+/** What a stopped block's roll back did (hypercomb-plan-transaction.ts):
+ *  pages put back, pages left because something else moved them, pages
+ *  that could not be put back, why nothing was, and the lines that wrote
+ *  outside the pages — which a roll back of pages cannot reach. */
+export type DoRollback = {
+  readonly restored: number
+  readonly kept: number
+  readonly failed: number
+  readonly refused?: string
+  readonly beyond: readonly string[]
+}
+
+const pages = (count: number): string => `${count} page${count === 1 ? '' : 's'}`
+
+/** One paragraph, in the order a model needs it: whether anything of the
+ *  block still stands, then what outside the pages stays. */
+const rollbackText = (rollback: DoRollback): string => {
+  const said: string[] = []
+  if (rollback.refused) said.push(`Nothing was put back: ${rollback.refused}.`)
+  else if (!rollback.restored && !rollback.kept && !rollback.failed) said.push('Those lines changed no page, so there was nothing to put back.')
+  else {
+    said.push(rollback.restored
+      ? `The hive put back the ${pages(rollback.restored)} they changed, as new versions — nothing is lost from history.`
+      : 'No page was put back.')
+    if (rollback.kept) said.push(`${pages(rollback.kept)} changed again by something else meanwhile ${rollback.kept === 1 ? 'was' : 'were'} left as ${rollback.kept === 1 ? 'it is' : 'they are'}.`)
+    if (rollback.failed) said.push(`${pages(rollback.failed)} could not be put back.`)
+  }
+  if (rollback.beyond.length) said.push(`What these lines wrote outside the pages stays: ${rollback.beyond.join(', ')}.`)
+  const whole = !rollback.refused && !rollback.kept && !rollback.failed && !rollback.beyond.length
+  return `\n${said.join(' ')}${whole ? ' Nothing of the block stands.' : ''}`
+}
+
+export const doFailedMessage = (ran: readonly string[], stoppedAt: string, reason: string, request: string, rollback?: DoRollback): string =>
+  `Your ${DO_FENCE_LANG} block stopped at ${stoppedAt}: ${reason}.${ran.length ? `\nIt ran before stopping:\n${bullets(ran)}${rollback ? rollbackText(rollback) : ''}` : ' Nothing ran.'}\n\nContinue: correct it, or tell the participant what went wrong.${carry(request)}`
 
 const fenceLangOf = (kind: WorkKind): string =>
   kind === 'read' ? READ_FENCE_LANG : kind === 'table' ? TABLE_FENCE_LANG : kind === 'write' ? WRITE_FENCE_LANG : DO_FENCE_LANG
