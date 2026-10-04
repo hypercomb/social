@@ -402,7 +402,7 @@ describe('NovaLogic DOS Bubble Bobble reconstruction', () => {
     expect(game.player.grounded).toBe(true)
   })
 
-  it('uses the native solid underside, turn tick and delayed first jump step', () => {
+  it('jumps up through a native platform onto its top, with the turn tick and delayed first jump step', () => {
     const game = playing(BUILTIN_LEVELS[0])
     game.enemies.forEach(enemy => { enemy.state = 'trapped' })
     game.player.x = 160; game.player.y = 176; game.player.grounded = true
@@ -424,9 +424,26 @@ describe('NovaLogic DOS Bubble Bobble reconstruction', () => {
       game.update(1 / 60, idle)
       minimum = Math.min(minimum, game.player.y)
     }
-    // ROUND 01's row-19 platform has a solid native underside at y=160.
-    expect(minimum).toBe(160)
-    expect(game.player).toMatchObject({ y: 176, grounded: true })
+    // ROUND 01 spaces its platforms one jump apart: the jump rises through the
+    // row-19 platform (top y=152) and lands on it.
+    expect(minimum).toBe(135.21875)
+    expect(game.player).toMatchObject({ y: 136, grounded: true })
+  })
+
+  it('stops a native jump at the ceiling row and lands back where it took off', () => {
+    const game = playing(BUILTIN_LEVELS[1])
+    game.enemies.forEach(enemy => { enemy.state = 'trapped' })
+    // ROUND 02: standing on the row-4 platform, under a solid row 0.
+    game.player.x = 160; game.player.y = 16; game.player.grounded = true
+    game.player.vx = 0; game.player.vy = 0; game.player.facing = 1
+    game.update(1 / 60, { ...idle, jump: true })
+    let minimum = game.player.y
+    for (let tick = 0; tick < 120; tick++) {
+      game.update(1 / 60, idle)
+      minimum = Math.min(minimum, game.player.y)
+    }
+    expect(minimum).toBe(8)
+    expect(game.player).toMatchObject({ y: 16, grounded: true })
   })
 
   it('keeps takeoff momentum until reverse input gives air control', () => {

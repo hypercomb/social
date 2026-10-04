@@ -1204,7 +1204,12 @@ export class Engine {
       nativeY = wrapDosY(advanceFixedValue(nativeY, raw(body.vy)))
       body.y = nativeY - 16
       const direction = body.vy < 0 ? 'up' : 'down'
-      if (dosBlocksDirection(dosCollisionWord(masks, Math.floor(nativeY), Math.floor(body.x)), direction)) {
+      // A rising body passes up through terrain and only the ceiling row stops
+      // it: the rounds space their platforms one jump apart (ROUND 01: rows 9,
+      // 14, 19, a 42 px jump over 40 px), and the high jump at A99F is taken
+      // BECAUSE a platform is above. Falling still lands on top.
+      if ((direction === 'down' || body.y < TILE)
+        && dosBlocksDirection(dosCollisionWord(masks, Math.floor(nativeY), Math.floor(body.x)), direction)) {
         nativeY = snapDosCoordinate(nativeY, body.vy)
         body.y = nativeY - 16
         body.grounded = direction === 'down'
