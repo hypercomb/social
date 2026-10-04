@@ -1,5 +1,5 @@
 // pixi/tile-overlay.drone.ts
-import { Drone, EffectBus, consumePointerGesture, POINTER_GESTURE_END, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
+import { Drone, EffectBus, consumePointerGesture, POINTER_GESTURE_END, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Sprite, Text, TextStyle } from 'pixi.js'
 import { containerScreenScale, followTextResolution, screenTextResolution } from '../grid/screen-text-resolution.js'
 import { HexIconButton } from './hex-icon-button.js'
@@ -9,7 +9,6 @@ import type { Axial, HexDetector } from '../../navigation/hex-detector.js'
 import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 import { hasDecorationKind, referenceTargetForLabel, tagsForLabel } from '../../commands/decoration-kind-index.js'
-import { cellLocationSig } from '../../editor/tile-properties.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-action-icons.js'
@@ -3557,14 +3556,6 @@ export class TileOverlayDrone extends Drone {
     // CURRENT location (a no-op) can release the guard instead of stranding it.
     const before = this.#currentLocationKey()
 
-    // COUNT THE INTERACTION, at the choke point every entry gesture passes
-    // through — the tile you MEET is the tile whose insides deserve to be
-    // preloaded first, next time. Keyed by the tile's own location sig (the
-    // same key its properties use), fire-and-forget, durable through the
-    // tracker's write-ahead queue. A settled visit is counted separately by
-    // the tracker's lineage hook; both feed one weight.
-    void this.#countInteraction(label)
-
     // Block re-entry for the duration of this transition — every branch below
     // commits a navigation (reference portal, sets-root hop, or explorerEnter).
     this.#beginNavigationTransition()
@@ -3733,19 +3724,6 @@ export class TileOverlayDrone extends Drone {
         ?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
       history.divertPreloadTo([...segs, label])
     } catch { /* never blocks navigation */ }
-  }
-
-  /** Record one interaction with the tile at `label` under the current
-   *  location. Best-effort: no tracker (or an older contract without `bump`)
-   *  ⇒ silent no-op, exactly like every other usage read. */
-  async #countInteraction(label: string): Promise<void> {
-    try {
-      const ranker = window.ioc.get<UsageRanker>(USAGE_IOC_KEY)
-      if (!ranker?.bump) return
-      const segs = (this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
-        ?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
-      ranker.bump(await cellLocationSig(segs, label))
-    } catch { /* local telemetry — never blocks navigation */ }
   }
 
   // Shared guard + commit for the back-navigation gesture (right-click or

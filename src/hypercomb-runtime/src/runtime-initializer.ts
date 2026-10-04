@@ -1,4 +1,4 @@
-import { EffectBus, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
+import { EffectBus } from '@hypercomb/core'
 import type {
   BootstrapHistoryLike,
   LineageLike,
@@ -424,12 +424,9 @@ const _runInitializeRuntime = async (
           }
         } catch { /* non-fatal: a cold render is correct, just slower */ }
         try {
-          // Rank declared destinations by local usage so the participant's
-          // most-used one-click targets survive the per-pass cap and warm
-          // first. Absent tracker → original order (a cold participant).
-          const declared = await collectProximity()
-          const ranker = get(USAGE_IOC_KEY) as UsageRanker | undefined
-          const proximate = ranker ? ranker.rank(declared) : declared
+          // Declared destinations warm in the order they were declared — no
+          // usage ranking (nothing about the participant's movement is kept).
+          const proximate = await collectProximity()
           // ABANDON ON NAVIGATION. Each warm below bails internally when the
           // participant moves, but the SEQUENCE did not: the loop marched on to
           // the next declared destination, so a stale sweep kept queuing OPFS

@@ -18,3 +18,8 @@ export const ATOMIZER_IOC_PREFIX = '@hypercomb.social/Atomizer:'
 
 /** Retired with the atomizer (break-apart is the one decompose verb). */
 export const ATOMIZABLE_TARGET_PREFIX = '@hypercomb.social/AtomizableTarget:'
+
+/** Retired with the usage tracker (no tracking — jwize, 2026-10-03). Nothing
+ *  registers under this key any more; installed packages that still look it
+ *  up get nothing and fall back to the unranked order. */
+export const USAGE_IOC_KEY = '@hypercomb.social/UsageTracker'

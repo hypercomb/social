@@ -1,6 +1,6 @@
 // pixi/show-cell.drone.ts
-import { Drone, EffectBus, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
-import type { I18nProvider, UsageRanker } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
+import type { I18nProvider } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
@@ -9901,21 +9901,12 @@ export class ShowCellDrone extends Drone {
         }
       }
 
-      // MOST-USED FIRST: rank the pending branch tiles by the participant's
-      // local usage of each child location, then check them SERIALLY. A tile
+      // IN DISPLAY ORDER: check the pending branch tiles SERIALLY. A tile
       // whose children are all present/concluded is released IMMEDIATELY —
       // its own repaint, not one batch flip at the end — so tiles brighten
-      // one by one, and the ones you actually open brighten first. Misses
-      // enqueue in this same priority order, so the warm queue drains toward
-      // the most-used tile's children before anything else.
-      const ranker = window.ioc?.get?.(USAGE_IOC_KEY) as UsageRanker | undefined
-      const weighted = await Promise.all(branchCells.map(async c => ({
-        c,
-        w: ranker ? ranker.weight(await cellLocationSig(parentSegments, c.label)) : 0,
-      })))
-      weighted.sort((a, b) => b.w - a.w)
-
-      for (const { c } of weighted) {
+      // one by one. Misses enqueue in this same order. Nothing about which
+      // tiles the participant opens is recorded or consulted (no tracking).
+      for (const c of branchCells) {
         // Superseded by navigation — abort but ALWAYS leave a retry behind.
         if (gen !== this.#readinessGen) { this.#queueComputeRetry(); return }
         if (this.#childrenReadyByLabel.get(c.label) === true) continue
@@ -10282,21 +10273,14 @@ export class ShowCellDrone extends Drone {
       } catch { /* unknown structure — nothing to pre-bake */ }
       if (grandkidsByLabel.size === 0) return
 
-      // Most-used first over the VISIBLE branches — same order the
-      // readiness compute releases in, so the branch the participant will
-      // actually open bakes first.
+      // The VISIBLE branches, in display order — the same order the
+      // readiness compute releases in.
       const visible = new Set(cells.filter(c => !c.plain).map(c => c.label))
-      const ranker = window.ioc?.get?.(USAGE_IOC_KEY) as UsageRanker | undefined
       const labels = [...grandkidsByLabel.keys()].filter(l => visible.has(l))
-      const weighted = await Promise.all(labels.map(async label => ({
-        label,
-        w: ranker ? ranker.weight(await cellLocationSig(parentSegments, label)) : 0,
-      })))
-      weighted.sort((a, b) => b.w - a.w)
 
       const livePropsIndex: Record<string, string> = readTilePropsIndex()
 
-      for (const { label } of weighted) {
+      for (const label of labels) {
         if (gen !== this.#prebakeGen) return
         if (this.#prebakeQueued.size >= ShowCellDrone.#PREBAKE_MAX_PER_LOCATION) break
         // Reuse the readiness compute's structure cache when it has a
