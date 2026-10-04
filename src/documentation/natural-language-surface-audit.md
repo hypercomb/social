@@ -585,4 +585,38 @@ three doors inherit it, and to grow a principal.
       asked. Right for the participant's own workflow; wrong for a step inside
       a branch adopted from a peer — a stranger's words, run unattended. Such a
       step is now judged as a model's line (`peerStepRefusal`,
-      workflow-runner.drone.ts): declaration, grant, ceiling, own refuse.
+      workflow-runner.drone.ts): declaration, grant, ceiling, own refuse. Since
+      2026-10-03 it asks `isPeerContentAt`, so a peer's tile carried onto the
+      participant's own page is still judged as theirs.
+14. **The chat's Execution window, audited (2026-10-03).** The queue
+    (`execution-queue.ts`) decides WHEN a model's change runs; the gate still
+    decides WHETHER. Traced door by door:
+    - *Do-lines* — **sound.** Parsed against the grant before anything is
+      queued, and each action re-checks the live census at run time
+      (`callableBehaviours` reads the current grant), so a grant taken back
+      while a row waits — `/grant none` included — stops it.
+    - *Writes were judged by nothing* — **fixed.** A module or doctrine section
+      written back declares no census row, so no rung of the gate read it: a
+      hive granting a machine only additive verbs, or keeping it within one
+      page, still had its running code rewritten (the brood holds only code
+      that newly REACHES something). A write is now judged as what it is — an
+      edit reaching the whole hive — against the ceiling, the scope and the
+      off switch, before it is queued and again after the wait
+      (`hypercombWriteRefusal`, hypercomb-grammar.ts).
+    - *Trust released rows marked for review* — **fixed.** A trusted
+      conversation (every manager's ask over the bridge is one) ran every
+      waiting row except the three holds — including `forceReview`, so a
+      doctrine section, which "always waits for their hand", was written with
+      no hand, and a decision Jev handed back was taken unseen. Trust is a
+      policy, and the queue's own rule is that no policy lifts review.
+    - *A peer's words, read one turn and acted on the next* — **resolved
+      (jwize: "hold all conversation").** `foreign` was per turn ("the
+      participant's next message is their words again"), but what the model
+      read stays in the conversation, so a change asked for the next turn
+      without re-reading ran unheld. Now once a conversation has read a peer's
+      words, every later change in it waits for a press — kept with the
+      surfaced signatures on the turn, so a reload does not lift it.
+    - *Other doors* — **none.** Only the command line, the chat window, the
+      workflow runner and the census itself run a behaviour. A peer-lent
+      model cannot act at all: `llm-hive-access` refuses every `peer:`
+      provider, and only a provider granted the hive is offered changes.

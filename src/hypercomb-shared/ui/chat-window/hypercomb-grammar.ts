@@ -14,6 +14,7 @@ export {
   hypercombVocabulary,
   hypercombPlanReach,
   hypercombPlanLeaves,
+  hypercombWriteRefusal,
   parseHypercombGrammars,
   executeHypercombPlan,
 } from '@hypercomb/core'

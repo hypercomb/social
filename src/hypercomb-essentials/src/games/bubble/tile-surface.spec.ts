@@ -34,13 +34,26 @@ function nativeHive() {
   const committer: BubbleTileCommitter = {
     importTree: async updates => {
       writes++
-      for (const update of [...updates].sort((a, b) => b.segments.length - a.segments.length)) {
-        const layer = { ...read(update.segments), ...update.layer }
-        const sig = put(update.segments, layer)
-        const parentSegments = update.segments.slice(0, -1)
-        const parent = read(parentSegments) ?? { name: parentSegments.at(-1) ?? 'root' }
-        const children = (parent.children ?? []).filter(childSig => pool.get(childSig)?.name !== layer.name)
-        put(parentSegments, { ...parent, children: [...children, sig] })
+      // Deepest first, and each parent is rewritten ONCE per depth with all of
+      // its new children. Rewriting it per child re-hashed an 800-cell round
+      // 800 times — that, not the surface, was this spec's running time.
+      const depths = [...new Set(updates.map(update => update.segments.length))].sort((a, b) => b - a)
+      for (const depth of depths) {
+        const parents = new Map<string, { segments: readonly string[]; children: Map<string | undefined, string> }>()
+        for (const update of updates.filter(update => update.segments.length === depth)) {
+          const layer = { ...read(update.segments), ...update.layer }
+          const sig = put(update.segments, layer)
+          const parentSegments = update.segments.slice(0, -1)
+          const parent = parents.get(key(parentSegments)) ?? { segments: parentSegments, children: new Map() }
+          parent.children.delete(layer.name)
+          parent.children.set(layer.name, sig)
+          parents.set(key(parentSegments), parent)
+        }
+        for (const { segments, children } of parents.values()) {
+          const parent = read(segments) ?? { name: segments.at(-1) ?? 'root' }
+          const kept = (parent.children ?? []).filter(childSig => !children.has(pool.get(childSig)?.name))
+          put(segments, { ...parent, children: [...kept, ...children.values()] })
+        }
       }
     },
   }

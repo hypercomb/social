@@ -136,6 +136,7 @@ import {
   hypercombPlanLeaves,
   hypercombPlanReach,
   hypercombVocabulary,
+  hypercombWriteRefusal,
   parseHypercombGrammars,
   HypercombActionExecutionError,
   HypercombPlanQueue,
@@ -3189,13 +3190,15 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** Every waiting row of a trusted conversation runs, as a press would —
    *  except the holds (execution-queue.ts): what leaves the machine, or
-   *  follows someone else's words, was never the trust's to give. */
+   *  follows someone else's words, was never the trust's to give. Nor is a
+   *  row marked for review — a doctrine section, a decision Jev handed back:
+   *  those wait for a hand whatever the policy, and trust is a policy. */
   #releaseTrusted(): void {
     const queue = this.#execQueue()
     const trusted = this.#autoConvos()
     if (!queue?.requests || !trusted.size) return
     for (const row of queue.requests()) {
-      if (row.state === 'waiting' && trusted.has(row.convoId) && !row.needsGrant && !row.leaves && !row.foreign) queue.decide(row.id, 'run')
+      if (row.state === 'waiting' && trusted.has(row.convoId) && !row.forceReview && !row.needsGrant && !row.leaves && !row.foreign) queue.decide(row.id, 'run')
     }
   }
   readonly execRows = signal<readonly ExecutionRequestLike[]>([])
@@ -6585,8 +6588,16 @@ export class ChatWindowComponent implements OnDestroy {
     let turnReads = 0
     // WHAT THIS TURN READ OF SOMEONE ELSE'S WORDS (execution-queue.ts,
     // `foreign`): a change asked for after it waits for the participant's
-    // hand. Per turn — the participant's next message is their words again.
+    // hand.
     const turnForeign: string[] = []
+    // FOR THE REST OF THE CONVERSATION (jwize, 2026-10-03: "hold all
+    // conversation"). What the model read stays in what it is sent, so the
+    // words do not become the participant's because a turn ended — a "go
+    // ahead" next turn is not a hand over text they may never have read. The
+    // signatures a foreign read surfaced are kept on the turn and restored on
+    // reload, so the hold outlives both.
+    const conversationForeign = (): boolean =>
+      turnForeign.length > 0 || (component.#foreignSigs.get(convoId)?.size ?? 0) > 0
     let turnWeight: MessageEffort = need.tier
     // THE ANATOMY GOES FIRST, TO EVERY PROVIDER. It is the stable protocol +
     // doctrine (documentation/anatomy-context-need.md): identical bytes on
@@ -7133,7 +7144,7 @@ export class ChatWindowComponent implements OnDestroy {
         // change following someone else's words, waits for a hand — unless the
         // participant chose this very sentence, which is the hand.
         const leaves = !own && hypercombPlanLeaves(plan, behaviourEntries).length > 0
-        const foreign = !own && turnForeign.length > 0
+        const foreign = !own && conversationForeign()
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: hypercombPlanReach(plan, behaviourEntries), lines: grammars, needsGrant: false, signal,
@@ -7205,11 +7216,15 @@ export class ChatWindowComponent implements OnDestroy {
         // (essentials assistant/agent-turn.ts); this shell does not teach it.
         if ('version' in parsed) throw new WorkRefused('the build\'s own source is not written from this window')
         if (!canWrite || !queue) throw new WorkRefused('writing code is not available here: nothing is installed to draft onto')
+        // The participant's ceiling answers a write as it answers a line —
+        // asked again after the wait, so a grant taken back meanwhile holds.
+        const refusedWrite = hypercombWriteRefusal()
+        if (refusedWrite) throw new WorkRefused(refusedWrite)
         const grammar = `write ${parsed.beeSig.slice(0, 12)}… ${parsed.section}`
         if (review) EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal,
-          forceReview: review, foreign: turnForeign.length > 0,
+          forceReview: review, foreign: conversationForeign(),
         })
         if (!review) waitingOn(entry.id)
         if (await entry.decision === 'skip') {
@@ -7218,6 +7233,11 @@ export class ChatWindowComponent implements OnDestroy {
           return writeSkippedMessage(parsed.section, message)
         }
         stillHere()
+        const revoked = hypercombWriteRefusal()
+        if (revoked) {
+          queue.settle(entry.id, 'skipped', revoked)
+          throw new WorkRefused(revoked)
+        }
         const outcome = await draftModule(parsed)
         if (!outcome.ok) {
           queue.settle(entry.id, 'failed', outcome.error)
@@ -7245,11 +7265,13 @@ export class ChatWindowComponent implements OnDestroy {
       // system text stays byte-stable.
       const runDoctrine = async (heading: string, body: string, providerId: string, model: string): Promise<string> => {
         if (!canWriteDoctrine || !queue) throw new WorkRefused('the doctrine cannot be written here')
+        const refusedWrite = hypercombWriteRefusal()
+        if (refusedWrite) throw new WorkRefused(refusedWrite)
         const grammar = `write doctrine ${heading}`
         EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: 'waiting for your review in Execution' })
         const entry = queue.request({
           convoId, providerId, model, kind: 'editing', lines: [grammar], needsGrant: false, signal, forceReview: true,
-          foreign: turnForeign.length > 0,
+          foreign: conversationForeign(),
         })
         if (await entry.decision === 'skip') {
           if (signal?.aborted) throw stopped()
@@ -7257,6 +7279,11 @@ export class ChatWindowComponent implements OnDestroy {
           return writeSkippedMessage(`the doctrine section "${heading}"`, message)
         }
         stillHere()
+        const revoked = hypercombWriteRefusal()
+        if (revoked) {
+          queue.settle(entry.id, 'skipped', revoked)
+          throw new WorkRefused(revoked)
+        }
         const outcome = await anatomyDoctrine!.write(heading, body)
         if (!outcome.ok) {
           queue.settle(entry.id, 'failed', outcome.error)

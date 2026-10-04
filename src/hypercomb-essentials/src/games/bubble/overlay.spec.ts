@@ -448,13 +448,50 @@ describe('BubbleOverlay pause and restart', () => {
 })
 
 describe('BubbleOverlay score and lifecycle', () => {
-  it('hydrates the next living round only when the current round clears', () => {
+  it('reads the next living round ahead while the current one is played, one round ahead only', async () => {
     const game = mount()
     expect(living.ensure).toHaveBeenCalledTimes(1)
     expect(living.ensure).toHaveBeenLastCalledWith(0)
+    frame()
+    await settle()
+    expect(living.ensure).toHaveBeenLastCalledWith(1)
+    expect(game.engine.installLevel).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'ROUND 2' }))
+    // Already installed when the round clears, so the clear reads nothing more.
     game.engine.state = 'clear'
     frame()
+    await settle()
+    expect(living.ensure).toHaveBeenCalledTimes(2)
+    // The engine reaching ROUND 02 is what brings ROUND 03 within range.
+    game.engine.levelIndex = 1
+    game.engine.state = 'playing'
+    frame()
+    await settle()
+    expect(living.ensure).toHaveBeenCalledTimes(3)
+    expect(living.ensure).toHaveBeenLastCalledWith(2)
+  })
+
+  it('keeps a failed read-ahead off the cover, and the clear retries it visibly', async () => {
+    let refuse = true
+    living.ensure.mockImplementation((index: number) => {
+      if (index === 1 && refuse) {
+        refuse = false
+        return Promise.reject(new Error('Hypercomb Bubble Bobble data is still loading; please open the game again'))
+      }
+      return { index, level: { name: `ROUND ${index + 1}` }, roundSegments: [], tiles: [] }
+    })
+    const game = mount()
+    start(game)
+    await settle()
     expect(living.ensure).toHaveBeenLastCalledWith(1)
+    expect(game.engine.installLevel).not.toHaveBeenCalledWith(1, expect.anything())
+    expect(game.doc.querySelector('.bub-cover-title')?.textContent).not.toBe('Living round unavailable')
+    const updates = game.engine.update.mock.calls.length
+    frame()
+    expect(game.engine.update.mock.calls.length).toBeGreaterThan(updates)
+    game.engine.state = 'clear'
+    frame()
+    await settle()
+    expect(living.ensure).toHaveBeenCalledTimes(3)
     expect(game.engine.installLevel).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'ROUND 2' }))
   })
 

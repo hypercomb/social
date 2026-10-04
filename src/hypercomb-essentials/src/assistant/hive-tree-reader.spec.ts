@@ -443,6 +443,44 @@ describe('a page history cannot pin to one signature', () => {
       .toMatchObject({ ok: true, name: 'projects', layerSig: sig(2) })
   })
 
+  it('walks a tree whose heads cannot be pinned, the way /read reads each page', async () => {
+    // /tree /games and /find answered incomplete-read for a whole hive whose
+    // pages /read opened: the walk asked the pinned head alone, and one that
+    // threw or came back cold failed everything.
+    const fx = fixture()
+    const current = fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>
+    current.mockImplementation(async (location: string, stats?: { cold?: boolean }) => {
+      if (location === sig(102)) throw new Error('cold head')
+      if (location === sig(101)) { if (stats) stats.cold = true; return null }
+      return fx.refs.get(location) ?? null
+    })
+    fx.history['listLayers'] = vi.fn(async (location: string) => location === sig(101) ? [{ index: 3, layerSig: sig(1) }] : [])
+
+    const tree = await fx.reader.readTree([], { maxDepth: 2 })
+    expect(tree.ok).toBe(true)
+    if (!tree.ok) return
+    // /projects is the copy the root carries (sig 2), so its child is legacy.
+    expect(tree.nodes.map(node => node.path)).toEqual(['/', '/projects', '/notes', '/projects/legacy'])
+    expect(await fx.reader.find('legacy', [])).toMatchObject({ ok: true, matches: [{ name: 'legacy', path: '/projects/legacy' }] })
+  })
+
+  it('finds a name past what a tree would show, in a hive wider than one tree read', async () => {
+    // /find walked on /tree's output budget — 64 names — and on a real hive
+    // never reached /games/Arkanoid. It returns only matches, so it walks wider.
+    const fx = fixture()
+    const wide = Array.from({ length: 90 }, (_, i) => sig(1_000 + i))
+    const layers = new Map<string, LayerContent>(wide.map((s, i) => [s, { name: `tile-${i}`, children: [] }]))
+    layers.set(sig(2_000), { name: 'games', children: [sig(2_001)] })
+    layers.set(sig(2_001), { name: 'Arkanoid', children: [] })
+    const rootLayer: LayerContent = { name: 'hive', children: [...wide, sig(2_000)] }
+    fx.refs.set(sig(101), { locationSig: sig(101), layerSig: sig(1), layer: rootLayer })
+    fx.getLayerBySig.mockImplementation(async (signature: string) => layers.get(signature) ?? null)
+
+    const tree = await fx.reader.readTree([], { maxDepth: 2 })
+    expect(tree.ok && tree.nodes.some(node => node.name === 'Arkanoid')).toBe(false)
+    expect(await fx.reader.find('arkanoid', [])).toMatchObject({ ok: true, matches: [{ name: 'Arkanoid', path: '/games/Arkanoid' }] })
+  })
+
   it('keeps a fallback route and its signature content in memory for the next read', async () => {
     const fx = fixture()
     fx.refs.delete(sig(102))

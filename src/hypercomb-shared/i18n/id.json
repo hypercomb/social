@@ -9,7 +9,7 @@
   "references.feed-selected": "Tambah {count} terpilih ke {pages}",
   "references.own-tiles": "Ubin milik {page} sendiri",
   "references.own-same": "juga ada di {group} — menjadi referensi",
-  "references.own-differs": "berbeda dari milik {group} — salinan ini tetap di riwayat:",
+  "references.own-differs": "berbeda dari milik {group} — ini tetap di sini:",
   "references.own-new": "tidak ada di {group} — dipindah ke sana, referensi tetap di sini",
   "references.gather-own": "Kumpulkan {count} ke {group}",
   "references.slot.picture": "gambar",

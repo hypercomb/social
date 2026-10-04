@@ -72,8 +72,8 @@
         <p class="ref-hint">{{ 'references.manage-none' | t }}</p>
       }
 
-      <!-- REVIEW — this page's OWN tiles against its group. Ticked from the
-           start only where nothing is lost; the rest wait for you to look. -->
+      <!-- REVIEW — this page's OWN tiles against its group. Nothing is
+           ticked at the start; each row says what gathering it does. -->
       @if (review(); as r) { @if (r.tiles.length > 0) {
         <label>{{ 'references.own-tiles' | t: { page: managePageName() } }}</label>
         <div class="ref-own">

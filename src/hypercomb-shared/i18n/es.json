@@ -9,7 +9,7 @@
   "references.feed-selected": "Añadir {count} seleccionados a {pages}",
   "references.own-tiles": "Mosaicos propios de {page}",
   "references.own-same": "también en {group} — pasa a ser una referencia",
-  "references.own-differs": "difiere de la de {group} — esta copia queda en el historial:",
+  "references.own-differs": "difiere de la de {group} — esto se queda aquí:",
   "references.own-new": "no está en {group} — se mueve allí y queda una referencia aquí",
   "references.gather-own": "Reunir {count} en {group}",
   "references.slot.picture": "imagen",

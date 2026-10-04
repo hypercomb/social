@@ -9,7 +9,7 @@
   "references.feed-selected": "{count} चुने हुए {pages} में जोड़ें",
   "references.own-tiles": "{page} की अपनी टाइलें",
   "references.own-same": "{group} में भी है — संदर्भ बन जाएगा",
-  "references.own-differs": "{group} वाले से अलग — यह प्रति इतिहास में रहेगी:",
+  "references.own-differs": "{group} वाले से अलग — यह यहीं रहेगा:",
   "references.own-new": "{group} में नहीं — वहाँ जाएगी, यहाँ संदर्भ रहेगा",
   "references.gather-own": "{count} को {group} में जोड़ें",
   "references.slot.picture": "चित्र",

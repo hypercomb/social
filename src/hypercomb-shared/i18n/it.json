@@ -9,7 +9,7 @@
   "references.feed-selected": "Aggiungi {count} selezionati a {pages}",
   "references.own-tiles": "Tessere proprie di {page}",
   "references.own-same": "anche in {group} — diventa un riferimento",
-  "references.own-differs": "diversa da quella di {group} — questa copia resta nella cronologia:",
+  "references.own-differs": "diversa da quella di {group} — questo resta qui:",
   "references.own-new": "non in {group} — si sposta lì, qui resta un riferimento",
   "references.gather-own": "Raccogli {count} in {group}",
   "references.slot.picture": "immagine",

@@ -9,7 +9,7 @@
   "references.feed-selected": "{count} ausgewählte zu {pages} hinzufügen",
   "references.own-tiles": "Eigene Kacheln von {page}",
   "references.own-same": "auch in {group} — wird ein Verweis",
-  "references.own-differs": "weicht von {group} ab — diese Kopie bleibt im Verlauf:",
+  "references.own-differs": "weicht von {group} ab — das bleibt hier:",
   "references.own-new": "nicht in {group} — zieht dorthin, ein Verweis bleibt hier",
   "references.gather-own": "{count} in {group} sammeln",
   "references.slot.picture": "Bild",

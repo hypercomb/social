@@ -9,7 +9,7 @@
   "references.feed-selected": "Seçili {count} öğeyi {pages} içine ekle",
   "references.own-tiles": "{page} sayfasının kendi kutuları",
   "references.own-same": "{group} içinde de var — referans olur",
-  "references.own-differs": "{group} içindekinden farklı — bu kopya geçmişte kalır:",
+  "references.own-differs": "{group} içindekinden farklı — bunlar burada kalır:",
   "references.own-new": "{group} içinde yok — oraya taşınır, burada referans kalır",
   "references.gather-own": "{count} öğeyi {group} içine topla",
   "references.slot.picture": "resim",
