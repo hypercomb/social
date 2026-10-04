@@ -157,6 +157,17 @@ describe('Bubble Bobble native DOS round surface', () => {
     expect(hive.writes()).toBe(BUILTIN_LEVELS.length)
   }, 60_000)
 
+  it('peeks a round without writing: its seed before the hive holds it, the hive round after', async () => {
+    const hive = nativeHive()
+    const surface = hive.surface()
+    expect(await surface.peekRound(0)).toEqual({ level: BUILTIN_LEVELS[0], stored: false })
+    expect(hive.writes()).toBe(0)
+    expect(hive.read([BUBBLE_DOS_BRANCH])).toBeUndefined()
+    await surface.ensureRound(0)
+    expect(await surface.peekRound(0)).toEqual({ level: BUILTIN_LEVELS[0], stored: true })
+    expect(hive.writes()).toBe(1)
+  })
+
   it('serializes concurrent first entry so the round is imported exactly once', async () => {
     const hive = nativeHive()
     const surface = hive.surface()

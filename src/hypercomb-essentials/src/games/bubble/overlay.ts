@@ -1,6 +1,6 @@
 // Hypercomb shell for the source-based Bubble Bobble adaptation.
 // Gameplay provenance and GPL notices: ./UPSTREAM.md and ./COPYING.
-import { Engine, WIDTH, HEIGHT, type Input } from './engine.js'
+import { Engine, WIDTH, HEIGHT, type Input, type LevelDef } from './engine.js'
 import { DOS_TICK_SECONDS } from './dos-mechanics.js'
 import { Renderer } from './renderer.js'
 import {
@@ -16,6 +16,7 @@ const SOURCE = 'https://github.com/JulianRijken/BubbleBobble/tree/6a59ee99e621f4
 type Control = 'left' | 'right' | 'jump' | 'blow'
 type LivingRoundSource = {
   ensureRound(index: number): LoadedBubbleRound | Promise<LoadedBubbleRound>
+  peekRound(index: number): { level: LevelDef; stored: boolean } | Promise<{ level: LevelDef; stored: boolean }>
 }
 type LivingRoundSourceFactory = () => LivingRoundSource
 
@@ -35,6 +36,9 @@ export class BubbleOverlay {
   #wantedRound = 0
   /** The round whose successor has been read ahead — once per round played. */
   #aheadOf = -1
+  /** Rounds the read-ahead installed from their bundled seed; each is written
+   *  into the hive when the player reaches it, never before. */
+  #fromSeed = new Set<number>()
   #audio = new GameAudio()
   #abort: AbortController | null = null
   #resize: ResizeObserver | null = null
@@ -186,6 +190,7 @@ export class BubbleOverlay {
     this.#livingError = ''
     this.#wantedRound = 0
     this.#aheadOf = -1
+    this.#fromSeed.clear()
     this.#engine.useLivingLevels()
     this.#keys.clear()
     this.#touch.clear()
@@ -267,16 +272,18 @@ export class BubbleOverlay {
     this.#roundLoads.set(index, pending)
   }
 
-  /** Quiet: nothing on the cover, and a failure is dropped — the visible load
-   *  when the round before it clears retries it and reports what went wrong. */
+  /** Read-only and quiet: it never writes (saves need human intent), shows
+   *  nothing on the cover, and drops a failure — the visible load when the
+   *  round before it clears retries it and reports what went wrong. */
   #loadAhead(index: number): void {
     const source = this.#roundSource
     if (!this.#root || !source || index >= this.#engine.levels.length
-      || this.#loadedRounds.has(index) || this.#roundLoads.has(index)) return
-    Promise.resolve().then(() => source.ensureRound(index)).then(loaded => {
+      || this.#loadedRounds.has(index) || this.#roundLoads.has(index) || this.#fromSeed.has(index)) return
+    Promise.resolve().then(() => source.peekRound(index)).then(({ level, stored }) => {
       if (!this.#root || this.#roundSource !== source || this.#loadedRounds.has(index)) return
-      this.#engine.installLevel(index, loaded.level)
-      this.#loadedRounds.add(index)
+      this.#engine.installLevel(index, level)
+      if (stored) this.#loadedRounds.add(index)
+      else this.#fromSeed.add(index)
     }).catch(() => {})
   }
 
@@ -345,9 +352,13 @@ export class BubbleOverlay {
       this.#sounds()
     }
     // Within range: once the round being played is installed, the next one is
-    // read ahead — and seeded into the hive the first time it is reached — so
-    // clearing this round does not wait on its 801 tiles being written.
+    // read ahead — the hive's own round, or its bundled seed when the hive has
+    // none yet — so clearing this round never waits on it.
     const playing = this.#engine.levelIndex
+    // Reached: a round played from its seed is written now, by the player's own
+    // arrival. The engine can pass a native clear inside one frame, so arrival
+    // is read from the round index rather than the 'clear' state.
+    if (this.#fromSeed.delete(playing)) this.#loadLivingRound(playing)
     if (this.#aheadOf !== playing && this.#loadedRounds.has(playing)) {
       this.#aheadOf = playing
       this.#loadAhead(playing + 1)

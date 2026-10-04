@@ -129,6 +129,20 @@ export class BubbleTileSurface {
     return run
   }
 
+  /** The round as play would see it, WITHOUT writing: the hive's own round when
+   *  it holds one, else the bundled seed it would be created from. A read-ahead
+   *  uses this — a round's tiles are written only when the player reaches it. */
+  peekRound(index: number, seed: LevelDef = BUILTIN_LEVELS[index]): Promise<{ level: LevelDef; stored: boolean }> {
+    const run = this.#pending.then(async () => {
+      const existing = await this.readRound(index)
+      if (existing) return { level: existing.level, stored: true }
+      this.#validateSeed(index, seed)
+      return { level: copy(seed), stored: false }
+    })
+    this.#pending = run.catch(() => {})
+    return run
+  }
+
   async #ensureRound(index: number, seed: LevelDef): Promise<LoadedBubbleRound> {
     if (!validRound(index)) throw new Error('Bubble Bobble round index is outside the DOS campaign')
     const existing = await this.readRound(index)
