@@ -40,6 +40,8 @@ const MAX_READ_MS = 5_000
 type WalkCeiling = { readonly nodes: number; readonly bytes: number; readonly ms: number; readonly partial: boolean }
 const TREE_WALK: WalkCeiling = { nodes: MAX_NODES, bytes: MAX_BYTES, ms: MAX_READ_MS, partial: false }
 const FIND_WALK: WalkCeiling = { nodes: 2_000, bytes: 400_000, ms: 12_000, partial: true }
+/** Children a walk opens at once. */
+const WALK_CONCURRENCY = 16
 const SNAPSHOT_TTL_MS = 2 * 60_000
 /** Snapshots kept for revalidation; the oldest falls out first. One leg
  *  alone mints twelve rounds of eight reads and a front-door listing (97),
@@ -469,6 +471,33 @@ export class HypercombHiveTreeReader {
         return null
       }
 
+      // A CHILD THAT CANNOT BE OPENED IS LEFT OUT, AND THE TREE SAYS SO
+      // (null). The parent names it but its own location has no layer by
+      // that name — a launcher entry under its display name, a child whose
+      // bag never drained. Failing the whole walk for it made /find and /tree
+      // answer "incomplete-read" for an entire hive while /read of the same
+      // routes worked (the games manager, 2026-10-01). `partial`: its own
+      // children list left one out.
+      const openChild = async (carried: CarriedChild, path: readonly string[]): Promise<{
+        readonly ref: CurrentLayerRef & { readonly live: boolean }
+        readonly children: readonly CarriedChild[]
+        readonly partial: boolean
+      } | null> => {
+        let ref: (CurrentLayerRef & { readonly live: boolean }) | null
+        try { ref = await currentRef(path, carried.sig) } catch (error) {
+          if (!(error instanceof IncompleteReadError)) throw error
+          return null
+        }
+        if (!ref || ref.layer.name !== carried.name) return null
+        try {
+          const children = await carriedChildren(ref.layer, history, store)
+          return { ref, children, partial: unopened.has(children) }
+        } catch (error) {
+          if (!(error instanceof IncompleteReadError)) throw error
+          return { ref, children: [], partial: true }
+        }
+      }
+
       const rootRef = await currentRef(segments)
       if (!rootRef) return { ok: false, root, code: 'not-found' }
       const rootChildren = await carriedChildren(rootRef.layer, history, store)
@@ -499,45 +528,37 @@ export class HypercombHiveTreeReader {
           continue
         }
 
-        for (const carried of parent.children) {
+        // A TILE'S CHILDREN ARE OPENED SIDE BY SIDE, a batch at a time, and
+        // taken in their order. One after another, a /find over a whole hive
+        // spent its time limit before reaching depth three and missed
+        // /dolphin/associates/betz (the housekeeping manager, 2026-10-04).
+        let from = 0
+        while (from < parent.children.length && !exhausted) {
           guard()
           if (nodes.length >= maxNodes || Date.now() > stopAt) { truncated = true; exhausted = true; break }
-          const path = [...parent.path, carried.name]
-          let ref: (CurrentLayerRef & { readonly live: boolean }) | null
-          try { ref = await currentRef(path, carried.sig) } catch (error) {
-            if (!(error instanceof IncompleteReadError)) throw error
-            truncated = true
-            continue
-          }
-          // A CHILD THAT CANNOT BE OPENED IS LEFT OUT, AND THE TREE SAYS SO.
-          // The parent names it but its own location has no layer by that
-          // name — a launcher entry under its display name, a child whose
-          // bag never drained. Failing the whole walk for it made /find and
-          // /tree answer "incomplete-read" for an entire hive while /read of
-          // the same routes worked (the games manager, 2026-10-01). The rest
-          // of the tree is still true; `truncated` tells the model it is not
-          // all of it.
-          if (!ref || ref.layer.name !== carried.name) { truncated = true; continue }
-          let children: readonly CarriedChild[]
-          try { children = await carriedChildren(ref.layer, history, store) } catch (error) {
-            if (!(error instanceof IncompleteReadError)) throw error
-            truncated = true
-            children = []
-          }
-          if (unopened.has(children)) truncated = true
+          const batch = parent.children.slice(from, from + Math.min(WALK_CONCURRENCY, maxNodes - nodes.length))
+          from += batch.length
+          const opened = await Promise.all(batch.map(carried => openChild(carried, [...parent.path, carried.name])))
           guard()
-          const node: HypercombTreeNode = {
-            path: rootLabel(path),
-            name: carried.name,
-            depth: parent.depth + 1,
-            childCount: children.length,
+          for (let at = 0; at < batch.length; at++) {
+            const carried = batch[at]
+            const got = opened[at]
+            if (!got) { truncated = true; continue }
+            if (got.partial) truncated = true
+            const path = [...parent.path, carried.name]
+            const node: HypercombTreeNode = {
+              path: rootLabel(path),
+              name: carried.name,
+              depth: parent.depth + 1,
+              childCount: got.children.length,
+            }
+            const cost = outputBytes(node)
+            if (bytes + cost > maxBytes) { truncated = true; exhausted = true; break }
+            bytes += cost
+            nodes.push(node)
+            if (got.ref.live) heads.push({ locationSig: got.ref.locationSig, layerSig: got.ref.layerSig })
+            queue.push({ path, depth: node.depth, children: got.children })
           }
-          const cost = outputBytes(node)
-          if (bytes + cost > maxBytes) { truncated = true; exhausted = true; break }
-          bytes += cost
-          nodes.push(node)
-          if (ref.live) heads.push({ locationSig: ref.locationSig, layerSig: ref.layerSig })
-          queue.push({ path, depth: node.depth, children })
         }
       }
 

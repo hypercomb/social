@@ -481,6 +481,25 @@ describe('a page history cannot pin to one signature', () => {
     expect(await fx.reader.find('arkanoid', [])).toMatchObject({ ok: true, matches: [{ name: 'Arkanoid', path: '/games/Arkanoid' }] })
   })
 
+  it('opens a tile’s children side by side and still lists them in order', async () => {
+    // One at a time, a whole-hive /find ran out its time before depth three.
+    const fx = fixture()
+    const current = fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>
+    const original = current.getMockImplementation()!
+    let inFlight = 0
+    let most = 0
+    current.mockImplementation(async (location: string, stats?: { cold?: boolean }) => {
+      inFlight++
+      most = Math.max(most, inFlight)
+      await new Promise(resolve => setTimeout(resolve, 5))
+      inFlight--
+      return original(location, stats)
+    })
+    const tree = await fx.reader.readTree([], { maxDepth: 1 })
+    expect(tree.ok && tree.nodes.map(node => node.path)).toEqual(['/', '/projects', '/notes'])
+    expect(most).toBeGreaterThan(1)
+  })
+
   it('reads a tile’s notes live from the notes service, every time, and never on a /list', async () => {
     // The notes of a tile are its word's facet, not the layer's slot: a read
     // that showed the slot answered "1 note" for a tile holding 13.
