@@ -6730,6 +6730,7 @@ export class ChatWindowComponent implements OnDestroy {
       let unwrittenSaid = false
       let unreadSaid = false
       let unranSaid = false
+      let readsCut = false
       // A READ THE PARTICIPANT WROTE OUT (`find arkanoid` in a read block):
       // until something is read, what the model says is not shown. Asked to
       // paste a read back, a model streamed 3 KB of invented module paths
@@ -6971,6 +6972,10 @@ export class ChatWindowComponent implements OnDestroy {
             maxBytes: perReadBytes,
             signal,
           }), covers)
+          if (receipt.results.some(result => {
+            const read = result.read as { ok?: boolean; truncated?: boolean; notesTruncated?: boolean }
+            return read.ok === true && (read.truncated === true || read.notesTruncated === true)
+          })) readsCut = true
           const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt)
           if (content.length > remaining) {
             // A BLOCK LARGER THAN A WHOLE FRESH STRETCH IS NOT HANDED OVER.
@@ -7579,6 +7584,10 @@ export class ChatWindowComponent implements OnDestroy {
             const note = await verifyAnswer(work.prose, roundText, roundProviderId)
             if (note) yield note
           }
+          // A READ CUT SHORT IS SAID, NOT LEFT TO A SCORE. Over a tree read
+          // to its limit, a model answered "80 leaf tiles" above a list of
+          // 106, and there are 119 (the harness manager, 2026-10-04).
+          if (readsCut) yield '\n\nSome reads in this turn were cut short at their size limit, so this answer may not cover everything — counts especially.'
           if (jevTurn && ran.length) yield needsVerification
             ? '\n\nThe commands ran, but no subsequent readback was completed.'
             : '\n\nReadback was collected after execution; correctness of every affected item has not been independently verified.'
