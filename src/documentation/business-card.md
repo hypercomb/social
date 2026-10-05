@@ -92,13 +92,30 @@ a card is holding its address and reading it, and reading it is replication:
 the bytes come from the card's host to the reader when the reader asks. The
 whole social layer of the card is that one act, seen from four sides.
 
-1. **You give them a link; they set up.** The link opens your card on its
-   door. A door is read-only: it may show, never author or install
-   ([read-only-deployment.md](read-only-deployment.md)), so it can only point
-   onward to a host's front door. There the newcomer takes a hive by
-   replication (`replicate(root)`; there is no installer), claims an address
-   ([domain-claim.md](domain-claim.md)) and publishes a card of their own. That
-   publish is the whole of joining.
+1. **You give them a link; they become a host and take a domain; then they
+   get a card.** *jwize, 2026-10-05:* "make them a host before they can get a
+   card … they need their own domain so they can publicize the changes."
+   The link opens your card on its door. A door is read-only: it may show,
+   never author or install ([read-only-deployment.md](read-only-deployment.md)),
+   so it can only point onward to a host's front door. From there the order is
+   fixed:
+   1. **A hive**, taken by replication (`replicate(root)`; there is no
+      installer).
+   2. **A host.** Their hive gets a node that serves it: their own machine
+      (Hive ▸ Serve This Hive), a server (`hypercomb-serve`), or a deploy they
+      run ([hosting-from-a-machine.md](hosting-from-a-machine.md)). A card is
+      sharing, and sharing requires hosting: the host is the truth, and it
+      keeps the card available whether or not its owner is online.
+   3. **Their own domain**, claimed with `domain claim`
+      ([domain-claim.md](domain-claim.md)). The domain is how their changes
+      are publicized: each publish advances the signed head that their address
+      answers, and every Hyperdex holding that address reads the change from
+      there. An address on someone else's domain is theirs only on loan.
+   4. **The card**, published from their host to their address. That publish
+      is the whole of joining.
+
+   A hive with no host and no domain can still keep a Hyperdex and read every
+   card in it. It cannot hand a card out.
 2. **They follow your card.** They keep your address as an entry in their
    `/hyperdex`, through the same confirm step as any dropped link, so nothing is
    written until they agree. Holding a card's address may also mean following
@@ -149,6 +166,8 @@ useful on day one, so it is the creation the concept is explained with:
 | The Hyperdex as a collection in the hive, synced across the participant's devices | design — a private `/hyperdex` collection of link tiles. The pieces are built: collections, link tiles, and the confirm step (`link:intake`). Nothing yet writes a scanned or pasted card address into it. |
 | Reading a held address at its live head | built — opening a door resolves the signed index |
 | "Updated" mark on a Hyperdex entry | not built — modelled on the update scout's one check per boot. Each host already answers its current heads in the signed `host:offerings` pool. |
-| From a card's door to your own hive and card | not built. The door shows nothing onward. Replication (`acquire`), `domain claim` and `/publish` are each built, but nothing joins them to a door. The door's `?home=` button is a hosting step for people who already have a hive. |
+| From a card's door to a hive, a host, a domain and a card, in that order | not built. The door shows nothing onward. Each step exists on its own: a hive by replication (`acquire`), a host (Serve This Hive in the desktop client, `hypercomb-serve`, or a Pages deploy), a domain (`domain claim`), and the card (`/publish`). Nothing leads a newcomer through them. The door's `?home=` button is a hosting step for people who already have a hive. |
+| Becoming a host without a developer | not built. Serve This Hive opens a port on the participant's own machine. Reaching it from the internet needs a server, a forwarded port or a tunnel in front, which is a developer's job today. |
+| No card without a host and a domain | not enforced. Today a guest with no host of their own can publish a branch to the shared hypercomb.com host, and it opens at a path on hypercomb.com. |
 | Sending a contact through the mesh | not built. The nearest built channel is the follow-request consent toast. It carries no address yet, and it reaches a person only inside a shared room. |
 | Consent-hosted cards | design ([consent-hosting.md](consent-hosting.md)) |
