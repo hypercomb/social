@@ -9,6 +9,7 @@
 //   node scripts/bridge/manager.cjs tree [/route]            the tiles under a route
 //   node scripts/bridge/manager.cjs read /route              one tile: properties and notes
 //   node scripts/bridge/manager.cjs notes /route             the notes on a tile
+//   node scripts/bridge/manager.cjs dates /route             a tile's versions, oldest first, with create dates (null = unknown)
 //   node scripts/bridge/manager.cjs note /route "<text>"     add a note to a tile
 //   node scripts/bridge/manager.cjs unnote /route <noteId>   take a note off a tile (a list change; history keeps it)
 //   node scripts/bridge/manager.cjs thread <manager|convoId> [n]   the last n turns
@@ -172,6 +173,13 @@ const main = async () => {
       // Both failed: that is a failure, not an empty tile.
       if (!tile.ok && !notes.ok) return fail(tile.error || notes.error)
       return print({ tile: tile.ok ? tile.data : tile.error, notes: notes.ok ? notes.data : notes.error })
+    }
+    case 'dates': {
+      // Markers written since 2026-10-02 carry their create date; older ones
+      // say null, which is unknown, never a date.
+      const reply = await send({ op: 'layers-at', segments: segmentsOf(first) })
+      if (!reply.ok) return fail(reply.error)
+      return print(reply.data.map(entry => ({ index: entry.index, sig: entry.layerSig, at: entry.at ? new Date(entry.at).toISOString() : null })))
     }
     case 'notes': {
       const reply = await send({ op: 'note-list', segments: segmentsOf(first) })
