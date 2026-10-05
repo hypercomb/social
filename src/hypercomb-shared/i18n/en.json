@@ -1204,6 +1204,7 @@
   "square-tile.controls.hide": "Hide controls",
   "square-tile.controls.show": "Show controls",
   "square-tile.hint.leaf": "the end of this branch",
+  "square-tile.hint.no-match": "nothing here matches the filter",
   "square-tile.brief.behind.one": "{count} tile behind",
   "square-tile.brief.behind.other": "{count} tiles behind",
   "square-tile.brief.leaf": "the end of this branch",

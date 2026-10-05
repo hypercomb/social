@@ -860,6 +860,7 @@
   "square-tile.fold.page": "这里承载着什么",
   "square-tile.hint.step": "穿过一块面板即可进入 · 翻开一角即可阅读",
   "square-tile.hint.leaf": "这条分支到此为止",
+  "square-tile.hint.no-match": "这里没有符合筛选条件的内容",
   "square-tile.brief.behind.one": "背后有 {count} 个磁贴",
   "square-tile.brief.behind.other": "背后有 {count} 个磁贴",
   "square-tile.brief.leaf": "这条分支到此为止",

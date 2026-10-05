@@ -8032,6 +8032,9 @@ export class ShowCellDrone extends Drone {
     shadedLabels: string[]
     flatPaths: Record<string, string[]>
     filterBlocked: string[]
+    /** Something narrows the page (a pheromone lens, a requirement, a
+     *  gathered set), so an empty list means "nothing matches", not a leaf. */
+    narrowed: boolean
   } {
     // Empty-layer invitation watermark — DISABLED for now. It should be a
     // genuine-swarm cue, but public mode is the default in some shells, so
@@ -8124,6 +8127,7 @@ export class ShowCellDrone extends Drone {
       // Matches with children but nothing tagged inside: entering would land on
       // a blank filtered mesh, so tile-overlay refuses and says why.
       filterBlocked: this.#narrowing() ? [...this.#filterBlockedLabels] : [],
+      narrowed: this.#narrowing(),
     }
   }
 

@@ -26,6 +26,7 @@ import { listDecorations } from '../../commands/decoration-manifest.js'
 import { readTilePropertiesAt, tilePictureCandidates } from '../../editor/tile-properties.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
+import { onPageCellsChanged, whenPageCells, type PageCells } from './page-cells.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { affordancesFor, readTileBrief, type TileBrief } from './tile-brief.js'
 import { SquareTileMenu, SQUARE_TILE_MENU_LAYOUT_CSS } from './square-tile-menu.js'
@@ -58,7 +59,9 @@ type StoreShape = {
 }
 const SIG_RE = /^[0-9a-f]{64}$/
 
-interface PanelData { label: string; title: string; imageUrl: string | null }
+/** `segments` is where the tile itself lives — under a flattening filter a
+ *  plate can be a match from anywhere in the hive. */
+interface PanelData { label: string; segments: readonly string[]; title: string; imageUrl: string | null }
 
 /** Everything the PAGE-scale brief needs, gathered while the sheet is being
  *  built. Present only when the layer has no children — a leaf is not an
@@ -113,6 +116,9 @@ export class SquareTileViewDrone extends Drone {
   #briefGen = 0
   #menu: SquareTileMenu | null = null
   #controlsVisible = true
+  /** Each plate's own path, for the corner's card (see PanelData). */
+  #plateSegments = new Map<string, readonly string[]>()
+  #pageCellsOff: (() => void) | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -131,6 +137,10 @@ export class SquareTileViewDrone extends Drone {
       // A note written on this page is one of the things the page SHOWS, so
       // the sheet is one of the surfaces that has to hear about it.
       this.onEffect('notes:changed', this.#change)
+      // WHAT THE PAGE SHOWS changed — a pheromone filter toggled, a tile
+      // hidden, added or removed. The sheet lays out the page's one answer
+      // (page-cells.ts), so every filter the hive applies reaches it too.
+      this.#pageCellsOff = onPageCellsChanged(this.#change)
       // The standard Escape cascade first clears typing, editors and tool
       // windows. Only its final fallback leaves this underlying view.
       this.onEffect('global:escape', this.#escape)
@@ -165,6 +175,8 @@ export class SquareTileViewDrone extends Drone {
       ?.removeEventListener?.('change', this.#lineageChange)
     this.#backOff?.()
     this.#backOff = null
+    this.#pageCellsOff?.()
+    this.#pageCellsOff = null
     this.#teardown()
   }
 
@@ -236,18 +248,19 @@ export class SquareTileViewDrone extends Drone {
     // host is torn down — teardown revokes what it owns, and revoking a URL
     // the new plates are about to use would blank the page it just built.
     const fresh: string[] = []
-    const panels = await this.#panels(segments, fresh)
+    const { panels, narrowed } = await this.#panels(segments, fresh)
     // NO EMPTY PAGES. A layer with nothing behind it is where the sheet has
     // the most room and the least excuse: the tile's own brief takes the
-    // whole page, and the row it sits on runs along the foot.
-    const pageData = panels.length || !segments.length
+    // whole page, and the row it sits on runs along the foot. A page a
+    // filter emptied is not a leaf — it says nothing matches.
+    const pageData = panels.length || narrowed || !segments.length
       ? null
       : await this.#pageData(segments, fresh)
     if (gen !== this.#gen || this.#vm()?.mode !== SQUARE_TILE_VIEW) { revokeAll(fresh); return }
 
     this.#teardown()
     this.#objectUrls = fresh
-    this.#host = this.#build(title, payload?.tagline ?? '', segments, panels, pageData)
+    this.#host = this.#build(title, payload?.tagline ?? '', segments, panels, pageData, narrowed)
     document.body.appendChild(this.#host)
     this.#syncControls()
     // The sheet scrolls, so on Windows it wears a real scrollbar — measure it
@@ -260,20 +273,32 @@ export class SquareTileViewDrone extends Drone {
     if (this.#briefLabel !== null && !pageData) void this.#openBrief(this.#briefLabel)
   }
 
-  /** The layer's children, in layer order — the elements of the page. */
-  async #panels(segments: readonly string[], sink: string[]): Promise<PanelData[]> {
+  /** What the page shows, in the order the hive lays it out — the elements
+   *  of the page. Read from the page's one answer, never from the layer, so
+   *  the pheromone filter (and every other filter) reaches the sheet. */
+  async #panels(segments: readonly string[], sink: string[]): Promise<{ panels: PanelData[]; narrowed: boolean }> {
+    const page = await whenPageCells(segments) ?? await this.#layerCells(segments)
+    const panels = await Promise.all(page.cells.map(async cell => ({
+      label: cell.label,
+      segments: cell.segments,
+      title: titleForLabel(cell.label, navigator.language) || cell.label,
+      imageUrl: await this.#tileImageUrl(cell.segments, sink),
+    })))
+    return { panels, narrowed: page.narrowed }
+  }
+
+  /** The layer's children, unfiltered — only for a page nothing has rendered
+   *  (the sheet opened on a tile the hive is not standing on). */
+  async #layerCells(segments: readonly string[]): Promise<PageCells> {
     const history = window.ioc?.get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
-    if (!history) return []
-    let labels: string[] = []
+    const unread: PageCells = { cells: [], narrowed: false }
+    if (!history) return unread
     try {
       const layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => [...segments] }))
-      if (layer) labels = await childNamesOf(history as unknown as PlacementHistory, layer as unknown as PlacementLayer)
-    } catch { /* no layer here */ }
-    return Promise.all(labels.map(async child => ({
-      label: child,
-      title: titleForLabel(child, navigator.language) || child,
-      imageUrl: await this.#tileImageUrl([...segments, child], sink),
-    })))
+      if (!layer) return unread
+      const labels = await childNamesOf(history as unknown as PlacementHistory, layer as unknown as PlacementLayer)
+      return { cells: labels.map(label => ({ label, segments: [...segments, label] })), narrowed: false }
+    } catch { return unread }
   }
 
   async #tileImageUrl(segments: readonly string[], sink: string[]): Promise<string | null> {
@@ -315,6 +340,7 @@ export class SquareTileViewDrone extends Drone {
     segments: readonly string[],
     panels: PanelData[],
     pageData: PageData | null,
+    narrowed = false,
   ): HTMLElement {
     const host = document.createElement('section')
     host.className = 'hc-square-tile-view'
@@ -369,6 +395,7 @@ export class SquareTileViewDrone extends Drone {
       },
       onDetails: label => { void this.#openBrief(label) },
     })
+    this.#plateSegments = new Map(panels.map(panel => [panel.label, panel.segments]))
     panels.forEach((panel, index) => {
       const plate = document.createElement('div')
       plate.className = 'wv-plate'
@@ -396,7 +423,7 @@ export class SquareTileViewDrone extends Drone {
       caption.className = 'wv-caption'
       caption.textContent = panel.title
       door.appendChild(caption)
-      door.onclick = () => this.#enter([...segments, panel.label])
+      door.onclick = () => this.#enter(panel.segments)
       plate.appendChild(door)
       // The plate is a doorway; the CORNER is the card. A hexagon has no
       // back, so the band crowds its icons around the rim — a plate has one,
@@ -430,7 +457,9 @@ export class SquareTileViewDrone extends Drone {
       hint.className = 'wv-hint'
       hint.textContent = panels.length
         ? this.#t('square-tile.menu.hint', 'click a tile to enter · hover or use ⋯ for options')
-        : this.#t('square-tile.hint.leaf', 'the end of this branch')
+        : narrowed
+          ? this.#t('square-tile.hint.no-match', 'nothing here matches the filter')
+          : this.#t('square-tile.hint.leaf', 'the end of this branch')
       sheet.appendChild(hint)
     }
 
@@ -576,7 +605,7 @@ export class SquareTileViewDrone extends Drone {
     const grid = host?.querySelector('.wv-grid')
     if (!host || !grid) return
     const segments = [...(this.#currentSegments())]
-    const target = label ? [...segments, label] : segments
+    const target = label ? this.#plateSegments.get(label) ?? [...segments, label] : segments
     if (label && !grid.querySelector(`[data-fold="${CSS.escape(label)}"]`)) {
       this.#briefLabel = null
       return

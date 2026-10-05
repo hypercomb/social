@@ -860,6 +860,7 @@
   "square-tile.fold.page": "यह जगह क्या रखती है",
   "square-tile.hint.step": "किसी प्लेट से होकर अंदर जाएँ · पढ़ने के लिए कोना मोड़ें",
   "square-tile.hint.leaf": "इस शाखा का अंत",
+  "square-tile.hint.no-match": "यहाँ कुछ भी फ़िल्टर से मेल नहीं खाता",
   "square-tile.brief.behind.one": "पीछे {count} टाइल",
   "square-tile.brief.behind.other": "पीछे {count} टाइलें",
   "square-tile.brief.leaf": "इस शाखा का अंत",

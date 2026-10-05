@@ -860,6 +860,7 @@
   "square-tile.fold.page": "Was dieser Ort trägt",
   "square-tile.hint.step": "tritt durch eine Tafel · klappe eine Ecke um, um eine zu lesen",
   "square-tile.hint.leaf": "das Ende dieses Zweigs",
+  "square-tile.hint.no-match": "hier passt nichts zum Filter",
   "square-tile.brief.behind.one": "{count} Kachel dahinter",
   "square-tile.brief.behind.other": "{count} Kacheln dahinter",
   "square-tile.brief.leaf": "das Ende dieses Zweigs",

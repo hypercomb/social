@@ -860,6 +860,7 @@
   "square-tile.fold.page": "Apa yang dibawa tempat ini",
   "square-tile.hint.step": "melangkah lewat sebuah pelat · lipat sudutnya untuk membaca satu",
   "square-tile.hint.leaf": "ujung cabang ini",
+  "square-tile.hint.no-match": "tidak ada yang cocok dengan filter di sini",
   "square-tile.brief.behind.one": "{count} ubin di baliknya",
   "square-tile.brief.behind.other": "{count} ubin di baliknya",
   "square-tile.brief.leaf": "ujung cabang ini",

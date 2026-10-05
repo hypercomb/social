@@ -860,6 +860,7 @@
   "square-tile.fold.page": "이곳이 지닌 것",
   "square-tile.hint.step": "플레이트를 통과해 들어가기 · 모서리를 접어 읽기",
   "square-tile.hint.leaf": "이 가지의 끝",
+  "square-tile.hint.no-match": "여기에는 필터와 일치하는 항목이 없습니다",
   "square-tile.brief.behind.one": "뒤에 타일 {count}개",
   "square-tile.brief.behind.other": "뒤에 타일 {count}개",
   "square-tile.brief.leaf": "이 가지의 끝",

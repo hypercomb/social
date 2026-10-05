@@ -860,6 +860,7 @@
   "square-tile.fold.page": "Bu yerin taşıdıkları",
   "square-tile.hint.step": "bir plakadan geç · birini okumak için köşesini kıvır",
   "square-tile.hint.leaf": "bu dalın sonu",
+  "square-tile.hint.no-match": "burada filtreyle eşleşen bir şey yok",
   "square-tile.brief.behind.one": "arkasında {count} döşeme",
   "square-tile.brief.behind.other": "arkasında {count} döşeme",
   "square-tile.brief.leaf": "bu dalın sonu",

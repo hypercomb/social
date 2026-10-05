@@ -860,6 +860,7 @@
   "square-tile.fold.page": "Cosa porta questo posto",
   "square-tile.hint.step": "attraversa una lastra · piega un angolo per leggerne una",
   "square-tile.hint.leaf": "la fine di questo ramo",
+  "square-tile.hint.no-match": "qui niente corrisponde al filtro",
   "square-tile.brief.behind.one": "{count} tessera dietro",
   "square-tile.brief.behind.other": "{count} tessere dietro",
   "square-tile.brief.leaf": "la fine di questo ramo",

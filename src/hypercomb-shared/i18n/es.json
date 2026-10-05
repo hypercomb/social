@@ -860,6 +860,7 @@
   "square-tile.fold.page": "Lo que lleva este lugar",
   "square-tile.hint.step": "cruza una placa · dobla una esquina para leerla",
   "square-tile.hint.leaf": "el final de esta rama",
+  "square-tile.hint.no-match": "nada aquí coincide con el filtro",
   "square-tile.brief.behind.one": "{count} mosaico detrás",
   "square-tile.brief.behind.other": "{count} mosaicos detrás",
   "square-tile.brief.leaf": "el final de esta rama",

@@ -860,6 +860,7 @@
   "square-tile.fold.page": "O que este lugar carrega",
   "square-tile.hint.step": "atravesse uma placa · vire um canto para ler uma",
   "square-tile.hint.leaf": "o fim deste ramo",
+  "square-tile.hint.no-match": "nada aqui corresponde ao filtro",
   "square-tile.brief.behind.one": "{count} bloco por trás",
   "square-tile.brief.behind.other": "{count} blocos por trás",
   "square-tile.brief.leaf": "o fim deste ramo",

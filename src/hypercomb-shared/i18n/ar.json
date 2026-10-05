@@ -860,6 +860,7 @@
   "square-tile.fold.page": "ما يحمله هذا المكان",
   "square-tile.hint.step": "اعبر لوحًا · اطوِ زاويته لقراءته",
   "square-tile.hint.leaf": "نهاية هذا الفرع",
+  "square-tile.hint.no-match": "لا شيء هنا يطابق عامل التصفية",
   "square-tile.brief.behind.one": "{count} بلاطة خلفها",
   "square-tile.brief.behind.other": "{count} بلاطات خلفها",
   "square-tile.brief.leaf": "نهاية هذا الفرع",

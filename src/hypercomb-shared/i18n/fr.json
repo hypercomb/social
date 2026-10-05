@@ -860,6 +860,7 @@
   "square-tile.fold.page": "Ce que porte cet endroit",
   "square-tile.hint.step": "franchissez une plaque · repliez un coin pour en lire une",
   "square-tile.hint.leaf": "le bout de cette branche",
+  "square-tile.hint.no-match": "rien ici ne correspond au filtre",
   "square-tile.brief.behind.one": "{count} tuile derrière",
   "square-tile.brief.behind.other": "{count} tuiles derrière",
   "square-tile.brief.leaf": "le bout de cette branche",

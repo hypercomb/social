@@ -946,6 +946,7 @@
   "square-tile.fold.page": "この場所が持つもの",
   "square-tile.hint.step": "プレートをくぐって中へ · 角をめくって読む",
   "square-tile.hint.leaf": "このブランチの終わり",
+  "square-tile.hint.no-match": "ここにはフィルターに合うものがありません",
   "square-tile.brief.behind.one": "奥に {count} 枚のタイル",
   "square-tile.brief.behind.other": "奥に {count} 枚のタイル",
   "square-tile.brief.leaf": "このブランチの終わり",

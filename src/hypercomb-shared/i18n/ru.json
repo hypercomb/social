@@ -860,6 +860,7 @@
   "square-tile.fold.page": "Что несёт это место",
   "square-tile.hint.step": "шагните сквозь панель · загните уголок, чтобы прочитать",
   "square-tile.hint.leaf": "конец этой ветки",
+  "square-tile.hint.no-match": "здесь ничего не подходит под фильтр",
   "square-tile.brief.behind.one": "{count} плитка позади",
   "square-tile.brief.behind.other": "{count} плиток позади",
   "square-tile.brief.leaf": "конец этой ветки",
