@@ -801,7 +801,13 @@ export const formatHypercombObservationReceipt = (
     if (result.kind === 'find') {
       const found = result.read
       return found.ok
-        ? { grammar, root: found.root, query: found.query, matches: found.matches, truncated: found.truncated }
+        ? {
+          grammar, root: found.root, query: found.query, matches: found.matches, truncated: found.truncated,
+          // A whole-hive find stops before the deepest tiles on a large hive
+          // (2026-10-04: `find betz /` missed /dolphin/associates/betz, which
+          // `find betz /dolphin` found). Say how to reach the rest.
+          ...(found.truncated ? { truncatedNote: 'the search stopped before the whole route; other matches may exist deeper — search again under a narrower route: find <word> /path' } : {}),
+        }
         : { grammar, root: read.root, error: found.code }
     }
     if (result.kind === 'summary') {
