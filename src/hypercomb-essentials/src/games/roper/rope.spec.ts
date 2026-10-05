@@ -231,6 +231,53 @@ describe('roper aim: one aim for the rope and the weapon', () => {
     expect(e.rope!.length).toBeLessThan(length)
     expect(elevationDeg(e)).toBeCloseTo(30, 6)
   })
+
+  const stick = (e: RoperEngine, aimDeg: number, facing: 1 | -1): void => {
+    const w = e.active!
+    w.x = 450; w.y = 400; w.vx = 0; w.vy = 0; w.onGround = false; w.facing = facing
+    e.aimAngle = (aimDeg * Math.PI) / 180
+    e.fireRope()
+    for (let i = 0; i < 30 && !e.attached; i++) e.update(1 / 60)
+    expect(e.attached).toBe(true)
+  }
+
+  it('letting go of a rope that stuck starts the next aim at 45 degrees on the other side', () => {
+    for (const [aimDeg, facing, side] of [[-60, 1, -1], [-120, -1, 1]] as const) {
+      const e = arena()
+      stick(e, aimDeg, facing)
+      e.toggleRope()                                        // let go
+      expect(e.rope).toBeNull()
+      expect(e.active!.facing).toBe(side)
+      expect(Math.sign(Math.cos(e.aimAngle))).toBe(side)
+      expect(elevationDeg(e)).toBeCloseTo(45, 9)
+      e.update(1 / 60)                                      // the aim holds; W/S move it from here
+      expect(elevationDeg(e)).toBeCloseTo(45, 9)
+      e.toggleRope()                                        // the re-rope fires from it
+      expect(e.rope!.dy).toBeCloseTo(-Math.SQRT1_2, 9)
+      expect(Math.sign(e.rope!.dx)).toBe(side)
+    }
+  })
+
+  it('after a rope that stuck straight up, the next aim is 45 degrees toward the worm\'s facing', () => {
+    const e = arena()
+    stick(e, -90, -1)
+    e.toggleRope()
+    expect(Math.sign(Math.cos(e.aimAngle))).toBe(-1)
+    expect(elevationDeg(e)).toBeCloseTo(45, 9)
+  })
+
+  it('throwing off the rope keeps the aim you set', () => {
+    const e = arena()
+    attach(e, 450 + 100, 40 + 300)
+    const w = e.active!
+    w.vx = 0; w.vy = 0; w.facing = 1
+    e.aimAngle = (-30 * Math.PI) / 180
+    e.throwWeapon(0.5)
+    expect(e.rope).toBeNull()
+    expect(elevationDeg(e)).toBeCloseTo(30, 9)
+    const shot = e.projectiles.at(-1)!
+    expect(Math.atan2(shot.vy, shot.vx)).toBeCloseTo(e.aimAngle, 9)
+  })
 })
 
 describe('roper rope: re-rope speed', () => {
