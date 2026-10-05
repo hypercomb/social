@@ -115,12 +115,17 @@ function recordPublisher(data: Record<string, unknown>): void {
   const pubkey = String(data['pubkey'] ?? '').trim().toLowerCase()
   if (!SIG_RE.test(pubkey)) return
   const host = String(data['host'] ?? '').trim().toLowerCase()
-  const next = { pubkey, hosts: host ? [host] : [], channel }
-  try {
-    const current = JSON.parse(readFileSync(PUBLISHER_FILE, 'utf8')) as typeof next
-    if (current.pubkey === next.pubkey && current.channel === next.channel
-      && JSON.stringify(current.hosts) === JSON.stringify(next.hosts)) return
-  } catch { /* absent or unreadable — write it */ }
+  // THE HOSTS ARE THE OWNER'S. The host a stamp landed on is only where this
+  // tab's hive happened to sign; writing it over the list made every stamp
+  // from 4250 swap content.hypercomb.com for pluginthematrix.com (jwize,
+  // 2026-10-05: "keep hypercomb.com default"). A host is recorded only when
+  // the file names none.
+  let current: { pubkey?: string; hosts?: string[]; channel?: string } | null = null
+  try { current = JSON.parse(readFileSync(PUBLISHER_FILE, 'utf8')) } catch { /* absent or unreadable — write it */ }
+  const hosts = Array.isArray(current?.hosts) && current!.hosts.length ? current!.hosts : host ? [host] : []
+  const next = { pubkey, hosts, channel }
+  if (current && current.pubkey === next.pubkey && current.channel === next.channel
+    && JSON.stringify(current.hosts) === JSON.stringify(next.hosts)) return
   writeFileSync(PUBLISHER_FILE, JSON.stringify(next, null, 2) + '\n')
   console.log(`[stamp-install-channel] builds now follow pubkey ${pubkey.slice(0, 12)}… (src/sharing/install-publisher.json) — the next build carries it`)
 }
