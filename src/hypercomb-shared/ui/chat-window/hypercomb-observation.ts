@@ -345,22 +345,27 @@ const parseObservation = (
   if (short) {
     throw new HypercombObservationError(`${short[2]} is a shortened signature; /${short[1]} takes all 64 hex characters — copy the full one from the receipt or the earlier read`)
   }
-  // /find <word>: names under the current page.
-  const find = /^\/find\s+(\S.*)$/.exec(grammar)
+  // /find <word>: names under the current page. /find <word> /route: names
+  // under that route — asked for that way (`find betz /dolphin`), it was
+  // turned back as a malformed word and the whole block with it (2026-10-04).
+  const find = /^\/find\s+(.+?)(?:\s+(\/.*))?$/.exec(grammar)
   if (find) {
     const query = find[1].trim()
     if (!query || query.length > MAX_QUERY_LENGTH || query.includes('/') || query.includes('\\')
       || CONTROL_CHARACTER.test(query)) {
-      throw new HypercombObservationError('/find takes one short name fragment, no slashes')
+      throw new HypercombObservationError('/find takes one short name fragment, no slashes, and may be followed by /absolute/path')
     }
-    return { grammar, verb: 'find', segments: [...currentSegments], query }
+    return { grammar, verb: 'find', segments: find[2] ? routeSegments(find[2]) : [...currentSegments], query }
   }
   const match = /^\/(tree|read|list|history|summary)\s+(\/.*)$/.exec(grammar)
   if (!match || !VERBS.includes(match[1] as HypercombObservationVerb)) {
-    throw new HypercombObservationError('hive observations use /tree, /read, /list, /history or /summary (alone or followed by /absolute/path), /read <sig> [src/path.ts] [from], /list <sig>, /find <word>, or /code [word]')
+    throw new HypercombObservationError('hive observations use /tree, /read, /list, /history or /summary (alone or followed by /absolute/path), /read <sig> [src/path.ts] [from], /list <sig>, /find <word> [/absolute/path], or /code [word]')
   }
-  const verb = match[1] as HypercombObservationVerb
-  const absolute = match[2]
+  return { grammar, verb: match[1] as HypercombObservationVerb, segments: routeSegments(match[2]) }
+}
+
+/** An /absolute/path as segments, bounded and canonical, or refused. */
+const routeSegments = (absolute: string): string[] => {
   const segments = absolute === '/' ? [] : absolute.slice(1).split('/')
   if (segments.length > MAX_PATH_SEGMENTS || segments.some(segment =>
     !segment || segment !== segment.trim() || segment.length > MAX_SEGMENT_LENGTH
@@ -368,7 +373,7 @@ const parseObservation = (
     || CONTROL_CHARACTER.test(segment))) {
     throw new HypercombObservationError('the observation path is not a bounded canonical Hypercomb path')
   }
-  return { grammar, verb, segments }
+  return segments
 }
 
 /** The stable parser: one plan from ordered lines, validated whole. */

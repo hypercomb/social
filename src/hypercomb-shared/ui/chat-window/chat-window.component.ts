@@ -7512,10 +7512,26 @@ export class ChatWindowComponent implements OnDestroy {
         if (!work.request && !lastRound && !unreadSaid && canRead && readRounds === 0) {
           // A read the participant wrote out themselves names no route
           // (`find arkanoid`): it is asked for all the same.
+          // THE HIVE RUNS IT. Sent back to run the read, a model invented its
+          // result a second time with nothing read (2026-10-04), and a second
+          // unread answer goes out as it stands. The participant wrote the
+          // block; it is theirs to have run, so the hive runs it — through
+          // the same read step, grants and withheld tiles included — and the
+          // model answers from the receipt.
           if (readAsked) {
             unreadSaid = true
-            messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: unreadAskedMessage(askedRead.lines.slice(0, 6), message) })
-            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `asked again: answered ${askedRead.lines[0]} without running it` })
+            messages.push({ role: 'assistant', content: roundText })
+            let reply: string
+            try {
+              reply = await runRead(askedRead.lines.slice(0, readsPerBlock), roundProviderId, roundModel)
+            } catch (error) {
+              if (signal?.aborted) throw error
+              reply = isWorkRefusal(error)
+                ? blockRefusedMessage('read', (error as Error).message, message)
+                : unreadAskedMessage(askedRead.lines.slice(0, 6), message)
+            }
+            messages.push({ role: 'user', content: reply })
+            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `ran ${askedRead.lines[0]} itself: the model answered without running it` })
             continue
           }
           const named = routesNamedIn(message)

@@ -297,6 +297,16 @@ describe('opening what a signature names', () => {
   })
 })
 
+describe('/find under a route', () => {
+  it('searches under the route it names, and under the current page without one', () => {
+    const plan = parseHypercombObservationGrammars(['/find betz /dolphin', '/find bubble bobble /games', '/find betz'], ['people'])
+    expect(plan.observations.map(o => [o.query, o.segments])).toEqual([
+      ['betz', ['dolphin']], ['bubble bobble', ['games']], ['betz', ['people']],
+    ])
+    expect(() => parseHypercombObservationGrammars(['/find be/tz'], [])).toThrow(/no slashes/)
+  })
+})
+
 describe('LLM context projection substitutes for content on /read only', () => {
   const layerSig = 'e'.repeat(64)
 
