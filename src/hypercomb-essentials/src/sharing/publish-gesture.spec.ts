@@ -76,7 +76,9 @@ describe('publishing is an act', () => {
     const body = src.slice(src.indexOf('public readonly ensureSwarmTarget'), src.indexOf('public readonly disablePublicHost'))
     expect(body.includes('enablePublicHost(')).toBe(false)
     expect(body.includes("'needs-host'")).toBe(true)
-    expect(body.includes("EffectBus.emit('host-sync:needs-target'")).toBe(true)
+    // E4 (2026-10-04): the swarm host is DERIVED from the mesh, so there is
+    // no target to ask for and no 'host-sync:needs-target' signal to send.
+    expect(body.includes("EffectBus.emit('host-sync:needs-target'")).toBe(false)
   })
 
   // ── the fifth hole (2026-09-04) ───────────────────────────────────────

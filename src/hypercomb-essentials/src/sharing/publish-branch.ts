@@ -102,6 +102,8 @@ interface HostSyncLike {
   drain?: () => Promise<void>
   reDrain?: () => Promise<unknown>
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
+  /** Available on one of THESE hosts (the nodes this publish writes to). */
+  isClosureAvailableOn?: (sig: string, kind: string, closure: boolean, domains: readonly string[]) => Promise<boolean>
   ensureReceipt?: (sig: string, timeoutMs?: number) => Promise<boolean>
   probeServed?: (host: string, sig: string) => Promise<'served' | 'absent' | 'unknown'>
 }
@@ -310,16 +312,27 @@ export async function publishBranch(
   else void hostSync.drain?.()
 
   // 5. THE AVAILABILITY GATE — the index only ever names a served head.
+  //    Served by the nodes THIS publish writes to: a joined participant's
+  //    meeting host takes the closure first (it leads the drain), and its
+  //    receipts say nothing about the node whose index is about to name the
+  //    branch. So the question is asked of the answering nodes, and the
+  //    progress counts only what they still owe.
   report({ phase: 'waiting' })
+  const nodeSet = new Set(answering.map(d => foldContentLabel(String(d).toLowerCase())))
   let pending = -1
-  const offSync = EffectBus.on<{ pending?: number }>('sync:state', p => {
-    if (typeof p?.pending === 'number') pending = p.pending
+  const offSync = EffectBus.on<{ pending?: number; host?: string }>('sync:state', p => {
+    if (typeof p?.pending !== 'number') return
+    if (p.host && !nodeSet.has(foldContentLabel(String(p.host).toLowerCase()))) return
+    pending = p.pending
   })
+  const availableOnNodes = async (): Promise<boolean> => hostSync.isClosureAvailableOn
+    ? (await hostSync.isClosureAvailableOn(sealed, 'layer', true, answering)) === true
+    : (await hostSync.isClosureAvailable?.(sealed, 'layer', true)) === true
   let available = false
   const deadline = Date.now() + AVAILABILITY_DEADLINE_MS
   try {
     for (;;) {
-      available = (await hostSync.isClosureAvailable?.(sealed, 'layer', true)) === true
+      available = await availableOnNodes()
       if (available || Date.now() >= deadline) break
       report({ phase: 'waiting', ...(pending >= 0 ? { pending } : {}) })
       await new Promise(r => setTimeout(r, AVAILABILITY_POLL_MS))

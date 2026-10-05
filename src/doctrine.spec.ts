@@ -1558,4 +1558,23 @@ describe('doctrine ratchets', () => {
     ], 'dependency self-registration')
   })
 
+  it('essentials never reads the origin-wide swarm flag — membership is per tab', () => {
+    // `hc:mesh-public` lives in localStorage, which every tab on the origin
+    // shares, and the shell rewrites it from each tab's own session at boot.
+    // A second tab that opened unjoined therefore silenced the JOINED tab
+    // mid-meeting — no beacon, no publish, no new subscription — while its UI
+    // still said joined (second-tab-silences-joined-tab). Membership is this
+    // tab's: `isJoinedHere()` in hypercomb-essentials/src/sharing/
+    // membership.ts, seeded from the tab's session and following
+    // `mesh:public-changed`. The literal may appear in comments; in code,
+    // never. Empty allowlist, and it stays empty.
+    const actual: string[] = []
+    for (const file of walk(join(ROOT, 'hypercomb-essentials/src'))) {
+      if (/['"`]hc:mesh-public['"`]/.test(stripComments(readFileSync(file, 'utf8')))) {
+        actual.push(relative(ROOT, file).replace(/\\/g, '/'))
+      }
+    }
+    assertRatchet(actual.sort(), [], 'origin-wide swarm flag read in essentials')
+  })
+
 })

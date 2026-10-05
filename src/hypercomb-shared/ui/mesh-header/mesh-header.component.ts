@@ -4,6 +4,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { fromRuntime } from '../../core/from-runtime'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
+import { UNREACHABLE_AFTER_MS, linkPhase, type MeshConnection } from '../presence-banner/presence-status'
 
 /** Stages of the single share toggle. Ordered: the preview is on from WORLD up. */
 const STAGE_PRIVATE = 0
@@ -63,9 +64,33 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
     EffectBus.emit('mesh:open-modal', { join: true })
   }
 
+  // ── the socket, on the glyph ──────────────────────────────────────
+  // 'joined' used to be read straight off the per-tab flag, so a dead socket
+  // still wore 'groups' and a room that could not hear you looked like a
+  // room with nobody in it. In a swarm the glyph now follows the mesh's own
+  // `mesh:connection`: 'groups' while live, amber 'sync' while it connects
+  // or reconnects, 'link_off' once it has had no socket for 30 s. Until the
+  // mesh reports anything (an older essentials package never does) it stays
+  // 'groups', exactly as before.
+  readonly #conn = signal<MeshConnection | null>(null)
+  readonly #downSince = signal<number | null>(null)
+  readonly #clock = signal(Date.now())
+  #downTimer: ReturnType<typeof setTimeout> | null = null
+  #unsubConn: (() => void) | null = null
+
+  /** 'open' | 'pending' | 'down' — null when the mesh never said. */
+  readonly link = computed<'open' | 'pending' | 'down' | null>(() => {
+    const phase = linkPhase(this.#conn(), this.#downSince(), this.#clock(), true)
+    if (!phase) return null
+    return phase === 'open' ? 'open' : phase === 'down' ? 'down' : 'pending'
+  })
+
   /** Glyph for the current stage (see class comment). */
   readonly modeGlyph = (): string => {
-    if (this.meshPublic) return 'groups'
+    if (this.meshPublic) {
+      const link = this.link()
+      return link === 'pending' ? 'sync' : link === 'down' ? 'link_off' : 'groups'
+    }
     if (this.#stage() === STAGE_WORLD) return 'public'
     if (this.#stage() === STAGE_HOST) return 'hub'
     return 'lock'
@@ -122,6 +147,7 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
         if (!open && cancelled && !this.meshPublic) this.#setStage(STAGE_PRIVATE)
       },
     )
+    this.#unsubConn = EffectBus.on<MeshConnection>('mesh:connection', (c) => this.#onConnection(c, false))
     // ALWAYS boot at PRIVATE — a refresh never carries a sharing posture.
     this.#setStage(STAGE_PRIVATE)
   }
@@ -139,12 +165,37 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
     // land on PRIVATE: on JOIN the glyph still reads 'groups' because
     // meshPublic wins that check; on LEAVE it returns to the secure lock.
     this.#setStage(STAGE_PRIVATE)
+    // A join starts the socket's 30 s clock over.
+    this.#downSince.set(null)
+    if (this.#downTimer) { clearTimeout(this.#downTimer); this.#downTimer = null }
+    const conn = this.#conn()
+    if (this.meshPublic && conn) this.#onConnection(conn, true)
+  }
+
+  #onConnection(c: MeshConnection | null | undefined, rejoined: boolean): void {
+    if (!c || typeof c.state !== 'string') return
+    this.#conn.set(c)
+    if (c.state === 'open') {
+      this.#downSince.set(null)
+      if (this.#downTimer) { clearTimeout(this.#downTimer); this.#downTimer = null }
+      return
+    }
+    if (this.#downSince() !== null) return
+    const now = Date.now()
+    const since = !rejoined && typeof c.since === 'number' && c.since > 0 && c.since <= now ? c.since : now
+    this.#downSince.set(since)
+    this.#downTimer = setTimeout(() => {
+      this.#downTimer = null
+      this.#clock.set(Date.now())
+    }, Math.max(0, since + UNREACHABLE_AFTER_MS - now) + 50)
   }
 
   ngOnDestroy(): void {
     this.#unsubDraft?.()
     this.#unsubStepBack?.()
     this.#unsubModal?.()
+    this.#unsubConn?.()
+    if (this.#downTimer) clearTimeout(this.#downTimer)
   }
 
   // One control, cycling PRIVATE → WORLD → HOST → (wrap) PRIVATE.

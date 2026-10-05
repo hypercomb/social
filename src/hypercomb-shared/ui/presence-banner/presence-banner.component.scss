@@ -196,6 +196,80 @@
   }
 }
 
+// ── the whole room ────────────────────────────────────
+// Someone elsewhere in the room is dim; someone away is hollow — their
+// tiles stay until their slot runs out, and the badge says so.
+.badge.elsewhere { opacity: 0.55; }
+.badge.away {
+  background: transparent;
+  border-style: dashed;
+  opacity: 0.6;
+  text-shadow: none;
+}
+
+// ── the one status line ───────────────────────────────
+// One sentence under the badges: the socket, the room, what you offer
+// here. Role colours only — the status hues mark a held or lost state.
+.presence-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem 0.3rem;
+  max-width: min(68vw, 42rem);
+  margin: 0.3rem 0 0;
+  padding: 0.18rem 0.6rem;
+  background: rgba(var(--hc-panel-pane), 0.92);
+  border: 1px solid var(--hc-window-line);
+  border-radius: 999px;
+  color: var(--hc-window-ink-plain);
+  font-family: var(--hc-font);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: auto;
+
+  &.warn { border-color: var(--hc-status-warn); }
+  &.down { border-color: var(--hc-status-alert); }
+}
+
+.presence-status-dot {
+  flex: 0 0 auto;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--hc-status-ok);
+
+  .warn > & { background: var(--hc-status-warn); }
+  .down > & { background: var(--hc-status-alert); }
+}
+
+.presence-status-word { color: var(--hc-window-ink-loud); font-weight: 600; }
+.presence-status-sep { margin: 0 0.2rem; color: var(--hc-window-ink-quiet); }
+
+.presence-status-action,
+.presence-status-fold {
+  appearance: none;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--md-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.presence-status-action { text-decoration: underline; }
+.presence-status-fold { display: none; color: var(--hc-window-ink-loud); }
+
+// A narrow phone folds a quiet line to the dot and the counts; a tap opens
+// it. A line that asks for anything (a held upload, a lost socket, an
+// action) never folds.
+@media (max-width: 400px) {
+  .presence-status { max-width: 92vw; }
+  .presence-status.quiet .presence-status-fold { display: inline; }
+  .presence-status.quiet:not(.open) .presence-status-text { display: none; }
+}
+
 // ── participant panel ─────────────────────────────────
 .participant-panel {
   margin-top: 0.4rem;

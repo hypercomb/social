@@ -15,6 +15,7 @@ import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import { visitRecordAt } from '../../sharing/visit-genome.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
+import { isJoinedHere } from '../../sharing/membership.js'
 import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel, defaultViewWithinSegments, HEXAGONS_SURFACE } from '../../commands/decoration-kind-index.js'
 import { defaultViewWithinAt } from '../../commands/view-default.js'
 import { slotAt, type AxialLike } from '../../sequence/pattern.js'
@@ -1367,11 +1368,9 @@ export class ShowCellDrone extends Drone {
   // Public/swarm mode. When on, EVERY tile is navigable (you can drill
   // into an empty tile to explore / invite others), unlike private mode
   // where only branch tiles — ones that already have children — open on
-  // click. Mirrors the master privacy switch (`hc:mesh-public`) and is
+  // click. Mirrors THIS tab's swarm membership (membership.ts) and is
   // kept live via the `mesh:public-changed` effect.
-  #publicMode = (() => {
-    try { return localStorage.getItem('hc:mesh-public') === 'true' } catch { return false }
-  })()
+  #publicMode = isJoinedHere()
 
   // Per-tile presence glow (0..1), keyed by child name. Reflects how many
   // peers are currently inside (or entering) each child location at the
@@ -1816,9 +1815,7 @@ export class ShowCellDrone extends Drone {
     // used to wake SwarmDrone, presence, avatars, and meeting consumers even
     // while the UI said private. Keep the mesh completely cold until the user
     // explicitly enters public/swarm mode.
-    let meshPublic = false
-    try { meshPublic = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* privacy-safe default: off */ }
-    if (meshPublic) {
+    if (isJoinedHere()) {
       mesh.ensureStartedForSig(sig)
       this.emitEffect('mesh:ensure-started', { signature: sig })
     }

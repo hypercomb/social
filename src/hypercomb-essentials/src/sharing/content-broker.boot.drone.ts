@@ -74,6 +74,7 @@ import { Drone, EffectBus, isMetaEnvelope, registerPoolMeaning } from '@hypercom
 import { decorationClosureSigs } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
+import { isJoinedHere } from './membership.js'
 import { PASSIVE_REPLICATION_KEY, passiveReplicationQueue } from './passive-replication-queue.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
@@ -646,6 +647,25 @@ export class ContentBrokerDrone extends Drone {
     catch { return '' }
   }
 
+  /** The swarm's host — host[:port] of the relay this tab meets at, as the
+   *  mesh derives it. '' when the mesh is absent or names none. */
+  #swarmHost = (): string => {
+    try { return String((this.#getMesh() as { swarmHost?: () => string } | undefined)?.swarmHost?.() ?? '').trim() }
+    catch { return '' }
+  }
+
+  /** True when the self-domain is nothing but this page's own origin: not a
+   *  backup host (self-domain host sync off) and not a published site's own
+   *  door (a read-only visitor reads its bytes there). */
+  #selfIsOnlyTheOrigin = (selfDomain: string): boolean => {
+    try {
+      if (!selfDomain || this.#domainToHost(selfDomain).toLowerCase() !== location.host.toLowerCase()) return false
+      if ((globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) return false
+      const hostSync = window.ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as { isEnabled?: () => boolean } | undefined
+      return hostSync?.isEnabled?.() !== true
+    } catch { return false }
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // Community-trust gate — the binary in-community trust formula
   // ─────────────────────────────────────────────────────────────────
@@ -1019,12 +1039,23 @@ export class ContentBrokerDrone extends Drone {
       ordered.push(host)
     }
 
+    // Tier −1 — THE SWARM'S HOST, while this tab is joined: the relay it
+    // meets at is the host its peers upload to (documentation/swarm-host.md),
+    // so a peer's tile is fetched where it was put, in the first wave.
+    if (isJoinedHere()) push(this.#swarmHost())
+
     // Tier 0 — self-domain. There is NO localhost tier: the app only ever
     // dials real domains. The operator's own domain resolves locally anyway
     // when the tunnel terminates on this machine (e.g. jwize.com →
     // cloudflared → the local relay), so a localhost shortcut buys nothing
     // and costs the guarantee that local ports are never fetched directly.
-    push(this.#getSelfDomain())
+    // THE ORIGIN IS THE SHELL, NOT A HOST: a self-domain that is only this
+    // page's own origin (hypercomb.io seeds it so) answers every /<sig> with
+    // the app page — skipped, unless the participant backs up to it
+    // (self-domain host sync on) or this is a published site reading its own
+    // door.
+    const selfDomain = this.#getSelfDomain()
+    if (!this.#selfIsOnlyTheOrigin(selfDomain)) push(selfDomain)
 
     // Tier 1 — community-trusted domains. Always included regardless
     // of whether they've witnessed this sig via the mesh: the operator

@@ -6,7 +6,8 @@
 // secret" — so this command takes AT MOST those three inputs and configures
 // everything else a working participant needs, idempotently:
 //
-//   /use-live-relay                       join the commons (room+secret 'hive')
+//   /use-live-relay                       join: keep the zone you are in, or
+//                                         the commons (room+secret 'hive')
 //   /use-live-relay <room>                join <room> (secret = room)
 //   /use-live-relay <room> <secret>       join an explicit zone
 //   /use-live-relay <room> <secret> <ws(s)://relay>   + explicit server
@@ -18,17 +19,21 @@
 //      real host forces the live relay ('hc:nostrmesh:use-live-relay'='1')
 //      and applies it NOW via mesh.configureRelays (no reload); an explicit
 //      ws(s):// server persists 'hc:nostrmesh:relays' instead. A local
-//      origin keeps its loopback default unless a server is given.
+//      origin keeps its loopback default unless a server is given. The mesh
+//      is re-pointed ONLY when the relay actually differs: re-pointing it at
+//      the relay it already holds tore down a live socket mid-meeting.
 //   2. the zone — RoomStore/SecretStore .set() (their change events run the
-//      swarm's teardown+resync). The BARE command always lands the shared
-//      default zone, so two people who each type nothing more than
-//      `/use-live-relay` are guaranteed to MEET — predictability beats
-//      preserving a stale room here.
+//      swarm's teardown+resync). The BARE command keeps the zone you are
+//      already in (room AND secret set) — typed mid-meeting it used to drag
+//      a participant out of their room into 'hive'. With no zone yet it
+//      lands the shared default, so two people who each type nothing more
+//      than `/use-live-relay` still MEET.
 //   3. public — the same guarded mesh.togglePublic gesture the keymap uses
-//      (only when not already public; never toggles OFF).
-//   4. the availability gate STANDS (jwize, 2026-09-25): sharing requires
-//      hosting. Your public tiles announce once your host serves them; the
-//      drain asks the host before it sends, so a hosted hive is quick.
+//      (only when THIS tab is not already joined; never toggles OFF).
+//   4. no host to pick (2026-10-04): the relay you meet at is the swarm's
+//      host. Your public tiles go out by name at once and with their
+//      signatures once that host serves them. Swarm sharing never touches
+//      the public content worker — this command no longer enables it.
 //
 // Sharing CONTENT stays a deliberate act (world mode / in-zone creates are
 // auto-public) — this command makes the PARTICIPANT work, it does not
@@ -37,22 +42,18 @@
 // The old on|off|clear ramp-control forms keep working for scripts.
 
 import { EffectBus } from '@hypercomb/core'
+import { isJoinedHere } from './membership.js'
 
 const FLAG_KEY = 'hc:nostrmesh:use-live-relay'
 const RELAYS_KEY = 'hc:nostrmesh:relays'
 const NETWORK_KEY = 'hc:nostrmesh:network'
-const PUBLIC_KEY = 'hc:mesh-public'
 const DEFAULT_ZONE = 'hive'
 
 interface ZoneStore { value: string; set: (v: string) => void }
 interface MeshLike {
   configureRelays?: (urls: string[], persist?: boolean) => void
   connectAll?: () => void
-}
-interface HostSyncLike {
-  isEnabled?: () => boolean
-  isPublicHostEnabled?: () => boolean
-  enablePublicHost?: () => void
+  getDebug?: () => { relays?: readonly string[] } | undefined
 }
 
 const ioc = () => (window as { ioc?: { get?: <T>(k: string) => T | undefined } }).ioc
@@ -73,7 +74,7 @@ const liveRelayUrl = (): string => {
 export class UseLiveRelayQueenBee {
   readonly command = 'use-live-relay'
   readonly description =
-    'One-command swarm setup: /use-live-relay [room] [secret] [ws(s)://server] configures the relay, the zone, and goes public — nothing else to set. Bare = join the shared default zone. off = leave, clear = reset the relay flag.'
+    'One-command swarm setup: /use-live-relay [room] [secret] [ws(s)://server] configures the relay, the zone, and goes public — nothing else to set. Bare = keep the zone you are in (or join the shared default). off = leave, clear = reset the relay flag.'
   readonly slashHidden = false
 
   invoke(args: string): void {
@@ -83,7 +84,7 @@ export class UseLiveRelayQueenBee {
     // ── legacy ramp controls, kept for scripts ─────────────────────────
     if (first === 'off' || first === '0' || first === 'false') {
       localStorage.setItem(FLAG_KEY, '0')
-      if (localStorage.getItem(PUBLIC_KEY) === 'true') this.#togglePublic()
+      if (isJoinedHere()) this.#togglePublic()
       this.#toast('success', `left the swarm — live relay opted out ('0')`)
       return
     }
@@ -100,8 +101,14 @@ export class UseLiveRelayQueenBee {
       : tokens
     const server = zoneTokens.find(t => /^wss?:\/\//i.test(t))
     const named = zoneTokens.filter(t => !/^wss?:\/\//i.test(t))
-    const room = named[0] ?? DEFAULT_ZONE
-    const secret = named[1] ?? named[0] ?? DEFAULT_ZONE
+    // The bare form keeps the zone this hive is already in — see step 2.
+    const roomStore = ioc()?.get?.<ZoneStore>('@hypercomb.social/RoomStore')
+    const secretStore = ioc()?.get?.<ZoneStore>('@hypercomb.social/SecretStore')
+    const currentRoom = String(roomStore?.value ?? '').trim()
+    const currentSecret = String(secretStore?.value ?? '').trim()
+    const keepZone = named.length === 0 && !!currentRoom && !!currentSecret
+    const room = keepZone ? String(roomStore?.value) : (named[0] ?? DEFAULT_ZONE)
+    const secret = keepZone ? String(secretStore?.value) : (named[1] ?? named[0] ?? DEFAULT_ZONE)
 
     // 1. Relay reachability — undo opt-outs, then point at a server.
     if (localStorage.getItem(NETWORK_KEY) === '0') localStorage.removeItem(NETWORK_KEY)
@@ -109,21 +116,20 @@ export class UseLiveRelayQueenBee {
     let relayNote: string
     if (server) {
       localStorage.setItem(RELAYS_KEY, JSON.stringify([server]))
-      mesh?.configureRelays?.([server], false)
+      this.#pointAt(mesh, server)
       relayNote = server
     } else if (isLocalOrigin()) {
       relayNote = 'local relay'
     } else {
       localStorage.setItem(FLAG_KEY, '1')
-      mesh?.configureRelays?.([liveRelayUrl()], false)
+      this.#pointAt(mesh, liveRelayUrl())
       relayNote = 'live relay'
     }
     mesh?.connectAll?.()
 
     // 2. The zone. set() fires the stores' change events — the swarm tears
-    // down the old zone and resyncs into this one on its own.
-    const roomStore = ioc()?.get?.<ZoneStore>('@hypercomb.social/RoomStore')
-    const secretStore = ioc()?.get?.<ZoneStore>('@hypercomb.social/SecretStore')
+    // down the old zone and resyncs into this one on its own; an unchanged
+    // value is never set, so a bare run in the current zone tears nothing.
     if (!roomStore?.set || !secretStore?.set) {
       this.#toast('warning', 'the shell is still booting — try again in a moment')
       return
@@ -131,25 +137,11 @@ export class UseLiveRelayQueenBee {
     if (roomStore.value !== room) roomStore.set(room)
     if (secretStore.value !== secret) secretStore.set(secret)
 
-    // 3b. A BYTE TARGET — the pictures half. The wire carries signatures,
-    // never image bytes: a visitor fetches each picture from a host, so a
-    // participant with no target announces tiles whose pictures 404 for
-    // everyone (the "tiles show, images don't" bug, hit live 2026-08-20 —
-    // a stale hc:public-host='0' silently kept a whole hive's backlog off
-    // every host). Typing the setup command IS the consent gesture, so it
-    // (re-)enables the public content endpoint whenever no target is on —
-    // including over a stale opt-out. A configured self-domain still wins;
-    // the publish walk then stages the public backlog via markPublic and
-    // the 30s drain ticks upload it.
-    const hostSync = ioc()?.get?.<HostSyncLike>('@diamondcoreprocessor.com/HostSyncService')
-    if (hostSync && !hostSync.isEnabled?.() && !hostSync.isPublicHostEnabled?.()) {
-      hostSync.enablePublicHost?.()
-    }
+    // 3. Public — the guarded gesture, only ever toward ON, and only when
+    // THIS tab is not already joined.
+    if (!isJoinedHere()) this.#togglePublic()
 
-    // 4. Public — the guarded gesture, only ever toward ON.
-    if (localStorage.getItem(PUBLIC_KEY) !== 'true') this.#togglePublic()
-
-    // 5. The WARM-UP PLACE (Jaime, 2026-08-20): joining opens the global
+    // 4. The WARM-UP PLACE (Jaime, 2026-08-20): joining opens the global
     // Beehaviors roster so the participant explicitly decides which
     // BEHAVIORS travel with what they share (the withheld list is the
     // 30208 broadcast) — the tile half of the ritual is world mode's
@@ -161,8 +153,18 @@ export class UseLiveRelayQueenBee {
       `you're in "${room}" via ${relayNote} — the roster picks which behaviors you share; world mode picks the tiles`)
   }
 
+  /** Point the mesh at `url` — only when it is not already the one relay
+   *  the mesh dials. Re-pointing an unchanged list tore down the live
+   *  socket (and, before the mesh's retire fix, orphaned it). */
+  #pointAt(mesh: MeshLike | undefined, url: string): void {
+    let current: readonly string[] | undefined
+    try { current = mesh?.getDebug?.()?.relays } catch { current = undefined }
+    if (Array.isArray(current) && current.length === 1 && current[0] === url) return
+    mesh?.configureRelays?.([url], false)
+  }
+
   /** The same guarded toggle the keymap rides — with a complete zone it
-   *  flips public, provisions the byte target, and resyncs. */
+   *  flips public and resyncs. */
   #togglePublic(): void {
     EffectBus.emit('keymap:invoke', { cmd: 'mesh.togglePublic', binding: null, event: null })
   }

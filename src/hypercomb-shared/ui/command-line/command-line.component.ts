@@ -3081,6 +3081,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // register line goes to the slash pipeline whole, as a typed `/word …`
     // always has.
     if (this.#keepsRawArgs(text)) return false
+    const typed = text.trim()
     text = lowered(text)
     const reading = this.#utteranceReader()?.read(text, this.#utteranceResolutions())
     if (!reading) return false
@@ -3099,9 +3100,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // Grammar without a behaviour is inert. It must not fall through to
       // tile creation, offer a creation pathway, or enter command history:
       // none of those are evidence that an action ran.
+      //
+      // Nor may it VANISH. Clearing the line here swallowed every tile name
+      // a guest typed after one '/word' left the bar in command stance —
+      // no tile, no message, nothing in history — and a meeting read that as
+      // "cannot share". The line stays as typed and says why nothing ran.
       this.#pendingChoice.set(null)
       this.#utteranceResolutions.set(new Map())
-      this.clear()
+      const i18n = get('@hypercomb.social/I18n') as
+        { t?(k: string, p?: Record<string, string | number>): string } | undefined
+      const hint = i18n?.t?.('command.inert', { text: typed })
+      EffectBus.emit('activity:log', {
+        message: hint && hint !== 'command.inert'
+          ? hint
+          : `"${typed}" isn't a command — say "create ${typed}" to add it as a tile, or type > on an empty line to make tiles`,
+        icon: '⬡',
+      })
       return true
     }
 

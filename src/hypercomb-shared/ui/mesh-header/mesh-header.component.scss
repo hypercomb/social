@@ -3,3 +3,9 @@
 :host {
   display: contents;
 }
+
+// In a swarm whose socket is not live: amber while it connects or comes
+// back, the alert hue once it has been out of reach for 30 s. Three classes
+// so it outranks the partial's shield colour.
+.mode-toggle.shield-mode.mesh-pending { color: var(--hc-status-warn); }
+.mode-toggle.shield-mode.mesh-down { color: var(--hc-status-alert); }

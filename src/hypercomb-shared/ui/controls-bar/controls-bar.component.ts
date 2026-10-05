@@ -29,7 +29,7 @@ import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '@hypercomb/runtime/install-monitor'
 import { VoiceInputService } from '../../core/voice-input.service'
-import { secretTag } from '@hypercomb/core'
+import { roomWords } from '../presence-banner/presence-status'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
@@ -1145,19 +1145,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   })
 
   readonly secretWords = computed(() => {
-    // The word pair is a human-verifiable reflection of the mesh FILTER.
-    // It hashes the EXACT SAME STRING the mesh requests use today —
-    // `lineage \0 room \0 secret` (no domain) — so two peers comparing
-    // their two words confirm they share the same place AND the same
-    // secret, i.e. they're on the same channel. See SwarmDrone
-    // (#syncForCurrentLineage / composeSigForSegments), which signs this
-    // same string into the channel sig. Keep this string byte-identical
-    // to the swarm's: same trim, same NUL separators, same lineage.
-    const secret = this.#secret$().trim()
-    const room = this.#room$().trim()
-    const lineage = this.#lineageKey()
-    if (!lineage && !room && !secret) return ''
-    return secretTag(`${lineage}\0${room}\0${secret}`, this.#locale$())
+    // THE ROOM'S TWO WORDS — a human-verifiable reflection of the room:
+    // they hash the room and the secret only (`roomWords`, the swarm's
+    // lifecycle channel `lifecycle \0 room \0 secret`), never the page. The
+    // page used to be in the preimage, so two people in one room standing
+    // on different pages read different pairs and a room could never check
+    // itself out loud; a split it SHOULD catch (a capital the phone slipped
+    // into the room, a stale secret) hid among those false alarms. Same
+    // pair in the location window and on the presence line.
+    return roomWords(this.#room$(), this.#secret$(), this.#locale$())
   })
 
   readonly hasSecret = computed(() => !!this.#secret$().trim())
@@ -1176,20 +1172,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Active domain for breadcrumb display */
   readonly activeDomain = computed(() => {
     return window.location.hostname || 'hypercomb.io'
-  })
-
-  /**
-   * Lineage path key — the navigation path, derived byte-identically to
-   * the swarm's lineageKey (#syncForCurrentLineage): trim each segment,
-   * drop empties, join with '/'. Two peers at the same lineage derive the
-   * same value regardless of room or secret. Feeds the secret-words crumb.
-   */
-  readonly #lineageKey = computed(() => {
-    this.#moved$()
-    return this.navigation.segmentsRaw()
-      .map(s => String(s ?? '').trim())
-      .filter(s => s.length > 0)
-      .join('/')
   })
 
   readonly canGoBack = computed(() => {

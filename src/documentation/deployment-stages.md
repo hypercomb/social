@@ -23,6 +23,11 @@ and §4 steps 1–3 (`stage-succession.ts`, `publish-branch.ts`,
 before it sends (`host-sync.service.ts`), and the availability gate stands on
 both swarm announce surfaces with no escape hatch (`swarm.drone.ts`).
 
+*Amended 2026-10-04 by [swarm-host.md](swarm-host.md):* joining now offers
+the tiles made public while joined — the relay the room meets at is the
+swarm's host — and `publish here` is no longer part of swarm sharing. The
+`shared` row below describes the 09-25 recipe.
+
 ## 1. The idea in one paragraph
 
 A **stage is a word**, and a word is a molecule: its address is `sign(word)`

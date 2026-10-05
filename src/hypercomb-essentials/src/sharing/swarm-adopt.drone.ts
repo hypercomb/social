@@ -59,6 +59,7 @@ import { setDivergedLabels, clearPeerDivergence } from './peer-divergence.js'
 import { publisherHoldsUnheldBelow } from './branch-difference.js'
 import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 import { _adoptQueue } from './adopt-queue.service.js'
+import { isJoinedHere } from './membership.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -762,8 +763,7 @@ export class SwarmAdoptDrone extends Drone {
   public wandEligible = (label: string): boolean => {
     const name = String(label ?? '').trim()
     if (!name) return false
-    let inZone = false
-    try { inZone = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* private default */ }
+    const inZone = isJoinedHere()
     // A STATIC offer is takeable in private mode — nothing of yours leaves
     // when you take a public host's tile; the zone flag governs the mesh.
     if (!inZone && !this.#staticEntryFor(name)) return false
@@ -781,7 +781,13 @@ export class SwarmAdoptDrone extends Drone {
     // contract, so it can only read the location carrier, which holds nothing
     // for a peer's tile. The gate that can actually refuse foreign bytes is the
     // union read in `#foldPageTile`, at the commit.
-    return this.#peerEntryFor(name) !== null
+    //
+    // A PLACEHOLDER IS NOT TAKEABLE. A sharer announces a tile by name the
+    // moment it exists and with its layerSig once a host serves it
+    // (swarm.drone #entryFor); until then the name is all there is, and a
+    // take would fold a husk. The shade appears when the signature does.
+    const entry = this.#peerEntryFor(name)
+    return entry !== null && SIG_RE.test(String(entry['layerSig'] ?? '').trim().toLowerCase())
   }
 
   /** THE TAKE (see the constructor comment). One witnessed tile per touch,
@@ -819,9 +825,7 @@ export class SwarmAdoptDrone extends Drone {
   #wandHinted = false
   #hintWand = (): void => {
     if (this.#wandHinted) return
-    let inZone = false
-    try { inZone = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* private default */ }
-    if (!inZone) return
+    if (!isJoinedHere()) return
     const swarm = this.#ioc()?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
     if (!(swarm?.peerTilesAtCurrentSig?.().length)) return
     this.#wandHinted = true

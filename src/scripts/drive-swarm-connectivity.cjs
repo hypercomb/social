@@ -15,19 +15,40 @@
 // which is what makes them genuinely different clients rather than two tabs
 // sharing one hive.
 //
+// SWARM MODE (2026-10-05). Since the 09-25 hosting gate a tile is announced
+// only once a host serves its bytes, and this harness configured no host — so
+// from then on every run "failed" for a reason that had nothing to do with the
+// swarm, and the 2-client baseline meant nothing. Now THE RELAY YOU MEET AT IS
+// YOUR SWARM'S HOST: by default the harness starts a SCRATCH relay from this
+// tree's hypercomb-relay (port --relay-port, content in the OS temp dir,
+// --allow-participants — or --dev-open-writes on a relay that predates it) and
+// the clients carry nothing but that relay: no hc:public-host, no host-sync
+// switch, no self-domain, no publish node. Each client derives its host from
+// the relay it dials. It never dials the shell's default relay (on a loopback
+// origin that is port 7777, the operator's live relay). `--relay` points at an
+// existing relay instead and starts nothing; `--host-mode self` seeds the old
+// standing self-domain host for comparison with pre-swarm-host code.
+//
 // Usage:
-//   node scripts/drive-swarm-connectivity.cjs                         # dev 4250
-//   node scripts/drive-swarm-connectivity.cjs --url https://hypercomb.io/
+//   node scripts/drive-swarm-connectivity.cjs                         # dev 4250, scratch relay on 7801
+//   node scripts/drive-swarm-connectivity.cjs --url https://hypercomb.io/ --relay wss://jwize.com
 //   node scripts/drive-swarm-connectivity.cjs --headed                # watch it
 //
 // Options:
-//   --url <origin>     shell to drive          (default http://localhost:4250/)
-//   --relay <ws url>   relay override          (default: the shell's own default)
-//   --headed           show the browsers
-//   --keep             leave browsers open at the end
-//   --shots <dir>      save PNGs of the swarm page (shaded, then added)
+//   --url <origin>       shell to drive            (default http://localhost:4250/)
+//   --relay <ws url>     use this relay; start none (default: a scratch relay)
+//   --relay-port <n>     the scratch relay's port   (default 7801)
+//   --host-mode <m>      swarm (default) | self
+//   --no-two-tab         skip the same-profile second-tab check
+//   --headed             show the browsers
+//   --keep               leave browsers open at the end
+//   --shots <dir>        save PNGs of the swarm page (shaded, then added)
 
 const { chromium, webkit, firefox } = require('playwright')
+const fs = require('fs')
+const os = require('os')
+const pathMod = require('path')
+const { spawn } = require('child_process')
 
 // Two clients can be two isolated contexts (own OPFS, own identity — already
 // genuinely separate participants) or two different BROWSERS. --engine-b puts
@@ -57,6 +78,48 @@ const ENGINE_B = arg('engine-b', 'chromium')
 const SHOTS = arg('shots', null)   // dir: save what the swarm LOOKS like
 const HEADED = process.argv.includes('--headed')
 const KEEP = process.argv.includes('--keep')
+const RELAY_PORT = Number(arg('relay-port', '7801'))
+const HOST_MODE = arg('host-mode', 'swarm')
+const TWO_TAB = !process.argv.includes('--no-two-tab')
+
+// ── the scratch relay: the meeting point, and therefore the swarm's host ──
+const scratch = { proc: null, dir: null, url: null, policy: null }
+async function startScratchRelay(port = RELAY_PORT, mode = HOST_MODE) {
+  const relayJs = pathMod.join(__dirname, '..', 'hypercomb-relay', 'relay.js')
+  const text = fs.readFileSync(relayJs, 'utf8')
+  const hosts = mode === 'swarm' && text.includes('--allow-participants')
+  scratch.policy = hosts ? '--allow-participants' : '--dev-open-writes'
+  scratch.dir = fs.mkdtempSync(pathMod.join(os.tmpdir(), `hc-swarm-check-${port}-`))
+  scratch.proc = spawn(process.execPath, [relayJs, '--port', String(port), '--content-dir', scratch.dir, scratch.policy], {
+    cwd: pathMod.dirname(relayJs), stdio: ['ignore', 'ignore', 'pipe'],
+  })
+  scratch.proc.stderr.on('data', d => log('relay', String(d).trim().slice(0, 200)))
+  let up = false
+  for (let i = 0; i < 100 && !up; i++) {
+    try { up = (await fetch(`http://localhost:${port}/`, { headers: { Accept: 'application/nostr+json' } })).ok } catch { /* not yet */ }
+    if (!up) await sleep(100)
+  }
+  if (!up || scratch.proc.exitCode != null) throw new Error(`the scratch relay did not come up on ${port} (port taken? pass --relay-port)`)
+  scratch.url = `ws://localhost:${port}`
+  log('relay', `scratch relay ${scratch.url} (${scratch.policy}${mode === 'swarm' && !hosts ? ' — this relay predates --allow-participants' : ''}) content=${scratch.dir}`)
+  return scratch.url
+}
+function stopScratchRelay() {
+  try { scratch.proc?.kill() } catch { /* gone */ }
+  scratch.proc = null
+  if (scratch.dir) { try { fs.rmSync(scratch.dir, { recursive: true, force: true }) } catch { /* in use; the OS temp dir sweeps it */ } scratch.dir = null }
+}
+process.on('exit', () => { try { scratch.proc?.kill() } catch { /* gone */ } })
+
+/** The host a client derives from a relay URL (what the mesh's swarmHost() returns). */
+const hostOfRelay = (relay) => { try { return new URL(relay).host } catch { return '' } }
+
+/** What a swarm-mode client stores: its relay, and nothing about hosts. */
+function swarmSeed(relay, mode = HOST_MODE) {
+  const seed = { 'hc:nostrmesh:use-live-relay': '0' }
+  if (mode === 'self') Object.assign(seed, { 'hc:nostrmesh:self-domain': hostOfRelay(relay), 'hc:host-sync:enabled': 'true' })
+  return seed
+}
 
 // One zone per run so a shared relay's stored history can never leak in.
 const ROOM = 'swarm-check-' + Date.now().toString(36)
@@ -467,7 +530,8 @@ function check(name, ok, detail) {
 }
 
 async function main() {
-  log('boot', `url=${URL_} relay=${RELAY ?? '(shell default)'} zone=${ROOM}`)
+  const relay = RELAY ?? await startScratchRelay()
+  log('boot', `url=${URL_} relay=${relay}${RELAY ? '' : ' (scratch)'} host-mode=${HOST_MODE} zone=${ROOM}`)
   log('boot', `clients: A=${ENGINE_A} B=${ENGINE_B}`)
   const la = launcherFor(ENGINE_A)
   const lb = launcherFor(ENGINE_B)
@@ -478,8 +542,10 @@ async function main() {
   const sameBrowser = ENGINE_A === ENGINE_B
   const browserB = sameBrowser ? browserA : await lb.type.launch({ headless: !HEADED, ...lb.opts })
   const browsers = sameBrowser ? [browserA] : [browserA, browserB]
-  const A = await newClient(browserA, 'A')
-  const B = await newClient(browserB, 'B')
+  // Both clients carry only the relay — the host is theirs to derive.
+  const zone = { room: ROOM, secret: SECRET, relay, seed: swarmSeed(relay) }
+  const A = await newClient(browserA, 'A', zone)
+  const B = await newClient(browserB, 'B', zone)
 
   for (const c of [A, B]) await c.page.goto(URL_, { waitUntil: 'domcontentloaded' })
 
@@ -538,6 +604,22 @@ async function main() {
 
   if (!openA.ok || !openB.ok) return finish(browsers)
 
+  // THE DERIVED HOST. Nothing named a host; each joined client works it out
+  // from the relay it dials (host[:port]) and its uploads go there.
+  if (HOST_MODE === 'swarm') {
+    for (const c of [A, B]) {
+      const h = await evalSafe(() => c.page.evaluate(() => {
+        const mesh = window.ioc?.get?.('@diamondcoreprocessor.com/NostrMeshDrone')
+        const hs = window.ioc?.get?.('@diamondcoreprocessor.com/HostSyncService')
+        const api = typeof mesh?.swarmHost === 'function'
+        return { api, host: api ? mesh.swarmHost() : null, target: hs?.ensureSwarmTarget?.() ?? null }
+      }))
+      check(`${c.label} derives its swarm host from its relay`, h.host === hostOfRelay(relay),
+        h.api ? `swarmHost()=${JSON.stringify(h.host)}, expected ${hostOfRelay(relay)}` : 'mesh.swarmHost() missing — no derived host (pre-swarm-host code)')
+      check(`${c.label}'s swarm target is ready`, h.target === 'ready', `ensureSwarmTarget()=${JSON.stringify(h.target)}`)
+    }
+  }
+
   log('tiles', 'A adds alpha+bravo, B adds charlie+delta')
   await addTile(A.page, 'alpha'); await sleep(800)
   await addTile(A.page, 'bravo'); await sleep(800)
@@ -571,6 +653,20 @@ async function main() {
     fullA.ok ? `${fullA.waitedMs}ms` : JSON.stringify(fullA.value?.peerTiles))
   check('B converges on A\'s FULL tile set', fullB.ok,
     fullB.ok ? `${fullB.waitedMs}ms` : JSON.stringify(fullB.value?.peerTiles))
+
+  // HOSTING STAYS THE TRUTH: a name may travel first, but a tile can be TAKEN
+  // only once its bytes are on the swarm host — so the layerSig B receives
+  // must be one the relay serves.
+  if (seesA.ok) {
+    const lay = await waitFor(() => evalSafe(() => B.page.evaluate(() => {
+      const t = (window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')?.peerTilesAtCurrentSig?.() ?? []).find(x => x.name === 'alpha')
+      return t?.layerSig ?? null
+    })), v => /^[0-9a-f]{64}$/.test(v ?? ''), 20000)
+    const http = relay.replace(/^ws/, 'http')
+    const status = lay.ok ? (await fetch(`${http}/${lay.value}`, { method: 'HEAD' }).catch(() => null))?.status ?? 0 : null
+    check('a shared tile carries a layerSig its swarm host serves', status === 200,
+      lay.ok ? `alpha ${lay.value.slice(0, 12)}… → HEAD ${status} after ${lay.waitedMs}ms` : 'alpha never carried a layerSig (names only)')
+  }
 
   if (seesA.ok) {
     log('adopt', 'B adopts alpha (programmatic verb — the button is retired)')
@@ -830,12 +926,36 @@ async function main() {
   // (A bound behaviour earns no per-tile icon — behaviours are managed only
   // from the context layer; scripts/drive-tile-behavior-icon.cjs holds that.)
 
+  // ── THE SAME PROFILE, A SECOND TAB ─────────────────────────────────────
+  // Membership is per tab. A participant who opens hypercomb in a second tab
+  // (never joined) must not take the first one out of the meeting — the
+  // shared localStorage flag used to, mid-meeting — and the second tab opens
+  // no socket of its own.
+  if (TWO_TAB) {
+    const A2 = await A.ctx.newPage()
+    A2.__lastNavAt = Date.now()
+    A2.on('framenavigated', f => { if (f === A2.mainFrame()) A2.__lastNavAt = Date.now() })
+    const relaySockets = []
+    A2.on('websocket', ws => { if (ws.url().startsWith(relay)) relaySockets.push(ws.url()) })
+    await A2.goto(URL_, { waitUntil: 'domcontentloaded' })
+    await waitForShell(A2, 120000); await waitForReady(A2, 120000); await settle(A2)
+    await A.page.bringToFront().catch(() => {})
+    await sleep(3000)
+    await navTo(A.page, []); await navTo(B.page, []); await sleep(1500)
+    await addTile(A.page, 'echo')
+    const echo = await waitFor(() => peerTilesNow(B.page), tiles => (tiles ?? []).includes('echo'), 20000)
+    check('a second, unjoined tab does not silence the joined one', echo.ok,
+      echo.ok ? `B saw A's new tile after ${echo.waitedMs}ms` : `B never saw "echo": ${JSON.stringify(echo.value)}`)
+    check('the second tab opens no relay socket', relaySockets.length === 0, JSON.stringify(relaySockets))
+    await A2.close().catch(() => {})
+  }
+
   // ── the dead-swarm regression ──────────────────────────────────────
   // A client with no zone (what every visitor to a bare-domain origin has:
   // nothing seeds a room there) takes the keyboard shortcut to go public.
   // It must NOT end up flagged public with a swarm that can never reach
   // anyone — the state that reads as "the swarm is broken".
-  const C = await newClientNoZone(browserA, 'C')
+  const C = await newClientNoZone(browserA, 'C', relay)
   await C.page.goto(URL_, { waitUntil: 'domcontentloaded' })
   await waitForShell(C.page, 120000)
   const cInstall = await installIfNeeded(C.page, 'C')
@@ -865,9 +985,18 @@ async function main() {
   return finish(browsers)
 }
 
-// Same as newClient but with no zone seeded — a first-time visitor.
-async function newClientNoZone(browser, label) {
+// Same as newClient but with no zone seeded — a first-time visitor. A relay,
+// when given, is pinned the same way (so even this client never dials the
+// shell's default relay); the zone stays empty.
+async function newClientNoZone(browser, label, relay = null) {
   const ctx = await browser.newContext()
+  if (relay) {
+    await ctx.addInitScript(({ relay, seed }) => {
+      localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([relay]))
+      localStorage.setItem('hc:nostrmesh:allow-loopback', '1')
+      for (const [k, v] of Object.entries(seed)) localStorage.setItem(k, v)
+    }, { relay, seed: swarmSeed(relay) })
+  }
   const page = await ctx.newPage()
   page.on('pageerror', e => log(label, 'PAGE ERROR:', String(e).slice(0, 200)))
   page.__lastNavAt = Date.now()
@@ -880,17 +1009,18 @@ async function finish(browsers) {
   console.log('\n========== ' + URL_ + ' ==========')
   for (const r of results) console.log((r.ok ? '  ✓ ' : '  ✗ ') + r.name + (r.detail ? '  — ' + r.detail : ''))
   console.log(`========== ${results.length - failed.length}/${results.length} passed ==========\n`)
-  if (!KEEP) for (const b of browsers) await b.close()
+  if (!KEEP) { for (const b of browsers) await b.close(); stopScratchRelay() }
   else log('boot', 'left open (--keep)')
   process.exit(failed.length ? 1 : 0)
 }
 
-if (require.main === module) main().catch(e => { console.error('[fatal]', e); process.exit(1) })
+if (require.main === module) main().catch(e => { console.error('[fatal]', e); stopScratchRelay(); process.exit(1) })
 
 // The helpers double as a library for the other swarm harnesses
 // (drive-swarm-join-order.cjs) — same clients, same join gesture, same probes.
 module.exports = {
   URL_, RELAY, HEADED, KEEP, launcherFor, log, sleep, check, results, finish,
+  startScratchRelay, stopScratchRelay, swarmSeed, hostOfRelay,
   newClient, newClientNoZone, waitForShell, waitForReady, installIfNeeded, settle,
   joinSwarm, meshState, swarmState, pubkeyOf, addTile, ownChildren, navTo,
   locationNow, peerTilesNow, waitFor, evalSafe,

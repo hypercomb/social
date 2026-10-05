@@ -5,6 +5,7 @@
 // origins seed the loopback dev relay instead; hc:nostrmesh:use-live-relay
 // ('1'/'0') and hc:nostrmesh:relays override.
 import { Drone } from '@hypercomb/core'
+import { isJoinedHere } from './membership.js'
 
 const LOCAL_RELAY = 'ws://localhost:7777'
 // Live bootstrap relay.
@@ -49,7 +50,138 @@ type MeshSub = { close: () => void }
 // need). A store-and-forward consumer (the feedback channel) passes a wider
 // window so a relay REPLAYS stored events published while it was offline;
 // null = no `since` filter at all (relay retention decides).
-type Bucket = { sig: string; subId: string; cbs: Set<MeshCb>; sinceSec?: number | null }
+//
+// seen — the ids THIS bucket has delivered. Dedup used to be one set for the
+// whole mesh, never cleared: a visuals probe that opened a bucket at a page
+// first ate the relay's replay of every peer layer there, and the swarm's own
+// subscription at that page later had the same ids dropped as duplicates —
+// an empty page until each publisher's next refresh. Per bucket, and cleared
+// on every reopen, so a replay always reaches the consumer that asked for it.
+//
+// closedN — consecutive CLOSED refusals; the retry waits 1 s · 2^n (cap 30 s)
+// and an EOSE resets it.
+type Bucket = {
+  sig: string
+  subId: string
+  cbs: Set<MeshCb>
+  sinceSec?: number | null
+  seen: Set<string>
+  closedN: number
+  retryTimer?: ReturnType<typeof setTimeout>
+}
+
+// An EVENT frame on its way to the relays. slot is kind\0d for the
+// parameterized-replaceable range (30000-39999): one slot holds one current
+// event per key, so a newer publish to it supersedes any older frame still
+// queued or awaiting its OK. exp is the frame's NIP-40 expiration in relay
+// seconds; queuedAtMs is when the frame first entered the mesh (its TTL).
+type Outbound = { frame: string; id: string; kind: number; slot?: string; exp?: number; createdAt: number; queuedAtMs: number }
+// An EVENT sent on one relay's socket and not yet answered with an OK.
+type Inflight = Outbound & { relay: string; sentAtMs: number; attempts: number; timer?: ReturnType<typeof setTimeout> }
+// What the watchdog knows about one socket. openedAtMs/healthy: the socket
+// has proved itself (answered a probe, or stayed open 30 s) and the ladder
+// starts again from 0. buffered/bufferedMovedMs: the last bufferedAmount seen
+// and when it last went down. suspectAtMs: the probe deadline passed and a
+// replacement is being dialled while this socket keeps its place.
+type Liveness = {
+  createdAtMs: number; connectTimeoutMs: number; lastInboundMs: number; probeSentAtMs: number; probeDeadlineMs: number
+  openedAtMs: number; healthy: boolean; buffered: number; bufferedMovedMs: number; suspectAtMs: number
+}
+
+/** The mesh's connection, announced as `mesh:connection` on every
+ *  transition (last-value replay). open — a socket is OPEN and answering;
+ *  stalled — every OPEN socket has left a liveness probe unanswered for
+ *  1.5 s; retrying — no OPEN socket after having had one (or after a failed
+ *  first attempt); connecting — the first attempt is in flight; offline —
+ *  not joined, stopped, or no relay this tab may dial. reopened is true on
+ *  exactly ONE payload: the one a socket's open sends when an earlier socket
+ *  had been open — the relay may have marked this key away or restarted
+ *  empty, so the swarm reasserts. Every later payload (a stall answered on
+ *  the same socket, a refusal set or cleared, a clock card) carries false: it
+ *  is an edge, never a level, or a slow probe would replay the whole room.
+ *  refused names a standing
+ *  relay refusal: 'clock' (created_at too far in the future) or
+ *  'subscriptions' (too many subscriptions). */
+export type MeshConnectionState = 'connecting' | 'open' | 'stalled' | 'retrying' | 'offline'
+export type MeshConnection = { state: MeshConnectionState; reopened: boolean; since: number; attempt: number; clockOffsetMs: number; refused?: string }
+
+// ── liveness and reconnect (2026-10-04) ──────────────────────────────────────
+// The client used to have no idea whether it was connected: a half-open
+// socket (phone lock, wifi roam, a tunnel edge lost) stayed OPEN while every
+// publish "succeeded" into the void, and peers evicted us. Now:
+//   - every inbound frame stamps the socket; after 10 s of silence (30 s
+//     hidden) one probe goes out — a REQ on a fixed subId routed by #x, so it
+//     replaces itself and never joins a fan-out — and a socket that answers
+//     nothing within 4 s is retired;
+//   - an EVENT left without its OK for 5 s, with nothing heard since it went
+//     out, triggers the same probe (never a kill outright);
+//   - nothing is judged while bytes queued on the device are still draining
+//     (bufferedAmount going down) or on a tick that ran more than 1 s late —
+//     silence then proves nothing. A buffer that has not gone down for 15 s
+//     is a path that stopped taking bytes, and is judged like any other;
+//   - MAKE BEFORE BREAK: a socket that misses its probe deadline keeps its
+//     place while a replacement dials (at the ladder's next step). Whichever
+//     speaks first wins: the replacement's open retires the old socket, any
+//     frame on the old one drops the replacement. A live socket behind our
+//     own uploads (a slow uplink queues the probe behind megabytes of PUTs)
+//     is therefore never torn down for being slow, and a dead one is replaced
+//     as fast as before; one that stays silent 12 s past its deadline is
+//     retired even if no replacement has opened;
+//   - a socket stuck CONNECTING is cut after 8 s, then 12 s, then 20 s:
+//     a slow phone handshake gets more time, never less;
+//   - online, a tab coming back to view, and pageshow probe an OPEN socket
+//     with a 3 s deadline, and dial any other relay at once;
+//   - the reconnect ladder is 0, 250 ms, 500 ms, 1 s, 2 s, 4 s with 0-30%
+//     jitter taken off the step (so the cap holds), capped at 4 s while
+//     visible and 15 s while hidden. It starts again from 0 only once a
+//     socket has PROVED itself — answered a probe, or stayed open 30 s — so
+//     a path that opens and then goes silent (a middlebox, a relay drowning
+//     in a reconnect burst) climbs the ladder instead of redialling at once
+//     forever.
+// Detection: ≤ 15 s idle, ≤ 9 s after a publish, ≤ 3 s after a wake. Cost:
+// at most 6 probe frames a minute on an idle socket, none while traffic flows.
+const LADDER_MS = [0, 250, 500, 1_000, 2_000, 4_000]
+const LADDER_CAP_HIDDEN_MS = 15_000
+const CONNECT_TIMEOUTS_MS = [8_000, 12_000, 20_000]
+const TICK_VISIBLE_MS = 1_000
+const TICK_HIDDEN_MS = 5_000
+const LATE_TICK_MS = 1_000
+const IDLE_PROBE_VISIBLE_MS = 10_000
+const IDLE_PROBE_HIDDEN_MS = 30_000
+const PROBE_DEADLINE_MS = 4_000
+const WAKE_PROBE_DEADLINE_MS = 3_000
+const UNACKED_PROBE_MS = 5_000
+const STALL_AFTER_MS = 1_500
+const BUFFER_STUCK_MS = 15_000
+const REPLACE_CAP_MS = 12_000
+const HEALTHY_AFTER_MS = 30_000
+// A card read while the main thread is backed up carries the backlog as
+// skew: a tick overdue by more than this at the card, or one that ran this
+// late just before it, makes a device-looks-fast sample untrustworthy.
+const CARD_LAG_MS = 500
+const PROBE_FRAME = JSON.stringify(['REQ', 'hc-live', { '#x': ['hc:live'], limit: 0 }])
+
+// ── delivery ─────────────────────────────────────────────────────────────────
+// A refused EVENT used to be a console.warn: publish() had already said true,
+// the swarm kept its memo, and the event was gone until the next refresh
+// 45-75 s later. Every frame now waits for its OK: 'rate-limited:' re-sends
+// after 1, 2, 4, 8, 15 s (at most 5 times, unless superseded or expired), any
+// other refusal is announced as mesh:rejected, and frames a dead socket
+// swallowed are queued again for the next open.
+const INFLIGHT_MAX = 256
+const INFLIGHT_TTL_MS = 60_000
+const RATE_RETRY_MS = [1_000, 2_000, 4_000, 8_000, 15_000]
+const CLOSED_RETRY_CAP_MS = 30_000
+const SEEN_CAP = 1024
+const SLOT_FLOOR_CAP = 4096
+const CLOCK_APPLY_MS = 2_000
+
+/** kind\0d for a parameterized-replaceable kind, else undefined. */
+const slotOf = (kind: number, tags: string[][] | undefined): string | undefined => {
+  if (!(kind >= 30000 && kind < 40000)) return undefined
+  const d = Array.isArray(tags) ? tags.find(t => Array.isArray(t) && t[0] === 'd') : undefined
+  return `${kind}\0${String(d?.[1] ?? '')}`
+}
 
 type MeshStats = {
   startedAtMs: number
@@ -68,6 +200,10 @@ type MeshStats = {
   noBucket: number
   sendSkippedNoSigner: number
   dupDrop: number
+  probeSent: number
+  retired: number
+  retrySent: number
+  rejected: number
 }
 
 type MeshLog = { atMs: number; type: string; relay?: string; sig?: string; subId?: string; kind?: number; note?: string; data?: any }
@@ -93,7 +229,7 @@ export class NostrMeshDrone extends Drone {
 
   protected override deps = { signer: '@diamondcoreprocessor.com/NostrSigner' }
   protected override listens = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish']
-  protected override emits = ['mesh:ready', 'mesh:items-updated']
+  protected override emits = ['mesh:ready', 'mesh:items-updated', 'mesh:connection', 'mesh:rejected']
 
   // -----------------------------
   // config
@@ -141,10 +277,28 @@ export class NostrMeshDrone extends Drone {
   private itemsBySig = new Map<string, CachedItem[]>()
   private readyWaitersBySig = new Map<string, SigReadyWaiter[]>()
 
-  // note: dedupe across relays (drops repeated ids)
-  private recentIds: string[] = []
-  private recentIdsSet = new Set<string>()
-  private readonly recentCap = 2048
+  // liveness (see the block at the top of the file)
+  #live = new WeakMap<WebSocket, Liveness>()
+  #connectTimeouts = new Map<string, number>()
+  #standby = new Map<string, WebSocket>()
+  #tickTimer: ReturnType<typeof setTimeout> | undefined = undefined
+  #tickDueMs = 0
+  #lastTickAtMs = 0
+  #lastTickLagMs = 0
+
+  // connection state
+  #everOpen = false
+  #refusal: { reason: string; subId?: string } | null = null
+  #conn: MeshConnection = { state: 'offline', reopened: false, since: Date.now(), attempt: 0, clockOffsetMs: 0 }
+
+  // delivery
+  #inflight = new Map<string, Inflight>()
+  #slotFloor = new Map<string, number>()
+  #selfPubkey = ''
+
+  // relay clock — from the 'hc:host' card the relay sends as its first frame
+  #clockOffsetMs = 0
+  #hostCard: { relay: string; time: number; participants: unknown; atMs: number } | null = null
 
   // -----------------------------
   // debug (off by default)
@@ -155,31 +309,52 @@ export class NostrMeshDrone extends Drone {
   private logs: MeshLog[] = []
   private readonly logCap = 200
 
-  #initialized = false
+  // Armed from the constructor, one microtask after the module registers this
+  // instance — not on the first heartbeat. The first pulse can come 10-60 s
+  // after load, and every mesh:subscribe or mesh:publish emitted before it
+  // reached nobody while the socket that should carry it sat unopened. The
+  // heartbeat still calls #arm (idempotent), so a host that pulses before the
+  // microtask runs is armed all the same.
+  constructor() {
+    super()
+    queueMicrotask(() => this.#arm())
+  }
+
+  #armed = false
+
+  #arm = (): void => {
+    if (this.#armed) return
+    this.#armed = true
+
+    this.ensureStartedNow()
+
+    // effect bus listeners — allow other drones to coordinate via effects
+    this.onEffect<{ signature: string }>('mesh:ensure-started', async ({ signature }) => {
+      this.ensureStartedForSig(signature)
+      this.emitEffect('mesh:ready', { signature })
+    })
+
+    this.onEffect<{ signature: string, onItems: (e: any) => void }>('mesh:subscribe', ({ signature, onItems }) => {
+      this.subscribe(signature, onItems)
+    })
+
+    this.onEffect<{ kind: number, sig: string, payload: any, extraTags?: string[][] }>('mesh:publish', async ({ kind, sig, payload, extraTags }) => {
+      await this.publish(kind, sig, payload, extraTags)
+    })
+
+    try {
+      window.addEventListener('online', this.#onWake)
+      window.addEventListener('pageshow', this.#onWake)
+      document.addEventListener('visibilitychange', this.#onVisibility)
+    } catch { /* no window or document — nothing wakes us but our own timers */ }
+
+    this.#emitConnection(true)
+  }
 
   protected override sense = () => true
 
   protected override heartbeat = async (): Promise<void> => {
-    if (!this.#initialized) {
-      this.#initialized = true
-
-      this.ensureStartedNow()
-
-      // effect bus listeners — allow other drones to coordinate via effects
-      this.onEffect<{ signature: string }>('mesh:ensure-started', async ({ signature }) => {
-        this.ensureStartedForSig(signature)
-        this.emitEffect('mesh:ready', { signature })
-      })
-
-      this.onEffect<{ signature: string, onItems: (e: any) => void }>('mesh:subscribe', ({ signature, onItems }) => {
-        this.subscribe(signature, onItems)
-      })
-
-      this.onEffect<{ kind: number, sig: string, payload: any, extraTags?: string[][] }>('mesh:publish', async ({ kind, sig, payload, extraTags }) => {
-        await this.publish(kind, sig, payload, extraTags)
-      })
-    }
-
+    this.#arm()
     this.pruneAllExpired()
     this.ensureSocketHealth()
   }
@@ -189,13 +364,61 @@ export class NostrMeshDrone extends Drone {
   // -----------------------------
 
   public configureRelays = (urls: string[], persist = true): void => {
-    const next = (Array.isArray(urls) ? urls : [])
+    const next = Array.from(new Set((Array.isArray(urls) ? urls : [])
       .map(u => String(u ?? '').trim())
-      .filter(u => u.startsWith('ws://') || u.startsWith('wss://'))
+      .filter(u => u.startsWith('ws://') || u.startsWith('wss://'))))
 
-    this.relays = Array.from(new Set(next))
+    // The same list again — /use-live-relay re-run on a joined tab, /domain
+    // naming the relay it already has — is no reason to tear the swarm down:
+    // closing a live socket fires the relay's will for this key, and every
+    // peer drops our tiles until the reassert lands.
+    const unchanged = this.started && next.length === this.relays.length && next.every((u, i) => u === this.relays[i])
+
+    this.relays = next
     if (persist) this.saveRelays(this.relays)
+    if (unchanged) return
     this.reconnectAll()
+  }
+
+  /** The swarm's host: host[:port] of the first relay this tab may dial.
+   *  The relay you meet at IS the swarm's host — wss://jwize.com serves
+   *  https://jwize.com/<sig>, ws://localhost:7801 serves
+   *  http://localhost:7801/<sig> — so this is a pure function of the relay
+   *  list: no fetch, no NIP-11, nothing stored. '' when no relay can be
+   *  dialled. A loopback relay is the swarm's host only for a page that is
+   *  itself local: a developer's ws://localhost override beside the live
+   *  relay on https://hypercomb.io may be dialled, but a peer on another
+   *  machine can never fetch from it, so the bytes go to the next relay —
+   *  the same rule the swarm's domain tags follow. */
+  public swarmHost = (): string => {
+    const relays = this.started ? this.relays : this.loadRelays(this.relays)
+    const local = this.isLocalContext()
+    for (const relay of relays) {
+      if (!this.#relayAllowed(relay)) continue
+      if (!local && this.isLoopbackRelay(relay)) continue
+      try {
+        const host = new URL(relay).host
+        if (host) return host
+      } catch { /* not a URL — try the next relay */ }
+    }
+    return ''
+  }
+
+  /** Milliseconds on the RELAY's clock: this device's clock corrected by the
+   *  'hc:host' card the relay sends on connect (only when they differ by more
+   *  than 2 s). Freshness, expiry and NIP-98 stamps that peers or the relay
+   *  judge use this, so a device whose clock is off still agrees with the
+   *  room. */
+  public now = (): number => Date.now() + this.#clockOffsetMs
+
+  /** Unix seconds on the relay's clock. */
+  public nowSec = (): number => Math.floor(this.now() / 1000)
+
+  /** The current connection (the last `mesh:connection` payload, brought up
+   *  to date). */
+  public connectionState = (): MeshConnection => {
+    this.#emitConnection()
+    return { ...this.#conn }
   }
 
   private loadRelayConfig = (): void => {
@@ -295,7 +518,7 @@ export class NostrMeshDrone extends Drone {
     const existing = this.bucketsBySig.get(s)
     if (existing) return
 
-    const bucket: Bucket = { sig: s, subId: this.makeSubId(), cbs: new Set<MeshCb>() }
+    const bucket = this.#bucket(s)
     this.bucketsBySig.set(s, bucket)
     this.bucketsBySubId.set(bucket.subId, bucket)
 
@@ -338,7 +561,7 @@ export class NostrMeshDrone extends Drone {
     const s = String(sig ?? '').trim()
     if (!s) return []
     if (!this.networkEnabled) return this.getNonExpired(s)
-    const bucket: Bucket = { sig: s, subId: this.makeSubId(), cbs: new Set<MeshCb>(), sinceSec }
+    const bucket = this.#bucket(s, sinceSec)
     this.bucketsBySubId.set(bucket.subId, bucket)
     this.sendReqToAll(bucket)
     const t = Math.max(200, Math.min(Number(timeoutMs) || 1800, 8000))
@@ -381,18 +604,24 @@ export class NostrMeshDrone extends Drone {
 
   public stop = (): void => {
     this.stopped = true
+    this.#stopTick()
 
     for (const [url, st] of this.backoff.entries()) {
       if (st.timer) clearTimeout(st.timer)
       this.backoff.delete(url)
     }
 
+    this.#dropAllStandby('stop')
     for (const [url, ws] of this.sockets.entries()) {
       try { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null } catch { /* ignore */ }
       try { ws.close() } catch { /* ignore */ }
       this.sockets.delete(url)
       this.note('socket:stop', url)
     }
+
+    for (const key of Array.from(this.#inflight.keys())) this.#dropInflight(key)
+    this.pendingOutbound = []
+    this.#emitConnection()
   }
 
   public setDebug = (enabled: boolean): void => {
@@ -420,8 +649,13 @@ export class NostrMeshDrone extends Drone {
       perSigCap: this.perSigCap,
       expiryRules: this.getExpiryRules(),
       sockets: Array.from(this.sockets.entries()).map(([url, ws]) => ({ url, readyState: ws.readyState })),
+      standby: Array.from(this.#standby.keys()),
       buckets: Array.from(this.bucketsBySig.values()).map(b => ({ sig: b.sig, subId: b.subId, consumers: b.cbs.size })),
       cached: Array.from(this.itemsBySig.entries()).map(([sig, items]) => ({ sig, count: items.length })),
+      connection: this.connectionState(),
+      inflight: this.#inflight.size,
+      pending: this.pendingOutbound.length,
+      hostCard: this.#hostCard ? { ...this.#hostCard } : null,
       stats: { ...this.stats },
       logs: this.logs.slice()
     }
@@ -449,6 +683,7 @@ export class NostrMeshDrone extends Drone {
   // coming back online
   this.ensureStartedNow()
   this.reconnectAll()
+  this.#emitConnection()
 }
 
   // note: signature-only subscription
@@ -472,11 +707,22 @@ export class NostrMeshDrone extends Drone {
         existing.sinceSec = want
         this.sendReqToAll(existing)
       }
+      // The relay replayed this sig to whoever opened the bucket — a visuals
+      // probe, a hidden ensureStartedForSig — and a joiner sends no REQ of its
+      // own, so it would never see what is already here. Hand it the cache,
+      // oldest first, once the caller holds its handle.
+      queueMicrotask(() => {
+        if (!existing.cbs.has(cb) || this.bucketsBySig.get(s) !== existing) return
+        const held = this.getNonExpired(s)
+        for (let i = held.length - 1; i >= 0; i--) {
+          try { cb(held[i]) } catch { /* ignore */ }
+        }
+      })
       this.note('sub:join', undefined, s, existing.subId, undefined, { consumers: existing.cbs.size })
       return { close: () => this.unsubscribe(s, cb) }
     }
 
-    const bucket: Bucket = { sig: s, subId: this.makeSubId(), cbs: new Set<MeshCb>(), sinceSec: opts?.sinceSec }
+    const bucket = this.#bucket(s, opts?.sinceSec)
     bucket.cbs.add(cb)
 
     this.bucketsBySig.set(s, bucket)
@@ -509,21 +755,42 @@ export class NostrMeshDrone extends Drone {
     // toggle revokes them — so a time-based default would lie.
     const tags: string[][] = [['x', s]]
 
-    const callerHasExpiration = Array.isArray(extraTags) &&
-      extraTags.some(t => Array.isArray(t) && t[0] === 'expiration')
+    // Stamped on the RELAY's clock. A caller computes its expiration from
+    // this device's clock, so the tag moves by the same offset as created_at:
+    // a device two minutes slow no longer publishes events that peers and the
+    // relay already consider expired.
+    const offsetSec = Math.round(this.#clockOffsetMs / 1000)
 
     if (Array.isArray(extraTags)) {
       for (const t of extraTags) {
         if (!Array.isArray(t) || t.length < 2) continue
-        tags.push(t.map(x => String(x)))
+        const tag = t.map(x => String(x))
+        if (offsetSec !== 0 && tag[0] === 'expiration') {
+          const v = Number(tag[1])
+          if (Number.isFinite(v)) tag[1] = String(v + offsetSec)
+        }
+        tags.push(tag)
       }
     }
-    void callerHasExpiration  // surface for future opt-in hardening
 
     const content = typeof payload === 'string' ? payload : JSON.stringify(payload ?? {})
 
+    // created_at only ever increases per slot. Two updates to one replaceable
+    // slot within the same second used to tie, and the relay kept whichever
+    // id sorted lower — half the newer ones were acknowledged and never
+    // delivered. The floor also holds anything heard under our own key (a
+    // relay-made tombstone on our lifecycle slot), so the next beacon is
+    // strictly newer than it.
+    const slot = slotOf(k, tags)
+    let createdAt = this.nowSec()
+    if (slot) {
+      const floor = this.#slotFloor.get(slot)
+      if (floor !== undefined && createdAt <= floor) createdAt = floor + 1
+      this.#raiseFloor(slot, createdAt)
+    }
+
     const evt: NostrEvent = {
-      created_at: Math.floor(Date.now() / 1000),
+      created_at: createdAt,
       kind: k,
       tags,
       content
@@ -544,6 +811,7 @@ export class NostrMeshDrone extends Drone {
       this.note('publish:send-skipped-nosigner', undefined, s, undefined, k)
       return false
     }
+    if (signed.pubkey && signed.pubkey !== this.#selfPubkey) this.#learnSelf(String(signed.pubkey))
 
     const delivered = this.sendEventToAll(signed)
     this.note('publish:sent', undefined, s, undefined, k)
@@ -569,6 +837,7 @@ export class NostrMeshDrone extends Drone {
     this.note('mesh:started', undefined, undefined, undefined, undefined, { relays: this.relays, kinds: this.kinds })
 
     this.connectAll()
+    this.#armTick(this.#nextTickDelay(Date.now()))
   }
 
   // -----------------------------
@@ -582,17 +851,6 @@ export class NostrMeshDrone extends Drone {
 
   private ensureSocketHealth = (): void => {
     if (!this.networkEnabled || this.stopped) return
-
-    // reset backoff for relays stuck at max attempts for over 30s
-    const now = Date.now()
-    for (const [url, st] of this.backoff.entries()) {
-      if (st.attempts >= 10 && st.nextAtMs > 0 && (now - st.nextAtMs) > 30_000) {
-        st.attempts = 0
-        st.nextAtMs = 0
-        if (st.timer) { clearTimeout(st.timer); st.timer = undefined }
-        this.note('socket:backoff-reset', url)
-      }
-    }
 
     // reconnect any configured relays that are missing
     for (const url of this.relays) {
@@ -608,13 +866,110 @@ export class NostrMeshDrone extends Drone {
       this.backoff.delete(url)
     }
 
-    for (const [url, ws] of this.sockets.entries()) {
-      try { ws.close() } catch { /* ignore */ }
-      this.sockets.delete(url)
+    // A replacement dialled for the old list is not the one to keep.
+    this.#dropAllStandby('reconnect')
+    // A copy: #retire re-opens the relay under the same key, and a live Map
+    // iterator would visit the replacement and retire it too.
+    for (const [url, ws] of Array.from(this.sockets.entries())) {
       this.note('socket:close-requested', url)
+      this.#retire(url, ws, 'reconnect')
     }
 
     this.connectAll()
+  }
+
+  // Retire one socket for good. Its handlers go first, so nothing it does
+  // later — a close event that arrives after its replacement opened — can
+  // touch the map: an orphan's late onclose used to delete the LIVE socket,
+  // leaving it open, subscribed and untracked. Frames it swallowed without an
+  // OK are queued again for the next open, and the relay is dialled again at
+  // once (the ladder's first step is 0 ms).
+  // A replacement already dialling (make-before-break) takes the slot instead
+  // of a fresh dial: it is the one the ladder already paid for.
+  #retire = (relay: string, ws: WebSocket, why: string, bump = true): void => {
+    try { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null } catch { /* ignore */ }
+    try { ws.close() } catch { /* ignore */ }
+    this.#live.delete(ws)
+    if (this.sockets.get(relay) !== ws) return
+
+    this.sockets.delete(relay)
+    this.stats.socketsClosed++
+    if (why !== 'closed') this.stats.retired++
+    this.note('socket:retired', relay, undefined, undefined, undefined, why)
+
+    this.#requeueInflight(relay)
+
+    if (this.networkEnabled && !this.stopped && this.relays.includes(relay)) {
+      const next = this.#standby.get(relay)
+      if (next) {
+        this.#standby.delete(relay)
+        this.sockets.set(relay, next)
+      } else {
+        if (bump) this.bumpBackoff(relay)
+        this.ensureSocket(relay)
+      }
+    } else {
+      this.#dropStandby(relay, why)
+    }
+    this.#emitConnection()
+  }
+
+  // The replacement opened while the suspect socket still held the slot: the
+  // suspect goes, its unanswered frames are queued again, and the open that
+  // follows re-sends the REQs and flushes them on the new socket.
+  #promote = (relay: string, ws: WebSocket): void => {
+    this.#standby.delete(relay)
+    const old = this.sockets.get(relay)
+    this.sockets.set(relay, ws)
+    if (!old || old === ws) return
+    try { old.onopen = null; old.onmessage = null; old.onerror = null; old.onclose = null } catch { /* ignore */ }
+    try { old.close() } catch { /* ignore */ }
+    this.#live.delete(old)
+    this.stats.socketsClosed++
+    this.stats.retired++
+    this.note('socket:retired', relay, undefined, undefined, undefined, 'replaced')
+    this.#requeueInflight(relay)
+  }
+
+  #dropStandby = (relay: string, why: string): void => {
+    const ws = this.#standby.get(relay)
+    if (!ws) return
+    this.#standby.delete(relay)
+    try { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null } catch { /* ignore */ }
+    try { ws.close() } catch { /* ignore */ }
+    this.#live.delete(ws)
+    this.note('socket:standby-dropped', relay, undefined, undefined, undefined, why)
+  }
+
+  #dropAllStandby = (why: string): void => {
+    for (const relay of Array.from(this.#standby.keys())) this.#dropStandby(relay, why)
+  }
+
+  // The probe deadline passed. The first time: a failure on the ladder, and
+  // a replacement dialled at its next step. Then: a replacement that timed out
+  // is dialled again, and 12 s on the socket goes even with none open.
+  #suspect = (relay: string, ws: WebSocket, lv: Liveness, now: number): void => {
+    if (lv.suspectAtMs <= 0) {
+      lv.suspectAtMs = now
+      this.note('socket:suspect', relay)
+      this.bumpBackoff(relay)
+    } else if (now - lv.suspectAtMs >= REPLACE_CAP_MS) {
+      this.#retire(relay, ws, 'probe-timeout', false)
+      return
+    }
+    this.ensureSocket(relay)
+  }
+
+  // A socket that proved itself: the ladder starts again from 0.
+  #markHealthy = (relay: string, lv: Liveness): void => {
+    if (lv.healthy) return
+    lv.healthy = true
+    const b = this.backoff.get(relay)
+    if (b && (b.attempts > 0 || b.nextAtMs > 0)) {
+      b.attempts = 0
+      b.nextAtMs = 0
+      this.#emitConnection()
+    }
   }
 
   private resubscribeAll = (): void => {
@@ -627,7 +982,16 @@ export class NostrMeshDrone extends Drone {
   private ensureSocket = (relay: string): void => {
     if (!this.networkEnabled) return
     if (this.stopped) return
-    if (this.sockets.has(relay)) return
+    // A socket that missed its probe keeps its place until a replacement
+    // opens (make-before-break): that replacement is the one dial allowed
+    // while the relay has a socket.
+    const cur = this.sockets.get(relay)
+    const standby = !!cur && (this.#live.get(cur)?.suspectAtMs ?? 0) > 0
+    if (cur && !standby) return
+    if (standby && this.#standby.has(relay)) return
+    // A relay taken off the list stays off: a pending backoff timer or a
+    // late close must not dial it back.
+    if (!this.relays.includes(relay)) return
     if (!this.canAttemptRelay(relay)) return
 
     const now = Date.now()
@@ -636,14 +1000,17 @@ export class NostrMeshDrone extends Drone {
       this.scheduleEnsure(relay, st.nextAtMs - now)
       return
     }
+    this.#dial(relay, standby)
+  }
 
+  #dial = (relay: string, standby: boolean): void => {
     let ws: WebSocket
     try { ws = new WebSocket(relay) } catch {
       // A synchronous constructor throw (malformed URL, mixed-content
       // SecurityError) used to drop the relay from the loop for the whole
       // session with no backoff entry and no retry. Record the failure and
       // retry on the normal ladder instead — a transient throw self-heals,
-      // a permanent one backs off to the 15s cap and stays visible in
+      // a permanent one backs off to the ladder's cap and stays visible in
       // getDebug()'s backoff map instead of vanishing.
       this.stats.socketsErrors++
       this.note('socket:create-threw', relay)
@@ -653,45 +1020,325 @@ export class NostrMeshDrone extends Drone {
       return
     }
 
-    this.sockets.set(relay, ws)
-    this.note('socket:create', relay)
+    const createdAtMs = Date.now()
+    const timeouts = this.#connectTimeouts.get(relay) ?? 0
+    if (standby) this.#standby.set(relay, ws)
+    else this.sockets.set(relay, ws)
+    this.#live.set(ws, {
+      createdAtMs,
+      connectTimeoutMs: CONNECT_TIMEOUTS_MS[Math.min(timeouts, CONNECT_TIMEOUTS_MS.length - 1)],
+      lastInboundMs: 0,
+      probeSentAtMs: 0,
+      probeDeadlineMs: 0,
+      openedAtMs: 0,
+      healthy: false,
+      buffered: 0,
+      bufferedMovedMs: 0,
+      suspectAtMs: 0,
+    })
+    this.note(standby ? 'socket:standby' : 'socket:create', relay)
+    this.#armTick(this.#nextTickDelay(createdAtMs))
 
+    // Every handler first asks whether its socket is still THE socket for
+    // this relay (or its replacement in waiting). A retired one has its
+    // handlers removed, but a reference captured earlier must still change
+    // nothing.
     ws.onopen = () => {
+      if (this.#standby.get(relay) === ws) this.#promote(relay, ws)
+      if (this.sockets.get(relay) !== ws) return
       this.stats.socketsOpened++
       this.note('socket:open', relay)
 
-      const b = this.backoff.get(relay)
-      if (b) { b.attempts = 0; b.nextAtMs = 0 }
+      // The ladder is NOT reset here: an open proves only the handshake.
+      // #markHealthy resets it once this socket answers a probe or has been
+      // open 30 s.
 
-      // note: resubscribe everything on connect
+      // note: resubscribe everything on connect — FIRST, before anything
+      // else goes out on this socket (each bucket with its own window).
       for (const bucket of this.bucketsBySig.values()) this.sendReq(relay, bucket)
 
       // Deliver anything queued while no socket was open — the join's
-      // first publish burst rides here instead of dying in CONNECTING.
+      // first publish burst rides here instead of dying in CONNECTING —
+      // and the frames a dead socket swallowed without an OK.
       this.flushPendingOutbound()
+
+      // Bookkeeping after the frames: no relay frame can arrive before this
+      // handler returns. Each bucket forgets what it delivered, so the
+      // replay of a peer swept while we were dead reaches the swarm again;
+      // a CLOSED retry is moot, its REQ just went out.
+      for (const bucket of this.bucketsBySig.values()) {
+        bucket.seen.clear()
+        if (bucket.retryTimer) { clearTimeout(bucket.retryTimer); bucket.retryTimer = undefined }
+      }
+      const lv = this.#live.get(ws)
+      if (lv) { lv.lastInboundMs = Date.now(); lv.openedAtMs = lv.lastInboundMs }
+      this.#connectTimeouts.delete(relay)
+      this.#refusal = null
+
+      const reopened = this.#everOpen
+      this.#everOpen = true
+      // A reopen is always announced, even when another relay kept the
+      // aggregate open: this one may have restarted empty. It is announced
+      // ONCE — this payload alone carries reopened: true.
+      this.#emitConnection(reopened, reopened)
     }
 
     ws.onmessage = (msg) => {
+      if (this.sockets.get(relay) !== ws) return
+      const lv = this.#live.get(ws)
+      if (lv) {
+        lv.lastInboundMs = Date.now()
+        if (lv.probeDeadlineMs > 0) {
+          // The probe is answered (anything heard counts): the socket is
+          // alive, and a replacement dialled for it is not needed.
+          lv.probeSentAtMs = 0
+          lv.probeDeadlineMs = 0
+          lv.suspectAtMs = 0
+          this.#dropStandby(relay, 'answered')
+          this.#markHealthy(relay, lv)
+          this.#emitConnection()
+        }
+      }
       this.onMessage(relay, msg?.data)
     }
 
     ws.onclose = () => {
-      this.stats.socketsClosed++
+      if (this.#standby.get(relay) === ws) {
+        // The replacement failed before it opened: the next judge dials
+        // another at the ladder's next step, or the cap retires the suspect.
+        this.bumpBackoff(relay)
+        this.#dropStandby(relay, 'closed')
+        return
+      }
+      if (this.sockets.get(relay) !== ws) return
       this.note('socket:closed', relay)
-
-      this.sockets.delete(relay)
-      if (!this.networkEnabled || this.stopped) return
-
-      this.bumpBackoff(relay)
-      this.ensureSocket(relay)
+      this.#retire(relay, ws, 'closed')
     }
 
     ws.onerror = () => {
+      if (this.sockets.get(relay) !== ws && this.#standby.get(relay) !== ws) return
       this.stats.socketsErrors++
       this.note('socket:error', relay)
 
       try { ws.close() } catch { /* ignore */ }
     }
+  }
+
+  // -----------------------------
+  // liveness watchdog
+  // -----------------------------
+
+  #hidden = (): boolean => {
+    try { return typeof document !== 'undefined' && document.visibilityState === 'hidden' } catch { return false }
+  }
+
+  // One timer, always at the earliest moment something is due: the next
+  // tick, a probe's stall point or deadline, a handshake's timeout.
+  #armTick = (delayMs: number): void => {
+    if (!this.networkEnabled || this.stopped || this.sockets.size === 0) return
+    const wait = Math.max(0, delayMs)
+    const due = Date.now() + wait
+    if (this.#tickTimer !== undefined) {
+      if (this.#tickDueMs <= due) return
+      clearTimeout(this.#tickTimer)
+    }
+    this.#tickDueMs = due
+    this.#tickTimer = setTimeout(this.#tick, wait)
+  }
+
+  #stopTick = (): void => {
+    if (this.#tickTimer !== undefined) clearTimeout(this.#tickTimer)
+    this.#tickTimer = undefined
+  }
+
+  #nextTickDelay = (now: number): number => {
+    let next = this.#hidden() ? TICK_HIDDEN_MS : TICK_VISIBLE_MS
+    const consider = (due: number): void => {
+      // A moment already past was judged (or deferred) by the tick that is
+      // running — only future ones move the timer, or a deferral would spin.
+      if (due > now) next = Math.min(next, due - now)
+    }
+    for (const ws of this.sockets.values()) {
+      const lv = this.#live.get(ws)
+      if (!lv) continue
+      consider(ws.readyState === WebSocket.CONNECTING ? lv.createdAtMs + lv.connectTimeoutMs
+        : lv.suspectAtMs > 0 ? lv.suspectAtMs + REPLACE_CAP_MS
+        : lv.probeDeadlineMs <= 0 ? 0
+        : now < lv.probeSentAtMs + STALL_AFTER_MS ? lv.probeSentAtMs + STALL_AFTER_MS
+        : lv.probeDeadlineMs)
+    }
+    for (const ws of this.#standby.values()) {
+      const lv = this.#live.get(ws)
+      if (lv) consider(lv.createdAtMs + lv.connectTimeoutMs)
+    }
+    return next
+  }
+
+  #tick = (): void => {
+    this.#tickTimer = undefined
+    if (!this.networkEnabled || this.stopped) return
+    const now = Date.now()
+    this.#lastTickAtMs = now
+    this.#lastTickLagMs = now - this.#tickDueMs
+    this.#purgeInflight(now)
+    // A tick more than a second late means the main thread was blocked or
+    // the tab frozen: frames may be waiting unread in the task queue, so
+    // silence proves nothing yet. The next, punctual tick judges.
+    if (now - this.#tickDueMs <= LATE_TICK_MS) this.#judge(now)
+    this.#emitConnection()
+    this.#armTick(this.#nextTickDelay(Date.now()))
+  }
+
+  #judge = (now: number): void => {
+    const idleMs = this.#hidden() ? IDLE_PROBE_HIDDEN_MS : IDLE_PROBE_VISIBLE_MS
+    // A replacement that never finished its handshake is dropped; the
+    // suspect it was dialled for gets another at the ladder's next step.
+    for (const [relay, ws] of Array.from(this.#standby.entries())) {
+      const lv = this.#live.get(ws)
+      if (ws.readyState === WebSocket.CONNECTING && lv && now - lv.createdAtMs < lv.connectTimeoutMs) continue
+      if (ws.readyState === WebSocket.OPEN) continue
+      if (ws.readyState === WebSocket.CONNECTING) this.#connectTimeouts.set(relay, (this.#connectTimeouts.get(relay) ?? 0) + 1)
+      this.bumpBackoff(relay)
+      this.#dropStandby(relay, 'connect-timeout')
+    }
+    for (const [relay, ws] of Array.from(this.sockets.entries())) {
+      const lv = this.#live.get(ws)
+      if (!lv) continue
+      if (ws.readyState === WebSocket.CONNECTING) {
+        if (now - lv.createdAtMs >= lv.connectTimeoutMs) {
+          this.#connectTimeouts.set(relay, (this.#connectTimeouts.get(relay) ?? 0) + 1)
+          this.#retire(relay, ws, 'connect-timeout')
+        }
+        continue
+      }
+      if (ws.readyState === WebSocket.CLOSED) { this.#retire(relay, ws, 'closed'); continue }
+      if (ws.readyState !== WebSocket.OPEN) continue
+      if (!lv.healthy && lv.openedAtMs > 0 && now - lv.openedAtMs >= HEALTHY_AFTER_MS) this.#markHealthy(relay, lv)
+      // Bytes still queued on this device and going down: the silence may be
+      // ours. A buffer that has not gone down for 15 s is a path that stopped
+      // taking bytes (the gateway forgot us, nothing ACKs) — judged as usual.
+      const buffered = ws.bufferedAmount
+      if (buffered > 0) {
+        if (lv.buffered === 0 || buffered < lv.buffered) lv.bufferedMovedMs = now
+        lv.buffered = buffered
+        if (now - lv.bufferedMovedMs < BUFFER_STUCK_MS) continue
+      } else {
+        lv.buffered = 0
+      }
+      if (lv.probeDeadlineMs > 0) {
+        if (now >= lv.probeDeadlineMs) this.#suspect(relay, ws, lv, now)
+        continue
+      }
+      if (now - lv.lastInboundMs >= idleMs || this.#unackedSince(relay, lv.lastInboundMs, now)) {
+        this.#probe(relay, ws, PROBE_DEADLINE_MS)
+      }
+    }
+  }
+
+  // An EVENT out for 5 s with no OK and nothing at all heard since it left.
+  #unackedSince = (relay: string, lastInboundMs: number, now: number): boolean => {
+    for (const e of this.#inflight.values()) {
+      if (e.relay !== relay || e.timer) continue
+      if (now - e.sentAtMs >= UNACKED_PROBE_MS && lastInboundMs < e.sentAtMs) return true
+    }
+    return false
+  }
+
+  #probe = (relay: string, ws: WebSocket, deadlineMs: number): void => {
+    const lv = this.#live.get(ws)
+    if (!lv) return
+    const now = Date.now()
+    try { ws.send(PROBE_FRAME) } catch { this.#retire(relay, ws, 'probe-send'); return }
+    this.stats.probeSent++
+    this.note('out:probe', relay, undefined, 'hc-live', undefined, { deadlineMs })
+    lv.probeDeadlineMs = lv.probeDeadlineMs > now ? Math.min(lv.probeDeadlineMs, now + deadlineMs) : now + deadlineMs
+    lv.probeSentAtMs = now
+    this.#armTick(this.#nextTickDelay(now))
+  }
+
+  #onVisibility = (): void => {
+    if (this.#hidden()) return
+    this.#onWake()
+  }
+
+  // A phone that wakes, a network that returns, a page restored from the
+  // back-forward cache: the moments a socket is most likely dead without
+  // knowing it. An OPEN one must answer within 3 s (one already suspect gets
+  // its replacement now); any other relay drops its backoff and is dialled
+  // now. A handshake already in flight is left to finish — it is usually the
+  // fastest way back.
+  #onWake = (): void => {
+    if (!this.networkEnabled || this.stopped) return
+    for (const relay of this.relays.slice()) {
+      const ws = this.sockets.get(relay)
+      const suspect = !!ws && (this.#live.get(ws)?.suspectAtMs ?? 0) > 0
+      if (ws && ws.readyState === WebSocket.OPEN && !suspect) { this.#probe(relay, ws, WAKE_PROBE_DEADLINE_MS); continue }
+      if (ws && ws.readyState === WebSocket.CONNECTING) continue
+      const st = this.backoff.get(relay)
+      if (st) {
+        if (st.timer) clearTimeout(st.timer)
+        st.timer = undefined
+        st.attempts = 0
+        st.nextAtMs = 0
+      }
+      if (suspect) this.ensureSocket(relay)
+      else if (ws) this.#retire(relay, ws, 'wake')
+      else this.ensureSocket(relay)
+    }
+    this.#emitConnection()
+  }
+
+  // -----------------------------
+  // connection state
+  // -----------------------------
+
+  #computeState = (now: number): MeshConnectionState => {
+    if (this.stopped || !this.networkEnabled) return 'offline'
+    if (!this.relays.some(r => this.#relayAllowed(r))) return 'offline'
+    let anyOpen = false
+    for (const relay of this.relays) {
+      const ws = this.sockets.get(relay)
+      if (!ws || ws.readyState !== WebSocket.OPEN) continue
+      const lv = this.#live.get(ws)
+      if (!lv || lv.probeDeadlineMs <= 0 || now - lv.probeSentAtMs < STALL_AFTER_MS) return 'open'
+      anyOpen = true
+    }
+    if (anyOpen) return 'stalled'
+    if (this.#everOpen) return 'retrying'
+    return this.relays.some(r => (this.backoff.get(r)?.attempts ?? 0) > 0) ? 'retrying' : 'connecting'
+  }
+
+  // Announce the connection when anything in it changed (force: a reopen,
+  // which the swarm answers with a reassert even when the aggregate state
+  // did not move). `reopened` is passed by a socket's open and by nothing
+  // else, so it rides exactly one payload.
+  #emitConnection = (force = false, reopened = false): void => {
+    const state = this.#computeState(Date.now())
+    const prev = this.#conn
+    const next: MeshConnection = {
+      state,
+      reopened: state === 'open' && reopened,
+      since: state === prev.state ? prev.since : Date.now(),
+      attempt: this.relays.reduce((m, r) => Math.max(m, this.backoff.get(r)?.attempts ?? 0), 0),
+      clockOffsetMs: this.#clockOffsetMs,
+    }
+    if (this.#refusal) next.refused = this.#refusal.reason
+    const changed = force || next.state !== prev.state || next.reopened !== prev.reopened
+      || next.attempt !== prev.attempt || next.clockOffsetMs !== prev.clockOffsetMs || next.refused !== prev.refused
+    if (!changed) return
+    this.#conn = next
+    this.emitEffect('mesh:connection', { ...next })
+  }
+
+  #setRefusal = (reason: string, subId?: string): void => {
+    this.#refusal = { reason, subId }
+    this.#emitConnection()
+  }
+
+  #clearRefusal = (): void => {
+    if (!this.#refusal) return
+    this.#refusal = null
+    this.#emitConnection()
   }
 
   private scheduleEnsure = (relay: string, delayMs: number): void => {
@@ -706,21 +1353,36 @@ export class NostrMeshDrone extends Drone {
     }, Math.max(0, delayMs))
   }
 
+  // The ladder: 0, 250 ms, 500 ms, 1 s, 2 s, 4 s, then 4 s while visible —
+  // a relay restart has every client back within 4 s of it listening. Hidden,
+  // it keeps doubling to 15 s. The jitter (up to 30%) comes OFF the step, so
+  // the cap is a cap and a room that lost the relay together does not return
+  // in lockstep. Resets once a socket proves healthy (#markHealthy), and on
+  // online and a return to view — never on a bare open.
   private bumpBackoff = (relay: string): void => {
     const now = Date.now()
     const st = this.backoff.get(relay) ?? { attempts: 0, nextAtMs: 0 }
 
-    st.attempts = Math.min(10, st.attempts + 1)
+    st.attempts = Math.min(32, st.attempts + 1)
 
-    const base = Math.min(15000, 250 * (2 ** (st.attempts - 1)))
-    const jitter = Math.floor(Math.random() * 250)
-    st.nextAtMs = now + base + jitter
+    const step = st.attempts - 1
+    const base = step < LADDER_MS.length ? LADDER_MS[step]
+      : !this.#hidden() ? LADDER_MS[LADDER_MS.length - 1]
+      : Math.min(LADDER_CAP_HIDDEN_MS, LADDER_MS[LADDER_MS.length - 1] * (2 ** (step - LADDER_MS.length + 1)))
+    const waitMs = base - Math.floor(base * 0.3 * Math.random())
+    st.nextAtMs = now + waitMs
 
     this.backoff.set(relay, st)
-    this.note('socket:backoff', relay, undefined, undefined, undefined, { attempts: st.attempts, waitMs: base + jitter })
+    this.note('socket:backoff', relay, undefined, undefined, undefined, { attempts: st.attempts, waitMs })
   }
 
   private canAttemptRelay = (relay: string): boolean => {
+    if (this.#relayAllowed(relay)) return true
+    this.note('socket:skip-loopback-relay', relay)
+    return false
+  }
+
+  #relayAllowed = (relay: string): boolean => {
     if (!this.isLoopbackRelay(relay)) return true
     // Loopback is fine when the app itself runs on a local origin. From a
     // real host it needs an EXPLICIT signal: the user-configured
@@ -731,8 +1393,6 @@ export class NostrMeshDrone extends Drone {
     if (this.isLocalContext()) return true
     if (this.userConfiguredRelays().includes(relay)) return true
     if (this.allowLoopbackRelay()) return true
-
-    this.note('socket:skip-loopback-relay', relay)
     return false
   }
 
@@ -797,12 +1457,20 @@ export class NostrMeshDrone extends Drone {
     if (type === 'NOTICE') {
       this.stats.msgNoticeIn++
       this.note('in:notice', relay, undefined, undefined, undefined, msg[1])
+      const noticeText = String(msg[1] ?? '')
+      // The relay's card, its first frame on every connection: its clock and
+      // whether it hosts participants' bytes. It rides the first flight — no
+      // round trip, and nothing ever waits for it; an older relay simply
+      // never sends one.
+      if (noticeText.startsWith('hc:host ')) {
+        this.#onHostCard(relay, noticeText.slice('hc:host '.length))
+        return
+      }
       // Drop NOTICEs are the relay telling us our events are being thrown
       // away ('rate-limited', 'message too large'). Swallowing them is how
       // the swarm union silently went one-sided — a publisher's layer
       // events vanished and nothing anywhere said so. Loud in the console;
       // the note() ring above keeps the full history for diagnostics.
-      const noticeText = String(msg[1] ?? '')
       if (/rate-limited|too large/i.test(noticeText)) {
         console.warn(`[nostr-mesh] relay ${relay} is DROPPING our messages: "${noticeText}" — published events are not reaching peers`)
       }
@@ -820,8 +1488,11 @@ export class NostrMeshDrone extends Drone {
     // NIP-01: a refused or ended subscription arrives as CLOSED with a
     // prefixed reason. It is not a NOTICE — it names the subscription, so
     // we know exactly which bucket is deaf. auth-required: is answered by
-    // the AUTH branch below; anything else is retried once after a pause
-    // (a rate limit or a cap that has since freed up).
+    // the AUTH branch below; anything else (a rate limit, a cap that may
+    // free up) is retried per bucket after 1 s · 2^n plus jitter, capped at
+    // 30 s, until an EOSE says the subscription stands. It used to be a
+    // fixed 5 s for every refused bucket on every client behind one venue
+    // address — all of them spending the shared budget again in lockstep.
     if (type === 'CLOSED') {
       const subId = String(msg[1] ?? '')
       const reason = String(msg[2] ?? '')
@@ -830,22 +1501,29 @@ export class NostrMeshDrone extends Drone {
       this.note('in:closed', relay, bucket?.sig, subId, undefined, reason)
       if (!bucket) return
       console.warn(`[nostr-mesh] relay ${relay} CLOSED subscription ${subId}: "${reason}" — ${this.bucketsBySig.size} open here`)
+      if (/too many subscriptions/i.test(reason)) this.#setRefusal('subscriptions', subId)
       if (reason.startsWith('auth-required:')) return
-      window.setTimeout(() => {
-        if (this.stopped || !this.bucketsBySubId.has(subId)) return
+      const base = Math.min(CLOSED_RETRY_CAP_MS, 1000 * (2 ** Math.min(bucket.closedN, 15)))
+      const waitMs = Math.min(CLOSED_RETRY_CAP_MS, base + Math.floor(base * 0.3 * Math.random()))
+      bucket.closedN++
+      if (bucket.retryTimer) clearTimeout(bucket.retryTimer)
+      bucket.retryTimer = setTimeout(() => {
+        bucket.retryTimer = undefined
+        if (this.stopped || this.bucketsBySubId.get(subId) !== bucket) return
         this.sendReq(relay, bucket)
-      }, 5000)
+      }, waitMs)
       return
     }
 
     // NIP-01: every published event gets an OK. A false one means the
     // relay threw it away, and the reason's prefix says why.
     if (type === 'OK') {
+      const id = String(msg[1] ?? '')
       const accepted = msg[2] === true
       const reason = String(msg[3] ?? '')
       this.stats.msgOtherIn++
-      if (this.debug || !accepted) this.note('in:ok', relay, undefined, undefined, undefined, { id: msg[1], accepted, reason })
-      if (!accepted) console.warn(`[nostr-mesh] relay ${relay} REJECTED event ${String(msg[1] ?? '').slice(0, 12)}: "${reason}"`)
+      if (this.debug || !accepted) this.note('in:ok', relay, undefined, undefined, undefined, { id, accepted, reason })
+      this.#onOk(relay, id, accepted, reason)
       return
     }
 
@@ -864,7 +1542,11 @@ export class NostrMeshDrone extends Drone {
     if (type === 'EOSE') {
       const subId = String(msg[1] ?? '')
       const bucket = this.bucketsBySubId.get(subId)
-      if (bucket) this.resolveReadyWaiters(bucket.sig)
+      if (bucket) {
+        bucket.closedN = 0
+        if (this.#refusal?.subId === subId) this.#clearRefusal()
+        this.resolveReadyWaiters(bucket.sig)
+      }
 
       this.stats.msgOtherIn++
       if (this.debug) this.note('in:eose', relay, bucket?.sig, subId)
@@ -883,6 +1565,8 @@ export class NostrMeshDrone extends Drone {
     const evt = msg[2] as NostrEvent | undefined
     if (!subId || !evt) return
 
+    this.#absorbOwn(evt)
+
     const bucket = this.bucketsBySubId.get(subId)
     if (!bucket) {
       this.stats.noBucket++
@@ -895,14 +1579,18 @@ export class NostrMeshDrone extends Drone {
       if (!this.kinds.includes(Number(evt.kind ?? 0))) return
     }
 
-    // note: dedupe by event id across relays
+    // note: dedupe by event id within this bucket (across relays)
     if (evt.id) {
       const id = String(evt.id)
-      if (this.recentIdsSet.has(id)) {
+      if (bucket.seen.has(id)) {
         this.stats.dupDrop++
         return
       }
-      this.pushRecentId(id)
+      bucket.seen.add(id)
+      if (bucket.seen.size > SEEN_CAP) {
+        const oldest = bucket.seen.values().next().value
+        if (oldest !== undefined) bucket.seen.delete(oldest)
+      }
     }
 
     const payload = this.parsePayload(evt)
@@ -920,10 +1608,23 @@ export class NostrMeshDrone extends Drone {
 
   private cacheItem = (relay: string, sig: string, evt: NostrEvent, payload: any): void => {
     const now = Date.now()
+    const list = this.itemsBySig.get(sig) ?? []
+
+    // One copy per event id. A reopen replays the relay's window into buckets
+    // that forgot what they delivered, and a second bucket at the same sig
+    // (a read-back query) sees the same events: the cache keeps the copy it
+    // has, re-confirmed. Our own fanout, signed in place, becomes the relay's
+    // copy when the relay replays it — that IS the read-back query() wants.
+    const id = evt?.id ? String(evt.id) : ''
+    const held = id ? list.find(i => i.event?.id === id) : undefined
+    if (held) {
+      if (relay !== 'local') { held.relay = relay; held.receivedAtMs = now }
+      return
+    }
+
     const createdAtMs = Number(evt?.created_at ?? 0) > 0 ? Number(evt.created_at) * 1000 : now
     const item: CachedItem = { relay, sig, event: evt, payload, receivedAtMs: now, createdAtMs }
 
-    const list = this.itemsBySig.get(sig) ?? []
     list.push(item)
 
     // note: cap newest by created time
@@ -934,16 +1635,6 @@ export class NostrMeshDrone extends Drone {
 
     this.itemsBySig.set(sig, list)
     this.pruneSigExpired(sig)
-  }
-
-  private pushRecentId = (id: string): void => {
-    this.recentIds.push(id)
-    this.recentIdsSet.add(id)
-
-    if (this.recentIds.length <= this.recentCap) return
-
-    const drop = this.recentIds.splice(0, this.recentIds.length - this.recentCap)
-    for (const d of drop) this.recentIdsSet.delete(d)
   }
 
   private parsePayload = (evt: NostrEvent): any => {
@@ -984,8 +1675,11 @@ export class NostrMeshDrone extends Drone {
     // was offline — the relay HELD the feedback item, but no late REQ ever
     // asked for it, so hosts/routines that weren't online within 15 minutes
     // of the publish read an empty channel forever.
+    // The window is measured on the relay's clock: a device minutes fast used
+    // to ask for a window that started in the relay's future and got no
+    // replay at all.
     const sinceSec = b.sinceSec === undefined ? 900 : b.sinceSec
-    if (sinceSec !== null) filter.since = Math.floor(Date.now() / 1000) - Math.max(0, Number(sinceSec) || 0)
+    if (sinceSec !== null) filter.since = this.nowSec() - Math.max(0, Number(sinceSec) || 0)
     if (Array.isArray(this.kinds) && this.kinds.length > 0) filter.kinds = this.kinds
 
     this.stats.reqSent++
@@ -997,7 +1691,7 @@ export class NostrMeshDrone extends Drone {
   // NIP-42 handshake: kind 22242, tags relay + challenge, fresh created_at.
   private answerAuth = async (relay: string, challenge: string): Promise<void> => {
     const evt: NostrEvent = {
-      created_at: Math.floor(Date.now() / 1000),
+      created_at: this.nowSec(),
       kind: 22242,
       tags: [['relay', relay], ['challenge', challenge]],
       content: ''
@@ -1035,20 +1729,22 @@ export class NostrMeshDrone extends Drone {
   // ~75s (the next heartbeat republish). Reads exactly like a dead swarm.
   // Queue the frames instead and flush them the moment a socket opens.
   // Relays dedupe by event id, so a flush to multiple relays is safe.
-  private pendingOutbound: { frame: string; queuedAtMs: number }[] = []
+  // One frame per replaceable slot: a newer publish to a slot replaces the
+  // older frame still waiting here.
+  private pendingOutbound: Outbound[] = []
   private static readonly PENDING_OUTBOUND_MAX = 64
   private static readonly PENDING_OUTBOUND_TTL_MS = 60_000
 
   private flushPendingOutbound = (): void => {
     if (this.pendingOutbound.length === 0) return
     const now = Date.now()
-    const live = this.pendingOutbound.filter(p => now - p.queuedAtMs <= NostrMeshDrone.PENDING_OUTBOUND_TTL_MS)
+    const live = this.pendingOutbound.filter(p => now - p.queuedAtMs <= NostrMeshDrone.PENDING_OUTBOUND_TTL_MS && !this.#expired(p))
     this.pendingOutbound = []
     for (const p of live) {
       let sent = false
-      for (const ws of this.sockets.values()) {
+      for (const [relay, ws] of this.sockets.entries()) {
         if (ws.readyState !== WebSocket.OPEN) continue
-        try { ws.send(p.frame); sent = true } catch { /* ignore */ }
+        try { ws.send(p.frame); sent = true; this.#track(relay, p, now) } catch { /* ignore */ }
       }
       if (sent) this.note('out:flush-pending')
       else this.pendingOutbound.push(p)  // still nothing open — keep it
@@ -1057,26 +1753,223 @@ export class NostrMeshDrone extends Drone {
 
   /** Send to every OPEN relay socket. Returns true when the frame reached
    *  (or was queued for) at least one relay, or when zero relays are
-   *  configured (deliberate local-only mode). False = dropped. */
+   *  configured (deliberate local-only mode). False = dropped. A frame that
+   *  reached a socket is held until that relay's OK (see #onOk). */
   private sendEventToAll = (evt: NostrEvent): boolean => {
-    const frame = JSON.stringify(['EVENT', evt])
+    const out = this.#outbound(evt)
 
     this.stats.eventSent++
 
     let sent = false
-    for (const ws of this.sockets.values()) {
+    const now = Date.now()
+    for (const [relay, ws] of this.sockets.entries()) {
       if (!this.networkEnabled) return false
       if (ws.readyState !== WebSocket.OPEN) continue
-      try { ws.send(frame); sent = true } catch { /* ignore */ }
+      try { ws.send(out.frame); sent = true; this.#track(relay, out, now) } catch { /* ignore */ }
     }
     if (sent) return true
     if (this.relays.length === 0) return true  // local-only by configuration
     // Relays configured but nothing OPEN (connecting / backing off) —
     // queue for the next socket open instead of dropping silently.
-    if (this.pendingOutbound.length >= NostrMeshDrone.PENDING_OUTBOUND_MAX) this.pendingOutbound.shift()
-    this.pendingOutbound.push({ frame, queuedAtMs: Date.now() })
+    this.#queueOutbound(out)
     this.note('out:queued-pending')
     return true
+  }
+
+  // -----------------------------
+  // delivery (acks, retries, requeue)
+  // -----------------------------
+
+  #outbound = (evt: NostrEvent): Outbound => {
+    const kind = Number(evt?.kind ?? 0)
+    const exp = Number((evt?.tags ?? []).find(t => Array.isArray(t) && t[0] === 'expiration')?.[1])
+    return {
+      frame: JSON.stringify(['EVENT', evt]),
+      id: String(evt?.id ?? ''),
+      kind,
+      slot: slotOf(kind, evt?.tags),
+      exp: Number.isFinite(exp) && exp > 0 ? exp : undefined,
+      createdAt: Number(evt?.created_at) || 0,
+      queuedAtMs: Date.now(),
+    }
+  }
+
+  #expired = (o: Outbound): boolean => o.exp !== undefined && o.exp <= this.nowSec()
+
+  // Hold a frame sent on `relay` until its OK. A newer frame for the same
+  // slot drops the older one: a retry of a superseded event would only
+  // spend budget on something the relay must refuse as stale.
+  #track = (relay: string, o: Outbound, now: number): void => {
+    if (!o.id) return
+    const key = `${relay}\0${o.id}`
+    const prior = this.#inflight.get(key)
+    if (prior) { prior.sentAtMs = now; return }
+    if (o.slot) {
+      for (const [k, e] of this.#inflight) {
+        if (e.relay === relay && e.slot === o.slot && e.createdAt < o.createdAt) this.#dropInflight(k)
+      }
+    }
+    if (this.#inflight.size >= INFLIGHT_MAX) {
+      const oldest = this.#inflight.keys().next().value
+      if (oldest !== undefined) this.#dropInflight(oldest)
+    }
+    const { frame, id, kind, slot, exp, createdAt, queuedAtMs } = o
+    this.#inflight.set(key, { frame, id, kind, slot, exp, createdAt, queuedAtMs, relay, sentAtMs: now, attempts: 0 })
+  }
+
+  #dropInflight = (key: string): void => {
+    const e = this.#inflight.get(key)
+    if (!e) return
+    if (e.timer) clearTimeout(e.timer)
+    this.#inflight.delete(key)
+  }
+
+  #purgeInflight = (now: number): void => {
+    for (const [k, e] of this.#inflight) {
+      if (now - e.queuedAtMs > INFLIGHT_TTL_MS) this.#dropInflight(k)
+    }
+  }
+
+  // A retired socket's unanswered frames go back in the queue for the next
+  // open — the half-open socket swallowed them while publish() said true.
+  #requeueInflight = (relay: string): void => {
+    const now = Date.now()
+    for (const [k, e] of this.#inflight) {
+      if (e.relay !== relay) continue
+      this.#dropInflight(k)
+      if (now - e.queuedAtMs < INFLIGHT_TTL_MS) this.#queueOutbound(e)
+    }
+  }
+
+  #queueOutbound = (o: Outbound): void => {
+    if (o.id && this.pendingOutbound.some(p => p.id === o.id)) return
+    if (o.slot) {
+      if (this.pendingOutbound.some(p => p.slot === o.slot && p.createdAt > o.createdAt)) return
+      this.pendingOutbound = this.pendingOutbound.filter(p => p.slot !== o.slot)
+    }
+    if (this.pendingOutbound.length >= NostrMeshDrone.PENDING_OUTBOUND_MAX) this.pendingOutbound.shift()
+    const { frame, id, kind, slot, exp, createdAt, queuedAtMs } = o
+    this.pendingOutbound.push({ frame, id, kind, slot, exp, createdAt, queuedAtMs })
+  }
+
+  // NIP-01 OK. true or 'duplicate:' — delivered. 'rate-limited:' — sent
+  // again after 1, 2, 4, 8, 15 s (plus jitter), at most five times, unless a
+  // newer publish superseded the slot or the event expired. Anything else is
+  // final: announced as mesh:rejected so the publisher can un-stamp its memo
+  // and the status line can say why ('too far in the future' also marks the
+  // connection refused: 'clock').
+  #onOk = (relay: string, id: string, accepted: boolean, reason: string): void => {
+    const key = `${relay}\0${id}`
+    const entry = this.#inflight.get(key)
+
+    if (accepted || reason.startsWith('duplicate:')) {
+      this.#dropInflight(key)
+      if (this.#refusal?.reason === 'clock') this.#clearRefusal()
+      return
+    }
+
+    if (reason.startsWith('rate-limited:') && entry && entry.attempts < RATE_RETRY_MS.length && !this.#expired(entry)) {
+      const base = RATE_RETRY_MS[entry.attempts]
+      if (entry.timer) clearTimeout(entry.timer)
+      entry.timer = setTimeout(() => this.#resend(key, entry), base + Math.floor(base * 0.3 * Math.random()))
+      this.note('out:retry-scheduled', relay, undefined, undefined, entry.kind, { id, attempt: entry.attempts + 1 })
+      return
+    }
+
+    this.#dropInflight(key)
+    if (/too far in the future/i.test(reason)) this.#setRefusal('clock')
+    this.stats.rejected++
+    console.warn(`[nostr-mesh] relay ${relay} REJECTED event ${id.slice(0, 12)}: "${reason}"`)
+    // `d` names the replaceable slot (kind\0d) so the publisher can un-stamp
+    // the memo that says it was sent.
+    const d = entry?.slot ? entry.slot.slice(entry.slot.indexOf('\0') + 1) : undefined
+    this.emitEffect('mesh:rejected', d !== undefined ? { id, kind: entry?.kind ?? 0, reason, d } : { id, kind: entry?.kind ?? 0, reason })
+  }
+
+  #resend = (key: string, entry: Inflight): void => {
+    entry.timer = undefined
+    if (this.#inflight.get(key) !== entry) return   // answered, superseded or requeued meanwhile
+    if (this.#expired(entry)) { this.#dropInflight(key); return }
+    entry.attempts++
+    const ws = this.sockets.get(entry.relay)
+    if (!this.networkEnabled || !ws || ws.readyState !== WebSocket.OPEN) {
+      this.#dropInflight(key)
+      this.#queueOutbound(entry)
+      return
+    }
+    try { ws.send(entry.frame) } catch { /* the watchdog judges the socket */ }
+    entry.sentAtMs = Date.now()
+    this.stats.retrySent++
+    this.note('out:retry', entry.relay, undefined, undefined, entry.kind, { id: entry.id, attempt: entry.attempts })
+  }
+
+  // -----------------------------
+  // relay clock and slot floors
+  // -----------------------------
+
+  // The 'hc:host' card: {v, time, participants}. The offset is applied only
+  // past 2 s — ordinary skew changes nothing. A device found to be FAST asks
+  // again for the window it cut short: its first REQs went out before the
+  // card arrived, measured on its own clock.
+  //
+  // A card read late — the main thread busy with boot work while it sat in
+  // the task queue — carries that backlog as skew, always in the
+  // device-looks-fast direction. When the watchdog's own timer shows the
+  // thread was backed up (a tick overdue now, or one that just ran late), a
+  // sample that would move the offset that way is not trusted; one that
+  // moves it the other way cannot be explained by the backlog and still is.
+  #onHostCard = (relay: string, json: string): void => {
+    const card = this.tryJson(json)
+    const time = Number(card?.time)
+    if (!card || !Number.isFinite(time) || time <= 0) return
+    const now = Date.now()
+    this.#hostCard = { relay, time, participants: card.participants ?? false, atMs: now }
+    const offset = Math.round(time * 1000 + 500 - now)
+    const next = Math.abs(offset) > CLOCK_APPLY_MS ? offset : 0
+    const prev = this.#clockOffsetMs
+    if (next === prev) return
+    const backedUp = (this.#tickTimer !== undefined && now - this.#tickDueMs > CARD_LAG_MS)
+      || (now - this.#lastTickAtMs < 2_000 && this.#lastTickLagMs > CARD_LAG_MS)
+    if (backedUp && next < prev) {
+      this.note('clock:card-late', relay, undefined, undefined, undefined, { offsetMs: offset })
+      return
+    }
+    this.#clockOffsetMs = next
+    this.note('clock:offset', relay, undefined, undefined, undefined, { offsetMs: next })
+    if (prev - next > CLOCK_APPLY_MS) {
+      for (const bucket of this.bucketsBySig.values()) this.sendReq(relay, bucket)
+    }
+    this.#emitConnection()
+  }
+
+  #raiseFloor = (slot: string, sec: number): void => {
+    const cur = this.#slotFloor.get(slot)
+    if (cur !== undefined && cur >= sec) return
+    this.#slotFloor.delete(slot)
+    this.#slotFloor.set(slot, sec)
+    if (this.#slotFloor.size > SLOT_FLOOR_CAP) {
+      const oldest = this.#slotFloor.keys().next().value
+      if (oldest !== undefined) this.#slotFloor.delete(oldest)
+    }
+  }
+
+  // An event under our own key — our replay, or a tombstone the relay made
+  // for us — sets the floor for its slot.
+  #absorbOwn = (evt: NostrEvent): void => {
+    if (!this.#selfPubkey || evt?.pubkey !== this.#selfPubkey) return
+    const kind = Number(evt.kind ?? 0)
+    const slot = slotOf(kind, evt.tags)
+    const t = Number(evt.created_at)
+    if (slot && Number.isFinite(t)) this.#raiseFloor(slot, t)
+  }
+
+  // Our key is known once we have signed; anything already cached under it
+  // counts toward the floors from then on.
+  #learnSelf = (pubkey: string): void => {
+    this.#selfPubkey = pubkey
+    for (const items of this.itemsBySig.values()) {
+      for (const item of items) this.#absorbOwn(item.event)
+    }
   }
 
   /**
@@ -1158,7 +2051,17 @@ export class NostrMeshDrone extends Drone {
     }
   }
 
+  #bucket = (sig: string, sinceSec?: number | null): Bucket => ({
+    sig,
+    subId: this.makeSubId(),
+    cbs: new Set<MeshCb>(),
+    sinceSec,
+    seen: new Set<string>(),
+    closedN: 0,
+  })
+
   private closeBucket = (b: Bucket): void => {
+    if (b.retryTimer) { clearTimeout(b.retryTimer); b.retryTimer = undefined }
     this.sendCloseToAll(b.subId)
     this.bucketsBySig.delete(b.sig)
     this.bucketsBySubId.delete(b.subId)
@@ -1238,25 +2141,24 @@ export class NostrMeshDrone extends Drone {
 
   private loadNetworkEnabled(): boolean {
   try {
-    // Master privacy switch. Private mode (`hc:mesh-public` not set
-    // to 'true') means zero mesh network — no relay subscriptions,
-    // no publishes, no boot-time WebSocket bootstrap. The local
-    // `hc:nostrmesh:network` key is a finer-grained opt-OUT, never
-    // an opt-IN: when mesh-public is true the user has already
-    // consented to mesh networking, so the network defaults ON
-    // unless they explicitly disabled it via the `'0'` value.
+    // Master privacy switch: THIS TAB's swarm membership (membership.ts —
+    // per tab, so a second tab booting private can no longer silence a
+    // joined one). Not joined means zero mesh network — no relay
+    // subscriptions, no publishes, no boot-time WebSocket bootstrap. The
+    // local `hc:nostrmesh:network` key is a finer-grained opt-OUT, never
+    // an opt-IN: a joined tab has already consented to mesh networking,
+    // so the network defaults ON unless explicitly disabled via `'0'`.
     //
-    // Why the asymmetry: the OLD behaviour was "mesh-public on AND
+    // Why the asymmetry: the OLD behaviour was "public on AND
     // hc:nostrmesh:network='1' AND `hc:nostrmesh:relays` set". A fresh
-    // incognito tab with mesh-public toggled on via UI would have
+    // incognito tab that joined via the UI would have
     // `hc:nostrmesh:network` UNSET → fall through → networkEnabled
     // stayed false, mesh never opened sockets, no peer events ever
     // arrived. The user saw their tiles never sync and concluded "the
     // mesh is broken". Treating absence as opt-in (default ON when
-    // mesh-public is true) makes the public switch self-sufficient.
-    // Users who want fine-grained off without flipping privacy still
-    // have the explicit `'0'` value.
-    if (localStorage.getItem('hc:mesh-public') !== 'true') return false
+    // joined) makes the join self-sufficient. Users who want
+    // fine-grained off without leaving still have the explicit `'0'`.
+    if (!isJoinedHere()) return false
     const v = localStorage.getItem('hc:nostrmesh:network')
     if (v === '0') return false
     return true
@@ -1267,19 +2169,31 @@ export class NostrMeshDrone extends Drone {
 
 
   private pauseNetwork = (): void => {
+  this.#stopTick()
+
   for (const [url, st] of this.backoff.entries()) {
     if (st.timer) clearTimeout(st.timer)
     this.backoff.delete(url)
   }
 
+  this.#dropAllStandby('pause')
   for (const [url, ws] of this.sockets.entries()) {
     try { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null } catch {}
     try { ws.close() } catch {}
+    this.#live.delete(ws)
     this.sockets.delete(url)
     this.note('socket:pause', url)
   }
 
-  // Reset the across-relay event-id dedupe set on pause. The
+  // Leaving is not a blip: frames still awaiting an OK — or still queued
+  // for a socket that never opened — are not owed to anyone any more. A
+  // later join (perhaps into another room) must never carry them out. The
+  // next join is a first open, not a reopen.
+  for (const key of Array.from(this.#inflight.keys())) this.#dropInflight(key)
+  this.pendingOutbound = []
+  this.#everOpen = false
+
+  // Reset every bucket's event-id dedupe set on pause. The
   // replaceable-event slot at the relay survives our disconnect;
   // when we come back online (re-toggle to public) the relay
   // replays its latest stored event for our resubscribe — but the
@@ -1291,8 +2205,9 @@ export class NostrMeshDrone extends Drone {
   // Clearing here means the replay always reaches consumers; the
   // worst case is a single duplicate emission if the user toggles
   // rapidly, which is benign — replaceable caches converge.
-  this.recentIds = []
-  this.recentIdsSet.clear()
+  for (const bucket of this.bucketsBySubId.values()) bucket.seen.clear()
+
+  this.#emitConnection()
 }
 
   private loadDebugFlag = (): boolean => {
@@ -1412,7 +2327,11 @@ export class NostrMeshDrone extends Drone {
       parseFail: 0,
       noBucket: 0,
       sendSkippedNoSigner: 0,
-      dupDrop: 0
+      dupDrop: 0,
+      probeSent: 0,
+      retired: 0,
+      retrySent: 0,
+      rejected: 0
     }
   }
 

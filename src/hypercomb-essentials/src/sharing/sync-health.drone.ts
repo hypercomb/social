@@ -13,8 +13,15 @@
 //   • { status: 'syncing', pending: n } fires only when a drain ENDS
 //     still owing receipts — host unreachable, entries waiting. That is
 //     a standing "not yet backed up" condition, not a progress tick.
-//   • { status: 'unauthorized' } — the host refused this device's writer
-//     key; nothing will back up until it is whitelisted.
+//   • a standing failure names its class (2026-10-04): 'refused' (the
+//     host turned this key away — a writers list, participants closed),
+//     'full' (quota or disk; it named its wait), 'too-large' (one file over
+//     the host's cap), 'unreachable' (5xx, network, timeout) or 'not-live'
+//     (the meeting host has not seen this key's beacon yet). 'unauthorized'
+//     is retired — it is 'refused' now.
+//   • `swarm: true` marks the MEETING's host. Bytes there are SHARED with
+//     the room, not backed up — the presence status line reports that host,
+//     so this drone says nothing about it.
 //
 // So the surface follows the health doctrine exactly:
 //   • backed up = SILENCE. No log. The steady state is quiet.
@@ -31,9 +38,9 @@ import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/co
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
 
-type SyncStatus = 'backed-up' | 'syncing' | 'unauthorized'
+type SyncStatus = 'backed-up' | 'syncing' | 'refused' | 'full' | 'too-large' | 'unreachable' | 'not-live'
 
-interface SyncState { host: string; pending: number; status: SyncStatus }
+interface SyncState { host: string; pending: number; status: SyncStatus; swarm?: boolean }
 
 type FolderStatus =
   | 'unsupported'
@@ -81,13 +88,16 @@ export class SyncHealthDrone extends Drone {
     this.#evictPersistedPills()
 
     this.onEffect<SyncState>('sync:state', (p) => {
-      if (!p?.host || !p.status) return
+      if (!p?.host || !p.status || p.swarm === true) return
       this.#apply(p)
     })
 
     // Per-entry receipts tick a stuck host's pending count down live —
-    // the service already emits these; the countdown costs it nothing.
-    this.onEffect<{ sig: string }>('host:receipt', () => {
+    // the service already emits these; the countdown costs it nothing. A
+    // per-target receipt from the meeting's host (`swarm: true`) is not an
+    // entry settling, and is not counted.
+    this.onEffect<{ sig: string; swarm?: boolean }>('host:receipt', (r) => {
+      if (r?.swarm === true) return
       for (const [host, s] of this.#state) {
         if (s.status !== 'syncing' || s.pending <= 0) continue
         this.#state.set(host, { ...s, pending: s.pending - 1 })

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // hypercomb-relay — minimal Nostr relay AND HTTP content host for private swarm meetings
-// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--max-event-size 65536] [--content-dir ./content] [--shell-dir ./host-shell] [--writers hex1,hex2] [--domain a.example,b.example] [--primary hex|npub] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources]
+// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--max-event-size 65536] [--content-dir ./content] [--shell-dir ./host-shell] [--writers hex1,hex2] [--domain a.example,b.example] [--primary hex|npub] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources] [--allow-participants[=all|lifecycleSig,...]]
 //
 // env fallbacks (used when the matching --flag is absent):
 //   PORT             → port to listen on (Azure App Service injects this)
+//   ALLOW_PARTICIPANTS → --allow-participants: `all` (or 1/true), or a comma
+//                      list of lifecycle sigs; unset/0/false: writers only
 //   DOMAINS          → --domain: the hostnames /.well-known/nostr.json vouches
 //                      for this relay's writers at (none: nobody, anywhere)
 //   PRIMARY          → --primary: the writer answered as `_` (none: no `_`)
@@ -21,13 +23,13 @@
 
 import { createServer } from 'node:http'
 import { randomBytes, createHash } from 'node:crypto'
-import { createReadStream, existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
+import { createReadStream, existsSync, readFileSync, readdirSync, statSync, rmSync, promises as fsp } from 'node:fs'
+import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
 import { verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
-import { verifyNip98 } from './http-auth.js'
+import { requestIp, verifyNip98 } from './http-auth.js'
 import { blockedSourcesReason } from './address-guard.js'
 import { contentDirectoryIO, HOST_PACKAGES_POOL, PUBLIC_POOL_ADDRESSES, parseReplicationRequest, publishReplicatedPackage, resolvePackageClosure, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
 import { ReceiptIndex } from './receipt-index.js'
@@ -99,6 +101,11 @@ function parseArgs(argv) {
     // through a replication result. A dev relay pulling from 127.0.0.1 needs it;
     // a public host must never set it.
     allowPrivateSources: String(process.env.ALLOW_PRIVATE_SOURCES ?? '').trim() === '1',
+    // THE MEETING POINT HOSTS ITS PARTICIPANTS (participantPolicyOf below).
+    // Off unless the operator says so: `--allow-participants` alone (or `=all`)
+    // admits any key live on this relay's WebSocket; `=<lifecycleSig,...>` only
+    // keys whose {alive} beacon named one of those rooms. Writers are untouched.
+    allowParticipants: String(process.env.ALLOW_PARTICIPANTS ?? '').trim() || null,
     // SPA serving REMOVED — the relay is a slim STORAGE/MESH host only.
     //
     // Under the full-split model, the installer's code-serving role is fixed
@@ -114,17 +121,17 @@ function parseArgs(argv) {
     // installer, run `npm start` from `diamond-core-processor/` separately
     // (it serves at localhost:2400). Don't conflate.
     //
-    // swarm-temp REMOVED — the relay does not host other participants'
-    // bytes. Per the byte-path model: the mesh resolves sig→domains, bytes
-    // come HTTP-direct from real endpoints, and a sig with no endpoint
-    // stays an EGG (durable placeholder, hatches when an endpoint delivers).
-    // No mesh file transfers, no host-brokering of others' content.
+    // swarm-temp REMOVED — there is no mesh file transfer and no TTL'd side
+    // pool. A participant's bytes reach this host only as ordinary flat atoms
+    // over PUT /<sig>, and only when --allow-participants says so.
   }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--memory') continue  // accepted for old launch lines; memory is the only mode now
     if (a === '--dev-open-writes') { args.devOpenWrites = true; continue }
     if (a === '--allow-private-sources') { args.allowPrivateSources = true; continue }
+    if (a === '--allow-participants') { args.allowParticipants = 'all'; continue }
+    if (a.startsWith('--allow-participants=')) { args.allowParticipants = a.slice('--allow-participants='.length); continue }
     const next = argv[i + 1]
     if (a === '--port' && next) { args.port = Number(next); i++ }
     else if (a === '--pubkeys' && next) { args.pubkeys = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
@@ -216,14 +223,140 @@ function sha256Hex(buf) {
   return createHash('sha256').update(buf).digest('hex')
 }
 
-// ── swarm-temp pool: REMOVED ─────────────────────────────────────────────────
+// ── the swarm's host: participants ───────────────────────────────────────────
 //
-// The relay no longer hosts other participants' bytes. Per the byte-path
-// model (confirmed 2026-06): the mesh resolves sig→domains, bytes come
-// HTTP-direct from real endpoints, and a sig with no endpoint stays an EGG
-// (durable placeholder that hatches when an endpoint delivers). No mesh file
-// transfers, no host-brokering — so the __swarm_temp__ pool, its NIP-98
-// per-participant write path, quotas, and sweeper are all gone.
+// THE RELAY YOU MEET AT IS YOUR SWARM'S HOST. wss://<host> means
+// https://<host>/<sig>: every joined tab derives its upload target from the
+// relay it dials, so a meeting needs no host pick, no /publish and nothing
+// stored. This relay's HTTP half is that host for the participants its
+// operator allows (--allow-participants); the mesh half is unchanged — events
+// stay memory-only, a meeting point and never a store. Bytes that land here
+// are ordinary flat atoms: sha-verified, at /<sig> only, never over a pool or
+// a bag, and they outlive both the sharer and a relay restart.
+//
+// WHO: any key that has sent a verified EVENT on this relay's WebSocket in the
+// last 30 minutes — joining is the consent, and a key nobody has seen in the
+// room cannot upload. In zones mode, only keys whose {alive} beacon (kind
+// 30206) named one of the listed lifecycle sigs. The memory of who is live is
+// this process's alone: a restart wipes it, and the reconnect beacon refills it.
+//
+// HOW MUCH (participants only; writers stay uncapped): one atom at most 8 MB;
+// per key 256 MB and per venue IP 2 GB a day; 4 GB a day across every
+// participant; and nothing once the disk is under 10 GB free. Only NEW bytes
+// count — re-storing an atom already held costs nothing. No record of who
+// stored what is kept: the receipt index stays the writers', and the only
+// trace a participant leaves in the log is a count in the minute line.
+
+/** off | { mode: 'all' } | { mode: 'zones', zones }. A list naming no valid
+ *  lifecycle sig fails CLOSED, out loud: a typo must not open the disk. */
+function participantPolicyOf(raw) {
+  if (raw === null || raw === undefined) return { mode: false }
+  const value = String(raw).trim().toLowerCase()
+  if (['0', 'false', 'off', 'no'].includes(value)) return { mode: false }
+  if (['all', '1', 'true', 'on', 'yes'].includes(value)) return { mode: 'all' }
+  const named = value.split(',').map(s => s.trim()).filter(Boolean)
+  const zones = new Set(named.filter(s => /^[0-9a-f]{64}$/.test(s)))
+  if (zones.size !== named.length || zones.size === 0) {
+    console.error(`[relay] --allow-participants / ALLOW_PARTICIPANTS takes \`all\` or a comma list of 64-hex lifecycle sigs — ${zones.size === 0 ? 'participants stay closed' : `${named.length - zones.size} entr${named.length - zones.size === 1 ? 'y' : 'ies'} ignored`}`)
+    if (zones.size === 0) return { mode: false }
+  }
+  return { mode: 'zones', zones }
+}
+
+const participantPolicy = participantPolicyOf(cfg.allowParticipants)
+const participantMode = participantPolicy.mode  // 'all' | 'zones' | false — what NIP-11 and the hc:host card say
+
+// Past its live window an entry admits nothing, so it is forgotten then: a key
+// that speaks again is entered again, and its next beacon names its room.
+const PARTICIPANT_LIVE_MS = 30 * 60_000
+const QUOTA_WINDOW_MS = 24 * 60 * 60_000
+// An atom PUT can only ever re-store the bytes its address names, so a replayed
+// token buys nothing; ±10 min lets a device whose clock is off by minutes
+// still upload. Every other signed route keeps the ±60 s default.
+const ATOM_AUTH_SKEW_SECS = 600
+const MB = 1024 * 1024
+const participantCaps = {
+  blob: 8 * MB,
+  key: 256 * MB,
+  ip: 2048 * MB,
+  total: 4096 * MB,
+  floor: 10240 * MB,
+  // HARNESS ONLY: the same rules at sizes a test can reach (bytes, partial).
+  ...(() => { try { return JSON.parse(process.env.DIAG_PARTICIPANT_CAPS || '{}') } catch { return {} } })(),
+}
+
+const participants = new Map()  // pubkey → { seenAt, xs: Set<lifecycle x> } — only while the policy is on
+const keyQuota = new Map()      // pubkey → { at, bytes } over QUOTA_WINDOW_MS
+const ipQuota = new Map()       // ip → { at, bytes }
+let totalQuota = { at: Date.now(), bytes: 0 }
+let diskFree = null             // bytes free under the content dir, refreshed off the hot path
+
+function markLive(pubkey) {
+  if (!participantPolicy.mode) return
+  const held = participants.get(pubkey)
+  if (held) held.seenAt = Date.now()
+  else participants.set(pubkey, { seenAt: Date.now(), xs: new Set() })
+}
+
+function isLive(pubkey) {
+  const held = participants.get(pubkey)
+  return !!held && Date.now() - held.seenAt <= PARTICIPANT_LIVE_MS
+}
+
+function participantAllowed(pubkey) {
+  if (!participantPolicy.mode || !isLive(pubkey)) return false
+  if (participantPolicy.mode === 'all') return true
+  for (const x of participants.get(pubkey).xs) if (participantPolicy.zones.has(x)) return true
+  return false
+}
+
+function quotaOf(map, id, now) {
+  let held = map.get(id)
+  if (!held || now - held.at >= QUOTA_WINDOW_MS) { held = { at: now, bytes: 0 }; map.set(id, held) }
+  return held
+}
+
+const retryAfter = (window, now) => String(Math.max(1, Math.ceil((window.at + QUOTA_WINDOW_MS - now) / 1000)))
+
+/** [status, body, retryAfter?] when this many NEW bytes would cross a cap, else null. */
+function participantRefusal(pubkey, ip, bytes, now) {
+  if (bytes > participantCaps.blob) return [413, `too large: a participant atom is at most ${participantCaps.blob} bytes`]
+  const key = quotaOf(keyQuota, pubkey, now)
+  if (key.bytes + bytes > participantCaps.key) return [429, 'quota: this key has stored its share for today', retryAfter(key, now)]
+  const venue = quotaOf(ipQuota, ip, now)
+  if (venue.bytes + bytes > participantCaps.ip) return [429, 'quota: this network has stored its share for today', retryAfter(venue, now)]
+  if (now - totalQuota.at >= QUOTA_WINDOW_MS) totalQuota = { at: now, bytes: 0 }
+  if (totalQuota.bytes + bytes > participantCaps.total) return [507, 'host full', retryAfter(totalQuota, now)]
+  if (diskFree !== null && diskFree - bytes < participantCaps.floor) return [507, 'host full', '3600']
+  return null
+}
+
+function chargeParticipant(pubkey, ip, bytes, now) {
+  quotaOf(keyQuota, pubkey, now).bytes += bytes
+  quotaOf(ipQuota, ip, now).bytes += bytes
+  totalQuota.bytes += bytes
+  if (diskFree !== null) diskFree -= bytes
+}
+
+/** Free bytes under the content dir (its nearest existing ancestor before the
+ *  first write makes it). Never awaited by a request — the check reads the
+ *  last answer, and every participant write lowers it until the next one. */
+async function refreshDiskFree() {
+  let dir = resolve(cfg.contentDir)
+  for (;;) {
+    try { const s = await fsp.statfs(dir); diskFree = Number(s.bavail) * Number(s.bsize); return } catch {}
+    const up = dirname(dir)
+    if (up === dir) return
+    dir = up
+  }
+}
+
+function sweepParticipants() {
+  const now = Date.now()
+  for (const [pubkey, held] of participants) if (now - held.seenAt > PARTICIPANT_LIVE_MS) participants.delete(pubkey)
+  for (const map of [keyQuota, ipQuota]) for (const [id, held] of map) if (now - held.at >= QUOTA_WINDOW_MS) map.delete(id)
+  if (participantPolicy.mode) void refreshDiskFree()
+}
 
 // ── permissions-policy ───────────────────────────────────────────────────────
 //
@@ -385,34 +518,74 @@ function deleteExpired() {
 
 // ── rate limiting ────────────────────────────────────────────────────────────
 
-const rates = new Map() // ip -> { count, windowStart }
-const RATE_WINDOW = 60_000
-// Per-IP message budget. An IP is NOT one participant: localhost dev runs
-// every browser through 127.0.0.1, and NAT'd households/offices share one
-// address. A single swarm publish burst is up to MAX_PUBLISH_NODES (200)
-// layer events plus personal-channel/presence/resource traffic, so two
-// peers navigating a content-rich location together can legitimately emit
-// several hundred messages inside a window. At 100 this silently dropped
-// one peer's layer events (NOTICE 'rate-limited' — the mesh client ignores
-// NOTICEs) and the swarm union went one-sided. 1200/min ≈ 20 msg/s
-// sustained still stops floods without starving co-located participants.
-const RATE_LIMIT = 1200
+// AN IP IS NOT ONE PARTICIPANT. A venue is one public IPv4 address for the
+// whole room, and through the tunnel every socket's peer is cloudflared, so a
+// budget keyed on the IP alone was the whole meeting's: one fixed 1200/min
+// window, and crossing it muted everyone until it reset. The budget is now a
+// token bucket PER CONNECTION — burst 400, refilled at 10/s (600/min against
+// measured clients at 9–150/min; a full reconnect reassert is under 100
+// frames) — under a per-IP ceiling that exists only to stop a flood: burst
+// 12000, 200/s. The IP is CF-Connecting-IP when the peer is loopback, never
+// the client-written first X-Forwarded-For hop (requestIp, http-auth.js).
+// EVENT and REQ cost one token; CLOSE and AUTH cost nothing and are never
+// refused — a refused CLOSE leaked a subscription the client had forgotten.
+// HARNESS ONLY: DIAG_RATE_LIMIT (frames/min) scales the per-connection bucket.
+const CONN_SCALE = Number(process.env.DIAG_RATE_LIMIT) > 0 ? Number(process.env.DIAG_RATE_LIMIT) / 600 : 1
+const CONN_BURST = 400 * CONN_SCALE
+const CONN_REFILL_PER_SEC = 10 * CONN_SCALE
+const IP_BURST = 12_000
+const IP_REFILL_PER_SEC = 200
+const ipBuckets = new Map() // ip → { tokens, at }
 
-function checkRate(ip) {
-  const now = Date.now()
-  let entry = rates.get(ip)
-  if (!entry || now - entry.windowStart > RATE_WINDOW) {
-    entry = { count: 0, windowStart: now }
-    rates.set(ip, entry)
-  }
-  entry.count++
-  return entry.count <= RATE_LIMIT
+const freshBucket = (burst, now) => ({ tokens: burst, at: now })
+function refill(bucket, burst, perSec, now) {
+  bucket.tokens = Math.min(burst, bucket.tokens + (now - bucket.at) * perSec / 1000)
+  bucket.at = now
 }
 
-setInterval(() => {
-  const cutoff = Date.now() - RATE_WINDOW
-  for (const [ip, e] of rates) { if (e.windowStart < cutoff) rates.delete(ip) }
-}, RATE_WINDOW)
+/** One token from this connection AND its IP, or none from either. */
+function takeToken(client) {
+  const now = Date.now()
+  let venue = ipBuckets.get(client.ip)
+  if (!venue) { venue = freshBucket(IP_BURST, now); ipBuckets.set(client.ip, venue) }
+  refill(client.bucket, CONN_BURST, CONN_REFILL_PER_SEC, now)
+  refill(venue, IP_BURST, IP_REFILL_PER_SEC, now)
+  if (client.bucket.tokens < 1 || venue.tokens < 1) return false
+  client.bucket.tokens--
+  venue.tokens--
+  return true
+}
+
+// A bucket untouched for a full refill is full again: forgetting it changes nothing.
+function sweepBuckets() {
+  const idle = Date.now() - (IP_BURST / IP_REFILL_PER_SEC) * 1000
+  for (const [ip, bucket] of ipBuckets) if (bucket.at < idle) ipBuckets.delete(ip)
+}
+
+// ── the minute line (counts only) ────────────────────────────────────────────
+//
+// What an operator needs to see during a meeting, and nothing that names
+// anyone: open connections, what was refused, wills fired and cancelled,
+// participant uploads, and how many participants are alive in each room (a
+// room is the first 6 hex of its lifecycle sig). Never an IP, never a key.
+// Printed once a minute, and only when there is something to say.
+const census = { refusedEvents: 0, refusedReqs: 0, refusedSubs: 0, willsFired: 0, willsCancelled: 0, puts: 0, putBytes: 0, putsRefused: 0 }
+
+function printCensus() {
+  const rooms = new Map()  // x prefix → Set of pubkeys (counted, never printed)
+  for (const c of clients) for (const { x, pubkey } of c.lifecycle.values()) {
+    const room = x.slice(0, 6)
+    if (!rooms.has(room)) rooms.set(room, new Set())
+    rooms.get(room).add(pubkey)
+  }
+  const c = census
+  const said = clients.size + c.refusedEvents + c.refusedReqs + c.refusedSubs + c.willsFired + c.willsCancelled + c.puts + c.putsRefused
+  if (said > 0) {
+    const zones = [...rooms].map(([room, keys]) => `${room}:${keys.size}`).join(' ') || 'none'
+    console.log(`[minute] open ${clients.size} · refused event ${c.refusedEvents} req ${c.refusedReqs}${c.refusedSubs ? ` subs ${c.refusedSubs}` : ''} · wills fired ${c.willsFired} cancelled ${c.willsCancelled} · participant puts ${c.puts} (${c.putBytes} bytes) refused ${c.putsRefused} · zones ${zones}`)
+  }
+  for (const k of Object.keys(c)) c[k] = 0
+}
 
 // ── filter matching (for live broadcast) ─────────────────────────────────────
 
@@ -567,8 +740,24 @@ function send(ws, msg) {
 // already drop a peer's events, so this grants it no new power. If a client
 // is ever hardened to verify signatures on receive, switch to a client-
 // registered pre-signed WILL that is re-signed on every beacon.
+//
+// A DEAD SOCKET IS NOT A DEPARTED PARTICIPANT. A reload, a wifi→cellular
+// hop, a NAT rebind or a tunnel blip all kill a socket while the person is
+// still there, and a will fired at once took their tiles from the whole room
+// for the length of their reconnect. So a will WAITS (WILL_GRACE_MS) and is
+// cancelled by an {alive}/{left} on the same slot, or by any verified EVENT
+// on a connection that has itself beaconed that slot. A will belongs to the
+// connections that announced themselves alive IN THAT SLOT, never to every
+// connection the key has spoken on: a second tab that shares the key but
+// never joined (it may hold a socket for other features) is not the
+// participant, and taking its word as theirs kept a closed joined tab's will
+// from ever firing. Another open connection that beaconed the slot inherits
+// the will instead (willHeir): it fires when that one dies. The grace delays
+// only eviction, never seeing.
 const LIFECYCLE_KIND = 30206
 const LIFECYCLE_WILL_TTL = 300  // seconds the synthesized tombstone lingers for late joiners
+const WILL_GRACE_MS = 15_000
+const pendingWills = new Map()  // x\0d → { x, d, pubkey, timer }
 
 function lifecycleInfo(evt) {
   const tags = Array.isArray(evt.tags) ? evt.tags : []
@@ -587,7 +776,11 @@ function trackLifecycle(client, evt) {
   const info = lifecycleInfo(evt)
   if (!info || !info.pubkey) return
   const key = info.x + '\0' + info.d
-  if (info.left) { client.lifecycle.delete(key); return }
+  cancelWill(key)
+  const live = participants.get(info.pubkey)
+  if (info.left) { client.lifecycle.delete(key); client.beaconed.delete(key); live?.xs.delete(info.x); return }
+  client.beaconed.add(key)
+  live?.xs.add(info.x)
   client.lifecycle.set(key, { x: info.x, d: info.d, pubkey: info.pubkey })
   // The participant is alive on THIS connection, so any will another
   // connection still holds for the same slot is stale — a refreshed tab
@@ -612,27 +805,56 @@ function synthTombstone(xSig, dTag, pubkey, nowSec) {
   return evt
 }
 
-// Fire a connection's last-will on disconnect: one tombstone per zone the
-// connection beaconed in. The closing socket is excluded from broadcast()
-// (readyState check + sourceWs skip), so only the remaining members get it.
-function fireWills(client) {
+/** An open connection other than `except` that beaconed this slot (x\0d). */
+function willHeir(key, except) {
+  for (const c of clients) if (c !== except && !c.closed && c.ws.readyState === 1 && c.beaconed.has(key)) return c
+  return null
+}
+
+// A dying connection's wills, one per zone it beaconed in: each goes to an
+// heir if another open connection beaconed the same slot, otherwise it waits
+// out the grace.
+function armWills(client) {
   if (!client.lifecycle || client.lifecycle.size === 0) return
-  const nowSec = Math.floor(Date.now() / 1000)
-  for (const { x, d, pubkey } of client.lifecycle.values()) {
-    const tomb = synthTombstone(x, d, pubkey, nowSec)
-    try { insertEvent(tomb) } catch {}
-    broadcast(tomb, client.ws)
+  for (const [key, will] of client.lifecycle) {
+    const heir = willHeir(key, client)
+    if (heir) { if (!heir.lifecycle.has(key)) heir.lifecycle.set(key, will); continue }
+    const held = pendingWills.get(key)
+    if (held) clearTimeout(held.timer)
+    pendingWills.set(key, { ...will, timer: setTimeout(() => fireWill(key), WILL_GRACE_MS) })
   }
   client.lifecycle.clear()
 }
 
+// The grace ran out with no word from the key: tombstone it for everyone.
+// created_at is the FIRING time — newer than any beacon the key sent.
+function fireWill(key) {
+  const will = pendingWills.get(key)
+  if (!will) return
+  pendingWills.delete(key)
+  const heir = willHeir(key, null)
+  if (heir) { if (!heir.lifecycle.has(key)) heir.lifecycle.set(key, { x: will.x, d: will.d, pubkey: will.pubkey }); return }
+  const tomb = synthTombstone(will.x, will.d, will.pubkey, Math.floor(Date.now() / 1000))
+  try { insertEvent(tomb) } catch {}
+  broadcast(tomb, null)
+  census.willsFired++
+}
+
+function cancelWill(key) {
+  const will = pendingWills.get(key)
+  if (!will) return
+  clearTimeout(will.timer)
+  pendingWills.delete(key)
+  census.willsCancelled++
+}
+
 // One disconnect path for both 'close' and 'error' — guarded so the will
-// fires at most once.
+// is armed at most once.
 function handleDisconnect(client) {
   if (client.closed) return
   client.closed = true
   for (const subId of [...client.routes.keys()]) unrouteSubscription(client, subId)
-  try { fireWills(client) } catch {}
+  try { armWills(client) } catch {}
   clients.delete(client)
 }
 
@@ -657,11 +879,20 @@ function handleMessage(client, raw) {
 
   const type = msg[0]
 
-  if (!checkRate(client.ip)) {
-    if (type === 'EVENT') send(client.ws, ['OK', msg[1]?.id ?? '', false, 'rate-limited: slow down'])
-    else if (type === 'REQ') send(client.ws, ['CLOSED', String(msg[1] ?? ''), 'rate-limited: slow down'])
-    else send(client.ws, ['NOTICE', 'rate-limited: slow down'])
+  // Never charged, never refused: a CLOSE the relay drops is a subscription
+  // the client has already forgotten, still costing the broadcast loop.
+  if (type === 'CLOSE') {
+    client.subs.delete(msg[1])
+    unrouteSubscription(client, String(msg[1] ?? ''))
     return
+  }
+
+  if (type === 'EVENT' || type === 'REQ') {
+    if (!takeToken(client)) {
+      if (type === 'EVENT') { census.refusedEvents++; send(client.ws, ['OK', msg[1]?.id ?? '', false, 'rate-limited: slow down']) }
+      else { census.refusedReqs++; send(client.ws, ['CLOSED', String(msg[1] ?? ''), 'rate-limited: slow down']) }
+      return
+    }
   }
 
   if (type === 'AUTH') {
@@ -689,10 +920,17 @@ function handleMessage(client, raw) {
     try { if (!verifyEvent(evt)) { send(client.ws, ['OK', evt.id, false, 'invalid: bad signature']); return } }
     catch { send(client.ws, ['OK', evt.id, false, 'invalid: verification error']); return }
 
+    // A verified EVENT is the key speaking, live, on this relay: it may upload
+    // to the swarm's host (markLive). It speaks for a slot's pending will only
+    // on a connection that beaconed that slot — the participant, still here on
+    // a socket that announced it (see WILL_GRACE_MS).
+    markLive(evt.pubkey)
+    if (pendingWills.size) for (const key of client.beaconed) cancelWill(key)
+
     const verdict = insertEvent(evt)
     // Arm/disarm this connection's last-will from lifecycle beacons so we
     // can tombstone it server-side if the socket dies without a graceful
-    // {left} (tab crash / kill — see fireWills). A duplicate counts too: the
+    // {left} (tab crash / kill — see armWills). A duplicate counts too: the
     // same beacon from a NEW connection (a refresh inside the same second)
     // still says the participant lives here now.
     if (Number(evt.kind) === LIFECYCLE_KIND) trackLifecycle(client, evt)
@@ -708,9 +946,9 @@ function handleMessage(client, raw) {
     const subId = msg[1]
     if (typeof subId !== 'string' || !subId || subId.length > MAX_SUBID_LENGTH) { send(client.ws, ['CLOSED', String(subId ?? ''), `invalid: subscription id must be 1–${MAX_SUBID_LENGTH} characters`]); return }
     if (client.subs.size >= MAX_SUBS_PER_CLIENT && !client.subs.has(subId)) {
-      // Loud on the relay side too — a silent refusal here is a deaf
+      // Counted in the minute line — a silent refusal here is a deaf
       // participant who cannot tell why.
-      console.warn(`[subs] refused REQ from ${client.ip} (${client.pubkey?.slice(0, 8) ?? 'anon'}): ${client.subs.size} open subscriptions`)
+      census.refusedSubs++
       send(client.ws, ['CLOSED', subId, `error: too many subscriptions (max ${MAX_SUBS_PER_CLIENT})`]); return
     }
 
@@ -719,15 +957,13 @@ function handleMessage(client, raw) {
     client.subs.set(subId, filters)
     routeSubscription(client, subId, filters)
 
+    // limit:0 asks for nothing stored — a liveness probe ('hc-live') or a
+    // live-only listen. Answer EOSE without scanning the store.
+    if (filters.every((f) => f.limit === 0)) { send(client.ws, ['EOSE', subId]); return }
+
     const events = queryEvents(filters)
     for (const evt of events) send(client.ws, ['EVENT', subId, evt])
     send(client.ws, ['EOSE', subId])
-    return
-  }
-
-  if (type === 'CLOSE') {
-    client.subs.delete(msg[1])
-    unrouteSubscription(client, String(msg[1] ?? ''))
     return
   }
 }
@@ -745,7 +981,11 @@ const relayInfo = {
     max_subscriptions: MAX_SUBS_PER_CLIENT,
     max_subid_length: MAX_SUBID_LENGTH,
     max_limit: 5000,
-    auth_required: authRequired
+    auth_required: authRequired,
+    // Whether PUT /<sig> takes a live participant's bytes: 'all', 'zones', or
+    // false (writers only). A pre-meeting curl reads it; clients never
+    // pre-check — the first PUT's answer is the policy.
+    participant_uploads: participantMode,
   }
 }
 
@@ -843,6 +1083,10 @@ const HIVE_INDEX_KIND = 30564
 
 const HIVE_INDEXES_POOL = sha256Hex(Buffer.from('hive:indexes', 'utf8'))
 
+// Addresses no atom may take (tryWriteContent): the floor's pools, the host's
+// packages and this pool of indexes. Each one's preimage is public.
+const RESERVED_ADDRESSES = new Set([...PUBLIC_POOL_ADDRESSES, HOST_PACKAGES_POOL, HIVE_INDEXES_POOL])
+
 function tryServeHiveIndex(req, res) {
   const path = (req.url || '').split('?')[0]
   const match = path.match(/^\/([0-9a-f]{64})\/([0-9a-f]{64})$/)
@@ -908,17 +1152,24 @@ function tryServeHiveIndex(req, res) {
 /** Is this pool LISTED here? The floor always is (replicate.js
  *  PUBLIC_POOL_ADDRESSES); any other meaning only while an operator's signed
  *  index declares it in `listed` (host-listing.js). The floor answers without
- *  reading an index, so the addresses every follower asks cost nothing. */
+ *  reading an index, so the addresses every follower asks cost nothing. The
+ *  declared ones are read once per move of a writer's index (as profileSigs
+ *  is) — every PUT asks this too, and finding an index scans the store. */
+let declaredPools = { moves: -1, sigs: new Set() }
 function listedPool(sig) {
   if (PUBLIC_POOL_ADDRESSES.has(sig)) return true
-  for (const pubkey of writers) {
-    const row = newestEvent(pubkey, HIVE_INDEX_KIND)
-    if (!row) continue
-    let content
-    try { content = JSON.parse(row.content) } catch { continue }
-    if (listedMeanings(content).some(m => sha256Hex(Buffer.from(m, 'utf8')) === sig)) return true
+  if (declaredPools.moves !== writerIndexMoves) {
+    const sigs = new Set()
+    for (const pubkey of writers) {
+      const row = newestEvent(pubkey, HIVE_INDEX_KIND)
+      if (!row) continue
+      let content
+      try { content = JSON.parse(row.content) } catch { continue }
+      for (const meaning of listedMeanings(content)) sigs.add(sha256Hex(Buffer.from(meaning, 'utf8')))
+    }
+    declaredPools = { moves: writerIndexMoves, sigs }
   }
-  return false
+  return declaredPools.sigs.has(sig)
 }
 
 // ── GET /.well-known/nostr.json — who each writer IS, at this host (NIP-05)
@@ -1111,14 +1362,14 @@ function tryServeContent(req, res) {
     // Flat sig endpoint: /<sig> → probe the pools (§21.10). A miss is a
     // clean 404 (NOT the liveness fallthrough) so an adopting client can
     // tell "host doesn't have it" from real content and try another host
-    // / treat it as an egg. No immutable cache on the 404 — the sig may
-    // arrive later.
+    // / treat it as an egg. Never cached at all — the sig may arrive a
+    // second later, and an edge that pinned the miss would hide it.
     const hit = resolveFlatSig(sigMatch[1])
     if (!hit) {
       // The framework-free bootstrap is signature-named too, but it belongs
       // to the shell payload rather than the writable participant heap.
       if (cfg.shellDir && existsSync(join(cfg.shellDir, sigMatch[1]))) return false
-      respondText(res, 404, 'sig not held')
+      respondText(res, 404, 'sig not held', { 'Cache-Control': 'no-store' })
       return true
     }
     resolved = hit.path
@@ -1165,15 +1416,21 @@ function tryServeContent(req, res) {
   }
 
   try {
-    const bytes = readFileSync(resolved)
+    // NEVER READ WHOLE ON THE LOOP. This loop also carries the meeting —
+    // every EVENT's fan-out, every probe's EOSE — and the meeting's pictures
+    // (up to 8 MB each, no edge cache on /<sig>) are served from here: a room
+    // of phones fetching a sharer's four photos at once was 76 synchronous
+    // multi-megabyte reads and every Buffer held until the slowest phone
+    // drained it. A stat answers HEAD and the headers; the body streams.
+    const st = statSync(resolved)
+    if (!st.isFile()) return false
     // WHEN A HOST RECEIVED IT, from the filesystem rather than from anything
     // anyone published. A pool entry carries the package signature and nothing
     // about time; the fact that this file arrived on Tuesday is the transport's
     // own, not a claim in a document, and every static host (S3, Pages, nginx)
     // already answers with it. It is the last thing the manifest was carrying
     // for the browse list.
-    let lastModified = ''
-    try { lastModified = statSync(resolved).mtime.toUTCString() } catch { /* unknowable */ }
+    const lastModified = st.mtime.toUTCString()
     // IMMUTABLE MEANS SIG-ADDRESSED, AND NOTHING ELSE. A signature names one
     // closure forever, so those bytes can be pinned for a year. A NAMED file
     // — manifest.json, packages.json — is the domain's mutable voice: the one
@@ -1184,7 +1441,7 @@ function tryServeContent(req, res) {
     const sigAddressed = /[a-f0-9]{64}/i.test(urlPath)
     res.writeHead(200, {
       'Content-Type': contentType,
-      'Content-Length': String(bytes.length),
+      'Content-Length': String(st.size),
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': sigAddressed ? 'public, max-age=31536000, immutable' : 'no-store',
       ...(lastModified ? { 'Last-Modified': lastModified } : {}),
@@ -1192,15 +1449,16 @@ function tryServeContent(req, res) {
       'Permissions-Policy': PERMISSIONS_POLICY,
     })
     if (req.method === 'HEAD') { res.end(); return true }
-    res.end(bytes)
+    createReadStream(resolved).on('error', () => res.destroy()).pipe(res)
     return true
   } catch {
     return false
   }
 }
 
-function respondText(res, code, msg) {
-  res.writeHead(code, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
+function respondText(res, code, msg, headers = {}) {
+  if (res.headersSent) return  // answered already (a stream error after the answer) — never a throw
+  res.writeHead(code, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*', ...headers })
   res.end(msg)
 }
 
@@ -1234,16 +1492,36 @@ function fromSandboxDoor(req) {
 //      a forged sig is computationally impossible. Idempotent: same sig
 //      == same bytes.
 //   2. writer-authorization — a NIP-98 signed event (Authorization:
-//      Nostr <base64-event>) whose pubkey is in the allowed-writers set.
-//      Proves WHO without ever sending a secret; the host holds only
-//      public keys. Empty writer set => writes disabled.
+//      Nostr <base64-event>) whose pubkey is in the allowed-writers set,
+//      or — with --allow-participants — a participant live on this relay's
+//      WebSocket (participantAllowed). Proves WHO without ever sending a
+//      secret; the host holds only public keys.
 //
 // Reads stay open (tryServeContent); only writes are gated.
 
 function verifyWriteAuth(req) {
   // DEV ONLY: bypass writer-auth (sha256(body)===sig is still enforced by the
   // caller, so content can't be forged — only the WHO check is skipped).
-  return verifyNip98(req, writers, { devOpen: cfg.devOpenWrites })
+  return verifyNip98(req, writers, {
+    devOpen: cfg.devOpenWrites,
+    allow: pubkey => writers.has(pubkey) || participantAllowed(pubkey),
+    skewSecs: ATOM_AUTH_SKEW_SECS,
+  })
+}
+
+/** Land an atom so no reader ever sees part of it: staged beside its final
+ *  name, then renamed over it in one step (a held atom is replaced by the
+ *  same bytes, never removed first). Asynchronous end to end — the loop that
+ *  carries the meeting's frames never waits on the disk. */
+async function writeAtom(finalPath, bytes) {
+  const partPath = join(dirname(finalPath), `.part-${basename(finalPath)}-${randomBytes(6).toString('hex')}`)
+  await fsp.mkdir(dirname(finalPath), { recursive: true })
+  try {
+    await fsp.writeFile(partPath, bytes, { flag: 'wx' })
+    await fsp.rename(partPath, finalPath)
+  } finally {
+    await fsp.rm(partPath, { force: true }).catch(() => {})
+  }
 }
 
 const replicationJobs = new Map()
@@ -1478,42 +1756,135 @@ function tryWriteContent(req, res) {
   const base = urlPath.split('/').pop() || ''
   const sig = base.replace(/\.(js|json)$/i, '').toLowerCase()
   if (!/^[0-9a-f]{64}$/.test(sig)) { respondText(res, 400, 'target is not sig-addressed'); return true }
-  // The pool's address has a known atom preimage (`host:packages`). Reserve it
-  // on BOTH write paths even before the directory exists, or a valid direct
-  // PUT could occupy the path and permanently prevent package publication.
-  if (sig === HOST_PACKAGES_POOL) { respondText(res, 409, 'target is reserved for the host:packages pool'); return true }
+  // POOL ADDRESSES ARE NOT ATOMS. A pool's address is sign(meaning), and its
+  // preimage — the meaning — is public, so a valid PUT of those bytes would
+  // occupy the path and permanently prevent the pool. Refused for everyone,
+  // before auth: the reserved set is public knowledge, so the answer reveals
+  // nothing. (host:packages is reserved on the replication path too.)
+  if (RESERVED_ADDRESSES.has(sig) || listedPool(sig)) {
+    respondText(res, 409, sig === HOST_PACKAGES_POOL ? 'target is reserved for the host:packages pool' : 'target is reserved for a pool')
+    return true
+  }
 
   const auth = verifyWriteAuth(req)
-  if (!auth.ok) { respondText(res, 401, auth.reason); return true }
+  if (!auth.ok) {
+    if (!auth.denied) { respondText(res, 401, auth.reason); return true }
+    census.putsRefused++
+    if (!participantMode) { respondText(res, 403, 'participants-closed'); return true }
+    // Live and beaconed — but only in rooms this host does not take. That is
+    // a standing answer, not a race with the beacon: 403, so the client
+    // pauses (10 min) instead of retrying every second for good. A live key
+    // with no room yet is the race (its PUT beat its beacon): 401 not-live.
+    if (participantMode === 'zones' && isLive(auth.pubkey) && participants.get(auth.pubkey).xs.size > 0) {
+      respondText(res, 403, 'participants-closed: this room is not hosted here')
+      return true
+    }
+    respondText(res, 401, participantMode === 'zones' && isLive(auth.pubkey)
+      ? 'not-live: join a room this relay hosts first'
+      : 'not-live: join a swarm on this relay first')
+    return true
+  }
+  const participant = auth.role === 'participant'
+  // A participant's atom lands at the one address its receipt names, /<sig>
+  // (a writer's legacy /<sig>.js keeps its own name).
+  const target = participant ? join(root, sig) : resolved
 
+  // A directory at the address is a pool or a history bag: never replaced by
+  // an atom. Asked only once the caller is admitted, so a stranger cannot use
+  // the answer to learn which bags this host holds.
+  let held = false
+  try {
+    const entry = statSync(target)
+    if (entry.isDirectory()) { respondText(res, 409, 'target is a directory — an atom never replaces a pool or a bag'); return true }
+    held = entry.isFile()
+  } catch { /* not held */ }
+
+  const ip = participant ? requestIp(req) : null
+  const limit = participant ? participantCaps.blob : cfg.maxBodyBytes
+  const declared = Number(req.headers['content-length'])
+  if (participant && Number.isFinite(declared)) {
+    // Refused on the declared length before a byte is read. A re-store of an
+    // atom already held is never refused by a cap: only new bytes count.
+    const refusal = declared > limit || !held ? participantRefusal(auth.pubkey, ip, declared, Date.now()) : null
+    if (refusal) { refuseParticipant(req, res, refusal, declared); return true }
+  }
+
+  // Hashed as it arrives, so no 8–50 MB digest ever runs in one piece on the
+  // loop that carries the meeting's frames.
+  const hash = createHash('sha256')
   const chunks = []
   let size = 0
   let aborted = false
   req.on('data', (c) => {
     if (aborted) return
     size += c.length
-    if (size > cfg.maxBodyBytes) { aborted = true; respondText(res, 413, 'body too large'); req.destroy(); return }
+    if (size > limit) {
+      aborted = true
+      if (participant) census.putsRefused++
+      respondText(res, 413, participant ? `too large: a participant atom is at most ${limit} bytes` : 'body too large')
+      req.destroy()
+      return
+    }
+    hash.update(c)
     chunks.push(c)
   })
-  req.on('end', () => {
-    if (aborted) return
-    const body = Buffer.concat(chunks)
-    const actual = sha256Hex(body)
+  const land = async () => {
+    const actual = hash.digest('hex')
     if (actual !== sig) { respondText(res, 422, `hash mismatch: sha256(body)=${actual.slice(0, 12)} != ${sig.slice(0, 12)}`); return }
+    const now = Date.now()
+    if (participant) {
+      // Held already (or landed while this one uploaded): the receipt is true
+      // as it stands, and nothing is written or counted.
+      if (held || await isHeldAtom(target)) { stored(res, sig); return }
+      // Checked and charged in one step, so racing uploads cannot pass a cap
+      // together.
+      const refusal = participantRefusal(auth.pubkey, ip, size, now)
+      if (refusal) { refuseParticipant(req, res, refusal, size); return }
+      chargeParticipant(auth.pubkey, ip, size, now)
+    }
     try {
-      mkdirSync(dirname(resolved), { recursive: true })
-      writeFileSync(resolved, body)
-      receiptIndex.add(auth.pubkey, [sig])
+      await writeAtom(target, Buffer.concat(chunks, size))
+      if (!participant) receiptIndex.add(auth.pubkey, [sig])
     } catch (e) {
+      if (participant) chargeParticipant(auth.pubkey, ip, -size, now)
       respondText(res, 500, 'write failed: ' + (e?.message || 'unknown'))
       return
     }
-    res.writeHead(201, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
-    res.end(`stored ${sig}`)
-    console.log(`[write] ${auth.pubkey.slice(0, 8)}… PUT ${urlPath} (${body.length} bytes)`)
+    stored(res, sig)
+    // A participant's write is a count in the minute line, never a line of
+    // its own: the log names no key that is not the operator's.
+    if (participant) { census.puts++; census.putBytes += size }
+    else console.log(`[write] ${auth.pubkey.slice(0, 8)}… PUT ${urlPath} (${size} bytes)`)
+  }
+  req.on('end', () => {
+    if (aborted) return
+    land().catch(e => respondText(res, 500, 'write failed: ' + (e?.message || 'unknown')))
   })
   req.on('error', () => { if (!aborted) respondText(res, 400, 'request stream error') })
   return true
+}
+
+// The receipt: a 2xx whose body is exactly `stored <sig>`, readable from any
+// origin. A swarm client counts it as the host serving the atom — no read-back.
+function stored(res, sig) {
+  res.writeHead(201, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
+  res.end(`stored ${sig}`)
+}
+
+async function isHeldAtom(path) {
+  try { return (await fsp.stat(path)).isFile() } catch { return false }
+}
+
+// A cap's refusal, with Retry-After where waiting helps — exposed, or a
+// browser on another origin cannot read it. Refused on the declared length,
+// the body is left unread: Node discards it and the uploader still reads the
+// answer, unless it claims more than this host takes from anyone.
+function refuseParticipant(req, res, [status, body, wait], declared) {
+  census.putsRefused++
+  const headers = wait ? { 'Retry-After': wait, 'Access-Control-Expose-Headers': 'Retry-After' } : {}
+  if (declared > cfg.maxBodyBytes) headers.Connection = 'close'
+  respondText(res, status, body, headers)
+  if (declared > cfg.maxBodyBytes) req.destroy()
 }
 
 // ── landing page (slim storage-host identity announcement) ───────────────────
@@ -1546,7 +1917,7 @@ function tryServeShell(req, res) {
   // signed location have the same rule even though the marker is not hashed.
   const isAddress = urlPath.split('/').filter(Boolean).some(segment => /^[0-9a-f]{64}$/.test(segment))
   if (!held && (isAddress || urlPath.startsWith('/content/'))) {
-    respondText(res, 404, 'not held')
+    respondText(res, 404, 'not held', { 'Cache-Control': 'no-store' })
     return true
   }
   const file = held ? target : join(root, 'index.html')
@@ -1712,8 +2083,16 @@ const server = createServer((req, res) => {
 const wss = new WebSocketServer({ server })
 
 wss.on('connection', (ws, req) => {
-  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown'
-  const client = { ws, ip, authed: !authRequired, pubkey: null, challenge: null, subs: new Map(), routes: new Map(), lifecycle: new Map(), closed: false }
+  const client = {
+    ws, ip: requestIp(req), authed: !authRequired, pubkey: null, challenge: null,
+    subs: new Map(), routes: new Map(), lifecycle: new Map(), closed: false,
+    bucket: freshBucket(CONN_BURST, Date.now()), beaconed: new Set(),
+  }
+
+  // THE HOST CARD, first frame, before anything is asked: the relay's clock
+  // (a client corrects its created_at by it — no round trip) and whether this
+  // host takes participants' bytes. An older client notes an unknown NOTICE.
+  send(ws, ['NOTICE', 'hc:host ' + JSON.stringify({ v: 1, time: Math.floor(Date.now() / 1000), participants: participantMode })])
 
   if (authRequired) {
     client.challenge = makeChallenge()
@@ -1735,7 +2114,9 @@ wss.on('connection', (ws, req) => {
 // lifecycle will never fires, so peers keep seeing a ghost. Ping every
 // 30 s; a socket that answered nothing in a full interval is terminated,
 // which runs the ordinary disconnect path.
-const KEEPALIVE_MS = 30_000
+// HARNESS ONLY: DIAG_KEEPALIVE_MS shortens the interval (a lock drill that
+// must see the reap inside its window).
+const KEEPALIVE_MS = Number(process.env.DIAG_KEEPALIVE_MS) > 0 ? Number(process.env.DIAG_KEEPALIVE_MS) : 30_000
 setInterval(() => {
   for (const c of clients) {
     if (c.ws.readyState !== 1) continue
@@ -1746,7 +2127,10 @@ setInterval(() => {
 }, KEEPALIVE_MS)
 
 // periodic cleanup
-setInterval(deleteExpired, 60_000)
+setInterval(() => { deleteExpired(); sweepBuckets(); sweepParticipants() }, 60_000)
+// HARNESS ONLY: DIAG_CENSUS_MS shortens the minute.
+setInterval(printCensus, Number(process.env.DIAG_CENSUS_MS) > 0 ? Number(process.env.DIAG_CENSUS_MS) : 60_000)
+if (participantMode) void refreshDiskFree()
 
 // graceful shutdown
 function shutdown() {
@@ -1771,6 +2155,10 @@ server.listen(cfg.port, () => {
   else console.log('writes: disabled (no --writers / --pubkeys configured)')
   if (nip05Domains.size === 0) console.log('names: /.well-known/nostr.json vouches for nobody (no --domain declared)')
   else console.log(`names: /.well-known/nostr.json vouches for ${writers.size} writer(s) at ${[...nip05Domains].join(', ')}; _ ${nip05Primary ? `is ${nip05Primary.slice(0, 8)}…` : 'unanswered (no --primary)'}`)
+  const mb = bytes => `${Math.round(bytes / MB)} MB`
+  console.log(participantMode
+    ? `participants: ${participantMode === 'all' ? 'any swarm meeting here' : `${participantPolicy.zones.size} listed room(s)`} may upload (live key; ${mb(participantCaps.blob)}/atom, ${mb(participantCaps.key)}/key and ${mb(participantCaps.ip)}/IP a day, ${mb(participantCaps.total)} a day in all, none under ${mb(participantCaps.floor)} free)`
+    : 'participants: closed (writers only — --allow-participants opens the swarm host)')
   console.log(`replication sources: ${replicationOrigins.size ? `${replicationOrigins.size} allowed origin(s)` : 'any public origin'}`)
   if (cfg.allowPrivateSources) console.log('replication sources: PRIVATE ADDRESSES ALLOWED (--allow-private-sources — dev only, NEVER use on a public host)')
   // Banner: slim storage-host announcement (no SPA — full-split model).

@@ -5,7 +5,7 @@
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, computed, type OnInit, type OnDestroy } from '@angular/core'
-import { EffectBus, secretTag } from '@hypercomb/core'
+import { EffectBus } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
@@ -13,6 +13,7 @@ import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
 import type { SavedLocationsStore } from '../../core/saved-locations-store'
+import { roomWords } from '../presence-banner/presence-status'
 
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 /** The /invite queen (essentials sharing/invite.queen.ts) — reached through
@@ -20,7 +21,7 @@ const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 const INVITE_QUEEN_KEY = '@diamondcoreprocessor.com/InviteQueenBee'
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 
-interface InviteQueenLike { invoke: (args: string) => Promise<void> }
+interface InviteQueenLike { invoke: (args: string) => Promise<void>; meetingLink?: () => Promise<void> }
 interface SwarmLabelApi { myLabel?: () => string; setMyLabel?: (s: string) => void }
 
 /** Normalize a host string the same way the rest of the codebase does:
@@ -56,27 +57,15 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   readonly roomDraft = signal('')
   readonly secretDraft = signal('')
 
-  /** The navigation path when the window opened — the lineage half of the
-   *  channel string (same derivation as the controls bar's #lineageKey:
-   *  trim, drop empties, join with '/'). */
-  readonly #lineageKey = signal('')
   readonly #locale = signal('en')
 
-  /** THE SAME TWO WORDS THE BREADCRUMB SHOWS — live, from the drafts. The
-   *  crumb hashes `lineage \0 room \0 secret` (controls-bar secretWords),
-   *  the exact string the swarm signs into its channel sig; this hashes the
-   *  same string from what is being typed, so the pair a participant sees
-   *  here is the pair they find up top once the window closes — the crumb
-   *  stops being an unexplained pair of words and reads as "this location,
-   *  this secret". Same emptiness rule as the crumb, so the two never
-   *  disagree about whether there is a pair to show. */
-  readonly zoneWords = computed(() => {
-    const room = this.roomDraft().trim()
-    const secret = this.secretDraft().trim()
-    const lineage = this.#lineageKey()
-    if (!lineage && !room && !secret) return ''
-    return secretTag(`${lineage}\0${room}\0${secret}`, this.#locale())
-  })
+  /** THE ROOM'S TWO WORDS — the same pair the breadcrumb and the presence
+   *  line show, live from the drafts. They hash the room and the secret
+   *  ONLY (`roomWords`: the swarm's lifecycle channel), never the page, so
+   *  everyone in one room reads the same pair wherever they stand: the room
+   *  can check out loud that it typed the same thing, and a capital the
+   *  phone slipped in shows up as a different pair. */
+  readonly zoneWords = computed(() => roomWords(this.roomDraft(), this.secretDraft(), this.#locale()))
   readonly labelDraft = signal('')
   readonly hostDraft = signal('')
   readonly secretVisible = signal(false)
@@ -131,14 +120,10 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       const initialSecret = this.#secretStore?.value ?? ''
       this.roomDraft.set(this.#roomStore?.value ?? '')
       this.secretDraft.set(initialSecret)
-      // Seed the word pair's other two inputs at open time — the window is
-      // modal, so the location does not move underneath it.
+      // The word pair's locale, read at open time — the window is modal.
       try {
-        const nav = get('@hypercomb.social/Navigation') as { segmentsRaw?: () => readonly unknown[] } | undefined
-        const segs = nav?.segmentsRaw?.() ?? []
-        this.#lineageKey.set(segs.map(s => String(s ?? '').trim()).filter(s => s.length > 0).join('/'))
         this.#locale.set((get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en')
-      } catch { /* the pair still reflects room + secret */ }
+      } catch { /* English words */ }
       this.labelDraft.set(this.#readMyLabel())
       this.hostDraft.set(this.#readHost())
       this.secretVisible.set(false)
@@ -204,14 +189,15 @@ export class MeshModalComponent implements OnInit, OnDestroy {
    *  Nothing decodes that shape on landing — the boot capture
    *  (invite-capture.ts) only stashes a lone `/<sig>` path, and parseAddress
    *  has no caller — so the recipient landed on a plain page with the secret
-   *  sitting unread in the hash. The one link that DOES land is the /invite
-   *  bundle: a content-addressed `{segments, room, secret}` resource, served
-   *  by the host, resolved by MeetingInviteWorker at boot and joined through
-   *  the confirm dialog. InviteQueenBee mints it for the room + secret in the
-   *  credential stores and delivers it itself (share sheet → clipboard →
-   *  fresh-tap toast, deliver-link.ts), so the drafts are committed first and
-   *  the queen is invoked; its own toasts report the outcome, including the
-   *  honest refusals (no hosting, no room/secret).
+   *  sitting unread in the hash. The link that DOES land is the one the
+   *  `invite` word hands out: with nothing selected, the MEETING LINK
+   *  (`#meet=room/secret/page`, captured at boot by invite-capture.ts and
+   *  joined through one confirm sheet by MeetingInviteWorker) — no host, no
+   *  upload, ready at once. InviteQueenBee builds it from the room + secret
+   *  in the credential stores and delivers it itself (share sheet →
+   *  clipboard → fresh-tap toast, deliver-link.ts), so the drafts are
+   *  committed first and the queen is invoked; its own toasts report the
+   *  outcome.
    *
    *  The method keeps its name: the template binds `copyShareLink()`. */
   readonly copyShareLink = async (): Promise<void> => {
@@ -239,7 +225,8 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     // screen so the link never points at a stale pair.
     this.#commitDrafts()
     this.#sharing = true
-    try { await invite.invoke('') }
+    // The meeting link, whatever is selected (an older queen: invoke('')).
+    try { await (invite.meetingLink ? invite.meetingLink() : invite.invoke('')) }
     catch (e) { console.warn('[mesh-modal] invite mint failed:', e) }
     finally { this.#sharing = false }
   }

@@ -491,7 +491,16 @@ const _runInitializeRuntime = async (
   // mesh: toggle public/private on keymap command
   EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
     if (cmd !== 'mesh.togglePublic') return
-    const current = localStorage.getItem('hc:mesh-public') === 'true'
+    // THIS TAB's membership, never the origin-wide `hc:mesh-public` flag:
+    // every tab shares that one, so a second tab's boot (which writes it
+    // 'false') turned the joined tab's `leave` into a second join. The shell
+    // keeps membership per tab in sessionStorage `hc:mesh-session`
+    // (hypercomb-shared/core/mesh-session.ts) and essentials reads the same
+    // key (hypercomb-essentials/src/sharing/membership.ts); this package
+    // imports neither, so it reads the key directly — keep the literal in
+    // step with both.
+    let current = false
+    try { current = sessionStorage.getItem('hc:mesh-session') === 'true' } catch { /* no storage — not joined */ }
     const next = !current
 
     // Going public needs somewhere to go public IN. The swarm composes its
@@ -512,7 +521,12 @@ const _runInitializeRuntime = async (
       }
     }
 
+    // The origin-wide flag stays written for packages older than per-tab
+    // membership. The tab's own record is the shell's (rememberMeshSession on
+    // `mesh:public-changed`); it is written here too, identically, so a shell
+    // without that adapter still reads back the state this toggle just set.
     localStorage.setItem('hc:mesh-public', String(next))
+    try { sessionStorage.setItem('hc:mesh-session', String(next)) } catch { /* no storage — the effect still flips this tab */ }
     // ANNOUNCE, DON'T REACH IN. Going public is driven by
     // `mesh:public-changed` — the mesh owns its own network flag and the swarm
     // owns its subscriptions, and both react to this. A direct

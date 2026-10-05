@@ -18,6 +18,23 @@
 // Source: SwarmDrone effects + APIs. The strip stays inert without a
 // SwarmDrone in IoC, so non-swarm shells pay zero cost.
 //
+// THE ONE STATUS LINE. Under the badges sits a single line that says the
+// REAL state — the socket (`mesh:connection`: connecting, live, reconnecting,
+// "can't reach <host>"), the room (everyone in it, how many on this page,
+// the room's two words), and what YOU are offering here
+// (`swarm:share-status` + `sync:state`: sharing, uploading, name-only and
+// why, private with a one-tap Share). It replaces the toasts that told a
+// meeting "the upload is running" when nothing was. The words themselves
+// live in presence-status.ts, pure, so a spec pins each state's exact text.
+// Until the mesh has reported a connection state at all (an older essentials
+// package never does), the strip renders exactly as it always did.
+//
+// The badges cover the WHOLE ROOM: solid for someone on this page, dim for
+// someone elsewhere in the room, hollow for someone away (their socket
+// dropped; their tiles stay until their slot expires). Tapping a badge still
+// filters the canvas to that person — but now a chip says so, with the way
+// back, because a filter nobody can see reads as "people vanished".
+//
 // Private mode gate: presence is a public (swarm) concept. In private
 // mode the mesh network is disabled, so no peer can ever surface — it's
 // only you. Showing a participant badge for yourself alone is noise, so
@@ -27,14 +44,22 @@
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, ElementRef, inject, signal, computed, effect, viewChild, type OnDestroy, type OnInit } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, requestConfirm } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { fromRuntime } from '../../core/from-runtime'
+import {
+  UNREACHABLE_AFTER_MS, clockRefused, linkPhase, roomWords, statusLine,
+  type MeshConnection, type ShareStatus, type StatusLine, type SyncState,
+} from './presence-status'
 
 interface PresencePayload {
   sig?: string
   peerCount?: number
   alone?: boolean
   peers?: readonly string[]
+  /** Everyone live in the room, on any page (SwarmDrone, room-wide roster).
+   *  Pubkeys, or `{ pubkey }` rows. Absent on older essentials. */
+  zonePeers?: readonly unknown[]
   reason?: string
 }
 
@@ -49,7 +74,19 @@ interface SwarmConsumerApi extends SwarmLabelApi {
   following: () => string
   subscribeTo: (pubkey: string | null) => Promise<void>
   follow: (pubkey: string | null) => Promise<void>
+  // The room-wide roster and share status (all optional — an older
+  // essentials package has none of them, and the strip degrades to today's).
+  participantsInZone?: () => readonly unknown[]
+  awayInZone?: () => readonly unknown[]
+  privateCountHere?: () => number
+  offerPrivateHere?: () => unknown
+  currentSegments?: () => readonly string[]
+  peersOnOlderVersion?: () => unknown
 }
+
+/** NostrMeshDrone — only its derived host is read here. */
+interface MeshApi { swarmHost?: () => string }
+interface InviteApi { invoke: (args: string) => Promise<void>; meetingLink?: () => Promise<void> }
 
 /** Who a key is, at its host (essentials NameService), consumed via IoC at
  *  runtime — shared never imports modules. A name a host vouches for first,
@@ -64,6 +101,7 @@ interface NameApi {
 interface SwarmFilterApi {
   selected: ReadonlySet<string>
   toggle: (pubkey: string) => void
+  clear?: () => void
 }
 
 /** One participant chip in the top strip. */
@@ -82,11 +120,29 @@ interface Badge {
   unnamed: boolean
   /** True when this peer is in the participant-filter selection. */
   selected: boolean
+  /** Where in the room they are: on this page, elsewhere, or away. */
+  where: 'self' | 'here' | 'elsewhere' | 'away'
 }
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const SWARM_FILTER_KEY = '@diamondcoreprocessor.com/SwarmFilterService'
 const NAMES_KEY = '@diamondcoreprocessor.com/NameService'
+const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
+const INVITE_KEY = '@diamondcoreprocessor.com/InviteQueenBee'
+
+/** How long a relay refusal stays on the line. */
+const REJECTED_SHOWN_MS = 20_000
+
+/** A roster entry is a pubkey, or a row carrying one. */
+const pubkeysOf = (list: unknown): string[] => {
+  if (!Array.isArray(list)) return []
+  const out: string[] = []
+  for (const e of list) {
+    const pk = typeof e === 'string' ? e : (e as { pubkey?: unknown } | null)?.pubkey
+    if (typeof pk === 'string' && pk) out.push(pk)
+  }
+  return out
+}
 
 @Component({
   selector: 'hc-presence-banner',
@@ -168,7 +224,99 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
    *  uploading. */
   readonly upload = signal<{ done: number; total: number } | null>(null)
 
-  readonly visible = computed(() => this.#seen() && this.#public())
+  // ── the one status line ─────────────────────────────────
+
+  /** The socket's real state, as the mesh last reported it. Null until the
+   *  first `mesh:connection` — an older essentials package never sends one,
+   *  and then the strip keeps its old rendering. */
+  readonly #conn = signal<MeshConnection | null>(null)
+  /** When the tab last stopped having an OPEN socket (null while open). */
+  readonly #downSince = signal<number | null>(null)
+  /** Whether a socket has opened since this strip mounted — a first connect
+   *  says "Connecting", every later one "Reconnecting". */
+  readonly #wasOpen = signal(false)
+  /** Bumped by the two timers below; the only clock the line reads. */
+  readonly #clock = signal(Date.now())
+  #downTimer: ReturnType<typeof setTimeout> | null = null
+  #rejectedTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** The swarm's host — the relay this tab meets at, as `jwize.com`. */
+  readonly #swarmHost = signal('')
+  /** Live participants anywhere in the room (not you), and those away. */
+  readonly #zone = signal<readonly string[]>([])
+  readonly #away = signal<readonly string[]>([])
+  /** This page, as the swarm names it: its composed sig and its path. */
+  readonly #hereSig = signal('')
+  readonly #hereLocation = signal<string | null>(null)
+  /** The swarm's per-location share status, newest per location. */
+  readonly #shares = signal<ReadonlyMap<string, ShareStatus>>(new Map())
+  readonly #lastShare = signal<ShareStatus | null>(null)
+  readonly #sync = signal<SyncState | null>(null)
+  readonly #older = signal(0)
+  readonly #rejected = signal('')
+
+  readonly #room = fromRuntime(
+    get('@hypercomb.social/RoomStore') as EventTarget | undefined,
+    () => (get('@hypercomb.social/RoomStore') as { value?: string } | undefined)?.value ?? '',
+  )
+  readonly #secret = fromRuntime(
+    get('@hypercomb.social/SecretStore') as EventTarget | undefined,
+    () => (get('@hypercomb.social/SecretStore') as { value?: string } | undefined)?.value ?? '',
+  )
+  readonly #locale = fromRuntime(
+    get('@hypercomb.social/I18n') as EventTarget | undefined,
+    () => (get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en',
+  )
+
+  /** This page's share status: matched by path or by composed sig, else —
+   *  on a swarm that names neither — the newest walk's. */
+  readonly #share = computed<ShareStatus | null>(() => {
+    const shares = this.#shares()
+    const at = this.#hereLocation()
+    if (at !== null) return shares.get(at) ?? shares.get(this.#hereSig()) ?? null
+    return shares.get(this.#hereSig()) ?? this.#lastShare()
+  })
+
+  /** The line, or null for the old rendering. */
+  readonly status = computed<StatusLine | null>(() => {
+    const conn = this.#conn()
+    const phase = linkPhase(conn, this.#downSince(), this.#clock(), this.#wasOpen())
+    if (!phase) return null
+    const away = new Set(this.#away())
+    const here = new Set(this.#peers().filter(pk => !away.has(pk)))
+    const room = new Set([...this.#zone(), ...here])
+    for (const pk of away) room.delete(pk)
+    return statusLine({
+      phase,
+      host: this.#swarmHost() || this.#t('mesh.state.no-host-name'),
+      room: this.#room().trim(),
+      words: roomWords(this.#room(), this.#secret(), this.#locale()),
+      roomCount: room.size + 1,
+      hereCount: here.size + 1,
+      share: this.#share(),
+      sync: this.#sync(),
+      older: this.#older(),
+      clockOff: clockRefused(conn),
+      rejected: this.#rejected(),
+    })
+  })
+
+  /** A phone folds a quiet line to the dot and the counts; a tap opens it. */
+  readonly lineOpen = signal(false)
+
+  /** Whether the swarm has reported any share status — once it has, the
+   *  status line carries the upload and the old upload caption stands down. */
+  readonly shareSeen = computed(() => this.#lastShare() !== null)
+
+  /** "Only Ana's tiles" — the filter, said out loud, while one is on. */
+  readonly filterNames = computed(() => {
+    this.#labelVersion()
+    const selected = [...this.#selected()]
+    if (!selected.length) return ''
+    return selected.map(pk => this.#labelOf(pk)).join(', ')
+  })
+
+  readonly visible = computed(() => (this.#seen() || this.#conn() !== null) && this.#public())
   readonly alone = computed(() => this.#alone())
   readonly peerCount = computed(() => this.#peers().length)
 
@@ -188,11 +336,26 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       isSelf: true,
       unnamed: !myLabel,
       selected: false,
+      where: 'self',
     })
 
     const selected = this.#selected()
     const names = this.#names()
-    for (const pk of this.#peers()) {
+    // The whole room, nearest first: on this page, elsewhere, away. A room
+    // the swarm does not report (older essentials) is just this page.
+    // Away wins: someone whose socket dropped still has tiles on this page
+    // until their slot runs out, and the badge says they are away.
+    const away = this.#away()
+    const awaySet = new Set(away)
+    const here = this.#peers().filter(pk => !awaySet.has(pk))
+    const seen = new Set<string>([...here, ...away])
+    const elsewhere = this.#zone().filter(pk => !seen.has(pk))
+    const roster: [string, Badge['where']][] = [
+      ...here.map((pk): [string, Badge['where']] => [pk, 'here']),
+      ...elsewhere.map((pk): [string, Badge['where']] => [pk, 'elsewhere']),
+      ...away.map((pk): [string, Badge['where']] => [pk, 'away']),
+    ]
+    for (const [pk, where] of roster) {
       // A name their host vouches for letters the badge first; the label
       // they announced is the unverified fallback.
       const verified = names?.nameOf?.(pk) ?? null
@@ -207,6 +370,7 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         isSelf: false,
         unnamed: false,
         selected: selected.has(pk),
+        where,
       })
     }
     return out
@@ -270,6 +434,8 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         this.#peers.set(peers)
         this.#alone.set(alone)
         this.#seen.set(true)
+        if (typeof payload?.sig === 'string') this.#hereSig.set(payload.sig)
+        this.#readRoom(payload?.zonePeers)
         // Last peer left: the caret unmounts with them, so an expanded
         // panel would have no way left to close. Collapse with them.
         if (alone) this.expanded.set(false)
@@ -301,6 +467,13 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       // hides the instant mesh-public goes off (and reappears on).
       EffectBus.on<{ public?: boolean }>('mesh:public-changed', ({ public: pub }) => {
         this.#public.set(!!pub)
+        // A join (or a leave) starts the socket's story over: the next
+        // connect is a first connect, and the 30 s clock runs from now.
+        this.#wasOpen.set(false)
+        this.#downSince.set(null)
+        if (this.#downTimer) { clearTimeout(this.#downTimer); this.#downTimer = null }
+        const conn = this.#conn()
+        if (pub && conn) this.#onConnection(conn, true)
       }),
 
       // Participant-filter selection — mirror so badges/rows relight
@@ -315,6 +488,45 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         const done = Number(p?.done ?? 0), total = Number(p?.total ?? 0)
         this.upload.set(total > 0 && done < total ? { done, total } : null)
       }),
+
+      // The socket's real state. `downSince` is kept HERE rather than taken
+      // from the mesh's `since`, which restarts on every ladder step — the
+      // "can't reach" threshold is about how long the tab has had no live
+      // socket at all.
+      EffectBus.on<MeshConnection>('mesh:connection', (c) => this.#onConnection(c, false)),
+
+      // A relay refusal the mesh does not retry itself — said for a while.
+      EffectBus.on<{ reason?: unknown }>('mesh:rejected', (p) => {
+        const reason = String(p?.reason ?? '').trim()
+        if (!reason) return
+        this.#rejected.set(reason.slice(0, 120))
+        if (this.#rejectedTimer) clearTimeout(this.#rejectedTimer)
+        this.#rejectedTimer = setTimeout(() => { this.#rejectedTimer = null; this.#rejected.set('') }, REJECTED_SHOWN_MS)
+      }),
+
+      // What the swarm offered at a page on its last walk of it.
+      EffectBus.on<ShareStatus>('swarm:share-status', (p) => {
+        if (!p || typeof p !== 'object') return
+        const at = String(p.location ?? '')
+        const next = new Map(this.#shares())
+        next.set(at, p)
+        this.#shares.set(next)
+        this.#lastShare.set(p)
+        this.#readHere()
+      }),
+
+      // Does the swarm's host take the bytes — and if not, why. Only the
+      // swarm host's report: another target is a backup, not what the room
+      // fetches from.
+      EffectBus.on<SyncState>('sync:state', (p) => {
+        if (!p || typeof p !== 'object') return
+        const host = String(p.host ?? '').trim()
+        if (p.swarm !== true && !(host && host === this.#swarmHost())) return
+        this.#sync.set(p)
+      }),
+
+      // Someone arrived, left, went away or came back anywhere in the room.
+      EffectBus.on('swarm:roster-changed', () => this.#readRoom()),
     )
 
     // The panel is dismissible from anywhere: a pointer down outside
@@ -343,12 +555,62 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     // mounts, but a fresh mount before any toggle has no last value.
     const filter = this.#filter()
     if (filter) this.#selected.set(new Set(filter.selected))
+    this.#readHost()
   }
 
   /** Click a peer badge (or their row name) → toggle that participant
-   *  in the canvas filter. No selection = everyone shows. */
+   *  in the canvas filter. No selection = everyone shows. Only someone on
+   *  this page has tiles here to filter to — a badge for someone elsewhere
+   *  or away says where they are and does nothing else. */
   onPeerBadgeClick(pubkey: string): void {
+    if (!this.#peers().includes(pubkey) && !this.#selected().has(pubkey)) return
     this.#filter()?.toggle(pubkey)
+  }
+
+  /** The chip's way back: everyone shows again. */
+  onShowEveryone(): void {
+    const filter = this.#filter()
+    if (filter?.clear) { filter.clear(); return }
+    for (const pk of [...(filter?.selected ?? [])]) filter?.toggle(pk)
+  }
+
+  /** The line's buttons. `invite` hands out the meeting link (the invite
+   *  word, with nothing selected); `share` offers this page's private tiles
+   *  after one confirmation — tile by tile, their insides stay private. */
+  async onStatusAction(action: 'invite' | 'share' | undefined): Promise<void> {
+    if (action === 'invite') {
+      const invite = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(INVITE_KEY) as InviteApi | undefined
+      // The meeting link, whatever is selected (an older queen: invoke('')).
+      try { await (invite?.meetingLink ? invite.meetingLink() : invite?.invoke?.('')) } catch (e) { console.warn('[presence] invite failed:', e) }
+      return
+    }
+    if (action !== 'share') return
+    const swarm = this.#swarm()
+    if (typeof swarm?.offerPrivateHere !== 'function') return
+    let count = Number(this.#share()?.private ?? 0)
+    if (!(count > 0)) { try { count = Number(swarm.privateCountHere?.() ?? 0) } catch { count = 0 } }
+    const ok = await requestConfirm({
+      title: 'swarm.share.confirm.title',
+      message: 'swarm.share.confirm.message',
+      messageParams: { count, host: this.#swarmHost() || this.#t('mesh.state.no-host-name') },
+      confirmLabel: 'swarm.share.confirm.ok',
+      cancelLabel: 'swarm.share.confirm.cancel',
+    })
+    if (!ok) return
+    try { await swarm.offerPrivateHere() } catch (e) { console.warn('[presence] share failed:', e) }
+  }
+
+  /** The phone's folded line opens and closes on a tap. */
+  onLineToggle(): void {
+    this.lineOpen.set(!this.lineOpen())
+  }
+
+  /** Title for a peer badge: what tapping it does, or where they are. */
+  badgeTitleKey(b: Badge): string {
+    if (b.isSelf) return 'presence.set-name'
+    if (b.where === 'elsewhere') return 'presence.room-elsewhere'
+    if (b.where === 'away') return 'presence.room-away'
+    return 'presence.filter-toggle'
   }
 
   /** The caret toggles the expanded participant panel (expansion no
@@ -416,6 +678,8 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     for (const u of this.#unsubs) u()
     this.#unsubs.length = 0
+    if (this.#downTimer) clearTimeout(this.#downTimer)
+    if (this.#rejectedTimer) clearTimeout(this.#rejectedTimer)
   }
 
   // ── helpers ───────────────────────────────────────────
@@ -430,6 +694,84 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   #filter(): SwarmFilterApi | undefined {
     return (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(SWARM_FILTER_KEY) as SwarmFilterApi | undefined
+  }
+
+  #t(key: string): string {
+    const i18n = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/I18n') as
+      { t?: (k: string) => string } | undefined
+    return i18n?.t?.(key) ?? key
+  }
+
+  #labelOf(pk: string): string {
+    const announced = (this.#swarm()?.labelFor?.(pk) ?? '').trim()
+    return this.#names()?.label?.(pk, undefined, announced) || announced || `${pk.slice(0, 6)}…`
+  }
+
+  #onConnection(c: MeshConnection | null | undefined, rejoined: boolean): void {
+    if (!c || typeof c.state !== 'string') return
+    this.#conn.set(c)
+    this.#readHost()
+    if (c.state === 'open') {
+      this.#wasOpen.set(true)
+      this.#downSince.set(null)
+      if (this.#downTimer) { clearTimeout(this.#downTimer); this.#downTimer = null }
+      return
+    }
+    if (this.#downSince() !== null) return
+    const now = Date.now()
+    const since = !rejoined && typeof c.since === 'number' && c.since > 0 && c.since <= now ? c.since : now
+    this.#downSince.set(since)
+    this.#downTimer = setTimeout(() => {
+      this.#downTimer = null
+      this.#clock.set(Date.now())
+    }, Math.max(0, since + UNREACHABLE_AFTER_MS - now) + 50)
+  }
+
+  /** The swarm's host: host[:port] of the relay this tab dials. Derived by
+   *  the mesh, synchronously — nothing is fetched to know it. */
+  #readHost(): void {
+    try {
+      const mesh = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(MESH_KEY) as MeshApi | undefined
+      const host = mesh?.swarmHost?.()
+      if (typeof host === 'string') this.#swarmHost.set(host)
+    } catch { /* keep the last one */ }
+  }
+
+  /** Where this page is, as the swarm hashes it (null on a swarm that does
+   *  not say — the newest walk's status is then taken as this page's). */
+  #readHere(): void {
+    try {
+      const segs = this.#swarm()?.currentSegments?.()
+      if (Array.isArray(segs)) this.#hereLocation.set('/' + segs.join('/'))
+    } catch { /* keep the last one */ }
+  }
+
+  /** The room-wide roster, from the presence payload and the swarm. */
+  #readRoom(zonePeers?: readonly unknown[]): void {
+    const swarm = this.#swarm()
+    // The presence payload's rows carry each member's place; the swarm's
+    // own reads fill in whatever a payload-less refresh (roster-changed)
+    // did not bring.
+    const zone = new Set<string>()
+    const away = new Set<string>()
+    for (const row of Array.isArray(zonePeers) ? zonePeers : []) {
+      const [pk] = pubkeysOf([row])
+      if (!pk) continue
+      if ((row as { state?: unknown } | null)?.state === 'away') away.add(pk)
+      else zone.add(pk)
+    }
+    try { for (const pk of pubkeysOf(swarm?.participantsInZone?.())) zone.add(pk) } catch { /* older swarm */ }
+    try { for (const pk of pubkeysOf(swarm?.awayInZone?.())) away.add(pk) } catch { /* older swarm */ }
+    for (const pk of away) zone.delete(pk)
+    let older = 0
+    try {
+      const o = swarm?.peersOnOlderVersion?.()
+      older = Array.isArray(o) ? o.length : Number(o ?? 0) || 0
+    } catch { older = 0 }
+    this.#zone.set([...zone])
+    this.#away.set([...away])
+    this.#older.set(older)
+    this.#readHere()
   }
 
   /** Two-letter initials from a label. Two+ words → first letter of

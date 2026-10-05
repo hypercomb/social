@@ -114,7 +114,7 @@ export const hostCurrentBranch = async (): Promise<void> => {
           return
         case 'not-available':
           toast('info', t(i18n, 'host.title', 'Publish branch'),
-            t(i18n, 'host.failed', 'The branch is still uploading — your hive index was NOT advanced (no dead links). Uploads retry automatically; try again once the sync pill clears.'))
+            t(i18n, 'host.failed', 'The branch is still uploading — your hive index was NOT advanced, so no link points at missing bytes. Uploads retry on their own; publish again in a moment.'))
           return
         case 'index-unsafe':
           // The refusal that protects every OTHER branch: rewriting the index

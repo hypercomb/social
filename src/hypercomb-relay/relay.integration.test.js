@@ -2,10 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { WebSocket } from 'ws'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { HOST_PACKAGES_POOL } from './replicate.js'
@@ -16,10 +17,10 @@ const freePort = () => new Promise(resolve => {
   server.listen(0, '127.0.0.1', () => { const port = server.address().port; server.close(() => resolve(port)) })
 })
 
-function auth(secret, url, method, body) {
+function auth(secret, url, method, body, age = 0) {
   const tags = [['u', url], ['method', method]]
   if (body) tags.push(['payload', sha(body)])
-  const event = finalizeEvent({ kind: 27235, created_at: Math.floor(Date.now() / 1000), tags, content: '' }, secret)
+  const event = finalizeEvent({ kind: 27235, created_at: Math.floor(Date.now() / 1000) - age, tags, content: '' }, secret)
   return `Nostr ${Buffer.from(JSON.stringify(event)).toString('base64')}`
 }
 
@@ -91,7 +92,13 @@ test('authenticated replication is private, asynchronous, and receipted', { time
     }
     assert.equal(status?.state, 'complete')
     assert.deepEqual(status.holes, [])
-    assert.equal((await fetch(`${base}/${signature}`, { method: 'HEAD' })).status, 200)
+    // Served from a stat and a stream, never a whole-file read on the loop:
+    // HEAD carries the length with no body, GET streams the exact bytes.
+    const head = await fetch(`${base}/${signature}`, { method: 'HEAD' })
+    assert.equal(head.status, 200)
+    assert.equal(head.headers.get('content-length'), String(atom.length))
+    const got = await fetch(`${base}/${signature}`)
+    assert.equal(Buffer.from(await got.arrayBuffer()).toString(), atom.toString())
     const receiptsUrl = `${base}/receipts`
     const receipts = await fetch(receiptsUrl, { headers: { Authorization: auth(secret, receiptsUrl, 'GET') } })
     assert.equal(receipts.status, 200)
@@ -346,70 +353,8 @@ test('replication destinations are screened, and a redirect is never followed', 
   }
 })
 
-test('a refreshed participant is not tombstoned by the last-will of their old socket', { timeout: 20_000 }, async () => {
-  const { WebSocket } = await import('ws')
-  const port = await freePort()
-  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-will-'))
-  const child = spawn(process.execPath, ['relay.js', '--port', String(port), '--memory', '--content-dir', dir], { cwd: import.meta.dirname, stdio: 'ignore' })
-  const sockets = []
-  const open = () => new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-    sockets.push(ws)
-    ws.once('open', () => resolve(ws))
-    ws.once('error', reject)
-  })
-  const zone = 'a'.repeat(64)
-  const beacon = (ws, secret) => new Promise(resolve => {
-    const evt = finalizeEvent({ kind: 30206, created_at: Math.floor(Date.now() / 1000), tags: [['x', zone], ['d', getPublicKey(secret)]], content: JSON.stringify({ alive: true }) }, secret)
-    const onMessage = raw => { const msg = JSON.parse(String(raw)); if (msg[0] === 'OK' && msg[1] === evt.id) { ws.off('message', onMessage); resolve() } }
-    ws.on('message', onMessage)
-    ws.send(JSON.stringify(['EVENT', evt]))
-  })
-  // Everything the watcher hears on the zone channel, live.
-  const tombstonesFor = async () => {
-    const watcher = await open()
-    const heard = []
-    watcher.on('message', raw => {
-      const msg = JSON.parse(String(raw))
-      if (msg[0] === 'EVENT' && JSON.parse(msg[2].content).left === true) heard.push(msg[2].pubkey)
-    })
-    await new Promise(resolve => {
-      watcher.on('message', raw => { if (JSON.parse(String(raw))[0] === 'EOSE') resolve() })
-      watcher.send(JSON.stringify(['REQ', 'zone', { '#x': [zone] }]))
-    })
-    return heard
-  }
-  const closeAndSettle = async ws => { ws.terminate(); await new Promise(resolve => setTimeout(resolve, 300)) }
-  try {
-    await waitForRelay(`http://127.0.0.1:${port}`)
-    const heard = await tombstonesFor()
-
-    // Control: a lone socket dying fires its will.
-    const crashed = generateSecretKey()
-    const lone = await open()
-    await beacon(lone, crashed)
-    await closeAndSettle(lone)
-    assert.deepEqual(heard, [getPublicKey(crashed)])
-
-    // A refresh: the new tab beacons before the old socket is reaped.
-    heard.length = 0
-    const returner = generateSecretKey()
-    const oldTab = await open()
-    await beacon(oldTab, returner)
-    const newTab = await open()
-    await beacon(newTab, returner)
-    await closeAndSettle(oldTab)
-    assert.deepEqual(heard, [])
-
-    // The new tab's own will stays armed.
-    await closeAndSettle(newTab)
-    assert.deepEqual(heard, [getPublicKey(returner)])
-  } finally {
-    for (const ws of sockets) try { ws.terminate() } catch {}
-    child.kill()
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
+// The last-will (grace, cancellation, inheritance) is exercised in
+// relay.meeting.test.js, beside the other meeting-transport behaviour.
 
 test("a pool past the floor is listed only while the operator's signed index declares it", { timeout: 30_000 }, async () => {
   const port = await freePort()
@@ -693,5 +638,225 @@ test('with a shell, the names are still the JSON — never index.html, never a f
     child.kill()
     rmSync(dir, { recursive: true, force: true })
     rmSync(shell, { recursive: true, force: true })
+  }
+})
+
+// ── the swarm's host: participants (--allow-participants) ────────────────────
+// The relay a swarm meets at hosts its participants' atoms: a key live on the
+// WebSocket may PUT /<sig>, within caps that count only new bytes, never over
+// a pool's address, and the 201 body is the receipt.
+
+/** A key that has spoken on the relay's WebSocket: one verified EVENT, or a
+ *  lifecycle {alive} beacon in `zone`. The socket is returned open. */
+async function goLive(port, secret, zone = null) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) })
+  const now = Math.floor(Date.now() / 1000)
+  const evt = zone
+    ? finalizeEvent({ kind: 30206, created_at: now, tags: [['x', zone], ['d', getPublicKey(secret)], ['expiration', String(now + 90)]], content: JSON.stringify({ alive: true }) }, secret)
+    : finalizeEvent({ kind: 30200, created_at: now, tags: [['x', 'f'.repeat(64)], ['d', 'f'.repeat(64)]], content: '{}' }, secret)
+  const ok = await new Promise(resolve => {
+    ws.on('message', raw => { const msg = JSON.parse(String(raw)); if (msg[0] === 'OK' && msg[1] === evt.id) resolve(msg) })
+    ws.send(JSON.stringify(['EVENT', evt]))
+  })
+  assert.equal(ok[2], true, ok[3])
+  return ws
+}
+
+/** PUT bytes at their own address (or `at`), signed by `secret` unless null. */
+async function putAtom(base, secret, bytes, { at = sha(bytes), age = 0, headers = {} } = {}) {
+  const url = `${base}/${at}`
+  const res = await fetch(url, { method: 'PUT', body: bytes, headers: { ...(secret ? { Authorization: auth(secret, url, 'PUT', null, age) } : {}), ...headers } })
+  return { status: res.status, body: await res.text(), headers: res.headers, sig: sha(bytes) }
+}
+
+const nip11 = async base => (await fetch(base, { headers: { Accept: 'application/nostr+json' } })).json()
+
+async function relayWith(args, env = {}) {
+  const port = await freePort()
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-participants-'))
+  const child = startRelay(port, dir, args, env)
+  const base = `http://127.0.0.1:${port}`
+  await waitForRelay(base)
+  return { port, dir, base, close: () => { child.kill(); rmSync(dir, { recursive: true, force: true }) } }
+}
+
+test('a swarm meeting here is hosted: a live participant stores atoms, anyone else is told why not', { timeout: 30_000 }, async () => {
+  const writer = generateSecretKey()
+  const r = await relayWith(['--allow-participants', '--writers', getPublicKey(writer)])
+  const sockets = []
+  try {
+    assert.equal((await nip11(r.base)).limitation.participant_uploads, 'all')
+    const guest = generateSecretKey()
+    const atom = Buffer.from('a tile picture, shared in the meeting')
+
+    // Before the key has said a word on the WebSocket: not live, and told so.
+    const early = await putAtom(r.base, guest, atom)
+    assert.equal(early.status, 401)
+    assert.match(early.body, /^not-live/)
+    // Unsigned is still unsigned.
+    assert.equal((await putAtom(r.base, null, atom)).status, 401)
+
+    // One verified EVENT later, the same PUT is stored, and the 201 body is the receipt.
+    sockets.push(await goLive(r.port, guest))
+    const stored = await putAtom(r.base, guest, atom)
+    assert.equal(stored.status, 201)
+    assert.equal(stored.body, `stored ${stored.sig}`)
+    assert.equal(stored.headers.get('access-control-allow-origin'), '*')
+    const read = await fetch(`${r.base}/${stored.sig}`)
+    assert.equal(read.status, 200)
+    assert.match(read.headers.get('cache-control'), /immutable/)
+    assert.deepEqual(Buffer.from(await read.arrayBuffer()), atom)
+    // No staging residue beside it.
+    assert.deepEqual(readdirSync(r.dir).filter(name => name.startsWith('.part')), [])
+
+    // A device whose clock is minutes off still uploads; past ±10 min it does not.
+    assert.equal((await putAtom(r.base, guest, Buffer.from('clock five minutes slow'), { age: 300 })).status, 201)
+    assert.match((await putAtom(r.base, guest, Buffer.from('clock eleven minutes slow'), { age: 660 })).body, /freshness/)
+
+    // Bytes that are not the address are refused, as for a writer.
+    assert.equal((await putAtom(r.base, guest, Buffer.from('not these bytes'), { at: sha(Buffer.from('other')) })).status, 422)
+
+    // A pool's address is never an atom, for anyone — answered before auth.
+    for (const meaning of ['hive:indexes', 'host:packages', 'community:hosts', 'host:offerings', 'community:offers']) {
+      const preimage = Buffer.from(meaning, 'utf8')
+      for (const who of [guest, null]) {
+        const refused = await putAtom(r.base, who, preimage)
+        assert.equal(refused.status, 409, `${meaning} must be reserved`)
+      }
+    }
+    // A directory at the address (a bag, a pool) is never replaced — and only
+    // an admitted key learns that it is there.
+    const bag = Buffer.from('some/private/path', 'utf8')
+    mkdirSync(join(r.dir, sha(bag)))
+    assert.equal((await putAtom(r.base, guest, bag)).status, 409)
+    assert.equal((await putAtom(r.base, generateSecretKey(), bag)).status, 401)
+
+    // A miss is never cached, so the atom can arrive a moment later.
+    const miss = await fetch(`${r.base}/${'0'.repeat(64)}`)
+    assert.equal(miss.status, 404)
+    assert.equal(miss.headers.get('cache-control'), 'no-store')
+
+    // The real cap: one participant atom is at most 8 MB — refused before a byte is stored.
+    const big = await putAtom(r.base, guest, Buffer.alloc(9 * 1000 * 1000, 7))
+    assert.equal(big.status, 413)
+    assert.equal((await fetch(`${r.base}/${big.sig}`, { method: 'HEAD' })).status, 404)
+
+    // Writers are unchanged: uncapped, and receipted to their own key. A
+    // participant leaves no receipt — the host keeps no record of who stored what.
+    const writerAtom = Buffer.alloc(9 * 1000 * 1000, 3)
+    const written = await putAtom(r.base, writer, writerAtom)
+    assert.equal(written.status, 201)
+    assert.equal(written.body, `stored ${written.sig}`)
+    const receiptsUrl = `${r.base}/receipts`
+    const receipts = await (await fetch(receiptsUrl, { headers: { Authorization: auth(writer, receiptsUrl, 'GET') } })).json()
+    assert.deepEqual(receipts.signatures, [written.sig])
+    assert.deepEqual(readdirSync(join(r.dir, '.receipts')), [`${getPublicKey(writer)}.json`])
+  } finally {
+    for (const ws of sockets) ws.terminate()
+    r.close()
+  }
+})
+
+test('participant caps count only new bytes — per key, per venue address, in all — and say when to retry', { timeout: 30_000 }, async () => {
+  const writer = generateSecretKey()
+  const caps = { key: 3000, ip: 5000, total: 9000 }
+  const r = await relayWith(['--allow-participants', '--writers', getPublicKey(writer)], { DIAG_PARTICIPANT_CAPS: JSON.stringify(caps) })
+  const sockets = []
+  const live = async () => { const secret = generateSecretKey(); sockets.push(await goLive(r.port, secret)); return secret }
+  const venue = (ip, spoof) => ({ 'CF-Connecting-IP': ip, 'X-Forwarded-For': spoof })
+  const retryAfter = res => {
+    assert.ok(Number(res.headers.get('retry-after')) > 0, 'Retry-After is said')
+    assert.match(res.headers.get('access-control-expose-headers') ?? '', /Retry-After/)
+  }
+  try {
+    // Per key: 2000 new bytes, the same atom again for free, 1000 more fits, then nothing.
+    const a = await live()
+    assert.equal((await putAtom(r.base, a, Buffer.alloc(2000, 1))).status, 201)
+    assert.equal((await putAtom(r.base, a, Buffer.alloc(2000, 1))).status, 201, 're-storing a held atom costs nothing')
+    assert.equal((await putAtom(r.base, a, Buffer.alloc(1000, 2))).status, 201)
+    const keyFull = await putAtom(r.base, a, Buffer.alloc(10, 3))
+    assert.equal(keyFull.status, 429)
+    assert.match(keyFull.body, /key/)
+    retryAfter(keyFull)
+    // … but a held atom is still answered, whatever the quota says.
+    assert.equal((await putAtom(r.base, a, Buffer.alloc(2000, 1))).status, 201)
+
+    // Per venue: CF-Connecting-IP from the tunnel is the address; a spoofed
+    // X-Forwarded-For does not buy a second budget.
+    const [b, c, d] = [await live(), await live(), await live()]
+    assert.equal((await putAtom(r.base, b, Buffer.alloc(2000, 4), { headers: venue('198.51.100.7', '192.0.2.1') })).status, 201)
+    assert.equal((await putAtom(r.base, c, Buffer.alloc(2000, 5), { headers: venue('198.51.100.7', '192.0.2.2') })).status, 201)
+    const venueFull = await putAtom(r.base, d, Buffer.alloc(2000, 6), { headers: venue('198.51.100.7', '192.0.2.3') })
+    assert.equal(venueFull.status, 429)
+    assert.match(venueFull.body, /network/)
+    retryAfter(venueFull)
+    // The same key from another address is within both of its budgets.
+    assert.equal((await putAtom(r.base, d, Buffer.alloc(2000, 6), { headers: venue('203.0.113.9', '192.0.2.3') })).status, 201)
+
+    // In all: 3000 + 2000 + 2000 + 2000 = 9000 — the host is full for participants …
+    const full = await putAtom(r.base, await live(), Buffer.alloc(1, 8))
+    assert.equal(full.status, 507)
+    assert.equal(full.body, 'host full')
+    retryAfter(full)
+    // … and never for its writers.
+    assert.equal((await putAtom(r.base, writer, Buffer.alloc(4000, 9))).status, 201)
+  } finally {
+    for (const ws of sockets) ws.terminate()
+    r.close()
+  }
+})
+
+test('participants are closed by default, by room when listed, and refused on a nearly full disk', { timeout: 30_000 }, async () => {
+  const writer = generateSecretKey()
+  const room = sha(Buffer.from('lifecycle\0room\0secret'))
+  const other = sha(Buffer.from('lifecycle\0other\0secret'))
+  const [closed, byRoom, nearlyFull] = await Promise.all([
+    relayWith(['--writers', getPublicKey(writer)]),
+    relayWith([`--allow-participants=${room}`]),
+    relayWith([], { ALLOW_PARTICIPANTS: 'all', DIAG_PARTICIPANT_CAPS: JSON.stringify({ floor: 1e18 }) }),
+  ])
+  const sockets = []
+  const atom = Buffer.from('a shared tile')
+  try {
+    // No flag: the policy says so, and a live key is told the host is closed.
+    assert.equal((await nip11(closed.base)).limitation.participant_uploads, false)
+    const guest = generateSecretKey()
+    sockets.push(await goLive(closed.port, guest))
+    const refused = await putAtom(closed.base, guest, atom)
+    assert.equal(refused.status, 403)
+    assert.equal(refused.body, 'participants-closed')
+    assert.equal((await putAtom(closed.base, writer, atom)).status, 201)
+
+    // By room: a key that only spoke is not live here yet (its PUT beat its
+    // beacon — 401, retried soon); a key that beaconed only in a room this
+    // host does not take is refused for good (403, paused); a key that
+    // beaconed in the listed room is in.
+    assert.equal((await nip11(byRoom.base)).limitation.participant_uploads, 'zones')
+    const [elsewhere, spoke, member] = [generateSecretKey(), generateSecretKey(), generateSecretKey()]
+    sockets.push(await goLive(byRoom.port, elsewhere, other), await goLive(byRoom.port, spoke), await goLive(byRoom.port, member, room))
+    const early = await putAtom(byRoom.base, spoke, atom)
+    assert.equal(early.status, 401)
+    assert.match(early.body, /^not-live/)
+    const notHere = await putAtom(byRoom.base, elsewhere, atom)
+    assert.equal(notHere.status, 403)
+    assert.match(notHere.body, /^participants-closed/)
+    assert.equal((await putAtom(byRoom.base, member, atom)).status, 201)
+
+    // Under the free-disk floor, nothing more from participants (ALLOW_PARTICIPANTS=all from the environment).
+    assert.equal((await nip11(nearlyFull.base)).limitation.participant_uploads, 'all')
+    const late = generateSecretKey()
+    sockets.push(await goLive(nearlyFull.port, late))
+    let full
+    for (let tries = 0; tries < 40; tries++) {
+      full = await putAtom(nearlyFull.base, late, atom)
+      if (full.status === 507) break
+      await new Promise(resolve => setTimeout(resolve, 50))  // the first free-space reading is in flight
+    }
+    assert.equal(full.status, 507)
+    assert.equal(full.body, 'host full')
+  } finally {
+    for (const ws of sockets) ws.terminate()
+    for (const r of [closed, byRoom, nearlyFull]) r.close()
   }
 })
