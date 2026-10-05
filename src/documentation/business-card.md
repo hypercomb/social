@@ -55,9 +55,11 @@ Publishing your own card at your own address is the whole act of joining; the
 community you are part of is the set of addresses you hold and the hosts you
 follow ([pools-across-hosts.md](pools-across-hosts.md)).
 
-## The rolodex
+## The Hyperdex
 
-The rolodex is the participant's collection of the addresses they have been
+*jwize, 2026-10-05:* the rolodex is called the **Hyperdex**.
+
+The Hyperdex is the participant's collection of the addresses they have been
 handed. It is a collection of references, so:
 
 - An entry is an address. Opening it reads the card at its head, so a contact
@@ -65,11 +67,57 @@ handed. It is a collection of references, so:
 - It is the participant's own and private by default, as every collection is
   ([collections-sharing.md](collections-sharing.md)); handing a card to one
   person does not put it in front of a third.
-- It keeps no copy. A card that goes dark goes dark in every rolodex that
+- It keeps no copy. A card that goes dark goes dark in every Hyperdex that
   holds it, which is the owner's right.
 
 The exchange is two scans: you scan their code, they scan yours. A one-scan
 handshake through a relay is a meeting point, never a store, and is not built.
+
+In the hive the Hyperdex is a private collection, `/hyperdex`, kept in the
+collections index like any other. Each entry is a link tile whose link is the
+card's address. The contact's name is the tile's name, one level down inside
+the collection. The entry never holds the card's bytes or its head signature
+as its key, because either would freeze the card. Publishing your card never
+publishes your Hyperdex.
+
+## Following is replication
+
+*jwize, 2026-10-05:* "the replication [is] the interaction … you give them a
+link and then [they] set up and follow your card. When you make an update or
+you push another person's address they can look at it and add [it] to their
+rolodex."
+
+There is no follow server, no subscriber list and no message queue. Following
+a card is holding its address and reading it, and reading it is replication:
+the bytes come from the card's host to the reader when the reader asks. The
+whole social layer of the card is that one act, seen from four sides.
+
+1. **You give them a link; they set up.** The link opens your card on its
+   door. A door is read-only: it may show, never author or install
+   ([read-only-deployment.md](read-only-deployment.md)), so it can only point
+   onward to a host's front door. There the newcomer takes a hive by
+   replication (`replicate(root)`; there is no installer), claims an address
+   ([domain-claim.md](domain-claim.md)) and publishes a card of their own. That
+   publish is the whole of joining.
+2. **They follow your card.** They keep your address as an entry in their
+   `/hyperdex`, through the same confirm step as any dropped link, so nothing is
+   written until they agree. Holding a card's address may also mean following
+   its host, since the community is "the set of addresses you hold and the
+   hosts you follow".
+3. **You make an update; they see it.** You publish, and your door's signed
+   head moves. Their hive notices on its own: once per boot it asks each held
+   address's host for its current head (the host's signed `host:offerings`),
+   compares it with the head it last saw, and marks the entry as updated.
+   Opening the entry reads the live card. You never push, and you never learn
+   who follows you: a host sees only anonymous reads, and keeping a follower
+   list would be tracking.
+4. **You send someone a contact.** You hand them another person's address,
+   never their card. In person or out of band it is a link or a QR. Through the
+   mesh it is a signed offer to that one person that expires within minutes, in
+   the shape of the existing consent toast: they accept, and the address lands
+   in their `/hyperdex` through the same confirm step, or they decline, and
+   nothing is kept. If they are not there when it arrives, it is gone. The
+   relay is a meeting point, never an inbox.
 
 ## Why this is the founding creation
 
@@ -82,8 +130,11 @@ useful on day one, so it is the creation the concept is explained with:
 | The participant's own address | `/domain claim`, then publish to `<name>.<zone>` |
 | Hosting by a chosen host, live from the store | the machine that serves `jaime-weise.hypercomb.com` |
 | The head is what the address answers | editing the tile and publishing again |
-| References, never copies | the QR carries the address; the rolodex holds addresses |
-| Collections are private, owned, cross-host | the rolodex |
+| References, never copies | the QR carries the address; the Hyperdex holds addresses |
+| Collections are private, owned, cross-host | the Hyperdex |
+| Replication is the only way bytes move | following a card is reading it; joining is taking a hive and publishing a card |
+| No tracking | updates are read by the follower; the owner keeps no follower list |
+| Consent before anything lands | a sent contact is an offer the receiver accepts or declines |
 | No central party | two cards on two domains are one application |
 
 ## Ledger — what is true today
@@ -91,9 +142,13 @@ useful on day one, so it is the creation the concept is explained with:
 | | Status |
 |---|---|
 | The card page on `jaime-weise`, opening by default, publishable with `/publish` | built |
-| QR of the card's address on the back; scanning adds to the rolodex; rolodex kept on the device | built, in the page |
+| QR of the card's address on the back; scanning adds to the Hyperdex; Hyperdex kept on the device | built, in the page |
 | The phone gesture (Quick Tap, shake) opening the card; a scribble choosing between cards | built for the local development build; the published site cannot yet be installed as an app |
 | The page as one artifact of ~830 KB | not yet broken apart: the three.js dependency, the animation and the card data are owed as separate signed parts |
 | Gestures and choosers as drone modules | design — the page carries a registry; nothing is a bee yet |
-| The rolodex as a collection in the hive, synced across the participant's devices | design |
+| The Hyperdex as a collection in the hive, synced across the participant's devices | design — a private `/hyperdex` collection of link tiles. The pieces are built: collections, link tiles, and the confirm step (`link:intake`). Nothing yet writes a scanned or pasted card address into it. |
+| Reading a held address at its live head | built — opening a door resolves the signed index |
+| "Updated" mark on a Hyperdex entry | not built — modelled on the update scout's one check per boot. Each host already answers its current heads in the signed `host:offerings` pool. |
+| From a card's door to your own hive and card | not built. The door shows nothing onward. Replication (`acquire`), `domain claim` and `/publish` are each built, but nothing joins them to a door. The door's `?home=` button is a hosting step for people who already have a hive. |
+| Sending a contact through the mesh | not built. The nearest built channel is the follow-request consent toast. It carries no address yet, and it reaches a person only inside a shared room. |
 | Consent-hosted cards | design ([consent-hosting.md](consent-hosting.md)) |
