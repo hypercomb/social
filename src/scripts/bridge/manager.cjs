@@ -82,7 +82,15 @@ const sendOnce = (req, waitMs) => new Promise(resolve => {
     try { ws.close() } catch { /* gone */ }
     resolve(message)
   })
-  ws.on('error', error => { clearTimeout(timer); resolve({ ok: false, error: String(error.message) }) })
+  // A REFUSED CONNECTION HAS NO MESSAGE: Node reports it as an AggregateError
+  // whose .message is empty, so a dead broker printed nothing and looked like
+  // a failed read (all three managers, 2026-10-04). Say what is down.
+  ws.on('error', error => {
+    clearTimeout(timer)
+    const code = error.code || error.errors?.[0]?.code || ''
+    const refused = code === 'ECONNREFUSED' || code === 'ECONNRESET'
+    resolve({ ok: false, error: refused ? `bridge broker not running at ${BRIDGE} (${code}); start it with: node scripts/bridge/run-bridge.cjs` : (error.message || code || 'bridge connection failed') })
+  })
 })
 
 // GIT BASH REWRITES A LEADING SLASH. Under MSYS an argument that starts with
@@ -161,6 +169,8 @@ const main = async () => {
         send({ op: 'inspect', segments }),
         send({ op: 'note-list', segments }),
       ])
+      // Both failed: that is a failure, not an empty tile.
+      if (!tile.ok && !notes.ok) return fail(tile.error || notes.error)
       return print({ tile: tile.ok ? tile.data : tile.error, notes: notes.ok ? notes.data : notes.error })
     }
     case 'notes': {
