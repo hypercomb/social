@@ -115,7 +115,8 @@ whole social layer of the card is that one act, seen from four sides.
       is the whole of joining.
 
    A hive with no host and no domain can still keep a Hyperdex and read every
-   card in it. It cannot hand a card out.
+   card in it. It cannot publish a card. Until it can, the silo below is how
+   its owner hands one out.
 2. **They follow your card.** They keep your address as an entry in their
    `/hyperdex`, through the same confirm step as any dropped link, so nothing is
    written until they agree. Holding a card's address may also mean following
@@ -135,6 +136,35 @@ whole social layer of the card is that one act, seen from four sides.
    in their `/hyperdex` through the same confirm step, or they decline, and
    nothing is kept. If they are not there when it arrives, it is gone. The
    relay is a meeting point, never an inbox.
+
+## A card before a host: a silo on someone else's domain
+
+*jwize, 2026-10-05:* "a path for them to locally have their own card at your
+domain … with you or any contacts they send you or you create by domain
+pointing at them … basically you can use local domain as a silo for your apps
+but you must trust them or they might disappear."
+
+Before someone is a host with a domain, they can still have a card of their
+own. They make it on their own device, in the card page at someone else's
+address, and that address becomes their silo:
+
+- **Kept on their device, under that domain.** Their card and their Hyperdex
+  live in their browser's storage for that domain, and nowhere else.
+- **Shared with the people around them.** They can swap cards with the
+  domain's owner, keep the contacts people send them, and add contacts by
+  address, a domain that points at a person.
+- **The card travels inside its link.** The QR is `<domain>/#c=…`, and that
+  domain's card page draws whatever card the link carries. The part after `#`
+  never reaches the domain's host, so its owner never sees a guest's card
+  unless the guest shows it to them.
+- **A snapshot, not an address.** Changing the card means handing out a new
+  code, and nobody holding the old one sees the change. Live updates need
+  their own host and domain.
+- **Trust is the price.** If the domain goes away, or its page stops offering
+  cards, the silo and everything in it disappear with it.
+
+When they become a host with a domain and publish, their QR carries their own
+address, and the card is theirs.
 
 ## Why this is the founding creation
 
@@ -165,6 +195,8 @@ useful on day one, so it is the creation the concept is explained with:
 | Gestures and choosers as drone modules | design — the page carries a registry; nothing is a bee yet |
 | The Hyperdex as a collection in the hive, synced across the participant's devices | design — a private `/hyperdex` collection of link tiles. The pieces are built: collections, link tiles, and the confirm step (`link:intake`). Nothing yet writes a scanned or pasted card address into it. |
 | Reading a held address at its live head | built — opening a door resolves the signed index |
+| A local card at someone else's domain (the silo) | built, in the page. "New card" keeps it on the device, its QR carries the card in a link at that domain, and opening the link shows it with "Add to my Hyperdex". The hive clears a link's `#` part before a page mounts, so the page reads the link it was opened with from the browser's record of the visit, once per load. The card's extra links list does not travel in the link. |
+| Moving a silo's card and Hyperdex into your own hive | not built |
 | "Updated" mark on a Hyperdex entry | not built — modelled on the update scout's one check per boot. Each host already answers its current heads in the signed `host:offerings` pool. |
 | From a card's door to a hive, a host, a domain and a card, in that order | not built. The door shows nothing onward. Each step exists on its own: a hive by replication (`acquire`), a host (Serve This Hive in the desktop client, `hypercomb-serve`, or a Pages deploy), a domain (`domain claim`), and the card (`/publish`). Nothing leads a newcomer through them. The door's `?home=` button is a hosting step for people who already have a hive. |
 | Becoming a host without a developer | not built. Serve This Hive opens a port on the participant's own machine. Reaching it from the internet needs a server, a forwarded port or a tunnel in front, which is a developer's job today. |
