@@ -81,7 +81,7 @@ const KEPT_AFTER_COMPACT = 6
 
 type StoreLike = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
 }
 
@@ -121,7 +121,7 @@ const putResidentTalk = async (talk: ResidentTalk): Promise<boolean> => {
     const held = await talkPool()
     if (!held?.store.putPoolDoc) return false
     const bytes = new TextEncoder().encode(JSON.stringify(talk)).buffer as ArrayBuffer
-    return !!(await held.store.putPoolDoc(held.pool, bytes, talk.residentId))
+    return !!(await held.store.putPoolDoc(held.pool, bytes, talk.residentId, { keep: 'current' }))
   } catch { return false }
 }
 

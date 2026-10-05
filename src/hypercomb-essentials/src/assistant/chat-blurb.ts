@@ -105,7 +105,7 @@ export interface ChatBlurb {
 
 type StoreLike = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
 }
 
@@ -151,12 +151,10 @@ const putBlurb = async (blurb: ChatBlurb): Promise<boolean> => {
     const held = await blurbPool()
     if (!held?.store.putPoolDoc) return false
     const bytes = new TextEncoder().encode(JSON.stringify(blurb)).buffer as ArrayBuffer
-    // subKey = the conversation, so each conversation keeps its own thread of
-    // blurbs and the max marker is the current one. putPoolDoc keeps EVERY
-    // version, so this grows by one small atom per distinct save; pruning it is
-    // an open policy decision (documentation/layer-pattern-audit.md), not
-    // something this call does.
-    return !!(await held.store.putPoolDoc(held.pool, bytes, blurb.convoId))
+    // subKey = the conversation, and a blurb is the model's work, not a save
+    // ("saves never happen without human intent"), so `keep: 'current'` IS the
+    // recycling: one blurb per conversation, nothing accumulates.
+    return !!(await held.store.putPoolDoc(held.pool, bytes, blurb.convoId, { keep: 'current' }))
   } catch { return false }
 }
 

@@ -36,7 +36,7 @@ type StoreLike = {
 type StoreDocApi = {
   translations?: FileSystemDirectoryHandle
   getPoolDoc: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
-  putPoolDoc: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
 }
 
 type LocaleMap = Record<string, string> // sourceSig → translatedSig for one locale
@@ -550,7 +550,8 @@ export class TranslationService extends EventTarget {
     if (!store?.translations) return
     const m = this.#cache.get(locale) ?? {}
     const bytes = new TextEncoder().encode(JSON.stringify(m, null, 2)).buffer as ArrayBuffer
-    await store.putPoolDoc(store.translations, bytes, locale)
+    // A cache of AI translations, not a save: only the current map is kept.
+    await store.putPoolDoc(store.translations, bytes, locale, { keep: 'current' })
   }
 
   async #signString(text: string): Promise<string> {

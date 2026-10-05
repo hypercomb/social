@@ -469,7 +469,7 @@ type StoreLike = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
   putResource?: (blob: Blob) => Promise<string>
   getResource?: (sig: string) => Promise<Blob | null>
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
 }
 
@@ -1414,7 +1414,8 @@ export const saveTileDraft = async (path: string, text: string): Promise<boolean
   else return true   // nothing held, nothing asked for — already true
 
   const bytes = new TextEncoder().encode(JSON.stringify(map)).buffer as ArrayBuffer
-  const ok = await store.putPoolDoc(pool, bytes)
+  // Drafts are typing in progress, not a save: only the current one is kept.
+  const ok = await store.putPoolDoc(pool, bytes, undefined, { keep: 'current' })
   if (ok) EffectBus.emit('chat:drafts-changed', { path: key, held: !!body.trim() })
   return !!ok
 }
@@ -1473,7 +1474,7 @@ const writeStreams = async (map: Record<string, ChatStream>): Promise<boolean> =
   const pool = await store?.getPool?.(STREAMS_POOL)
   if (!pool || !store?.putPoolDoc) return false
   const bytes = new TextEncoder().encode(JSON.stringify(map)).buffer as ArrayBuffer
-  return !!(await store.putPoolDoc(pool, bytes))
+  return !!(await store.putPoolDoc(pool, bytes, undefined, { keep: 'current' }))
 }
 
 /** Checkpoint the text one answer has produced so far. Empty text forgets the
