@@ -117,7 +117,7 @@ const scope = async (host: string, deps: TextThemeOfferDeps): Promise<
   { host: string; endpoint: string; pubkey: string; sync: SyncLike } | { reason: string }
 > => {
   const selected = cleanHost(host)
-  if (!selected) return { reason: 'Choose a root domain such as jwize.com.' }
+  if (!selected) return { reason: 'Choose a root domain such as example.org.' }
   const sync = deps.sync ?? get<SyncLike>(SYNC_KEY)
   if (!sync?.publishAtoms || !sync.publicHostDomain) return { reason: 'Host sync is unavailable.' }
   // Writes go to the zone root — a stored `content.` face is read as its zone.

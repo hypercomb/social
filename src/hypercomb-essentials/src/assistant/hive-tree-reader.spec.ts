@@ -158,6 +158,18 @@ describe('the bounded live hive tree reader', () => {
       .resolves.toEqual({ ok: false, root: '/', code: 'stale-read' })
   })
 
+  it('does not call a read changed when the hive changed somewhere it did not read', async () => {
+    // Another manager filing a note moves the epoch; the pages read are as
+    // they were, and saying otherwise sends the participant to ask again.
+    const fx = fixture()
+    const read = await fx.reader.readTree(['projects'], { maxDepth: 1 })
+    if (!read.ok) throw new Error('read failed')
+    fx.epoch.value++
+    expect(await fx.reader.validateSnapshots([read.snapshot])).toBe(true)
+    fx.refs.set(sig(102), { locationSig: sig(102), layerSig: sig(2), layer: { name: 'projects', children: [] } })
+    expect(await fx.reader.validateSnapshots([read.snapshot])).toBe(false)
+  })
+
   it('revalidates the private visited-head vector, even without an epoch bump', async () => {
     const fx = fixture()
     const result = await fx.reader.readTree([])
@@ -479,6 +491,46 @@ describe('a page history cannot pin to one signature', () => {
     const tree = await fx.reader.readTree([], { maxDepth: 2 })
     expect(tree.ok && tree.nodes.some(node => node.name === 'Arkanoid')).toBe(false)
     expect(await fx.reader.find('arkanoid', [])).toMatchObject({ ok: true, matches: [{ name: 'Arkanoid', path: '/games/Arkanoid' }] })
+  })
+
+  it('finds names from the search index the walk never reaches, and is whole when the record is', async () => {
+    // A whole-hive find over ~5,900 tiles ran out its time walking; the
+    // participant's own search keeps every name under a layer in one record.
+    const fx = fixture()
+    const readRecord = vi.fn(async (layerSig: string) => layerSig === sig(1)
+      ? { v: 1, rows: [
+        { sig: sig(2), name: 'projects', path: ['projects'] },
+        { sig: sig(9), name: 'Deep Betz', path: ['far', 'away', 'down', 'Deep Betz'] },
+      ] }
+      : null)
+    const services = new Map<string, unknown>([
+      ['@diamondcoreprocessor.com/HistoryService', fx.history],
+      ['@hypercomb.social/Store', { getResource: vi.fn(async () => null) }],
+      ['@diamondcoreprocessor.com/LayerCommitter', { settled: fx.settled }],
+      ['@diamondcoreprocessor.com/HiveSearchService', { readRecord }],
+    ])
+    const reader = new HypercombHiveTreeReader(<T>(key: string) => services.get(key) as T | undefined)
+    expect(await reader.find('betz', [])).toMatchObject({ ok: true, truncated: false, matches: [{ name: 'Deep Betz', path: '/far/away/down/Deep Betz' }] })
+    // The live walk's hit comes once, not twice.
+    const projects = await reader.find('projects', [])
+    expect(projects.ok && projects.matches.map(match => match.path)).toEqual(['/projects'])
+  })
+
+  it('reads a large hive branch by branch when its root has no record', async () => {
+    // The search index never keeps a truncated record, so a hive past its
+    // row cap has none at the root; its branches have theirs.
+    const fx = fixture()
+    const readRecord = vi.fn(async (layerSig: string) => layerSig === sig(2)
+      ? { v: 1, rows: [{ sig: sig(9), name: 'Deep Betz', path: ['far', 'Deep Betz'] }] }
+      : layerSig === sig(3) ? { v: 1, rows: [] } : null)
+    const services = new Map<string, unknown>([
+      ['@diamondcoreprocessor.com/HistoryService', fx.history],
+      ['@hypercomb.social/Store', { getResource: vi.fn(async () => null) }],
+      ['@diamondcoreprocessor.com/LayerCommitter', { settled: fx.settled }],
+      ['@diamondcoreprocessor.com/HiveSearchService', { readRecord }],
+    ])
+    const reader = new HypercombHiveTreeReader(<T>(key: string) => services.get(key) as T | undefined)
+    expect(await reader.find('betz', [])).toMatchObject({ ok: true, truncated: false, matches: [{ name: 'Deep Betz', path: '/projects/far/Deep Betz' }] })
   })
 
   it('walks into a page by its bag’s latest marker before the older copy its parent carries', async () => {

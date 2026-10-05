@@ -50,7 +50,7 @@ interface StoreLike {
   readonly clipboard: FileSystemDirectoryHandle
   getResource?: (sig: string) => Promise<Blob | null>
   putResource?: (blob: Blob) => Promise<string>
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
 }
 
@@ -1073,7 +1073,8 @@ async function writeMeta(
 ): Promise<void> {
   try {
     const bytes = new TextEncoder().encode(JSON.stringify(meta))
-    const sig = await store.putPoolDoc?.(store.clipboard, bytes.buffer as ArrayBuffer, META_SUBKEY)
+    // What you last copied is working state, not a save: only the current list is kept.
+    const sig = await store.putPoolDoc?.(store.clipboard, bytes.buffer as ArrayBuffer, META_SUBKEY, { keep: 'current' })
     if (!sig) {
       console.warn('[clipboard] writeMeta failed — pool doc unavailable')
       return

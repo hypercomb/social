@@ -33,7 +33,7 @@ export interface DocumentStoreLike {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null | undefined>
   openPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null | undefined>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
 }
 
 export interface ParticipantDocumentOptions<T> {
@@ -47,6 +47,10 @@ export interface ParticipantDocumentOptions<T> {
   readonly empty: T
   /** The old localStorage key, read once at construction and never written. */
   readonly legacyKey?: string
+  /** `'current'` when the document is working state the software writes on its
+   *  own (an autosaved draft) rather than a participant's save, which keeps
+   *  every version. Default `'versions'`. */
+  readonly keep?: 'versions' | 'current'
   /** How the Store is reached. Defaults to IoC `whenReady`; tests hand in a
    *  callback they fire themselves. */
   readonly whenStore?: (ready: (store: DocumentStoreLike) => void) => void
@@ -87,12 +91,14 @@ export class ParticipantDocument<T> extends EventTarget {
   #store: DocumentStoreLike | undefined
   readonly #meaning: string
   readonly #subKey: string | undefined
+  readonly #keep: 'versions' | 'current'
   readonly #parse: (raw: unknown) => T | null
 
   constructor(opts: ParticipantDocumentOptions<T>) {
     super()
     this.#meaning = opts.meaning
     this.#subKey = opts.subKey
+    this.#keep = opts.keep ?? 'versions'
     this.#parse = opts.parse
     try { declarePoolKind(opts.meaning, 'document') } catch { /* an older core — the seed census still names it */ }
     let initial: T | null = null
@@ -143,7 +149,7 @@ export class ParticipantDocument<T> extends EventTarget {
     try {
       await store.initialize?.()
       const pool = await store.getPool?.(this.#meaning)
-      if (pool && store.putPoolDoc) await store.putPoolDoc(pool, encode(value), this.#subKey)
+      if (pool && store.putPoolDoc) await store.putPoolDoc(pool, encode(value), this.#subKey, { keep: this.#keep })
     } catch { /* the in-memory value stands; the next edit tries again */ }
     finally {
       this.#writing = false

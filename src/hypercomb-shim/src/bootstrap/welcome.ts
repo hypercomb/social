@@ -126,13 +126,21 @@ const sameDoor = (a: string, b: string, origin: string): boolean => {
   } catch { return false }
 }
 
+/** The name a card goes by. A front door whose domain opens on a creation
+ *  keeps its card at `host.<zone>` (the worker's HOST_DOOR_LABEL), and that
+ *  card is the zone's host — so it is named as the zone. */
+const hostNameOf = (hostname: string): string => {
+  const rest = hostname.startsWith('host.') ? hostname.slice('host.'.length) : ''
+  return rest.includes('.') ? rest : hostname
+}
+
 /** The card a host shows: the staged front door where there is one, and the
  *  host's own name, the platform's sentence and the platform's doors where
  *  there is not. Pure, so the default is a fact the suite can pin. */
 export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: string): FrontDoor => {
   const links = welcome?.links ?? []
   return {
-    title: welcome?.title || hostname,
+    title: welcome?.title || hostNameOf(hostname),
     tagline: welcome?.tagline || DEFAULT_TAGLINE,
     links,
     footer: PLATFORM_LINKS.filter(door => !links.some(link => sameDoor(link.href, door.href, origin))),

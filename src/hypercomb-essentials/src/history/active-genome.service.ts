@@ -46,7 +46,7 @@ type StoreLike = {
   getLayerPoolBytes(sig: string): Promise<Uint8Array | null>
   getResourceLocal(sig: string): Promise<Blob | null>
   getPool(meaning: string): Promise<FileSystemDirectoryHandle | null>
-  putPoolDoc(pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string): Promise<string | null>
+  putPoolDoc(pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }): Promise<string | null>
   getPoolDoc(pool: FileSystemDirectoryHandle | undefined, subKey?: string): Promise<ArrayBuffer | null>
   bees?: Directory
   dependencies?: Directory
@@ -377,6 +377,7 @@ export class ActiveGenomeService {
       pool,
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
       subKey,
+      { keep: 'current' },   // a derived census, not a save
     )
   }
 

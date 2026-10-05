@@ -42,7 +42,10 @@ const TREE_WALK: WalkCeiling = { nodes: MAX_NODES, bytes: MAX_BYTES, ms: MAX_REA
 const FIND_WALK: WalkCeiling = { nodes: 2_000, bytes: 400_000, ms: 12_000, partial: true }
 /** Children a walk opens at once. */
 const WALK_CONCURRENCY = 16
-const SNAPSHOT_TTL_MS = 2 * 60_000
+/** A leg of three rounds on a slow model outlived two minutes, and its own
+ *  reads then counted as changed (2026-10-04). The table's size still
+ *  bounds it. */
+const SNAPSHOT_TTL_MS = 15 * 60_000
 /** Snapshots kept for revalidation; the oldest falls out first. One leg
  *  alone mints twelve rounds of eight reads and a front-door listing (97),
  *  and every conversation shares this one reader — at 32 a leg evicted its
@@ -118,6 +121,7 @@ type CarriedChild = { readonly name: string; readonly sig: string }
 const MAX_HISTORY_MARKERS = 32
 const COMPACTION_KEY = '@hypercomb.social/Compaction'
 const NOTES_KEY = '@diamondcoreprocessor.com/NotesService'
+const SEARCH_KEY = '@diamondcoreprocessor.com/HiveSearchService'
 const PRELOADER_KEY = '@hypercomb.social/ScriptPreloader'
 const DEPENDENCY_LOADER_KEY = '@hypercomb.social/DependencyLoader'
 const MAX_CODE_ENTRIES = 200
@@ -425,9 +429,12 @@ export class HypercombHiveTreeReader {
     const maxDepth = boundedInteger(options.maxDepth, 2, MAX_DEPTH)
     const maxNodes = Math.max(1, boundedInteger(options.maxNodes, 48, ceiling.nodes))
     const maxBytes = Math.max(1_024, boundedInteger(options.maxBytes, 8_000, ceiling.bytes))
-    const deadline = Date.now() + ceiling.ms
-    // A partial walk stops itself short of the deadline, between pages.
-    const stopAt = ceiling.partial ? deadline - 1_500 : Number.POSITIVE_INFINITY
+    // A partial walk stops itself between batches at `stopAt` and answers
+    // with what it found; its deadline is only the backstop for a read that
+    // never returns. With the two a second and a half apart, a batch that
+    // ran long threw "budget-exceeded" and the whole find failed (2026-10-05).
+    const stopAt = ceiling.partial ? Date.now() + ceiling.ms : Number.POSITIVE_INFINITY
+    const deadline = Date.now() + ceiling.ms + (ceiling.partial ? 20_000 : 0)
     const signal = options.signal
 
     try {
@@ -810,19 +817,84 @@ export class HypercombHiveTreeReader {
     const root = rootLabel(segments)
     const needle = String(query ?? '').trim().toLowerCase()
     if (!needle) return { ok: false, root, code: 'not-found' }
+    // THE SEARCH INDEX FIRST (search/hive-search.service.ts): the record the
+    // participant's own search reads — every name under a layer with its
+    // path, one pool read. Walking alone, a whole-hive find over ~5,900
+    // tiles ran out its time, and a model spent 13 rounds and 124k tokens
+    // finding two tiles route by route (the harness manager, 2026-10-04).
+    // The record is built from the copies parents carry, so the live walk
+    // still runs and its hits come first; when the record covers the whole
+    // route, the walk only needs a tree's reach.
+    const indexed = await this.#indexedNames(segments, needle, options.signal)
+    const ceiling = indexed?.complete ? TREE_WALK : FIND_WALK
     const epoch = await this.#settledEpoch(options.signal)
     const walk = await this.#readTreeLive(segments, {
-      maxDepth: MAX_DEPTH, maxNodes: FIND_WALK.nodes, maxBytes: FIND_WALK.bytes, signal: options.signal,
-    }, epoch !== undefined, FIND_WALK)
-    if (!walk.ok) return { ok: false, root, code: walk.code }
+      maxDepth: MAX_DEPTH, maxNodes: ceiling.nodes, maxBytes: ceiling.bytes, signal: options.signal,
+    }, epoch !== undefined, ceiling)
+    if (!walk.ok && !indexed) return { ok: false, root, code: walk.code }
     const limit = Math.max(1, boundedInteger(options.maxNodes, 48, MAX_NODES))
-    const hits = walk.nodes.filter(node => node.depth > 0 && node.name.toLowerCase().includes(needle))
+    const hits = walk.ok ? walk.nodes.filter(node => node.depth > 0 && node.name.toLowerCase().includes(needle)).map(node => ({ name: node.name, path: node.path })) : []
+    const seen = new Set(hits.map(hit => hit.path.toLowerCase()))
+    for (const hit of indexed?.matches ?? []) {
+      if (seen.has(hit.path.toLowerCase())) continue
+      seen.add(hit.path.toLowerCase())
+      hits.push(hit)
+    }
     return {
       ok: true, root, query: needle,
-      matches: hits.slice(0, limit).map(node => ({ name: node.name, path: node.path })),
-      truncated: walk.truncated || hits.length > limit,
-      snapshot: walk.snapshot,
+      matches: hits.slice(0, limit),
+      truncated: (indexed?.complete ? false : !walk.ok || walk.truncated) || hits.length > limit,
+      snapshot: walk.ok ? walk.snapshot : this.#remember(epoch ?? 0, []),
     }
+  }
+
+  /** Names under a route from the search index's record, or null when the
+   *  hive has no record for that layer yet (the optimize phase mints it).
+   *  `complete`: the record holds the whole subtree, not its first rows. */
+  async #indexedNames(
+    segments: readonly string[],
+    needle: string,
+    signal?: AbortSignal,
+  ): Promise<{ readonly matches: readonly { readonly name: string; readonly path: string }[]; readonly complete: boolean } | null> {
+    const search = this.#lookup<{
+      readRecord?(layerSig: string): Promise<{ readonly rows?: readonly { readonly name?: unknown; readonly path?: unknown }[]; readonly truncated?: boolean } | null>
+    }>(SEARCH_KEY)
+    if (!search?.readRecord) return null
+    const node = await this.readNode(segments, { withContent: false, signal }).catch(() => null)
+    if (!node?.ok) return null
+    const readRecord = search.readRecord
+    const matches: { name: string; path: string }[] = []
+    const take = (rows: readonly { readonly name?: unknown; readonly path?: unknown }[], base: readonly string[]): void => {
+      for (const row of rows) {
+        if (typeof row?.name !== 'string' || !Array.isArray(row.path)) continue
+        if (!row.name.toLowerCase().includes(needle)) continue
+        const path = (row.path as readonly unknown[]).filter((part): part is string => typeof part === 'string')
+        if (!path.length || path.some((part: string) => !part || UNSAFE_NAME.test(part))) continue
+        matches.push({ name: row.name, path: rootLabel([...base, ...path]) })
+      }
+    }
+    const record = await readRecord(node.layerSig).catch(() => null)
+    if (record && Array.isArray(record.rows)) {
+      take(record.rows, segments)
+      return { matches, complete: record.truncated !== true }
+    }
+    // A LARGE HIVE HAS NO RECORD AT ITS ROOT: the search index never keeps a
+    // truncated record, and a hive past its row cap (~5,900 tiles, the cap is
+    // 4,000) truncates there. Its branches are smaller and are kept, so the
+    // route is read branch by branch, one record each.
+    if (!node.children.length) return null
+    const records = await Promise.all(node.children.map(child => readRecord(child.sig).catch(() => null)))
+    let complete = true
+    let any = false
+    node.children.forEach((child, at) => {
+      if (child.name.toLowerCase().includes(needle)) matches.push({ name: child.name, path: rootLabel([...segments, child.name]) })
+      const branch = records[at]
+      if (!branch || !Array.isArray(branch.rows)) { complete = false; return }
+      any = true
+      if (branch.truncated === true) complete = false
+      take(branch.rows, [...segments, child.name])
+    })
+    return any ? { matches, complete } : null
   }
 
   /**
@@ -1331,9 +1403,12 @@ export class HypercombHiveTreeReader {
     this.#pruneSnapshots()
     const snapshots = ids.map(id => this.#snapshots.get(id))
     if (snapshots.some(snapshot => !snapshot)) return false
-    const epoch = history.treeEpoch()
-    if (snapshots.some(snapshot => snapshot!.epoch !== epoch)) return false
 
+    // WHAT WAS READ CHANGED, NOT THE HIVE. The epoch moves on any write
+    // anywhere — another manager filing a note — and on its own it said "the
+    // tree changed while the model was reading it" over /dolphin, where
+    // nothing had (the harness manager, 2026-10-04), sending the participant
+    // to ask again for nothing. The heads the read saw are the test.
     const expected = new Map<string, string>()
     for (const snapshot of snapshots as Snapshot[]) {
       for (const head of snapshot.heads) {
@@ -1345,8 +1420,8 @@ export class HypercombHiveTreeReader {
     for (const [locationSig, layerSig] of expected) {
       if (signal?.aborted) throw stopped()
       const ref = await history.currentLayerRefAt(locationSig)
-      if (!ref || ref.layerSig !== layerSig || history.treeEpoch() !== epoch) return false
+      if (!ref || ref.layerSig !== layerSig) return false
     }
-    return history.treeEpoch() === epoch
+    return true
   }
 }

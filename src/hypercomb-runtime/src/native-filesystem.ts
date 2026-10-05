@@ -321,10 +321,11 @@ class NativeFileHandle {
  * DIRECTORY. That distinction is load-bearing for `putPoolDoc`'s check of the
  * space it writes into — but `kind === 'file'` is NOT its shape guard
  * (store.ts, putPoolDoc): a molecule's succession atoms are 64-hex files too.
- * `putPoolDoc` removes nothing; it keeps every version and adds the next
- * marker, and only on positive proof that the target is the caller's own
- * document space — a `subKey` sub-bucket, or a colon-carrying meaning — never
- * on a bare-word address. Reporting a sub-bucket as a directory still
+ * A save through `putPoolDoc` keeps every version and adds the next marker; a
+ * write that is not a save (`keep: 'current'`) replaces the old atoms. Either
+ * happens only on positive proof that the target is the caller's own document
+ * space — a `subKey` sub-bucket, or a colon-carrying meaning — never on a
+ * bare-word address. Reporting a sub-bucket as a directory still
  * matters: a sub-bucket must never be read as a member.
  */
 class NativeSigDirectory {

@@ -135,6 +135,9 @@ const ROPE_MAX_SPEED = 1300            // cap on total roped speed (keeps swings
 // W/S turn the one aim — the rope and the weapon share it (jwize, 2026-10-04:
 // "you only need one aim") — at this rate while held.
 const AIM_SPEED = 1.6                  // radians per second
+// Letting go of a rope that stuck turns the aim to this elevation on the OTHER
+// side from that rope: the next rope starts there, never straight up (jwize).
+const REROPE_ELEVATION = Math.PI / 4
 
 // Weapons
 const CHARGE_MIN = 260                 // throw speed at a tap
@@ -294,11 +297,19 @@ export class RoperEngine {
   }
 
   releaseRope(): void { this.rope = null }
-  /** Space / right-click: detach when swinging, otherwise (re)fire — so you can
-   *  pop the rope out again and again to range a swing before committing. */
+  /** J / right-click: detach when swinging, otherwise (re)fire — so you can
+   *  pop the rope out again and again to range a swing before committing.
+   *  Letting go of a rope that stuck turns the aim to REROPE_ELEVATION on the
+   *  other side from it (toward the worm's facing if it went straight up);
+   *  W/S adjust from there. */
   toggleRope(): void {
-    if (this.rope?.phase === 'attached') this.releaseRope()
-    else this.fireRope()
+    const r = this.rope, w = this.active
+    if (r?.phase !== 'attached') { this.fireRope(); return }
+    this.releaseRope()
+    if (!w) return
+    const side: 1 | -1 = Math.abs(r.dx) < 1e-6 ? w.facing : r.dx > 0 ? -1 : 1
+    w.facing = side
+    this.aimAngle = Math.atan2(-Math.sin(REROPE_ELEVATION), side * Math.cos(REROPE_ELEVATION))
   }
 
   /** Throw the selected weapon along the aim at the given power (0..1). One

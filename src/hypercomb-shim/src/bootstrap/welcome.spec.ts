@@ -60,6 +60,11 @@ describe('frontDoorOf — the default experience, and a staged one on top', () =
     expect(door.footer).toEqual(PLATFORM_LINKS)
   })
 
+  it('a card at host.<zone> is the host of the zone, and goes by the zone', () => {
+    expect(frontDoorOf(null, 'host.pointblanksolutions.ca', 'https://host.pointblanksolutions.ca').title).toBe('pointblanksolutions.ca')
+    expect(frontDoorOf(null, 'host.ca', 'https://host.ca').title).toBe('host.ca')
+  })
+
   it('a staged front door leads, and the footer never repeats a door its links already open', () => {
     const door = frontDoorOf({
       title: 'hypercomb',

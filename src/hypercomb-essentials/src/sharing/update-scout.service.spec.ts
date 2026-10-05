@@ -21,7 +21,7 @@ const manifestOf = (roots: Record<string, string>): HiveManifest =>
 describe('readInstallFollow', () => {
   it('parses a pinned follow and defaults hosts + channel', () => {
     const parsed = readInstallFollow(storageOf({ [INSTALL_FOLLOW_KEY]: JSON.stringify({ pubkey: PUB }) }), null)
-    expect(parsed).toEqual({ pubkey: PUB, hosts: ['pluginthematrix.com'], channel: 'essentials' })
+    expect(parsed).toEqual({ pubkey: PUB, hosts: ['hypercomb.com'], channel: 'essentials' })
   })
 
   it('treats absence and malformation as no follow', () => {

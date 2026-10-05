@@ -48,7 +48,7 @@ export type TutorialArtifactRecord = {
 
 type StoreApi = {
   getPool(meaning: string): Promise<FileSystemDirectoryHandle | null>
-  putPoolDoc(pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string): Promise<string | null>
+  putPoolDoc(pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }): Promise<string | null>
   getPoolDoc(pool: FileSystemDirectoryHandle | undefined, subKey?: string): Promise<ArrayBuffer | null>
 }
 type LineageApi = { domain?: () => string }
@@ -118,7 +118,8 @@ export const writeTutorialRecord = async (record: TutorialArtifactRecord): Promi
   const address = await wordAddress(record.segments)
   if (!address) return   // no word (the root), no address, no write — never a path
   const bytes = new TextEncoder().encode(JSON.stringify(record, null, 2))
-  await s.putPoolDoc(pool, bytes.buffer as ArrayBuffer, address)
+  // Written by the tour, not saved by the participant: only the current record is kept.
+  await s.putPoolDoc(pool, bytes.buffer as ArrayBuffer, address, { keep: 'current' })
 }
 
 /** Document pools always hold one current member — clearing writes a tombstone. */

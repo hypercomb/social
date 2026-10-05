@@ -181,6 +181,27 @@ export class HiveSearchService {
    * paying out — an unchanged child has an unchanged sig, and its record is
    * therefore still exactly true.
    */
+  /**
+   * THE BRANCHES OF A LAYER, EACH ITS OWN RECORD. A hive past the row cap
+   * gets no record at its root (a truncated record is never kept), and the
+   * root's derive stops adding branches when its rows reach the cap — so the
+   * branches after that point were never derived at all, pass after pass,
+   * and a hive-wide find never saw /dolphin (2026-10-05). This derives each
+   * branch that has no record, within the budget; a branch too big for one
+   * pass still keeps every complete record beneath it, so the next pass
+   * starts further on. Derived cache only — nothing here is truth.
+   */
+  warmBranches = async (layerSig: string, budget: { nodes: number; cancelled?: () => boolean }): Promise<void> => {
+    const manifest = await this.#manifestOf(layerSig)
+    if (!manifest) return
+    for (const entry of manifest) {
+      if (budget.cancelled?.() || budget.nodes <= 0) return
+      if (await this.readRecord(entry.sig)) continue
+      const record = await this.derive(entry.sig, budget)
+      if (record) await this.writeRecord(entry.sig, record)
+    }
+  }
+
   derive = async (
     layerSig: string,
     budget: { nodes: number; cancelled?: () => boolean },

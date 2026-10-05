@@ -70,7 +70,7 @@ export interface FacetStore {
    *  Absent in a fake that stores raw bytes only. */
   getResourceLocal?: (sig: string) => Promise<Blob | null | undefined>
   /** The document-pool contract, for the per-device minted record. */
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
   putArtifactMeta?: (
     kind: 'layer' | 'resource' | 'dependency' | 'bee',
@@ -147,7 +147,8 @@ const writeMinted = async (store: FacetStore, facet: string, pubkey: string, rec
     const pool = await store.getPool(FACET_MINTED_MEANING)
     if (!pool) return
     const bytes = new TextEncoder().encode(JSON.stringify({ facet, pubkey, ...record, at: Date.now() })).buffer as ArrayBuffer
-    await store.putPoolDoc(pool, bytes, mintedKey(facet, pubkey))
+    // Bookkeeping for the anti-rollback rule, not a save: only the latest is kept.
+    await store.putPoolDoc(pool, bytes, mintedKey(facet, pubkey), { keep: 'current' })
   } catch { /* the cache still holds it for this session */ }
 }
 

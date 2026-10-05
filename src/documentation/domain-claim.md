@@ -152,6 +152,26 @@ host; `@<zone>` is read as that zone's write face — the zone root itself.
   hive's Hosts (`hosts:add`), so the Publish panel shows it as a switch.
 - **contested** / **refused** — a toast with the reason.
 
+## Opening the domain on a creation
+
+A claimed apex is its host's front door: the card, with the creations
+switched on here. The claimant can instead open the bare domain on one of
+their creations (jwize 2026-10-05, for pointblanksolutions.ca: the domain is
+both the offer and the proof of the hosting). In the Publish panel, on the
+domain's row, Own address → **Make it the front page of `<domain>`**. That
+signs `addresses["<domain>"] = "<lineage>"` in the index; the label is `@`,
+the apex's own name in DNS.
+
+- The apex then serves that creation through the visitor engine, exactly as
+  any door serves its site: its page, its tiles, every view and filter.
+- One origin runs one shell (the card and the visitor engine each bring their
+  own service worker and storage), so the card moves to **`host.<domain>`**.
+  That first-level name is reserved on every front door: never a site, never
+  an own address, and read-only. `/hosts` and `/@hypercomb` on the apex
+  redirect there.
+- The apex stays the zone root, so every write still lands there.
+- **Use the root path** on the same row puts the card back at the apex.
+
 ## Contested and lost claims
 
 A contest lapses 7 days after it began. Before that, the operator decides it

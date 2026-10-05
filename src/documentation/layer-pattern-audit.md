@@ -142,7 +142,7 @@ jwize's points that shape it:
 
 | # | Phase | Notes |
 |---|---|---|
-| 0 | Step 1 BUILT: `putPoolDoc` keeps every version, max marker is current. Wording TIDIED 2026-10-01: `pool-kinds.ts` (`deletion` is now `'keeps-versions'`, with its two specs), `directory-safety.ts` header and veto doc, `native-filesystem.ts`, `pool-registry.ts`, `address-syntax.md`, `molecule-index.md`, and the comments in `chat-blurb.ts`, `tree-insight.ts`, `registry-document.ts` | still open: adopt a legacy member as marker 0 on first write; `chat-blurb.ts` now grows one atom per distinct save (prune policy) |
+| 0 | Step 1 BUILT: `putPoolDoc` keeps every version, max marker is current. Wording TIDIED 2026-10-01: `pool-kinds.ts` (`deletion` is now `'keeps-versions'`, with its two specs), `directory-safety.ts` header and veto doc, `native-filesystem.ts`, `pool-registry.ts`, `address-syntax.md`, `molecule-index.md`, and the comments in `chat-blurb.ts`, `tree-insight.ts`, `registry-document.ts` | still open: adopt a legacy member as marker 0 on first write. The growth question is settled (decision 1 below): writes that are not a participant's save pass `keep: 'current'` |
 | 1 | The door: `update(meta)` contract in core + one implementation over `putPoolDoc` and `LayerCommitter` (`commitSlotSet/Append/Remove/Swap`); `restore` is a new marker naming an earlier atom | the facade, domain-namespaced, with the admission gate |
 | 2 | The RATCHET, early: no new `removeEntry` / `createWritable` / `localStorage.setItem` outside the storage module and a frozen allowlist of today's sites (101 / 63 / 107) that may only shrink | stops new drift now, costs little |
 | 3 | Sets as successions with hide entries, one small pilot first (`participant-features` or `code-trust`), then `tile-public`, `pheromone-marks`, `substrate:references`, `concealment` (reveal = a new entry), the optimization pool's `hidden` kind (own pool), hosts LAST | hosts files carry another session's uncommitted edits: coordinate first |
@@ -154,7 +154,7 @@ jwize's points that shape it:
 
 ## Decisions still jwize's
 
-1. Prune policy for document history (one atom and one marker per distinct save; nothing cleans it yet).
+1. ~~Prune policy for document history.~~ DECIDED 2026-10-03 (jwize): *"saves never happen without human intent."* A write the participant deliberately caused keeps every version and nothing prunes it. A write the software makes on its own is not a save: `putPoolDoc(…, { keep: 'current' })` replaces the old atoms and lays no marker (same space proof). Fifteen writers pass it (chat blurbs, route flows, stream checkpoints, chat and context drafts, clipboard, active genome, hive format, substrate model sets, translation cache, Solomon resident chat and designer draft, tutorial provenance, facet minted). The usage tracker that wrote most of all is retired outright (no tracking).
 2. Atomic multi-item writes: `update` takes a list, writes every atom, then advances the markers (crash-survivable, not atomic), or something stronger.
 3. Which slots the transport projection mirrors, and what a peer must verify.
 4. The pilot pool for phase 3, and when the hosts files are free.

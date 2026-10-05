@@ -470,7 +470,7 @@ type StoreLike = {
   /** Opens a pool WITHOUT creating it — every read path. */
   openPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
   /** One current document per sub-key; writing it drops the previous one. */
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
   listOptimizations?: () => Promise<string[]>
   getOptimization?: (sig: string) => Promise<Blob | null>
@@ -2365,7 +2365,8 @@ export const writeRouteFlow = async (record: RouteFlowRecord): Promise<boolean> 
     const pool = await flowsPool(store, true)
     if (!pool || !store?.putPoolDoc) return false
     const bytes = new TextEncoder().encode(JSON.stringify(checked))
-    return !!(await store.putPoolDoc(pool, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, checked.convoId))
+    // The organizer's own output, not a save: only the current flow is kept.
+    return !!(await store.putPoolDoc(pool, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, checked.convoId, { keep: 'current' }))
   } catch { return false }
 }
 

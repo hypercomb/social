@@ -1046,6 +1046,29 @@ test('a front-door apex is the shim host card; the ledger and the heap stay on t
   } finally { globalThis.fetch = realFetch }
 })
 
+test('the host card names its host in the served HTML — the staged welcome, else the host itself', async () => {
+  const bindings = { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], lineage: 'pluginthematrix.com', frontDoor: true } }
+  const { env } = await fixture(undefined, bindings)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  const shell = '<!doctype html><html><head><title>Hypercomb</title></head><body></body></html>'
+  const realFetch = globalThis.fetch
+  let welcome = null
+  globalThis.fetch = async (url) => String(url).endsWith('/welcome.json')
+    ? (welcome ? new Response(JSON.stringify(welcome), { headers: { 'content-type': 'application/json' } }) : new Response('nope', { status: 404 }))
+    : new Response(shell, { headers: { 'content-type': 'text/html' } })
+  try {
+    let html = await (await worker.fetch(page('https://pluginthematrix.com/'), env)).text()
+    assert.match(html, /<title>pluginthematrix\.com<\/title>/)
+    assert(html.includes('<meta property="og:title" content="pluginthematrix.com">'))
+    assert(html.includes('<meta property="og:description" content="Discover creations'))
+    welcome = { title: 'Plugin the Matrix', tagline: 'Hives & "creations"' }
+    html = await (await worker.fetch(page('https://pluginthematrix.com/'), env)).text()
+    assert.match(html, /<title>Plugin the Matrix<\/title>/)
+    assert(html.includes('<meta name="description" content="Hives &amp; &quot;creations&quot;">'))
+    assert(!html.includes('(shim)'))
+  } finally { globalThis.fetch = realFetch }
+})
+
 test('a byte mirror serves the host door while retaining its signed read and write routes', async () => {
   const { env } = await fixture()
   env.HOST_DOOR_ORIGIN = 'https://door.example'
@@ -2985,4 +3008,69 @@ test('a signed index carries its addresses only in the bounded shape', async () 
   const bag = await sha256Hex('shop.pluginthematrix.com')
   assert.ok(env.CONTENT.held.has(`${bag}/00000000`))
   assert.equal((await doorMeta('https://shop.pluginthematrix.com/', env)).record.lineage, 'revolucion')
+})
+
+test('a front door opens on the creation its publisher signs at the apex, and the card moves to host.<zone>', async () => {
+  const welcome = 'b'.repeat(64)
+  const event = await signedIndex({ 'pointblanksolutions-ca': welcome, camelflage: head }, 1_800_000_000, {}, undefined, {
+    addresses: { 'pluginthematrix.com': 'pointblanksolutions-ca' },
+  })
+  const { env } = await fixture(event, FRONT_DOOR_ZONE)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  visitorAssets(env, [])
+  const card = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => { card.push(String(url)); return new Response('host card', { headers: { 'content-type': 'text/html' } }) }
+  try {
+    // The apex is the creation's door: the visitor engine, carrying its door,
+    // with every engine file its own.
+    const door = carriedDoor(await pageAt('https://pluginthematrix.com/', env))
+    assert.deepEqual([door.lineage, door.layer, door.pubkey], ['pointblanksolutions-ca', welcome, pubkey])
+    assert.equal(carriedDoor(await pageAt('https://pluginthematrix.com/work/anything', env)).lineage, 'pointblanksolutions-ca')
+    assert.equal(await (await worker.fetch(new Request('https://pluginthematrix.com/main.js'), env)).text(), 'export {}')
+    assert.equal((await doorMeta('https://pluginthematrix.com/', env)).record.lineage, 'pointblanksolutions-ca')
+    assert.deepEqual(card, [], 'an opened apex never reaches the card')
+    // The card answers at host.<zone>, files and all …
+    assert.equal(await pageAt('https://host.pluginthematrix.com/', env), 'host card')
+    assert.equal(await pageAt('https://host.pluginthematrix.com/main.js', env), 'host card')
+    // … the apex hands it the card's own routes …
+    for (const path of ['/hosts', '/@hypercomb']) {
+      const moved = await worker.fetch(page(`https://pluginthematrix.com${path}`), env)
+      assert.equal(moved.status, 302, path)
+      assert.equal(moved.headers.get('location'), `https://host.pluginthematrix.com${path}`)
+    }
+    // … and a project keeps its own label door beside it.
+    assert.equal(carriedDoor(await pageAt('https://camelflage.pluginthematrix.com/', env)).lineage, 'camelflage')
+    // The host door writes nothing; the apex still takes every write.
+    const next = await signedIndex({ 'pointblanksolutions-ca': welcome, camelflage: head }, 1_800_000_001, {}, undefined, {
+      addresses: { 'pluginthematrix.com': 'pointblanksolutions-ca' },
+    })
+    assert.equal((await putIndexAt(env, 'host.pluginthematrix.com', next)).status, 405)
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', next)).status, 200)
+    // The ledger lists the creation at the apex.
+    const sites = JSON.parse(await publicationsAt(env, 'pluginthematrix.com')).sites
+    assert.equal(sites.find((site) => site.lineage === 'pointblanksolutions-ca').url, 'https://pluginthematrix.com/')
+    // host.<zone> is never a site or an own address, whatever an index names.
+    assert.ok(!sites.some((site) => site.hosts.some((d) => d.host === 'host.pluginthematrix.com')))
+  } finally { globalThis.fetch = realFetch }
+})
+
+test('a front door with no apex address keeps the card at the apex, and at host.<zone> too', async () => {
+  const event = await signedIndex({ host: head, camelflage: head }, 1_800_000_000, {}, undefined, {
+    addresses: { 'host.pluginthematrix.com': 'camelflage' },
+  })
+  const { env } = await fixture(event, FRONT_DOOR_ZONE)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  visitorAssets(env, [])
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('host card', { headers: { 'content-type': 'text/html' } })
+  try {
+    assert.equal(await pageAt('https://pluginthematrix.com/', env), 'host card')
+    assert.equal(await pageAt('https://host.pluginthematrix.com/', env), 'host card', 'a lineage named host and an address there both lose to the card')
+    assert.equal((await worker.fetch(page('https://pluginthematrix.com/hosts'), env)).status, 200, 'the card keeps its own routes at the apex')
+  } finally { globalThis.fetch = realFetch }
+  // On a zone that is not a front door, host.<zone> is an ordinary name.
+  const plain = await fixture(event)
+  visitorAssets(plain.env, [])
+  assert.equal(carriedDoor(await pageAt('https://host.pluginthematrix.com/', plain.env)).lineage, 'camelflage')
 })

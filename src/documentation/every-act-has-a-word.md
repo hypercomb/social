@@ -58,6 +58,7 @@ mechanism.
 | `/undo`, `/redo` | keystroke, control bar, phone deck | walks `HistoryCursorService`; the one wholly reversible verb in the language |
 | `/copy`, `/cut` | keystroke, control bar | NAME their tiles on the machine seam — the button acts on the selection, which a speaker cannot see |
 | `/paste` | keystroke, control bar | bare means something entire: place what is held, where you are |
+| `/card`, `/card wear <template>`, `/card <tile> wear <template>` | writing a tile's `card:data` and page records over the bridge | a card wears a template by reference: the template's page and theme, its own details and picture. Bare `card` says what a card wears. Added 2026-10-05 with card templates (business-card.md) |
 | `/opens <tile> as <view>`, `/opens <tile> as hexagons` | ctrl+click on a tile's view icon, the header rail's ctrl+click | the same `features:default` toggle the icon emits; bare `opens <tile>` says how it opens. Added 2026-10-04 with the tile-icon gesture, in the same pass |
 
 And `/remove` — which already had a word — became sayable by a machine, at
