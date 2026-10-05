@@ -52,3 +52,26 @@ describe('writeRecord', () => {
     expect(await service.readRecord(SIG)).toEqual({ v: 1, rows: [] })
   })
 })
+
+describe('warmBranches', () => {
+  it('gives every branch of a root too big for one record a record of its own', async () => {
+    // A root past the row cap keeps no record, and its derive stops adding
+    // branches at the cap — the later branches were never derived at all.
+    const { pool, files } = fakePool()
+    const sig = (n: number): string => n.toString(16).padStart(64, '0')
+    const manifests = new Map<string, unknown[]>([
+      [sig(1), [{ sig: sig(2), layer: { name: 'big' } }, { sig: sig(3), layer: { name: 'dolphin' } }]],
+      [sig(3), [{ sig: sig(4), layer: { name: 'members' } }]],
+    ])
+    const store = { getPool: async () => pool, readChildrenManifest: async (s: string) => manifests.get(s) ?? null }
+    const resolve = (key: string) => key === '@hypercomb.social/Store' ? store : undefined
+    ;(globalThis as unknown as { ioc: { get: (k: string) => unknown } }).ioc.get = resolve
+    vi.stubGlobal('get', resolve)
+    const service = new HiveSearchService()
+    // 'big' already has a record; 'dolphin' is the branch the root never reached.
+    await service.writeRecord(sig(2), { v: 1, rows: [] })
+    await service.warmBranches(sig(1), { nodes: 50 })
+    expect(files.has(sig(3))).toBe(true)
+    expect((await service.readRecord(sig(3)))?.rows.map(row => row.name)).toEqual(['members'])
+  })
+})

@@ -40,6 +40,11 @@ const NODES_PER_PASS = 600
  *  just warmed, so in the settled case it spends almost none of this. */
 const ROOT_NODES_PER_PASS = 400
 
+/** Reads for the root's own branches when the root is past the row cap and
+ *  keeps no record: each branch is then a record of its own, and a branch
+ *  the root's derive never reached would otherwise never get one. */
+const BRANCH_NODES_PER_PASS = 400
+
 /** Layers whose records get minted in one pass. The rest wait; nothing is
  *  lost, because the queue is keyed by sig and a sig is never in a hurry. */
 const LAYERS_PER_PASS = 12
@@ -100,6 +105,8 @@ export class SearchIndexDrone extends Drone {
       if (await search.readRecord(rootSig)) return
       const record = await search.derive(rootSig, budget)
       if (record) await search.writeRecord(rootSig, record)
+      // Past the row cap the root keeps no record: warm its branches instead.
+      if (record?.truncated) await search.warmBranches(rootSig, { nodes: BRANCH_NODES_PER_PASS })
     } catch { /* the root is warmed next pass — nothing depends on it */ }
   }
 }
