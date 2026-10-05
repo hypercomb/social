@@ -516,6 +516,23 @@ describe('a page history cannot pin to one signature', () => {
     expect(projects.ok && projects.matches.map(match => match.path)).toEqual(['/projects'])
   })
 
+  it('reads a large hive branch by branch when its root has no record', async () => {
+    // The search index never keeps a truncated record, so a hive past its
+    // row cap has none at the root; its branches have theirs.
+    const fx = fixture()
+    const readRecord = vi.fn(async (layerSig: string) => layerSig === sig(2)
+      ? { v: 1, rows: [{ sig: sig(9), name: 'Deep Betz', path: ['far', 'Deep Betz'] }] }
+      : layerSig === sig(3) ? { v: 1, rows: [] } : null)
+    const services = new Map<string, unknown>([
+      ['@diamondcoreprocessor.com/HistoryService', fx.history],
+      ['@hypercomb.social/Store', { getResource: vi.fn(async () => null) }],
+      ['@diamondcoreprocessor.com/LayerCommitter', { settled: fx.settled }],
+      ['@diamondcoreprocessor.com/HiveSearchService', { readRecord }],
+    ])
+    const reader = new HypercombHiveTreeReader(<T>(key: string) => services.get(key) as T | undefined)
+    expect(await reader.find('betz', [])).toMatchObject({ ok: true, truncated: false, matches: [{ name: 'Deep Betz', path: '/projects/far/Deep Betz' }] })
+  })
+
   it('walks into a page by its bag’s latest marker before the older copy its parent carries', async () => {
     // /dolphin/associates read as empty — its parent's copy predates its four
     // tiles — while its own bag's latest marker held them.

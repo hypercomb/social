@@ -429,9 +429,12 @@ export class HypercombHiveTreeReader {
     const maxDepth = boundedInteger(options.maxDepth, 2, MAX_DEPTH)
     const maxNodes = Math.max(1, boundedInteger(options.maxNodes, 48, ceiling.nodes))
     const maxBytes = Math.max(1_024, boundedInteger(options.maxBytes, 8_000, ceiling.bytes))
-    const deadline = Date.now() + ceiling.ms
-    // A partial walk stops itself short of the deadline, between pages.
-    const stopAt = ceiling.partial ? deadline - 1_500 : Number.POSITIVE_INFINITY
+    // A partial walk stops itself between batches at `stopAt` and answers
+    // with what it found; its deadline is only the backstop for a read that
+    // never returns. With the two a second and a half apart, a batch that
+    // ran long threw "budget-exceeded" and the whole find failed (2026-10-05).
+    const stopAt = ceiling.partial ? Date.now() + ceiling.ms : Number.POSITIVE_INFINITY
+    const deadline = Date.now() + ceiling.ms + (ceiling.partial ? 20_000 : 0)
     const signal = options.signal
 
     try {
@@ -859,17 +862,39 @@ export class HypercombHiveTreeReader {
     if (!search?.readRecord) return null
     const node = await this.readNode(segments, { withContent: false, signal }).catch(() => null)
     if (!node?.ok) return null
-    const record = await search.readRecord(node.layerSig).catch(() => null)
-    if (!record || !Array.isArray(record.rows)) return null
+    const readRecord = search.readRecord
     const matches: { name: string; path: string }[] = []
-    for (const row of record.rows) {
-      if (typeof row?.name !== 'string' || !Array.isArray(row.path)) continue
-      if (!row.name.toLowerCase().includes(needle)) continue
-      const path = (row.path as readonly unknown[]).filter((part): part is string => typeof part === 'string')
-      if (!path.length || path.some((part: string) => !part || UNSAFE_NAME.test(part))) continue
-      matches.push({ name: row.name, path: rootLabel([...segments, ...path]) })
+    const take = (rows: readonly { readonly name?: unknown; readonly path?: unknown }[], base: readonly string[]): void => {
+      for (const row of rows) {
+        if (typeof row?.name !== 'string' || !Array.isArray(row.path)) continue
+        if (!row.name.toLowerCase().includes(needle)) continue
+        const path = (row.path as readonly unknown[]).filter((part): part is string => typeof part === 'string')
+        if (!path.length || path.some((part: string) => !part || UNSAFE_NAME.test(part))) continue
+        matches.push({ name: row.name, path: rootLabel([...base, ...path]) })
+      }
     }
-    return { matches, complete: record.truncated !== true }
+    const record = await readRecord(node.layerSig).catch(() => null)
+    if (record && Array.isArray(record.rows)) {
+      take(record.rows, segments)
+      return { matches, complete: record.truncated !== true }
+    }
+    // A LARGE HIVE HAS NO RECORD AT ITS ROOT: the search index never keeps a
+    // truncated record, and a hive past its row cap (~5,900 tiles, the cap is
+    // 4,000) truncates there. Its branches are smaller and are kept, so the
+    // route is read branch by branch, one record each.
+    if (!node.children.length) return null
+    const records = await Promise.all(node.children.map(child => readRecord(child.sig).catch(() => null)))
+    let complete = true
+    let any = false
+    node.children.forEach((child, at) => {
+      if (child.name.toLowerCase().includes(needle)) matches.push({ name: child.name, path: rootLabel([...segments, child.name]) })
+      const branch = records[at]
+      if (!branch || !Array.isArray(branch.rows)) { complete = false; return }
+      any = true
+      if (branch.truncated === true) complete = false
+      take(branch.rows, [...segments, child.name])
+    })
+    return any ? { matches, complete } : null
   }
 
   /**
