@@ -2022,7 +2022,7 @@ function htmlText(value) {
  *  bookmark) reads the HTML as served and runs no script, so the site's title
  *  set at boot never reaches it — every shared link read "Published website".
  *  The served page carries the title and the share card itself. */
-function shareHead(title, request, base) {
+function shareHead(title, request, base, description = '') {
   const url = new URL(request.url)
   const root = `${url.origin}${base || '/'}`
   const name = htmlText(title)
@@ -2030,6 +2030,7 @@ function shareHead(title, request, base) {
   return `<meta property="og:type" content="website"><meta property="og:title" content="${name}"><meta property="og:site_name" content="${name}">`
     + `<meta property="og:url" content="${page}"><meta property="og:image" content="${htmlText(`${root}apple-touch-icon.png`)}">`
     + `<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${name}">`
+    + (description ? `<meta name="description" content="${htmlText(description)}"><meta property="og:description" content="${htmlText(description)}">` : '')
 }
 
 async function serveVisitorAsset(request, env, { spa = true, door = null, install = null, index = null, base = null, title = null } = {}) {

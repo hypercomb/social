@@ -1046,6 +1046,29 @@ test('a front-door apex is the shim host card; the ledger and the heap stay on t
   } finally { globalThis.fetch = realFetch }
 })
 
+test('the host card names its host in the served HTML — the staged welcome, else the host itself', async () => {
+  const bindings = { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], lineage: 'pluginthematrix.com', frontDoor: true } }
+  const { env } = await fixture(undefined, bindings)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  const shell = '<!doctype html><html><head><title>Hypercomb</title></head><body></body></html>'
+  const realFetch = globalThis.fetch
+  let welcome = null
+  globalThis.fetch = async (url) => String(url).endsWith('/welcome.json')
+    ? (welcome ? new Response(JSON.stringify(welcome), { headers: { 'content-type': 'application/json' } }) : new Response('nope', { status: 404 }))
+    : new Response(shell, { headers: { 'content-type': 'text/html' } })
+  try {
+    let html = await (await worker.fetch(page('https://pluginthematrix.com/'), env)).text()
+    assert.match(html, /<title>pluginthematrix\.com<\/title>/)
+    assert(html.includes('<meta property="og:title" content="pluginthematrix.com">'))
+    assert(html.includes('<meta property="og:description" content="Discover creations'))
+    welcome = { title: 'Plugin the Matrix', tagline: 'Hives & "creations"' }
+    html = await (await worker.fetch(page('https://pluginthematrix.com/'), env)).text()
+    assert.match(html, /<title>Plugin the Matrix<\/title>/)
+    assert(html.includes('<meta name="description" content="Hives &amp; &quot;creations&quot;">'))
+    assert(!html.includes('(shim)'))
+  } finally { globalThis.fetch = realFetch }
+})
+
 test('a byte mirror serves the host door while retaining its signed read and write routes', async () => {
   const { env } = await fixture()
   env.HOST_DOOR_ORIGIN = 'https://door.example'
