@@ -223,7 +223,9 @@ const main = async () => {
         const reply = await send({ op: 'chat-asked', cell: askId })
         if (!reply.ok) return fail(reply.error)
         if (reply.data?.done) {
-          const { outcome, rounds, reads, tokens, answer, left, error } = reply.data
+          const { outcome, rounds, reads, tokens, answer, left, error, held } = reply.data
+          // Held for jwize: the change waits in Execution; nothing ran yet.
+          if (outcome === 'held') return print({ convoId, outcome, held, note: 'waiting for jwize in Execution — report it; do not try to get around the hold' })
           return print({ convoId, outcome, rounds, reads, ...(reads === 0 ? { warning: 'nothing was read in this turn: check every claim about the hive yourself' } : {}), tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
         }
       }

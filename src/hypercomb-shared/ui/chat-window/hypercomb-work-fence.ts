@@ -228,7 +228,11 @@ export const HANDOFF_INSTRUCTION = 'HANDING OFF. If the request is beyond what y
 const carry = (request: string): string => {
   const text = String(request ?? '').trim()
   const cut = text.length > REQUEST_ECHO_MAX ? `${text.slice(0, REQUEST_ECHO_MAX)}…` : text
-  return cut ? `\n\nThe participant's request, for reference: «${cut}»` : ''
+  // THE HIVE'S NOTE IS NOT THE PARTICIPANT'S WORDS. Sent back to read first,
+  // a model answered the note — "You're right — I refused rather than
+  // answering… Reading them now." — and that went out in the answer (the
+  // harness manager, 2026-10-04).
+  return cut ? `\n\nThe participant's request, for reference: «${cut}»\n\nThis message is from the hive, not the participant: do not reply to it, thank it or apologise for it. Write only your answer to the participant.` : ''
 }
 
 const bullets = (lines: readonly string[]): string => lines.map(line => `- ${line}`).join('\n')

@@ -3150,6 +3150,27 @@ export class ChatWindowComponent implements OnDestroy {
         done()
       }))
     })
+    // HELD FOR THE PARTICIPANT: a change Jev marked for review, or one that
+    // leaves the machine or follows someone else's words, waits for a hand
+    // even in a trusted conversation. The asker hears so at once, with the
+    // lines, instead of waiting out its own timeout (the harness manager's
+    // write probe, 2026-10-04: fifteen minutes, then nothing). The turn
+    // itself waits on in Execution.
+    let answered = false
+    offs.push(EffectBus.on<{ at?: number; waiting?: readonly { id: string; convoId: string; lines: readonly string[]; review?: boolean; needsGrant?: boolean; leaves?: boolean; foreign?: boolean }[] }>('agent:held', payload => {
+      if (answered || (payload?.at ?? 0) < since) return
+      const held = (payload?.waiting ?? []).filter(row => row.convoId === ask.convoId && (row.review || row.needsGrant || row.leaves || row.foreign))
+      if (!held.length) return
+      answered = true
+      EffectBus.emit('chat:asked', {
+        askId: ask.askId, convoId: ask.convoId, at: Date.now(), ok: false, outcome: 'held',
+        held: held.map(row => ({
+          id: row.id, lines: row.lines,
+          why: row.review ? 'Jev marked it for review' : row.needsGrant ? 'it needs a grant' : row.leaves ? 'it leaves this machine' : 'it follows someone else’s words',
+        })),
+        rounds: 0, reads: 0, tokens: 0, answer: '',
+      })
+    }))
     if (ask.trust) this.#trustConversation(ask.convoId, true)
     let failure = ''
     await this.#load(ask.convoId)
@@ -3166,6 +3187,8 @@ export class ChatWindowComponent implements OnDestroy {
       const last = [...turns].reverse().find(entry => entry.role === 'assistant' && entry.at >= since)
       if (!failure && receipt?.outcome === 'failed') failure = this.#turnFailures.get(ask.convoId) ?? ''
       this.#turnFailures.delete(ask.convoId)
+      if (answered) return
+      answered = true
       EffectBus.emit('chat:asked', {
         askId: ask.askId, convoId: ask.convoId, at: Date.now(),
         ok: !failure && !!last,
