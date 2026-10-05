@@ -1380,6 +1380,7 @@
   "slash.view": "Altıgenler ve web sitesi görünümü arasında geçiş yap",
   "slash.website": "Web sitesi görünümünü aç/kapat, alt ağacı dışa aktar veya Claude ile sayfalar oluştur",
   "slash.opens": "Bir karonun nasıl açılacağını ayarla: görünümlerinden biri olarak ya da altıgenler olarak",
+  "slash.card": "Bir kart şablonu giy veya kartın ne giydiğini söyle",
   "slash.tutor": "Çalışma oyunları — bu kovanı aralıklı tekrar oyunlarına dönüştür; on | off | here | build | list",
   "slash.present": "Sunum görünümü — bu alanın diyagram döşemelerini slayt olarak oynat; on | off | here | slide",
   "slash.reference": "Buraya bir referans döşemesi bırak — başka bir konuma canlı işaretçi; /reference <path>",

@@ -253,12 +253,28 @@ keeps opening as its card now that it has children, for visitors and, in the
 authoring hive, on arrival. `business-card` wears `hexagons`, which stops that
 mark cascading onto a tile with no page.
 
-### Making your own from a template
+### Making your own from a template, and changing it
 
-Wear the template's page signature on your own tile, put your card in your own
-`card:data`, and name a theme. In the silo (a card kept on your device at
-someone else's domain) the card editor's theme picker does the same, and the
-card's link carries the theme's name.
+The word is `card wear <template>` (`commands/card.queen.ts`). Standing on your
+card's tile:
+
+```
+card                                        what this card wears
+card wear business-card/template/graphite   wear the Graphite template
+card wear /jaime-weise/business-card/template/honeycomb-edge
+```
+
+Wearing is two references and never a copy: the tile's page becomes the
+template's page, and its card keeps its own details and picture and takes the
+template's theme. A tile with no card yet starts from the template's card, the
+name slots to fill in. Routes are relative to where you stand, or from the
+hive root with a leading `/`. Both writes are ordinary commits, so they undo
+like any other. Change it in your hive first; visitors see it after the next
+publish.
+
+In the silo (a card kept on your device at someone else's domain) the card
+editor's theme picker does the same, and the card's link carries the theme's
+name.
 
 ### The middle picture by AI
 

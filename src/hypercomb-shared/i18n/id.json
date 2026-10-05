@@ -1380,6 +1380,7 @@
   "slash.view": "Alihkan antara tampilan heksagon dan situs web",
   "slash.website": "Alihkan tampilan situs web, ekspor subpohon, atau bangun halaman via Claude",
   "slash.opens": "Atur cara ubin terbuka: sebagai salah satu tampilannya, atau sebagai segi enam",
+  "slash.card": "Kenakan templat kartu, atau sebutkan apa yang dikenakan kartu",
   "slash.tutor": "Permainan belajar — ubah sarang ini menjadi permainan pengulangan berjarak; on | off | here | build | list",
   "slash.present": "Tampilan presentasi — putar ubin diagram area ini sebagai slide; on | off | here | slide",
   "slash.reference": "Letakkan ubin referensi di sini — penunjuk langsung ke lokasi lain; /reference <path>",

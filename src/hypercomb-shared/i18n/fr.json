@@ -1380,6 +1380,7 @@
   "slash.view": "Basculer entre hexagones et rendu site web",
   "slash.website": "Basculer la vue site web, exporter le sous-arbre, ou générer des pages via Claude",
   "slash.opens": "Définir comment une tuile s'ouvre : dans l'une de ses vues ou en hexagones",
+  "slash.card": "Porter un modèle de carte, ou dire ce que porte une carte",
   "slash.tutor": "Jeux de révision — transformez cette ruche en jeux de répétition espacée ; on | off | here | build | list",
   "slash.present": "Vue présentation — lire les tuiles-diagrammes de cette zone en diapositives ; on | off | here | slide",
   "slash.reference": "Déposer une tuile de référence ici — un pointeur vivant vers un autre emplacement ; /reference <path>",

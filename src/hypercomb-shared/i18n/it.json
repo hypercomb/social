@@ -1380,6 +1380,7 @@
   "slash.view": "Alterna tra esagoni e rendering sito web",
   "slash.website": "Alterna vista sito web, esporta sottoalbero o crea pagine tramite Claude",
   "slash.opens": "Imposta come si apre una tessera: in una delle sue viste o come esagoni",
+  "slash.card": "Indossare un modello di biglietto, o dire cosa indossa un biglietto",
   "slash.tutor": "Giochi di studio — trasforma questo alveare in giochi a ripetizione spaziata; on | off | here | build | list",
   "slash.present": "Vista presentazione — riproduce le tessere diagramma di quest'area come slide; on | off | here | slide",
   "slash.reference": "Inserisci qui una tessera riferimento — un puntatore vivo a un'altra posizione; /reference <path>",

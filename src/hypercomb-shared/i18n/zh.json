@@ -1380,6 +1380,7 @@
   "slash.view": "在六边形和网站渲染之间切换",
   "slash.website": "切换网站视图、导出子树或通过 Claude 构建页面",
   "slash.opens": "设置图块的打开方式:以其某个视图打开,或以六边形打开",
+  "slash.card": "为名片套用模板，或显示名片当前所用的模板",
   "slash.tutor": "学习游戏 — 将蜂巢变为间隔重复游戏; on | off | here | build | list",
   "slash.present": "演示视图 — 将此区域的图示磁贴作为幻灯片播放；on | off | here | slide",
   "slash.reference": "在此放置引用磁贴 — 指向其他位置的实时指针；/reference <path>",

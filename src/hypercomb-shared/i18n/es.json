@@ -1380,6 +1380,7 @@
   "slash.view": "Alternar entre hexágonos y representación de sitio web",
   "slash.website": "Alternar vista de sitio web, exportar subárbol o construir páginas con Claude",
   "slash.opens": "Define cómo se abre un mosaico: como una de sus vistas o como hexágonos",
+  "slash.card": "Usar una plantilla de tarjeta o decir qué lleva una tarjeta",
   "slash.tutor": "Juegos de estudio — convierte esta colmena en juegos de repetición espaciada; on | off | here | build | list",
   "slash.present": "Vista de presentación — reproduce los mosaicos de diagrama de esta área como diapositivas; on | off | here | slide",
   "slash.reference": "Colocar un mosaico de referencia aquí — un puntero vivo a otra ubicación; /reference <path>",

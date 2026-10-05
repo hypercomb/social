@@ -1735,6 +1735,7 @@
   "slash.view": "Toggle between hexagons and website rendering",
   "slash.website": "Toggle website view, export subtree, or build pages via Claude",
   "slash.opens": "Set how a tile opens: as one of its views, or as hexagons",
+  "slash.card": "Wear a card template, or say what a card wears",
   "slash.tutor": "Study games — turn this hive into spaced-repetition games; on | off | here | build | list",
   "slash.present": "Slides view — play the presentation this tile belongs to; on | off | slide",
   "slash.scroller": "Scroller — flick through this branch's pictures and videos as a feed; on | off | here",

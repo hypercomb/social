@@ -1380,6 +1380,7 @@
   "slash.view": "Alternar entre hexágonos e renderização de site",
   "slash.website": "Alternar visão de site, exportar subárvore ou criar páginas via Claude",
   "slash.opens": "Define como um bloco abre: como uma de suas visões ou como hexágonos",
+  "slash.card": "Usar um modelo de cartão ou dizer o que um cartão usa",
   "slash.tutor": "Jogos de estudo — transforme esta colmeia em jogos de repetição espaçada; on | off | here | build | list",
   "slash.present": "Visão de apresentação — reproduzir os blocos de diagrama desta área como slides; on | off | here | slide",
   "slash.reference": "Soltar um bloco de referência aqui — um ponteiro vivo para outra localização; /reference <path>",

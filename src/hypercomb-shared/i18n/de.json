@@ -1380,6 +1380,7 @@
   "slash.view": "Zwischen Hexagonen und Website-Darstellung umschalten",
   "slash.website": "Website-Ansicht umschalten, Unterbaum exportieren oder Seiten über Claude erstellen",
   "slash.opens": "Festlegen, wie sich eine Kachel öffnet: als eine ihrer Ansichten oder als Sechsecke",
+  "slash.card": "Eine Kartenvorlage tragen oder sagen, was eine Karte trägt",
   "slash.tutor": "Lernspiele — diesen Bienenstock in Wiederholungsspiele verwandeln; on | off | here | build | list",
   "slash.present": "Präsentationsansicht — die Diagramm-Kacheln dieses Bereichs als Folien abspielen; on | off | here | slide",
   "slash.reference": "Referenzkachel hier ablegen — ein Live-Zeiger auf einen anderen Standort; /reference <path>",

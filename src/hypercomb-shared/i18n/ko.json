@@ -1380,6 +1380,7 @@
   "slash.view": "육각형과 웹사이트 렌더링 간 전환",
   "slash.website": "웹사이트 보기 전환, 하위 트리 내보내기 또는 Claude를 통한 페이지 빌드",
   "slash.opens": "타일이 열리는 방식 설정: 보기 중 하나로, 또는 육각형으로",
+  "slash.card": "카드 템플릿을 입히거나 카드가 무엇을 입었는지 표시",
   "slash.tutor": "학습 게임 — 하이브를 간격 반복 게임으로 변환; on | off | here | build | list",
   "slash.present": "프레젠테이션 보기 — 이 영역의 다이어그램 타일을 슬라이드로 재생; on | off | here | slide",
   "slash.reference": "여기에 참조 타일 놓기 — 다른 위치를 가리키는 라이브 포인터; /reference <path>",

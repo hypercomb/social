@@ -1435,6 +1435,7 @@
   "slash.view": "ヘキサゴンとウェブサイト表示を切替",
   "slash.website": "ウェブサイト表示の切替、サブツリーのエクスポート、Claudeによるページ構築",
   "slash.opens": "タイルの開き方を設定:ビューのひとつで開くか、六角形で開くか",
+  "slash.card": "カードのテンプレートをまとう、またはカードが何をまとっているかを表示",
   "slash.tutor": "学習ゲーム — このハイブを間隔反復ゲームに変換; on | off | here | build | list",
   "slash.present": "プレゼン表示 — このエリアの図タイルをスライドとして再生; on | off | here | slide",
   "slash.reference": "参照タイルをここに作成 — 別の場所へのライブポインタ; /reference <path>",
