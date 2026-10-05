@@ -171,6 +171,110 @@ address, and that address becomes their silo:
 When they become a host with a domain and publish, their QR carries their own
 address, and the card is theirs.
 
+## Templates and themes
+
+*jwize, 2026-10-05:* "make some other themes for the business cards so people
+who want something to start with can apply their own information, get ai to add
+the middle card imagery, and share their templates across public domains
+(indexed) or just by swarming. Then we break the atom of jaime-weise be
+jaime-weise/business-card/template (name slots embedded)."
+
+### The rule underneath: break a creation along its program
+
+*jwize, 2026-10-05:* "we're basically reaching for the simplest construct. But
+expresses the program efficiently and simply and to follow that pattern as
+doctrine, the spoils go to the code reusability when you follow this pattern."
+
+A creation is broken apart the way its program is built, and each part is a
+tile. The route names the parts: `jaime-weise/business-card/template` reads as
+the person, the creation, and the creation's template. Behaviours ride on
+those tiles as decorations, so they stay swappable. Meaning comes from the
+pools a part belongs to, never from where it sits. A part is one atom,
+referenced from every pool it means and never copied into a second place. Reuse
+is what this buys: a template every card can wear is written once.
+
+This is not the retired mirror paradigm. Nothing is kept beside the code: the
+tiles are the creation, broken apart.
+
+### How the words map onto pools
+
+Two address rules shape the spelling:
+
+- **A bare word is singular** ([address-syntax.md](address-syntax.md)). The set
+  of every template of any kind is the molecule `template`. A tile joins it by
+  being named `template`; no list has to be kept.
+- **A pool never holds a pool.** The business card's own templates are a
+  facet, a collection about one subject, at the root beside every other pool:
+  `templates:<sign('business-card')>`. A facet is the one place the plural is
+  right.
+
+So "business-card/[templates, other references]" is the facet
+`templates:<business-card>` plus reference cells for the rest. "/templates/[…]"
+is the molecule `template`. One template is referenced from both and never
+copied. Pools list members; marks on the members name their pools.
+
+### The parts of a card
+
+| Part | What it is | Where it lives |
+|---|---|---|
+| Template | the shared page: the scene, the layout, and the name slots the card fills (name, up to four roles, up to three contact lines) | `visual:website:page`, one signature every card can wear |
+| Theme | a JSON object of colours: metal, light, plate, type, middle art, chrome. It names only what it changes; every value it leaves out stays Honeycomb Edge | a starter theme the page carries (the card names it with `h`), or the tile's own (`card:data` → `themeSig`) |
+| Card | the person's own fields | `card:data` → `dataSig` |
+| Middle picture | an image for the open area, drawn where the comb would be, inside the borders and clear of the type, the icons and the cube | `card:data` → `artSig` |
+
+Every signature a card names sits in the `card:data` payload, so the record's
+references carry the theme and the picture to every host and adopter. A
+signature inside the card's JSON would never be followed.
+
+The starter themes are Honeycomb Edge (the card as it was made), Graphite,
+Graphite Red and Emerald. A card with no theme is Honeycomb Edge exactly: the
+themed scene with no theme was checked byte for byte against the scene before
+themes.
+
+### The tree as it stands in the hive
+
+*jwize, 2026-10-05:* "It should be easy to read from hive and represent its
+structure."
+
+```
+jaime-weise              the card: its page and its own card:data; opens as the card
+└─ business-card         opens as hexagons: the card's parts
+   └─ template           the shared, themed page and a card of name slots; opens as the card
+      ├─ honeycomb-edge  the template in each starter theme: the same page and card,
+      ├─ emerald         with card:data naming that theme's JSON by signature;
+      ├─ graphite        each opens as the card, so walking in is the preview
+      └─ graphite-red
+```
+
+Each tile is one part, and every part is readable from the hive: the page is
+the `visual:website:page` record, the slots are the template's card, each
+theme is its own JSON atom. `jaime-weise` wears `view:default=website`, so it
+keeps opening as its card now that it has children, for visitors and, in the
+authoring hive, on arrival. `business-card` wears `hexagons`, which stops that
+mark cascading onto a tile with no page.
+
+### Making your own from a template
+
+Wear the template's page signature on your own tile, put your card in your own
+`card:data`, and name a theme. In the silo (a card kept on your device at
+someone else's domain) the card editor's theme picker does the same, and the
+card's link carries the theme's name.
+
+### The middle picture by AI
+
+The picture is made in the hive, never by the published page: `/comfy <prompt>`
+with the card's tile selected stores the image by signature, and the card's
+`card:data` names it as `artSig`. The generator runs only on the participant's
+side. A published card serves only the stored image from its own host.
+
+### Sharing templates
+
+- **By swarming** this works today: a peer at the same route sees the template
+  tile and adopting it brings its page and closure.
+- **Indexed across public domains** is the `themes:card` meaning, offered from
+  a host the way text themes are. It needs hive code and a host deploy, as the
+  ledger says.
+
 ## Why this is the founding creation
 
 Each primitive the concept rests on is exercised by the card, and the card is
@@ -197,6 +301,11 @@ useful on day one, so it is the creation the concept is explained with:
 | QR of the card's address on the back; scanning adds to the Hyperdex; Hyperdex kept on the device | built, in the page |
 | The phone gesture (Quick Tap, shake) opening the card; a scribble choosing between cards | built for the local development build; the published site cannot yet be installed as an app |
 | One shared page plus each tile's own card | built. The page carries no card; it reads the `card:data` record on its tile through the hive's own services (and `card.json` beside it when it runs on its own). The cube is the card's own `logo`, so it appears only on cards that name it. The three.js dependency and the animation are still inside the shared page, owed as separate signed parts. |
+| Themes | built in the page: Honeycomb Edge, Graphite, Graphite Red and Emerald; a theme from the tile (`themeSig`) or named by the card (`h`); the editor's picker; the page chrome follows the card's theme. `jaime-weise` still wears the page from before themes, by choice |
+| The middle picture | built in the page (`artSig`). Making it is `/comfy` today; the hive's AI cannot start a picture on its own yet (`comfy:generate` is not a bridge intent) |
+| `jaime-weise/business-card/template` and its theme tiles | built in the hive. The template wears the themed page and a card of name slots; each starter theme is a tile under it wearing the same page and naming its theme. `jaime-weise` keeps its own page and card and wears `view:default=website`; `business-card` wears `hexagons` |
+| `templates:<business-card>` facet and `template` membership | membership in `template` is by name, today. The facet needs a writer in the hive (`facet-succession.ts` exists; no word or bridge op writes this facet) |
+| Templates indexed across public domains (`themes:card`) | not built. It needs the meaning reserved in the pool registry, an offering handler, and the host worker to list it (today it lists `themes:text` only) |
 | Gestures and choosers as drone modules | design — the page carries a registry; nothing is a bee yet |
 | The Hyperdex as a collection in the hive, synced across the participant's devices | design — a private `/hyperdex` collection of link tiles. The pieces are built: collections, link tiles, and the confirm step (`link:intake`). Nothing yet writes a scanned or pasted card address into it. |
 | Reading a held address at its live head | built — opening a door resolves the signed index |
