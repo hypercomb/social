@@ -1264,7 +1264,7 @@ export class DockedPanel implements GroupMember, LaneMember {
       const rows: SettingRow[] = [{
         kind: 'text', key: 'text-theme-offer-host',
         label: this.#t('panel.text-theme.offer-host', 'Domain'), value: host,
-        placeholder: 'jwize.com',
+        placeholder: 'example.org',
         hint: !theme?.head || !theme.location
           ? this.#t('panel.text-theme.offer-select-hint', 'Choose a saved theme above to share.')
           : this.#t('panel.text-theme.offer-host-hint', 'Choose a domain served by your public host.'),

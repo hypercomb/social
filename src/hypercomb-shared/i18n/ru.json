@@ -1753,7 +1753,7 @@
   "publish.row.live-head": "в сети",
   "publications.discoverTagline": "всё, чем делится этот домен",
   "discover.title": "Обзор",
-  "discover.usage": "Укажите домен — например /discover pluginthematrix.com",
+  "discover.usage": "Укажите домен — например /discover hypercomb.com",
   "discover.unreachable": "Реестр публикаций на {host} не ответил.",
   "publish.row.domain-change": "Изменить домен",
   "publish.row.domain-placeholder": "example.com",

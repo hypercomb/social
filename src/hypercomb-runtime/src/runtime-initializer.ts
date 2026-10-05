@@ -47,14 +47,11 @@ export type RuntimeInitializerOptions = {
   locales?: () => readonly string[]
 }
 
-// Dev-build defaults, applied on a LOOPBACK origin only (the operator's own
+// Dev-build default, applied on a LOOPBACK origin only (the operator's own
 // dev machine) and only when the value is unset — so two localhost tabs join
-// the same swarm (same host + same room secret) with zero manual setup, while
-// a real deployed origin (non-loopback) is never affected. An env.js
-// HYPERCOMB_DEV_HOST still overrides the host; an explicit clear still empties
-// the secret. The mesh relay's own loopback default (nostr-mesh.drone) lands
-// on the same jwize.com relay.
-const DEV_DEFAULT_HOST = 'jwize.com'
+// the same swarm room with zero manual setup, while a real deployed origin
+// (non-loopback) is never affected. An explicit clear still empties it. The
+// host is never defaulted (see the self-domain block below).
 const DEV_DEFAULT_SECRET = 'downtown'
 
 // Reset the former flat-top rollout once, then preserve every explicit
@@ -98,21 +95,12 @@ const _runInitializeRuntime = async (
     // Storage-free sessions already use the in-memory point-top default.
   }
 
-  // Every participant has a host. Three cases, resolved in order:
-  //
-  //   1. Real domain origin (jwize.com, alice.dev) — auto-bootstrap to the
-  //      page's origin. Casual visitors and operators-in-production both
-  //      get the right value with zero config.
-  //
-  //   2. Loopback origin + a `window.HYPERCOMB_DEV_HOST` global set by the
-  //      shell's env.js — auto-bootstrap to that. This is how an operator
-  //      tells their dev shell "I am jwize.com, even though the browser
-  //      loaded me from localhost:4250." env.js is gitignored so the value
-  //      is per-developer, not committed.
-  //
-  //   3. Loopback origin and no dev-host global — default to DEV_DEFAULT_HOST
-  //      (jwize.com) so the operator's dev tabs auto-resolve against the host
-  //      with zero config. The mesh-modal still lets them change it.
+  // A participant has a host only once they name one (the mesh modal's host
+  // field). The one exception: on a loopback origin, a
+  // `window.HYPERCOMB_DEV_HOST` global set by the shell's env.js — an
+  // operator telling their dev shell "I serve from this domain, even though
+  // the browser loaded me from localhost:4250". env.js is gitignored, so the
+  // value is per-developer, never committed.
   try {
     const rawOrigin = String(window.location.origin ?? '')
     const isLoopback = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(rawOrigin)
@@ -123,18 +111,17 @@ const _runInitializeRuntime = async (
       .toLowerCase()
 
     // ── host (self-domain) ──
-    if (!localStorage.getItem('hc:nostrmesh:self-domain')) {
-      let candidate = ''
-      if (!isLoopback) {
-        // Case 1 — real domain. Use the page's origin.
-        candidate = normalize(rawOrigin)
-      } else {
-        // Case 2 — env.js per-developer override (gitignored); Case 3 — the
-        // dev-build default host.
-        const devHost = normalize(String((window as { HYPERCOMB_DEV_HOST?: string }).HYPERCOMB_DEV_HOST ?? ''))
-        candidate = devHost || DEV_DEFAULT_HOST
-      }
-      if (candidate) localStorage.setItem('hc:nostrmesh:self-domain', candidate)
+    // EMPTY UNTIL THE PARTICIPANT HOSTS (jwize, 2026-10-05: "the host field
+    // in the swarm setting needs to be empty by default. Only they can add
+    // hosts."). It is the domain this participant serves from: every swarm
+    // publish advertises it as where the bytes can be fetched. Seeded with
+    // the page's own origin, every hypercomb.io visitor advertised
+    // hypercomb.io as their host; seeded on localhost, every dev install
+    // advertised jwize.com. Only an env.js HYPERCOMB_DEV_HOST — the operator
+    // naming their own machine — still fills it.
+    if (!localStorage.getItem('hc:nostrmesh:self-domain') && isLoopback) {
+      const devHost = normalize(String((window as { HYPERCOMB_DEV_HOST?: string }).HYPERCOMB_DEV_HOST ?? ''))
+      if (devHost) localStorage.setItem('hc:nostrmesh:self-domain', devHost)
     }
 
     // ── beta ramp: live relay + byte mirrors (real origins only) ──

@@ -24,7 +24,7 @@
 // its own key. A participant's own record overrides the file:
 //
 //   localStorage['hc:install-follow'] =
-//     '{"pubkey":"<64-hex>","hosts":["pluginthematrix.com"],"channel":"essentials"}'
+//     '{"pubkey":"<64-hex>","hosts":["hypercomb.com"],"channel":"essentials"}'
 //   localStorage['hc:install-follow'] = 'off'     // follow nobody
 //
 // (hosts may be omitted — the standing public content endpoint is the default.
@@ -48,7 +48,9 @@
 import { EffectBus } from '@hypercomb/core'
 import { checkRemoteHiveFormat } from './hive-format.js'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
-import { installRootOf, PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { installRootOf } from './hive-link.js'
+
+const DEFAULT_FOLLOW_HOST = 'hypercomb.com'
 import { foldContentLabel } from './zone-door.js'
 import { takeIfAllowed } from './upgrade-allow.js'
 // LOAD-BEARING IMPORT. The hive FORMAT check has no registration of its own —
@@ -103,7 +105,10 @@ function parseFollow(value: unknown): InstallFollow | null {
     ? [...new Set(rawHosts.map(h => foldContentLabel(h)).filter(Boolean))]
     : []
   const channel = String(parsed['channel'] ?? '').trim().toLowerCase() || 'essentials'
-  return { pubkey, hosts: hosts.length ? hosts : [...PUBLIC_CONTENT_HOSTS], channel }
+  // A follow that names no host follows hypercomb.com, the public install's
+  // one default host (jwize, 2026-10-05: "There should only be hypercomb.com
+  // on the public install"); it used to fall back to a personal domain.
+  return { pubkey, hosts: hosts.length ? hosts : [DEFAULT_FOLLOW_HOST], channel }
 }
 
 /** The pure verdict: the sig to announce, or null for silence. `roots` must

@@ -1753,7 +1753,7 @@
   "publish.row.live-head": "yayında",
   "publications.discoverTagline": "bu alan adının paylaştığı her şey",
   "discover.title": "Keşfet",
-  "discover.usage": "Bir alan adı belirtin — örn. /discover pluginthematrix.com",
+  "discover.usage": "Bir alan adı belirtin — örn. /discover hypercomb.com",
   "discover.unreachable": "{host} üzerinde yayın defteri yanıt vermedi.",
   "publish.row.domain-change": "Alan adını değiştir",
   "publish.row.domain-placeholder": "example.com",

@@ -56,7 +56,7 @@ export class DiscoverQueenBee extends QueenBee {
   override description = 'Discover a domain — every creation its hypercomb host publishes, as plates; with no domain, every host you carry'
   override options = ['<domain>', '']
   override examples = [
-    { input: '/discover pluginthematrix.com', result: 'Opens the publication directory that domain serves' },
+    { input: '/discover hypercomb.com', result: 'Opens the publication directory that domain serves' },
     { input: '/discover', result: 'One page of everything the hosts in your host directory share' },
   ]
 
@@ -65,7 +65,7 @@ export class DiscoverQueenBee extends QueenBee {
     const directory = normalizeDirectory(args)
     if (!directory) {
       this.#toast('tip', this.#t('discover.title', 'Discover'),
-        this.#t('discover.usage', 'Name a domain — try /discover pluginthematrix.com — or say it alone for every host you carry'))
+        this.#t('discover.usage', 'Name a domain — try /discover hypercomb.com — or say it alone for every host you carry'))
       return
     }
 

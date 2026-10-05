@@ -1753,7 +1753,7 @@
   "publish.row.live-head": "online",
   "publications.discoverTagline": "tutto ciò che questo dominio condivide",
   "discover.title": "Scopri",
-  "discover.usage": "Indica un dominio — es. /discover pluginthematrix.com",
+  "discover.usage": "Indica un dominio — es. /discover hypercomb.com",
   "discover.unreachable": "Nessun registro delle pubblicazioni ha risposto su {host}.",
   "publish.row.domain-change": "Cambia dominio",
   "publish.row.domain-placeholder": "example.com",

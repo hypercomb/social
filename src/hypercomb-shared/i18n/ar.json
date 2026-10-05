@@ -1753,7 +1753,7 @@
   "publish.row.live-head": "المنشور",
   "publications.discoverTagline": "كل ما يشاركه هذا النطاق",
   "discover.title": "استكشاف",
-  "discover.usage": "حدّد نطاقًا — مثال: /discover pluginthematrix.com",
+  "discover.usage": "حدّد نطاقًا — مثال: /discover hypercomb.com",
   "discover.unreachable": "لم يستجب أي سجل نشر على {host}.",
   "publish.row.domain-change": "تغيير النطاق",
   "publish.row.domain-placeholder": "example.com",

@@ -1753,7 +1753,7 @@
   "publish.row.live-head": "게시본",
   "publications.discoverTagline": "이 도메인이 공유하는 모든 것",
   "discover.title": "발견",
-  "discover.usage": "도메인을 입력하세요 — 예: /discover pluginthematrix.com",
+  "discover.usage": "도메인을 입력하세요 — 예: /discover hypercomb.com",
   "discover.unreachable": "{host}에서 게시 원장이 응답하지 않았습니다.",
   "publish.row.domain-change": "도메인 변경",
   "publish.row.domain-placeholder": "example.com",

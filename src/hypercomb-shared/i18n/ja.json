@@ -935,7 +935,7 @@
   "publications.tagline": "世界に共有された作品たち",
   "publications.discoverTagline": "このドメインが共有しているすべて",
   "discover.title": "発見",
-  "discover.usage": "ドメインを指定してください — 例: /discover pluginthematrix.com",
+  "discover.usage": "ドメインを指定してください — 例: /discover hypercomb.com",
   "discover.unreachable": "{host} の公開台帳に到達できませんでした。",
   "publications.hint": "プレートをくぐると作品を訪れます",
   "publications.empty": "まだ何も共有されていません。",
