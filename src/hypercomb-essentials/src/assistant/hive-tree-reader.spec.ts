@@ -481,6 +481,32 @@ describe('a page history cannot pin to one signature', () => {
     expect(await fx.reader.find('arkanoid', [])).toMatchObject({ ok: true, matches: [{ name: 'Arkanoid', path: '/games/Arkanoid' }] })
   })
 
+  it('reads a tile’s notes live from the notes service, every time, and never on a /list', async () => {
+    // The notes of a tile are its word's facet, not the layer's slot: a read
+    // that showed the slot answered "1 note" for a tile holding 13.
+    const notesOf = new Map<string, unknown[]>([['projects', [
+      { text: 'first', tags: ['plan'], children: [{ text: 'under it', children: [] }] },
+      { text: 'second', children: [] },
+    ]]])
+    const getNotesAtSegments = vi.fn(async (segments: readonly string[]) => notesOf.get(segments.join('/')) ?? [])
+    const fx = fixture()
+    const services = new Map<string, unknown>([
+      ['@diamondcoreprocessor.com/HistoryService', fx.history],
+      ['@hypercomb.social/Store', { getResource: vi.fn(async () => null) }],
+      ['@diamondcoreprocessor.com/LayerCommitter', { settled: fx.settled }],
+      ['@diamondcoreprocessor.com/NotesService', { getNotesAtSegments }],
+    ])
+    const reader = new HypercombHiveTreeReader(<T>(key: string) => services.get(key) as T | undefined)
+
+    const read = await reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })
+    expect(read).toMatchObject({ ok: true, notes: ['first [plan]', '  under it', 'second'], noteCount: 2 })
+    // A note added without the layer changing is on the next read.
+    notesOf.get('projects')!.push({ text: 'third', children: [] })
+    expect(await reader.readNode(['projects'], { maxBytes: 8_000, withContent: true })).toMatchObject({ noteCount: 3 })
+    const listed = await reader.readNode(['projects'], { maxBytes: 8_000, withContent: false })
+    expect(listed.ok && listed.notes).toBeUndefined()
+  })
+
   it('keeps a fallback route and its signature content in memory for the next read', async () => {
     const fx = fixture()
     fx.refs.delete(sig(102))

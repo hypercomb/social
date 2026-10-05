@@ -115,6 +115,7 @@ type CarriedChild = { readonly name: string; readonly sig: string }
 
 const MAX_HISTORY_MARKERS = 32
 const COMPACTION_KEY = '@hypercomb.social/Compaction'
+const NOTES_KEY = '@diamondcoreprocessor.com/NotesService'
 const PRELOADER_KEY = '@hypercomb.social/ScriptPreloader'
 const DEPENDENCY_LOADER_KEY = '@hypercomb.social/DependencyLoader'
 const MAX_CODE_ENTRIES = 200
@@ -133,6 +134,12 @@ export type HypercombNodeRead =
     /** The layer's own slots, everything but `children`. Absent for `/list`. */
     readonly content?: Record<string, unknown>
     readonly truncated?: boolean
+    /** A route `/read`: the tile's notes as the notes window shows them,
+     *  flattened, two spaces per depth. `noteCount` is how many top-level
+     *  notes there are; `notesTruncated` when the size limit cut the list. */
+    readonly notes?: readonly string[]
+    readonly noteCount?: number
+    readonly notesTruncated?: boolean
     /** Absent on a sig-addressed read: immutable content has no live head. */
     readonly snapshot?: string
   }
@@ -1147,6 +1154,60 @@ export class HypercombHiveTreeReader {
   async readNode(
     segments: readonly string[],
     options: { readonly maxBytes?: number; readonly withContent?: boolean; readonly signal?: AbortSignal } = {},
+  ): Promise<HypercombNodeRead> {
+    const read = await this.#readNodeRouted(segments, options)
+    if (!read.ok || options.withContent === false || !segments.length) return read
+    return this.#withNotes(read, segments, options.maxBytes)
+  }
+
+  /**
+   * A TILE'S NOTES, READ LIVE. Since 2026-09-04 a tile's notes are the notes
+   * of its word — the `notes:<name>` facet — and the layer's `notes` slot
+   * holds only what predates that; the read showed the slot, so a model
+   * asked for the notes on a tile holding 13 answered "1 note" (the games
+   * manager, 2026-10-04). The facet changes without the layer changing, so
+   * it is never cached with the layer: it is asked for on every read, from
+   * the notes service, the way the notes window asks.
+   */
+  async #withNotes(
+    read: Extract<HypercombNodeRead, { ok: true }>,
+    segments: readonly string[],
+    maxBytes?: number,
+  ): Promise<HypercombNodeRead> {
+    type NoteLike = { readonly text?: unknown; readonly tags?: unknown; readonly children?: unknown }
+    const service = this.#lookup<{ getNotesAtSegments?(segments: readonly string[]): Promise<readonly NoteLike[]> }>(NOTES_KEY)
+    if (!service?.getNotesAtSegments) return read
+    const notes = await service.getNotesAtSegments(segments).catch(() => null)
+    if (!notes) return read
+    const lines: string[] = []
+    const flatten = (list: readonly NoteLike[], depth: number): void => {
+      for (const note of list) {
+        if (typeof note?.text !== 'string') continue
+        const tags = Array.isArray(note.tags) ? note.tags.filter((tag): tag is string => typeof tag === 'string' && !!tag) : []
+        lines.push(`${'  '.repeat(depth)}${note.text}${tags.length ? ` [${tags.join(', ')}]` : ''}`)
+        if (Array.isArray(note.children)) flatten(note.children as NoteLike[], depth + 1)
+      }
+    }
+    flatten(notes, 0)
+    const budget = Math.max(512, boundedInteger(maxBytes, 8_000, MAX_PAGE_BYTES))
+    const kept: string[] = []
+    let bytes = 0
+    for (const line of lines) {
+      if (bytes + line.length > budget) break
+      bytes += line.length
+      kept.push(line)
+    }
+    return {
+      ...read,
+      notes: kept,
+      noteCount: notes.length,
+      ...(kept.length < lines.length ? { notesTruncated: true } : {}),
+    }
+  }
+
+  async #readNodeRouted(
+    segments: readonly string[],
+    options: { readonly maxBytes?: number; readonly withContent?: boolean; readonly signal?: AbortSignal },
   ): Promise<HypercombNodeRead> {
     const epoch = await this.#settledEpoch(options.signal)
     if (epoch === undefined) return this.#readNodeLive(segments, options)

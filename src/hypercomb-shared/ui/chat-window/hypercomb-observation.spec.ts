@@ -347,6 +347,26 @@ describe('LLM context projection substitutes for content on /read only', () => {
     expect(out).not.toContain('projection')
   })
 
+  it('keeps the live notes and drops the projection’s older notes list when a read carries them', async () => {
+    // The projection lists the layer's notes slot only (what predates the
+    // notes facet): one note of thirteen. Shown beside the live list, a
+    // model counted the shorter one.
+    (window as unknown as { ioc: unknown }).ioc = {
+      get: (key: string) => key === '@diamondcoreprocessor.com/LlmContext'
+        ? { project: async () => ({ text: 'Humidor\nnotes:\n  Buy cedar\n    soon\nproperties:\n  size: 3', minted: true }) }
+        : undefined,
+    }
+    const reader = readerFor()
+    const base = reader.readNode as ReturnType<typeof vi.fn>
+    const inner = base.getMockImplementation()!
+    base.mockImplementation(async (segments, options) => ({ ...(await inner(segments, options)), notes: ['Buy cedar', 'Light the burner'], noteCount: 2 }))
+    const out = formatHypercombObservationReceipt(await executeHypercombObservationPlan(
+      parseHypercombObservationGrammars(['/read /humidor'], []), reader))
+    expect(out).toContain('"projection":"Humidor\\nproperties:\\n  size: 3"')
+    expect(out).toContain('"notes":["Buy cedar","Light the burner"]')
+    expect(out).toContain('"noteCount":2')
+  })
+
   it('never projects /list, even with a service that would happily project', async () => {
     (window as unknown as { ioc: unknown }).ioc = {
       get: () => ({ project: vi.fn(async () => ({ text: 'should never appear', minted: true })) }),
