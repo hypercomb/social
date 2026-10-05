@@ -15,9 +15,14 @@ creation the concept is explained with.
 
 ## What the card is
 
-- **A creation on a tile.** The card is a page worn by an ordinary tile
-  (`visual:website:page`) with a `view:default` mark so the tile opens as the
-  card. It stands alone and depends on no other artifact
+- **A creation on a tile, in two parts.** An ordinary tile wears the card
+  page (`visual:website:page`) and its own card (`card:data`, a record that
+  names the card's JSON by signature), plus a `view:default` mark so the tile
+  opens as the card. The page is shared: every card wears the same page
+  signature, and the page reads the card from the tile it is mounted on. A
+  second person's card is the same page and their own `card:data`, never a
+  copy of the page with their name in it. Each part stands alone: the page
+  without a card offers to make one, and the card is plain JSON
   ([website-artifact-paradigm.md](website-artifact-paradigm.md)).
 - **The current you.** The card carries what is current in your life: your
   roles, your links, your lists. You change it by editing the tile; the
@@ -191,7 +196,7 @@ useful on day one, so it is the creation the concept is explained with:
 | The card page on `jaime-weise`, opening by default, publishable with `/publish` | built |
 | QR of the card's address on the back; scanning adds to the Hyperdex; Hyperdex kept on the device | built, in the page |
 | The phone gesture (Quick Tap, shake) opening the card; a scribble choosing between cards | built for the local development build; the published site cannot yet be installed as an app |
-| The page as one artifact of ~830 KB | not yet broken apart: the three.js dependency, the animation and the card data are owed as separate signed parts |
+| One shared page plus each tile's own card | built. The page carries no card; it reads the `card:data` record on its tile through the hive's own services (and `card.json` beside it when it runs on its own). The cube is the card's own `logo`, so it appears only on cards that name it. The three.js dependency and the animation are still inside the shared page, owed as separate signed parts. |
 | Gestures and choosers as drone modules | design — the page carries a registry; nothing is a bee yet |
 | The Hyperdex as a collection in the hive, synced across the participant's devices | design — a private `/hyperdex` collection of link tiles. The pieces are built: collections, link tiles, and the confirm step (`link:intake`). Nothing yet writes a scanned or pasted card address into it. |
 | Reading a held address at its live head | built — opening a door resolves the signed index |
