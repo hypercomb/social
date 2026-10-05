@@ -30,9 +30,9 @@
 // ── the way back to the true root ─────────────────────────────────────
 //
 // Marking a home must never cost you the root itself. `showHiveRoot()` suspends
-// the substitution for as long as you stay there — the Home menu's "hive root"
-// row calls it right before navigating — and it lapses the moment you walk
-// anywhere else, so the next arrival at `/` is home again.
+// the substitution for as long as you stay there — call it right before
+// navigating — and it lapses the moment you walk anywhere else, so the next
+// arrival at `/` is home again.
 
 import type { RecentPortalsStore } from './recent-portals.store'
 

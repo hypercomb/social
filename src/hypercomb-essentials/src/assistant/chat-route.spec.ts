@@ -1855,12 +1855,12 @@ describe('the passive drain — as many conversations as it can reach', () => {
     await thread.setConversationArchived('chat:tile:/archived-newer', true)
   }
 
-  /** The participant opened five of the six — in this order, oldest visit
-   *  first. FRESH was never opened. */
-  const visitFive = (m: Flows): void => {
-    const base = Date.now() - 60_000
-    ;['chat:tile:/archived-older', 'chat:tile:/archived-newer', 'chat:tile:/live-older', 'chat:tile:/live-newer', 'chat:tile:/recent']
-      .forEach((id, i) => m.route.markRouteVisited(id, base + i * 1_000))
+  /** The participant opened five of the six — in this order, oldest first.
+   *  FRESH was never opened. `waiting` queues without organizing. */
+  const visitFive = async (m: Flows): Promise<void> => {
+    for (const id of ['chat:tile:/archived-older', 'chat:tile:/archived-newer', 'chat:tile:/live-older', 'chat:tile:/live-newer', 'chat:tile:/recent']) {
+      await m.route.organizeRoute(id, undefined, true)
+    }
   }
 
   /** Which conversation each STRUCTURE call was about, in order. */
@@ -1878,8 +1878,9 @@ describe('the passive drain — as many conversations as it can reach', () => {
     // Nothing opened yet: the drain organizes nothing, and reads no thread.
     expect(await m.route.drainRouteFlows()).toMatchObject({ organized: 0, behind: 0 })
     expect(server).not.toHaveBeenCalled()
-    visitFive(m)
-    expect(JSON.parse(localStorage.getItem(m.route.ROUTE_VISITED_KEY)!)).toHaveProperty(['chat:tile:/recent'])
+    await visitFive(m)
+    // The queue is a session's work list, never a saved record of visits.
+    expect(localStorage.getItem('hc:chat-route-visited')).toBeNull()
 
     const pass = await m.route.drainRouteFlows()
     expect(whoWasAsked(server)).toEqual(['RECENT', 'LIVE-NEWER', 'LIVE-OLDER', 'ARCHIVED-NEWER', 'ARCHIVED-OLDER'])
@@ -1906,7 +1907,7 @@ describe('the passive drain — as many conversations as it can reach', () => {
     const store = makeStore(pool)
     const m = await loadFlows(store)
     await seedSix(store, pool, m.thread)
-    visitFive(m)
+    await visitFive(m)
     const busy = () => ({ ok: false, status: 429, headers: { get: () => null }, json: async () => ({ error: 'busy' }), text: async () => 'busy' })
     const server = localServer(busy)
     await wake(m, server)
@@ -1928,7 +1929,7 @@ describe('the passive drain — as many conversations as it can reach', () => {
     const store = makeStore(pool)
     const m = await loadFlows(store)
     await seedSix(store, pool, m.thread)
-    visitFive(m)
+    await visitFive(m)
     const server = localServer()
     await wake(m, server)
 
@@ -1948,7 +1949,7 @@ describe('the passive drain — as many conversations as it can reach', () => {
     const store = makeStore(pool)
     const m = await loadFlows(store)
     await seedSix(store, pool, m.thread)
-    visitFive(m)
+    await visitFive(m)
     const server = localServer(body => {
       // The participant switches the local tier off while the first answer
       // is on its way.
@@ -1961,16 +1962,6 @@ describe('the passive drain — as many conversations as it can reach', () => {
     expect(pass).toMatchObject({ organized: 1, stopped: 'gate' })
     expect(chatCalls(server)).toBe(1)
     expect(store.pools.get(FLOWS_MEANING)!.dirs.size).toBe(1)
-  })
-
-  it('the attended call is a visit: the conversation on screen joins the queue, whatever the gate says', async () => {
-    const pool = new MockDir('threads')
-    const store = makeStore(pool)
-    await twoExchanges(store, pool)
-    const m = await loadFlows(store)
-    for (const provider of m.registry.all()) m.registry.unregister(provider.id)
-    expect(await m.route.organizeRoute(CONVO)).toBe(0)
-    expect(m.route.routeVisited().has(CONVO)).toBe(true)
   })
 
   it('never mints the same flow twice — the drain yields to an attended call in flight, and finds the flow current after it', async () => {
@@ -2002,7 +1993,7 @@ describe('the passive drain — as many conversations as it can reach', () => {
     const store = makeStore(pool)
     const m = await loadFlows(store)
     await seedSix(store, pool, m.thread)
-    visitFive(m)
+    await visitFive(m)
     const server = localServer(() => { throw new TypeError('connection refused') })
     await wake(m, server)
     expect(await m.route.drainRouteFlows()).toMatchObject({ organized: 0, stopped: 'fault' })

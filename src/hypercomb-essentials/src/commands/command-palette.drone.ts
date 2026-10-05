@@ -5,7 +5,7 @@ export interface PaletteItem {
   id: string
   label: string
   category: string
-  type: 'command' | 'recent'
+  type: 'command'
   binding: KeyBinding | null
   matchIndices: number[]
   score: number
@@ -25,24 +25,15 @@ export interface CommandPaletteState {
   totalCount: number
 }
 
-const RECENT_KEY = 'hc:recent-commands'
-const MAX_RECENT = 8
-
 export class CommandPaletteDrone extends EventTarget {
   #open = false
   #query = ''
   #activeIndex = 0
   #groups: PaletteGroup[] = []
   #totalCount = 0
-  #recent: string[] = []
 
   constructor() {
     super()
-
-    // restore recent commands
-    try {
-      this.#recent = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
-    } catch { this.#recent = [] }
 
     EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
       if (payload?.cmd === 'ui.commandPalette') this.#toggle()
@@ -126,9 +117,6 @@ export class CommandPaletteDrone extends EventTarget {
     }
     if (!item) return
 
-    // track in recents
-    this.#addRecent(item.id)
-
     // close first, then invoke
     this.#close()
 
@@ -136,11 +124,6 @@ export class CommandPaletteDrone extends EventTarget {
     if (item.binding) {
       EffectBus.emit('keymap:invoke', { cmd: item.id, binding: item.binding, event: null })
     }
-  }
-
-  #addRecent(cmd: string): void {
-    this.#recent = [cmd, ...this.#recent.filter(c => c !== cmd)].slice(0, MAX_RECENT)
-    try { localStorage.setItem(RECENT_KEY, JSON.stringify(this.#recent)) } catch { /* noop */ }
   }
 
   #rebuild(): void {
@@ -174,33 +157,12 @@ export class CommandPaletteDrone extends EventTarget {
         .sort((a, b) => b.score - a.score)
     }
 
-    // group results
+    // group by category (in score order when searching)
     const grouped = new Map<string, PaletteItem[]>()
-
-    if (!this.#query) {
-      // show recents first when no query
-      const recentItems = this.#recent
-        .map(cmd => items.find(i => i.id === cmd))
-        .filter((i): i is PaletteItem => !!i)
-        .map(i => ({ ...i, type: 'recent' as const, category: 'Recent' }))
-
-      if (recentItems.length) grouped.set('Recent', recentItems)
-
-      // then all by category (excluding those in recents)
-      const recentIds = new Set(this.#recent)
-      for (const item of items) {
-        if (recentIds.has(item.id) && grouped.has('Recent')) continue
-        const arr = grouped.get(item.category) ?? []
-        arr.push(item)
-        grouped.set(item.category, arr)
-      }
-    } else {
-      // when searching, group by category in score order
-      for (const item of items) {
-        const arr = grouped.get(item.category) ?? []
-        arr.push(item)
-        grouped.set(item.category, arr)
-      }
+    for (const item of items) {
+      const arr = grouped.get(item.category) ?? []
+      arr.push(item)
+      grouped.set(item.category, arr)
     }
 
     // assign global indices and build final groups

@@ -115,7 +115,6 @@ diamond
 diversity_3
 dns
 done_all
-door_open
 download
 draft
 drafts

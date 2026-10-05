@@ -27,7 +27,6 @@ export const sleepers: readonly Sleeper[] = [
   { command: "debug", description: "Toggle the Pixi display-tree inspector", load: () => import('./commands/debug.queen') },
   { command: "deposit", description: "Deposit a signed pheromone — an authored interest-signal on a tile\\", load: () => import('./commands/deposit.queen') },
   { command: "enroll", description: "Relate this tile to a website — the one way artifacts belong together", load: () => import('./commands/enroll.queen') },
-  { command: "forget", description: "Show or drop the phrasings the command line learned from you", load: () => import('./commands/forget.queen') },
   { command: "genome", description: "Measure the active hive genome: current markers plus every reachable byte", load: () => import('./commands/genome.queen') },
   { command: "grant", description: "Set how far a machine may go in this hive", load: () => import('./commands/grant.queen') },
   { command: "history", description: "Toggle the history panel", load: () => import('./commands/history.queen') },
