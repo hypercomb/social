@@ -2676,6 +2676,9 @@
   "publish.own.clear": "استخدام المسار الجذري",
   "publish.own.saved": "تم الحفظ — أصبح لهذا المكان عنوان خاص.",
   "publish.own.cleared": "عاد هذا المكان إلى المسار الجذري.",
+  "publish.own.apex": "اجعله الصفحة الأولى لـ {zone}",
+  "publish.own.apex-note": "يفتح {zone} على هذا المكان. بطاقة المضيف على host.{zone}.",
+  "publish.own.apex-saved": "أصبح {zone} يفتح على هذا المكان. بطاقة المضيف على host.{zone}.",
   "publish.own.not-a-label": "يتكون اسم العنوان من حروف وأرقام وشرطات، حتى 63 حرفًا، دون شرطة في بدايته أو نهايته.",
   "publish.own.reserved": "«content» والأسماء التي تبدأ بـ «try-» تخص المضيف — اختر اسمًا آخر.",
   "publish.own.not-published": "انشر هذا المكان على النطاق أولًا، ثم امنحه عنوانًا خاصًا."

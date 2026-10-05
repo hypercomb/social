@@ -170,14 +170,30 @@ function siteBinding(env, hostname) {
 // for exactly the host still wins over both.
 const ADDRESS_SITES = Symbol('address-sites')
 
+// THE HOST'S OWN DOOR (jwize 2026-10-05). One origin runs one shell: an apex
+// that opens on a creation runs the visitor engine, and the host card — the
+// shim, with its own service worker and its own storage — cannot share that
+// origin. So every front-door zone keeps its card at one reserved first-level
+// name, host.<zone>, whether or not the apex opens on a creation. It is never
+// a site and never an own address, and it writes nothing (the zone root does).
+const HOST_DOOR_LABEL = 'host'
+
 function resolveSite(env, hostname) {
   const host = String(hostname || '').toLowerCase()
   const bindings = siteBindings(env)
   const exact = bindings[host]
-  if (exact) return { site: exact, implicit: false, zone: null }
+  if (exact) {
+    // A FRONT DOOR THAT OPENS ON A CREATION: the zone's publisher signed the
+    // apex itself as that creation's own address (zonePlaces). The apex is
+    // then the creation's door, and the card answers at host.<zone>.
+    const opened = exact.frontDoor === true ? env?.[ADDRESS_SITES]?.get(host) : null
+    if (opened) return { site: opened, implicit: false, zone: host, address: true, apex: true }
+    return { site: exact, implicit: false, zone: null }
+  }
   const zone = bindingZoneOf(bindings, host)
   if (!zone || host === `content.${zone}`) return { site: null, implicit: false, zone: zone ?? null }
   const label = host.slice(0, -(zone.length + 1))
+  if (label === HOST_DOOR_LABEL && bindings[zone].frontDoor === true) return { site: null, implicit: false, zone, hostDoor: true }
   if (!DNS_LABEL_RE.test(label)) return { site: null, implicit: false, zone }
   const addressed = env?.[ADDRESS_SITES]?.get(host)
   if (addressed) return { site: addressed, implicit: false, zone, address: true }
@@ -289,6 +305,7 @@ function addressableHost(bindings, host, zone) {
   if (!host.endsWith('.' + zone) || bindings[host]) return false
   if (bindingZoneOf(bindings, host) !== zone) return false
   const label = host.slice(0, -(zone.length + 1))
+  if (label === HOST_DOOR_LABEL && bindings[zone]?.frontDoor === true) return false
   return DNS_LABEL_RE.test(label) && label !== 'content' && !SANDBOX_LABEL_RE.test(label)
 }
 
@@ -320,7 +337,9 @@ async function zonePlaces(env, zone, read = indexReader(env)) {
       }
     }
     for (const [host, lineage] of Object.entries(index.addresses ?? {})) {
-      if (!addressableHost(bindings, host, zone)) continue
+      // The apex itself, on a front door: the creation the domain opens on.
+      const apex = host === zone && binding.frontDoor === true
+      if (!apex && !addressableHost(bindings, host, zone)) continue
       if (!signed(lineage) || !opensOn(index, lineage, host)) continue
       const claims = named.get(host) ?? []
       if (!claims.some((c) => c.publisher.pubkey === publisher.pubkey)) claims.push({ publisher: selected, lineage })
@@ -748,8 +767,12 @@ function sameLocationState(a, b) {
 
 async function publishedRoot(env, publisher, lineage, read = indexReader(env), host = '') {
   let site = null
+  let card = false
   if (host) {
-    site = resolveSite(env, host).site
+    const resolved = resolveSite(env, host)
+    site = resolved.site
+    // A front door's card keeps no revisions; an apex opened on a creation does.
+    card = !!siteBinding(env, host)?.frontDoor && !resolved.apex
     const selected = site?.publishers?.find(p => p.primary) || site?.publishers?.[0]
     if (!site || site.lineage !== lineage || selected?.pubkey !== publisher.pubkey) return null
   }
@@ -761,7 +784,7 @@ async function publishedRoot(env, publisher, lineage, read = indexReader(env), h
   // A published route is a location, not a mutable signature alias. The
   // signed index authorizes the route; its hostname bag names the current
   // revision. A disagreement is a closed door until the publisher repairs it.
-  if (host && !siteBinding(env, host)?.frontDoor
+  if (host && !card
     && await currentRouteHead(env, host, head, meta) !== head) return null
   return {
     head,
@@ -1510,8 +1533,31 @@ async function serveFrontDoor(request, env) {
   })
   const headers = new Headers(upstream.headers)
   headers.set('Access-Control-Allow-Origin', '*')
+  // THE CARD NAMES ITS HOST in the HTML a link preview reads, exactly as the
+  // shim names the tab once it runs (welcome.ts frontDoorOf): the staged
+  // welcome's title, else the host's own name — never the shell's.
+  if (upstream.status === 200 && String(upstream.headers.get('content-type') || '').includes('text/html')) {
+    const html = await upstream.text()
+    const at = html.indexOf('</head>')
+    if (at < 0) return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers })
+    const welcome = await fetch(`${origin}/welcome.json`, { headers: { accept: 'application/json' } })
+      .then((r) => r.ok && String(r.headers.get('content-type') || '').includes('json') ? r.json() : null)
+      .catch(() => null)
+    const host = url.hostname.toLowerCase()
+    const named = host.startsWith('host.') && host.slice(5).includes('.') ? host.slice(5) : host
+    const name = String(welcome?.title || '').trim().slice(0, 60) || named
+    const tagline = String(welcome?.tagline || '').trim().slice(0, 400) || FRONT_DOOR_TAGLINE
+    headers.delete('Content-Length')
+    headers.delete('Content-Encoding')
+    const body = html.slice(0, at).replace(/<title>[^<]*<\/title>/, () => `<title>${htmlText(name)}</title>`)
+      + shareHead(name, request, '/', tagline) + html.slice(at)
+    return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers })
+  }
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
 }
+
+/** The shim card's own sentence when a host stages none (welcome.ts DEFAULT_TAGLINE). */
+const FRONT_DOOR_TAGLINE = 'Discover creations, inspect their source, and choose what to carry into your hive.'
 
 // Some byte mirrors also welcome people. This is a read-side shell on the
 // same hostname, not a SITE_BINDINGS entry: the mirror's signed PUT, hive and
@@ -3615,6 +3661,15 @@ export default {
             routing = { env: view, ...resolveSite(view, host) }
           }
         }
+        // A front door's apex may open on a creation its publisher signed there.
+        // Only a front-door zone root pays the read.
+        if (resolved.site?.frontDoor === true && isZoneRoot(scoped, host)) {
+          const opened = (await zonePlaces(scoped, host)).addresses.get(host)
+          if (opened) {
+            const view = withAddresses(scoped, new Map([[host, opened]]))
+            routing = { env: view, ...resolveSite(view, host) }
+          }
+        }
       }
       return routing
     }
@@ -3642,6 +3697,7 @@ export default {
       if (routed.site && !isZoneRoot(routed.env, requestUrl.hostname)) {
         return text(405, 'published Core hosts are read-only')
       }
+      if (routed.hostDoor) return text(405, 'the host door is read-only — write at the zone root')
     }
 
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: fromDoor ? DOOR_CORS : CORS })
@@ -3788,7 +3844,8 @@ export default {
         // know asks the claims.
         if (heap.status === 404 && (siteBindings(env)[requestUrl.hostname.toLowerCase()]?.frontDoor
           || servesHostDoor(env, requestUrl.hostname)
-          || await claimedFrontDoor(env, requestUrl.hostname))) {
+          || await claimedFrontDoor(env, requestUrl.hostname)
+          || (await route()).hostDoor)) {
           return serveFrontDoor(request, env)
         }
         return heap
@@ -3879,6 +3936,14 @@ export default {
     }
 
 
+    // THE HOST'S OWN DOOR — host.<zone> is the card, always (HOST_DOOR_LABEL).
+    if (routed.hostDoor && (method === 'GET' || method === 'HEAD')) return serveFrontDoor(request, env)
+    // An apex that opens on a creation hands the card's own routes to the host
+    // door, so a link to /hosts or /@hypercomb still reaches the card.
+    if (routed.apex && (pathname === '/hosts' || pathname === '/@hypercomb') && (method === 'GET' || method === 'HEAD')) {
+      return new Response(null, { status: 302, headers: { Location: `${requestUrl.protocol}//${HOST_DOOR_LABEL}.${requestUrl.hostname}${pathname}${requestUrl.search}`, ...CORS } })
+    }
+
     // THE FRONT DOOR — an apex is the entrance to its domain, not a hive: the
     // shim host card (HOST_DOOR_ORIGIN, a static Pages deployment) draws it,
     // and lists the hives switched on here from sign('host:publications'). Every
@@ -3930,7 +3995,7 @@ export default {
       // listing and no marker before it starts. The two reads run side by side.
       // …and its publisher's signed index, so the visitor verifies it against
       // the key it pins with no round trip. The reads run side by side.
-      const frontDoor = !!siteBinding(env, requestUrl.hostname)?.frontDoor
+      const frontDoor = !routed.apex && !!siteBinding(env, requestUrl.hostname)?.frontDoor
       const publisher = site.publishers?.find((p) => p.primary) || site.publishers?.[0]
       const [located, pointer, signedIndex] = frontDoor ? [null, null, null] : await Promise.all([
         newestLocation(env, await poolAddress(requestUrl.hostname.toLowerCase())),

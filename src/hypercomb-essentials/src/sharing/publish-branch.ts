@@ -45,7 +45,7 @@ import {
   type StageWord,
 } from './stage-succession.js'
 import { isReservedRootKey } from './hive-link.js'
-import { creationUrl, foldContentLabel, ownAddressRefusal, withOwnAddress, zoneDoor } from './zone-door.js'
+import { creationUrl, foldContentLabel, ownAddressHost, ownAddressRefusal, withOwnAddress, zoneDoor } from './zone-door.js'
 
 /** The heads the index names under its branch keys — what a stage list may
  *  hold (deployment-stages.md R2: a list is reconciled against the index). */
@@ -697,7 +697,7 @@ export async function setBranchAddress(
   const put = await putHiveManifest(indexHost, read.manifest.roots, read.manifest.doors ?? {},
     read.manifest.createdAt, { ...read.manifest.signedContent, addresses })
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
-  return { ok: true, host: label ? `${label}.${z}` : z }
+  return { ok: true, host: label ? ownAddressHost(label, z) || `${label}.${z}` : z }
 }
 
 // ── SECURE DELETE — remove a switched-off place from my hosts ──────────────

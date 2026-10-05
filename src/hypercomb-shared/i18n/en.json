@@ -3317,7 +3317,10 @@
   "publish.own.clear": "Use the root path",
   "publish.own.saved": "Saved — this place has its own address.",
   "publish.own.cleared": "This place lives at the root path again.",
+  "publish.own.apex": "Make it the front page of {zone}",
+  "publish.own.apex-note": "{zone} opens on this place. Its host card is at host.{zone}.",
+  "publish.own.apex-saved": "{zone} now opens on this place. Its host card is at host.{zone}.",
   "publish.own.not-a-label": "An address name is letters, digits and hyphens, up to 63 characters, with no hyphen at either end.",
-  "publish.own.reserved": "“content” and names starting with “try-” belong to the host — choose another name.",
+  "publish.own.reserved": "“content”, “host” and names starting with “try-” belong to the host — choose another name.",
   "publish.own.not-published": "Publish this place on the domain first, then give it its own address."
 }

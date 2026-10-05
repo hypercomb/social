@@ -2676,6 +2676,9 @@
   "publish.own.clear": "Gunakan jalur akar",
   "publish.own.saved": "Tersimpan — tempat ini kini punya alamat sendiri.",
   "publish.own.cleared": "Tempat ini kembali berada di jalur akar.",
+  "publish.own.apex": "Jadikan halaman depan {zone}",
+  "publish.own.apex-note": "{zone} terbuka di tempat ini. Kartu host-nya ada di host.{zone}.",
+  "publish.own.apex-saved": "{zone} kini terbuka di tempat ini. Kartu host-nya ada di host.{zone}.",
   "publish.own.not-a-label": "Nama alamat terdiri dari huruf, angka, dan tanda hubung, paling banyak 63 karakter, tanpa tanda hubung di awal atau akhir.",
   "publish.own.reserved": "“content” dan nama yang diawali “try-” milik host — pilih nama lain.",
   "publish.own.not-published": "Terbitkan tempat ini di domain terlebih dahulu, lalu beri alamat sendiri."

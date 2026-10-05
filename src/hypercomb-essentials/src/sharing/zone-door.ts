@@ -100,13 +100,24 @@ export const rootPathUrl = (zone: unknown, segments: readonly string[]): string 
 
 const DNS_LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 
+/** THE DOMAIN ITSELF as an own address — `@`, the zone apex's own name in
+ *  DNS. A creation given `@` on a front-door domain is what the bare domain
+ *  opens on; the host card then answers at `host.<zone>` (jwize 2026-10-05:
+ *  pointblanksolutions.ca opens on its creation, and shows off its hosting). */
+export const APEX_LABEL = '@'
+
+/** The first-level name a front door keeps its card at — never a creation's. */
+export const HOST_DOOR_LABEL = 'host'
+
 /** Why a label cannot be an own address, or '' when it can. `content` is the
- *  retired write face and `try-*` names a module sandbox — both belong to the
- *  host, never to a creation. */
+ *  retired write face, `host` is a front door's card and `try-*` names a module
+ *  sandbox — all belong to the host, never to a creation. `@` is the domain
+ *  itself. */
 export const ownAddressRefusal = (label: unknown): '' | 'not-a-label' | 'reserved' => {
   const text = String(label ?? '')
+  if (text === APEX_LABEL) return ''
   if (!DNS_LABEL_RE.test(text)) return 'not-a-label'
-  if (text === 'content' || text.startsWith('try-')) return 'reserved'
+  if (text === 'content' || text === HOST_DOOR_LABEL || text.startsWith('try-')) return 'reserved'
   return ''
 }
 
@@ -122,10 +133,12 @@ export const foldDnsLabel = (raw: unknown): string =>
     .slice(0, 63)
     .replace(/-+$/g, '')
 
-/** The own-address host for a label on a zone, or '' when either is unusable. */
+/** The own-address host for a label on a zone, or '' when either is unusable.
+ *  `@` is the zone itself. */
 export const ownAddressHost = (label: unknown, zone: unknown): string => {
   const z = foldContentLabel(zone)
-  return z && !LOOPBACK_RE.test(z) && isOwnAddressLabel(label) ? `${String(label)}.${z}` : ''
+  if (!z || LOOPBACK_RE.test(z) || !isOwnAddressLabel(label)) return ''
+  return label === APEX_LABEL ? z : `${String(label)}.${z}`
 }
 
 /** The signed `addresses` map, leniently: a host that is not `<label>.<zone>`
@@ -149,6 +162,7 @@ export const readAddresses = (raw: unknown, roots: Record<string, string>): Reco
 export const ownLabelOn = (addresses: Record<string, string> | undefined, zone: unknown, key: string): string => {
   const z = foldContentLabel(zone)
   for (const [host, k] of Object.entries(addresses ?? {})) {
+    if (k === key && host === z) return APEX_LABEL
     if (k === key && host.endsWith(`.${z}`)) {
       const label = host.slice(0, host.length - z.length - 1)
       if (isOwnAddressLabel(label)) return label
@@ -182,7 +196,7 @@ export const withOwnAddress = (
   const z = foldContentLabel(zone)
   const next: Record<string, string> = {}
   for (const [host, k] of Object.entries(addresses ?? {})) {
-    if (k === key && host.endsWith(`.${z}`)) continue
+    if (k === key && (host === z || host.endsWith(`.${z}`))) continue
     next[host] = k
   }
   if (label) {

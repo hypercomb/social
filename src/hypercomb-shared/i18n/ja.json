@@ -2764,6 +2764,9 @@
   "publish.own.clear": "ルートパスを使う",
   "publish.own.saved": "保存しました — この場所に専用アドレスが付きました。",
   "publish.own.cleared": "この場所は再びルートパスにあります。",
+  "publish.own.apex": "{zone} のトップページにする",
+  "publish.own.apex-note": "{zone} はこの場所を開きます。ホストカードは host.{zone} にあります。",
+  "publish.own.apex-saved": "{zone} はこの場所を開くようになりました。ホストカードは host.{zone} にあります。",
   "publish.own.not-a-label": "アドレス名は英小文字・数字・ハイフンで、63文字以内、先頭と末尾にハイフンは使えません。",
   "publish.own.reserved": "「content」と「try-」で始まる名前はホスト用です — 別の名前を選んでください。",
   "publish.own.not-published": "まずこの場所をドメインに公開してから、専用アドレスを付けてください。"

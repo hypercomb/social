@@ -2676,6 +2676,9 @@
   "publish.own.clear": "Utiliser le chemin racine",
   "publish.own.saved": "Enregistré — ce lieu a sa propre adresse.",
   "publish.own.cleared": "Ce lieu se trouve de nouveau au chemin racine.",
+  "publish.own.apex": "En faire la page d’accueil de {zone}",
+  "publish.own.apex-note": "{zone} s’ouvre sur cet endroit. Sa carte d’hôte est à host.{zone}.",
+  "publish.own.apex-saved": "{zone} s’ouvre désormais sur cet endroit. Sa carte d’hôte est à host.{zone}.",
   "publish.own.not-a-label": "Un nom d’adresse se compose de lettres, de chiffres et de traits d’union, 63 caractères au plus, sans trait d’union au début ni à la fin.",
   "publish.own.reserved": "« content » et les noms commençant par « try- » appartiennent à l’hôte — choisissez un autre nom.",
   "publish.own.not-published": "Publiez d’abord ce lieu sur le domaine, puis donnez-lui sa propre adresse."

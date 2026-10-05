@@ -115,6 +115,7 @@ describe('the own-address label', () => {
     expect(zone.ownAddressRefusal('x'.repeat(64))).toBe('not-a-label')
     expect(zone.ownAddressRefusal('')).toBe('not-a-label')
     expect(zone.ownAddressRefusal('content')).toBe('reserved')
+    expect(zone.ownAddressRefusal('host')).toBe('reserved')
     expect(zone.ownAddressRefusal('try-rituals')).toBe('reserved')
     expect(zone.ownAddressHost('content', 'cafesociety.buzz')).toBe('')
     expect(zone.ownAddressHost('tea', 'localhost:4291')).toBe('')
@@ -241,7 +242,7 @@ describe('publish.own.* — catalog parity', () => {
 
   it('finds all fourteen catalogs and the keys to compare', () => {
     expect(catalogs.length).toBeGreaterThanOrEqual(14)
-    expect(keys.length).toBe(10)
+    expect(keys.length).toBe(13)
   })
 
   for (const file of catalogs) {
@@ -253,4 +254,23 @@ describe('publish.own.* — catalog parity', () => {
       expect(keys.filter(k => json[k] === reference[k])).toEqual([])
     })
   }
+})
+
+describe('the domain itself as an own address', () => {
+  it('is `@`, the apex: the bare domain opens on the creation', () => {
+    expect(zone.ownAddressRefusal('@')).toBe('')
+    expect(zone.ownAddressHost('@', 'pointblanksolutions.ca')).toBe('pointblanksolutions.ca')
+    expect(zone.ownAddressHost('@', 'localhost:4291')).toBe('')
+    const addresses = zone.withOwnAddress({ 'shop.pointblanksolutions.ca': 'site' }, 'pointblanksolutions.ca', 'site', '@')
+    expect(addresses).toEqual({ 'pointblanksolutions.ca': 'site' })
+    expect(zone.ownLabelOn(addresses, 'pointblanksolutions.ca', 'site')).toBe('@')
+    expect(zone.creationUrl('pointblanksolutions.ca', ['site'], 'site', addresses)).toBe('https://pointblanksolutions.ca')
+    expect(zone.readAddresses(addresses, { site: 'a'.repeat(64) })).toEqual(addresses)
+  })
+
+  it('names one creation; giving it to another moves it, and null takes it back', () => {
+    const start = { 'pointblanksolutions.ca': 'old' }
+    expect(zone.withOwnAddress(start, 'pointblanksolutions.ca', 'new', '@')).toEqual({ 'pointblanksolutions.ca': 'new' })
+    expect(zone.withOwnAddress(start, 'pointblanksolutions.ca', 'old', null)).toEqual({})
+  })
 })

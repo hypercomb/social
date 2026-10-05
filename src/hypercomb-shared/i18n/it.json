@@ -2676,6 +2676,9 @@
   "publish.own.clear": "Usa il percorso radice",
   "publish.own.saved": "Salvato: questo luogo ha un indirizzo proprio.",
   "publish.own.cleared": "Questo luogo si trova di nuovo nel percorso radice.",
+  "publish.own.apex": "Rendilo la pagina iniziale di {zone}",
+  "publish.own.apex-note": "{zone} si apre su questo luogo. La sua scheda host è su host.{zone}.",
+  "publish.own.apex-saved": "{zone} ora si apre su questo luogo. La sua scheda host è su host.{zone}.",
   "publish.own.not-a-label": "Un nome di indirizzo è fatto di lettere, cifre e trattini, fino a 63 caratteri, senza trattino all’inizio o alla fine.",
   "publish.own.reserved": "«content» e i nomi che iniziano con «try-» appartengono all’host: scegli un altro nome.",
   "publish.own.not-published": "Pubblica prima questo luogo sul dominio, poi dagli un indirizzo proprio."

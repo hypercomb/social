@@ -2676,6 +2676,9 @@
   "publish.own.clear": "Kök yolu kullan",
   "publish.own.saved": "Kaydedildi — bu yerin artık kendi adresi var.",
   "publish.own.cleared": "Bu yer yeniden kök yolda.",
+  "publish.own.apex": "{zone} ana sayfası yap",
+  "publish.own.apex-note": "{zone} bu yerde açılır. Barındırıcı kartı host.{zone} adresinde.",
+  "publish.own.apex-saved": "{zone} artık bu yerde açılıyor. Barındırıcı kartı host.{zone} adresinde.",
   "publish.own.not-a-label": "Adres adı harf, rakam ve kısa çizgiden oluşur, en fazla 63 karakterdir, başında ve sonunda kısa çizgi olamaz.",
   "publish.own.reserved": "“content” ve “try-” ile başlayan adlar sunucuya aittir — başka bir ad seç.",
   "publish.own.not-published": "Önce bu yeri alan adında yayımla, sonra ona kendi adresini ver."

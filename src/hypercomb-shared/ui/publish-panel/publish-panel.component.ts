@@ -383,6 +383,14 @@ export class PublishPanelComponent implements OnDestroy {
     this.ownOpen.set('')
   }
 
+  /** The bare domain opens on this place (`@`, the zone apex); the host card
+   *  moves to host.<zone>. */
+  saveApex(row: PublishRow, zone: string): void {
+    if (row.busyPhase) return
+    EffectBus.emit('publish:own-address', { key: row.key, zone, label: '@' })
+    this.ownOpen.set('')
+  }
+
   /** Back to the root path on `zone` — the own address is dropped. */
   clearOwn(row: PublishRow, zone: string): void {
     if (row.busyPhase) return

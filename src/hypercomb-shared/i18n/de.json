@@ -2676,6 +2676,9 @@
   "publish.own.clear": "Stammpfad verwenden",
   "publish.own.saved": "Gespeichert — dieser Ort hat jetzt eine eigene Adresse.",
   "publish.own.cleared": "Dieser Ort liegt wieder unter dem Stammpfad.",
+  "publish.own.apex": "Zur Startseite von {zone} machen",
+  "publish.own.apex-note": "{zone} öffnet diesen Ort. Die Host-Karte liegt unter host.{zone}.",
+  "publish.own.apex-saved": "{zone} öffnet jetzt diesen Ort. Die Host-Karte liegt unter host.{zone}.",
   "publish.own.not-a-label": "Ein Adressname besteht aus Buchstaben, Ziffern und Bindestrichen, höchstens 63 Zeichen, ohne Bindestrich am Anfang oder Ende.",
   "publish.own.reserved": "„content“ und Namen, die mit „try-“ beginnen, gehören dem Host — wähle einen anderen Namen.",
   "publish.own.not-published": "Veröffentliche diesen Ort zuerst auf der Domain und gib ihm dann eine eigene Adresse."

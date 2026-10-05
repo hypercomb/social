@@ -2676,6 +2676,9 @@
   "publish.own.clear": "रूट पाथ इस्तेमाल करें",
   "publish.own.saved": "सहेजा गया — इस जगह का अब अपना पता है।",
   "publish.own.cleared": "यह जगह फिर से रूट पाथ पर है।",
+  "publish.own.apex": "इसे {zone} का मुखपृष्ठ बनाएँ",
+  "publish.own.apex-note": "{zone} इसी जगह पर खुलता है। इसका होस्ट कार्ड host.{zone} पर है।",
+  "publish.own.apex-saved": "{zone} अब इसी जगह पर खुलता है। इसका होस्ट कार्ड host.{zone} पर है।",
   "publish.own.not-a-label": "पते के नाम में अक्षर, अंक और हाइफ़न हो सकते हैं, अधिकतम 63 वर्ण, और शुरुआत या अंत में हाइफ़न नहीं।",
   "publish.own.reserved": "“content” और “try-” से शुरू होने वाले नाम होस्ट के हैं — कोई दूसरा नाम चुनें।",
   "publish.own.not-published": "पहले इस जगह को डोमेन पर प्रकाशित करें, फिर इसे अपना पता दें।"

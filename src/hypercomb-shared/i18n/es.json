@@ -2676,6 +2676,9 @@
   "publish.own.clear": "Usar la ruta raíz",
   "publish.own.saved": "Guardado: este lugar tiene su propia dirección.",
   "publish.own.cleared": "Este lugar vuelve a vivir en la ruta raíz.",
+  "publish.own.apex": "Convertirlo en la portada de {zone}",
+  "publish.own.apex-note": "{zone} abre en este lugar. Su tarjeta de anfitrión está en host.{zone}.",
+  "publish.own.apex-saved": "{zone} ahora abre en este lugar. Su tarjeta de anfitrión está en host.{zone}.",
   "publish.own.not-a-label": "Un nombre de dirección lleva letras, dígitos y guiones, hasta 63 caracteres, sin guion al principio ni al final.",
   "publish.own.reserved": "«content» y los nombres que empiezan por «try-» pertenecen al host: elige otro nombre.",
   "publish.own.not-published": "Publica primero este lugar en el dominio y luego dale su propia dirección."

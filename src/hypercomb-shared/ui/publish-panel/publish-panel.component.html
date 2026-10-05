@@ -158,6 +158,15 @@
                     <button class="pcur-action" type="button" (click)="clearOwn(row, zone)">{{ 'publish.own.clear' | t }}</button>
                   }
                 </div>
+                <!-- THE DOMAIN ITSELF — the bare domain opens on this place, and
+                     the host card moves to host.<zone>. -->
+                @if (ownLabel(row, zone) === '@') {
+                  <p class="pdoor-ownnote">{{ 'publish.own.apex-note' | t: { zone: zone } }}</p>
+                } @else {
+                  <div class="pdoor-ownrow">
+                    <button class="pcur-action" type="button" (click)="saveApex(row, zone)">{{ 'publish.own.apex' | t: { zone: zone } }}</button>
+                  </div>
+                }
               </li>
             }
           }

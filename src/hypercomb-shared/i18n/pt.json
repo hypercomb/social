@@ -2676,6 +2676,9 @@
   "publish.own.clear": "Usar o caminho raiz",
   "publish.own.saved": "Salvo — este lugar tem um endereço próprio.",
   "publish.own.cleared": "Este lugar voltou a ficar no caminho raiz.",
+  "publish.own.apex": "Torná-lo a página inicial de {zone}",
+  "publish.own.apex-note": "{zone} abre neste lugar. O cartão do anfitrião fica em host.{zone}.",
+  "publish.own.apex-saved": "{zone} agora abre neste lugar. O cartão do anfitrião fica em host.{zone}.",
   "publish.own.not-a-label": "Um nome de endereço tem letras, dígitos e hifens, até 63 caracteres, sem hífen no início nem no fim.",
   "publish.own.reserved": "“content” e nomes que começam com “try-” pertencem ao host — escolha outro nome.",
   "publish.own.not-published": "Publique este lugar no domínio primeiro e depois dê a ele um endereço próprio."

@@ -2676,6 +2676,9 @@
   "publish.own.clear": "使用根路径",
   "publish.own.saved": "已保存 — 此位置有了专属地址。",
   "publish.own.cleared": "此位置已恢复为根路径。",
+  "publish.own.apex": "设为 {zone} 的首页",
+  "publish.own.apex-note": "{zone} 打开的就是这里。它的主机卡片在 host.{zone}。",
+  "publish.own.apex-saved": "{zone} 现在打开的就是这里。它的主机卡片在 host.{zone}。",
   "publish.own.not-a-label": "地址名称由字母、数字和连字符组成，最多 63 个字符，开头和结尾不能是连字符。",
   "publish.own.reserved": "“content”以及以“try-”开头的名称属于主机 — 请换一个名称。",
   "publish.own.not-published": "请先在该域名上发布此位置，然后再为它设置专属地址。"

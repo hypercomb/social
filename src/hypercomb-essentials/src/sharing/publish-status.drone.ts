@@ -75,7 +75,7 @@ import {
   type PublishFailure,
   type PublishProgress,
 } from './publish-branch.js'
-import { creationUrl, foldDnsLabel, ownAddressRefusal, ownLabelOn, zoneDoor } from './zone-door.js'
+import { APEX_LABEL, creationUrl, foldDnsLabel, ownAddressRefusal, ownLabelOn, zoneDoor } from './zone-door.js'
 
 /** English fallbacks for every way publishing can stop. Each one names what
  *  happened AND what it means for the participant's existing links — the
@@ -952,7 +952,7 @@ export class PublishStatusDrone extends Drone {
       const refusal = ownAddressRefusal(label)
       if (refusal) {
         this.#toast('error', `publish.own.${refusal}`, refusal === 'reserved'
-          ? '“content” and names starting with “try-” belong to the host — choose another name.'
+          ? '“content”, “host” and names starting with “try-” belong to the host — choose another name.'
           : 'An address name is letters, digits and hyphens, up to 63 characters, with no hyphen at either end.')
         return
       }
@@ -972,8 +972,12 @@ export class PublishStatusDrone extends Drone {
       this.#emit()
       return
     }
-    this.#toast('success', label ? 'publish.own.saved' : 'publish.own.cleared',
-      label ? 'Saved — this place has its own address.' : 'This place lives at the root path again.')
+    if (label === APEX_LABEL) {
+      this.#toast('success', 'publish.own.apex-saved', `${zone} now opens on this place. Its host card is at host.${zone}.`, { zone })
+    } else {
+      this.#toast('success', label ? 'publish.own.saved' : 'publish.own.cleared',
+        label ? 'Saved — this place has its own address.' : 'This place lives at the root path again.')
+    }
     void this.#refresh()
   }
 
@@ -1066,12 +1070,12 @@ export class PublishStatusDrone extends Drone {
   /** Toasts carry RESOLVED text — the bus payload is display copy, and the
    *  shell must not have to know which fields are keys (the publishing gesture
    *  resolves the same way). */
-  #toast(type: string, messageKey: string, fallback: string): void {
+  #toast(type: string, messageKey: string, fallback: string, params?: Record<string, string>): void {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     EffectBus.emit('toast:show', {
       type,
       title: i18n?.t('publish.title') ?? 'Publish',
-      message: i18n?.t(messageKey) ?? fallback,
+      message: i18n?.t(messageKey, params) ?? fallback,
     })
   }
 
