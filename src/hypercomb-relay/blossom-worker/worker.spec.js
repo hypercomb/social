@@ -202,7 +202,23 @@ test('a signed landing field is inert — the door omits it and the visitor page
   assert.equal('landing' in JSON.parse(door[1]), false)
   // The signed index rides verbatim (its landing field inert inside the publisher's own signed bytes).
   const signed = /<script id="hc-index" type="application\/json">[^<]*<\/script>/.exec(html)
-  assert.equal(html.replace(door[0], '').replace(signed?.[0] ?? '', ''), shell)
+  const card = html.match(/<meta (property="og:|name="twitter:)[^>]*>/g) ?? []
+  const rest = card.reduce((page, tag) => page.replace(tag, ''), html.replace(door[0], '').replace(signed?.[0] ?? '', ''))
+  assert.equal(rest, shell.replace('<title>x</title>', `<title>${site.title}</title>`))
+})
+
+test('a page names its site — the title and share card are in the served HTML, not set by script', async () => {
+  const bindings = { ...ONE_ZONE, 'revolucion.pluginthematrix.com': { ...ONE_ZONE['revolucion.pluginthematrix.com'], title: 'Revolución & "Co" $&' } }
+  const { env } = await fixture(undefined, bindings)
+  const shell = '<!doctype html><html><head><title>Hypercomb</title></head><body></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/about'), env)).text()
+  const name = 'Revolución &amp; &quot;Co&quot; $&amp;'
+  assert.match(html, new RegExp(`<title>${name.replace(/\$/g, '\\$')}</title>`))
+  assert(html.includes(`<meta property="og:title" content="${name}">`))
+  assert(html.includes(`<meta name="twitter:title" content="${name}">`))
+  assert(html.includes('<meta property="og:url" content="https://revolucion.pluginthematrix.com/about">'))
+  assert(!html.includes('Published website'))
 })
 
 test('a page carries its door record, escaped so no value can close the script', async () => {

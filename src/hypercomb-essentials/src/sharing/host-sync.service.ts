@@ -41,8 +41,8 @@
 //
 // MULTI-TARGET DRAIN (consent-hosting.md §"Transfer"): the drain iterates a
 // LIST of targets — the operator's self-domain plus granted hosts. Phase 1
-// grants exactly one standing host: the PUBLIC content endpoint
-// content.pluginthematrix.com (documentation/read-only-deployment.md — Blossom/
+// grants exactly one standing host: the PUBLIC content endpoint at the zone
+// ROOT pluginthematrix.com (documentation/read-only-deployment.md — Blossom/
 // NIP-98 worker over R2), behind its own explicit opt-in
 // (localStorage['hc:public-host'] = '1'). Doctrine: swarms resolve around
 // hosts; PUBLIC content posts to the CDN; private/group content NEVER
@@ -78,6 +78,7 @@
 
 import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
+import { foldContentLabel, legacyContentFace } from './zone-door.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
 
@@ -158,8 +159,13 @@ const PUBLIC_HOST_KEY = 'hc:public-host'
 // per host, so bytes already confirmed on the old host stay confirmed there and
 // the new host earns its own receipts. Nothing is deleted and nothing is
 // invalidated by re-pointing.
+//
+// THE ROOT IS THE DOOR (2026-10-03): writes go to the zone itself, never its
+// retired `content.` face. A value stored as `content.<zone>` is READ as
+// `<zone>` (zone-door.ts) and saved folded the next time it is set — the
+// stored history is never rewritten behind the participant's back.
 const PUBLIC_HOST_DOMAIN_KEY = 'hc:public-host:domain'
-const DEFAULT_PUBLIC_HOST_DOMAIN = 'content.pluginthematrix.com'
+const DEFAULT_PUBLIC_HOST_DOMAIN = 'pluginthematrix.com'
 /** A bare hostname: labels joined by dots, no scheme, no path, no port. The
  *  target is concatenated into request URLs, so anything else is refused
  *  rather than normalised — a half-understood value is how you publish to
@@ -187,7 +193,16 @@ type QueueEntry = { sig: string; kind: HostSyncKind; fileName: string; mtime: nu
  *  sigs carrying a `{sig}.public` marker — the doctrine gate that keeps
  *  private/group bytes off the public endpoint. Future consent-granted
  *  hosts (30411 records) append here with their own scoping. */
-type SyncTarget = { domain: string; hostHash: string | null; publicOnly: boolean }
+type SyncTarget = {
+  domain: string
+  hostHash: string | null
+  publicOnly: boolean
+  /** The hash of the zone's retired `content.<zone>` face. Receipts earned
+   *  there before the face retired are the SAME store's answer, so they stay
+   *  honoured — an updated hive does not re-push what the host already holds.
+   *  Read only: new receipts are written under `hostHash`. */
+  legacyHostHash?: string
+}
 
 export class HostSyncService extends EventTarget {
 
@@ -291,7 +306,7 @@ export class HostSyncService extends EventTarget {
   /** True iff the operator opted in to the PUBLIC content endpoint. */
   public readonly isPublicHostEnabled = (): boolean => this.#publicHostEnabled()
 
-  /** Opt in to the public relay target (content.pluginthematrix.com). Published-public
+  /** Opt in to the public relay target (pluginthematrix.com). Published-public
    *  closures (and ONLY those — see markPublic) start draining there.
    *  Effect is immediate. Caller shows the "your public tiles will be
    *  posted to the public content endpoint" consent BEFORE invoking —
@@ -356,7 +371,7 @@ export class HostSyncService extends EventTarget {
    *  default, so an unset value and a never-asked participant behave alike. */
   public readonly publicHostDomain = (): string => {
     let stored = ''
-    try { stored = String(localStorage.getItem(PUBLIC_HOST_DOMAIN_KEY) ?? '').trim().toLowerCase() }
+    try { stored = foldContentLabel(localStorage.getItem(PUBLIC_HOST_DOMAIN_KEY) ?? '') }
     catch { /* storage unavailable */ }
     return HOST_DOMAIN_RE.test(stored) ? stored : DEFAULT_PUBLIC_HOST_DOMAIN
   }
@@ -375,7 +390,8 @@ export class HostSyncService extends EventTarget {
    * delete surface by design — so this is a change of destination, not a move.
    */
   public readonly setPublicHostDomain = (domain: string): boolean => {
-    const clean = String(domain ?? '').trim().toLowerCase()
+    // Saved as the zone: a `content.` face typed or carried in is the zone.
+    const clean = foldContentLabel(String(domain ?? '').trim().toLowerCase())
     if (!clean) {
       try { localStorage.removeItem(PUBLIC_HOST_DOMAIN_KEY) } catch { /* ignore */ }
       this.dispatchEvent(new CustomEvent('change'))
@@ -468,7 +484,8 @@ export class HostSyncService extends EventTarget {
   public readonly addPublishNodes = (domains: readonly string[]): void => {
     let added = false
     for (const raw of domains) {
-      const domain = String(raw ?? '').trim().toLowerCase()
+      // A node is a write door — the zone root, never a `content.` face.
+      const domain = foldContentLabel(String(raw ?? '').trim().toLowerCase())
       if (!HOST_DOMAIN_RE.test(domain) || this.#publishNodes.has(domain)) continue
       this.#publishNodes.add(domain)
       added = true
@@ -491,17 +508,25 @@ export class HostSyncService extends EventTarget {
     }
     if (this.#publicHostEnabled()) {
       const domain = this.publicHostDomain()
-      targets.push({
-        domain,
-        hostHash: await HostSyncService.#hostHash(domain),
-        publicOnly: true,
-      })
+      targets.push(await HostSyncService.#grantedTarget(domain))
     }
     for (const domain of this.#publishNodes) {
       if (targets.some(t => t.domain === domain)) continue
-      targets.push({ domain, hostHash: await HostSyncService.#hostHash(domain), publicOnly: true })
+      targets.push(await HostSyncService.#grantedTarget(domain))
     }
     return targets
+  }
+
+  /** A granted (public-only) target, with the hash of its retired content
+   *  face so receipts earned there before the retirement keep counting. */
+  static #grantedTarget = async (domain: string): Promise<SyncTarget> => {
+    const face = legacyContentFace(domain)
+    return {
+      domain,
+      hostHash: await HostSyncService.#hostHash(domain),
+      publicOnly: true,
+      ...(face ? { legacyHostHash: await HostSyncService.#hostHash(face) } : {}),
+    }
   }
 
   /** Receipt filename for a target: bare `{sig}` for the self-domain (no
@@ -513,13 +538,18 @@ export class HostSyncService extends EventTarget {
    *  legacy drain source while it exists (which only ever held bare
    *  self-domain names; hostHash-suffixed names simply never match there). */
   readonly #receiptExists = async (sig: string, target: SyncTarget): Promise<boolean> => {
-    const name = HostSyncService.#receiptName(sig, target)
+    const names = [HostSyncService.#receiptName(sig, target)]
+    // A receipt earned on the zone's retired `content.` face is the same
+    // store's answer — honoured on read, never written again.
+    if (target.legacyHostHash) names.push(`${sig}.${target.legacyHostHash}`)
     for (const dir of [await this.#getReceiptsDir(), await this.#getLegacyReceiptsDir()]) {
       if (!dir) continue
-      try {
-        await dir.getFileHandle(name, { create: false })
-        return true
-      } catch { /* not in this source */ }
+      for (const name of names) {
+        try {
+          await dir.getFileHandle(name, { create: false })
+          return true
+        } catch { /* not in this source */ }
+      }
     }
     return false
   }
@@ -1875,7 +1905,8 @@ export class HostSyncService extends EventTarget {
     sigs: readonly string[],
     bytesOf: (sig: string) => Promise<Uint8Array | null>,
   ): Promise<{ ok: true; sent: number; held: number } | { ok: false; error: string; sig?: string }> => {
-    const domain = String(host ?? '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+    // A write goes to the zone root — a `content.` face handed in folds to it.
+    const domain = foldContentLabel(String(host ?? '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, ''))
     if (!domain) return { ok: false, error: 'no host to publish to' }
     // Any *.localhost name is loopback (RFC 6761): a zone's content face on
     // one machine is content.localhost.
@@ -1970,7 +2001,8 @@ export class HostSyncService extends EventTarget {
   readonly #hostBase = (): string => {
     let raw = ''
     try { raw = String(localStorage.getItem(SELF_DOMAIN_KEY) ?? '').trim() } catch { return '' }
-    return raw.replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
+    // The zone root is the write door; a stored `content.` face folds to it.
+    return foldContentLabel(raw.replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim())
   }
 
   // -------------------------------------------------

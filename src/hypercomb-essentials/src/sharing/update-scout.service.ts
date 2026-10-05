@@ -24,10 +24,12 @@
 // its own key. A participant's own record overrides the file:
 //
 //   localStorage['hc:install-follow'] =
-//     '{"pubkey":"<64-hex>","hosts":["content.pluginthematrix.com"],"channel":"essentials"}'
+//     '{"pubkey":"<64-hex>","hosts":["pluginthematrix.com"],"channel":"essentials"}'
 //   localStorage['hc:install-follow'] = 'off'     // follow nobody
 //
-// (hosts may be omitted — the standing public content endpoint is the default.)
+// (hosts may be omitted — the standing public content endpoint is the default.
+// A host recorded as `content.<zone>` — the retired face — is read as its zone;
+// the index read still falls back to that face for old data: zone-door.ts.)
 //
 // Silence rules — the scout only ever ANNOUNCES a divergence, never argues:
 //   - no follow (no record and no key in the file, or 'off') → dormant
@@ -47,6 +49,7 @@ import { EffectBus } from '@hypercomb/core'
 import { checkRemoteHiveFormat } from './hive-format.js'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import { installRootOf, PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { foldContentLabel } from './zone-door.js'
 import { takeIfAllowed } from './upgrade-allow.js'
 // LOAD-BEARING IMPORT. The hive FORMAT check has no registration of its own —
 // it reaches the app by riding this module, which side-effects.ts already
@@ -97,7 +100,7 @@ function parseFollow(value: unknown): InstallFollow | null {
   if (!SIG_RE.test(pubkey)) return null
   const rawHosts = parsed['hosts']
   const hosts = Array.isArray(rawHosts)
-    ? rawHosts.map(h => String(h ?? '').trim().toLowerCase()).filter(Boolean)
+    ? [...new Set(rawHosts.map(h => foldContentLabel(h)).filter(Boolean))]
     : []
   const channel = String(parsed['channel'] ?? '').trim().toLowerCase() || 'essentials'
   return { pubkey, hosts: hosts.length ? hosts : [...PUBLIC_CONTENT_HOSTS], channel }

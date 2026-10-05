@@ -1967,7 +1967,26 @@ function indexScript(raw) {
   return `<script id="hc-index" type="application/json">${raw.replace(/</g, '\\u003c')}</script>`
 }
 
-async function serveVisitorAsset(request, env, { spa = true, door = null, install = null, index = null, base = null } = {}) {
+/** Text safe inside an attribute or element body. */
+function htmlText(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** THE PAGE NAMES ITS SITE. A link preview (a chat app, a search result, a
+ *  bookmark) reads the HTML as served and runs no script, so the site's title
+ *  set at boot never reaches it — every shared link read "Published website".
+ *  The served page carries the title and the share card itself. */
+function shareHead(title, request, base) {
+  const url = new URL(request.url)
+  const root = `${url.origin}${base || '/'}`
+  const name = htmlText(title)
+  const page = htmlText(`${url.origin}${url.pathname}`)
+  return `<meta property="og:type" content="website"><meta property="og:title" content="${name}"><meta property="og:site_name" content="${name}">`
+    + `<meta property="og:url" content="${page}"><meta property="og:image" content="${htmlText(`${root}apple-touch-icon.png`)}">`
+    + `<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${name}">`
+}
+
+async function serveVisitorAsset(request, env, { spa = true, door = null, install = null, index = null, base = null, title = null } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   let response = await env.ASSETS.fetch(request)
   // Under /content/ a miss is a miss. The engine walks its package pool by
@@ -1999,8 +2018,10 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
       && new URL(request.url).pathname.startsWith(`/content/${await poolAddress(INSTALL_INDEX_MEANING)}/`)) {
     headers.set('Content-Type', 'application/json; charset=utf-8')
   }
-  if (door && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
+  const name = String(door?.title || title || '').trim()
+  if ((door || name) && response.status === 200 && String(response.headers.get('content-type') || '').includes('text/html')) {
     let html = await response.text()
+    if (name) html = html.replace(/<title>[^<]*<\/title>/, () => `<title>${htmlText(name)}</title>`)
     // A ROOT PLACE's page lives under its path: the document base moves there,
     // so every relative asset the build names is asked under the same prefix.
     if (base) html = html.replace(/<base href="\/"\s*\/?>/, `<base href="${base.replace(/"/g, '%22')}" />`)
@@ -2008,7 +2029,7 @@ async function serveVisitorAsset(request, env, { spa = true, door = null, instal
     if (at >= 0) {
       headers.delete('Content-Length')
       headers.set('Cache-Control', 'no-store')
-      const body = html.slice(0, at) + doorScript(door) + (install ? doorScript(install, 'hc-install') : '') + (index ? indexScript(index) : '') + html.slice(at)
+      const body = html.slice(0, at) + (name ? shareHead(name, request, base) : '') + (door ? doorScript(door) : '') + (install ? doorScript(install, 'hc-install') : '') + (index ? indexScript(index) : '') + html.slice(at)
       return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers })
     }
     return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers })
@@ -2058,7 +2079,7 @@ async function serveRootPlace(request, env, zone, place) {
   const door = located?.record ?? null
   const install = door ? pointer : null
   const index = door && signedIndex && signedIndex.length <= PAGE_INDEX_MAX ? signedIndex : null
-  return serveVisitorAsset(inner, env, { door, install, index, base: `${place.prefix}/` })
+  return serveVisitorAsset(inner, env, { door, install, index, base: `${place.prefix}/`, title: site.title })
 }
 
 // ── responses ────────────────────────────────────────────────────────────────
@@ -3919,7 +3940,7 @@ export default {
       const door = located?.record ?? null
       const install = door ? pointer : null
       const index = door && signedIndex && signedIndex.length <= PAGE_INDEX_MAX ? signedIndex : null
-      return serveVisitorAsset(request, env, { door, install, index })
+      return serveVisitorAsset(request, env, { door, install, index, title: site.title })
     }
 
     // A zone subdomain that could not even become an implicit site (nested

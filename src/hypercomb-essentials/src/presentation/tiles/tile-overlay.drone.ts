@@ -103,6 +103,11 @@ type OverlayAction = {
   visibleWhen?: OverlayVisibilityFn
   /** If provided, called to compute per-tile tint */
   tintWhen?: OverlayTintFn
+  /** Answers ctrl/cmd+click (the default-view toggle) instead of letting
+   *  ctrl fall through to selection — see #ctrlIconAt. */
+  ctrlClick?: boolean
+  /** If provided, per tile: wear the standing selected ring */
+  selectedWhen?: OverlaySelectedFn
   /** i18n key for the short hint label */
   labelKey?: string
   /** i18n key for the expanded description */
@@ -143,6 +148,17 @@ export type OverlayActionDescriptor = {
    * whenever the active tile changes.
    */
   tintWhen?: OverlayTintFn
+  /**
+   * Ctrl/cmd+click on this icon is its OWN gesture: the overlay keeps the
+   * band up under a held ctrl while the pointer is on it and emits
+   * `tile:action` with `ctrlKey`, instead of handing the click to selection.
+   * For view icons this is "make this the tile's default view" (own tiles
+   * only — on a peer's tile ctrl stays the claim gesture).
+   */
+  ctrlClick?: boolean
+  /** Per-tile standing SELECTED ring (e.g. "this view is the tile's default").
+   *  Evaluated with `visibleWhen` / `tintWhen`; survives hover. */
+  selectedWhen?: OverlaySelectedFn
   /** i18n key for the short hint label (shown on sustained hover) */
   labelKey?: string
   /** i18n key for the expanded description (shown on sustained hover) */
@@ -154,6 +170,9 @@ export type OverlayActionDescriptor = {
 
 export type OverlayVisibilityFn = (ctx: OverlayTileContext) => boolean
 export type OverlayTintFn = (ctx: OverlayTileContext) => number | null | undefined
+export type OverlaySelectedFn = (ctx: OverlayTileContext) => boolean
+/** A ctrl/cmd press that began on a ctrl-capable icon (see TileOverlayDrone #onClick). */
+type CtrlIconPress = { pointerId: number; name: string; q: number; r: number; x: number; y: number }
 
 export type OverlayTileContext = {
   label: string
@@ -596,6 +615,7 @@ export class TileOverlayDrone extends Drone {
     'navigation:hexagons-once',
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
+    'default-view:indexed',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'clipboard:verb', 'swarm:wand', 'editor:switch-request']
 
@@ -932,6 +952,14 @@ export class TileOverlayDrone extends Drone {
       // time from peer-divergence, so there's no cached set here to drift —
       // this only says WHEN to look again.
       this.onEffect('swarm:divergence-changed', () => {
+        if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
+      })
+
+      // A layer's default view changed (a ctrl+click on a view icon, the rail,
+      // the `opens` word). The view icons' tint and selected ring read the
+      // index inline, so this only says WHEN to look again — without it the
+      // ring would lag until the pointer left the tile it was just set on.
+      this.onEffect('default-view:indexed', () => {
         if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
       })
 
@@ -1662,6 +1690,8 @@ export class TileOverlayDrone extends Drone {
         labelRow: desc.labelRow,
         visibleWhen: desc.visibleWhen,
         tintWhen: desc.tintWhen,
+        ctrlClick: desc.ctrlClick,
+        selectedWhen: desc.selectedWhen,
         labelKey: desc.labelKey,
         descriptionKey: desc.descriptionKey,
         backingKey: desc.backingKey,
@@ -1866,6 +1896,7 @@ export class TileOverlayDrone extends Drone {
       }
       const tint = action.tintWhen ? action.tintWhen(ctx) : null
       action.button.setNormalTint(tint ?? null)
+      action.button.selected = action.selectedWhen ? action.selectedWhen(ctx) === true : false
       // Feature-readiness shade: an affordance whose backing bee has not yet
       // registered (loaded) is shaded + inert until it's available — the same
       // "shaded until preloaded" rule tiles follow. window.ioc.has is a cheap
@@ -2610,7 +2641,23 @@ export class TileOverlayDrone extends Drone {
       }
 
       // Ctrl/Meta held: track position but hide overlay (selection mode, not navigation)
+      // — unless the pointer is on one of this tile's ctrl-capable icons (the
+      // default-view toggle). Lay the band out for the new tile first so its
+      // icons can be found under the held key.
       if (e.ctrlKey || e.metaKey) {
+        // Lay the new tile's band out HIDDEN, so the layout names no owner and
+        // nothing rises for a band that is not shown.
+        this.#positionOverlay(axial.q, axial.r)
+        this.#overlay.visible = false
+        this.#ctrlBandHeld = false
+        this.#updateCellLabel(axial.q, axial.r)
+        this.#updatePerTileVisibility()
+        if (this.#holdBandForCtrl(local, e.buttons)) {
+          this.#refreshSwapCue(false, e.pointerType)
+          this.#updateIconHover(local)
+          this.emitEffect('tile:hover', { q: axial.q, r: axial.r, label: entry?.label ?? null, bandRows: entry ? this.#bandRows : 1 })
+          return
+        }
         this.#overlay.visible = false
         this.#refreshSwapCue(true, e.pointerType)
         this.emitEffect('tile:hover', {
@@ -2635,15 +2682,108 @@ export class TileOverlayDrone extends Drone {
       })
     }
 
-    // Ctrl/Meta held but hex didn't change — still hide overlay
+    // Ctrl/Meta held but hex didn't change — still hide overlay, unless the
+    // pointer is on a ctrl-capable icon (see #holdBandForCtrl)
     if (e.ctrlKey || e.metaKey) {
-      this.#overlay.visible = false
+      const wasHeldHere = this.#ctrlBandHeld
+      if (this.#holdBandForCtrl(local, e.buttons)) {
+        this.#refreshSwapCue(false, e.pointerType)
+        this.#updateIconHover(local)
+        // Announce the band once, when it comes up — not on every move.
+        if (!wasHeldHere && this.#currentAxial) this.emitEffect('tile:hover', {
+          q: this.#currentAxial.q, r: this.#currentAxial.r,
+          label: this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))?.label ?? null,
+          bandRows: this.#bandRows,
+        })
+        return
+      }
+      const wasHeld = this.#ctrlBandHeld
+      this.#dropCtrlBand()
+      if (wasHeld && this.#currentAxial) this.emitEffect('tile:hover', {
+        q: this.#currentAxial.q, r: this.#currentAxial.r,
+        label: this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))?.label ?? null,
+        bandRows: 1,
+      })
       this.#refreshSwapCue(true, e.pointerType)
       return
     }
 
     this.#refreshSwapCue(false, e.pointerType)
     this.#updateIconHover(local)
+  }
+
+  // ── Ctrl over a view icon: the default-view gesture ────────────────
+
+  /** The ctrl press that began on a ctrl-capable icon, for #onClick to pair with. */
+  #ctrlIconPress: CtrlIconPress | null = null
+  /** The band is up only because ctrl is held over a ctrl-capable icon. */
+  #ctrlBandHeld = false
+
+  #ctrlIconPressAt(e: PointerEvent): CtrlIconPress | null {
+    if (!this.#renderContainer || !this.#overlay?.visible || !this.#currentAxial || e.target !== this.#canvas) return null
+    const g = this.#clientToPixiGlobal(e.clientX, e.clientY)
+    const icon = this.#ctrlIconAt(this.#renderContainer.toLocal(new Point(g.x, g.y)))
+    if (!icon || icon.inert) return null
+    return { pointerId: e.pointerId, name: icon.name, q: this.#currentAxial.q, r: this.#currentAxial.r, x: e.clientX, y: e.clientY }
+  }
+
+  /** The visible ctrl-capable icon (`ctrlClick`) under `local`, or null.
+   *  Reads the band as last laid out for the hovered tile. A peer's tile
+   *  never answers: there ctrl is the claim gesture (SelectionInputDrone). */
+  #ctrlIconAt(local: Point): OverlayAction | null {
+    if (!this.#overlay || !this.#currentAxial) return null
+    // A tag filter flattens the page: a visible tile can live anywhere in the
+    // hive, so `here/label` would name the wrong place. No gesture there.
+    if (this.#flatPaths.size > 0) return null
+    const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
+    if (!entry || this.#externalLabels.has(entry.label)) return null
+    const ox = this.#overlay.position.x
+    const oy = this.#overlay.position.y
+    for (const a of this.#actions) {
+      if (!a.ctrlClick || !a.button.visible || a.inert) continue
+      if (a.button.containsPoint(local.x - ox - a.button.position.x, local.y - oy - a.button.position.y)) return a
+    }
+    return null
+  }
+
+  /** Under a held ctrl the band stands down (ctrl means selection). Over a
+   *  ctrl-capable icon it stays up instead, so the icon you are about to make
+   *  the tile's default is the one you can see. Same gates as #updateVisibility. */
+  #holdBandForCtrl(local: Point, buttons: number): boolean {
+    if (!this.#overlay) return false
+    if (buttons !== 0) return false   // a ctrl DRAG (paint, claim, move) keeps the band down
+    if (this.#editing || this.#touchDragging || this.#dropDragging || this.#screensaverActive
+      || this.#hiveHidden || this.#pheromoneWindowOpen || this.#mobileMode()) return false
+    if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) return false
+    if (!this.#ctrlIconAt(local)) return false
+    const wasHidden = !this.#overlay.visible
+    this.#overlay.visible = true
+    this.#ctrlBandHeld = true
+    // Shown now: re-announce the band so show-cell's background and the DOM
+    // name rise to the icon rows (#layoutIconRow names the band's owner only
+    // while the overlay is visible).
+    if (wasHidden) this.#layoutIconRow()
+    return true
+  }
+
+  /** Ctrl is still held but the pointer left the icon: stand the band down
+   *  and, if it was up for the icon, say so — one row again. */
+  #dropCtrlBand(): void {
+    if (!this.#overlay) return
+    this.#overlay.visible = false
+    if (!this.#ctrlBandHeld) return
+    this.#ctrlBandHeld = false
+    this.#layoutIconRow()
+  }
+
+  /** For SelectionInputDrone: is a ctrl+press at this client point on a
+   *  ctrl-capable tile icon? Then it is the default-view gesture and must not
+   *  start a selection paint. */
+  ctrlIconAtClient(clientX: number, clientY: number): string | null {
+    if (!this.#renderContainer || !this.#overlay?.visible) return null
+    const g = this.#clientToPixiGlobal(clientX, clientY)
+    const local = this.#renderContainer.toLocal(new Point(g.x, g.y))
+    return this.#ctrlIconAt(local)?.name ?? null
   }
 
   #updateIconHover(local: Point): void {
@@ -2886,6 +3026,10 @@ export class TileOverlayDrone extends Drone {
     // Every new press invalidates the previous press-capture — a click must
     // only ever pair with ITS OWN pointerdown's capture.
     this.#pressCapture = null
+    // A ctrl/cmd press that STARTS on a ctrl-capable icon (a view icon) is the
+    // only press whose click may toggle the tile's default view — a selection
+    // paint, a claim sweep or a move that merely ENDS over one must not.
+    this.#ctrlIconPress = (e.ctrlKey || e.metaKey) && e.button === 0 ? this.#ctrlIconPressAt(e) : null
     // Right-button down → instant back navigation (trailing pointerup + contextmenu suppressed)
     if (e.button === 2) {
       this.#beginBackGesture(e)
@@ -3168,6 +3312,30 @@ export class TileOverlayDrone extends Drone {
 
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
       if (!entry?.label) return
+      // Ctrl/cmd on one of this tile's ctrl-capable icons (a view icon) is its
+      // own gesture — "make this the tile's default view", or take it away —
+      // and outranks the copy and the selection toggle below. The icon's
+      // owner reads `ctrlKey`; `leaf` tells it the tile has no children.
+      const press = this.#ctrlIconPress
+      this.#ctrlIconPress = null
+      const onBand = this.#overlay?.visible && this.#currentAxial?.q === axial.q && this.#currentAxial?.r === axial.r
+      const ctrlIcon = onBand ? this.#ctrlIconAt(local) : null
+      const samePress = !!press && !!ctrlIcon && press.name === ctrlIcon.name && press.q === axial.q && press.r === axial.r
+        && Math.hypot(e.clientX - press.x, e.clientY - press.y) <= 6
+      if (ctrlIcon && samePress && !ctrlIcon.inert && !this.#iconEditOn) {
+        this.#pressCapture = null
+        this.#clearHint()
+        this.emitEffect('tile:action', {
+          action: ctrlIcon.name,
+          q: axial.q,
+          r: axial.r,
+          index: entry.index,
+          label: entry.label,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+        })
+        return
+      }
       // Swap mode: ctrl is the COPY. Same take gesture as the plain click,
       // but the tile STAYS on the page — it lands in the window as a sig
       // reference without the cut commit (ctrl+drag-copies-in-Explorer

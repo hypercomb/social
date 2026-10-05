@@ -13,6 +13,7 @@
 import { EffectBus, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { validateInviteBundle, type MeetingInviteBundle } from './meeting-invite.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { readDoorsOf } from './zone-door.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const ROOM_KEY = '@hypercomb.social/RoomStore'
@@ -47,7 +48,7 @@ export async function loadBundleJson(sig: string): Promise<unknown | null> {
   // a different app origin has no other reachable host in private mode.
   try {
     get<{ noteDomainsForSig?: (sig: string, domains: string[]) => void }>(CONTENT_BROKER_KEY)
-      ?.noteDomainsForSig?.(sig, PUBLIC_CONTENT_HOSTS)
+      ?.noteDomainsForSig?.(sig, readDoorsOf(PUBLIC_CONTENT_HOSTS))
   } catch { /* broker absent — origin fetch below still covers same-origin */ }
   let blob: Blob | null = null
   try { blob = (await store?.getResource(sig)) ?? null } catch { /* fall through */ }

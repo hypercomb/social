@@ -322,11 +322,13 @@ const MAX_MISS_TTL_MS = 30 * 60_000
 // sha256 gates every fetched byte, so a mirror that 404s or serves wrong bytes
 // is harmless — it only ever costs a 404 before the cascade moves on, never
 // corruption.
-// content.jwize.com is the PUBLIC content endpoint (Blossom over R2,
-// documentation/public-content-endpoint.md) — where published-public
-// closures land via HostSyncService's public target. Same tier, same
-// flag, same sha256 harmlessness as the mirrors.
-const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io', 'content.jwize.com'] as const
+// pluginthematrix.com is the PUBLIC content endpoint's zone ROOT (Blossom
+// over R2, documentation/public-content-endpoint.md) — where published-public
+// closures land via HostSyncService's public target. content.jwize.com is
+// the retired content face, kept LAST as a read fallback for bytes only it
+// held (writes never go there — zone-door.ts). Same tier, same flag, same
+// sha256 harmlessness as the mirrors.
+const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io', 'pluginthematrix.com', 'content.jwize.com'] as const
 
 export type ContentType = 'layer' | 'resource' | 'dependency' | 'bee'
 

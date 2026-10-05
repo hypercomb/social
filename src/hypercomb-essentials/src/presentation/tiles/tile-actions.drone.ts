@@ -3,7 +3,7 @@ import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import { confirmRemoval } from '../../commands/remove-confirm.js'
 import { resolveCurrentLayer } from '../../history/layer-placement.js'
 import type { PlacementHistory } from '../../history/layer-placement.js'
-import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
+import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn, OverlaySelectedFn } from './tile-overlay.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
@@ -50,6 +50,10 @@ type IconProviderEntry = {
   hoverTint?: number
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
+  /** Ctrl/cmd+click is this icon's own gesture (see OverlayActionDescriptor). */
+  ctrlClick?: boolean
+  /** Per-tile standing selected ring. */
+  selectedWhen?: OverlaySelectedFn
   labelKey?: string
   descriptionKey?: string
 }
@@ -129,6 +133,10 @@ export type IconRegistryEntry = {
   labelRow?: boolean
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
+  /** Ctrl/cmd+click is this icon's own gesture (see OverlayActionDescriptor). */
+  ctrlClick?: boolean
+  /** Per-tile standing selected ring. */
+  selectedWhen?: OverlaySelectedFn
   /** i18n key for the short hint label (shown on sustained hover) */
   labelKey?: string
   /** i18n key for the expanded description (shown on sustained hover) */
@@ -471,6 +479,8 @@ export class TileActionsDrone extends Drone {
           labelRow: p.labelRow,
           visibleWhen: p.visibleWhen,
           tintWhen: p.tintWhen,
+          ctrlClick: p.ctrlClick,
+          selectedWhen: p.selectedWhen,
           labelKey: p.labelKey,
           descriptionKey: p.descriptionKey,
         })
@@ -523,6 +533,8 @@ export class TileActionsDrone extends Drone {
           labelRow: entry.labelRow,
           visibleWhen: entry.visibleWhen,
           tintWhen: entry.tintWhen,
+          ctrlClick: entry.ctrlClick,
+          selectedWhen: entry.selectedWhen,
           labelKey: entry.labelKey,
           descriptionKey: entry.descriptionKey,
           // Feature-readiness shade: the overlay dims + disables this affordance
@@ -581,6 +593,8 @@ export class TileActionsDrone extends Drone {
         // (the only tintWhen users) lose their public-state color after any
         // IconProviderRegistry 'change' (e.g. a drone toggled on/off).
         tintWhen: entry.tintWhen,
+        ctrlClick: entry.ctrlClick,
+        selectedWhen: entry.selectedWhen,
         labelKey: entry.labelKey,
         descriptionKey: entry.descriptionKey,
         // Preserve the feature-readiness backing on re-registration too.

@@ -106,7 +106,7 @@ const PARENT_NOTE = [
   'mobile:friendly throughout so the mobile gate renders it the moment it',
   'folds.',
   '',
-  'Published to content.jwize.com via scripts/publish-content.ts; offered on',
+  'Published to the public heap (pluginthematrix.com) via scripts/publish-content.ts; offered on',
   'first boot by the example-hives worker (see',
   'documentation/example-hives-first-boot.md).',
 ].join('\n')

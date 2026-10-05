@@ -42,6 +42,7 @@ import { swarmFilterSelection } from './swarm-filter.service.js'
 import { allowsHere } from '../pheromones/intake-filter.js'
 import { withheldForShare, ENABLEMENT_CHANGED } from './behavior-enablement.js'
 import { swarmFilterService } from './swarm-filter.service.js'
+import { nameService } from './names.service.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -2149,6 +2150,9 @@ export class SwarmDrone extends Drone {
       if (domainTags.length && broker?.noteDomainsForSig) {
         noteVisualHosts(cleanVisuals, domainTags, broker.noteDomainsForSig)
       }
+      // NOT where their name is asked: a recovered entry is a responder's
+      // unsigned JSON, so it could tie any key to any host. Only the key's own
+      // signed layer event (#onEvent) hints its host to the name service.
       // A recovered entry is a LIVE answer from a participant who is in the
       // zone right now — the late-joiner path, which is the exact moment the
       // user means by "it should be immediate when participants connect".
@@ -2426,6 +2430,11 @@ export class SwarmDrone extends Drone {
     if (domainTags.length && broker?.noteDomainsForSig) {
       noteVisualHosts(cleanVisuals, domainTags, broker.noteDomainsForSig)
     }
+    const refs = visualArtifactSigs(cleanVisuals)
+    // The same host is where their NAME is asked (names.service.ts) — this
+    // event is the key's own, signed and relay-verified, and only when it
+    // names bytes is the host on the byte path the attribution above opened.
+    if (refs.length) for (const host of domainTags) nameService.hint(pubkey, host)
 
     // THE PUBLISHER IS HERE, AND THEY HAVE THE BYTES. Unconditional — the
     // attribution above only fires for a peer who advertises a host, which
@@ -2437,7 +2446,6 @@ export class SwarmDrone extends Drone {
     // Idempotent per (pubkey, sig) inside the broker, so the 30s heartbeat
     // re-announce costs nothing and the crowd cannot turn this into a storm.
     if (broker?.notePeerLiveness) {
-      const refs = visualArtifactSigs(cleanVisuals)
       if (refs.length) broker.notePeerLiveness(pubkey, refs)
     }
 

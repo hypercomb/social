@@ -58,6 +58,7 @@ mechanism.
 | `/undo`, `/redo` | keystroke, control bar, phone deck | walks `HistoryCursorService`; the one wholly reversible verb in the language |
 | `/copy`, `/cut` | keystroke, control bar | NAME their tiles on the machine seam — the button acts on the selection, which a speaker cannot see |
 | `/paste` | keystroke, control bar | bare means something entire: place what is held, where you are |
+| `/opens <tile> as <view>`, `/opens <tile> as hexagons` | ctrl+click on a tile's view icon, the header rail's ctrl+click | the same `features:default` toggle the icon emits; bare `opens <tile>` says how it opens. Added 2026-10-04 with the tile-icon gesture, in the same pass |
 
 And `/remove` — which already had a word — became sayable by a machine, at
 `reach: 'destructive'`, stated in the catalogue, confirmed at its own door.

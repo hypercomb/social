@@ -51,6 +51,14 @@ interface SwarmConsumerApi extends SwarmLabelApi {
   follow: (pubkey: string | null) => Promise<void>
 }
 
+/** Who a key is, at its host (essentials NameService), consumed via IoC at
+ *  runtime — shared never imports modules. A name a host vouches for first,
+ *  else the caller's label marked unverified, else a short npub. */
+interface NameApi {
+  nameOf: (pubkey: string, host?: string) => { name: string; host: string } | null
+  label: (pubkey: string, host?: string, unverifiedFallback?: string) => string
+}
+
 /** The participant filter (essentials SwarmFilterService), consumed via
  *  IoC at runtime — shared never imports modules. */
 interface SwarmFilterApi {
@@ -78,6 +86,7 @@ interface Badge {
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const SWARM_FILTER_KEY = '@diamondcoreprocessor.com/SwarmFilterService'
+const NAMES_KEY = '@diamondcoreprocessor.com/NameService'
 
 @Component({
   selector: 'hc-presence-banner',
@@ -182,8 +191,13 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     })
 
     const selected = this.#selected()
+    const names = this.#names()
     for (const pk of this.#peers()) {
-      const label = (swarm?.labelFor?.(pk) ?? '').trim()
+      // A name their host vouches for letters the badge first; the label
+      // they announced is the unverified fallback.
+      const verified = names?.nameOf?.(pk) ?? null
+      const label = (verified ? (verified.name === '_' ? verified.host : verified.name) : '')
+        || (swarm?.labelFor?.(pk) ?? '').trim()
       out.push({
         key: pk,
         // Colour seeds from the stable pubkey, not the label — a peer
@@ -212,10 +226,14 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     const subscribedTo = this.#subscribedTo()
     const following = this.#following()
     const selected = this.#selected()
-    const raw = peers.map(pk => ({
-      pubkey: pk,
-      label: (swarm?.labelFor?.(pk) ?? '').trim() || `${pk.slice(0, 6)}…`,
-    }))
+    const names = this.#names()
+    const raw = peers.map(pk => {
+      const announced = (swarm?.labelFor?.(pk) ?? '').trim()
+      return {
+        pubkey: pk,
+        label: names?.label?.(pk, undefined, announced) || announced || `${pk.slice(0, 6)}…`,
+      }
+    })
     const labelCount = new Map<string, number>()
     for (const r of raw) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1)
     return raw.map(r => ({
@@ -262,6 +280,11 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       // selector rather than this strip's inline field.
       EffectBus.on<{ label?: string; self?: boolean }>('swarm:label-changed', (p) => {
         if (p?.self && typeof p.label === 'string') this.#myLabel.set(p.label)
+        this.#labelVersion.update(v => v + 1)
+      }),
+
+      // A host vouched for a name (NameService) — re-letter badges and rows.
+      EffectBus.on('names:changed', () => {
         this.#labelVersion.update(v => v + 1)
       }),
 
@@ -399,6 +422,10 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
   #swarm(): SwarmConsumerApi | undefined {
     return (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(SWARM_KEY) as SwarmConsumerApi | undefined
+  }
+
+  #names(): NameApi | undefined {
+    return (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(NAMES_KEY) as NameApi | undefined
   }
 
   #filter(): SwarmFilterApi | undefined {

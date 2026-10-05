@@ -103,7 +103,7 @@ function doorsFrom(sites) {
       if (!doors.has(host)) doors.set(host, doorOf(host, title))
     }
   }
-  // `content.<zone>` is the write/relay face and is never a site.
+  // `content.<zone>` is the legacy write/relay face and is never a site.
   doors.delete(`content.${ZONE}`)
   return [...doors.values()].sort(byTitle)
 }

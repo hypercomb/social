@@ -30,6 +30,7 @@ import { isBehaviorDormant } from '../../sharing/behavior-enablement.js'
 import { listDecorations } from '../../commands/decoration-manifest.js'
 import { fetchPublicationCards, type PublicationCard } from '../../sharing/publications-ledger.js'
 import { offerFromCard } from '../../sharing/static-peers.js'
+import { nameService } from '../../sharing/names.service.js'
 import { lineageKey } from '../../history/lineage-key.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { openExternalLink } from './document-view-links.js'
@@ -61,6 +62,9 @@ export class PublicationsViewDrone extends Drone {
   /** Stops the scrollbar-width tracker that keeps the × clear of the
    *  sheet's own scrollbar (scroll-gutter.ts). */
   #gutterOff: (() => void) | null = null
+  /** Each plate's "shared … · {label}" line, repainted in place when a host
+   *  vouches for a name — never a re-read of the ledger. */
+  #nameLines: (() => void)[] = []
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -71,6 +75,7 @@ export class PublicationsViewDrone extends Drone {
       this.onEffect('decorations:changed', this.#change)
       this.onEffect('feature:hidden', this.#change)
       this.onEffect('feature:restored', this.#change)
+      this.onEffect('names:changed', () => { for (const paint of this.#nameLines) paint() })
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', payload => {
         if (payload?.view !== PUBLICATIONS_VIEW) return
         this.#targetSegments = (payload.segments ?? []).map(String).filter(Boolean)
@@ -345,9 +350,19 @@ export class PublicationsViewDrone extends Drone {
       shared.className = 'pv-shared'
       const date = new Date(card.publishedAt * 1000).toLocaleDateString(
         navigator.language, { year: 'numeric', month: 'long', day: 'numeric' })
-      shared.textContent = this.#t('publications.sharedBy', 'shared {date} · {label}')
-        .replace('{date}', date)
-        .replace('{label}', card.publisherLabel)
+      // WHO SHARED IT, AT ITS HOST: the plate's own address serves its bytes,
+      // so it is where the publisher's name is asked (names.service.ts) — for
+      // this plate only. The ledger is unsigned, so the pair it names is never
+      // recorded as the key's host for any other surface. Its label is a
+      // claim, shown unverified until that host vouches.
+      const paint = (): void => {
+        const label = nameService.label(card.pubkey, card.host, card.publisherName ?? card.publisherLabel)
+        shared.textContent = this.#t('publications.sharedBy', 'shared {date} · {label}')
+          .replace('{date}', date)
+          .replace('{label}', label)
+      }
+      paint()
+      this.#nameLines.push(paint)
       plate.appendChild(shared)
     }
 
@@ -364,6 +379,7 @@ export class PublicationsViewDrone extends Drone {
   }
 
   #teardown(): void {
+    this.#nameLines = []
     this.#gutterOff?.()
     this.#gutterOff = null
     this.#host?.remove()

@@ -21,6 +21,7 @@ import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { composeDivision, hydrateSeatedParts } from './division-render.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
+import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
@@ -99,6 +100,17 @@ const EXIT_OVERLAY_CSS = [
  *  Doctrine: `documentation/embedded-sites.md` → *The chrome corner*. */
 const CHROME_CORNER_BOTTOM = 'calc(3.5rem + env(safe-area-inset-bottom, 0px))'
 const CHROME_CORNER_RIGHT = 'calc(3.5rem + env(safe-area-inset-right, 0px))'
+
+/** THE EXIT IS THE AUTHOR'S CALL ON A PUBLISHED SITE. Inside a hive the exit
+ *  hexagon is the way back to the participant's own tiles. On a published
+ *  door there is nothing behind the page to go back to: a business card that
+ *  shows a "close website" button reads as broken. So the visitor shell
+ *  offers the exit (button, Escape, the chrome-corner reservation) only when
+ *  the page says so itself, in its own signed bytes:
+ *    <meta name="hypercomb:exit" content="show">
+ *  Absent that, a published page stands alone. */
+const pageAsksForExit = (page: Document): boolean =>
+  (page.querySelector('meta[name="hypercomb:exit"]')?.getAttribute('content') ?? '').trim().toLowerCase() === 'show'
 
 /** Raw-DOM review-gate card. Out-of-Angular, opaque full-viewport backdrop:
  *  shown over a FOREIGN, unverified page INSTEAD of mounting it, so nothing of
@@ -455,7 +467,9 @@ export class SiteViewDrone extends Drone {
     }
     // In website mode the raw-DOM exit overlay is ALWAYS present — even on a
     // page-less cell — so there is always a guaranteed way back to the hive.
-    if (vm?.mode === 'website') this.#ensureExitOverlay()
+    // A published site offers it only when its page asks (pageAsksForExit) —
+    // decided at mount, where the page is read.
+    if (vm?.mode === 'website' && !isPublishedVisitorShell()) this.#ensureExitOverlay()
 
     // Strip any stale tile-selection hash so the address bar reads
     // cleanly while in website mode (where selection has no consumer).
@@ -735,6 +749,7 @@ export class SiteViewDrone extends Drone {
     if (gen !== this.#gen) return
 
     const parsed = new DOMParser().parseFromString(rewriteCellPageRefs(rawHtml), 'text/html')
+    const offersExit = !isPublishedVisitorShell() || pageAsksForExit(parsed)
 
     // The page's linked sheets load BEFORE any of it goes in, the way a document
     // holds its first paint for the sheets in its <head> — otherwise the content
@@ -783,7 +798,7 @@ export class SiteViewDrone extends Drone {
       'position:fixed;top:0;bottom:0;' +
       'left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);' +
       'z-index:59988;overflow:auto;' +
-      `--hc-site-chrome-bottom:${CHROME_CORNER_BOTTOM};--hc-site-chrome-right:${CHROME_CORNER_RIGHT};`
+      (offersExit ? `--hc-site-chrome-bottom:${CHROME_CORNER_BOTTOM};--hc-site-chrome-right:${CHROME_CORNER_RIGHT};` : '')
     // The site host IS the page's scroll surface. Without this opt-out the
     // always-on hex wheel-zoom handler (MousewheelZoomInput) preventDefaults
     // every wheel/trackpad event over the full-viewport canvas — which is only
@@ -850,7 +865,9 @@ export class SiteViewDrone extends Drone {
     reserve.setAttribute('data-hc-site-chrome-reserve', '')
     reserve.setAttribute('aria-hidden', 'true')
     reserve.style.cssText = 'display:block;flex:none;grid-column:1/-1;height:var(--hc-site-chrome-bottom);margin:0;padding:0;border:0;pointer-events:none'
-    host.appendChild(reserve)
+    if (offersExit) host.appendChild(reserve)
+    if (offersExit) this.#ensureExitOverlay()
+    else this.#removeExitOverlay()
     // The host's scrollbar comes and goes with the page's height (images
     // landing, a section opening); the button follows it off the thumb.
     const placeExit = new ResizeObserver(() => this.#placeExitOverlay(host))

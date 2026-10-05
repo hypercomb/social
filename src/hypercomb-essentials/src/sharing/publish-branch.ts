@@ -45,6 +45,7 @@ import {
   type StageWord,
 } from './stage-succession.js'
 import { isReservedRootKey } from './hive-link.js'
+import { creationUrl, foldContentLabel, ownAddressRefusal, withOwnAddress, zoneDoor } from './zone-door.js'
 
 /** The heads the index names under its branch keys — what a stage list may
  *  hold (deployment-stages.md R2: a list is reconciled against the index). */
@@ -137,7 +138,12 @@ export type PublishResult =
       host: string
       lineageKey: string
       bundleSig: string
+      /** The link bundle on this shell's origin — the adopt/invite link. */
       url: string
+      /** WHERE THE CREATION LIVES — the share link: its own address on the
+       *  primary domain when it has one, else that domain's root path
+       *  (`https://<zone>/<path>`). */
+      address: string
       /** The link bundle's own receipt landed inside the wait. */
       linkReceipted: boolean
       /** Index keys our ledger knows about that the live index does NOT carry
@@ -173,25 +179,23 @@ const normalizeHost = (raw: string): string =>
     .replace(/\/+$/, '').toLowerCase()
 
 const selfDomain = (): string => {
-  try { return normalizeHost(localStorage.getItem(SELF_DOMAIN_KEY) ?? '') } catch { return '' }
+  try { return foldContentLabel(normalizeHost(localStorage.getItem(SELF_DOMAIN_KEY) ?? '')) } catch { return '' }
 }
 
-/** A root zone's content endpoint. Loopback is already the endpoint: unlike a
- *  public zone, it has no `content.` DNS label in front of it. */
-const contentDoor = (zone: string): string => LOOPBACK_RE.test(zone) ? zone : `content.${zone}`
-
 /** The nodes a branch is served from: its host marks (primary first) as
- *  content doors, else the participant's STANDING targets as they already
- *  are — never anything flipped on for the occasion. */
-const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike | undefined): Promise<string[]> => {
+ *  zone ROOTS, else the participant's STANDING targets — never anything
+ *  flipped on for the occasion. Every node is a write door, so every one is
+ *  a zone root: the `content.<zone>` face is retired, and a stored one (an
+ *  install from before the retirement) is read as its zone (zone-door.ts). */
+export const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike | undefined): Promise<string[]> => {
   let branchZones: string[] = []
   try { branchZones = await hostsOfBranch(segs) } catch { /* no marks — the standing targets remain */ }
   const self = selfDomain()
   const standing = [
     ...(hostSync?.isEnabled?.() && self ? [self] : []),
-    ...(hostSync?.isPublicHostEnabled?.() ? [hostSync.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || ''] : []),
+    ...(hostSync?.isPublicHostEnabled?.() ? [zoneDoor(hostSync.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || '')] : []),
   ]
-  return [...new Set([...branchZones.map(contentDoor), ...standing])].filter(Boolean)
+  return [...new Set([...branchZones.map(zoneDoor), ...standing])].filter(Boolean)
 }
 
 /** Walk the doors until one ANSWERS — a verified index or an honest 404. A
@@ -436,6 +440,10 @@ export async function publishBranch(
   const linkHost = normalizeHost(window.location.host) || window.location.host
   const scheme = LOOPBACK_RE.test(linkHost) ? 'http' : 'https'
   const url = `${scheme}://${linkHost}/${bundleSig}`
+  // The address a person shares: the branch's primary open domain, at its
+  // root path unless the signed index gives it an own address there.
+  const primary = (doors[key] ?? [])[0] || answering[0] || ''
+  const address = primary ? creationUrl(primary, segs, key, read.ok ? read.manifest.addresses : undefined) : ''
 
   // 8. Write the ledger record BEFORE confirming. The PUT already happened —
   //    if the tab closes during confirmation the act still has to be on
@@ -468,6 +476,7 @@ export async function publishBranch(
     lineageKey: key,
     bundleSig,
     url,
+    address,
     linkReceipted,
     missingFromIndex,
     stages,
@@ -542,6 +551,14 @@ export async function unpublishBranch(
   delete roots[key]
   const doors = { ...(read.manifest.doors ?? {}) }
   delete doors[key]
+  // Its own addresses go with it: a host never names a creation the index
+  // no longer publishes (putHiveManifest prunes the same way, for every writer).
+  const content: Record<string, unknown> | undefined = read.manifest.signedContent
+    ? { ...read.manifest.signedContent }
+    : undefined
+  if (content && read.manifest.addresses) {
+    content['addresses'] = Object.fromEntries(Object.entries(read.manifest.addresses).filter(([, k]) => k !== key))
+  }
   // The withdrawn head leaves every stage list — an unlink, never a forget:
   // the prior lists are one `prev` back and the bytes stay by signature. The
   // new pointers ride this same write (deployment-stages.md R4). A head another
@@ -560,7 +577,7 @@ export async function unpublishBranch(
   ))
 
   const put = await putHiveManifest(indexHost, roots, doors,
-    read.manifest.createdAt, read.manifest.signedContent)
+    read.manifest.createdAt, content)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
 
   // Local mark follows the index, so the two cannot disagree afterwards.
@@ -638,6 +655,49 @@ export async function setBranchDoors(
     read.manifest.createdAt, read.manifest.signedContent)
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
   return { ok: true }
+}
+
+/** Why an own address could not be set. */
+export type OwnAddressFailure = PublishFailure | 'not-a-label' | 'reserved' | 'not-published'
+
+/** GIVE A CREATION ITS OWN ADDRESS on one zone — `https://<label>.<zone>` —
+ *  or, with `label` null, take it away so the creation lives at its root path
+ *  again (`https://<zone>/<path>`, the default). One signed index rewrite in
+ *  the same shape every publish makes: the `addresses` map rides beside the
+ *  roots and doors, and every other field is carried through. A label that is
+ *  not a DNS label, or is reserved (`content`, `try-*`), is refused before
+ *  anything is signed. A branch the index does not name has nothing to
+ *  address yet — the caller publishes it first. */
+export async function setBranchAddress(
+  segments: readonly string[],
+  zone: string,
+  label: string | null,
+): Promise<{ ok: true; host: string } | { ok: false; failure: OwnAddressFailure; reason?: string }> {
+  const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
+  if (!signer?.getPublicKeyHex) return { ok: false, failure: 'services' }
+  const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+  if (segs.length === 0) return { ok: false, failure: 'no-branch' }
+  const z = foldContentLabel(zone)
+  if (!z || LOOPBACK_RE.test(z)) return { ok: false, failure: 'no-host', reason: 'not a zone' }
+  if (label !== null) {
+    const refusal = ownAddressRefusal(label)
+    if (refusal) return { ok: false, failure: refusal }
+  }
+
+  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
+  const key = lineageKey(segs)
+  const nodes = await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY))
+  if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
+  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
+  if (!read.ok) return { ok: false, failure: 'index-unsafe', reason: read.reason }
+  if (!(key in read.manifest.roots)) return { ok: false, failure: 'not-published' }
+
+  const addresses = withOwnAddress(read.manifest.addresses, z, key, label)
+  const put = await putHiveManifest(indexHost, read.manifest.roots, read.manifest.doors ?? {},
+    read.manifest.createdAt, { ...read.manifest.signedContent, addresses })
+  if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
+  return { ok: true, host: label ? `${label}.${z}` : z }
 }
 
 // ── SECURE DELETE — remove a switched-off place from my hosts ──────────────

@@ -21,8 +21,9 @@ npm run publish:content -- /revolucion --r2
 ```
 
 Needs the bridge (broker on `ws://localhost:2401`) with a live renderer.
-Flags: `--r2` also backfills the public CDN (`content.jwize.com`, R2 bucket
-`hypercomb-content`); `--no-relink` skips step 0 (documented in the file
+Flags: `--r2` also backfills the public CDN (the zone root
+`pluginthematrix.com`, R2 bucket `hypercomb-content`; `content.jwize.com`
+reads the same bucket and is legacy); `--no-relink` skips step 0 (documented in the file
 header only — the usage string omits it).
 
 What it does, in order:

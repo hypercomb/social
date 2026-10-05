@@ -148,7 +148,8 @@ base of every zone that publishes nothing.
 
 **Where a client asks.** The zone's own name, flat then `/content`
 (`https://<zone>/<pool>/`, `https://<zone>/content/<pool>/`). `content.<zone>`
-is asked only when the zone's own name gives no HTTP answer at all: on every
+(legacy since 2026-10-03, when the zone root became the write face) is asked
+only when the zone's own name gives no HTTP answer at all: on every
 zone the edge worker serves, the apex and the content face are one worker over
 one heap, so asking both only doubled the requests. A zone that answered with
 no pool is remembered as publishing nothing for fifteen minutes, and probes of

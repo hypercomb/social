@@ -16,8 +16,9 @@
 // authoring hive runs in a browser on this same machine — so "push to host"
 // doesn't need the in-app push queue at all: walk the branch closure over
 // the Claude bridge (ws:2401), and write every sig file the relay lacks.
-// With --r2, also backfill the public CDN (content.jwize.com — the Blossom
-// worker over R2 bucket `hypercomb-content`) for any closure sig it 404s.
+// With --r2, also backfill the public CDN (the zone root pluginthematrix.com —
+// the Blossom worker over R2 bucket `hypercomb-content`) for any closure sig it
+// 404s. content.jwize.com reads the same bucket and is legacy.
 //
 // The walk is pure get-resource BFS: layers and resources are both flat
 // sig files at the OPFS root, and every referenced sig is a 64-hex string
@@ -41,7 +42,7 @@ const SRC = dirname(dirname(fileURLToPath(import.meta.url)))
 const RELAY_DIR = join(SRC, 'hypercomb-relay', 'content')
 const WORKER_DIR = join(SRC, 'hypercomb-relay', 'blossom-worker')
 const WRANGLER = join(WORKER_DIR, 'node_modules', 'wrangler', 'bin', 'wrangler.js')
-const CDN = 'https://content.jwize.com'
+const CDN = 'https://pluginthematrix.com'
 const BRIDGE_PORT = 2401
 const SIG = /^[a-f0-9]{64}$/
 const MAX_SIGS = 20_000
@@ -256,7 +257,7 @@ const main = async (): Promise<void> => {
   const label = segments[segments.length - 1]
   const at = JSON.stringify(segments.slice(0, -1))
   console.log(`\nto update a consumer install — paste in its console at the hexagon root:\n`)
-  console.log(`ioc.get('@diamondcoreprocessor.com/ContentBrokerDrone').noteDomainsForSig('${head}', ['jwize.com','content.jwize.com']); await ioc.get('@diamondcoreprocessor.com/SwarmAdoptDrone').syncResolvedBranch({ layerSig: '${head}', at: ${at}, domain: 'jwize.com', label: '${label}' })`)
+  console.log(`ioc.get('@diamondcoreprocessor.com/ContentBrokerDrone').noteDomainsForSig('${head}', ['pluginthematrix.com','jwize.com','content.jwize.com']); await ioc.get('@diamondcoreprocessor.com/SwarmAdoptDrone').syncResolvedBranch({ layerSig: '${head}', at: ${at}, domain: 'jwize.com', label: '${label}' })`)
   console.log(`\nthen reload, and confirm with:`)
   console.log(`await ioc.get('@diamondcoreprocessor.com/SiteViewDrone').resolvePageSig(${JSON.stringify(segments)})`)
   const pageSig = await branchPageSig(segments)

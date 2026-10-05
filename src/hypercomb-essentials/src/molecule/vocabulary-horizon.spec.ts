@@ -41,7 +41,8 @@ describe('the doors', () => {
   it('asks the zone itself as well as the relay face', () => {
     expect(doorsOfZone('susan.hypercomb.com')).toEqual(['susan.hypercomb.com', 'content.hypercomb.com'])
     expect(doorsOfZone('example.com')).toEqual(['example.com', 'content.example.com'])
-    expect(doorsOfZone('content.example.com')).toEqual(['content.example.com'])
+    // A zone recorded as its retired content face is asked at its ROOT first.
+    expect(doorsOfZone('content.example.com')).toEqual(['example.com', 'content.example.com'])
     expect(doorsOfZone('')).toEqual([])
   })
 })

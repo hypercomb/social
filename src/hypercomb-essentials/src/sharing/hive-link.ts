@@ -165,8 +165,12 @@ export const STATIC_FOLLOWS_KEY = 'hc:static-follows'
  *  documentation/public-content-endpoint.md). Seeded as a byte source for
  *  link-bundle resolution so a fresh visitor on ANY origin can fetch a
  *  bundle minted to the public CDN — private mode, no relay flags. Same
- *  standing host HostSyncService drains public closures to. */
-export const PUBLIC_CONTENT_HOSTS = ['content.pluginthematrix.com']
+ *  standing host HostSyncService drains public closures to.
+ *
+ *  The worker's ZONE ROOT: writes go to the zone itself, never its retired
+ *  `content.` face (zone-door.ts). Reads that must reach old published data
+ *  fall back to `content.pluginthematrix.com` through `readDoorsOf`. */
+export const PUBLIC_CONTENT_HOSTS = ['pluginthematrix.com']
 
 // ── THE OUTSIDE-IN DOOR ─────────────────────────────────────────────────────
 //

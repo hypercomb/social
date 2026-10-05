@@ -12,6 +12,7 @@
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { zoneDoor } from './zone-door.js'
 import { publishArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
 
 const say = (type: string, message: string): void => {
@@ -34,7 +35,7 @@ export class ArrivalQueenBee extends QueenBee {
   protected async execute(args: string): Promise<void> {
     const [branch = '', ...names] = args.trim().split(/\s+/).filter(Boolean)
     const lineage = lineageOf(branch)
-    const host = PUBLIC_CONTENT_HOSTS[0] ?? ''
+    const host = zoneDoor(PUBLIC_CONTENT_HOSTS[0] ?? '')
     if (!lineage || !host) { say('warning', 'Name the branch and the bees: "arrival revolucion ViewBee SiteViewDrone".'); return }
     const withdraw = names.length === 1 && names[0]!.toLowerCase() === 'none'
     const result = withdraw ? await withdrawArrivalPlan(host, lineage) : await publishArrivalPlan(host, lineage, names)

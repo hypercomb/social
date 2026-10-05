@@ -15,6 +15,15 @@ const BACKDROP_STROKE = 0x6688cc
 const BACKDROP_STROKE_ALPHA = 0.35
 const BACKDROP_STROKE_WIDTH = 0.6
 
+// ── Selected ring ───────────────────────────────────────────────────
+// A STANDING mark (not a hover state): this icon names the tile's default.
+// Same violet as the view family's default tint and the header rail's
+// `.is-default` ring, so one colour means "this is how it opens" everywhere.
+const SELECTED_STROKE = 0xc8b8ff
+const SELECTED_STROKE_ALPHA = 0.9
+const SELECTED_STROKE_WIDTH = 0.7
+const SELECTED_FILL_ALPHA = 0.16
+
 // SVG source dimensions (viewBox coordinate space)
 const SVG_VIEWBOX = 24
 
@@ -192,6 +201,8 @@ export type IconButtonConfig = {
 export class HexIconButton extends Container {
   #sprite: Sprite | null = null
   #backdrop: Graphics
+  #ring: Graphics
+  #selected = false
   #size: number
   #normalTint: number
   #hoverTint: number
@@ -208,6 +219,8 @@ export class HexIconButton extends Container {
     this.#hoverTint = config.hoverTint ?? 0xc8d8ff
     this.#backdrop = this.#buildBackdrop()
     this.addChild(this.#backdrop)
+    this.#ring = this.#buildRing()
+    this.addChild(this.#ring)
   }
 
   // ── Async icon load ────────────────────────────────────────────────
@@ -311,6 +324,18 @@ export class HexIconButton extends Container {
     }
   }
 
+  // ── Selected state ─────────────────────────────────────────────────
+
+  get selected(): boolean { return this.#selected }
+
+  /** A standing ring that survives hover — it is a fact about the tile (this
+   *  icon is its default), not a reaction to the pointer. */
+  set selected(value: boolean) {
+    if (this.#selected === value) return
+    this.#selected = value
+    this.#ring.visible = value
+  }
+
   // ── Hit testing ────────────────────────────────────────────────────
 
   containsPoint(localX: number, localY: number): boolean {
@@ -335,6 +360,17 @@ export class HexIconButton extends Container {
     g.fill({ color: BACKDROP_FILL, alpha: BACKDROP_FILL_ALPHA })
     g.roundRect(-r, -r, r * 2, r * 2, BACKDROP_RADIUS)
     g.stroke({ color: BACKDROP_STROKE, alpha: BACKDROP_STROKE_ALPHA, width: BACKDROP_STROKE_WIDTH })
+    g.visible = false
+    return g
+  }
+
+  #buildRing(): Graphics {
+    const r = this.#size / 2 + BACKDROP_PAD
+    const g = new Graphics()
+    g.roundRect(-r, -r, r * 2, r * 2, BACKDROP_RADIUS)
+    g.fill({ color: SELECTED_STROKE, alpha: SELECTED_FILL_ALPHA })
+    g.roundRect(-r, -r, r * 2, r * 2, BACKDROP_RADIUS)
+    g.stroke({ color: SELECTED_STROKE, alpha: SELECTED_STROKE_ALPHA, width: SELECTED_STROKE_WIDTH })
     g.visible = false
     return g
   }

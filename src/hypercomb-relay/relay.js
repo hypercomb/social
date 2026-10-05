@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // hypercomb-relay — minimal Nostr relay AND HTTP content host for private swarm meetings
-// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--max-event-size 65536] [--content-dir ./content] [--shell-dir ./host-shell] [--writers hex1,hex2] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources]
+// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--max-event-size 65536] [--content-dir ./content] [--shell-dir ./host-shell] [--writers hex1,hex2] [--domain a.example,b.example] [--primary hex|npub] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources]
 //
 // env fallbacks (used when the matching --flag is absent):
 //   PORT             → port to listen on (Azure App Service injects this)
+//   DOMAINS          → --domain: the hostnames /.well-known/nostr.json vouches
+//                      for this relay's writers at (none: nobody, anywhere)
+//   PRIMARY          → --primary: the writer answered as `_` (none: no `_`)
 //   CONTENT_DIR      → directory to serve HTTP content from (sig-addressed
 //                      content store). Defaults to ./content next to the
 //                      script. Operators populate it however they want
@@ -29,6 +32,7 @@ import { blockedSourcesReason } from './address-guard.js'
 import { contentDirectoryIO, HOST_PACKAGES_POOL, PUBLIC_POOL_ADDRESSES, parseReplicationRequest, publishReplicatedPackage, resolvePackageClosure, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
 import { ReceiptIndex } from './receipt-index.js'
 import { listedMeanings } from './host-listing.js'
+import { nip05Name, nostrJson } from './nip05-names.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -58,6 +62,16 @@ function parseArgs(argv) {
     // here, falls back to --pubkeys after parse; empty => writes disabled.
     // Each PUT carries a NIP-98 signed event whose pubkey must be in this set.
     writers: (() => { const e = String(process.env.WRITERS ?? '').trim(); return e ? e.split(',').map(normalizePubkey).filter(Boolean) : null })(),
+    // NIP-05 (`/.well-known/nostr.json`, documentation/sealed-audiences.md,
+    // Names). Both DECLARED, never inferred. `domains`: the hostnames this
+    // relay vouches for its writers at — a relay cannot see which names point
+    // at it, so every other Host it is reached by (content.<domain> included)
+    // vouches for nobody, and with none declared, nobody anywhere. `primary`:
+    // the writer that IS the domain (`_@<domain>`), which must also be a
+    // writer — the writer list is unordered (one key per authoring browser
+    // profile), so its order never ranks anyone. Undeclared: no `_`.
+    domains: (() => { const e = String(process.env.DOMAINS ?? '').trim(); return e ? e.split(',').map(normalizeDomain).filter(Boolean) : null })(),
+    primary: (() => { const e = String(process.env.PRIMARY ?? '').trim(); return e ? declaredPrimary(e) : null })(),
     // Hard cap on a single PUT body (default 50 MB) — prevents disk-fill abuse.
     maxBodyBytes: 52_428_800,
     // DEV ONLY: skip writer-authorization on PUT (sha256 content-integrity is
@@ -118,6 +132,8 @@ function parseArgs(argv) {
     else if (a === '--content-dir' && next) { args.contentDir = resolve(next); i++ }
     else if (a === '--shell-dir' && next) { args.shellDir = resolve(next); i++ }
     else if (a === '--writers' && next) { args.writers = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
+    else if (a === '--domain' && next) { args.domains = next.split(',').map(normalizeDomain).filter(Boolean); i++ }
+    else if (a === '--primary' && next) { args.primary = declaredPrimary(next); i++ }
     else if (a === '--max-body-bytes' && next) { args.maxBodyBytes = Number(next); i++ }
     else if (a === '--replication-origins' && next) { args.replicationOrigins = next.split(',').map(normalizeOrigin).filter(Boolean); i++ }
     else if (a === '--spa-dir' && next) {
@@ -148,6 +164,23 @@ function normalizeOrigin(raw) {
   } catch { return null }
 }
 
+/** A hostname as a Host header carries it: lowercase, no port, no trailing
+ *  dot. A bracketed IPv6 literal keeps its brackets. Anything else is none. */
+function normalizeDomain(raw) {
+  let host = String(raw ?? '').trim().toLowerCase()
+  if (host.startsWith('[')) host = host.slice(0, host.indexOf(']') + 1)
+  else if (host.includes(':')) host = host.slice(0, host.indexOf(':'))
+  if (host.endsWith('.')) host = host.slice(0, -1)
+  return /^(?:[a-z0-9-]+(?:\.[a-z0-9-]+)*|\[[0-9a-f:.]+\])$/.test(host) ? host : null
+}
+
+/** The declared `_` key, or null — said out loud when it is no key at all. */
+function declaredPrimary(raw) {
+  const pubkey = normalizePubkey(raw)
+  if (!pubkey) console.error('[relay] --primary / PRIMARY is not a 64-hex or npub key — /.well-known/nostr.json answers no _')
+  return pubkey
+}
+
 function normalizePubkey(raw) {
   const s = raw.trim()
   if (/^[0-9a-f]{64}$/i.test(s)) return s.toLowerCase()
@@ -167,6 +200,13 @@ if (cfg.shellDir && (!existsSync(join(cfg.shellDir, 'index.html')) || !existsSyn
 const writers = new Set(
   ((cfg.writers && cfg.writers.length ? cfg.writers : cfg.pubkeys) || []).map((p) => p.toLowerCase())
 )
+
+// NIP-05: the hostnames this relay vouches for its writers at, and the writer
+// answered as `_` there — both declared (see parseArgs). A primary that is not
+// a writer is not this relay's to vouch for, so it is refused out loud.
+const nip05Domains = new Set(cfg.domains || [])
+const nip05Primary = cfg.primary && writers.has(cfg.primary) ? cfg.primary : null
+if (cfg.primary && !nip05Primary) console.error(`[relay] --primary ${cfg.primary.slice(0, 8)}… is not a writer — /.well-known/nostr.json answers no _`)
 
 // Origins a replication source may name. Empty = unrestricted (the address
 // screen still applies); non-empty = an exact-origin allowlist.
@@ -253,6 +293,12 @@ const PERMISSIONS_POLICY = [
 const events = new Map()  // id → event
 const slots = new Map()   // pubkey\0kind\0d → id of the replaceable event held
 
+// Bumped whenever a WRITER's hive index enters or leaves the store, so what
+// the writers' indexes say (/.well-known/nostr.json) is re-read only when one
+// of them moved — never per request, since finding an index scans the store.
+let writerIndexMoves = 0
+const movesWriterIndex = (evt) => Number(evt.kind) === HIVE_INDEX_KIND && writers.has(evt.pubkey)
+
 const isEphemeralKind = (kind) => kind >= 20000 && kind < 30000
 const isAddressableKind = (kind) => kind >= 30000 && kind < 40000                       // one per pubkey+kind+d
 const isReplaceableKind = (kind) => kind === 0 || kind === 3 || (kind >= 10000 && kind < 20000)  // one per pubkey+kind
@@ -278,6 +324,7 @@ function insertEvent(evt) {
     slots.set(key, evt.id)
   }
   events.set(evt.id, { id: evt.id, pubkey: evt.pubkey, created_at: Number(evt.created_at), kind, tags: evt.tags, content: evt.content, sig: evt.sig })
+  if (movesWriterIndex(evt)) writerIndexMoves++
   return 'stored'
 }
 
@@ -330,6 +377,7 @@ function deleteExpired() {
     const exp = expirationOf(evt)
     if (exp && exp < now) {
       events.delete(id)
+      if (movesWriterIndex(evt)) writerIndexMoves++
       if ((isAddressableKind(evt.kind) || isReplaceableKind(evt.kind)) && slots.get(slotKey(evt, evt.kind)) === id) slots.delete(slotKey(evt, evt.kind))
     }
   }
@@ -871,6 +919,113 @@ function listedPool(sig) {
     if (listedMeanings(content).some(m => sha256Hex(Buffer.from(m, 'utf8')) === sig)) return true
   }
   return false
+}
+
+// ── GET /.well-known/nostr.json — who each writer IS, at this host (NIP-05)
+//
+// The one standards-fixed named route: every Nostr client asks exactly this
+// path, so it is not ours to retire (documentation/sealed-audiences.md, Names).
+// Derived from the keys this relay already serves — its writers — and never a
+// second list to keep. A writer's name is the one its own signed profile
+// carries: its index names the profile atom as roots['nostr:profile'], and the
+// atom is the complete signed kind-0 event. `_` is the writer the operator
+// DECLARED (--primary); the writer list is unordered, so none is `_` otherwise.
+//
+// WRITERS ONLY. Any key may PUT its own index here, so the held indexes are
+// never enumerated: a stranger's profile is theirs to sign, not this host's to
+// vouch for.
+//
+// PER REQUEST HOST. Only a declared --domain vouches; any other name that
+// reaches this relay (content.<domain>, a name somebody pointed here) answers
+// `{ names: {} }`, as the worker's relay face and unbound hosts do.
+
+const PROFILE_ROOT = 'nostr:profile'
+const PROFILE_MAX_BYTES = 64 * 1024
+// atom sig → { pubkey, name } of an atom whose bytes hashed to its sig. Those
+// bytes can never change, so neither can the verdict on them. A miss (not held
+// yet) is never remembered — the atom may still arrive.
+const profileVerdicts = new Map()
+
+function profileVerdict(sig) {
+  const held = profileVerdicts.get(sig)
+  if (held) return held
+  const hit = resolveFlatSig(sig)
+  if (!hit) return null
+  let bytes
+  try {
+    if (statSync(hit.path).size > PROFILE_MAX_BYTES) return null
+    bytes = readFileSync(hit.path)
+  } catch { return null }
+  if (sha256Hex(bytes) !== sig) return null
+  let verdict = { pubkey: null, name: null }
+  try {
+    const event = JSON.parse(bytes.toString('utf8'))
+    if (event && typeof event === 'object' && event.kind === 0 && verifyEvent(event)) {
+      let profile = null
+      try { profile = JSON.parse(event.content) } catch { /* a profile with no readable content names nobody */ }
+      verdict = { pubkey: event.pubkey, name: profile && typeof profile === 'object' ? nip05Name(profile.name) : null }
+    }
+  } catch { /* not an event: names nobody */ }
+  if (profileVerdicts.size >= 1024) profileVerdicts.clear()
+  profileVerdicts.set(sig, verdict)
+  return verdict
+}
+
+/** The profile atom sig a writer's newest index names, or null. */
+function profileRootOf(pubkey) {
+  try {
+    const row = newestEvent(pubkey, HIVE_INDEX_KIND)
+    if (!row || typeof row.content !== 'string') return null
+    let content
+    try { content = JSON.parse(row.content) } catch { return null }
+    const roots = content && typeof content === 'object' ? content.roots : null
+    const sig = roots && typeof roots === 'object' ? roots[PROFILE_ROOT] : null
+    return typeof sig === 'string' && HEX64.test(sig) ? sig : null
+  } catch { return null }
+}
+
+// writer → the profile sig its index names, as of `writerIndexMoves`. The
+// store scan and the index parse run once per move of a writer's index, never
+// per request: this route is public, uncached and asked by every NIP-05 client.
+let profileRoots = { moves: -1, sigs: new Map() }
+
+function profileSigs() {
+  if (profileRoots.moves !== writerIndexMoves) {
+    const sigs = new Map()
+    for (const pubkey of writers) sigs.set(pubkey, profileRootOf(pubkey))
+    profileRoots = { moves: writerIndexMoves, sigs }
+  }
+  return profileRoots.sigs
+}
+
+/** The name a writer's own signed profile carries, or undefined. */
+function profileName(pubkey, sig) {
+  if (!sig) return undefined
+  const verdict = profileVerdict(sig)
+  // Signed by the key whose index named it, or it names nobody.
+  return verdict && verdict.pubkey === pubkey && verdict.name ? verdict.name : undefined
+}
+
+function tryServeNip05(req, res) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false
+  const url = String(req.url || '')
+  const at = url.indexOf('?')
+  if ((at < 0 ? url : url.slice(0, at)) !== '/.well-known/nostr.json') return false
+  let asked = null
+  try { asked = new URLSearchParams(at < 0 ? '' : url.slice(at + 1)).get('name') } catch { /* no filter */ }
+  const host = normalizeDomain(req.headers.host)
+  const sigs = host !== null && nip05Domains.has(host) ? profileSigs() : null
+  const entries = sigs ? [...writers].map(pubkey => ({ pubkey, primary: pubkey === nip05Primary, names: [profileName(pubkey, sigs.get(pubkey))] })) : []
+  const body = Buffer.from(JSON.stringify(nostrJson(entries, asked)), 'utf8')
+  // NEVER CACHED: a writer's profile moves with its index.
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Content-Length': String(body.length),
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-store',
+  })
+  res.end(req.method === 'HEAD' ? undefined : body)
+  return true
 }
 
 function tryServeContent(req, res) {
@@ -1491,7 +1646,7 @@ function tryLanding(req, res) {
 // that isn't a real file falls back to index.html (client-side routing).
 // Opt-in: only active when --spa-dir / SPA_DIR is set.
 //
-// Routing precedence (see createServer): NIP-11 → /<sig> content → PUT →
+// Routing precedence (see createServer): NIP-05 → NIP-11 → /<sig> content → PUT →
 // SPA. So sig URLs and the typed pools always win; the SPA only catches
 // what's left (/, /index.html, hashed assets, app routes).
 
@@ -1504,6 +1659,11 @@ const server = createServer((req, res) => {
     respondText(res, 403, 'a sandbox door writes nothing — do this from your own hive\n')
     return
   }
+
+  // NIP-05 names — before NIP-11 (a client may send the nostr Accept header
+  // here too), and before the content heap and the shell, so neither a file
+  // placed by hand nor the shell's index.html can answer for this host's keys.
+  if (tryServeNip05(req, res)) return
 
   // NIP-11 relay metadata (Accept: application/nostr+json)
   if (req.headers.accept?.includes('application/nostr+json')) {
@@ -1609,6 +1769,8 @@ server.listen(cfg.port, () => {
   if (cfg.devOpenWrites) console.log('writes: OPEN (--dev-open-writes — sha256 verify only, NEVER use on a public host)')
   else if (writers.size > 0) console.log(`writes: enabled — ${writers.size} authorized writer pubkey(s) (NIP-98 + sha256 verify)`)
   else console.log('writes: disabled (no --writers / --pubkeys configured)')
+  if (nip05Domains.size === 0) console.log('names: /.well-known/nostr.json vouches for nobody (no --domain declared)')
+  else console.log(`names: /.well-known/nostr.json vouches for ${writers.size} writer(s) at ${[...nip05Domains].join(', ')}; _ ${nip05Primary ? `is ${nip05Primary.slice(0, 8)}…` : 'unanswered (no --primary)'}`)
   console.log(`replication sources: ${replicationOrigins.size ? `${replicationOrigins.size} allowed origin(s)` : 'any public origin'}`)
   if (cfg.allowPrivateSources) console.log('replication sources: PRIVATE ADDRESSES ALLOWED (--allow-private-sources — dev only, NEVER use on a public host)')
   // Banner: slim storage-host announcement (no SPA — full-split model).

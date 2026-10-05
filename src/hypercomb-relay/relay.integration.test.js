@@ -3,10 +3,11 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:http'
+import { createServer, request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { nip19 } from 'nostr-tools'
 import { HOST_PACKAGES_POOL } from './replicate.js'
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -452,5 +453,245 @@ test("a pool past the floor is listed only while the operator's signed index dec
   } finally {
     child.kill()
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ── NIP-05: who each writer is, at this host (documentation/sealed-audiences.md, Names)
+// The relay answers /.well-known/nostr.json from its writers alone, and only
+// at the hostnames its operator declared (--domain). `_` is the writer the
+// operator declared (--primary), never whichever key a list happens to start
+// with. A writer's name is the one its own signed profile atom carries, named
+// by its own index as roots['nostr:profile'].
+const NOSTR_JSON = '/.well-known/nostr.json'
+const HIVE_INDEXES = sha(Buffer.from('hive:indexes', 'utf8'))
+const DOMAIN = 'jwize.test'
+
+/** A profile atom as the hive mints it: the complete signed event, as JSON bytes. */
+function profileAtom(secret, profile, kind = 0) {
+  const event = finalizeEvent({ kind, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify(profile) }, secret)
+  const bytes = Buffer.from(JSON.stringify(event), 'utf8')
+  return { bytes, sig: sha(bytes) }
+}
+
+async function putIndex(base, secret, content, createdAt = Math.floor(Date.now() / 1000)) {
+  const url = `${base}/${HIVE_INDEXES}/${getPublicKey(secret)}`
+  const evt = finalizeEvent({ kind: 30564, created_at: createdAt, tags: [],
+    content: typeof content === 'string' ? content : JSON.stringify(content) }, secret)
+  const body = Buffer.from(JSON.stringify(evt))
+  const put = await fetch(url, { method: 'PUT', body, headers: { Authorization: auth(secret, url, 'PUT', body), 'Content-Type': 'application/json' } })
+  assert.equal(put.status, 200)
+  assert.equal((await put.json()).created_at, createdAt)
+}
+
+/** A request as a client reaching the relay under `host` makes it. fetch
+ *  cannot set Host, so this goes through node:http. */
+function askAt(base, path, { host = DOMAIN, method = 'GET', headers = {} } = {}) {
+  const { hostname, port } = new URL(base)
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ hostname, port, path, method, headers: { ...headers, host } }, res => {
+      const chunks = []
+      res.on('data', chunk => chunks.push(chunk))
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+async function namesAt(base, query = '', options = {}) {
+  const res = await askAt(base, `${NOSTR_JSON}${query}`, options)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers['content-type'], 'application/json')
+  assert.equal(res.headers['access-control-allow-origin'], '*')
+  assert.equal(res.headers['cache-control'], 'no-store')
+  const doc = JSON.parse(res.body)
+  assert.deepEqual(Object.keys(doc), ['names'])
+  return doc.names
+}
+
+function startRelay(port, dir, args, env = {}) {
+  return spawn(process.execPath, ['relay.js', '--port', String(port), '--memory', '--content-dir', dir, ...args],
+    { cwd: import.meta.dirname, stdio: 'ignore', env: { ...process.env, ...env } })
+}
+
+test('the relay names its writers from their own signed profiles, and vouches for nobody else', { timeout: 20_000 }, async () => {
+  const port = await freePort()
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-nip05-'))
+  const keys = Object.fromEntries(['first', 'leanne', 'copycat', 'wrongKind', 'tampered', 'unparsed', 'unrooted', 'twinA', 'twinB', 'stranger']
+    .map(name => [name, generateSecretKey()]))
+  const pub = name => getPublicKey(keys[name])
+  // The declared primary is LAST in the list: the order ranks nobody.
+  const writers = [...Object.keys(keys).filter(name => name !== 'stranger' && name !== 'first'), 'first'].map(pub)
+  const hold = atom => writeFileSync(join(dir, atom.sig), atom.bytes)
+  const child = startRelay(port, dir, ['--writers', writers.join(','), '--domain', DOMAIN, '--primary', pub('first')])
+  const base = `http://127.0.0.1:${port}`
+  try {
+    await waitForRelay(base)
+    // No index held anywhere: the declared primary is the host's own key, and only that.
+    assert.deepEqual(await namesAt(base), { _: pub('first') })
+
+    // A writer's index names a profile atom the relay does not hold yet: no
+    // name — and the miss is not remembered, so the atom counts once it lands.
+    const leanne = profileAtom(keys.leanne, { name: 'Leanne', about: 'cafe society' })
+    await putIndex(base, keys.leanne, { roots: { 'nostr:profile': leanne.sig } })
+    assert.deepEqual(await namesAt(base), { _: pub('first') })
+    hold(leanne)
+    assert.deepEqual(await namesAt(base), { _: pub('first'), leanne: pub('leanne') })
+
+    // Every profile that fails a check names nobody, and the answer is still 200:
+    // an atom another key signed (the one just read, remembered by its sig) …
+    await putIndex(base, keys.copycat, { roots: { 'nostr:profile': leanne.sig } })
+    // … a signed event that is not a profile …
+    const notProfile = profileAtom(keys.wrongKind, { name: 'wrongkind' }, 1)
+    hold(notProfile)
+    await putIndex(base, keys.wrongKind, { roots: { 'nostr:profile': notProfile.sig } })
+    // … bytes that do not hash to the signature the index names …
+    const named = profileAtom(keys.tampered, { name: 'tampered' })
+    writeFileSync(join(dir, named.sig), profileAtom(keys.tampered, { name: 'swapped' }).bytes)
+    await putIndex(base, keys.tampered, { roots: { 'nostr:profile': named.sig } })
+    // … and indexes that do not parse, or name no atom.
+    await putIndex(base, keys.unparsed, 'not json')
+    await putIndex(base, keys.unrooted, { roots: { 'nostr:profile': 42 } })
+    // A name two writers carry goes to neither.
+    for (const twin of ['twinA', 'twinB']) {
+      const atom = profileAtom(keys[twin], { name: 'Twin' })
+      hold(atom)
+      await putIndex(base, keys[twin], { roots: { 'nostr:profile': atom.sig } })
+    }
+    // Any key may sign its own index here; a stranger is not the host's to vouch for.
+    const stranger = profileAtom(keys.stranger, { name: 'stranger' })
+    hold(stranger)
+    await putIndex(base, keys.stranger, { roots: { 'nostr:profile': stranger.sig } })
+    assert.deepEqual(await namesAt(base), { _: pub('first'), leanne: pub('leanne') })
+
+    // The primary answers as `_` and under its own name.
+    const first = profileAtom(keys.first, { name: 'jwize' })
+    hold(first)
+    const firstAt = Math.floor(Date.now() / 1000)
+    await putIndex(base, keys.first, { roots: { 'nostr:profile': first.sig } }, firstAt)
+    const all = { _: pub('first'), jwize: pub('first'), leanne: pub('leanne') }
+    assert.deepEqual(await namesAt(base), all)
+
+    // ?name= answers one entry keyed exactly as asked; an unknown name is an empty 200.
+    assert.deepEqual(await namesAt(base, '?name=Leanne'), { Leanne: pub('leanne') })
+    assert.deepEqual(await namesAt(base, '?name=_'), { _: pub('first') })
+    for (const unknown of ['nobody', 'stranger', 'twin', 'tampered', 'swapped', 'wrongkind']) {
+      assert.deepEqual(await namesAt(base, `?name=${unknown}`), {}, unknown)
+    }
+    // A lookalike spelling (U+212A KELVIN SIGN lowercases to `k`) is not the name.
+    assert.deepEqual(await namesAt(base, `?name=${encodeURIComponent('JwiKe')}`), {})
+    assert.deepEqual(await namesAt(base, '?name='), all)
+    // A client asking with the NIP-11 Accept header still gets the names.
+    assert.deepEqual(await namesAt(base, '', { headers: { Accept: 'application/nostr+json' } }), all)
+    // HEAD: the same answer, no body.
+    const head = await askAt(base, NOSTR_JSON, { method: 'HEAD' })
+    assert.equal(head.status, 200)
+    assert.equal(head.headers['content-type'], 'application/json')
+    assert.equal(head.body, '')
+
+    // The names follow a writer's index as it moves — read once per move, never stale.
+    const renamed = profileAtom(keys.first, { name: 'wize' })
+    hold(renamed)
+    await putIndex(base, keys.first, { roots: { 'nostr:profile': renamed.sig } }, firstAt + 1)
+    assert.deepEqual(await namesAt(base), { _: pub('first'), wize: pub('first'), leanne: pub('leanne') })
+    await putIndex(base, keys.leanne, { roots: {} }, firstAt + 1)
+    assert.deepEqual(await namesAt(base), { _: pub('first'), wize: pub('first') })
+  } finally {
+    child.kill()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('names answer per request host: only a declared domain vouches, never a name merely pointed here', { timeout: 20_000 }, async () => {
+  const [declaredPort, undeclaredPort] = [await freePort(), await freePort()]
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-nip05-'))
+  const writer = getPublicKey(generateSecretKey())
+  const declared = startRelay(declaredPort, dir, ['--writers', writer, '--domain', `${DOMAIN},second.test`, '--primary', writer])
+  // The same writer and primary with no domain declared.
+  const undeclared = startRelay(undeclaredPort, dir, ['--writers', writer, '--primary', writer])
+  const [base, bare] = [`http://127.0.0.1:${declaredPort}`, `http://127.0.0.1:${undeclaredPort}`]
+  try {
+    await Promise.all([waitForRelay(base), waitForRelay(bare)])
+    // Each declared name, however a Host header spells it.
+    for (const host of [DOMAIN, 'second.test', `${DOMAIN}:8443`, 'JWize.Test', `${DOMAIN}.`]) {
+      assert.deepEqual(await namesAt(base, '', { host }), { _: writer }, host)
+    }
+    // The relay face of the same domain, a name somebody pointed here, the bare address.
+    for (const host of [`content.${DOMAIN}`, 'evil.example', `x${DOMAIN}`, `127.0.0.1:${declaredPort}`, 'localhost', '[::1]:7777', 'not a host']) {
+      assert.deepEqual(await namesAt(base, '', { host }), {}, host)
+      assert.deepEqual(await namesAt(base, '?name=_', { host }), {}, host)
+    }
+    // No domain declared: the relay vouches for nobody, anywhere.
+    for (const host of [DOMAIN, `127.0.0.1:${undeclaredPort}`, 'evil.example']) {
+      assert.deepEqual(await namesAt(bare, '', { host }), {}, host)
+    }
+  } finally {
+    declared.kill()
+    undeclared.kill()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('_ is only the declared primary: never the first writer, never a key that is not a writer', { timeout: 20_000 }, async () => {
+  const ports = [await freePort(), await freePort(), await freePort(), await freePort()]
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-nip05-'))
+  const [a, b, outsider] = [generateSecretKey(), generateSecretKey(), generateSecretKey()]
+  const [A, B] = [getPublicKey(a), getPublicKey(b)]
+  const relays = [
+    // Nobody declared, in either order: nobody is `_`.
+    startRelay(ports[0], dir, ['--writers', `${A},${B}`, '--domain', DOMAIN]),
+    startRelay(ports[1], dir, ['--writers', `${B},${A}`, '--domain', DOMAIN]),
+    // Declared through the environment, as an npub: that key, wherever it sits in the list.
+    startRelay(ports[2], dir, [], { WRITERS: `${A},${B}`, DOMAINS: DOMAIN, PRIMARY: nip19.npubEncode(B) }),
+    // Declared, but not a writer: not this relay's to vouch for.
+    startRelay(ports[3], dir, ['--writers', `${A},${B}`, '--domain', DOMAIN, '--primary', getPublicKey(outsider)]),
+  ]
+  const bases = ports.map(port => `http://127.0.0.1:${port}`)
+  try {
+    await Promise.all(bases.map(waitForRelay))
+    assert.deepEqual(await namesAt(bases[0]), {})
+    assert.deepEqual(await namesAt(bases[1]), {})
+    assert.deepEqual(await namesAt(bases[2]), { _: B })
+    assert.deepEqual(await namesAt(bases[3]), {})
+    // Unranked writers still answer under their own profile names.
+    const atom = profileAtom(a, { name: 'alpha' })
+    writeFileSync(join(dir, atom.sig), atom.bytes)
+    for (const base of bases) await putIndex(base, a, { roots: { 'nostr:profile': atom.sig } })
+    assert.deepEqual(await namesAt(bases[0]), { alpha: A })
+    assert.deepEqual(await namesAt(bases[1]), { alpha: A })
+    assert.deepEqual(await namesAt(bases[2]), { _: B, alpha: A })
+    assert.deepEqual(await namesAt(bases[3]), { alpha: A })
+  } finally {
+    for (const relay of relays) relay.kill()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('with a shell, the names are still the JSON — never index.html, never a file placed by hand', { timeout: 20_000 }, async () => {
+  const port = await freePort()
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-relay-nip05-'))
+  const shell = mkdtempSync(join(tmpdir(), 'hypercomb-relay-nip05-shell-'))
+  writeFileSync(join(shell, 'index.html'), '<!doctype html><title>host shell</title>')
+  writeFileSync(join(shell, 'pin'), 'pin')
+  const planted = JSON.stringify({ names: { _: 'f'.repeat(64), planted: 'f'.repeat(64) } })
+  for (const root of [dir, shell]) {
+    mkdirSync(join(root, '.well-known'))
+    writeFileSync(join(root, '.well-known', 'nostr.json'), planted)
+  }
+  const writer = getPublicKey(generateSecretKey())
+  const child = startRelay(port, dir, ['--shell-dir', shell, '--writers', writer, '--domain', DOMAIN, '--primary', writer])
+  const base = `http://127.0.0.1:${port}`
+  try {
+    await waitForRelay(base)
+    assert.match((await askAt(base, '/')).body, /host shell/)
+    assert.deepEqual(await namesAt(base), { _: writer })
+    assert.deepEqual(await namesAt(base, '', { headers: { Accept: 'text/html,*/*' } }), { _: writer })
+    assert.deepEqual(await namesAt(base, '?name=planted'), {})
+    // A host this relay does not vouch at gets the empty JSON — still never the file or the shell.
+    assert.deepEqual(await namesAt(base, '', { host: 'evil.example', headers: { Accept: 'text/html,*/*' } }), {})
+  } finally {
+    child.kill()
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(shell, { recursive: true, force: true })
   }
 })

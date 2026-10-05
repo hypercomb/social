@@ -23,7 +23,7 @@ import {
   removeDecorationAndWait,
   replaceDecoration,
 } from './decoration-manifest.js'
-import { DEFAULT_VIEW_DECORATION_KIND, normalizeViewToken } from './decoration-kind-index.js'
+import { DEFAULT_VIEW_DECORATION_KIND, HEXAGONS_SURFACE, normalizeViewToken } from './decoration-kind-index.js'
 
 interface DefaultViewPayload {
   /** The ViewMode token — `VisualBeeDescriptor.view`, e.g. `postit`. */
@@ -73,6 +73,48 @@ export function writeDefaultView(
     payload: { view },
     mark: 'persistent',
   })
+}
+
+/** THE TOGGLE'S ONE RULE — what a single "this view is the default" gesture
+ *  writes at `segments` (ctrl+click on a tile's view icon, the header rail's
+ *  ctrl+click, the `opens` word).
+ *
+ *  It reads what the place OPENS AS — its own mark, else the nearest
+ *  ancestor's — because that is what the gesture is about (and what the
+ *  icon's ring shows):
+ *  - It does not open as `view` → turn it on: write `view`.
+ *  - It does → turn it off. Plain clearing is right only when the place's own
+ *    mark is the one doing it and nothing would open it as a view once it is
+ *    gone. Two things would: an ancestor's default cascading back over it
+ *    (clearing only re-inherits), and the visitor rule that a childless page
+ *    opens as its page. Otherwise "off" is the explicit `hexagons` opt-out,
+ *    so off means off for the owner and for every visitor alike.
+ *
+ *  `own` is the place's own mark, `inherited` the nearest ancestor's (both ''
+ *  when absent), `leaf` whether the place has no children. Pure; the caller
+ *  reads and writes. */
+export function decideDefaultToggle(
+  own: string,
+  inherited: string,
+  view: string,
+  leaf: boolean,
+): { write: string } | { clear: true } {
+  if ((own || inherited) !== view) return { write: view }
+  if (own === view && !leaf && (!inherited || inherited === HEXAGONS_SURFACE)) return { clear: true }
+  return { write: HEXAGONS_SURFACE }
+}
+
+/** `decideDefaultToggle` from the layers themselves (the cold walk), so a
+ *  default the warm index has not seen yet — the hive root's, an unvisited
+ *  branch's — still counts. */
+export async function nextDefaultViewAt(
+  segments: readonly string[],
+  view: string,
+  leaf: boolean,
+): Promise<{ write: string } | { clear: true }> {
+  const own = await defaultViewAt(segments)
+  const inherited = segments.length > 0 ? await defaultViewWithinAt(segments.slice(0, -1)) : ''
+  return decideDefaultToggle(own, inherited, view, leaf)
 }
 
 /** Drop this layer's default — it goes back to opening as hexagons.

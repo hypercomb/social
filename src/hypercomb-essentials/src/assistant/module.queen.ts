@@ -93,6 +93,7 @@ import { clearHiveRoot, ownHiveRoot, setHiveRoot } from '../sharing/hive-pointer
 import { JEV_IOC_KEY, jevDoctrineSections, type JevReadingInput, type JevReadingResult, type JevPassInput, type JevPassResult } from './jev-decision.js'
 import { assessSandbox, changedPaths, countedAssessors, doorReader, jevReadTrial, publishChange, readChange, readSandboxDoor, reviewChange, takeDepsFrom, takeTrial, tallyAssessments, trialsOf, VERDICTS, type ModuleChangeRecord, type ReviewDeps, type ReviewVerdict, type SandboxSite, type SandboxTrial, jevPassZone } from './module-review.js'
 import { INSTALL_CHANNEL_PREFIX, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+import { readDoorsOf, zoneDoor } from '../sharing/zone-door.js'
 // A type only: the audit itself is loaded when the word is said.
 import type { ModuleAuditRecord } from './module-audit.js'
 
@@ -242,9 +243,9 @@ export const sandboxName = (change: string): string => {
 /** The zone sandboxes open on for a host: the sandbox zone for the public
  *  host, the host's own zone otherwise. Its sign('host:trials') lists them. */
 export const sandboxZoneUrl = (host: string): string => {
-  const bare = host.replace(/^https?:\/\//, '').replace(/\/+$/, '')
-  const publicHost = PUBLIC_CONTENT_HOSTS.includes(bare) || !bare
-  const zone = publicHost ? SANDBOX_ZONE : bare.replace(/^content\./, '')
+  const bare = zoneDoor(host)
+  const publicHost = PUBLIC_CONTENT_HOSTS.map(zoneDoor).includes(bare) || !bare
+  const zone = publicHost ? SANDBOX_ZONE : bare
   return hostOrigin(zone)
 }
 
@@ -387,7 +388,7 @@ export class ModuleQueenBee extends QueenBee {
     // [@<host>] publishes to a host of your own (a machine running
     // hypercomb-serve, a relay) instead of the public one; the other words are
     // the change's name and, for promote, the live channel.
-    const host = rest.find(part => part.startsWith('@'))?.slice(1) || (PUBLIC_CONTENT_HOSTS[0] ?? '')
+    const host = zoneDoor(rest.find(part => part.startsWith('@'))?.slice(1) || (PUBLIC_CONTENT_HOSTS[0] ?? ''))
     const words = rest.filter(part => !part.startsWith('@'))
     if (!host) { toast(t('module.nohost', 'No host is configured to publish to.'), 'warning'); return }
 
@@ -489,7 +490,7 @@ export class ModuleQueenBee extends QueenBee {
       const door = sandboxDoorUrl(name, host)
       const deps = {
         modules: (root: string | null) => install.modulesOf!(root, root ? [host, new URL(door).host] : []),
-        bytes: audit.signedBytes([...PUBLIC_CONTENT_HOSTS.map(hostOrigin), hostOrigin(host), door]),
+        bytes: audit.signedBytes([...readDoorsOf(PUBLIC_CONTENT_HOSTS).map(hostOrigin), hostOrigin(host), door]),
         held: (sig: string) => drafts.bytesOf(sig),
         put: (text: string, type: string) => putResource(new Blob([text], { type }), { emit: false }),
         now: Date.now,

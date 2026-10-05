@@ -215,6 +215,24 @@ behaviour" row for it). Owner: `commands/view-default.ts`.
   rides the layer commit to the root, it travels when the branch is adopted,
   and a peer who walks into your tile arrives the way you arranged it.
 
+**Set from the parent too (jwize, 2026-10-04).** Ctrl/cmd+click on a tile's
+view icon in the hexagon view toggles THAT tile's default — the approved
+exception recorded in `context-behaviors.md`. The icon wears a standing violet
+ring (`HexIconButton.selected`, the rail's `.is-default` mark) whenever the
+tile opens as that view, its own mark or an ancestor's; it survives hover, and
+the overlay repaints on `default-view:indexed`. Ctrl over that icon keeps the
+band up instead of standing it down for selection, and SelectionInputDrone
+does not start a paint there. The word is `opens <tile> as <view|hexagons>`
+(`commands/opens.queen.ts`); phones use the word. Every toggle — tile icon,
+header rail — ends in `features:default` with `toggle: true` (the word sets
+and unsets explicitly), decided from the layers themselves (show-features
+reads the marks cold and the place's children itself) by
+ONE rule, `decideDefaultToggle`: off clears the mark only when the tile's own mark
+is the one doing it and nothing would open it as a view without it; under an
+ancestor's default, or on a childless page (which a visitor would otherwise
+land on as its page), off writes the explicit `hexagons` opt-out. A toggle is a
+layer commit — visitors see it after the branch is published again.
+
 This **replaced `hc:view-defaults`**, a localStorage map that could do none of
 those and only tinted an icon. Its three call sites are gone. The mark is
 indexed in `decoration-kind-index.ts` (`defaultViewForSegments`) because both

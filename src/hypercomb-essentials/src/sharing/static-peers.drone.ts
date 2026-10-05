@@ -31,6 +31,7 @@ import {
   type StaticOffer, type StaticPeerEntry, type StaticPeersIo,
 } from './static-peers.js'
 import { STATIC_FOLLOWS_KEY } from './hive-link.js'
+import { nameService } from './names.service.js'
 import type { TileEntry, TileSource, LocationContext } from '../presentation/tiles/tile-source.types.js'
 
 export const STATIC_PEERS_KEY = '@diamondcoreprocessor.com/StaticPeersDrone'
@@ -113,7 +114,7 @@ export class StaticPeersDrone extends Drone {
   override description =
     'Offers the creations public hosts publish as shaded peer tiles in your hive — the swarm model for static content. Each step you take through them is the adopt; nothing folds on its own.'
   public override effects = ['network'] as const
-  protected override listens = ['community:offer', 'community:withdraw', 'hosts:creations']
+  protected override listens = ['community:offer', 'community:withdraw', 'hosts:creations', 'names:changed']
   protected override emits = [
     'swarm:peers-changed', 'activity:log', 'community:offers-render', 'hosts:creations:render',
   ]
@@ -147,6 +148,8 @@ export class StaticPeersDrone extends Drone {
     // one. The offers document lives here, so the row that carries the switch
     // is minted here too and no surface has to hold both halves.
     this.onEffect<{ zone?: string }>('hosts:creations', (p) => { void this.#lookCreations(String(p?.zone ?? '')) })
+    // A host vouched for a name — the rows that show its publishers say so.
+    this.onEffect('names:changed', () => { for (const zone of this.#creations.keys()) this.#renderCreations(zone) })
   }
 
   protected override heartbeat = async (): Promise<void> => {
@@ -259,7 +262,10 @@ export class StaticPeersDrone extends Drone {
     })
   }
 
-  /** A plate becomes a row: the switch's state, and the offer it sends. */
+  /** A plate becomes a row: the switch's state, and the offer it sends. The
+   *  zone being browsed serves these bytes, so it is where the publisher's
+   *  name is asked (names.service.ts) — and only for this row: the zone is
+   *  never recorded as the key's host anywhere else. */
   #rowsFrom = (cards: readonly HostOffering[], zone: string): HostCreationRow[] =>
     cards.map(card => {
       const offer = offerFromHostOffering(card, zone)
@@ -270,7 +276,7 @@ export class StaticPeersDrone extends Drone {
         lineage: card.lineage,
         host: new URL(card.route).host,
         url: card.route,
-        publisherLabel: card.pubkey.slice(0, 12),
+        publisherLabel: nameService.label(card.pubkey, zone),
         offered: this.#offers.has(name),
         offer,
       }
@@ -281,7 +287,11 @@ export class StaticPeersDrone extends Drone {
     if (!held) return
     // The switch's state is read at emit time, never stored on the card: an
     // offer made from anywhere else in the hive must show here too.
-    const rows = held.rows.map(row => ({ ...row, offered: this.#offers.has(row.name) }))
+    const rows = held.rows.map(row => ({
+      ...row,
+      offered: this.#offers.has(row.name),
+      publisherLabel: row.offer ? nameService.label(row.offer.pubkey, zone) : row.publisherLabel,
+    }))
     this.#creations.set(zone, { ...held, rows })
     this.emitEffect('hosts:creations:render', { zone, rows, answered: held.answered })
   }

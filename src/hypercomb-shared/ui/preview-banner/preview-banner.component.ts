@@ -26,6 +26,16 @@ interface PreviewModePayload {
   tiles?: number
 }
 
+/** Who a key is, at its host (essentials NameService), consumed via IoC at
+ *  runtime — shared never imports modules. */
+interface NameApi {
+  nameOf: (pubkey: string, host?: string) => { display: string } | null
+  label: (pubkey: string, host?: string, unverifiedFallback?: string) => string
+}
+
+const NAMES_KEY = '@diamondcoreprocessor.com/NameService'
+const ioc = () => (window as { ioc?: { get?: (k: string) => unknown; whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
+
 @Component({
   selector: 'hc-preview-banner',
   standalone: true,
@@ -38,20 +48,41 @@ export class PreviewBannerComponent implements OnInit, OnDestroy {
   #unsubs: (() => void)[] = []
 
   readonly #state = signal<PreviewModePayload | null>(null)
+  /** Bumped when a host vouches for a name, or the name service arrives. */
+  readonly #namesVersion = signal(0)
 
   readonly visible = computed(() => this.#state()?.active === true)
   readonly label = computed(() => String(this.#state()?.label ?? ''))
   readonly tiles = computed(() => Number(this.#state()?.tiles ?? 0))
-  /** Publisher shorthand — the pubkey's first 8 hex chars. Enough to
-   *  tell publishers apart; the full key is in the link they opened. */
-  readonly publisherShort = computed(() => String(this.#state()?.pubkey ?? '').slice(0, 8))
+  /** Who published it: a name one of the preview's byte hosts vouches for
+   *  (`jwize@jwize.com`), else one a host the key itself advertised vouches
+   *  for, else a short npub. Each byte host is asked for this banner only —
+   *  the link that named them is not the key's word, so they are never
+   *  recorded as its hosts elsewhere — and only the first few (the primary
+   *  leads). Without the name service, the pubkey's first 8 hex chars. */
+  readonly publisherShort = computed(() => {
+    this.#namesVersion()
+    const state = this.#state()
+    const pubkey = String(state?.pubkey ?? '')
+    const names = ioc()?.get?.(NAMES_KEY) as NameApi | undefined
+    if (!names || !pubkey) return pubkey.slice(0, 8)
+    for (const host of (state?.hosts ?? []).slice(0, 4)) {
+      const verified = names.nameOf(pubkey, String(host))
+      if (verified) return verified.display
+    }
+    return names.label(pubkey)
+  })
 
   ngOnInit(): void {
     this.#unsubs.push(
       EffectBus.on<PreviewModePayload>('preview:mode', (p) => {
         this.#state.set(p ?? null)
       }),
+      EffectBus.on('names:changed', () => {
+        this.#namesVersion.update(v => v + 1)
+      }),
     )
+    ioc()?.whenReady?.(NAMES_KEY, () => this.#namesVersion.update(v => v + 1))
   }
 
   ngOnDestroy(): void {

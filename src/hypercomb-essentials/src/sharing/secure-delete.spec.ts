@@ -72,7 +72,8 @@ describe('secure delete — remove from my hosts', () => {
     const result = await secureDeleteBranch(['place'])
     expect(result.ok).toBe(true)
     expect(posts).toHaveLength(1)
-    expect(posts[0]!.url).toBe('https://content.example.com/forget')
+    // The standing host was stored as its retired content face: forget goes to the ROOT.
+    expect(posts[0]!.url).toBe('https://example.com/forget')
     expect(new Set(posts[0]!.sigs)).toEqual(new Set([V1, V2, ONLY1, ONLY2, LEAF]))
     expect(posts[0]!.sigs).not.toContain(SHARED)
     expect(posts[0]!.sigs).not.toContain(OPEN)

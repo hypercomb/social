@@ -47,6 +47,7 @@ await import('../presentation/tiles/organism.queen.js')
 await import('../references/gather/feed.queen.js')
 await import('../references/gather/from.queen.js')
 await import('../references/gather/references.queen.js')
+await import('../sharing/profile.queen.js')
 
 type Declared = { reach?: string; scope?: string; refuse?: (args: string) => string | undefined }
 const census = (ioc.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
@@ -78,6 +79,10 @@ const AUDITED: Record<string, readonly [reach: string, scope: string]> = {
   feed: ['editing', 'page'],           // was additive: `<page> off` switches a target off
   from: ['editing', 'page'],           // was additive: `<group> off` detaches a link
   references: ['additive', 'local'],   // was page: it opens two panels and writes nothing
+  // Judged on arrival (2026-10-03, sealed-audiences Names step 3).
+  profile: ['additive', 'local'],      // shows only, from the participant's own host; every set
+                                       // form and any other host is refused, so nothing is written
+                                       // and no host a model names is ever asked
 }
 
 describe('every machine declaration, as audited', () => {
@@ -99,6 +104,14 @@ describe('what the corrections refuse', () => {
     expect(refuse('list')).toBeUndefined()
     expect(refuse('drop games/solomon')).toBe("/module drop takes the participant's draft off what runs; only the participant says it")
     expect(refuse('commit fresh-rooms')).toContain('only the participant says it')
+  })
+
+  it("/profile lets a machine look, on the participant's own host, and nothing else", () => {
+    const refuse = declared.get('profile')!.refuse!
+    expect(refuse('')).toBeUndefined()
+    expect(refuse('@tracker.example')).toBe("/profile shows the participant's own host; a machine does not name another")
+    expect(refuse('name jwize')).toBe("/profile name publishes under the participant's key; only the participant says it")
+    expect(refuse('about I make hives')).toContain('only the participant says it')
   })
 
   it('/copy is refused over a tile the participant cut and has not placed', () => {

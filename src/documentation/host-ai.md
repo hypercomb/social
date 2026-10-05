@@ -7,7 +7,7 @@ Two tiers answer questions, and they are deliberately different animals.
 
 | | **Host AI** (this doc) | **Claude Code bridge** |
 |---|---|---|
-| Where | The operator's Cloudflare worker (`content.jwize.com`) | Home server, `ws://localhost:2401` |
+| Where | The operator's Cloudflare worker, at a zone root (`pluginthematrix.com`) | Home server, `ws://localhost:2401` |
 | Model | Haiku (`AI_MODEL`) | Whatever Claude Code runs |
 | Latency | First tokens ~sub-second, streamed | Agent turn |
 | Can it write? | **No** — read-only, answers only | Yes — full hive authorship |
@@ -24,7 +24,7 @@ Added to `hypercomb-relay/blossom-worker/worker.js` (the same worker that
 already serves the public sig heap, so there is no new deployment target).
 
 ```
-POST https://content.jwize.com/ai/ask
+POST https://pluginthematrix.com/ai/ask      # a zone root; content.<zone> is legacy
 Authorization: Nostr <base64(kind-27235 event)>
 Content-Type: application/json
 
@@ -81,7 +81,7 @@ signature doctrine holds end to end.
 const ai = window.ioc.get('@diamondcoreprocessor.com/HostAi')
 for await (const chunk of ai.ask('what changed today?')) render(chunk)
 const answer = await ai.askText('summarise this page')   // one-shot
-ai.setHost('my.domain')                                   // default content.jwize.com
+ai.setHost('my.domain')                                   // a zone root, e.g. pluginthematrix.com
 ```
 
 Every chunk is mirrored onto the EffectBus as
@@ -118,7 +118,8 @@ wrangler secret put ANTHROPIC_API_KEY      # paste the key
 wrangler deploy
 ```
 
-Then from the app: `/ask host content.jwize.com` (or leave the default) and
+Then from the app: `/ask host pluginthematrix.com` (a zone root — the write
+face since 2026-10-03; `content.<zone>` still answers for old installs) and
 `/ask what is this hive about?`.
 
 ## Not built yet

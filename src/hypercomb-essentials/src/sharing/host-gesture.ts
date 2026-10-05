@@ -138,15 +138,19 @@ export const hostCurrentBranch = async (): Promise<void> => {
     // outside the tap's activation — deliverLink descends sheet → clipboard →
     // fresh-tap offer, and on phones that offer is the path that actually
     // fires (mobile browsers refuse both sheet and clipboard this late).
-    const delivery = await deliverLink(result.url, name)
+    // The share link is WHERE THE CREATION LIVES — the domain's root path, or
+    // its own address when it has one (zone-door.ts); the bundle link is the
+    // fallback only when no domain took the publish.
+    const shared = result.address || result.url
+    const delivery = await deliverLink(shared, name)
     const linkText = delivery === 'shared'
       ? 'Link shared — anyone who opens it can preview, then adopt.'
       : delivery === 'copied'
         ? 'Link copied — anyone who opens it can preview, then adopt.'
-        : result.url
+        : shared
     const doneMsg = result.linkReceipted
       ? t(i18n, 'host.done', 'Branch published. {link}', { link: linkText })
-      : t(i18n, 'host.done-pending-link', 'Branch published; the link itself is still uploading (retries automatically). {link}', { link: delivery === 'offered' ? result.url : 'Link ready.' })
+      : t(i18n, 'host.done-pending-link', 'Branch published; the link itself is still uploading (retries automatically). {link}', { link: delivery === 'offered' ? shared : 'Link ready.' })
     toast(result.status === 'confirmed' ? 'success' : 'info',
       t(i18n, 'host.title', 'Publish branch'),
       result.status === 'confirmed'

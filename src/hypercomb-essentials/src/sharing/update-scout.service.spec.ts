@@ -21,7 +21,7 @@ const manifestOf = (roots: Record<string, string>): HiveManifest =>
 describe('readInstallFollow', () => {
   it('parses a pinned follow and defaults hosts + channel', () => {
     const parsed = readInstallFollow(storageOf({ [INSTALL_FOLLOW_KEY]: JSON.stringify({ pubkey: PUB }) }), null)
-    expect(parsed).toEqual({ pubkey: PUB, hosts: ['content.pluginthematrix.com'], channel: 'essentials' })
+    expect(parsed).toEqual({ pubkey: PUB, hosts: ['pluginthematrix.com'], channel: 'essentials' })
   })
 
   it('treats absence and malformation as no follow', () => {
@@ -32,8 +32,9 @@ describe('readInstallFollow', () => {
   })
 
   it('follows the publisher the package names when the participant has no record', () => {
+    // A host recorded as the retired content face is read as its zone.
     expect(readInstallFollow(storageOf({}), { pubkey: PUB, hosts: ['content.example.com'] }))
-      .toEqual({ pubkey: PUB, hosts: ['content.example.com'], channel: 'essentials' })
+      .toEqual({ pubkey: PUB, hosts: ['example.com'], channel: 'essentials' })
     // No stamp has succeeded yet: the file names no key, and the scout is dormant.
     expect(readInstallFollow(storageOf({}), { pubkey: '', hosts: [], channel: 'essentials' })).toBeNull()
   })

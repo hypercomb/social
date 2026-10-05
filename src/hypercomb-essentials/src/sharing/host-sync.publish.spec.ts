@@ -57,7 +57,8 @@ describe('publishAtoms', () => {
     const outcome = await publishAtoms('content.example.com', [a.sig, b.sig], async sig => local.get(sig) ?? null)
     expect(outcome).toEqual({ ok: true, sent: 1, held: 1 })
     expect(new TextDecoder().decode(held.get(b.sig))).toBe('export {}')
-    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'PUT').map(([url]) => url)).toEqual([`https://content.example.com/${b.sig}`])
+    // A write goes to the zone ROOT — the retired content face folds away.
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'PUT').map(([url]) => url)).toEqual([`https://example.com/${b.sig}`])
     vi.unstubAllGlobals()
   })
 

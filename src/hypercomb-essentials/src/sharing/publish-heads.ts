@@ -35,6 +35,7 @@
 // line an offline panel shows.
 
 import { get, SignatureService, registerPoolMeaning } from '@hypercomb/core'
+import { foldContentLabel, legacyContentFace } from './zone-door.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const POOL_MEANING = 'publish:heads'
@@ -196,10 +197,12 @@ export async function latestByLineageKey(pubkey?: string): Promise<Map<string, P
  *  rather than fall back to this map — the ledger's job there is to prove the
  *  danger is real, not to paper over it. */
 export async function knownRoots(host: string, pubkey: string): Promise<Record<string, string>> {
-  const h = String(host ?? '').trim().toLowerCase()
+  // A record written when the door was `content.<zone>` is the same host as
+  // `<zone>` now — compared as zones (zone-door.ts), never rewritten.
+  const h = foldContentLabel(host)
   const out: Record<string, string> = {}
   for (const [key, entry] of await latestByLineageKey(pubkey)) {
-    if (h && entry.record.host && entry.record.host !== h) continue
+    if (h && entry.record.host && foldContentLabel(entry.record.host) !== h) continue
     out[key] = entry.sealed
   }
   return out
@@ -233,7 +236,7 @@ export async function writeObservation(sealed: string, host: string, observation
   const dir = await getPool(true)
   if (!dir) return
   try {
-    const handle = await dir.getFileHandle(`${s}.${await hostHash(host)}${SEEN_SUFFIX}`, { create: true })
+    const handle = await dir.getFileHandle(`${s}.${await hostHash(foldContentLabel(host))}${SEEN_SUFFIX}`, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(new TextEncoder().encode(JSON.stringify(observation))) }
     finally { await writable.close() }
@@ -245,27 +248,34 @@ export async function readObservation(sealed: string, host: string): Promise<Pub
   if (!SIG_RE.test(s)) return null
   const dir = await getPool(false)
   if (!dir) return null
-  try {
-    const handle = await dir.getFileHandle(`${s}.${await hostHash(host)}${SEEN_SUFFIX}`, { create: false })
-    const parsed = JSON.parse(await (await handle.getFile()).text()) as Record<string, unknown>
-    return {
-      at: Number(parsed?.['at'] ?? 0) || 0,
-      verdict: String(parsed?.['verdict'] ?? ''),
-      indexCreatedAt: Number(parsed?.['indexCreatedAt'] ?? 0) || 0,
-    }
-  } catch { return null }
+  // Written under the zone now; an observation from before the content face
+  // retired sits under that face's hash and is still read.
+  const zone = foldContentLabel(host)
+  const face = legacyContentFace(zone)
+  for (const named of face ? [zone, face] : [zone]) {
+    try {
+      const handle = await dir.getFileHandle(`${s}.${await hostHash(named)}${SEEN_SUFFIX}`, { create: false })
+      const parsed = JSON.parse(await (await handle.getFile()).text()) as Record<string, unknown>
+      return {
+        at: Number(parsed?.['at'] ?? 0) || 0,
+        verdict: String(parsed?.['verdict'] ?? ''),
+        indexCreatedAt: Number(parsed?.['indexCreatedAt'] ?? 0) || 0,
+      }
+    } catch { /* not under this name */ }
+  }
+  return null
 }
 
 /** The newest index `created_at` this participant has ever signed for
  *  `host`/`pubkey`. An index read whose stamp is OLDER than this is being
  *  served stale — the only detectable form of "authentic but superseded". */
 export async function highWaterIndexStamp(host: string, pubkey: string): Promise<number> {
-  const h = String(host ?? '').trim().toLowerCase()
+  const h = foldContentLabel(host)
   const key = String(pubkey ?? '').trim().toLowerCase()
   let max = 0
   for (const entry of await listPublishRecords()) {
     if (key && entry.record.pubkey !== key) continue
-    if (h && entry.record.host && entry.record.host !== h) continue
+    if (h && entry.record.host && foldContentLabel(entry.record.host) !== h) continue
     if (entry.record.indexCreatedAt > max) max = entry.record.indexCreatedAt
   }
   return max

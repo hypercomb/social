@@ -1,6 +1,7 @@
 // Walk /revolucion by layer-at per path; collect every 64-hex ref in each
-// layer; test each ref locally (get-resource) and remotely (content.jwize.com
-// HEAD — same R2 bucket as content.pluginthematrix.com). Report holes.
+// layer; test each ref locally (get-resource) and remotely (a HEAD at the zone
+// root pluginthematrix.com — the same R2 bucket every content.<zone> face
+// reads). Report holes.
 const WebSocket = require('ws')
 const https = require('https')
 const ws = new WebSocket('ws://localhost:2401')
@@ -19,7 +20,7 @@ ws.on('message', raw => {
 })
 function head(sig) {
   return new Promise(resolve => {
-    const req = https.request({ host: 'content.jwize.com', path: '/' + sig, method: 'HEAD', timeout: 15000 },
+    const req = https.request({ host: 'pluginthematrix.com', path: '/' + sig, method: 'HEAD', timeout: 15000 },
       res => resolve(res.statusCode))
     req.on('error', () => resolve(0)); req.on('timeout', () => { req.destroy(); resolve(0) })
     req.end()

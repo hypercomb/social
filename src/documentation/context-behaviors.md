@@ -16,6 +16,15 @@
 > DEPRECATED (the asleep icon, the brief at page scale and the `?features=`
 > intent now open the context panel instead). Never add a door that names a
 > tile other than the context.
+>
+> **One approved exception — a child's DEFAULT VIEW (jwize, 2026-10-04).**
+> Ctrl/cmd+click on a tile's view icon sets or clears how THAT tile opens
+> (its own `view:default` mark), from its parent, without walking in; the
+> word is `opens <tile> as <view|hexagons>`. It is a view door, not behaviour
+> management: it writes the same record the rail and the panel write, through
+> the same intent (`features:default`, `toggle`), and the one rule in
+> `view-default.ts` `decideDefaultToggle`. See behaviors-view-simplification.md,
+> "THE DEFAULT VIEW". Nothing else may name a tile other than the context.
 
 > **The `/dashboard` first slice is RETIRED (2026-07-26).** It was built as
 > the worked example of the toggle semantics below and is cited that way
