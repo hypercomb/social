@@ -459,6 +459,17 @@ export class HypercombHiveTreeReader {
         guard()
         if (head) return { ...head, live: true }
         if (carriedSig) {
+          // The bag's latest marker before the parent's copy, as /read does:
+          // the parent's copy can be older than the page. Straight to the
+          // copy, /dolphin/associates read as empty while its page held
+          // four tiles, and /find never saw them (2026-10-04).
+          const markers = await history.listLayers?.(locationSig).catch(() => []) ?? []
+          const latest = [...markers].sort((a, b) => b.index - a.index)[0]
+          const marked = latest && SIG.test(latest.layerSig) ? await history.getLayerBySig(latest.layerSig).catch(() => null) : null
+          guard()
+          if (marked && latest && !Object.keys(marked).every(key => key === 'name')) {
+            return { locationSig, layerSig: latest.layerSig, layer: marked, live: false }
+          }
           const layer = await history.getLayerBySig(carriedSig).catch(() => null)
           guard()
           if (layer) return { locationSig, layerSig: carriedSig, layer, live: false }

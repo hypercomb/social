@@ -481,11 +481,21 @@ describe('a page history cannot pin to one signature', () => {
     expect(await fx.reader.find('arkanoid', [])).toMatchObject({ ok: true, matches: [{ name: 'Arkanoid', path: '/games/Arkanoid' }] })
   })
 
+  it('walks into a page by its bag’s latest marker before the older copy its parent carries', async () => {
+    // /dolphin/associates read as empty — its parent's copy predates its four
+    // tiles — while its own bag's latest marker held them.
+    const fx = fixture()
+    fx.refs.delete(sig(102)) // /projects: the head cannot be pinned
+    fx.history['listLayers'] = vi.fn(async (location: string) => location === sig(102) ? [{ index: 2, layerSig: sig(5) }] : [])
+    const tree = await fx.reader.readTree([], { maxDepth: 2 })
+    expect(tree.ok && tree.nodes.map(node => node.path)).toEqual(['/', '/projects', '/notes', '/projects/roadmap'])
+  })
+
   it('opens a tile’s children side by side and still lists them in order', async () => {
     // One at a time, a whole-hive /find ran out its time before depth three.
     const fx = fixture()
     const current = fx.history['currentLayerRefAt'] as ReturnType<typeof vi.fn>
-    const original = current.getMockImplementation()!
+    const original = current.getMockImplementation()! as (location: string, stats?: { cold?: boolean }) => Promise<unknown>
     let inFlight = 0
     let most = 0
     current.mockImplementation(async (location: string, stats?: { cold?: boolean }) => {
