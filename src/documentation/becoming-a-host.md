@@ -151,15 +151,32 @@ One word for the act, kept for the act:
 
 Two words, one each way (jwize, 2026-10-07: "we say follow though"):
 
-- **follow** — the domains you read from. Inbound. `follow` alone shows
-  who you follow; `follow someonesdomain.com` adds one. Following changes only
-  your own install, and an update from someone you follow is taken only when
-  you turn updates on for them.
+- **follow** — the domains you read from. Inbound. **Built**
+  (`sharing/follow.queen.ts`, 2026-10-07): `follow` alone says who you
+  follow and who in the swarm you could; `follow <domain>` follows any domain
+  at any time, and as you type it offers the hosts participants in the swarm
+  advertise as their own (each from an event their key signed) that you do
+  not follow yet; `follow off <domain>` stops. Following changes only your
+  own install, and an update from someone you follow is taken only when you
+  turn updates on for them.
 - **host** — the domains you *serve*: your own, someone else's, or several.
-  Outbound. `host` alone shows what you serve; `host someonesdomain.com`
-  serves that domain once its owner points it at you. The swarm field is
-  labelled **Your host** with the hint "the domain you serve from — leave
-  empty if you don't host".
+  Outbound. `host` alone lists the hosts you manage; `host <domain>` opens
+  that host's management (jwize, 2026-10-07: "host jwize.com is my manage
+  hosts list") — set it as your host, set up the key that may upload to it,
+  and choose what you share from it and change those preferences. The swarm
+  field is labelled **Your host** with the hint "the domain you serve from —
+  leave empty if you don't host".
+
+### Desktop and phone
+
+The desktop is where hosts are **configured** — the `host` side: keys,
+settings, what you share. On a phone, "your hosts" means the domains you
+**follow**. They are the same records, shared across your devices
+(jwize, 2026-10-07): your phone, your desktop and any host you run recognise
+each other through a common key — your participant key — and the follow list
+and host settings are records that key signs, so every place holding it reads
+the same ones. How a new device is given that key, and how a host accepts it
+for uploads, is the part to design next.
 
 Open question: the `hosts` word exists today for the followed list
 (`hosts.queen.ts`). With `follow` as the word, `hosts` either stays as a
