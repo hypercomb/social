@@ -291,6 +291,22 @@ side. A published card serves only the stored image from its own host.
   a host the way text themes are. It needs hive code and a host deploy, as the
   ledger says.
 
+## On a phone: the list is the root
+
+The card page opens on a phone as a directory of people
+([using-a-creation.md](using-a-creation.md), "On a phone, the root is people"):
+the default card at the top, then your own cards and the site's card, then
+everyone in your Hyperdex, then "Create your own card" until you have one.
+Each row is the card made small, its name and title. Pulling up from the
+bottom of a card shrinks it into its row; past halfway it finishes on its own.
+Tapping a row grows it back into the card. A dock along the bottom scans,
+shows your code, shares, searches and opens your own card. Turning the card
+over is one swipe, never a spin past the side you meant.
+
+Someone using another person's card site can make their own card the default
+there, and carry their cards and Hyperdex to another address in a file until
+they have a host of their own.
+
 ## Why this is the founding creation
 
 Each primitive the concept rests on is exercised by the card, and the card is
@@ -322,6 +338,9 @@ useful on day one, so it is the creation the concept is explained with:
 | `jaime-weise/business-card/template` and its theme tiles | built in the hive. The template wears the themed page and a card of name slots; each starter theme is a tile under it wearing the same page and naming its theme. `jaime-weise` keeps its own page and card and wears `view:default=website`; `business-card` wears `hexagons` |
 | `templates:<business-card>` facet and `template` membership | membership in `template` is by name, today. The facet needs a writer in the hive (`facet-succession.ts` exists; no word or bridge op writes this facet) |
 | Templates indexed across public domains (`themes:card`) | not built. It needs the meaning reserved in the pool registry, an offering handler, and the host worker to list it (today it lists `themes:text` only) |
+| The list as the root on a phone; pull a card down into its row, tap a row to grow it; the dock | built in the card page |
+| Making yourself the default on someone's card site; carrying cards and Hyperdex in a file | built in the card page |
+| Staying on the page version you use when the site publishes a newer one | not built ([using-a-creation.md](using-a-creation.md)) |
 | Gestures and choosers as drone modules | design — the page carries a registry; nothing is a bee yet |
 | The Hyperdex as a collection in the hive, synced across the participant's devices | design — a private `/hyperdex` collection of link tiles. The pieces are built: collections, link tiles, and the confirm step (`link:intake`). Nothing yet writes a scanned or pasted card address into it. |
 | Reading a held address at its live head | built — opening a door resolves the signed index |
