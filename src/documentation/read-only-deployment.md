@@ -87,6 +87,16 @@ What a door may do comes from one of two places:
 
 There is no "trust this site" button. A single tap is not a review.
 
+**A separate address is not trust in its host.** *jwize:* "You can use
+subdomains and hosted friends but you are still at risk if they deploy a
+backdoor." A subdomain on a friend's host keeps your data apart from other
+sites, but not from that host. Whoever runs the host decides what code the
+address serves, and can change it at any deploy: the shell, the worker, the
+page. Verifying a signed version tells you what that version does. It cannot
+stop a host from serving something else in its place. So data kept at an
+address is only as safe as whoever runs it. Your own domain on your own host
+is the only place where you are that someone.
+
 ## The hosting model (settled 2026-08-28)
 
 A publish **is** the website deployment. There is no separately maintained

@@ -61,7 +61,7 @@ you accepted until you take a newer one. There are two gaps:
 
 | | Where your data lives | Who decides when it changes | |
 |---|---|---|---|
-| **On someone's domain** (`jaime-weise.hypercomb.com`, or any host) | your browser, at that address: the silo | today the domain's owner; by this promise, you | no install, no host of your own; you trust the owner to keep the domain |
+| **On someone's domain** (`jaime-weise.hypercomb.com`, or any host) | your browser, at that address: the silo | today the domain's owner; by this promise, you | no install, no host of your own; you trust the owner to keep the domain, and not to serve a backdoor: whoever runs the host decides what code that address serves |
 | **On hypercomb.io** | your own hive, in your browser | you: a new version is a notice | the whole application; you cannot publish until you have a host and a domain |
 | **On your own domain** (the best choice) | your host | you, entirely | nobody else's upgrade at the root reaches you |
 
