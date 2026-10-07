@@ -1374,6 +1374,7 @@
   "slash.branch": "Beri nama jalur atau tanda tangan untuk pelengkapan otomatis perintah",
   "slash.chat": "Percakapan multi-giliran dengan Claude — membuat ubin utas dengan anak tanya-jawab",
   "slash.withhold": "Sembunyikan ubin dari model luar — hanya model lokal Anda yang boleh membacanya",
+  "slash.follow": "Ikuti sebuah domain — baca apa yang diterbitkan di sana",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "Alihkan antara tampilan heksagon dan situs web",

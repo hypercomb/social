@@ -1374,6 +1374,7 @@
   "slash.branch": "为命令自动补全指定路径或签名",
   "slash.chat": "与 Claude 多轮对话 — 创建带问答子项的线程磁贴",
   "slash.withhold": "对外部模型隐藏一个瓦片 — 只有你的本地模型可以读取",
+  "slash.follow": "关注一个域名 — 阅读那里发布的内容",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "在六边形和网站渲染之间切换",

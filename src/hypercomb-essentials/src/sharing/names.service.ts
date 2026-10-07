@@ -309,6 +309,13 @@ export class NameService extends EventTarget {
     this.#hints.set(key, hosts)
   }
 
+  /** Every host a participant advertised as their own, each from an event its
+   *  key signed, in the order first seen (capped at MAX_ADVERTISED_HOSTS).
+   *  What `follow` offers as it completes. */
+  advertisedHosts(): readonly string[] {
+    return [...this.#advertised]
+  }
+
   /** The name a host vouches for, synchronously. With `host` — the host the
    *  caller is showing — that host alone is asked and answers. Without it,
    *  the hosts the key advertised itself, in hint order. A miss starts the

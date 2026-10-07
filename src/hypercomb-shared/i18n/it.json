@@ -1374,6 +1374,7 @@
   "slash.branch": "Assegna un percorso o una firma per l'autocompletamento dei comandi",
   "slash.chat": "Conversazione multi-turno con Claude — crea tessere thread con figli Q&A",
   "slash.withhold": "Nascondere un riquadro ai modelli esterni — solo il tuo modello locale può leggerlo",
+  "slash.follow": "Segui un dominio — leggi ciò che vi è pubblicato",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "Alterna tra esagoni e rendering sito web",

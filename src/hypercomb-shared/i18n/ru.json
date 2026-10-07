@@ -1374,6 +1374,7 @@
   "slash.branch": "Задать путь или подпись для автодополнения команд",
   "slash.chat": "Многоходовая беседа с Claude — создаёт плитки-потоки с дочерними вопросами и ответами",
   "slash.withhold": "Скрыть плитку от внешних моделей — читать её может только ваша локальная модель",
+  "slash.follow": "Подписаться на домен — читать то, что там публикуется",
   "slash.harness": "List the agent harnesses, choose one for the device or this conversation, bring one in",
   "slash.models": "Open the providers console; add a model line for a weight of work, drop one, read what the work asked for",
   "slash.view": "Переключить между шестиугольниками и отображением веб-сайта",
