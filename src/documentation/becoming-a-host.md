@@ -53,6 +53,32 @@ What goes wrong:
 - **No answer to "did it work?"** The 12-point check in the `host-deploy`
   skill exists, but a participant never sees it.
 
+## Two roads to a hosted domain
+
+A host is someone whose machine serves domains — not only their own. You
+could host someonesdomain.com: its owner points the domain at your machine
+and you let them in. pluginthematrix.com hosted jwize.com this way when it
+replaced the jwize.com tunnel, and pointblanksolutions.ca is served from
+Cloudflare the same way.
+
+It is safe for the owner: every byte a reader takes is checked against its
+signature and only the owner's key signs the content, so a host cannot change
+what it serves — at worst it fails to serve it. The owner trusts the host to
+stay up, never to be honest.
+
+So a participant with a domain has two roads:
+
+1. **Serve it yourself** — the four steps below.
+2. **Have someone host it** — pick a host that offers hosting (hypercomb.com
+   by default, or anyone in your hosts list who offers it), point your domain
+   at it, and wait for the host to let you in. No machine, no build. This is
+   the road most people will take, and the one the hosts window should offer
+   first.
+
+And a host can serve many domains: their own and other people's. The hosts
+window shows a host the domains it serves and the requests waiting for it to
+let someone in.
+
 ## The path: four steps, one place
 
 The path lives in the **hosts window**, the place a participant already goes
@@ -123,10 +149,13 @@ themselves; updates from it reach them only once they turn updates on for it
 
 One word for the act, kept for the act:
 
-- **host** — a domain that serves a hive. *Your host* is the one you serve
-  from; *hosts* are the ones you follow. The swarm field is labelled **Your
-  host** with the hint "the domain you serve your hive from — leave empty if
-  you don't host".
+- **hosts** — the domains you *follow*: what you read from. Inbound. Hosts
+  you follow change only your own install, and only when you turn updates on.
+- **host** — the domains you *serve*: your own, someone else's, or several.
+  Outbound. `host` alone shows what you serve; `host someonesdomain.com`
+  serves that domain once its owner points it at you. The swarm field is
+  labelled **Your host** with the hint "the domain you serve from — leave
+  empty if you don't host".
 - **follow** — add a host to your list.
 - **updates** — taken from a host you follow, only when you turn them on.
 
