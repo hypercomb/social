@@ -87,6 +87,16 @@ What a door may do comes from one of two places:
 
 There is no "trust this site" button. A single tap is not a review.
 
+**Values a door keeps today.** Each value is named, with the only values it
+may hold, so it can never carry anything else, such as an identity. The visitor
+shell (`hypercomb-web/src/index.visitor.html`, `KEPT`) reads it from the
+browser's own storage and writes it back. Everything else still ends with the
+page.
+
+| Key | Values | What it is | Allowed |
+|---|---|---|---|
+| `bc.howto` | `true` / `false` | The card page's How-to was shown, so it opens by itself only once | jwize, 2026-10-07: "make it remember the how-to on doors too" |
+
 **A separate address is not trust in its host.** *jwize:* "You can use
 subdomains and hosted friends but you are still at risk if they deploy a
 backdoor." And: "or any domain but the same is true." Any address you
