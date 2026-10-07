@@ -300,9 +300,11 @@ everyone in your Hyperdex, then "Create your own card" until you have one.
 Each row is the card made small, its name and title. Pulling up from the
 bottom of a card shrinks it into its row; past halfway it finishes on its own.
 Tapping a row grows it back into the card. The search sits at the top of the
-list and is always there. Each of your own rows ends with an edit button. A
-dock along the bottom scans, shows your code, shares and edits your own card.
-Turning the card over is one swipe, never a spin past the side you meant.
+list and is always there. A row whose card has a phone number starts with a
+call button, and each of your own rows ends with an edit button. A dock along
+the bottom scans, shows your code, shares and edits your own card; its bottom
+right corner holds the manage toggle. Turning the card over is one swipe, never
+a spin past the side you meant.
 
 Someone using another person's card site can make their own card the default
 there, and carry their cards and Hyperdex to another address in a file until
@@ -331,8 +333,14 @@ the card is its own editor:
   ⋯ menu.
 - **The bar** along the bottom changes the template (‹ name ›), records the
   card's mark, makes the card the first one on this site (☆), and holds the
-  rest under ⋯: a phone, a link, shake, the site's card as a start, the card's
-  address, saving and bringing cards in a file, and delete.
+  rest under ⋯: the card's options, a phone, a link, shake, the site's card as
+  a start, the card's address, saving and bringing cards in a file, and delete.
+- **Card options** shrinks the card into its own row in the list, open on its
+  options, while the edit waits in the ring (*jwize:* "make the options for the
+  card somehow available and when you come back you are back to the card
+  editing"). The row says *Editing*. Tapping it, or *Continue editing*, grows it
+  back into the card, still editing. A new card not yet kept has a row of its
+  own to land on.
 - **Back** and **Done** sit in the top corners.
 
 #### The ring: nothing is lost until you accept
@@ -352,6 +360,54 @@ way you left it. The ring is saved as you go: close the page mid-edit and the
 next edit picks up where you stopped. Done keeps the version on screen and
 empties the ring. Back empties it and keeps nothing, and the card returns to
 exactly how it was.
+
+### A row held, and managing
+
+*jwize, 2026-10-07:* "a call icon on the left … more options … by holding down
+on the item … an expanded rectangle with the flag and any other options
+needed", and "don't make them up yet if you don't know".
+
+- **Hold a row** (or tap its ⋯) and it opens in place into a larger rectangle
+  with its options. The options are only what was asked for, or what the page
+  already does for that kind of row:
+  - every row: call, if the card has a phone, and its own entrance flag;
+  - your own card: edit and make first;
+  - a Hyperdex contact: details, save to the phone's contacts, pass it on, and
+    remove.
+
+  A tap anywhere else closes the rectangle and does nothing more.
+- **The manage toggle** turns manage mode on. The defaults open full screen
+  first. Pulling up, or the list icon, collapses them into the list's top rows
+  the way a card collapses into its row. While manage is on, a tap opens any
+  row instead of its card. The toggle and the list take the theme's second
+  accent (red, not gold), so the mode is never mistaken for the ordinary list.
+  It stays on until the toggle is turned off. Holding the search does the same
+  as the toggle.
+- **The defaults are toggles**: one tap moves a default to its next state, with
+  no second level (*jwize:* "just click to change the state instantly"). There
+  are two defaults, the only settings that exist: the card entrance, and shake
+  to show your card.
+
+### The entrance
+
+*jwize, 2026-10-07:* asked whether a card's entrance should play every time,
+then "at least should be a setting", "with flag as well", and "multi stage
+toggle entrance → Starts | Always | Never".
+
+The entrance plays when a card **starts** in someone's hands: shown with the
+phone gesture, or received by a scan or a link. It does not play while you
+browse: the list, the Hyperdex, or a card read again all open the card at
+rest. This rule follows from the act, not from a record of which cards you
+have seen, so nothing keeps a viewing history.
+
+The entrance is decided by the first of these that applies:
+
+1. **A phone set to reduce motion** never plays it.
+2. **The link's flag** decides for that visit (`?entrance=starts`,
+   `?entrance=always` or `?entrance=never`), over the viewer's own choice. A
+   kiosk's link can say always.
+3. **A card's own flag**: Default, Always or Never, from its row.
+4. **The default**: Starts, Always or Never.
 
 ## Why this is the founding creation
 
@@ -387,6 +443,10 @@ useful on day one, so it is the creation the concept is explained with:
 | The list as the root on a phone; pull a card up into its row, tap a row to grow it; the search always at the top; the dock | built in the card page |
 | Editing a card in place: select, type, drag, size, align and change the template on the card; default elements drawn faint; the ring until Done | built in the card page. The ring lives in the browser at that address, not yet in the hive's clipboard pool |
 | Each template naming its own default elements | not built. Every template offers the business card's |
+| A row held: call on the left, the rectangle of options, the card's own entrance flag | built in the card page. The per-card flag lives in the browser, keyed by the card's name and first way to reach it. Editing your own card carries the flag over; a held card that arrives again under a new name starts without one |
+| Manage: the toggle at the dock's corner, the defaults full screen collapsing into the list, toggles that change on one tap, the red accent | built in the card page |
+| Card options from the editor, and coming back to the edit from its row | built in the card page |
+| The entrance rule (starts, always, never; the link's flag; reduce motion) | built in the card page |
 | Making yourself the default on someone's card site; carrying cards and Hyperdex in a file | built in the card page |
 | Staying on the page version you use when the site publishes a newer one | not built ([using-a-creation.md](using-a-creation.md)) |
 | Gestures and choosers as drone modules | design — the page carries a registry; nothing is a bee yet |
