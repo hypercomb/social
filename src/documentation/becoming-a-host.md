@@ -77,6 +77,15 @@ login). They stay on the device that configures the host — the desktop —
 and never go into a shared record. Your phone sees your hosts and their
 state; it does not hold the keys to change them.
 
+**A secret is never stored in a pool or anywhere public** (jwize,
+2026-10-07). Not a private signing key, not a host API credential, not a
+provider's API key. A pool follows you between devices and can be served
+from a host; a resource or layer is content-addressed and replicated; an
+event, an export or a published record leaves the machine. A secret lives
+only in the device's own local storage, is used there, and is never written
+into anything that can travel. What travels between your devices is the
+public half.
+
 ## The path: four steps, one place
 
 The path lives in the **hosts window**, the place a participant already goes
