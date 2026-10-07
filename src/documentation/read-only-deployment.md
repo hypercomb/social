@@ -98,6 +98,14 @@ stop a host from serving something else in its place. So data kept at an
 address is only as safe as whoever runs it. Your own domain on your own host
 is the only place where you are that someone.
 
+**More than one entry point segregates the danger.** *jwize:* "It is always
+best to secure by one or even better multiple host entry points that would
+segregate the dangers further." One host entry point you run is good. Several
+are better. Put different things behind different hosts, so a breach at one
+reaches only what that host serves. And the same signed item, read through
+more than one host, lets a reader notice when one of them serves something
+else.
+
 ## The hosting model (settled 2026-08-28)
 
 A publish **is** the website deployment. There is no separately maintained
