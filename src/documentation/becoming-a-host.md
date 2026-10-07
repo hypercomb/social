@@ -53,31 +53,29 @@ What goes wrong:
 - **No answer to "did it work?"** The 12-point check in the `host-deploy`
   skill exists, but a participant never sees it.
 
-## Two roads to a hosted domain
+## A host is a domain you own
 
-A host is someone whose machine serves domains — not only their own. You
-could host someonesdomain.com: its owner points the domain at your machine
-and you let them in. pluginthematrix.com hosted jwize.com this way when it
-replaced the jwize.com tunnel, and pointblanksolutions.ca is served from
-Cloudflare the same way.
+A **host** is a domain you own, and you change it through its **host API**
+(jwize, 2026-10-07: "The host means you own the domain and you need to use
+your host api to make changes, ie deploy to the server side your latest
+build. So these are your hosts."). Through that API you deploy your latest
+build to it, change its settings, and choose what it shares. Whose machine
+answers for the domain does not change whose host it is:
 
-It is safe for the owner: every byte a reader takes is checked against its
-signature and only the owner's key signs the content, so a host cannot change
-what it serves — at worst it fails to serve it. The owner trusts the host to
-stay up, never to be honest.
+- **your own machine** — the desktop app serving the hive live;
+- **a provider** — Cloudflare, or any server you rent;
+- **someone else's machine** — a friend, or hypercomb.com, serving it for
+  you. Their machine answers; the domain, and the host, are still yours.
 
-So a participant with a domain has two roads:
+Serving a domain for someone else is safe for its owner: every byte a reader
+takes is checked against its signature, and only the owner's key signs the
+content, so whoever serves it cannot change it — at worst they fail to serve
+it. The owner trusts the server to stay up, never to be honest.
 
-1. **Serve it yourself** — the four steps below.
-2. **Have someone host it** — pick a host that offers hosting (hypercomb.com
-   by default, or anyone in your hosts list who offers it), point your domain
-   at it, and wait for the host to let you in. No machine, no build. This is
-   the road most people will take, and the one the hosts window should offer
-   first.
-
-And a host can serve many domains: their own and other people's. The hosts
-window shows a host the domains it serves and the requests waiting for it to
-let someone in.
+**The host API's credentials are secrets** (a Cloudflare token, a server
+login). They stay on the device that configures the host — the desktop —
+and never go into a shared record. Your phone sees your hosts and their
+state; it does not hold the keys to change them.
 
 ## The path: four steps, one place
 
@@ -159,13 +157,13 @@ Two words, one each way (jwize, 2026-10-07: "we say follow though"):
   not follow yet; `follow off <domain>` stops. Following changes only your
   own install, and an update from someone you follow is taken only when you
   turn updates on for them.
-- **host** — the domains you *serve*: your own, someone else's, or several.
-  Outbound. `host` alone lists the hosts you manage; `host <domain>` opens
-  that host's management (jwize, 2026-10-07: "host jwize.com is my manage
-  hosts list") — set it as your host, set up the key that may upload to it,
-  and choose what you share from it and change those preferences. The swarm
-  field is labelled **Your host** with the hint "the domain you serve from —
-  leave empty if you don't host".
+- **host** — the domains you *own*, changed through their host API.
+  Outbound. `host` alone lists your hosts; `host <domain>` opens that host's
+  management (jwize, 2026-10-07: "host jwize.com is my manage hosts list") —
+  deploy your latest build, set up the key that may upload to it, change its
+  settings, and choose what it shares. The swarm field is labelled **Your
+  host** with the hint "the domain you serve from — leave empty if you don't
+  host".
 
 ### Desktop and phone
 
