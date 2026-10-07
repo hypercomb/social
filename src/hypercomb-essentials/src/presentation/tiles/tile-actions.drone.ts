@@ -908,8 +908,8 @@ export class TileActionsDrone extends Drone {
     void swarm?.publishHide?.(updated)
 
     // Drop the lineage-keyed hide too — break-apart unhides across
-    // every layer the user is filtering on, including the persistent
-    // cross-zone hide for peer visuals.
+    // every layer the user is filtering on, including the cross-zone
+    // hide for peer visuals.
     removeHiddenLineage(this.#segments(), label)
 
     void new hypercomb().act()
@@ -997,8 +997,9 @@ export class TileActionsDrone extends Drone {
       )
       void swarm?.publishHide?.(existing)
 
-      // Lineage-keyed hide — additional persistent layer so a hide
-      // survives across zones and sessions. The path string is the
+      // Lineage-keyed hide — a second, zone-INDEPENDENT list so a hide
+      // holds across a zone/sig change within the session (session-only
+      // like every hide: session-hide.store.ts). The path string is the
       // user-visible identity of the tile (parent segments + name).
       // The swarm tile source filters against this list at render
       // time, so a peer publishing the same lineage anywhere later
@@ -1021,8 +1022,8 @@ export class TileActionsDrone extends Drone {
   }
 }
 
-/** Append `parentSegments.join('/') + '/' + name` to the persistent
- *  `hc:hidden-lineages` localStorage array. Cross-zone, cross-session
+/** Append `parentSegments.join('/') + '/' + name` to the session-only
+ *  `hc:hidden-lineages` list (session-hide.store.ts). Cross-zone
  *  hide for peer visuals (and own tiles too — same key). Idempotent on
  *  duplicates. The swarm tile source reads this list at render time. */
 function addHiddenLineage(parentSegments: readonly string[], name: string): void {
@@ -1044,8 +1045,8 @@ function addHiddenLineage(parentSegments: readonly string[], name: string): void
   }
 }
 
-/** Remove `parentSegments.join('/') + '/' + name` from the persistent
- *  `hc:hidden-lineages` localStorage array. Paired with break-apart so
+/** Remove `parentSegments.join('/') + '/' + name` from the session-only
+ *  `hc:hidden-lineages` list. Paired with break-apart so
  *  the cross-zone hide can be cleared by the same gesture that clears
  *  the name-keyed local hide. */
 function removeHiddenLineage(parentSegments: readonly string[], name: string): void {
