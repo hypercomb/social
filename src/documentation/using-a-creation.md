@@ -116,6 +116,53 @@ purpose is to have the mobile experience to be about your community."
   your Hyperdex. Its QR code and the links you share are the domain root
   (jwize's is `jwize.com`).
 
+### Your root, your entrances, and the community farm
+
+*jwize, 2026-10-07:* "we make the root page a lighter build and then the shares
+are available through our card or page … your entrance over your root, meaning
+let's just manage one for your mobile and one for your other devices. I say the
+aggregate pool is the other participants and nothing holds you back. The
+hosting is supposed to be shared within your community so we can take
+advantage by signature the information. A signature is a right to use the
+content, meaning someone published it publicly and shared the bytesig." And:
+"You can move the hosting role over to pluginthematrix.io/com … you can have
+the redundancy and start a little farm."
+
+- **Two entrances at your root, and you manage both.** One opens on phones:
+  the light build, your card and your Hyperdex. One opens on your other
+  devices, whatever you choose. There is no aggregate page at the root.
+- **What you share is reached through your card and your list:** people first,
+  then their offerings. The aggregate is the community pool, the other
+  participants, and nothing holds you back from it.
+- **A signature is a right to use.** Content that someone published publicly,
+  with its byte signature shared, may be used by anyone who holds that
+  signature. That is how hosting is shared within a community.
+- **Hosting is a farm, not a place.** The same bytes, held by signature on
+  several hosts, give redundancy. jwize's hosting role moves from the
+  `jwize.com` root to `pluginthematrix.com` and `pluginthematrix.io`, which
+  frees his root to be his entrance.
+
+### Powers are off by default, and the participant turns them on
+
+*jwize, 2026-10-07:* "This must be participant driven … You can't get
+dangerous stuff by default, so it needs to be off by default." And: "If someone
+has an update you should preview in their hive … turn it on from there and
+receive or be notified of updates if you follow them (ie. in your domains)."
+
+- **Off by default.** No page on any domain keeps visitors' data, uses the
+  camera, or reads other hosts until that domain's participant turns it on.
+  A host's list of voices never turns it on by itself.
+- **Turned on from your hive, for one version you previewed.** You preview a
+  card page in your own hive and turn it on there for your domains. Your
+  domains then serve that version with those powers, and no other.
+- **Updates are followed, never taken for you.** When the page you follow has
+  a newer version, your hive tells you. You preview it and turn it on, and only
+  then do your domains change. This is the held-item rule ("Holding a published
+  item" above) applied to the page your domain runs.
+- **Scents inform the choice.** The community's scents on a version
+  ([read-only-deployment.md](read-only-deployment.md), "Discovered security")
+  are what you read before turning it on. They never turn it on for you.
+
 ## On a phone, the root is people
 
 *jwize, 2026-10-07:* "this is a collaboration software so the first thing we
