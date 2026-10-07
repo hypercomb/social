@@ -189,7 +189,7 @@
     "hypercomb-essentials/src/sharing/swarm.drone.ts": 6,
     "hypercomb-essentials/src/sharing/use-live-relay.queen.ts": 3,
     "hypercomb-essentials/src/sharing/visit-genome.ts": 1,
-    "hypercomb-essentials/src/substrate/substrate.service.ts": 9,
+    "hypercomb-essentials/src/substrate/substrate.service.ts": 7,
     "hypercomb-essentials/src/widgets/widget-zoom.drone.ts": 1,
     "hypercomb-legacy/src/app/common/footer-controls/default-view/default-view.component.ts": 1,
     "hypercomb-legacy/src/app/helper/storage-manager.ts": 1,

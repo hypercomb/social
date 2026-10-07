@@ -559,6 +559,15 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // read-fallback. Per-participant, replaced whole: DOCUMENT.
   'substrate:registry',
   'substrate:sources',
+  // THE PICTURES TAKEN OUT OF THE ROTATION — the participant's own choice, one
+  // current document with every version kept (essentials/substrate). Moved out
+  // of localStorage `hc:substrate-hidden`, read once as a fallback.
+  'substrate:hidden',
+  // THE SIGNATURES THE SUBSTRATE ITSELF ASSIGNED — the ledger that tells a
+  // default picture (ours to replace) from an explicit one (never touched).
+  // Written by the software, so it keeps only the current document. Moved out
+  // of localStorage `hc:substrate-assigned`, read once as a fallback.
+  'substrate:assigned',
   // THE STATIC ANATOMY'S LINEAGE BAG — the protocol + doctrine text every
   // model outside the machine is sent first (documentation/anatomy-context-
   // need.md §2). 8-digit `{ layerSig, at }` markers, the history service's

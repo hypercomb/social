@@ -46,6 +46,7 @@ import {
 } from './folder-handles.js'
 import { readTilePropertiesAt, readTilePropsSigAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig, isParticipantImage, isSignature, seedLayerKeyedTileProps, primaryTileImageSig } from '../editor/tile-properties.js'
 import { renderTileSmall } from './tile-small-render.js'
+import { ParticipantDocument } from '../preferences/participant-document.js'
 import { readFraming } from '../editor/crop-math.js'
 
 const PROPS_FILE = '0000'                    // legacy per-hive dir props (read-fallback)
@@ -54,15 +55,19 @@ const INHERIT_KEY = 'substrate-inherit'      // per-hive barrier
 const REGISTRY_KEY = 'substrate-registry'    // LEGACY root-0000 property (read-fallback)
 const LEGACY_GLOBAL_KEY = 'substrate-global' // migrated into registry on load
 // The pictures taken out of the rotation. Participant-local like the colour
-// theme and the screen backdrop: localStorage, never a layer, never a peer's.
-const HIDDEN_KEY = 'hc:substrate-hidden'
-const readHiddenImages = (): Set<string> => {
-  try {
-    const raw = localStorage.getItem(HIDDEN_KEY)
-    const parsed: unknown = raw ? JSON.parse(raw) : []
-    return new Set(Array.isArray(parsed) ? parsed.filter((sig): sig is string => typeof sig === 'string') : [])
-  } catch { return new Set() }
-}
+// theme and the screen backdrop: a document in its own pool, never a layer,
+// never a peer's. The old `hc:substrate-hidden` key is read once, as a
+// fallback, by the document itself.
+export const SUBSTRATE_HIDDEN_MEANING = 'substrate:hidden'
+const sigList = (raw: unknown): string[] | null =>
+  Array.isArray(raw) ? raw.filter((sig): sig is string => typeof sig === 'string') : null
+let hiddenImagesDocument: ParticipantDocument<string[]> | null = null
+const hiddenImagesDoc = (): ParticipantDocument<string[]> => hiddenImagesDocument ??= new ParticipantDocument<string[]>({
+  meaning: SUBSTRATE_HIDDEN_MEANING,
+  legacyKey: 'hc:substrate-hidden',
+  empty: [],
+  parse: sigList,
+})
 const LEGACY_LS_GLOBAL = 'hc:substrate-global'
 
 // Pools-of-meaning storage. Addresses are DERIVED — sha256 of the UTF-8
@@ -182,18 +187,16 @@ const REDRESS_ARMED = `${SETS_VERSION}:pending`
 // to be touched). Participant-local; a picture's own bytes carry no such mark,
 // and the pool that supplied it is gone the moment the theme changes, so the
 // fact has to be written down when the assignment happens.
-const ASSIGNED_LS = 'hc:substrate-assigned'
-
-const readAssignedSigs = (): string[] => {
-  try {
-    const raw = JSON.parse(localStorage.getItem(ASSIGNED_LS) ?? '[]')
-    return Array.isArray(raw) ? raw.filter((s): s is string => typeof s === 'string') : []
-  } catch { return [] }
-}
-
-const writeAssignedSigs = (sigs: ReadonlySet<string>): void => {
-  try { localStorage.setItem(ASSIGNED_LS, JSON.stringify([...sigs])) } catch { /* storage unavailable */ }
-}
+// The software writes it, so it is not a save: only the current ledger is kept.
+export const SUBSTRATE_ASSIGNED_MEANING = 'substrate:assigned'
+let assignedDocument: ParticipantDocument<string[]> | null = null
+const assignedDoc = (): ParticipantDocument<string[]> => assignedDocument ??= new ParticipantDocument<string[]>({
+  meaning: SUBSTRATE_ASSIGNED_MEANING,
+  legacyKey: 'hc:substrate-assigned',
+  keep: 'current',
+  empty: [],
+  parse: sigList,
+})
 
 const BUILTIN_SETS: SubstrateSource[] = [
   // Nature FIRST: `resolve()` falls back to the first builtin, and that
@@ -333,12 +336,21 @@ export class SubstrateService extends EventTarget {
   // imageSig → friendly label (manifest filename / tile name / file name).
   // Rebuilt on every warm-up so the /backgrounds queen can name the pool.
   #imageNames: Map<string, string> = new Map()
-  // Session-only availability switches: imageSigs the participant toggled OFF
-  // this session via /backgrounds. NEVER persisted — not in the registry, the
-  // layer, or localStorage — so it resets to all-on on reload and peers never
-  // see it. The picker simply skips these images.
-  // Restored at construction: a picture you hid last week is still hidden.
-  #disabledImages: Set<string> = readHiddenImages()
+  // The imageSigs the participant toggled OFF via /backgrounds. The picker
+  // simply skips them. Kept in the participant's own `substrate:hidden`
+  // document — never the registry, a layer, or a peer — so a picture you hid
+  // last week is still hidden.
+  #disabledImages: Set<string> = new Set(hiddenImagesDoc().value)
+
+  constructor() {
+    super()
+    // A record that arrives from disk replaces what the first frame read.
+    hiddenImagesDoc().addEventListener('change', () => {
+      this.#disabledImages = new Set(hiddenImagesDoc().value)
+      EffectBus.emit('substrate:changed', { scope: 'hidden' })
+    })
+    assignedDoc().addEventListener('change', () => { this.#assigned = new Set(assignedDoc().value) })
+  }
 
   // ───────────────────────── registry ─────────────────────────
 
@@ -1548,7 +1560,7 @@ export class SubstrateService extends EventTarget {
   // Losing the ledger (cleared storage, a new browser) is safe in the only
   // direction that matters: forgotten defaults are treated as explicit and
   // survive. It never grows the set of things force may destroy.
-  #assigned = new Set<string>(readAssignedSigs())
+  #assigned = new Set<string>(assignedDoc().value)
 
   /** Every signature the substrate has ever assigned, plus the current pool —
    *  a picture in the live pool is a default even if it predates the ledger. */
@@ -1562,7 +1574,7 @@ export class SubstrateService extends EventTarget {
   #recordAssigned(sig: string): void {
     if (!sig || this.#assigned.has(sig)) return
     this.#assigned.add(sig)
-    writeAssignedSigs(this.#assigned)
+    assignedDoc().write([...this.#assigned])
   }
 
   /** Pin ONE image from the pool: every pick returns it, so a wall of tiles
@@ -1930,10 +1942,7 @@ export class SubstrateService extends EventTarget {
   hiddenImages(): readonly string[] { return [...this.#disabledImages] }
 
   #persistHidden(): void {
-    try {
-      if (this.#disabledImages.size === 0) localStorage.removeItem(HIDDEN_KEY)
-      else localStorage.setItem(HIDDEN_KEY, JSON.stringify([...this.#disabledImages]))
-    } catch { /* private mode */ }
+    hiddenImagesDoc().write([...this.#disabledImages])
   }
 
   /** Reroll the visible tiles currently showing an image that's now toggled
