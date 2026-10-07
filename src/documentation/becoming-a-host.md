@@ -175,8 +175,18 @@ settings, what you share. On a phone, "your hosts" means the domains you
 (jwize, 2026-10-07): your phone, your desktop and any host you run recognise
 each other through a common key — your participant key — and the follow list
 and host settings are records that key signs, so every place holding it reads
-the same ones. How a new device is given that key, and how a host accepts it
-for uploads, is the part to design next.
+the same ones.
+
+**Public keys are enough** (jwize, 2026-10-07: "I suppose a public key would
+be sufficient"). Recognising a record as yours, and a host deciding whose
+uploads it accepts, both need only your public key — a signature checks
+against it, and a host's allow-list holds public keys, never private ones.
+Writing needs signing, so each device holds a private key — its own, made on
+that device. Your public keys are tied together by one short record listing
+them, signed by a key already on it; a host that trusts one of your keys
+accepts the others. No private key ever travels between your devices or to a
+host, and a lost phone is one public key taken off the record, not a new
+identity.
 
 Open question: the `hosts` word exists today for the followed list
 (`hosts.queen.ts`). With `follow` as the word, `hosts` either stays as a
