@@ -12,24 +12,50 @@
 something on it even if you update it it shouldn't affect other people who are
 using a particular version. At most maybe a notification for a new version."
 
-A creation has two halves, and they are treated differently:
+### Holding a published item: the head you took, and the update you're offered
 
-- **What you read is live.** A card you follow, a page you visit, a friend's
-  offering: opening it reads its head, so you always see what its owner
-  publishes now. That is the point of holding an address.
-- **What you run is chosen.** The application your own data lives in — the
-  page, the bees, the template — changes only when you accept a new version.
-  A newer one is a notice, never a swap under you. Content-addressing makes
-  this cheap: a version is a signature, the old bytes are never deleted, so the
-  version you use keeps working for as long as you choose it.
+*jwize, 2026-10-07:* "if there is no root you should get the latest head but if
+you already have a head in a published item you should get an update notifier
+that you can leave alone the same way you normally do your local. You should be
+able to skip and leave the entry as the next entry in the list (ie. the current
+is at the top). Then you either upgrade or skip; you can delete items if they
+are inactive if you like but they don't delete source signature files."
+
+The same rule holds for everything you take from someone's published site: a
+card in your Hyperdex, a creation you adopted, the application you run, a
+package you follow.
+
+- **The first read takes the head.** If you hold nothing of an item yet,
+  opening it takes its current head, and that becomes the version you hold.
+- **Once you hold a head, a newer one is an update notice.** Nothing changes
+  under you. You can leave the notice alone, the same way your own hive's
+  update notice waits.
+- **Upgrade or skip.** Each item keeps a list of its versions, with the current
+  one at the top. Upgrading makes the newer head current. Skipping leaves it as
+  the next entry under the current one, still there to take later.
+- **Versions turn on and off.** One is on, the current one. The others are
+  history items.
+- **Deleting is a local forget.** You can delete an inactive version from the
+  list. The entry goes, but the signature files it pointed to stay, and they
+  remain valid everywhere else.
+- **Outsiders read only the head.** From outside, a host shows an item's head
+  and what that head holds. Your history of an item is the heads you took or
+  were offered, kept on your side.
+
+Content-addressing makes this cheap: a version is a signature, and the bytes
+are never deleted, so the version you hold keeps working for as long as you
+choose it. A package, an adopted creation or a card you hold all follow this
+rule. The page you are on and the hive itself do too.
 
 The hive already keeps this promise for its own code: it boots from what is
 installed, and a new package is "one check per boot, no push channel … the
 consumer asks; the icon is the answer; the human decides"
 (`sharing/update-scout.service.ts`). An adopted peer's creation keeps the head
-you accepted until you take a newer one. The gap is the third place below:
-someone using a creation on another person's domain gets whatever that person
-published last.
+you accepted until you take a newer one. There are two gaps:
+- **The third place below:** someone using a creation on another person's
+  domain gets whatever that person published last.
+- **The card page's Hyperdex:** it keeps a copy of each card, not its address
+  and the head you took.
 
 ## Three places to use a creation
 
@@ -110,6 +136,7 @@ mode, or Single App Mode on a supervised iPhone).
 |---|---|
 | The hive's own code changes only when you accept (notice, never a swap) | built |
 | An adopted peer's creation stays at the head you accepted | built |
+| A held item keeps the head you took: a newer head is an update notice; upgrade or skip; the item's versions in a list with the current one on top; deleting an inactive version is a local forget | built for the hive's own packages and adopted creations. Not built in the card page, whose Hyperdex keeps a copy of each card rather than its address and head |
 | A creation used on someone else's domain stays at the version you use | not built. The page would record the signature it runs, keep serving it, and show a notice when the domain publishes a newer one; the visitor shell would need to open a creation by signature |
 | The list as the phone's root, people first, the default at the top, "create your own" at the bottom | built in the card page |
 | Making yourself the default on someone's domain | built in the card page ("Open this site with") |
