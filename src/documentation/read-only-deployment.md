@@ -41,7 +41,7 @@ There are distinct trust decisions:
 |---|---|---|
 | View public signed content | Resolve and render immutable public bytes | Allowed in the read-only profile |
 | Run or adopt application code in `hypercomb.io` | Execute that publisher's beehaviors in the personal hive | Explicit adoption and code consent |
-| Use a provider domain for an account or storage | Let that normal web origin hold consumer data and mediate its services | Only after the consumer trusts that domain |
+| Use a provider domain for an account or storage | Let that normal web origin hold consumer data and mediate its services | Only by an allowance: a community standard's, or the consumer's own override after a review (below) |
 | Copy personal hive data to a provider | Send specifically selected signed content out of the personal hive | Explicit, scoped consumer action |
 
 The current `pluginthematrix.com` website profile implements only the first
@@ -52,6 +52,40 @@ as a provider. It never follows merely from the fact that both sides run Core.
 Browser-origin separation keeps that provider relationship tight and natural:
 the consumer's state at one provider does not silently become another
 provider's state or the contents of their personal `hypercomb.io` hive.
+
+### Trust is an allowance, never a tap
+
+*jwize, 2026-10-07*, asked how a card door should let someone without a host
+keep their cards and use the camera: "Trust is only based on some
+predetermined allowances based on community standards and or your overridden
+things. However, overriding should always be preceded by some form of review
+either by humans or AI agents but [more] reviews the better."
+
+And: "you can allow certain fields like text and others but if it is code
+then it needs to be community verified. One breach can be total breach."
+
+**Data and code are allowed differently.**
+- **Data can be allowed by field.** Text and other plain fields, such as what
+  a card holds or a held address, are values that never run. A community
+  standard can allow them, and so can the participant's own choice.
+- **Code needs community verification.** Anything that runs needs it before it
+  is allowed anything more than showing signed content: a page, a bee, a
+  template's script, a slot's filler script. That includes keeping storage in
+  its origin or using the camera, because the code holds those powers.
+  Verification is the same review a module change gets before it is adopted:
+  the reader's own AI audit, Jev's reading, the host AI and public
+  assessments. More reviews are better. One breach can be a total breach, so
+  no single person's say-so is enough for code.
+
+What a door may do comes from one of two places:
+- **A community standard's allowance**, decided in advance for that kind of
+  creation. For example: a card door whose page the community has verified
+  may keep the visitor's cards in its origin and use the camera to scan.
+- **The participant's own override.** An override always comes after a
+  review, by people or AI agents, and for code that review is community
+  verification.
+
+There is no "trust this site" button. A single tap is not a review.
 
 ## The hosting model (settled 2026-08-28)
 
