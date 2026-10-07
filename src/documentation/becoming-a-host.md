@@ -196,13 +196,25 @@ host, and a lost phone is one public key taken off the record, not a new
 identity.
 
 **A share hash names the group** (jwize, 2026-10-07: "or a computed share
-hash of some sort"). The signature of your sorted public keys is one address
-for "you, across your devices" — a group signature — so your follow list and
-host settings can live in a pool named by it, and every device and host
-computes the same name from the same keys. It names; it does not admit:
-anyone who knows your public keys can compute it, so a write is accepted
-only when one of the listed keys signed it. And never a hash of a secret (a
-passphrase): that is a password, and whoever learns it is you.
+hash of some sort"). It is one address for "you, across your devices" — a
+group signature — so your follow list and host settings can live in a pool
+named by it, and every device and host computes the same name. It names; it
+does not admit: anyone who knows your public keys can compute it, so a write
+is accepted only when one of the listed keys signed it. And never a hash of
+a secret (a passphrase): that is a password, and whoever learns it is you.
+
+**Keys are recycled** (jwize, 2026-10-07: "recycling is also essential").
+So the address cannot be the hash of the keys you hold *now* — rotating one
+would move it and strand everything filed under it. The share hash is the
+signature of your **first** key list, and never changes. Each later list is
+a signed successor, made by a key on the list before it — a lineage, read
+like history markers: the latest is current, none is ever deleted. Recycling
+a key is one new list: the new key in, the old one out. Hosts and devices
+follow the lineage to its head. The recycled secret is destroyed on its
+device; its public key stays in the lineage, so what it signed before still
+checks, and it signs nothing new. Host API credentials recycle locally the
+same way — a new token on the desktop, the old one revoked at the provider —
+and nothing shared changes.
 
 Open question: the `hosts` word exists today for the followed list
 (`hosts.queen.ts`). With `follow` as the word, `hosts` either stays as a
