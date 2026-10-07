@@ -149,15 +149,21 @@ themselves; updates from it reach them only once they turn updates on for it
 
 One word for the act, kept for the act:
 
-- **hosts** — the domains you *follow*: what you read from. Inbound. Hosts
-  you follow change only your own install, and only when you turn updates on.
+Two words, one each way (jwize, 2026-10-07: "we say follow though"):
+
+- **follow** — the domains you read from. Inbound. `follow` alone shows
+  who you follow; `follow someonesdomain.com` adds one. Following changes only
+  your own install, and an update from someone you follow is taken only when
+  you turn updates on for them.
 - **host** — the domains you *serve*: your own, someone else's, or several.
   Outbound. `host` alone shows what you serve; `host someonesdomain.com`
   serves that domain once its owner points it at you. The swarm field is
   labelled **Your host** with the hint "the domain you serve from — leave
   empty if you don't host".
-- **follow** — add a host to your list.
-- **updates** — taken from a host you follow, only when you turn them on.
+
+Open question: the `hosts` word exists today for the followed list
+(`hosts.queen.ts`). With `follow` as the word, `hosts` either stays as a
+second spelling or retires (a retired word still answers, saying the new one).
 
 "Self-domain", "zone", "door" and "content. face" stay internal and leave the
 participant-facing text.
