@@ -85,6 +85,24 @@ people … mine just happens to be a business card … we can give templates."
   a friend's project beside their card.
 - Mobile is for using creations; the hive at hypercomb.io is where they are
   made. The phone app is the published page; there is no separate native app.
+- **Pulling up to the list is the phone's way back**, from any front page
+  (*jwize, 2026-10-07:* "bake the scroll up to community list as the default
+  mobile behavior"). The list is where other front pages and ways in are
+  offered, never a menu laid over a creation.
+- **The phone gesture opens a front page full screen.**
+
+### Keeping a phone on one creation
+
+A phone can be held to the one page without anything built here. The phone
+does it itself, and the menu names vary by maker:
+- **Android:** turn on App pinning (in Security settings), open the page, then
+  pin it from the recent apps screen.
+- **iPhone:** turn on Guided Access (in Accessibility settings), open the page,
+  then triple-click the side button.
+
+A device that should never leave the page, such as a kiosk on a counter, is
+set up as a dedicated device by whoever manages it (Android's device owner
+mode, or Single App Mode on a supervised iPhone).
 
 ## Ledger — what is true today
 
@@ -99,3 +117,6 @@ people … mine just happens to be a business card … we can give templates."
 | Bringing a silo into your own hive by replication | not built |
 | Offerings of a followed domain in your list | not built |
 | A front page other than a card for a person in the list | not built: every row opens a card today |
+| Pulling up from a front page to the list | built in the card page |
+| Other front pages and ways in, offered from the list | not built |
+| Editing your own front page in place, nothing kept until you accept | built in the card page ([business-card.md](business-card.md), "Editing a card in place") |

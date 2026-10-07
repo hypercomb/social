@@ -272,9 +272,9 @@ hive root with a leading `/`. Both writes are ordinary commits, so they undo
 like any other. Change it in your hive first; visitors see it after the next
 publish.
 
-In the silo (a card kept on your device at someone else's domain) the card
-editor's theme picker does the same, and the card's link carries the theme's
-name.
+In the silo (a card kept on your device at someone else's domain), the
+template's name on the card's editing bar does the same: ‹ and › step through
+the templates. The card's link carries the theme's name.
 
 ### The middle picture by AI
 
@@ -299,13 +299,59 @@ the default card at the top, then your own cards and the site's card, then
 everyone in your Hyperdex, then "Create your own card" until you have one.
 Each row is the card made small, its name and title. Pulling up from the
 bottom of a card shrinks it into its row; past halfway it finishes on its own.
-Tapping a row grows it back into the card. A dock along the bottom scans,
-shows your code, shares, searches and opens your own card. Turning the card
-over is one swipe, never a spin past the side you meant.
+Tapping a row grows it back into the card. The search sits at the top of the
+list and is always there. Each of your own rows ends with an edit button. A
+dock along the bottom scans, shows your code, shares and edits your own card.
+Turning the card over is one swipe, never a spin past the side you meant.
 
 Someone using another person's card site can make their own card the default
 there, and carry their cards and Hyperdex to another address in a file until
 they have a host of their own.
+
+### Editing a card in place
+
+*jwize, 2026-10-07:* "edit the card elements in place … it has to be mobile
+friendly dragging and selecting things … the edit screen goes away but we make
+everything possible in-line on the card."
+
+There is no edit screen. Editing holds the card flat, face up and still, and
+the card is its own editor:
+
+- **Tap a line** to select its block: the name, the roles, or the ways to reach
+  you. Tap it again to type straight onto the card. The card redraws the line
+  as you type.
+- **Drag** a block to move it. **A−** and **A+** size it, and the align button
+  steps through left, centre and right. The glass behind the type follows the
+  type wherever it goes.
+- **A template's default elements** that the card does not have yet are drawn
+  faint where they belong. Tap one and type it. Left empty, it stays faint and
+  nobody else ever sees it: a card shows only what its owner filled in. The
+  business card's default elements are a title, what you make, a role, a
+  company, a website and an email. A phone number and more links come from the
+  ⋯ menu.
+- **The bar** along the bottom changes the template (‹ name ›), records the
+  card's mark, makes the card the first one on this site (☆), and holds the
+  rest under ⋯: a phone, a link, shake, the site's card as a start, the card's
+  address, saving and bringing cards in a file, and delete.
+- **Back** and **Done** sit in the top corners.
+
+#### The ring: nothing is lost until you accept
+
+*jwize, 2026-10-07:* "remember the current state so the clipboard ring
+remembers your last version as well as each template. That way you don't
+accidentally lose anything until you accept a new template."
+
+While you edit a card, the ring holds:
+- the card as it was;
+- the version you are making;
+- your version under every template you try.
+
+Your words follow you from template to template. Where the type sits and how
+big it is belong to each template, so going back to a template finds it the
+way you left it. The ring is saved as you go: close the page mid-edit and the
+next edit picks up where you stopped. Done keeps the version on screen and
+empties the ring. Back empties it and keeps nothing, and the card returns to
+exactly how it was.
 
 ## Why this is the founding creation
 
@@ -333,12 +379,14 @@ useful on day one, so it is the creation the concept is explained with:
 | QR of the card's address on the back; scanning adds to the Hyperdex; Hyperdex kept on the device | built, in the page |
 | The phone gesture (Quick Tap, shake) opening the card; a scribble choosing between cards | built for the local development build; the published site cannot yet be installed as an app |
 | One shared page plus each tile's own card | built. The page carries no card; it reads the `card:data` record on its tile through the hive's own services (and `card.json` beside it when it runs on its own). The cube is the card's own `logo`, so it appears only on cards that name it. The three.js dependency and the animation are still inside the shared page, owed as separate signed parts. |
-| Themes | built in the page: Honeycomb Edge, Graphite, Graphite Red and Emerald; a theme from the tile (`themeSig`) or named by the card (`h`); the editor's picker; the page chrome follows the card's theme. `jaime-weise` still wears the page from before themes, by choice |
+| Themes | built in the page: Honeycomb Edge, Graphite, Graphite Red and Emerald; a theme from the tile (`themeSig`) or named by the card (`h`); ‹ and › on the editing bar; the page chrome follows the card's theme. `jaime-weise` still wears the page from before themes, by choice |
 | The middle picture | built in the page (`artSig`). Making it is `/comfy` today; the hive's AI cannot start a picture on its own yet (`comfy:generate` is not a bridge intent) |
 | `jaime-weise/business-card/template` and its theme tiles | built in the hive. The template wears the themed page and a card of name slots; each starter theme is a tile under it wearing the same page and naming its theme. `jaime-weise` keeps its own page and card and wears `view:default=website`; `business-card` wears `hexagons` |
 | `templates:<business-card>` facet and `template` membership | membership in `template` is by name, today. The facet needs a writer in the hive (`facet-succession.ts` exists; no word or bridge op writes this facet) |
 | Templates indexed across public domains (`themes:card`) | not built. It needs the meaning reserved in the pool registry, an offering handler, and the host worker to list it (today it lists `themes:text` only) |
-| The list as the root on a phone; pull a card down into its row, tap a row to grow it; the dock | built in the card page |
+| The list as the root on a phone; pull a card up into its row, tap a row to grow it; the search always at the top; the dock | built in the card page |
+| Editing a card in place: select, type, drag, size, align and change the template on the card; default elements drawn faint; the ring until Done | built in the card page. The ring lives in the browser at that address, not yet in the hive's clipboard pool |
+| Each template naming its own default elements | not built. Every template offers the business card's |
 | Making yourself the default on someone's card site; carrying cards and Hyperdex in a file | built in the card page |
 | Staying on the page version you use when the site publishes a newer one | not built ([using-a-creation.md](using-a-creation.md)) |
 | Gestures and choosers as drone modules | design — the page carries a registry; nothing is a bee yet |
