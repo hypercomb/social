@@ -89,8 +89,9 @@ There is no "trust this site" button. A single tap is not a review.
 
 **A separate address is not trust in its host.** *jwize:* "You can use
 subdomains and hosted friends but you are still at risk if they deploy a
-backdoor." A subdomain on a friend's host keeps your data apart from other
-sites, but not from that host. Whoever runs the host decides what code the
+backdoor." And: "or any domain but the same is true." Any address you
+use but do not run, whether a friend's subdomain, a community host or any
+other domain, keeps your data apart from other sites, but not from its host. Whoever runs the host decides what code the
 address serves, and can change it at any deploy: the shell, the worker, the
 page. Verifying a signed version tells you what that version does. It cannot
 stop a host from serving something else in its place. So data kept at an
