@@ -147,5 +147,6 @@ mode, or Single App Mode on a supervised iPhone).
 | Offerings of a followed domain in your list | not built |
 | A front page other than a card for a person in the list | not built: every row opens a card today |
 | Pulling up from a front page to the list | built in the card page |
+| A How-to the first time you reach the Hyperdex (jwize: "mobile is all about connecting people with our creations"): a menu down the middle, each section a popup you read and close, the three ways to set up with pros and cons | built in the card page. It opens by itself only where the page can remember it showed it once (not on a published door); a "How it works" row at the end of the list opens it again |
 | Other front pages and ways in, offered from the list | not built |
 | Editing your own front page in place, nothing kept until you accept | built in the card page ([business-card.md](business-card.md), "Editing a card in place") |
