@@ -333,8 +333,8 @@ the card is its own editor:
   ⋯ menu.
 - **The bar** along the bottom changes the template (‹ name ›), records the
   card's mark, makes the card the first one on this site (☆), and holds the
-  rest under ⋯: the card's options, a phone, a link, shake, the site's card as
-  a start, the card's address, saving and bringing cards in a file, and delete.
+  rest under ⋯: the card's options, a phone, a link, the card's address, saving
+  and bringing cards in a file, and delete. Shake is one of the defaults.
 - **Card options** shrinks the card into its own row in the list, open on its
   options, while the edit waits in the ring (*jwize:* "make the options for the
   card somehow available and when you come back you are back to the card
@@ -381,8 +381,8 @@ needed", and "don't make them up yet if you don't know".
   the way a card collapses into its row. While manage is on, a tap opens any
   row instead of its card. The toggle and the list take the theme's second
   accent (red, not gold), so the mode is never mistaken for the ordinary list.
-  It stays on until the toggle is turned off. Holding the search does the same
-  as the toggle.
+  It stays on until the toggle is turned off. The toggle is the only way in:
+  the search keeps its own long-press (paste).
 - **The defaults are toggles**: one tap moves a default to its next state, with
   no second level (*jwize:* "just click to change the state instantly"). There
   are two defaults, the only settings that exist: the card entrance, and shake
