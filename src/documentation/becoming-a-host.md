@@ -216,6 +216,18 @@ checks, and it signs nothing new. Host API credentials recycle locally the
 same way — a new token on the desktop, the old one revoked at the provider —
 and nothing shared changes.
 
+**A host can destroy an old key at any time** (jwize, 2026-10-07: "any time
+on the server there should be a way to destroy the old one"). Every host
+answers a revocation, whenever it comes: a signed instruction from a key
+still current in your lineage that names the old key. From that moment the
+host refuses anything the old key signs, and it drops the old key from
+whatever it keeps — its writers list, any session or token tied to it. It
+needs no operator, no restart and no redeploy, and it is the same act on
+every kind of host (the desktop app, a Pages deployment, a server). The
+revocation is itself kept, so a host that was offline catches up when it
+next reads your lineage. Today this is missing: a relay's writers come from
+its `--writers` start-up flag, which only its operator can change.
+
 Open question: the `hosts` word exists today for the followed list
 (`hosts.queen.ts`). With `follow` as the word, `hosts` either stays as a
 second spelling or retires (a retired word still answers, saying the new one).
@@ -242,6 +254,9 @@ hosting, and this path is hosting. Decide before building step 1.
 - **Writes without an operator's allow-list,** or a stated reason why a
   newcomer's host does not need relay writes at all (a static host publishes
   bytes over HTTP and needs none).
+- **Revocation on every host** — a signed "destroy this key" a host honours
+  at any time, without its operator; and the key lineage (first list,
+  signed successors) that says which keys are current.
 
 ## Decisions this depends on
 
