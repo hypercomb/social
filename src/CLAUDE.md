@@ -225,7 +225,7 @@ Do NOT reintroduce derived-cache writes into the commit path (`commitLayer` mint
 
 ### Doctrine ratchets (`src/doctrine.spec.ts`)
 
-Mechanical anti-drift guards run with the vitest suite. Each compares files matching a forbidden pattern (direct `synchronize` dispatch, hardcoded 64-hex signatures, bare `'__x__'` typed-folder literals, out-of-place children-manifest writers) against a frozen allowlist. **Never extend an allowlist** — fix the code instead. When you pay down a listed debt, remove its entry so the ratchet clicks tight.
+Mechanical anti-drift guards run with the vitest suite. Each compares files matching a forbidden pattern (direct `synchronize` dispatch, hardcoded 64-hex signatures, bare `'__x__'` typed-folder literals, out-of-place children-manifest writers) against a frozen allowlist. **Never extend an allowlist** — fix the code instead. When you pay down a listed debt, remove its entry so the ratchet clicks tight. Raw storage writes (`removeEntry(`, `createWritable(`, `localStorage.setItem(`) are frozen PER FILE as counts in `src/doctrine.storage-writes.json`: never raise a count; durable state goes through the store (a layer commit, `putResource`, `putPoolDoc`).
 
 ### Drones
 Self-contained modules. Lifecycle: Created → Registered → Active → Disposed.
