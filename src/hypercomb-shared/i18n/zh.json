@@ -349,7 +349,6 @@
   "explorer.toggle-raw": "切换原始视图",
   "explorer.name-placeholder": "名称",
   "explorer.add-folder": "添加文件夹",
-  "explorer.add-file": "添加文件",
   "explorer.add-dependency": "添加依赖",
   "explorer.col-name": "名称",
   "explorer.col-actions": "操作",

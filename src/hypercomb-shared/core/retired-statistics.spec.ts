@@ -56,12 +56,18 @@ beforeEach(async () => {
   versions(await pool('habits:spoken'))
   for (const key of RETIRED_STATISTIC_KEYS) localStorage.setItem(key, '1')
   localStorage.setItem('hc:home-portal', 'kept')
+  localStorage.setItem('hc:history-cursor:' + 'a'.repeat(64), '3')
+  localStorage.setItem('hc:history-cursor:' + 'b'.repeat(64), '7')
+  localStorage.setItem('hc:history-group-step', '1')   // a live preference: never touched
 })
 
 describe('the retired statistics', () => {
   it('removes every key, the usage pool, and the walking trail — never the home mark', async () => {
     expect(await retireStatistics(store())).toBe(true)
     for (const key of RETIRED_STATISTIC_KEYS) expect(localStorage.getItem(key)).toBeNull()
+    expect(localStorage.getItem('hc:history-cursor:' + 'a'.repeat(64))).toBeNull()
+    expect(localStorage.getItem('hc:history-cursor:' + 'b'.repeat(64))).toBeNull()
+    expect(localStorage.getItem('hc:history-group-step')).toBe('1')
     expect(localStorage.getItem('hc:home-portal')).toBe('kept')
     expect(root.entriesMap.has(await sig('usage:dwell'))).toBe(false)
     expect(root.entriesMap.has(await sig('habits:spoken'))).toBe(false)

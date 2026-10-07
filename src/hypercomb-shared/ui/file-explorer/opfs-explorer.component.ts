@@ -459,27 +459,6 @@ export class OpfsExplorerComponent extends hypercomb {
     void this.runProcessor()
   }
 
-  public createFile = async (): Promise<void> => {
-    const raw = this.newName.trim()
-    if (!raw) return
-
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
-
-    const installName = raw.endsWith(OpfsExplorerComponent.INSTALL_SUFFIX) ? raw : `${raw}${OpfsExplorerComponent.INSTALL_SUFFIX}`
-    const handle = await dir.getFileHandle(installName, { create: true })
-    const writable = await handle.createWritable()
-
-    try {
-      await writable.write('')
-    } finally {
-      await writable.close()
-    }
-
-    this.newName = ''
-    void this.runProcessor()
-  }
-
   public addDependency = async (): Promise<void> => {
     const sig = this.newName.trim()
     if (!sig) return

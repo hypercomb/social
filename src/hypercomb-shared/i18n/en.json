@@ -339,7 +339,6 @@
   "explorer.toggle-raw": "toggle raw view",
   "explorer.name-placeholder": "name",
   "explorer.add-folder": "add folder",
-  "explorer.add-file": "add file",
   "explorer.add-dependency": "add dependency",
   "explorer.col-name": "name",
   "explorer.col-actions": "actions",

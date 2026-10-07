@@ -349,7 +349,6 @@
   "explorer.toggle-raw": "переключить необработанный вид",
   "explorer.name-placeholder": "имя",
   "explorer.add-folder": "добавить папку",
-  "explorer.add-file": "добавить файл",
   "explorer.add-dependency": "добавить зависимость",
   "explorer.col-name": "имя",
   "explorer.col-actions": "действия",

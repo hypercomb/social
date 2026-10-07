@@ -349,7 +349,6 @@
   "explorer.toggle-raw": "basculer la vue brute",
   "explorer.name-placeholder": "nom",
   "explorer.add-folder": "ajouter un dossier",
-  "explorer.add-file": "ajouter un fichier",
   "explorer.add-dependency": "ajouter une dépendance",
   "explorer.col-name": "nom",
   "explorer.col-actions": "actions",

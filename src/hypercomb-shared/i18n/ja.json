@@ -353,7 +353,6 @@
   "explorer.toggle-raw": "Raw表示切替",
   "explorer.name-placeholder": "名前",
   "explorer.add-folder": "フォルダを追加",
-  "explorer.add-file": "ファイルを追加",
   "explorer.add-dependency": "依存関係を追加",
   "explorer.col-name": "名前",
   "explorer.col-actions": "操作",
