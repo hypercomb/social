@@ -7,7 +7,18 @@
 #
 # Run only after relay.js in this checkout knows the flag (documentation/
 # swarm-host.md): an older relay ignores it and keeps participants closed.
-$log = 'C:\Projects\hypercomb\social\src\hypercomb-relay\allow-participants-result.txt'
+
+# Not elevated? Ask Windows (UAC) and reopen in an admin window that stays
+# open, so the result is visible. A plain prompt can read the service but not
+# change it — every step below would be refused.
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $admin) {
+  'Not elevated: asking Windows for administrator rights (approve the UAC prompt)...'
+  Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', "`"$PSCommandPath`""
+  exit 0
+}
+
+$log ='C:\Projects\hypercomb\social\src\hypercomb-relay\allow-participants-result.txt'
 Start-Transcript -Path $log -Force | Out-Null
 
 $relayJs = 'C:\Projects\hypercomb\social\src\hypercomb-relay\relay.js'
