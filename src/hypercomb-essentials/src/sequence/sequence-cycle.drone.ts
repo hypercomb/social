@@ -29,7 +29,7 @@
 // by SequenceService (content-addressed, shareable, bound per-location via
 // the cascading `sequence:target` decoration).
 //
-// The active position in the cycle is participant-local (localStorage,
+// The active position in the cycle is participant-local (its own document,
 // keyed by location) — it is a view preference, like the viewport, not
 // shared content. The arrangement itself IS committed: the reorder goes
 // through `writeTilePropertiesAt({ index })` per tile exactly like a drag,
@@ -59,6 +59,7 @@ import {
 } from './sequence-target.js'
 import { FrameService } from './frame.service.js'
 import { SequenceService } from './sequence.service.js'
+import { ParticipantDocument } from '../preferences/participant-document.js'
 
 type CellCountPayload = {
   count: number
@@ -80,8 +81,23 @@ type SequenceServiceLike = {
 type StoreLike = { putResource(blob: Blob): Promise<string> }
 type I18nLike = { t: (k: string, p?: Record<string, string | number>) => string }
 
-const ACTIVE_KEY = 'hc:arrange-active'
-const RING_KEY = 'hc:arrange-ring'
+// Both records are working state the cycle keeps for itself, not saves:
+// documents of their own, only the current one kept. The old browser keys
+// are read once, as a fallback, by the documents.
+export const ARRANGE_ACTIVE_MEANING = 'arrange:active'
+export const ARRANGE_RING_MEANING = 'arrange:ring'
+const byLocation = <T,>(raw: unknown): Record<string, T> | null =>
+  raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, T> : null
+let activeDocument: ParticipantDocument<Record<string, number>> | null = null
+const activeDoc = (): ParticipantDocument<Record<string, number>> => activeDocument ??= new ParticipantDocument<Record<string, number>>({
+  meaning: ARRANGE_ACTIVE_MEANING, legacyKey: 'hc:arrange-active', keep: 'current', empty: {}, parse: byLocation,
+})
+let ringDocument: ParticipantDocument<Record<string, Record<string, number>[]>> | null = null
+const ringDoc = (): ParticipantDocument<Record<string, Record<string, number>[]>> => ringDocument ??= new ParticipantDocument<Record<string, Record<string, number>[]>>({
+  meaning: ARRANGE_RING_MEANING, legacyKey: 'hc:arrange-ring', keep: 'current', empty: {}, parse: byLocation,
+})
+/** Test seam: forget both records so the next read starts from the store. */
+export const _resetArrangeRecords = (): void => { activeDocument = null; ringDocument = null }
 const RING_ID_PREFIX = 'ring:'
 /** Earlier layouts kept per location. */
 const RING_SIZE = 8
@@ -504,23 +520,12 @@ export class SequenceCycleDrone extends Drone {
   // ── active pointer (participant-local, per location) ────────────────
 
   #readActive = (locationKey: string): number => {
-    try {
-      const map = JSON.parse(localStorage.getItem(ACTIVE_KEY) ?? '{}') as Record<string, number>
-      const n = map?.[locationKey]
-      return Number.isFinite(n) ? n : -1
-    } catch {
-      return -1
-    }
+    const n = activeDoc().value[locationKey]
+    return Number.isFinite(n) ? n : -1
   }
 
   #writeActive = (locationKey: string, idx: number): void => {
-    try {
-      const map = JSON.parse(localStorage.getItem(ACTIVE_KEY) ?? '{}') as Record<string, number>
-      map[locationKey] = idx
-      localStorage.setItem(ACTIVE_KEY, JSON.stringify(map))
-    } catch {
-      /* ignore quota / disabled storage */
-    }
+    activeDoc().write({ ...activeDoc().value, [locationKey]: idx })
   }
 
   // ── layout ring (participant-local, per location) ───────────────────
@@ -545,23 +550,12 @@ export class SequenceCycleDrone extends Drone {
   }
 
   #readRing = (locationKey: string): Placement[] => {
-    try {
-      const all = JSON.parse(localStorage.getItem(RING_KEY) ?? '{}') as Record<string, Record<string, number>[]>
-      const ring = all?.[locationKey]
-      return Array.isArray(ring) ? ring.map((saved) => new Map(Object.entries(saved))) : []
-    } catch {
-      return []
-    }
+    const ring = ringDoc().value[locationKey]
+    return Array.isArray(ring) ? ring.map((saved) => new Map(Object.entries(saved))) : []
   }
 
   #writeRing = (locationKey: string, ring: readonly Placement[]): void => {
-    try {
-      const all = JSON.parse(localStorage.getItem(RING_KEY) ?? '{}') as Record<string, Record<string, number>[]>
-      all[locationKey] = ring.map((saved) => Object.fromEntries(saved))
-      localStorage.setItem(RING_KEY, JSON.stringify(all))
-    } catch {
-      /* ignore quota / disabled storage */
-    }
+    ringDoc().write({ ...ringDoc().value, [locationKey]: ring.map((saved) => Object.fromEntries(saved)) })
   }
 
   // ── feedback ────────────────────────────────────────────────────────

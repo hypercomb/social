@@ -568,6 +568,16 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Written by the software, so it keeps only the current document. Moved out
   // of localStorage `hc:substrate-assigned`, read once as a fallback.
   'substrate:assigned',
+  // THE ARRANGE CYCLE'S WORKING STATE — per location, the active position in
+  // the cycle and the ring of earlier layouts it keeps to cycle back to
+  // (essentials/sequence). Written by the software: only the current document
+  // is kept. Moved out of localStorage `hc:arrange-active` / `hc:arrange-ring`.
+  'arrange:active',
+  'arrange:ring',
+  // THE CIGAR CATALOG INDEX — cigar key -> the signature of its record, the
+  // participant's own (essentials/revolucionstyle.com). Each cigar added is a
+  // save, so every version is kept. Moved out of `hc:cigar-catalog-index`.
+  'cigars:catalog',
   // THE STATIC ANATOMY'S LINEAGE BAG — the protocol + doctrine text every
   // model outside the machine is sent first (documentation/anatomy-context-
   // need.md §2). 8-digit `{ layerSig, at }` markers, the history service's
