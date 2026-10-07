@@ -3074,3 +3074,26 @@ test('a front door with no apex address keeps the card at the apex, and at host.
   visitorAssets(plain.env, [])
   assert.equal(carriedDoor(await pageAt('https://host.pluginthematrix.com/', plain.env)).lineage, 'camelflage')
 })
+
+test('an explicit domain opens only what is signed open on it; an entry signed before doors stays shut there', async () => {
+  // dylan was signed before doors existed (no doors entry); camelflage names the domain.
+  const event = await signedIndex({ dylan: head, camelflage: head }, 1_800_000_000, null, undefined, {
+    doors: { camelflage: ['pluginthematrix.com'] },
+  })
+  const explicit = { ...FRONT_DOOR_ZONE, 'pluginthematrix.com': { ...FRONT_DOOR_ZONE['pluginthematrix.com'], explicitDoors: true } }
+  const { env } = await fixture(event, explicit)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  visitorAssets(env, [])
+  const shut = await worker.fetch(page('https://dylan.pluginthematrix.com/'), env)
+  assert.equal(shut.status, 404, 'a doorless entry never opens on an explicit domain')
+  assert.equal(carriedDoor(await pageAt('https://camelflage.pluginthematrix.com/', env)).lineage, 'camelflage')
+  const sites = JSON.parse(await publicationsAt(env, 'pluginthematrix.com')).sites
+  const onZone = (lineage) => sites.some((s) => s.lineage === lineage && s.hosts.some((d) => d.host.endsWith('pluginthematrix.com')))
+  assert.ok(onZone('camelflage'))
+  assert.ok(!onZone('dylan'), 'the directory never lists what the domain keeps shut')
+  // The same index on an ordinary domain: the doorless entry opens as it always did.
+  const plain = await fixture(event, FRONT_DOOR_ZONE)
+  plain.env.HOST_DOOR_ORIGIN = 'https://door.example'
+  visitorAssets(plain.env, [])
+  assert.equal(carriedDoor(await pageAt('https://dylan.pluginthematrix.com/', plain.env)).lineage, 'dylan')
+})

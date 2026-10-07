@@ -138,6 +138,11 @@ function normalizeBinding(rawHost, raw) {
     // THE FRONT DOOR: this host is a domain's entrance (management + the
     // hives switched on here), not a hive — the shim host card answers it.
     frontDoor: raw.frontDoor === true,
+    // AN EXPLICIT DOMAIN opens only what is signed open on it (jwize
+    // 2026-10-07, pointblanksolutions.ca: "this is explicitly a business").
+    // An index entry signed before doors existed opens everywhere else; here
+    // it stays shut until its publisher names this domain in its doors.
+    ...(raw.explicitDoors === true ? { explicitDoors: true } : {}),
   }]
 }
 
@@ -332,7 +337,7 @@ async function zonePlaces(env, zone, read = indexReader(env)) {
     if (paths) {
       for (const lineage of Object.keys(index.roots)) {
         if (roots.has(lineage) || !rootPathLineage(lineage, binding)) continue
-        if (!signed(lineage) || !opensOn(index, lineage, zone)) continue
+        if (!signed(lineage) || !opensOn(index, lineage, zone, env)) continue
         roots.set(lineage, { publisher: selected })
       }
     }
@@ -340,7 +345,7 @@ async function zonePlaces(env, zone, read = indexReader(env)) {
       // The apex itself, on a front door: the creation the domain opens on.
       const apex = host === zone && binding.frontDoor === true
       if (!apex && !addressableHost(bindings, host, zone)) continue
-      if (!signed(lineage) || !opensOn(index, lineage, host)) continue
+      if (!signed(lineage) || !opensOn(index, lineage, host, env)) continue
       const claims = named.get(host) ?? []
       if (!claims.some((c) => c.publisher.pubkey === publisher.pubkey)) claims.push({ publisher: selected, lineage })
       named.set(host, claims)
@@ -407,7 +412,7 @@ const rootPlaceKey = (zone, lineage) => `${zone}/${lineage}`
 async function rootPlaceRoot(env, zone, lineage, publisher, read = indexReader(env)) {
   const index = await read(publisher.pubkey)
   const head = String(index?.roots?.[lineage] || '').toLowerCase()
-  if (!SIG_RE.test(head) || !opensOn(index, lineage, zone)) return null
+  if (!SIG_RE.test(head) || !opensOn(index, lineage, zone, env)) return null
   const meta = locationMeta({ lineage, title: lineage.split('/').at(-1) }, publisher.pubkey, head, index)
   if (await currentRouteHead(env, rootPlaceKey(zone, lineage), head, meta) !== head) return null
   return { head, pubkey: publisher.pubkey, publishedAt: index.createdAt }
@@ -712,16 +717,26 @@ async function claimedFrontDoor(env, host) {
  *  inferred or written; the branch becomes explicit the next time its
  *  publisher publishes with doors. The same reading as the Publish window's
  *  doorOn. */
-function opensOn(index, lineage, host) {
+function opensOn(index, lineage, host, env) {
   if (!host) return false
   const listed = index?.doors?.[lineage]
-  if (listed === undefined) return true
+  if (listed === undefined) return !explicitDoorsOn(env, host)
   if (!Array.isArray(listed)) return false
   const h = String(host).toLowerCase()
   return listed.some((z) => {
     const zone = String(z || '').toLowerCase()
     return !!zone && (h === zone || h.endsWith('.' + zone))
   })
+}
+
+/** Is `host` on a domain that opens only explicitly signed doors? Asked of
+ *  the host's own binding, else the zone it hangs off. */
+function explicitDoorsOn(env, host) {
+  if (!env) return false
+  const h = String(host || '').toLowerCase()
+  const bindings = siteBindings(env)
+  const zone = bindings[h] ? h : bindingZoneOf(bindings, h)
+  return !!zone && bindings[zone]?.explicitDoors === true
 }
 
 /** WHAT A DOOR IS — the record every numbered marker of its location bag,
@@ -779,7 +794,7 @@ async function publishedRoot(env, publisher, lineage, read = indexReader(env), h
   const index = await read(publisher.pubkey)
   const head = String(index?.roots?.[lineage] || '').toLowerCase()
   if (!SIG_RE.test(head)) return null
-  if (!opensOn(index, lineage, host)) return null
+  if (!opensOn(index, lineage, host, env)) return null
   const meta = locationMeta(site ?? { lineage }, publisher.pubkey, head, index)
   // A published route is a location, not a mutable signature alias. The
   // signed index authorizes the route; its hostname bag names the current
@@ -959,7 +974,7 @@ async function servePublications(request, scoped) {
         const resolved = resolveSite(env, host)
         if (!resolved.implicit || resolved.site?.lineage !== lineage) continue
         // Switched off on this domain: the next zone that opens it keeps the plate.
-        if (!opensOn(index, lineage, host)) continue
+        if (!opensOn(index, lineage, host, env)) continue
         named.add(lineage)
         sites.push(await ledgerEntry(env, read, protocol, host, resolved.site))
       }
@@ -1354,7 +1369,7 @@ async function offeredMembers(request, env) {
       // reader and the route itself verify the bag's current marker.
       const index = await read(publisher.pubkey)
       if (!SIG_RE.test(String(index?.roots?.[site.lineage] || '').toLowerCase())
-        || !opensOn(index, site.lineage, door)) return
+        || !opensOn(index, site.lineage, door, scoped)) return
       const key = `${publisher.pubkey}:${site.lineage}:${door}`
       if (!offered.has(key)) offered.set(key, {
         kind: 'host:offering', title: site.title, route: `${url.protocol}//${door}/`,
@@ -1418,14 +1433,14 @@ async function routeMetaForIndex(env, pubkey, evt) {
   for (const [host, site] of addresses) {
     if (site.publishers[0]?.pubkey !== pubkey) continue
     const head = String(index.roots?.[site.lineage] || '').toLowerCase()
-    if (SIG_RE.test(head) && opensOn(index, site.lineage, host)) found.set(host, locationMeta(site, pubkey, head, index))
+    if (SIG_RE.test(head) && opensOn(index, site.lineage, host, scoped)) found.set(host, locationMeta(site, pubkey, head, index))
   }
   // Root places this key holds: the bag is sign(<zone>/<lineage>).
   for (const zone of zones) {
     for (const [lineage, place] of (await zonePlaces(scoped, zone, read)).roots) {
       if (place.publisher.pubkey !== pubkey) continue
       const head = String(index.roots?.[lineage] || '').toLowerCase()
-      if (SIG_RE.test(head) && opensOn(index, lineage, zone)) {
+      if (SIG_RE.test(head) && opensOn(index, lineage, zone, scoped)) {
         found.set(rootPlaceKey(zone, lineage), locationMeta({ lineage, title: lineage.split('/').at(-1) }, pubkey, head, index))
       }
     }
@@ -1434,7 +1449,7 @@ async function routeMetaForIndex(env, pubkey, evt) {
     if (!site.routed || site.frontDoor) continue
     const selected = site.publishers.find(p => p.primary) || site.publishers[0]
     const head = String(index.roots[site.lineage] || '').toLowerCase()
-    if (selected?.pubkey === pubkey && SIG_RE.test(head) && opensOn(index, site.lineage, host)) {
+    if (selected?.pubkey === pubkey && SIG_RE.test(head) && opensOn(index, site.lineage, host, scoped)) {
       found.set(host, locationMeta(site, pubkey, head, index))
     }
   }
@@ -1447,7 +1462,7 @@ async function routeMetaForIndex(env, pubkey, evt) {
       const host = `${lineage}.${zone}`
       const resolved = resolveSite(scoped, host)
       if (SIG_RE.test(head) && resolved.implicit && resolved.site?.lineage === lineage
-        && opensOn(index, lineage, host)) found.set(host, locationMeta(resolved.site, pubkey, head, index))
+        && opensOn(index, lineage, host, scoped)) found.set(host, locationMeta(resolved.site, pubkey, head, index))
     }
   }
   return found
