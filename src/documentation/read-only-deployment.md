@@ -87,6 +87,34 @@ What a door may do comes from one of two places:
 
 There is no "trust this site" button. A single tap is not a review.
 
+**Discovered security: scents in community pools.** *jwize, 2026-10-07:* "these
+publications become staging areas where people leave their scents to be
+picked up by the truster. This allows another level of security … discovered
+security by community pools, and that being an explicit playground area for
+everyone. Then we can add flagged domains as well. Pools allow for everything
+and anything."
+
+- **Publications are the playground.** Anything published can be tried where
+  it is published, on its own origin, by anyone. Trying something adopts
+  nothing. It is an explicit staging area for everyone.
+- **People leave scents.** A scent is a pheromone ([pheromones.md](pheromones.md)):
+  a signed claim on a signature, left by a person or by an agent that read the
+  thing. "I reviewed this page", "it is safe to keep its data", "it did
+  something it should not" are all scents. It never labels what something is.
+  It is someone's claim.
+- **Scents gather in community pools on hosts.** Anyone can read them.
+  Pools allow for anything, including a pool of **flagged domains**: scents
+  that warn against a domain.
+- **The truster picks them up.** The truster is whoever decides: your own hive
+  before it adopts code, or a host before it gives a door's page a power. It
+  reads the pools and weighs each scent by whose it is, through the people and
+  agents it chooses to listen to. No scent is authority on its own. Trust is
+  discovered from the community, not declared by a list.
+- **Community verification is scents.** A page or module is verified for a
+  truster when enough scents from the voices that truster listens to say so.
+  A flag from those same voices can take it away. For the card page today, the
+  first scents are jwize's reviews.
+
 **Values a door keeps today.** Each value is named, with the only values it
 may hold, so it can never carry anything else, such as an identity. The visitor
 shell (`hypercomb-web/src/index.visitor.html`, `KEPT`) reads it from the
