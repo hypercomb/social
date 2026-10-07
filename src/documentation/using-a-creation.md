@@ -94,6 +94,28 @@ authoring feature and opens one creation. The full hive is the same modules
 with more of them on. Builds are phased up from the minimal one, never forked
 from it.
 
+### The thin layer is the way to your own host
+
+*jwize, 2026-10-07:* "We can install larger builds later but for now it is
+about hosting, replication and running a thin layer of Hypercomb to share an
+experience that can be done in ways that guide the user to become their own
+host and take back social control of their data. Obviously that is the final:
+your domain, your server setup. That way you can bring these apps in after they
+are feeling safe and you want to lock them down completely." And: "the whole
+purpose is to have the mobile experience to be about your community."
+
+- **On a phone, Hypercomb is a thin layer:** hosting, replication, and one
+  shared experience. Your card and your community come first.
+- **The layer guides.** Each step it offers leads toward the final setup: your
+  own domain on your own server, where you take back control of your social
+  data.
+- **Larger builds come later.** The full hive, and apps beyond the card, arrive
+  once someone feels safe and wants to lock things down on a host of their own.
+  They are never the first thing a newcomer meets.
+- **Your root domain is your first point of contact.** It opens your card and
+  your Hyperdex. Its QR code and the links you share are the domain root
+  (jwize's is `jwize.com`).
+
 ## On a phone, the root is people
 
 *jwize, 2026-10-07:* "this is a collaboration software so the first thing we
