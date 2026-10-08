@@ -143,7 +143,19 @@ function normalizeBinding(rawHost, raw) {
     // An index entry signed before doors existed opens everywhere else; here
     // it stays shut until its publisher names this domain in its doors.
     ...(raw.explicitDoors === true ? { explicitDoors: true } : {}),
+    // THE LIVE RELAY BEHIND A FRONT DOOR: where its WebSocket upgrades go
+    // (relayPassthrough). Deployment wiring, like the route itself.
+    ...(validHostName(String(raw.relay || '').trim().toLowerCase()) ? { relay: String(raw.relay).trim().toLowerCase() } : {}),
+    // THE FARM: other hosts holding the same heap, asked in order for a bare
+    // signature this bucket lacks (readThroughFarm). Hostnames only.
+    ...(farmHosts(raw.farm).length ? { farm: farmHosts(raw.farm) } : {}),
   }]
+}
+
+/** A binding's farm: distinct lowercase hostnames, in the order given. */
+function farmHosts(raw) {
+  const hosts = (Array.isArray(raw) ? raw : []).map((h) => String(h || '').trim().toLowerCase()).filter(validHostName)
+  return [...new Set(hosts)].slice(0, FARM_MAX)
 }
 
 /** An operator-declared site icon, or null. Off-origin is refused rather than
@@ -282,12 +294,17 @@ function rootPathLineage(lineage, binding) {
   return !RESERVED_ROOT_SEGMENTS.has(first) && !RESERVED_ROOT_PREFIX_RE.test(first)
 }
 
-/** One `addresses` entry the index may sign: a lowercase multi-label DNS
- *  host and a non-empty lineage key. */
-function validAddressEntry(host, lineage) {
+/** A lowercase multi-label DNS host. */
+function validHostName(host) {
   return typeof host === 'string' && host.length > 0 && host.length <= 253
     && host === host.toLowerCase() && host.includes('.')
     && host.split('.').every((label) => DNS_LABEL_RE.test(label))
+}
+
+/** One `addresses` entry the index may sign: a lowercase multi-label DNS
+ *  host and a non-empty lineage key. */
+function validAddressEntry(host, lineage) {
+  return validHostName(host)
     && typeof lineage === 'string' && lineage.trim().length > 0 && lineage.length <= 512
 }
 
@@ -305,6 +322,64 @@ function readAddresses(raw) {
     .filter(([host, lineage]) => validAddressEntry(host, lineage)))
 }
 
+// ── entrances: the participant's signed turn-on ──────────────────────────────
+//
+// `entrances: { "<zone>": { page, powers, other, from } }` in the same signed
+// index. It is read only for a front-door apex, and only from the publisher
+// whose `addresses[<zone>]` claim on that apex won (zonePlaces), so nobody can
+// turn on a page at an apex they do not open. Without a `page` the entry does
+// nothing. `page` is the card page's signature, H. `powers` is all or nothing
+// in this version: exactly keep, camera and read turns them on. `other` is
+// where every device but a phone is sent. `from` is the hive's own note of
+// where the page came from, and the worker never reads it.
+
+const ENTRANCES_MAX = 16
+const ENTRANCE_POWERS = ['keep', 'camera', 'read']
+const ENTRANCE_POWERS_MAX = 8
+const POWER_RE = /^[a-z][a-z0-9-]{0,31}$/
+
+/** One `entrances` entry the index may sign. */
+function validEntrance(zone, raw) {
+  if (!validHostName(zone) || !raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  const { page, powers, other, from } = raw
+  if (page !== undefined && !(typeof page === 'string' && SIG_RE.test(page))) return false
+  if (powers !== undefined && !(Array.isArray(powers) && powers.length <= ENTRANCE_POWERS_MAX
+    && powers.every((p) => typeof p === 'string' && POWER_RE.test(p)) && new Set(powers).size === powers.length)) return false
+  // Another name under the same zone: host.<zone> or one of its own labels.
+  if (other !== undefined && !(typeof other === 'string' && other.endsWith('.' + zone)
+    && DNS_LABEL_RE.test(other.slice(0, -(zone.length + 1))))) return false
+  if (from !== undefined && !(from && typeof from === 'object' && !Array.isArray(from)
+    && typeof from.pubkey === 'string' && SIG_RE.test(from.pubkey)
+    && typeof from.lineage === 'string' && from.lineage.trim().length > 0 && from.lineage.length <= 512)) return false
+  return true
+}
+
+/** On write: a malformed `entrances` refuses the whole index. */
+function validEntrances(raw) {
+  if (raw === undefined) return true
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  const entries = Object.entries(raw)
+  return entries.length <= ENTRANCES_MAX && entries.every(([zone, entry]) => validEntrance(zone, entry))
+}
+
+/** On read: the entries of a held index's `entrances` this host will use. An
+ *  index held from before this check may carry a bad entry; it is dropped. */
+function readEntrances(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  return Object.fromEntries(Object.entries(raw).slice(0, ENTRANCES_MAX)
+    .filter(([zone, entry]) => validEntrance(zone, entry))
+    .map(([zone, { page, powers, other }]) => [zone, {
+      ...(page ? { page } : {}), ...(powers ? { powers } : {}), ...(other ? { other } : {}),
+    }]))
+}
+
+/** Are the powers on? Exactly keep, camera and read; duplicates never pass
+ *  validEntrance, so three that include all three is the whole set. */
+function entrancePowersOn(entrance) {
+  const powers = Array.isArray(entrance?.powers) ? entrance.powers : []
+  return powers.length === ENTRANCE_POWERS.length && ENTRANCE_POWERS.every((p) => powers.includes(p))
+}
+
 /** Is `host` a name an address may take under `zone`? */
 function addressableHost(bindings, host, zone) {
   if (!host.endsWith('.' + zone) || bindings[host]) return false
@@ -315,11 +390,12 @@ function addressableHost(bindings, host, zone) {
 }
 
 /** A zone's own addresses (`host → site`) and root places (`lineage →
- *  {publisher}`), from its publishers' verified indexes, primary first. */
+ *  {publisher}`), from its publishers' verified indexes, primary first — and
+ *  the apex's entrance, from the publisher whose apex claim won. */
 async function zonePlaces(env, zone, read = indexReader(env)) {
   const bindings = siteBindings(env)
   const binding = bindings[zone]
-  const empty = { addresses: new Map(), roots: new Map() }
+  const empty = { addresses: new Map(), roots: new Map(), entrance: null }
   if (!binding) return empty
   const paths = binding.frontDoor === true && rootPathsOn(env)
   const key = `${zone}\n${paths ? 1 : 0}\n${binding.lineage}\n${binding.publishers.map((p) => p.pubkey).join(',')}`
@@ -347,18 +423,25 @@ async function zonePlaces(env, zone, read = indexReader(env)) {
       if (!apex && !addressableHost(bindings, host, zone)) continue
       if (!signed(lineage) || !opensOn(index, lineage, host, env)) continue
       const claims = named.get(host) ?? []
-      if (!claims.some((c) => c.publisher.pubkey === publisher.pubkey)) claims.push({ publisher: selected, lineage })
+      // An entrance rides only on a claim to the apex itself.
+      const entrance = apex ? index.entrances?.[zone] ?? null : null
+      if (!claims.some((c) => c.publisher.pubkey === publisher.pubkey)) claims.push({ publisher: selected, lineage, entrance })
       named.set(host, claims)
     }
   }
   const addresses = new Map()
+  let entrance = null
   for (const [host, claims] of named) {
-    // Contested binds nobody.
+    // Contested binds nobody — and so turns on no entrance either.
     if (claims.length !== 1) continue
-    const [{ publisher, lineage }] = claims
+    const [{ publisher, lineage, entrance: signed }] = claims
     addresses.set(host, { title: lineage.split('/').at(-1), lineage, publishers: [publisher] })
+    if (signed) entrance = signed
   }
-  const value = { addresses, roots }
+  // A publisher whose index could not be read may hold the winning claim, or
+  // contest it: this answer is a guess, so it says so and is never kept.
+  if (binding.publishers.some((p) => read.failed?.has(p.pubkey))) return { addresses, roots, entrance, unreadable: true }
+  const value = { addresses, roots, entrance }
   zonePlacesHeld.set(key, { at: Date.now(), content: env.CONTENT, hives: env.HIVES?.get, written: indexesWritten, value })
   return value
 }
@@ -452,10 +535,17 @@ function nothingHere(hostname, zone) {
 // VISITOR_HOLD curtain hid what was signed open and opened what was not.
 
 /** A publisher's index, parsed and signature-checked: `{roots, createdAt}`, or
- *  null when the key holds nothing this host will trust. */
-async function verifiedIndex(env, pubkey) {
+ *  null when the key holds nothing this host will trust. A store that could
+ *  not be READ is not the same as an index that is absent: the key goes into
+ *  `failed`, so a caller that must not guess (zonePlaces) can tell. */
+async function verifiedIndex(env, pubkey, failed) {
+  let raw
+  try { raw = await heldIndexRaw(env, pubkey) } catch {
+    failed?.add(pubkey)
+    return null
+  }
   let evt
-  try { evt = JSON.parse((await heldIndexRaw(env, pubkey)) ?? 'null') } catch { return null }
+  try { evt = JSON.parse(raw ?? 'null') } catch { return null }
   if (!evt || Number(evt.kind) !== HIVE_KIND || evt.pubkey !== pubkey) return null
   if (!(await verifyEventSig(evt))) return null
   let content
@@ -464,19 +554,23 @@ async function verifiedIndex(env, pubkey) {
     || !validOfferingDeclarations(content.offerings)) return null
   const doors = content.doors && typeof content.doors === 'object' && !Array.isArray(content.doors) ? content.doors : {}
   return { roots: content.roots, doors, offerings: content.offerings ?? {}, listed: listedMeanings(content),
-    addresses: readAddresses(content.addresses), createdAt: Number(evt.created_at || 0) }
+    addresses: readAddresses(content.addresses), entrances: readEntrances(content.entrances),
+    createdAt: Number(evt.created_at || 0) }
 }
 
 /** One request's index reads, memoized by pubkey. The ledger asks the same
  *  key for every site it reports; a page passes one reader to its gate and its
  *  package. A reader never outlives the request that made it, so an index is
- *  never answered stale. */
+ *  never answered stale. `failed` holds the keys whose store read threw. */
 function indexReader(env) {
   const reads = new Map()
-  return (pubkey) => {
-    if (!reads.has(pubkey)) reads.set(pubkey, verifiedIndex(env, pubkey))
+  const failed = new Set()
+  const read = (pubkey) => {
+    if (!reads.has(pubkey)) reads.set(pubkey, verifiedIndex(env, pubkey, failed))
     return reads.get(pubkey)
   }
+  read.failed = failed
+  return read
 }
 
 // ── the allowlist as content (documentation/signed-site-bindings.md, Plan A) ──
@@ -2050,6 +2144,14 @@ function shareHead(title, request, base, description = '') {
 
 async function serveVisitorAsset(request, env, { spa = true, door = null, install = null, index = null, base = null, title = null } = {}) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
+  // The asset store would answer a validator with its own 304, past every
+  // header set below; ask it unconditionally so this function always decides.
+  if (request.headers.has('if-none-match') || request.headers.has('if-modified-since')) {
+    const asked = new Headers(request.headers)
+    asked.delete('if-none-match')
+    asked.delete('if-modified-since')
+    request = new Request(request, { headers: asked })
+  }
   let response = await env.ASSETS.fetch(request)
   // Under /content/ a miss is a miss. The engine walks its package pool by
   // marker until the first gap; a page of HTML where a marker should be reads
@@ -2142,6 +2244,373 @@ async function serveRootPlace(request, env, zone, place) {
   const install = door ? pointer : null
   const index = door && signedIndex && signedIndex.length <= PAGE_INDEX_MAX ? signedIndex : null
   return serveVisitorAsset(inner, env, { door, install, index, base: `${place.prefix}/`, title: site.title })
+}
+
+// ── two entrances at one root address ────────────────────────────────────────
+//
+// An apex whose winning publisher signed an entrance page (H) has two ways
+// in. A phone gets the card door: the bytes H, nothing else. Any other device
+// is sent to `other` when the entrance names one, and is never served here:
+// one origin shares one storage, so no other code may run where kept cards
+// live. Without `other`, every device gets the card door.
+//
+// A CARD-DOOR ORIGIN STAYS ONE. Once an apex has served H, the worker keeps
+// `entrance-last:<zone>` = H in the HIVES store. If the signed entrance then
+// goes — withdrawn, contested, its lineage unpublished, its doors edited —
+// every page path gets that H sandboxed, with its powers off, so what
+// visitors kept stays unreadable. It never gets the host card, a root place
+// or the visitor shell. RELEASING AN ORIGIN IS AN OPERATOR ACT: delete the
+// key (`wrangler kv key delete --binding HIVES "entrance-last:<zone>"`),
+// knowing that whatever runs there next can read what visitors kept.
+//
+// An index this worker could not READ is not an absent one. While an apex
+// that has served an entrance cannot be read — or the key that remembers it
+// cannot — its page paths get a page that runs nothing. An apex that never
+// served one keeps its front door through a storage hiccup, as before.
+//
+// Machine paths (`/<sig>`, `/content/…`, the index, the marks) never change
+// for any device, and a miss there is the heap's own 404.
+
+/** Which entrance a request takes. `?entrance=` overrides; then Chromium's
+ *  mobile hint, which it sends unasked; then the user agent. An Android tablet
+ *  and "Desktop site" mode count as other. */
+function deviceEntrance(request, url) {
+  const asked = url.searchParams.get('entrance')
+  if (asked === 'phone' || asked === 'other') return asked
+  const hint = request.headers.get('sec-ch-ua-mobile')
+  const phone = hint === '?1' ? true : hint === '?0' ? false
+    : /Mobi|iPhone|iPod/i.test(request.headers.get('user-agent') || '')
+  return phone ? 'phone' : 'other'
+}
+
+// One URL answers differently per device, so no cache may keep one answer,
+// and nothing may ask it back with a validator.
+const ENTRANCE_CACHE = { 'Cache-Control': 'no-store, private', Vary: 'Sec-CH-UA-Mobile, User-Agent' }
+// The card door's own device: the camera, for its Scan button. Nothing else.
+const CARD_DOOR_PERMISSIONS = 'camera=(self), microphone=(), geolocation=(), payment=(), usb=()'
+// The page plus its inlined reader passes the 1 MiB default.
+const CARD_PAGE_MAX = 2_097_152
+
+function entranceRedirect(location) {
+  return new Response(null, { status: 302, headers: { Location: location, ...ENTRANCE_CACHE } })
+}
+
+// A zone's last entrance, held a minute in the isolate: a front door that
+// never had one pays one store read a minute, not one a request.
+const ENTRANCE_LAST_TTL_MS = 60_000
+const entranceLastHeld = new Map()
+const entranceLastKey = (zone) => `entrance-last:${zone}`
+
+/** The page this zone last served as an entrance, or null. Throws when the
+ *  store cannot be read: an unknown answer must never open the origin. */
+async function lastEntrance(env, zone) {
+  const kv = env.HIVES
+  if (!kv?.get) return null
+  const held = entranceLastHeld.get(zone)
+  if (held && held.kv === kv && Date.now() - held.at < ENTRANCE_LAST_TTL_MS) return held.page
+  const raw = String((await kv.get(entranceLastKey(zone))) ?? '').trim().toLowerCase()
+  const page = SIG_RE.test(raw) ? raw : null
+  entranceLastHeld.set(zone, { at: Date.now(), kv, page })
+  return page
+}
+
+/** Keep H as the zone's last entrance — written only when it changes, since
+ *  the store allows few writes a day. */
+async function rememberEntrance(env, zone, page) {
+  const kv = env.HIVES
+  if (!kv?.put) return
+  try {
+    if (await lastEntrance(env, zone) === page) return
+    await kv.put(entranceLastKey(zone), page)
+    entranceLastHeld.set(zone, { at: Date.now(), kv, page })
+  } catch { /* kept on the next serve */ }
+}
+
+/** What this request's host is to a card door. Null for any host that is not
+ *  a front door's apex, and for an apex that has never served an entrance.
+ *  Otherwise `{ entrance }` — the signed one, or `{ page }` with `last` when
+ *  only the remembered page is left — or `{ unreadable }` when the store
+ *  that remembers it could not be read, or an index could not be read on an
+ *  apex that has served an entrance. An apex that never served one answers a
+ *  failed index read as it always did: its front door, not a 503 for every
+ *  plain host card on a storage hiccup. */
+async function cardDoorOf(routed, deployed, host) {
+  if (siteBinding(routed.env, host)?.frontDoor !== true || !isZoneRoot(routed.env, host)) return null
+  if (!routed.unreadable && routed.apex && routed.entrance?.page) return { entrance: routed.entrance }
+  let page
+  try { page = await lastEntrance(deployed, host) } catch { return { unreadable: true } }
+  if (routed.unreadable) return page ? { unreadable: true } : null
+  return page ? { entrance: { page }, last: true } : null
+}
+
+/** A page path on a card-door origin: the other entrance, a move to `/`, or
+ *  the card itself — and nothing else. */
+async function answerCardDoor(request, url, routed, deployed, card) {
+  const { entrance } = card
+  if (entrance.other && deviceEntrance(request, url) === 'other') return entranceRedirect(`${url.protocol}//${entrance.other}/`)
+  if (url.pathname !== '/') return entranceRedirect(`/${url.search}`)
+  const zone = url.hostname.toLowerCase()
+  let page = entrance.page
+  let on = !card.last && entrancePowersOn(entrance)
+  // A signed entrance waits on the open mark, as every door does. A door
+  // closed under it keeps the last page, sandboxed; with none, nothing runs.
+  if (!card.last && !(await siteOpen(routed.env, routed.site, indexReader(routed.env), zone, false)).open) {
+    let last
+    try { last = await lastEntrance(deployed, zone) } catch { last = null }
+    if (!last) return cardDoorUnavailable(request)
+    page = last
+    on = false
+  }
+  const answer = await serveCardDoor(request, routed.env, page, on)
+  if (answer.status === 200) await rememberEntrance(deployed, zone, page)
+  return answer
+}
+
+/** The page's inline-script hashes as a browser will split them, or null when
+ *  the page is refused. A script with `src` would run bytes nobody verified.
+ *  `<!--` or `<script` inside a body moves the browser's own end of the script
+ *  away from the first `</script`, so the split here would not be the one the
+ *  browser makes. Hashed over LF line endings, as the browser reads them. */
+async function cardPageScripts(html) {
+  const hashes = []
+  const open = /<script(?=[\s/>])([^>]*)>/gi
+  const close = /<\/script[\s/>]/gi
+  let tag
+  while ((tag = open.exec(html))) {
+    if (/(?:^|[\s/"'])src(?![\w-])/i.test(tag[1])) return null
+    close.lastIndex = open.lastIndex
+    const end = close.exec(html)
+    if (!end) return null
+    const body = html.slice(open.lastIndex, end.index)
+    if (/<!--|<script/i.test(body)) return null
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body.replace(/\r\n?/g, '\n')))
+    hashes.push(`'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`)
+    open.lastIndex = end.index
+  }
+  return hashes
+}
+
+// H → its script hashes, or null when refused. H names its bytes, so the
+// verdict never changes; a few pages is all one apex ever turns on.
+const cardPageChecks = new Map()
+const CARD_PAGE_CHECKS_HELD = 16
+
+/** THE PHONE ENTRANCE: the bytes H as the whole document — no shell, no bees.
+ *  Only scripts whose hashes come from H may run. Never `'self'`: a flat
+ *  `/<sig>` is served as a module to a script fetch, so `'self'` would run
+ *  anything in the shared heap. `blob:` is how the page loads its inlined
+ *  three.js, and only a script that already passed may make one.
+ *
+ *  Powers ON: real storage, the camera and https reads. Powers OFF after
+ *  being on: the same bytes in a sandbox — an opaque origin, so kept cards
+ *  stay unreadable and no other code ever runs where they live. */
+async function serveCardDoor(request, env, page, on) {
+  const bytes = await heldCreationBytes(env, page, CARD_PAGE_MAX).catch(() => null)
+  if (!bytes) return cardDoorUnavailable(request)
+  if (!cardPageChecks.has(page)) {
+    if (cardPageChecks.size >= CARD_PAGE_CHECKS_HELD) cardPageChecks.delete(cardPageChecks.keys().next().value)
+    cardPageChecks.set(page, await cardPageScripts(new TextDecoder().decode(bytes)))
+  }
+  const hashes = cardPageChecks.get(page)
+  if (!hashes) return cardDoorUnavailable(request)
+  const policy = [
+    ...(on ? [] : ['sandbox allow-scripts']),
+    `script-src ${[...hashes, 'blob:'].join(' ')}`,
+    `connect-src 'self'${on ? ' https:' : ''}`,
+    "object-src 'none'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'",
+  ].join('; ')
+  const answer = new Response(request.method === 'HEAD' ? null : bytes, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': policy,
+      'Permissions-Policy': on ? CARD_DOOR_PERMISSIONS : PERMISSIONS_POLICY,
+      'Referrer-Policy': 'no-referrer',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'X-Content-Type-Options': 'nosniff',
+      ...ENTRANCE_CACHE,
+    },
+  })
+  cardDoorAnswers.add(answer)
+  return answer
+}
+
+// The card door's own answers: the one page the last guard lets run.
+const cardDoorAnswers = new WeakSet()
+// Types a browser runs script in when it is sent to one as a page.
+const ACTIVE_TYPE_RE = /^\s*(?:text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml)\b/i
+
+/** Could this answer run code as a page? A body of an active type, or of no
+ *  declared type (which a browser may sniff) — unless its own policy is a
+ *  sandbox without scripts, as every heap read's is. */
+function runsAsPage(response) {
+  if (!response?.body || !response.headers?.get) return false
+  const type = response.headers.get('content-type')
+  if (type && !ACTIVE_TYPE_RE.test(type)) return false
+  return !/(?:^|;)\s*sandbox(?![^;]*allow-scripts)/i.test(response.headers.get('content-security-policy') || '')
+}
+
+/** H is missing, fails its hash, or fails the script check: a page that runs
+ *  nothing. Never the visitor shell, which would run other code on the
+ *  origin that holds kept cards. */
+function cardDoorUnavailable(request) {
+  return new Response(request.method === 'HEAD' ? null
+    : '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>card unavailable</title><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0b1218;color:#dce7ef;font:16px/1.6 system-ui,sans-serif"><main style="text-align:center;padding:2rem"><h1 style="font-size:1.3rem;margin:0 0 .5rem">This card can’t be shown right now</h1><p style="opacity:.7;margin:0">Its page is not here, or did not pass its check. Try again later.</p></main>', {
+    status: 503,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+      'Permissions-Policy': PERMISSIONS_POLICY,
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+      ...ENTRANCE_CACHE,
+    },
+  })
+}
+
+// ── the live relay behind a front door ───────────────────────────────────────
+//
+// Builds already shipped meet at `wss://<apex>`. When an apex moves onto this
+// worker, its binding's `relay` names where the relay now answers, and every
+// WebSocket upgrade there is handed on unchanged — same path, same query — and
+// the relay's answer (the 101) is returned as it came. Read from the var the
+// worker was deployed with, as its routes are: no index is read first.
+//
+// Every socket handed on reaches relay.js from this worker's egress address,
+// so the relay's per-address flood ceiling (a 12,000 burst, 200 a second) is
+// one budget shared by everyone who meets here. Enough at demo scale; past
+// it, the relay must learn to trust a forwarded address from this worker.
+function relayPassthrough(request, env, url) {
+  if (String(request.headers.get('upgrade') || '').toLowerCase() !== 'websocket') return null
+  const binding = siteBindings(env)[url.hostname.toLowerCase()]
+  if (binding?.frontDoor !== true || !binding.relay) return null
+  const target = new URL(url)
+  target.protocol = 'https:'
+  target.host = binding.relay
+  return fetch(new Request(target, request))
+}
+
+// ── the farm: read-through for bare signatures ───────────────────────────────
+//
+// A zone's binding may name a FARM: other hosts that hold the same heap, in
+// order (`farm: ["relay.pluginthematrix.io"]`). A bare signature this bucket
+// does not hold is asked of each in turn as `https://<farm>/<sig>`. Only bytes
+// that hash to the name are believed, and they are kept here under that name,
+// so the next read is local. A signature is a right to use: a copy can never
+// be a different thing, wherever it came from. Nothing but a bare signature
+// is read through — no pool, no index, no listing. Read from the var the
+// worker was deployed with, as the relay is.
+
+const FARM_MAX = 8
+// One deadline for the whole walk over the farm, however many hosts it asks.
+const FARM_READ_MS = 10_000
+// The largest file read through: the largest one the asset store holds. It is
+// streamed into the bucket, never held whole.
+const FARM_READ_MAX = 26_214_400
+// A reply whose length is not declared, or is only the compressed length, is
+// held whole to be hashed here, so only a small one is taken.
+const FARM_BUFFER_MAX = 1_048_576
+// A signature every farm host missed is not asked again for a minute.
+const FARM_MISS_MS = 60_000
+const FARM_MISSES_HELD = 4_096
+const farmReads = new Map()   // `<farm>\n<sig>` → the one read in flight
+const farmMisses = new Map()  // `<farm>\n<sig>` → when every host missed it
+
+/** The farm for `hostname`: its own binding's, else its zone's. Never itself. */
+function farmOf(env, hostname) {
+  const bindings = siteBindings(env)
+  const host = String(hostname || '').toLowerCase()
+  const binding = [bindings[host], bindings[bindingZoneOf(bindings, host)]].find((b) => b?.farm?.length)
+  return (binding?.farm ?? []).filter((farm) => farm !== host)
+}
+
+/** A response's bytes, or null past `maxBytes` — counted as they arrive, so
+ *  a farm host that lies about its length cannot make this hold more. */
+async function boundedBytes(response, maxBytes) {
+  if (Number(response.headers.get('content-length') || 0) > maxBytes) {
+    await response.body?.cancel()
+    return null
+  }
+  const reader = response.body?.getReader()
+  if (!reader) return new Uint8Array(0)
+  const chunks = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let at = 0
+  for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.byteLength }
+  return bytes
+}
+
+/** Read `sig` through the farm into this bucket. True once it is held here;
+ *  a miss everywhere leaves the 404 exactly as it was. Requests that miss
+ *  the same signature at once share one read. */
+async function readThroughFarm(env, hostname, sig) {
+  const farm = farmOf(env, hostname)
+  if (!farm.length || !env.CONTENT?.put) return false
+  const key = `${farm.join(',')}\n${sig}`
+  const missed = farmMisses.get(key)
+  if (missed !== undefined) {
+    if (Date.now() - missed < FARM_MISS_MS) return false
+    farmMisses.delete(key)
+  }
+  if (!farmReads.has(key)) {
+    farmReads.set(key, readFromFarm(env, farm, sig).then((held) => {
+      if (!held) {
+        if (farmMisses.size >= FARM_MISSES_HELD) farmMisses.delete(farmMisses.keys().next().value)
+        farmMisses.set(key, Date.now())
+      }
+      return held
+    }).finally(() => farmReads.delete(key)))
+  }
+  return farmReads.get(key)
+}
+
+async function readFromFarm(env, farm, sig) {
+  const deadline = AbortSignal.timeout(FARM_READ_MS)
+  for (const host of farm) {
+    if (deadline.aborted) break
+    try {
+      const response = await fetch(`https://${host}/${sig}`, { headers: { accept: '*/*', 'accept-encoding': 'identity' }, signal: deadline })
+      if (!response.ok) {
+        await response.body?.cancel()
+        continue
+      }
+      // No owner: bytes read through belong to nobody here, so /forget
+      // never takes them, as with anything stored before claims existed.
+      const type = String(response.headers.get('content-type') || '')
+      const store = { onlyIf: new Headers({ 'If-None-Match': '*' }),
+        ...(type && type.length <= 255 ? { httpMetadata: { contentType: type } } : {}) }
+      const declared = response.headers.get('content-length')
+      const length = Number(declared)
+      const encoded = !/^(?:identity)?$/i.test(String(response.headers.get('content-encoding') || '').trim())
+      if (declared !== null && Number.isSafeInteger(length) && length > 0 && !encoded) {
+        if (length > FARM_READ_MAX) {
+          await response.body?.cancel()
+          continue
+        }
+        // Streamed straight into the bucket, which checks the bytes against
+        // their name and refuses any other. A host that hides a miss behind
+        // a 200 page fails there.
+        await env.CONTENT.put(sig, response.body.pipeThrough(new FixedLengthStream(length)), { ...store, sha256: sig })
+        return true
+      }
+      const bytes = await boundedBytes(response, FARM_BUFFER_MAX)
+      if (!bytes || await sha256Hex(bytes) !== sig) continue
+      await env.CONTENT.put(sig, bytes, store)
+      return true
+    } catch { /* the next farm host, while the deadline lasts */ }
+  }
+  return false
 }
 
 // ── responses ────────────────────────────────────────────────────────────────
@@ -2884,7 +3353,9 @@ function validHiveEventContent(evt) {
   }
   // `addresses` — a publisher's own addresses, host → lineage key. Bounded,
   // lowercase hosts, non-empty keys; the 64 KB index cap still holds.
+  // `entrances` — the participant's signed turn-on, zone → entrance.
   return validOfferingDeclarations(parsed.offerings) && validAddresses(parsed.addresses)
+    && validEntrances(parsed.entrances)
 }
 
 async function validOfferingLocations(evt) {
@@ -3653,9 +4124,31 @@ function serveNostrJson(request, site, asked) {
 
 export default {
   async fetch(request, env, ctx) {
+    const scope = {}
+    const response = await router.fetch(request, env, ctx, scope)
+    // THE LAST GUARD ON A CARD-DOOR ORIGIN. Every branch is meant to answer
+    // such an apex with machine data or its card. Should one ever hand back
+    // something a browser would run as a page, a page that runs nothing goes
+    // out instead — never other code beside what visitors kept.
+    if (!runsAsPage(response) || cardDoorAnswers.has(response) || !scope.cardDoorAt) return response
+    let card
+    try { card = await scope.cardDoorAt() } catch { card = siteBinding(env, new URL(request.url).hostname)?.frontDoor ? { unreadable: true } : null }
+    return card ? cardDoorUnavailable(request) : response
+  },
+}
+
+const router = {
+  async fetch(request, env, ctx, scope = {}) {
     const requestUrl = new URL(request.url)
     const { pathname } = requestUrl
     const method = request.method
+    // A WebSocket upgrade on a front door with a relay goes to the relay,
+    // before any other routing on that host (relayPassthrough).
+    const relayed = relayPassthrough(request, env, requestUrl)
+    if (relayed) return relayed
+    // The var as deployed: the farm is read from it even after `env` becomes
+    // this request's view below.
+    const deployed = env
     // Which site this host is — resolved once, and only by a branch that needs
     // it. The flat sig read and the pool listing never ask, so the hot path
     // pays no index read for the operators' signed bindings.
@@ -3680,15 +4173,28 @@ export default {
         // A front door's apex may open on a creation its publisher signed there.
         // Only a front-door zone root pays the read.
         if (resolved.site?.frontDoor === true && isZoneRoot(scoped, host)) {
-          const opened = (await zonePlaces(scoped, host)).addresses.get(host)
+          const places = await zonePlaces(scoped, host)
+          const opened = places.addresses.get(host)
           if (opened) {
             const view = withAddresses(scoped, new Map([[host, opened]]))
-            routing = { env: view, ...resolveSite(view, host) }
+            // …with the entrance its publisher signed beside that claim.
+            routing = { env: view, ...resolveSite(view, host), ...(places.entrance ? { entrance: places.entrance } : {}) }
           }
+          // An index read failed: whose apex this is, and what entrance it
+          // has, are unknown (cardDoorAt).
+          if (places.unreadable) routing = { ...routing, unreadable: true }
         }
       }
       return routing
     }
+    // What this host is to a card door (cardDoorOf) — asked once, and only by
+    // a page path, a miss the host card would answer, or the last guard.
+    let cardDoor
+    const cardDoorAt = async () => {
+      if (cardDoor === undefined) cardDoor = await cardDoorOf(await route(), deployed, requestUrl.hostname.toLowerCase())
+      return cardDoor
+    }
+    scope.cardDoorAt = cardDoorAt
 
     // DOORS WRITE NOTHING, at any host this worker serves. A signed request
     // from a door — the visitor's own key through NIP-07, or one the package
@@ -3838,9 +4344,10 @@ export default {
         // worker) and gets a JavaScript MIME; every other consumer gets the
         // stored type. No typed prefix needed for modules either.
         const dest = String(request.headers.get('sec-fetch-dest') || '').toLowerCase()
-        const heap = (dest === 'script' || dest === 'worker' || dest === 'sharedworker')
-          ? await serveModule(request, env, sigMatch[2])
-          : await serveBlob(request, env, sigMatch[2], named ? suffixType(pathname) : null)
+        const fromHeap = () => (dest === 'script' || dest === 'worker' || dest === 'sharedworker')
+          ? serveModule(request, env, sigMatch[2])
+          : serveBlob(request, env, sigMatch[2], named ? suffixType(pathname) : null)
+        let heap = await fromHeap()
         // The one-file indexes answered at a pool's own derived address —
         // what a published-pool probe fetches: the community's translations,
         // and this host's publications and trials (jwize 2026-09-25: no named
@@ -3853,15 +4360,18 @@ export default {
             const routed = await route()
             return serveTrials(request, routed.env, routed.implicit ? routed.zone : requestUrl.hostname)
           }
+          // A bare signature this bucket lacks: the zone's farm may hold it.
+          if (await readThroughFarm(deployed, requestUrl.hostname, sigMatch[2])) heap = await fromHeap()
         }
         // A front-door apex also serves the shim's OWN bytes (its pinned
         // bootstrap, its packages), which live with the card, not in the heap.
         // A claimed apex is one too; only a miss on a host the var does not
-        // know asks the claims.
+        // know asks the claims. A card-door origin never does: the card lives
+        // at host.<zone>, and its page there would be other code here.
         if (heap.status === 404 && (siteBindings(env)[requestUrl.hostname.toLowerCase()]?.frontDoor
           || servesHostDoor(env, requestUrl.hostname)
           || await claimedFrontDoor(env, requestUrl.hostname)
-          || (await route()).hostDoor)) {
+          || (await route()).hostDoor) && !await cardDoorAt()) {
           return serveFrontDoor(request, env)
         }
         return heap
@@ -3896,6 +4406,9 @@ export default {
       if (mark.status === 200) {
         const headers = new Headers(mark.headers)
         headers.set('Cache-Control', 'public, max-age=3600')
+        // A mark is a picture, never a page: an SVG one opened on its own
+        // runs nothing here.
+        headers.set('Content-Security-Policy', 'sandbox')
         headers.set('Access-Control-Allow-Origin', '*')
         return new Response(mark.body, { status: 200, headers })
       }
@@ -3960,12 +4473,25 @@ export default {
       return new Response(null, { status: 302, headers: { Location: `${requestUrl.protocol}//${HOST_DOOR_LABEL}.${requestUrl.hostname}${pathname}${requestUrl.search}`, ...CORS } })
     }
 
+    // A CARD-DOOR ORIGIN (two entrances, above): every page path is its card,
+    // the other entrance or a move to `/` — never the host card, a root place
+    // or the visitor shell. /content/ files go on below as machine data.
+    if ((method === 'GET' || method === 'HEAD') && !pathname.startsWith('/content/')) {
+      const card = await cardDoorAt()
+      if (card?.unreadable) return cardDoorUnavailable(request)
+      if (card) return answerCardDoor(request, requestUrl, routed, deployed, card)
+    }
+
     // THE FRONT DOOR — an apex is the entrance to its domain, not a hive: the
     // shim host card (HOST_DOOR_ORIGIN, a static Pages deployment) draws it,
     // and lists the hives switched on here from sign('host:publications'). Every
     // machine read stays on this worker — flat sigs and pools are answered
     // above, the index and the ledger here — so the card reads the one heap.
     if (site?.frontDoor && (method === 'GET' || method === 'HEAD')) {
+      // On a card-door origin only a /content/ file reaches here, and the
+      // host card's files are not this origin's to give.
+      const card = await cardDoorAt()
+      if (card) return card.unreadable ? text(503, 'this host cannot read its index right now') : text(404, 'not here')
       // A ROOT PATH — https://<zone>/<lineage> — is that published place,
       // served as its own door would be. `/` and everything else stay the card.
       const host = requestUrl.hostname.toLowerCase()
@@ -3989,7 +4515,12 @@ export default {
       // ES modules, and the SPA fallback was answering these with index.html
       // (an empty/HTML Content-Type), which bricked every module load.
       const moduleMatch = pathname.match(/^\/content\/([0-9a-f]{64})$/)
-      if (moduleMatch) return serveModule(request, env, moduleMatch[1])
+      if (moduleMatch) {
+        const module = await serveModule(request, env, moduleMatch[1])
+        // …and a module this bucket lacks may be on the zone's farm.
+        if (module.status !== 404 || !await readThroughFarm(deployed, requestUrl.hostname, moduleMatch[1])) return module
+        return serveModule(request, env, moduleMatch[1])
+      }
       // A door — named or wildcard — is a website only while an approved
       // publisher's signed index carries its lineage (the open mark, above).
       // Until then, and again after a withdrawal, an honest 404 page.

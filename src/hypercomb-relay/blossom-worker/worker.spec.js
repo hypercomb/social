@@ -107,7 +107,12 @@ function contentBag(held = new Map()) {
     } : null,
     put: async (key, body, options) => {
       if (options?.onlyIf?.get?.('If-None-Match') === '*' && held.has(key)) return null
-      held.set(key, new Uint8Array(await new Response(body).arrayBuffer()))
+      const bytes = new Uint8Array(await new Response(body).arrayBuffer())
+      // As R2 does: a put that names its digest is refused when the bytes differ.
+      if (options?.sha256 && hex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))) !== options.sha256) {
+        throw new Error('put: the bytes do not match their sha256')
+      }
+      held.set(key, bytes)
       return { key }
     },
     // Each object's etag is a digest of its bytes, as R2's is: a record
@@ -3096,4 +3101,777 @@ test('an explicit domain opens only what is signed open on it; an entry signed b
   plain.env.HOST_DOOR_ORIGIN = 'https://door.example'
   visitorAssets(plain.env, [])
   assert.equal(carriedDoor(await pageAt('https://dylan.pluginthematrix.com/', plain.env)).lineage, 'dylan')
+})
+
+// ── two entrances at one root address (the participant's signed turn-on) ────
+// An apex whose winning publisher signs `entrances[<zone>]` with a page H: a
+// phone gets H as the whole document, any other device goes to `other`, and
+// no other code ever runs on that origin. Machine paths never change.
+
+const CARD_PAGE = '<!doctype html><html><head><title>card</title>'
+  + '<script type="text/plain" id="three-src">three()\r\n</script>'
+  + '<script>\r\nwindow.kept = localStorage.getItem("bc.cards")\r\n</script></head>'
+  + '<body><script type="module">import(URL.createObjectURL(new Blob([document.getElementById("three-src").textContent])))</script></body></html>'
+// What the browser hashes: each script's text, CRLF read as LF.
+const CARD_SCRIPTS = ['three()\n', '\nwindow.kept = localStorage.getItem("bc.cards")\n',
+  'import(URL.createObjectURL(new Blob([document.getElementById("three-src").textContent])))']
+const scriptHash = async (body) => `'sha256-${btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256', utf8(body)))))}'`
+const ALL_POWERS = ['keep', 'camera', 'read']
+const APEX = 'https://pluginthematrix.com'
+const HOME = 'home.pluginthematrix.com'
+const NO_DEVICES = 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
+const phone = (url, extra = {}) => page(url, { 'sec-ch-ua-mobile': '?1', ...extra })
+const desk = (url, extra = {}) => page(url, { 'sec-ch-ua-mobile': '?0', ...extra })
+const UA = {
+  iphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+  androidPhone: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36',
+  androidTablet: 'Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+  desktop: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+}
+const bodyHash = async (response) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', await response.arrayBuffer())))
+
+/** An apex opened on a creation, whose publisher signs `entrance` beside the
+ *  claim (none when null). The page's bytes are held under H unless `held`
+ *  says otherwise. */
+async function entranceEnv(entrance, { pageHtml = CARD_PAGE, held = utf8(pageHtml), bindings = FRONT_DOOR_ZONE } = {}) {
+  const H = await sha256(pageHtml)
+  const event = await signedIndex({ 'pointblanksolutions-ca': 'b'.repeat(64), camelflage: head }, 1_800_000_000, {}, undefined, {
+    addresses: { 'pluginthematrix.com': 'pointblanksolutions-ca' },
+    ...(entrance ? { entrances: { 'pluginthematrix.com': { page: H, ...entrance } } } : {}),
+  })
+  const { env } = await fixture(event, bindings)
+  rememberingKv(env)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  const asked = []
+  visitorAssets(env, asked)
+  if (held) env.CONTENT.held.set(H, held)
+  return { env, H, asked }
+}
+
+/** The fixture's HIVES with a real key-value store beside the index it
+ *  drains: every read and write of any other key is counted. A new object, as
+ *  a fresh isolate would see the store. */
+function rememberingKv(env, kv = new Map()) {
+  const { get, put } = env.HIVES
+  const reads = []
+  const writes = []
+  env.HIVES = {
+    kv, reads, writes,
+    get: async (key) => { if (key !== pubkey) reads.push(key); return kv.has(key) ? kv.get(key) : get(key) },
+    put: async (key, value) => { if (key !== pubkey) { writes.push(key); kv.set(key, String(value)) } return put(key, value) },
+  }
+  return env.HIVES
+}
+
+/** Runs `run` with the host card stubbed, and proves nothing reached it. */
+async function withoutCard(run) {
+  const card = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => { card.push(String(url)); return new Response('host card', { headers: { 'content-type': 'text/html' } }) }
+  try { await run() } finally { globalThis.fetch = realFetch }
+  assert.deepEqual(card, [], 'an opened apex never reaches the host card')
+}
+
+test('an apex with no entrance, or an entrance with no page, answers every device as before', async () => {
+  for (const entrance of [null, { page: undefined, powers: ALL_POWERS, other: HOME }]) {
+    const { env } = await entranceEnv(entrance)
+    await withoutCard(async () => {
+      for (const request of [phone(`${APEX}/`), desk(`${APEX}/`), page(`${APEX}/`, { 'user-agent': UA.desktop })]) {
+        const res = await worker.fetch(request, env)
+        assert.equal(res.status, 200)
+        assert.equal(res.headers.get('vary'), null)
+        assert.equal(res.headers.get('permissions-policy'), NO_DEVICES)
+        assert.equal(carriedDoor(await res.text()).lineage, 'pointblanksolutions-ca')
+      }
+      assert.equal(carriedDoor(await pageAt(`${APEX}/work/anything`, env)).lineage, 'pointblanksolutions-ca')
+    })
+  }
+})
+
+test('a malformed entrances is refused on write, and a bad entry already held is ignored on read', async () => {
+  const { env, H } = await entranceEnv(null)
+  const zone = 'pluginthematrix.com'
+  const signedWith = (entrances, at) => signedIndex({ 'pointblanksolutions-ca': 'b'.repeat(64) }, at, {}, undefined, {
+    addresses: { [zone]: 'pointblanksolutions-ca' }, entrances })
+  const refused = [
+    ['a list', [{ page: H }]],
+    ['an uppercase zone', { 'PluginTheMatrix.com': { page: H } }],
+    ['a page that is not a signature', { [zone]: { page: H.toUpperCase() } }],
+    ['powers that are not a list', { [zone]: { page: H, powers: 'keep camera read' } }],
+    ['a power named twice', { [zone]: { page: H, powers: ['keep', 'keep', 'camera', 'read'] } }],
+    ['too many powers', { [zone]: { page: H, powers: Array.from({ length: 9 }, (_, i) => `p${i}`) } }],
+    ['another zone as other', { [zone]: { page: H, other: 'home.other.example' } }],
+    ['a nested other', { [zone]: { page: H, other: `a.b.${zone}` } }],
+    ['a from with no key', { [zone]: { page: H, from: { lineage: 'card' } } }],
+    ['too many zones', Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`z${i}.example`, { page: H }]))],
+  ]
+  let at = 1_800_000_001
+  for (const [why, entrances] of refused) {
+    assert.equal((await putIndexAt(env, zone, await signedWith(entrances, at++))).status, 400, why)
+  }
+  const whole = { [zone]: { page: H, powers: ALL_POWERS, other: HOME, from: { pubkey, lineage: 'card' } } }
+  assert.equal((await putIndexAt(env, zone, await signedWith(whole, at++))).status, 200)
+
+  // An index held from before the check: its bad entry is read as absent.
+  for (const bad of [{ page: 'not-a-signature' }, { other: 'home.other.example' }, { powers: ['keep', 'keep', 'camera', 'read'] }]) {
+    const held = await entranceEnv({ powers: ALL_POWERS, other: HOME, ...bad })
+    await withoutCard(async () => {
+      for (const request of [phone(`${APEX}/`), desk(`${APEX}/`)]) {
+        const res = await worker.fetch(request, held.env)
+        assert.equal(res.status, 200, JSON.stringify(bad))
+        assert.equal(carriedDoor(await res.text()).lineage, 'pointblanksolutions-ca', JSON.stringify(bad))
+      }
+    })
+  }
+})
+
+test('an entrance counts only from the publisher whose claim on the apex won', async () => {
+  const both = { ...FRONT_DOOR_ZONE, 'pluginthematrix.com': { ...FRONT_DOOR_ZONE['pluginthematrix.com'],
+    publishers: [{ pubkey, label: 'Jaime', primary: true }, { pubkey: assessor, label: 'Other' }] } }
+  const theirs = (H, claimsApex) => indexWith(assessorKey, { roots: { mine: head }, doors: { mine: ['pluginthematrix.com'] },
+    // Not the apex: a name of their own under it, which their claim does win.
+    addresses: claimsApex ? { 'pluginthematrix.com': 'mine' } : { 'shop.pluginthematrix.com': 'mine' },
+    entrances: { 'pluginthematrix.com': { page: H, powers: ALL_POWERS, other: 'elsewhere.pluginthematrix.com' } } })
+  // The apex is the winner's; another key's entrance there turns nothing on,
+  // even beside an address that key does hold.
+  const plain = await entranceEnv(null, { bindings: both })
+  holdIndex(plain.env, await theirs(plain.H, false))
+  await withoutCard(async () => {
+    for (const request of [phone(`${APEX}/`), desk(`${APEX}/`)]) {
+      assert.equal(carriedDoor(await (await worker.fetch(request, plain.env)).text()).lineage, 'pointblanksolutions-ca')
+    }
+    assert.equal(carriedDoor(await pageAt('https://shop.pluginthematrix.com/', plain.env)).lineage, 'mine')
+  })
+  // The winner's own entrance is the one used, beside the other key's.
+  const signed = await entranceEnv({ powers: ALL_POWERS, other: HOME }, { bindings: both })
+  holdIndex(signed.env, await theirs(signed.H, false))
+  await withoutCard(async () => {
+    assert.equal((await worker.fetch(desk(`${APEX}/`), signed.env)).headers.get('location'), `https://${HOME}/`)
+  })
+  // Both keys claim the apex: contested binds nobody and turns on no entrance — the card answers.
+  const contested = await entranceEnv({ powers: ALL_POWERS, other: HOME }, { bindings: both })
+  holdIndex(contested.env, await theirs(contested.H, true))
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('host card', { headers: { 'content-type': 'text/html' } })
+  try {
+    for (const request of [phone(`${APEX}/`), desk(`${APEX}/`)]) {
+      const res = await worker.fetch(request, contested.env)
+      assert.equal(res.status, 200)
+      assert.equal(await res.text(), 'host card')
+    }
+  } finally { globalThis.fetch = realFetch }
+})
+
+test('a phone gets the page H; another device goes to the other entrance, never served at the apex', async () => {
+  const { env, H, asked } = await entranceEnv({ powers: ALL_POWERS, other: HOME })
+  const isPage = async (request, why) => {
+    const res = await worker.fetch(request, env)
+    assert.equal(res.status, 200, why)
+    assert.equal(await bodyHash(res), H, why)
+  }
+  const isOther = async (request, why) => {
+    const res = await worker.fetch(request, env)
+    assert.equal(res.status, 302, why)
+    assert.equal(res.headers.get('location'), `https://${HOME}/`, why)
+  }
+  await withoutCard(async () => {
+    await isPage(phone(`${APEX}/`), 'the mobile hint ?1')
+    await isOther(desk(`${APEX}/`), 'the mobile hint ?0')
+    await isOther(desk(`${APEX}/work/anything?x=1`), 'any page path, for another device')
+    // With no hint, the user agent decides — and an Android tablet is not a phone.
+    await isPage(page(`${APEX}/`, { 'user-agent': UA.iphone }), 'an iPhone')
+    await isPage(page(`${APEX}/`, { 'user-agent': UA.androidPhone }), 'an Android phone')
+    await isOther(page(`${APEX}/`, { 'user-agent': UA.androidTablet }), 'an Android tablet')
+    await isOther(page(`${APEX}/`, { 'user-agent': UA.desktop }), 'a desktop')
+    await isOther(page(`${APEX}/`), 'no hint and no agent')
+    // The hint outranks the agent; ?entrance= outranks both.
+    await isOther(page(`${APEX}/`, { 'user-agent': UA.androidPhone, 'sec-ch-ua-mobile': '?0' }), '"Desktop site" on a phone')
+    await isPage(desk(`${APEX}/?entrance=phone`), '?entrance=phone')
+    await isOther(phone(`${APEX}/?entrance=other`), '?entrance=other')
+    // A phone gets the page at / only; every other page path goes there, query kept.
+    for (const [path, to] of [['/index.html', '/'], ['/main.js', '/'], ['/work/anything?entrance=phone', '/?entrance=phone']]) {
+      const moved = await worker.fetch(phone(`${APEX}${path}`), env)
+      assert.equal(moved.status, 302, path)
+      assert.equal(moved.headers.get('location'), to, path)
+    }
+    // HEAD answers the same headers with no body.
+    const bare = await worker.fetch(new Request(`${APEX}/`, { method: 'HEAD', headers: { 'sec-ch-ua-mobile': '?1' } }), env)
+    assert.equal(bare.status, 200)
+    assert.equal(bare.headers.get('content-type'), 'text/html; charset=utf-8')
+    assert.equal(await bare.text(), '')
+  })
+  assert.deepEqual(asked, [], 'the visitor shell never answers on this origin')
+  // With no other entrance, every device gets the page.
+  const one = await entranceEnv({ powers: ALL_POWERS })
+  await withoutCard(async () => {
+    for (const request of [desk(`${APEX}/`), page(`${APEX}/`, { 'user-agent': UA.androidTablet }), phone(`${APEX}/?entrance=other`)]) {
+      const res = await worker.fetch(request, one.env)
+      assert.equal(res.status, 200)
+      assert.equal(await bodyHash(res), one.H)
+    }
+  })
+})
+
+test('powers on: the exact policy — the page\'s own script hashes and blob:, never self or unsafe-inline', async () => {
+  const { env } = await entranceEnv({ powers: ALL_POWERS, other: HOME })
+  const hashes = await Promise.all(CARD_SCRIPTS.map(scriptHash))
+  await withoutCard(async () => {
+    const policy = (await worker.fetch(phone(`${APEX}/`), env)).headers.get('content-security-policy')
+    assert.equal(policy, `script-src ${hashes.join(' ')} blob:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`)
+    assert.ok(!policy.split(';')[0].includes("'self'"), 'no script from this origin\'s heap')
+    assert.ok(!policy.includes("'unsafe-inline'"))
+  })
+})
+
+test('powers short of all three serve the same page in a sandbox — no storage, no camera, no reads', async () => {
+  const hashes = await Promise.all(CARD_SCRIPTS.map(scriptHash))
+  for (const powers of [['keep', 'camera'], [], undefined, [...ALL_POWERS, 'share']]) {
+    const { env, H } = await entranceEnv({ powers })
+    await withoutCard(async () => {
+      const res = await worker.fetch(phone(`${APEX}/`), env)
+      assert.equal(res.status, 200)
+      assert.equal(await bodyHash(res), H)
+      assert.equal(res.headers.get('content-security-policy'),
+        `sandbox allow-scripts; script-src ${hashes.join(' ')} blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+        JSON.stringify(powers))
+      assert.equal(res.headers.get('permissions-policy'), NO_DEVICES)
+    })
+  }
+})
+
+test('a page that is missing, fails its hash, or fails the script check gets a page that runs nothing', async () => {
+  const cases = [
+    ['bytes not held', { held: null }],
+    ['bytes that fail their hash', { held: utf8(CARD_PAGE + ' ') }],
+    ['an external script', { pageHtml: '<!doctype html><script src="/x.js"></script><script>ok()</script>' }],
+    ['an external module', { pageHtml: '<!doctype html><script type="module" src="https://cdn.example/x.js"></script>' }],
+    ['a comment opener in a script', { pageHtml: '<!doctype html><script>var a = "<!--"</script>' }],
+    ['a script opener in a script', { pageHtml: '<!doctype html><script>document.write("<script>x()</" + "script>")</script>' }],
+    ['a script never closed', { pageHtml: '<!doctype html><script>x()' }],
+  ]
+  for (const [why, options] of cases) {
+    const { env, asked } = await entranceEnv({ powers: ALL_POWERS }, options)
+    await withoutCard(async () => {
+      const res = await worker.fetch(phone(`${APEX}/`), env)
+      assert.equal(res.status, 503, why)
+      assert.match(res.headers.get('content-security-policy'), /^sandbox; default-src 'none'/, why)
+      assert.equal(res.headers.get('permissions-policy'), NO_DEVICES, why)
+      assert.equal(res.headers.get('cache-control'), 'no-store, private', why)
+      assert.doesNotMatch(await res.text(), /<script/i, why)
+    })
+    assert.deepEqual(asked, [], `${why}: never the visitor shell`)
+  }
+})
+
+test('every entrance answer is kept by no cache — no-store, Vary on the device, no ETag — and the camera is the page\'s own', async () => {
+  const { env, H } = await entranceEnv({ powers: ALL_POWERS, other: HOME })
+  await withoutCard(async () => {
+    const answers = [
+      await worker.fetch(phone(`${APEX}/`), env),             // the page
+      await worker.fetch(desk(`${APEX}/`), env),              // to the other entrance
+      await worker.fetch(phone(`${APEX}/index.html`), env),   // to /
+      await worker.fetch(phone(`${APEX}/`, { 'if-none-match': `"${H}"` }), env), // a validator changes nothing
+    ]
+    assert.deepEqual(answers.map((r) => r.status), [200, 302, 302, 200])
+    for (const res of answers) {
+      assert.equal(res.headers.get('cache-control'), 'no-store, private')
+      assert.equal(res.headers.get('vary'), 'Sec-CH-UA-Mobile, User-Agent')
+      assert.equal(res.headers.get('etag'), null)
+    }
+    const [card] = answers
+    assert.equal(card.headers.get('permissions-policy'), 'camera=(self), microphone=(), geolocation=(), payment=(), usb=()')
+    assert.equal(card.headers.get('content-type'), 'text/html; charset=utf-8')
+    assert.equal(card.headers.get('x-content-type-options'), 'nosniff')
+    assert.equal(card.headers.get('cross-origin-opener-policy'), 'same-origin')
+    assert.equal(card.headers.get('referrer-policy'), 'no-referrer')
+  })
+})
+
+test('the visitor engine is asked without validators, so the asset store\'s 304 never skips its headers', async () => {
+  const { env } = await fixture()
+  const seen = []
+  env.ASSETS = {
+    fetch: async (request) => {
+      seen.push([request.headers.get('if-none-match'), request.headers.get('if-modified-since')])
+      return request.headers.has('if-none-match') ? new Response(null, { status: 304 })
+        : new Response('visitor engine', { headers: { 'content-type': 'text/html' } })
+    },
+  }
+  const res = await worker.fetch(page('https://revolucion.pluginthematrix.com/',
+    { 'if-none-match': '"x"', 'if-modified-since': 'Wed, 01 Jan 2025 00:00:00 GMT' }), env)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('permissions-policy'), NO_DEVICES)
+  assert.ok(seen.length > 0 && seen.every(([etag, since]) => etag === null && since === null))
+})
+
+test('machine paths answer the same on a card door, for every device', async () => {
+  const pool = 'e'.repeat(64)
+  const envs = []
+  for (const entrance of [null, { powers: ALL_POWERS, other: HOME }]) {
+    const { env, H } = await entranceEnv(entrance)
+    env.ASSETS = {
+      fetch: async (request) => {
+        const { pathname } = new URL(request.url)
+        if (pathname === '/favicon.ico') return new Response('mark', { headers: { 'content-type': 'image/x-icon' } })
+        if (pathname === `/content/${pool}/00000000`) return new Response('member', { headers: { 'content-type': 'text/plain' } })
+        return new Response('missing', { status: 404 })
+      },
+    }
+    envs.push({ env, H })
+  }
+  const H = envs[0].H
+  // The signed index is the one thing that differs: its status and type are compared.
+  const indexPaths = new Set([`/${INDEXES}/${pubkey}`, `/hive/${pubkey}`])
+  const paths = [`/${H}`, `/content/${H}`, ...indexPaths, '/favicon.ico', `/content/${pool}/00000000`,
+    `/content/${await sha256Hex('pluginthematrix.com')}/`, '/.well-known/nostr.json', '/hosts', `/${PUBLICATIONS}`]
+  await withoutCard(async () => {
+    for (const path of paths) {
+      for (const [device, hint] of [[phone, '?1'], [desk, '?0']]) {
+        const answers = []
+        for (const { env } of envs) {
+          const res = await worker.fetch(device(`${APEX}${path}`), env)
+          const body = await res.text()
+          answers.push([res.status, res.headers.get('location'), res.headers.get('content-type'), indexPaths.has(path) ? null : body])
+        }
+        assert.deepEqual(answers[1], answers[0], `${path} ${hint}`)
+      }
+    }
+  })
+})
+
+test('a WebSocket upgrade on a front door with a relay goes to the relay unchanged, and nothing else does', async () => {
+  const RELAYED = { ...FRONT_DOOR_ZONE, 'pluginthematrix.com': { ...FRONT_DOOR_ZONE['pluginthematrix.com'], relay: 'relay.pluginthematrix.io' } }
+  const upgrade = (url) => new Request(url, { headers: { upgrade: 'websocket', connection: 'Upgrade',
+    'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==', 'sec-websocket-version': '13' } })
+  // Node cannot build a 101; the worker hands back whatever the relay answered.
+  const switched = { status: 101 }
+  const sent = []
+  const toRelay = () => sent.filter((r) => r.url.startsWith('https://relay.'))
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (input) => {
+    const request = input instanceof Request ? input : new Request(input)
+    sent.push(request)
+    return request.url.startsWith('https://relay.') ? switched : new Response('host card', { headers: { 'content-type': 'text/html' } })
+  }
+  try {
+    const { env } = await fixture(undefined, RELAYED)
+    env.HOST_DOOR_ORIGIN = 'https://door.example'
+    // An upgrade at the apex is forwarded with the same path, query and headers.
+    assert.equal(await worker.fetch(upgrade(`${APEX}/?relay=1`), env), switched)
+    assert.equal(await worker.fetch(upgrade(`${APEX}/some/path?x=1`), env), switched)
+    assert.deepEqual(sent.map((r) => r.url), ['https://relay.pluginthematrix.io/?relay=1', 'https://relay.pluginthematrix.io/some/path?x=1'])
+    assert.equal(sent[1].method, 'GET')
+    assert.equal(sent[1].headers.get('upgrade'), 'websocket')
+    assert.equal(sent[1].headers.get('sec-websocket-key'), 'dGhlIHNhbXBsZSBub25jZQ==')
+    // A request that is not an upgrade is answered here, as before.
+    sent.length = 0
+    assert.equal(await (await worker.fetch(page(`${APEX}/`), env)).text(), 'host card')
+    assert.equal((await worker.fetch(new Request(`${APEX}/${INDEXES}/${pubkey}`), env)).status, 200)
+    // An upgrade on a name under the zone is not the front door's.
+    await worker.fetch(upgrade('https://revolucion.pluginthematrix.com/'), env)
+    assert.deepEqual(toRelay(), [], 'only an upgrade at the apex reaches the relay')
+    // No relay in the binding: no passthrough — the apex answers as it always did.
+    const plain = await fixture(undefined, FRONT_DOOR_ZONE)
+    plain.env.HOST_DOOR_ORIGIN = 'https://door.example'
+    assert.equal(await (await worker.fetch(upgrade(`${APEX}/`), plain.env)).text(), 'host card')
+    // A relay on a binding that is not a front door is never used.
+    const site = await fixture(undefined, { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], relay: 'relay.pluginthematrix.io' } })
+    assert.equal(await (await worker.fetch(upgrade(`${APEX}/`), site.env)).text(), 'visitor engine')
+    assert.deepEqual(toRelay(), [])
+  } finally { globalThis.fetch = realFetch }
+})
+
+// ── the farm: read-through for bare signatures ──────────────────────────────
+// A zone's binding names other hosts that hold the same heap. A bare signature
+// this bucket lacks is read from them in order, believed only when it hashes
+// to its name, and kept here. Only the hostnames count, and never the zone
+// itself.
+
+const FARMED = { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'],
+  farm: ['pluginthematrix.com', 'relay.pluginthematrix.io', 'https://not-a-host.example/', 'second.example'] } }
+
+/** Runs `run` with the farm stubbed: `answer(url)` replies to each read (a
+ *  404 when it gives nothing), and every URL asked is recorded. */
+async function withFarm(answer, run) {
+  const asked = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (input) => {
+    const url = String(input instanceof Request ? input.url : input)
+    asked.push(url)
+    return answer(url) ?? new Response('missing', { status: 404 })
+  }
+  try { await run(asked) } finally { globalThis.fetch = realFetch }
+}
+
+test('a bare signature this bucket lacks is read from the farm in order, verified, served and kept', async () => {
+  const text = 'a picture only the machine holds'
+  const sig = await sha256(text)
+  const { env } = await fixture(undefined, FARMED)
+  await withFarm((url) => url === `https://second.example/${sig}` ? new Response(text) : null, async (asked) => {
+    const res = await worker.fetch(new Request(`${APEX}/${sig}`), env)
+    assert.equal(res.status, 200)
+    assert.equal(await res.text(), text)
+    assert.deepEqual(asked, [`https://relay.pluginthematrix.io/${sig}`, `https://second.example/${sig}`])
+    assert.deepEqual(env.CONTENT.held.get(sig), utf8(text))
+    // The next read is local.
+    asked.length = 0
+    assert.equal(await (await worker.fetch(new Request(`${APEX}/${sig}`), env)).text(), text)
+    assert.deepEqual(asked, [])
+  })
+  // A module a door of the zone imports from /content/ reads through the same way.
+  const module = 'export const kept = 1'
+  const moduleSig = await sha256(module)
+  const door = await fixture(undefined, FARMED)
+  visitorAssets(door.env, [])
+  await withFarm((url) => url === `https://relay.pluginthematrix.io/${moduleSig}` ? new Response(module) : null, async () => {
+    const res = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${moduleSig}`), door.env)
+    assert.equal(res.status, 200)
+    assert.equal(res.headers.get('content-type'), 'text/javascript; charset=utf-8')
+    assert.equal(await res.text(), module)
+    assert.ok(door.env.CONTENT.held.has(moduleSig))
+  })
+})
+
+test('bytes from the farm that do not hash to the name are the same 404, and nothing is kept', async () => {
+  const sig = await sha256('the real bytes')
+  const { env } = await fixture(undefined, FARMED)
+  await withFarm((url) => {
+    if (url.startsWith('https://relay.')) throw new TypeError('fetch failed')
+    // A host that answers a miss with its page, as hypercomb.com does.
+    return new Response('<!doctype html><title>spa</title>', { headers: { 'content-type': 'text/html' } })
+  }, async (asked) => {
+    const res = await worker.fetch(new Request(`${APEX}/${sig}`), env)
+    assert.equal(res.status, 404)
+    assert.equal(await res.text(), 'sig not held\n')
+    assert.deepEqual(asked, [`https://relay.pluginthematrix.io/${sig}`, `https://second.example/${sig}`])
+    assert.ok(!env.CONTENT.held.has(sig))
+  })
+})
+
+test('with no farm in the binding, a miss is the 404 it always was, and nothing is asked', async () => {
+  const sig = await sha256('held only on the farm')
+  const { env } = await fixture()
+  await withFarm(() => new Response('held only on the farm'), async (asked) => {
+    const res = await worker.fetch(new Request(`${APEX}/${sig}`), env)
+    assert.equal(res.status, 404)
+    assert.equal(await res.text(), 'sig not held\n')
+    assert.deepEqual(asked, [])
+  })
+})
+
+test('only a bare signature is read through — never a named file, an alias, a pool, an index or a listing', async () => {
+  const sig = await sha256('held only on the farm')
+  const { env } = await fixture(undefined, FARMED)
+  await withFarm(() => new Response('held only on the farm'), async (asked) => {
+    for (const path of [`/${sig}/picture.png`, `/@resource/${sig}`, `/${sig}/`, `/${sig}/00000000`, `/${sig}/${'d'.repeat(64)}`,
+      `/content/${sig}/`, `/content/${sig}/00000000`, `/${INDEXES}/${'c'.repeat(64)}`, `/hive/${'c'.repeat(64)}`]) {
+      await worker.fetch(new Request(`${APEX}${path}`), env)
+    }
+    assert.deepEqual(asked, [])
+    assert.ok(!env.CONTENT.held.has(sig))
+  })
+})
+
+// The Workers runtime's FixedLengthStream, as far as a put needs it: the bytes
+// pass through, and a stream of any other length errors.
+globalThis.FixedLengthStream ??= class FixedLengthStream extends TransformStream {
+  constructor(length) {
+    let seen = 0
+    super({
+      transform(chunk, controller) {
+        seen += chunk.byteLength
+        if (seen > length) controller.error(new TypeError('longer than its declared length'))
+        else controller.enqueue(chunk)
+      },
+      flush(controller) { if (seen !== length) controller.error(new TypeError('shorter than its declared length')) },
+    })
+  }
+}
+
+const sized = (body) => new Response(body, { headers: { 'content-length': String(utf8(body).byteLength) } })
+
+test('a farm reply that declares its length streams into the bucket, which refuses bytes that are not the name', async () => {
+  const text = 'a bundle the machine holds'
+  const sig = await sha256(text)
+  const { env } = await fixture(undefined, FARMED)
+  await withFarm((url) => url.startsWith('https://relay.') ? sized('a different bundle') : sized(text), async (asked) => {
+    const res = await worker.fetch(new Request(`${APEX}/${sig}`), env)
+    assert.equal(res.status, 200)
+    assert.equal(await res.text(), text)
+    assert.deepEqual(asked, [`https://relay.pluginthematrix.io/${sig}`, `https://second.example/${sig}`])
+    assert.deepEqual(env.CONTENT.held.get(sig), utf8(text))
+  })
+  // A length past the cap is never read at all.
+  const huge = await sha256('too big to take')
+  let pulled = 0
+  const endless = () => new ReadableStream({ pull: (controller) => {
+    if (++pulled > 8) controller.close()
+    else controller.enqueue(utf8('x'))
+  } }, { highWaterMark: 0 })
+  await withFarm(() => new Response(endless(), { headers: { 'content-length': String(26_214_401) } }), async () => {
+    assert.equal((await worker.fetch(new Request(`${APEX}/${huge}`), env)).status, 404)
+    assert.ok(!env.CONTENT.held.has(huge))
+    assert.equal(pulled, 0)
+  })
+})
+
+test('misses of one signature at once share one farm read, one deadline covers every host, and a miss is kept a minute', async () => {
+  const sig = await sha256('asked by two at once')
+  const { env } = await fixture(undefined, FARMED)
+  const signals = []
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const realFetch = globalThis.fetch
+  const asked = []
+  globalThis.fetch = async (input, init) => {
+    asked.push(String(input))
+    signals.push(init?.signal)
+    await gate
+    return new Response('missing', { status: 404 })
+  }
+  try {
+    const both = Promise.all([worker.fetch(new Request(`${APEX}/${sig}`), env), worker.fetch(new Request(`${APEX}/${sig}`), env)])
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    release()
+    assert.deepEqual((await both).map((r) => r.status), [404, 404])
+    assert.deepEqual(asked, [`https://relay.pluginthematrix.io/${sig}`, `https://second.example/${sig}`], 'one read for both')
+    assert.ok(signals[0] instanceof AbortSignal && signals.every((s) => s === signals[0]), 'one deadline for the whole walk')
+    // Every host missed: the next read asks nobody.
+    asked.length = 0
+    assert.equal((await worker.fetch(new Request(`${APEX}/${sig}`), env)).status, 404)
+    assert.deepEqual(asked, [])
+  } finally { globalThis.fetch = realFetch }
+})
+
+// ── a card-door origin stays one ────────────────────────────────────────────
+// Once an apex has served its card, nothing else ever runs there: a miss is
+// the heap's 404, a gone entrance keeps the last page sandboxed, and an index
+// that cannot be read runs nothing. Releasing the origin is the operator's act.
+
+const RUNNABLE_RE = /^\s*(?:text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml)\b/i
+const cardPolicy = (csp) => /^(?:sandbox allow-scripts; )?script-src (?:'sha256-[^']+' )*blob:; connect-src 'self'/.test(csp || '')
+const scriptFree = (csp) => /(?:^|;)\s*sandbox(?![^;]*allow-scripts)/.test(csp || '')
+const ZONE_LAST = 'entrance-last:pluginthematrix.com'
+
+/** An apex that has served its card once, as `entranceEnv` builds it. */
+async function servedCard(entrance = { powers: ALL_POWERS, other: HOME }, options) {
+  const made = await entranceEnv(entrance, options)
+  await withoutCard(async () => {
+    assert.equal(await bodyHash(await worker.fetch(phone(`${APEX}/`), made.env)), made.H)
+  })
+  assert.equal(made.env.HIVES.kv.get(ZONE_LAST), made.H, 'the zone remembers the page it served')
+  return made
+}
+
+/** The apex's publisher signs a newer index, through the zone root. */
+async function resign(env, roots, extra, createdAt) {
+  const res = await putIndexAt(env, 'pluginthematrix.com', await signedIndex(roots, createdAt, {}, undefined, extra))
+  assert.equal(res.status, 200)
+}
+
+const sandboxedCard = async (res, H, why) => {
+  assert.equal(res.status, 200, why)
+  assert.equal(await bodyHash(res), H, why)
+  assert.match(res.headers.get('content-security-policy'), /^sandbox allow-scripts; script-src /, why)
+  assert.equal(res.headers.get('permissions-policy'), NO_DEVICES, why)
+  assert.equal(res.headers.get('cache-control'), 'no-store, private', why)
+}
+
+test('nothing but the card runs on a card-door origin — every path, every device, powers on or off', async () => {
+  const unheld = 'f'.repeat(64)
+  const pool = 'e'.repeat(64)
+  const shapes = [
+    ['powers on', async () => entranceEnv({ powers: ALL_POWERS, other: HOME })],
+    ['powers off', async () => entranceEnv({ powers: ['keep'] })],
+    ['a forgotten entrance', async () => {
+      const made = await servedCard()
+      await resign(made.env, { 'pointblanksolutions-ca': 'b'.repeat(64), camelflage: head },
+        { addresses: { 'pluginthematrix.com': 'pointblanksolutions-ca' } }, 1_800_000_010)
+      return made
+    }],
+    ['an unpublished apex', async () => {
+      const made = await servedCard()
+      await resign(made.env, { camelflage: head }, {}, 1_800_000_010)
+      return made
+    }],
+  ]
+  const paths = ['/', '/index.html', '/main.js', '/x/y', '/hosts', '/@hypercomb', '/trials.json', '/publications.json',
+    `/${TRIALS}`, `/${PUBLICATIONS}`, `/@resource/${unheld}`, `/${unheld}`, `/${unheld}/x`, `/${unheld}/chrome.css`,
+    `/${unheld}/page.html`, `/content/${unheld}`, '/content/page.html', `/content/${pool}/`, '/content/', '/favicon.ico',
+    '/favicon.svg', `/${INDEXES}/${pubkey}`, `/${await sha256Hex('pluginthematrix.com')}/`, '/.well-known/nostr.json',
+    '/grant', '/claim/x', '/nothing.html', '/?entrance=other']
+  for (const [shape, make] of shapes) {
+    const { env, H } = await make()
+    env.ROOT_PATHS = '1'
+    env.ASSETS = {
+      fetch: async (request) => {
+        const { pathname } = new URL(request.url)
+        if (pathname === '/favicon.ico') return new Response('mark', { headers: { 'content-type': 'image/x-icon' } })
+        if (pathname === '/favicon.svg') return new Response('<svg xmlns="http://www.w3.org/2000/svg"/>', { headers: { 'content-type': 'image/svg+xml' } })
+        if (pathname === '/content/page.html' || pathname === '/' || pathname === '/index.html') {
+          return new Response(VISITOR_HTML, { headers: { 'content-type': 'text/html' } })
+        }
+        return new Response('missing', { status: 404 })
+      },
+    }
+    await withoutCard(async () => {
+      for (const path of paths) {
+        for (const [device, name] of [[phone, 'phone'], [desk, 'desktop'], [(url) => page(url, { 'user-agent': UA.desktop }), 'agent']]) {
+          const res = await worker.fetch(device(`${APEX}${path}`), env)
+          const type = res.headers.get('content-type')
+          const body = new Uint8Array(await res.arrayBuffer())
+          if (!body.byteLength || (type && !RUNNABLE_RE.test(type))) continue
+          const csp = res.headers.get('content-security-policy')
+          const isCard = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', body))) === H && cardPolicy(csp)
+          assert.ok(isCard || scriptFree(csp), `${shape} ${name} ${path}: ${res.status} ${type} ${csp}`)
+        }
+      }
+      // The marks still answer as pictures, sandboxed should one be opened as a page.
+      const mark = await worker.fetch(phone(`${APEX}/favicon.svg`), env)
+      assert.deepEqual([mark.status, mark.headers.get('content-type'), mark.headers.get('content-security-policy')],
+        [200, 'image/svg+xml', 'sandbox'], shape)
+    })
+  }
+})
+
+test('a gone entrance keeps the last page, sandboxed — withdrawn, contested or unpublished — until the operator releases it', async () => {
+  const both = { ...FRONT_DOOR_ZONE, 'pluginthematrix.com': { ...FRONT_DOOR_ZONE['pluginthematrix.com'],
+    publishers: [{ pubkey, label: 'Jaime', primary: true }, { pubkey: assessor, label: 'Other' }] } }
+  const roots = { 'pointblanksolutions-ca': 'b'.repeat(64), camelflage: head }
+  const apex = { addresses: { 'pluginthematrix.com': 'pointblanksolutions-ca' } }
+  const gone = [
+    ['a withdrawn entrance', (env) => resign(env, roots, apex, 1_800_000_010)],
+    ['an unpublished apex lineage', (env) => resign(env, { camelflage: head }, apex, 1_800_000_010)],
+    ['doors that leave the zone out', (env) => resign(env, roots, { ...apex, doors: { 'pointblanksolutions-ca': ['other.example'] } }, 1_800_000_010)],
+    ['a contested apex', async (env) => {
+      const theirs = await indexWith(assessorKey, { roots: { mine: head }, doors: { mine: ['pluginthematrix.com'] },
+        addresses: { 'pluginthematrix.com': 'mine' } })
+      assert.equal((await putIndexAt(env, 'pluginthematrix.com', theirs, assessorKey)).status, 201)
+    }],
+  ]
+  for (const [why, go] of gone) {
+    const { env, H } = await servedCard(undefined, { bindings: both })
+    await go(env)
+    await withoutCard(async () => {
+      // Every device gets the page now: the other entrance went with the signature.
+      for (const request of [phone(`${APEX}/`), desk(`${APEX}/`), page(`${APEX}/`, { 'user-agent': UA.desktop })]) {
+        await sandboxedCard(await worker.fetch(request, env), H, why)
+      }
+      const moved = await worker.fetch(phone(`${APEX}/work/anything`), env)
+      assert.deepEqual([moved.status, moved.headers.get('location')], [302, '/'], why)
+    })
+    assert.deepEqual(env.HIVES.writes, [ZONE_LAST], `${why}: written once, when it changed`)
+    // RELEASING THE ORIGIN IS THE OPERATOR'S ACT: the key deleted, the apex is what it was.
+    env.HIVES.kv.delete(ZONE_LAST)
+    rememberingKv(env, env.HIVES.kv)
+    const realFetch = globalThis.fetch
+    globalThis.fetch = async () => new Response('host card', { headers: { 'content-type': 'text/html' } })
+    try {
+      const released = await worker.fetch(phone(`${APEX}/`), env)
+      assert.equal(released.status, 200, `${why}: released`)
+      assert.notEqual(await bodyHash(released), H, `${why}: released`)
+    } finally { globalThis.fetch = realFetch }
+  }
+})
+
+test('an index read that fails runs nothing on an apex that served its card, and the failure is never kept', async () => {
+  const { env, H } = await servedCard()
+  const intact = env.CONTENT
+  let failures = 0
+  env.CONTENT = { ...intact, get: async (key) => {
+    if (key.startsWith(INDEXES)) { failures++; throw new Error('the bucket is down') }
+    return intact.get(key)
+  } }
+  await withoutCard(async () => {
+    for (const request of [phone(`${APEX}/`), desk(`${APEX}/`), phone(`${APEX}/work/anything`)]) {
+      const res = await worker.fetch(request, env)
+      assert.equal(res.status, 503)
+      assert.match(res.headers.get('content-security-policy'), /^sandbox; default-src 'none'/)
+      assert.equal(res.headers.get('cache-control'), 'no-store, private')
+      assert.doesNotMatch(await res.text(), /<script/i)
+    }
+    assert.ok(failures >= 3, 'each request asks again: an unreadable answer is never held')
+    // Machine paths still answer, and a miss there is the heap's.
+    assert.equal(await bodyHash(await worker.fetch(phone(`${APEX}/${H}`), env)), H)
+    assert.equal((await worker.fetch(phone(`${APEX}/@resource/${'f'.repeat(64)}`), env)).status, 404)
+  })
+  // Readable again: the powered card is back.
+  env.CONTENT = intact
+  rememberingKv(env, env.HIVES.kv)
+  await withoutCard(async () => {
+    const res = await worker.fetch(phone(`${APEX}/`), env)
+    assert.equal(await bodyHash(res), H)
+    assert.match(res.headers.get('content-security-policy'), /^script-src /)
+  })
+  // The store that remembers the page cannot be read: nothing runs either.
+  const blind = await servedCard()
+  await resign(blind.env, { 'pointblanksolutions-ca': 'b'.repeat(64), camelflage: head },
+    { addresses: { 'pluginthematrix.com': 'pointblanksolutions-ca' } }, 1_800_000_010)
+  const index = blind.env.HIVES
+  blind.env.HIVES = { get: async (key) => { if (key !== pubkey) throw new Error('KV down'); return index.get(key) }, put: index.put }
+  await withoutCard(async () => {
+    assert.equal((await worker.fetch(phone(`${APEX}/`), blind.env)).status, 503)
+  })
+})
+
+test('an index read that fails on an apex that never served an entrance is today\'s front door, never a 503', async () => {
+  const failing = (env) => {
+    const intact = env.CONTENT
+    const seen = { failures: 0 }
+    env.CONTENT = { ...intact, get: async (key) => {
+      if (key.startsWith(INDEXES)) { seen.failures++; throw new Error('the bucket is down') }
+      return intact.get(key)
+    } }
+    return seen
+  }
+  const card = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => { card.push(String(url)); return new Response('host card', { headers: { 'content-type': 'text/html' } }) }
+  try {
+    // An apex that opens on a creation, or on nothing: unread, either is the card, as before.
+    for (const make of [() => entranceEnv(null), async () => {
+      const { env } = await fixture(undefined, FRONT_DOOR_ZONE)
+      env.HOST_DOOR_ORIGIN = 'https://door.example'
+      rememberingKv(env)
+      return { env }
+    }]) {
+      const { env } = await make()
+      const seen = failing(env)
+      for (const request of [phone(`${APEX}/`), desk(`${APEX}/`)]) {
+        const res = await worker.fetch(request, env)
+        assert.equal(res.status, 200)
+        assert.equal(await res.text(), 'host card')
+      }
+      assert.ok(seen.failures >= 2, 'each request asks again: an unreadable answer is never held')
+      assert.equal(await pageAt(`${APEX}/@resource/${'f'.repeat(64)}`, env), 'host card', 'a miss there is the card\'s, as before')
+      assert.deepEqual(env.HIVES.writes, [])
+    }
+    // …unless the key that would remember an entrance cannot be read either.
+    const { env } = await entranceEnv(null)
+    failing(env)
+    const index = env.HIVES
+    env.HIVES = { get: async (key) => { if (key !== pubkey) throw new Error('KV down'); return index.get(key) }, put: index.put }
+    card.length = 0
+    assert.equal((await worker.fetch(phone(`${APEX}/`), env)).status, 503)
+    assert.deepEqual(card, [])
+  } finally { globalThis.fetch = realFetch }
+})
+
+test('a front door that never had an entrance reads the store once a minute, and answers as it always did', async () => {
+  const { env } = await entranceEnv(null)
+  await withoutCard(async () => {
+    for (let n = 0; n < 4; n++) assert.equal(carriedDoor(await pageAt(`${APEX}/`, env)).lineage, 'pointblanksolutions-ca')
+  })
+  assert.deepEqual(env.HIVES.reads, [ZONE_LAST])
+  assert.deepEqual(env.HIVES.writes, [])
+  // The host card on an apex that opens on nothing is untouched too.
+  const plain = await fixture(undefined, FRONT_DOOR_ZONE)
+  plain.env.HOST_DOOR_ORIGIN = 'https://door.example'
+  const kv = rememberingKv(plain.env)
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('host card', { headers: { 'content-type': 'text/html' } })
+  try {
+    for (const path of ['/', '/hosts', `/@resource/${'f'.repeat(64)}`]) assert.equal(await pageAt(`${APEX}${path}`, plain.env), 'host card', path)
+  } finally { globalThis.fetch = realFetch }
+  assert.deepEqual(kv.writes, [])
 })
