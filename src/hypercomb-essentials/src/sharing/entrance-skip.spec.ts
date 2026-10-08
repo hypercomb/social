@@ -10,6 +10,8 @@ import { EffectBus } from '@hypercomb/core'
 import type { HiveManifest } from './hive-pointer.js'
 
 const ZONE = 'jwize.com'
+/** The app address the entrance runs at. */
+const APP = `business-card.${ZONE}`
 const OWN = 'a'.repeat(64)
 const PUB = 'b'.repeat(64)
 const RUNS = 'c'.repeat(64)
@@ -75,7 +77,7 @@ const { listConcealed } = await import('../concealment/concealment.js')
 const manifests: Record<string, HiveManifest> = {
   [OWN]: {
     roots: {}, createdAt: 1, pubkey: OWN,
-    entrances: { [ZONE]: { page: RUNS, powers: ['keep', 'camera', 'read'], from: { pubkey: PUB, lineage: 'card', at: 1 } } },
+    entrances: { [APP]: { page: RUNS, powers: ['keep', 'camera', 'read'], from: { pubkey: PUB, lineage: 'card', at: 1 } } },
   },
   [PUB]: { roots: { card: HEAD }, createdAt: 2, pubkey: PUB },
 }
@@ -96,13 +98,13 @@ describe('skipping an offered page', () => {
 
     const refreshed = vi.fn()
     const off = EffectBus.on('hidden:refresh', refreshed)
-    EffectBus.emit(ENTRANCE_UPDATE_EFFECT, { zone: ZONE, current: RUNS, offered: NEWER, at: 2 })
-    EffectBus.emit('publish:entrance-skip', { key: 'jwize', zone: ZONE, page: NEWER })
+    EffectBus.emit(ENTRANCE_UPDATE_EFFECT, { host: APP, current: RUNS, offered: NEWER, at: 2 })
+    EffectBus.emit('publish:entrance-skip', { key: 'jwize', host: APP, page: NEWER })
 
     await vi.waitFor(async () => {
       const held = await listConcealed()
       expect(held.map(i => ({ sig: i.sig, scope: i.scope, from: i.from, state: i.state })))
-        .toEqual([{ sig: NEWER, scope: ENTRANCE_SKIP_SCOPE, from: ZONE, state: 'hidden' }])
+        .toEqual([{ sig: NEWER, scope: ENTRANCE_SKIP_SCOPE, from: APP, state: 'hidden' }])
     })
     expect(refreshed).toHaveBeenCalled()
     off()

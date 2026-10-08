@@ -291,6 +291,22 @@ side. A published card serves only the stored image from its own host.
   a host the way text themes are. It needs hive code and a host deploy, as the
   ledger says.
 
+### Slots on a card
+
+Slots are a Hypercomb primitive, not the card's: [slots.md](slots.md). A
+template leaves blanks as slot marks naming one word each; the hive shows an
+unfilled slot as a hexagon silhouette, fills it from an explicit mark, then
+from `sign(word)` on the hive and the hosts it follows, and asks on a miss.
+Passive discovery, the halo and count, `fill`, and the sticky
+`sign('discovery')` observation are all there.
+
+What the card adds is only its words. The business card's template wears
+`name`, up to four roles, up to three contact lines, `portrait`, and the
+middle picture. A card instance wears `slot → signature` marks for the ones it
+chose. A different card with more blanks is a different template signature
+that may reuse every filler this one had. No subdomain is involved: a filler
+is a tile named the word, published from its author's own domain.
+
 ## On a phone: the list is the root
 
 The card page opens on a phone as a directory of people
@@ -439,6 +455,7 @@ useful on day one, so it is the creation the concept is explained with:
 | The middle picture | built in the page (`artSig`). Making it is `/comfy` today; the hive's AI cannot start a picture on its own yet (`comfy:generate` is not a bridge intent) |
 | `jaime-weise/business-card/template` and its theme tiles | built in the hive. The template wears the themed page and a card of name slots; each starter theme is a tile under it wearing the same page and naming its theme. `jaime-weise` keeps its own page and card and wears `view:default=website`; `business-card` wears `hexagons` |
 | `templates:<business-card>` facet and `template` membership | membership in `template` is by name, today. The facet needs a writer in the hive (`facet-succession.ts` exists; no word or bridge op writes this facet) |
+| The card's blanks as slot marks ([slots.md](slots.md)) | not built. Today the template's card carries the name slots as fields of its `card:data`, filled by typing; nothing is a slot mark yet |
 | Templates indexed across public domains (`themes:card`) | not built. It needs the meaning reserved in the pool registry, an offering handler, and the host worker to list it (today it lists `themes:text` only) |
 | The list as the root on a phone; pull a card up into its row, tap a row to grow it; the search always at the top; the dock | built in the card page |
 | Editing a card in place: select, type, drag, size, align and change the template on the card; default elements drawn faint; the ring until Done | built in the card page. The ring lives in the browser at that address, not yet in the hive's clipboard pool |

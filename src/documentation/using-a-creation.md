@@ -206,7 +206,12 @@ domain a front door is set and it becomes part of your hyperdex."
   page. Holding a domain puts its front door in your Hyperdex, by its address,
   at the head you took. So the Hyperdex is your community: one front door per
   domain you hold.
-- **Your own domain's front door is you, first.**
+- **Your own domain's front door is you, first, wherever you run it.** *jwize,
+  2026-10-07:* "of course when someone else uses my domain the root is their
+  hyperdex which is otherdomain.com then they run the hyperdex with the root as
+  your hosted domain." Someone using `jwize.com` sees their own domain at the
+  top; `jwize.com` is the site they are on, one row below. On your own domain,
+  you and the site are one row. Sharing your card shares your own domain.
 - **The Hyperdex is the phone's front page**, hypercomb.io's included. *jwize,
   2026-10-07:* "This is the new front page nothing can change that part for
   now." It is not a setting, and nothing replaces it; the full hive is reached

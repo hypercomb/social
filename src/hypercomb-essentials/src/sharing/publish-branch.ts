@@ -46,8 +46,8 @@ import {
 } from './stage-succession.js'
 import { isReservedRootKey } from './hive-link.js'
 import {
-  APEX_LABEL, ENTRANCES_MAX, ENTRANCE_POWERS, creationUrl, entranceOther, foldContentLabel, isPoweredEntrance, ownAddressHost,
-  ownAddressRefusal, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
+  ENTRANCES_MAX, ENTRANCE_POWERS, boundLineage, creationUrl, entranceHost, foldContentLabel, isPoweredEntrance, ownAddressHost,
+  ownAddressRefusal, readEntrance, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
 } from './zone-door.js'
 import type { ModuleAssessmentRecord } from '../assistant/module-review.js'
 
@@ -720,14 +720,15 @@ export async function setBranchAddress(
   return { ok: true, host: label ? ownAddressHost(label, z) || `${label}.${z}` : z }
 }
 
-/** Why a zone's entrance could not be changed — each its own word for the
+/** Why an address's entrance could not be changed — each its own word for the
  *  participant (`publish.entrance.failure.<code>`); `reason` is for logs.
- *  `no-apex` = no creation is the zone itself (`@`), so nothing runs there;
- *  `bad-other` = not host.<zone> nor one of the zone's own addresses;
- *  `powers-unasked` = the write would leave powers on without a Turn on. */
+ *  `root` = the host is a domain's root, whose front door runs no powers;
+ *  `no-address` = the index binds no creation to the host, so nothing runs
+ *  there; `powers-unasked` = the write would leave powers on without a Turn
+ *  on. */
 export type ZoneEntranceFailure =
   | 'services' | 'no-host' | 'no-signer' | 'index-unsafe' | 'index-failed'
-  | 'not-available' | 'scent-failed' | 'no-apex' | 'no-page' | 'too-many' | 'bad-other' | 'powers-unasked'
+  | 'not-available' | 'scent-failed' | 'root' | 'no-address' | 'no-page' | 'too-many' | 'powers-unasked'
 
 /** WHAT THE PARTICIPANT ASKED — never a whole entry. The intent is applied to
  *  the entrance as the index holds it at the moment of writing, so no cached
@@ -737,13 +738,11 @@ export type ZoneEntranceIntent =
   | { kind: 'on'; page: string; from?: ZoneEntranceFrom }
   /** Keep serving the page, with no powers. */
   | { kind: 'off' }
-  /** Where devices that are not phones go; null = the phone entrance. */
-  | { kind: 'other'; other: string | null }
   /** Forget the entrance (the host keeps the last page it served sealed). */
   | { kind: 'forget' }
 
 export type ZoneEntranceResult =
-  | { ok: true; zone: string; entrance: ZoneEntrance | null; reason?: 'unchanged'; assessed?: string }
+  | { ok: true; host: string; entrance: ZoneEntrance | null; reason?: 'unchanged'; assessed?: string }
   | { ok: false; failure: ZoneEntranceFailure; reason?: string }
 
 /** The participant's own review scent for a card page they turned on: the
@@ -751,46 +750,34 @@ export type ZoneEntranceResult =
  *  as its sandbox, so the community reads it beside any other assessment. */
 export const CARD_DOOR_SANDBOX = 'card-door'
 
-/** The entrance an intent leaves, from what the index holds now. Pure. */
-export function applyEntranceIntent(
-  before: ZoneEntrance | null, intent: ZoneEntranceIntent, zone: string, addresses: Record<string, string>,
-): ZoneEntrance | null {
-  const norm = (entry: ZoneEntrance): ZoneEntrance | null => readEntrances({ [zone]: entry }, addresses)[zone] ?? null
+/** The entrance an intent leaves, from what the index holds now. Pure; the
+ *  shape only — whether the host is bound is the index's own question. */
+export function applyEntranceIntent(before: ZoneEntrance | null, intent: ZoneEntranceIntent): ZoneEntrance | null {
   switch (intent.kind) {
     case 'on': {
       const from = intent.from ?? before?.from
-      return norm({
-        page: intent.page, powers: [...ENTRANCE_POWERS],
-        ...(before?.other ? { other: before.other } : {}), ...(from ? { from } : {}),
-      })
+      return readEntrance({ page: intent.page, powers: [...ENTRANCE_POWERS], ...(from ? { from } : {}) })
     }
-    case 'off': return before ? norm({ ...before, powers: [] }) : null
-    case 'other': {
-      if (!before && !intent.other) return null
-      const next: ZoneEntrance = { ...(before ?? {}) }
-      if (intent.other) next.other = intent.other
-      else delete next.other
-      // An entry the change leaves empty is forgotten, not refused.
-      return norm(next)
-    }
+    case 'off': return before ? readEntrance({ ...before, powers: [] }) : null
     case 'forget': return null
   }
 }
 
-/** THE PARTICIPANT TURNS A ZONE'S POWERS ON, OR OFF — the one writer of the
- *  signed `entrances[zone]` (documentation/using-a-creation.md, "Powers are
- *  off by default, and the participant turns them on"). Never remote: the
- *  bridge has no intent for it, because a review is not a single tap.
+/** THE PARTICIPANT TURNS AN ADDRESS'S POWERS ON, OR OFF — the one writer of
+ *  the signed `entrances[host]` (documentation/using-a-creation.md, "Powers
+ *  are off by default, and the participant turns them on"). The Hyperdex app
+ *  runs at its own address (`business-card.<zone>`), never at a domain's
+ *  root: the root is a plain front door. Never remote: the bridge has no
+ *  intent for it, because a review is not a single tap.
  *
- *  It reads the index, applies the INTENT to the entrance it holds now, and
- *  signs — one read-modify-write:
+ *  It reads the index at the host's zone root, applies the INTENT to the
+ *  entrance it holds now, and signs — one read-modify-write:
  *  - `on` sets the page and all three powers, and in the SAME signed write
  *    records the participant's own review scent for the page as
- *    `roots['assess:<page>']`. Only `on` needs a creation at the apex
- *    (`addresses[zone]`) and the page held on the host.
+ *    `roots['assess:<page>']`. Only `on` needs the host bound to a creation
+ *    (`boundLineage`), never a domain's root, and the page held on the host.
  *  - `off` keeps the page and sets no powers: the host keeps serving it, so
  *    cards visitors already kept stay unreadable to any other code there.
- *  - `other` changes only where other devices go.
  *  - `forget` removes the entry; the panel asks first.
  *
  *  HARD GUARD: no write leaves powers on unless the intent is `on`, or the
@@ -798,36 +785,42 @@ export function applyEntranceIntent(
  *
  *  Refuses, before anything is signed, an index it cannot read (the wipe
  *  guard). */
-export async function setZoneEntrance(zone: string, intent: ZoneEntranceIntent): Promise<ZoneEntranceResult> {
+export async function setEntrance(host: string, intent: ZoneEntranceIntent): Promise<ZoneEntranceResult> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
   const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
   if (!signer?.getPublicKeyHex) return { ok: false, failure: 'services' }
-  const z = foldContentLabel(zone)
-  if (!z || LOOPBACK_RE.test(z) || ownAddressHost(APEX_LABEL, z) !== z) return { ok: false, failure: 'no-host', reason: 'not a zone' }
+  const h = entranceHost(String(host ?? '').toLowerCase())
+  if (!h) return { ok: false, failure: 'no-host', reason: 'not an address' }
   if (intent.kind === 'on' && !SIG_RE.test(String(intent.page ?? '').toLowerCase())) return { ok: false, failure: 'no-page' }
-  if (intent.kind === 'other' && intent.other && !entranceOther(intent.other, z)) return { ok: false, failure: 'bad-other' }
 
   const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
-  // The zone itself first — it is where the entrance is served — then the
-  // standing targets, against the same shared index.
-  const nodes = [...new Set([z, ...await nodesFor([], hostSync)])]
+  // THE ZONE ROOT carries the write — the host itself when it is one of the
+  // standing write doors, else the domain it sits under — then the standing
+  // targets, against the same shared index.
+  const standing = await nodesFor([], hostSync)
+  const rest = h.slice(h.indexOf('.') + 1)
+  const zone = standing.includes(h) || !rest.includes('.') ? h : rest
+  const nodes = [...new Set([zone, ...standing])]
   hostSync?.addPublishNodes?.(nodes)
   const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
   const nothing = !read.ok && read.reason === 'http' && read.status === 404
   if (!read.ok && !nothing) return { ok: false, failure: 'index-unsafe', reason: read.reason }
   const manifest = read.ok ? read.manifest : null
-  const addresses = manifest?.addresses ?? {}
   const held = manifest?.entrances ?? {}
-  const before = held[z] ?? null
+  const before = held[h] ?? null
 
-  // A creation must open the apex for a page to run there. Turning powers
-  // off, choosing Other and forgetting are always allowed: an entrance whose
-  // apex went away must still be possible to switch off.
-  if (intent.kind === 'on' && !addresses[z]) return { ok: false, failure: 'no-apex' }
-  if (intent.kind === 'other' && intent.other && !entranceOther(intent.other, z, addresses)) return { ok: false, failure: 'bad-other' }
+  // A DOMAIN'S ROOT IS A PLAIN FRONT DOOR on every device: nothing may run
+  // with powers there. And a creation must live at the address for a page to
+  // run there. Turning powers off and forgetting are always allowed: an
+  // entrance whose address went away must still be possible to switch off.
+  if (intent.kind === 'on') {
+    const roots = new Set([...standing, ...Object.values(manifest?.doors ?? {}).flat().map(z => String(z ?? '').toLowerCase())])
+    if (roots.has(h)) return { ok: false, failure: 'root' }
+    if (!boundLineage(manifest, h)) return { ok: false, failure: 'no-address' }
+  }
 
-  const next = applyEntranceIntent(before, { ...intent, ...(intent.kind === 'on' ? { page: intent.page.toLowerCase() } : {}) } as ZoneEntranceIntent, z, addresses)
+  const next = applyEntranceIntent(before, intent.kind === 'on' ? { ...intent, page: intent.page.toLowerCase() } : intent)
   if (isPoweredEntrance(next) && intent.kind !== 'on' && !(isPoweredEntrance(before) && before?.page === next?.page)) {
     return { ok: false, failure: 'powers-unasked' }
   }
@@ -836,13 +829,13 @@ export async function setZoneEntrance(zone: string, intent: ZoneEntranceIntent):
     const strip = (e: ZoneEntrance | null) => e?.from ? { ...e, from: { pubkey: e.from.pubkey, lineage: e.from.lineage } } : e
     return JSON.stringify(strip(a)) === JSON.stringify(strip(b))
   }
-  if (same(before, next)) return { ok: true, zone: z, entrance: before, reason: 'unchanged' }
+  if (same(before, next)) return { ok: true, host: h, entrance: before, reason: 'unchanged' }
   if (next && !before && Object.keys(held).length >= ENTRANCES_MAX) {
     return { ok: false, failure: 'too-many', reason: `a host keeps at most ${ENTRANCES_MAX} entrances` }
   }
 
   // THE PAGE MUST BE HELD before powers run it — asked only when this write
-  // turns a page's powers on. Off, Other and Forget never wait on a receipt.
+  // turns a page's powers on. Off and Forget never wait on a receipt.
   const page = next?.page ?? ''
   const raising = !!next && isPoweredEntrance(next) && (page !== before?.page || !isPoweredEntrance(before))
   if (raising) {
@@ -882,20 +875,23 @@ export async function setZoneEntrance(zone: string, intent: ZoneEntranceIntent):
   let assessed: string | undefined
   const scentKey = `assess:${page}`
   if (raising && !roots[scentKey]) {
-    const scent = await cardDoorScent(page, z, indexHost, hostSync)
+    const scent = await cardDoorScent(page, h, indexHost, hostSync)
     if ('error' in scent) return { ok: false, failure: 'scent-failed', reason: scent.error }
     roots[scentKey] = scent.sig
     assessed = scent.sig
   }
 
   const entrances: Record<string, ZoneEntrance> = { ...held }
-  if (next) entrances[z] = next
-  else delete entrances[z]
+  if (next) entrances[h] = next
+  else delete entrances[h]
   const put = await putHiveManifest(indexHost, roots, manifest?.doors ?? {},
     manifest?.createdAt ?? 0, { ...(manifest?.signedContent ?? {}), entrances },
     { setsEntrances: true, ...(createdAt ? { createdAt } : {}) })
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
-  return { ok: true, zone: z, entrance: next, ...(assessed ? { assessed } : {}) }
+  // What the write signed, after its own normalisation: an entry on a host
+  // the index no longer binds is dropped there, never kept here.
+  const written = next && manifest ? readEntrances({ [h]: next }, manifest)[h] ?? null : next
+  return { ok: true, host: h, entrance: written, ...(assessed ? { assessed } : {}) }
 }
 
 /** Mint and publish the participant's review scent for page `page`: a note
@@ -903,7 +899,7 @@ export async function setZoneEntrance(zone: string, intent: ZoneEntranceIntent):
  *  assessment record, sent to the host now and read back by hash. The index
  *  pointer `assess:<page>` is the caller's, in its own signed write. */
 async function cardDoorScent(
-  page: string, zone: string, host: string, hostSync: HostSyncLike | undefined,
+  page: string, address: string, host: string, hostSync: HostSyncLike | undefined,
 ): Promise<{ sig: string } | { error: string }> {
   const store = get<StoreLike>(STORE_KEY)
   if (!store?.putResource || !hostSync?.publishAtoms) return { error: 'the review scent cannot be published from here' }
@@ -915,7 +911,7 @@ async function cardDoorScent(
     return sig
   }
   try {
-    const noteText = await put(`Previewed and turned on for ${zone}.`, 'text/plain; charset=utf-8')
+    const noteText = await put(`Previewed and turned on for ${address}.`, 'text/plain; charset=utf-8')
     const note = await put(JSON.stringify(mintMetaEnvelope({ resource: noteText, relation: 'note' })), 'application/json')
     const record: ModuleAssessmentRecord = {
       kind: 'module-assessment', sandbox: CARD_DOOR_SANDBOX, root: page, change: null, verdict: 'accept', note, at: Date.now(),

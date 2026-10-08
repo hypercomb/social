@@ -1,26 +1,27 @@
 // sharing/entrance-scout.service.ts
 //
-// THE PAGE YOUR DOMAIN RUNS HAS A NEWER VERSION — a notice, never a swap
+// THE PAGE YOUR ADDRESS RUNS HAS A NEWER VERSION — a notice, never a swap
 // (documentation/using-a-creation.md, "Powers are off by default, and the
 // participant turns them on"). Copied from the shape of update-scout.service:
 // once per boot, off the critical path, it reads the participant's own signed
 // index and, for every powered entrance that follows a publisher (`from`),
 // asks that publisher's index where the followed lineage's head stands and
 // which card page that head wears (pageAtHead). A page that is not the one the
-// domain runs, and that the participant has not skipped, is announced as
-// `entrance:update-available { zone, current, offered }`.
+// address runs, and that the participant has not skipped there, is announced
+// as `entrance:update-available { host, current, offered, at, head }`.
 //
 // It TAKES NOTHING AND WRITES NOTHING. There is no counterpart to
-// `takeIfAllowed`: a new page changes the domain only when the participant
-// previews it and turns it on (setZoneEntrance). It does not reuse
+// `takeIfAllowed`: a new page changes the address only when the participant
+// previews it and turns it on (setEntrance). It does not reuse
 // `update:available`, which means a package update.
 //
 // SKIPPING is putting a version away, the held-item rule (current on top; a
 // skip leaves the next version in line; delete is a local forget): the Publish
 // panel conceals the offered page under ENTRANCE_SKIP_SCOPE in the
 // `hidden:items` pool (concealment/concealment.ts — hide first, delete
-// second), and this scout reads that set back. Nothing here keeps a list of
-// its own.
+// second) with the address as where it came from, and this scout reads that
+// set back as `<host> <page>`: a skip at one address is not a skip at
+// another. Nothing here keeps a list of its own.
 //
 // Trust: both indexes are schnorr-verified against the pinned key
 // (fetchHiveManifestFromAny), and every byte read on the way to a page is
@@ -47,8 +48,9 @@ const BOOT_CHECK_DELAY_MS = 12_000
 const SIG_RE = /^[a-f0-9]{64}$/
 
 export interface EntranceUpdate {
-  zone: string
-  /** The page the domain runs now (H). */
+  /** The address the entrance runs at — `business-card.<zone>`, never a root. */
+  host: string
+  /** The page the address runs now (H). */
   current: string
   /** The newer page the followed publisher's head wears. */
   offered: string
@@ -65,7 +67,7 @@ export type EntranceScoutDeps = {
   fetchManifest?: typeof fetchHiveManifestFromAny
   /** The card page a head wears, read from these hosts. */
   pageAt?: (head: string, hosts: readonly string[]) => Promise<string | null>
-  /** Pages the participant put away. */
+  /** What the participant put away, as `<host> <page>`. */
   skipped?: () => Promise<ReadonlySet<string>>
   emit?: (update: EntranceUpdate) => void
 }
@@ -93,16 +95,19 @@ const defaultPageAt = (head: string, hosts: readonly string[]): Promise<string |
   return pageAtHead(head, { layer: bytes, resource: bytes })
 }
 
-/** Every page the participant skipped (hidden or deleted alike). */
+/** Every page the participant skipped (hidden or deleted alike), as
+ *  `<host> <page>` — the address it was skipped at, then the page. */
 export async function skippedEntrancePages(): Promise<ReadonlySet<string>> {
   try {
-    return new Set((await listConcealed()).filter(item => item.scope === ENTRANCE_SKIP_SCOPE).map(item => item.sig))
+    return new Set((await listConcealed())
+      .filter(item => item.scope === ENTRANCE_SKIP_SCOPE)
+      .map(item => `${item.from} ${item.sig}`))
   } catch { return new Set() }
 }
 
 export class EntranceScoutService {
 
-  /** What this session already announced, `<zone> <offered>` — one notice each. */
+  /** What this session already announced, `<host> <offered>` — one notice each. */
   readonly #announced = new Set<string>()
 
   /** One demand-driven look. Returns the updates it announced. */
@@ -121,7 +126,7 @@ export class EntranceScoutService {
     const pageAt = deps.pageAt ?? defaultPageAt
     const emit = deps.emit ?? ((update: EntranceUpdate) => EffectBus.emit(ENTRANCE_UPDATE_EFFECT, update))
     const announced: EntranceUpdate[] = []
-    for (const [zone, entrance] of followed) {
+    for (const [host, entrance] of followed) {
       const from = entrance.from!
       const publisher = from.pubkey === pubkey ? own : await fetchManifest(hosts, from.pubkey)
       // ONLY A LATER INDEX CAN OFFER AN UPDATE. A page that merely differs
@@ -137,11 +142,11 @@ export class EntranceScoutService {
       // entry that never recorded its head keeps the stamp rule alone.
       if (from.head && head === from.head) continue
       const offered = await pageAt(head, hosts).catch(() => null)
-      if (!offered || offered === entrance.page || skipped.has(offered)) continue
-      const said = `${zone} ${offered}`
+      const said = `${host} ${offered}`
+      if (!offered || offered === entrance.page || skipped.has(said)) continue
       if (this.#announced.has(said)) continue
       this.#announced.add(said)
-      const update = { zone, current: entrance.page!, offered, at: publisher.createdAt, head }
+      const update = { host, current: entrance.page!, offered, at: publisher.createdAt, head }
       emit(update)
       announced.push(update)
     }
@@ -162,7 +167,7 @@ export type PageBytesDeps = {
 }
 
 /** The bytes named `page`, held here or read from these hosts — and only if
- *  they hash to that name. What a preview shows is exactly what the domain
+ *  they hash to that name. What a preview shows is exactly what the address
  *  would serve. */
 export async function readPageBytes(page: string, hosts: readonly string[], deps: PageBytesDeps = {}): Promise<Uint8Array | null> {
   const sig = String(page ?? '').toLowerCase()

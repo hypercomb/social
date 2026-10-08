@@ -158,29 +158,32 @@ export const readAddresses = (raw: unknown, roots: Record<string, string>): Reco
   return out
 }
 
-// ── the entrance a zone runs ───────────────────────────────────────────
+/// ── the entrance an app address runs ───────────────────────────────────
 //
 // POWERS ARE OFF BY DEFAULT, AND THE PARTICIPANT TURNS THEM ON
-// (documentation/using-a-creation.md). The signed index may carry
-// `entrances: { "<zone>": { page, powers, other, from } }`, keyed by the zone
-// and never by a lineage:
+// (documentation/using-a-creation.md). The Hyperdex app lives at its OWN
+// ADDRESS — `business-card.<zone>` — and its powers are turned on for THAT
+// address, never for a domain's root: a separate address is a separate browser
+// storage, so the cards visitors keep live at the app address, and the root
+// stays a plain front door that can change freely. The signed index may carry
+// `entrances: { "<host>": { page, powers, from } }`, keyed by the host:
 //
 //   page    the one card page (htmlSig) the participant previewed — the bytes
-//           the domain serves at its root, by signature;
+//           the address serves at `/`, by signature;
 //   powers  what that page may do there; version 1 is all or nothing, so only
-//           all three together turn anything on;
-//   other   where any device that is not a phone goes (`host.<zone>` or one of
-//           the zone's own `<label>.<zone>` addresses); absent = every device
-//           gets the phone entrance;
+//           exactly `keep`, `camera` and `read` turn anything on;
 //   from    whose page this is followed from, `at`: the followed index's stamp
 //           (whole seconds) when the participant turned it on, and `head`: the
 //           followed lineage's head layer then. Only a later stamp AND a moved
 //           head can offer an update. Read by the hive only; the host ignores
 //           it.
 //
-// The entry counts only where the same publisher's `addresses[zone]` opens the
-// zone apex; that is the host's check, so no entry is pruned here. `other` IS
-// pruned: it must still be `host.<zone>` or an address the same index names.
+// An entry counts only while the same index BINDS its host to a lineage
+// (`boundLineage`): its own address, or the implicit `<key>.<zone>` label of a
+// published key. Every read and every write drops an entry whose host is no
+// longer bound — so unpublishing, closing a door or moving an address takes
+// the entrance with it. The host remembers the last page it served with
+// powers and serves it sealed; releasing that is an operator act.
 
 /** The powers a card door may be given — keep the visitor's cards, use the
  *  camera, read other hosts. Version 1 grants all three or none. */
@@ -199,44 +202,77 @@ export interface ZoneEntranceFrom {
 export interface ZoneEntrance {
   page?: string
   powers?: EntrancePower[]
-  other?: string
   from?: ZoneEntranceFrom
+}
+
+/** What an index says about where its creations live — the three maps that
+ *  decide whether an entrance's host is bound. */
+export interface EntranceBinding {
+  roots: Record<string, string>
+  addresses?: Record<string, string>
+  doors?: Record<string, readonly string[]>
 }
 
 const ENTRANCE_SIG_RE = /^[a-f0-9]{64}$/
 const MAX_FOLLOWED_LINEAGE = 512
+const MAX_HOST = 253
+/** The host refuses a powers list longer than this (worker ENTRANCE_POWERS_MAX). */
+const ENTRANCE_POWERS_MAX = 8
 /** The host refuses an index naming more (worker ENTRANCES_MAX). */
 export const ENTRANCES_MAX = 16
 
-/** Where a non-phone device may be sent from `zone`: `host.<zone>` or a
- *  `<label>.<zone>` own address. '' when `raw` is neither. With `addresses`,
- *  a `<label>.<zone>` must also be an address that map names — an address
- *  given up takes its entrance choice with it. */
-export const entranceOther = (raw: unknown, zone: unknown, addresses?: Record<string, string>): string => {
-  const z = foldContentLabel(zone)
+/** An entrance's host: lower case, at most 253 characters, more than one
+ *  label, every label a DNS label — or '' when `raw` is not one. Loopback has
+ *  no DNS labels in front of it, so it is never one. */
+export const entranceHost = (raw: unknown): string => {
   const h = bareHost(raw)
-  if (!z || !h.endsWith(`.${z}`)) return ''
-  const label = h.slice(0, h.length - z.length - 1)
-  if (label === HOST_DOOR_LABEL) return h
-  if (label === APEX_LABEL || !isOwnAddressLabel(label)) return ''
-  return !addresses || h in addresses ? h : ''
+  if (!h || h.length > MAX_HOST || LOOPBACK_RE.test(h)) return ''
+  const labels = h.split('.')
+  return labels.length > 1 && labels.every(label => DNS_LABEL_RE.test(label)) ? h : ''
 }
 
-/** One entry, leniently: an invalid field is dropped, never the entry; an
- *  entry with nothing valid left is null. Powers without a page mean nothing
- *  and are dropped with it. */
-const readEntrance = (raw: unknown, zone: string, addresses?: Record<string, string>): ZoneEntrance | null => {
+/** THE LINEAGE AN INDEX BINDS `host` TO, or ''. Its own address first (an
+ *  `addresses` entry — a `<label>.<zone>` or an apex claim); otherwise the
+ *  implicit label: `<key>.<rest>` names the published key `key` when `key` is
+ *  an own-address label (never `@`) and the key's doors are unset or open on
+ *  `rest` (or a zone `rest` sits under). An entrance counts only while this
+ *  is not empty. */
+export const boundLineage = (index: EntranceBinding | null | undefined, host: unknown): string => {
+  const h = bareHost(host)
+  if (!index || !h) return ''
+  const own = index.addresses?.[h]
+  if (own) return own
+  const dot = h.indexOf('.')
+  if (dot <= 0) return ''
+  const label = h.slice(0, dot)
+  const rest = h.slice(dot + 1)
+  if (label === APEX_LABEL || !isOwnAddressLabel(label) || !(label in (index.roots ?? {}))) return ''
+  const zones = index.doors?.[label]
+  if (zones === undefined) return label
+  return zones.some(z => {
+    const zone = String(z ?? '').trim().toLowerCase()
+    return !!zone && (rest === zone || rest.endsWith(`.${zone}`))
+  }) ? label : ''
+}
+
+/** One entry's SHAPE, leniently: an invalid field is dropped, never the
+ *  entry; an unknown field (a leftover `other` included) is dropped; an entry
+ *  with nothing valid left is null. Powers without a page mean nothing and
+ *  are dropped with it. A powers list that is not a short list of unique
+ *  known powers is dropped whole — a field this hive cannot read never turns
+ *  powers on. */
+export const readEntrance = (raw: unknown): ZoneEntrance | null => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const entry = raw as Record<string, unknown>
   const out: ZoneEntrance = {}
   const page = String(entry['page'] ?? '').trim().toLowerCase()
   if (ENTRANCE_SIG_RE.test(page)) out.page = page
-  if (out.page && Array.isArray(entry['powers'])) {
-    const named = new Set(entry['powers'].map(p => String(p ?? '').trim().toLowerCase()))
-    out.powers = ENTRANCE_POWERS.filter(p => named.has(p))
+  const powers = entry['powers']
+  if (out.page && Array.isArray(powers) && powers.length <= ENTRANCE_POWERS_MAX
+    && new Set(powers).size === powers.length
+    && powers.every(p => (ENTRANCE_POWERS as readonly unknown[]).includes(p))) {
+    out.powers = ENTRANCE_POWERS.filter(p => powers.includes(p))
   }
-  const other = entranceOther(entry['other'], zone, addresses)
-  if (other) out.other = other
   const from = entry['from']
   if (from && typeof from === 'object' && !Array.isArray(from)) {
     const f = from as Record<string, unknown>
@@ -255,25 +291,28 @@ const readEntrance = (raw: unknown, zone: string, addresses?: Record<string, str
   return Object.keys(out).length > 0 ? out : null
 }
 
-/** The signed `entrances` map, leniently: a key that is not a real zone, or an
- *  entry with nothing valid in it, drops that entry — never the whole index.
- *  The same rules normalize every write (putHiveManifest), with the index's
- *  own `addresses`. */
-export const readEntrances = (raw: unknown, addresses?: Record<string, string>): Record<string, ZoneEntrance> => {
+/** The signed `entrances` map, leniently: a key that is not a host, a host
+ *  the index does not bind (`boundLineage`), or an entry with nothing valid in
+ *  it drops that entry — never the whole index; at most sixteen are kept. The
+ *  same rules normalize every write (putHiveManifest), against the roots,
+ *  addresses and doors that write signs. */
+export const readEntrances = (raw: unknown, index: EntranceBinding): Record<string, ZoneEntrance> => {
   const out: Record<string, ZoneEntrance> = {}
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    const zone = foldContentLabel(key)
-    if (!zone.includes('.') || ownAddressHost(APEX_LABEL, zone) !== zone) continue
-    const entry = readEntrance(value, zone, addresses)
-    if (entry && (zone in out || Object.keys(out).length < ENTRANCES_MAX)) out[zone] = entry
+    const host = entranceHost(key)
+    if (!host || !boundLineage(index, host)) continue
+    const entry = readEntrance(value)
+    if (entry && (host in out || Object.keys(out).length < ENTRANCES_MAX)) out[host] = entry
   }
   return out
 }
 
-/** Are this entrance's powers on? Version 1: a page AND all three powers. */
-export const isPoweredEntrance = (entrance: ZoneEntrance | null | undefined): boolean =>
-  !!entrance?.page && ENTRANCE_POWERS.every(p => entrance.powers?.includes(p))
+/** Are this entrance's powers on? Version 1: a page AND exactly the three. */
+export const isPoweredEntrance = (entrance: ZoneEntrance | null | undefined): boolean => {
+  const powers = entrance?.powers ?? []
+  return !!entrance?.page && powers.length === ENTRANCE_POWERS.length && ENTRANCE_POWERS.every(p => powers.includes(p))
+}
 
 /** The own address a lineage key holds on `zone`, as its label, or ''. */
 export const ownLabelOn = (addresses: Record<string, string> | undefined, zone: unknown, key: string): string => {

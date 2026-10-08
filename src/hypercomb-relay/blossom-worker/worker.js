@@ -324,14 +324,18 @@ function readAddresses(raw) {
 
 // ── entrances: the participant's signed turn-on ──────────────────────────────
 //
-// `entrances: { "<zone>": { page, powers, other, from } }` in the same signed
-// index. It is read only for a front-door apex, and only from the publisher
-// whose `addresses[<zone>]` claim on that apex won (zonePlaces), so nobody can
-// turn on a page at an apex they do not open. Without a `page` the entry does
-// nothing. `page` is the card page's signature, H. `powers` is all or nothing
-// in this version: exactly keep, camera and read turns them on. `other` is
-// where every device but a phone is sent. `from` is the hive's own note of
-// where the page came from, and the worker never reads it.
+// `entrances: { "<host>": { page, powers, from } }` in the same signed index,
+// keyed by the APP ADDRESS (jwize 2026-10-07: the Hyperdex lives at
+// `business-card.<yourdomain>`), never by a zone root: a root is a plain front
+// door that runs no powers. It is read only for a site host under a zone (a
+// card door, cardDoorHost), and only from that site's primary publisher, so
+// nobody turns on a page at an address they do not hold. Without a `page` the
+// entry does nothing. `page` is the card page's signature, H. `powers` is all
+// or nothing in this version: exactly keep, camera and read turns them on.
+// `from` is the hive's own note of where the page came from; the worker checks
+// its shape and never reads it. Any other field is ignored on write and
+// dropped on read. Whether the host is the signer's to turn on is judged when
+// the index is read, never when it is written.
 
 const ENTRANCES_MAX = 16
 const ENTRANCE_POWERS = ['keep', 'camera', 'read']
@@ -339,38 +343,37 @@ const ENTRANCE_POWERS_MAX = 8
 const POWER_RE = /^[a-z][a-z0-9-]{0,31}$/
 
 /** One `entrances` entry the index may sign. */
-function validEntrance(zone, raw) {
-  if (!validHostName(zone) || !raw || typeof raw !== 'object' || Array.isArray(raw)) return false
-  const { page, powers, other, from } = raw
+function validEntrance(host, raw) {
+  if (!validHostName(host) || !raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  const { page, powers, from } = raw
   if (page !== undefined && !(typeof page === 'string' && SIG_RE.test(page))) return false
   if (powers !== undefined && !(Array.isArray(powers) && powers.length <= ENTRANCE_POWERS_MAX
     && powers.every((p) => typeof p === 'string' && POWER_RE.test(p)) && new Set(powers).size === powers.length)) return false
-  // Another name under the same zone: host.<zone> or one of its own labels.
-  if (other !== undefined && !(typeof other === 'string' && other.endsWith('.' + zone)
-    && DNS_LABEL_RE.test(other.slice(0, -(zone.length + 1))))) return false
   if (from !== undefined && !(from && typeof from === 'object' && !Array.isArray(from)
     && typeof from.pubkey === 'string' && SIG_RE.test(from.pubkey)
-    && typeof from.lineage === 'string' && from.lineage.trim().length > 0 && from.lineage.length <= 512)) return false
+    && typeof from.lineage === 'string' && from.lineage.length > 0 && from.lineage === from.lineage.trim()
+    && from.lineage.length <= 512
+    && (from.at === undefined || (Number.isSafeInteger(from.at) && from.at >= 0))
+    && (from.head === undefined || (typeof from.head === 'string' && SIG_RE.test(from.head))))) return false
   return true
 }
 
-/** On write: a malformed `entrances` refuses the whole index. */
+/** On write: a malformed `entrances` refuses the whole index. Shape only. */
 function validEntrances(raw) {
   if (raw === undefined) return true
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
   const entries = Object.entries(raw)
-  return entries.length <= ENTRANCES_MAX && entries.every(([zone, entry]) => validEntrance(zone, entry))
+  return entries.length <= ENTRANCES_MAX && entries.every(([host, entry]) => validEntrance(host, entry))
 }
 
-/** On read: the entries of a held index's `entrances` this host will use. An
- *  index held from before this check may carry a bad entry; it is dropped. */
+/** On read: the first ENTRANCES_MAX valid entries of a held index's
+ *  `entrances`, `{page?, powers?}` only. An index held from before this check
+ *  may carry a bad entry; it is dropped. */
 function readEntrances(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
-  return Object.fromEntries(Object.entries(raw).slice(0, ENTRANCES_MAX)
-    .filter(([zone, entry]) => validEntrance(zone, entry))
-    .map(([zone, { page, powers, other }]) => [zone, {
-      ...(page ? { page } : {}), ...(powers ? { powers } : {}), ...(other ? { other } : {}),
-    }]))
+  return Object.fromEntries(Object.entries(raw)
+    .filter(([host, entry]) => validEntrance(host, entry)).slice(0, ENTRANCES_MAX)
+    .map(([host, { page, powers }]) => [host, { ...(page ? { page } : {}), ...(powers ? { powers } : {}) }]))
 }
 
 /** Are the powers on? Exactly keep, camera and read; duplicates never pass
@@ -390,12 +393,11 @@ function addressableHost(bindings, host, zone) {
 }
 
 /** A zone's own addresses (`host → site`) and root places (`lineage →
- *  {publisher}`), from its publishers' verified indexes, primary first — and
- *  the apex's entrance, from the publisher whose apex claim won. */
+ *  {publisher}`), from its publishers' verified indexes, primary first. */
 async function zonePlaces(env, zone, read = indexReader(env)) {
   const bindings = siteBindings(env)
   const binding = bindings[zone]
-  const empty = { addresses: new Map(), roots: new Map(), entrance: null }
+  const empty = { addresses: new Map(), roots: new Map() }
   if (!binding) return empty
   const paths = binding.frontDoor === true && rootPathsOn(env)
   const key = `${zone}\n${paths ? 1 : 0}\n${binding.lineage}\n${binding.publishers.map((p) => p.pubkey).join(',')}`
@@ -423,25 +425,21 @@ async function zonePlaces(env, zone, read = indexReader(env)) {
       if (!apex && !addressableHost(bindings, host, zone)) continue
       if (!signed(lineage) || !opensOn(index, lineage, host, env)) continue
       const claims = named.get(host) ?? []
-      // An entrance rides only on a claim to the apex itself.
-      const entrance = apex ? index.entrances?.[zone] ?? null : null
-      if (!claims.some((c) => c.publisher.pubkey === publisher.pubkey)) claims.push({ publisher: selected, lineage, entrance })
+      if (!claims.some((c) => c.publisher.pubkey === publisher.pubkey)) claims.push({ publisher: selected, lineage })
       named.set(host, claims)
     }
   }
   const addresses = new Map()
-  let entrance = null
   for (const [host, claims] of named) {
-    // Contested binds nobody — and so turns on no entrance either.
+    // Contested binds nobody.
     if (claims.length !== 1) continue
-    const [{ publisher, lineage, entrance: signed }] = claims
+    const [{ publisher, lineage }] = claims
     addresses.set(host, { title: lineage.split('/').at(-1), lineage, publishers: [publisher] })
-    if (signed) entrance = signed
   }
   // A publisher whose index could not be read may hold the winning claim, or
   // contest it: this answer is a guess, so it says so and is never kept.
-  if (binding.publishers.some((p) => read.failed?.has(p.pubkey))) return { addresses, roots, entrance, unreadable: true }
-  const value = { addresses, roots, entrance }
+  if (binding.publishers.some((p) => read.failed?.has(p.pubkey))) return { addresses, roots, unreadable: true }
+  const value = { addresses, roots }
   zonePlacesHeld.set(key, { at: Date.now(), content: env.CONTENT, hives: env.HIVES?.get, written: indexesWritten, value })
   return value
 }
@@ -1706,6 +1704,26 @@ function servesHostDoor(env, hostname) {
     .some(host => host && host.toLowerCase() === hostname.toLowerCase())
 }
 
+// AN ORIGIN HOST keeps the site it already has (jwize 2026-10-07: "route the
+// apex through the worker"). hypercomb.com's pages — the host card, /tour/,
+// /downloads/, /welcome.json, and the package pool under /content/ that a fresh
+// install finds first — stay on their own origin behind the zone's DNS record,
+// and this worker becomes the zone root's WRITE FACE. On a host named here the
+// worker answers every write, the reads that give back what the hive writes
+// (the heap, the signed index) and the machine JSON nobody else serves, and
+// hands every other read to that origin unchanged. A pool listing `/<pool>/` is
+// the origin's on purpose: the package pool is there, and an empty listing here
+// would stop the install's walk before it ever asked /content/.
+// The hand-off is fetch(request), which reaches the origin only from a ZONE
+// ROUTE — on a custom domain this worker IS the origin and would call itself —
+// so the list is the deploy var alone, never a binding or a signed record.
+const ORIGIN_OWNED_BY_WORKER = /^\/(?:(?:@resource\/)?[0-9a-f]{64}(?:\/[^/]+)?|hive\/[0-9a-f]{64}|publications\.json|trials\.json|i18n\/[^/]+\.json|\.well-known\/nostr\.json|grant|upload|claim\/[^/]+)$/
+
+function servesOrigin(env, hostname) {
+  return String(env.ORIGIN_HOSTS || '').split(/[\s,]+/)
+    .some(host => host && host.toLowerCase() === String(hostname || '').toLowerCase())
+}
+
 // ── the sandbox door ─────────────────────────────────────────────────────
 //
 // A MODULE CHANGE IS TRIED IN PUBLIC BEFORE IT GOES LIVE (documentation/
@@ -2276,123 +2294,152 @@ async function serveRootPlace(request, env, zone, place) {
   return serveVisitorAsset(inner, env, { door, install, index, base: `${place.prefix}/`, title: site.title })
 }
 
-// ── two entrances at one root address ────────────────────────────────────────
+// ── the app address: a card door under a domain ─────────────────────────────
 //
-// An apex whose winning publisher signed an entrance page (H) has two ways
-// in. A phone gets the card door: the bytes H, nothing else. Any other device
-// is sent to `other` when the entrance names one, and is never served here:
-// one origin shares one storage, so no other code may run where kept cards
-// live. Without `other`, every device gets the card door.
+// THE HYPERDEX LIVES AT ITS OWN ADDRESS (jwize 2026-10-07). A site host under a
+// zone — an own address such as `business-card.<zone>`, an implicit label, or
+// an explicit binding that is not a front door — whose site's primary
+// publisher signed `entrances[<host>]` with a page H is a CARD DOOR: `/` is the
+// bytes H on every device, and every other page path is a 404. One origin is
+// one browser storage, so the powers (keeping visitors' cards, the camera,
+// reading other hosts) are turned on for THAT address, and a domain's root
+// stays a plain front door that runs no powers and that nothing locks: no zone
+// root is ever a card door (cardDoorHost).
 //
-// A CARD-DOOR ORIGIN STAYS ONE. Once an apex has served H, the worker keeps
-// `entrance-last:<zone>` = H in the HIVES store. If the signed entrance then
-// goes — withdrawn, contested, its lineage unpublished, its doors edited —
-// every page path gets that H sandboxed, with its powers off, so what
-// visitors kept stays unreadable. It never gets the host card, a root place
-// or the visitor shell. RELEASING AN ORIGIN IS AN OPERATOR ACT: delete the
-// key (`wrangler kv key delete --binding HIVES "entrance-last:<zone>"`),
-// knowing that whatever runs there next can read what visitors kept.
+// A CARD-DOOR ORIGIN STAYS ONE. Once an address has served H with its powers
+// on, the worker keeps `entrance-last:<host>` = `<H> <pubkey>` in the HIVES
+// store. If the signed entrance then goes — withdrawn, its lineage
+// unpublished, its doors edited — or the address is won by another key (a
+// contest, the label rule, a withdrawn address), `/` gets that H sealed in a
+// sandbox with its powers off, so what visitors kept stays unreadable. It
+// never gets the visitor shell. RELEASING AN ADDRESS IS AN OPERATOR ACT:
+// delete the key (`wrangler kv key delete --binding HIVES
+// "entrance-last:<host>"`), knowing that whatever runs there next can read
+// what visitors kept.
 //
-// An index this worker could not READ is not an absent one. While an apex
+// An index this worker could not READ is not an absent one. While an address
 // that has served an entrance cannot be read — or the key that remembers it
-// cannot — its page paths get a page that runs nothing. An apex that never
-// served one keeps its front door through a storage hiccup, as before.
+// cannot — its page paths get a page that runs nothing. The cost, accepted:
+// every site host that is not a zone root reads that key once a minute, and
+// gets that page while the store is down.
 //
-// Machine paths (`/<sig>`, `/content/…`, the index, the marks) never change
-// for any device, and a miss there is the heap's own 404.
+// Machine paths (`/<sig>`, the index, the marks, a `/content/<sig>` module)
+// answer as on any site; every other `/content/` path there is a 404.
 
-/** Which entrance a request takes. `?entrance=` overrides; then Chromium's
- *  mobile hint, which it sends unasked; then the user agent. An Android tablet
- *  and "Desktop site" mode count as other. */
-function deviceEntrance(request, url) {
-  const asked = url.searchParams.get('entrance')
-  if (asked === 'phone' || asked === 'other') return asked
-  const hint = request.headers.get('sec-ch-ua-mobile')
-  const phone = hint === '?1' ? true : hint === '?0' ? false
-    : /Mobi|iPhone|iPod/i.test(request.headers.get('user-agent') || '')
-  return phone ? 'phone' : 'other'
-}
-
-// One URL answers differently per device, so no cache may keep one answer,
-// and nothing may ask it back with a validator.
-const ENTRANCE_CACHE = { 'Cache-Control': 'no-store, private', Vary: 'Sec-CH-UA-Mobile, User-Agent' }
+// No cache may keep an entrance answer, and nothing may ask it back with a
+// validator.
+const ENTRANCE_CACHE = { 'Cache-Control': 'no-store, private' }
 // The card door's own device: the camera, for its Scan button. Nothing else.
 const CARD_DOOR_PERMISSIONS = 'camera=(self), microphone=(), geolocation=(), payment=(), usb=()'
 // The page plus its inlined reader passes the 1 MiB default.
 const CARD_PAGE_MAX = 2_097_152
 
-function entranceRedirect(location) {
-  return new Response(null, { status: 302, headers: { Location: location, ...ENTRANCE_CACHE } })
+/** Could `host` be a card door? Never a zone root. An explicit binding that is
+ *  not a front door, or a first-level name a site may take under a bound zone
+ *  — never `content`, `host` on a front door, or a try- door. */
+function cardDoorHost(env, hostname) {
+  const host = String(hostname || '').toLowerCase()
+  if (!host || isZoneRoot(env, host)) return false
+  const bindings = siteBindings(env)
+  if (bindings[host]) return bindings[host].frontDoor !== true
+  const zone = bindingZoneOf(bindings, host)
+  if (!zone) return false
+  const label = host.slice(0, -(zone.length + 1))
+  if (!DNS_LABEL_RE.test(label) || label === 'content' || SANDBOX_LABEL_RE.test(label)) return false
+  return !(label === HOST_DOOR_LABEL && bindings[zone].frontDoor === true)
 }
 
-// A zone's last entrance, held a minute in the isolate: a front door that
+// An address's last entrance, held a minute in the isolate: a site host that
 // never had one pays one store read a minute, not one a request.
 const ENTRANCE_LAST_TTL_MS = 60_000
 const entranceLastHeld = new Map()
-const entranceLastKey = (zone) => `entrance-last:${zone}`
+const entranceLastKey = (host) => `entrance-last:${host}`
 
-/** The page this zone last served as an entrance, or null. Throws when the
- *  store cannot be read: an unknown answer must never open the origin. */
-async function lastEntrance(env, zone) {
+/** The page this address last served with its powers on, and whose key signed
+ *  it — `{ page, pubkey }` — or null; a value that does not parse is null.
+ *  Throws when the store cannot be read: an unknown answer must never open
+ *  the origin. */
+async function lastEntrance(env, host) {
   const kv = env.HIVES
   if (!kv?.get) return null
-  const held = entranceLastHeld.get(zone)
-  if (held && held.kv === kv && Date.now() - held.at < ENTRANCE_LAST_TTL_MS) return held.page
-  const raw = String((await kv.get(entranceLastKey(zone))) ?? '').trim().toLowerCase()
-  const page = SIG_RE.test(raw) ? raw : null
-  entranceLastHeld.set(zone, { at: Date.now(), kv, page })
-  return page
+  const held = entranceLastHeld.get(host)
+  if (held && held.kv === kv && Date.now() - held.at < ENTRANCE_LAST_TTL_MS) return held.last
+  const [page, pubkey, ...rest] = String((await kv.get(entranceLastKey(host))) ?? '').trim().toLowerCase().split(/\s+/)
+  const last = SIG_RE.test(page) && SIG_RE.test(pubkey ?? '') && !rest.length ? { page, pubkey } : null
+  entranceLastHeld.set(host, { at: Date.now(), kv, last })
+  return last
 }
 
-/** Keep H as the zone's last entrance — written only when it changes, since
- *  the store allows few writes a day. */
-async function rememberEntrance(env, zone, page) {
+/** Keep H and its signer as the address's last entrance — written only when
+ *  it changes, since the store allows few writes a day. */
+async function rememberEntrance(env, host, page, pubkey) {
   const kv = env.HIVES
-  if (!kv?.put) return
+  if (!kv?.put || !pubkey) return
   try {
-    if (await lastEntrance(env, zone) === page) return
-    await kv.put(entranceLastKey(zone), page)
-    entranceLastHeld.set(zone, { at: Date.now(), kv, page })
+    const last = await lastEntrance(env, host)
+    if (last?.page === page && last.pubkey === pubkey) return
+    await kv.put(entranceLastKey(host), `${page} ${pubkey}`)
+    entranceLastHeld.set(host, { at: Date.now(), kv, last: { page, pubkey } })
   } catch { /* kept on the next serve */ }
 }
 
-/** What this request's host is to a card door. Null for any host that is not
- *  a front door's apex, and for an apex that has never served an entrance.
- *  Otherwise `{ entrance }` — the signed one, or `{ page }` with `last` when
- *  only the remembered page is left — or `{ unreadable }` when the store
- *  that remembers it could not be read, or an index could not be read on an
- *  apex that has served an entrance. An apex that never served one answers a
- *  failed index read as it always did: its front door, not a 503 for every
- *  plain host card on a storage hiccup. */
-async function cardDoorOf(routed, deployed, host) {
-  if (siteBinding(routed.env, host)?.frontDoor !== true || !isZoneRoot(routed.env, host)) return null
-  if (!routed.unreadable && routed.apex && routed.entrance?.page) return { entrance: routed.entrance }
-  let page
-  try { page = await lastEntrance(deployed, host) } catch { return { unreadable: true } }
-  if (routed.unreadable) return page ? { unreadable: true } : null
-  return page ? { entrance: { page }, last: true } : null
+/** What this request's host is to a card door. Null for a host that cannot be
+ *  one (cardDoorHost), and for an address that neither signs an entrance page
+ *  nor has served one. Otherwise `{ entrance, pubkey }` — the page its site's
+ *  primary publisher signed — or `{ entrance: { page }, last }` when only the
+ *  remembered page is left, which another key that wins the address gets too,
+ *  sealed — or `{ unreadable }` when the store that remembers it could not be
+ *  read, or an index could not be read on an address that has served an
+ *  entrance. One that never served one answers a failed index read as any
+ *  site does. */
+async function cardDoorOf(routed, deployed, host, read = indexReader(routed.env)) {
+  const { site } = routed
+  if (!cardDoorHost(routed.env, host) || !site || site.frontDoor === true) return null
+  const publisher = site.publishers?.find((p) => p.primary) || site.publishers?.[0]
+  const signed = publisher ? (await read(publisher.pubkey))?.entrances?.[host] : undefined
+  const unreadable = routed.unreadable === true || (!!publisher && read.failed.has(publisher.pubkey))
+  let last
+  try { last = await lastEntrance(deployed, host) } catch { return { unreadable: true } }
+  if (unreadable) return last ? { unreadable: true } : null
+  if (signed?.page && (!last || last.pubkey === publisher.pubkey)) return { entrance: signed, pubkey: publisher.pubkey }
+  return last ? { entrance: { page: last.page }, last: true } : null
 }
 
-/** A page path on a card-door origin: the other entrance, a move to `/`, or
- *  the card itself — and nothing else. */
-async function answerCardDoor(request, url, routed, deployed, card) {
-  const { entrance } = card
-  if (entrance.other && deviceEntrance(request, url) === 'other') return entranceRedirect(`${url.protocol}//${entrance.other}/`)
-  if (url.pathname !== '/') return entranceRedirect(`/${url.search}`)
-  const zone = url.hostname.toLowerCase()
-  let page = entrance.page
-  let on = !card.last && entrancePowersOn(entrance)
+// A host's card-door verdict, left by each fresh read for the files a page
+// then pulls: a /content/ file reuses it for SITE_TTL_MS instead of reading
+// the index again, as the open mark is reused (siteOpen). A failed read is
+// never kept.
+const cardDoorsHeld = new Map()
+
+/** cardDoorOf, or with `reuse` the verdict a recent request left. */
+async function heldCardDoor(routed, deployed, host, read, reuse) {
+  const held = cardDoorsHeld.get(host)
+  if (reuse && held && Date.now() - held.at < SITE_TTL_MS && held.content === deployed.CONTENT
+    && held.hives === deployed.HIVES?.get) return held.card
+  const card = await cardDoorOf(routed, deployed, host, read)
+  if (card?.unreadable) cardDoorsHeld.delete(host)
+  else cardDoorsHeld.set(host, { at: Date.now(), content: deployed.CONTENT, hives: deployed.HIVES?.get, card })
+  return card
+}
+
+/** A page path on a card door: the card at `/`, on every device, and nothing
+ *  else. `read` is the reader cardDoorOf used. */
+async function answerCardDoor(request, url, routed, deployed, card, read = indexReader(routed.env)) {
+  if (url.pathname !== '/') return text(404, 'not here')
+  const host = url.hostname.toLowerCase()
+  let page = card.entrance.page
+  let on = !card.last && entrancePowersOn(card.entrance)
   // A signed entrance waits on the open mark, as every door does. A door
-  // closed under it keeps the last page, sandboxed; with none, nothing runs.
-  if (!card.last && !(await siteOpen(routed.env, routed.site, indexReader(routed.env), zone, false)).open) {
+  // closed under it keeps the last page, sealed; with none, nothing runs.
+  if (!card.last && !(await siteOpen(routed.env, routed.site, read, host, false)).open) {
     let last
-    try { last = await lastEntrance(deployed, zone) } catch { last = null }
+    try { last = await lastEntrance(deployed, host) } catch { last = null }
     if (!last) return cardDoorUnavailable(request)
-    page = last
+    page = last.page
     on = false
   }
   const answer = await serveCardDoor(request, routed.env, page, on)
-  if (answer.status === 200) await rememberEntrance(deployed, zone, page)
+  if (answer.status === 200 && on) await rememberEntrance(deployed, host, page, card.pubkey)
   return answer
 }
 
@@ -2421,18 +2468,18 @@ async function cardPageScripts(html) {
 }
 
 // H → its script hashes, or null when refused. H names its bytes, so the
-// verdict never changes; a few pages is all one apex ever turns on.
+// verdict never changes; a few pages is all one app address ever turns on.
 const cardPageChecks = new Map()
 const CARD_PAGE_CHECKS_HELD = 16
 
-/** THE PHONE ENTRANCE: the bytes H as the whole document — no shell, no bees.
+/** THE CARD DOOR: the bytes H as the whole document — no shell, no bees.
  *  Only scripts whose hashes come from H may run. Never `'self'`: a flat
  *  `/<sig>` is served as a module to a script fetch, so `'self'` would run
  *  anything in the shared heap. `blob:` is how the page loads its inlined
  *  three.js, and only a script that already passed may make one.
  *
- *  Powers ON: real storage, the camera and https reads. Powers OFF after
- *  being on: the same bytes in a sandbox — an opaque origin, so kept cards
+ *  Powers ON: real storage, the camera and https reads. Powers OFF, or the
+ *  remembered page: the same bytes in a sandbox — an opaque origin, so kept cards
  *  stay unreadable and no other code ever runs where they live. */
 async function serveCardDoor(request, env, page, on) {
   const bytes = await heldCreationBytes(env, page, CARD_PAGE_MAX).catch(() => null)
@@ -3383,7 +3430,7 @@ function validHiveEventContent(evt) {
   }
   // `addresses` — a publisher's own addresses, host → lineage key. Bounded,
   // lowercase hosts, non-empty keys; the 64 KB index cap still holds.
-  // `entrances` — the participant's signed turn-on, zone → entrance.
+  // `entrances` — the participant's signed turn-on, app address → entrance.
   return validOfferingDeclarations(parsed.offerings) && validAddresses(parsed.addresses)
     && validEntrances(parsed.entrances)
 }
@@ -4162,7 +4209,7 @@ export default {
     // out instead — never other code beside what visitors kept.
     if (!runsAsPage(response) || cardDoorAnswers.has(response) || !scope.cardDoorAt) return response
     let card
-    try { card = await scope.cardDoorAt() } catch { card = siteBinding(env, new URL(request.url).hostname)?.frontDoor ? { unreadable: true } : null }
+    try { card = await scope.cardDoorAt() } catch { card = cardDoorHost(env, new URL(request.url).hostname) ? { unreadable: true } : null }
     return card ? cardDoorUnavailable(request) : response
   },
 }
@@ -4194,34 +4241,39 @@ const router = {
         const bindings = siteBindings(scoped)
         if (resolved.implicit && resolved.zone && wildcardZones(bindings).includes(resolved.zone)
           && addressableHost(bindings, host, resolved.zone)) {
-          const addressed = (await zonePlaces(scoped, resolved.zone)).addresses.get(host)
+          const places = await zonePlaces(scoped, resolved.zone)
+          const addressed = places.addresses.get(host)
           if (addressed) {
             const view = withAddresses(scoped, new Map([[host, addressed]]))
             routing = { env: view, ...resolveSite(view, host) }
           }
+          // An index read failed: whose address this is is unknown (cardDoorOf).
+          if (places.unreadable) routing.unreadable = true
         }
         // A front door's apex may open on a creation its publisher signed there.
         // Only a front-door zone root pays the read.
         if (resolved.site?.frontDoor === true && isZoneRoot(scoped, host)) {
-          const places = await zonePlaces(scoped, host)
-          const opened = places.addresses.get(host)
+          const opened = (await zonePlaces(scoped, host)).addresses.get(host)
           if (opened) {
             const view = withAddresses(scoped, new Map([[host, opened]]))
-            // …with the entrance its publisher signed beside that claim.
-            routing = { env: view, ...resolveSite(view, host), ...(places.entrance ? { entrance: places.entrance } : {}) }
+            routing = { env: view, ...resolveSite(view, host) }
           }
-          // An index read failed: whose apex this is, and what entrance it
-          // has, are unknown (cardDoorAt).
-          if (places.unreadable) routing = { ...routing, unreadable: true }
         }
       }
       return routing
     }
     // What this host is to a card door (cardDoorOf) — asked once, and only by
-    // a page path, a miss the host card would answer, or the last guard.
+    // a page path, a site's /content/ file (which may reuse a recent verdict),
+    // a miss the host card would answer, or the last guard. The card's own
+    // page reuses its reader.
     let cardDoor
-    const cardDoorAt = async () => {
-      if (cardDoor === undefined) cardDoor = await cardDoorOf(await route(), deployed, requestUrl.hostname.toLowerCase())
+    let cardRead
+    const cardDoorAt = async (reuse = false) => {
+      if (cardDoor === undefined) {
+        const routed = await route()
+        cardRead = indexReader(routed.env)
+        cardDoor = await heldCardDoor(routed, deployed, requestUrl.hostname.toLowerCase(), cardRead, reuse)
+      }
       return cardDoor
     }
     scope.cardDoorAt = cardDoorAt
@@ -4253,6 +4305,13 @@ const router = {
     }
 
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: fromDoor ? DOOR_CORS : CORS })
+
+    // AN ORIGIN HOST's own site stays its origin's (servesOrigin): every read
+    // the worker does not own goes there exactly as it arrived.
+    if ((method === 'GET' || method === 'HEAD') && servesOrigin(env, requestUrl.hostname)
+      && !ORIGIN_OWNED_BY_WORKER.test(pathname)) {
+      return fetch(request)
+    }
 
     // A DOOR RUNS NO WORKER FROM THE HEAP. A worker takes its policy from its
     // own script's response, not from the page, and heap bytes carry only
@@ -4393,6 +4452,15 @@ const router = {
           // A bare signature this bucket lacks: the zone's farm may hold it.
           if (await readThroughFarm(deployed, requestUrl.hostname, sigMatch[2])) heap = await fromHeap()
         }
+        // An origin host's own root files (its card's pinned bootstrap) live on
+        // the origin, not in the heap, so a bare miss asks it. A page there is
+        // the origin's SPA answering a path it does not hold — never the bytes,
+        // so it stays a miss and a HEAD never reads as held.
+        if (heap.status === 404 && !isAlias && !named && servesOrigin(env, requestUrl.hostname)) {
+          const held = await fetch(request)
+          if (held.ok && !String(held.headers.get('content-type') || '').includes('text/html')) return held
+          return heap
+        }
         // A front-door apex also serves the shim's OWN bytes (its pinned
         // bootstrap, its packages), which live with the card, not in the heap.
         // A claimed apex is one too; only a miss on a host the var does not
@@ -4503,13 +4571,13 @@ const router = {
       return new Response(null, { status: 302, headers: { Location: `${requestUrl.protocol}//${HOST_DOOR_LABEL}.${requestUrl.hostname}${pathname}${requestUrl.search}`, ...CORS } })
     }
 
-    // A CARD-DOOR ORIGIN (two entrances, above): every page path is its card,
-    // the other entrance or a move to `/` — never the host card, a root place
-    // or the visitor shell. /content/ files go on below as machine data.
+    // A CARD DOOR (the app address, above): `/` is its card and every other
+    // page path a 404 — never a root place or the visitor shell. /content/
+    // files go on below.
     if ((method === 'GET' || method === 'HEAD') && !pathname.startsWith('/content/')) {
       const card = await cardDoorAt()
       if (card?.unreadable) return cardDoorUnavailable(request)
-      if (card) return answerCardDoor(request, requestUrl, routed, deployed, card)
+      if (card) return answerCardDoor(request, requestUrl, routed, deployed, card, cardRead)
     }
 
     // THE FRONT DOOR — an apex is the entrance to its domain, not a hive: the
@@ -4518,10 +4586,6 @@ const router = {
     // machine read stays on this worker — flat sigs and pools are answered
     // above, the index and the ledger here — so the card reads the one heap.
     if (site?.frontDoor && (method === 'GET' || method === 'HEAD')) {
-      // On a card-door origin only a /content/ file reaches here, and the
-      // host card's files are not this origin's to give.
-      const card = await cardDoorAt()
-      if (card) return card.unreadable ? text(503, 'this host cannot read its index right now') : text(404, 'not here')
       // A ROOT PATH — https://<zone>/<lineage> — is that published place,
       // served as its own door would be. `/` and everything else stay the card.
       const host = requestUrl.hostname.toLowerCase()
@@ -4551,6 +4615,9 @@ const router = {
         if (module.status !== 404 || !await readThroughFarm(deployed, requestUrl.hostname, moduleMatch[1])) return module
         return serveModule(request, env, moduleMatch[1])
       }
+      // A card door gives no other /content/ file: the engine's files are not
+      // this origin's, and its one page is `/`.
+      if (pathname.startsWith('/content/') && await cardDoorAt(true)) return text(404, 'not here')
       // A door — named or wildcard — is a website only while an approved
       // publisher's signed index carries its lineage (the open mark, above).
       // Until then, and again after a withdrawal, an honest 404 page.

@@ -52,7 +52,7 @@ export async function cardAtHead(head: string, io: CardReadIo): Promise<CardAtHe
 }
 
 /** THE PAGE AT A HEAD — the card page (`visual:website:page` → htmlSig) the head's card tile wears, or null when it
- *  wears none. What a domain's entrance follows: a publisher's newer page is a newer htmlSig here
+ *  wears none. What an app address's entrance follows: a publisher's newer page is a newer htmlSig here
  *  (documentation/using-a-creation.md, "Powers are off by default, and the participant turns them on"). Only the
  *  layer and its record are read; the page's own bytes are not. */
 export async function pageAtHead(head: string, io: CardReadIo): Promise<string | null> {

@@ -123,7 +123,7 @@
                 class="pdoor-own"
                 type="button"
                 [class.set]="!!ownLabel(current(), zone)"
-                [class.update]="!!entranceOf(current(), zone)?.offered"
+                [class.update]="entranceOfferedOn(current(), zone)"
                 [attr.aria-expanded]="isOwnOpen(current(), zone)"
                 [attr.aria-label]="'publish.own.toggle' | t"
                 [attr.data-tip]="'publish.own.toggle' | t"
@@ -160,35 +160,44 @@
                   }
                 </div>
                 <!-- THE DOMAIN ITSELF — the bare domain opens on this place, and
-                     the host card moves to host.<zone>. -->
+                     the host card moves to host.<zone>. A root is a plain
+                     front door: it never runs a page with powers. -->
                 @if (ownLabel(row, zone) === '@') {
                   <p class="pdoor-ownnote">{{ 'publish.own.apex-note' | t: { zone: zone } }}</p>
-                  <!-- THE ENTRANCE — powers are off until you turn them on,
-                       for the one page you previewed here. Code and data are
-                       bound apart: the domain serves this page by signature,
-                       and the card it shows follows this place's head. -->
-                  @if (entranceOf(row, zone); as e) {
+                } @else {
+                  <div class="pdoor-ownrow">
+                    <button class="pcur-action" type="button" (click)="saveApex(row, zone)">{{ 'publish.own.apex' | t: { zone: zone } }}</button>
+                  </div>
+                }
+                <!-- THE ENTRANCES — one per address this place is served at
+                     under the domain. Powers are off until you turn them on,
+                     for the one page you previewed here, at that address and
+                     nowhere else. Code and data are bound apart: the address
+                     serves this page by signature, and the card it shows
+                     follows this place's head. -->
+                @for (host of entranceHostsOn(row, zone); track host) {
+                  @if (entranceOf(row, host); as e) {
                     <div class="pentr" [class.powered]="e.powered">
+                      <div class="pentr-head">{{ 'publish.entrance.at' | t: { host: host } }}</div>
                       <p class="pdoor-ownnote">{{ 'publish.entrance.note' | t }}</p>
-                      <div class="pentr-head">{{ 'publish.entrance.phone' | t }}</div>
                       <div class="pentr-line">
                         <span>{{ (e.page ? 'publish.entrance.runs' : 'publish.entrance.runs-none') | t: { page: short(e.page) } }}</span>
                         @if (e.page) {
                           <span class="pentr-quiet">{{ (e.powered ? 'publish.entrance.powers-on' : 'publish.entrance.powers-off') | t }}</span>
-                          <button class="pentr-act" type="button" (click)="previewEntrance(row, zone, e.page)">{{ 'publish.entrance.preview' | t }}</button>
+                          <button class="pentr-act" type="button" (click)="previewEntrance(row, host, e.page)">{{ 'publish.entrance.preview' | t }}</button>
                         }
                       </div>
                       <div class="pentr-line">
                         <span>{{ (e.wears ? 'publish.entrance.wears' : 'publish.entrance.wears-none') | t: { page: short(e.wears) } }}</span>
                         @if (e.wears && e.wears !== e.page) {
-                          <button class="pentr-act" type="button" (click)="previewEntrance(row, zone, e.wears)">{{ 'publish.entrance.preview' | t }}</button>
+                          <button class="pentr-act" type="button" (click)="previewEntrance(row, host, e.wears)">{{ 'publish.entrance.preview' | t }}</button>
                         }
                       </div>
                       @if (e.offered) {
                         <div class="pentr-line">
                           <span class="pentr-badge">{{ 'publish.entrance.offered' | t: { page: short(e.offered) } }}</span>
-                          <button class="pentr-act" type="button" (click)="previewEntrance(row, zone, e.offered)">{{ 'publish.entrance.preview' | t }}</button>
-                          <button class="pentr-act" type="button" (click)="skipEntrance(row, zone)">{{ 'publish.entrance.skip' | t }}</button>
+                          <button class="pentr-act" type="button" (click)="previewEntrance(row, host, e.offered)">{{ 'publish.entrance.preview' | t }}</button>
+                          <button class="pentr-act" type="button" (click)="skipEntrance(row, host)">{{ 'publish.entrance.skip' | t }}</button>
                         </div>
                       }
                       @for (sig of e.skipped; track sig) {
@@ -205,10 +214,10 @@
                           }
                         </div>
                       }
-                      @if (previewFor(zone); as pv) {
+                      @if (previewFor(host); as pv) {
                         <div class="pentr-line">
                           <span>{{ 'publish.entrance.previewing' | t: { page: short(pv.page) } }}</span>
-                          <button class="pentr-act" type="button" (click)="closeEntrancePreview(row, zone)">{{ 'publish.entrance.preview-close' | t }}</button>
+                          <button class="pentr-act" type="button" (click)="closeEntrancePreview(row, host)">{{ 'publish.entrance.preview-close' | t }}</button>
                         </div>
                         <iframe
                           class="pentr-frame"
@@ -222,38 +231,19 @@
                         <button
                           class="pentr-act"
                           type="button"
-                          [disabled]="!canTurnOn(row, zone)"
+                          [disabled]="!canTurnOn(row, host)"
                           [attr.data-tip]="'publish.entrance.turn-on-tip' | t"
-                          (click)="turnOn(row, zone)"
+                          (click)="turnOn(row, host)"
                         >{{ 'publish.entrance.turn-on' | t }}</button>
                         @if (e.powered) {
-                          <button class="pentr-act" type="button" (click)="turnOff(row, zone)">{{ 'publish.entrance.turn-off' | t }}</button>
+                          <button class="pentr-act" type="button" (click)="turnOff(row, host)">{{ 'publish.entrance.turn-off' | t }}</button>
                         }
-                        @if (e.page || e.other) {
-                          <button class="pentr-act" type="button" (click)="forgetEntrance(row, zone)">{{ 'publish.entrance.forget' | t }}</button>
+                        @if (e.page || e.from) {
+                          <button class="pentr-act" type="button" (click)="forgetEntrance(row, host)">{{ 'publish.entrance.forget' | t }}</button>
                         }
                       </div>
-                      <div class="pentr-head">{{ 'publish.entrance.other' | t }}</div>
-                      <!-- Drawn once per settled change: a refused pick falls
-                           back to what the signed index says. -->
-                      @for (epoch of [entranceEpoch()]; track epoch) {
-                        <select
-                          class="pdoor-owninput"
-                          [attr.aria-label]="'publish.entrance.other' | t"
-                          (change)="setOther(row, zone, $any($event.target).value)"
-                        >
-                          <option value="" [selected]="!e.other">{{ 'publish.entrance.other-phone' | t }}</option>
-                          @for (choice of e.otherChoices; track choice) {
-                            <option [value]="choice" [selected]="choice === e.other">{{ choice }}</option>
-                          }
-                        </select>
-                      }
                     </div>
                   }
-                } @else {
-                  <div class="pdoor-ownrow">
-                    <button class="pcur-action" type="button" (click)="saveApex(row, zone)">{{ 'publish.own.apex' | t: { zone: zone } }}</button>
-                  </div>
                 }
               </li>
             }

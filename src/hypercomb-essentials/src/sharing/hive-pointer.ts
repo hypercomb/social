@@ -40,10 +40,10 @@ export interface HiveManifest {
    *  Signed with the roots, so a host serves a subdomain only for the key its
    *  publisher named there. */
   addresses?: Record<string, string>
-  /** `<zone>` → the entrance that zone's root runs: the one previewed card
-   *  page, the powers the participant turned on for it, where other devices
-   *  go, and whose page it follows (zone-door.ts). Absent = powers off on
-   *  every zone, which is the default. */
+  /** `<host>` → the entrance an app address runs: the one previewed card
+   *  page, the powers the participant turned on for it there, and whose page
+   *  it follows (zone-door.ts). Only hosts this index binds to a lineage are
+   *  kept. Absent = powers off everywhere, which is the default. */
   entrances?: Record<string, ZoneEntrance>
   /** Optional public declarations. Values are held as signed data here; the
    *  offering reader decides their meaning when that protocol is defined. */
@@ -141,10 +141,11 @@ function hiveIndexOf(evt: Record<string, unknown>, key: string): HiveIndexResult
     return { ok: false, reason: 'malformed' }
   }
   const addresses = readAddresses(signedContent['addresses'], roots)
-  const entrances = readEntrances(signedContent['entrances'], addresses)
+  const doors = readDoors(signedContent['doors'], roots)
+  const entrances = readEntrances(signedContent['entrances'], { roots, addresses, doors })
   return { ok: true, manifest: {
     roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key,
-    doors: readDoors(signedContent['doors'], roots),
+    doors,
     ...(Object.keys(addresses).length > 0 ? { addresses } : {}),
     ...(Object.keys(entrances).length > 0 ? { entrances } : {}),
     ...(rawOfferings !== undefined ? { offerings: rawOfferings as Record<string, unknown> } : {}),
@@ -241,10 +242,10 @@ export async function putHiveManifest(
 
   // THE ENTRANCES ARE NEVER CARRIED FROM A STALE READ. Every other writer read
   // the index some time ago — a publish waits minutes for its bytes — and the
-  // participant may have turned a zone's powers off since. Carrying the old
-  // map forward would silently turn them back on. So, right before signing,
-  // the index is read again and its entrances are the ones this write keeps.
-  // Only setZoneEntrance changes them, and says so (`setsEntrances`).
+  // participant may have turned an address's powers off since. Carrying the
+  // old map forward would silently turn them back on. So, right before
+  // signing, the index is read again and its entrances are the ones this write
+  // keeps. Only setEntrance changes them, and says so (`setsEntrances`).
   const fresh = options.setsEntrances ? undefined : await freshEntrances(host, signer, replaces)
 
   let signed: Record<string, unknown>
@@ -261,12 +262,13 @@ export async function putHiveManifest(
     if (Object.keys(nextAddresses).length > 0) content['addresses'] = nextAddresses
     else delete content['addresses']
     // THE ENTRANCES ride through every write too — from the fresh read above
-    // (or, when that read failed, the caller's), only valid entries kept, an
-    // `other` only while its address is still named, and omitted when empty
-    // so an index without them stays byte-identical. Keyed by zone, not by a
-    // lineage, so the roots prune no entry here.
+    // (or, when that read failed, the caller's), only valid entries kept, and
+    // only for a host this write still BINDS (its own address, or a published
+    // key's implicit label on a domain its doors open): unpublishing, closing
+    // a door or moving an address drops the entrance with it. Omitted when
+    // empty so an index without them stays byte-identical.
     if (fresh !== undefined) content['entrances'] = fresh ?? undefined
-    const nextEntrances = readEntrances(content['entrances'], nextAddresses)
+    const nextEntrances = readEntrances(content['entrances'], { roots, addresses: nextAddresses, doors: nextDoors ?? {} })
     if (Object.keys(nextEntrances).length > 0) content['entrances'] = nextEntrances
     else delete content['entrances']
     // The retired landing picture (0ec3c2d15): an index signed with one
@@ -302,7 +304,7 @@ export async function putHiveManifest(
 }
 
 export interface PutHiveOptions {
-  /** This write sets the entrances itself (setZoneEntrance, the one writer):
+  /** This write sets the entrances itself (setEntrance, the one writer):
    *  the caller's map is the truth, and the index is not read again. */
   setsEntrances?: boolean
   /** Sign at this stamp (seconds) rather than now — still at least one past

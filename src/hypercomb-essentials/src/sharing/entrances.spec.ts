@@ -1,16 +1,19 @@
 // sharing/entrances.spec.ts — POWERS ARE OFF BY DEFAULT, AND THE PARTICIPANT
-// TURNS THEM ON (documentation/using-a-creation.md).
+// TURNS THEM ON, AT THE APP'S OWN ADDRESS (documentation/using-a-creation.md).
 //
-//   • `entrances` is one zone-keyed field of the signed index: read leniently,
+//   • `entrances` is one HOST-keyed field of the signed index: read leniently,
 //     normalized on every write, and omitted when empty so an index without it
 //     is byte-identical to before;
-//   • EVERY index writer carries it through (the plan's table): publish,
-//     unpublish, the domain switch, the own address, setHiveRoot (and the
-//     bridge and the profile word that go through it), clearHiveRoot, the host
-//     listing, and the text-theme offering;
-//   • setZoneEntrance refuses an unreadable index, a zone no creation opens
-//     at its apex, and a page the host does not hold — and turning on records
-//     the participant's own review scent in the same signed write.
+//   • an entry counts only while the same index BINDS its host to a lineage —
+//     an own address, or a published key's implicit `<key>.<zone>` label — so
+//     unpublishing, closing a door or moving an address drops it;
+//   • EVERY other index writer carries it through: publish, the domain switch,
+//     setHiveRoot (and the bridge and the profile word that go through it),
+//     clearHiveRoot, the host listing, and the text-theme offering;
+//   • setEntrance refuses an unreadable index, a domain's root (a plain front
+//     door), a host no creation is bound to, and a page the host does not hold
+//     — and turning on records the participant's own review scent in the same
+//     signed write, at the zone root.
 //
 // Real signing and real index reads: only the network and IoC are stubbed, so
 // what a writer signs is exactly what the next reader verifies.
@@ -28,6 +31,8 @@ const OTHER_HEAD = 'b'.repeat(64)
 const PAGE = 'd'.repeat(64)
 const NEWER = 'e'.repeat(64)
 const ZONE = 'cafesociety.buzz'
+/** The Hyperdex app's own address — where its powers run. */
+const APP = `business-card.${ZONE}`
 
 let marks: string[]
 let served: Record<string, unknown> | null
@@ -36,6 +41,7 @@ let held: boolean
 let resources: Map<string, Uint8Array>
 let published: { host: string; sigs: string[] }[]
 let availableAsk: unknown[][]
+let requests: { url: string; method: string }[]
 
 vi.mock('./community-hosts.js', () => ({ hostsOfBranch: async () => marks }))
 
@@ -86,9 +92,11 @@ const bytesOfBlob = (blob: Blob): Promise<Uint8Array> => new Promise((resolve, r
   },
 }
 
-// The host: one signed index per key, served back exactly as it was PUT.
+// The host: one signed index per key, served back exactly as it was PUT —
+// whichever zone root it is asked through.
 globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input)
+  requests.push({ url, method: init?.method ?? 'GET' })
   if (!url.endsWith(`/${PUBKEY}`)) return new Response('', { status: 404 })
   if ((init?.method ?? 'GET') === 'PUT') {
     served = JSON.parse(String(init?.body)) as Record<string, unknown>
@@ -99,18 +107,21 @@ globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
 }) as typeof fetch
 
 const { lineageKey } = await import('../history/lineage-key.js')
-const { readEntrances, isPoweredEntrance, entranceOther } = await import('./zone-door.js')
+const { readEntrances, isPoweredEntrance, boundLineage, entranceHost } = await import('./zone-door.js')
 const { fetchHiveIndex, putHiveManifest, setHiveRoot, clearHiveRoot, setHostListing } = await import('./hive-pointer.js')
-const { publishBranch, unpublishBranch, setBranchDoors, setBranchAddress, setZoneEntrance, applyEntranceIntent } = await import('./publish-branch.js')
+const { publishBranch, unpublishBranch, setBranchDoors, setBranchAddress, setEntrance, applyEntranceIntent } = await import('./publish-branch.js')
 const { setTextThemeOffering } = await import('./text-theme-offering.js')
 const { HIVE_LINK_VERSION } = await import('./hive-link.js')
 const { EntranceScoutService } = await import('./entrance-scout.service.js')
 
 const SEGS = ['jaime-weise']
 const KEY = lineageKey(SEGS)
+/** The creation's implicit address on the zone — its key as the first label. */
+const LABELLED = `${KEY}.${ZONE}`
 const ALL: EntrancePower[] = ['keep', 'camera', 'read']
-const ENTRANCE: ZoneEntrance = { page: PAGE, powers: ALL, other: `host.${ZONE}`, from: { pubkey: PUBKEY, lineage: KEY } }
-const ENTRANCES: Record<string, ZoneEntrance> = { [ZONE]: ENTRANCE }
+const ENTRANCE: ZoneEntrance = { page: PAGE, powers: ALL, from: { pubkey: PUBKEY, lineage: KEY } }
+const ENTRANCES: Record<string, ZoneEntrance> = { [APP]: ENTRANCE }
+const BOUND = { roots: { [KEY]: HEAD }, addresses: { [APP]: KEY }, doors: { [KEY]: [ZONE] } }
 
 const sign = (content: Record<string, unknown>, createdAt = 1_700_000_000): Record<string, unknown> =>
   finalizeEvent({ kind: 30564, created_at: createdAt, tags: [], content: JSON.stringify(content) }, SECRET) as unknown as Record<string, unknown>
@@ -118,11 +129,12 @@ const sign = (content: Record<string, unknown>, createdAt = 1_700_000_000): Reco
 const seed = (extra: Record<string, unknown> = {}): void => {
   served = sign({
     v: 1, roots: { [KEY]: HEAD, other: OTHER_HEAD }, doors: { [KEY]: [ZONE] },
-    addresses: { [ZONE]: KEY }, entrances: ENTRANCES, future: { kept: true }, ...extra,
+    addresses: { [APP]: KEY }, entrances: ENTRANCES, future: { kept: true }, ...extra,
   })
 }
 
 const signedContent = (): Record<string, unknown> => JSON.parse(String(served?.['content'] ?? '{}')) as Record<string, unknown>
+const entrancesNow = (): Record<string, ZoneEntrance> | undefined => signedContent()['entrances'] as Record<string, ZoneEntrance> | undefined
 
 beforeEach(() => {
   marks = [ZONE]
@@ -132,86 +144,114 @@ beforeEach(() => {
   resources = new Map()
   published = []
   availableAsk = []
+  requests = []
   seed()
 })
 
 describe('the entrances field, leniently', () => {
-  it('keeps every valid field, folds the zone, orders the powers, and keeps a whole-second from.at', () => {
+  it('keeps every valid field, folds the host to lower case, orders the powers, and keeps a whole-second from.at', () => {
     expect(readEntrances({
-      'content.Cafesociety.buzz': { page: PAGE.toUpperCase(), powers: ['read', 'keep', 'camera', 'fly'], other: `Tea.${ZONE}`, from: { pubkey: PUBKEY, lineage: KEY, at: 1_700_000_005 } },
-    })).toEqual({ [ZONE]: { page: PAGE, powers: ALL, other: `tea.${ZONE}`, from: { pubkey: PUBKEY, lineage: KEY, at: 1_700_000_005 } } })
-    expect(readEntrances({ [ZONE]: { page: PAGE, from: { pubkey: PUBKEY, lineage: KEY, at: 1.5, head: 'nope' } } }))
-      .toEqual({ [ZONE]: { page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } } })
-    expect(readEntrances({ [ZONE]: { page: PAGE, from: { pubkey: PUBKEY, lineage: KEY, head: HEAD.toUpperCase() } } }))
-      .toEqual({ [ZONE]: { page: PAGE, from: { pubkey: PUBKEY, lineage: KEY, head: HEAD } } })
+      'Business-Card.Cafesociety.buzz': { page: PAGE.toUpperCase(), powers: ['read', 'keep', 'camera'], from: { pubkey: PUBKEY, lineage: KEY, at: 1_700_000_005 } },
+    }, BOUND)).toEqual({ [APP]: { page: PAGE, powers: ALL, from: { pubkey: PUBKEY, lineage: KEY, at: 1_700_000_005 } } })
+    expect(readEntrances({ [APP]: { page: PAGE, from: { pubkey: PUBKEY, lineage: KEY, at: 1.5, head: 'nope' } } }, BOUND))
+      .toEqual({ [APP]: { page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } } })
+    expect(readEntrances({ [APP]: { page: PAGE, from: { pubkey: PUBKEY, lineage: KEY, at: -1, head: HEAD.toUpperCase() } } }, BOUND))
+      .toEqual({ [APP]: { page: PAGE, from: { pubkey: PUBKEY, lineage: KEY, head: HEAD } } })
   })
 
-  it('drops an invalid field, never the entry; an entry with nothing valid goes; powers need a page', () => {
-    expect(readEntrances({
-      [ZONE]: { page: 'nope', powers: ['keep', 'camera', 'read'], other: 'elsewhere.org', from: { pubkey: 'short', lineage: KEY } },
-      'other.org': { page: PAGE, other: 'host.other.org', from: { pubkey: PUBKEY } },
-      localhost: { page: PAGE },
-      'not a zone': { page: PAGE },
-    })).toEqual({ 'other.org': { page: PAGE, other: 'host.other.org' } })
-    expect(readEntrances(null)).toEqual({})
-    expect(readEntrances([ENTRANCES])).toEqual({})
+  it('drops an invalid or unknown field (a leftover `other` too), never the entry; an entry with nothing valid goes; powers need a page', () => {
+    expect(readEntrances({ [APP]: { page: PAGE, powers: ALL, other: `host.${ZONE}`, junk: 1 } }, BOUND))
+      .toEqual({ [APP]: { page: PAGE, powers: ALL } })
+    expect(readEntrances({ [APP]: { page: 'nope', powers: ALL, other: `host.${ZONE}`, from: { pubkey: 'short', lineage: KEY } } }, BOUND)).toEqual({})
+    expect(readEntrances({ [APP]: { powers: ALL, from: { pubkey: PUBKEY, lineage: KEY } } }, BOUND))
+      .toEqual({ [APP]: { from: { pubkey: PUBKEY, lineage: KEY } } })
+    expect(readEntrances({ [APP]: { page: PAGE, from: { pubkey: PUBKEY, lineage: 'x'.repeat(513) } } }, BOUND)).toEqual({ [APP]: { page: PAGE } })
+    expect(readEntrances(null, BOUND)).toEqual({})
+    expect(readEntrances([ENTRANCES], BOUND)).toEqual({})
   })
 
-  it('other is host.<zone> or a <label>.<zone> own address, never the apex or another zone', () => {
-    expect(entranceOther(`host.${ZONE}`, ZONE)).toBe(`host.${ZONE}`)
-    expect(entranceOther(`home.${ZONE}`, ZONE)).toBe(`home.${ZONE}`)
-    expect(entranceOther(ZONE, ZONE)).toBe('')
-    expect(entranceOther(`try-x.${ZONE}`, ZONE)).toBe('')
-    expect(entranceOther(`a.b.${ZONE}`, ZONE)).toBe('')
-    expect(entranceOther('host.other.org', ZONE)).toBe('')
+  it('a powers list it cannot read is dropped whole — never read as on', () => {
+    for (const powers of [
+      ['keep', 'camera', 'read', 'fly'], ['keep', 'keep', 'camera', 'read'], ['Keep', 'camera', 'read'], 'keep camera read',
+    ]) {
+      expect(readEntrances({ [APP]: { page: PAGE, powers } }, BOUND)).toEqual({ [APP]: { page: PAGE } })
+    }
+    expect(readEntrances({ [APP]: { page: PAGE, powers: ['keep'] } }, BOUND)).toEqual({ [APP]: { page: PAGE, powers: ['keep'] } })
   })
 
-  it('with the index\'s addresses, an other whose address is gone is dropped (host.<zone> always stays)', () => {
-    const raw = { [ZONE]: { page: PAGE, other: `home.${ZONE}` } }
-    expect(readEntrances(raw, { [`home.${ZONE}`]: KEY })).toEqual(raw)
-    expect(readEntrances(raw, {})).toEqual({ [ZONE]: { page: PAGE } })
-    expect(readEntrances({ [ZONE]: { other: `host.${ZONE}` } }, {})).toEqual({ [ZONE]: { other: `host.${ZONE}` } })
+  it('a key must be a host: lower-cased, more than one label, every label a DNS label, at most 253 characters', () => {
+    expect(entranceHost('https://Business-Card.Cafesociety.buzz/x')).toBe(APP)
+    for (const raw of ['localhost', 'app.localhost:4250', '127.0.0.1', 'com', 'not a host', 'under_score.cafesociety.buzz', '-x.cafesociety.buzz', `${'a'.repeat(63)}.`.repeat(4) + 'buzz']) {
+      expect(entranceHost(raw)).toBe('')
+    }
   })
 
-  it('powers are on only for a page with all three — version 1 is all or nothing', () => {
+  it('keeps at most sixteen entries', () => {
+    const addresses = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`a${i}.${ZONE}`, KEY]))
+    const raw = Object.fromEntries(Object.keys(addresses).map(h => [h, { page: PAGE }]))
+    expect(Object.keys(readEntrances(raw, { ...BOUND, addresses }))).toHaveLength(16)
+  })
+
+  it('powers are on only for a page with exactly all three — version 1 is all or nothing', () => {
     expect(isPoweredEntrance({ page: PAGE, powers: ['keep', 'camera', 'read'] })).toBe(true)
+    expect(isPoweredEntrance({ page: PAGE, powers: ['read', 'camera', 'keep'] })).toBe(true)
     expect(isPoweredEntrance({ page: PAGE, powers: ['keep', 'camera'] })).toBe(false)
     expect(isPoweredEntrance({ powers: ['keep', 'camera', 'read'] })).toBe(false)
     expect(isPoweredEntrance(undefined)).toBe(false)
   })
 })
 
-describe('an intent applies to what the index holds now', () => {
-  const addresses = { [ZONE]: KEY, [`home.${ZONE}`]: KEY }
-  const powered: ZoneEntrance = { page: PAGE, powers: ALL, other: `home.${ZONE}` }
+describe('an entrance counts only where the index binds its host', () => {
+  it('its own address names the lineage — `<label>.<zone>`, or an apex claim', () => {
+    expect(boundLineage(BOUND, APP)).toBe(KEY)
+    expect(boundLineage({ ...BOUND, addresses: { [ZONE]: KEY } }, ZONE)).toBe(KEY)
+  })
 
-  it('on sets the page and all three powers, keeping other', () => {
-    expect(applyEntranceIntent({ page: NEWER, powers: [], other: `home.${ZONE}` }, { kind: 'on', page: PAGE }, ZONE, addresses)).toEqual(powered)
+  it('the implicit label names a published key on a domain its doors open — or on any, with no doors', () => {
+    const roots = { [KEY]: HEAD }
+    expect(boundLineage({ roots, doors: { [KEY]: [ZONE] } }, LABELLED)).toBe(KEY)
+    expect(boundLineage({ roots }, LABELLED)).toBe(KEY)
+    expect(boundLineage({ roots, doors: { [KEY]: [ZONE] } }, `${KEY}.eu.${ZONE}`)).toBe(KEY)
+    expect(boundLineage({ roots, doors: { [KEY]: ['jwize.com'] } }, LABELLED)).toBe('')
+    expect(boundLineage({ roots, doors: { [KEY]: [ZONE] } }, `${KEY}.evil${ZONE}`)).toBe('')
+    expect(boundLineage({ roots: {}, doors: {} }, LABELLED)).toBe('')
+  })
+
+  it('an own address outranks the label; a reserved or apex label never binds', () => {
+    expect(boundLineage({ roots: { [KEY]: HEAD, other: OTHER_HEAD }, addresses: { [LABELLED]: 'other' } }, LABELLED)).toBe('other')
+    for (const label of ['host', 'content', 'try-x']) {
+      expect(boundLineage({ roots: { [label]: HEAD } }, `${label}.${ZONE}`)).toBe('')
+    }
+    expect(boundLineage({ roots: { [KEY]: HEAD } }, ZONE)).toBe('')
+  })
+
+  it('reading drops an entrance whose host the index does not bind', () => {
+    const raw = { [APP]: { page: PAGE }, [`tea.${ZONE}`]: { page: PAGE }, [LABELLED]: { page: PAGE } }
+    expect(readEntrances(raw, BOUND)).toEqual({ [APP]: { page: PAGE }, [LABELLED]: { page: PAGE } })
+    expect(readEntrances(raw, { roots: {}, addresses: {} })).toEqual({})
+  })
+})
+
+describe('an intent applies to what the index holds now', () => {
+  const powered: ZoneEntrance = { page: PAGE, powers: ALL, from: { pubkey: PUBKEY, lineage: KEY } }
+
+  it('on sets the page and all three powers, keeping who is followed', () => {
+    expect(applyEntranceIntent({ page: NEWER, powers: [], from: powered.from }, { kind: 'on', page: PAGE })).toEqual(powered)
   })
 
   it('off keeps the page and sets no powers', () => {
-    expect(applyEntranceIntent(powered, { kind: 'off' }, ZONE, addresses)).toEqual({ ...powered, powers: [] })
-    expect(applyEntranceIntent(null, { kind: 'off' }, ZONE, addresses)).toBeNull()
-  })
-
-  it('other changes only other — it neither raises nor drops powers', () => {
-    expect(applyEntranceIntent(powered, { kind: 'other', other: `host.${ZONE}` }, ZONE, addresses)).toEqual({ ...powered, other: `host.${ZONE}` })
-    const off = { ...powered, powers: [] as EntrancePower[] }
-    expect(applyEntranceIntent(off, { kind: 'other', other: null }, ZONE, addresses)).toEqual({ page: PAGE, powers: [] })
-  })
-
-  it('an other change that leaves the entry empty is a forget', () => {
-    expect(applyEntranceIntent({ other: `host.${ZONE}` }, { kind: 'other', other: null }, ZONE, addresses)).toBeNull()
+    expect(applyEntranceIntent(powered, { kind: 'off' })).toEqual({ ...powered, powers: [] })
+    expect(applyEntranceIntent(null, { kind: 'off' })).toBeNull()
   })
 
   it('forget removes the entry', () => {
-    expect(applyEntranceIntent(powered, { kind: 'forget' }, ZONE, addresses)).toBeNull()
+    expect(applyEntranceIntent(powered, { kind: 'forget' })).toBeNull()
   })
 })
 
 describe('the index reads and writes it', () => {
-  it('a verified read surfaces the entrances and ignores a malformed entry without refusing the index', async () => {
-    seed({ entrances: { ...ENTRANCES, 'bad.org': { page: 'x' } } })
+  it('a verified read surfaces the entrances, and ignores a malformed or unbound entry without refusing the index', async () => {
+    seed({ entrances: { ...ENTRANCES, 'bad.org': { page: PAGE }, [`tea.${ZONE}`]: { page: 'x' } } })
     const read = await fetchHiveIndex(ZONE, PUBKEY)
     expect(read.ok).toBe(true)
     if (read.ok) expect(read.manifest.entrances).toEqual(ENTRANCES)
@@ -223,11 +263,14 @@ describe('the index reads and writes it', () => {
     expect(read.ok && 'entrances' in read.manifest).toBe(false)
   })
 
-  it('a write normalizes the entrances it carries', async () => {
+  it('a write normalizes the entrances it carries — an unknown field is ignored, an unbound host dropped', async () => {
     served = null   // nothing to read back: the caller's map is the one carried
-    const previous = { v: 1, roots: { [KEY]: HEAD }, entrances: { [ZONE]: { page: PAGE, powers: ['read', 'keep', 'camera'], junk: 1 }, 'bad.org': {} } }
+    const previous = {
+      v: 1, roots: { [KEY]: HEAD }, addresses: { [APP]: KEY },
+      entrances: { [APP]: { page: PAGE, powers: ['read', 'keep', 'camera'], other: `host.${ZONE}`, junk: 1 }, 'bad.org': { page: PAGE } },
+    }
     expect((await putHiveManifest(ZONE, { [KEY]: HEAD }, {}, 1_600_000_000, previous)).ok).toBe(true)
-    expect(signedContent()['entrances']).toEqual({ [ZONE]: { page: PAGE, powers: ALL } })
+    expect(entrancesNow()).toEqual({ [APP]: { page: PAGE, powers: ALL } })
   })
 
   it('an index without entrances is byte-identical to before, and an empty map is omitted', async () => {
@@ -243,45 +286,45 @@ describe('the index reads and writes it', () => {
 
 describe('no writer carries a stale entrance forward', () => {
   // The participant turned powers off while another writer held an older read.
-  const staleRead = { v: 1, roots: { [KEY]: HEAD }, addresses: { [ZONE]: KEY }, entrances: ENTRANCES }
-  const offNow = { [ZONE]: { ...ENTRANCE, powers: [] as EntrancePower[] } }
+  const staleRead = { v: 1, roots: { [KEY]: HEAD }, addresses: { [APP]: KEY }, entrances: ENTRANCES }
+  const offNow = { [APP]: { ...ENTRANCE, powers: [] as EntrancePower[] } }
 
   it('takes the entrances from a fresh read right before signing, never from the caller\'s copy', async () => {
     served = sign({ ...staleRead, entrances: offNow }, 1_700_000_100)
     expect((await putHiveManifest(ZONE, { [KEY]: HEAD }, {}, 1_700_000_000, staleRead)).ok).toBe(true)
-    expect(signedContent()['entrances']).toEqual(offNow)
+    expect(entrancesNow()).toEqual(offNow)
   })
 
   it('a stale setHiveRoot cannot undo a Turn off', async () => {
     seed({ entrances: offNow })                           // what the host holds now
     const stale: HiveIndexResult = { ok: true, manifest: {  // what the writer read earlier
       roots: { [KEY]: HEAD }, createdAt: 1_600_000_000, pubkey: PUBKEY,
-      addresses: { [ZONE]: KEY }, entrances: ENTRANCES, signedContent: staleRead,
+      addresses: { [APP]: KEY }, entrances: ENTRANCES, signedContent: staleRead,
     } }
     expect((await setHiveRoot(ZONE, 'install:essentials', NEWER, { fetchIndex: async () => stale })).ok).toBe(true)
-    expect(signedContent()['entrances']).toEqual(offNow)
+    expect(entrancesNow()).toEqual(offNow)
   })
 
-  it('only setZoneEntrance sets them — its own map stands', async () => {
+  it('only setEntrance sets them — its own map stands', async () => {
     served = sign({ ...staleRead, entrances: offNow }, 1_700_000_100)
     await putHiveManifest(ZONE, { [KEY]: HEAD }, {}, 1_700_000_100, staleRead, { setsEntrances: true })
-    expect(signedContent()['entrances']).toEqual(ENTRANCES)
+    expect(entrancesNow()).toEqual(ENTRANCES)
   })
 
   it('falls back to the caller\'s copy when the fresh read fails, or is older than what it replaces', async () => {
     indexStatus = 503
     await putHiveManifest(ZONE, { [KEY]: HEAD }, {}, 1_700_000_000, staleRead)
     indexStatus = 200
-    expect(signedContent()['entrances']).toEqual(ENTRANCES)
+    expect(entrancesNow()).toEqual(ENTRANCES)
     served = sign({ ...staleRead, entrances: offNow }, 1_600_000_000)
     await putHiveManifest(ZONE, { [KEY]: HEAD }, {}, 1_700_000_000, staleRead)
-    expect(signedContent()['entrances']).toEqual(ENTRANCES)
+    expect(entrancesNow()).toEqual(ENTRANCES)
   })
 })
 
-describe('every index writer carries the entrances', () => {
+describe('every other index writer carries the entrances', () => {
   const carried = (): void => {
-    expect(signedContent()['entrances']).toEqual(ENTRANCES)
+    expect(entrancesNow()).toEqual(ENTRANCES)
     expect(signedContent()['future']).toEqual({ kept: true })
   }
 
@@ -291,19 +334,8 @@ describe('every index writer carries the entrances', () => {
     carried()
   })
 
-  it('unpublishBranch — keyed by zone, so withdrawing the creation prunes nothing here', async () => {
-    expect(await unpublishBranch(SEGS)).toEqual({ ok: true, removed: true })
-    expect((signedContent()['roots'] as Record<string, string>)[KEY]).toBeUndefined()
-    carried()
-  })
-
-  it('setBranchDoors', async () => {
+  it('setBranchDoors — an own address stays bound whatever the doors say', async () => {
     expect((await setBranchDoors(SEGS, [ZONE, 'pluginthematrix.com'])).ok).toBe(true)
-    carried()
-  })
-
-  it('setBranchAddress', async () => {
-    expect(await setBranchAddress(SEGS, ZONE, 'tea')).toEqual({ ok: true, host: `tea.${ZONE}` })
     carried()
   })
 
@@ -335,14 +367,40 @@ describe('every index writer carries the entrances', () => {
   })
 })
 
-describe('setZoneEntrance — the participant turns a zone\'s powers on or off', () => {
-  const start = (extra: Record<string, unknown> = {}): void => seed({ entrances: undefined, ...extra })
-  const entranceNow = (): ZoneEntrance | undefined => (signedContent()['entrances'] as Record<string, ZoneEntrance> | undefined)?.[ZONE]
+describe('an entrance goes with its binding', () => {
+  it('unpublishBranch drops the withdrawn creation\'s entrance, and keeps another creation\'s', async () => {
+    const tea = `tea.${ZONE}`
+    seed({ addresses: { [APP]: KEY, [tea]: 'other' }, entrances: { ...ENTRANCES, [tea]: { page: NEWER } } })
+    expect(await unpublishBranch(SEGS)).toEqual({ ok: true, removed: true })
+    expect((signedContent()['roots'] as Record<string, string>)[KEY]).toBeUndefined()
+    expect(entrancesNow()).toEqual({ [tea]: { page: NEWER } })
+    expect(signedContent()['future']).toEqual({ kept: true })
+  })
 
-  it('turn on writes the page with all three powers, the review scent and what was followed, in one signed write', async () => {
+  it('moving the own address drops the entrance of the address given up', async () => {
+    expect(await setBranchAddress(SEGS, ZONE, 'tea')).toEqual({ ok: true, host: `tea.${ZONE}` })
+    expect(signedContent()['addresses']).toEqual({ [`tea.${ZONE}`]: KEY })
+    expect('entrances' in signedContent()).toBe(false)
+  })
+
+  it('closing the door an implicit label stood on drops its entrance', async () => {
+    seed({ addresses: undefined, entrances: { [LABELLED]: ENTRANCE } })
+    expect((await setBranchDoors(SEGS, [ZONE, 'pluginthematrix.com'])).ok).toBe(true)
+    expect(entrancesNow()).toEqual({ [LABELLED]: ENTRANCE })
+    expect((await setBranchDoors(SEGS, ['pluginthematrix.com'])).ok).toBe(true)
+    expect('entrances' in signedContent()).toBe(false)
+  })
+})
+
+describe('setEntrance — the participant turns an app address\'s powers on or off', () => {
+  const start = (extra: Record<string, unknown> = {}): void => seed({ entrances: undefined, ...extra })
+  const entranceNow = (host = APP): ZoneEntrance | undefined => entrancesNow()?.[host]
+  const puts = (): string[] => requests.filter(r => r.method === 'PUT').map(r => new URL(r.url).host)
+
+  it('turn on writes the page with all three powers, the review scent and what was followed, in one signed write at the zone root', async () => {
     start()
-    const out = await setZoneEntrance(ZONE, { kind: 'on', page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } })
-    expect(out.ok).toBe(true)
+    const out = await setEntrance(APP, { kind: 'on', page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } })
+    expect(out).toMatchObject({ ok: true, host: APP })
     // Following yourself: `at` is the stamp of this very write, `head` the
     // followed lineage's head as your index names it.
     expect(entranceNow()).toEqual({ page: PAGE, powers: ALL, from: { pubkey: PUBKEY, lineage: KEY, at: served?.['created_at'], head: HEAD } })
@@ -351,94 +409,107 @@ describe('setZoneEntrance — the participant turns a zone\'s powers on or off',
     expect(published).toEqual([{ host: ZONE, sigs: expect.arrayContaining([scent]) }])
     const record = JSON.parse(new TextDecoder().decode(resources.get(scent!)!)) as Record<string, unknown>
     expect(record).toMatchObject({ kind: 'module-assessment', sandbox: 'card-door', root: PAGE, change: null, verdict: 'accept' })
+    const notes = [...resources.values()].map(b => new TextDecoder().decode(b))
+    expect(notes).toContain(`Previewed and turned on for ${APP}.`)
     expect(availableAsk).toEqual([[PAGE, 'resource', false, [ZONE]]])
+    expect(puts()).toEqual([ZONE])
+  })
+
+  it('an implicit label is an address too — the creation\'s key on a domain its doors open', async () => {
+    start({ addresses: undefined })
+    expect(await setEntrance(LABELLED.toUpperCase(), { kind: 'on', page: PAGE })).toMatchObject({ ok: true, host: LABELLED })
+    expect(entranceNow(LABELLED)).toEqual({ page: PAGE, powers: ALL })
+  })
+
+  it('aims the index, the receipt and the scent at the zone the address sits under', async () => {
+    const app = 'business-card.jwize.com'
+    start({ addresses: { [app]: KEY }, doors: { [KEY]: [ZONE, 'jwize.com'] } })
+    expect((await setEntrance(app, { kind: 'on', page: PAGE })).ok).toBe(true)
+    expect(entranceNow(app)).toEqual({ page: PAGE, powers: ALL })
+    expect(new URL(requests[0]!.url).host).toBe('jwize.com')
+    expect(puts()).toEqual(['jwize.com'])
+    expect(availableAsk).toEqual([[PAGE, 'resource', false, ['jwize.com']]])
+    expect(published.map(p => p.host)).toEqual(['jwize.com'])
   })
 
   it('turn off keeps the page with no powers — never gated on the page being held, and no scent', async () => {
     held = false
-    expect((await setZoneEntrance(ZONE, { kind: 'off' })).ok).toBe(true)
+    expect(await setEntrance(APP, { kind: 'off' })).toMatchObject({ ok: true, host: APP, entrance: { ...ENTRANCE, powers: [] } })
     expect(entranceNow()).toEqual({ ...ENTRANCE, powers: [] })
     expect(published).toEqual([])
     expect(availableAsk).toEqual([])
   })
 
-  it('Turn off, then choosing Other, stays off', async () => {
-    seed({ addresses: { [ZONE]: KEY, [`home.${ZONE}`]: KEY } })
-    expect((await setZoneEntrance(ZONE, { kind: 'off' })).ok).toBe(true)
-    expect((await setZoneEntrance(ZONE, { kind: 'other', other: `home.${ZONE}` })).ok).toBe(true)
-    expect(entranceNow()).toEqual({ ...ENTRANCE, powers: [], other: `home.${ZONE}` })
-  })
-
   it('what a stale panel believed can neither drop nor raise powers — the intent meets the index as it is', async () => {
-    // The panel last saw nothing; the index holds a powered entrance.
-    expect((await setZoneEntrance(ZONE, { kind: 'other', other: null })).ok).toBe(true)
-    const { other: _gone, ...kept } = ENTRANCE
-    expect(entranceNow()).toEqual(kept)
-    // The panel last saw powers on; the index holds them off.
-    seed({ entrances: { [ZONE]: { page: PAGE, powers: [], from: ENTRANCE.from } } })
-    expect((await setZoneEntrance(ZONE, { kind: 'other', other: `host.${ZONE}` })).ok).toBe(true)
-    expect(entranceNow()).toEqual({ ...ENTRANCE, powers: [] })
+    // The panel last saw powers on; the index holds them off. Off again is no change.
+    seed({ entrances: { [APP]: { ...ENTRANCE, powers: [] } } })
+    const before = served
+    expect(await setEntrance(APP, { kind: 'off' })).toMatchObject({ ok: true, reason: 'unchanged' })
+    expect(served).toBe(before)
   })
 
   it('forget removes the entrance — the field goes with its last entry', async () => {
     held = false
-    expect((await setZoneEntrance(ZONE, { kind: 'forget' })).ok).toBe(true)
+    expect((await setEntrance(APP, { kind: 'forget' })).ok).toBe(true)
     expect('entrances' in signedContent()).toBe(false)
     expect(signedContent()['future']).toEqual({ kept: true })
-  })
-
-  it('clearing Other on an entry with no page forgets it', async () => {
-    seed({ entrances: { [ZONE]: { other: `host.${ZONE}` } } })
-    expect((await setZoneEntrance(ZONE, { kind: 'other', other: null })).ok).toBe(true)
-    expect('entrances' in signedContent()).toBe(false)
   })
 
   it('refuses an index it cannot read, and signs nothing', async () => {
     const before = served
     indexStatus = 503
-    expect(await setZoneEntrance(ZONE, { kind: 'off' })).toMatchObject({ ok: false, failure: 'index-unsafe' })
+    expect(await setEntrance(APP, { kind: 'off' })).toMatchObject({ ok: false, failure: 'index-unsafe' })
     expect(served).toBe(before)
   })
 
-  it('needs a creation at the apex only to turn on — an orphaned entrance can still be turned off and forgotten', async () => {
+  it('a domain\'s root is a plain front door: no powers there, even where a creation claims the apex', async () => {
+    seed({ addresses: { [ZONE]: KEY, 'jwize.com': KEY }, doors: { [KEY]: [ZONE, 'jwize.com'] }, entrances: undefined })
+    const before = served
+    expect(await setEntrance(ZONE, { kind: 'on', page: PAGE })).toMatchObject({ ok: false, failure: 'root' })
+    expect(await setEntrance('jwize.com', { kind: 'on', page: PAGE })).toMatchObject({ ok: false, failure: 'root' })
+    expect(served).toBe(before)
+    expect(published).toEqual([])
+  })
+
+  it('needs the address bound to a creation only to turn on — off and forget are always allowed', async () => {
     seed({ addresses: { [`rituals.${ZONE}`]: KEY } })
     const before = served
-    expect(await setZoneEntrance(ZONE, { kind: 'on', page: NEWER })).toMatchObject({ ok: false, failure: 'no-apex' })
+    expect(await setEntrance(APP, { kind: 'on', page: NEWER })).toMatchObject({ ok: false, failure: 'no-address' })
     expect(served).toBe(before)
-    expect((await setZoneEntrance(ZONE, { kind: 'off' })).ok).toBe(true)
-    expect(entranceNow()?.powers).toEqual([])
-    expect((await setZoneEntrance(ZONE, { kind: 'forget' })).ok).toBe(true)
-    expect('entrances' in signedContent()).toBe(false)
+    // The unbound entry is not read at all, so there is nothing to change.
+    expect(await setEntrance(APP, { kind: 'off' })).toMatchObject({ ok: true, reason: 'unchanged' })
+    expect(await setEntrance(APP, { kind: 'forget' })).toMatchObject({ ok: true, reason: 'unchanged' })
+    expect(served).toBe(before)
     served = null
-    expect(await setZoneEntrance(ZONE, { kind: 'on', page: PAGE })).toMatchObject({ ok: false, failure: 'no-apex' })
+    expect(await setEntrance(APP, { kind: 'on', page: PAGE })).toMatchObject({ ok: false, failure: 'no-address' })
   })
 
   it('refuses to turn on a page the host does not hold', async () => {
     start()
     const before = served
     held = false
-    expect(await setZoneEntrance(ZONE, { kind: 'on', page: NEWER })).toMatchObject({ ok: false, failure: 'not-available' })
+    expect(await setEntrance(APP, { kind: 'on', page: NEWER })).toMatchObject({ ok: false, failure: 'not-available' })
     expect(served).toBe(before)
     expect(published).toEqual([])
   })
 
-  it('refuses a bad page, an other that is not one of the zone\'s addresses, and a loopback zone', async () => {
-    expect(await setZoneEntrance(ZONE, { kind: 'on', page: 'nope' })).toMatchObject({ ok: false, failure: 'no-page' })
-    expect(await setZoneEntrance(ZONE, { kind: 'other', other: `home.${ZONE}` })).toMatchObject({ ok: false, failure: 'bad-other' })
-    expect(await setZoneEntrance(ZONE, { kind: 'other', other: 'elsewhere.org' })).toMatchObject({ ok: false, failure: 'bad-other' })
-    expect(await setZoneEntrance('localhost:4250', { kind: 'off' })).toMatchObject({ ok: false, failure: 'no-host' })
+  it('refuses a bad page, and a host that is not an address', async () => {
+    expect(await setEntrance(APP, { kind: 'on', page: 'nope' })).toMatchObject({ ok: false, failure: 'no-page' })
+    for (const host of ['localhost:4250', 'app.localhost', 'com', 'not a host', '']) {
+      expect(await setEntrance(host, { kind: 'off' })).toMatchObject({ ok: false, failure: 'no-host' })
+    }
   })
 
   it('refuses a seventeenth entrance rather than letting the host refuse the whole index', async () => {
-    const full = Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`zone${i}.org`, { page: PAGE }]))
-    seed({ entrances: full })
-    expect(await setZoneEntrance(ZONE, { kind: 'on', page: PAGE })).toMatchObject({ ok: false, failure: 'too-many' })
+    const addresses = Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`a${i}.${ZONE}`, 'other']))
+    const full = Object.fromEntries(Object.keys(addresses).map(h => [h, { page: PAGE }]))
+    seed({ addresses: { ...addresses, [APP]: KEY }, entrances: full })
+    expect(await setEntrance(APP, { kind: 'on', page: PAGE })).toMatchObject({ ok: false, failure: 'too-many' })
   })
 
   it('an unchanged entrance signs nothing', async () => {
     const before = served
-    expect(await setZoneEntrance(ZONE, { kind: 'on', page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } })).toMatchObject({ ok: true, reason: 'unchanged' })
-    expect(await setZoneEntrance(ZONE, { kind: 'other', other: `host.${ZONE}` })).toMatchObject({ ok: true, reason: 'unchanged' })
+    expect(await setEntrance(APP, { kind: 'on', page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } })).toMatchObject({ ok: true, reason: 'unchanged' })
     expect(served).toBe(before)
   })
 })
@@ -449,7 +520,7 @@ describe('a self-followed entrance, turned on before its page is published', () 
   const OLDER_PUBLISHED = 'f'.repeat(64)
   const MOVED_PAGE = '9'.repeat(64)
   const MOVED_HEAD = '8'.repeat(64)
-  const entranceNow = (): ZoneEntrance => (signedContent()['entrances'] as Record<string, ZoneEntrance>)[ZONE]!
+  const entranceNow = (): ZoneEntrance => entrancesNow()![APP]!
   const look = async () => {
     const emitted: unknown[] = []
     await new EntranceScoutService().check({
@@ -464,7 +535,7 @@ describe('a self-followed entrance, turned on before its page is published', () 
 
   it('stays silent when another write re-stamps the index — the followed head did not move', async () => {
     seed({ entrances: undefined })
-    expect((await setZoneEntrance(ZONE, { kind: 'on', page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } })).ok).toBe(true)
+    expect((await setEntrance(APP, { kind: 'on', page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } })).ok).toBe(true)
     const turnedOn = entranceNow().from!
     expect(turnedOn.head).toBe(HEAD)
     // Publishing something else: the index is stamped later than `at`.
@@ -476,14 +547,14 @@ describe('a self-followed entrance, turned on before its page is published', () 
     // The stamp rule alone (an entry with no recorded head) would have
     // offered the older published page — the gap `from.head` closes.
     const { head: _head, ...stampOnly } = turnedOn
-    served = sign({ ...signedContent(), entrances: { [ZONE]: { ...entranceNow(), from: stampOnly } } }, Number(served?.['created_at']) + 1)
-    expect(await look()).toEqual([expect.objectContaining({ zone: ZONE, offered: OLDER_PUBLISHED })])
+    served = sign({ ...signedContent(), entrances: { [APP]: { ...entranceNow(), from: stampOnly } } }, Number(served?.['created_at']) + 1)
+    expect(await look()).toEqual([expect.objectContaining({ host: APP, offered: OLDER_PUBLISHED })])
   })
 
   it('offers the page once the followed head moves', async () => {
     seed({ entrances: undefined })
-    expect((await setZoneEntrance(ZONE, { kind: 'on', page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } })).ok).toBe(true)
+    expect((await setEntrance(APP, { kind: 'on', page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } })).ok).toBe(true)
     expect((await setHiveRoot(ZONE, KEY, MOVED_HEAD)).ok).toBe(true)
-    expect(await look()).toEqual([expect.objectContaining({ zone: ZONE, current: PAGE, offered: MOVED_PAGE, head: MOVED_HEAD })])
+    expect(await look()).toEqual([expect.objectContaining({ host: APP, current: PAGE, offered: MOVED_PAGE, head: MOVED_HEAD })])
   })
 })

@@ -15,6 +15,8 @@ const PUB_SECRET = new Uint8Array(32).fill(22)
 const OWN = getPublicKey(OWN_SECRET)
 const PUB = getPublicKey(PUB_SECRET)
 const ZONE = 'jwize.com'
+/** The app address the entrance runs at — never the domain's root. */
+const APP = `business-card.${ZONE}`
 const RUNS = 'c'.repeat(64)
 const NEWER_PAGE = 'd'.repeat(64)
 const ALL = ['keep', 'camera', 'read']
@@ -32,7 +34,7 @@ let requests: { url: string; method: string }[]
 let head: string
 
 const ownIndex = (entrance: Record<string, unknown>): Record<string, unknown> =>
-  signed({ v: 1, roots: { 'jaime-weise': 'a'.repeat(64) }, addresses: { [ZONE]: 'jaime-weise' }, entrances: { [ZONE]: entrance } }, OWN_SECRET)
+  signed({ v: 1, roots: { 'jaime-weise': 'a'.repeat(64) }, addresses: { [APP]: 'jaime-weise' }, entrances: { [APP]: entrance } }, OWN_SECRET)
 
 beforeEach(async () => {
   atoms = new Map()
@@ -68,16 +70,24 @@ describe('the entrance scout', () => {
   it('announces a newer page the followed head wears — once', async () => {
     const scout = new EntranceScoutService()
     const emitted: EntranceUpdate[] = []
-    const update = { zone: ZONE, current: RUNS, offered: NEWER_PAGE, at: 1_700_000_000, head }
+    const update = { host: APP, current: RUNS, offered: NEWER_PAGE, at: 1_700_000_000, head }
     expect(await scout.check(deps(emitted))).toEqual([update])
     await scout.check(deps(emitted))
     expect(emitted).toEqual([update])
   })
 
-  it('honours a skip', async () => {
+  it('honours a skip at that address — and only there', async () => {
     const emitted: EntranceUpdate[] = []
-    expect(await new EntranceScoutService().check(deps(emitted, [NEWER_PAGE]))).toEqual([])
+    expect(await new EntranceScoutService().check(deps(emitted, [`${APP} ${NEWER_PAGE}`]))).toEqual([])
     expect(emitted).toEqual([])
+    // The same page skipped at another address is still offered here.
+    expect(await new EntranceScoutService().check(deps(emitted, [`other.${ZONE} ${NEWER_PAGE}`, NEWER_PAGE])))
+      .toEqual([expect.objectContaining({ host: APP, offered: NEWER_PAGE })])
+  })
+
+  it('reads no entrance the index does not bind to an address', async () => {
+    indexes[OWN] = signed({ v: 1, roots: { 'jaime-weise': 'a'.repeat(64) }, entrances: { [APP]: { page: RUNS, powers: ALL, from: { ...FOLLOWED, pubkey: PUB } } } }, OWN_SECRET)
+    expect(await new EntranceScoutService().check(deps([]))).toEqual([])
   })
 
   it('is silent when the domain already runs that page, when powers are off, or when nothing is followed', async () => {

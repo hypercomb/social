@@ -59,18 +59,36 @@ routes = [
   # THIRD ZONE — hypercomb.com. Same script, same bindings: one worker serves
   # every zone, so a new domain is routes + SITE_BINDINGS and nothing else.
   # Zone ACTIVE 2026-08-30 (registrar NS moved to jack/margaret) with a
-  # proxied `* CNAME hypercomb.com` for the wildcard. WILDCARD ONLY for now:
+  # proxied `* CNAME hypercomb.com` for the wildcard.
   #
-  #   • The apex custom domain is deliberately NOT routed yet. The zone still
-  #     carries the imported `A hypercomb.com → Azure` record, so the apex
-  #     keeps serving the old Azure site until the `hypercomb` lineage is
-  #     published and the cutover is chosen — routing it today would replace
-  #     a working site with "nothing published here" AND collide with that
-  #     A record at deploy time.
-  #   • replication.hypercomb.com waits with it: its nested lineage
+  #   • THE APEX IS THE ZONE ROOT'S WRITE FACE (2026-10-07, jwize: "route the
+  #     apex through the worker"), by a ZONE ROUTE — never the custom domain.
+  #     The zone keeps its imported `A hypercomb.com → Azure` record, so the
+  #     apex keeps its own site (the host card, /tour/, /downloads/,
+  #     /welcome.json, the package pool under /content/): ORIGIN_HOSTS below
+  #     hands every read the worker does not own back to that origin
+  #     (worker.js servesOrigin), and the worker takes the writes. A custom
+  #     domain would collide with that A record at deploy time — and from a
+  #     non-TTY shell wrangler replaces the record without asking — and then
+  #     the worker would BE the origin, and the hand-off would call itself.
+  #     Removing this one route gives the apex back to Azure at once.
+  #   • SCRIPTLESS ROUTES FIRST. The asset server answers the run_worker_first
+  #     negations below before any worker code, from the VISITOR build, whose
+  #     service worker, runtime, /core/ and /vendor/ differ from the card's.
+  #     Four routes on the zone with NO worker (dashboard or API; wrangler
+  #     cannot write a route without a script) keep those files Azure's, and
+  #     must exist BEFORE this route is first deployed (the more specific
+  #     route wins):
+  #       hypercomb.com/hypercomb.worker.js   hypercomb.com/hypercomb-core.runtime.js
+  #       hypercomb.com/core/*                hypercomb.com/vendor/*
+  #     The card's other negated files (env.js, pixi.js, manifest.webmanifest,
+  #     the favicons and icons) were byte-identical in both builds on
+  #     2026-10-07; give them routes too the day that stops being true.
+  #   • replication.hypercomb.com waits: its nested lineage
   #     (hypercomb/architecture/replication-by-signature) is not published
-  #     yet either. Uncomment both together at cutover.
+  #     yet, and `*.hypercomb.com/*` already reaches it.
   #
+  { pattern = "hypercomb.com/*", zone_name = "hypercomb.com" },
   # { pattern = "hypercomb.com", custom_domain = true },
   # { pattern = "replication.hypercomb.com", custom_domain = true },
   { pattern = "*.hypercomb.com/*", zone_name = "hypercomb.com" },
@@ -171,6 +189,12 @@ HOST_DOOR_ORIGIN = "https://hypercomb-host.pages.dev"
 # The participant shell a sandbox door (try-<label>.<zone>) proxies to for
 # everything that is not the package's own files (worker.js serveSandboxShell).
 SANDBOX_SHELL_ORIGIN = "https://hypercomb.io"
+# ORIGIN HOSTS — a zone root reached by a ZONE ROUTE over its own proxied origin
+# record, whose site stays on that origin: the worker answers the writes, the
+# heap, the signed index and the machine JSON, and passes every other read
+# through unchanged (worker.js servesOrigin). Never a custom-domain host: there
+# the worker IS the origin, and the pass-through would call itself.
+ORIGIN_HOSTS = "hypercomb.com"
 # ROOT PATHS — https://<front-door zone>/<lineage> serves that published place
 # (worker.js rootPlaceAt) and /publications.json lists it there. Off until the
 # visitor engine asks its own files relative to its document base (today it
@@ -203,8 +227,9 @@ CLAIM_SCRIPT = "hypercomb-hosts"
 
 # The legacy relay hostname (content.<zone>) is deliberately absent: it keeps
 # its signed PUT routes for installs that have not updated. The apexes below
-# are zone roots and take the same writes (worker.js isZoneRoot); hypercomb.com
-# and jwize.com are not routed here, so their writes land on pluginthematrix.com.
+# are zone roots and take the same writes (worker.js isZoneRoot). hypercomb.com's
+# apex is routed here for its writes only (ORIGIN_HOSTS); jwize.com's apex is not
+# routed here, so its writes land on pluginthematrix.com.
 #
 # `routed` / `wildcard` (both default true) SAY WHAT IS DEPLOYED — a binding
 # whose route is commented out above resolves in the worker and is never reached
@@ -213,8 +238,11 @@ CLAIM_SCRIPT = "hypercomb-hosts"
 # request that does arrive is still answered. KEEP THEM IN STEP WITH THE ROUTES:
 # uncommenting a route above without clearing its flag here leaves a live door
 # missing from the directory, and the reverse advertises one nobody can dial.
-#   hypercomb.com    routed:false  — apex still `A → Azure`; it answers 200 with the
-#                                    Azure page, so a status code proves NOTHING here
+#   hypercomb.com    routed:false  — STILL TRUE with the apex route: the route makes
+#                                    it the write face, but its pages are Azure's
+#                                    (ORIGIN_HOSTS), so it is no hive's door; it
+#                                    answers 200 with the Azure page, so a status
+#                                    code proves NOTHING here
 #   jwize.com        routed:false  — anchor apex never routed; the `*` route is LIVE (2026-09-21)
 #   realones.online  apex = FRONT DOOR (shim host card); the `*` route is LIVE
 #
