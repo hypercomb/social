@@ -87,6 +87,18 @@ What a door may do comes from one of two places:
 
 There is no "trust this site" button. A single tap is not a review.
 
+**On your own domain, your review is the one that turns it on.** *Decided
+2026-10-07 (jwize):* powers are off by default, and a domain's participant
+turns them on from their own hive, for one page version, after previewing it
+and signing their own review of it. Other voices' scents are shown beside it,
+to read; they never turn it on, and none is required. Visitors already trust
+whoever runs a domain (below, "A separate address is not trust in its host"),
+so the review that turns a domain's page on is the one by the person who
+answers for that domain. Community verification is what you ask of someone
+else's code before it runs in your own space. How it is built:
+[using-a-creation.md](using-a-creation.md), "Powers are off by default, and the
+participant turns them on".
+
 **Discovered security: scents in community pools.** *jwize, 2026-10-07:* "these
 publications become staging areas where people leave their scents to be
 picked up by the truster. This allows another level of security … discovered
@@ -124,6 +136,29 @@ page.
 | Key | Values | What it is | Allowed |
 |---|---|---|---|
 | `bc.howto` | `true` / `false` | The card page's How-to was shown, so it opens by itself only once | jwize, 2026-10-07: "make it remember the how-to on doors too" |
+
+**Values a card door keeps, once its participant turns it on.** A card door
+has no visitor shell: the host serves the one page version its participant
+turned on as the whole document, so the browser's storage at that address is
+the page's own. The page checks every value as it loads, each on its own, and
+drops what breaks its rule, because other code may have run at that address
+before. In your hive the same checks run, but nothing you keep is ever cut.
+
+| Key | Rule | At most |
+|---|---|---|
+| `bc.cards` | Your own cards: `{id, card, mark}`. `id` is `c<n>`; `card` holds only a card's own fields; `mark` is 64 number pairs, or nothing | 16 |
+| `bc.current`, `bc.default` | An id in `bc.cards` (`bc.default` may also be `site`, or empty) | — |
+| `bc.hyperdex` | The people you keep. `id` is `d<n>`; a note of where you met, at most 300 characters; then either a card received as a link, or an address with the versions you took (`sig`, `data`, `at`, `publishedAt`) | 500 people, 16 versions each |
+| `bc.sigs` | A card's text by its SHA-256: a card, at most 65,536 characters, checked against its name on every load | — |
+| `bc.next` | The last id given out in each list, so an id is never given twice | — |
+| `bc.entrance`, `bc.entranceFor`, `bc.shake`, `bc.howto` | The page's own settings: fixed words, or `true` / `false` | — |
+
+Never kept on a card door: `bc.base` (the share address is the domain itself),
+`bc.ring` (an edit in progress ends with the page) and `bc.chooser`. Times are
+kept to the day and ids count up, so nothing kept says more about you than
+what you put on a card. The current version of each card you keep is held
+against its head again on every load; a version its head does not carry is
+dropped.
 
 **A separate address is not trust in its host.** *jwize:* "You can use
 subdomains and hosted friends but you are still at risk if they deploy a

@@ -162,6 +162,33 @@ receive or be notified of updates if you follow them (ie. in your domains)."
 - **Scents inform the choice.** The community's scents on a version
   ([read-only-deployment.md](read-only-deployment.md), "Discovered security")
   are what you read before turning it on. They never turn it on for you.
+- **Your review is enough for your own domain** (decided 2026-10-07). Turning
+  on signs your own review scent for that version in the same act. No other
+  voice is required.
+
+How it is built:
+- **The signed choice** is one field in your signed index, `entrances`, keyed
+  by domain: `{ page, powers, other, from }`. `page` is the one page version
+  (its signature); `powers` on means keeping, the camera and reading other
+  hosts, all three. `other` is the address your other devices are sent to;
+  `from` is the page you follow for updates. Without the field, a domain
+  behaves as before. It counts only from the publisher whose own address is
+  that domain's root.
+- **Your hive** (Publish panel, on a domain's root row, "Entrances"): preview
+  the page in a sealed frame that cannot reach your hive, then Turn on, Turn
+  off or Skip. Turn on is offered only for the version you just previewed, and
+  only once its bytes are on your hosts. Turning off keeps the page but runs it
+  sealed, so it can no longer read what visitors kept. Agents over the bridge
+  cannot turn it on. Once per start, your hive looks at the page you follow and
+  shows a newer version as an update (`sharing/entrance-scout.service.ts`).
+- **The host** serves that version as the whole page at your root, every
+  script pinned by its hash, the camera allowed to it alone. Phones get it;
+  other devices are sent to `other` (`worker.js`, `serveCardDoor`).
+- **A root remembers its page.** Once a root has served a page, visitors may
+  have kept cards there, so no other code ever runs at that root again: if
+  your choice is forgotten, unpublished or contested, the root serves the last
+  page sealed; if it cannot be read for a moment, a plain page with no scripts.
+  Releasing the root for something else is the host operator's act.
 
 ## On a phone, the root is people
 
@@ -171,6 +198,19 @@ hexagons … first before the offerings the people and it starts with you."
 And: "the card doesn't have to be a card but it should be a directory of
 people … mine just happens to be a business card … we can give templates."
 
+*jwize, 2026-10-07:* "remember mobile is all about your community and for each
+domain a front door is set and it becomes part of your hyperdex."
+
+- **Every domain sets a front door, and the front door is the row.** A
+  domain's participant chooses what its front door is: a card, or any front
+  page. Holding a domain puts its front door in your Hyperdex, by its address,
+  at the head you took. So the Hyperdex is your community: one front door per
+  domain you hold.
+- **Your own domain's front door is you, first.**
+- **The Hyperdex is the phone's front page**, hypercomb.io's included. *jwize,
+  2026-10-07:* "This is the new front page nothing can change that part for
+  now." It is not a setting, and nothing replaces it; the full hive is reached
+  from it.
 - The first screen is a **directory of people**: you at the top, then everyone
   you hold, then a way to make your own if you have none.
 - **Tapping a person opens their front page**, whatever they chose. A business
@@ -205,7 +245,10 @@ mode, or Single App Mode on a supervised iPhone).
 |---|---|
 | The hive's own code changes only when you accept (notice, never a swap) | built |
 | An adopted peer's creation stays at the head you accepted | built |
-| Keeping your cards and scanning on a card door (someone without a host) | not built. A door keeps nothing: the read-only visitor shell gives the page storage that lasts one load, and the host's headers block the camera. It waits on a community standard that allows a verified card page to keep the visitor's data and use the camera ([read-only-deployment.md](read-only-deployment.md), "Trust is an allowance, never a tap"). Until then, keeping and scanning work in your hive |
+| Keeping your cards and scanning on a card door (someone without a host) | built, not deployed. A domain's participant turns it on from their hive for one page version they previewed; the host then serves that version as the whole page, with keeping and the camera allowed to it alone, and the page reads its own card and other cards' addresses with a reader built into it. Every kept value is checked as it loads ([read-only-deployment.md](read-only-deployment.md), "Values a card door keeps"). Scanning in the page needs Android (Chrome); on an iPhone the camera app opens the other person's link. Waits on the worker deploy and a turn-on. Elsewhere a door still keeps nothing |
+| Two entrances at your root (phones get the card; other devices are sent to the address you choose) | built, not deployed (`worker.js`, entrances) |
+| Turning a domain's page on or off from your hive, with a preview and your review; a newer version of the page you follow shown as an update | built (Publish panel, `setZoneEntrance`, `entrance-scout.service.ts`). Reaches your hive with an essentials rebuild |
+| jwize.com as jwize's entrance, his machine a farm member at `relay.pluginthematrix.io` | prepared: the relay passthrough and the farm read-through are built, not deployed; the steps are in [hosting-from-a-machine.md](hosting-from-a-machine.md), "Moving your root off the machine" |
 | Held cards read and updated by address in the hive | built: essentials `CardReader` (`sharing/published-address.ts`, `commands/card-read.ts`) and the card page. An address's head is read from its door record and taken only when the publisher's signed index names it, binds that address to the lineage and opens a door there; an older head is never offered; a version from a file counts once its head is seen to carry its card. It reaches your hive with an essentials rebuild, and hypercomb.io with a revision publish. On a door, or with a root-path address (`hypercomb.com/<name>`), a held card waits unread |
 | A held item keeps the head you took: a newer head is an update notice; upgrade or skip; the item's versions in a list with the current one on top; deleting an inactive version is a local forget | built for the hive's own packages and adopted creations. Not built in the card page, whose Hyperdex keeps a copy of each card rather than its address and head |
 | A creation used on someone else's domain stays at the version you use | not built. The page would record the signature it runs, keep serving it, and show a notice when the domain publishes a newer one; the visitor shell would need to open a creation by signature |
@@ -216,6 +259,6 @@ mode, or Single App Mode on a supervised iPhone).
 | Offerings of a followed domain in your list | not built |
 | A front page other than a card for a person in the list | not built: every row opens a card today |
 | Pulling up from a front page to the list | built in the card page |
-| A How-to the first time you reach the Hyperdex (jwize: "mobile is all about connecting people with our creations"): a menu down the middle, each section a popup you read and close, the three ways to set up with pros and cons | built in the card page. It opens by itself only where the page can remember it showed it once (not on a published door); a "How it works" row at the end of the list opens it again |
+| A How-to the first time you reach the Hyperdex (jwize: "mobile is all about connecting people with our creations"): a menu down the middle, each section a popup you read and close, the three ways to set up with pros and cons | built in the card page. It opens by itself once, on doors too (the door keeps `bc.howto`, true or false only); a "How it works" row at the end of the list opens it again |
 | Other front pages and ways in, offered from the list | not built |
 | Editing your own front page in place, nothing kept until you accept | built in the card page ([business-card.md](business-card.md), "Editing a card in place") |

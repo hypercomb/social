@@ -206,6 +206,71 @@ upload end to end with a throwaway key.
 The machine itself needs Ethernet, no sleep and no shutdown on meeting days:
 see the runbook in [swarm-host.md](swarm-host.md).
 
+## Moving your root off the machine: the machine joins the farm
+
+*jwize, 2026-10-07:* "You can move the hosting role over to
+pluginthematrix.io/com … you can have the redundancy and start a little
+farm." A root domain is an entrance ([using-a-creation.md](using-a-creation.md),
+"Your root, your entrances, and the community farm"), so it moves to the host
+worker, and the machine keeps serving under a name of its own. For
+`jwize.com` that name is `relay.pluginthematrix.io`.
+
+The host worker carries the machine's two jobs over, both set per domain in
+`SITE_BINDINGS` (`wrangler.pluginthematrix.toml`):
+- **`relay`**: a WebSocket upgrade on the root is passed through unchanged to
+  that host, so builds already shipped keep meeting at `wss://jwize.com`.
+- **`farm`**: a signature the worker's storage lacks is read from each farm
+  host in turn, checked against its name, served, and kept, so the next read
+  is local. A signature is a right to use; nothing else is ever read through.
+
+**Still tied to the machine:** the relay itself (a meeting needs it on), and
+any bytes only it holds until they are read once or copied. Until the relay
+runs somewhere always on, a demo needs the machine awake.
+
+**What changes after the move:** uploads at `https://jwize.com/<sig>`,
+including a meeting's, land in the worker's storage under its upload rules
+(`AUTO_GRANT`), not the relay's live-participant rule.
+
+### The cutover, in order
+
+Each step is the owner's act; nothing here deploys by itself.
+
+1. **Workers Paid** on the Cloudflare account ($5 a month). It removes the
+   100,000-requests-a-day cliff that takes every site down at once.
+2. **Deploy the worker** with the entrance, relay and farm code
+   (`npm run deploy:pluginthematrix` in `hypercomb-relay/blossom-worker`). It
+   changes nothing until a binding or a signed index asks for it.
+3. **Give the machine its own name.** The ingress for
+   `relay.pluginthematrix.io` is already in `~/.cloudflared/config.yml`. Add
+   its DNS route, then restart the tunnel:
+   ```bash
+   cloudflared tunnel route dns 88ceb5a9-fd5f-47de-9fd1-9bb8be2c3e7d relay.pluginthematrix.io
+   ```
+   Check: `curl -s -H "Accept: application/nostr+json" https://relay.pluginthematrix.io`.
+4. **Bind and route the root** in `wrangler.pluginthematrix.toml`. Add the route
+   `{ pattern = "jwize.com", custom_domain = true }`. In the `jwize.com` binding,
+   drop `"routed":false` and add:
+   ```json
+   "frontDoor":true,"relay":"relay.pluginthematrix.io","farm":["relay.pluginthematrix.io"]
+   ```
+5. **Free the root from the tunnel.** Remove the `jwize.com` tunnel DNS record
+   in the dashboard (it collides with a custom domain at deploy) and the
+   `jwize.com` ingress in `config.yml`, then restart the tunnel.
+6. **Deploy the worker again**, then check:
+   - `https://jwize.com/` answers as a front door;
+   - `https://jwize.com/<the current install root>` answers 200, read through
+     the farm;
+   - `node scripts/swarm-preflight.cjs --relay wss://jwize.com` meets.
+7. **In your hive:** publish your card to the `jwize.com` root, then, in the
+   Publish panel on the `jwize.com` row, preview the page and turn it on, and
+   choose your other entrance.
+8. **On an Android phone**, `https://jwize.com/` opens your card; on a desktop
+   it opens your other entrance.
+
+**To undo:** remove the route, put back the DNS record and the ingress
+(`config.yml.bak-2026-10-07` holds the old file), restart the tunnel, and
+deploy.
+
 ## Related
 
 - [swarm-host.md](swarm-host.md) — the meeting point hosts the meeting
