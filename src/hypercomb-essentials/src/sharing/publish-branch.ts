@@ -26,7 +26,7 @@
 //   `confirmed`. A caller may render "published" on `unconfirmed`, but it must
 //   not render "live".
 
-import { EffectBus, get } from '@hypercomb/core'
+import { EffectBus, get, mintMetaEnvelope } from '@hypercomb/core'
 import {
   HIVE_LINK_KIND,
   HIVE_LINK_VERSION,
@@ -34,7 +34,7 @@ import {
   encodeHiveLinkBundle,
   type HiveLinkBundle,
 } from './hive-link.js'
-import { fetchHiveIndex, nip98Header, putHiveManifest } from './hive-pointer.js'
+import { fetchHiveIndex, fetchHiveManifestFromAny, nip98Header, putHiveManifest } from './hive-pointer.js'
 import {
   STAGE_LIVE,
   STAGE_PUBLISHED,
@@ -45,7 +45,11 @@ import {
   type StageWord,
 } from './stage-succession.js'
 import { isReservedRootKey } from './hive-link.js'
-import { creationUrl, foldContentLabel, ownAddressHost, ownAddressRefusal, withOwnAddress, zoneDoor } from './zone-door.js'
+import {
+  APEX_LABEL, ENTRANCES_MAX, ENTRANCE_POWERS, creationUrl, entranceOther, foldContentLabel, isPoweredEntrance, ownAddressHost,
+  ownAddressRefusal, readEntrances, withOwnAddress, zoneDoor, type ZoneEntrance, type ZoneEntranceFrom,
+} from './zone-door.js'
+import type { ModuleAssessmentRecord } from '../assistant/module-review.js'
 
 /** The heads the index names under its branch keys — what a stage list may
  *  hold (deployment-stages.md R2: a list is reconciled against the index). */
@@ -88,7 +92,7 @@ const CONFIRM_POLL_MS = 2_000
  *  a green branch with a 404 link is still a broken share. */
 const BUNDLE_RECEIPT_MS = 12_000
 
-interface StoreLike { putResource: (b: Blob) => Promise<string> }
+interface StoreLike { putResource: (b: Blob, options?: { emit?: boolean }) => Promise<string> }
 interface HistoryLike {
   sealSubtree: (segments: readonly string[]) => Promise<string | null>
 }
@@ -106,6 +110,9 @@ interface HostSyncLike {
   isClosureAvailableOn?: (sig: string, kind: string, closure: boolean, domains: readonly string[]) => Promise<boolean>
   ensureReceipt?: (sig: string, timeoutMs?: number) => Promise<boolean>
   probeServed?: (host: string, sig: string) => Promise<'served' | 'absent' | 'unknown'>
+  /** Publish these atoms to one host now, read back by hash (host-sync). */
+  publishAtoms?: (host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>) =>
+    Promise<{ ok: true } | { ok: false; error: string }>
 }
 interface SignerLike { getPublicKeyHex?: () => Promise<string | null> }
 
@@ -711,6 +718,212 @@ export async function setBranchAddress(
     read.manifest.createdAt, { ...read.manifest.signedContent, addresses })
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
   return { ok: true, host: label ? ownAddressHost(label, z) || `${label}.${z}` : z }
+}
+
+/** Why a zone's entrance could not be changed — each its own word for the
+ *  participant (`publish.entrance.failure.<code>`); `reason` is for logs.
+ *  `no-apex` = no creation is the zone itself (`@`), so nothing runs there;
+ *  `bad-other` = not host.<zone> nor one of the zone's own addresses;
+ *  `powers-unasked` = the write would leave powers on without a Turn on. */
+export type ZoneEntranceFailure =
+  | 'services' | 'no-host' | 'no-signer' | 'index-unsafe' | 'index-failed'
+  | 'not-available' | 'scent-failed' | 'no-apex' | 'no-page' | 'too-many' | 'bad-other' | 'powers-unasked'
+
+/** WHAT THE PARTICIPANT ASKED — never a whole entry. The intent is applied to
+ *  the entrance as the index holds it at the moment of writing, so no cached
+ *  copy can raise or drop powers it did not mean to touch. */
+export type ZoneEntranceIntent =
+  /** Run `page` (previewed) with all three powers; follow `from` for updates. */
+  | { kind: 'on'; page: string; from?: ZoneEntranceFrom }
+  /** Keep serving the page, with no powers. */
+  | { kind: 'off' }
+  /** Where devices that are not phones go; null = the phone entrance. */
+  | { kind: 'other'; other: string | null }
+  /** Forget the entrance (the host keeps the last page it served sealed). */
+  | { kind: 'forget' }
+
+export type ZoneEntranceResult =
+  | { ok: true; zone: string; entrance: ZoneEntrance | null; reason?: 'unchanged'; assessed?: string }
+  | { ok: false; failure: ZoneEntranceFailure; reason?: string }
+
+/** The participant's own review scent for a card page they turned on: the
+ *  module-assessment shape (assistant/module-review.ts) with the card door
+ *  as its sandbox, so the community reads it beside any other assessment. */
+export const CARD_DOOR_SANDBOX = 'card-door'
+
+/** The entrance an intent leaves, from what the index holds now. Pure. */
+export function applyEntranceIntent(
+  before: ZoneEntrance | null, intent: ZoneEntranceIntent, zone: string, addresses: Record<string, string>,
+): ZoneEntrance | null {
+  const norm = (entry: ZoneEntrance): ZoneEntrance | null => readEntrances({ [zone]: entry }, addresses)[zone] ?? null
+  switch (intent.kind) {
+    case 'on': {
+      const from = intent.from ?? before?.from
+      return norm({
+        page: intent.page, powers: [...ENTRANCE_POWERS],
+        ...(before?.other ? { other: before.other } : {}), ...(from ? { from } : {}),
+      })
+    }
+    case 'off': return before ? norm({ ...before, powers: [] }) : null
+    case 'other': {
+      if (!before && !intent.other) return null
+      const next: ZoneEntrance = { ...(before ?? {}) }
+      if (intent.other) next.other = intent.other
+      else delete next.other
+      // An entry the change leaves empty is forgotten, not refused.
+      return norm(next)
+    }
+    case 'forget': return null
+  }
+}
+
+/** THE PARTICIPANT TURNS A ZONE'S POWERS ON, OR OFF — the one writer of the
+ *  signed `entrances[zone]` (documentation/using-a-creation.md, "Powers are
+ *  off by default, and the participant turns them on"). Never remote: the
+ *  bridge has no intent for it, because a review is not a single tap.
+ *
+ *  It reads the index, applies the INTENT to the entrance it holds now, and
+ *  signs — one read-modify-write:
+ *  - `on` sets the page and all three powers, and in the SAME signed write
+ *    records the participant's own review scent for the page as
+ *    `roots['assess:<page>']`. Only `on` needs a creation at the apex
+ *    (`addresses[zone]`) and the page held on the host.
+ *  - `off` keeps the page and sets no powers: the host keeps serving it, so
+ *    cards visitors already kept stay unreadable to any other code there.
+ *  - `other` changes only where other devices go.
+ *  - `forget` removes the entry; the panel asks first.
+ *
+ *  HARD GUARD: no write leaves powers on unless the intent is `on`, or the
+ *  entrance already ran that same page with its powers on.
+ *
+ *  Refuses, before anything is signed, an index it cannot read (the wipe
+ *  guard). */
+export async function setZoneEntrance(zone: string, intent: ZoneEntranceIntent): Promise<ZoneEntranceResult> {
+  const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
+  const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+  if (!signer?.getPublicKeyHex) return { ok: false, failure: 'services' }
+  const z = foldContentLabel(zone)
+  if (!z || LOOPBACK_RE.test(z) || ownAddressHost(APEX_LABEL, z) !== z) return { ok: false, failure: 'no-host', reason: 'not a zone' }
+  if (intent.kind === 'on' && !SIG_RE.test(String(intent.page ?? '').toLowerCase())) return { ok: false, failure: 'no-page' }
+  if (intent.kind === 'other' && intent.other && !entranceOther(intent.other, z)) return { ok: false, failure: 'bad-other' }
+
+  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
+  // The zone itself first — it is where the entrance is served — then the
+  // standing targets, against the same shared index.
+  const nodes = [...new Set([z, ...await nodesFor([], hostSync)])]
+  hostSync?.addPublishNodes?.(nodes)
+  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
+  const nothing = !read.ok && read.reason === 'http' && read.status === 404
+  if (!read.ok && !nothing) return { ok: false, failure: 'index-unsafe', reason: read.reason }
+  const manifest = read.ok ? read.manifest : null
+  const addresses = manifest?.addresses ?? {}
+  const held = manifest?.entrances ?? {}
+  const before = held[z] ?? null
+
+  // A creation must open the apex for a page to run there. Turning powers
+  // off, choosing Other and forgetting are always allowed: an entrance whose
+  // apex went away must still be possible to switch off.
+  if (intent.kind === 'on' && !addresses[z]) return { ok: false, failure: 'no-apex' }
+  if (intent.kind === 'other' && intent.other && !entranceOther(intent.other, z, addresses)) return { ok: false, failure: 'bad-other' }
+
+  const next = applyEntranceIntent(before, { ...intent, ...(intent.kind === 'on' ? { page: intent.page.toLowerCase() } : {}) } as ZoneEntranceIntent, z, addresses)
+  if (isPoweredEntrance(next) && intent.kind !== 'on' && !(isPoweredEntrance(before) && before?.page === next?.page)) {
+    return { ok: false, failure: 'powers-unasked' }
+  }
+  const same = (a: ZoneEntrance | null, b: ZoneEntrance | null): boolean => {
+    // What was followed is recorded at turn-on, never asked for: compare who.
+    const strip = (e: ZoneEntrance | null) => e?.from ? { ...e, from: { pubkey: e.from.pubkey, lineage: e.from.lineage } } : e
+    return JSON.stringify(strip(a)) === JSON.stringify(strip(b))
+  }
+  if (same(before, next)) return { ok: true, zone: z, entrance: before, reason: 'unchanged' }
+  if (next && !before && Object.keys(held).length >= ENTRANCES_MAX) {
+    return { ok: false, failure: 'too-many', reason: `a host keeps at most ${ENTRANCES_MAX} entrances` }
+  }
+
+  // THE PAGE MUST BE HELD before powers run it — asked only when this write
+  // turns a page's powers on. Off, Other and Forget never wait on a receipt.
+  const page = next?.page ?? ''
+  const raising = !!next && isPoweredEntrance(next) && (page !== before?.page || !isPoweredEntrance(before))
+  if (raising) {
+    const ok = hostSync?.isClosureAvailableOn
+      ? (await hostSync.isClosureAvailableOn(page, 'resource', false, [indexHost])) === true
+      : (await hostSync?.isClosureAvailable?.(page, 'resource', false)) === true
+    if (!ok) return { ok: false, failure: 'not-available', reason: 'the page is not held on the host yet' }
+  }
+
+  // WHAT WAS FOLLOWED AT TURN-ON: the followed index's stamp and the followed
+  // lineage's head. Following yourself, the stamp is that of this very write
+  // and the head is the one your index names now; another publisher's are
+  // taken from the notice that offered the page, or read from their index.
+  let createdAt: number | undefined
+  if (intent.kind === 'on' && next?.from) {
+    const replaces = manifest?.createdAt ?? 0
+    const { pubkey: followedKey, lineage } = next.from
+    let at: number
+    let head = ''
+    if (followedKey === pubkey) {
+      at = Math.max(Math.floor(Date.now() / 1000), replaces + 1)
+      createdAt = at
+      head = String(manifest?.roots[lineage] ?? '')
+    } else if (Number.isSafeInteger(intent.from?.at) && SIG_RE.test(String(intent.from?.head ?? ''))) {
+      at = intent.from!.at!
+      head = intent.from!.head!
+    } else {
+      const followed = await fetchHiveManifestFromAny([indexHost, ...nodes], followedKey).catch(() => null)
+      at = followed?.createdAt || Math.floor(Date.now() / 1000)
+      head = String(followed?.roots[lineage] ?? '')
+    }
+    head = head.toLowerCase()
+    next.from = { pubkey: followedKey, lineage, at, ...(SIG_RE.test(head) ? { head } : {}) }
+  }
+
+  const roots = { ...(manifest?.roots ?? {}) }
+  let assessed: string | undefined
+  const scentKey = `assess:${page}`
+  if (raising && !roots[scentKey]) {
+    const scent = await cardDoorScent(page, z, indexHost, hostSync)
+    if ('error' in scent) return { ok: false, failure: 'scent-failed', reason: scent.error }
+    roots[scentKey] = scent.sig
+    assessed = scent.sig
+  }
+
+  const entrances: Record<string, ZoneEntrance> = { ...held }
+  if (next) entrances[z] = next
+  else delete entrances[z]
+  const put = await putHiveManifest(indexHost, roots, manifest?.doors ?? {},
+    manifest?.createdAt ?? 0, { ...(manifest?.signedContent ?? {}), entrances },
+    { setsEntrances: true, ...(createdAt ? { createdAt } : {}) })
+  if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
+  return { ok: true, zone: z, entrance: next, ...(assessed ? { assessed } : {}) }
+}
+
+/** Mint and publish the participant's review scent for page `page`: a note
+ *  (wrapped in its relation envelope, as module-review's putHop does) and the
+ *  assessment record, sent to the host now and read back by hash. The index
+ *  pointer `assess:<page>` is the caller's, in its own signed write. */
+async function cardDoorScent(
+  page: string, zone: string, host: string, hostSync: HostSyncLike | undefined,
+): Promise<{ sig: string } | { error: string }> {
+  const store = get<StoreLike>(STORE_KEY)
+  if (!store?.putResource || !hostSync?.publishAtoms) return { error: 'the review scent cannot be published from here' }
+  const held = new Map<string, Uint8Array>()
+  const put = async (text: string, type: string): Promise<string> => {
+    const bytes = new TextEncoder().encode(text)
+    const sig = await store.putResource(new Blob([bytes], { type }), { emit: false })
+    held.set(sig, bytes)
+    return sig
+  }
+  try {
+    const noteText = await put(`Previewed and turned on for ${zone}.`, 'text/plain; charset=utf-8')
+    const note = await put(JSON.stringify(mintMetaEnvelope({ resource: noteText, relation: 'note' })), 'application/json')
+    const record: ModuleAssessmentRecord = {
+      kind: 'module-assessment', sandbox: CARD_DOOR_SANDBOX, root: page, change: null, verdict: 'accept', note, at: Date.now(),
+    }
+    const sig = await put(JSON.stringify(record), 'application/json')
+    const sent = await hostSync.publishAtoms(host, [noteText, note, sig], async s => held.get(s) ?? null)
+    return sent.ok ? { sig } : { error: sent.error }
+  } catch { return { error: 'the review scent could not be written' } }
 }
 
 // ── SECURE DELETE — remove a switched-off place from my hosts ──────────────

@@ -33,6 +33,17 @@
 // back as intents (publish:run, publish:unpublish, publish:inspect, …).
 
 import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, type I18nProvider, registerPoolMeaning } from '@hypercomb/core'
+import { listDecorations } from '../commands/decoration-manifest.js'
+import { CARD_PAGE_KIND } from '../commands/card-wear.js'
+import { conceal, listConcealed, type ConcealedItem } from '../concealment/concealment.js'
+import {
+  ENTRANCE_SKIP_SCOPE,
+  ENTRANCE_UPDATE_EFFECT,
+  entranceHosts,
+  entranceScout,
+  readEntranceScents,
+  readPageBytes,
+} from './entrance-scout.service.js'
 import { PUBLIC_CONTENT_HOSTS, isReservedRootKey } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { arrivalPointer, publishArrivalPlan, readArrivalPlan, withdrawArrivalPlan } from './arrival-plan-publish.js'
@@ -71,11 +82,17 @@ import {
   secureDeleteBranch,
   setBranchAddress,
   setBranchDoors,
+  setZoneEntrance,
   unpublishBranch,
   type PublishFailure,
   type PublishProgress,
+  type ZoneEntranceFailure,
+  type ZoneEntranceIntent,
 } from './publish-branch.js'
-import { APEX_LABEL, creationUrl, foldDnsLabel, ownAddressRefusal, ownLabelOn, zoneDoor } from './zone-door.js'
+import {
+  APEX_LABEL, creationUrl, entranceOther, foldDnsLabel, isPoweredEntrance, ownAddressRefusal, ownLabelOn,
+  zoneDoor, type ZoneEntrance,
+} from './zone-door.js'
 
 /** English fallbacks for every way publishing can stop. Each one names what
  *  happened AND what it means for the participant's existing links — the
@@ -91,6 +108,24 @@ const PUBLISH_FAILURE_TEXT: Record<PublishFailure, string> = {
   'index-unsafe': 'Your hive index could not be read back, so it was left untouched — publishing over an index we cannot see would drop every other branch. Try again when the host answers.',
   'index-failed': 'The bytes are hosted but the index update failed. Publish again to retry the index.',
   'bundle-failed': 'The link resource could not be created.',
+}
+
+/** English fallbacks for every way an entrance change can stop, keyed as the
+ *  catalogs are (`publish.entrance.failure.<code>`). The routine's own reason
+ *  goes to the activity log, never into a translated sentence. */
+const ENTRANCE_FAILURE_TEXT: Record<ZoneEntranceFailure, string> = {
+  'services': 'Core services are not ready yet.',
+  'no-host': 'That is not a domain an entrance can run on.',
+  'no-signer': 'No signing key is available — the entrance must be signed.',
+  'index-unsafe': 'Your hive index could not be read back, so nothing was changed. Try again when the host answers.',
+  'index-failed': 'The host did not take the signed change. Try again.',
+  'not-available': 'The page is not held on the host yet, so its powers were not turned on.',
+  'scent-failed': 'Your review of the page could not be published, so its powers were not turned on.',
+  'no-apex': 'Make a creation the front page of this domain first.',
+  'no-page': 'Preview a page first — there is no page to turn on.',
+  'too-many': 'A host keeps at most sixteen entrances.',
+  'bad-other': 'Other devices can go to host.<domain> or one of this domain\'s own addresses only.',
+  'powers-unasked': 'That change would have turned powers on without your Turn on, so nothing was signed.',
 }
 
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
@@ -189,6 +224,33 @@ export interface PublishRow {
   /** The label an own address starts from — the tile's name, folded to a DNS
    *  label ('' when the name has nothing usable). */
   defaultLabel: string
+  /** zone → the entrance that zone's root runs, for each zone where THIS
+   *  creation is the domain itself (`@`); empty on every other row. */
+  entrances: Record<string, PublishEntrance>
+}
+
+/** One zone's entrance as the panel shows it (documentation/using-a-creation.md,
+ *  "Powers are off by default, and the participant turns them on"). */
+export interface PublishEntrance {
+  /** The page the domain runs (H), or null when it runs none of its own. */
+  page: string | null
+  /** H runs with its powers on — all three, version 1. */
+  powered: boolean
+  /** Where devices that are not phones go; '' = they get the phone entrance. */
+  other: string
+  /** The choices for `other`: host.<zone>, then this participant's own
+   *  <label>.<zone> addresses. */
+  otherChoices: string[]
+  /** Whose page the entrance follows, when it follows one. */
+  from: { pubkey: string; lineage: string } | null
+  /** The card page this tile wears here now, or null. */
+  wears: string | null
+  /** A newer page the followed head wears, not skipped (the entrance scout). */
+  offered: string | null
+  /** What the community's scents say about H — read only, never a gate. */
+  scents: { pubkey: string; verdict: string; at: number; own: boolean }[]
+  /** Versions put away with Skip, for this zone — each can be shown again. */
+  skipped: string[]
 }
 
 /** One choice on the "opens as" strip. `view: ''` is the hexagons ground. */
@@ -242,6 +304,14 @@ export interface PublishRenderPayload {
    *  snapshot matches it: 'published', 'changed' here since, or 'none'. */
   participantOnly: string[]
   participantState: 'published' | 'changed' | 'none'
+  /** The page being previewed: a blob: URL of its exact bytes, shown in a
+   *  sandboxed frame with no storage, no camera and no hive. */
+  entrancePreview: { zone: string; page: string; url: string } | null
+  /** Pages previewed in this session — Turn on is offered for these only. */
+  previewed: string[]
+  /** Bumped when an entrance change settles, kept or refused — a control that
+   *  painted a choice redraws from the signed state. */
+  entranceEpoch: number
 }
 
 export class PublishStatusDrone extends Drone {
@@ -258,8 +328,9 @@ export class PublishStatusDrone extends Drone {
     'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
     'hosts:render', 'publish:arrival', 'publish:participant', 'publish:participant-publish',
+    'publish:entrance', 'publish:entrance-preview', 'publish:entrance-skip', ENTRANCE_UPDATE_EFFECT, 'hidden:render',
   ]
-  protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log']
+  protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log', 'hidden:refresh']
 
   #open = false
   #refreshing = false
@@ -285,7 +356,7 @@ export class PublishStatusDrone extends Drone {
     open: false, host: '', zone: '', pubkey: '', currentKey: '', hosts: [],
     index: 'checking', indexCreatedAt: 0, indexStale: false,
     keyMismatch: false, refreshing: false, rows: [], collisions: [], views: [],
-    participantOnly: [], participantState: 'none',
+    participantOnly: [], participantState: 'none', entrancePreview: null, previewed: [], entranceEpoch: 0,
   }
   #debounce: ReturnType<typeof setTimeout> | null = null
   /** Something changed while a sweep was in flight — sweep again after it. */
@@ -293,6 +364,27 @@ export class PublishStatusDrone extends Drone {
   /** The row shown in the properties pane. Gap enumeration is expensive, so
    *  it follows this one subject instead of running for every list row. */
   #inspectedKey = ''
+
+  /** THE ENTRANCES — each zone's signed entry as the last sweep read it. */
+  readonly #entranceOf = new Map<string, ZoneEntrance>()
+  /** zone → the newer page the entrance scout announced (and the followed
+   *  index's stamp), until it is turned on or skipped. */
+  readonly #entranceUpdates = new Map<string, { offered: string; at: number; head: string }>()
+  /** Pages skipped this session → the notice they were, so Show again can
+   *  offer them back. */
+  readonly #skippedUpdates = new Map<string, { zone: string; offered: string; at: number; head: string }>()
+  /** Every version put away with Skip, still hidden (the concealment pool). */
+  #skipped: ConcealedItem[] = []
+  /** Pages previewed THIS SESSION. Never stored: a review is something you
+   *  just did, and Turn on asks for exactly the page you looked at. */
+  readonly #previewed = new Set<string>()
+  #preview: { zone: string; page: string; url: string } | null = null
+  /** Bumped by every preview request and every close: a load installs its
+   *  frame only while its own ticket is still the latest. */
+  #previewTicket = 0
+  #entranceEpoch = 0
+  /** zone → the signed addresses the last sweep read, for the Other choices. */
+  readonly #zoneAddresses = new Map<string, Record<string, string>>()
 
   constructor() {
     super()
@@ -315,6 +407,7 @@ export class PublishStatusDrone extends Drone {
     this.onEffect('publish:close', () => {
       if (!this.#open) return
       this.#open = false
+      this.#closePreview()
       this.#emit()
     })
 
@@ -375,6 +468,45 @@ export class PublishStatusDrone extends Drone {
       void this.#setParticipant(String(p?.name ?? ''), p?.on === true)
     })
     this.onEffect('publish:participant-publish', () => { void this.#publishParticipant() })
+
+    // THE ENTRANCE (the `@` row only): preview a page sandboxed, turn its
+    // powers on or off, choose where other devices go, skip an offered
+    // version. The participant's own acts — the bridge has no intent for any.
+    this.onEffect<{ key?: string; zone?: string; page?: string | null }>('publish:entrance-preview', (p) => {
+      void this.#previewEntrance(String(p?.zone ?? ''), String(p?.page ?? ''))
+    })
+    this.onEffect<{ key?: string; zone?: string; on?: boolean; page?: string; other?: string | null; forget?: boolean }>('publish:entrance', (p) => {
+      void this.#entrance(String(p?.key ?? ''), String(p?.zone ?? ''), p ?? {})
+    })
+    this.onEffect<{ key?: string; zone?: string; page?: string }>('publish:entrance-skip', (p) => {
+      void this.#skipEntrance(String(p?.zone ?? ''), String(p?.page ?? ''))
+    })
+    // The scout's notice: a badge on the row, and one toast.
+    this.onEffect<{ zone?: string; current?: string; offered?: string; at?: number; head?: string }>(ENTRANCE_UPDATE_EFFECT, (p) => {
+      const zone = hostZone(String(p?.zone ?? ''))
+      const offered = String(p?.offered ?? '').toLowerCase()
+      const at = Number.isSafeInteger(p?.at) ? Number(p?.at) : 0
+      const head = String(p?.head ?? '').toLowerCase()
+      if (!zone || !SIG_RE.test(offered) || this.#entranceUpdates.get(zone)?.offered === offered) return
+      this.#entranceUpdates.set(zone, { offered, at, head: SIG_RE.test(head) ? head : '' })
+      for (const row of this.#rows) { const view = row.entrances[zone]; if (view) view.offered = offered }
+      this.#toast('info', 'publish.entrance.update', `A newer card page is offered for ${zone} — preview it in Publish.`, { zone })
+      this.#emit()
+    })
+    // What is put away changed (a skip, or Show again): the skipped lists
+    // follow, and a version shown again this session is offered again.
+    this.onEffect<{ items?: ConcealedItem[]; gone?: string[] }>('hidden:render', (p) => {
+      const items = Array.isArray(p?.items) ? p.items : []
+      const gone = new Set(Array.isArray(p?.gone) ? p.gone.map(String) : [])
+      this.#skipped = items.filter(i => i?.scope === ENTRANCE_SKIP_SCOPE)
+      const still = new Set(this.#skipped.map(i => i.sig))
+      for (const [sig, notice] of this.#skippedUpdates) {
+        if (still.has(sig) || gone.has(sig)) continue
+        this.#skippedUpdates.delete(sig)
+        if (this.#entranceOf.get(notice.zone)?.page !== sig) this.#entranceUpdates.set(notice.zone, { offered: sig, at: notice.at, head: notice.head })
+      }
+      this.#paintEntrances()
+    })
 
     // A commit anywhere bumps the tree epoch, which invalidates every seal —
     // so every row's local side is stale. Coalesce: a burst of commits must
@@ -452,6 +584,9 @@ export class PublishStatusDrone extends Drone {
         return
       }
 
+      // What Skip put away — read from the pool itself, so the list shows even
+      // before the concealment bee has woken.
+      try { this.#skipped = (await listConcealed()).filter(i => i.scope === ENTRANCE_SKIP_SCOPE && i.state === 'hidden') } catch { /* keep the last answer */ }
       const ledger = await latestByLineageKey(pubkey)
       const anyRecord = (await latestByLineageKey()).size > 0
       const keyMismatch = ledger.size === 0 && anyRecord
@@ -518,6 +653,7 @@ export class PublishStatusDrone extends Drone {
         state: PublishIndexState; roots: Record<string, string>
         doors: Record<string, string[]>
         addresses: Record<string, string>
+        entrances: Record<string, ZoneEntrance>
         createdAt: number; stale: boolean
       }>()
       for (const door of doors) {
@@ -525,6 +661,7 @@ export class PublishStatusDrone extends Drone {
         const roots = read.ok ? read.manifest.roots : {}
         const doorsMap = read.ok ? read.manifest.doors ?? {} : {}
         const addresses = read.ok ? read.manifest.addresses ?? {} : {}
+        const entrances = read.ok ? read.manifest.entrances ?? {} : {}
         const createdAt = read.ok ? read.manifest.createdAt : 0
         const state: PublishIndexState = read.ok
           ? 'ok'
@@ -533,7 +670,7 @@ export class PublishStatusDrone extends Drone {
         // which are recorded per host — can say.
         const highWater = await highWaterIndexStamp(door, pubkey)
         indexes.set(door, {
-          state, roots, doors: doorsMap, addresses, createdAt,
+          state, roots, doors: doorsMap, addresses, entrances, createdAt,
           stale: read.ok && highWater > 0 && createdAt < highWater,
         })
       }
@@ -579,6 +716,7 @@ export class PublishStatusDrone extends Drone {
         row.doors = indexes.get(hostFor(key))?.doors[key] ?? null
         row.versions = versionsByKey.get(key) ?? []
         this.#addressRow(row, indexes.get(hostFor(key))?.addresses ?? {})
+        this.#entranceRow(row, indexes.get(hostFor(key))?.addresses ?? {}, indexes.get(hostFor(key))?.entrances ?? {})
         draft.push(row)
       }
       draft.sort((a, b) => a.path.localeCompare(b.path))
@@ -597,6 +735,7 @@ export class PublishStatusDrone extends Drone {
         refreshing: true, rows: this.#rows, collisions,
         views: this.#viewChoices(),
         participantOnly, participantState,
+        entrancePreview: this.#preview, previewed: [...this.#previewed], entranceEpoch: this.#entranceEpoch,
       }
       this.#emit()
 
@@ -631,6 +770,17 @@ export class PublishStatusDrone extends Drone {
               'unknown' as const,
             )
           : 'unknown'
+        // THE ENTRANCE, on the `@` row: the page this tile wears here now,
+        // and what the community's scents say about the page the domain runs.
+        if (Object.keys(row.entrances).length > 0) {
+          const wears = row.segments.length > 0 ? await beforeDeadline(this.#wornPage(row.segments), null) : null
+          for (const view of Object.values(row.entrances)) {
+            view.wears = wears
+            if (!view.page) continue
+            const read = await beforeDeadline(readEntranceScents(door, view.page, [pubkey]).catch(() => []), [])
+            view.scents = read.map(s => ({ ...s, own: s.pubkey === pubkey }))
+          }
+        }
         const entry = ledger.get(row.key)
         row.here = here
         row.state = publishVerdict({
@@ -691,7 +841,69 @@ export class PublishStatusDrone extends Drone {
       urls: {},
       ownLabels: {},
       defaultLabel: foldDnsLabel(segments[segments.length - 1] ?? ''),
+      entrances: {},
     }
+  }
+
+  /** The entrance of every zone this row opens as the domain itself (`@`),
+   *  from the signed index; the slow halves (what the tile wears, the scents)
+   *  fill in during the sweep. */
+  #entranceRow(row: PublishRow, addresses: Record<string, string>, entrances: Record<string, ZoneEntrance>): void {
+    const views: Record<string, PublishEntrance> = {}
+    // The zones #addressRow found this creation opening as the domain itself.
+    for (const [zone, label] of Object.entries(row.ownLabels)) {
+      if (label !== APEX_LABEL) continue
+      const entrance = entrances[zone]
+      if (entrance) this.#entranceOf.set(zone, entrance)
+      else this.#entranceOf.delete(zone)
+      this.#zoneAddresses.set(zone, addresses)
+      views[zone] = this.#entranceView(zone, entrance ?? null, addresses)
+    }
+    row.entrances = views
+  }
+
+  /** One zone's view from its signed entrance — what the sweep has not read
+   *  yet (wears, scents) is left for it to fill. */
+  #entranceView(zone: string, entrance: ZoneEntrance | null, addresses: Record<string, string>): PublishEntrance {
+    const page = entrance?.page ?? null
+    const offered = this.#entranceUpdates.get(zone)?.offered ?? null
+    const other = entrance?.other ?? ''
+    const choices = [`host.${zone}`, ...Object.keys(addresses).filter(h => h !== zone && entranceOther(h, zone, addresses) === h).sort()]
+    // The current choice is always on the list, so the select shows the truth.
+    if (other && !choices.includes(other)) choices.push(other)
+    return {
+      page,
+      powered: isPoweredEntrance(entrance),
+      other,
+      otherChoices: choices,
+      from: entrance?.from ? { pubkey: entrance.from.pubkey, lineage: entrance.from.lineage } : null,
+      wears: null,
+      offered: offered && offered !== page ? offered : null,
+      scents: [],
+      skipped: this.#skipped.filter(i => i.from === zone && i.state === 'hidden').map(i => i.sig),
+    }
+  }
+
+  /** Restate every row's skipped list and offer after the put-away set or a
+   *  notice changed. */
+  #paintEntrances(): void {
+    for (const row of this.#rows) {
+      for (const [zone, view] of Object.entries(row.entrances)) {
+        view.skipped = this.#skipped.filter(i => i.from === zone && i.state === 'hidden').map(i => i.sig)
+        const offered = this.#entranceUpdates.get(zone)?.offered ?? null
+        view.offered = offered && offered !== view.page ? offered : null
+      }
+    }
+    if (this.#open) this.#emit()
+  }
+
+  /** The card page (htmlSig) the tile at `segments` wears here, or null. */
+  async #wornPage(segments: readonly string[]): Promise<string | null> {
+    try {
+      const [page] = await listDecorations<Record<string, unknown>>({ kind: CARD_PAGE_KIND, segments })
+      const sig = String(page?.record?.payload?.['htmlSig'] ?? '').toLowerCase()
+      return SIG_RE.test(sig) ? sig : null
+    } catch { return null }
   }
 
   /** Every zone's address for one row, from the signed `addresses` map: the
@@ -981,6 +1193,142 @@ export class PublishStatusDrone extends Drone {
     void this.#refresh()
   }
 
+  // ── the entrance ──────────────────────────────────────────────────────
+
+  /** PREVIEW a page exactly as the domain would serve it: its bytes, checked
+   *  against its signature, as a blob: URL the panel shows in a frame
+   *  sandboxed to scripts alone — no same origin, so no storage, no camera
+   *  and no hive. Never site-view, which mounts page code in this document.
+   *  An empty page closes the preview. */
+  async #previewEntrance(rawZone: string, page: string): Promise<void> {
+    // Every request takes a ticket; a slower load that lost the race to a
+    // newer request (or a close) installs nothing and counts as no preview.
+    const ticket = ++this.#previewTicket
+    const zone = hostZone(rawZone)
+    const sig = page.trim().toLowerCase()
+    if (!zone || !SIG_RE.test(sig)) { this.#dropPreview(); this.#emit(); return }
+    const door = this.#zoneDoorFor(zone)
+    const bytes = await readPageBytes(sig, [...new Set([zone, door, ...await entranceHosts()])].filter(Boolean))
+    if (ticket !== this.#previewTicket) return
+    if (!bytes) {
+      this.#toast('error', 'publish.entrance.preview-missing', 'That page is not held here or on your hosts.')
+      return
+    }
+    this.#dropPreview()
+    const url = URL.createObjectURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: 'text/html; charset=utf-8' }))
+    this.#preview = { zone, page: sig, url }
+    this.#previewed.add(sig)
+    this.#emit()
+  }
+
+  /** Close the preview, and void any load still in flight. */
+  #closePreview(): void {
+    this.#previewTicket++
+    this.#dropPreview()
+  }
+
+  #dropPreview(): void {
+    if (this.#preview) { try { URL.revokeObjectURL(this.#preview.url) } catch { /* already gone */ } }
+    this.#preview = null
+  }
+
+  /** The door a zone's row is read through — the zone itself when no row
+   *  claims it. */
+  #zoneDoorFor(zone: string): string {
+    const row = this.#rows.find(r => r.entrances[zone])
+    return (row ? this.#hostByKey.get(row.key) : '') || zone
+  }
+
+  /** TURN ON, TURN OFF, CHOOSE OTHER, FORGET — each an INTENT, never a whole
+   *  entry: setZoneEntrance applies it to the entrance as the index holds it
+   *  at that moment, so nothing cached here can raise or drop powers. Turn on
+   *  names only a page previewed this session, and follows its publisher (the
+   *  one already followed, else your own apex creation, so your next published
+   *  page is offered here too). */
+  async #entrance(
+    key: string, rawZone: string,
+    p: { on?: boolean; page?: string; other?: string | null; forget?: boolean },
+  ): Promise<void> {
+    const row = this.#rows.find(r => r.key === key)
+    const zone = hostZone(rawZone)
+    const view = row?.entrances[zone]
+    if (!row || !view || row.busyPhase) return
+    let intent: ZoneEntranceIntent
+    if (p.forget === true) intent = { kind: 'forget' }
+    else if (p.on === true) {
+      const page = String(p.page ?? '').toLowerCase()
+      if (!SIG_RE.test(page) || !this.#previewed.has(page)) {
+        this.#toast('tip', 'publish.entrance.not-previewed', 'Preview this exact page before turning it on.')
+        return
+      }
+      const followed = this.#entranceOf.get(zone)?.from
+      const notice = this.#entranceUpdates.get(zone)
+      const from = followed
+        // Turning on the page a notice offered: the stamp and head it read.
+        ? { pubkey: followed.pubkey, lineage: followed.lineage, ...(notice?.offered === page && notice.at && notice.head ? { at: notice.at, head: notice.head } : {}) }
+        : SIG_RE.test(this.#payload.pubkey) ? { pubkey: this.#payload.pubkey, lineage: row.key } : undefined
+      intent = { kind: 'on', page, ...(from ? { from } : {}) }
+    } else if (p.on === false) intent = { kind: 'off' }
+    else if ('other' in p) intent = { kind: 'other', other: p.other ? String(p.other) : null }
+    else return
+
+    row.busyPhase = 'indexing'
+    this.#emit()
+    const result = await setZoneEntrance(zone, intent)
+    row.busyPhase = null
+    this.#entranceEpoch++
+    if (!result.ok) {
+      this.#toast('error', `publish.entrance.failure.${result.failure}`, ENTRANCE_FAILURE_TEXT[result.failure] ?? 'The entrance was not changed.', { zone })
+      this.emitEffect('activity:log', { message: `${zone} entrance not changed: ${result.failure}${result.reason ? ` (${result.reason})` : ''}` })
+      this.#emit()
+      return
+    }
+    // THE WRITTEN ENTRY is the truth from here — never the request.
+    const written = result.entrance
+    if (written) this.#entranceOf.set(zone, written)
+    else this.#entranceOf.delete(zone)
+    const fresh = this.#entranceView(zone, written, this.#zoneAddresses.get(zone) ?? {})
+    row.entrances[zone] = { ...fresh, wears: view.wears, scents: written?.page === view.page ? view.scents : [] }
+    if (written && isPoweredEntrance(written)) {
+      if (this.#entranceUpdates.get(zone)?.offered === written.page) this.#entranceUpdates.delete(zone)
+      this.#closePreview()
+    }
+    const said: [string, string] = intent.kind === 'forget' ? ['publish.entrance.forgotten', `${zone} has no entrance now.`]
+      : intent.kind === 'on' ? ['publish.entrance.on', `${zone} runs this page with its powers on.`]
+      : intent.kind === 'off' ? ['publish.entrance.off', `${zone} runs its page with the powers off.`]
+      : written?.other ? ['publish.entrance.other-saved', `Other devices go to ${written.other}.`]
+      : ['publish.entrance.other-cleared', 'Every device gets the phone entrance.']
+    this.#toast('success', said[0], said[1], { zone, other: written?.other ?? '' })
+    this.#emit()
+    void this.#refresh()
+  }
+
+  /** SKIP an offered page: put it away in the concealment pool (hide first,
+   *  delete second), written HERE — the concealment bee may be asleep, and
+   *  `hidden:conceal` does not wake it. Its list is then asked to refresh.
+   *  The scout stays quiet about the page; a newer one is still offered. */
+  async #skipEntrance(rawZone: string, page: string): Promise<void> {
+    const zone = hostZone(rawZone)
+    const sig = page.trim().toLowerCase()
+    const notice = this.#entranceUpdates.get(zone)
+    if (!zone || !SIG_RE.test(sig) || notice?.offered !== sig) return
+    const kept = await conceal({ sig, scope: ENTRANCE_SKIP_SCOPE, label: `${zone} ${sig.slice(0, 12)}`, from: zone, deletable: true })
+    if (!kept) {
+      this.#toast('error', 'publish.entrance.skip-failed', 'The version could not be put away. Try again.')
+      return
+    }
+    this.#skippedUpdates.set(sig, { zone, offered: sig, at: notice.at, head: notice.head })
+    this.#entranceUpdates.delete(zone)
+    if (!this.#skipped.some(i => i.sig === sig)) {
+      this.#skipped = [...this.#skipped, { sig, scope: ENTRANCE_SKIP_SCOPE, label: `${zone} ${sig.slice(0, 12)}`, from: zone, deletable: true, state: 'hidden' }]
+    }
+    if (this.#preview?.page === sig) this.#closePreview()
+    this.emitEffect('hidden:refresh', {})
+    this.#toast('info', 'publish.entrance.skipped', 'Skipped — it waits in your put-away list.')
+    this.#paintEntrances()
+    this.#emit()
+  }
+
   /** SECURE DELETE — the rare act after "off everywhere": ask each host to
    *  stop holding what only this place used (publish-branch.ts). The panel
    *  confirms before emitting; the gates live in the routine, not here. */
@@ -1080,7 +1428,10 @@ export class PublishStatusDrone extends Drone {
   }
 
   #emit(): void {
-    this.#payload = { ...this.#payload, open: this.#open, rows: this.#rows }
+    this.#payload = {
+      ...this.#payload, open: this.#open, rows: this.#rows,
+      entrancePreview: this.#preview, previewed: [...this.#previewed], entranceEpoch: this.#entranceEpoch,
+    }
     this.emitEffect<PublishRenderPayload>('publish:render', this.#payload)
   }
 }
@@ -1089,6 +1440,12 @@ const _publishStatus = new PublishStatusDrone()
 ;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(
   '@diamondcoreprocessor.com/PublishStatusDrone',
   _publishStatus,
+)
+// THE BEE WIRES its dependency (atomic-modules-plan.md): the entrance scout
+// registers nothing itself; this drone shows its notices, so it registers it.
+;(window as { ioc?: { register?: (k: string, v: unknown) => void } }).ioc?.register?.(
+  '@diamondcoreprocessor.com/EntranceScoutService',
+  entranceScout,
 )
 
 /** Every domain a host serves, read from its publications at sign('host:publications'): each door

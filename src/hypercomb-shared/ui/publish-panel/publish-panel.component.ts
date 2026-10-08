@@ -35,7 +35,7 @@
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, computed, inject, signal, type OnDestroy } from '@angular/core'
-import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
+import { DomSanitizer, type SafeHtml, type SafeResourceUrl } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
@@ -82,6 +82,28 @@ interface PublishRow {
   ownLabels: Record<string, string>
   /** The tile's name folded to a DNS label — where an own address starts. */
   defaultLabel: string
+  /** zone → the entrance that zone's root runs, on the `@` row only. */
+  entrances: Record<string, PublishEntrance>
+}
+
+/** Mirrors PublishEntrance in sharing/publish-status.drone.ts. */
+interface PublishEntrance {
+  /** The page the domain runs (H), or null. */
+  page: string | null
+  /** H runs with its powers on. */
+  powered: boolean
+  /** Where devices that are not phones go; '' = the phone entrance. */
+  other: string
+  otherChoices: string[]
+  from: { pubkey: string; lineage: string } | null
+  /** The card page this tile wears here now. */
+  wears: string | null
+  /** A newer page the followed head wears, not skipped. */
+  offered: string | null
+  /** The community's scents on H — read only. */
+  scents: { pubkey: string; verdict: string; at: number; own: boolean }[]
+  /** Versions put away with Skip, for this zone. */
+  skipped: string[]
 }
 
 interface PublishViewChoice {
@@ -141,6 +163,12 @@ interface PublishRenderPayload {
    *  snapshot matches them. */
   participantOnly?: string[]
   participantState?: 'published' | 'changed' | 'none'
+  /** The page being previewed — a blob: URL of its exact bytes. */
+  entrancePreview?: { zone: string; page: string; url: string } | null
+  /** Pages previewed this session; Turn on is offered for these only. */
+  previewed?: string[]
+  /** Bumped when an entrance change settles — kept or refused. */
+  entranceEpoch?: number
 }
 
 const SIG_SHOWN = 12
@@ -203,6 +231,15 @@ export class PublishPanelComponent implements OnDestroy {
   readonly optimizeDraft = signal<Record<string, string>>({})
   /** Where each row's last trial arrival opened, keyed by row. */
   readonly optimizeTried = signal<Record<string, string>>({})
+  /** THE ENTRANCE PREVIEW — the drone's blob: URL with `#<zone>` as its
+   *  fragment (the page reads its address from it off https), trusted ONCE
+   *  per URL so a re-render never reloads the frame. */
+  readonly entrancePreview = signal<{ zone: string; page: string; url: string; src: SafeResourceUrl } | null>(null)
+  /** Pages previewed this session — the only ones Turn on may name. */
+  readonly previewed = signal<ReadonlySet<string>>(new Set())
+  /** The drone's count of settled entrance changes. The Other select is drawn
+   *  per epoch, so a refused choice falls back to the signed one. */
+  readonly entranceEpoch = signal(0)
   readonly #sanitizer = inject(DomSanitizer)
   /** A deliberately coarse render clock. Template helpers must not call
    *  Date.now() themselves: Angular's development check renders twice and a
@@ -398,6 +435,97 @@ export class PublishPanelComponent implements OnDestroy {
     this.ownOpen.set('')
   }
 
+  // ── THE ENTRANCE (the `@` row) ──────────────────────────────────────
+  // Powers are off by default, and the participant turns them on, for the
+  // one page they previewed (documentation/using-a-creation.md). The drone
+  // writes the signed index; the panel only names the acts. None of these
+  // intents is open to the bridge.
+
+  entranceOf(row: PublishRow | null, zone: string): PublishEntrance | null {
+    return row?.entrances?.[zone] ?? null
+  }
+
+  /** The preview open for THIS zone, if any. */
+  previewFor(zone: string): { page: string; src: SafeResourceUrl } | null {
+    const preview = this.entrancePreview()
+    return preview && preview.zone === zone ? preview : null
+  }
+
+  /** Show a page in a frame sandboxed to scripts alone. */
+  previewEntrance(row: PublishRow, zone: string, page: string | null): void {
+    if (!page) return
+    EffectBus.emit('publish:entrance-preview', { key: row.key, zone, page })
+  }
+
+  closeEntrancePreview(row: PublishRow, zone: string): void {
+    EffectBus.emit('publish:entrance-preview', { key: row.key, zone, page: '' })
+  }
+
+  /** Turn on is offered only for the exact page previewed here, this session,
+   *  and only when it would change what the domain runs. */
+  canTurnOn(row: PublishRow, zone: string): boolean {
+    const preview = this.previewFor(zone)
+    const entrance = this.entranceOf(row, zone)
+    if (!preview || !entrance || row.busyPhase || !this.previewed().has(preview.page)) return false
+    return !(entrance.powered && entrance.page === preview.page)
+  }
+
+  turnOn(row: PublishRow, zone: string): void {
+    const preview = this.previewFor(zone)
+    if (!preview || !this.canTurnOn(row, zone)) return
+    EffectBus.emit('publish:entrance', { key: row.key, zone, on: true, page: preview.page })
+  }
+
+  turnOff(row: PublishRow, zone: string): void {
+    if (row.busyPhase || !this.entranceOf(row, zone)?.powered) return
+    EffectBus.emit('publish:entrance', { key: row.key, zone, on: false })
+  }
+
+  /** Put the offered version away; the next newer one is still offered. */
+  skipEntrance(row: PublishRow, zone: string): void {
+    const offered = this.entranceOf(row, zone)?.offered
+    if (!offered) return
+    EffectBus.emit('publish:entrance-skip', { key: row.key, zone, page: offered })
+  }
+
+  /** Where other devices go: '' = every device gets the phone entrance. */
+  setOther(row: PublishRow, zone: string, other: string): void {
+    if (row.busyPhase) return
+    EffectBus.emit('publish:entrance', { key: row.key, zone, other: other || null })
+  }
+
+  /** Forget the entrance entirely — asked first, in the participant's words. */
+  forgetEntrance(row: PublishRow, zone: string): void {
+    if (row.busyPhase) return
+    const i18n = window.ioc?.get<{ t?: (k: string, p?: Record<string, string>) => string }>('@hypercomb.social/I18n')
+    const question = i18n?.t?.('publish.entrance.forget-confirm', { zone })
+      ?? `Forget the entrance of ${zone}?`
+    if (!window.confirm(question)) return
+    EffectBus.emit('publish:entrance', { key: row.key, zone, forget: true })
+  }
+
+  /** The scents line: none yet, or a tally. */
+  scentsKey(entrance: PublishEntrance): string {
+    return entrance.scents.length === 0 ? 'publish.entrance.scents-none' : 'publish.entrance.scents'
+  }
+
+  scentParams(entrance: PublishEntrance): Record<string, number> {
+    const count = (verdict: string): number => entrance.scents.filter(s => s.verdict === verdict).length
+    return { accept: count('accept'), refuse: count('refuse'), unclear: count('unclear') }
+  }
+
+  /** Your own reading, as its catalog key — '' when you have none. */
+  ownVerdictKey(entrance: PublishEntrance): string {
+    const verdict = entrance.scents.find(s => s.own)?.verdict ?? ''
+    return ['accept', 'refuse', 'unclear'].includes(verdict) ? `publish.entrance.verdict.${verdict}` : ''
+  }
+
+  /** Bring a skipped version back: it leaves the put-away list, and the
+   *  Publish panel may offer it again. */
+  showAgain(sig: string): void {
+    EffectBus.emit('hidden:reveal', { sig })
+  }
+
   constructor() {
     const ageTimer = setInterval(() => this.renderedAt.set(Date.now()), 15_000)
     this.#cleanups.push(() => clearInterval(ageTimer))
@@ -449,8 +577,28 @@ export class PublishPanelComponent implements OnDestroy {
             urls: { ...(row.urls ?? {}) },
             ownLabels: { ...(row.ownLabels ?? {}) },
             defaultLabel: String(row.defaultLabel ?? ''),
+            entrances: Object.fromEntries(Object.entries(row.entrances ?? {}).map(([zone, e]) => [zone, {
+              ...e,
+              otherChoices: Array.isArray(e.otherChoices) ? e.otherChoices.map(String) : [],
+              from: e.from ? { ...e.from } : null,
+              scents: Array.isArray(e.scents) ? e.scents.map(s => ({ ...s })) : [],
+              skipped: Array.isArray(e.skipped) ? e.skipped.map(String) : [],
+            }])),
           }))
         : [])
+      this.previewed.set(new Set(Array.isArray(p.previewed) ? p.previewed.map(String) : []))
+      this.entranceEpoch.set(Number(p.entranceEpoch ?? 0) || 0)
+      const preview = p.entrancePreview
+      const shown = this.entrancePreview()
+      if (!preview?.url) this.entrancePreview.set(null)
+      else if (!shown || shown.url !== preview.url || shown.zone !== preview.zone) {
+        // A blob: URL the drone minted from bytes it checked against their
+        // signature; the frame is sandboxed to scripts with no same origin.
+        this.entrancePreview.set({
+          zone: preview.zone, page: preview.page, url: preview.url,
+          src: this.#sanitizer.bypassSecurityTrustResourceUrl(`${preview.url}#${preview.zone}`),
+        })
+      }
       this.participantOnly.set(Array.isArray(p.participantOnly) ? p.participantOnly.map(String) : [])
       this.participantState.set(p.participantState === 'published' || p.participantState === 'changed' ? p.participantState : 'none')
       this.views.set(Array.isArray(p.views)
