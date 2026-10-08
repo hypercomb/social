@@ -6,7 +6,7 @@
 // field survives its clamp.
 
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_TAGLINE, PLATFORM_LINKS, frontDoorOf, parseWelcome } from './welcome'
+import { DEFAULT_TAGLINE, PLATFORM_LINKS, frontDoorOf, parseWelcome, readWelcome } from './welcome'
 
 describe('parseWelcome — the staged file is data', () => {
   it('keeps a path on this origin and a plain web address; drops anything that could become script', () => {
@@ -84,5 +84,26 @@ describe('frontDoorOf — the default experience, and a staged one on top', () =
       'host.example', 'https://host.example')
     expect(door.title).toBe('host.example')
     expect(door.tagline).toBe(DEFAULT_TAGLINE)
+  })
+})
+
+describe("readWelcome — a zone's signed card before the shared file", () => {
+  it('reads the card the worker carries in the page, and never asks the origin for welcome.json', async () => {
+    const script = document.createElement('script')
+    script.id = 'hc-welcome'
+    script.type = 'application/json'
+    script.textContent = JSON.stringify({ title: 'Real Ones', tagline: 'People, not profiles', links: [{ label: 'bad', href: 'javascript:alert(1)' }] })
+    document.head.append(script)
+    const asked: string[] = []
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async (url: string) => { asked.push(String(url)); return new Response('{}') }) as typeof fetch
+    try {
+      const welcome = await readWelcome()
+      expect(welcome).toEqual({ title: 'Real Ones', tagline: 'People, not profiles', links: [] })
+      expect(asked).toEqual([])
+    } finally {
+      globalThis.fetch = realFetch
+      script.remove()
+    }
   })
 })

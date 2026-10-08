@@ -1074,6 +1074,34 @@ test('the host card names its host in the served HTML — the staged welcome, el
   } finally { globalThis.fetch = realFetch }
 })
 
+test('a front door names itself from the card its publisher signs into welcome:<zone> — a pool, not the shared origin\'s file', async () => {
+  const cardBytes = new TextEncoder().encode(JSON.stringify({ title: 'Plugin the Matrix', tagline: 'Creations worth carrying', links: [{ label: 'Tour', href: '/tour/' }] }))
+  const cardSig = await sha256Hex(cardBytes)
+  const event = await signedIndex({ pluginthematrix: head, 'welcome:pluginthematrix.com': cardSig })
+  const bindings = { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], lineage: 'pluginthematrix.com', frontDoor: true } }
+  const { env } = await fixture(event, bindings)
+  env.CONTENT.held.set(cardSig, cardBytes)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  const asked = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    asked.push(String(url))
+    return String(url).endsWith('/welcome.json')
+      ? new Response(JSON.stringify({ title: 'Shared file' }), { headers: { 'content-type': 'application/json' } })
+      : new Response('<!doctype html><html><head><title>Hypercomb</title></head><body></body></html>', { headers: { 'content-type': 'text/html' } })
+  }
+  try {
+    const html = await (await worker.fetch(page('https://pluginthematrix.com/'), env)).text()
+    assert.match(html, /<title>Plugin the Matrix<\/title>/)
+    assert(html.includes('<meta property="og:description" content="Creations worth carrying">'))
+    const data = /<script id="hc-welcome" type="application\/json">([^<]*)<\/script>/.exec(html)
+    assert(data, 'the page carries its card for the shim')
+    assert.deepEqual(JSON.parse(data[1]), { title: 'Plugin the Matrix', tagline: 'Creations worth carrying', links: [{ label: 'Tour', href: '/tour/' }] })
+    // A signed card outranks the shared origin's file, which is not even asked.
+    assert(!asked.some((u) => u.endsWith('/welcome.json')))
+  } finally { globalThis.fetch = realFetch }
+})
+
 test('a byte mirror serves the host door while retaining its signed read and write routes', async () => {
   const { env } = await fixture()
   env.HOST_DOOR_ORIGIN = 'https://door.example'
@@ -1522,6 +1550,19 @@ test('writing an index that names agent:harness puts the record it points at int
   assert.equal(await member('agent:harness', record), true)
   assert.equal(await member('agent:harness', assessor), false)
   assert.equal(await member('agent:other', 'c'.repeat(64)), false)
+})
+
+test('writing an index that names welcome:<zone> puts that card into the zone\'s pool, by signature', async () => {
+  const HIVES = kvMap()
+  const CONTENT = contentBag()
+  const env = { SITE_BINDINGS: '{}', HIVES, CONTENT }
+  const url = `https://content.hypercomb.com/${INDEXES}/${assessor}`
+  const card = 'd'.repeat(64)
+  const body = JSON.stringify(await indexBy(assessorKey, { 'welcome:pluginthematrix.com': card, 'welcome:Not A Zone': 'e'.repeat(64) }))
+  const response = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', assessorKey) }, body }), env)
+  assert.equal(response.status, 201)
+  assert.equal(CONTENT.held.has(`${await sha256Hex('welcome:pluginthematrix.com')}/${card}`), true)
+  assert.equal(CONTENT.held.has(`${await sha256Hex('welcome:Not A Zone')}/${'e'.repeat(64)}`), false)
 })
 
 test('writing an index that names i18n:<locale> lists its signer as a translator, and i18n-missing:<locale> as missing', async () => {

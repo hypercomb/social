@@ -1649,20 +1649,50 @@ async function serveFrontDoor(request, env) {
     const html = await upstream.text()
     const at = html.indexOf('</head>')
     if (at < 0) return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers })
-    const welcome = await fetch(`${origin}/welcome.json`, { headers: { accept: 'application/json' } })
-      .then((r) => r.ok && String(r.headers.get('content-type') || '').includes('json') ? r.json() : null)
-      .catch(() => null)
     const host = url.hostname.toLowerCase()
     const named = host.startsWith('host.') && host.slice(5).includes('.') ? host.slice(5) : host
+    // The zone's card from its pool (welcomeCard); a static welcome.json only
+    // where no publisher has signed one — the file a plain host still stages.
+    const card = await welcomeCard(env, named)
+    const welcome = card ?? await fetch(`${origin}/welcome.json`, { headers: { accept: 'application/json' } })
+      .then((r) => r.ok && String(r.headers.get('content-type') || '').includes('json') ? r.json() : null)
+      .catch(() => null)
     const name = String(welcome?.title || '').trim().slice(0, 60) || named
     const tagline = String(welcome?.tagline || '').trim().slice(0, 400) || FRONT_DOOR_TAGLINE
     headers.delete('Content-Length')
     headers.delete('Content-Encoding')
     const body = html.slice(0, at).replace(/<title>[^<]*<\/title>/, () => `<title>${htmlText(name)}</title>`)
-      + shareHead(name, request, '/', tagline) + html.slice(at)
+      + shareHead(name, request, '/', tagline) + (card ? doorScript(card, 'hc-welcome') : '') + html.slice(at)
     return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers })
   }
   return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
+}
+
+/** A ZONE'S CARD IS A POOL OF MEANING, not a file on an origin (jwize
+ *  2026-10-07: "it is extensible if it uses pools, otherwise it is not").
+ *  Every zone this worker fronts shares one shim origin, so a staged
+ *  welcome.json could only ever name all of them at once. The card is an atom
+ *  on the heap — `{ title, tagline, links }` — that a publisher of the zone
+ *  names in their signed index as `welcome:<zone>`; every card ever named
+ *  joins the pool sign('welcome:<zone>') (noteSharedPools), so the history
+ *  only grows and replicates like any pool. The CURRENT card is the one the
+ *  zone's own publishers sign now: the primary first, then the rest. */
+const WELCOME_KEY_RE = /^welcome:[a-z0-9.-]+$/
+async function welcomeCard(env, zone) {
+  const binding = siteBindings(env)[zone]
+  const publishers = [...(binding?.publishers ?? [])].sort((a, b) => Number(b.primary) - Number(a.primary))
+  const read = indexReader(env)
+  for (const publisher of publishers) {
+    const index = await read(publisher.pubkey).catch(() => null)
+    const record = await heapRecord(env, String(index?.roots?.[`welcome:${zone}`] || '').toLowerCase())
+    if (!record || typeof record !== 'object') continue
+    const title = String(record.title ?? '').trim().slice(0, 60)
+    const tagline = String(record.tagline ?? '').trim().slice(0, 400)
+    if (!title && !tagline) continue
+    // Links ride as data; the shim keeps only what it would stage (welcome.ts parseWelcome).
+    return { title, tagline, links: Array.isArray(record.links) ? record.links.slice(0, 12) : [] }
+  }
+  return null
 }
 
 /** The shim card's own sentence when a host stages none (welcome.ts DEFAULT_TAGLINE). */
@@ -1878,7 +1908,7 @@ async function noteSharedPools(env, pubkey, evt) {
   let roots = {}
   try { roots = JSON.parse(evt.content)?.roots ?? {} } catch { return }
   for (const [key, value] of Object.entries(roots)) {
-    if (!SHARED_RECORD_POOLS.has(key)) continue
+    if (!SHARED_RECORD_POOLS.has(key) && !WELCOME_KEY_RE.test(key)) continue
     const sig = String(value ?? '').toLowerCase()
     if (!SIG_RE.test(sig)) continue
     await addPoolMember(env, key, sig)
