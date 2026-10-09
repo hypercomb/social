@@ -238,7 +238,7 @@ The machine's half is a setting, once:
 
 *jwize, 2026-10-07:* "You can move the hosting role over to
 pluginthematrix.io/com … you can have the redundancy and start a little
-farm." A root domain is an entrance ([using-a-creation.md](using-a-creation.md),
+farm." A root domain is a front door ([using-a-creation.md](using-a-creation.md),
 "Your root, your entrances, and the community farm"), so it moves to the host
 worker, and the machine keeps serving under a name of its own. For
 `jwize.com` that name is `relay.pluginthematrix.io`.
@@ -289,11 +289,16 @@ Each step is the owner's act; nothing here deploys by itself.
    - `https://jwize.com/<the current install root>` answers 200, read through
      the farm;
    - `node scripts/swarm-preflight.cjs --relay wss://jwize.com` meets.
-7. **In your hive:** publish your card to the `jwize.com` root, then, in the
-   Publish panel on the `jwize.com` row, preview the page and turn it on, and
-   choose your other entrance.
-8. **On an Android phone**, `https://jwize.com/` opens your card; on a desktop
-   it opens your other entrance.
+7. **Check:** `https://jwize.com/` shows your front door on every device.
+
+The Hyperdex needs none of this cutover. It runs at its own address,
+`business-card.jwize.com`, and `*.jwize.com` already reaches the worker, so it
+needs only step 2:
+1. In your hive, on `/jaime-weise`, open Publish and switch `jwize.com` on.
+2. Use the own-address button: type `business-card` and Save.
+3. In the `business-card.jwize.com` Entrances block, preview the card page,
+   then Turn on.
+4. `https://business-card.jwize.com/` now runs your Hyperdex on any device.
 
 **To undo:** remove the route, put back the DNS record and the ingress
 (`config.yml.bak-2026-10-07` holds the old file), restart the tunnel, and
