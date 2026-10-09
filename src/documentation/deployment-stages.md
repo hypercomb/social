@@ -261,10 +261,29 @@ builder:
 What it promotes lands in `<label>-drafts`, signed in the role `builder`,
 chained to the draft's base, never the head. Followers see it and never take
 it. It joins the channel (`builds.mjs adopt`) only after someone other than
-its author signs it as `reviewer`. Still owed: building as another user or in
-a container; listing asks to builders only (`host:asks`, read by a builder
-key the operator names); builders watching for asks; the author shown what
-became of each draft.
+its author signs it as `reviewer`.
+
+**Asks a host holds for its builders (2026-10-09).** A host that keeps grants
+(the content worker) recognises an ask among the bytes its author uploads —
+signed by the uploading key, naming this host, from the last seven days, its
+signature verifying — and notes it in the private pool `host:asks`
+(`hypercomb-relay/build-asks.js`). Listing an ask publishes its draft, so the
+pool's listing answers only a signed request (NIP-98) from a builder: the
+operator of the zone the ask's host falls in (its most specific zone), or a
+key that operator's signed index names under `builders` (`hosts builders add
+<pubkey> [@host]`; a key named so builds for every zone that operator runs on
+the host). Anyone else is answered exactly as for a pool the host does not
+hold, and no operator's `listed` can make it public. An ask is noted once,
+only when its bytes and its draft (a draft record) were first stored under
+its author's own grant and its host has an operator; each zone keeps an
+author's newest four and 128 in all, newest by the host's receipt, so an
+author's clock earns no place. The ask's bytes stay where its author put
+them; the author takes it off the listing by forgetting it or its draft,
+even after someone else re-uploaded the same bytes. With grants open to every key (`AUTO_GRANT=1`) fresh keys can
+still crowd a zone's listing; R12's grant rules (§4 step 8) are the answer to
+that. A builder reads it with `builds.mjs asks <host>`. Still
+owed: building as another user or in a container; builders watching for asks
+and answering each; the author shown what became of each draft.
 
 ## 4. What changes in the code, in order
 

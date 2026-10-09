@@ -45,7 +45,7 @@ import { fileURLToPath } from 'node:url'
 import {
   AUTHOR_SCRIPTS, BUILDS_MEANING, GENERATED_FILES, INSTALL_WORKSPACES, SIGNATURES_MEANING,
   adoptStaged, carryPools, checkout, collect, draftsLabel, findRevision, isDraftsLabel, poolDir, promote, pullPools, readTrusted, revisions,
-  sign as signOf, workspaceOf,
+  sign as signOf, signerKey, workspaceOf,
 } from './builds.mjs'
 
 export const ASK_KIND = 30568
@@ -54,11 +54,22 @@ export const ASK_KIND = 30568
 export const ASK_TTL_DAYS = 7
 /** The labels a draft's build stages, the package before the host. */
 const BUILT_LABELS = ['hypercomb-essentials', 'host']
+/** Where a host lists the asks it holds for its builders
+ *  (hypercomb-relay/build-asks.js): to a builder's signed request only. */
+export const ASKS_MEANING = 'host:asks'
 export const askPreimage = draft => `hc:ask:v1\n${draft}`
 const SIG = /^[a-f0-9]{64}$/
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const tag = (event, name) => event?.tags?.find?.(t => t[0] === name)?.[1]
-const originOf = host => (/^https?:\/\//.test(host) ? host : /^(localhost|127\.)/.test(host) ? `http://${host}` : `https://${host}`).replace(/\/+$/, '')
+/** A host's origin, normalized (lowercase, no default port, no path): https
+ *  unless it is loopback — the same comparison a host makes when it notes an
+ *  ask (hypercomb-relay/build-asks.js originOf). */
+export const originOf = host => {
+  const text = String(host ?? '').trim()
+  if (!text) return ''
+  const loopback = /^(localhost|127\.|\[::1\])/i.test(text) || /^[^/:]+\.localhost(?::\d+)?(?:\/|$)/i.test(text)
+  try { return new URL(/^https?:\/\//i.test(text) ? text : `${loopback ? 'http' : 'https'}://${text}`).origin } catch { return '' }
+}
 
 /** The bytes a host serves under `sig`, or an error: refused unless they
  *  hash to the name. */
@@ -110,8 +121,9 @@ const keepIn = async (meaning, sig, bytes) => {
   await writeFile(resolve(pool, sig), bytes, { flag: 'wx' }).catch(e => { if (e.code !== 'EEXIST') throw e })
 }
 
-/** Read and verify what an ask names: the author, the draft, its files. */
-export const takeAsk = async (host, ask, { get = fetch, now = new Date() } = {}) => {
+/** Read and verify one ask, and nothing it names: a signed ask for one
+ *  draft, sent to this host, recent. Returns its event, bytes and author. */
+export const readAsk = async (host, ask, { get = fetch, now = new Date() } = {}) => {
   if (!SIG.test(ask)) throw new Error('an ask is named by its signature (64 hex)')
   const askBytes = await fetchSig(host, ask, get)
   let event
@@ -130,6 +142,12 @@ export const takeAsk = async (host, ask, { get = fetch, now = new Date() } = {})
   if (!(at > now.getTime() - ASK_TTL_DAYS * 86_400_000) || at > now.getTime() + 600_000) {
     throw new Error(`the ask is from ${new Date(at).toISOString().slice(0, 10)}: older than ${ASK_TTL_DAYS} days (or from the future) — ask again`)
   }
+  return { event, askBytes, draft, author: String(event.pubkey) }
+}
+
+/** Read and verify what an ask names: the author, the draft, its files. */
+export const takeAsk = async (host, ask, { get = fetch, now = new Date() } = {}) => {
+  const { event, askBytes, draft } = await readAsk(host, ask, { get, now })
   const draftBytes = await fetchSig(host, draft, get)
   const record = JSON.parse(draftBytes.toString('utf8'))
   if (record?.name !== 'draft' || !SIG.test(record.base ?? '') || !SIG.test(record.files ?? '')) throw new Error('the ask names something that is not a draft')
@@ -150,6 +168,52 @@ export const takeAsk = async (host, ask, { get = fetch, now = new Date() } = {})
   await keepIn(BUILDS_MEANING, record.files, layerBytes)
   for (const [path, bytes] of files) if (bytes) await keepIn(BUILDS_MEANING, layer.files[path], bytes)
   return { ask, draft, author: event.pubkey, record, files }
+}
+
+/** A NIP-98 Authorization header for one request (kind 27235: the URL and
+ *  the method), signed with this builder's key. */
+const nip98 = async (url, method, key) => {
+  const { finalizeEvent } = await import('nostr-tools/pure')
+  const event = finalizeEvent({ kind: 27235, created_at: Math.floor(Date.now() / 1000), tags: [['u', url], ['method', method]], content: '' }, key)
+  return `Nostr ${Buffer.from(JSON.stringify(event)).toString('base64')}`
+}
+
+/**
+ * THE ASKS A HOST HOLDS FOR THIS BUILDER (hypercomb-relay/build-asks.js): its
+ * listing, asked for under this builder's key — a host answers it only to
+ * its operators and the builders their signed index names — and each ask
+ * read and verified. What the draft would change is not fetched; whether it
+ * is built is the builder's next act (buildDraft).
+ */
+export const listAsks = async (host, { get = fetch, now = new Date(), key } = {}) => {
+  const secret = key ?? await signerKey()
+  const origin = originOf(host)
+  const pool = sha(ASKS_MEANING)
+  // The listing is served at /<pool>/ on every face of the host, and only
+  // there: a page some face answers elsewhere is never read as one.
+  const url = `${origin}/${pool}/`
+  const response = await get(url, { headers: { Authorization: await nip98(url, 'GET', secret) }, cache: 'no-store' }).catch(() => null)
+  if (!response) throw new Error(`${origin} did not answer`)
+  if (response.status === 404) throw new Error(`${origin} lists no asks to this key: its operator names builders with hosts builders add <your pubkey> @${new URL(origin).host}`)
+  const type = String(response.headers?.get?.('content-type') ?? 'text/plain')
+  if (!response.ok || !type.startsWith('text/plain')) throw new Error(`${origin} answered ${response.status} ${type}, not a listing of asks`)
+  // One ask per line, `<signature> <origin it was sent to>`: an ask sent to
+  // another face of the zone is read, and built, at the origin it names.
+  const names = (await response.text()).split(/\r?\n/).map(line => line.trim().split(/\s+/))
+    .filter(([name]) => SIG.test(name ?? ''))
+    .map(([name, sentTo]) => ({ name, origin: originOf(sentTo) || origin }))
+  const trusted = new Set(await readTrusted())
+  const built = new Set((await revisions()).filter(r => r.record.ask && r.record.label === draftsLabel('host')).map(r => r.record.ask))
+  const out = []
+  for (const { name: ask, origin: sentTo } of names) {
+    try {
+      const { event, draft, author } = await readAsk(sentTo, ask, { get, now })
+      out.push({ ask, origin: sentTo, author, draft, at: Number(event.created_at), trusted: trusted.has(author), built: built.has(ask) })
+    } catch (error) {
+      out.push({ ask, origin: sentTo, refused: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return out
 }
 
 /** Build a draft into revisions and promote them. Returns what was promoted. */
@@ -238,7 +302,24 @@ export const buildDraft = async (host, ask, { to = null, test = false, keepWork 
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+const age = seconds => {
+  const s = Math.max(0, Math.floor(Date.now() / 1000) - seconds)
+  return s < 3600 ? `${Math.floor(s / 60)}m` : s < 86_400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86_400)}d`
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === 'asks') {
+  const host = process.argv[3]
+  if (!host) { console.error('usage: node host/builder.mjs asks <host>'); process.exit(2) }
+  listAsks(host).then(asks => {
+    if (!asks.length) { console.log(`${originOf(host)} holds no open asks`); return }
+    for (const a of asks) {
+      console.log(a.refused
+        ? `  ${a.ask.slice(0, 12)}  refused: ${a.refused}`
+        : `  ${a.ask.slice(0, 12)}  from ${a.author.slice(0, 12)} ${a.trusted ? '(trusted) ' : '(not trusted)'} ${age(a.at).padStart(4)} ago · draft ${a.draft.slice(0, 12)} · sent to ${a.origin}${a.built ? ' · built' : ''}`)
+    }
+    console.log('build one: node host/builds.mjs build-draft <its origin> <ask>   (an author you do not trust: builds.mjs trust <pubkey>, or --untrusted)')
+  }).catch(e => { console.error(`[builder] ${e.message}`); process.exit(1) })
+} else if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const at = process.argv.indexOf('--to')
   const [host, ask] = process.argv.slice(2).filter((a, i) => !a.startsWith('--') && !(at >= 0 && i + 2 === at + 1))
   if (!host || !ask) {

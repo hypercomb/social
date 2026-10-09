@@ -421,6 +421,51 @@ export async function setHostListing(host: string, meaning: string, on: boolean,
 /** The cap a host applies (hypercomb-relay/host-listing.js MAX_LISTED). */
 const MAX_LISTED = 32
 
+/** The builder keys an index names (hypercomb-relay/build-asks.js
+ *  buildersOf): a host lists its asks to them, and to its operators. */
+export const buildersOf = (content: Record<string, unknown> | undefined): string[] =>
+  Array.isArray(content?.['builders'])
+    ? [...new Set((content['builders'] as unknown[]).filter((k): k is string => typeof k === 'string').map(k => k.trim().toLowerCase()).filter(k => SIG_RE.test(k)))]
+    : []
+
+/** The cap a host applies (hypercomb-relay/build-asks.js MAX_BUILDERS). */
+const MAX_BUILDERS = 16
+
+export type SetHostBuildersResult =
+  | { ok: true; builders: string[]; reason?: 'unchanged' }
+  | { ok: false; reason: string }
+
+/**
+ * NAME A BUILDER of a host you operate (`on`), or stop naming one: the host
+ * lists the asks participants send it (pool `host:asks`) to its operators and
+ * to the keys their signed index names under `builders` — nobody else
+ * (hypercomb-relay/build-asks.js). Same safety as setHostListing: only a
+ * verified read or a 404 is a baseline, and every other field of the index
+ * is carried through untouched.
+ */
+export async function setHostBuilders(host: string, builder: string, on: boolean, deps: SetHiveRootDeps = {}): Promise<SetHostBuildersResult> {
+  const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
+  const putManifest = deps.putManifest ?? putHiveManifest
+  const publicKey = deps.publicKey ?? (() => get<SignerLike>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
+  const key = String(builder ?? '').trim().toLowerCase()
+  if (!SIG_RE.test(key)) return { ok: false, reason: 'a builder is named by its public key (64 hex)' }
+  const pubkey = String((await publicKey().catch(() => null)) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return { ok: false, reason: 'no signer' }
+  const read = await fetchIndex(host, pubkey)
+  if (!read.ok && !(read.reason === 'http' && read.status === 404)) return { ok: false, reason: `index-unsafe: ${read.reason}` }
+  const previous = read.ok ? read.manifest.signedContent : undefined
+  const builders = buildersOf(previous)
+  if (builders.includes(key) === on) return { ok: true, builders, reason: 'unchanged' }
+  const next = on ? [...builders, key] : builders.filter(k => k !== key)
+  if (next.length > MAX_BUILDERS) return { ok: false, reason: `a host names at most ${MAX_BUILDERS} builders` }
+  const content: Record<string, unknown> = { ...previous, builders: next }
+  if (!next.length) delete content['builders']
+  const put = await putManifest(host, read.ok ? read.manifest.roots : {}, read.ok ? read.manifest.doors ?? {} : {},
+    read.ok ? read.manifest.createdAt : 0, content)
+  if (!put.ok) return { ok: false, reason: put.reason ?? 'index write failed' }
+  return { ok: true, builders: next }
+}
+
 /** A root the participant's OWN index names on `host`, verified, or null. */
 export async function ownHiveRoot(host: string, key: string, deps: Pick<SetHiveRootDeps, 'fetchIndex' | 'publicKey'> = {}): Promise<string | null> {
   const fetchIndex = deps.fetchIndex ?? fetchHiveIndex

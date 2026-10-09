@@ -13,7 +13,10 @@
 // harness to assert on. `POST /__bind {zone, pubkey, label?}` binds a zone to
 // a publisher as the operator's SITE_BINDINGS would, so `try-<change>.localhost`
 // is a sandbox door; a second call with another key approves that publisher
-// too. The door's shell is fetched from the second argument.
+// too. `POST /__operate {zone, pubkey}` names the zone's operator as
+// SITE_OPERATORS does, so its signed index can name builders (the asks a host
+// holds, hypercomb-relay/build-asks.js). The door's shell is fetched from the
+// second argument.
 //
 // `--ai-stub` stands in for Anthropic behind the worker's `/ai/ask`: the real
 // endpoint runs (NIP-98, the context read from the heap by signature, the
@@ -53,14 +56,15 @@ const bytesOf = (value) => value instanceof Uint8Array ? value
 const r2 = () => {
   const objects = new Map()
   const meta = (key, entry) => ({
-    key, size: entry.bytes.byteLength, etag: key, httpEtag: `"${key}"`, httpMetadata: entry.httpMetadata ?? {},
+    key, size: entry.bytes.byteLength, etag: key, httpEtag: `"${key}"`, httpMetadata: entry.httpMetadata ?? {}, customMetadata: entry.customMetadata ?? {},
     writeHttpMetadata: (headers) => { if (entry.httpMetadata?.contentType) headers.set('content-type', entry.httpMetadata.contentType) },
   })
   return {
     objects,
     put: async (key, body, options = {}) => {
       const bytes = body instanceof ReadableStream ? new Uint8Array(await new Response(body).arrayBuffer()) : bytesOf(body)
-      objects.set(key, { bytes, httpMetadata: options.httpMetadata })
+      if (options.onlyIf?.get?.('If-None-Match') === '*' && objects.has(key)) return null
+      objects.set(key, { bytes, httpMetadata: options.httpMetadata, customMetadata: options.customMetadata })
       return meta(key, objects.get(key))
     },
     head: async (key) => objects.has(key) ? meta(key, objects.get(key)) : null,
@@ -76,7 +80,7 @@ const r2 = () => {
         json: async () => JSON.parse(new TextDecoder().decode(copy())),
       }
     },
-    list: async ({ prefix = '' } = {}) => ({ objects: [...objects.keys()].filter(key => key.startsWith(prefix)).sort().map(key => ({ key })), truncated: false }),
+    list: async ({ prefix = '' } = {}) => ({ objects: [...objects.keys()].filter(key => key.startsWith(prefix)).sort().map(key => ({ key, customMetadata: objects.get(key).customMetadata ?? {} })), truncated: false }),
     delete: async (key) => { objects.delete(key) },
   }
 }
@@ -86,6 +90,7 @@ const kv = () => {
 }
 
 const bindings = {}
+const operators = {}
 const env = { CONTENT: r2(), HIVES: kv(), GRANTS: kv(), AUTO_GRANT: '1', SANDBOX_SHELL_ORIGIN: shell, SITE_BINDINGS: '{}', ...(aiStub ? { ANTHROPIC_API_KEY: 'local-stub' } : {}) }
 
 http.createServer(async (req, res) => {
@@ -94,7 +99,7 @@ http.createServer(async (req, res) => {
   // which sends neither an Origin nor Sec-Fetch-Site; any page in this machine's
   // browser — a sandbox door above all — sends one (a same-origin GET carries no
   // Origin, but always Sec-Fetch-Site), and must not bind a zone or read the store.
-  if ((req.url === '/__state' || req.url === '/__bind') && (req.headers.origin || req.headers['sec-fetch-site'])) {
+  if ((req.url === '/__state' || req.url === '/__bind' || req.url === '/__operate') && (req.headers.origin || req.headers['sec-fetch-site'])) {
     res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
     res.end('the harness endpoints answer the harness, not a page\n')
     return
@@ -117,6 +122,14 @@ http.createServer(async (req, res) => {
     env.SITE_BINDINGS = JSON.stringify(bindings)
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ ok: true, bindings }))
+    return
+  }
+  if (req.url === '/__operate' && req.method === 'POST') {
+    const { zone, pubkey } = JSON.parse(Buffer.concat(chunks).toString() || '{}')
+    operators[String(zone)] = String(pubkey)
+    env.SITE_OPERATORS = JSON.stringify(operators)
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, operators }))
     return
   }
   const body = ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks)

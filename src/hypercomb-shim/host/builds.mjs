@@ -632,7 +632,9 @@ export const signaturesOf = async (buildSig, version, held) => {
   return [...seen.values()].sort((a, b) => ROLES.indexOf(a.role) - ROLES.indexOf(b.role) || (a.pubkey < b.pubkey ? -1 : 1))
 }
 
-const signerKey = async () => {
+/** This device's signing key: the one promotions are signed with, and a
+ *  builder's NIP-98 requests (host/builder.mjs listAsks). */
+export const signerKey = async () => {
   const file = process.env.HYPERCOMB_SIGNER_KEY_FILE
   const hex = (process.env.HYPERCOMB_SIGNER_KEY || (file ? await readFile(file, 'utf8') : '')).trim().toLowerCase()
   if (!SIG.test(hex)) {
@@ -1341,6 +1343,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const r = await adopt(ref, { sync: !rest.includes('--no-sync') })
       console.log(`${r.record.label} ${r.record.version} ${short(r.sig)} adopted from ${short(r.from)} — reviewed by ${r.reviewers.map(short).join(', ')}${r.signed ? ', signed as author' : ' — UNSIGNED: builds.mjs sign ' + r.record.version + ' --as author'}`)
       printSync(r.synced)
+    } else if (command === 'asks') {
+      // Its own process, like build-draft: builder.mjs imports this module.
+      const r = spawnSync(process.execPath, [resolve(HERE, 'builder.mjs'), 'asks', ref, ...rest].filter(Boolean), { stdio: 'inherit' })
+      if (r.status !== 0) process.exitCode = r.status ?? 1
     } else if (command === 'build-draft') {
       // Its own process: builder.mjs imports this module, which is still
       // evaluating while its command line runs.

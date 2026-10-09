@@ -97,9 +97,13 @@ async function fixture(event, bindings = ONE_ZONE) {
 }
 
 function contentBag(held = new Map()) {
+  // Custom metadata kept beside the bytes, as R2 keeps it: on head, and on a
+  // listing that asks for it.
+  const meta = new Map()
   return {
     held,
-    head: async key => held.has(key) ? { size: held.get(key).byteLength } : null,
+    meta,
+    head: async key => held.has(key) ? { size: held.get(key).byteLength, customMetadata: meta.get(key) ?? {} } : null,
     get: async key => held.has(key) ? {
       size: held.get(key).byteLength,
       body: held.get(key),
@@ -108,16 +112,18 @@ function contentBag(held = new Map()) {
     put: async (key, body, options) => {
       if (options?.onlyIf?.get?.('If-None-Match') === '*' && held.has(key)) return null
       held.set(key, new Uint8Array(await new Response(body).arrayBuffer()))
+      meta.set(key, options?.customMetadata ?? {})
       return { key }
     },
     // Each object's etag is a digest of its bytes, as R2's is: a record
     // rewritten by hand is a new etag, the same bytes are the same one.
-    list: async ({ prefix }) => ({
+    list: async ({ prefix, include }) => ({
       objects: await Promise.all([...held.keys()].filter(key => key.startsWith(prefix)).map(async key =>
-        ({ key, etag: hex(new Uint8Array(await crypto.subtle.digest('SHA-256', held.get(key)))) }))),
+        ({ key, etag: hex(new Uint8Array(await crypto.subtle.digest('SHA-256', held.get(key)))),
+          ...(include?.includes('customMetadata') ? { customMetadata: meta.get(key) ?? {} } : {}) }))),
       truncated: false,
     }),
-    delete: async key => { held.delete(key) },
+    delete: async key => { held.delete(key); meta.delete(key) },
   }
 }
 
@@ -3124,4 +3130,216 @@ test('an explicit domain opens only what is signed open on it; an entry signed b
   plain.env.HOST_DOOR_ORIGIN = 'https://door.example'
   visitorAssets(plain.env, [])
   assert.equal(carriedDoor(await pageAt('https://dylan.pluginthematrix.com/', plain.env)).lineage, 'dylan')
+})
+
+// ── build asks: noted on upload, listed to builders only (../build-asks.js) ──
+
+const ASKS = await sha256Hex('host:asks')
+const askKey = (n) => Uint8Array.from({ length: 32 }, (_, i) => i === 31 ? n : 0)
+const PTM = 'https://content.pluginthematrix.com'
+/** A draft record and an ask for it, signed by `key`. */
+async function askFor(key, { h = PTM, at = Math.floor(Date.now() / 1000), seed = 'x' } = {}) {
+  const draft = JSON.stringify({ name: 'draft', label: 'hypercomb-essentials', base: 'b'.repeat(64), files: 'f'.repeat(64), at: seed })
+  const d = await sha256Hex(draft)
+  const event = { pubkey: pubOf(key), created_at: at, kind: 30568, tags: [['d', d], ['h', h]], content: `hc:ask:v1\n${d}` }
+  event.id = await sha256Hex(JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]))
+  event.sig = hex(schnorr.sign(event.id, key))
+  return { draft, ask: JSON.stringify(event) }
+}
+/** Upload bytes at /<sig> under `key`'s grant, as askBuild does. */
+async function upload(env, bytes, key, origin = PTM) {
+  const url = `${origin}/${await sha256Hex(bytes)}`
+  const res = await worker.fetch(new Request(url, { method: 'PUT', headers: { authorization: await nip98(url, 'PUT', key) }, body: bytes }), env)
+  assert.ok(res.status === 201 || res.status === 200, `upload ${res.status}`)
+  return sha256Hex(bytes)
+}
+/** The draft, then its ask, under the author's own grant (askBuild's order). */
+async function sendAsk(env, key, options = {}, origin = options.h ?? PTM) {
+  const { draft, ask } = await askFor(key, options)
+  await upload(env, draft, key, origin)
+  return upload(env, ask, key, origin)
+}
+/** The asks listing, as a key asks for it (NIP-98, GET or HEAD), or with no signature. */
+async function asksFor(env, key, { origin = PTM, method = 'GET' } = {}) {
+  const url = `${origin}/${ASKS}/`
+  return worker.fetch(new Request(url, { method, ...(key ? { headers: { authorization: await nip98(url, method, key) } } : {}) }), env)
+}
+const listed = async (res) => (await res.text()).split('\n').filter(Boolean)
+const noted = (env) => [...env.CONTENT.held.keys()].filter((k) => k.startsWith(`${ASKS}/`))
+
+async function askFixture() {
+  const builder = askKey(7)
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head }, 1_800_000_000, undefined, undefined, { builders: [pubOf(builder), 'not a key'] }))
+  env.SITE_OPERATORS = JSON.stringify({ 'pluginthematrix.com': pubkey })
+  return { env, builder }
+}
+
+test('an ask its own author uploads is noted, and listed only to a builder', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const ask = await sendAsk(env, author)
+  // Nobody unsigned, and no key that is not a builder, learns the pool exists:
+  // the answer is the one a pool the host does not hold gets, header for header.
+  const absent = await worker.fetch(new Request(`${PTM}/${await sha256Hex('nothing:held')}/`), env)
+  const absentHead = await worker.fetch(new Request(`${PTM}/${await sha256Hex('nothing:held')}/`, { method: 'HEAD' }), env)
+  const headersOf = (res) => JSON.stringify([...res.headers].sort())
+  for (const res of [await asksFor(env), await asksFor(env, author), await asksFor(env, askKey(11))]) {
+    assert.equal(res.status, 404)
+    assert.equal(headersOf(res), headersOf(absent))
+    assert.equal(await res.text(), 'no pool at this address\n')
+  }
+  for (const res of [await asksFor(env, null, { method: 'HEAD' }), await asksFor(env, author, { method: 'HEAD' })]) {
+    assert.equal(res.status, 404)
+    assert.equal(headersOf(res), headersOf(absentHead))
+  }
+  // The operator, and a builder its signed index names, read the open asks,
+  // each with the origin it was sent to; never cached for anyone else.
+  for (const key of [sk, builder]) {
+    const res = await asksFor(env, key)
+    assert.equal(res.status, 200)
+    assert.equal(res.headers.get('cache-control'), 'no-store, private')
+    assert.equal(res.headers.get('vary'), 'Authorization')
+    assert.deepEqual(await listed(res), [`${ask} ${PTM}`])
+  }
+  assert.equal((await asksFor(env, builder, { method: 'HEAD' })).status, 200)
+  // A member is never served on its own path; the ask's bytes stay at /<sig>.
+  assert.equal((await worker.fetch(new Request(`${PTM}/${ASKS}/${ask}`), env)).status, 404)
+  assert.equal((await worker.fetch(new Request(`${PTM}/${ask}`), env)).status, 200)
+  // The same ask uploaded again notes nothing more.
+  const again = await askFor(askKey(14), { seed: 'again' })
+  await upload(env, again.draft, askKey(14))
+  for (let i = 0; i < 2; i++) await upload(env, again.ask, askKey(14))
+  assert.equal(noted(env).length, 2)
+})
+
+test('an ask is not noted unless its author uploaded it and its draft, for this host, recently, and it verifies', async () => {
+  const { env } = await askFixture()
+  const author = askKey(9)
+  const now = Math.floor(Date.now() / 1000)
+  const refused = async (label, run) => { await run(); assert.deepEqual(noted(env), [], label) }
+  await refused('someone else uploaded it', async () => {
+    const { draft, ask } = await askFor(author, { seed: 'a' })
+    await upload(env, draft, author)
+    await upload(env, ask, askKey(12))
+    await upload(env, ask, author)   // its author's upload of bytes another key stored first
+  })
+  await refused('its draft was never uploaded', async () => { await upload(env, (await askFor(author, { seed: 'b' })).ask, author) })
+  await refused('its draft is someone else\'s', async () => {
+    const { draft, ask } = await askFor(author, { seed: 'b2' })
+    await upload(env, draft, askKey(12))
+    await upload(env, draft, author)   // re-uploading it marks it shared, never theirs
+    await upload(env, ask, author)
+  })
+  await refused('its draft is not a draft', async () => {
+    const d = await upload(env, JSON.stringify({ name: 'note', text: 'not a draft' }), author)
+    const event = { pubkey: pubOf(author), created_at: Math.floor(Date.now() / 1000), kind: 30568, tags: [['d', d], ['h', PTM]], content: `hc:ask:v1\n${d}` }
+    event.id = await sha256Hex(JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]))
+    event.sig = hex(schnorr.sign(event.id, author))
+    await upload(env, JSON.stringify(event), author)
+  })
+  await refused('it names another host', () => sendAsk(env, author, { h: 'https://elsewhere.example', seed: 'c' }, PTM))
+  await refused('it is old', () => sendAsk(env, author, { at: now - 8 * 86_400, seed: 'd' }))
+  await refused('it is from the future', () => sendAsk(env, author, { at: now + 3600, seed: 'e' }))
+  await refused('its host has no operator', () => sendAsk(env, author, { h: 'https://other.example', seed: 'f' }, 'https://other.example'))
+  await refused('it does not verify', async () => {
+    const { draft, ask } = await askFor(author, { seed: 'g' })
+    const forged = JSON.parse(ask)
+    forged.created_at += 1
+    await upload(env, draft, author)
+    await upload(env, JSON.stringify(forged), author)
+  })
+  await refused('it is not an ask', () => upload(env, JSON.stringify({ kind: 1, content: 'hello' }), author))
+})
+
+test('the listing keeps each author\'s newest four in its zone, and shows a builder only the zones it builds for', async () => {
+  const { env, builder } = await askFixture()
+  const other = askKey(13)
+  env.SITE_OPERATORS = JSON.stringify({ 'pluginthematrix.com': pubkey, 'other.example': pubOf(other) })
+  const author = askKey(9)
+  const asks = []
+  for (let i = 0; i < 5; i++) asks.push(await later(i * 10, () => sendAsk(env, author, { seed: `n${i}` })))
+  // Newest by receipt; the first noted falls off, from the pool itself.
+  assert.deepEqual((await listed(await asksFor(env, builder))).map((line) => line.split(' ')[0]), asks.slice(1).reverse())
+  assert.equal(noted(env).length, 4)
+  // Another zone's ask is noted in its own zone: its operator sees it, this
+  // zone's builder does not, and it evicts nothing here.
+  const theirs = await sendAsk(env, other, { h: 'https://other.example', seed: 'o' }, 'https://other.example')
+  assert.equal(noted(env).length, 5)
+  assert.deepEqual((await listed(await asksFor(env, other, { origin: 'https://other.example' }))), [`${theirs} https://other.example`])
+  assert.ok(!(await listed(await asksFor(env, builder))).some((line) => line.startsWith(theirs)))
+})
+
+test('forgetting an ask\'s bytes takes it off the listing', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const ask = await sendAsk(env, author)
+  const url = `${PTM}/forget`
+  const res = await worker.fetch(new Request(url, {
+    method: 'POST', headers: { authorization: await nip98(url, 'POST', author), 'content-type': 'application/json' },
+    body: JSON.stringify({ sigs: [ask] }),
+  }), env)
+  assert.deepEqual((await res.json()).removed, [ask])
+  assert.deepEqual(await listed(await asksFor(env, builder)), [])
+})
+
+test('a draft another key re-uploads after its author is still its author\'s, and the ask is noted', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const { draft, ask } = await askFor(author, { seed: 'shared-draft' })
+  await upload(env, draft, author)
+  await upload(env, draft, askKey(12))
+  const sig = await upload(env, ask, author)
+  assert.deepEqual(await listed(await asksFor(env, builder)), [`${sig} ${PTM}`])
+})
+
+test('an ask uploaded again keeps its place; an expired one leaves the listing with nothing else noted', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const first = await askFor(author, { seed: 'first' })
+  await upload(env, first.draft, author)
+  const sig = await upload(env, first.ask, author)
+  const before = env.CONTENT.meta.get(`${ASKS}/${sig}`)?.noted
+  await later(50, () => upload(env, first.ask, author))
+  assert.equal(env.CONTENT.meta.get(`${ASKS}/${sig}`)?.noted, before)
+  assert.deepEqual(await listed(await asksFor(env, builder)), [`${sig} ${PTM}`])
+  assert.deepEqual(await later(8 * 86_400_000, async () => listed(await asksFor(env, builder))), [])
+})
+
+test('no operator\'s listed declaration makes the asks public', async () => {
+  const builder = askKey(7)
+  const { env } = await fixture(await signedIndex({ pluginthematrix: head }, 1_800_000_000, undefined, undefined, { builders: [pubOf(builder)], listed: ['host:asks'] }))
+  env.SITE_OPERATORS = JSON.stringify({ 'pluginthematrix.com': pubkey })
+  const sig = await sendAsk(env, askKey(9))
+  assert.equal((await asksFor(env)).status, 404)
+  assert.equal((await asksFor(env, askKey(11))).status, 404)
+  assert.equal((await worker.fetch(new Request(`${PTM}/${ASKS}/${sig}`), env)).status, 404)
+  assert.equal((await asksFor(env, builder)).status, 200)
+})
+
+test('its author withdraws an ask by forgetting it, even shared, or by forgetting its draft', async () => {
+  const { env, builder } = await askFixture()
+  const author = askKey(9)
+  const forget = async (sigs) => {
+    const url = `${PTM}/forget`
+    return (await worker.fetch(new Request(url, {
+      method: 'POST', headers: { authorization: await nip98(url, 'POST', author), 'content-type': 'application/json' },
+      body: JSON.stringify({ sigs }),
+    }), env)).json()
+  }
+  const shared = await askFor(author, { seed: 'w1' })
+  await upload(env, shared.draft, author)
+  const sharedSig = await upload(env, shared.ask, author)
+  await upload(env, shared.ask, askKey(12))
+  assert.deepEqual((await forget([sharedSig])).kept, { [sharedSig]: 'shared' })
+  const byDraft = await askFor(author, { seed: 'w2' })
+  const draftSig = await upload(env, byDraft.draft, author)
+  await upload(env, byDraft.ask, author)
+  assert.equal((await listed(await asksFor(env, builder))).length, 1)
+  assert.deepEqual((await forget([draftSig])).removed, [draftSig])
+  assert.deepEqual(await listed(await asksFor(env, builder)), [])
+  // Someone else's forget withdraws nothing of the author's.
+  const kept = await sendAsk(env, author, { seed: 'w3' })
+  const url = `${PTM}/forget`
+  await worker.fetch(new Request(url, { method: 'POST', headers: { authorization: await nip98(url, 'POST', askKey(12)), 'content-type': 'application/json' }, body: JSON.stringify({ sigs: [kept] }) }), env)
+  assert.deepEqual((await listed(await asksFor(env, builder))).map((l) => l.split(' ')[0]), [kept])
 })

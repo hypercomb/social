@@ -97,3 +97,82 @@ describe('a draft\'s build', () => {
     })
   })
 })
+
+describe('a builder lists the asks a host holds for it', () => {
+  /** A host that lists its asks only to `builder`'s signed request (NIP-98),
+   *  as hypercomb-relay/build-asks.js has a host do. */
+  const listing = async (h: ReturnType<typeof hosting>, builder: Uint8Array, names: string[], sentTo = 'http://h.test') => {
+    const { verifyEvent } = await import('nostr-tools/pure')
+    const pool = sha('host:asks')
+    return (async (url: string, init?: RequestInit) => {
+      if (url.endsWith(`/${pool}/`)) {
+        const header = String((init?.headers as Record<string, string> | undefined)?.Authorization ?? '')
+        let event: { kind?: number; pubkey?: string; tags?: string[][] } | null = null
+        try { event = JSON.parse(Buffer.from(header.replace(/^Nostr /, ''), 'base64').toString('utf8')) } catch { event = null }
+        const signed = !!event && event.kind === 27235 && verifyEvent(event as never) && event.pubkey === getPublicKey(builder)
+          && event.tags?.some(t => t[0] === 'u' && t[1] === url) && event.tags?.some(t => t[0] === 'method' && t[1] === 'GET')
+        return signed ? new Response(names.map(n => `${n} ${sentTo}\n`).join('')) : new Response('no pool at this address\n', { status: 404 })
+      }
+      return h.get(url)
+    }) as unknown as typeof fetch
+  }
+
+  it('reads each listed ask under its key, and says which authors it trusts', async () => {
+    const { listAsks } = await import('./builder.mjs')
+    const { trustAuthor } = await import('./builds.mjs')
+    const builder = generateSecretKey()
+    const h = hosting()
+    await trustAuthor(h.author)
+    const asks = await listAsks('http://h.test', { get: await listing(h, builder, [h.ask, 'f'.repeat(64)]), key: builder, now: NOW })
+    expect(asks[0]).toEqual({ ask: h.ask, origin: 'http://h.test', author: h.author, draft: h.draft, at: 1_790_000_000, trusted: true, built: false })
+    expect(asks[1]).toMatchObject({ ask: 'f'.repeat(64), refused: expect.stringMatching(/does not serve/) })
+  })
+
+  it('says how to be named a builder when the host lists nothing to its key', async () => {
+    const { listAsks } = await import('./builder.mjs')
+    const h = hosting()
+    const someoneElse = generateSecretKey()
+    await expect(listAsks('http://h.test', { get: await listing(h, generateSecretKey(), [h.ask]), key: someoneElse, now: NOW }))
+      .rejects.toThrow(/hosts builders add <your pubkey> @h.test/)
+  })
+})
+
+describe('an ask sent to another face of the zone', () => {
+  it('is read at the origin the listing names, where its h tag holds', async () => {
+    const { listAsks } = await import('./builder.mjs')
+    const builder = generateSecretKey()
+    const h = hosting({ h: 'http://content.h.test' })
+    const pool = sha('host:asks')
+    const { verifyEvent } = await import('nostr-tools/pure')
+    const get = (async (url: string, init?: RequestInit) => {
+      if (url === `http://h.test/${pool}/`) {
+        const header = String((init?.headers as Record<string, string> | undefined)?.Authorization ?? '')
+        const event = JSON.parse(Buffer.from(header.replace(/^Nostr /, ''), 'base64').toString('utf8'))
+        return verifyEvent(event) && event.pubkey === getPublicKey(builder) ? new Response(`${h.ask} http://content.h.test\n`) : new Response('', { status: 404 })
+      }
+      // The ask's bytes are served only where it was sent.
+      return url.startsWith('http://content.h.test/') ? h.get(url) : new Response('', { status: 404 })
+    }) as unknown as typeof fetch
+    const [ask] = await listAsks('http://h.test', { get, key: builder, now: NOW })
+    expect(ask).toMatchObject({ ask: h.ask, origin: 'http://content.h.test', author: h.author })
+    expect(ask.refused).toBeUndefined()
+  })
+
+  it('a page some face answers is never read as a listing', async () => {
+    const { listAsks } = await import('./builder.mjs')
+    const html = (async () => new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } })) as unknown as typeof fetch
+    await expect(listAsks('http://h.test', { get: html, key: generateSecretKey(), now: NOW })).rejects.toThrow(/not a listing of asks/)
+    const down = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    await expect(listAsks('http://h.test', { get: down, key: generateSecretKey(), now: NOW })).rejects.toThrow(/did not answer/)
+  })
+})
+
+describe('origins compare normalized, as a host compares them', () => {
+  it('lowercases, drops a default port and a path, and keeps loopback on http', async () => {
+    const { originOf } = await import('./builder.mjs')
+    expect(originOf('Content.Example.org')).toBe('https://content.example.org')
+    expect(originOf('https://content.example.org:443/x')).toBe('https://content.example.org')
+    expect(originOf('localhost:4291')).toBe('http://localhost:4291')
+    expect(originOf('try-x.localhost:4291')).toBe('http://try-x.localhost:4291')
+  })
+})

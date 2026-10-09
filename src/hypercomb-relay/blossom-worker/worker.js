@@ -36,6 +36,7 @@
 
 import { schnorr } from '@noble/curves/secp256k1'
 import { HOST_LISTING_FLOOR, listedMeanings } from '../host-listing.js'
+import { ASKS_MEANING, ASK_TTL_DAYS, MAX_ASK_BYTES, MAX_DRAFT_BYTES, buildersOf, isDraft, noteable, sweep as sweepAsks, zoneOf } from '../build-asks.js'
 import { nostrJson } from '../nip05-names.js'
 import { encodeTransferPack, gzipBytes } from '../../hypercomb-runtime/src/transfer-pack.ts'
 
@@ -463,7 +464,7 @@ async function verifiedIndex(env, pubkey) {
   if (!content?.roots || typeof content.roots !== 'object' || Array.isArray(content.roots)
     || !validOfferingDeclarations(content.offerings)) return null
   const doors = content.doors && typeof content.doors === 'object' && !Array.isArray(content.doors) ? content.doors : {}
-  return { roots: content.roots, doors, offerings: content.offerings ?? {}, listed: listedMeanings(content),
+  return { roots: content.roots, doors, offerings: content.offerings ?? {}, listed: listedMeanings(content), builders: buildersOf(content),
     addresses: readAddresses(content.addresses), createdAt: Number(evt.created_at || 0) }
 }
 
@@ -1052,7 +1053,7 @@ async function declaredListing(env, read) {
 /** The host's own private ledgers. Each member names a key or a domain and
  *  holds what only its own endpoint may hand out, so no declaration lists
  *  them — not even an operator's signed `listed`. */
-const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters']
+const PRIVATE_POOL_MEANINGS = ['host:claims', 'host:grants', 'host:ai-meters', ASKS_MEANING]
 
 /** Is this pool listed here? The floor answers without an index read — the
  *  addresses every follower asks stay on the hot path; anything else is
@@ -1506,13 +1507,19 @@ async function serveOfferingsPool(request, env, member) {
     : new Response(null, { status: 404, headers })
 }
 
+/** THE ANSWER FOR A POOL NOT HELD HERE — one response, so a pool that is
+ *  held but not for this caller (host:asks to a non-builder) cannot be told
+ *  apart from one that is not held at all. */
+function noPoolHere(request) {
+  return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
+    status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS, 'X-Reason': 'no pool at this address' },
+  })
+}
+
 async function servePoolListing(request, env, sig) {
   const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
-  if (!await listedPool(env, sig)) {
-    return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
-      status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
-    })
-  }
+  if (sig === await poolAddress(ASKS_MEANING)) return serveAsks(request, env)
+  if (!await listedPool(env, sig)) return noPoolHere(request)
   const prefix = `${sig}/`
   const names = []
   if (env.CONTENT?.list) {
@@ -2534,6 +2541,118 @@ async function storeBlob(env, pubkey, sig, body, contentType) {
   return { outcome: 'stored', size: body.byteLength, type }
 }
 
+// ── build asks (hypercomb-relay/build-asks.js) ───────────────────────────────
+//
+// An ask a participant uploads under their grant is NOTED here, in the private
+// pool host:asks, so the builders this host lends its surface to can find it
+// without being told its signature. Noted once, only when its own author
+// stored it and its draft under their grant, for this host and a zone with an
+// operator, recently, and it verifies; listed only to that zone's builders.
+// Its author takes it off the listing by forgetting it, or its draft.
+
+/** Note these uploaded bytes in host:asks if they are an ask this host should
+ *  keep for its builders, and let the oldest of its zone fall off. Runs after
+ *  the upload has answered (waitUntil) and never fails it. */
+async function noteAsk(env, request, uploader, sig, body) {
+  if (!env.CONTENT?.put || !env.CONTENT?.list || !env.CONTENT?.head || body.byteLength > MAX_ASK_BYTES) return
+  try {
+    const url = new URL(request.url)
+    const verdict = await noteable(new Uint8Array(body), { uploader, origin: url.origin, verify: verifyEventSig })
+    if (!verdict.ok) return
+    // A zone with an operator: nobody could list an ask for any other host.
+    const zone = zoneOf(url.hostname, siteOperators(env).map(([z]) => z))
+    if (!zone) return
+    // The author's own uploads: the ask, and the draft it names, each stored
+    // under their grant first (a later re-upload by another key marks bytes
+    // shared but never makes them that key's), the draft a draft record.
+    if ((await env.CONTENT.head(sig))?.customMetadata?.owner !== uploader) return
+    const draftHead = await env.CONTENT.head(verdict.record.draft)
+    if (draftHead?.customMetadata?.owner !== uploader || !(Number(draftHead.size) <= MAX_DRAFT_BYTES)) return
+    const draftObject = await env.CONTENT.get(verdict.record.draft)
+    if (!draftObject || !isDraft(new Uint8Array(await draftObject.arrayBuffer()))) return
+    // Once: a member already noted is not noted, nor swept, again.
+    const pool = await poolAddress(ASKS_MEANING)
+    const member = `${pool}/${sig}`
+    if (await env.CONTENT.head(member)) return
+    // When the host received it, to the millisecond: the order the pool keeps.
+    const noted = Date.now()
+    const record = { ...verdict.record, noted, zone }
+    await env.CONTENT.put(member, new Uint8Array(0), {
+      customMetadata: Object.fromEntries(Object.entries(record).map(([k, v]) => [k, String(v)])),
+      onlyIf: new Headers({ 'If-None-Match': '*' }),
+    })
+    for (const name of sweepAsks(await askMembers(env))) await env.CONTENT.delete(`${pool}/${name}`)
+  } catch { /* an ask that cannot be noted is still stored: the author can name it by hand */ }
+}
+
+/** Every ask the pool holds, with the record noted with it — read in one
+ *  listing (R2 returns each member's custom metadata), never member by member. */
+async function askMembers(env) {
+  const pool = await poolAddress(ASKS_MEANING)
+  const out = []
+  let cursor
+  do {
+    const page = await env.CONTENT.list({ prefix: `${pool}/`, cursor, limit: 1000, include: ['customMetadata'] })
+    for (const object of page.objects ?? []) {
+      const name = String(object.key ?? '').slice(pool.length + 1)
+      if (!SIG_RE.test(name)) continue
+      const meta = object.customMetadata ?? {}
+      out.push({ name, author: String(meta.author ?? ''), draft: String(meta.draft ?? ''), at: Number(meta.at) || 0,
+        noted: Number(meta.noted) || 0, zone: String(meta.zone ?? ''), origin: String(meta.origin ?? '') })
+    }
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+  return out
+}
+
+/** The zones a key builds for: those it operates (SITE_OPERATORS), and those
+ *  whose operator's signed index names it under `builders`. */
+async function builderZones(env, pubkey, read = indexReader(env)) {
+  const zones = []
+  for (const [zone, operator] of siteOperators(env)) {
+    if (operator === pubkey || (await read(operator))?.builders?.includes(pubkey)) zones.push(zone)
+  }
+  return zones
+}
+
+/** GET /<sign('host:asks')>/ — the asks open on this host, newest first, one
+ *  per line as `<signature> <origin it was sent to>`: to a builder's signed
+ *  request (NIP-98, GET), for the zones it builds for — each ask in the most
+ *  specific zone its host falls in. Anyone else gets noPoolHere. */
+async function serveAsks(request, env) {
+  const auth = await verifyNip98(request, parseAuthEvent(request), request.method === 'HEAD' ? 'HEAD' : 'GET')
+  if (!auth.ok) return noPoolHere(request)
+  const mine = new Set(await builderZones(env, auth.pubkey))
+  if (!mine.size) return noPoolHere(request)
+  const zones = siteOperators(env).map(([zone]) => zone)
+  const since = Math.floor(Date.now() / 1000) - ASK_TTL_DAYS * 86_400
+  const open = (await askMembers(env))
+    .filter((m) => m.at > since && m.origin && mine.has(zoneOf(new URL(m.origin).hostname, zones)))
+    .sort((a, b) => (b.noted - a.noted) || (a.name < b.name ? -1 : 1))
+  const listing = open.length ? open.map((m) => `${m.name} ${m.origin}`).join('\n') + '\n' : ''
+  return new Response(request.method === 'HEAD' ? null : listing, {
+    status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store, private', Vary: 'Authorization', ...CORS },
+  })
+}
+
+/** WITHDRAWN BY ITS AUTHOR: every ask of `owner`'s that is, or names as its
+ *  draft, one of `sigs` leaves the listing — one scan, only when the author
+ *  forgot something of their own. */
+async function withdrawAsks(env, owner, sigs) {
+  if (!sigs.size || !env.CONTENT?.list) return
+  const pool = await poolAddress(ASKS_MEANING)
+  for (const m of await askMembers(env)) {
+    if (m.author === owner && (sigs.has(m.name) || sigs.has(m.draft))) await env.CONTENT.delete(`${pool}/${m.name}`)
+  }
+}
+
+/** Note an upload as an ask once the upload has answered. */
+function noteAskLater(ctx, env, request, uploader, sig, body) {
+  const noting = noteAsk(env, request, uploader, sig, body)
+  if (ctx?.waitUntil) ctx.waitUntil(noting)
+  return ctx?.waitUntil ? undefined : noting
+}
+
 // POST /forget — REMOVE FROM MY HOSTS (documentation/remove-from-my-hosts.md).
 // A publisher (NIP-98, method POST) names sigs it no longer wants held. Each
 // is deleted only when the publisher is its sole claimant: the object's owner
@@ -2566,6 +2685,9 @@ async function forgetSigs(request, env) {
   }
   const removed = []
   const kept = {}
+  // The caller's own bytes named here — removed, or kept because another key
+  // relies on them too: either way no ask of theirs stays listed for them.
+  const theirs = new Set()
   for (const sig of sigs) {
     if (heads.has(sig)) { kept[sig] = 'still-open'; continue }
     const head = await env.CONTENT.head(sig)
@@ -2573,16 +2695,18 @@ async function forgetSigs(request, env) {
     const claim = head.customMetadata ?? {}
     if (!claim.owner) { kept[sig] = 'unclaimed'; continue }
     if (claim.owner !== auth.pubkey) { kept[sig] = 'not-yours'; continue }
+    theirs.add(sig)
     if (claim.shared === '1') { kept[sig] = 'shared'; continue }
     await env.CONTENT.delete(sig)
     removed.push(sig)
   }
+  await withdrawAsks(env, auth.pubkey, theirs)
   return json(200, { removed, kept }, { 'Cache-Control': 'no-store' })
 }
 
 // PUT /<sig> — hypercomb host-sync shape (NIP-98). The URL names the
 // content; sha256(body) must equal it.
-async function putSig(request, env, sig) {
+async function putSig(request, env, sig, ctx) {
   const evt = parseAuthEvent(request)
   const auth = await verifyNip98(request, evt)
   if (!auth.ok) return text(401, auth.reason)
@@ -2595,6 +2719,7 @@ async function putSig(request, env, sig) {
 
   const stored = await storeBlob(env, auth.pubkey, sig, body, request.headers.get('content-type'))
   if (stored.outcome === 'denied') return text(403, stored.reason)
+  await noteAskLater(ctx, env, request, auth.pubkey, sig, body)
   if (stored.outcome === 'exists') return text(200, `already held ${sig}`)
   return text(201, `stored ${sig}`)
 }
@@ -2602,7 +2727,7 @@ async function putSig(request, env, sig) {
 // PUT /upload — Blossom BUD-02. The x tag names the content; sha256(body)
 // must be among the x tags. Responds with a blob descriptor either way
 // (an existing blob is a successful upload that cost nothing).
-async function putUpload(request, env) {
+async function putUpload(request, env, ctx) {
   const evt = parseAuthEvent(request)
   const body = await request.arrayBuffer()
   const sig = await sha256Hex(body)
@@ -2611,6 +2736,7 @@ async function putUpload(request, env) {
 
   const stored = await storeBlob(env, auth.pubkey, sig, body, request.headers.get('content-type'))
   if (stored.outcome === 'denied') return text(403, stored.reason)
+  await noteAskLater(ctx, env, request, auth.pubkey, sig, body)
   return json(200, {
     url: new URL(request.url).origin + '/' + sig,
     sha256: sig,
@@ -3891,7 +4017,7 @@ export default {
         }
         return heap
       }
-      if (method === 'PUT' && !isAlias && !named) return putSig(request, env, sigMatch[2])
+      if (method === 'PUT' && !isAlias && !named) return putSig(request, env, sigMatch[2], ctx)
       return text(405, 'method not allowed')
     }
 
@@ -3943,7 +4069,7 @@ export default {
     }
 
     if (writeFace && pathname === '/upload') {
-      if (method === 'PUT') return putUpload(request, env)
+      if (method === 'PUT') return putUpload(request, env, ctx)
       if (method === 'HEAD') return headUpload(request, env)
       return text(405, 'method not allowed')
     }

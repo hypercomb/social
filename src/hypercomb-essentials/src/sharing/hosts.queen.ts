@@ -14,15 +14,20 @@
 //                                   (hypercomb-relay/host-listing.js)
 //   hosts unlist <meaning> [@<host>]  withdraw it; the bytes stay, the listing goes
 //   hosts listed [@<host>]          what your index on the host declares
+//   hosts builders [@<host>]        the builders your index names: the keys,
+//                                   beside you, the host lists its asks to —
+//                                   for every zone you operate on that host
+//   hosts builders add <pubkey> [@<host>]     name one (hypercomb-relay/build-asks.js)
+//   hosts builders remove <pubkey> [@<host>]  stop naming it
 //
 // With no @<host>, the words speak to your public content host.
 
 import { EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { fetchHiveIndex, listedOf, setHostListing } from './hive-pointer.js'
+import { buildersOf, fetchHiveIndex, listedOf, setHostBuilders, setHostListing } from './hive-pointer.js'
 
 const SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
-const WORDS = ['list', 'unlist', 'listed']
+const WORDS = ['list', 'unlist', 'listed', 'builders']
 
 type SyncLike = { publicHostDomain?: () => string }
 type SignerLike = { getPublicKeyHex?: () => Promise<string | null> }
@@ -38,7 +43,7 @@ export class HostsQueenBee {
   readonly description =
     'Open your host directory — add or remove a host, inspect its packages, and add one to your hive. Publish uses this directory for branch destinations.'
   readonly descriptionKey = 'slash.hosts'
-  readonly options = ['list <meaning> [@<host>]', 'unlist <meaning> [@<host>]', 'listed [@<host>]']
+  readonly options = ['list <meaning> [@<host>]', 'unlist <meaning> [@<host>]', 'listed [@<host>]', 'builders [add|remove <pubkey>] [@<host>]']
 
   slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()
@@ -65,6 +70,8 @@ export class HostsQueenBee {
       return
     }
 
+    if (word === 'builders') return this.#builders(host, parts.slice(1).filter(p => !p.startsWith('@')))
+
     const meaning = parts.slice(1).find(p => !p.startsWith('@')) ?? ''
     if (!meaning) { toast(t('hosts.saymeaning', 'Say hosts {word} <meaning>, such as hypercomb:windows.', { word }), 'warning'); return }
     const on = word === 'list'
@@ -77,6 +84,35 @@ export class HostsQueenBee {
       ? (on ? t('hosts.alreadylisted', '{meaning} was already listed on {host}.', params) : t('hosts.alreadyunlisted', '{meaning} was already not listed on {host}.', params))
       : (on ? t('hosts.nowlisted', '{host} now lists {meaning} for anyone who asks.', params) : t('hosts.nowunlisted', '{host} no longer lists {meaning}.', params)), 'success')
     EffectBus.emit('hosts:listed', { host, listed: done.listed })
+  }
+
+  /** `hosts builders [add|remove <pubkey>]`: who the host lists its asks to. */
+  async #builders(host: string, rest: readonly string[]): Promise<void> {
+    const verb = (rest[0] ?? '').toLowerCase()
+    if (verb !== 'add' && verb !== 'remove') {
+      const pubkey = String(await get<SignerLike>(SIGNER_KEY)?.getPublicKeyHex?.().catch(() => null) ?? '').toLowerCase()
+      if (!pubkey) { toast(t('hosts.nosigner', 'A signing key is required.'), 'warning'); return }
+      const read = await fetchHiveIndex(host, pubkey)
+      if (!read.ok && !(read.reason === 'http' && read.status === 404)) {
+        toast(t('hosts.buildersunread', 'Your index on {host} could not be read ({reason}), so the builders it names are unknown.', { host, reason: read.reason }), 'warning')
+        return
+      }
+      const builders = read.ok ? buildersOf(read.manifest.signedContent) : []
+      toast(builders.length
+        ? t('hosts.builders', 'Your index on {host} names these builders: {keys}. For the zones you operate there, the host lists its asks to you and to them.', { host, keys: builders.map(k => k.slice(0, 12)).join(', ') })
+        : t('hosts.buildersnone', 'Your index on {host} names no builders: for the zones you operate there, the host lists its asks to you alone.', { host }))
+      return
+    }
+    const key = rest[1] ?? ''
+    const on = verb === 'add'
+    const done = await setHostBuilders(host, key, on)
+    if (!done.ok) { toast(t('hosts.buildersfailed', 'The builders on {host} were not changed: {reason}', { host, reason: done.reason }), 'warning'); return }
+    const params = { host, key: key.slice(0, 12) }
+    toast(done.reason === 'unchanged'
+      ? t('hosts.buildersunchanged', 'Nothing changed: {key} was already {state} on {host}.', { ...params, state: on ? 'a builder' : 'not a builder' })
+      : on
+        ? t('hosts.builderadded', '{host} now lists its asks to {key} too, for every zone you operate there: it can read the drafts people send to them.', params)
+        : t('hosts.builderremoved', '{host} no longer lists its asks to {key}.', params), 'success')
   }
 }
 

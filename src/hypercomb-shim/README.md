@@ -347,6 +347,7 @@ kind 30568), and sends both to a host under its grant: the same signed
 builder takes it from there:
 
 ```bash
+node host/builds.mjs asks <host>                  # the asks the host holds for this builder's key
 node host/builds.mjs trust <author pubkey>        # once: whose drafts this builder builds
 HYPERCOMB_SIGNER_KEY=<builder key> node host/builds.mjs build-draft <host> <ask> [--to <dir>] [--test] [--untrusted]
 ```
@@ -370,6 +371,19 @@ without it, and promote reads the key afterwards), but a key kept in a file
 is still a file that user can read. Until a draft builds as another user or
 in a container, run `build-draft` only for authors you would let run code on
 the machine.
+
+**Finding the asks.** A host that keeps grants notes each ask its author
+uploads there in the private pool `host:asks` (`hypercomb-relay/build-asks.js`)
+— once, when the ask and its draft were first stored under that author's own
+grant, for this host, recent, and it verifies; forgetting either withdraws it — and lists it only to a builder's
+signed request: the operator of the zone the ask's host falls in, or a key
+that operator's signed index names (`hosts builders add <pubkey> @<host>` in
+the hive; it builds for every zone the operator runs there). Anyone else gets
+exactly the answer a pool the host does not hold gets, since an ask's draft
+is readable by its signature. Each line is `<ask> <origin it was sent to>`.
+`builds.mjs asks <host>` signs that request with `HYPERCOMB_SIGNER_KEY`, reads
+and verifies each ask at its own origin, and says whose it is and whether
+this builder trusts them.
 
 **What a builder refuses, and what it signs.** Before anything runs:
 - an author it does not trust (`builds.mjs trust <pubkey>`; `--untrusted`

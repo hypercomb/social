@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
-import { clearHiveRoot, setHostListing, fetchHiveIndex, ownHiveRoot, putHiveManifest, setHiveRoot, type HiveIndexResult, type PutHiveResult } from './hive-pointer.js'
+import { clearHiveRoot, setHostBuilders, setHostListing, fetchHiveIndex, ownHiveRoot, putHiveManifest, setHiveRoot, type HiveIndexResult, type PutHiveResult } from './hive-pointer.js'
 import { HIVE_LINK_VERSION } from './hive-link.js'
 
 const PUB = 'a'.repeat(64)
@@ -266,6 +266,37 @@ describe('setHostListing — a host lists a pool past the floor only by its oper
     expect((await setHostListing(HOST, 'windows', true, deps)).ok).toBe(false)
     expect((await setHostListing(HOST, 'molecule:index', true, deps)).ok).toBe(false)
     expect((await setHostListing(HOST, 'hypercomb:windows', true, harness({ ok: false, reason: 'forged' }).deps)).ok).toBe(false)
+    expect(puts).toHaveLength(0)
+  })
+})
+
+describe('setHostBuilders — a host lists its asks to the builders its operator names', () => {
+  const withContent = (signedContent: Record<string, unknown>): HiveIndexResult => ({ ok: true, manifest: {
+    roots: { arkanoid: OTHER }, createdAt: 1600000000, pubkey: PUB, signedContent,
+  } })
+  const BUILDER = 'b'.repeat(64)
+
+  it('names a builder and carries every other signed field through', async () => {
+    const signedContent = { v: 1, roots: { arkanoid: OTHER }, listed: ['host:builds'] }
+    const { deps, puts } = harness(withContent(signedContent))
+    expect(await setHostBuilders(HOST, BUILDER.toUpperCase(), true, deps)).toEqual({ ok: true, builders: [BUILDER] })
+    expect(puts[0].roots).toEqual({ arkanoid: OTHER })
+    expect(puts[0].previousContent).toEqual({ ...signedContent, builders: [BUILDER] })
+  })
+
+  it('stops naming one and drops an empty list; no-ops when nothing would change', async () => {
+    const named = harness(withContent({ v: 1, roots: {}, builders: [BUILDER] }))
+    expect((await setHostBuilders(HOST, BUILDER, false, named.deps)).ok).toBe(true)
+    expect(named.puts[0].previousContent).not.toHaveProperty('builders')
+    const same = harness(withContent({ v: 1, roots: {}, builders: [BUILDER] }))
+    expect(await setHostBuilders(HOST, BUILDER, true, same.deps)).toEqual({ ok: true, builders: [BUILDER], reason: 'unchanged' })
+    expect(same.puts).toHaveLength(0)
+  })
+
+  it('refuses what is not a key, and an index it cannot see', async () => {
+    const { deps, puts } = harness(withContent({ v: 1, roots: {} }))
+    expect((await setHostBuilders(HOST, 'npub1nope', true, deps)).ok).toBe(false)
+    expect((await setHostBuilders(HOST, BUILDER, true, harness({ ok: false, reason: 'forged' }).deps)).ok).toBe(false)
     expect(puts).toHaveLength(0)
   })
 })
