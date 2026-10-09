@@ -36,7 +36,9 @@ export const KEEP_ALIVE_PULSE_MS = 25_000
 type WakeLockSentinelLike = { released: boolean; release(): Promise<void> }
 type WakeLockLike = { request(type: 'screen'): Promise<WakeLockSentinelLike> }
 type StoreLike = {
+  initialize?: () => Promise<void>
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+  openPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined) => Promise<ArrayBuffer | null>
   putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer) => Promise<string | null>
 }
@@ -102,7 +104,10 @@ const keeper = new KeepAlive()
 
 async function remembered(): Promise<boolean> {
   const store = get<StoreLike>('@hypercomb.social/Store')
-  const pool = await store?.getPool?.(KEEP_ALIVE_POOL).catch(() => null)
+  // The store is registered before its root is open; ask once it is. A read
+  // never creates the pool: a hive that never kept alive grows no directory.
+  await store?.initialize?.().catch(() => {})
+  const pool = await store?.openPool?.(KEEP_ALIVE_POOL).catch(() => null)
   const bytes = pool ? await store?.getPoolDoc?.(pool).catch(() => null) : null
   if (!bytes) return false
   try { return (JSON.parse(new TextDecoder().decode(bytes)) as { on?: unknown }).on === true } catch { return false }
@@ -110,6 +115,7 @@ async function remembered(): Promise<boolean> {
 
 async function remember(on: boolean): Promise<void> {
   const store = get<StoreLike>('@hypercomb.social/Store')
+  await store?.initialize?.().catch(() => {})
   const pool = await store?.getPool?.(KEEP_ALIVE_POOL).catch(() => null)
   if (!pool || !store?.putPoolDoc) return
   const bytes = new TextEncoder().encode(JSON.stringify({ on })).buffer as ArrayBuffer
@@ -144,9 +150,13 @@ export class KeepAliveQueenBee extends QueenBee {
     else await keeper.stop()
     await remember(want)
     if (!want) { say(t('keep-alive.off', 'Keep-alive is off — this computer sleeps as usual.')); return }
+    // Three honest answers: holding the screen now; able to, once the hive
+    // shows (a hidden tab cannot hold it); or this browser cannot at all.
     say(keeper.awake
       ? t('keep-alive.on', 'Keep-alive is on — this computer stays awake and in the swarm while the hive is showing.')
-      : t('keep-alive.on-no-lock', 'Keep-alive is on, but this browser cannot hold the screen awake — set the computer not to sleep.'))
+      : wakeLock() && document.visibilityState !== 'visible'
+        ? t('keep-alive.on-hidden', 'Keep-alive is on — it holds the screen awake as soon as the hive is showing.')
+        : t('keep-alive.on-no-lock', 'Keep-alive is on, but this browser cannot hold the screen awake — set the computer not to sleep.'))
   }
 }
 

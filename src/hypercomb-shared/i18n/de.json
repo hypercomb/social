@@ -2724,6 +2724,7 @@
   "keep-alive.usage": "keep-alive: sag „keep-alive“, „keep-alive on“ oder „keep-alive off“",
   "keep-alive.on": "Keep-alive ist an — dieser Computer bleibt wach und im Schwarm, solange der Bienenstock sichtbar ist.",
   "keep-alive.on-no-lock": "Keep-alive ist an, aber dieser Browser kann den Bildschirm nicht wach halten — stell den Computer so ein, dass er nicht schläft.",
+  "keep-alive.on-hidden": "Keep-alive ist an — der Bildschirm bleibt wach, sobald der Bienenstock sichtbar ist.",
   "keep-alive.off": "Keep-alive ist aus — dieser Computer schläft wie gewohnt.",
   "host.no-host": "Kein Ort für die Bytes ({reason}) — füge diesem Zweig einen Host hinzu oder lege einen im Host-Bereich fest und veröffentliche dann erneut. Es wurde nichts veröffentlicht."
 }

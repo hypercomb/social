@@ -3411,6 +3411,7 @@
   "keep-alive.usage": "keep-alive: say \"keep-alive\", \"keep-alive on\" or \"keep-alive off\"",
   "keep-alive.on": "Keep-alive is on — this computer stays awake and in the swarm while the hive is showing.",
   "keep-alive.on-no-lock": "Keep-alive is on, but this browser cannot hold the screen awake — set the computer not to sleep.",
+  "keep-alive.on-hidden": "Keep-alive is on — it holds the screen awake as soon as the hive is showing.",
   "keep-alive.off": "Keep-alive is off — this computer sleeps as usual.",
   "host.no-host": "Nowhere to put the bytes ({reason}) — add a host to this branch, or set one in the hosts panel, then publish again. Nothing was published."
 }

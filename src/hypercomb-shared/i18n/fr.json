@@ -2724,6 +2724,7 @@
   "keep-alive.usage": "keep-alive : dis « keep-alive », « keep-alive on » ou « keep-alive off »",
   "keep-alive.on": "Keep-alive activé — cet ordinateur reste éveillé et dans l’essaim tant que la ruche est affichée.",
   "keep-alive.on-no-lock": "Keep-alive activé, mais ce navigateur ne peut pas garder l’écran éveillé — règle l’ordinateur pour qu’il ne se mette pas en veille.",
+  "keep-alive.on-hidden": "Keep-alive activé — l’écran reste éveillé dès que la ruche est affichée.",
   "keep-alive.off": "Keep-alive désactivé — cet ordinateur se met en veille comme d’habitude.",
   "host.no-host": "Nulle part où mettre les octets ({reason}) — ajoutez un hôte à cette branche, ou définissez-en un dans le panneau des hôtes, puis publiez à nouveau. Rien n'a été publié."
 }

@@ -2724,6 +2724,7 @@
   "keep-alive.usage": "keep-alive: di \"keep-alive\", \"keep-alive on\" o \"keep-alive off\"",
   "keep-alive.on": "Keep-alive activado: este ordenador sigue despierto y en el enjambre mientras la colmena esté a la vista.",
   "keep-alive.on-no-lock": "Keep-alive activado, pero este navegador no puede mantener la pantalla despierta: configura el ordenador para que no se suspenda.",
+  "keep-alive.on-hidden": "Keep-alive activado: mantiene la pantalla despierta en cuanto la colmena esté a la vista.",
   "keep-alive.off": "Keep-alive desactivado: este ordenador se suspende como siempre.",
   "host.no-host": "No hay dónde poner los bytes ({reason}) — añade un host a esta rama, o configura uno en el panel de hosts, y vuelve a publicar. No se publicó nada."
 }

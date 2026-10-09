@@ -2724,6 +2724,7 @@
   "keep-alive.usage": "keep-alive: di' \"keep-alive\", \"keep-alive on\" o \"keep-alive off\"",
   "keep-alive.on": "Keep-alive attivo: questo computer resta sveglio e nello sciame finché l’alveare è visibile.",
   "keep-alive.on-no-lock": "Keep-alive attivo, ma questo browser non può tenere sveglio lo schermo: imposta il computer perché non vada in sospensione.",
+  "keep-alive.on-hidden": "Keep-alive attivo: tiene sveglio lo schermo non appena l’alveare è visibile.",
   "keep-alive.off": "Keep-alive disattivato: questo computer va in sospensione come al solito.",
   "host.no-host": "Nessun posto dove mettere i byte ({reason}) — aggiungi un host a questo ramo, o impostane uno nel pannello degli host, poi pubblica di nuovo. Non è stato pubblicato nulla."
 }

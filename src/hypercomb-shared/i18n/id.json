@@ -2724,6 +2724,7 @@
   "keep-alive.usage": "keep-alive: ucapkan \"keep-alive\", \"keep-alive on\", atau \"keep-alive off\"",
   "keep-alive.on": "Keep-alive aktif — komputer ini tetap terjaga dan di dalam kawanan selama sarang tampil.",
   "keep-alive.on-no-lock": "Keep-alive aktif, tetapi browser ini tidak bisa menjaga layar tetap menyala — atur komputer agar tidak tidur.",
+  "keep-alive.on-hidden": "Keep-alive aktif — layar tetap menyala begitu sarang tampil.",
   "keep-alive.off": "Keep-alive nonaktif — komputer ini tidur seperti biasa.",
   "host.no-host": "Tidak ada tempat untuk byte ({reason}) — tambahkan host ke cabang ini, atau atur satu di panel host, lalu terbitkan lagi. Tidak ada yang diterbitkan."
 }

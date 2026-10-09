@@ -2724,6 +2724,7 @@
   "keep-alive.usage": "keep-alive：请输入 \"keep-alive\"、\"keep-alive on\" 或 \"keep-alive off\"",
   "keep-alive.on": "Keep-alive 已开启——只要蜂巢在屏幕上，这台电脑就保持唤醒并留在群里。",
   "keep-alive.on-no-lock": "Keep-alive 已开启，但此浏览器无法保持屏幕唤醒——请把电脑设为不休眠。",
+  "keep-alive.on-hidden": "Keep-alive 已开启——蜂巢一出现在屏幕上就会保持屏幕唤醒。",
   "keep-alive.off": "Keep-alive 已关闭——这台电脑照常休眠。",
   "host.no-host": "没有存放字节的地方（{reason}）— 请为此分支添加主机，或在主机面板中设置一个，然后重新发布。未发布任何内容。"
 }

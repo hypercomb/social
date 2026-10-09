@@ -2724,6 +2724,7 @@
   "keep-alive.usage": "keep-alive: \"keep-alive\", \"keep-alive on\", \"keep-alive off\" 중 하나를 입력하세요",
   "keep-alive.on": "Keep-alive 켜짐 — 하이브가 화면에 보이는 동안 이 컴퓨터는 깨어 있고 스웜에 남습니다.",
   "keep-alive.on-no-lock": "Keep-alive가 켜졌지만 이 브라우저는 화면을 깨어 있게 할 수 없습니다 — 컴퓨터가 절전 모드로 들어가지 않게 설정하세요.",
+  "keep-alive.on-hidden": "Keep-alive 켜짐 — 하이브가 화면에 보이는 즉시 화면을 깨어 있게 합니다.",
   "keep-alive.off": "Keep-alive 꺼짐 — 이 컴퓨터는 평소처럼 절전 모드로 들어갑니다.",
   "host.no-host": "바이트를 둘 곳이 없습니다 ({reason}) — 이 분기에 호스트를 추가하거나 호스트 패널에서 설정한 뒤 다시 게시하세요. 아무것도 게시되지 않았습니다."
 }
