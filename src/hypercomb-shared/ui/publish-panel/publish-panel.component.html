@@ -200,10 +200,10 @@
                           <button class="pentr-act" type="button" (click)="skipEntrance(row, host)">{{ 'publish.entrance.skip' | t }}</button>
                         </div>
                       }
-                      @for (sig of e.skipped; track sig) {
+                      @for (skip of e.skipped; track skip.sig) {
                         <div class="pentr-line pentr-quiet">
-                          <span>{{ 'publish.entrance.skipped-version' | t: { page: short(sig) } }}</span>
-                          <button class="pentr-act" type="button" (click)="showAgain(sig)">{{ 'publish.entrance.show-again' | t }}</button>
+                          <span>{{ 'publish.entrance.skipped-version' | t: { page: short(skip.page) } }}</span>
+                          <button class="pentr-act" type="button" (click)="showAgain(skip.sig)">{{ 'publish.entrance.show-again' | t }}</button>
                         </div>
                       }
                       @if (e.page) {

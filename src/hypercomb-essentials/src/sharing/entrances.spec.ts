@@ -10,10 +10,13 @@
 //   • EVERY other index writer carries it through: publish, the domain switch,
 //     setHiveRoot (and the bridge and the profile word that go through it),
 //     clearHiveRoot, the host listing, and the text-theme offering;
-//   • setEntrance refuses an unreadable index, a domain's root (a plain front
-//     door), a host no creation is bound to, and a page the host does not hold
-//     — and turning on records the participant's own review scent in the same
-//     signed write, at the zone root.
+//   • setEntrance reads and signs through the participant's own write doors —
+//     never a domain apex that may be another host keeping no copy — refuses
+//     an unreadable index, an index no door holds, a domain's root (a plain
+//     front door), a host no creation is bound to, and a page the host does
+//     not hold — and turning on records the participant's own review scent in
+//     the same signed write;
+//   • no writer signs powers from a copy it could not read back.
 //
 // Real signing and real index reads: only the network and IoC are stubbed, so
 // what a writer signs is exactly what the next reader verifies.
@@ -42,6 +45,9 @@ let resources: Map<string, Uint8Array>
 let published: { host: string; sigs: string[] }[]
 let availableAsk: unknown[][]
 let requests: { url: string; method: string }[]
+/** Domains whose apex is ANOTHER host (a home relay): it answers an honest 404
+ *  for this index, and keeps whatever is PUT there to itself. */
+let relays: Set<string>
 
 vi.mock('./community-hosts.js', () => ({ hostsOfBranch: async () => marks }))
 
@@ -93,11 +99,14 @@ const bytesOfBlob = (blob: Blob): Promise<Uint8Array> => new Promise((resolve, r
 }
 
 // The host: one signed index per key, served back exactly as it was PUT —
-// whichever zone root it is asked through.
+// whichever of its zone roots it is asked through. A relay apex is not it.
 globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input)
   requests.push({ url, method: init?.method ?? 'GET' })
   if (!url.endsWith(`/${PUBKEY}`)) return new Response('', { status: 404 })
+  if (relays.has(new URL(url).host)) {
+    return (init?.method ?? 'GET') === 'PUT' ? new Response('', { status: 200 }) : new Response('no index for this publisher', { status: 404 })
+  }
   if ((init?.method ?? 'GET') === 'PUT') {
     served = JSON.parse(String(init?.body)) as Record<string, unknown>
     return new Response('', { status: 200 })
@@ -107,7 +116,7 @@ globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
 }) as typeof fetch
 
 const { lineageKey } = await import('../history/lineage-key.js')
-const { readEntrances, isPoweredEntrance, boundLineage, entranceHost } = await import('./zone-door.js')
+const { readEntrances, isPoweredEntrance, boundLineage, entranceHost, entranceAddresses } = await import('./zone-door.js')
 const { fetchHiveIndex, putHiveManifest, setHiveRoot, clearHiveRoot, setHostListing } = await import('./hive-pointer.js')
 const { publishBranch, unpublishBranch, setBranchDoors, setBranchAddress, setEntrance, applyEntranceIntent } = await import('./publish-branch.js')
 const { setTextThemeOffering } = await import('./text-theme-offering.js')
@@ -145,6 +154,7 @@ beforeEach(() => {
   published = []
   availableAsk = []
   requests = []
+  relays = new Set()
   seed()
 })
 
@@ -205,6 +215,15 @@ describe('an entrance counts only where the index binds its host', () => {
   it('its own address names the lineage — `<label>.<zone>`, or an apex claim', () => {
     expect(boundLineage(BOUND, APP)).toBe(KEY)
     expect(boundLineage({ ...BOUND, addresses: { [ZONE]: KEY } }, ZONE)).toBe(KEY)
+    expect(boundLineage({ roots: BOUND.roots, addresses: BOUND.addresses }, APP)).toBe(KEY)
+  })
+
+  it('an own address binds only on a domain its doors open — as the host reads it', () => {
+    expect(boundLineage({ ...BOUND, doors: { [KEY]: ['pluginthematrix.com'] } }, APP)).toBe('')
+    expect(boundLineage({ ...BOUND, addresses: { [ZONE]: KEY }, doors: { [KEY]: ['jwize.com'] } }, ZONE)).toBe('')
+    // The host then falls to the implicit label, as the worker's router does.
+    const roots = { [KEY]: HEAD, 'business-card': OTHER_HEAD }
+    expect(boundLineage({ roots, addresses: BOUND.addresses, doors: { [KEY]: ['jwize.com'] } }, APP)).toBe('business-card')
   })
 
   it('the implicit label names a published key on a domain its doors open — or on any, with no doors', () => {
@@ -229,6 +248,41 @@ describe('an entrance counts only where the index binds its host', () => {
     const raw = { [APP]: { page: PAGE }, [`tea.${ZONE}`]: { page: PAGE }, [LABELLED]: { page: PAGE } }
     expect(readEntrances(raw, BOUND)).toEqual({ [APP]: { page: PAGE }, [LABELLED]: { page: PAGE } })
     expect(readEntrances(raw, { roots: {}, addresses: {} })).toEqual({})
+  })
+})
+
+describe('the addresses a creation offers an Entrances block for', () => {
+  const live = { key: KEY, live: true, doors: [ZONE] as string[] | null }
+  const hosts = (creation: typeof live, zones: string[], addresses: Record<string, string>) =>
+    entranceAddresses(creation, zones, addresses).map(a => `${a.host} ${a.zone}`)
+
+  it('its own addresses under each open domain, and the implicit label no own address took', () => {
+    expect(hosts(live, [ZONE, 'jwize.com'], { [APP]: KEY, [`tea.${ZONE}`]: 'other' }))
+      .toEqual([`${APP} ${ZONE}`, `${LABELLED} ${ZONE}`])
+    // An own address named after the key is the implicit one, listed once.
+    expect(hosts(live, [ZONE], { [LABELLED]: KEY })).toEqual([`${LABELLED} ${ZONE}`])
+    // Another creation's address on the implicit host takes it.
+    expect(hosts(live, [ZONE], { [LABELLED]: 'other' })).toEqual([])
+  })
+
+  it('never a domain itself, even where the creation claims the apex', () => {
+    expect(hosts(live, [ZONE], { [ZONE]: KEY })).toEqual([`${LABELLED} ${ZONE}`])
+    expect(hosts({ ...live, key: '@' }, [ZONE], {})).toEqual([])
+  })
+
+  it('nothing under a domain the creation is switched off for, and nothing at all when it is not live', () => {
+    expect(hosts(live, ['jwize.com'], { 'business-card.jwize.com': KEY })).toEqual([])
+    expect(hosts({ ...live, live: false }, [ZONE], { [APP]: KEY })).toEqual([])
+  })
+
+  it('with no doors signed (open everywhere), the implicit label on every known domain', () => {
+    expect(hosts({ ...live, doors: null }, [ZONE, 'jwize.com'], {}))
+      .toEqual([`${LABELLED} ${ZONE}`, `${KEY}.jwize.com jwize.com`])
+  })
+
+  it('a nested key is no label: only its own addresses', () => {
+    const nested = lineageKey(['a', 'b'])
+    expect(hosts({ key: nested, live: true, doors: null }, [ZONE], { [APP]: nested })).toEqual([`${APP} ${ZONE}`])
   })
 })
 
@@ -311,14 +365,37 @@ describe('no writer carries a stale entrance forward', () => {
     expect(entrancesNow()).toEqual(ENTRANCES)
   })
 
-  it('falls back to the caller\'s copy when the fresh read fails, or is older than what it replaces', async () => {
+  it('signs nothing when it cannot read back a copy that runs powers — the copy may predate a Turn off', async () => {
+    const before = served
     indexStatus = 503
-    await putHiveManifest(ZONE, { [KEY]: HEAD }, {}, 1_700_000_000, staleRead)
+    expect(await putHiveManifest(ZONE, { [KEY]: HEAD }, {}, 1_700_000_000, staleRead)).toMatchObject({ ok: false })
     indexStatus = 200
-    expect(entrancesNow()).toEqual(ENTRANCES)
+    expect(served).toBe(before)
+    // A read older than the index being replaced (a lagging edge) is no read back either.
     served = sign({ ...staleRead, entrances: offNow }, 1_600_000_000)
-    await putHiveManifest(ZONE, { [KEY]: HEAD }, {}, 1_700_000_000, staleRead)
-    expect(entrancesNow()).toEqual(ENTRANCES)
+    const lagging = served
+    expect(await putHiveManifest(ZONE, { [KEY]: HEAD }, {}, 1_700_000_000, staleRead)).toMatchObject({ ok: false })
+    expect(served).toBe(lagging)
+  })
+
+  it('falls back to the caller\'s copy when it runs no powers — nothing in it can raise any', async () => {
+    indexStatus = 503
+    expect((await putHiveManifest(ZONE, { [KEY]: HEAD }, {}, 1_700_000_000, { ...staleRead, entrances: offNow })).ok).toBe(true)
+    indexStatus = 200
+    expect(entrancesNow()).toEqual(offNow)
+  })
+
+  it('a writer whose read-back fails cannot turn powers back on', async () => {
+    // Turned off on the host; the writer's own earlier read still saw them on.
+    seed({ entrances: offNow })
+    const stale: HiveIndexResult = { ok: true, manifest: {
+      roots: { [KEY]: HEAD }, createdAt: 1_600_000_000, pubkey: PUBKEY,
+      addresses: { [APP]: KEY }, entrances: ENTRANCES, signedContent: staleRead,
+    } }
+    indexStatus = 503
+    expect((await setHiveRoot(ZONE, 'install:essentials', NEWER, { fetchIndex: async () => stale })).ok).toBe(false)
+    indexStatus = 200
+    expect(entrancesNow()).toEqual(offNow)
   })
 })
 
@@ -334,7 +411,7 @@ describe('every other index writer carries the entrances', () => {
     carried()
   })
 
-  it('setBranchDoors — an own address stays bound whatever the doors say', async () => {
+  it('setBranchDoors — an own address stays bound while its door stays open', async () => {
     expect((await setBranchDoors(SEGS, [ZONE, 'pluginthematrix.com'])).ok).toBe(true)
     carried()
   })
@@ -383,6 +460,14 @@ describe('an entrance goes with its binding', () => {
     expect('entrances' in signedContent()).toBe(false)
   })
 
+  it('closing the door an own address stood on drops its entrance — reopening it brings no powers back', async () => {
+    expect((await setBranchDoors(SEGS, ['pluginthematrix.com'])).ok).toBe(true)
+    expect('entrances' in signedContent()).toBe(false)
+    expect(signedContent()['addresses']).toEqual({ [APP]: KEY })
+    expect((await setBranchDoors(SEGS, [ZONE])).ok).toBe(true)
+    expect('entrances' in signedContent()).toBe(false)
+  })
+
   it('closing the door an implicit label stood on drops its entrance', async () => {
     seed({ addresses: undefined, entrances: { [LABELLED]: ENTRANCE } })
     expect((await setBranchDoors(SEGS, [ZONE, 'pluginthematrix.com'])).ok).toBe(true)
@@ -397,7 +482,7 @@ describe('setEntrance — the participant turns an app address\'s powers on or o
   const entranceNow = (host = APP): ZoneEntrance | undefined => entrancesNow()?.[host]
   const puts = (): string[] => requests.filter(r => r.method === 'PUT').map(r => new URL(r.url).host)
 
-  it('turn on writes the page with all three powers, the review scent and what was followed, in one signed write at the zone root', async () => {
+  it('turn on writes the page with all three powers, the review scent and what was followed, in one signed write at the door holding the index', async () => {
     start()
     const out = await setEntrance(APP, { kind: 'on', page: PAGE, from: { pubkey: PUBKEY, lineage: KEY } })
     expect(out).toMatchObject({ ok: true, host: APP })
@@ -421,15 +506,38 @@ describe('setEntrance — the participant turns an app address\'s powers on or o
     expect(entranceNow(LABELLED)).toEqual({ page: PAGE, powers: ALL })
   })
 
-  it('aims the index, the receipt and the scent at the zone the address sits under', async () => {
+  it('reads and signs through the participant’s own doors — never a domain apex that keeps no copy of the index', async () => {
+    // jwize.com's apex is the home relay: an honest 404 for this index. The
+    // card door at business-card.jwize.com reads the shared index the
+    // standing door holds, so that is where the entrance must land.
     const app = 'business-card.jwize.com'
+    relays.add('jwize.com')
     start({ addresses: { [app]: KEY }, doors: { [KEY]: [ZONE, 'jwize.com'] } })
-    expect((await setEntrance(app, { kind: 'on', page: PAGE })).ok).toBe(true)
+    expect((await setEntrance(app, { kind: 'on', page: PAGE }, { doors: ['jwize.com'] })).ok).toBe(true)
     expect(entranceNow(app)).toEqual({ page: PAGE, powers: ALL })
-    expect(new URL(requests[0]!.url).host).toBe('jwize.com')
-    expect(puts()).toEqual(['jwize.com'])
-    expect(availableAsk).toEqual([[PAGE, 'resource', false, ['jwize.com']]])
-    expect(published.map(p => p.host)).toEqual(['jwize.com'])
+    expect(puts()).toEqual([ZONE])
+    expect(availableAsk).toEqual([[PAGE, 'resource', false, [ZONE]]])
+    expect(published.map(p => p.host)).toEqual([ZONE])
+    // Turn off finds the powered entry there too — signed, never "unchanged".
+    expect(await setEntrance(app, { kind: 'off' }, { doors: ['jwize.com'] })).toMatchObject({ ok: true, entrance: { page: PAGE, powers: [] } })
+    expect(entranceNow(app)).toEqual({ page: PAGE, powers: [] })
+    expect(puts()).toEqual([ZONE, ZONE])
+    // Without being told, the derived apex is never asked at all.
+    requests = []
+    expect((await setEntrance(app, { kind: 'forget' })).ok).toBe(true)
+    expect(requests.some(r => new URL(r.url).host === 'jwize.com')).toBe(false)
+  })
+
+  it('an Off or a Forget that finds no index at any door fails — it never reports a change it did not sign', async () => {
+    served = null
+    expect(await setEntrance(APP, { kind: 'off' })).toMatchObject({ ok: false, failure: 'index-unsafe' })
+    expect(await setEntrance(APP, { kind: 'forget' })).toMatchObject({ ok: false, failure: 'index-unsafe' })
+    expect(served).toBeNull()
+    // A 404 at one door and a failure at the next is no answer either.
+    seed()
+    relays.add('jwize.com')
+    indexStatus = 503
+    expect(await setEntrance(APP, { kind: 'off' }, { doors: ['jwize.com'] })).toMatchObject({ ok: false, failure: 'index-unsafe' })
   })
 
   it('turn off keeps the page with no powers — never gated on the page being held, and no scent', async () => {
@@ -464,10 +572,12 @@ describe('setEntrance — the participant turns an app address\'s powers on or o
 
   it('a domain\'s root is a plain front door: no powers there, even where a creation claims the apex', async () => {
     seed({ addresses: { [ZONE]: KEY, 'jwize.com': KEY }, doors: { [KEY]: [ZONE, 'jwize.com'] }, entrances: undefined })
-    const before = served
     expect(await setEntrance(ZONE, { kind: 'on', page: PAGE })).toMatchObject({ ok: false, failure: 'root' })
     expect(await setEntrance('jwize.com', { kind: 'on', page: PAGE })).toMatchObject({ ok: false, failure: 'root' })
-    expect(served).toBe(before)
+    // A bare domain is a root even where no door names it.
+    seed({ addresses: { 'example.org': KEY }, doors: undefined, entrances: undefined })
+    expect(await setEntrance('example.org', { kind: 'on', page: PAGE })).toMatchObject({ ok: false, failure: 'root' })
+    expect(requests.filter(r => r.method === 'PUT')).toEqual([])
     expect(published).toEqual([])
   })
 

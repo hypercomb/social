@@ -17,7 +17,7 @@
 import { get, poolKindOfMeaning, registerPoolMeaning } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { HIVE_INDEX_EVENT_KIND, HIVE_LINK_VERSION } from './hive-link.js'
-import { readAddresses, readDoorsOf, readEntrances, type ZoneEntrance } from './zone-door.js'
+import { isPoweredEntrance, readAddresses, readDoorsOf, readEntrances, type ZoneEntrance } from './zone-door.js'
 
 interface SignerLike {
   signEvent: (evt: { kind: number; created_at: number; tags: string[][]; content: string }) => Promise<Record<string, unknown>>
@@ -267,8 +267,17 @@ export async function putHiveManifest(
     // key's implicit label on a domain its doors open): unpublishing, closing
     // a door or moving an address drops the entrance with it. Omitted when
     // empty so an index without them stays byte-identical.
-    if (fresh !== undefined) content['entrances'] = fresh ?? undefined
+    if (fresh !== undefined && fresh !== NO_INDEX) content['entrances'] = fresh ?? undefined
     const nextEntrances = readEntrances(content['entrances'], { roots, addresses: nextAddresses, doors: nextDoors ?? {} })
+    // NO STALE COPY SIGNS POWERS. When the fresh read could not be trusted,
+    // the caller's map is all there is — and it may predate a Turn off. Signed
+    // with this later stamp it would turn those powers back on with no Turn
+    // on, so a write carrying a powered entrance it could not read back is
+    // refused whole: nothing is signed, nothing is raised, and nothing is
+    // dropped behind the owner's back either. The caller tries again.
+    if (fresh === undefined && !options.setsEntrances && Object.values(nextEntrances).some(isPoweredEntrance)) {
+      return { ok: false, pubkey: '', createdAt: 0, reason: 'the index could not be read back to carry its entrances — nothing was signed' }
+    }
     if (Object.keys(nextEntrances).length > 0) content['entrances'] = nextEntrances
     else delete content['entrances']
     // The retired landing picture (0ec3c2d15): an index signed with one
@@ -313,16 +322,22 @@ export interface PutHiveOptions {
   createdAt?: number
 }
 
+/** The host answered that it holds NO index for this key (an honest 404):
+ *  nothing there can be newer than the caller's copy, so that copy stands. */
+const NO_INDEX = Symbol('no index')
+
 /** The entrances the index holds NOW, read right before a write: the raw map,
- *  null when it holds none, or undefined when the read cannot be trusted to be
- *  newer — then the caller's own copy stands. Falling back is the lesser harm:
- *  dropping the map would forget every entrance on one failed read, and a read
- *  older than the index being replaced (a lagging edge) knows less than the
- *  caller does. */
-async function freshEntrances(host: string, signer: SignerLike, replaces: number): Promise<unknown | null | undefined> {
+ *  null when it holds none, NO_INDEX when the host holds no index at all, or
+ *  undefined when the read cannot be trusted to be newer — then the caller's
+ *  own copy stands, but only while it runs no powers (putHiveManifest refuses
+ *  the write otherwise). Falling back is the lesser harm: dropping the map
+ *  would forget every entrance on one failed read, and a read older than the
+ *  index being replaced (a lagging edge) knows less than the caller does. */
+async function freshEntrances(host: string, signer: SignerLike, replaces: number): Promise<unknown | null | undefined | typeof NO_INDEX> {
   const pubkey = String((await signer.getPublicKeyHex?.().catch(() => null)) ?? '').toLowerCase()
   if (!SIG_RE.test(pubkey)) return undefined
   const read = await fetchHiveIndex(host, pubkey).catch(() => null)
+  if (read && !read.ok && read.reason === 'http' && read.status === 404) return NO_INDEX
   if (!read?.ok || read.manifest.createdAt < (Number(replaces) || 0)) return undefined
   return read.manifest.signedContent?.['entrances'] ?? null
 }

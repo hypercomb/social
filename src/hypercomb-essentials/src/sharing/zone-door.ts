@@ -180,10 +180,11 @@ export const readAddresses = (raw: unknown, roots: Record<string, string>): Reco
 //
 // An entry counts only while the same index BINDS its host to a lineage
 // (`boundLineage`): its own address, or the implicit `<key>.<zone>` label of a
-// published key. Every read and every write drops an entry whose host is no
-// longer bound — so unpublishing, closing a door or moving an address takes
-// the entrance with it. The host remembers the last page it served with
-// powers and serves it sealed; releasing that is an operator act.
+// published key, on a domain the key's doors open. Every read and every write
+// drops an entry whose host is no longer bound — so unpublishing, closing a
+// door or moving an address takes the entrance with it. The host remembers the
+// last page it served with powers and serves it sealed; releasing that is an
+// operator act.
 
 /** The powers a card door may be given — keep the visitor's cards, use the
  *  camera, read other hosts. Version 1 grants all three or none. */
@@ -234,25 +235,65 @@ export const entranceHost = (raw: unknown): string => {
 /** THE LINEAGE AN INDEX BINDS `host` TO, or ''. Its own address first (an
  *  `addresses` entry — a `<label>.<zone>` or an apex claim); otherwise the
  *  implicit label: `<key>.<rest>` names the published key `key` when `key` is
- *  an own-address label (never `@`) and the key's doors are unset or open on
- *  `rest` (or a zone `rest` sits under). An entrance counts only while this
- *  is not empty. */
+ *  an own-address label (never `@`). Either way only while the key's doors
+ *  are unset or open on the host (or a zone it sits under) — the host's own
+ *  reading (worker `opensOn`): an own address on a domain the creation was
+ *  switched off for binds nothing there, so its entrance goes with the door
+ *  and never comes back on by itself when the door reopens. An entrance
+ *  counts only while this is not empty. */
 export const boundLineage = (index: EntranceBinding | null | undefined, host: unknown): string => {
   const h = bareHost(host)
   if (!index || !h) return ''
+  const opens = (key: string): boolean => {
+    const zones = index.doors?.[key]
+    if (zones === undefined) return true
+    return zones.some(z => {
+      const zone = String(z ?? '').trim().toLowerCase()
+      return !!zone && (h === zone || h.endsWith(`.${zone}`))
+    })
+  }
   const own = index.addresses?.[h]
-  if (own) return own
+  if (own && opens(own)) return own
   const dot = h.indexOf('.')
   if (dot <= 0) return ''
   const label = h.slice(0, dot)
-  const rest = h.slice(dot + 1)
   if (label === APEX_LABEL || !isOwnAddressLabel(label) || !(label in (index.roots ?? {}))) return ''
-  const zones = index.doors?.[label]
-  if (zones === undefined) return label
-  return zones.some(z => {
-    const zone = String(z ?? '').trim().toLowerCase()
-    return !!zone && (rest === zone || rest.endsWith(`.${zone}`))
-  }) ? label : ''
+  return opens(label) ? label : ''
+}
+
+/** EVERY ADDRESS A CREATION RUNS AN ENTRANCE AT — the hosts the Publish panel
+ *  offers an Entrances block for, each with the domain it sits under. On every
+ *  domain the creation is open on (its doors; with none signed, every domain
+ *  in `zones`), each own address the index gives it under that domain, and
+ *  `<key>.<zone>` when the key is an address label no own address took. Never
+ *  a domain itself — a root is a plain front door — never an address under a
+ *  domain the creation is switched off for, and nothing at all for a creation
+ *  that is not live. A nested key (`a/b`) is no label, so it has only its own
+ *  addresses. */
+export const entranceAddresses = (
+  creation: { key: string; live: boolean; doors: readonly string[] | null },
+  zones: readonly string[],
+  addresses: Record<string, string>,
+): { host: string; zone: string }[] => {
+  if (!creation.live) return []
+  const out: { host: string; zone: string }[] = []
+  const seen = new Set<string>()
+  const open = [...new Set(zones.map(z => bareHost(z)).filter(Boolean))]
+    .filter(zone => creation.doors === null || creation.doors.some(d => bareHost(d) === zone))
+  for (const zone of open) {
+    const hosts = Object.entries(addresses)
+      .filter(([host, key]) => key === creation.key && host !== zone && host.endsWith(`.${zone}`))
+      .map(([host]) => entranceHost(host))
+      .filter(Boolean)
+    const implicit = creation.key !== APEX_LABEL && isOwnAddressLabel(creation.key) ? entranceHost(`${creation.key}.${zone}`) : ''
+    if (implicit && !(implicit in addresses)) hosts.push(implicit)
+    for (const host of hosts.sort()) {
+      if (seen.has(host) || host === zone) continue
+      seen.add(host)
+      out.push({ host, zone })
+    }
+  }
+  return out
 }
 
 /** One entry's SHAPE, leniently: an invalid field is dropped, never the

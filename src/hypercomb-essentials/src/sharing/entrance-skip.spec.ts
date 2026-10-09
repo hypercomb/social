@@ -1,17 +1,20 @@
 // sharing/entrance-skip.spec.ts — SKIP IS WRITTEN. The Publish panel's Skip
 // puts the offered page away in the concealment pool itself (the concealment
 // bee may be asleep, and `hidden:conceal` does not wake it), asks that bee to
-// refresh, and the scout's next look stays quiet about the page. End to end:
-// the real drone, the real concealment module, the real scout, and an
-// in-memory pool directory.
+// refresh, and the scout's next look stays quiet about the page. One record
+// per OFFER — the page at that address — so a skip at a second address never
+// undoes the first. End to end: the real drone, the real concealment module,
+// the real scout, and an in-memory pool directory.
 
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 import type { HiveManifest } from './hive-pointer.js'
 
 const ZONE = 'jwize.com'
 /** The app address the entrance runs at. */
 const APP = `business-card.${ZONE}`
+/** A second app address following the same publisher. */
+const SECOND = 'business-card.pluginthematrix.com'
 const OWN = 'a'.repeat(64)
 const PUB = 'b'.repeat(64)
 const RUNS = 'c'.repeat(64)
@@ -71,15 +74,26 @@ const pool = {
 }
 
 await import('./publish-status.drone.js')
-const { ENTRANCE_SKIP_SCOPE, ENTRANCE_UPDATE_EFFECT, EntranceScoutService } = await import('./entrance-scout.service.js')
-const { listConcealed } = await import('../concealment/concealment.js')
+const { ENTRANCE_SKIP_SCOPE, ENTRANCE_UPDATE_EFFECT, EntranceScoutService, entranceSkipSig } = await import('./entrance-scout.service.js')
+const { conceal, listConcealed } = await import('../concealment/concealment.js')
 
+const powered = { page: RUNS, powers: ['keep', 'camera', 'read'] as ('keep' | 'camera' | 'read')[], from: { pubkey: PUB, lineage: 'card', at: 1 } }
 const manifests: Record<string, HiveManifest> = {
-  [OWN]: {
-    roots: {}, createdAt: 1, pubkey: OWN,
-    entrances: { [APP]: { page: RUNS, powers: ['keep', 'camera', 'read'], from: { pubkey: PUB, lineage: 'card', at: 1 } } },
-  },
+  [OWN]: { roots: {}, createdAt: 1, pubkey: OWN, entrances: { [APP]: powered, [SECOND]: powered } },
   [PUB]: { roots: { card: HEAD }, createdAt: 2, pubkey: PUB },
+}
+
+beforeEach(() => { files.clear() })
+
+/** What the concealment bee renders after a refresh: the pool as it stands. */
+const render = async (): Promise<void> => {
+  EffectBus.emit('hidden:render', { items: (await listConcealed()).filter(i => i.state === 'hidden'), gone: [] })
+}
+const skip = async (host: string): Promise<void> => {
+  const before = (await listConcealed()).length
+  EffectBus.emit(ENTRANCE_UPDATE_EFFECT, { host, current: RUNS, offered: NEWER, at: 2 })
+  EffectBus.emit('publish:entrance-skip', { key: 'jwize', host, page: NEWER })
+  await vi.waitFor(async () => { expect((await listConcealed()).length).toBe(before + 1) })
 }
 const scoutDeps = (emitted: unknown[]) => ({
   hosts: async () => [ZONE],
@@ -94,24 +108,53 @@ describe('skipping an offered page', () => {
     // Without a skip, this look would announce the page.
     const before: unknown[] = []
     await new EntranceScoutService().check({ ...scoutDeps(before), skipped: async () => new Set() })
-    expect(before).toHaveLength(1)
+    expect(before).toHaveLength(2)
 
     const refreshed = vi.fn()
     const off = EffectBus.on('hidden:refresh', refreshed)
     EffectBus.emit(ENTRANCE_UPDATE_EFFECT, { host: APP, current: RUNS, offered: NEWER, at: 2 })
     EffectBus.emit('publish:entrance-skip', { key: 'jwize', host: APP, page: NEWER })
 
+    const offer = await entranceSkipSig(APP, NEWER)
     await vi.waitFor(async () => {
       const held = await listConcealed()
       expect(held.map(i => ({ sig: i.sig, scope: i.scope, from: i.from, state: i.state })))
-        .toEqual([{ sig: NEWER, scope: ENTRANCE_SKIP_SCOPE, from: APP, state: 'hidden' }])
+        .toEqual([{ sig: offer, scope: ENTRANCE_SKIP_SCOPE, from: `${APP} ${NEWER}`, state: 'hidden' }])
     })
     expect(refreshed).toHaveBeenCalled()
     off()
 
-    // The scout reads the pool for itself (no skip list handed in).
+    // The scout reads the pool for itself (no skip list handed in): quiet at
+    // this address, still offering the page at the other.
+    const after: unknown[] = []
+    expect(await new EntranceScoutService().check(scoutDeps(after))).toEqual([expect.objectContaining({ host: SECOND, offered: NEWER })])
+  })
+
+  it('skipping the same page at a second address keeps the first skip — in the pool, in the panel, and at the next boot', async () => {
+    await skip(APP)
+    await skip(SECOND)
+    expect((await listConcealed()).map(i => i.from).sort()).toEqual([`${APP} ${NEWER}`, `${SECOND} ${NEWER}`])
+
+    // The put-away list re-renders: neither address is offered the page again
+    // — a re-offer would let a second Skip at the first address through.
+    await render()
+    const refreshed = vi.fn()
+    const off = EffectBus.on('hidden:refresh', refreshed)
+    const replayed = refreshed.mock.calls.length   // the bus replays its last value
+    EffectBus.emit('publish:entrance-skip', { key: 'jwize', host: APP, page: NEWER })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(refreshed.mock.calls.length).toBe(replayed)
+    off()
+    expect(await listConcealed()).toHaveLength(2)
+
+    // Next boot: the scout is quiet at both.
     const after: unknown[] = []
     expect(await new EntranceScoutService().check(scoutDeps(after))).toEqual([])
-    expect(after).toEqual([])
+  })
+
+  it('a skip put away before skips were named by their offer still counts', async () => {
+    expect(await conceal({ sig: NEWER, scope: ENTRANCE_SKIP_SCOPE, label: APP, from: APP, deletable: true })).toBe(true)
+    const after: unknown[] = []
+    expect(await new EntranceScoutService().check(scoutDeps(after))).toEqual([expect.objectContaining({ host: SECOND })])
   })
 })

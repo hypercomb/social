@@ -17,10 +17,13 @@
 //
 // SKIPPING is putting a version away, the held-item rule (current on top; a
 // skip leaves the next version in line; delete is a local forget): the Publish
-// panel conceals the offered page under ENTRANCE_SKIP_SCOPE in the
-// `hidden:items` pool (concealment/concealment.ts — hide first, delete
-// second) with the address as where it came from, and this scout reads that
-// set back as `<host> <page>`: a skip at one address is not a skip at
+// panel conceals the offer under ENTRANCE_SKIP_SCOPE in the `hidden:items`
+// pool (concealment/concealment.ts — hide first, delete second). The thing
+// put away is the OFFER — this page at this address — so its record is named
+// by `entranceSkipSig(host, page)` and says where it came from as
+// `<host> <page>`: the pool keeps one record per signature, and a skip of the
+// same page at a second address must not replace the first. This scout reads
+// that set back as `<host> <page>`: a skip at one address is not a skip at
 // another. Nothing here keeps a list of its own.
 //
 // Trust: both indexes are schnorr-verified against the pinned key
@@ -95,13 +98,25 @@ const defaultPageAt = (head: string, hosts: readonly string[]): Promise<string |
   return pageAtHead(head, { layer: bytes, resource: bytes })
 }
 
+/** THE OFFER'S OWN SIGNATURE — what a skip conceals: this page offered at
+ *  this address. One record per offer, so skipping the same page at a second
+ *  address keeps the first skip (the pool holds one record per signature). */
+export const entranceSkipSig = (host: string, page: string): Promise<string> =>
+  SignatureService.sign(new TextEncoder().encode(`${ENTRANCE_SKIP_SCOPE} ${host} ${page.toLowerCase()}`).buffer as ArrayBuffer)
+
+/** A skip record's `<host> <page>` — its `from` says both. A record put away
+ *  before skips were named by their offer carried the page as its signature
+ *  and the address alone as `from`; it reads the same. */
+export const entranceSkipSaid = (item: { sig: string; from: string }): string =>
+  item.from.includes(' ') ? item.from : `${item.from} ${item.sig}`
+
 /** Every page the participant skipped (hidden or deleted alike), as
  *  `<host> <page>` — the address it was skipped at, then the page. */
 export async function skippedEntrancePages(): Promise<ReadonlySet<string>> {
   try {
     return new Set((await listConcealed())
       .filter(item => item.scope === ENTRANCE_SKIP_SCOPE)
-      .map(item => `${item.from} ${item.sig}`))
+      .map(entranceSkipSaid))
   } catch { return new Set() }
 }
 

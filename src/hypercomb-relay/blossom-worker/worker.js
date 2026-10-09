@@ -2306,16 +2306,24 @@ async function serveRootPlace(request, env, zone, place) {
 // stays a plain front door that runs no powers and that nothing locks: no zone
 // root is ever a card door (cardDoorHost).
 //
-// A CARD-DOOR ORIGIN STAYS ONE. Once an address has served H with its powers
-// on, the worker keeps `entrance-last:<host>` = `<H> <pubkey>` in the HIVES
-// store. If the signed entrance then goes — withdrawn, its lineage
-// unpublished, its doors edited — or the address is won by another key (a
-// contest, the label rule, a withdrawn address), `/` gets that H sealed in a
-// sandbox with its powers off, so what visitors kept stays unreadable. It
-// never gets the visitor shell. RELEASING AN ADDRESS IS AN OPERATOR ACT:
-// delete the key (`wrangler kv key delete --binding HIVES
-// "entrance-last:<host>"`), knowing that whatever runs there next can read
-// what visitors kept.
+// A CARD-DOOR ORIGIN STAYS ONE. Before an address serves H with its powers
+// on, the store must hold `entrance-last:<host>` = `<H> <pubkey>` (HIVES):
+// powers never run on a memory that was not kept, and a page whose memory
+// cannot be written is served sealed (rememberEntrance). The memory is never
+// overwritten by another key. If the signed entrance then goes — withdrawn,
+// its lineage unpublished, its doors edited — or the address is won by
+// another key (a contest, the label rule, a withdrawn address), or an
+// operator rebinds it as a front door or a zone of its own (boundBelowZone),
+// `/` gets that H sealed in a sandbox with its powers off, so what visitors
+// kept stays unreadable. It never gets the visitor shell or the host card.
+// RELEASING AN ADDRESS IS AN OPERATOR ACT: delete the key (`wrangler kv key
+// delete --binding HIVES "entrance-last:<host>"`), knowing that whatever runs
+// there next can read what visitors kept.
+//
+// The store has no compare-and-swap and shows a new key elsewhere within
+// about a minute. So a second key that wins the address and turns its own
+// page on inside that minute, at another location, can still write over the
+// first: the narrow window this design accepts.
 //
 // An index this worker could not READ is not an absent one. While an address
 // that has served an entrance cannot be read — or the key that remembers it
@@ -2349,59 +2357,94 @@ function cardDoorHost(env, hostname) {
   return !(label === HOST_DOOR_LABEL && bindings[zone].frontDoor === true)
 }
 
+/** Was `host` perhaps a card door under an earlier binding? A bound host — an
+ *  explicit binding, or a zone an operator speaks for — that sits below
+ *  another bound host or operated zone, and that its binding now makes a
+ *  front door or a zone root (cardDoorHost says no). Its memory is still read,
+ *  so what it served stays sealed (cardDoorOf). A plain apex has nothing above
+ *  it and is never asked. */
+function boundBelowZone(env, hostname) {
+  const host = String(hostname || '').toLowerCase()
+  if (!host) return false
+  const zones = [...Object.keys(siteBindings(env)), ...siteOperators(env).map(([zone]) => zone)]
+  return zones.includes(host) && zones.some((zone) => zone !== host && host.endsWith('.' + zone))
+}
+
 // An address's last entrance, held a minute in the isolate: a site host that
 // never had one pays one store read a minute, not one a request.
 const ENTRANCE_LAST_TTL_MS = 60_000
 const entranceLastHeld = new Map()
 const entranceLastKey = (host) => `entrance-last:${host}`
+// Counts the isolate's store reads, so a request can tell a value read since
+// it began from one held from before (rememberEntrance).
+let entranceLastReads = 0
 
 /** The page this address last served with its powers on, and whose key signed
  *  it — `{ page, pubkey }` — or null; a value that does not parse is null.
  *  Throws when the store cannot be read: an unknown answer must never open
- *  the origin. */
-async function lastEntrance(env, host) {
+ *  the origin. A held value counts only when it was read after the read
+ *  numbered `after`. */
+async function lastEntrance(env, host, after = 0) {
   const kv = env.HIVES
   if (!kv?.get) return null
   const held = entranceLastHeld.get(host)
-  if (held && held.kv === kv && Date.now() - held.at < ENTRANCE_LAST_TTL_MS) return held.last
+  if (held && held.kv === kv && held.read > after && Date.now() - held.at < ENTRANCE_LAST_TTL_MS) return held.last
   const [page, pubkey, ...rest] = String((await kv.get(entranceLastKey(host))) ?? '').trim().toLowerCase().split(/\s+/)
   const last = SIG_RE.test(page) && SIG_RE.test(pubkey ?? '') && !rest.length ? { page, pubkey } : null
-  entranceLastHeld.set(host, { at: Date.now(), kv, last })
+  entranceLastHeld.set(host, { at: Date.now(), read: ++entranceLastReads, kv, last })
   return last
 }
 
-/** Keep H and its signer as the address's last entrance — written only when
- *  it changes, since the store allows few writes a day. */
-async function rememberEntrance(env, host, page, pubkey) {
+/** Keep H and its signer as the address's memory, BEFORE its powers run.
+ *  Returns what the store now holds for the address — `{ page, pubkey }` —
+ *  or null when that could not be confirmed. Written only when it changes,
+ *  since the store allows few writes a day, and only after the store itself
+ *  was asked in this request (`asked`, the read count cardDoorOf saw before
+ *  its own read): a null this isolate held from before may be stale. Another
+ *  key's memory is never written over: only the operator's delete releases
+ *  an address. */
+async function rememberEntrance(env, host, page, pubkey, asked) {
   const kv = env.HIVES
-  if (!kv?.put || !pubkey) return
+  if (!kv?.get || !kv.put || !pubkey) return null
   try {
-    const last = await lastEntrance(env, host)
-    if (last?.page === page && last.pubkey === pubkey) return
+    let last = await lastEntrance(env, host)
+    if (last?.page === page && last.pubkey === pubkey) return last
+    last = await lastEntrance(env, host, asked ?? entranceLastReads)
+    if (last && (last.pubkey !== pubkey || last.page === page)) return last
     await kv.put(entranceLastKey(host), `${page} ${pubkey}`)
-    entranceLastHeld.set(host, { at: Date.now(), kv, last: { page, pubkey } })
-  } catch { /* kept on the next serve */ }
+    const kept = { page, pubkey }
+    entranceLastHeld.set(host, { at: Date.now(), read: ++entranceLastReads, kv, last: kept })
+    return kept
+  } catch { return null }
 }
 
 /** What this request's host is to a card door. Null for a host that cannot be
- *  one (cardDoorHost), and for an address that neither signs an entrance page
- *  nor has served one. Otherwise `{ entrance, pubkey }` — the page its site's
- *  primary publisher signed — or `{ entrance: { page }, last }` when only the
- *  remembered page is left, which another key that wins the address gets too,
- *  sealed — or `{ unreadable }` when the store that remembers it could not be
- *  read, or an index could not be read on an address that has served an
- *  entrance. One that never served one answers a failed index read as any
- *  site does. */
+ *  one (cardDoorHost) and never could have been (boundBelowZone), and for an
+ *  address that neither signs an entrance page nor has served one. Otherwise
+ *  `{ entrance, pubkey, asked }` — the page its site's primary publisher
+ *  signed, and the read count before this request asked the store — or
+ *  `{ entrance: { page }, last }` when only the remembered page is left, which
+ *  another key that wins the address gets too, sealed, as does a host rebound
+ *  as a front door or a zone of its own — or `{ unreadable }` when the store
+ *  that remembers it could not be read, or an index could not be read on an
+ *  address that has served an entrance. One that never served one answers a
+ *  failed index read as any site does. */
 async function cardDoorOf(routed, deployed, host, read = indexReader(routed.env)) {
   const { site } = routed
-  if (!cardDoorHost(routed.env, host) || !site || site.frontDoor === true) return null
+  const asked = entranceLastReads
+  if (!cardDoorHost(routed.env, host) || !site || site.frontDoor === true) {
+    if (!boundBelowZone(routed.env, host)) return null
+    let last
+    try { last = await lastEntrance(deployed, host) } catch { return { unreadable: true } }
+    return last ? { entrance: { page: last.page }, last: true } : null
+  }
   const publisher = site.publishers?.find((p) => p.primary) || site.publishers?.[0]
   const signed = publisher ? (await read(publisher.pubkey))?.entrances?.[host] : undefined
   const unreadable = routed.unreadable === true || (!!publisher && read.failed.has(publisher.pubkey))
   let last
   try { last = await lastEntrance(deployed, host) } catch { return { unreadable: true } }
   if (unreadable) return last ? { unreadable: true } : null
-  if (signed?.page && (!last || last.pubkey === publisher.pubkey)) return { entrance: signed, pubkey: publisher.pubkey }
+  if (signed?.page && (!last || last.pubkey === publisher.pubkey)) return { entrance: signed, pubkey: publisher.pubkey, asked }
   return last ? { entrance: { page: last.page }, last: true } : null
 }
 
@@ -2439,8 +2482,12 @@ async function answerCardDoor(request, url, routed, deployed, card, read = index
     on = false
   }
   const answer = await serveCardDoor(request, routed.env, page, on)
-  if (answer.status === 200 && on) await rememberEntrance(deployed, host, page, card.pubkey)
-  return answer
+  if (answer.status !== 200 || !on) return answer
+  // POWERS RUN ONLY ON A KEPT MEMORY. Unconfirmed, the page goes out sealed;
+  // another key's memory found there, that key's page goes out sealed.
+  const kept = await rememberEntrance(deployed, host, page, card.pubkey, card.asked)
+  if (kept?.page === page && kept.pubkey === card.pubkey) return answer
+  return serveCardDoor(request, routed.env, kept?.page ?? page, false)
 }
 
 /** The page's inline-script hashes as a browser will split them, or null when
@@ -4209,7 +4256,10 @@ export default {
     // out instead — never other code beside what visitors kept.
     if (!runsAsPage(response) || cardDoorAnswers.has(response) || !scope.cardDoorAt) return response
     let card
-    try { card = await scope.cardDoorAt() } catch { card = cardDoorHost(env, new URL(request.url).hostname) ? { unreadable: true } : null }
+    try { card = await scope.cardDoorAt() } catch {
+      const host = new URL(request.url).hostname
+      card = cardDoorHost(env, host) || boundBelowZone(env, host) ? { unreadable: true } : null
+    }
     return card ? cardDoorUnavailable(request) : response
   },
 }

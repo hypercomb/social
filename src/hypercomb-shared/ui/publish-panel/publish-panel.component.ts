@@ -102,8 +102,9 @@ interface PublishEntrance {
   offered: string | null
   /** The community's scents on H — read only. */
   scents: { pubkey: string; verdict: string; at: number; own: boolean }[]
-  /** Versions put away with Skip, for this address. */
-  skipped: string[]
+  /** Versions put away with Skip, for this address: the page, and the
+   *  signature of its skip record (Show again names it). */
+  skipped: { page: string; sig: string }[]
 }
 
 interface PublishViewChoice {
@@ -410,7 +411,7 @@ export class PublishPanelComponent implements OnDestroy {
   saveOwn(row: PublishRow, zone: string): void {
     if (row.busyPhase) return
     const label = this.ownValue(row, zone).trim().toLowerCase()
-    if (!label) return
+    if (!label || !this.#mayMoveAddress(row, zone, label)) return
     EffectBus.emit('publish:own-address', { key: row.key, zone, label })
     this.ownOpen.set('')
   }
@@ -418,16 +419,36 @@ export class PublishPanelComponent implements OnDestroy {
   /** The bare domain opens on this place (`@`, the zone apex); the host card
    *  moves to host.<zone>. */
   saveApex(row: PublishRow, zone: string): void {
-    if (row.busyPhase) return
+    if (row.busyPhase || !this.#mayMoveAddress(row, zone, '@')) return
     EffectBus.emit('publish:own-address', { key: row.key, zone, label: '@' })
     this.ownOpen.set('')
   }
 
   /** Back to the root path on `zone` — the own address is dropped. */
   clearOwn(row: PublishRow, zone: string): void {
-    if (row.busyPhase) return
+    if (row.busyPhase || !this.#mayMoveAddress(row, zone, null)) return
     EffectBus.emit('publish:own-address', { key: row.key, zone, label: null })
     this.ownOpen.set('')
+  }
+
+  /** A creation holds ONE own address per domain, and an entrance lives only
+   *  while its address is bound — so moving, clearing or turning the address
+   *  into the domain's front page (`@`) takes the entrance of the address it
+   *  leaves with it: no page runs there with powers until one is turned on
+   *  again. Asked first, as Forget is: true when no page runs there or the
+   *  participant agrees. The implicit `<key>.<zone>` stays bound without an
+   *  own address. */
+  #mayMoveAddress(row: PublishRow, zone: string, label: string | null): boolean {
+    const current = this.ownLabel(row, zone)
+    if (!current) return true
+    const leaving = current === '@' ? zone : `${current}.${zone}`
+    const next = label === '@' ? zone : label ? `${label}.${zone}` : ''
+    if (leaving === next || leaving === `${row.key}.${zone}`) return true
+    if (!this.entranceOf(row, leaving)?.page) return true
+    const i18n = window.ioc?.get<{ t?: (k: string, p?: Record<string, string>) => string }>('@hypercomb.social/I18n')
+    const question = i18n?.t?.('publish.entrance.unbind-confirm', { host: leaving })
+      ?? `${leaving} runs its own page. Moving this address takes that entrance with it, and no page runs at ${leaving} with powers until you turn one on there again. Move it anyway?`
+    return window.confirm(question)
   }
 
   // ── THE ENTRANCES (each app address) ────────────────────────────────
@@ -582,7 +603,7 @@ export class PublishPanelComponent implements OnDestroy {
               zone: String(e.zone ?? ''),
               from: e.from ? { ...e.from } : null,
               scents: Array.isArray(e.scents) ? e.scents.map(s => ({ ...s })) : [],
-              skipped: Array.isArray(e.skipped) ? e.skipped.map(String) : [],
+              skipped: Array.isArray(e.skipped) ? e.skipped.map(k => ({ page: String(k?.page ?? ''), sig: String(k?.sig ?? '') })) : [],
             }])),
           }))
         : [])

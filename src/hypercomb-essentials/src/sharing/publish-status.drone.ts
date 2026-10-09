@@ -41,6 +41,8 @@ import {
   ENTRANCE_UPDATE_EFFECT,
   entranceHosts,
   entranceScout,
+  entranceSkipSaid,
+  entranceSkipSig,
   readEntranceScents,
   readPageBytes,
 } from './entrance-scout.service.js'
@@ -90,7 +92,7 @@ import {
   type ZoneEntranceIntent,
 } from './publish-branch.js'
 import {
-  APEX_LABEL, creationUrl, entranceHost, foldDnsLabel, isOwnAddressLabel, isPoweredEntrance, ownAddressRefusal, ownLabelOn,
+  APEX_LABEL, creationUrl, entranceAddresses, entranceHost, foldDnsLabel, isPoweredEntrance, ownAddressRefusal, ownLabelOn,
   zoneDoor, type ZoneEntrance,
 } from './zone-door.js'
 
@@ -248,8 +250,9 @@ export interface PublishEntrance {
   offered: string | null
   /** What the community's scents say about H — read only, never a gate. */
   scents: { pubkey: string; verdict: string; at: number; own: boolean }[]
-  /** Versions put away with Skip, for this address — each can be shown again. */
-  skipped: string[]
+  /** Versions put away with Skip, for this address — each can be shown
+   *  again by its record's signature (the offer's, not the page's). */
+  skipped: { page: string; sig: string }[]
 }
 
 /** One choice on the "opens as" strip. `view: ''` is the hexagons ground. */
@@ -366,9 +369,9 @@ export class PublishStatusDrone extends Drone {
   /** host → the newer page the entrance scout announced (and the followed
    *  index's stamp), until it is turned on or skipped. */
   readonly #entranceUpdates = new Map<string, { offered: string; at: number; head: string }>()
-  /** `<host> <page>` skipped this session → the notice it was, so Show again
-   *  can offer it back. */
-  readonly #skippedUpdates = new Map<string, { host: string; offered: string; at: number; head: string }>()
+  /** `<host> <page>` skipped this session → the notice it was (and the
+   *  signature its skip was put away under), so Show again can offer it back. */
+  readonly #skippedUpdates = new Map<string, { host: string; offered: string; at: number; head: string; sig: string }>()
   /** Every version put away with Skip, still hidden (the concealment pool). */
   #skipped: ConcealedItem[] = []
   /** Pages previewed THIS SESSION. Never stored: a review is something you
@@ -492,9 +495,9 @@ export class PublishStatusDrone extends Drone {
       const items = Array.isArray(p?.items) ? p.items : []
       const gone = new Set(Array.isArray(p?.gone) ? p.gone.map(String) : [])
       this.#skipped = items.filter(i => i?.scope === ENTRANCE_SKIP_SCOPE)
-      const still = new Set(this.#skipped.map(i => `${i.from} ${i.sig}`))
+      const still = new Set(this.#skipped.map(entranceSkipSaid))
       for (const [said, notice] of this.#skippedUpdates) {
-        if (still.has(said) || gone.has(notice.offered)) continue
+        if (still.has(said) || gone.has(notice.sig)) continue
         this.#skippedUpdates.delete(said)
         if (this.#entranceOf.get(notice.host)?.page !== notice.offered) {
           this.#entranceUpdates.set(notice.host, { offered: notice.offered, at: notice.at, head: notice.head })
@@ -842,28 +845,18 @@ export class PublishStatusDrone extends Drone {
   }
 
   /** The entrance of every address this row is served at, from the signed
-   *  index: on each domain the row is switched on for, every own address the
-   *  index gives it under that domain, and `<key>.<zone>` when the key is an
-   *  address label no own address took. Never the domain itself — a root is a
-   *  plain front door. The slow halves (what the tile wears, the scents) fill
+   *  index (`entranceAddresses`: own addresses and the implicit label, on the
+   *  domains the row is switched on for — never a domain itself, a root is a
+   *  plain front door). The slow halves (what the tile wears, the scents) fill
    *  in during the sweep. */
   #entranceRow(row: PublishRow, addresses: Record<string, string>, entrances: Record<string, ZoneEntrance>): void {
     const views: Record<string, PublishEntrance> = {}
     const zones = [...new Set([...this.#knownZones(), ...row.zones])]
-      .filter(zone => !!row.live && (row.doors === null || row.doors.includes(zone)))
-    for (const zone of zones) {
-      const hosts = Object.entries(addresses)
-        .filter(([host, key]) => key === row.key && host !== zone && host.endsWith(`.${zone}`))
-        .map(([host]) => host)
-      const implicit = row.key !== APEX_LABEL && isOwnAddressLabel(row.key) ? entranceHost(`${row.key}.${zone}`) : ''
-      if (implicit && !(implicit in addresses)) hosts.push(implicit)
-      for (const host of hosts.sort()) {
-        if (views[host]) continue
-        const entrance = entrances[host]
-        if (entrance) this.#entranceOf.set(host, entrance)
-        else this.#entranceOf.delete(host)
-        views[host] = this.#entranceView(host, zone, entrance ?? null)
-      }
+    for (const { host, zone } of entranceAddresses({ key: row.key, live: !!row.live, doors: row.doors }, zones, addresses)) {
+      const entrance = entrances[host]
+      if (entrance) this.#entranceOf.set(host, entrance)
+      else this.#entranceOf.delete(host)
+      views[host] = this.#entranceView(host, zone, entrance ?? null)
     }
     row.entrances = views
   }
@@ -881,8 +874,20 @@ export class PublishStatusDrone extends Drone {
       wears: null,
       offered: offered && offered !== page ? offered : null,
       scents: [],
-      skipped: this.#skipped.filter(i => i.from === host && i.state === 'hidden').map(i => i.sig),
+      skipped: this.#skippedAt(host),
     }
+  }
+
+  /** What Skip put away at `host`, still hidden: each page, and the record's
+   *  signature Show again names. */
+  #skippedAt(host: string): { page: string; sig: string }[] {
+    const out: { page: string; sig: string }[] = []
+    for (const item of this.#skipped) {
+      if (item.state !== 'hidden') continue
+      const said = entranceSkipSaid(item)
+      if (said.startsWith(`${host} `)) out.push({ page: said.slice(host.length + 1), sig: item.sig })
+    }
+    return out
   }
 
   /** Restate every row's skipped list and offer after the put-away set or a
@@ -890,7 +895,7 @@ export class PublishStatusDrone extends Drone {
   #paintEntrances(): void {
     for (const row of this.#rows) {
       for (const [host, view] of Object.entries(row.entrances)) {
-        view.skipped = this.#skipped.filter(i => i.from === host && i.state === 'hidden').map(i => i.sig)
+        view.skipped = this.#skippedAt(host)
         const offered = this.#entranceUpdates.get(host)?.offered ?? null
         view.offered = offered && offered !== view.page ? offered : null
       }
@@ -1277,7 +1282,10 @@ export class PublishStatusDrone extends Drone {
 
     row.busyPhase = 'indexing'
     this.#emit()
-    const result = await setEntrance(host, intent)
+    // Read and signed through the door this row's index was read from — the
+    // index the panel shows — then the standing targets; never the domain the
+    // address merely sits under, which may be another host altogether.
+    const result = await setEntrance(host, intent, { doors: [this.#hostByKey.get(row.key) ?? this.#payload.host] })
     row.busyPhase = null
     if (!result.ok) {
       this.#toast('error', `publish.entrance.failure.${result.failure}`, ENTRANCE_FAILURE_TEXT[result.failure] ?? 'The entrance was not changed.', { host, zone: view.zone })
@@ -1295,10 +1303,12 @@ export class PublishStatusDrone extends Drone {
       if (this.#entranceUpdates.get(host)?.offered === written.page) this.#entranceUpdates.delete(host)
       this.#closePreview()
     }
-    const said: [string, string] = intent.kind === 'forget' ? ['publish.entrance.forgotten', `${host} has no entrance now.`]
+    // Nothing signed is never told as a change made.
+    const said: [string, string] = result.reason === 'unchanged' ? ['publish.entrance.unchanged', `${host} was already that way, so nothing was signed.`]
+      : intent.kind === 'forget' ? ['publish.entrance.forgotten', `${host} has no entrance now.`]
       : intent.kind === 'on' ? ['publish.entrance.on', `${host} runs this page with its powers on.`]
       : ['publish.entrance.off', `${host} runs its page with the powers off.`]
-    this.#toast('success', said[0], said[1], { host })
+    this.#toast(result.reason === 'unchanged' ? 'info' : 'success', said[0], said[1], { host })
     this.#emit()
     void this.#refresh()
   }
@@ -1310,20 +1320,28 @@ export class PublishStatusDrone extends Drone {
    *  still offered. */
   async #skipEntrance(rawHost: string, page: string): Promise<void> {
     const host = entranceHost(rawHost)
-    const sig = page.trim().toLowerCase()
+    const offered = page.trim().toLowerCase()
     const notice = this.#entranceUpdates.get(host)
-    if (!host || !SIG_RE.test(sig) || notice?.offered !== sig) return
-    const kept = await conceal({ sig, scope: ENTRANCE_SKIP_SCOPE, label: `${host} ${sig.slice(0, 12)}`, from: host, deletable: true })
+    if (!host || !SIG_RE.test(offered) || notice?.offered !== offered) return
+    // ONE RECORD PER OFFER: the pool keeps one record per signature, so the
+    // skip is named by this page at THIS address — skipping the same page at
+    // a second address must never replace the first skip.
+    const said = `${host} ${offered}`
+    const item = {
+      sig: await entranceSkipSig(host, offered), scope: ENTRANCE_SKIP_SCOPE,
+      label: `${host} ${offered.slice(0, 12)}`, from: said, deletable: true,
+    }
+    const kept = await conceal(item)
     if (!kept) {
       this.#toast('error', 'publish.entrance.skip-failed', 'The version could not be put away. Try again.')
       return
     }
-    this.#skippedUpdates.set(`${host} ${sig}`, { host, offered: sig, at: notice.at, head: notice.head })
+    this.#skippedUpdates.set(said, { host, offered, at: notice.at, head: notice.head, sig: item.sig })
     this.#entranceUpdates.delete(host)
-    if (!this.#skipped.some(i => i.sig === sig && i.from === host)) {
-      this.#skipped = [...this.#skipped, { sig, scope: ENTRANCE_SKIP_SCOPE, label: `${host} ${sig.slice(0, 12)}`, from: host, deletable: true, state: 'hidden' }]
+    if (!this.#skipped.some(i => i.sig === item.sig)) {
+      this.#skipped = [...this.#skipped, { ...item, state: 'hidden' }]
     }
-    if (this.#preview?.page === sig) this.#closePreview()
+    if (this.#preview?.page === offered) this.#closePreview()
     this.emitEffect('hidden:refresh', {})
     this.#toast('info', 'publish.entrance.skipped', 'Skipped — it waits in your put-away list.')
     this.#paintEntrances()

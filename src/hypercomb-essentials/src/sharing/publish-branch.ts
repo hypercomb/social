@@ -763,6 +763,37 @@ export function applyEntranceIntent(before: ZoneEntrance | null, intent: ZoneEnt
   }
 }
 
+/** Where setEntrance reads and signs. */
+export interface SetEntranceOptions {
+  /** The doors the caller read this index through (the Publish panel passes
+   *  its row's door) — zone roots the participant writes to, asked before the
+   *  standing targets. */
+  doors?: readonly string[]
+}
+
+/** Walk the doors for the VERIFIED index. Unlike resolveIndexDoor, an honest
+ *  404 at one door is not the answer while a later door holds the index: a
+ *  domain's apex may be another host altogether (jwize.com's is the home
+ *  relay, which keeps no copy of this index), and reading "no index" there
+ *  would refuse a Turn on and report a Turn off that signed nothing.
+ *  `nothing` only when EVERY door answered 404. */
+async function verifiedIndexDoor(
+  doors: readonly string[],
+  pubkey: string,
+): Promise<{ host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>>; nothing: boolean }> {
+  let failed: { host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> } | null = null
+  let missing: { host: string; read: Awaited<ReturnType<typeof fetchHiveIndex>> } | null = null
+  for (const host of doors) {
+    const read = await fetchHiveIndex(host, pubkey)
+    if (read.ok) return { host, read, nothing: false }
+    if (read.reason === 'http' && read.status === 404) missing ??= { host, read }
+    else failed ??= { host, read }
+  }
+  if (failed) return { ...failed, nothing: false }
+  if (missing) return { ...missing, nothing: true }
+  return { host: '', read: { ok: false, reason: 'unreachable' } as Awaited<ReturnType<typeof fetchHiveIndex>>, nothing: false }
+}
+
 /** THE PARTICIPANT TURNS AN ADDRESS'S POWERS ON, OR OFF — the one writer of
  *  the signed `entrances[host]` (documentation/using-a-creation.md, "Powers
  *  are off by default, and the participant turns them on"). The Hyperdex app
@@ -770,8 +801,11 @@ export function applyEntranceIntent(before: ZoneEntrance | null, intent: ZoneEnt
  *  root: the root is a plain front door. Never remote: the bridge has no
  *  intent for it, because a review is not a single tap.
  *
- *  It reads the index at the host's zone root, applies the INTENT to the
- *  entrance it holds now, and signs — one read-modify-write:
+ *  It reads the index through the participant's own write doors — the doors
+ *  the caller read it through, then the standing targets; never the domain
+ *  the address merely sits under, which may be a different host that keeps
+ *  no copy of this index — applies the INTENT to the entrance it holds now,
+ *  and signs at the door that held it — one read-modify-write:
  *  - `on` sets the page and all three powers, and in the SAME signed write
  *    records the participant's own review scent for the page as
  *    `roots['assess:<page>']`. Only `on` needs the host bound to a creation
@@ -784,8 +818,13 @@ export function applyEntranceIntent(before: ZoneEntrance | null, intent: ZoneEnt
  *  entrance already ran that same page with its powers on.
  *
  *  Refuses, before anything is signed, an index it cannot read (the wipe
- *  guard). */
-export async function setEntrance(host: string, intent: ZoneEntranceIntent): Promise<ZoneEntranceResult> {
+ *  guard) — and an index no door holds: Off and Forget then have nothing they
+ *  could truthfully report as done. */
+export async function setEntrance(
+  host: string,
+  intent: ZoneEntranceIntent,
+  options: SetEntranceOptions = {},
+): Promise<ZoneEntranceResult> {
   const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
   const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
   if (!signer?.getPublicKeyHex) return { ok: false, failure: 'services' }
@@ -795,28 +834,33 @@ export async function setEntrance(host: string, intent: ZoneEntranceIntent): Pro
 
   const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
-  // THE ZONE ROOT carries the write — the host itself when it is one of the
-  // standing write doors, else the domain it sits under — then the standing
-  // targets, against the same shared index.
+  // THE PARTICIPANT'S OWN WRITE DOORS carry the read and the write: the doors
+  // the caller read the index through, then the standing targets — the same
+  // shared index every one of them fronts.
   const standing = await nodesFor([], hostSync)
-  const rest = h.slice(h.indexOf('.') + 1)
-  const zone = standing.includes(h) || !rest.includes('.') ? h : rest
-  const nodes = [...new Set([zone, ...standing])]
+  const nodes = [...new Set([...(options.doors ?? []).map(zoneDoor), ...standing].filter(Boolean))]
+  if (nodes.length === 0) return { ok: false, failure: 'index-unsafe', reason: 'no door to read the index through' }
   hostSync?.addPublishNodes?.(nodes)
-  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
-  const nothing = !read.ok && read.reason === 'http' && read.status === 404
-  if (!read.ok && !nothing) return { ok: false, failure: 'index-unsafe', reason: read.reason }
-  const manifest = read.ok ? read.manifest : null
-  const held = manifest?.entrances ?? {}
+  const found = await verifiedIndexDoor(nodes, pubkey)
+  if (!found.read.ok) {
+    // Nothing anywhere binds the host, so there is nothing to turn on; and an
+    // Off or a Forget that found no index must never report success.
+    if (intent.kind === 'on' && found.nothing) return { ok: false, failure: 'no-address', reason: 'no index at any door' }
+    return { ok: false, failure: 'index-unsafe', reason: found.nothing ? 'no index at any door' : found.read.reason }
+  }
+  const indexHost = found.host
+  const manifest = found.read.manifest
+  const held = manifest.entrances ?? {}
   const before = held[h] ?? null
 
   // A DOMAIN'S ROOT IS A PLAIN FRONT DOOR on every device: nothing may run
-  // with powers there. And a creation must live at the address for a page to
-  // run there. Turning powers off and forgetting are always allowed: an
-  // entrance whose address went away must still be possible to switch off.
+  // with powers there — a write door, a domain any creation's doors name, or
+  // a bare two-label domain. And a creation must live at the address for a
+  // page to run there. Turning powers off and forgetting are always allowed:
+  // an entrance whose address went away must still be possible to switch off.
   if (intent.kind === 'on') {
-    const roots = new Set([...standing, ...Object.values(manifest?.doors ?? {}).flat().map(z => String(z ?? '').toLowerCase())])
-    if (roots.has(h)) return { ok: false, failure: 'root' }
+    const roots = new Set([...nodes, ...Object.values(manifest.doors ?? {}).flat().map(z => zoneDoor(z))])
+    if (roots.has(h) || h.split('.').length === 2) return { ok: false, failure: 'root' }
     if (!boundLineage(manifest, h)) return { ok: false, failure: 'no-address' }
   }
 
@@ -851,14 +895,14 @@ export async function setEntrance(host: string, intent: ZoneEntranceIntent): Pro
   // taken from the notice that offered the page, or read from their index.
   let createdAt: number | undefined
   if (intent.kind === 'on' && next?.from) {
-    const replaces = manifest?.createdAt ?? 0
+    const replaces = manifest.createdAt ?? 0
     const { pubkey: followedKey, lineage } = next.from
     let at: number
     let head = ''
     if (followedKey === pubkey) {
       at = Math.max(Math.floor(Date.now() / 1000), replaces + 1)
       createdAt = at
-      head = String(manifest?.roots[lineage] ?? '')
+      head = String(manifest.roots[lineage] ?? '')
     } else if (Number.isSafeInteger(intent.from?.at) && SIG_RE.test(String(intent.from?.head ?? ''))) {
       at = intent.from!.at!
       head = intent.from!.head!
@@ -871,7 +915,7 @@ export async function setEntrance(host: string, intent: ZoneEntranceIntent): Pro
     next.from = { pubkey: followedKey, lineage, at, ...(SIG_RE.test(head) ? { head } : {}) }
   }
 
-  const roots = { ...(manifest?.roots ?? {}) }
+  const roots = { ...manifest.roots }
   let assessed: string | undefined
   const scentKey = `assess:${page}`
   if (raising && !roots[scentKey]) {
@@ -884,13 +928,13 @@ export async function setEntrance(host: string, intent: ZoneEntranceIntent): Pro
   const entrances: Record<string, ZoneEntrance> = { ...held }
   if (next) entrances[h] = next
   else delete entrances[h]
-  const put = await putHiveManifest(indexHost, roots, manifest?.doors ?? {},
-    manifest?.createdAt ?? 0, { ...(manifest?.signedContent ?? {}), entrances },
+  const put = await putHiveManifest(indexHost, roots, manifest.doors ?? {},
+    manifest.createdAt ?? 0, { ...(manifest.signedContent ?? {}), entrances },
     { setsEntrances: true, ...(createdAt ? { createdAt } : {}) })
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason }
   // What the write signed, after its own normalisation: an entry on a host
   // the index no longer binds is dropped there, never kept here.
-  const written = next && manifest ? readEntrances({ [h]: next }, manifest)[h] ?? null : next
+  const written = next ? readEntrances({ [h]: next }, manifest)[h] ?? null : null
   return { ok: true, host: h, entrance: written, ...(assessed ? { assessed } : {}) }
 }
 

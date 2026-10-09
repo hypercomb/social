@@ -4035,6 +4035,106 @@ test('another key that wins a remembered address gets the remembered page, seale
   }
 })
 
+test('powers run only on a kept memory: a write that fails serves the page sealed, and nothing opens later', async () => {
+  const { env, H, roots } = await entranceEnv({ powers: ALL_POWERS })
+  // The store refuses the write, as it does once the day's writes are spent.
+  const { put } = env.HIVES
+  let refused = 0
+  env.HIVES.put = async (key, value) => {
+    if (key.startsWith('entrance-last:')) { refused++; throw new Error('KV put() limit exceeded for the day.') }
+    return put(key, value)
+  }
+  await withoutCard(async () => {
+    for (const [device, request] of DEVICES) await sandboxedCard(await worker.fetch(request(`${CARD}/`), env), H, `unkept ${device}`)
+  })
+  assert.equal(refused, DEVICES.length, 'each serve asks the store again')
+  assert.equal(env.HIVES.kv.has(CARD_LAST), false)
+  // No powered page ever ran, so nothing was kept there: a withdrawn entrance
+  // leaves the site it always was.
+  await resign(env, roots, {}, 1_800_000_010)
+  await withoutCard(async () => {
+    assert.equal(carriedDoor(await pageAt(`${CARD}/`, env)).lineage, 'business-card')
+  })
+  // The store takes writes again: the memory is kept first, then the powers run.
+  env.HIVES.put = put
+  await resign(env, roots, { entrances: { [CARD_HOST]: { page: H, powers: ALL_POWERS } } }, 1_800_000_020)
+  await withoutCard(async () => {
+    const res = await worker.fetch(desk(`${CARD}/`), env)
+    assert.equal(await bodyHash(res.clone()), H)
+    assert.match(res.headers.get('content-security-policy'), /^script-src /)
+    assert.equal(res.headers.get('permissions-policy'), 'camera=(self), microphone=(), geolocation=(), payment=(), usb=()')
+  })
+  assert.equal(env.HIVES.kv.get(CARD_LAST), `${H} ${pubkey}`)
+  // No store to keep it in at all: sealed.
+  const bare = await entranceEnv({ powers: ALL_POWERS })
+  delete bare.env.HIVES.put
+  await withoutCard(async () => {
+    await sandboxedCard(await worker.fetch(desk(`${CARD}/`), bare.env), bare.H, 'no store')
+  })
+})
+
+test('a null this isolate held from before never lets another key write over an address\'s memory', async () => {
+  const both = { ...FRONT_DOOR_ZONE, 'pluginthematrix.com': { ...FRONT_DOOR_ZONE['pluginthematrix.com'],
+    publishers: [{ pubkey, label: 'Jaime', primary: true }, { pubkey: assessor, label: 'Other' }] } }
+  const { env, H } = await entranceEnv(null, { bindings: both, via: 'address' })
+  // This isolate asks once, while nothing has been served there …
+  await withoutCard(async () => {
+    assert.equal(carriedDoor(await pageAt(`${CARD}/`, env)).lineage, 'jaime-weise')
+  })
+  // … then, at another location, Jaime's card is served and remembered.
+  env.HIVES.kv.set(CARD_LAST, `${H} ${pubkey}`)
+  // Jaime gives the address up; the other key takes it and turns its own page on.
+  const H2 = await sha256('their own card')
+  env.CONTENT.held.set(H2, utf8('their own card'))
+  await resign(env, { camelflage: head }, {}, 1_800_000_010)
+  const theirs = await indexWith(assessorKey, { roots: { mine: head }, doors: { mine: ['pluginthematrix.com'] },
+    addresses: { [CARD_HOST]: 'mine' }, entrances: { [CARD_HOST]: { page: H2, powers: ALL_POWERS } } })
+  assert.equal((await putIndexAt(env, 'pluginthematrix.com', theirs, assessorKey)).status, 201)
+  // Before any power runs the store itself is asked: Jaime's page, sealed.
+  await withoutCard(async () => {
+    for (const [device, request] of DEVICES) await sandboxedCard(await worker.fetch(request(`${CARD}/`), env), H, device)
+  })
+  assert.equal(env.HIVES.kv.get(CARD_LAST), `${H} ${pubkey}`, 'never written over')
+  assert.deepEqual(env.HIVES.writes, [])
+})
+
+test('an address rebound as a front door or a zone of its own keeps what it served, sealed, until the operator releases it', async () => {
+  const card = { title: 'Card', lineage: 'business-card', publishers: [{ pubkey, label: 'Jaime', primary: true }] }
+  const rebinds = [
+    ['a front door under the zone', { SITE_BINDINGS: JSON.stringify({ ...FRONT_DOOR_ZONE, [CARD_HOST]: { ...card, frontDoor: true } }) }],
+    ['an operated zone of its own', { SITE_OPERATORS: JSON.stringify({ [CARD_HOST]: pubkey }) }],
+    ['a zone record that leaves the apex out', { SITE_BINDINGS: JSON.stringify({ [CARD_HOST]: card }),
+      SITE_OPERATORS: JSON.stringify({ 'pluginthematrix.com': pubkey }) }],
+  ]
+  for (const [why, changes] of rebinds) {
+    const { env, H } = await servedCard()
+    const rebound = { ...env, ...changes }
+    rememberingKv(rebound, env.HIVES.kv)
+    await withCard(async () => {
+      for (const [device, request] of DEVICES) await sandboxedCard(await worker.fetch(request(`${CARD}/`), rebound), H, `${why} ${device}`)
+      for (const path of ['/work/anything', '/index.html', '/hosts']) {
+        assert.equal((await worker.fetch(desk(`${CARD}${path}`), rebound)).status, 404, `${why} ${path}`)
+      }
+    })
+    assert.ok(rebound.HIVES.reads.includes(CARD_LAST), `${why}: its memory is read`)
+    assert.ok(!rebound.HIVES.reads.includes('entrance-last:pluginthematrix.com'), `${why}: the root is never asked`)
+    // The store is down: nothing runs.
+    const blind = { ...rebound }
+    kvDown(blind)
+    await withCard(async () => {
+      const res = await worker.fetch(desk(`${CARD}/`), blind)
+      assert.equal(res.status, 503, `${why}: KV down`)
+      assert.doesNotMatch(await res.text(), /<script/i)
+    })
+    // RELEASING THE ADDRESS IS THE OPERATOR'S ACT.
+    env.HIVES.kv.delete(CARD_LAST)
+    rememberingKv(rebound, env.HIVES.kv)
+    await withCard(async () => {
+      assert.notEqual(await bodyHash(await worker.fetch(desk(`${CARD}/`), rebound)), H, `${why}: released`)
+    })
+  }
+})
+
 test('an index read that fails runs nothing on an address that served its card, and the failure is never kept', async () => {
   for (const [why, via] of VIAS) {
     const { env, H } = await servedCard(undefined, { via })
