@@ -370,6 +370,19 @@ describe('CLOSED backoff', () => {
     expect(reqs(ws, S)).toHaveLength(9)
   })
 
+  it("a standing refusal ('restricted:' / 'invalid:') is never retried", async () => {
+    const { mesh, ws } = await boot()
+    const word = 'not-a-signature'
+    mesh.subscribe(word, () => void 0)
+    ws.receive(['CLOSED', subIdOf(ws, word), 'restricted: name a signature address (#x) or exact ids — this relay lists nothing'])
+    mesh.subscribe(S, () => void 0)
+    ws.receive(['CLOSED', subIdOf(ws, S), 'invalid: kinds must be an array of integers'])
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(reqs(ws, word)).toHaveLength(1)
+    expect(reqs(ws, S)).toHaveLength(1)
+    expect(mesh.connectionState().refused).toBeUndefined()
+  })
+
   it("'too many subscriptions' marks the connection refused until that bucket stands", async () => {
     const { mesh, ws } = await boot()
     mesh.subscribe(S, () => void 0)

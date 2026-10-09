@@ -25,7 +25,7 @@ const ROOM_KEY = '@hypercomb.social/RoomStore'
 const SECRET_KEY = '@hypercomb.social/SecretStore'
 const NAV_KEY = '@hypercomb.social/Navigation'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
-const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
+const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 /** Mirror of the command line's own key (hypercomb-shared/ui/command-line). */
 const STANCE_KEY = 'hc:command-line-stance'
@@ -43,7 +43,33 @@ interface NavLike {
   segments: () => string[]
 }
 interface LineageLike { explorerSegments?: () => readonly string[] }
-interface MeshLike { swarmHost?: () => string }
+interface HostSyncLike {
+  swarmHostsFor?: (segments: readonly string[]) => { hosts: readonly string[]; pending: boolean }
+  warmSwarmHosts?: (segments: readonly string[]) => void
+}
+
+/** How long the sheet waits for the invited page's host to be known (local
+ *  reads only — the pool, the page's marks; the socket is already warm). */
+const KEEPER_WAIT_MS = 1_500
+const KEEPER_POLL_MS = 100
+
+/** WHO KEEPS WHAT THE GUEST SHARES on the invited page: its publish domains,
+ *  else their hosts pool, else a relay that hosts participants (host-sync,
+ *  from caches). On a first visit those are still being read when the link
+ *  opens, and the sheet IS the consent — so it waits, briefly, for the answer
+ *  rather than naming no one. '' when nothing hosts it (or still unknown). */
+async function keeperOf(segments: readonly string[]): Promise<string> {
+  const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+  if (!hostSync?.swarmHostsFor) return ''
+  try { hostSync.warmSwarmHosts?.(segments) } catch { /* an older host-sync */ }
+  const deadline = Date.now() + KEEPER_WAIT_MS
+  for (;;) {
+    let choice: { hosts: readonly string[]; pending: boolean } | undefined
+    try { choice = hostSync.swarmHostsFor(segments) } catch { return '' }
+    if (!choice?.pending || Date.now() >= deadline) return choice?.hosts?.[0] ?? ''
+    await new Promise(resolve => setTimeout(resolve, KEEPER_POLL_MS))
+  }
+}
 
 function toast(type: string, title: string, message: string): void {
   EffectBus.emit('toast:show', { type, title, message })
@@ -147,10 +173,9 @@ export async function joinMeetingPlace(bundle: MeetingInviteBundle): Promise<boo
   // restores them exactly. All live writes are deferred to the accept path,
   // so cancel is non-destructive by construction; this is the explicit belt.
   const prev = { room: room.value, secret: secret.value }
-  // The sheet names who keeps what the guest shares: the swarm's host is the
-  // relay they are about to meet at (derived, synchronous — never fetched).
-  let host = ''
-  try { host = get<MeshLike>(MESH_KEY)?.swarmHost?.() ?? '' } catch { host = '' }
+  // The sheet names who keeps what the guest shares (keeperOf). Still not
+  // known after the short wait: the sheet names no one.
+  const host = await keeperOf(bundle.segments)
   const params = { room: bundle.room, host }
   const confirmed = await requestConfirm({
     title: tr('invite.meet.join.title', 'Join the room'),

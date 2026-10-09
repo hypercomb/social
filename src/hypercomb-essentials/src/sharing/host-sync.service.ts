@@ -76,25 +76,34 @@
 // Toggle live via the public enable()/disable() methods; localStorage
 // changes take effect on the next event, no reload required.
 //
-// THE SWARM'S HOST IS A DERIVED TARGET (documentation/swarm-host.md). The
-// relay a joined tab meets at IS the host its public tiles go to: wss://h
-// means https://h/<sig> — the relay's own content heap, the same process and
-// the same tunnel. Nothing is stored and nothing is picked: the target is a
-// function of THIS tab's membership (membership.ts) and the mesh's relay list
-// (NostrMeshDrone.swarmHost()), so a reload, a discarded tab or the update
-// pill brings back the same target and the receipts on disk count again. It
-// is public-only like every granted host, it has NO legacy content face (the
-// zone's `content.` face is a different heap, whose receipts must not count
-// here), and joining is the consent — the join sheet says the meeting's host
-// keeps what you share. Its receipt is the relay's own answer: the relay
-// hashes the body against the URL before it writes, and only then says
-// `stored <sig>` — a statement about that sig, not a bare 200 — so the swarm
-// target skips the read-back GET. Every other target keeps the read-back.
+// THE SWARM'S HOSTS ARE RESOLVED PER PAGE (documentation/swarm-host.md,
+// jwize 2026-10-07). A joined tab uploads the tiles it offers on a page to
+// that page's PUBLISH DOMAINS (the host marks of the nearest branch at or
+// above it), else to the primary host of its HOSTS POOL (`community:hosts`,
+// hypercomb.com seeded), else — only then, and only when its card allows
+// participants — to the RELAY it meets at. swarm-hosts.ts answers that from
+// caches, synchronously; nothing on connect, join or announce waits on it.
+// Each sig goes where it is SHOWN: a tile where its page goes, a branch's
+// subtree where the pages below go (#publicRoots), and what already went
+// elsewhere is re-staged when a host becomes owed it (#restage). A pool host
+// that cannot take uploads is passed over (#notePoolHostFailure).
+// Nothing is stored or picked here: the targets are a function of THIS tab's
+// membership (membership.ts), the roots it offered this join and the pages it
+// offered them on, so a reload, a discarded tab or the update pill brings back
+// the same targets and the receipts on disk count again. Every swarm target is
+// public-only like every granted host; a pool or publish host keeps its zone's
+// retired `content.` face receipts (the same store); the meeting relay, however
+// it was named, has none. Its
+// receipt is the host's own answer when it says `stored <sig>` (the relay hashes
+// the body against the URL before it writes) — a statement about that sig, not
+// a bare 200 — so that answer skips the read-back GET. Every other answer
+// keeps the read-back.
 
 import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 import { isJoinedHere } from './membership.js'
 import { foldContentLabel, legacyContentFace } from './zone-door.js'
+import { swarmHosts, type SwarmHostChoice, type SwarmHostResolver, type SwarmHostSource } from './swarm-hosts.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
 
@@ -149,8 +158,7 @@ const LEGACY_PUSH_DIR = '__host_push__'
 const LEGACY_QUEUE_SUBDIR = 'queue'
 const LEGACY_RECEIPTS_DIR = '__host_receipts__'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
-// The mesh names the swarm's host (swarmHost()) and keeps the relay-corrected
-// clock (now()). Absent → no swarm target and the local clock — never an error.
+// The mesh keeps the relay-corrected clock (now()). Absent → the local clock.
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const STORE_KEY = '@hypercomb.social/Store'
 const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
@@ -218,9 +226,6 @@ const FULL_MIN_BACKOFF_MS = 10 * 60_000
 // (the drain is single-flight) or a verify slot (the semaphore is shared).
 const REQUEST_TIMEOUT_MS = 15_000
 const TIMEOUT_PER_100KB_MS = 1_000
-/** Loopback names — the only hosts a swarm target may carry a port on (the
- *  harness relay on localhost:PORT). A real host is a bare name over https. */
-const LOOPBACK_HOST_RE = /^(?:(?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[::1\])(?::\d{1,5})?$/
 
 type QueueEntry = { sig: string; kind: HostSyncKind; fileName: string; mtime: number; dir: FileSystemDirectoryHandle }
 
@@ -251,13 +256,27 @@ type SyncTarget = {
    *  honoured — an updated hive does not re-push what the host already holds.
    *  Read only: new receipts are written under `hostHash`. */
   legacyHostHash?: string
-  /** The swarm's host (#swarmDomain): its PUT answer `stored <sig>` is the
-   *  receipt, and unheld closure refs are vouched for by one HEAD to it. */
+  /** A swarm host (#swarmSources): owed what the pages it hosts offer now
+   *  (#owedBy); its PUT answer `stored <sig>` is the receipt, and unheld
+   *  closure refs are vouched for by one HEAD to it. */
   swarm?: true
+  /** Also a plain public-only target (the public host or a publish node):
+   *  owed every marked sig, not only what the room is offered now. */
+  marker?: true
 }
 
-/** The drain destinations by name, in order, before their hashes are taken. */
-type TargetSpec = { domain: string; self: boolean; swarm: boolean }
+/** The drain destinations by name, in order, before their hashes are taken.
+ *  `relay`: a swarm host only because the meeting relay hosts participants —
+ *  its own heap, with no retired `content.` face. */
+type TargetSpec = { domain: string; self: boolean; swarm: boolean; marker: boolean; relay: boolean }
+
+/** The swarm gate's per-page scope (isClosureAvailableAt): the page the
+ *  node is shown on, hosts that count everywhere, the current targets, and
+ *  whether some page on the way was still being read. */
+type ScopeAt = { page: readonly string[]; extra: ReadonlySet<string>; targets: readonly SyncTarget[]; pending: { seen: boolean } }
+
+/** One ref the marking walk recorded (#linkRef). */
+type RefEdge = { kind: HostSyncKind; child: boolean; step: string }
 
 /** A host's standing failure (#noteHostFailure). Removed on its next success. */
 type HostBackoff = { until: number; streak: number; notLive: number; status: SyncStatus; reason: string }
@@ -331,8 +350,29 @@ export class HostSyncService extends EventTarget {
    *  bytes we hold, so re-warning every retry tick is just noise. */
   #warnedCorrupt = new Set<string>()
 
-  constructor() {
+  /** Where each offered page's bytes go (swarm-hosts.ts) — synchronous. */
+  readonly #resolver: SwarmHostResolver
+
+  constructor(resolver: SwarmHostResolver = swarmHosts) {
     super()
+    this.#resolver = resolver
+    // A page's hosts became known or moved (the pool, a branch's marks, the
+    // relay's card): re-judge the target set, send what is now owed, and let
+    // the swarm walk again so names wait no longer than the read did.
+    resolver.addEventListener('change', () => {
+      // A page whose hosts were pending may now be served: no "not
+      // available" verdict judged before this answer stands.
+      this.#receiptEpoch++
+      this.#hostsEpoch++
+      this.#targetSpecs()
+      // What was sent elsewhere reaches the hosts it is now owed to.
+      void this.#restageAll()
+      if (this.#anyEnabled()) void this.drain()
+      EffectBus.emit('swarm:hosts-changed', { at: Date.now() })
+    })
+    // Where the hive root's tiles go is read now, off every path, so a join
+    // finds it cached rather than pending.
+    resolver.warm(null)
     // Auto-enqueue every committed sig — gated on #isEnabled(). With the
     // gate off, the handler exits before reaching enqueue/signer, so no
     // permission prompt can fire. Subscription stays live so toggling the
@@ -369,18 +409,28 @@ export class HostSyncService extends EventTarget {
     // the one payload that says reopened. The mesh also announces 'open' when
     // a slow probe is answered, a refusal clears or the ladder resets; none
     // of those is a new path, and resetting on them dissolved a refusing
-    // host's 10-minute pause on every flicker. And only the swarm's host is
-    // reset: it is the relay that came back. Every other host keeps the
-    // window its own answer earned.
+    // host's 10-minute pause on every flicker. Only swarm hosts are reset:
+    // the RELAY's whole pause (it is the relay that came back — restarted
+    // with participants allowed, it is shared with at once), any other swarm
+    // host's only when the path was the problem (unreachable, not-live). A
+    // refusal or a full host keeps the window its own answer earned.
     EffectBus.on<{ state?: string; reopened?: boolean }>('mesh:connection', (p) => {
       const prev = this.#meshState
       this.#meshState = String(p?.state ?? '')
       // stalled → open is the same socket answering late, not a return.
       const cameBack = p?.state === 'open' && (p.reopened === true || (prev !== 'open' && prev !== 'stalled'))
       if (!cameBack) return
-      const swarm = this.#swarmDomain()
-      const backoff = swarm ? this.#hostBackoff.get(swarm) : undefined
-      if (backoff && backoff.status !== 'full') this.#hostBackoff.delete(swarm)
+      // A pool host that went silent while the path itself was down is given
+      // its chance again with the path (one that failed while the relay
+      // answered stays passed over — that was the host).
+      for (const host of [...this.#downWhileOffline]) this.#resolver.markUp(host)
+      this.#downWhileOffline.clear()
+      const relay = this.#resolver.relayHost()
+      for (const domain of this.#swarmSources().keys()) {
+        const backoff = this.#hostBackoff.get(domain)
+        if (!backoff || backoff.status === 'full') continue
+        if (domain === relay || backoff.status === 'unreachable' || backoff.status === 'not-live') this.#hostBackoff.delete(domain)
+      }
       if (this.#anyEnabled()) void this.drain()
     })
     // A join or a leave starts a new offer: what was named before it is not
@@ -392,6 +442,12 @@ export class HostSyncService extends EventTarget {
       if (joined === this.#rootsJoined) return
       this.#rootsJoined = joined
       this.#publicRoots.clear()
+      this.#rootsByPage.clear()
+      this.#pages.clear()
+      this.#rootClosure.clear()
+      this.#restagedAt.clear()
+      this.#closurePagesOf.clear()
+      this.#rootsVersion++
     })
   }
 
@@ -418,6 +474,8 @@ export class HostSyncService extends EventTarget {
     // still-broken host costs one extra refusal before re-pausing.
     this.#hostBackoff.clear()
     this.#assertedAbsent.clear()
+    this.#pageHosts.clear()
+    this.#resolver.clearDown()
     void this.drain()
   }
 
@@ -441,6 +499,7 @@ export class HostSyncService extends EventTarget {
     // The operator's "retry now" signal for THIS host.
     this.#hostBackoff.delete(this.publicHostDomain())
     this.#assertedAbsent.clear()
+    this.#pageHosts.clear()
     void this.drain()
   }
 
@@ -462,15 +521,16 @@ export class HostSyncService extends EventTarget {
    *  decision; absent is merely unasked).
    *
    *  CONSENT — AND WHY THIS NEVER FLIPS A SWITCH. Joining a swarm is the
-   *  gesture "share these tiles with these people in this zone", and the
-   *  meeting point is part of it: the swarm's host is DERIVED from the relay
-   *  this tab meets at (#swarmDomain), and the join sheet says that host keeps
-   *  what you share. Uploading to some OTHER named party is a different act
-   *  the participant never said, so this answers the question and provisions
-   *  nothing: `'ready'` (a target exists — a joined tab whose mesh names a
-   *  host always has one), `'opted-out'` (they decided), or `'needs-host'`
-   *  (not joined, or a mesh with no relay). The `host-sync:needs-target`
-   *  effect it once emitted had no listener and is gone. */
+   *  gesture "share these tiles with these people in this zone", and where
+   *  they are kept is part of it: the swarm's hosts are RESOLVED from what
+   *  the participant already chose — the page's publish domains, else their
+   *  hosts pool, else a relay that says it hosts participants (#swarmSources)
+   *  — and the join sheet names the host that keeps what you share. Uploading
+   *  to some OTHER named party is a different act the participant never said,
+   *  so this answers the question and provisions nothing: `'ready'` (a target
+   *  exists), `'opted-out'` (they decided), or `'needs-host'` (not joined, or
+   *  nothing to put the bytes on). The `host-sync:needs-target` effect it
+   *  once emitted had no listener and is gone. */
   public readonly ensureSwarmTarget = (): 'ready' | 'opted-out' | 'needs-host' => {
     if (this.#anyEnabled()) return 'ready'
     let optedOut = false
@@ -543,22 +603,62 @@ export class HostSyncService extends EventTarget {
    *  handler, the retry timer, and the boot drains. */
   readonly #anyEnabled = (): boolean =>
     !this.#readonlyVisitor()
-    && (this.#isEnabled() || this.#publicHostEnabled() || this.#publishNodes.size > 0 || this.#swarmDomain() !== '')
+    && (this.#isEnabled() || this.#publicHostEnabled() || this.#publishNodes.size > 0 || this.#swarmSources().size > 0)
 
-  /** THE SWARM'S HOST: host[:port] of the relay this tab meets at, while THIS
-   *  tab is joined — '' otherwise. Synchronous and pure: the mesh derives it
-   *  from its relay list (wss://h → h, ws://localhost:7801 → localhost:7801),
-   *  no fetch, no NIP-11, nothing stored. A port is honoured only on a
-   *  loopback name (the harness relay); a real host must be a bare hostname
-   *  (HOST_DOMAIN_RE), because the target is concatenated into request URLs. */
-  readonly #swarmDomain = (): string => {
-    if (!isJoinedHere()) return ''
-    let raw = ''
-    try { raw = String(this.#ioc<{ swarmHost?: () => string }>(NOSTR_MESH_KEY)?.swarmHost?.() ?? '') } catch { return '' }
-    const host = raw.trim().toLowerCase().replace(/^(?:wss?|https?):\/\//, '').replace(/[/?#].*$/, '')
-    if (LOOPBACK_HOST_RE.test(host)) return host
-    return HOST_DOMAIN_RE.test(host) ? host : ''
+  /** THE SWARM'S HOSTS, while THIS tab is joined — empty otherwise: every
+   *  write door a page this tab offers on resolves to (swarm-hosts.ts), plus
+   *  the hive root's own answer (a root offered with no page — a publish, an
+   *  invite — and the target a joined tab has before its first walk). Each
+   *  door maps to the sources that named it. Synchronous: caches only, so a
+   *  page whose hosts are still being read simply has none yet. */
+  readonly #swarmSources = (): Map<string, Set<SwarmHostSource>> => {
+    const out = new Map<string, Set<SwarmHostSource>>()
+    if (!isJoinedHere()) return out
+    const key = `${this.#resolver.version}|${this.#rootsVersion}|${this.#resolver.relayHost()}`
+    if (this.#swarmSourcesMemo?.key === key) return this.#swarmSourcesMemo.value
+    const add = (choice: SwarmHostChoice): void => {
+      for (const door of choice.hosts) {
+        let sources = out.get(door)
+        if (!sources) { sources = new Set(); out.set(door, sources) }
+        sources.add(choice.source)
+      }
+    }
+    add(this.#resolver.hostsFor(null))
+    for (const segments of this.#pages.values()) add(this.#resolver.hostsFor(segments))
+    // The pages BELOW an offered branch (its own publish domains) — learnt
+    // by the re-stage walk, so a subtree is a target even when the walk
+    // never offered a root on one of its pages.
+    for (const [root, pages] of this.#closurePagesOf) {
+      if (!this.#publicRoots.has(root)) continue
+      for (const segments of pages.values()) add(this.#resolver.hostsFor(segments))
+    }
+    this.#swarmSourcesMemo = { key, value: out }
+    return out
   }
+
+  /** The last answer, keyed by everything it reads: the drain asks once per
+   *  entry per target, and the answer only moves when the resolver's caches,
+   *  the offered roots, the meeting relay or this tab's membership do. */
+  #swarmSourcesMemo: { key: string; value: Map<string, Set<SwarmHostSource>> } | null = null
+  /** Bumped whenever the offered roots or their pages change. */
+  #rootsVersion = 0
+
+  /** Where THIS page's offered tiles go — synchronous, from caches (see
+   *  swarm-hosts.ts). The swarm names these in its domain tags, asks them in
+   *  its share gate and says them in its status line. Joined or not: the join
+   *  sheet asks before the tab joins. */
+  public readonly swarmHostsFor = (segments: readonly string[] | null | undefined): SwarmHostChoice =>
+    this.#resolver.hostsFor(segments)
+
+  /** Start reading where this page's tiles will go (its publish domains,
+   *  the hosts pool) before anything asks — the swarm calls it on arriving at
+   *  a page, so its walk finds the answer cached. Never waits. */
+  public readonly warmSwarmHosts = (segments: readonly string[] | null | undefined): void =>
+    this.#resolver.warm(segments)
+
+  /** Every swarm host of this tab right now, primary first — what a reader
+   *  in this room tries after a sig's advertised hosts. Empty unless joined. */
+  public readonly swarmHosts = (): string[] => [...this.#swarmSources().keys()]
 
   readonly #isEnabled = (): boolean => {
     if (this.#readonlyVisitor()) return false
@@ -636,7 +736,7 @@ export class HostSyncService extends EventTarget {
   /** The nodes publishes have named this session — for a status line. */
   public readonly publishNodes = (): string[] => [...this.#publishNodes]
 
-  /** The currently-enabled drain destinations: the swarm's host FIRST (while
+  /** The currently-enabled drain destinations: the swarm's hosts FIRST (while
    *  this tab is joined), the operator's self-domain (when configured AND
    *  opted in), the public CDN target (behind its own gate), and every node a
    *  publish named this session (`#publishNodes`). Empty when everything is
@@ -644,32 +744,39 @@ export class HostSyncService extends EventTarget {
   readonly #targets = async (): Promise<SyncTarget[]> => {
     const targets: SyncTarget[] = []
     for (const spec of this.#targetSpecs()) {
-      if (spec.self) targets.push({ domain: spec.domain, hostHash: null, publicOnly: false, ...(spec.swarm ? { swarm: true as const } : {}) })
-      // No legacy face: the swarm's host is the relay's own heap.
-      else if (spec.swarm) targets.push({ domain: spec.domain, hostHash: await HostSyncService.#hostHash(spec.domain), publicOnly: true, swarm: true })
-      else targets.push(await HostSyncService.#grantedTarget(spec.domain))
+      const roles = { ...(spec.swarm ? { swarm: true as const } : {}), ...(spec.marker ? { marker: true as const } : {}) }
+      if (spec.self) targets.push({ domain: spec.domain, hostHash: null, publicOnly: false, ...roles })
+      // The relay's own heap has no retired content face.
+      else if (spec.relay) targets.push({ domain: spec.domain, hostHash: await HostSyncService.#hostHash(spec.domain), publicOnly: true, ...roles })
+      else targets.push({ ...await HostSyncService.#grantedTarget(spec.domain), ...roles })
     }
     return targets
   }
 
   /** The targets by name, in drain order — synchronous, so a memo check can
-   *  notice a changed set before it trusts a verdict. The swarm's host is
-   *  first, and the public host and publish nodes are deduplicated against
-   *  it; when the operator's own backup host IS the meeting point, the self
-   *  target carries both roles (bare receipts, everything it backs up). */
+   *  notice a changed set before it trusts a verdict. The swarm's hosts come
+   *  first; the self-domain, the public host and publish nodes are merged
+   *  into a swarm host of the same name rather than listed twice. When the
+   *  operator's own backup host is a swarm host, the self target carries both
+   *  roles (bare receipts, everything it backs up); when the public host or a
+   *  publish node is, that target is owed every marked sig as well. */
   readonly #targetSpecs = (): TargetSpec[] => {
     const specs: TargetSpec[] = []
-    const swarm = this.#swarmDomain()
     const self = this.#isEnabled() ? this.#hostBase() : ''
-    if (swarm) specs.push({ domain: swarm, self: swarm === self, swarm: true })
-    if (self && self !== swarm) specs.push({ domain: self, self: true, swarm: false })
-    if (this.#publicHostEnabled()) {
-      const domain = this.publicHostDomain()
-      if (domain !== swarm) specs.push({ domain, self: false, swarm: false })
+    // The meeting relay's own heap is not its zone's retired `content.` face,
+    // whatever named it a host (the relay step, the pool, a publish domain):
+    // receipts earned on that face must never count for it.
+    const meetingRelay = this.#resolver.relayHost()
+    for (const [domain, sources] of this.#swarmSources()) {
+      const relay = domain === meetingRelay || (sources.size === 1 && sources.has('relay'))
+      specs.push({ domain, self: domain === self, swarm: true, marker: false, relay })
     }
-    for (const domain of this.#publishNodes) {
-      if (specs.some(s => s.domain === domain)) continue
-      specs.push({ domain, self: false, swarm: false })
+    if (self && !specs.some(s => s.domain === self)) specs.push({ domain: self, self: true, swarm: false, marker: false, relay: false })
+    const granted = [...(this.#publicHostEnabled() ? [this.publicHostDomain()] : []), ...this.#publishNodes]
+    for (const domain of granted) {
+      const at = specs.find(s => s.domain === domain)
+      if (!at) specs.push({ domain, self: false, swarm: false, marker: false, relay: false })
+      else if (at.swarm) at.marker = true
     }
     this.#noteTargetSet(specs)
     return specs
@@ -798,10 +905,9 @@ export class HostSyncService extends EventTarget {
     if (this.#missingLocal.has(sig)) return // re-check after the awaits above
     this.#missingLocal.add(sig)
     EffectBus.emit('share:missing-local', { sig })
-    // The hole reaches the status line through the swarm host's state
+    // The hole reaches the status line through the swarm hosts' state
     // (`missing`): a tile that waits on it is "not held here", not "uploading".
-    const swarm = (await this.#targets()).find(t => t.swarm)
-    if (swarm) this.#emitSyncState(swarm)
+    for (const target of await this.#targets()) if (target.swarm) this.#emitSyncState(target)
   }
 
   /** Enqueue everything a layer references, recursively. Slot → kind:
@@ -907,47 +1013,268 @@ export class HostSyncService extends EventTarget {
    *  the full walk covers strictly more. */
   readonly #markedWalk = new Set<string>()
 
-  /** WHAT THE ROOM IS STILL OWED — the swarm's host only. A `.public` marker
+  /** WHAT THE ROOM IS STILL OWED — swarm hosts only. A `.public` marker
    *  lives on disk for good, and the queue does too, so a marker alone would
-   *  carry a tile's bytes to the meeting host after its owner made it private
-   *  again (an upload waiting out a 'full' backoff), or into the NEXT room's
-   *  host days later. So the swarm's host takes a sig only while some ROOT
-   *  that needs it is current: a sig the walk (or a publish) named through
-   *  `markPublic` THIS join, and has not since withdrawn (`withdrawPublic`,
-   *  which the walk calls for every child it prunes as private). The edges
-   *  are content facts — a layer's refs never change — recorded by the
-   *  marking walk; the roots are this join's, and fall with a leave. The
-   *  public CDN and publish nodes keep the marker rule unchanged. */
-  readonly #publicRoots = new Set<string>()
-  readonly #parentsOf = new Map<string, Set<string>>()
+   *  carry a tile's bytes to a swarm host after its owner made it private
+   *  again (an upload waiting out a 'full' backoff), or into the NEXT room
+   *  days later. So a swarm host takes a sig only while some ROOT that needs
+   *  it is current AND the sig is SHOWN on a page that host serves: a sig the
+   *  walk named through `markPublic` THIS join, and has not since withdrawn
+   *  (`withdrawPublic`, which the walk calls for every child it prunes as
+   *  private). The edges are content facts — a layer's refs never change —
+   *  recorded by the marking walk; the roots and their pages are this join's,
+   *  and fall with a leave. The public CDN and publish nodes keep the marker
+   *  rule unchanged.
+   *
+   *  WHERE A SIG IS SHOWN. A root offered on page P is a tile on P: its own
+   *  layer and resources are P's. Its children are tiles on P/<its name>, and
+   *  so on down — every child-slot edge is one page step, named by the parent
+   *  layer. So a branch that wears its own publish domains keeps its subtree
+   *  on them (jwize 2026-10-07: publish domains take precedence over pools),
+   *  however far up the root that reached it was offered; only the branch
+   *  tile itself goes where the page it sits on goes.
+   *
+   *  root → the keys of the pages it was offered on ('' = the hive root);
+   *  page key → its segments, and → its current roots; root → whether any
+   *  offer vouched for its whole closure (a tile-only root never reaches a
+   *  child layer, whatever another walk once recorded). */
+  readonly #publicRoots = new Map<string, Set<string>>()
+  readonly #pages = new Map<string, readonly string[]>()
+  readonly #rootsByPage = new Map<string, Set<string>>()
+  readonly #rootClosure = new Map<string, boolean>()
+  /** child → parent → the edge (see #linkRef). */
+  readonly #parentsOf = new Map<string, Map<string, RefEdge>>()
+  /** parent → child → the same edge, forward (the re-stage walk). */
+  readonly #refsOf = new Map<string, Map<string, RefEdge>>()
+  /** What kind each marked sig is (the re-stage reads its local bytes). */
+  readonly #kindOf = new Map<string, HostSyncKind>()
   #rootsJoined: boolean | null = null
 
-  readonly #linkRef = (parent: string, ref: string): void => {
+  /** One recorded ref. `step`: the page step from the parent's page to the
+   *  ref's ('' when the ref is shown on the parent's own page — a resource,
+   *  a meta incidence — else the parent layer's name). `child`: a child-slot
+   *  edge, crossed only under branch closure. */
+  readonly #linkRef = (parent: string, ref: string, kind: HostSyncKind, child: boolean, step: string): void => {
+    const edge: RefEdge = { kind, child, step }
     let parents = this.#parentsOf.get(ref)
-    if (!parents) { parents = new Set(); this.#parentsOf.set(ref, parents) }
-    parents.add(parent)
+    if (!parents) { parents = new Map(); this.#parentsOf.set(ref, parents) }
+    if (!parents.has(parent)) parents.set(parent, edge)
+    let refs = this.#refsOf.get(parent)
+    if (!refs) { refs = new Map(); this.#refsOf.set(parent, refs) }
+    if (!refs.has(ref)) refs.set(ref, edge)
   }
 
-  /** Is `sig` inside the closure of a root the room is currently offered? */
-  readonly #neededBySwarm = (sig: string): boolean => {
-    const seen = new Set<string>()
-    const stack = [sig]
-    while (stack.length > 0) {
-      const s = stack.pop()!
-      if (seen.has(s)) continue
-      seen.add(s)
-      if (this.#publicRoots.has(s)) return true
-      for (const p of this.#parentsOf.get(s) ?? []) stack.push(p)
+  /** Offer `root` on `page` (segments; [] = the hive root). */
+  readonly #offerRoot = (root: string, page: readonly string[], closure: boolean): void => {
+    const segments = page.map(s => String(s ?? ''))
+    const key = segments.join('\u0000')
+    let pages = this.#publicRoots.get(root)
+    if (!pages) { pages = new Set(); this.#publicRoots.set(root, pages) }
+    if (!pages.has(key)) this.#rootsVersion++
+    pages.add(key)
+    if (closure) this.#rootClosure.set(root, true)
+    else if (!this.#rootClosure.has(root)) this.#rootClosure.set(root, false)
+    if (key) {
+      this.#pages.set(key, segments)
+      let roots = this.#rootsByPage.get(key)
+      if (!roots) { roots = new Set(); this.#rootsByPage.set(key, roots) }
+      roots.add(root)
     }
-    return false
+  }
+
+  /** The pages `sig` is shown on, through the roots the room is offered now
+   *  (see #publicRoots): each root's page plus the steps down to the sig. */
+  readonly #pagesOf = (sig: string): string[][] => {
+    const out: string[][] = []
+    const seen = new Set<string>()
+    const stack: { s: string; steps: string[]; viaChild: boolean }[] = [{ s: sig, steps: [], viaChild: false }]
+    let budget = HostSyncService.#PAGES_WALK_MAX
+    while (stack.length > 0 && budget-- > 0) {
+      const { s, steps, viaChild } = stack.pop()!
+      const key = `${s}\u0001${viaChild ? 1 : 0}\u0001${steps.join('\u0000')}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const pages = this.#publicRoots.get(s)
+      // A sig reached through a child slot is the room's only under a root
+      // that was offered with its closure.
+      if (pages && (!viaChild || this.#rootClosure.get(s) === true)) {
+        for (const pageKey of pages) out.push([...(pageKey ? this.#pages.get(pageKey) ?? [] : []), ...steps])
+      }
+      for (const [p, edge] of this.#parentsOf.get(s) ?? []) {
+        stack.push({ s: p, steps: edge.step ? [edge.step, ...steps] : steps, viaChild: viaChild || edge.child })
+      }
+    }
+    return out
+  }
+
+  static readonly #PAGES_WALK_MAX = 4_096
+
+  /** Is `sig` inside the closure of a root the room is currently offered —
+   *  shown on a page whose hosts include `domain`, when one is named? */
+  readonly #neededBySwarm = (sig: string, domain?: string): boolean => {
+    const pages = this.#pagesOf(sig)
+    if (domain === undefined) return pages.length > 0
+    return pages.some(page => this.#resolver.hostsFor(page).hosts.includes(domain))
   }
 
   /** The walk pruned this child as private: what only it needed stops
-   *  travelling to the swarm's host (markers and queue entries stay — the
+   *  travelling to the swarm's hosts (markers and queue entries stay — the
    *  next `markPublic` of the same root resumes it). */
   public readonly withdrawPublic = (sig: string): void => {
     const s = String(sig ?? '').trim().toLowerCase()
-    if (SIG_RE.test(s)) this.#publicRoots.delete(s)
+    if (!SIG_RE.test(s)) return
+    const pages = this.#publicRoots.get(s)
+    this.#publicRoots.delete(s)
+    this.#rootClosure.delete(s)
+    this.#restagedAt.delete(s)
+    const hadPages = this.#closurePagesOf.delete(s)
+    for (const key of pages ?? []) {
+      const roots = this.#rootsByPage.get(key)
+      roots?.delete(s)
+      if (roots && roots.size === 0) { this.#rootsByPage.delete(key); this.#pages.delete(key) }
+    }
+    this.#rootsVersion++
+    if (hadPages) this.#targetSpecs()
+  }
+
+  // ── RE-STAGING: a host that becomes owed what was already sent elsewhere ──
+  //
+  // The marking walk runs once per sig per session (#markedWalk), and the
+  // drain retires an entry once every target owed it AT THAT MOMENT holds it.
+  // With one swarm host that was enough. With hosts per page it is not: a
+  // picture shared on /meetup (the pool host) and later on /shop (its publish
+  // domain), a pool that changes, a branch given a publish domain, a pool host
+  // passed over for the relay — each makes a host owed sigs whose queue
+  // entries are long gone. So, per root, whenever the hosts its closure is
+  // shown on may have moved (a resolver change, a new page), the closure is
+  // walked again IN MEMORY over the recorded edges, and every sig a host is
+  // owed but holds no receipt for, and that is not still queued, is queued
+  // again from the local bytes. A pair proven once is never asked again.
+
+  /** Bumped on every resolver change: where pages' bytes go may have moved. */
+  #hostsEpoch = 0
+  /** root → the epoch + page set its closure was last re-staged under. */
+  readonly #restagedAt = new Map<string, string>()
+  /** sig → the hosts it is known to be receipted on (positive only). */
+  readonly #receiptedOnHost = new Map<string, Set<string>>()
+  /** root → every page its closure is shown on (key → segments). Fixed for a
+   *  root and its page set — the edges never change — while the HOSTS of
+   *  those pages are resolved live: a branch's own publish domain is a target
+   *  even when the walk never offered a root on one of its pages. */
+  readonly #closurePagesOf = new Map<string, Map<string, readonly string[]>>()
+  /** Roots being re-staged, and roots asked for again meanwhile. */
+  readonly #restaging = new Set<string>()
+  readonly #restageAgain = new Set<string>()
+
+  static readonly #RESTAGE_WALK_MAX = 20_000
+
+  /** The swarm hosts `sig`'s closure is shown on (its own page and every page
+   *  below it, as last re-staged) — synchronous. For a page's domain tags: a
+   *  receiver taking a branch learns where its subtree went. */
+  public readonly closureHostsOf = (sig: string): string[] => {
+    const pages = this.#closurePagesOf.get(String(sig ?? '').trim().toLowerCase())
+    const out: string[] = []
+    for (const segments of pages?.values() ?? []) {
+      for (const host of this.#resolver.hostsFor(segments).hosts) if (!out.includes(host)) out.push(host)
+    }
+    return out
+  }
+
+  /** Re-stage every current root (a resolver change). Sequential: the I/O is
+   *  one closure at a time. */
+  readonly #restageAll = async (): Promise<void> => {
+    for (const root of [...this.#publicRoots.keys()]) {
+      try { await this.#restage(root) } catch { /* the next change asks again */ }
+    }
+  }
+
+  readonly #restage = async (root: string): Promise<void> => {
+    if (!isJoinedHere()) return
+    if (this.#restaging.has(root)) { this.#restageAgain.add(root); return }
+    const pages = this.#publicRoots.get(root)
+    if (!pages) return
+    const closure = this.#rootClosure.get(root) === true
+    const stamp = `${this.#hostsEpoch}|${closure ? 1 : 0}|${[...pages].sort().join('\u0001')}`
+    if (this.#restagedAt.get(root) === stamp) return
+    this.#restagedAt.set(root, stamp)
+    this.#restaging.add(root)
+    try {
+      const shown = new Map<string, readonly string[]>()
+      let complete = true
+      const targets = new Map((await this.#targets()).map(t => [t.domain, t] as const))
+      const work: { s: string; kind: HostSyncKind; page: string[] }[] = []
+      for (const pageKey of pages) work.push({ s: root, kind: this.#kindOf.get(root) ?? 'layer', page: pageKey ? [...(this.#pages.get(pageKey) ?? [])] : [] })
+      const seen = new Set<string>()
+      let budget = HostSyncService.#RESTAGE_WALK_MAX
+      while (work.length > 0 && budget-- > 0) {
+        const { s, kind, page } = work.pop()!
+        const pageKey = page.join('\u0000')
+        const key = `${s}\u0001${pageKey}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        if (!shown.has(pageKey)) shown.set(pageKey, page)
+        const choice = this.#resolver.hostsFor(page)
+        if (choice.pending) complete = false
+        if (choice.hosts.length > 0) await this.#stageFor(s, kind, choice.hosts, targets)
+        for (const [ref, edge] of this.#refsOf.get(s) ?? []) {
+          if (edge.child && !closure) continue
+          work.push({ s: ref, kind: edge.kind, page: edge.step ? [...page, edge.step] : page })
+        }
+      }
+      // A page still being read: this root is walked again when it lands.
+      if (!complete) this.#restagedAt.delete(root)
+      if (!this.#publicRoots.has(root)) return // withdrawn while we walked
+      const before = this.#closurePagesOf.get(root)
+      this.#closurePagesOf.set(root, shown)
+      if (before && before.size === shown.size && [...shown.keys()].every(k => before.has(k))) return
+      // New pages under this root: their hosts are targets now. A host that
+      // was not one when this pass began could not be staged for — once more.
+      this.#rootsVersion++
+      this.#targetSpecs()
+      const missed = [...shown.values()].some(page => this.#resolver.hostsFor(page).hosts.some(h => !targets.has(h)))
+      if (missed) { this.#restagedAt.delete(root); this.#restageAgain.add(root) }
+      if (this.#anyEnabled()) void this.drain()
+      // The swarm names these hosts in its domain tags: walk again.
+      EffectBus.emit('swarm:hosts-changed', { at: Date.now() })
+    } finally {
+      this.#restaging.delete(root)
+      if (this.#restageAgain.delete(root)) void this.#restage(root)
+    }
+  }
+
+  /** Make sure `sig` reaches each of `hosts` it is owed: a receipt there, or
+   *  its entry still queued, already does; otherwise it is queued again from
+   *  the local bytes (what this tab does not hold it never had to send). A
+   *  host that is not a target yet is asked on the next pass. */
+  readonly #stageFor = async (
+    sig: string,
+    kind: HostSyncKind,
+    hosts: readonly string[],
+    targets: ReadonlyMap<string, SyncTarget>,
+  ): Promise<void> => {
+    const proven = this.#receiptedOnHost.get(sig)
+    let owed = false
+    for (const host of hosts) {
+      if (proven?.has(host)) continue
+      const target = targets.get(host)
+      if (!target) continue
+      if (await this.#receiptExists(sig, target)) { this.#noteReceiptedOn(sig, host); continue }
+      owed = true
+    }
+    if (!owed) return
+    const queueDir = await this.#getQueueDir(false)
+    if (queueDir) {
+      try { await queueDir.getFileHandle(`${sig}.${kind}`, { create: false }); return } catch { /* not queued */ }
+    }
+    let bytes: ArrayBuffer | null = null
+    try { bytes = await this.#readLocalBytes(sig, kind) } catch { bytes = null }
+    if (bytes) await this.enqueue(sig, kind, bytes)
+  }
+
+  readonly #noteReceiptedOn = (sig: string, host: string): void => {
+    let hosts = this.#receiptedOnHost.get(sig)
+    if (!hosts) { hosts = new Set(); this.#receiptedOnHost.set(sig, hosts) }
+    hosts.add(host)
   }
 
   /** Marker existence = "this sig is inside a published-public closure". */
@@ -1003,18 +1330,43 @@ export class HostSyncService extends EventTarget {
    *  (individually-marked), so the walk keeps the layer's own resource/
    *  bee/dependency refs and the resource content-descent but NEVER
    *  recurses into `cells`/`layers`/`children` — a tile-only public tile
-   *  must never mark its private descendants' layers. */
-  public readonly markPublic = async (sig: string, kind: HostSyncKind = 'layer', closure = true): Promise<void> => {
-    // A public-only target must exist for the marker to mean anything: the
-    // swarm's host while joined, the standing public host, or a node a
-    // publish named for this act.
-    if (!this.#publicHostEnabled() && this.#publishNodes.size === 0 && !this.#swarmDomain()) return
+   *  must never mark its private descendants' layers.
+   *
+   *  `page` (a joined tab): the page the walk offers the root ON — the root
+   *  is a tile there, and where that page's bytes go decides where it goes
+   *  (swarm-hosts.ts); its subtree goes where the pages below go. Omitted or
+   *  null: the hive root. `false`: NOT a room offer at all — a publish, a
+   *  vocabulary claim: its bytes go to the nodes that act named (the marker
+   *  rule), never to the room's hosts. */
+  public readonly markPublic = async (
+    sig: string,
+    kind: HostSyncKind = 'layer',
+    closure = true,
+    page?: readonly string[] | null | false,
+  ): Promise<void> => {
+    // A public-only target must exist, or be about to, for the marker to mean
+    // anything: a swarm host while joined (resolved per page — a page whose
+    // hosts are still being read stages now and drains when they land), the
+    // standing public host, or a node a publish named for this act.
+    if (!this.#publicHostEnabled() && this.#publishNodes.size === 0 && !isJoinedHere()) return
     const s = String(sig ?? '').trim().toLowerCase()
     if (!SIG_RE.test(s)) return
-    // A root the room is offered now — before the walk dedup, so a root
-    // named again after a withdrawal resumes without re-reading anything.
-    this.#publicRoots.add(s)
-    return await this.#mark(s, kind, closure)
+    // A root the room is offered now, on this page — before the walk dedup,
+    // so a root named again after a withdrawal resumes without re-reading
+    // anything. `page` is where the walk offered it (its publish domains
+    // decide where it goes).
+    const offered = page !== false && isJoinedHere()
+    const segments = page === false ? [] : (page ?? []).map(x => String(x ?? ''))
+    if (offered) {
+      // A LOOKUP, not a warm: a root staged while its page's hosts are still
+      // being read waits on them, so their landing must kick the drain.
+      void this.#resolver.hostsFor(segments)
+      this.#offerRoot(s, segments, closure)
+    }
+    await this.#mark(s, kind, closure)
+    // What was already sent elsewhere (or retired from the queue) reaches the
+    // hosts this offer owes it to.
+    if (offered) await this.#restage(s)
   }
 
   /** The marking walk below a root (see markPublic). */
@@ -1026,6 +1378,7 @@ export class HostSyncService extends EventTarget {
     const walkKey = closure ? s : `${s}:tile`
     if (this.#markedWalk.has(walkKey)) return
     this.#markedWalk.add(walkKey)
+    if (!this.#kindOf.has(s)) this.#kindOf.set(s, kind)
     await this.#writePublicMarker(s)
     let bytes: ArrayBuffer | null = null
     try { bytes = await this.#readLocalBytes(s, kind) } catch { bytes = null }
@@ -1040,15 +1393,19 @@ export class HostSyncService extends EventTarget {
       if (!layer || typeof layer !== 'object') return
       // Meta envelope: the incidence IS the whole reference set. Its
       // `relation` plays the part a slot name plays below, so the privacy
-      // gate reads identically.
+      // gate reads identically. The envelope stands for what it points at:
+      // the same tile, on the same page.
       const incidence = metaIncidence(layer)
       if (incidence) {
-        if (metaIsChildIncidence(layer, incidence.kind) && !closure) return
+        const childIncidence = metaIsChildIncidence(layer, incidence.kind)
+        if (childIncidence && !closure) return
         const ref = String(incidence.sig ?? '').trim().toLowerCase()
         if (!SIG_RE.test(ref)) return
-        this.#linkRef(s, ref)
+        this.#linkRef(s, ref, incidence.kind, childIncidence, '')
         return await this.#mark(ref, incidence.kind, closure)
       }
+      // A child layer is a tile on THIS layer's own page, one step down.
+      const name = typeof layer['name'] === 'string' ? String(layer['name']) : ''
       for (const [slot, value] of Object.entries(layer)) {
         if (!Array.isArray(value)) continue
         const isChildSlot = CHILD_SLOT_SET.has(slot)
@@ -1062,7 +1419,7 @@ export class HostSyncService extends EventTarget {
         for (const raw of value) {
           const ref = String(raw ?? '').trim().toLowerCase()
           if (!SIG_RE.test(ref) || ref === s) continue
-          this.#linkRef(s, ref)
+          this.#linkRef(s, ref, refKind, isChildSlot, isChildSlot ? name : '')
           await this.#mark(ref, refKind, closure)
         }
       }
@@ -1077,7 +1434,7 @@ export class HostSyncService extends EventTarget {
       for (const raw of nested) {
         const ref = String(raw ?? '').trim().toLowerCase()
         if (!SIG_RE.test(ref) || ref === s) continue
-        this.#linkRef(s, ref)
+        this.#linkRef(s, ref, 'resource', false, '')
         await this.#mark(ref, 'resource', true)
       }
     }
@@ -1180,10 +1537,11 @@ export class HostSyncService extends EventTarget {
       // (#scheduleRetry); a reopened mesh socket, enable(), enablePublicHost()
       // and reDrain() end it early. If every target is paused there is
       // nothing to do yet.
-      // The swarm's host stops being a target the moment this tab leaves:
-      // a pass that began joined must not keep PUTting into the room.
+      // A swarm host stops being a target the moment this tab leaves (or no
+      // offered page resolves to it): a pass that began joined must not keep
+      // PUTting into the room.
       const active = (t: SyncTarget): boolean =>
-        this.#hostActive(t.domain) && (!t.swarm || this.#swarmDomain() === t.domain)
+        this.#hostActive(t.domain) && (!t.swarm || t.marker === true || this.#swarmSources().has(t.domain))
       if (!targets.some(active)) return
       // Absorb any legacy dirs into the pools first, under this same
       // single-flight guard so it can never race the queue removals below.
@@ -1354,11 +1712,12 @@ export class HostSyncService extends EventTarget {
 
   static readonly #PUSH_MAX_CONCURRENT = 4
 
-  /** The swarm's host (as a public-only target) is owed only what a current
-   *  root needs (#neededBySwarm); every other target, whatever its marker
-   *  rule says. */
+  /** A swarm host (as a public-only target) is owed only what a current root
+   *  offered on a page it serves needs (#neededBySwarm); every other target —
+   *  and a swarm host that is also the public host or a publish node —
+   *  whatever its marker rule says. */
   readonly #owedBy = (target: SyncTarget, sig: string): boolean =>
-    !(target.swarm && target.publicOnly) || this.#neededBySwarm(sig)
+    !(target.swarm && target.publicOnly) || target.marker === true || this.#neededBySwarm(sig, target.domain)
 
   /** Is this host taking requests right now? */
   readonly #hostActive = (domain: string): boolean => Date.now() >= (this.#hostBackoff.get(domain)?.until ?? 0)
@@ -1380,6 +1739,7 @@ export class HostSyncService extends EventTarget {
       : ladder + Math.floor(Math.random() * ladder * 0.25)
     const until = Math.max(now + wait, sameWave ? prev.until : 0)
     this.#hostBackoff.set(target.domain, { until, streak, notLive, status: failure.status, reason: failure.reason })
+    this.#notePoolHostFailure(target, failure.status, streak)
     if (!sameWave || prev.status !== failure.status) {
       this.#emitSyncState(target)
       // An operator fixing a writers list needs the exact key — once per episode.
@@ -1388,6 +1748,30 @@ export class HostSyncService extends EventTarget {
         `ioc.get('@diamondcoreprocessor.com/HostSyncService').enable() retries now. pubkey: ${pk || '(no signer available)'}`))
     }
     this.#scheduleRetry()
+  }
+
+  /** Pool hosts passed over while the PATH was down (the mesh not open) —
+   *  given back when a socket comes back. */
+  readonly #downWhileOffline = new Set<string>()
+  /** Hosts that held a receipt this session: proven to take uploads, so a
+   *  run of silence from one is the path, not the host. */
+  readonly #provenHosts = new Set<string>()
+
+  /** A POOL HOST THAT CANNOT TAKE UPLOADS MUST NOT STRAND THE ROOM. When one
+   *  refuses (401/403 — the writers list, a closed door), is full, or has
+   *  never answered an upload and stays silent while this tab is connected
+   *  (a page answering where a heap should be, an upload blocked at the CORS
+   *  preflight — both read as no answer), the resolver passes it over: the
+   *  next pool host, else a relay that hosts participants (swarm-hosts.ts).
+   *  Publish domains are the participant's explicit choice for a branch and
+   *  are never passed over; the status line names their refusal instead. */
+  readonly #notePoolHostFailure = (target: SyncTarget, status: SyncStatus, streak: number): void => {
+    if (!target.swarm || !this.#resolver.isPoolHost(target.domain)) return
+    const reason = `${status}`
+    if (status === 'refused' || status === 'full') { this.#resolver.markDown(target.domain, reason); return }
+    if (status !== 'unreachable' || this.#provenHosts.has(target.domain) || streak < 2) return
+    if (this.#meshState !== 'open') this.#downWhileOffline.add(target.domain)
+    this.#resolver.markDown(target.domain, reason)
   }
 
   /** One timer for the earliest backoff that ends — the retry is the host's
@@ -1416,7 +1800,7 @@ export class HostSyncService extends EventTarget {
     this.#lastPending.set(target.domain, pending)
     const failure = this.#hostBackoff.get(target.domain)
     let refusal = this.#entryRefusal.get(target.domain)
-    if (refusal && target.swarm && target.publicOnly && !this.#neededBySwarm(refusal.sig)) {
+    if (refusal && target.swarm && target.publicOnly && !target.marker && !this.#neededBySwarm(refusal.sig, target.domain)) {
       this.#entryRefusal.delete(target.domain)
       refusal = undefined
     }
@@ -1428,6 +1812,9 @@ export class HostSyncService extends EventTarget {
     EffectBus.emit('sync:state', {
       host: target.domain, pending, status, state: status, reason,
       swarm: target.swarm === true, missing: this.#missingLocal.size,
+      // Why this host: the page's publish domains, the hosts pool, or the
+      // relay that allows participants (absent for every other target).
+      ...(target.swarm ? { source: [...(this.#swarmSources().get(target.domain) ?? [])][0] ?? 'none' } : {}),
     })
   }
 
@@ -1596,9 +1983,11 @@ export class HostSyncService extends EventTarget {
     this.#walkedResources.clear()
     this.#verifiedOnHost.clear()
     this.#assertedAbsent.clear()
+    this.#pageHosts.clear()
     this.#hostBackoff.clear()
     this.#refusedEntries.clear()
     this.#entryRefusal.clear()
+    this.#resolver.clearDown()
 
     // Every previously-receipted sig: pool + legacy source, both name
     // shapes (`{sig}` self-domain, `{sig}.{hostHash}` granted hosts).
@@ -1756,6 +2145,34 @@ export class HostSyncService extends EventTarget {
     return await this.#closureReceipted(s, kind, closure, new Set<string>(), only)
   }
 
+  /** THE SWARM'S GATE: is the closure rooted at `sig` — a tile offered on
+   *  `page` — served where each part of it is SHOWN? The tile itself and its
+   *  own resources by `page`'s swarm hosts; each child layer by the hosts of
+   *  the page one step down; and so on (see #publicRoots). So a branch that
+   *  wears its own publish domains is judged on them below its tile, which
+   *  is where its bytes went. `extra` hosts count at every level (the
+   *  sharer's own backup host, which its events also name). NULL when a page
+   *  in the closure has hosts still being read: unknown, never "no". */
+  public readonly isClosureAvailableAt = async (
+    sig: string,
+    kind: HostSyncKind,
+    closure: boolean,
+    page: readonly string[],
+    extra: readonly string[] = [],
+  ): Promise<boolean | null> => {
+    const s = String(sig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(s)) return false
+    this.#targetSpecs()
+    const at: ScopeAt = {
+      page: (page ?? []).map(x => String(x ?? '')),
+      extra: new Set(extra.map(d => foldContentLabel(String(d ?? '').trim().toLowerCase())).filter(Boolean)),
+      targets: await this.#targets(),
+      pending: { seen: false },
+    }
+    const ok = await this.#closureReceipted(s, kind, closure, new Set<string>(), undefined, at)
+    return ok ? true : at.pending.seen ? null : false
+  }
+
   /** Per-NODE closure verdicts, so a re-walk reuses the subtrees it already
    *  proved. `isClosureAvailable` memoizes only the ROOT it was asked about;
    *  every miss therefore re-walked the entire closure from scratch, reading
@@ -1773,16 +2190,28 @@ export class HostSyncService extends EventTarget {
     closure: boolean,
     visited: Set<string>,
     only?: readonly SyncTarget[],
+    at?: ScopeAt,
   ): Promise<boolean> => {
-    if (visited.has(sig)) return true
-    visited.add(sig)
-    const scope = only ? only.map(t => t.domain).sort().join(',') + '|' : ''
+    const visitKey = at ? `${sig}\u0001${at.page.join('\u0000')}` : sig
+    if (visited.has(visitKey)) return true
+    visited.add(visitKey)
+    if (at) {
+      // This node is judged by the hosts of the page it is shown on.
+      const choice = this.#resolver.hostsFor(at.page)
+      if (choice.pending) { at.pending.seen = true; return false }
+      only = at.targets.filter(t => choice.hosts.includes(t.domain) || at.extra.has(t.domain))
+    }
+    // Judged per page, a node's verdict also rests on the pages below it:
+    // its key carries its own page, never shared with a whole-host verdict.
+    const scope = (at ? `@${at.page.join('/')}@` : '') + (only ? only.map(t => t.domain).sort().join(',') + '|' : '')
     const nodeKey = `${scope}${sig}:${kind}:${closure ? 'c' : 't'}`
     if (this.#nodeAvailable.has(nodeKey)) return true
     if (this.#nodeUnavailableAtEpoch.get(nodeKey) === this.#receiptEpoch) return false
-    const verdict = await this.#closureReceiptedUncached(sig, kind, closure, visited, only)
+    const pendingBefore = at?.pending.seen ?? false
+    const verdict = await this.#closureReceiptedUncached(sig, kind, closure, visited, only, at)
     if (verdict) this.#nodeAvailable.add(nodeKey)
-    else this.#nodeUnavailableAtEpoch.set(nodeKey, this.#receiptEpoch)
+    // A "no" that rests on a page still being read is not a verdict.
+    else if (!at || at.pending.seen === pendingBefore) this.#nodeUnavailableAtEpoch.set(nodeKey, this.#receiptEpoch)
     return verdict
   }
 
@@ -1792,6 +2221,7 @@ export class HostSyncService extends EventTarget {
     closure: boolean,
     visited: Set<string>,
     only?: readonly SyncTarget[],
+    at?: ScopeAt,
   ): Promise<boolean> => {
     const swarm = only ? (only.find(t => t.swarm) ?? null) : await this.#swarmTarget()
     if (!(only ? await this.#receiptedOn(sig, only) : await this.#anyTargetReceipted(sig))) {
@@ -1821,8 +2251,11 @@ export class HostSyncService extends EventTarget {
       const incidence = metaIncidence(layer)
       if (incidence) {
         if (metaIsChildIncidence(layer, incidence.kind) && !closure) return true
-        return await this.#closureReceipted(incidence.sig, incidence.kind, closure, visited, only)
+        return await this.#closureReceipted(incidence.sig, incidence.kind, closure, visited, at ? undefined : only, at)
       }
+      // A child layer is shown one page down: on this layer's own page.
+      const name = typeof layer['name'] === 'string' ? String(layer['name']) : ''
+      const below: ScopeAt | undefined = at && name ? { ...at, page: [...at.page, name] } : at
       for (const [slot, value] of Object.entries(layer)) {
         if (!Array.isArray(value)) continue
         const isChildSlot = CHILD_SLOT_SET.has(slot)
@@ -1835,7 +2268,7 @@ export class HostSyncService extends EventTarget {
         for (const raw of value) {
           const ref = String(raw ?? '').trim().toLowerCase()
           if (!SIG_RE.test(ref) || ref === sig) continue
-          if (!(await this.#closureReceipted(ref, refKind, closure, visited, only))) return false
+          if (!(await this.#closureReceipted(ref, refKind, closure, visited, at ? undefined : only, isChildSlot ? below : at))) return false
         }
       }
     } else if (kind === 'resource') {
@@ -1845,7 +2278,7 @@ export class HostSyncService extends EventTarget {
       ]
       for (const ref of nested) {
         if (!SIG_RE.test(ref) || ref === sig) continue
-        if (!(await this.#closureReceipted(ref, 'resource', closure, visited, only))) return false
+        if (!(await this.#closureReceipted(ref, 'resource', closure, visited, at ? undefined : only, at))) return false
       }
     }
     return true
@@ -1859,7 +2292,7 @@ export class HostSyncService extends EventTarget {
     return false
   }
 
-  /** The swarm's host as a target, or null when this tab has none. */
+  /** The first swarm host as a target, or null when this tab has none. */
   readonly #swarmTarget = async (): Promise<SyncTarget | null> =>
     (await this.#targets()).find(t => t.swarm) ?? null
 
@@ -2292,7 +2725,12 @@ export class HostSyncService extends EventTarget {
       // public host) would hold the room's name-only tiles until it relents.
       // This one is per target (`swarm: true`) — the swarm re-walks on it;
       // counters of settled entries skip it.
-      if (target.swarm) EffectBus.emit('host:receipt', { sig, host: target.domain, swarm: true })
+      if (target.swarm) {
+        this.#provenHosts.add(target.domain)
+        this.#resolver.markUp(target.domain)
+        EffectBus.emit('host:receipt', { sig, host: target.domain, swarm: true })
+      }
+      this.#noteReceiptedOn(sig, target.domain)
       return true
     } catch { return false }
   }
@@ -2352,6 +2790,10 @@ export class HostSyncService extends EventTarget {
    *  it on its own. */
   readonly #assertedAbsent = new Set<string>()
 
+  /** Pool hosts that answered a page where a sig's bytes should be — not
+   *  probed again this session (#hostHolds). Cleared with #assertedAbsent. */
+  readonly #pageHosts = new Set<string>()
+
   /** ASK THE HOST before sending: does it already serve this sig? One HEAD
    *  on the flat address, under the verify concurrency cap and this host's
    *  own breaker. A served answer (#servesSig) mints the receipt and returns
@@ -2364,6 +2806,7 @@ export class HostSyncService extends EventTarget {
     const host = target.domain
     const key = `${host}:${sig}`
     if (this.#assertedAbsent.has(key)) return false
+    if (this.#pageHosts.has(host)) return false // it answers every address with a page
     const health = this.#holdsHealth.get(host) ?? { streak: 0, pausedUntil: 0 }
     this.#holdsHealth.set(host, health)
     if (Date.now() < health.pausedUntil) return false // breaker open — no probes; the push will tell
@@ -2380,6 +2823,18 @@ export class HostSyncService extends EventTarget {
         // getKnownDomains() without a mesh wait.
         if (target.publicOnly) this.#noteAttribution(sig, host)
         return true
+      }
+      if (res.ok && (res.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) {
+        // A PAGE WHERE BYTES SHOULD BE: a site's fallback for every address
+        // (the hypercomb.com apex is the Azure shell today). For a POOL host —
+        // where a host that cannot take uploads is passed over — its answer to
+        // the next sig would be the same page, so it is not asked again this
+        // session; the push says whether it takes uploads at all
+        // (#notePoolHostFailure). Any other host keeps its per-sig probe: a
+        // static door may hold some sigs as files and fall back for the rest.
+        if (target.swarm && this.#resolver.isPoolHost(host)) this.#pageHosts.add(host)
+        this.#assertedAbsent.add(key)
+        return false
       }
       if (res.ok || res.status === 404) { this.#assertedAbsent.add(key); return false }
       this.#noteHoldsFailure(host, health)

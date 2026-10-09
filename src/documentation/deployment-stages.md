@@ -24,9 +24,11 @@ before it sends (`host-sync.service.ts`), and the availability gate stands on
 both swarm announce surfaces with no escape hatch (`swarm.drone.ts`).
 
 *Amended 2026-10-04 by [swarm-host.md](swarm-host.md):* joining now offers
-the tiles made public while joined — the relay the room meets at is the
-swarm's host — and `publish here` is no longer part of swarm sharing. The
-`shared` row below describes the 09-25 recipe.
+the tiles made public while joined, and `publish here` is no longer part of
+swarm sharing. Since 2026-10-07 their bytes go to each page's publish domains,
+else the participant's hosts pool, and to the relay the room meets at only
+when neither can take them and its card allows participants. The `shared` row
+below describes the 09-25 recipe.
 
 ## 1. The idea in one paragraph
 

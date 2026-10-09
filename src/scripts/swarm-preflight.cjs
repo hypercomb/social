@@ -1,8 +1,12 @@
 // scripts/swarm-preflight.cjs — is the meeting point ready to host a meeting?
 //
-// THE RELAY YOU MEET AT IS YOUR SWARM'S HOST: wss://jwize.com means
-// https://jwize.com/<sig>, and the relay started with --allow-participants
-// keeps what the room shares (within its caps). Run this an hour before a
+// WHERE A MEETING'S BYTES GO (documentation/swarm-host.md, 2026-10-07): each
+// page's publish domains, else the participant's hosts pool — hypercomb.com on
+// a fresh install — and, when neither can take them, the relay they meet at
+// (wss://jwize.com means https://jwize.com/<sig>) if it was started with
+// --allow-participants. So this checks both: the relay, and whether the pool's
+// default host takes a fresh key's upload at all (WARN, not FAIL: a pool host
+// that cannot is passed over for the relay). Run this an hour before a
 // meeting, and after every relay restart or stamp. It is live and as light as a
 // check can be: one throwaway key, one throwaway zone (beaconed, then left),
 // one stored 16-byte atom. Every line is PASS / FAIL / SKIP; the exit code is
@@ -17,12 +21,16 @@
 //   --no-apex             skip the package checks (a scratch relay has no package)
 //   --known <sig>         a sig the swarm host must serve (default: the signed install:<channel> root)
 //   --room / --secret     beacon in a real zone (for a relay that allows only listed zones)
+//   --pool-host <zone>    the hosts pool's default host   (default hypercomb.com)
+//   --no-pool-host        skip the pool-host checks
 //
 // Checks:
 //   ws        the WebSocket upgrade answers 101
 //   card      the first frame is the hc:host card; the relay's clock is near ours
 //   policy    NIP-11 limitation.participant_uploads allows guests (and agrees with the card)
 //   probe     the liveness probe (limit:0 REQ) answers EOSE at once
+//   scan      a read that names no signature (kinds only, limit 1) is CLOSED restricted:, nothing replayed —
+//             the relay's address gate; an open relay lists every room's events to anyone (FAIL)
 //   unsigned  a PUT without NIP-98 is refused (401)
 //   not-live  a signed PUT from a key the relay has not heard on its socket is refused (401 not-live)
 //   beacon    a {alive} beacon on the throwaway zone is accepted
@@ -32,6 +40,9 @@
 //   no-store  a missing sig answers 404 with Cache-Control: no-store
 //   known     HEAD on a known sig (the installed package root) answers 200
 //   apex      the apex's sign('host:packages') head equals the signed install:<channel> root, and the apex serves it
+//   pool-cors the pool host's CORS preflight allows a PUT carrying Authorization from a hive origin   (WARN)
+//   pool-404  the pool host answers a missing sig with 404 — a heap, not a page where bytes should be (WARN)
+//   pool-put  a signed PUT of one 16-byte atom answers 2xx 'stored <sig>' (or is served back)          (WARN)
 'use strict'
 const crypto = require('crypto')
 const path = require('path')
@@ -59,6 +70,9 @@ const results = []
 const line = (verdict, id, text) => { results.push(verdict); console.log(`${verdict.padEnd(4)}  ${id.padEnd(8)} ${text}`) }
 const pass = (id, text) => line('PASS', id, text)
 const fail = (id, text) => line('FAIL', id, text)
+const warn = (id, text) => line('WARN', id, text)
+const POOL_HOST = process.argv.includes('--no-pool-host') ? null : String(arg('pool-host', 'hypercomb.com')).replace(/^https?:\/\//, '').replace(/\/+$/, '')
+const POOL_HTTP = POOL_HOST ? `${/^(localhost|127\.)/.test(POOL_HOST) ? 'http' : 'https'}://${POOL_HOST}` : null
 const skip = (id, text) => line('SKIP', id, text)
 
 const sk = generateSecretKey()
@@ -184,6 +198,18 @@ async function apexHead() {
     sock.send(['CLOSE', 'hc-live'])
   } else skip('probe', 'no socket')
 
+  // scan — counts only; nothing a replay carries is printed
+  if (sock.ok) {
+    sock.send(['REQ', 'hc-scan', { kinds: [30206], limit: 1 }])
+    const answer = await sock.wait(m => (m[0] === 'EOSE' || m[0] === 'CLOSED') && m[1] === 'hc-scan', 4000)
+    const evs = sock.inbox.filter(x => x.m[0] === 'EVENT' && x.m[1] === 'hc-scan').length
+    const gated = answer?.[0] === 'CLOSED' && /^restricted:/.test(String(answer[2])) && evs === 0
+    ;(gated ? pass : fail)('scan', gated
+      ? 'a read naming no signature is CLOSED restricted: — nothing listed'
+      : `a read naming no signature answered ${answer ? answer[0] : 'nothing'} with ${evs} event(s) — this relay lists rooms to anyone (deploy the address gate)`)
+    sock.send(['CLOSE', 'hc-scan'])
+  } else skip('scan', 'no socket')
+
   // the atom
   const atom = crypto.randomBytes(16)
   const sig = sha256(atom)
@@ -242,6 +268,33 @@ async function apexHead() {
     }
   } else skip('apex', '--no-apex')
 
+  // the hosts pool's default host — where a fresh install offers its uploads
+  // first. WARN only: one that cannot take them is passed over for the relay.
+  if (POOL_HTTP) {
+    const probeSig = sha256(crypto.randomBytes(16))
+    const pre = await http('OPTIONS', `${POOL_HTTP}/${probeSig}`, {
+      headers: { Origin: 'https://hypercomb.io', 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'authorization' },
+    })
+    const methods = String(pre.headers.get('access-control-allow-methods') ?? '').toUpperCase()
+    const allowHeaders = String(pre.headers.get('access-control-allow-headers') ?? '').toLowerCase()
+    const corsOk = pre.status >= 200 && pre.status < 300 && (methods.includes('PUT') || methods === '*') && (allowHeaders.includes('authorization') || allowHeaders === '*')
+    ;(corsOk ? pass : warn)('pool-cors', `OPTIONS ${POOL_HOST}/<sig> (PUT + authorization) → ${pre.status} · allow-methods '${methods || '—'}' · allow-headers '${allowHeaders || '—'}'${corsOk ? '' : ' — a browser cannot upload there'}`)
+    const head = await http('HEAD', `${POOL_HTTP}/${probeSig}`)
+    const type = String(head.headers.get('content-type') ?? '')
+    const heap = head.status === 404
+    ;(heap ? pass : warn)('pool-404', `a missing sig → ${head.status}${type ? ` ${type}` : ''}${heap ? '' : /text\/html/i.test(type) ? ' — a page where a heap should be: not an upload host' : ''}`)
+    const poolAtom = crypto.randomBytes(16)
+    const poolSig = sha256(poolAtom)
+    const poolUrl = `${POOL_HTTP}/${poolSig}`
+    const put = await http('PUT', poolUrl, { body: poolAtom, headers: { Authorization: nip98(poolUrl, 'PUT', poolAtom) } })
+    let stored = put.status >= 200 && put.status < 300 && put.text.trim() === `stored ${poolSig}`
+    if (!stored && put.status >= 200 && put.status < 300) {
+      const back = await http('GET', poolUrl)
+      stored = back.status === 200 && sha256(back.bytes) === poolSig
+    }
+    ;(stored ? pass : warn)('pool-put', `signed PUT of a fresh key's atom → ${put.status} ${put.text.slice(0, 60)}${stored ? '' : ` — fresh installs' tiles fall to the relay${policy === 'all' || policy === 'zones' ? '' : ', which takes nobody: names only'}`}`)
+  } else skip('pool-cors', '--no-pool-host')
+
   // leave the throwaway zone politely
   if (sock.ok) {
     if (beaconOk) {
@@ -252,6 +305,7 @@ async function apexHead() {
     sock.ws.close()
   }
   const failed = results.filter(r => r === 'FAIL').length
-  console.log(`\n${results.filter(r => r === 'PASS').length} PASS · ${failed} FAIL · ${results.filter(r => r === 'SKIP').length} SKIP — ${failed ? 'NOT READY' : 'ready to host a meeting'}`)
+  const warned = results.filter(r => r === 'WARN').length
+  console.log(`\n${results.filter(r => r === 'PASS').length} PASS · ${failed} FAIL · ${warned} WARN · ${results.filter(r => r === 'SKIP').length} SKIP — ${failed ? 'NOT READY' : warned ? `ready — but ${POOL_HOST} cannot take uploads, so the relay hosts the meeting` : 'ready to host a meeting'}`)
   process.exit(failed ? 1 : 0)
 })().catch((e) => { console.error('[fatal]', e); process.exit(2) })

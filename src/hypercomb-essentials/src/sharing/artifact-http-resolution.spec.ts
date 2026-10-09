@@ -46,8 +46,8 @@ describe('typed artifacts over immutable HTTP', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
     const broker = new ContentBrokerDrone()
-    broker.noteDomain('hung.example')
-    broker.noteDomainsForSig(sig, ['images.example'])
+    // Both attributed: one wave, bounded overlap — the hung one never blocks.
+    broker.noteDomainsForSig(sig, ['hung.example', 'images.example'])
     expect(Array.from((await broker.fetchBySig(sig, 'resource'))!)).toEqual(Array.from(bytes))
     expect(aborted).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(2)

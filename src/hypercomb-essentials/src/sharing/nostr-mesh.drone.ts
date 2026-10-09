@@ -229,7 +229,7 @@ export class NostrMeshDrone extends Drone {
 
   protected override deps = { signer: '@diamondcoreprocessor.com/NostrSigner' }
   protected override listens = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish']
-  protected override emits = ['mesh:ready', 'mesh:items-updated', 'mesh:connection', 'mesh:rejected']
+  protected override emits = ['mesh:ready', 'mesh:items-updated', 'mesh:connection', 'mesh:rejected', 'mesh:host-card']
 
   // -----------------------------
   // config
@@ -299,6 +299,8 @@ export class NostrMeshDrone extends Drone {
   // relay clock — from the 'hc:host' card the relay sends as its first frame
   #clockOffsetMs = 0
   #hostCard: { relay: string; time: number; participants: unknown; atMs: number } | null = null
+  /** Each relay's last card policy (relayParticipants). */
+  #participantsByRelay = new Map<string, unknown>()
 
   // -----------------------------
   // debug (off by default)
@@ -380,26 +382,40 @@ export class NostrMeshDrone extends Drone {
     this.reconnectAll()
   }
 
-  /** The swarm's host: host[:port] of the first relay this tab may dial.
-   *  The relay you meet at IS the swarm's host — wss://jwize.com serves
-   *  https://jwize.com/<sig>, ws://localhost:7801 serves
-   *  http://localhost:7801/<sig> — so this is a pure function of the relay
-   *  list: no fetch, no NIP-11, nothing stored. '' when no relay can be
-   *  dialled. A loopback relay is the swarm's host only for a page that is
-   *  itself local: a developer's ws://localhost override beside the live
-   *  relay on https://hypercomb.io may be dialled, but a peer on another
-   *  machine can never fetch from it, so the bytes go to the next relay —
-   *  the same rule the swarm's domain tags follow. */
+  /** The relay this tab meets at: host[:port] of the first relay it may
+   *  dial — wss://jwize.com gives jwize.com, ws://localhost:7801 gives
+   *  localhost:7801. A pure function of the relay list: no fetch, no NIP-11,
+   *  nothing stored. '' when no relay can be dialled. A loopback relay
+   *  counts only for a page that is itself local: a developer's
+   *  ws://localhost override beside the live relay on https://hypercomb.io
+   *  may be dialled, but a peer on another machine can never reach it.
+   *
+   *  It is NOT the swarm's upload host by default any more (2026-10-07,
+   *  documentation/swarm-host.md): uploads go to the page's publish domains,
+   *  else the hosts pool, and to this relay only when both are empty AND its
+   *  card allows participants (`relayParticipants`). */
   public swarmHost = (): string => {
+    const relay = this.#meetingRelay()
+    if (!relay) return ''
+    try { return new URL(relay).host } catch { return '' }
+  }
+
+  /** What the meeting relay's `hc:host` card said about participant
+   *  uploads: 'all', 'zones' or false — undefined until its card has been
+   *  heard on this page. Synchronous; nothing is asked for it. */
+  public relayParticipants = (): unknown => {
+    const relay = this.#meetingRelay()
+    return relay ? this.#participantsByRelay.get(relay) : undefined
+  }
+
+  /** The first relay this tab may dial (see swarmHost), as configured. */
+  #meetingRelay = (): string => {
     const relays = this.started ? this.relays : this.loadRelays(this.relays)
     const local = this.isLocalContext()
     for (const relay of relays) {
       if (!this.#relayAllowed(relay)) continue
       if (!local && this.isLoopbackRelay(relay)) continue
-      try {
-        const host = new URL(relay).host
-        if (host) return host
-      } catch { /* not a URL — try the next relay */ }
+      try { if (new URL(relay).host) return relay } catch { /* not a URL — try the next relay */ }
     }
     return ''
   }
@@ -1454,6 +1470,15 @@ export class NostrMeshDrone extends Drone {
 
     const type = String(msg[0] ?? '')
 
+    // A relay whose FIRST frame is not its card never sends one (an older
+    // build, a third-party relay): it hosts nobody's bytes. Said once, so the
+    // swarm's last-resort host is "none" — the status line says why — rather
+    // than "not heard yet" for ever.
+    if (!this.#participantsByRelay.has(relay) && !(type === 'NOTICE' && String(msg[1] ?? '').startsWith('hc:host '))) {
+      this.#participantsByRelay.set(relay, false)
+      this.emitEffect('mesh:host-card', { relay, participants: false })
+    }
+
     if (type === 'NOTICE') {
       this.stats.msgNoticeIn++
       this.note('in:notice', relay, undefined, undefined, undefined, msg[1])
@@ -1503,6 +1528,10 @@ export class NostrMeshDrone extends Drone {
       console.warn(`[nostr-mesh] relay ${relay} CLOSED subscription ${subId}: "${reason}" — ${this.bucketsBySig.size} open here`)
       if (/too many subscriptions/i.test(reason)) this.#setRefusal('subscriptions', subId)
       if (reason.startsWith('auth-required:')) return
+      // A standing answer: the read names no signature, or is malformed (the
+      // relay's address gate — only signatures can be queried). Asking again
+      // changes nothing, so the bucket is not retried; a resubscribe asks anew.
+      if (reason.startsWith('restricted:') || reason.startsWith('invalid:')) return
       const base = Math.min(CLOSED_RETRY_CAP_MS, 1000 * (2 ** Math.min(bucket.closedN, 15)))
       const waitMs = Math.min(CLOSED_RETRY_CAP_MS, base + Math.floor(base * 0.3 * Math.random()))
       bucket.closedN++
@@ -1924,6 +1953,14 @@ export class NostrMeshDrone extends Drone {
     if (!card || !Number.isFinite(time) || time <= 0) return
     const now = Date.now()
     this.#hostCard = { relay, time, participants: card.participants ?? false, atMs: now }
+    // Whether this relay hosts participants' bytes — the swarm's LAST-resort
+    // upload host (swarm-hosts.ts). Said on the bus so the resolver re-reads
+    // it; a repeat of the same policy is no news.
+    const participants = card.participants ?? false
+    if (this.#participantsByRelay.get(relay) !== participants) {
+      this.#participantsByRelay.set(relay, participants)
+      this.emitEffect('mesh:host-card', { relay, participants })
+    }
     const offset = Math.round(time * 1000 + 500 - now)
     const next = Math.abs(offset) > CLOCK_APPLY_MS ? offset : 0
     const prev = this.#clockOffsetMs

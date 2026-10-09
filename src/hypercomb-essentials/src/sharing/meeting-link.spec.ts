@@ -34,6 +34,20 @@ services.set('@hypercomb.social/Navigation', {
 })
 services.set('@hypercomb.social/Lineage', { explorerSegments: () => explorer })
 services.set('@diamondcoreprocessor.com/NostrMeshDrone', { swarmHost: () => 'jwize.com' })
+// Where the invited page's tiles would go for this guest (host-sync's
+// resolver): a fresh install's pool host — never the relay it meets at.
+const asked: string[][] = []
+const warmed: string[][] = []
+/** Lookups that answer "still being read" before the host is known. */
+let pendingLookups = 0
+services.set('@diamondcoreprocessor.com/HostSyncService', {
+  swarmHostsFor: (segments: readonly string[]) => {
+    asked.push([...segments])
+    if (pendingLookups > 0) { pendingLookups--; return { hosts: [], source: 'none', pending: true } }
+    return { hosts: ['hypercomb.com'], source: 'pool', pending: false }
+  },
+  warmSwarmHosts: (segments: readonly string[]) => { warmed.push([...segments]) },
+})
 
 // What the join says and does, captured from the bus.
 const confirms: { title: string; message: string }[] = []
@@ -112,7 +126,18 @@ describe('joining from a meeting link', () => {
     expect(confirms).toHaveLength(1)
     expect(confirms[0].title).toBe('Join the room')
     expect(confirms[0].message).toContain('“meetup”')
-    expect(confirms[0].message).toContain('kept by jwize.com')
+    expect(confirms[0].message).toContain('kept by hypercomb.com')
+    expect(confirms[0].message).not.toContain('jwize.com')
+    expect(asked.at(-1)).toEqual(['Ideas']) // the page the link names
+  })
+
+  it('a first visit: the sheet waits briefly for the invited page host, and names it', async () => {
+    pendingLookups = 3 // the pool and the page's marks are still being read
+    confirms.length = 0
+    await joinMeetingPlace(parseMeet(meetFragment('meetup', '4417', ['Fresh']))!)
+    expect(warmed.at(-1)).toEqual(['Fresh'])
+    expect(confirms.at(-1)!.message).toContain('kept by hypercomb.com')
+    expect(confirms.at(-1)!.message).not.toContain('jwize.com')
   })
 
   it('on Join: exact credentials, the page as written, tiles stance, then the one toggle', async () => {

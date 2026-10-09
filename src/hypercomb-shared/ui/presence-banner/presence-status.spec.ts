@@ -96,6 +96,26 @@ describe('the status line — one state, one sentence', () => {
       .toContain('A picture is too large for jwize.com')
   })
 
+  it('the upload lines name the page\'s host; the connection lines name the relay', () => {
+    // 2026-10-07: a page's tiles go to its publish domains, else the hosts
+    // pool, else a relay that hosts participants — never the relay merely
+    // because it is where we meet.
+    const pooled = { ...live, uploadHost: 'hypercomb.com' }
+    const refused = say(statusLine({ ...pooled, share: { offered: 2, host: 'hypercomb.com', hostSource: 'pool', hostState: 'refused' } }))
+    expect(refused).toContain("hypercomb.com isn't taking uploads from guests — others see your tile names only")
+    expect(refused).not.toContain('jwize.com')
+    expect(say(statusLine({ ...pooled, sync: { state: 'full', host: 'hypercomb.com' } }))).toContain('hypercomb.com is full')
+    expect(say(statusLine({ ...pooled, share: { offered: 4 }, sync: { state: 'too-large' } }))).toContain('A picture is too large for hypercomb.com')
+    expect(say(statusLine({ ...pooled, phase: 'connecting' }))).toBe('Connecting to jwize.com…')
+    expect(say(statusLine({ ...pooled, phase: 'down' }))).toContain("Can't reach jwize.com")
+  })
+
+  it('nothing hosts the tiles: said once, names only', () => {
+    const line = statusLine({ ...live, uploadHost: '', share: { offered: 3, uploading: 3, nameOnly: 3, host: '', hostSource: 'none', hostState: 'no-host' } })
+    expect(say(line)).toBe('Live · meetup · amber falcon · 7 in the room (3 here) · No host keeps your tiles yet — others see your tile names only')
+    expect(line.tone).toBe('warn')
+  })
+
   it('a picture too large is said beside the counts, and the host\'s live word beats the walk\'s snapshot', () => {
     const big = statusLine({ ...live, share: { offered: 4 }, sync: { state: 'too-large' } })
     expect(say(big)).toBe('Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 4 · A picture is too large for jwize.com')

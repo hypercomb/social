@@ -349,10 +349,12 @@ test("a 6 MB upload adds under 20 ms to the meeting's frame latency", { timeout:
     // navigating client was measured at), every frame fanned out to the other
     // 19, signed up front so the test's own signing is not what gets measured.
     const PER_SOCKET = 24
+    // The room meets at a signature, as every room does (the address gate).
+    const roomSig = sha(Buffer.from('meeting-room'))
     const room = []
     for (let i = 0; i < 20; i++) {
       const s = await connect(r.port)
-      s.send(['REQ', 'room', { '#x': ['meeting-room'], limit: 0 }])
+      s.send(['REQ', 'room', { '#x': [roomSig], limit: 0 }])
       assert.ok(await s.wait(m => m[0] === 'EOSE'))
       s.key = generateSecretKey()
       room.push(s)
@@ -360,7 +362,7 @@ test("a 6 MB upload adds under 20 ms to the meeting's frame latency", { timeout:
     sockets.push(...room)
 
     const measure = async () => {
-      for (const [i, s] of room.entries()) s.frames = Array.from({ length: PER_SOCKET }, (_, n) => event(s.key, 21000, 'meeting-room', JSON.stringify({ n, i, at: Date.now() })))
+      for (const [i, s] of room.entries()) s.frames = Array.from({ length: PER_SOCKET }, (_, n) => event(s.key, 21000, roomSig, JSON.stringify({ n, i, at: Date.now() })))
       const samples = []  // { sentAt, ms }
       const began = Date.now()
       const run = room.map(async (s, i) => {

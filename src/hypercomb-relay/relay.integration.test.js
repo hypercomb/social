@@ -731,6 +731,13 @@ test('a swarm meeting here is hosted: a live participant stores atoms, anyone el
     mkdirSync(join(r.dir, sha(bag)))
     assert.equal((await putAtom(r.base, guest, bag)).status, 409)
     assert.equal((await putAtom(r.base, generateSecretKey(), bag)).status, 401)
+    // … and an admitted key that does NOT hold the address's preimage learns
+    // nothing: wrong bytes at a held directory answer exactly as at an empty one.
+    const wrong = Buffer.from('not the preimage')
+    const atBag = await putAtom(r.base, guest, wrong, { at: sha(bag) })
+    const atNothing = await putAtom(r.base, guest, wrong, { at: sha(Buffer.from('no directory here')) })
+    assert.equal(atBag.status, 422)
+    assert.equal(atNothing.status, 422)
 
     // A miss is never cached, so the atom can arrive a moment later.
     const miss = await fetch(`${r.base}/${'0'.repeat(64)}`)

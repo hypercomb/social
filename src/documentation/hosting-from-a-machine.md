@@ -165,7 +165,11 @@ Unlike the hosts above, it accepts writes: from its `--writers`, and, with
 `--allow-participants`, from the live participants of any swarm that meets on
 it. The doctrine, the caps and the meeting runbook are in
 [swarm-host.md](swarm-host.md). This replaces the guest recipe of 2026-10-04
-(join, pick a host, `publish here`): a guest now only joins.
+(join, pick a host, `publish here`): a guest now only joins. Since 2026-10-07
+the relay is a participant's upload host only when they name none themselves
+(no publish domain on the page, an empty hosts pool); to make it a meeting
+page's host for everyone, give that page the relay's zone as a publish domain
+(`host:<zone>`).
 
 ### The NSSM line
 
@@ -208,7 +212,8 @@ see the runbook in [swarm-host.md](swarm-host.md).
 
 ## Related
 
-- [swarm-host.md](swarm-host.md) — the meeting point hosts the meeting
+- [swarm-host.md](swarm-host.md) — your hosts host the meeting: publish
+  domains, then the hosts pool, then a relay that allows participants
 - [`hypercomb-shim/host/README.md`](../hypercomb-shim/host/README.md) — the
   contract, and what to do when the host is not Cloudflare
 - [native-client.md](native-client.md) — the desktop client itself

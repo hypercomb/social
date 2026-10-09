@@ -30,10 +30,12 @@
 //      than `/use-live-relay` still MEET.
 //   3. public — the same guarded mesh.togglePublic gesture the keymap uses
 //      (only when THIS tab is not already joined; never toggles OFF).
-//   4. no host to pick (2026-10-04): the relay you meet at is the swarm's
-//      host. Your public tiles go out by name at once and with their
-//      signatures once that host serves them. Swarm sharing never touches
-//      the public content worker — this command no longer enables it.
+//   4. no host to pick (2026-10-04; hosts by pool 2026-10-07): each page's
+//      tiles go to its publish domains, else your hosts pool, else a relay
+//      that hosts participants (swarm-hosts.ts). Your public tiles go out by
+//      name at once and with their signatures once that host serves them.
+//      This command never turns on the standing public host
+//      (hc:public-host) — that stays the Hosts panel's decision.
 //
 // Sharing CONTENT stays a deliberate act (world mode / in-zone creates are
 // auto-public) — this command makes the PARTICIPANT work, it does not

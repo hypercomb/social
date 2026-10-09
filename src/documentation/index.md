@@ -55,7 +55,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [sync-paired-channel.md](sync-paired-channel.md) — Paired-channel sync: sharing tree branches across browsers and devices
 - [swarm-resource-streaming.md](swarm-resource-streaming.md) — Share bundles: layer payload plus transitively referenced resources
 - [swarm-scale-and-host-delegation.md](swarm-scale-and-host-delegation.md) — Root announcements, location snapshots, and host delegation
-- [swarm-host.md](swarm-host.md) — The meeting point hosts the meeting: a derived swarm host, names before bytes, never-retract, soft wills, per-tab membership, the #meet= link and the meeting runbook
+- [swarm-host.md](swarm-host.md) — Your hosts host the meeting: per page, publish domains, then the hosts pool, then a relay that allows participants; names before bytes, never-retract, soft wills, per-tab membership, the #meet= link and the meeting runbook
 - [file-transit.md](file-transit.md) — *(design — phased plan)* Moving signature-addressed content across the wire
 
 ## Features

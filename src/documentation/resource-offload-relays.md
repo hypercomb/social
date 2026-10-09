@@ -126,8 +126,10 @@ proof surface; the gate is their read side (`host-sync.service.ts` +
   accrue); misses re-check only when a new receipt bumps the epoch.
 - *Amended 2026-10-04 by [swarm-host.md](swarm-host.md): the swarm host
   provides the hosting — "no host, no share" narrows to "no host, no
-  bytes": names go out at once, signatures once the meeting's host serves
-  them, and a tile is never taken back for being new or uploading.*
+  bytes": names go out at once, signatures once the page's host serves
+  them, and a tile is never taken back for being new or uploading. Which
+  host (2026-10-07): the page's publish domains, else the hosts pool, else a
+  relay that allows participants.*
 - **Sharing requires hosting (jwize, 2026-09-25).** Both announce surfaces
   (the publish walk AND the personal subscribe channel) announce a public
   child only once its closure is available on a host, and hold it back

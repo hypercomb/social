@@ -12,8 +12,8 @@
 //   - 'mesh:connection'     (NostrMeshDrone)  — is the socket actually live?
 //   - 'swarm:share-status'  (SwarmDrone)      — what is offered here, what is
 //                                               only a name, what is private
-//   - 'sync:state'          (HostSyncService) — does the swarm's host take
-//                                               the bytes, and if not why
+//   - 'sync:state'          (HostSyncService) — does the page's upload host
+//                                               take the bytes, and if not why
 //   - the room roster                         — who is in the room, who is
 //                                               on this page, who is away
 //
@@ -39,26 +39,35 @@ export interface MeshConnection {
   refused?: unknown
 }
 
-/** SwarmDrone's `swarm:share-status` payload — one per walked location. */
+/** SwarmDrone's `swarm:share-status` payload — one per walked location.
+ *  `host` is where THIS page's tiles go (its publish domains, else the hosts
+ *  pool, else a relay that hosts participants — `hostSource` says which), and
+ *  `hostState` what it last said; 'no-host' when nothing hosts them. An older
+ *  swarm names no host: the relay was its host. */
 export interface ShareStatus {
   location?: string
   offered?: number
   uploading?: number
   nameOnly?: number
   private?: number
+  host?: string
+  hosts?: readonly string[]
+  hostSource?: string
   hostState?: string
   reason?: string
 }
 
-/** HostSyncService's `sync:state` payload — the swarm host's only (the
- *  component drops other targets' reports: a backup is not what the room
- *  fetches from). `missing` counts closure refs no store here holds. */
+/** HostSyncService's `sync:state` payload — swarm hosts' only (the component
+ *  drops other targets' reports: a backup is not what the room fetches from),
+ *  and the page's own host's when the share status names one. `missing`
+ *  counts closure refs no store here holds. */
 export interface SyncState {
   state?: string
   status?: string
   reason?: string
   host?: string
   swarm?: boolean
+  source?: string
   missing?: number
 }
 
@@ -127,9 +136,13 @@ export interface StatusLine {
 
 export interface StatusInput {
   phase: LinkPhase
-  /** The swarm's host as a person reads it (`jwize.com`), already resolved
-   *  to a readable stand-in by the caller when there is none. */
+  /** The relay this tab meets at as a person reads it (`jwize.com`),
+   *  already resolved to a readable stand-in by the caller when there is
+   *  none — what the connection lines name. */
   host: string
+  /** The host THIS page's tiles go to (the share status's `host`) — what the
+   *  upload lines name. Empty: the relay, as an older swarm had it. */
+  uploadHost?: string
   room: string
   words: string
   /** Everyone live in the room, you included. */
@@ -149,6 +162,7 @@ export interface StatusInput {
 
 /** Host answers that keep a participant's tiles name-only, by catalog key. */
 const HOST_HELD: Readonly<Record<string, string>> = {
+  'no-host': 'swarm.share.no-host',
   'refused': 'swarm.share.refused',
   'full': 'swarm.share.full',
   'too-large': 'swarm.share.too-large',
@@ -163,6 +177,8 @@ const count = (n: unknown): number => {
 
 export function statusLine(i: StatusInput): StatusLine {
   const host = i.host
+  // The upload lines name where the bytes go, never the meeting point.
+  const upload = i.uploadHost || host
   const parts: StatusPart[] = []
   let tone: StatusLine['tone'] = 'live'
 
@@ -197,7 +213,7 @@ export function statusLine(i: StatusInput): StatusLine {
     const held = tooLarge ? undefined : HOST_HELD[hostWord]
     if (held) {
       // Names only — the count would promise more than the room receives.
-      parts.push({ key: held, params: { host } })
+      parts.push({ key: held, params: { host: upload } })
       tone = 'warn'
     } else {
       if (share && count(share.offered) > 0) {
@@ -213,7 +229,7 @@ export function statusLine(i: StatusInput): StatusLine {
         tone = 'warn'
       }
       if (tooLarge) {
-        parts.push({ key: HOST_HELD['too-large'], params: { host } })
+        parts.push({ key: HOST_HELD['too-large'], params: { host: upload } })
         tone = 'warn'
       }
     }

@@ -240,7 +240,8 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   #downTimer: ReturnType<typeof setTimeout> | null = null
   #rejectedTimer: ReturnType<typeof setTimeout> | null = null
 
-  /** The swarm's host — the relay this tab meets at, as `jwize.com`. */
+  /** The relay this tab meets at, as `jwize.com` — what the connection
+   *  lines name. Where a page's tiles go is the share status's `host`. */
   readonly #swarmHost = signal('')
   /** Live participants anywhere in the room (not you), and those away. */
   readonly #zone = signal<readonly string[]>([])
@@ -251,7 +252,9 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   /** The swarm's per-location share status, newest per location. */
   readonly #shares = signal<ReadonlyMap<string, ShareStatus>>(new Map())
   readonly #lastShare = signal<ShareStatus | null>(null)
-  readonly #sync = signal<SyncState | null>(null)
+  /** Each swarm host's last report, by host, and the newest of them. */
+  readonly #syncs = signal<ReadonlyMap<string, SyncState>>(new Map())
+  readonly #lastSync = signal<SyncState | null>(null)
   readonly #older = signal(0)
   readonly #rejected = signal('')
 
@@ -277,6 +280,18 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     return shares.get(this.#hereSig()) ?? this.#lastShare()
   })
 
+  /** The report of the host THIS page's tiles go to — none while the page
+   *  has no host. A swarm that names no host (older essentials): the newest
+   *  swarm-host report, as before. */
+  readonly #sync = computed<SyncState | null>(() => {
+    const share = this.#share()
+    if (share && typeof share.host === 'string') return share.host ? this.#syncs().get(share.host) ?? null : null
+    return this.#lastSync()
+  })
+
+  /** The host the upload lines name: where this page's tiles go. */
+  readonly #uploadHost = computed(() => String(this.#share()?.host ?? ''))
+
   /** The line, or null for the old rendering. */
   readonly status = computed<StatusLine | null>(() => {
     const conn = this.#conn()
@@ -289,6 +304,7 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     return statusLine({
       phase,
       host: this.#swarmHost() || this.#t('mesh.state.no-host-name'),
+      uploadHost: this.#uploadHost(),
       room: this.#room().trim(),
       words: roomWords(this.#room(), this.#secret(), this.#locale()),
       roomCount: room.size + 1,
@@ -515,14 +531,19 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         this.#readHere()
       }),
 
-      // Does the swarm's host take the bytes — and if not, why. Only the
-      // swarm host's report: another target is a backup, not what the room
-      // fetches from.
+      // Does a swarm host take the bytes — and if not, why. Only swarm
+      // hosts' reports: another target is a backup, not what the room
+      // fetches from. Kept per host; the line reads this page's (#sync).
       EffectBus.on<SyncState>('sync:state', (p) => {
         if (!p || typeof p !== 'object') return
         const host = String(p.host ?? '').trim()
         if (p.swarm !== true && !(host && host === this.#swarmHost())) return
-        this.#sync.set(p)
+        if (host) {
+          const next = new Map(this.#syncs())
+          next.set(host, p)
+          this.#syncs.set(next)
+        }
+        this.#lastSync.set(p)
       }),
 
       // Someone arrived, left, went away or came back anywhere in the room.
@@ -589,10 +610,17 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     if (typeof swarm?.offerPrivateHere !== 'function') return
     let count = Number(this.#share()?.private ?? 0)
     if (!(count > 0)) { try { count = Number(swarm.privateCountHere?.() ?? 0) } catch { count = 0 } }
+    // Who keeps what is shared: this page's upload host, never the relay
+    // merely because it is where we meet. An older swarm names no host (the
+    // relay was its host); a page with no host, or one not known yet, names
+    // no keeper — the confirmation must never promise one that is not there.
+    const share = this.#share()
+    const named = share && typeof share.host === 'string'
+    const keeper = named ? this.#uploadHost() : (this.#swarmHost() || this.#t('mesh.state.no-host-name'))
     const ok = await requestConfirm({
       title: 'swarm.share.confirm.title',
-      message: 'swarm.share.confirm.message',
-      messageParams: { count, host: this.#swarmHost() || this.#t('mesh.state.no-host-name') },
+      message: keeper ? 'swarm.share.confirm.message' : 'swarm.share.confirm.message-local',
+      messageParams: { count, host: keeper },
       confirmLabel: 'swarm.share.confirm.ok',
       cancelLabel: 'swarm.share.confirm.cancel',
     })

@@ -246,6 +246,15 @@ const RECEIPT_REWALK_MS = 150
 // How long a walk waits on the newest version's availability when an earlier
 // hosted version could go out instead (see #entryFor).
 const ENTRY_WAIT_MS = 250
+// A host's `sync:state` words that mean it is not taking this page's bytes
+// right now (#hostReport): another of the page's hosts that is, speaks.
+const HOST_HELD_STATES: ReadonlySet<string> = new Set(['refused', 'full', 'unreachable', 'not-live', 'too-large'])
+// WHERE A PAGE'S BYTES GO still being read (a reload's first walk; a page
+// whose branch marks were never read) is UNKNOWN, like a cold history read:
+// the walk says nothing for that page — the relay keeps our last slot — and
+// walks again when the answer lands. Bounded, so a page is never silent for
+// longer than this.
+const HOSTS_PENDING_WAIT_MS = 5_000
 // A cold history read (stats.cold) is UNKNOWN, never "no layer" (see
 // #knownLayerAt). Until history has answered once, the store root is still
 // coming up — a reload's first walk — so the read is retried at this cadence
@@ -381,8 +390,8 @@ interface MeshApi {
   subscribe: (sig: string, cb: (e: MeshEvtLike) => void) => MeshSubLike
   configureKinds: (kinds: number[] | null, persist?: boolean) => void
   ensureStartedForSig: (sig: string) => void
-  /** host[:port] of the relay this tab meets at — the swarm's host. '' when
-   *  no relay can be dialled. Optional: an older mesh has none. */
+  /** host[:port] of the relay this tab meets at. '' when no relay can be
+   *  dialled. Optional: an older mesh has none. */
   swarmHost?: () => string
   /** Relay-clock-corrected unix seconds (the hc:host card). */
   nowSec?: () => number
@@ -391,14 +400,33 @@ interface MeshApi {
 /** The slice of HostSyncService the swarm uses: the `.public` marker
  *  writer (which stages uploads) and the availability question. */
 interface HostSyncLike {
-  markPublic: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<void>
+  /** `page`: where the walk offers it — its publish domains decide where the
+   *  bytes go (swarm-hosts.ts). */
+  markPublic: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean, page?: readonly string[]) => Promise<void>
   isClosureAvailable?: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<boolean>
+  /** The same question asked of NAMED hosts only — the page's own. */
+  isClosureAvailableOn?: (sig: string, kind: 'layer' | 'bee' | 'dependency' | 'resource', closure: boolean, domains: readonly string[]) => Promise<boolean>
+  /** The swarm's gate: each part of the closure judged by the hosts of the
+   *  page it is shown on (a branch's own publish domains below its tile).
+   *  null = a page on the way is still being read. */
+  isClosureAvailableAt?: (sig: string, kind: 'layer' | 'bee' | 'dependency' | 'resource', closure: boolean, page: readonly string[], extra?: readonly string[]) => Promise<boolean | null>
+  /** Every swarm host a root's closure is shown on (synchronous). */
+  closureHostsOf?: (sig: string) => string[]
+  /** Where a page's offered tiles go, synchronously (swarm-hosts.ts):
+   *  publish domains, else the hosts pool, else a relay that hosts
+   *  participants. Optional: an older host-sync derives one from the relay. */
+  swarmHostsFor?: (segments: readonly string[]) => SwarmHostChoiceLike
+  /** Start reading a page's hosts before the walk asks. Never waits. */
+  warmSwarmHosts?: (segments: readonly string[]) => void
   /** Is the self-domain backup target on? Only then is it advertised. */
   isEnabled?: () => boolean
   /** A child the walk pruned as private: what only it needed stops
    *  travelling to the swarm's host. */
   withdrawPublic?: (sig: string) => void
 }
+
+/** Where a page's bytes go — host-sync's SwarmHostChoice, structurally. */
+interface SwarmHostChoiceLike { hosts: readonly string[]; source: string; pending: boolean; passedOver?: readonly string[] }
 
 /** The connection state the mesh announces on every transition. */
 interface MeshConnection {
@@ -706,7 +734,7 @@ export class SwarmDrone extends Drone {
   // emits it on every render; if it fires before our lineage-change hook
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
-  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed', 'swarm:visit-folded', 'mesh:connection', 'mesh:rejected', 'sync:state']
+  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed', 'swarm:visit-folded', 'mesh:connection', 'mesh:rejected', 'sync:state', 'swarm:hosts-changed']
   protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed', 'swarm:zone-incomplete', 'swarm:zone-complete', 'swarm:tile-visited', 'swarm:share-status', 'swarm:roster-changed']
 
   // Per-lineage subscription handle. We open one per visited sig and
@@ -766,10 +794,15 @@ export class SwarmDrone extends Drone {
   // set when a walk finds nothing pending.
   #pendingPages = new Map<string, readonly string[]>()
 
-  // The swarm host's last reported state (`sync:state`) — the reason a
-  // name-only tile is name-only, for the sharer's status line.
-  #hostState = ''
-  #hostReason = ''
+  // Each swarm host's last reported state (`sync:state`) — the reason a
+  // name-only tile is name-only, for the sharer's status line. Keyed by host:
+  // a page names the state of the host ITS tiles go to.
+  readonly #hostStates = new Map<string, { state: string; reason: string }>()
+
+  // Pages the walk is holding while their hosts are being read: since when,
+  // and the one timer that walks them again when the wait runs out.
+  readonly #hostsHeldSince = new Map<string, number>()
+  readonly #hostsHeldTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   // Private children at the page this tab stands on, from its last walk —
   // privateCountHere() reads it synchronously.
@@ -1486,17 +1519,20 @@ export class SwarmDrone extends Drone {
     // RECEIPT_REWALK_MS, one walk per burst (a drain lands receipts in runs).
     this.onEffect('host:receipt', () => this.#scheduleReceiptRewalk())
 
-    // The swarm host's state, for the status line: why a tile is name-only
-    // (refused, full, too large, unreachable) or that it is uploading. Only
-    // the swarm host's report counts — another target's backup is not what
-    // this room can fetch from.
-    this.onEffect<{ host?: string; state?: string; status?: string; reason?: string }>('sync:state', (s) => {
+    // The swarm hosts' states, for the status line: why a tile is name-only
+    // (refused, full, too large, unreachable) or that it is uploading. Only a
+    // swarm host's report counts — another target's backup is not what this
+    // room can fetch from — and a page reads its own host's.
+    this.onEffect<{ host?: string; state?: string; status?: string; reason?: string; swarm?: boolean }>('sync:state', (s) => {
       const host = String(s?.host ?? '').trim()
-      const swarmHost = this.#swarmHost()
-      if (host && swarmHost && host !== swarmHost) return
-      this.#hostState = String(s?.state ?? s?.status ?? '')
-      this.#hostReason = String(s?.reason ?? '')
+      if (!host || s?.swarm !== true) return
+      this.#hostStates.set(host, { state: String(s?.state ?? s?.status ?? ''), reason: String(s?.reason ?? '') })
     })
+
+    // A page's hosts became known or moved (the pool, a branch's marks, the
+    // relay's card): walk again, so a name that waited on the read — or went
+    // to the old host — is offered where its bytes now go.
+    this.onEffect('swarm:hosts-changed', () => this.#scheduleReceiptRewalk())
 
     // A FINAL REFUSAL (rate-limited past its re-sends, invalid, a far-off
     // clock): the relay does not hold what the memo says was sent. Un-stamp
@@ -1548,13 +1584,14 @@ export class SwarmDrone extends Drone {
         mesh.resubscribeAll?.()
       }
 
-      // THE MEETING POINT HOSTS THE MEETING (2026-10-04). Joining needs no
-      // host pick: the relay this tab meets at is the swarm's host, derived
-      // by host-sync from the mesh (swarmHost) while this tab is joined. A
-      // tile goes out by name at once and with its signatures once that host
-      // serves them — so there is no "watching only" state to warn about,
-      // and the status line (swarm:share-status) says why a tile is still
-      // name-only when it is.
+      // JOINING IS ENOUGH TO SHARE (2026-10-04; hosts by pool 2026-10-07).
+      // Joining needs no host pick: each page's tiles go to its publish
+      // domains, else the participant's hosts pool, else a relay that hosts
+      // participants — resolved by host-sync (swarmHostsFor) while this tab
+      // is joined. A tile goes out by name at once and with its signatures
+      // once its host serves them — so there is no "watching only" state to
+      // warn about, and the status line (swarm:share-status) says why a tile
+      // is still name-only, and which host it waits on.
 
       if (payload?.public === false) {
         // Graceful leave — a SIGNED tombstone, so peers drop our tiles in one
@@ -2233,6 +2270,9 @@ export class SwarmDrone extends Drone {
       .map((x: unknown) => String(x ?? '').trim())
       .filter((x: string) => x.length > 0)
     const pathKey = lineageKey(segments)
+    // Where this page's tiles go (its publish domains, the hosts pool) starts
+    // being read now, so the walk below finds it cached. Never waited on.
+    try { this.#getHostSync()?.warmSwarmHosts?.(segments) } catch { /* an older host-sync */ }
 
     let composedSig = ''
     try {
@@ -3254,13 +3294,15 @@ export class SwarmDrone extends Drone {
       // CDN doctrine-gate feed: this walk enumerates EXACTLY the public
       // subset, so it is the sanctioned writer of `.public` markers
       // (host-sync markPublic) — and marking is what stages the upload to
-      // the swarm host. A public-BRANCH root vouches for its whole closure;
-      // an individually-public tile marks only its own layer + resources
-      // (closure=false) — private descendants must never acquire a marker.
-      // Fire-and-forget: never awaited in the walk, never throws into it.
+      // this page's swarm hosts (its publish domains, else the hosts pool,
+      // else a relay that hosts participants). A public-BRANCH root vouches
+      // for its whole closure; an individually-public tile marks only its own
+      // layer + resources (closure=false) — private descendants must never
+      // acquire a marker. Fire-and-forget: never awaited in the walk, never
+      // throws into it.
       if (c.layerSig && hostSync) {
         try {
-          void hostSync.markPublic(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name))
+          void hostSync.markPublic(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name), segments)
             .catch(() => undefined)
         } catch { /* never disturb the publish walk */ }
       }
@@ -3268,6 +3310,9 @@ export class SwarmDrone extends Drone {
     }
     childRefs = publicRefs
     const childNames = childRefs.map(c => c.name)  // legacy local var — still used by recursion + log
+    const pageKey = lineageKey(segments)
+    // Unknown hosts: say NOTHING here and stamp no memo (HOSTS_PENDING_WAIT_MS).
+    if (this.#perPage(hostSync) && this.#pageHosts(segments)?.pending && this.#holdForHosts(pageKey, segments)) return
 
     // One entry per public child — its newest version when a host serves
     // it, else the last version one did, else its name (see #entryFor).
@@ -3279,10 +3324,14 @@ export class SwarmDrone extends Drone {
       if (key.startsWith(`${sig}\0`) && !here.has(key)) this.#lastHostedEntry.delete(key)
     }
     const announced = await Promise.all(childRefs.map(c => this.#entryFor(c, segments, sig, hostSync)))
+    // A child whose closure reaches a page still being read, with nothing
+    // hosted to say for it yet: the same hold as above, rather than a name
+    // where a hosted entry may already stand.
+    if (announced.some(a => a.unknown) && this.#holdForHosts(pageKey, segments)) return
+    this.#releaseHostsHold(pageKey)
     const children: ChildEntry[] = announced.map(a => a.entry)
     const nameOnly = announced.filter(a => a.form === 'placeholder').length
     const uploading = announced.filter(a => a.form !== 'full').length
-    const pageKey = lineageKey(segments)
     if (uploading > 0) {
       // Re-insert so the freshest waiting page sits last; the oldest falls off.
       this.#pendingPages.delete(pageKey)
@@ -3298,8 +3347,10 @@ export class SwarmDrone extends Drone {
     if (pageKey === this.#currentPageKey()) {
       // The sharer's status line for the page they stand on: how many go
       // out, how many are still on their way to the host (and of those, how
-      // many as a name alone), how many stay private, and what the swarm
-      // host last said — the reason a name-only tile is name-only.
+      // many as a name alone), how many stay private, WHICH host this page's
+      // tiles go to and why that one (publish domains, the hosts pool, the
+      // relay), and what it last said — the reason a name-only tile is
+      // name-only. No host at all is said as 'no-host'.
       this.#privateHere = prunedNames.length
       this.emitEffect('swarm:share-status', {
         location: publicLocation,
@@ -3307,8 +3358,7 @@ export class SwarmDrone extends Drone {
         uploading,
         nameOnly,
         private: prunedNames.length,
-        hostState: this.#hostState,
-        reason: this.#hostReason,
+        ...this.#hostReport(segments),
       })
     }
     // Stamp our chosen label onto the payload so participants can render
@@ -3373,8 +3423,9 @@ const payload: SwarmLayerPayload = myLabel
       ]
       // Attribute the hosts that hold these tiles' bytes so receivers learn
       // WHERE they live (the adopt's capture-source folder + byte path) —
-      // the swarm host first (#domainTags).
-      tags.push(...this.#domainTags())
+      // this page's swarm hosts first, then where the offered branches'
+      // subtrees went (#domainTags).
+      tags.push(...this.#domainTags(segments, this.#closureHosts(hostSync, childRefs)))
       this.#publishStats.wireEvents++
       const delivered = await mesh.publish(SWARM_LAYER_KIND, sig, payload, tags)
       // Publish honesty: `false` means signing failed — NOTHING reached
@@ -3484,24 +3535,42 @@ const payload: SwarmLayerPayload = myLabel
     segments: readonly string[],
     pageSig: string,
     hostSync: HostSyncLike | undefined,
-  ): Promise<{ entry: ChildEntry; form: EntryForm }> => {
+  ): Promise<{ entry: ChildEntry; form: EntryForm; unknown?: boolean }> => {
     const location = '/' + segments.join('/')
     const memoKey = `${pageSig}\0${child.name}`
     const closure = isBranchPublic(location, child.name)
     let previous = this.#lastHostedEntry.get(memoKey)
     let available = typeof hostSync?.isClosureAvailable !== 'function'
+    // HOSTED = served WHERE IT IS SHOWN: the tile by this page's swarm hosts,
+    // its subtree by the hosts of the pages below (a branch's own publish
+    // domains) — every one of them named in this page's event — or by our own
+    // backup host. A receipt on some other target would announce a handle the
+    // receiver is never told where to fetch. Unjoined (a follower channel) or
+    // an older host-sync: any target. null = a page's hosts still being read.
+    const perPage = this.#perPage(hostSync)
+    const self = this.#advertisedSelf()
+    const advertised = perPage ? this.#advertisedHosts(segments) : []
+    const servedHere = (sig: string): Promise<boolean | null> => !perPage
+      ? hostSync!.isClosureAvailable!(sig, 'layer', closure)
+      : typeof hostSync!.isClosureAvailableAt === 'function'
+        ? hostSync!.isClosureAvailableAt(sig, 'layer', closure, segments, self)
+        : (advertised.length > 0 ? hostSync!.isClosureAvailableOn!(sig, 'layer', closure, advertised) : Promise.resolve(false))
+    let unknown = false
     if (!available && child.layerSig) {
-      const verdict = hostSync!.isClosureAvailable!(child.layerSig, 'layer', closure).catch(() => false)
+      const verdict = servedHere(child.layerSig).catch(() => false)
+      let answer: boolean | null
       if (previous && previous.layerSig !== child.layerSig) {
         let late = false
         let timer: ReturnType<typeof setTimeout> | undefined
-        available = await Promise.race([verdict, new Promise<boolean>(r => { timer = setTimeout(() => { late = true; r(false) }, ENTRY_WAIT_MS) })])
+        answer = await Promise.race([verdict, new Promise<boolean>(r => { timer = setTimeout(() => { late = true; r(false) }, ENTRY_WAIT_MS) })])
         clearTimeout(timer)
         // The answer came after the walk moved on: if it is yes, walk again.
-        if (late) void verdict.then(ok => { if (ok) this.#scheduleReceiptRewalk() })
+        if (late) void verdict.then(ok => { if (ok === true) this.#scheduleReceiptRewalk() })
       } else {
-        available = await verdict
+        answer = await verdict
       }
+      available = answer === true
+      unknown = answer === null
     }
     if (available) {
       const entry = await this.#visualFor(child, segments)
@@ -3509,15 +3578,62 @@ const payload: SwarmLayerPayload = myLabel
       return { entry, form: 'full' }
     }
     if (previous && typeof previous.layerSig === 'string' && hostSync?.isClosureAvailable) {
-      let still = false
-      try { still = await hostSync.isClosureAvailable(previous.layerSig, 'layer', closure) } catch { still = false }
-      if (!still) { this.#lastHostedEntry.delete(memoKey); previous = undefined }
+      let still: boolean | null = false
+      try { still = await servedHere(previous.layerSig) } catch { still = false }
+      // Unknown is not "no": what was hosted stands until the hosts are read.
+      if (still === false) { this.#lastHostedEntry.delete(memoKey); previous = undefined }
     }
     if (previous) return { entry: previous, form: 'previous' }
     const { name, layerSig: _layerSig, inviteSig: _inviteSig, ...rest } = await this.#visualFor(child, segments)
     void _layerSig; void _inviteSig
     const inert = withoutSignatures(rest) as Record<string, unknown> | undefined
-    return { entry: canonicaliseValue({ ...(inert ?? {}), name }) as ChildEntry, form: 'placeholder' }
+    return { entry: canonicaliseValue({ ...(inert ?? {}), name }) as ChildEntry, form: 'placeholder', ...(unknown ? { unknown: true } : {}) }
+  }
+
+  /** Does this host-sync answer where each PAGE's bytes go (and is this tab
+   *  joined, so it has swarm hosts)? */
+  #perPage = (hostSync: HostSyncLike | undefined): boolean =>
+    isJoinedHere() && typeof hostSync?.swarmHostsFor === 'function'
+    && (typeof hostSync.isClosureAvailableAt === 'function' || typeof hostSync.isClosureAvailableOn === 'function')
+
+  /** Hold a page while its hosts are being read (HOSTS_PENDING_WAIT_MS):
+   *  true = say nothing this walk. The answer landing walks it again
+   *  (swarm:hosts-changed); so does the end of the wait, after which the walk
+   *  goes on with what it has. */
+  #holdForHosts = (pageKey: string, segments: readonly string[]): boolean => {
+    const now = Date.now()
+    const since = this.#hostsHeldSince.get(pageKey)
+    if (since === undefined) this.#hostsHeldSince.set(pageKey, now)
+    const waited = now - (since ?? now)
+    if (waited >= HOSTS_PENDING_WAIT_MS) return false
+    this.#pendingPages.delete(pageKey)
+    this.#pendingPages.set(pageKey, [...segments])
+    if (!this.#hostsHeldTimers.has(pageKey)) {
+      this.#hostsHeldTimers.set(pageKey, setTimeout(() => {
+        this.#hostsHeldTimers.delete(pageKey)
+        this.#scheduleReceiptRewalk()
+      }, HOSTS_PENDING_WAIT_MS - waited + 20))
+    }
+    return true
+  }
+
+  #releaseHostsHold = (pageKey: string): void => {
+    this.#hostsHeldSince.delete(pageKey)
+    const timer = this.#hostsHeldTimers.get(pageKey)
+    if (timer !== undefined) { clearTimeout(timer); this.#hostsHeldTimers.delete(pageKey) }
+  }
+
+  /** Where the offered tiles' subtrees went, beyond this page's own hosts:
+   *  the hosts of the pages below each offered branch (host-sync learns them
+   *  re-staging). A receiver taking a branch from this page is told. */
+  #closureHosts = (hostSync: HostSyncLike | undefined, refs: readonly ChildRef[]): string[] => {
+    if (!this.#perPage(hostSync) || typeof hostSync?.closureHostsOf !== 'function') return []
+    const out: string[] = []
+    for (const c of refs) {
+      if (!c.layerSig) continue
+      try { for (const h of hostSync.closureHostsOf(c.layerSig)) if (!out.includes(h)) out.push(h) } catch { /* an older host-sync */ }
+    }
+    return out
   }
 
   // One child's visual — flat: { name, layerSig?, ...0000_fields, titles?,
@@ -3596,27 +3712,67 @@ const payload: SwarmLayerPayload = myLabel
     return visual
   }
 
-  /** ['domain', …] tags for a layer event — WHERE these tiles' bytes live,
-   *  for the receiver's fetch candidates and the adopt's capture-source
-   *  folder. The swarm host first: the relay this tab meets at is the host
-   *  its uploads go to (wss://jwize.com → jwize.com). Our own self-domain
-   *  only when its backup target is actually on — advertising the page's
+  /** Where THIS page's offered tiles go (host-sync, synchronous — caches
+   *  only), or null from an older host-sync that has no per-page answer. */
+  #pageHosts = (segments: readonly string[]): SwarmHostChoiceLike | null => {
+    try { return this.#getHostSync()?.swarmHostsFor?.(segments) ?? null } catch { return null }
+  }
+
+  /** The hosts a page's layer event names, in order — WHERE these tiles'
+   *  bytes went: the page's swarm hosts (its publish domains, else the hosts
+   *  pool, else a relay that hosts participants), then our own self-domain
+   *  only while its backup target is actually on — advertising the page's
    *  origin named a host that never received the bytes (hypercomb.io answers
-   *  every /<sig> with the app page). A loopback host is never advertised
-   *  from a non-loopback origin: nobody else can reach it. */
-  #domainTags = (): string[][] => {
-    const hosts: string[] = []
-    const swarmHost = this.#swarmHost()
-    if (swarmHost) hosts.push(swarmHost)
+   *  every /<sig> with the app page). An older host-sync names the relay, as
+   *  it did. A loopback host is never advertised from a non-loopback origin:
+   *  nobody else can reach it. */
+  #advertisedHosts = (segments: readonly string[], below: readonly string[] = []): string[] => {
+    const choice = this.#pageHosts(segments)
+    const hosts: string[] = choice ? [...choice.hosts] : [this.#swarmHost()].filter(Boolean)
+    for (const h of below) if (h && !hosts.includes(h)) hosts.push(h)
+    for (const h of this.#advertisedSelf()) if (!hosts.includes(h)) hosts.push(h)
+    let originLoopback = false
+    try { originLoopback = isLoopbackHost(window.location.host) } catch { /* no location — treat as public */ }
+    return hosts.filter(h => originLoopback || !isLoopbackHost(h))
+  }
+
+  /** Our own self-domain, while its backup target is actually on — the one
+   *  host our events name besides the swarm's. */
+  #advertisedSelf = (): string[] => {
     let selfOn = false
     try { selfOn = this.#getHostSync()?.isEnabled?.() === true } catch { /* off */ }
     const self = selfOn ? this.#readSelfDomain() : ''
-    if (self && !hosts.includes(self)) hosts.push(self)
+    if (!self) return []
     let originLoopback = false
     try { originLoopback = isLoopbackHost(window.location.host) } catch { /* no location — treat as public */ }
-    return hosts
-      .filter(h => originLoopback || !isLoopbackHost(h))
-      .map(h => ['domain', h])
+    return originLoopback || !isLoopbackHost(self) ? [self] : []
+  }
+
+  /** ['domain', …] tags for a page's layer event — the receiver's fetch
+   *  candidates and the adopt's capture-source folder (#advertisedHosts):
+   *  the page's own hosts first, then `below` (where the offered branches'
+   *  subtrees went). */
+  #domainTags = (segments: readonly string[], below: readonly string[] = []): string[][] =>
+    this.#advertisedHosts(segments, below).map(h => ['domain', h])
+
+  /** WHICH host a page's status line speaks for, why that one, and what it
+   *  last said. Of the page's hosts, the first that is taking bytes — a
+   *  second publish domain that refuses says nothing while the first serves
+   *  the room — else the primary's refusal. A page with no host at all, once
+   *  its hosts have been read, is 'no-host'. */
+  #hostReport = (segments: readonly string[]): { host: string; hosts: string[]; hostSource: string; hostState: string; reason: string; passedOver?: string[] } => {
+    const choice = this.#pageHosts(segments)
+    const hosts = choice ? [...choice.hosts] : [this.#swarmHost()].filter(Boolean)
+    const hostSource = choice ? choice.source : (hosts.length ? 'relay' : 'none')
+    // Pool hosts passed over this session (refused, full, silent): the line
+    // can say why the bytes went elsewhere.
+    const passedOver = choice?.passedOver?.length ? { passedOver: [...choice.passedOver] } : {}
+    if (hosts.length === 0) {
+      return { host: '', hosts, hostSource, hostState: choice && !choice.pending ? 'no-host' : '', reason: '', ...passedOver }
+    }
+    const states = hosts.map(host => ({ host, ...(this.#hostStates.get(host) ?? { state: '', reason: '' }) }))
+    const shown = states.find(x => !HOST_HELD_STATES.has(x.state)) ?? states[0]!
+    return { host: shown.host, hosts, hostSource, hostState: shown.state, reason: shown.reason, ...passedOver }
   }
 
   // Resolve the children to publish at `segments`: the current layer's
@@ -3786,7 +3942,7 @@ const payload: SwarmLayerPayload = myLabel
       ['d', sig],
       ['expiration', String(expirationSecs)],
     ]
-    tags.push(...this.#domainTags())
+    tags.push(...this.#domainTags(segments))
     counter.count++
     this.#publishStats.wireEvents++
     await mesh.publish(SWARM_LAYER_KIND, sig, payload, tags)
@@ -4674,7 +4830,7 @@ const payload: SwarmLayerPayload = myLabel
       for (const c of childEntries) {
         if (!c.layerSig) continue
         try {
-          void hostSync.markPublic(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name))
+          void hostSync.markPublic(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name), segments)
             .catch(() => undefined)
         } catch { /* never disturb the publish */ }
       }
@@ -4702,7 +4858,7 @@ const payload: SwarmLayerPayload = myLabel
       ]
       // Same domain attribution as #publishSubtree — followers adopting from
       // our personal channel get the capture-source host too.
-      tags.push(...this.#domainTags())
+      tags.push(...this.#domainTags(segments, this.#closureHosts(hostSync, childEntries)))
       await mesh.publish(SWARM_LAYER_KIND, channelSig, payload, tags)
     } catch (err) {
       console.warn('[swarm] publish to personal channel failed', { err })

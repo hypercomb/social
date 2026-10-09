@@ -426,9 +426,52 @@ const PERMISSIONS_POLICY = [
 const events = new Map()  // id → event
 const slots = new Map()   // pubkey\0kind\0d → id of the replaceable event held
 
+// THE STORE IS READ BY ADDRESS ONLY (the address gate, below). So it is
+// indexed by the addresses an event names — each 64-hex `x` tag — and, for
+// the HTTP index route, by publisher + kind. A read costs the matches at the
+// address it names, never a walk over every room's events. storeEvent and
+// dropEvent are the only writers of `events`, so the indexes cannot drift.
+const HEX64 = /^[0-9a-f]{64}$/
+const idsByX = new Map()          // 64-hex x value → Set<event id>
+const idsByAuthorKind = new Map() // pubkey\0kind → Set<event id>
+
+function indexAdd(map, key, id) {
+  let set = map.get(key)
+  if (!set) { set = new Set(); map.set(key, set) }
+  set.add(id)
+}
+
+function indexDrop(map, key, id) {
+  const set = map.get(key)
+  if (!set) return
+  set.delete(id)
+  if (set.size === 0) map.delete(key)
+}
+
+/** The signature addresses an event names: its 64-hex `x` tag values. */
+function addressesOf(evt) {
+  const xs = new Set()
+  for (const tag of evt.tags || []) if (Array.isArray(tag) && tag[0] === 'x' && HEX64.test(String(tag[1]))) xs.add(String(tag[1]))
+  return xs
+}
+
+function storeEvent(rec) {
+  events.set(rec.id, rec)
+  for (const x of addressesOf(rec)) indexAdd(idsByX, x, rec.id)
+  indexAdd(idsByAuthorKind, `${rec.pubkey}\0${rec.kind}`, rec.id)
+}
+
+function dropEvent(id) {
+  const rec = events.get(id)
+  if (!rec) return
+  events.delete(id)
+  for (const x of addressesOf(rec)) indexDrop(idsByX, x, id)
+  indexDrop(idsByAuthorKind, `${rec.pubkey}\0${rec.kind}`, id)
+}
+
 // Bumped whenever a WRITER's hive index enters or leaves the store, so what
 // the writers' indexes say (/.well-known/nostr.json) is re-read only when one
-// of them moved — never per request, since finding an index scans the store.
+// of them moved — never per request, since parsing every index costs a read per writer.
 let writerIndexMoves = 0
 const movesWriterIndex = (evt) => Number(evt.kind) === HIVE_INDEX_KIND && writers.has(evt.pubkey)
 
@@ -453,17 +496,16 @@ function insertEvent(evt) {
     const heldId = slots.get(key)
     const held = heldId ? events.get(heldId) : undefined
     if (held && (held.created_at > evt.created_at || (held.created_at === evt.created_at && held.id < evt.id))) return 'stale'
-    if (heldId) events.delete(heldId)
+    if (heldId) dropEvent(heldId)
     slots.set(key, evt.id)
   }
-  events.set(evt.id, { id: evt.id, pubkey: evt.pubkey, created_at: Number(evt.created_at), kind, tags: evt.tags, content: evt.content, sig: evt.sig })
+  storeEvent({ id: evt.id, pubkey: evt.pubkey, created_at: Number(evt.created_at), kind, tags: evt.tags, content: evt.content, sig: evt.sig })
   if (movesWriterIndex(evt)) writerIndexMoves++
   return 'stored'
 }
 
 // NIP-01 event shape, checked before the (expensive) signature. Every
 // refusal is an OK false with a machine-readable prefix.
-const HEX64 = /^[0-9a-f]{64}$/
 const HEX128 = /^[0-9a-f]{128}$/
 const FUTURE_SKEW_SECS = 15 * 60
 function eventShapeError(evt) {
@@ -481,11 +523,21 @@ function eventShapeError(evt) {
 
 function newestEvent(pubkey, kind) {
   let best
-  for (const evt of events.values()) {
-    if (evt.pubkey !== pubkey || evt.kind !== kind) continue
-    if (!best || evt.created_at > best.created_at) best = evt
+  for (const id of idsByAuthorKind.get(`${pubkey}\0${kind}`) ?? []) {
+    const evt = events.get(id)
+    if (evt && (!best || evt.created_at > best.created_at)) best = evt
   }
   return best
+}
+
+/** The ids a filter can match, from the index: exact ids, else every event
+ *  held at one of its `#x` addresses. The address gate has already refused
+ *  any filter that names neither. */
+function candidatesOf(f) {
+  if (Array.isArray(f.ids) && f.ids.length) return f.ids
+  const out = new Set()
+  for (const x of f['#x'] || []) for (const id of idsByX.get(x) ?? []) out.add(id)
+  return out
 }
 
 function queryEvents(filters) {
@@ -493,13 +545,15 @@ function queryEvents(filters) {
   const now = Math.floor(Date.now() / 1000)
   for (const f of filters) {
     const hits = []
-    for (const evt of events.values()) {
+    for (const id of candidatesOf(f)) {
+      const evt = events.get(id)
+      if (!evt) continue
       const exp = expirationOf(evt)
       if (exp && exp < now) continue  // NIP-40: never replay an expired beacon, even before the sweep
       if (matchFilter(f, evt)) hits.push(evt)
     }
     hits.sort((a, b) => b.created_at - a.created_at)
-    results.push(...hits.slice(0, Math.min(f.limit ?? 500, 5000)))
+    results.push(...hits.slice(0, Math.min(f.limit ?? 500, MAX_LIMIT)))
   }
   return results
 }
@@ -509,7 +563,7 @@ function deleteExpired() {
   for (const [id, evt] of events) {
     const exp = expirationOf(evt)
     if (exp && exp < now) {
-      events.delete(id)
+      dropEvent(id)
       if (movesWriterIndex(evt)) writerIndexMoves++
       if ((isAddressableKind(evt.kind) || isReplaceableKind(evt.kind)) && slots.get(slotKey(evt, evt.kind)) === id) slots.delete(slotKey(evt, evt.kind))
     }
@@ -569,7 +623,7 @@ function sweepBuckets() {
 // participant uploads, and how many participants are alive in each room (a
 // room is the first 6 hex of its lifecycle sig). Never an IP, never a key.
 // Printed once a minute, and only when there is something to say.
-const census = { refusedEvents: 0, refusedReqs: 0, refusedSubs: 0, willsFired: 0, willsCancelled: 0, puts: 0, putBytes: 0, putsRefused: 0 }
+const census = { refusedEvents: 0, refusedReqs: 0, refusedSubs: 0, unaddressed: 0, handlerErrors: 0, willsFired: 0, willsCancelled: 0, puts: 0, putBytes: 0, putsRefused: 0 }
 
 function printCensus() {
   const rooms = new Map()  // x prefix → Set of pubkeys (counted, never printed)
@@ -579,10 +633,11 @@ function printCensus() {
     rooms.get(room).add(pubkey)
   }
   const c = census
-  const said = clients.size + c.refusedEvents + c.refusedReqs + c.refusedSubs + c.willsFired + c.willsCancelled + c.puts + c.putsRefused
+  const said = clients.size + c.refusedEvents + c.refusedReqs + c.refusedSubs + c.unaddressed + c.handlerErrors + c.willsFired + c.willsCancelled + c.puts + c.putsRefused
   if (said > 0) {
     const zones = [...rooms].map(([room, keys]) => `${room}:${keys.size}`).join(' ') || 'none'
-    console.log(`[minute] open ${clients.size} · refused event ${c.refusedEvents} req ${c.refusedReqs}${c.refusedSubs ? ` subs ${c.refusedSubs}` : ''} · wills fired ${c.willsFired} cancelled ${c.willsCancelled} · participant puts ${c.puts} (${c.putBytes} bytes) refused ${c.putsRefused} · zones ${zones}`)
+    // `unaddressed`: reads that named no signature (a scan) — CLOSED, see the address gate.
+    console.log(`[minute] open ${clients.size} · refused event ${c.refusedEvents} req ${c.refusedReqs}${c.refusedSubs ? ` subs ${c.refusedSubs}` : ''}${c.unaddressed ? ` unaddressed ${c.unaddressed}` : ''}${c.handlerErrors ? ` · handler errors ${c.handlerErrors}` : ''} · wills fired ${c.willsFired} cancelled ${c.willsCancelled} · participant puts ${c.puts} (${c.putBytes} bytes) refused ${c.putsRefused} · zones ${zones}`)
   }
   for (const k of Object.keys(c)) c[k] = 0
 }
@@ -643,64 +698,139 @@ const clients = new Set()
 const MAX_SUBS_PER_CLIENT = 200
 const MAX_SUBID_LENGTH = 64  // NIP-01
 
+// ── the address gate ─────────────────────────────────────────────────────────
+//
+// THE SIGNATURES ARE THE ONLY THING THAT CAN BE QUERIED (jwize 2026-09-25;
+// 2026-10-07: "the directory can not be scanned on the mesh … that would be
+// making our private information public"). A room meets at addresses only
+// its members can derive — sign(<label>\0room\0secret) — so what the relay
+// holds stays the room's exactly as long as every read must NAME one. A
+// filter that named none (kinds only, authors only, `{}`) used to replay up to
+// 5000 events from every room, then receive every live event the relay saw,
+// and it cost a walk over the whole store per REQ. Now each filter names its
+// addresses — `#x` signatures, or exact event `ids` — and anything else is
+// CLOSED `restricted:`: nothing replayed, nothing routed, the store untouched.
+// A read costs the matches at its addresses (idsByX), never the store.
+//
+// Two words predate signatures naming everything. Each is decided here:
+//   'hc:live'      the liveness probe (nostr-mesh PROBE_FRAME). Not a channel:
+//                  answered EOSE and never stored or routed, so nothing can
+//                  ever be heard on it.
+//   'broker:fetch' the content broker's ask channel on builds before the
+//                  room-scoped one (content-broker ASK_LABEL). An ask names the
+//                  bytes — or a room's location — it wants, so a channel anyone
+//                  can hear is a directory of every room's addresses. Kept for
+//                  the drain ONLY room-scoped: an event on it reaches a
+//                  subscriber only when both connections beaconed one lifecycle
+//                  zone (sharesZone), and nothing on it is ever replayed. A
+//                  scanner that knows no room's lifecycle sig hears nothing.
+//                  Retire it with the last build that asks there.
+const LIVENESS_WORD = 'hc:live'
+const ROOM_SCOPED_WORDS = new Set(['broker:fetch'])
+const MAX_FILTERS_PER_REQ = 10
+const MAX_ADDRESSES_PER_REQ = 256
+const MAX_LIMIT = 5000
+
+const isStringArray = (v) => Array.isArray(v) && v.every((s) => typeof s === 'string')
+const isCount = (v) => v === undefined || v === null || (typeof v === 'number' && Number.isFinite(v))
+
+/** The `ids` or the `#x` values a filter names, or null when it names none. */
+function namedAddresses(f) {
+  if (Array.isArray(f.ids) && f.ids.length) return f.ids
+  if (Array.isArray(f['#x']) && f['#x'].length) return f['#x']
+  return null
+}
+
+/** The CLOSED reason for a REQ whose filters are malformed or name no
+ *  signature address, else null. Shape first: a `kinds` that was not an array
+ *  used to throw inside matchFilter and take the whole process down. */
+function filterRefusal(filters) {
+  if (filters.length > MAX_FILTERS_PER_REQ) return `invalid: at most ${MAX_FILTERS_PER_REQ} filters in one REQ`
+  let named = 0
+  for (const f of filters) {
+    for (const field of ['ids', 'authors']) if (f[field] !== undefined && !isStringArray(f[field])) return `invalid: ${field} must be an array of strings`
+    if (f.kinds !== undefined && !(Array.isArray(f.kinds) && f.kinds.every(Number.isInteger))) return 'invalid: kinds must be an array of integers'
+    for (const field of ['since', 'until', 'limit']) if (!isCount(f[field])) return `invalid: ${field} must be a number`
+    if (typeof f.limit === 'number' && f.limit < 0) return 'invalid: limit must not be negative'
+    for (const key of Object.keys(f)) if (key[0] === '#' && !isStringArray(f[key])) return `invalid: ${key} must be an array of strings`
+    const addresses = namedAddresses(f)
+    if (!addresses) return 'restricted: name a signature address (#x) or exact ids — this relay lists nothing'
+    if (addresses === f.ids ? !addresses.every((id) => HEX64.test(id)) : !addresses.every((x) => HEX64.test(x) || ROOM_SCOPED_WORDS.has(x))) {
+      return `restricted: ${addresses === f.ids ? 'ids' : '#x'} must be 64-hex signatures`
+    }
+    named += addresses.length
+  }
+  return named > MAX_ADDRESSES_PER_REQ ? `invalid: at most ${MAX_ADDRESSES_PER_REQ} addresses in one REQ` : null
+}
+
+/** The liveness probe: every filter's `#x` is the probe word and nothing else. */
+const isLivenessProbe = (filters) => filters.every((f) => !f.ids && Array.isArray(f['#x']) && f['#x'].length > 0 && f['#x'].every((x) => x === LIVENESS_WORD))
+
+/** Did connections `a` and `b` both beacon {alive} in one lifecycle zone? */
+function sharesZone(a, b) {
+  for (const key of a.beaconed) {
+    const x = key.slice(0, key.indexOf('\0'))
+    if (!HEX64.test(x)) continue
+    for (const other of b.beaconed) if (other.startsWith(x + '\0')) return true
+  }
+  return false
+}
+
 // ── subscription routing ─────────────────────────────────────────────────────
 //
-// Every swarm subscription is addressed by a signature in its `#x` filter —
-// that IS the meeting point. So live fan-out is routed by that tag: an
-// event is offered only to the subscriptions that asked for one of its
-// `x` values, never to every subscription of every connection. A filter
-// without `#x` (a generic Nostr client) lands in the catch-all and is
-// checked against everything. Cost per event is the number of listeners
-// at that address, not the number of listeners on the relay.
+// Every subscription names its addresses (the gate above), so live fan-out is
+// routed by them: an event is offered only to the subscriptions that named one
+// of its `x` values or its id, never to every subscription of every
+// connection. Cost per event is the number of listeners at that address, not
+// the number of listeners on the relay. There is no catch-all.
 
-const subsByX = new Map()     // x value → Set<{ client, subId }>
-const subsCatchAll = new Set() // { client, subId } for filters without #x
+const subsByX = new Map()   // x value → Set<{ client, subId }>
+const subsById = new Map()  // event id → Set<{ client, subId }>
 
-function xValuesOf(filters) {
+/** The routing keys of a filter set: each filter's exact ids, else its `#x`. */
+function routesOf(filters) {
   const xs = new Set()
+  const ids = new Set()
   for (const f of filters) {
-    const values = f['#x']
-    if (!Array.isArray(values) || values.length === 0) return null  // one unaddressed filter → catch-all
-    for (const v of values) xs.add(String(v))
+    if (Array.isArray(f.ids) && f.ids.length) for (const id of f.ids) ids.add(id)
+    else for (const x of f['#x']) xs.add(x)
   }
-  return xs
+  return { xs, ids }
 }
 
 function routeSubscription(client, subId, filters) {
   unrouteSubscription(client, subId)
   const entry = { client, subId }
-  const xs = xValuesOf(filters)
-  if (!xs) { subsCatchAll.add(entry); client.routes.set(subId, { entry, xs: null }); return }
-  for (const x of xs) {
-    let set = subsByX.get(x)
-    if (!set) { set = new Set(); subsByX.set(x, set) }
-    set.add(entry)
-  }
-  client.routes.set(subId, { entry, xs })
+  const { xs, ids } = routesOf(filters)
+  for (const x of xs) indexAdd(subsByX, x, entry)
+  for (const id of ids) indexAdd(subsById, id, entry)
+  client.routes.set(subId, { entry, xs, ids })
 }
 
 function unrouteSubscription(client, subId) {
   const route = client.routes.get(subId)
   if (!route) return
   client.routes.delete(subId)
-  if (!route.xs) { subsCatchAll.delete(route.entry); return }
-  for (const x of route.xs) {
-    const set = subsByX.get(x)
-    if (!set) continue
-    set.delete(route.entry)
-    if (set.size === 0) subsByX.delete(x)
-  }
+  for (const x of route.xs) indexDrop(subsByX, x, route.entry)
+  for (const id of route.ids) indexDrop(subsById, id, route.entry)
 }
 
-function broadcast(evt, sourceWs) {
-  const candidates = new Set(subsCatchAll)
+/** Fan an event out to the subscriptions at its addresses. `source` is the
+ *  connection it came from (never echoed), or null for one the relay made. A
+ *  room-scoped word reaches only subscribers that share a zone with `source`. */
+function broadcast(evt, source) {
+  const candidates = new Set()
   for (const tag of evt.tags || []) {
     if (!Array.isArray(tag) || tag[0] !== 'x') continue
-    const set = subsByX.get(String(tag[1]))
-    if (set) for (const entry of set) candidates.add(entry)
+    const value = String(tag[1])
+    const set = subsByX.get(value)
+    if (!set) continue
+    const scoped = ROOM_SCOPED_WORDS.has(value)
+    for (const entry of set) if (!scoped || (source && sharesZone(source, entry.client))) candidates.add(entry)
   }
+  for (const entry of subsById.get(evt.id) ?? []) candidates.add(entry)
   for (const { client: c, subId } of candidates) {
-    if (c.ws === sourceWs) continue
+    if (c === source) continue
     if (c.ws.readyState !== 1) continue
     if (authRequired && !c.authed) continue
     const filters = c.subs.get(subId)
@@ -938,27 +1068,41 @@ function handleMessage(client, raw) {
     send(client.ws, ['OK', evt.id, true, ''])
     // A stale replaceable is accepted (the publisher did nothing wrong) but
     // not fanned out: subscribers already hold the newer slot.
-    if (verdict !== 'stale') broadcast(evt, client.ws)
+    if (verdict !== 'stale') broadcast(evt, client)
     return
   }
 
   if (type === 'REQ') {
     const subId = msg[1]
     if (typeof subId !== 'string' || !subId || subId.length > MAX_SUBID_LENGTH) { send(client.ws, ['CLOSED', String(subId ?? ''), `invalid: subscription id must be 1–${MAX_SUBID_LENGTH} characters`]); return }
+
+    const filters = msg.slice(2)
+    if (filters.length === 0 || !filters.every((f) => f && typeof f === 'object' && !Array.isArray(f))) { send(client.ws, ['CLOSED', subId, 'invalid: a REQ needs at least one filter object']); return }
+
+    // A REQ replaces any subscription of the same id (NIP-01), so a refused
+    // or probing REQ also ends whatever that id was listening to.
+    const probe = isLivenessProbe(filters)
+    const refusal = probe ? null : filterRefusal(filters)
+    if (probe || refusal) {
+      client.subs.delete(subId)
+      unrouteSubscription(client, subId)
+      if (probe) { send(client.ws, ['EOSE', subId]); return }
+      census.unaddressed++
+      send(client.ws, ['CLOSED', subId, refusal])
+      return
+    }
+
     if (client.subs.size >= MAX_SUBS_PER_CLIENT && !client.subs.has(subId)) {
       // Counted in the minute line — a silent refusal here is a deaf
       // participant who cannot tell why.
       census.refusedSubs++
       send(client.ws, ['CLOSED', subId, `error: too many subscriptions (max ${MAX_SUBS_PER_CLIENT})`]); return
     }
-
-    const filters = msg.slice(2)
-    if (filters.length === 0 || !filters.every((f) => f && typeof f === 'object' && !Array.isArray(f))) { send(client.ws, ['CLOSED', subId, 'invalid: a REQ needs at least one filter object']); return }
     client.subs.set(subId, filters)
     routeSubscription(client, subId, filters)
 
-    // limit:0 asks for nothing stored — a liveness probe ('hc-live') or a
-    // live-only listen. Answer EOSE without scanning the store.
+    // limit:0 asks for nothing stored — a live-only listen. Answer EOSE
+    // without reading the store.
     if (filters.every((f) => f.limit === 0)) { send(client.ws, ['EOSE', subId]); return }
 
     const events = queryEvents(filters)
@@ -980,7 +1124,11 @@ const relayInfo = {
     max_message_length: cfg.maxEventSize,
     max_subscriptions: MAX_SUBS_PER_CLIENT,
     max_subid_length: MAX_SUBID_LENGTH,
-    max_limit: 5000,
+    max_limit: MAX_LIMIT,
+    max_filters: MAX_FILTERS_PER_REQ,
+    // Every read names a signature address (`#x`) or exact ids; any other
+    // filter is CLOSED `restricted:` (the address gate). Nothing is listed.
+    addressed_reads: true,
     auth_required: authRequired,
     // Whether PUT /<sig> takes a live participant's bytes: 'all', 'zones', or
     // false (writers only). A pre-meeting curl reads it; clients never
@@ -1154,7 +1302,7 @@ function tryServeHiveIndex(req, res) {
  *  index declares it in `listed` (host-listing.js). The floor answers without
  *  reading an index, so the addresses every follower asks cost nothing. The
  *  declared ones are read once per move of a writer's index (as profileSigs
- *  is) — every PUT asks this too, and finding an index scans the store. */
+ *  is) — every PUT asks this too, and each writer's index is parsed once per move. */
 let declaredPools = { moves: -1, sigs: new Set() }
 function listedPool(sig) {
   if (PUBLIC_POOL_ADDRESSES.has(sig)) return true
@@ -1790,14 +1938,13 @@ function tryWriteContent(req, res) {
   const target = participant ? join(root, sig) : resolved
 
   // A directory at the address is a pool or a history bag: never replaced by
-  // an atom. Asked only once the caller is admitted, so a stranger cannot use
-  // the answer to learn which bags this host holds.
+  // an atom. That is answered only once the body hashes to the address (land):
+  // with --allow-participants any key that has spoken once is admitted, so an
+  // answer given before the hash told anyone which bags and pools this host
+  // holds, at any address they cared to name. Now only a caller holding the
+  // address's own preimage can learn it.
   let held = false
-  try {
-    const entry = statSync(target)
-    if (entry.isDirectory()) { respondText(res, 409, 'target is a directory — an atom never replaces a pool or a bag'); return true }
-    held = entry.isFile()
-  } catch { /* not held */ }
+  try { held = statSync(target).isFile() } catch { /* not held */ }
 
   const ip = participant ? requestIp(req) : null
   const limit = participant ? participantCaps.blob : cfg.maxBodyBytes
@@ -1831,6 +1978,7 @@ function tryWriteContent(req, res) {
   const land = async () => {
     const actual = hash.digest('hex')
     if (actual !== sig) { respondText(res, 422, `hash mismatch: sha256(body)=${actual.slice(0, 12)} != ${sig.slice(0, 12)}`); return }
+    if (await isDirectoryAt(target)) { respondText(res, 409, 'target is a directory — an atom never replaces a pool or a bag'); return }
     const now = Date.now()
     if (participant) {
       // Held already (or landed while this one uploaded): the receipt is true
@@ -1873,6 +2021,10 @@ function stored(res, sig) {
 
 async function isHeldAtom(path) {
   try { return (await fsp.stat(path)).isFile() } catch { return false }
+}
+
+async function isDirectoryAt(path) {
+  try { return (await fsp.stat(path)).isDirectory() } catch { return false }
 }
 
 // A cap's refusal, with Retry-After where waiting helps — exposed, or a
@@ -2103,7 +2255,12 @@ wss.on('connection', (ws, req) => {
 
   client.alive = true
   ws.on('pong', () => { client.alive = true })
-  ws.on('message', (data) => { client.alive = true; handleMessage(client, String(data)) })
+  // One frame can never take the meeting point down: a throw is this frame's
+  // NOTICE and a count in the minute line, and the process carries on.
+  ws.on('message', (data) => {
+    client.alive = true
+    try { handleMessage(client, String(data)) } catch { census.handlerErrors++; send(ws, ['NOTICE', 'error: could not handle that message']) }
+  })
   ws.on('close', () => handleDisconnect(client))
   ws.on('error', () => handleDisconnect(client))
 })

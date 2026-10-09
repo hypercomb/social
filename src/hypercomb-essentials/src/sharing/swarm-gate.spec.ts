@@ -10,7 +10,7 @@
 // (hypercomb.io), so the loopback-advertising rule is exercised for real.
 
 import { createHash } from 'node:crypto'
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus, lineageKey } from '@hypercomb/core'
 
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
@@ -295,5 +295,153 @@ describe('the never-retract gate', () => {
     for (const p of published) {
       for (const t of p.tags) if (t[0] === 'domain') expect(t[1]).not.toMatch(/localhost|127\.0\.0\.1/)
     }
+  })
+})
+
+// ── per page: the hosts its tiles went to (jwize 2026-10-07) ──────────────
+// A current host-sync answers where each page's tiles go (swarmHostsFor:
+// publish domains, else the hosts pool, else a relay that hosts participants)
+// and whether a closure is served ON those hosts (isClosureAvailableOn). The
+// layer event names exactly them, the gate asks exactly them, and the status
+// line says which one and why.
+
+describe('per page: the hosts its tiles went to', () => {
+  type Choice = { hosts: string[]; source: string; pending: boolean }
+  const pageHosts = new Map<string, Choice>()
+  const availableOn = new Map<string, string[]>()
+  const current = hostSync as unknown as Record<string, unknown>
+  const domainsAt = (page: string[]): string[][] => lastLayerAt(page)!.tags.filter(t => t[0] === 'domain')
+
+  beforeEach(() => {
+    pageHosts.clear()
+    availableOn.clear()
+    current['swarmHostsFor'] = (segments: readonly string[]): Choice =>
+      pageHosts.get(segments.join('/')) ?? { hosts: ['hypercomb.com'], source: 'pool', pending: false }
+    current['isClosureAvailableOn'] = async (sig: string, _kind: string, _closure: boolean, domains: readonly string[]) =>
+      (availableOn.get(sig) ?? []).some(d => domains.includes(d))
+    current['warmSwarmHosts'] = () => undefined
+  })
+  afterEach(() => {
+    delete current['swarmHostsFor']
+    delete current['isClosureAvailableOn']
+    delete current['warmSwarmHosts']
+  })
+
+  it('a pool page names hypercomb.com — never the relay it meets at — and tells markPublic the page', async () => {
+    const page = ['p1']
+    seedPage(page, ['eta'])
+    makePublic(page, 'eta')
+    availableOn.set(sealOf(page, 'eta'), ['hypercomb.com'])
+    await goTo(page)
+    expect(domainsAt(page)).toEqual([['domain', 'hypercomb.com']])
+    expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBe(sealOf(page, 'eta'))
+    expect(JSON.stringify(layerAt(page).map(p => p.tags))).not.toContain('jwize.com')
+    expect(shareStatus.at(-1)).toMatchObject({ location: '/p1', host: 'hypercomb.com', hosts: ['hypercomb.com'], hostSource: 'pool' })
+    expect(hostSync.markPublic).toHaveBeenCalledWith(sealOf(page, 'eta'), 'layer', false, ['p1'])
+  })
+
+  it('a page wearing publish domains names them, and counts as hosted only once THEY serve it', async () => {
+    const page = ['p2']
+    pageHosts.set('p2', { hosts: ['pointblank.example'], source: 'publish', pending: false })
+    seedPage(page, ['theta'])
+    makePublic(page, 'theta')
+    availableOn.set(sealOf(page, 'theta'), ['hypercomb.com']) // served elsewhere only
+    await goTo(page)
+    expect(domainsAt(page)).toEqual([['domain', 'pointblank.example']])
+    expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBeUndefined()
+    expect(shareStatus.at(-1)).toMatchObject({ location: '/p2', host: 'pointblank.example', hostSource: 'publish' })
+
+    availableOn.set(sealOf(page, 'theta'), ['pointblank.example'])
+    const n = layerAt(page).length
+    EffectBus.emit('host:receipt', { sig: sealOf(page, 'theta'), host: 'pointblank.example', swarm: true })
+    await until(() => layerAt(page).length > n, 1000)
+    expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBe(sealOf(page, 'theta'))
+  })
+
+  it('a page\'s status speaks for its own host: another host\'s refusal is not its reason', async () => {
+    const page = ['p4']
+    seedPage(page, ['kappa'])
+    makePublic(page, 'kappa')
+    EffectBus.emit('sync:state', { host: 'jwize.com', state: 'refused', status: 'refused', reason: '403 participants-closed', swarm: true })
+    EffectBus.emit('sync:state', { host: 'hypercomb.com', state: 'syncing', status: 'syncing', reason: '', swarm: true })
+    await goTo(page)
+    expect(shareStatus.at(-1)).toMatchObject({ location: '/p4', host: 'hypercomb.com', hostState: 'syncing' })
+  })
+
+  it('nothing hosts a page: names only, no domain named, said as no-host', async () => {
+    const page = ['p3']
+    pageHosts.set('p3', { hosts: [], source: 'none', pending: false })
+    seedPage(page, ['iota'])
+    makePublic(page, 'iota')
+    availableOn.set(sealOf(page, 'iota'), ['jwize.com'])
+    await goTo(page)
+    expect(domainsAt(page)).toEqual([])
+    expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBeUndefined()
+    expect(shareStatus.at(-1)).toMatchObject({ location: '/p3', host: '', hostSource: 'none', hostState: 'no-host' })
+  })
+
+  it('a page whose hosts are still being read says NOTHING yet — never the relay meanwhile — and walks when they land', async () => {
+    const page = ['p5']
+    pageHosts.set('p5', { hosts: [], source: 'none', pending: true })
+    seedPage(page, ['lambda'])
+    makePublic(page, 'lambda')
+    availableOn.set(sealOf(page, 'lambda'), ['jwize.com', 'hypercomb.com'])
+    const since = published.length
+    state.segments = page
+    lineage.dispatchEvent(new Event('change'))
+    await new Promise(r => setTimeout(r, 300))
+    // Like a cold history read: no slot is written for a page whose hosts are
+    // unknown — the relay keeps whatever it had, and no host is guessed.
+    expect(layerAt(page)).toEqual([])
+    expect(JSON.stringify(published.slice(since).map(p => p.tags))).not.toContain('jwize.com')
+    expect(hostSync.markPublic).toHaveBeenCalledWith(sealOf(page, 'lambda'), 'layer', false, ['p5'])
+
+    // The read lands: the page walks, where its bytes go.
+    pageHosts.set('p5', { hosts: ['hypercomb.com'], source: 'pool', pending: false })
+    EffectBus.emit('swarm:hosts-changed', { at: Date.now() })
+    await until(() => layerAt(page).length > 0, 1000)
+    expect(domainsAt(page)).toEqual([['domain', 'hypercomb.com']])
+    expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBe(sealOf(page, 'lambda'))
+  })
+
+  it('hosts going unknown again (a reload\'s first walk) never take back a hosted handle', async () => {
+    const page = ['p6']
+    seedPage(page, ['mu'])
+    makePublic(page, 'mu')
+    availableOn.set(sealOf(page, 'mu'), ['hypercomb.com'])
+    await goTo(page)
+    expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBe(sealOf(page, 'mu'))
+    const n = layerAt(page).length
+
+    pageHosts.set('p6', { hosts: [], source: 'none', pending: true })
+    EffectBus.emit('cell:0000-changed', { cell: 'mu' })
+    await new Promise(r => setTimeout(r, 300))
+    // Nothing said while unknown: the slot that holds the hosted entry stands.
+    expect(layerAt(page).length).toBe(n)
+    for (const p of layerAt(page)) expect(p.payload.visuals![0]['layerSig']).toBe(sealOf(page, 'mu'))
+  })
+
+  it('a closure whose deeper page is still being read keeps the hosted entry, not a name', async () => {
+    const page = ['p7']
+    seedPage(page, ['nu'])
+    makePublic(page, 'nu')
+    // The per-page gate (isClosureAvailableAt): yes for the first version.
+    const verdicts = new Map<string, boolean | null>([[sealOf(page, 'nu'), true]])
+    current['isClosureAvailableAt'] = async (sig: string) => (verdicts.has(sig) ? verdicts.get(sig)! : false)
+    try {
+      await goTo(page)
+      expect(lastLayerAt(page)!.payload.visuals![0]['layerSig']).toBe(sealOf(page, 'nu'))
+
+      // An edit whose subtree reaches a page still being read: unknown, for
+      // the new version AND (a moment) for the one already hosted.
+      state.seal.set('p7/nu', sha('seal:p7/nu:v2'))
+      verdicts.set(sha('seal:p7/nu:v2'), null)
+      verdicts.set(sha('seal:p7/nu:v1'), null)
+      const statusBefore = shareStatus.length
+      EffectBus.emit('cell:0000-changed', { cell: 'nu' })
+      await until(() => shareStatus.length > statusBefore && shareStatus.at(-1)!['location'] === '/p7')
+      for (const p of layerAt(page)) expect(p.payload.visuals![0]['layerSig']).toBe(sha('seal:p7/nu:v1'))
+      expect(shareStatus.at(-1)).toMatchObject({ nameOnly: 0 })
+    } finally { delete current['isClosureAvailableAt'] }
   })
 })

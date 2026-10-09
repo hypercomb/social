@@ -31,6 +31,7 @@
 
 import { Drone, isWindowShowing } from '@hypercomb/core'
 import {
+  HOSTS_SEEDED_KEY,
   addCommunityHost,
   hostZone,
   listCommunityHosts,
@@ -95,7 +96,14 @@ const SEED_HOST = 'hypercomb.com'
 /** Seeded once, ever. Without this the seed would come BACK after a removal,
  *  which is precisely the bug the community/marks split was built to kill: a
  *  host you deleted must stay deleted, even this one. */
-const SEEDED_KEY = 'hc:hosts:seeded'
+const SEEDED_KEY = HOSTS_SEEDED_KEY
+
+/** A seed that could not be written is read for again, a bounded few times:
+ *  the store registers before its OPFS root is open, and both boot reads can
+ *  land in that gap — on some profiles every boot did, and the pool stayed
+ *  empty for good (the swarm's upload host is this pool's first host). */
+const SEED_RETRIES = 8
+const SEED_RETRY_MS = 500
 
 export interface HostsRenderPayload {
   open: boolean
@@ -123,6 +131,7 @@ export class HostsDrone extends Drone {
   #open = false
   #loaded = false
   #zones: string[] = []
+  #seedRetries = 0
 
   constructor() {
     super()
@@ -245,6 +254,17 @@ export class HostsDrone extends Drone {
     }
     this.#loaded = true
     this.#emit()
+    this.#retryMissedSeed()
+  }
+
+  /** The pool is still empty and the seed never landed: read again soon. A
+   *  participant who removed every host has the flag set, so this never
+   *  plants a host they deleted. */
+  #retryMissedSeed(): void {
+    if (this.#zones.length > 0 || this.#seedRetries >= SEED_RETRIES) return
+    try { if (localStorage.getItem(SEEDED_KEY) === '1') return } catch { return }
+    this.#seedRetries++
+    setTimeout(() => { void this.#read() }, SEED_RETRY_MS * this.#seedRetries)
   }
 
   /**

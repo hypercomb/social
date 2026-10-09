@@ -98,7 +98,10 @@ interface HostSyncLike {
   publicHostDomain?: () => string
   /** Name the nodes THIS publish puts its bytes on (host-sync.service). */
   addPublishNodes?: (domains: readonly string[]) => void
-  markPublic?: (sig: string, kind?: string, closure?: boolean) => Promise<void>
+  /** `page: false` — a publish is not a room offer: its bytes go to the
+   *  nodes this act names (the marker rule), never to a joined tab's swarm
+   *  hosts (host-sync.service markPublic). */
+  markPublic?: (sig: string, kind?: string, closure?: boolean, page?: readonly string[] | null | false) => Promise<void>
   drain?: () => Promise<void>
   reDrain?: () => Promise<unknown>
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
@@ -307,7 +310,7 @@ export async function publishBranch(
 
   // 4. Stage the sealed closure and start pushing.
   report({ phase: 'staging' })
-  await hostSync.markPublic(sealed, 'layer', true)
+  await hostSync.markPublic(sealed, 'layer', true, false)
   if (options.forceReDrain) void hostSync.reDrain?.()
   else void hostSync.drain?.()
 
@@ -416,7 +419,7 @@ export async function publishBranch(
     // stranger who reads the pointer must find the atoms on the same host.
     for (const sig of [advanced.claim, advanced.head, ...advanced.envelopes]) {
       if (!stageAtoms.includes(sig)) stageAtoms.push(sig)
-      await hostSync.markPublic(sig, 'resource')
+      await hostSync.markPublic(sig, 'resource', true, false)
     }
   }
 
@@ -442,7 +445,7 @@ export async function publishBranch(
   let bundleSig: string
   try { bundleSig = await store.putResource(encodeHiveLinkBundle(bundle)) }
   catch { return { ok: false, failure: 'bundle-failed', sealed } }
-  await hostSync.markPublic(bundleSig, 'resource')
+  await hostSync.markPublic(bundleSig, 'resource', true, false)
   const linkReceipted = (await hostSync.ensureReceipt?.(bundleSig, BUNDLE_RECEIPT_MS)) === true
   // The stage atoms share the link's budget, side by side: a pointer a
   // stranger can read must find its atom on the host.
@@ -617,7 +620,7 @@ async function withdrawFromStages(
     const next = await withdrawStage(word, gone, { pubkey }, keepFor(word))
     if (!next.ok || !next.changed || !SIG_RE.test(next.claim)) continue
     pointers[stageRootKey(word)] = next.claim
-    for (const sig of [next.claim, next.head, ...next.envelopes]) await hostSync?.markPublic?.(sig, 'resource')
+    for (const sig of [next.claim, next.head, ...next.envelopes]) await hostSync?.markPublic?.(sig, 'resource', true, false)
   }
   return pointers
 }
@@ -662,7 +665,7 @@ export async function setBranchDoors(
   const live = await advanceStage(STAGE_LIVE, { add: [head], keep: h => liveHeads.has(h) }, { pubkey })
   if (live.ok && live.changed && SIG_RE.test(live.claim)) {
     roots[stageRootKey(STAGE_LIVE)] = live.claim
-    for (const sig of [live.claim, live.head, ...live.envelopes]) await hostSync?.markPublic?.(sig, 'resource')
+    for (const sig of [live.claim, live.head, ...live.envelopes]) await hostSync?.markPublic?.(sig, 'resource', true, false)
   }
   const put = await putHiveManifest(indexHost, roots, doors,
     read.manifest.createdAt, read.manifest.signedContent)

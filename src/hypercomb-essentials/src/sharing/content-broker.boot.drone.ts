@@ -27,9 +27,10 @@
 //
 // Wire shape (layer-only on the mesh):
 //
-//   REQUEST  kind 20400, tags [['x', BROADCAST_TAG], ['d', sig], ['t', 'layer']]
+//   REQUEST  kind 20400, tags [['x', askChannel], ['d', sig], ['t', 'layer']]
 //            content empty; the sig travels as a tag.
-//            Broadcast to every participant subscribed on BROADCAST_TAG.
+//            Asked on the ROOM's ask channel (see ASK_LABEL), heard by
+//            every participant joined to the same room.
 //            `t` field retained for forward compatibility but the
 //            responder ignores any value other than 'layer'.
 //
@@ -106,7 +107,7 @@ const KIND_FETCH_RESPONSE = 30401
 // sig (between #readLocal and the publish call) checks the cancelled
 // set before committing bandwidth and aborts if the sig is now done.
 //
-// The cancel event flows on BROADCAST_TAG (same channel as requests) so
+// The cancel event flows on the ask channel (same channel as requests) so
 // every broker already subscribed there sees it without needing
 // per-sig subscriptions. Short expiration — just long enough to outlast
 // in-flight preparations.
@@ -119,12 +120,31 @@ const CANCEL_TTL_MS = 30_000  // 30s — enough to cover any reasonable readLoca
 // for an active session window without piling up indefinitely.
 const RESPONSE_TTL_SECS = 86_400
 
-// Well-known broadcast channel. Every participant subscribes here at
-// boot; every request publishes here. Could be made room-scoped later
-// if we want network partitioning by zone, but plain global works for
-// the layer/resource/dependency space since content is content-
-// addressed (sig collision across zones is cryptographically absent).
-const BROADCAST_TAG = 'broker:fetch'
+// THE ASK CHANNEL IS THE ROOM'S (jwize 2026-10-07: "the signatures are the
+// only thing that can be queried"; a scannable directory "would be making our
+// private information public"). Every ask names what it wants in `d` — and a
+// visuals ask names the room's own composed location — so whoever can hear
+// the channel learns the room's addresses, then reads them. It used to be the
+// one global word 'broker:fetch', which anyone on a relay could subscribe to.
+// Now it is sign('broker:fetch\0room\0secret'), derived like the lifecycle
+// and presence channels: only the room's members can name it. A tab that is
+// not joined to a room asks nothing over the mesh — its bytes come from hosts.
+const ASK_LABEL = 'broker:fetch'
+const ROOM_STORE_KEY = '@hypercomb.social/RoomStore'
+const SECRET_STORE_KEY = '@hypercomb.social/SecretStore'
+
+// DRAIN — builds before the room channel ask and listen on the WORD itself.
+// While a joined tab is in a room it still LISTENS there, so an older build's
+// ask is answered, and while it has heard an older build ask in the last
+// OLDER_ASKER_TTL_MS it also ASKS there, so an older build's bytes are still
+// reachable — that copy carries ROOM_COPY_TAG, and a current holder (which
+// heard the room copy) skips it. A relay with the address gate delivers the
+// word only between connections that beaconed the same zone and replays
+// nothing on it (relay.js ROOM_SCOPED_WORDS); a relay before it is the open
+// word it always was. Retire both with the last build that asks there.
+const LEGACY_ASK_WORD = 'broker:fetch'
+const ROOM_COPY_TAG: string[] = ['asked', 'room']
+const OLDER_ASKER_TTL_MS = 10 * 60_000
 
 // Hard ceiling for response bytes. Mirrors swarm.drone.ts
 // MAX_RESOURCE_BYTES — at this size the base64-encoded content is
@@ -514,7 +534,16 @@ export class ContentBrokerDrone extends Drone {
   protected override listens: string[] = []
   protected override emits: string[] = ['broker:fetched', 'broker:outcome', 'adopt:progress', 'adopt:done', 'content:arrived']
 
-  #broadcastSub: MeshSubLike | null = null
+  // The room's ask channel this tab listens on ('' = none), its subscription,
+  // the drained word's, and the last derivation (room\0secret → channel).
+  #askChannel = ''
+  #askSub: MeshSubLike | null = null
+  #legacyAskSub: MeshSubLike | null = null
+  #askDerivation: { key: string; channel: Promise<string> } | null = null
+  #askSyncGen = 0
+  #askWired = false
+  // Older builds heard asking on the drained word (unmarked) → last ms.
+  #olderAskersSeenMs = new Map<string, number>()
   #myPubkey: string | null = null
   #initialized = false
 
@@ -586,6 +615,14 @@ export class ContentBrokerDrone extends Drone {
   // primitive: { bytes, domains }".
   #knownDomainsBySig = new Map<string, Set<string>>()
 
+  // INFERRED hosts — the §21.14 presumption that a host serving a layer
+  // serves its closure (#attributeClosure). A guess, not an attribution:
+  // since 2026-10-07 a branch that wears its own publish domains keeps its
+  // subtree there, not where its tile went. Asked only after the attributed
+  // hosts (#knownDomainsBySig) have missed, so a sig whose publisher said
+  // where it went is never first asked somewhere it is not.
+  #inferredDomainsBySig = new Map<string, Set<string>>()
+
   // Session-scoped fetch sources — domains noted as places to HTTP-direct
   // fetch from, for THIS session, independent of the per-sig mesh-learned
   // map. Seeded by noteDomain() — e.g. the adopt handoff passes the
@@ -647,11 +684,15 @@ export class ContentBrokerDrone extends Drone {
     catch { return '' }
   }
 
-  /** The swarm's host — host[:port] of the relay this tab meets at, as the
-   *  mesh derives it. '' when the mesh is absent or names none. */
-  #swarmHost = (): string => {
-    try { return String((this.#getMesh() as { swarmHost?: () => string } | undefined)?.swarmHost?.() ?? '').trim() }
-    catch { return '' }
+  /** This tab's swarm hosts while it is joined — where its own pages' bytes
+   *  go (host-sync: publish domains, else the hosts pool, else a relay that
+   *  hosts participants), the room's likeliest hosts after a sig's own
+   *  advertised ones. Empty when host-sync is absent or names none. */
+  #swarmHosts = (): string[] => {
+    try {
+      const hosts = (window.ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as { swarmHosts?: () => string[] } | undefined)?.swarmHosts?.()
+      return Array.isArray(hosts) ? hosts.map(String) : []
+    } catch { return [] }
   }
 
   /** True when the self-domain is nothing but this page's own origin: not a
@@ -788,12 +829,13 @@ export class ContentBrokerDrone extends Drone {
   // Record a sig→domain mapping. Called whenever a response carrying
   // domain attributions arrives. Domains are deduped per-sig; the map
   // grows monotonically until the drone restarts.
-  #noteDomains = (sig: string, domains: string[]): void => {
+  #noteDomains = (sig: string, domains: string[], inferred = false): void => {
     if (!domains.length) return
-    const set = this.#knownDomainsBySig.get(sig) ?? new Set<string>()
-    const before = set.size
+    const map = inferred ? this.#inferredDomainsBySig : this.#knownDomainsBySig
+    const set = map.get(sig) ?? new Set<string>()
+    const before = this.getKnownDomains(sig).length
     for (const d of domains) set.add(d)
-    this.#knownDomainsBySig.set(sig, set)
+    map.set(sig, set)
     // Did we actually LEARN anything? Re-hearing a host we already had is not
     // new knowledge, and treating it as such is a retry storm: the closure
     // walk attributes every ref of every layer it reads, so a sig that no
@@ -801,7 +843,7 @@ export class ContentBrokerDrone extends Drone {
     // backoff cleared on each re-attribution, woke its consumers, missed
     // again, and went round — hundreds of requests for one dead sig in a
     // single tick, with the main thread pinned and the page never painting.
-    const learnedSomething = set.size > before
+    const learnedSomething = this.getKnownDomains(sig).length > before
     // The HOST half of the knowledge is durable: persist + hand to the SW so
     // reloads and DOM-side /@resource/ fetches can still reach the publisher.
     for (const d of domains) this.#learnHost(d)
@@ -910,7 +952,10 @@ export class ContentBrokerDrone extends Drone {
    *  the host of a root serves the root's whole closure, so one layer
    *  fetch teaches the address graph where the entire subtree lives.
    *  Best-effort: malformed JSON attributes nothing. */
-  #attributeClosure = (bytes: Uint8Array, host: string): void => {
+  #attributeClosure = (bytes: Uint8Array, host: string, layerSig = ''): void => {
+    // The serving host, then every host the layer's publisher named for it:
+    // a page's event names where its offered branches' subtrees went too.
+    const hosts = [host, ...(layerSig ? this.#knownDomainsBySig.get(layerSig) ?? [] : [])]
     try {
       const layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
       if (!layer || typeof layer !== 'object') return
@@ -918,7 +963,7 @@ export class ContentBrokerDrone extends Drone {
         if (!Array.isArray(value)) continue
         for (const raw of value) {
           const ref = String(raw ?? '').trim().toLowerCase()
-          if (/^[a-f0-9]{64}$/.test(ref)) this.#noteDomains(ref, [host])
+          if (/^[a-f0-9]{64}$/.test(ref)) this.#noteDomains(ref, hosts, true)
         }
       }
     } catch { /* not a JSON layer — nothing to attribute */ }
@@ -1039,10 +1084,29 @@ export class ContentBrokerDrone extends Drone {
       ordered.push(host)
     }
 
-    // Tier −1 — THE SWARM'S HOST, while this tab is joined: the relay it
-    // meets at is the host its peers upload to (documentation/swarm-host.md),
-    // so a peer's tile is fetched where it was put, in the first wave.
-    if (isJoinedHere()) push(this.#swarmHost())
+    // IN WAVES, each asked only when the one before missed — every extra
+    // probe is a request against some host's daily cap, and a peer's tile is
+    // fetched where it was put (documentation/swarm-host.md):
+    //   1. ADVERTISED — the hosts this sig was attributed to: the publisher's
+    //      ['domain', …] tags (where its bytes actually went, per page), mesh
+    //      responses, a confirmed receipt;
+    //   2. INFERRED — the hosts that served a layer holding it (§21.14);
+    //   3. everyone else, in the tiers below.
+    const waves: string[][] = [[], []]
+    const claimed = new Set<string>()
+    for (const [wave, map] of [[0, this.#knownDomainsBySig], [1, this.#inferredDomainsBySig]] as const) {
+      for (const domain of map.get(sig) ?? []) {
+        const host = this.#domainToHost(domain)
+        if (!host || claimed.has(host)) continue
+        claimed.add(host)
+        waves[wave]!.push(host)
+      }
+    }
+
+    // Tier −1 — THIS TAB'S SWARM HOSTS, while it is joined: the room most
+    // likely shares them (everyone's pool starts at the same host), and an
+    // unattributed ref under a shared page lives with its page.
+    if (isJoinedHere()) for (const host of this.#swarmHosts()) push(host)
 
     // Tier 0 — self-domain. There is NO localhost tier: the app only ever
     // dials real domains. The operator's own domain resolves locally anyway
@@ -1063,10 +1127,7 @@ export class ContentBrokerDrone extends Drone {
     const community = this.#getCommunityDomains()
     for (const host of community) push(host)
 
-    // Tier 2 — mesh-learned domains that aren't in the community set.
-    // (Domains in community already landed in Tier 1; the `seen` guard
-    // deduplicates.)
-    for (const domain of this.getKnownDomains(sig)) push(domain)
+    // (Tier 2 — mesh-learned domains — is asked first now, as Tier −2.)
 
     // Tier 2.5 — session-noted fetch sources (e.g. the publisher's domain
     // handed through the adopt flow). Tried before the public fallback so a
@@ -1080,12 +1141,13 @@ export class ContentBrokerDrone extends Drone {
     // acceptance — a wrong-bytes fallback is rejected like any other tier.
     for (const host of this.#getFallbackDomains()) push(host)
 
-    if (ordered.length === 0) return null
+    waves.push(ordered.filter(host => !claimed.has(host)))
+    if (waves.every(wave => wave.length === 0)) return null
 
     // Start at most three hosts in preference order; the first verified
     // response wins and cancels outstanding probes. A dead host must not
     // block a healthy publisher behind repeated multi-second timeouts.
-    return firstAvailableHost(ordered, async (host, cancelled) => {
+    const probe = async (host: string, cancelled: AbortSignal): Promise<Uint8Array | null> => {
       // Loopback hosts are served over plain http — the content-side analog
       // of the mesh's allow-loopback. Real domains always use https.
       const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
@@ -1173,7 +1235,7 @@ export class ContentBrokerDrone extends Drone {
           // resolving a branch collapses to ONE host instead of per-sig
           // discovery. sha256 still gates every byte; a non-conforming
           // host costs a 404 and the tier cascade takes over (the 1%).
-          if (type === 'layer') this.#attributeClosure(bytes, host)
+          if (type === 'layer') this.#attributeClosure(bytes, host, sig)
           // WRITE-THROUGH: persist to the local Store so getLayerBySig, the
           // render path, and re-serving can resolve it. The mesh path persists
           // via #acceptResponseBytes; the HTTP path must too, or an HTTP-fetched
@@ -1199,7 +1261,13 @@ export class ContentBrokerDrone extends Drone {
         }
       }
       return null
-    })
+    }
+    for (const wave of waves) {
+      if (wave.length === 0) continue
+      const hit = await firstAvailableHost(wave, probe)
+      if (hit) return hit
+    }
+    return null
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1214,8 +1282,10 @@ export class ContentBrokerDrone extends Drone {
    * have been observed yet for this sig.
    */
   public getKnownDomains = (sig: string): string[] => {
-    const set = this.#knownDomainsBySig.get(sig)
-    return set ? Array.from(set) : []
+    const known = this.#knownDomainsBySig.get(sig)
+    const inferred = this.#inferredDomainsBySig.get(sig)
+    if (!inferred) return known ? Array.from(known) : []
+    return [...new Set([...(known ?? []), ...inferred])]
   }
 
   /**
@@ -1587,8 +1657,7 @@ export class ContentBrokerDrone extends Drone {
     // monotonically as more peers attribute the same sig. Letting DCP
     // see the full list means it can pick its preferred mirror, show all
     // sources to the user, and fall back across them if any fail.
-    const knownDomains = this.#knownDomainsBySig.get(root)
-    const domains: string[] = knownDomains && knownDomains.size ? [...knownDomains] : []
+    const domains: string[] = this.getKnownDomains(root)
     if (!opts.quiet) this.emitEffect('adopt:meta', { rootSig: root, domains })
 
     const asSigs = (v: unknown): string[] =>
@@ -1930,6 +1999,9 @@ export class ContentBrokerDrone extends Drone {
   #fetchOverMesh = async (sig: string, type: ContentType, timeoutMs: number): Promise<Uint8Array | null> => {
     const mesh = this.#getMesh()
     if (!mesh) return null
+    // Only a room is asked: out of one, there is nobody to hear (ASK_LABEL).
+    const channel = await this.#roomAskChannel()
+    if (!channel) return null
 
     return new Promise<Uint8Array | null>((resolve) => {
       let settled = false
@@ -1971,7 +2043,7 @@ export class ContentBrokerDrone extends Drone {
           if (type === 'layer') {
             for (const d of attributed) {
               const host = this.#domainToHost(d)
-              if (host) this.#attributeClosure(ok, host)
+              if (host) this.#attributeClosure(ok, host, sig)
             }
           }
           // Cooperative-cancellable broadcast: signal that the sig
@@ -2031,8 +2103,8 @@ export class ContentBrokerDrone extends Drone {
         accept(whole, attributed)
       })
 
-      // Broadcast the request.
-      void mesh.publish(KIND_FETCH_REQUEST, BROADCAST_TAG, '', [
+      // Ask the room.
+      void this.#ask(channel, KIND_FETCH_REQUEST, [
         ['d', sig],
         ['t', type],
       ])
@@ -2045,6 +2117,8 @@ export class ContentBrokerDrone extends Drone {
   #fetchVisualsOverMesh = async (composedSig: string, timeoutMs: number): Promise<readonly CachedVisualsEntry[] | null> => {
     const mesh = this.#getMesh()
     if (!mesh) return null
+    const channel = await this.#roomAskChannel()
+    if (!channel) return null
 
     return new Promise<readonly CachedVisualsEntry[] | null>((resolve) => {
       let settled = false
@@ -2100,8 +2174,8 @@ export class ContentBrokerDrone extends Drone {
         } catch { /* malformed — keep waiting for another responder */ }
       })
 
-      // Broadcast the request.
-      void mesh.publish(KIND_FETCH_REQUEST, BROADCAST_TAG, '', [
+      // Ask the room.
+      void this.#ask(channel, KIND_FETCH_REQUEST, [
         ['d', composedSig],
         ['t', 'visuals'],
       ])
@@ -2284,8 +2358,9 @@ export class ContentBrokerDrone extends Drone {
   // Responder path
   // ─────────────────────────────────────────────────────────────────
 
-  /** Subscribe to the broadcast channel. Every participant runs this
-   *  on boot so every fetch request reaches the whole swarm. */
+  /** Listen where this tab's room asks (#syncAskChannel), and follow every
+   *  change of room, secret or membership. Runs once, at boot, as soon as
+   *  the mesh is registered. */
   #subscribeBroadcastWithRetry = (attempts: number): void => {
     const mesh = this.#getMesh()
     if (!mesh?.subscribe) {
@@ -2293,8 +2368,85 @@ export class ContentBrokerDrone extends Drone {
       setTimeout(() => this.#subscribeBroadcastWithRetry(attempts + 1), 100)
       return
     }
-    if (this.#broadcastSub) return  // already subscribed
-    this.#broadcastSub = mesh.subscribe(BROADCAST_TAG, (evt) => void this.#handleBroadcast(evt))
+    if (this.#askWired) return
+    this.#askWired = true
+    // A microtask later, so membership.ts has already taken the same effect.
+    const resync = (): void => { queueMicrotask(() => void this.#syncAskChannel()) }
+    EffectBus.on('mesh:public-changed', resync)
+    EffectBus.on('mesh:room', resync)
+    EffectBus.on('mesh:secret', resync)
+    const ioc = (window as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
+    for (const key of [ROOM_STORE_KEY, SECRET_STORE_KEY]) {
+      ioc?.whenReady?.(key, (store) => { (store as EventTarget | undefined)?.addEventListener?.('change', resync) })
+    }
+    resync()
+  }
+
+  /** This tab's room ask channel: sign('broker:fetch\0room\0secret') while
+   *  it is joined to a room, else ''. Derived once per room and secret. */
+  #roomAskChannel = (): Promise<string> => {
+    if (!isJoinedHere()) return Promise.resolve('')
+    const credential = (key: string): string => {
+      try { return String((window.ioc?.get?.(key) as { value?: unknown } | undefined)?.value ?? '').trim() } catch { return '' }
+    }
+    const room = credential(ROOM_STORE_KEY)
+    const secret = credential(SECRET_STORE_KEY)
+    if (!room || !secret) return Promise.resolve('')
+    const key = `${room}\0${secret}`
+    if (this.#askDerivation?.key !== key) {
+      this.#askDerivation = { key, channel: sha256Hex(new TextEncoder().encode(`${ASK_LABEL}\0${key}`)).catch(() => '') }
+    }
+    return this.#askDerivation.channel
+  }
+
+  /** Point the ask subscriptions at this tab's room: its channel and, for
+   *  the drain, the word. Out of a room, neither. The newest call wins. */
+  #syncAskChannel = async (): Promise<void> => {
+    const mesh = this.#getMesh()
+    if (!mesh?.subscribe) return
+    const gen = ++this.#askSyncGen
+    const channel = await this.#roomAskChannel()
+    if (gen !== this.#askSyncGen) return
+    if (channel === this.#askChannel && (!channel || this.#askSub)) return
+    try { this.#askSub?.close() } catch { /* already closed */ }
+    this.#askSub = null
+    this.#askChannel = channel
+    if (!channel) {
+      try { this.#legacyAskSub?.close() } catch { /* already closed */ }
+      this.#legacyAskSub = null
+      this.#olderAskersSeenMs.clear()
+      return
+    }
+    this.#askSub = mesh.subscribe(channel, (evt) => void this.#handleBroadcast(evt))
+    this.#legacyAskSub ??= mesh.subscribe(LEGACY_ASK_WORD, (evt) => this.#onLegacyAsk(evt))
+  }
+
+  /** An event on the drained word. A copy a current build ALSO sent on the
+   *  room channel is skipped — it was heard there; anything else is an older
+   *  build, remembered so this tab asks where that build listens. */
+  #onLegacyAsk = (evt: MeshEvtLike): void => {
+    const tags = evt.event?.tags ?? []
+    if (tags.some(t => t[0] === ROOM_COPY_TAG[0] && t[1] === ROOM_COPY_TAG[1])) return
+    const pubkey = String(evt.event?.pubkey ?? '').toLowerCase()
+    if (/^[0-9a-f]{64}$/.test(pubkey) && pubkey !== this.#myPubkey) this.#olderAskersSeenMs.set(pubkey, Date.now())
+    void this.#handleBroadcast(evt)
+  }
+
+  /** Has an older build asked on the drained word in this room lately? */
+  #olderBuildsAsking = (): boolean => {
+    const cutoff = Date.now() - OLDER_ASKER_TTL_MS
+    for (const [pubkey, seen] of this.#olderAskersSeenMs) if (seen < cutoff) this.#olderAskersSeenMs.delete(pubkey)
+    return this.#olderAskersSeenMs.size > 0
+  }
+
+  /** Ask the room on its channel — and on the drained word, marked, while an
+   *  older build there may be the only holder. */
+  #ask = (channel: string, kind: number, tags: string[][]): Promise<unknown> => {
+    const mesh = this.#getMesh()
+    if (!mesh?.publish) return Promise.resolve()
+    const sent: Promise<unknown>[] = [mesh.publish(kind, channel, '', tags)]
+    if (this.#olderBuildsAsking()) sent.push(mesh.publish(kind, LEGACY_ASK_WORD, '', [...tags, ROOM_COPY_TAG]))
+    return Promise.all(sent)
   }
 
   // Dispatch inbound broadcast events by kind. Requests get handled
@@ -2420,9 +2572,12 @@ export class ContentBrokerDrone extends Drone {
     // intended effect on subsequent #isCancelled checks.
     this.#cancelledSigs.set(sig, Date.now() + CANCEL_TTL_MS)
 
+    const channel = await this.#roomAskChannel()
+    if (!channel) return
+
     const expirationSecs = Math.floor((Date.now() + CANCEL_TTL_MS) / 1000)
     try {
-      await mesh.publish(KIND_FETCH_CANCEL, BROADCAST_TAG, '', [
+      await this.#ask(channel, KIND_FETCH_CANCEL, [
         ['d', sig],
         ['expiration', String(expirationSecs)],
       ])
