@@ -3,7 +3,8 @@ import {
   Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService,
   isLocalClaudeBridgeConfigured, holdAwake,
   REMOTE_SUBMIT, formatRemoteSubmitOutcome,
-  type RemoteSubmitRequest, type RemoteSubmitOutcome,
+  BRIDGE_CODE_STORE_IOC_KEY, bridgeCodeStore,
+  type RemoteSubmitRequest, type RemoteSubmitOutcome, type BridgeCodeStore,
 } from '@hypercomb/core'
 import { deliverTurnSig, readTurns, setConversationGoalReached } from './chat-thread.js'
 import { appendStep, nextSeq as ledgerNextSeq, readSteps, runForAsk } from './chat-steps.js'
@@ -192,6 +193,7 @@ export class ClaudeBridgeWorker extends Worker {
    *  `_dolphin-revision.cjs`) to find a renderer. */
   protected override act = async (): Promise<void> => {
     this.onEffect('claude-bridge:connect', () => this.connect())
+    this.#followBridgeCodes()
     // Auto-connect when the shared opt-in says this local tab is configured;
     // everyone else stays silent.
     this.connect()
@@ -203,6 +205,35 @@ export class ClaudeBridgeWorker extends Worker {
     if (this.#ws || this.#checkingHealth) return
     if (!isLocalClaudeBridgeConfigured()) return
     void this.#checkHealthThenConnect()
+  }
+
+  // ------- bridge codes -------
+  //
+  // WHO BESIDES THIS MACHINE MAY SEND OPS (documentation/claude-bridge-setup.md,
+  // "Who may use the bridge — codes"). The broker admits this machine's own
+  // tools and refuses everyone else who does not present a code; the codes
+  // are given from the hive (`bridge give <name>`) and only their SHA-256
+  // hashes ever leave this tab — at registration (onopen) and here, as the
+  // WHOLE set, whenever the list changes. A withdrawn code stops working on
+  // the broker's next op check. Counts are logged, never a hash.
+
+  #followingCodes = false
+
+  /** The store the shell holds, or core's own when no shell registry answers. */
+  #bridgeCodes(): BridgeCodeStore | undefined {
+    return (window.ioc?.get?.(BRIDGE_CODE_STORE_IOC_KEY) as BridgeCodeStore | undefined) ?? bridgeCodeStore
+  }
+
+  #followBridgeCodes(): void {
+    const store = this.#bridgeCodes()
+    if (this.#followingCodes || !store) return
+    this.#followingCodes = true
+    store.addEventListener('change', () => {
+      if (this.#ws?.readyState !== WebSocket.OPEN) return
+      const codes = store.hashes()
+      this.#ws.send(JSON.stringify({ type: 'codes', codes }))
+      console.log(`[claude-bridge] bridge codes changed (${codes.length})`)
+    })
   }
 
   // ------- WebSocket lifecycle -------
@@ -286,10 +317,14 @@ export class ClaudeBridgeWorker extends Worker {
       ws.onopen = () => {
         this.#connected = true
         this.#attempts = 0
-        ws.send(JSON.stringify({ type: 'renderer' }))
+        // The renderer brings the bridge codes' HASHES — who besides this
+        // machine may send ops. The list belongs to this socket: the broker
+        // forgets it when the socket closes, so every registration carries it.
+        const codes = this.#bridgeCodes()?.hashes() ?? []
+        ws.send(JSON.stringify({ type: 'renderer', codes }))
         this.#letSleep?.()
         this.#letSleep = holdAwake('hypercomb:bridge-renderer')
-        console.log('[claude-bridge] connected')
+        console.log(`[claude-bridge] connected (${codes.length} bridge codes)`)
         this.#announce()
       }
 
