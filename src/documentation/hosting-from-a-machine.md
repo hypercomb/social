@@ -17,6 +17,10 @@ exporting anything.
 
 The first two serve *a copy*. The third serves the hive itself.
 
+A swarm's meeting point is a fourth kind of machine host, and the only one
+that accepts writes: [the meeting point](#the-meeting-point-relayjs-as-a-swarms-host)
+below.
+
 ## Serving live, from the store
 
 `hypercomb-client/crates/serve` maps the interchange form onto URLs and answers
@@ -153,8 +157,58 @@ A recurring confusion, so plainly:
   network, not about the build — a Pages deployment, someone's laptop on a LAN,
   or a server running `hypercomb-serve`.
 
+## The meeting point: relay.js as a swarm's host
+
+`hypercomb-relay/relay.js` behind a Cloudflare tunnel is a swarm's meeting
+point (`wss://jwize.com`) and a flat content heap (`https://jwize.com/<sig>`).
+Unlike the hosts above, it accepts writes: from its `--writers`, and, with
+`--allow-participants`, from the live participants of any swarm that meets on
+it. The doctrine, the caps and the meeting runbook are in
+[swarm-host.md](swarm-host.md). This replaces the guest recipe of 2026-10-04
+(join, pick a host, `publish here`): a guest now only joins.
+
+### The NSSM line
+
+On jwize's machine the relay is the NSSM service `hypercomb-relay`. Its
+AppParameters gain one flag, and nothing else changes:
+
+```powershell
+nssm get hypercomb-relay AppParameters
+nssm set hypercomb-relay AppParameters "C:\Projects\hypercomb\social\src\hypercomb-relay\relay.js --port 7777 --content-dir C:\Projects\hypercomb\social\src\hypercomb-relay\content --writers <the existing writer keys> --allow-participants"
+```
+
+- Read the current line first and append the flag. Keep `--port 7777`,
+  `--content-dir`, `--writers` and any `--shell-dir` exactly as they are.
+- `--allow-participants=<lifecycleSig>,...` hosts only the rooms listed. Each
+  new room then needs a restart.
+- Restart cleanly with `hypercomb-relay/fix-relay-elevated.ps1`, elevated. It
+  kills the wrapper tree, frees port 7777 and starts the service. A bare
+  `nssm restart` can leave an orphan listener, and the new instance then dies
+  with EADDRINUSE.
+- A restart empties the relay's memory: events, wills, hive indexes and the
+  map of live participants. Clients reconnect and reassert within seconds, and
+  the bytes on disk are untouched. Still, restart at least 24 h before a
+  meeting.
+- To roll back, remove the flag and restart. Participants then share names
+  only, and their status line says the host isn't taking uploads.
+
+### The NIP-11 check
+
+```bash
+curl -s -H "Accept: application/nostr+json" https://jwize.com
+```
+
+`limitation.participant_uploads` is `"all"` for the bare flag, `"zones"` for a
+room list, and `false` when the flag is off. Then run
+`node scripts/swarm-preflight.cjs` from `src/`. It proves one participant
+upload end to end with a throwaway key.
+
+The machine itself needs Ethernet, no sleep and no shutdown on meeting days:
+see the runbook in [swarm-host.md](swarm-host.md).
+
 ## Related
 
+- [swarm-host.md](swarm-host.md) — the meeting point hosts the meeting
 - [`hypercomb-shim/host/README.md`](../hypercomb-shim/host/README.md) — the
   contract, and what to do when the host is not Cloudflare
 - [native-client.md](native-client.md) — the desktop client itself

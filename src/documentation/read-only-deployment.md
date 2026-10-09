@@ -195,11 +195,40 @@ profile and never land on Cloudflare.
 
 The content relay and application hosts may share one Worker and one public
 signature heap, but they do not share authority. Relay hostnames expose the
-signed write protocol used by DCP. Any hostname present in `SITE_BINDINGS` is
+signed write protocol used by DCP. Every site hostname UNDER a zone — an
+implicit `<label>.<zone>`, an explicit non-apex binding, a `try-` door — is
 failed closed above those routes: all non-`GET`/`HEAD` methods return `405`.
-For this installation, `content.pluginthematrix.com` is the relay and is
-deliberately absent from `SITE_BINDINGS`; `pluginthematrix.com` and
-`revolucion.pluginthematrix.com` are the GET-only Core hosts.
+**The zone root is the write face (2026-10-03):** an apex in `SITE_BINDINGS`
+(front door or not), a claimed apex, or a `SITE_OPERATORS` zone accepts the
+same signed writes as the relay. For this installation `pluginthematrix.com`
+takes the writes and `revolucion.pluginthematrix.com` is a GET-only Core host.
+`content.pluginthematrix.com` is the legacy relay face: still absent from
+`SITE_BINDINGS`, still accepting for installs that have not updated, never a
+new target.
+
+A published place is reached at, in order of precedence (worker.js
+`zonePlaces`, `rootPlaceAt`):
+
+1. **An operator binding** for exactly that host.
+2. **Its own address** — the publisher's signed index content may carry
+   `addresses: { "<host>": "<lineage key>" }` (≤64 entries, lowercase hosts,
+   non-empty keys). A first-level name under a bound zone answers that lineage
+   when exactly one publisher of the zone signs it, the lineage is one of that
+   publisher's roots and its doors cover the zone. Two publishers naming one
+   host bind nobody. `content` and `try-*` keep their meaning.
+3. **Its root path** on a front-door zone — `https://<zone>/<a>/<b>` is the
+   place whose lineage key is `a/b`, when a publisher of the zone signs it open
+   there (`doors`, or no doors per the pre-doors rule). `/` stays the front
+   door; machine paths win first; the front door's own files (`/pin`,
+   `/core/…`, `/main.js`, …) are never a lineage. The place's revisions live
+   in the bag `sign(<zone>/<lineage>)`, and its page carries that door record
+   and a document base of `/<a>/<b>/`. Served only while the worker var
+   `ROOT_PATHS = "1"`: the visitor engine must first ask its files relative
+   to that base and strip the prefix from its route (hypercomb-web).
+4. **Its label** — the legacy implicit `<label>.<zone>` for a top-level
+   lineage, which keeps answering.
+
+`/publications.json` lists each place at the first of 2–4 it has.
 
 ### Go-live runbook
 
@@ -218,8 +247,8 @@ The one-time supervised sequence is:
 
 1. Deploy the Worker with `npm run deploy:pluginthematrix`; Cloudflare creates
    the relay and application custom-domain routes and their certificates.
-2. In DCP, publish `/pluginthematrix` and `/revolucion` to
-   `content.pluginthematrix.com`. This pushes every missing signature object,
+2. In DCP, publish `/pluginthematrix` and `/revolucion` to the zone root
+   `pluginthematrix.com`. This pushes every missing signature object,
    proves each closure with public reads, and writes the publisher-signed
    `/hive/<public-key>` index.
 3. Copy that public key (never the private key) into both domain publisher

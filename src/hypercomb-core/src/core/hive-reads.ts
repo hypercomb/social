@@ -45,6 +45,8 @@ const CODE_KEPT = 12
  *  budget — matches the cap the writer enforces (assistant/llm-context.ts),
  *  with slack for a record minted by an older build. */
 const MAX_PROJECTION_LENGTH = 8_000
+/** A tile's notes on one read: the reader bounds them to the page size. */
+const MAX_NOTES_CHARS = 64_000
 
 /** Shared consumes modules through IoC at runtime and never imports an
  *  essentials path (CLAUDE.md's dependency direction) — this is the one
@@ -146,6 +148,11 @@ export type HypercombNodeRead =
      *  projection; when present, `content` is omitted, which is the saving. */
     readonly projection?: string
     readonly truncated?: boolean
+    /** `/read` of a tile by route: its notes, live from the notes service
+     *  (essentials hive-tree-reader.ts `#withNotes`), flattened. */
+    readonly notes?: readonly string[]
+    readonly noteCount?: number
+    readonly notesTruncated?: boolean
     /** Children the layer declares whose layers are not on this device —
      *  listed by signature rather than failing the whole read. */
     readonly unresolved?: readonly string[]
@@ -340,22 +347,27 @@ const parseObservation = (
   if (short) {
     throw new HypercombObservationError(`${short[2]} is a shortened signature; /${short[1]} takes all 64 hex characters — copy the full one from the receipt or the earlier read`)
   }
-  // /find <word>: names under the current page.
-  const find = /^\/find\s+(\S.*)$/.exec(grammar)
+  // /find <word>: names under the current page. /find <word> /route: names
+  // under that route — asked for that way (`find betz /dolphin`), it was
+  // turned back as a malformed word and the whole block with it (2026-10-04).
+  const find = /^\/find\s+(.+?)(?:\s+(\/.*))?$/.exec(grammar)
   if (find) {
     const query = find[1].trim()
     if (!query || query.length > MAX_QUERY_LENGTH || query.includes('/') || query.includes('\\')
       || CONTROL_CHARACTER.test(query)) {
-      throw new HypercombObservationError('/find takes one short name fragment, no slashes')
+      throw new HypercombObservationError('/find takes one short name fragment, no slashes, and may be followed by /absolute/path')
     }
-    return { grammar, verb: 'find', segments: [...currentSegments], query }
+    return { grammar, verb: 'find', segments: find[2] ? routeSegments(find[2]) : [...currentSegments], query }
   }
   const match = /^\/(tree|read|list|history|summary)\s+(\/.*)$/.exec(grammar)
   if (!match || !VERBS.includes(match[1] as HypercombObservationVerb)) {
-    throw new HypercombObservationError('hive observations use /tree, /read, /list, /history or /summary (alone or followed by /absolute/path), /read <sig> [src/path.ts] [from], /list <sig>, /find <word>, or /code [word]')
+    throw new HypercombObservationError('hive observations use /tree, /read, /list, /history or /summary (alone or followed by /absolute/path), /read <sig> [src/path.ts] [from], /list <sig>, /find <word> [/absolute/path], or /code [word]')
   }
-  const verb = match[1] as HypercombObservationVerb
-  const absolute = match[2]
+  return { grammar, verb: match[1] as HypercombObservationVerb, segments: routeSegments(match[2]) }
+}
+
+/** An /absolute/path as segments, bounded and canonical, or refused. */
+const routeSegments = (absolute: string): string[] => {
   const segments = absolute === '/' ? [] : absolute.slice(1).split('/')
   if (segments.length > MAX_PATH_SEGMENTS || segments.some(segment =>
     !segment || segment !== segment.trim() || segment.length > MAX_SEGMENT_LENGTH
@@ -363,7 +375,7 @@ const parseObservation = (
     || CONTROL_CHARACTER.test(segment))) {
     throw new HypercombObservationError('the observation path is not a bounded canonical Hypercomb path')
   }
-  return { grammar, verb, segments }
+  return segments
 }
 
 /** The stable parser: one plan from ordered lines, validated whole. */
@@ -443,8 +455,17 @@ const withProjection = async (read: HypercombNodeRead): Promise<HypercombNodeRea
   const projected = await service.project(read.layerSig).catch(() => null)
   if (!projected?.text) return read
   const { content: _content, ...rest } = read
-  return { ...rest, projection: projected.text }
+  // The projection's notes are the layer's slot only — what predates the
+  // notes facet. With the live notes on the read, they would be a second,
+  // shorter list of the same tile's notes; a model counted that one.
+  const projection = read.notes ? withoutNotesBlock(projected.text) : projected.text
+  return { ...rest, projection }
 }
+
+/** The `notes:` block of a projection (assistant/llm-context.ts): the
+ *  heading and the indented lines under it. */
+export const withoutNotesBlock = (projection: string): string =>
+  projection.replace(/^notes:\n(?: {2}.*(?:\n|$))*/m, '')
 
 export const executeHypercombObservationPlan = async (
   plan: HypercombObservationPlan,
@@ -714,7 +735,22 @@ const safeNode = (read: HypercombNodeRead, expectedRoot: string, maxChildren: nu
       : read.content && typeof read.content === 'object' ? { content: read.content, truncated: read.truncated === true } : {}),
     ...(read.snapshot ? { snapshot: read.snapshot } : {}),
     ...(read.code?.length ? { code: safeHits(read.code) } : {}),
+    ...safeNotes(read),
   }
+}
+
+/** A tile's live notes: text only, bounded, no control characters but the
+ *  line breaks a note may hold. Malformed notes are left off, not fatal —
+ *  the rest of the read is still true. */
+const safeNotes = (read: { readonly notes?: unknown; readonly noteCount?: unknown; readonly notesTruncated?: unknown }): {
+  notes?: string[]; noteCount?: number; notesTruncated?: boolean
+} => {
+  if (!Array.isArray(read.notes)) return {}
+  const notes = read.notes.filter((line): line is string => typeof line === 'string')
+    .map(line => line.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ''))
+  if (notes.join('').length > MAX_NOTES_CHARS) return {}
+  const count = typeof read.noteCount === 'number' && Number.isInteger(read.noteCount) && read.noteCount >= 0 ? read.noteCount : undefined
+  return { notes, ...(count !== undefined ? { noteCount: count } : {}), ...(read.notesTruncated === true ? { notesTruncated: true } : {}) }
 }
 
 const safeSummary = (read: HypercombSummaryRead, expectedRoot: string): HypercombSummaryRead => {
@@ -767,7 +803,13 @@ export const formatHypercombObservationReceipt = (
     if (result.kind === 'find') {
       const found = result.read
       return found.ok
-        ? { grammar, root: found.root, query: found.query, matches: found.matches, truncated: found.truncated }
+        ? {
+          grammar, root: found.root, query: found.query, matches: found.matches, truncated: found.truncated,
+          // A whole-hive find stops before the deepest tiles on a large hive
+          // (2026-10-04: `find betz /` missed /dolphin/associates/betz, which
+          // `find betz /dolphin` found). Say how to reach the rest.
+          ...(found.truncated ? { truncatedNote: 'the search stopped before the whole route; other matches may exist deeper — search again under a narrower route: find <word> /path' } : {}),
+        }
         : { grammar, root: read.root, error: found.code }
     }
     if (result.kind === 'summary') {
@@ -808,6 +850,12 @@ export const formatHypercombObservationReceipt = (
       ...(node.projection !== undefined
         ? { projection: node.projection, truncated: node.truncated === true }
         : node.content ? { content: node.content, truncated: node.truncated === true } : {}),
+      ...(node.notes
+        ? {
+          noteCount: node.noteCount ?? node.notes.length, notes: node.notes,
+          ...(node.notesTruncated ? { notesNote: 'the notes were cut at the size limit; noteCount is how many there are' } : {}),
+        }
+        : {}),
       ...(node.code?.length
         ? { code: node.code, codeNote: 'running code that names this tile; read <sig> <section> <at> opens it at that line' }
         : {}),

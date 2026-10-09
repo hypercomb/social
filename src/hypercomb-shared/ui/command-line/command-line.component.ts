@@ -245,17 +245,6 @@ interface UtteranceSpanLike {
   candidates?: readonly { name: string; description: string }[]
   color?: string
 }
-/** The learned-phrasing store, structurally — it lives in essentials
- *  ('@diamondcoreprocessor.com/SpokenHabits') and shared may never import it. */
-interface SpokenHabitsLike {
-  learn(reading: UtteranceReadingLike): void
-  phrasings(fragment: string): readonly { phrasing: string; command: string; count: number }[]
-  leadInCompletions(fragment: string): readonly { leadIn: string; command: string; count: number }[]
-  useCount(command: string): number
-  forgetPhrasing(phrasing: string): boolean
-  forget(leadIn?: string): number
-}
-
 interface UtteranceReadingLike {
   text: string
   spans: readonly UtteranceSpanLike[]
@@ -356,20 +345,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       provider: null,
     }))
     const all = [...builtinMatches, ...droneMatches]
-    // The behaviours you live in rise; THE WORKSHOP SINKS. A STABLE sort:
-    // prototypes go to the bottom as one group (they only appear at all when
-    // /prototypes has opened the shelf), then run count, then census order —
-    // so this reorders what you have actually used and touches nothing else.
-    // Counts come from execution alone, so a catalogue you have never run
-    // reads precisely as it always did.
-    const habits = this.#spokenHabits()
+    // THE WORKSHOP SINKS. A STABLE sort: prototypes go to the bottom as one
+    // group (they only appear at all when /prototypes has opened the shelf),
+    // then census order. Nothing about what you ran is counted.
     return all
-      .map((m, i) => ({
-        m, i,
-        proto: (m.behaviour as { prototype?: boolean }).prototype === true,
-        uses: habits?.useCount(m.behaviour.name) ?? 0,
-      }))
-      .sort((a, b) => (a.proto ? 1 : 0) - (b.proto ? 1 : 0) || b.uses - a.uses || a.i - b.i)
+      .map((m, i) => ({ m, i, proto: (m.behaviour as { prototype?: boolean }).prototype === true }))
+      .sort((a, b) => (a.proto ? 1 : 0) - (b.proto ? 1 : 0) || a.i - b.i)
       .map(x => x.m)
   })
 
@@ -453,44 +434,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     for (const m of this.#slashMatches()) {
       map.set(m.behaviour.name, m.behaviour.description)
     }
-    // A learned row must say what it RUNS. The phrasing is the participant's
-    // own words, so it carries no meaning the catalogue can look up — without
-    // this the row would offer "open providers" and never admit that the
-    // thing it reaches is `providers`.
-    // A learned row must say what it RUNS, and admit that it is YOURS — the
-    // mark is what makes the row prunable in the participant's mind before
-    // they ever reach for Shift+Delete. Without it a phrasing reads as though
-    // the hive shipped it, and a suggestion you believe is built in is one
-    // you put up with instead of removing.
-    const known = this.#slashMatches()
-    for (const p of this.#learnedPhrasings()) {
-      const described = known.find(m => m.behaviour.name === p.command)?.behaviour.description
-        ?? this.#learnedDescription(p.command)
-      map.set(p.phrasing, `${this.#utteranceText('utterance.learned.yours', 'yours')} · ${described}`)
-    }
-    // A discovered WORD has to admit both things about itself: that it runs
-    // nothing on its own, and where it usually goes. Without the first the
-    // row reads as a behaviour and Enter looks broken; without the second it
-    // reads as noise. A census entry of the same name always wins the row —
-    // a real behaviour is never described as filler.
-    for (const w of this.#learnedLeadIns()) {
-      if (map.has(w.leadIn)) continue
-      map.set(w.leadIn, [
-        this.#utteranceText('utterance.learned.yours', 'yours'),
-        `${this.#utteranceText('utterance.learned.word', 'a word — leads into')} ${w.command}`,
-      ].join(' · '))
-    }
     return map
   })
-
-  /** What a learned row says when the census cannot describe its command
-   *  (the behaviour is gone, or its description has not loaded). */
-  #learnedDescription(command: string): string {
-    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
-      { match?(q: string): { behaviour: { name: string; description: string } }[] } | undefined
-    const hit = drone?.match?.(command)?.find(m => m.behaviour.name === command)
-    return hit?.behaviour.description ?? `runs ${command} — your phrasing`
-  }
 
   /**
    * Feature behaviours matching the current `@` fragment, sourced live from
@@ -1368,6 +1313,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       segments,
       view: e.view,
       clear,
+      // The one toggle rule (view-default.ts `decideDefaultToggle`): off under an
+      // ancestor's default writes the `hexagons` opt-out instead of clearing,
+      // which would only re-inherit. `clear` stays for the hive root, which
+      // has no segments for the rule to stand on.
+      toggle: true,
       silent: true,
     })
   }
@@ -1650,22 +1600,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
           return [...drone.complete(cmdName, fullArgs)]
         }
       }
-      // Your own phrasings come first when the line has become a sentence:
-      // past the first space the census has nothing to say, so anything here
-      // is offered where the dropdown would otherwise be empty.
-      const learned = this.#learnedPhrasings().map(p => p.phrasing)
-      if (learned.length) return learned
-      const census = this.#slashCensus().names
-      // Before the first space the census speaks, and your own words follow
-      // it — never in front of it, and never twice: a word a behaviour
-      // already spells IS that behaviour's row. Strictly additive, so a
-      // participant who has never run a sentence sees exactly what they
-      // always saw.
-      const spelled = new Set(census)
-      const words = this.#learnedLeadIns()
-        .map(w => w.leadIn)
-        .filter(w => !spelled.has(w))
-      return words.length ? [...census, ...words] : census
+      return this.#slashCensus().names
     }
 
     // '@' feature mode: list registered behaviors (filtered by fragment).
@@ -3077,11 +3012,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    */
   readonly #catalogueRequested = signal(false)
 
-  /** Bumped whenever the habit store changes under us. The store lives in
-   *  essentials and is not a signal, so this is what tells the completion
-   *  computeds that a pruned row is gone. */
-  readonly #habitsRevision = signal(0)
-
   /** Pinned ambiguity choices, keyed by span start. Typing invalidates them. */
   readonly #utteranceResolutions = signal<ReadonlyMap<number, string>>(new Map())
 
@@ -3107,56 +3037,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #utteranceReader(): UtteranceReaderLike | undefined {
     return get('@diamondcoreprocessor.com/UtteranceReader') as UtteranceReaderLike | undefined
   }
-
-  #spokenHabits(): SpokenHabitsLike | undefined {
-    return get('@diamondcoreprocessor.com/SpokenHabits') as SpokenHabitsLike | undefined
-  }
-
-  /**
-   * The participant's own phrasings, offered where the census has nothing.
-   *
-   * Only once the fragment holds a SPACE — a bare word is a behaviour name
-   * being typed, and that belongs to the shared tongue. Past the first space
-   * the line is a sentence, the census is silent, and what you have actually
-   * said before is the best thing anyone can offer. `open ` → `open providers`,
-   * because you once ran exactly that.
-   *
-   * Strictly additive: these appear where the dropdown was empty, so the
-   * ordinary catalogue reads exactly as it always has.
-   */
-  readonly #learnedPhrasings = computed<readonly { phrasing: string; command: string }[]>(() => {
-    this.#habitsRevision()          // a pruned row must leave the list at once
-    const ctx = this.context()
-    if (!ctx.active || ctx.mode !== 'slash') return []
-    if (this.#stance() !== 'command') return []
-    // ctx.raw is the fragment WITH its whitespace — the trailing space in
-    // 'open ' is the whole signal that a lead-in has been finished.
-    const fragment = ctx.head === '/' ? ctx.raw : ''
-    if (!fragment.includes(' ')) return []
-    return this.#spokenHabits()?.phrasings(fragment) ?? []
-  })
-
-  /**
-   * The words you lead with, offered while the line is still one word.
-   *
-   * The other half of {@link #learnedPhrasings}: before the first space the
-   * census owns the fragment, so these rows are appended AFTER it and never
-   * displace a behaviour. `op` offers `open` under whatever the catalogue
-   * already had — and accepting it writes plain TEXT, so nothing runs and the
-   * phrasings take over on the space it leaves behind.
-   *
-   * Never on a blank line: Ctrl+Space asks for the catalogue, and filler is
-   * not part of the catalogue.
-   */
-  readonly #learnedLeadIns = computed<readonly { leadIn: string; command: string }[]>(() => {
-    this.#habitsRevision()          // a forgotten word must leave the list at once
-    const ctx = this.context()
-    if (!ctx.active || ctx.mode !== 'slash') return []
-    if (this.#stance() !== 'command') return []
-    const fragment = ctx.head === '/' ? ctx.raw : ''
-    if (!fragment.trim() || /\s/.test(fragment)) return []
-    return this.#spokenHabits()?.leadInCompletions(fragment) ?? []
-  })
 
   /** The live reading of the current line — null outside command stance, for
    *  exempt registers (sigils, calls, tags, URLs), and during captures. */
@@ -3201,6 +3081,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // register line goes to the slash pipeline whole, as a typed `/word …`
     // always has.
     if (this.#keepsRawArgs(text)) return false
+    const typed = text.trim()
     text = lowered(text)
     const reading = this.#utteranceReader()?.read(text, this.#utteranceResolutions())
     if (!reading) return false
@@ -3217,11 +3098,24 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     if (!reading.actions.length) {
       // Grammar without a behaviour is inert. It must not fall through to
-      // tile creation, offer a creation pathway, enter command history, or
-      // teach SpokenHabits: none of those are evidence that an action ran.
+      // tile creation, offer a creation pathway, or enter command history:
+      // none of those are evidence that an action ran.
+      //
+      // Nor may it VANISH. Clearing the line here swallowed every tile name
+      // a guest typed after one '/word' left the bar in command stance —
+      // no tile, no message, nothing in history — and a meeting read that as
+      // "cannot share". The line stays as typed and says why nothing ran.
       this.#pendingChoice.set(null)
       this.#utteranceResolutions.set(new Map())
-      this.clear()
+      const i18n = get('@hypercomb.social/I18n') as
+        { t?(k: string, p?: Record<string, string | number>): string } | undefined
+      const hint = i18n?.t?.('command.inert', { text: typed })
+      EffectBus.emit('activity:log', {
+        message: hint && hint !== 'command.inert'
+          ? hint
+          : `"${typed}" isn't a command — say "create ${typed}" to add it as a tile, or type > on an empty line to make tiles`,
+        icon: '⬡',
+      })
       return true
     }
 
@@ -3299,11 +3193,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         })
       }
     }
-    // ONLY EXECUTION TEACHES. The phrasing is learned here, after the actions
-    // have actually run — never from typing, never from a pathway the
-    // participant backed out of. A habit is evidence of intent, so this is the
-    // only place in the component allowed to mint one.
-    this.#spokenHabits()?.learn(reading)
     this.requestSynchronize()
     return outcomes
   }
@@ -3493,40 +3382,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#catalogueRequested.set(true)
       this.shell?.unsuppress()
       return
-    }
-
-    // Shift+Delete — PRUNE the highlighted row. The browser gesture for
-    // "stop suggesting this", pointed at the one list that can hold a bad
-    // guess: your own phrasings. A learned list you can only empty wholesale
-    // is one you stop trusting the first time something wrong gets in, so the
-    // row you are looking at is the unit of removal. Only ever removes a
-    // LEARNED row — the census is not yours to edit, and Shift+Delete over a
-    // real behaviour does nothing rather than something surprising.
-    if (e.key === 'Delete' && e.shiftKey) {
-      const list = this.suggestions()
-      const row = list[this.shell?.getActiveIndex() ?? 0]
-      if (row && this.#learnedPhrasings().some(p => p.phrasing === row)) {
-        e.preventDefault()
-        if (this.#spokenHabits()?.forgetPhrasing(row)) {
-          // The list is a computed over the store, but the store is not a
-          // signal — nudge the line so the dropdown recomputes without it.
-          this.#habitsRevision.update(n => n + 1)
-        }
-        return
-      }
-      // A discovered WORD is prunable on the same key, and pruning it takes
-      // every ending with it — the word is only on offer because those
-      // phrasings exist, so leaving them behind would put it straight back.
-      // Guarded on the census: a behaviour that happens to spell the same
-      // word owns its row, and that row is not yours to edit.
-      if (row && this.#learnedLeadIns().some(w => w.leadIn === row)
-          && !this.#slashMatches().some(m => m.behaviour.name === row)) {
-        e.preventDefault()
-        if ((this.#spokenHabits()?.forget(row) ?? 0) > 0) {
-          this.#habitsRevision.update(n => n + 1)
-        }
-        return
-      }
     }
 
     // Escape abandons a pending utterance choice — the line stays as typed.
@@ -5305,19 +5160,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
           // Preset position (after brackets or single arg)
           this.#setShellValue(ctx.head + best, false)
         }
-        return
-      }
-      // A DISCOVERED WORD COMPLETES AS TEXT. `open` is not a behaviour and
-      // must never be filled in as one: the line becomes the word and a
-      // space, nothing is suppressed and nothing is run. The trailing space
-      // is load-bearing twice over — it turns the phrasings on, and
-      // #completeOnEnter reads it as "your ending goes here", so Enter on a
-      // half-said sentence completes the word instead of firing it.
-      // The census keeps the row whenever it spells the same word.
-      if (ctx.head === '/'
-          && this.#learnedLeadIns().some(w => w.leadIn === best)
-          && !this.#slashMatches().some(m => m.behaviour.name === best)) {
-        this.#setShellValue('/' + best + ' ', false)
         return
       }
       // If head is just '/', we're completing the command name itself

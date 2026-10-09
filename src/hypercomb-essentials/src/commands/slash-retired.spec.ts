@@ -45,6 +45,14 @@ describe('the words this census retired', () => {
     }
   })
 
+  it('/forget went with the habits it emptied, and nothing replaces it', () => {
+    expect(drone.retired('forget')).toEqual({
+      word: 'forget',
+      note: 'the command line no longer learns your habits, so there is nothing to forget',
+    })
+    expect(drone.has('forget')).toBe(false)
+  })
+
   it('folds the word as the registry folds a name', () => {
     expect(drone.retired('  Delete ')).toEqual({ word: 'delete', by: 'remove' })
   })

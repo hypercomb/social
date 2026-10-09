@@ -15,6 +15,7 @@ export {
   hypercombPlanReach,
   hypercombPlanLeaves,
   hypercombWriteRefusal,
+  hypercombLinesBeyondPages,
   parseHypercombGrammars,
   executeHypercombPlan,
 } from '@hypercomb/core'

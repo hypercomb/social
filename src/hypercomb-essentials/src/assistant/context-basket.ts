@@ -40,7 +40,7 @@ export const DRAFT_POOL = 'context:draft'
 
 type StoreLike = {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
 }
 
@@ -112,7 +112,8 @@ export const saveDraft = async (text: string): Promise<boolean> => {
   const pool = await s?.getPool?.(DRAFT_POOL)
   if (!pool || !s?.putPoolDoc) return false
   const bytes = new TextEncoder().encode(JSON.stringify({ text: String(text ?? ''), at: Date.now() })).buffer as ArrayBuffer
-  return !!(await s.putPoolDoc(pool, bytes))
+  // The held question is working state, not a save: only the current one is kept.
+  return !!(await s.putPoolDoc(pool, bytes, undefined, { keep: 'current' }))
 }
 
 /** The held question, or '' when there is none. */

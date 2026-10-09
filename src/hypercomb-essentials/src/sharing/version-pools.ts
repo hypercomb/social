@@ -46,11 +46,17 @@ export interface PoolIo {
   write(meaning: string, name: string, bytes: Uint8Array): Promise<void>
 }
 
-type StoreLike = { getPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>; openPool?(meaning: string): Promise<FileSystemDirectoryHandle | null> }
+type StoreLike = {
+  getPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
+  openPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
+  /** Keep a verified atom in a pool by its name (runtime store.ts). */
+  keepPoolAtom?(meaning: string, signature: string, bytes: Uint8Array): Promise<boolean>
+}
 const store = (): StoreLike | undefined =>
   (globalThis as { ioc?: { get?: <T>(key: string) => T | undefined } }).ioc?.get?.<StoreLike>(STORE_KEY)
 
-/** The Store's pool directories: read without creating, write creating. */
+/** The Store's pool directories: read without creating; written through
+ *  the Store, which keeps an atom only under its own name. */
 export const opfsPools = (): PoolIo => ({
   async names(meaning) {
     const dir = await (store()?.openPool ?? store()?.getPool)?.(meaning).catch(() => null)
@@ -69,10 +75,9 @@ export const opfsPools = (): PoolIo => ({
     } catch { return null }
   },
   async write(meaning, name, bytes) {
-    const dir = await store()?.getPool?.(meaning)
-    if (!dir) throw new Error('this browser holds no pools (no storage)')
-    const writable = await (await dir.getFileHandle(name, { create: true })).createWritable()
-    try { await writable.write(bytes as unknown as ArrayBuffer) } finally { await writable.close() }
+    const keep = store()?.keepPoolAtom
+    if (!keep) throw new Error('this browser holds no pools (no storage)')
+    if (!await keep.call(store(), meaning, name, bytes)) throw new Error(`${name.slice(0, 12)} was not kept: not what it is named`)
   },
 })
 

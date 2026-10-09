@@ -55,9 +55,10 @@ const MARKER = `published-from-the-hive-${Date.now()}`
 const CHANGE = `proof-${Date.now().toString(36)}`
 const SANDBOX = `try-${CHANGE}`
 const DOOR = `http://${SANDBOX}.${HOST}`
-// Writes go to the zone's content face, as in production (content.<zone> is
-// the relay, never a site); the door opens on the zone itself.
-const WRITE = `content.${HOST}`
+// Writes go to the ZONE ROOT, as in production (jwize 2026-10-03: the root
+// is the write face; content.<zone> is legacy and only kept for old installs);
+// the door opens on a name under the zone.
+const WRITE = HOST
 
 /** What the door the page is on says about itself, read by signature only. */
 const readDoor = (page) => page.evaluate(async () => {

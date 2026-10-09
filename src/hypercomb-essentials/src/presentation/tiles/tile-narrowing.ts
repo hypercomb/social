@@ -151,7 +151,7 @@ export class TileNarrowing {
   }
 
   /** What tile-overlay needs to enter a flattened match, for render:cell-count. */
-  entry(): { flatPaths: Record<string, string[]>; filterBlocked: string[] } {
+  entry(): { flatPaths: Record<string, string[]>; filterBlocked: string[]; narrowed: boolean } {
     return {
       // A match can live anywhere, so entering it travels to its absolute path;
       // appending the label to wherever you're standing mints a phantom segment.
@@ -159,6 +159,7 @@ export class TileNarrowing {
       // Matches with children but nothing tagged inside: entering would land on
       // a blank filtered mesh, so tile-overlay refuses and says why.
       filterBlocked: this.active ? [...this.blocked] : [],
+      narrowed: this.active,
     }
   }
 

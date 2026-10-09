@@ -60,7 +60,7 @@ describe('the narrowing', () => {
   it('is inactive until a lens, a requirement or a gather narrows the page', () => {
     const n = new TileNarrowing(hostAt([]))
     expect(n.active).toBe(false)
-    expect(n.entry()).toEqual({ flatPaths: {}, filterBlocked: [] })
+    expect(n.entry()).toEqual({ flatPaths: {}, filterBlocked: [], narrowed: false })
   })
 
   it('reads a tile\'s tags from the decoration index and the legacy cache, once each', () => {
@@ -114,7 +114,7 @@ describe('the walk', () => {
       { label: 'garden', dir: null, path: ['garden'], hasChildren: true, matchesInside: 0 },
       { label: 'rose', dir: null, path: ['garden', 'rose'], hasChildren: false, matchesInside: 0 },
     ])
-    expect(n.entry()).toEqual({ flatPaths: { garden: ['garden'], rose: ['garden', 'rose'] }, filterBlocked: ['garden'] })
+    expect(n.entry()).toEqual({ flatPaths: { garden: ['garden'], rose: ['garden', 'rose'] }, filterBlocked: ['garden'], narrowed: true })
     expect(n.parentOf('rose')).toEqual(['garden'])
     expect(n.parentOf('elsewhere')).toBeNull()
   })

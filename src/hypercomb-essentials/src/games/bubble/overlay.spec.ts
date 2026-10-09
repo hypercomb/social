@@ -24,7 +24,7 @@ const doubles = vi.hoisted(() => ({
   engines: [] as FakeEngine[], renderers: [] as FakeRenderer[], audio: [] as FakeAudio[],
   effects: (): Effects => ({ jump: 0, blow: 0, trap: 0, pop: 0, fruit: 0, hurt: 0, clear: 0 }),
 }))
-const living = vi.hoisted(() => ({ ensure: vi.fn(), create: vi.fn() }))
+const living = vi.hoisted(() => ({ ensure: vi.fn(), peek: vi.fn(), create: vi.fn() }))
 
 vi.mock('./tile-surface.js', () => ({
   createBubbleTileSurface: living.create,
@@ -95,7 +95,10 @@ beforeEach(() => {
   living.ensure.mockReset().mockImplementation((index: number) => ({
     index, level: { name: `ROUND ${index + 1}` }, roundSegments: [], tiles: [],
   }))
-  living.create.mockReset().mockImplementation(() => ({ ensureRound: living.ensure }))
+  living.peek.mockReset().mockImplementation((index: number) => ({
+    level: { name: `ROUND ${index + 1}` }, stored: true,
+  }))
+  living.create.mockReset().mockImplementation(() => ({ ensureRound: living.ensure, peekRound: living.peek }))
   overlays = []
   observers = []
   frames = new Map()
@@ -269,7 +272,7 @@ describe('BubbleOverlay keyboard isolation', () => {
   it('reports a cold hive without using static fallback and retries the living source', () => {
     living.create.mockImplementationOnce(() => {
       throw new Error('Hypercomb Bubble Bobble data is still loading; please open the game again')
-    }).mockImplementationOnce(() => ({ ensureRound: living.ensure }))
+    }).mockImplementationOnce(() => ({ ensureRound: living.ensure, peekRound: living.peek }))
     const game = mount()
     const startButton = game.doc.querySelector<HTMLButtonElement>('.bub-start')!
     expect(game.doc.querySelector('.bub-cover-title')?.textContent).toBe('Living round unavailable')
@@ -434,7 +437,7 @@ describe('BubbleOverlay pause and restart', () => {
       .mockImplementationOnce(() => {
         throw new Error('Hypercomb Bubble Bobble data is still loading; please open the game again')
       })
-      .mockImplementationOnce(() => ({ ensureRound: living.ensure }))
+      .mockImplementationOnce(() => ({ ensureRound: living.ensure, peekRound: living.peek }))
     const game = mount()
     const restartButton = game.doc.querySelector<HTMLButtonElement>('.bub-restart')!
     expect(restartButton.disabled).toBe(true)
@@ -448,41 +451,58 @@ describe('BubbleOverlay pause and restart', () => {
 })
 
 describe('BubbleOverlay score and lifecycle', () => {
-  it('reads the next living round ahead while the current one is played, one round ahead only', async () => {
+  it('reads the next living round ahead while the current one is played, writing nothing, one round ahead only', async () => {
     const game = mount()
     expect(living.ensure).toHaveBeenCalledTimes(1)
     expect(living.ensure).toHaveBeenLastCalledWith(0)
     frame()
     await settle()
-    expect(living.ensure).toHaveBeenLastCalledWith(1)
+    expect(living.peek).toHaveBeenLastCalledWith(1)
     expect(game.engine.installLevel).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'ROUND 2' }))
-    // Already installed when the round clears, so the clear reads nothing more.
+    // Already in the hive and installed, so the clear neither reads nor writes.
     game.engine.state = 'clear'
     frame()
     await settle()
-    expect(living.ensure).toHaveBeenCalledTimes(2)
+    expect(living.ensure).toHaveBeenCalledTimes(1)
     // The engine reaching ROUND 02 is what brings ROUND 03 within range.
     game.engine.levelIndex = 1
     game.engine.state = 'playing'
     frame()
     await settle()
-    expect(living.ensure).toHaveBeenCalledTimes(3)
-    expect(living.ensure).toHaveBeenLastCalledWith(2)
+    expect(living.peek).toHaveBeenCalledTimes(2)
+    expect(living.peek).toHaveBeenLastCalledWith(2)
+    expect(living.ensure).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps a failed read-ahead off the cover, and the clear retries it visibly', async () => {
-    let refuse = true
-    living.ensure.mockImplementation((index: number) => {
-      if (index === 1 && refuse) {
-        refuse = false
-        return Promise.reject(new Error('Hypercomb Bubble Bobble data is still loading; please open the game again'))
-      }
-      return { index, level: { name: `ROUND ${index + 1}` }, roundSegments: [], tiles: [] }
-    })
+  it('plays a round the hive does not hold yet from its seed, and writes it only when the player arrives', async () => {
+    living.peek.mockImplementation((index: number) => ({ level: { name: `SEED ${index + 1}` }, stored: false }))
     const game = mount()
     start(game)
     await settle()
-    expect(living.ensure).toHaveBeenLastCalledWith(1)
+    expect(game.engine.installLevel).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'SEED 2' }))
+    frame()
+    await settle()
+    expect(living.ensure).not.toHaveBeenCalledWith(1)
+    // A native clear can pass inside one frame: arrival is the round index,
+    // never only the 'clear' state.
+    game.engine.levelIndex = 1
+    frame()
+    await settle()
+    expect(living.ensure).toHaveBeenCalledWith(1)
+    expect(living.ensure).toHaveBeenCalledTimes(2)
+    expect(game.engine.installLevel).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'ROUND 2' }))
+    // …and only then is ROUND 03 within range, again without a write.
+    expect(living.peek).toHaveBeenLastCalledWith(2)
+    expect(living.ensure).not.toHaveBeenCalledWith(2)
+    expect(game.doc.querySelector('.bub-cover-title')?.textContent).not.toBe('Living round unavailable')
+  })
+
+  it('keeps a failed read-ahead off the cover, and the clear retries it visibly', async () => {
+    living.peek.mockImplementation(() => Promise.reject(new Error('Hypercomb Bubble Bobble data is still loading; please open the game again')))
+    const game = mount()
+    start(game)
+    await settle()
+    expect(living.peek).toHaveBeenLastCalledWith(1)
     expect(game.engine.installLevel).not.toHaveBeenCalledWith(1, expect.anything())
     expect(game.doc.querySelector('.bub-cover-title')?.textContent).not.toBe('Living round unavailable')
     const updates = game.engine.update.mock.calls.length
@@ -491,7 +511,7 @@ describe('BubbleOverlay score and lifecycle', () => {
     game.engine.state = 'clear'
     frame()
     await settle()
-    expect(living.ensure).toHaveBeenCalledTimes(3)
+    expect(living.ensure).toHaveBeenLastCalledWith(1)
     expect(game.engine.installLevel).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'ROUND 2' }))
   })
 

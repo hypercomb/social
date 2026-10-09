@@ -16,7 +16,7 @@ import {
 const NS = ['ada.ns.cloudflare.com', 'bob.ns.cloudflare.com']
 const T0 = 1_700_000_000_000
 const DOMAIN = 'inspiredbyhumans.org'
-const HOST = 'content.pluginthematrix.com'
+const HOST = 'pluginthematrix.com'
 
 const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -107,15 +107,17 @@ describe('the signed ask', () => {
 })
 
 describe('the host a claim is made on', () => {
-  it('is the write face: content.<zone>, never a published site; loopback is its own face', () => {
-    expect(claimHost('pluginthematrix.com')).toBe('content.pluginthematrix.com')
-    expect(claimHost('@content.pluginthematrix.com')).toBe('content.pluginthematrix.com')
-    expect(claimHost('https://Content.PluginTheMatrix.com/')).toBe('content.pluginthematrix.com')
+  it('is the write face: the zone ROOT, never the retired content. face; loopback is its own face', () => {
+    expect(claimHost('pluginthematrix.com')).toBe('pluginthematrix.com')
+    expect(claimHost('@content.pluginthematrix.com')).toBe('pluginthematrix.com')
+    expect(claimHost('https://Content.PluginTheMatrix.com/')).toBe('pluginthematrix.com')
     expect(claimHost('localhost:8787')).toBe('localhost:8787')
+    // `content.com` is a domain of its own, not a face in front of one.
+    expect(claimHost('content.com')).toBe('content.com')
     expect(claimHost('not a host')).toBe('')
-    expect(claimUrl('content.pluginthematrix.com')).toBe('https://content.pluginthematrix.com/claim')
+    expect(claimUrl('pluginthematrix.com')).toBe('https://pluginthematrix.com/claim')
     expect(claimUrl('localhost:8787')).toBe('http://localhost:8787/claim')
-    expect(claimStatusUrl('content.pluginthematrix.com', 'inspiredbyhumans.org')).toBe('https://content.pluginthematrix.com/claim/inspiredbyhumans.org')
+    expect(claimStatusUrl('pluginthematrix.com', 'inspiredbyhumans.org')).toBe('https://pluginthematrix.com/claim/inspiredbyhumans.org')
   })
 })
 
@@ -139,15 +141,15 @@ describe('domain claim <domain>', () => {
 
     expect(w.calls).toHaveLength(1)
     const [{ url, init }] = w.calls
-    expect(url).toBe('https://content.pluginthematrix.com/claim')
+    expect(url).toBe('https://pluginthematrix.com/claim')
     expect(init?.method).toBe('POST')
-    expect((init?.headers as Record<string, string>)['Authorization']).toBe('Nostr POST https://content.pluginthematrix.com/claim')
+    expect((init?.headers as Record<string, string>)['Authorization']).toBe('Nostr POST https://pluginthematrix.com/claim')
     expect(JSON.parse(String(init?.body))).toEqual({ domain: 'inspiredbyhumans.org' })
 
-    expect(report).toEqual({ kind: 'pending', domain: 'inspiredbyhumans.org', host: 'content.pluginthematrix.com', nameservers: NS, again: false, copied: true })
+    expect(report).toEqual({ kind: 'pending', domain: 'inspiredbyhumans.org', host: 'pluginthematrix.com', nameservers: NS, again: false, copied: true })
     expect(w.reports).toEqual([report])
     expect(w.copied).toEqual([NS.join('\n')])
-    expect(readClaims(w.storage)).toEqual({ 'inspiredbyhumans.org': { host: 'content.pluginthematrix.com', nameservers: NS, since: T0, status: 'pending' } })
+    expect(readClaims(w.storage)).toEqual({ 'inspiredbyhumans.org': { host: 'pluginthematrix.com', nameservers: NS, since: T0, status: 'pending' } })
     expect(w.claims.watching).toEqual(['inspiredbyhumans.org'])
     expect(w.timers.size).toBe(1)
   })
@@ -159,7 +161,7 @@ describe('domain claim <domain>', () => {
     const again = await w.claims.claim(DOMAIN)
 
     expect(w.methods()).toEqual(['POST', 'GET'])
-    expect(w.calls[1].url).toBe('https://content.pluginthematrix.com/claim/inspiredbyhumans.org')
+    expect(w.calls[1].url).toBe('https://pluginthematrix.com/claim/inspiredbyhumans.org')
     expect(again).toMatchObject({ kind: 'pending', again: true, nameservers: NS })
     expect(readClaims(w.storage)[DOMAIN].since).toBe(T0)
     expect(w.timers.size).toBe(1)
@@ -168,8 +170,8 @@ describe('domain claim <domain>', () => {
   it('goes to the host it is told: @<host> is that host\'s write face', async () => {
     const w = world(() => pending())
     await w.claims.claim(DOMAIN, '@hypercomb.com')
-    expect(w.calls[0].url).toBe('https://content.hypercomb.com/claim')
-    expect(readClaims(w.storage)[DOMAIN].host).toBe('content.hypercomb.com')
+    expect(w.calls[0].url).toBe('https://hypercomb.com/claim')
+    expect(readClaims(w.storage)[DOMAIN].host).toBe('hypercomb.com')
   })
 
   it('settles at once when the host answers the signed claim active — that answer is already the participant\'s', async () => {
@@ -192,7 +194,7 @@ describe('domain claim <domain>', () => {
 
   it('reports each refusal with its reason, and keeps nothing', async () => {
     const cases: [Response | 'throw', Partial<ClaimReport>][] = [
-      [prose(503, 'this host takes no claims'), { kind: 'unconfigured', host: 'content.pluginthematrix.com' }],
+      [prose(503, 'this host takes no claims'), { kind: 'unconfigured', host: 'pluginthematrix.com' }],
       [prose(404, 'nothing here'), { kind: 'unconfigured' }],
       [prose(409, 'already served here'), { kind: 'refused', reason: 'already served here' }],
       [prose(409, 'one pending claim per key'), { kind: 'refused', reason: 'one pending claim per key' }],
@@ -238,8 +240,8 @@ describe('the watch', () => {
     // The public reading said active; the signed ask is what made it theirs.
     expect(w.methods()).toEqual(['POST', 'GET', 'GET', 'POST'])
     const confirm = w.calls[3]
-    expect(confirm.url).toBe('https://content.pluginthematrix.com/claim')
-    expect((confirm.init?.headers as Record<string, string>)['Authorization']).toBe('Nostr POST https://content.pluginthematrix.com/claim')
+    expect(confirm.url).toBe('https://pluginthematrix.com/claim')
+    expect((confirm.init?.headers as Record<string, string>)['Authorization']).toBe('Nostr POST https://pluginthematrix.com/claim')
     expect(w.storage.map.has(DOMAIN_CLAIMS_KEY)).toBe(false)
     expect(w.timers.size).toBe(0)
     expect(w.claims.watching).toEqual([])
@@ -411,7 +413,7 @@ describe('at boot', () => {
     w.storage.setItem(DOMAIN_CLAIMS_KEY, kept(T0 - 2 * 24 * 60 * 60 * 1000))
     expect(w.claims.resume()).toBe(1)
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(w.calls.map(call => call.url)).toEqual(['https://content.pluginthematrix.com/claim/inspiredbyhumans.org'])
+    expect(w.calls.map(call => call.url)).toEqual(['https://pluginthematrix.com/claim/inspiredbyhumans.org'])
     expect(w.claims.watching).toEqual([DOMAIN])
     expect(w.reports).toEqual([])
   })
@@ -430,11 +432,11 @@ describe('at boot', () => {
     w.storage.setItem(DOMAIN_CLAIMS_KEY, kept(T0 - CLAIM_MAX_AGE_MS - 1, 'content.hypercomb.com'))
     w.claims.resume()
     const [expired] = w.reports
-    expect(expired).toEqual({ kind: 'expired', domain: DOMAIN, host: 'content.hypercomb.com', word: 'domain claim inspiredbyhumans.org @content.hypercomb.com' })
+    expect(expired).toEqual({ kind: 'expired', domain: DOMAIN, host: 'hypercomb.com', word: 'domain claim inspiredbyhumans.org @hypercomb.com' })
     // Saying exactly what it names goes back to where the claim was made.
     const [, , name, at] = (expired as { word: string }).word.split(' ')
     await w.claims.claim(name, at)
-    expect(w.calls.map(call => call.url)).toEqual(['https://content.hypercomb.com/claim'])
+    expect(w.calls.map(call => call.url)).toEqual(['https://hypercomb.com/claim'])
   })
 
   it('an expired claim said again is claimed afresh, with a new week, on the host it was made on', async () => {
@@ -442,8 +444,8 @@ describe('at boot', () => {
     w.storage.setItem(DOMAIN_CLAIMS_KEY, kept(T0 - CLAIM_MAX_AGE_MS - 1, 'content.hypercomb.com'))
     await w.claims.claim(DOMAIN)
     expect(w.methods()).toEqual(['POST'])
-    expect(w.calls[0].url).toBe('https://content.hypercomb.com/claim')
-    expect(readClaims(w.storage)[DOMAIN]).toMatchObject({ host: 'content.hypercomb.com', since: T0 })
+    expect(w.calls[0].url).toBe('https://hypercomb.com/claim')
+    expect(readClaims(w.storage)[DOMAIN]).toMatchObject({ host: 'hypercomb.com', since: T0 })
   })
 
   it('what storage holds is read field by field; garbage is nothing', () => {
@@ -561,7 +563,7 @@ describe('the domain word', () => {
       off()
       expect(shown).toHaveLength(2)
       expect(shown[0]).toContain('Say domain claim first.org to check again')
-      expect(shown[1]).toContain('Say domain claim second.org @content.hypercomb.com to check again')
+      expect(shown[1]).toContain('Say domain claim second.org @hypercomb.com to check again')
       expect(localStorage.getItem(DOMAIN_CLAIMS_KEY)).toBeNull()
     })
   })

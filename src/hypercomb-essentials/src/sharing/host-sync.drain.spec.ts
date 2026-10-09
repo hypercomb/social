@@ -326,7 +326,8 @@ describe('the drain asks the host before it sends', () => {
     await service.drain()
 
     expect(calls(sick, 'HEAD')).toHaveLength(10)
-    expect(calls(sick, 'PUT')).toEqual(first.map(f => urlOf(f.sig)))
+    // Four pushes run at once (E4), so their order is not a contract.
+    expect([...calls(sick, 'PUT')].sort()).toEqual(first.map(f => urlOf(f.sig)).sort())
     expect(await queued()).toEqual([])
     expect(warn.mock.calls.some(([line]) => String(line).includes('pausing held-probes'))).toBe(true)
 

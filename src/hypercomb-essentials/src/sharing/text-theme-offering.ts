@@ -3,6 +3,7 @@
 import { CODE_FONTS, READ_FONTS, SignatureService, get, isMetaEnvelope,
   latestLayerMarker, metaPayloadOf, type TextTheme } from '@hypercomb/core'
 import { fetchHiveIndex, putHiveManifest } from './hive-pointer.js'
+import { foldContentLabel, zoneDoor } from './zone-door.js'
 
 const MEANING = 'themes:text'
 const SIG = /^[a-f0-9]{64}$/
@@ -45,8 +46,7 @@ const encoder = new TextEncoder()
 /** The chosen visible domain, never a route or a content endpoint. */
 export const textThemeOfferHost = (sync?: Pick<SyncLike, 'publicHostDomain'>): string => {
   const target = sync ?? get<SyncLike>(SYNC_KEY)
-  const contentHost = String(target?.publicHostDomain?.() ?? '').trim().toLowerCase()
-  return contentHost.startsWith('content.') ? contentHost.slice('content.'.length) : contentHost
+  return foldContentLabel(target?.publicHostDomain?.() ?? '')
 }
 
 const cleanHost = (raw: string): string | null => {
@@ -117,10 +117,11 @@ const scope = async (host: string, deps: TextThemeOfferDeps): Promise<
   { host: string; endpoint: string; pubkey: string; sync: SyncLike } | { reason: string }
 > => {
   const selected = cleanHost(host)
-  if (!selected) return { reason: 'Choose a root domain such as jwize.com.' }
+  if (!selected) return { reason: 'Choose a root domain such as example.org.' }
   const sync = deps.sync ?? get<SyncLike>(SYNC_KEY)
   if (!sync?.publishAtoms || !sync.publicHostDomain) return { reason: 'Host sync is unavailable.' }
-  const endpoint = String(sync.publicHostDomain()).trim().toLowerCase()
+  // Writes go to the zone root — a stored `content.` face is read as its zone.
+  const endpoint = zoneDoor(sync.publicHostDomain())
   if (!DOMAIN.test(endpoint)) return { reason: 'Choose a public content host in Hosts first.' }
   const signer = get<SignerLike>(SIGNER_KEY)
   const pubkey = String(await (deps.pubkey?.() ?? signer?.getPublicKeyHex?.()) ?? '').toLowerCase()

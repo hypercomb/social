@@ -270,6 +270,11 @@ decision, and D5 was answered directly.
   (`scripts/presentation/deploy-azure.cjs`) no longer mints its own package —
   `stage-signed-package.mjs` replicates the signed `install:essentials` root
   into the host and lists it. hypercomb.com now offers `8f6d68b2…`.
+  **2026-10-03 (jwize: "content. retire"):** writes and index reads move to
+  a ZONE ROOT. hypercomb.com's apex is the static Azure site, so the signed
+  index is read at `pluginthematrix.com/<sign('hive:indexes')>/<pubkey>`;
+  `content.hypercomb.com` stays in the read fallback list for old data and
+  old installs, and is never a new target.
 - **D6 — Rule changes as history.** *Recommend:* forward records (each change
   a new layer; data never heals), not one overwritten file.
 - **D7 — "Turn on all" over held behaviors.** *Recommend:* one two-warning

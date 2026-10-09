@@ -45,6 +45,11 @@ export type DevManifest = {
   root: string
 }
 
+/** How a `putPoolDoc` write keeps what came before it: `'versions'` (the
+ *  default — a participant's save) or `'current'` (anything the software
+ *  writes on its own). */
+export type PoolDocWrite = { readonly keep?: 'versions' | 'current' }
+
 export class Store extends EventTarget {
 
   /** THE STORAGE MODEL — no typed folders, ever.
@@ -318,6 +323,14 @@ export class Store extends EventTarget {
   // next write lays the first marker beside it. Forward only: nothing is
   // migrated, nothing heals.
   //
+  // ONLY A SAVE KEEPS HISTORY. "Saves never happen without human intent"
+  // (jwize, 2026-10-03): a write the participant deliberately caused keeps
+  // every version, as above. A write the software makes on its own — working
+  // state, checkpoints, caches, sync write-backs — is not a save, and passes
+  // `{ keep: 'current' }`: the new atom replaces the old ones and no marker is
+  // laid, the shape every document had before 2026-10-01. Removing what came
+  // before needs the same proof a marker does (`#documentSpace`).
+  //
   // Content-addressed, never a human filename: config that used to live under
   // a fixed label (`overrides/i18n.json`, `translations/<locale>.json`) is
   // addressed by its signature like everything else, and identical content
@@ -326,7 +339,8 @@ export class Store extends EventTarget {
   // (translations keys by locale).
 
   /** Write `bytes` as the CURRENT document of a document pool and keep every
-   *  earlier one. Signs the bytes, writes the atom at
+   *  earlier one — or, with `{ keep: 'current' }` (a write that is not a
+   *  participant's save), only it. Signs the bytes, writes the atom at
    *  `<pool>[/<sign(subKey)>]/<sign(bytes)>` exactly as before, then appends
    *  the next marker naming it. The atom is fully written BEFORE any marker
    *  names it, so a reader never follows a marker to nothing. Writing the
@@ -344,10 +358,11 @@ export class Store extends EventTarget {
     pool: FileSystemDirectoryHandle,
     bytes: ArrayBuffer,
     subKey?: string,
+    options?: PoolDocWrite,
   ): Promise<string | null> => {
     const key = `${pool?.name ?? ''}/${subKey ?? ''}`
     const run = (this.#documentWrites.get(key) ?? Promise.resolve(null))
-      .then(() => this.#writePoolDoc(pool, bytes, subKey))
+      .then(() => this.#writePoolDoc(pool, bytes, subKey, options?.keep === 'current'))
     this.#documentWrites.set(key, run)
     void run.then(() => { if (this.#documentWrites.get(key) === run) this.#documentWrites.delete(key) })
     return run
@@ -359,7 +374,8 @@ export class Store extends EventTarget {
   #writePoolDoc = async (
     pool: FileSystemDirectoryHandle,
     bytes: ArrayBuffer,
-    subKey?: string,
+    subKey: string | undefined,
+    currentOnly: boolean,
   ): Promise<string | null> => {
     try {
       const target = subKey
@@ -398,6 +414,7 @@ export class Store extends EventTarget {
         console.warn(`[pool] no history marker in ${target.name.slice(0, 8)}… — ${space.veto}`)
         return sig
       }
+      if (currentOnly) return await Store.#keepOnly(target, sig) ? sig : null
       return await Store.#appendDocumentMarker(target, sig, space.head) ? sig : null
     } catch { return null }
   }
@@ -479,6 +496,26 @@ export class Store extends EventTarget {
       veto: `holds ${markers} lineage marker${markers === 1 ? '' : 's'} whose current one names no document held here — it is not this caller's document space`,
       head: null,
     }
+  }
+
+  /** Leave `sig` as the only document in `target`, which `#documentSpace` has
+   *  just proven to be the caller's own. The markers go first, so a reader
+   *  never follows one to a removed atom: until the old atoms are gone a read
+   *  may still meet one of them, the same stale read a refused write costs. */
+  static #keepOnly = async (target: FileSystemDirectoryHandle, sig: string): Promise<boolean> => {
+    try {
+      const markers: string[] = []
+      const atoms: string[] = []
+      for await (const [name, handle] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        if (handle?.kind === 'directory') continue
+        const kind = classifyDirectoryEntry(name)
+        if (kind === 'marker') markers.push(name)
+        else if (kind === 'member' && name !== sig) atoms.push(name)
+      }
+      for (const name of markers) await target.removeEntry(name)
+      for (const name of atoms) await target.removeEntry(name)
+      return true
+    } catch { return false }
   }
 
   /** Append the next marker naming `sig` through core's one marker writer,
@@ -2245,9 +2282,7 @@ export class Store extends EventTarget {
     // replication's own writes. A bare `<sig>` was readable only through
     // getBeeBytes, so a module written here (a draft, a peer's bee) failed
     // the boot check on the next reload and the install cache was wiped.
-    const handle = await this.bees.getFileHandle(`${expected}.js`, { create: true })
-    const writable = await handle.createWritable()
-    try { await writable.write(exact) } finally { await writable.close() }
+    await Store.#keepAtom(this.bees, `${expected}.js`, exact)
   }
 
   public getDependencyBytes = async (signature: string): Promise<Uint8Array | null> => {
@@ -2271,9 +2306,31 @@ export class Store extends EventTarget {
     const expected = signature.toLowerCase()
     const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
     if (await SignatureService.sign(exact) !== expected) return
-    const handle = await this.dependencies.getFileHandle(`${expected}.js`, { create: true })
-    const writable = await handle.createWritable()
-    try { await writable.write(exact) } finally { await writable.close() }
+    await Store.#keepAtom(this.dependencies, `${expected}.js`, exact)
+  }
+
+  /**
+   * KEEP A VERIFIED ATOM IN A POOL OF MEANING, by its own name: a member a
+   * host serves at `/<sign(meaning)>/<sig>` (the build's version pools,
+   * essentials sharing/version-pools.ts), kept only when the bytes hash to
+   * it. Content-addressed and immutable, so it has no history to keep; it is
+   * the same file the host holds. Returns whether it was kept.
+   */
+  public keepPoolAtom = async (meaning: string, signature: string, bytes: Uint8Array): Promise<boolean> => {
+    const expected = String(signature ?? '').toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(expected)) return false
+    const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+    if (await SignatureService.sign(exact) !== expected) return false
+    const pool = await this.getPool(meaning)
+    if (!pool) return false
+    await Store.#keepAtom(pool, expected, exact)
+    return true
+  }
+
+  /** The one write an atom takes: its bytes, under its name, in its pool. */
+  static #keepAtom = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
+    const writable = await (await dir.getFileHandle(name, { create: true })).createWritable()
+    try { await writable.write(bytes) } finally { await writable.close() }
   }
 
   /** Content relocation: copy every sig-named file from the legacy

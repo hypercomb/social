@@ -27,11 +27,13 @@
             [class.self]="b.isSelf"
             [class.add-name]="b.unnamed"
             [class.selected]="b.selected"
+            [class.elsewhere]="b.where === 'elsewhere'"
+            [class.away]="b.where === 'away'"
             [style.--presence-identity]="b.color"
             (click)="b.isSelf ? onSelfBadgeClick() : onPeerBadgeClick(b.key)"
-            [attr.aria-pressed]="b.isSelf ? null : b.selected"
-            [attr.aria-label]="(b.isSelf ? 'presence.set-name' : 'presence.filter-toggle') | t"
-            [title]="(b.isSelf ? 'presence.set-name' : 'presence.filter-toggle') | t">
+            [attr.aria-pressed]="b.where === 'here' ? b.selected : null"
+            [attr.aria-label]="badgeTitleKey(b) | t"
+            [title]="badgeTitleKey(b) | t">
             {{ b.initials }}
           </button>
         }
@@ -47,11 +49,45 @@
       }
     </div>
 
-    @if (alone()) {
+    <!-- THE ONE STATUS LINE: the socket, the room, and what you offer here.
+         Absent until the mesh reports a connection (older essentials), and
+         then the old captions below stand in. A phone folds a quiet line to
+         the dot and the counts; a tap opens it. -->
+    @if (status(); as s) {
+      <p class="presence-status" role="status" aria-live="polite"
+         [class.warn]="s.tone === 'warn'" [class.down]="s.tone === 'down'"
+         [class.quiet]="s.quiet" [class.open]="lineOpen()">
+        <span class="presence-status-dot" aria-hidden="true"></span>
+        @if (s.quiet && s.compact) {
+          <button class="presence-status-fold" type="button" (click)="onLineToggle()"
+                  [attr.aria-expanded]="lineOpen()" [attr.aria-label]="'presence.expand' | t">{{ s.compact }}</button>
+        }
+        <span class="presence-status-text">
+          @for (p of s.parts; track $index) {
+            @if (!$first) {<span class="presence-status-sep" aria-hidden="true">·</span>}
+            @if (p.action) {
+              <button class="presence-status-action" type="button" (click)="onStatusAction(p.action)">{{ p.key ?? '' | t: p.params }}</button>
+            } @else if (p.key) {
+              <span>{{ p.key | t: p.params }}</span>
+            } @else {
+              <span class="presence-status-word">{{ p.text }}</span>
+            }
+          }
+        </span>
+      </p>
+    } @else if (alone()) {
       <span class="presence-caption">{{ 'presence.alone' | t }}</span>
     }
 
-    @if (upload(); as u) {
+    @if (filterNames(); as names) {
+      <p class="presence-status presence-filter" role="status">
+        <span>{{ 'presence.room-filter' | t: { name: names } }}</span>
+        <span class="presence-status-sep" aria-hidden="true">·</span>
+        <button class="presence-status-action" type="button" (click)="onShowEveryone()">{{ 'presence.room-show-all' | t }}</button>
+      </p>
+    }
+
+    @if (shareSeen() ? null : upload(); as u) {
       <span class="presence-caption presence-upload" role="status" aria-live="polite">
         <span class="presence-upload-bar" [style.--upload-fraction]="u.done / u.total"></span>
         {{ 'presence.uploading' | t: { done: u.done, total: u.total } }}

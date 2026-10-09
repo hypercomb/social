@@ -24,7 +24,7 @@ vi.hoisted(() => {
 })
 
 type StoreLike = {
-  putPoolDoc(pool: MockDir, bytes: ArrayBuffer, subKey?: string): Promise<string | null>
+  putPoolDoc(pool: MockDir, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }): Promise<string | null>
   getPoolDoc(pool: MockDir | undefined, subKey?: string): Promise<ArrayBuffer | null>
 }
 type StoreStatics = { poolSignature(meaning: string): Promise<string> }
@@ -271,6 +271,58 @@ describe('a space that is not provably the caller\'s gets no marker', () => {
     await pool.getDirectoryHandle('a'.repeat(64), { create: true })
     await store.putPoolDoc(pool, bytesOf('"doc"'))
     expect(markers(pool)).toEqual([])
+    expect(removals).toBe(0)
+    warn.mockRestore()
+  })
+})
+
+describe("{ keep: 'current' } — what the software writes on its own is not a save", () => {
+  // "Saves never happen without human intent" (jwize, 2026-10-03): a write
+  // nobody chose to make keeps only the current document, the shape every
+  // pool had before 2026-10-01.
+  const CURRENT = { keep: 'current' as const }
+
+  it('leaves exactly one atom and no marker, and reads it back', async () => {
+    const pool = await colonPool('spec:checkpoint')
+    await store.putPoolDoc(pool, bytesOf('"one"'), undefined, CURRENT)
+    const last = await store.putPoolDoc(pool, bytesOf('"two"'), undefined, CURRENT)
+    expect(atoms(pool)).toEqual([last!])
+    expect(markers(pool)).toEqual([])
+    expect(textOf(await store.getPoolDoc(pool))).toBe('"two"')
+  })
+
+  it('clears the versions an earlier keep-everything write left in its own space', async () => {
+    const pool = await colonPool('spec:working-state')
+    await store.putPoolDoc(pool, bytesOf('"a"'), 'k')
+    await store.putPoolDoc(pool, bytesOf('"b"'), 'k')
+    const bucket = await pool.getDirectoryHandle(await StoreClass.poolSignature('k'))
+    expect(markers(bucket)).toHaveLength(2)
+    const c = await store.putPoolDoc(pool, bytesOf('"c"'), 'k', CURRENT)
+    expect(atoms(bucket)).toEqual([c!])
+    expect(markers(bucket)).toEqual([])
+    expect(textOf(await store.getPoolDoc(pool, 'k'))).toBe('"c"')
+  })
+
+  it("removes nothing where the space is not provably the caller's", async () => {
+    removals = 0
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { /* quiet */ })
+    const molecule = new MockDir(await sha256('neighbours'))
+    const theirs = await sha256('{"member":"theirs"}')
+    molecule.put(theirs, '{"member":"theirs"}')
+    const mine = await store.putPoolDoc(molecule, bytesOf('{"mine":true}'), undefined, CURRENT)
+    expect(atoms(molecule)).toEqual([mine!, theirs].sort())
+    expect(removals).toBe(0)
+    warn.mockRestore()
+  })
+
+  it('removes nothing beside an author bucket or a foreign name', async () => {
+    removals = 0
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { /* quiet */ })
+    const pool = await colonPool('spec:shared-space')
+    pool.put('b'.repeat(64), '"older"')
+    pool.put('notes.txt', 'not ours')
+    await store.putPoolDoc(pool, bytesOf('"newer"'), undefined, CURRENT)
+    expect(pool.files.has('b'.repeat(64))).toBe(true)
     expect(removals).toBe(0)
     warn.mockRestore()
   })

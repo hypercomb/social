@@ -177,8 +177,9 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['substrate:references', 'set'],
   ['substrate:sources', 'set'],
   ['websites:menu', 'set'],
-  // DOCUMENTS — one CURRENT record, per-participant. Every earlier version is
-  // kept and a numbered marker names the current one (Store.putPoolDoc). They
+  // DOCUMENTS — one CURRENT record, per-participant. Every earlier version of
+  // a SAVE is kept and a numbered marker names the current one; a write the
+  // software makes on its own keeps only the current (Store.putPoolDoc). They
   // are declared never to replicate: only the genome (current state, no
   // history) travels.
   ['backgrounds:screen', 'document'],

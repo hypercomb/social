@@ -3,7 +3,7 @@ import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import { confirmRemoval } from '../../commands/remove-confirm.js'
 import { resolveCurrentLayer } from '../../history/layer-placement.js'
 import type { PlacementHistory } from '../../history/layer-placement.js'
-import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
+import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn, OverlaySelectedFn } from './tile-overlay.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
@@ -50,6 +50,10 @@ type IconProviderEntry = {
   hoverTint?: number
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
+  /** Ctrl/cmd+click is this icon's own gesture (see OverlayActionDescriptor). */
+  ctrlClick?: boolean
+  /** Per-tile standing selected ring. */
+  selectedWhen?: OverlaySelectedFn
   labelKey?: string
   descriptionKey?: string
 }
@@ -129,6 +133,10 @@ export type IconRegistryEntry = {
   labelRow?: boolean
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
+  /** Ctrl/cmd+click is this icon's own gesture (see OverlayActionDescriptor). */
+  ctrlClick?: boolean
+  /** Per-tile standing selected ring. */
+  selectedWhen?: OverlaySelectedFn
   /** i18n key for the short hint label (shown on sustained hover) */
   labelKey?: string
   /** i18n key for the expanded description (shown on sustained hover) */
@@ -226,6 +234,30 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xff8a8a, profile: 'public-own', dangerRow: true, labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   { name: 'promote-to-parent', svgMarkup: ICONS.arrowUpward, hoverTint: 0xc8d4ff, profile: 'public-own', visibleWhen: () => (window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).length > 0, labelKey: 'action.promote-to-parent', descriptionKey: 'action.promote-to-parent.description' },
+  // The globe on your OWN tile while joined. Everything you had before the
+  // meeting is private, and world mode (the only place these toggles lived)
+  // is prep that joining switches off — so a joined participant had no way
+  // left to offer an existing tile. The same two scopes, the same handler,
+  // the same tint: lookups match on profile, so the catalog carries them
+  // twice. `make-branch-public` waits in the arrange pool.
+  {
+    name: 'make-public',
+    svgMarkup: ICONS.public,
+    hoverTint: 0x6fd39a,
+    profile: 'public-own',
+    tintWhen: (ctx: OverlayTileContext) => isIndividuallyPublic(currentExplorerLabel(), ctx.label) ? 0x6fd39a : 0x9aa6b8,
+    labelKey: 'action.make-public',
+    descriptionKey: 'action.make-public.description',
+  },
+  {
+    name: 'make-branch-public',
+    svgMarkup: ICONS.share,
+    hoverTint: 0x6fd39a,
+    profile: 'public-own',
+    tintWhen: (ctx: OverlayTileContext) => isBranchPublic(currentExplorerLabel(), ctx.label) ? 0x6fd39a : 0x9aa6b8,
+    labelKey: 'action.make-branch-public',
+    descriptionKey: 'action.make-branch-public.description',
+  },
   // NOTE: there is NO `sync` button and NO `adopt` button. THE CLICK IS THE
   // ADOPT: in a swarm the tiles you don't own render shaded, and clicking one
   // adds it while walking you in (tile-overlay's entry choke point →
@@ -286,8 +318,9 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
   // Your own tile in public mode. `remove` rides the same ordering rule
-  // as private. (No `sync`, no `adopt` icon — taking is the wand.)
-  'public-own': ['break-apart', 'features', 'files', 'invite', 'remove'],
+  // as private. (No `sync`, no `adopt` icon — taking is the wand.) The
+  // globe leads: offering a tile to the room is the act a meeting needs.
+  'public-own': ['make-public', 'break-apart', 'features', 'files', 'invite', 'remove'],
   // Peer-only mesh tiles. There is still no adopt button, and walking in
   // takes NOTHING (2026-08-20): acquisition is the WAND — ctrl (⌘) +
   // press over the tile, which takes that one item (SwarmAdoptDrone's
@@ -471,6 +504,8 @@ export class TileActionsDrone extends Drone {
           labelRow: p.labelRow,
           visibleWhen: p.visibleWhen,
           tintWhen: p.tintWhen,
+          ctrlClick: p.ctrlClick,
+          selectedWhen: p.selectedWhen,
           labelKey: p.labelKey,
           descriptionKey: p.descriptionKey,
         })
@@ -523,6 +558,8 @@ export class TileActionsDrone extends Drone {
           labelRow: entry.labelRow,
           visibleWhen: entry.visibleWhen,
           tintWhen: entry.tintWhen,
+          ctrlClick: entry.ctrlClick,
+          selectedWhen: entry.selectedWhen,
           labelKey: entry.labelKey,
           descriptionKey: entry.descriptionKey,
           // Feature-readiness shade: the overlay dims + disables this affordance
@@ -581,6 +618,8 @@ export class TileActionsDrone extends Drone {
         // (the only tintWhen users) lose their public-state color after any
         // IconProviderRegistry 'change' (e.g. a drone toggled on/off).
         tintWhen: entry.tintWhen,
+        ctrlClick: entry.ctrlClick,
+        selectedWhen: entry.selectedWhen,
         labelKey: entry.labelKey,
         descriptionKey: entry.descriptionKey,
         // Preserve the feature-readiness backing on re-registration too.

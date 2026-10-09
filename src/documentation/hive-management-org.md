@@ -106,6 +106,19 @@ exact words to file, what not to touch, and what to answer with.
 Checked by Claude Code against the live 4250 hive, 2026-10-01. Managers had
 reported several of these the other way round.
 
+- **A held change comes back as `outcome: "held"` (2026-10-04).** `ask`
+  runs its conversation trusted, but a change Jev marks for review, one
+  that leaves the machine, one that follows someone else's words, or one
+  that needs a grant still waits for jwize in Execution. The ask returns at
+  once with the held lines and why; nothing has run. Report it, and do not
+  try another wording to get around the hold.
+- **`find <word> /route` searches under a route.** A whole-hive find on a
+  large hive stops before the deepest tiles and says `truncatedNote`;
+  search again under a narrower route. A tile `read` carries `notes` and
+  `noteCount` live.
+- **A dead broker says so.** `bridge broker not running at ws://…` means
+  the broker is down: stop and report it, never start one yourself.
+
 - **Source changes reach 4250 only where source registers first.** The dev
   shell imports essentials from source (`hypercomb-dev/src/app/app.ts`) AND
   runs the installed package, and a service key keeps its FIRST instance

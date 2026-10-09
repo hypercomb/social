@@ -69,11 +69,13 @@ import { visualBeeIconSvg } from '../commands/visual-bee-icon-svg.js'
 import {
   publishBranch,
   secureDeleteBranch,
+  setBranchAddress,
   setBranchDoors,
   unpublishBranch,
   type PublishFailure,
   type PublishProgress,
 } from './publish-branch.js'
+import { APEX_LABEL, creationUrl, foldDnsLabel, ownAddressRefusal, ownLabelOn, zoneDoor } from './zone-door.js'
 
 /** English fallbacks for every way publishing can stop. Each one names what
  *  happened AND what it means for the participant's existing links — the
@@ -97,7 +99,6 @@ const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 const LOOPBACK_RE = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i
-const contentDoor = (zone: string): string => LOOPBACK_RE.test(zone) ? zone : `content.${zone}`
 /** Gap enumeration reads local bytes across a closure — opt-in per row, and
  *  capped: "at least this many holes" is enough to refuse a green light. */
 const GAP_LIMIT = 8
@@ -154,7 +155,9 @@ export interface PublishRow {
   seenAt: number | null
   /** Objects in the published closure that are not served. Filled on inspect. */
   gaps: string[]
-  /** The shareable link, when a record carries its bundle sig. */
+  /** The shareable link — where the creation lives on its primary open
+   *  domain (its own address there, else the root path); null while it is
+   *  not published. */
   link: string | null
   /** Every root domain this branch claims, primary first. The name is the
    *  subdomain on each; the first is the door writes and probes go through. */
@@ -176,6 +179,16 @@ export interface PublishRow {
   /** OPTIMIZE — what the published branch's first view loads (IoC keys), from
    *  `plan:<key>` in the signed index; null = the whole package. */
   plan: string[] | null
+  /** zone → the address this creation is shown at there: the zone's root
+   *  path (`https://<zone>/<path>`) by default, its own address
+   *  (`https://<label>.<zone>`) when the signed index gives it one. */
+  urls: Record<string, string>
+  /** zone → the own-address LABEL the signed index gives this creation there;
+   *  absent = it lives at the root path on that zone. */
+  ownLabels: Record<string, string>
+  /** The label an own address starts from — the tile's name, folded to a DNS
+   *  label ('' when the name has nothing usable). */
+  defaultLabel: string
 }
 
 /** One choice on the "opens as" strip. `view: ''` is the hexagons ground. */
@@ -193,9 +206,8 @@ export interface PublishViewChoice {
 export interface PublishRenderPayload {
   open: boolean
   host: string
-  /** The ROOT domain of the target (host minus its `content.` label) — the
-   *  only part of an address a participant ever edits: the tile's name is the
-   *  subdomain and the content endpoint is plumbing, both derived from this. */
+  /** The ROOT domain of the target — writes go to it, and a creation lives
+   *  at its root path (or at an own address the participant gives it). */
   zone: string
   pubkey: string
   /** The row for THE CURRENT PAGE — the nearest branch at or above where the
@@ -343,6 +355,12 @@ export class PublishStatusDrone extends Drone {
       void this.#door(String(p?.key ?? ''), String(p?.zone ?? ''), p?.on === true)
     })
     this.onEffect<{ key?: string }>('publish:forget', (p) => { void this.#forget(String(p?.key ?? '')) })
+    // OWN ADDRESS — give the creation `<label>.<zone>` on one domain, or (no
+    // label) take it back to the root path there.
+    this.onEffect<{ key?: string; zone?: string; label?: string | null }>('publish:own-address', (p) => {
+      const label = typeof p?.label === 'string' ? p.label.trim().toLowerCase() : ''
+      void this.#ownAddress(String(p?.key ?? ''), String(p?.zone ?? ''), label || null)
+    })
     this.onEffect<{ key?: string }>('publish:unpublish', (p) => { void this.#unpublish(String(p?.key ?? '')) })
     this.onEffect<{ key?: string }>('publish:copy-link', (p) => { void this.#copyLink(String(p?.key ?? '')) })
     this.onEffect<{ key?: string; view?: string }>('publish:opens-as', (p) => {
@@ -416,8 +434,10 @@ export class PublishStatusDrone extends Drone {
       // owns the setting; the compiled-in list is the standing default for
       // anyone who never chose. Reading it here rather than importing the
       // constant is what lets the panel show a target that can change.
-      const host = hostSync?.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || ''
-      this.#zone = host.replace(/^content\./, '')
+      // The zone ROOT is the door: a setting stored as `content.<zone>`
+      // before the face retired is read as its zone (zone-door.ts).
+      const host = zoneDoor(hostSync?.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || '')
+      this.#zone = host
       // The domains come first: they are listed whether or not a key or a
       // tile is ready, so the panel is never an empty page.
       this.#community = await listCommunityHosts()
@@ -485,7 +505,7 @@ export class PublishStatusDrone extends Drone {
         let door = this.#hostByKey.get(key)
         if (!door) {
           const zone = this.#zonesFor(key)[0]
-          door = zone ? contentDoor(zone) : host
+          door = zone ? zoneDoor(zone) : host
           this.#hostByKey.set(key, door)
         }
         return door
@@ -497,12 +517,14 @@ export class PublishStatusDrone extends Drone {
       const indexes = new Map<string, {
         state: PublishIndexState; roots: Record<string, string>
         doors: Record<string, string[]>
+        addresses: Record<string, string>
         createdAt: number; stale: boolean
       }>()
       for (const door of doors) {
         const read = await fetchHiveIndex(door, pubkey)
         const roots = read.ok ? read.manifest.roots : {}
         const doorsMap = read.ok ? read.manifest.doors ?? {} : {}
+        const addresses = read.ok ? read.manifest.addresses ?? {} : {}
         const createdAt = read.ok ? read.manifest.createdAt : 0
         const state: PublishIndexState = read.ok
           ? 'ok'
@@ -511,7 +533,7 @@ export class PublishStatusDrone extends Drone {
         // which are recorded per host — can say.
         const highWater = await highWaterIndexStamp(door, pubkey)
         indexes.set(door, {
-          state, roots, doors: doorsMap, createdAt,
+          state, roots, doors: doorsMap, addresses, createdAt,
           stale: read.ok && highWater > 0 && createdAt < highWater,
         })
       }
@@ -556,6 +578,7 @@ export class PublishStatusDrone extends Drone {
         const row = this.#draftRow(key, segments, live, entry)
         row.doors = indexes.get(hostFor(key))?.doors[key] ?? null
         row.versions = versionsByKey.get(key) ?? []
+        this.#addressRow(row, indexes.get(hostFor(key))?.addresses ?? {})
         draft.push(row)
       }
       draft.sort((a, b) => a.path.localeCompare(b.path))
@@ -656,7 +679,7 @@ export class PublishStatusDrone extends Drone {
       publishedAt: entry?.record.at ?? null,
       seenAt: null,
       gaps: [],
-      link: entry?.record.bundleSig ? this.#linkFor(entry.record.bundleSig) : null,
+      link: null,
       // Every row has an address the moment it has a name — an unpublished
       // branch shows where it WILL live, which is where the domain is edited.
       zones: this.#zonesFor(key),
@@ -665,7 +688,31 @@ export class PublishStatusDrone extends Drone {
       opensAs: '',
       versions: [],
       plan: null,
+      urls: {},
+      ownLabels: {},
+      defaultLabel: foldDnsLabel(segments[segments.length - 1] ?? ''),
     }
+  }
+
+  /** Every zone's address for one row, from the signed `addresses` map: the
+   *  own address where the index gives one, the root path everywhere else.
+   *  The row's link is its primary OPEN domain's address. */
+  #addressRow(row: PublishRow, addresses: Record<string, string>): void {
+    const zones = [...new Set([...this.#knownZones(), ...row.zones])]
+    const urls: Record<string, string> = {}
+    const ownLabels: Record<string, string> = {}
+    for (const zone of zones) {
+      urls[zone] = creationUrl(zone, row.segments, row.key, addresses)
+      const label = ownLabelOn(addresses, zone, row.key)
+      if (label) ownLabels[zone] = label
+    }
+    row.urls = urls
+    row.ownLabels = ownLabels
+    const open = row.live ? (row.doors ?? row.zones) : []
+    const primary = row.zones.find(z => open.includes(z)) ?? open[0] ?? ''
+    row.link = primary && row.segments.length > 0
+      ? (urls[primary] ?? creationUrl(primary, row.segments, row.key, addresses))
+      : null
   }
 
   /** The opens-as choices: the hexagons ground first, then every registered
@@ -894,6 +941,46 @@ export class PublishStatusDrone extends Drone {
     void this.#refresh()
   }
 
+  /** OWN ADDRESS — one signed index rewrite giving this creation
+   *  `<label>.<zone>` (or, with no label, returning it to the root path on
+   *  that zone). The label is checked before anything is signed. */
+  async #ownAddress(key: string, rawZone: string, label: string | null): Promise<void> {
+    const row = this.#rows.find(r => r.key === key)
+    const zone = hostZone(rawZone)
+    if (!row || row.segments.length === 0 || !zone || row.busyPhase) return
+    if (label !== null) {
+      const refusal = ownAddressRefusal(label)
+      if (refusal) {
+        this.#toast('error', `publish.own.${refusal}`, refusal === 'reserved'
+          ? '“content”, “host” and names starting with “try-” belong to the host — choose another name.'
+          : 'An address name is letters, digits and hyphens, up to 63 characters, with no hyphen at either end.')
+        return
+      }
+    }
+    if (!row.live) {
+      this.#toast('tip', 'publish.own.not-published', 'Publish this place on the domain first, then give it its own address.')
+      return
+    }
+    row.busyPhase = 'indexing'
+    this.#emit()
+    const result = await setBranchAddress(row.segments, zone, label)
+    row.busyPhase = null
+    if (!result.ok) {
+      const known = result.failure in PUBLISH_FAILURE_TEXT
+      this.#toast('error', known ? `publish.failure.${result.failure}` : `publish.own.${result.failure}`,
+        known ? PUBLISH_FAILURE_TEXT[result.failure as PublishFailure] : 'The address could not be saved.')
+      this.#emit()
+      return
+    }
+    if (label === APEX_LABEL) {
+      this.#toast('success', 'publish.own.apex-saved', `${zone} now opens on this place. Its host card is at host.${zone}.`, { zone })
+    } else {
+      this.#toast('success', label ? 'publish.own.saved' : 'publish.own.cleared',
+        label ? 'Saved — this place has its own address.' : 'This place lives at the root path again.')
+    }
+    void this.#refresh()
+  }
+
   /** SECURE DELETE — the rare act after "off everywhere": ask each host to
    *  stop holding what only this place used (publish-branch.ts). The panel
    *  confirms before emitting; the gates live in the routine, not here. */
@@ -976,27 +1063,19 @@ export class PublishStatusDrone extends Drone {
     // unmarked branch rides the standing default.
     const named = this.#branchHosts.get(key) ?? []
     if (named.length > 0) return named
-    const fallback = this.#zone || PUBLIC_CONTENT_HOSTS[0]?.replace(/^content\./, '') || ''
+    const fallback = this.#zone || zoneDoor(PUBLIC_CONTENT_HOSTS[0] ?? '')
     return fallback ? [fallback] : []
-  }
-
-  #linkFor(bundleSig: string): string {
-    try {
-      const host = window.location.host
-      const scheme = LOOPBACK_RE.test(host) ? 'http' : 'https'
-      return `${scheme}://${host}/${bundleSig}`
-    } catch { return '' }
   }
 
   /** Toasts carry RESOLVED text — the bus payload is display copy, and the
    *  shell must not have to know which fields are keys (the publishing gesture
    *  resolves the same way). */
-  #toast(type: string, messageKey: string, fallback: string): void {
+  #toast(type: string, messageKey: string, fallback: string, params?: Record<string, string>): void {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     EffectBus.emit('toast:show', {
       type,
       title: i18n?.t('publish.title') ?? 'Publish',
-      message: i18n?.t(messageKey) ?? fallback,
+      message: i18n?.t(messageKey, params) ?? fallback,
     })
   }
 

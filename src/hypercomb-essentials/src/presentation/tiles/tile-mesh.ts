@@ -10,6 +10,7 @@
 // enabled AND a room and a secret are both set; clearing either seals it.
 
 import { isCellPublic } from './tile-public.js'
+import { isJoinedHere } from '../../sharing/membership.js'
 
 export type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 export type MeshSub = { close: () => void }
@@ -175,9 +176,7 @@ export class TileMesh {
     // used to wake SwarmDrone, presence, avatars, and meeting consumers even
     // while the UI said private. Keep the mesh completely cold until the user
     // explicitly enters public/swarm mode.
-    let meshPublic = false
-    try { meshPublic = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* privacy-safe default: off */ }
-    if (meshPublic) {
+    if (isJoinedHere()) {
       mesh.ensureStartedForSig(sig)
       this.host.emit('mesh:ensure-started', { signature: sig })
     }

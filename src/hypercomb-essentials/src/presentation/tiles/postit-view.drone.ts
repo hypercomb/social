@@ -24,6 +24,7 @@ import { isBehaviorDormant, isPublishedVisitorShell, ENABLEMENT_CHANGED } from '
 import { listDecorations, replaceDecoration } from '../../commands/decoration-manifest.js'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
+import { onPageCellsChanged, pageCellsAt } from './page-cells.js'
 import { readTilePropertiesAt, tilePictureCandidates } from '../../editor/tile-properties.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { trackScrollGutter } from './scroll-gutter.js'
@@ -141,6 +142,9 @@ export class PostitViewDrone extends Drone {
       // (and stayed missing after it was switched back on) until some unrelated
       // pass happened to reconcile.
       this.onEffect(ENABLEMENT_CHANGED, this.#change)
+      // WHAT THE PAGE SHOWS changed (a pheromone filter, a hide, an add): a
+      // sticky belongs only to a tile the page still shows (page-cells.ts).
+      this.#pageCellsOff = onPageCellsChanged(this.#change)
       // WHO HAS THE SURFACE, asked of the one registry that knows. This used
       // to read `chat:window-state` — the chat window by name — which was
       // right about the only cover that existed and wrong in two ways since:
@@ -184,11 +188,14 @@ export class PostitViewDrone extends Drone {
     window.removeEventListener('synchronize', this.#change)
     this.#backOff?.()
     this.#backOff = null
+    this.#pageCellsOff?.()
+    this.#pageCellsOff = null
     this.#stickies?.remove()
     this.#stickies = null
     this.#teardownPost()
   }
 
+  #pageCellsOff: (() => void) | null = null
   #changeTimer = 0
   readonly #navigate = (): void => {
     // Do not leave the old layer interactive during the trailing/coalesced
@@ -296,11 +303,17 @@ export class PostitViewDrone extends Drone {
     const history = window.ioc?.get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
     const segments = [...(lineage?.explorerSegments?.() ?? [])]
 
-    // Candidates: the cell we stand AT, then its children in layer order.
+    // Candidates: the cell we stand AT, then what the page shows, in the
+    // hive's order — after every filter, so a tile a pheromone filter took
+    // off the page takes its sticky with it. Until the page has rendered,
+    // its layer; the render that follows re-runs this through the filter.
     const candidates: Array<{ label: string; path: string[] }> = []
     const own = segments.at(-1)
     if (own) candidates.push({ label: own, path: [...segments] })
-    if (history) {
+    const shown = pageCellsAt(segments)
+    if (shown) {
+      for (const cell of shown.cells) candidates.push({ label: cell.label, path: [...cell.segments] })
+    } else if (history) {
       try {
         const layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
         if (layer) {

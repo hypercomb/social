@@ -74,6 +74,7 @@ import { Drone, EffectBus, isMetaEnvelope, registerPoolMeaning } from '@hypercom
 import { decorationClosureSigs } from './decoration-closure.js'
 import { adoptDescendantsOf } from './adopt-descendants.js'
 import { firstAvailableHost } from './first-available-host.js'
+import { isJoinedHere } from './membership.js'
 import { PASSIVE_REPLICATION_KEY, passiveReplicationQueue } from './passive-replication-queue.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
@@ -322,11 +323,13 @@ const MAX_MISS_TTL_MS = 30 * 60_000
 // sha256 gates every fetched byte, so a mirror that 404s or serves wrong bytes
 // is harmless — it only ever costs a 404 before the cascade moves on, never
 // corruption.
-// content.jwize.com is the PUBLIC content endpoint (Blossom over R2,
-// documentation/public-content-endpoint.md) — where published-public
-// closures land via HostSyncService's public target. Same tier, same
-// flag, same sha256 harmlessness as the mirrors.
-const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io', 'content.jwize.com'] as const
+// pluginthematrix.com is the PUBLIC content endpoint's zone ROOT (Blossom
+// over R2, documentation/public-content-endpoint.md) — where published-public
+// closures land via HostSyncService's public target. content.jwize.com is
+// the retired content face, kept LAST as a read fallback for bytes only it
+// held (writes never go there — zone-door.ts). Same tier, same flag, same
+// sha256 harmlessness as the mirrors.
+const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io', 'pluginthematrix.com', 'content.jwize.com'] as const
 
 export type ContentType = 'layer' | 'resource' | 'dependency' | 'bee'
 
@@ -642,6 +645,25 @@ export class ContentBrokerDrone extends Drone {
   #getSelfDomain = (): string => {
     try { return String(localStorage.getItem('hc:nostrmesh:self-domain') ?? '').trim() }
     catch { return '' }
+  }
+
+  /** The swarm's host — host[:port] of the relay this tab meets at, as the
+   *  mesh derives it. '' when the mesh is absent or names none. */
+  #swarmHost = (): string => {
+    try { return String((this.#getMesh() as { swarmHost?: () => string } | undefined)?.swarmHost?.() ?? '').trim() }
+    catch { return '' }
+  }
+
+  /** True when the self-domain is nothing but this page's own origin: not a
+   *  backup host (self-domain host sync off) and not a published site's own
+   *  door (a read-only visitor reads its bytes there). */
+  #selfIsOnlyTheOrigin = (selfDomain: string): boolean => {
+    try {
+      if (!selfDomain || this.#domainToHost(selfDomain).toLowerCase() !== location.host.toLowerCase()) return false
+      if ((globalThis as { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) return false
+      const hostSync = window.ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as { isEnabled?: () => boolean } | undefined
+      return hostSync?.isEnabled?.() !== true
+    } catch { return false }
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1017,12 +1039,23 @@ export class ContentBrokerDrone extends Drone {
       ordered.push(host)
     }
 
+    // Tier −1 — THE SWARM'S HOST, while this tab is joined: the relay it
+    // meets at is the host its peers upload to (documentation/swarm-host.md),
+    // so a peer's tile is fetched where it was put, in the first wave.
+    if (isJoinedHere()) push(this.#swarmHost())
+
     // Tier 0 — self-domain. There is NO localhost tier: the app only ever
     // dials real domains. The operator's own domain resolves locally anyway
     // when the tunnel terminates on this machine (e.g. jwize.com →
     // cloudflared → the local relay), so a localhost shortcut buys nothing
     // and costs the guarantee that local ports are never fetched directly.
-    push(this.#getSelfDomain())
+    // THE ORIGIN IS THE SHELL, NOT A HOST: a self-domain that is only this
+    // page's own origin (hypercomb.io seeds it so) answers every /<sig> with
+    // the app page — skipped, unless the participant backs up to it
+    // (self-domain host sync on) or this is a published site reading its own
+    // door.
+    const selfDomain = this.#getSelfDomain()
+    if (!this.#selfIsOnlyTheOrigin(selfDomain)) push(selfDomain)
 
     // Tier 1 — community-trusted domains. Always included regardless
     // of whether they've witnessed this sig via the mesh: the operator

@@ -472,9 +472,11 @@ three doors inherit it, and to grow a principal.
    not be pasted — it now writes through `#persistMeta`, the one writer.
 4. ~~**Fix `/undo N`** — the repair verb, silently broken.~~ **Resolved
    2026-09-04** by `44f720d3f`: the cursor serializes its own walks, so N steps
-   land regardless of caller. Still owed on top — `undo.queen.ts` reports the
-   number ASKED FOR rather than the number that moved, so it overstates when
-   the walk hits the floor; that file is untracked work from another session.
+   land regardless of caller. ~~Still owed on top — `undo.queen.ts` reports
+   the number ASKED FOR rather than the number that moved.~~ **Resolved
+   2026-10-02** by `c1d7b8639`: the walk stops when the position stops
+   moving, the receipt names the steps that moved, and nothing moved is a
+   refusal rather than a step.
 5. ~~**Make the fire-and-forget six honest**~~ **Resolved 2026-10-02.** The
    acknowledgement half had landed piecemeal (copy, cut, paste, hide await the
    worker's `complete`; undo and redo await the cursor). What remained was the
@@ -575,9 +577,19 @@ three doors inherit it, and to grow a principal.
       is off until granted per provider, with a character budget; only the
       participant's own local model reads freely. The existence oracle a
       granted additive verb offers stays, now bounded by the roster.
-    - *The unit of authorization is not the unit of atomicity* — **open, by
-      size.** A failure stops the tail and the receipt names the completed
-      prefix; a true rollback is a forward-commit revert across pages.
+    - *The unit of authorization is not the unit of atomicity* — **resolved
+      2026-10-04** (`hypercomb-plan-transaction.ts`). A plan records every
+      page it moves from its first line, in the lane (`history:marker-wrote`
+      fires before the head moves, so the earlier version is still known; a
+      pasted page's first marker IS its earlier state). When a line fails,
+      the earlier lines' pages go back as forward commits — nothing deleted,
+      the plan's versions kept in history — once the commit lane settles.
+      Not touched: a page something else moved since (left, counted), a hive
+      left rewound (refused, `/redo`), and what a line wrote outside the
+      pages (`hypercombLinesBeyondPages`: hive, local, network or unjudged
+      scope), which the receipt names instead of claiming undone. Stop is
+      the participant's hand and rolls nothing back. The model is told
+      whether anything of the block still stands.
     - *There is no single seam* — **one door was found and closed.** Every
       caller that runs a behaviour was traced: keyboard and bridge (command
       line), model channel (chat window), quick menu (the participant's hand),

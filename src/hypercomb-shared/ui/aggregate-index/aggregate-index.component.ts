@@ -397,8 +397,8 @@ export class AggregateIndexComponent implements OnDestroy {
       'gather:page-links', (p) => {
         this.#linkedKeys.set(new Set((p?.from ?? []).map(route => route.join('/'))))
       }))
-    // The home pin can move from outside this window (the rail's Home menu, or
-    // forgetting the pinned portal), and the lit row has to follow it.
+    // The home pin can move from outside this window (Ctrl/⌘+click on the
+    // rail's Home), and the lit row has to follow it.
     this.#cleanups.push(EffectBus.on('portals:recent-changed', () => this.#cdr.markForCheck()))
     this.#cleanups.push(EffectBus.on<{ active?: readonly string[]; scope?: string }>('tags:filter', (p) => {
       this.#activeTags.set(new Set((p?.active ?? []).map(String).filter(Boolean)))

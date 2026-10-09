@@ -39,6 +39,7 @@
 
 import { get, SignatureService } from '@hypercomb/core'
 import { nip98Header } from './hive-pointer.js'
+import { foldContentLabel } from './zone-door.js'
 
 /** Where waiting claims are kept, per browser. */
 export const DOMAIN_CLAIMS_KEY = 'hc:domain-claims'
@@ -55,8 +56,7 @@ export const CLAIM_LOST_AFTER = 2
 
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const REASON_MAX = 200
-// Loopback names its own write face: no `content.` label in front of it.
-// Same rule as hive-pointer.ts / publish-branch.ts.
+// Loopback is its own write face, exactly as a zone root is (zone-door.ts).
 const LOOPBACK_RE = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[::1\])(?::\d{1,5})?$/i
 const LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 const TLD_RE = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/
@@ -75,7 +75,9 @@ export interface ClaimState {
 
 /** A claim this browser is still waiting on. */
 export interface KeptClaim {
-  /** The write face the claim was made on, bare: `content.<zone>` or a loopback host. */
+  /** The write face the claim was made on, bare: the zone root or a loopback
+   *  host. A claim kept before the content face retired names `content.<zone>`
+   *  and is read as its zone. */
   host: string
   nameservers: string[]
   /** When this hive first heard the claim was pending (ms). */
@@ -143,8 +145,8 @@ export const claimDomain = (raw: unknown): string => {
 }
 
 /**
- * The write face a claim is made on: a host's `content.<zone>`, never a
- * published site (the worker takes writes only there). `pluginthematrix.com`,
+ * The write face a claim is made on: the host's ZONE ROOT — the `content.`
+ * face is retired as a write target (zone-door.ts). `pluginthematrix.com`,
  * `https://content.pluginthematrix.com/` and `content.pluginthematrix.com` are
  * the same face; a loopback host is its own face. '' when it is not a host.
  */
@@ -156,7 +158,7 @@ export const claimHost = (raw: unknown): string => {
   if (!bare) return ''
   if (LOOPBACK_RE.test(bare)) return bare
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/.test(bare)) return ''
-  return bare.startsWith('content.') ? bare : `content.${bare}`
+  return foldContentLabel(bare)
 }
 
 const baseOf = (host: string): string => `${LOOPBACK_RE.test(host) ? 'http' : 'https'}://${host}`

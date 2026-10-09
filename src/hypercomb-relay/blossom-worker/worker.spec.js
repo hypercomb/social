@@ -202,7 +202,23 @@ test('a signed landing field is inert — the door omits it and the visitor page
   assert.equal('landing' in JSON.parse(door[1]), false)
   // The signed index rides verbatim (its landing field inert inside the publisher's own signed bytes).
   const signed = /<script id="hc-index" type="application\/json">[^<]*<\/script>/.exec(html)
-  assert.equal(html.replace(door[0], '').replace(signed?.[0] ?? '', ''), shell)
+  const card = html.match(/<meta (property="og:|name="twitter:)[^>]*>/g) ?? []
+  const rest = card.reduce((page, tag) => page.replace(tag, ''), html.replace(door[0], '').replace(signed?.[0] ?? '', ''))
+  assert.equal(rest, shell.replace('<title>x</title>', `<title>${site.title}</title>`))
+})
+
+test('a page names its site — the title and share card are in the served HTML, not set by script', async () => {
+  const bindings = { ...ONE_ZONE, 'revolucion.pluginthematrix.com': { ...ONE_ZONE['revolucion.pluginthematrix.com'], title: 'Revolución & "Co" $&' } }
+  const { env } = await fixture(undefined, bindings)
+  const shell = '<!doctype html><html><head><title>Hypercomb</title></head><body></body></html>'
+  env.ASSETS.fetch = async () => new Response(shell, { headers: { 'content-type': 'text/html' } })
+  const html = await (await worker.fetch(page('https://revolucion.pluginthematrix.com/about'), env)).text()
+  const name = 'Revolución &amp; &quot;Co&quot; $&amp;'
+  assert.match(html, new RegExp(`<title>${name.replace(/\$/g, '\\$')}</title>`))
+  assert(html.includes(`<meta property="og:title" content="${name}">`))
+  assert(html.includes(`<meta name="twitter:title" content="${name}">`))
+  assert(html.includes('<meta property="og:url" content="https://revolucion.pluginthematrix.com/about">'))
+  assert(!html.includes('Published website'))
 })
 
 test('a page carries its door record, escaped so no value can close the script', async () => {
@@ -526,9 +542,11 @@ test('bare domain is a Core creation, not a server-authored landing page', async
 
 test('published Core hosts reject every mutation before relay routing', async () => {
   const { env, assetRequests } = await fixture()
-  const upload = await worker.fetch(new Request('https://pluginthematrix.com/upload', { method: 'PUT' }), env)
+  // A site under the zone — explicit or implicit — stays read-only. (The zone
+  // root itself is the write face now; see the root-write tests below.)
+  const upload = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/upload', { method: 'PUT' }), env)
   const hive = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${INDEXES}/${pubkey}`, { method: 'PUT' }), env)
-  const options = await worker.fetch(new Request('https://pluginthematrix.com/', { method: 'OPTIONS' }), env)
+  const options = await worker.fetch(new Request('https://pluginthematrix.pluginthematrix.com/', { method: 'OPTIONS' }), env)
   assert.equal(upload.status, 405)
   assert.equal(hive.status, 405)
   assert.equal(options.status, 405)
@@ -1025,6 +1043,29 @@ test('a front-door apex is the shim host card; the ledger and the heap stay on t
     assert.ok(Array.isArray((await ledger.json()).sites))
     assert.deepEqual(asked, ['https://door.example/?x=1'])
     assert.deepEqual(assetRequests, [])
+  } finally { globalThis.fetch = realFetch }
+})
+
+test('the host card names its host in the served HTML — the staged welcome, else the host itself', async () => {
+  const bindings = { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], lineage: 'pluginthematrix.com', frontDoor: true } }
+  const { env } = await fixture(undefined, bindings)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  const shell = '<!doctype html><html><head><title>Hypercomb</title></head><body></body></html>'
+  const realFetch = globalThis.fetch
+  let welcome = null
+  globalThis.fetch = async (url) => String(url).endsWith('/welcome.json')
+    ? (welcome ? new Response(JSON.stringify(welcome), { headers: { 'content-type': 'application/json' } }) : new Response('nope', { status: 404 }))
+    : new Response(shell, { headers: { 'content-type': 'text/html' } })
+  try {
+    let html = await (await worker.fetch(page('https://pluginthematrix.com/'), env)).text()
+    assert.match(html, /<title>pluginthematrix\.com<\/title>/)
+    assert(html.includes('<meta property="og:title" content="pluginthematrix.com">'))
+    assert(html.includes('<meta property="og:description" content="Discover creations'))
+    welcome = { title: 'Plugin the Matrix', tagline: 'Hives & "creations"' }
+    html = await (await worker.fetch(page('https://pluginthematrix.com/'), env)).text()
+    assert.match(html, /<title>Plugin the Matrix<\/title>/)
+    assert(html.includes('<meta name="description" content="Hives &amp; &quot;creations&quot;">'))
+    assert(!html.includes('(shim)'))
   } finally { globalThis.fetch = realFetch }
 })
 
@@ -2514,6 +2555,9 @@ test('a claimed apex is its claimant\'s front door, and every name under it is a
     const sites = JSON.parse(await publicationsAt(env, DOMAIN)).sites
     const blog = sites.find((site) => site.host === `blog.${DOMAIN}`)
     assert.deepEqual(blog.publishers.map((p) => [p.pubkey, p.head]), [[claimant, head]])
+    // ... and, once root paths are on, at its root path on the claimed apex first.
+    const rooted = JSON.parse(await publicationsAt({ ...env, ROOT_PATHS: '1' }, DOMAIN)).sites.find((site) => site.lineage === 'blog')
+    assert.deepEqual(rooted.hosts.map((door) => door.url), [`https://${DOMAIN}/blog`, `https://blog.${DOMAIN}/`])
     // ... and the operator's never does: a claim is not the operator's to advertise.
     const operators = await publicationsAt(env, 'pluginthematrix.com')
     assert.ok(JSON.parse(operators).sites.length)
@@ -2668,4 +2712,416 @@ test('an active claim lifts its key past the guest allowance; a stranger stays o
   const contested = await later(61_000, () => upload('after the contest', sk))
   assert.equal(contested.status, 403)
   assert.match(await contested.text(), /quota used up/)
+})
+
+// ── NIP-05: who a key is, at its host (documentation/sealed-audiences.md, Names)
+// `/.well-known/nostr.json` from the keys the host already serves — each
+// binding's publishers under their label, the primary as `_`. Always 200 JSON
+// with CORS `*`, never the page, the host card, a redirect or a 404.
+const NOSTR_JSON = '/.well-known/nostr.json'
+const nostrJsonAt = (env, host, { query = '', method = 'GET', headers } = {}) =>
+  worker.fetch(new Request(`https://${host}${NOSTR_JSON}${query}`, { method, headers }), env)
+async function namesAt(env, host, options) {
+  const res = await nostrJsonAt(env, host, options)
+  assert.equal(res.status, 200, host)
+  assert.equal(res.headers.get('content-type'), 'application/json', host)
+  assert.equal(res.headers.get('access-control-allow-origin'), '*', host)
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=60', host)
+  const doc = await res.json()
+  assert.deepEqual(Object.keys(doc), ['names'], host)
+  return doc.names
+}
+
+test('a bound apex answers its publishers by name, the primary as _ — the JSON, never the page', async () => {
+  const { env, assetRequests } = await fixture()
+  // Even asked as a browser navigation would ask it.
+  assert.deepEqual(await namesAt(env, 'pluginthematrix.com', { headers: { 'sec-fetch-dest': 'document', accept: 'text/html,*/*' } }),
+    { _: pubkey, jaime: pubkey })
+  // Another binding answers its own publishers' names.
+  assert.deepEqual(await namesAt(env, 'revolucion.pluginthematrix.com'), { _: pubkey, curator: pubkey })
+  // An implicit name under a zone answers the zone's.
+  assert.deepEqual(await namesAt(env, 'blog.pluginthematrix.com'), { _: pubkey, jaime: pubkey })
+  assert.deepEqual(assetRequests, [])
+})
+
+test('a front-door apex answers its names from the worker, never through the host card', async () => {
+  const bindings = { ...ONE_ZONE, 'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], lineage: 'pluginthematrix.com', frontDoor: true } }
+  const { env, assetRequests } = await fixture(undefined, bindings)
+  env.HOST_DOOR_ORIGIN = 'https://door.example/'
+  env.HOST_DOOR_HOSTS = 'pluginthematrix.io'
+  const asked = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => { asked.push(String(url)); return new Response('host card', { headers: { 'content-type': 'text/html' } }) }
+  try {
+    assert.deepEqual(await namesAt(env, 'pluginthematrix.com'), { _: pubkey, jaime: pubkey })
+    // A byte mirror binds nobody: it vouches for nobody, and still asks no card.
+    assert.deepEqual(await namesAt(env, 'pluginthematrix.io'), {})
+    assert.deepEqual(asked, [])
+    assert.deepEqual(assetRequests, [])
+  } finally { globalThis.fetch = realFetch }
+})
+
+test('a claimed domain answers only its claimant, as _; a contested claim vouches for nobody', async () => {
+  const env = claimEnv()
+  await keepClaim(env, { domain: DOMAIN, pubkey: assessor })
+  // A claim carries no label, so the claimant is the domain and nothing more.
+  assert.deepEqual(await namesAt(env, DOMAIN), { _: assessor })
+  assert.deepEqual(await namesAt(env, `blog.${DOMAIN}`), { _: assessor })
+  await keepClaim(env, { domain: DOMAIN, pubkey: assessor, contested: [assessor, pubkey] })
+  await later(61_000, async () => {
+    assert.deepEqual(await namesAt(env, DOMAIN), {})
+    assert.deepEqual(await namesAt(env, `blog.${DOMAIN}`), {})
+  })
+})
+
+test('the relay face and an unbound host vouch for nobody', async () => {
+  const { env } = await fixture()
+  assert.deepEqual(await namesAt(env, 'content.pluginthematrix.com'), {})
+  assert.deepEqual(await namesAt(env, 'unbound.example'), {})
+  // A name the wildcard cannot bring to life is no site either.
+  assert.deepEqual(await namesAt(env, 'a.b.pluginthematrix.com'), {})
+})
+
+test('a label two keys share on one host names neither; one key may hold several labels', async () => {
+  const { env } = await fixture(undefined, {
+    'shared.example': {
+      title: 'Shared', lineage: 'shared',
+      publishers: [
+        { pubkey, label: 'Jaime', primary: true },
+        { pubkey: assessor, label: 'jaime' },
+        { pubkey, label: 'jwize' },
+        { pubkey: assessor, label: 'Assessor' },
+        { pubkey: assessor, label: 'not a name' },
+      ],
+    },
+  })
+  assert.deepEqual(await namesAt(env, 'shared.example'), { _: pubkey, jwize: pubkey, assessor })
+})
+
+test('a lookalike spelling is never a name: not as a label, not as ?name=', async () => {
+  const { env } = await fixture(undefined, {
+    'kate.example': {
+      title: 'Kate', lineage: 'kate',
+      publishers: [{ pubkey, label: 'Kate', primary: true }, { pubkey: assessor, label: 'Kelvin' }],
+    },
+  })
+  // U+212A KELVIN SIGN lowercases to ASCII `k`; the label written with it names nobody.
+  assert.deepEqual(await namesAt(env, 'kate.example'), { _: pubkey, kate: pubkey })
+  assert.deepEqual(await namesAt(env, 'kate.example', { query: '?name=Kate' }), { Kate: pubkey })
+  assert.deepEqual(await namesAt(env, 'kate.example', { query: `?name=${encodeURIComponent('Kate')}` }), {})
+  assert.deepEqual(await namesAt(env, 'kate.example', { query: `?name=${encodeURIComponent('﻿kate')}` }), {})
+})
+
+test('?name= answers one entry keyed exactly as asked, and an unknown name is an empty 200', async () => {
+  const { env } = await fixture()
+  assert.deepEqual(await namesAt(env, 'pluginthematrix.com', { query: '?name=jaime' }), { jaime: pubkey })
+  assert.deepEqual(await namesAt(env, 'pluginthematrix.com', { query: '?name=Jaime' }), { Jaime: pubkey })
+  assert.deepEqual(await namesAt(env, 'pluginthematrix.com', { query: '?name=_' }), { _: pubkey })
+  assert.deepEqual(await namesAt(env, 'pluginthematrix.com', { query: '?name=curator' }), {})
+  assert.deepEqual(await namesAt(env, 'pluginthematrix.com', { query: '?name=nobody' }), {})
+  assert.deepEqual(await namesAt(env, 'pluginthematrix.com', { query: '?name=' }), { _: pubkey, jaime: pubkey })
+})
+
+test('HEAD answers the same headers with no body', async () => {
+  const { env } = await fixture()
+  const res = await nostrJsonAt(env, 'pluginthematrix.com', { method: 'HEAD' })
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('content-type'), 'application/json')
+  assert.equal(res.headers.get('access-control-allow-origin'), '*')
+  assert.equal(res.body, null)
+  assert.equal(await res.text(), '')
+})
+
+// ── the zone root (jwize 2026-10-03: publish to the root domain) ────────────
+// Every write the hive makes lands at the zone root; content.<zone> keeps
+// accepting for installs that have not updated; a site under a zone never
+// writes. A published place is reached at its own address, else its root
+// path, else (top-level, legacy) its label.
+
+const FRONT_DOOR_ZONE = {
+  ...ONE_ZONE,
+  'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], lineage: 'pluginthematrix.com', frontDoor: true },
+}
+
+async function putIndexAt(env, host, event, key = sk) {
+  const url = `https://${host}/${INDEXES}/${event.pubkey}`
+  return worker.fetch(new Request(url, { method: 'PUT',
+    headers: { authorization: await nip98(url, 'PUT', key) }, body: JSON.stringify(event) }), env)
+}
+
+/** A signed index by `key` with any content fields. */
+async function indexWith(key, content, createdAt = 1_800_000_100) {
+  const event = { pubkey: pubOf(key), created_at: createdAt, kind: 30564, tags: [], content: JSON.stringify(content) }
+  event.id = await sha256Hex(JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content]))
+  event.sig = hex(schnorr.sign(event.id, key))
+  return event
+}
+
+/** The visitor page as the build ships it: a document base and a head. */
+const VISITOR_HTML = '<!doctype html><html><head><base href="/" /><title>v</title></head><body>visitor</body></html>'
+function visitorAssets(env, asked) {
+  env.ASSETS = {
+    fetch: async (request) => {
+      const { pathname } = new URL(request.url)
+      asked.push(pathname)
+      if (pathname === '/main.js') return new Response('export {}', { headers: { 'content-type': 'text/javascript' } })
+      if (pathname === '/' || pathname === '/index.html') return new Response(VISITOR_HTML, { headers: { 'content-type': 'text/html' } })
+      return new Response('missing', { status: 404 })
+    },
+  }
+}
+const carriedDoor = (html) => JSON.parse(html.match(/<script id="hc-door" type="application\/json">(.*?)<\/script>/)[1])
+const pageAt = async (url, env) => (await worker.fetch(page(url), env)).text()
+
+test('the zone root takes every write: a bound apex, a front-door apex, a claimed apex and an operated one', async () => {
+  // A bound apex that is not a front door.
+  const plain = await fixture()
+  assert.equal((await putIndexAt(plain.env, 'pluginthematrix.com', await signedIndex({ revolucion: head }, 1_800_000_001))).status, 200)
+  // A front-door apex: the index, the /hive/<pubkey> drain, forget and grant all reach the worker.
+  const door = await fixture(undefined, FRONT_DOOR_ZONE)
+  door.env.HOST_DOOR_ORIGIN = 'https://door.example'
+  const asked = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => { asked.push(String(url)); return new Response('host card') }
+  try {
+    assert.equal((await putIndexAt(door.env, 'pluginthematrix.com', await signedIndex({ revolucion: head }, 1_800_000_002))).status, 200)
+    const drainUrl = `https://pluginthematrix.com/hive/${pubkey}`
+    const drained = await worker.fetch(new Request(drainUrl, { method: 'PUT',
+      headers: { authorization: await nip98(drainUrl, 'PUT') }, body: JSON.stringify(await signedIndex({ revolucion: head }, 1_800_000_003)) }), door.env)
+    assert.equal(drained.status, 200)
+    assert.equal((await worker.fetch(new Request('https://pluginthematrix.com/forget', { method: 'POST' }), door.env)).status, 401)
+    assert.notEqual(await (await worker.fetch(new Request('https://pluginthematrix.com/grant'), door.env)).text(), 'host card')
+    assert.equal((await worker.fetch(new Request('https://pluginthematrix.com/', { method: 'OPTIONS' }), door.env)).status, 204)
+    assert.deepEqual(asked, [], 'no write ever went to the host card')
+  } finally { globalThis.fetch = realFetch }
+  // A claimed apex: its claimant writes there.
+  const env = claimEnv()
+  await keepClaim(env, { domain: DOMAIN, pubkey: assessor })
+  const claimed = await putIndexAt(env, DOMAIN, await indexBy(assessorKey, { blog: head }, 1_800_000_100, { blog: [DOMAIN] }), assessorKey)
+  assert.equal(claimed.status, 201)
+  // An operator-record apex is a zone root even before its record verifies.
+  const operatedEnv = { ...plain.env, SITE_OPERATORS: JSON.stringify({ 'operated.example': pubkey }) }
+  assert.equal((await putIndexAt(operatedEnv, 'operated.example', await signedIndex({ revolucion: head }, 1_800_000_004))).status, 200)
+})
+
+test('a site under the zone never writes, and content.<zone> still does', async () => {
+  const { env } = await fixture()
+  for (const host of ['revolucion.pluginthematrix.com', 'pluginthematrix.pluginthematrix.com', 'try-rooms.pluginthematrix.com']) {
+    const refused = await putIndexAt(env, host, await signedIndex({ revolucion: head }, 1_800_000_001))
+    assert.equal(refused.status, 405, host)
+    assert.equal((await worker.fetch(new Request(`https://${host}/forget`, { method: 'POST' }), env)).status, 405, host)
+  }
+  // The legacy write face keeps accepting, forever, for installs not yet updated.
+  assert.equal((await putIndexAt(env, 'content.pluginthematrix.com', await signedIndex({ revolucion: head }, 1_800_000_005))).status, 200)
+})
+
+test('a root path serves its published place, nested too, exactly as its own door would', async () => {
+  const rituals = 'b'.repeat(64)
+  const event = await signedIndex({ pluginthematrix: head, 'honey-garden': head, 'honey-garden/rituals': rituals, elsewhere: head },
+    1_800_000_000, { elsewhere: ['other.example'] })
+  const { env } = await fixture(event, FRONT_DOOR_ZONE)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  visitorAssets(env, [])
+  const card = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => { card.push(String(url)); return new Response('host card', { headers: { 'content-type': 'text/html' } }) }
+  try {
+    // Until ROOT_PATHS is switched on, a path is the card's, as it always was,
+    // and the ledger keeps the label door.
+    assert.equal(await pageAt('https://pluginthematrix.com/honey-garden/rituals', env), 'host card')
+    const before = (await (await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()).sites
+    assert.equal(before.find((site) => site.lineage === 'honey-garden').url, 'https://honey-garden.pluginthematrix.com/')
+    card.length = 0
+    env.ROOT_PATHS = '1'
+    const nested = await worker.fetch(page('https://pluginthematrix.com/honey-garden/rituals'), env)
+    assert.equal(nested.status, 200)
+    const html = await nested.text()
+    assert.match(html, /<base href="\/honey-garden\/rituals\/" \/>/)
+    const door = carriedDoor(html)
+    assert.deepEqual([door.lineage, door.layer, door.pubkey], ['honey-garden/rituals', rituals, pubkey])
+    assert.ok(env.CONTENT.held.has(`${await sha256Hex('pluginthematrix.com/honey-garden/rituals')}/00000000`),
+      'the place keeps its revisions at sign(<zone>/<lineage>)')
+    // The engine's files are asked under the prefix and served without it.
+    const script = await worker.fetch(new Request('https://pluginthematrix.com/honey-garden/rituals/main.js'), env)
+    assert.equal(await script.text(), 'export {}')
+    // A route inside the place is the place's page; the parent is its own place.
+    assert.equal(carriedDoor(await pageAt('https://pluginthematrix.com/honey-garden/rituals/deeper', env)).lineage, 'honey-garden/rituals')
+    assert.equal(carriedDoor(await pageAt('https://pluginthematrix.com/honey-garden', env)).lineage, 'honey-garden')
+    assert.deepEqual(card, [], 'a place never reaches the host card')
+    // A lineage whose doors leave this zone out, `/`, and anything else: the card.
+    for (const path of ['/elsewhere', '/', '/nothing-here', '/main.js']) {
+      assert.equal(await pageAt(`https://pluginthematrix.com${path}`, env), 'host card', path)
+    }
+    assert.deepEqual(card, ['https://door.example/elsewhere', 'https://door.example/', 'https://door.example/nothing-here', 'https://door.example/main.js'])
+    // The ledger lists each place at its root path.
+    const sites = (await (await worker.fetch(new Request(`https://pluginthematrix.com/${PUBLICATIONS}`), env)).json()).sites
+    const place = sites.find((site) => site.lineage === 'honey-garden/rituals')
+    assert.equal(place.url, 'https://pluginthematrix.com/honey-garden/rituals')
+    assert.equal(place.host, 'pluginthematrix.com')
+    assert.deepEqual(place.publishers.map((p) => p.head), [rituals])
+    // A top-level place leads with its root path; its label door still answers beside it.
+    const top = sites.find((site) => site.lineage === 'honey-garden')
+    assert.deepEqual(top.hosts.map((d) => d.url), ['https://pluginthematrix.com/honey-garden', 'https://honey-garden.pluginthematrix.com/'])
+    assert.equal(carriedDoor(await pageAt('https://honey-garden.pluginthematrix.com/', env)).lineage, 'honey-garden')
+    assert.ok(!sites.some((site) => site.url === 'https://pluginthematrix.com/elsewhere'))
+  } finally { globalThis.fetch = realFetch }
+})
+
+test('a root path never shadows the front door\'s own files, and a site apex keeps its routes', async () => {
+  const event = await signedIndex({ pluginthematrix: head, pin: head, core: head, rooms: head })
+  const { env } = await fixture(event, FRONT_DOOR_ZONE)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  env.ROOT_PATHS = '1'
+  visitorAssets(env, [])
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('host card')
+  try {
+    for (const path of ['/pin', '/core/x.js']) assert.equal(await pageAt(`https://pluginthematrix.com${path}`, env), 'host card', path)
+    assert.match(await pageAt('https://pluginthematrix.com/rooms', env), /hc-door/)
+  } finally { globalThis.fetch = realFetch }
+  // A bound apex that is a site, not a front door, answers its own routes as before.
+  const plain = await fixture(event)
+  assert.equal(await pageAt('https://pluginthematrix.com/rooms', plain.env), 'visitor engine')
+})
+
+test('an own address names its lineage; the operator binding wins; two publishers naming one host bind nobody', async () => {
+  const bindings = {
+    ...ONE_ZONE,
+    'pluginthematrix.com': { ...ONE_ZONE['pluginthematrix.com'], publishers: [{ pubkey, label: 'Jaime', primary: true }, { pubkey: assessor, label: 'Other' }] },
+  }
+  const rituals = 'b'.repeat(64)
+  const event = await signedIndex({ revolucion: head, rituals: 'c'.repeat(64), 'honey-garden/rituals': rituals, quiet: head }, 1_800_000_000, {}, undefined, {
+    addresses: {
+      'rituals.pluginthematrix.com': 'honey-garden/rituals',
+      'revolucion.pluginthematrix.com': 'rituals',
+      'content.pluginthematrix.com': 'rituals',
+      'shared.pluginthematrix.com': 'quiet',
+    },
+  })
+  const { env } = await fixture(event, bindings)
+  holdIndex(env, await indexWith(assessorKey, { roots: { mine: head }, doors: { mine: ['pluginthematrix.com'] } }))
+  // The address outranks the label rule: rituals.<zone> is honey-garden/rituals, not `rituals`.
+  const addressed = await doorMeta('https://rituals.pluginthematrix.com/', env)
+  assert.deepEqual([addressed.record.lineage, addressed.record.layer], ['honey-garden/rituals', rituals])
+  // An operator binding for exactly the host wins.
+  assert.equal((await doorMeta('https://revolucion.pluginthematrix.com/', env)).record.lineage, 'revolucion')
+  // content.<zone> keeps its meaning.
+  assert.match(await (await worker.fetch(new Request('https://content.pluginthematrix.com/'), env)).text(), /public content endpoint/)
+  // One publisher's address binds; the ledger lists the place there.
+  assert.equal((await doorMeta('https://shared.pluginthematrix.com/', env)).record.lineage, 'quiet')
+  const sites = JSON.parse(await publicationsAt(env, 'pluginthematrix.com')).sites
+  const place = sites.find((site) => site.lineage === 'honey-garden/rituals')
+  assert.equal(place.url, 'https://rituals.pluginthematrix.com/')
+  assert.equal(place.hosts[0].host, 'rituals.pluginthematrix.com')
+
+  // A second publisher of the zone names the same host: contested — the label rule answers again.
+  const contested = await fixture(event, bindings)
+  holdIndex(contested.env, await indexWith(assessorKey, { roots: { mine: head }, doors: { mine: ['pluginthematrix.com'] },
+    addresses: { 'shared.pluginthematrix.com': 'mine' } }))
+  const shared = await worker.fetch(page('https://shared.pluginthematrix.com/'), contested.env)
+  assert.equal(shared.status, 404, 'contested binds nobody, and nothing named `shared` is published')
+  assert.equal((await doorMeta('https://rituals.pluginthematrix.com/', contested.env)).record.lineage, 'honey-garden/rituals')
+})
+
+test('a signed index carries its addresses only in the bounded shape', async () => {
+  const { env } = await fixture()
+  const addressed = (addresses, at) => signedIndex({ revolucion: head }, at, undefined, undefined, { addresses })
+  assert.equal((await putIndexAt(env, 'pluginthematrix.com', await addressed({ 'Shop.pluginthematrix.com': 'revolucion' }, 1_800_000_001))).status, 400)
+  assert.equal((await putIndexAt(env, 'pluginthematrix.com', await addressed({ 'shop.pluginthematrix.com': '' }, 1_800_000_002))).status, 400)
+  assert.equal((await putIndexAt(env, 'pluginthematrix.com', await addressed(['shop'], 1_800_000_003))).status, 400)
+  const many = Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`n${i}.pluginthematrix.com`, 'revolucion']))
+  assert.equal((await putIndexAt(env, 'pluginthematrix.com', await addressed(many, 1_800_000_004))).status, 400)
+  assert.equal((await putIndexAt(env, 'pluginthematrix.com', await addressed({ 'shop.pluginthematrix.com': 'revolucion' }, 1_800_000_005))).status, 200)
+  // Writing the index advanced the address's own bag, as for any door.
+  const bag = await sha256Hex('shop.pluginthematrix.com')
+  assert.ok(env.CONTENT.held.has(`${bag}/00000000`))
+  assert.equal((await doorMeta('https://shop.pluginthematrix.com/', env)).record.lineage, 'revolucion')
+})
+
+test('a front door opens on the creation its publisher signs at the apex, and the card moves to host.<zone>', async () => {
+  const welcome = 'b'.repeat(64)
+  const event = await signedIndex({ 'pointblanksolutions-ca': welcome, camelflage: head }, 1_800_000_000, {}, undefined, {
+    addresses: { 'pluginthematrix.com': 'pointblanksolutions-ca' },
+  })
+  const { env } = await fixture(event, FRONT_DOOR_ZONE)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  visitorAssets(env, [])
+  const card = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => { card.push(String(url)); return new Response('host card', { headers: { 'content-type': 'text/html' } }) }
+  try {
+    // The apex is the creation's door: the visitor engine, carrying its door,
+    // with every engine file its own.
+    const door = carriedDoor(await pageAt('https://pluginthematrix.com/', env))
+    assert.deepEqual([door.lineage, door.layer, door.pubkey], ['pointblanksolutions-ca', welcome, pubkey])
+    assert.equal(carriedDoor(await pageAt('https://pluginthematrix.com/work/anything', env)).lineage, 'pointblanksolutions-ca')
+    assert.equal(await (await worker.fetch(new Request('https://pluginthematrix.com/main.js'), env)).text(), 'export {}')
+    assert.equal((await doorMeta('https://pluginthematrix.com/', env)).record.lineage, 'pointblanksolutions-ca')
+    assert.deepEqual(card, [], 'an opened apex never reaches the card')
+    // The card answers at host.<zone>, files and all …
+    assert.equal(await pageAt('https://host.pluginthematrix.com/', env), 'host card')
+    assert.equal(await pageAt('https://host.pluginthematrix.com/main.js', env), 'host card')
+    // … the apex hands it the card's own routes …
+    for (const path of ['/hosts', '/@hypercomb']) {
+      const moved = await worker.fetch(page(`https://pluginthematrix.com${path}`), env)
+      assert.equal(moved.status, 302, path)
+      assert.equal(moved.headers.get('location'), `https://host.pluginthematrix.com${path}`)
+    }
+    // … and a project keeps its own label door beside it.
+    assert.equal(carriedDoor(await pageAt('https://camelflage.pluginthematrix.com/', env)).lineage, 'camelflage')
+    // The host door writes nothing; the apex still takes every write.
+    const next = await signedIndex({ 'pointblanksolutions-ca': welcome, camelflage: head }, 1_800_000_001, {}, undefined, {
+      addresses: { 'pluginthematrix.com': 'pointblanksolutions-ca' },
+    })
+    assert.equal((await putIndexAt(env, 'host.pluginthematrix.com', next)).status, 405)
+    assert.equal((await putIndexAt(env, 'pluginthematrix.com', next)).status, 200)
+    // The ledger lists the creation at the apex.
+    const sites = JSON.parse(await publicationsAt(env, 'pluginthematrix.com')).sites
+    assert.equal(sites.find((site) => site.lineage === 'pointblanksolutions-ca').url, 'https://pluginthematrix.com/')
+    // host.<zone> is never a site or an own address, whatever an index names.
+    assert.ok(!sites.some((site) => site.hosts.some((d) => d.host === 'host.pluginthematrix.com')))
+  } finally { globalThis.fetch = realFetch }
+})
+
+test('a front door with no apex address keeps the card at the apex, and at host.<zone> too', async () => {
+  const event = await signedIndex({ host: head, camelflage: head }, 1_800_000_000, {}, undefined, {
+    addresses: { 'host.pluginthematrix.com': 'camelflage' },
+  })
+  const { env } = await fixture(event, FRONT_DOOR_ZONE)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  visitorAssets(env, [])
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('host card', { headers: { 'content-type': 'text/html' } })
+  try {
+    assert.equal(await pageAt('https://pluginthematrix.com/', env), 'host card')
+    assert.equal(await pageAt('https://host.pluginthematrix.com/', env), 'host card', 'a lineage named host and an address there both lose to the card')
+    assert.equal((await worker.fetch(page('https://pluginthematrix.com/hosts'), env)).status, 200, 'the card keeps its own routes at the apex')
+  } finally { globalThis.fetch = realFetch }
+  // On a zone that is not a front door, host.<zone> is an ordinary name.
+  const plain = await fixture(event)
+  visitorAssets(plain.env, [])
+  assert.equal(carriedDoor(await pageAt('https://host.pluginthematrix.com/', plain.env)).lineage, 'camelflage')
+})
+
+test('an explicit domain opens only what is signed open on it; an entry signed before doors stays shut there', async () => {
+  // dylan was signed before doors existed (no doors entry); camelflage names the domain.
+  const event = await signedIndex({ dylan: head, camelflage: head }, 1_800_000_000, null, undefined, {
+    doors: { camelflage: ['pluginthematrix.com'] },
+  })
+  const explicit = { ...FRONT_DOOR_ZONE, 'pluginthematrix.com': { ...FRONT_DOOR_ZONE['pluginthematrix.com'], explicitDoors: true } }
+  const { env } = await fixture(event, explicit)
+  env.HOST_DOOR_ORIGIN = 'https://door.example'
+  visitorAssets(env, [])
+  const shut = await worker.fetch(page('https://dylan.pluginthematrix.com/'), env)
+  assert.equal(shut.status, 404, 'a doorless entry never opens on an explicit domain')
+  assert.equal(carriedDoor(await pageAt('https://camelflage.pluginthematrix.com/', env)).lineage, 'camelflage')
+  const sites = JSON.parse(await publicationsAt(env, 'pluginthematrix.com')).sites
+  const onZone = (lineage) => sites.some((s) => s.lineage === lineage && s.hosts.some((d) => d.host.endsWith('pluginthematrix.com')))
+  assert.ok(onZone('camelflage'))
+  assert.ok(!onZone('dylan'), 'the directory never lists what the domain keeps shut')
+  // The same index on an ordinary domain: the doorless entry opens as it always did.
+  const plain = await fixture(event, FRONT_DOOR_ZONE)
+  plain.env.HOST_DOOR_ORIGIN = 'https://door.example'
+  visitorAssets(plain.env, [])
+  assert.equal(carriedDoor(await pageAt('https://dylan.pluginthematrix.com/', plain.env)).lineage, 'dylan')
 })

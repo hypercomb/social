@@ -17,6 +17,7 @@
 import { get, poolKindOfMeaning, registerPoolMeaning } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { HIVE_INDEX_EVENT_KIND, HIVE_LINK_VERSION } from './hive-link.js'
+import { readAddresses, readDoorsOf } from './zone-door.js'
 
 interface SignerLike {
   signEvent: (evt: { kind: number; created_at: number; tags: string[][]; content: string }) => Promise<Record<string, unknown>>
@@ -34,6 +35,11 @@ export interface HiveManifest {
    *  branch only on a listed domain; an absent entry grants no door. This
    *  map, signed with the roots, is the per-domain on/off switch. */
   doors?: Record<string, string[]>
+  /** `<label>.<zone>` → lineageKey: the creations given an OWN ADDRESS on a
+   *  zone (zone-door.ts). Absent = every creation lives at its root path.
+   *  Signed with the roots, so a host serves a subdomain only for the key its
+   *  publisher named there. */
+  addresses?: Record<string, string>
   /** Optional public declarations. Values are held as signed data here; the
    *  offering reader decides their meaning when that protocol is defined. */
   offerings?: Record<string, unknown>
@@ -129,9 +135,11 @@ function hiveIndexOf(evt: Record<string, unknown>, key: string): HiveIndexResult
   if (rawOfferings !== undefined && (!rawOfferings || typeof rawOfferings !== 'object' || Array.isArray(rawOfferings))) {
     return { ok: false, reason: 'malformed' }
   }
+  const addresses = readAddresses(signedContent['addresses'], roots)
   return { ok: true, manifest: {
     roots, createdAt: Number(evt['created_at'] ?? 0), pubkey: key,
     doors: readDoors(signedContent['doors'], roots),
+    ...(Object.keys(addresses).length > 0 ? { addresses } : {}),
     ...(rawOfferings !== undefined ? { offerings: rawOfferings as Record<string, unknown> } : {}),
     signedContent,
   } }
@@ -180,7 +188,9 @@ export async function fetchHiveManifestFromAny(hosts: readonly string[], pubkey:
   // the pinned key, it answers with no round trip; otherwise ask the hosts.
   const carried = carriedHiveIndex(pubkey)
   if (carried) return carried
-  for (const host of hosts) {
+  // Zone roots first, then the retired `content.<zone>` faces — a READ may
+  // still meet an index only the old face held (zone-door.ts).
+  for (const host of readDoorsOf(hosts)) {
     const manifest = await fetchHiveManifest(host, pubkey)
     if (manifest) return manifest
   }
@@ -227,6 +237,13 @@ export async function putHiveManifest(
     const nextDoors = signedDoors(roots, doors).doors
     if (nextDoors) content['doors'] = nextDoors
     else delete content['doors']
+    // THE OWN ADDRESSES ride through every write exactly as the doors do —
+    // carried from the index this one replaces, kept only for keys the roots
+    // still name (an unpublished creation's addresses go with it), and
+    // omitted when empty so an index without them is byte-identical to before.
+    const nextAddresses = readAddresses(content['addresses'], roots)
+    if (Object.keys(nextAddresses).length > 0) content['addresses'] = nextAddresses
+    else delete content['addresses']
     // The retired landing picture (0ec3c2d15): an index signed with one
     // carries it inertly until this, its next write, drops it.
     delete content['landing']

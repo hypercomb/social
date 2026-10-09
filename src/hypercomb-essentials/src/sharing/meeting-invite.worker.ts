@@ -3,6 +3,12 @@
 // Receive side of "share a meeting place by link" AND "join via a tile-borne
 // invite junction". One Worker drives both:
 //
+//   • Meeting link — `#meet=room/secret/page`, the link a bare `invite`
+//     copies. The shell capture stashes the fragment under MEET_KEY; this
+//     worker drains it once and joins straight from it. Nothing is fetched
+//     first: the link carries the place itself, so joining by link waits on
+//     no host and no bundle.
+//
 //   • Link path — the shell capture (hypercomb-shared/core/invite-capture.ts)
 //     stashes a `/<sig>` boot URL under PENDING_INVITE_KEY; this worker drains
 //     it once, resolves the bundle, and joins. The same capture stashes an
@@ -23,8 +29,10 @@
 
 import { Worker, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
+  MEET_KEY,
   PENDING_INVITE_KEY,
   SWARM_INVITE_KIND,
+  parseMeet,
   validateInviteBundle,
   type InviteDecorationPayload,
 } from './meeting-invite.js'
@@ -51,10 +59,10 @@ export class MeetingInviteWorker extends Worker {
   override genotype = 'meeting-invite'
 
   public override description =
-    'Joins a meeting place from a /<sig> invite link (on boot) or from a swarm:invite tile junction (on click): resolves the bundle by signature, confirms, and auth-switches the participant in — restoring prior credentials on cancel.'
+    'Joins a meeting place from a #meet= meeting link or a /<sig> invite link (on boot), or from a swarm:invite tile junction (on click): confirms, and auth-switches the participant in — restoring prior credentials on cancel.'
   public override effects = ['network'] as const
   protected override listens = ['tile:action']
-  protected override emits = ['mesh:join', 'mesh:room', 'mesh:secret', 'toast:show', 'hive:link']
+  protected override emits = ['keymap:invoke', 'command-line:stance', 'mesh:room', 'mesh:secret', 'toast:show', 'hive:link']
 
   // Synchronous one-shot latch — Worker.pulse sets its own #acted only after
   // act() resolves, so guard re-entrancy ourselves (act awaits nothing before
@@ -75,6 +83,12 @@ export class MeetingInviteWorker extends Worker {
         void this.#joinFromTile(p.label)
       }
     })
+
+    // One-shot: a `#meet=` meeting link captured at boot. Drained BEFORE the
+    // join so a reload while the sheet is up never asks twice; a malformed
+    // fragment is simply dropped.
+    const meet = this.#pendingMeet()
+    if (meet) void joinMeetingPlace(meet)
 
     // One-shot: a /<sig> invite link captured at boot. sessionStorage
     // survives a reload within the tab, so clear it regardless of outcome.
@@ -102,6 +116,14 @@ export class MeetingInviteWorker extends Worker {
     // creation's coordinates and reads the same for everyone handed it, while
     // where the reader was standing is theirs alone.
     this.emitEffect('hive:link', door.at.length ? { ...door.bundle, at: [...door.at] } : door.bundle)
+  }
+
+  #pendingMeet = () => {
+    let held = ''
+    try { held = sessionStorage.getItem(MEET_KEY) ?? '' } catch { held = '' }
+    if (!held) return null
+    try { sessionStorage.removeItem(MEET_KEY) } catch { /* ignore */ }
+    return parseMeet(held)
   }
 
   #pendingLink = (): string => {

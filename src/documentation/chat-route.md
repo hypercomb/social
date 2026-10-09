@@ -3801,7 +3801,7 @@ step rules, composer; (3) the conversations list, grouped by who it waits on;
   title and the newest carded step's outcome. State colours are COLOUR ON
   PURPOSE through `tw.ink()`: done `#70d59a`, open `#e8b04a`, on the head's
   icon, the meter and each step's glyph.
-- **THE VISITED QUEUE** — Jaime: *"if we don't touch the conversation let's not
+- **THE VISITED QUEUE** (no longer saved since 2026-10-04 — see the last section) — Jaime: *"if we don't touch the conversation let's not
   organize the workflow sidebar … it gets into a queue if you visit it and then
   that will be done in the background."* `markRouteVisited` (called by the
   attended call, i.e. whenever a conversation is on screen) records
@@ -3980,3 +3980,19 @@ there is.
 Proved at 375 px on the isolated 4253 shell with seeded threads: Waiting on you
 (the reply that asked), Open (a question still out, a replied thread), Done
 (a thread whose stored flow is fully settled, lit as current), Archived (1).
+
+### 2026-10-04 — the visited queue keeps no record
+
+jwize, 2026-10-03: *"we don't collect any statistics at all … any tracker is
+overhead bloat."* The visited queue was saved in `hc:chat-route-visited` with
+the time each conversation was opened. `markRouteVisited`, `routeVisited` and
+`ROUTE_VISITED_KEY` are gone.
+
+Jaime's rule above still holds — a conversation nobody opened is never
+organized — but the queue is now a WORK QUEUE, not a record: `organizeRoute`
+(the attended call) puts the conversation on screen at the end of the state's
+in-memory `queued` set; the drain takes it newest first; an entry leaves once
+its flow is current with no exchange still closing (or it cannot be read). No
+times, nothing saved, and a reload empties it — a conversation opened before a
+reload is organized when it is opened again. Pinned in `chat-route.spec.ts`
+(the passive drain).

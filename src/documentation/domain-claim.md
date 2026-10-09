@@ -63,7 +63,9 @@ were routed there itself.
 **`POST /claim`** — NIP-98 signed (method `POST`, `u` = the URL, and a
 `payload` tag holding the sha256 of the exact body, so a lifted header can
 claim nothing else), body `{"domain":"<name>"}`. Taken on a host's write face
-(`content.<zone>`), never on a published site, like every other write.
+— the ZONE ROOT (`https://<zone>/claim`), never on a published site under it,
+like every other write. `content.<zone>` is the legacy write face: it still
+accepts, for installs that have not updated, and nothing new points at it.
 
 | Case | Answer |
 |---|---|
@@ -122,7 +124,8 @@ operator would have written it:
 
 so the apex is the front door (the shim host card), every first-level
 `<name>.<domain>` is an implicit site whose only publisher is the claimant,
-and `content.<domain>` is a write face. Claims are merged into the bindings
+and the apex itself is the domain's write face (`content.<domain>` still
+accepts, as a legacy face). Claims are merged into the bindings
 the router reads (beside the operators' signed records) and held for a
 minute per isolate; a failed read keeps the last view and never fails a
 request. An operator's binding or signed record always wins, and a claim
@@ -136,7 +139,7 @@ operator's money.
 `domain claim <domain> [@<host>]` — the participant's word: the model channel
 is refused it (the queen has no `machine` block), though the local bridge's
 operator door can still say it. The host defaults to the public content
-host; `@<zone>` is read as that zone's write face, `content.<zone>`.
+host; `@<zone>` is read as that zone's write face — the zone root itself.
 
 - **pending** — a toast names the two nameservers, which are also copied to
   the clipboard when the browser allows it. The hive checks every minute
@@ -148,6 +151,26 @@ host; `@<zone>` is read as that zone's write face, `content.<zone>`.
   holder. Then a toast: the domain is yours. The domain is added to the
   hive's Hosts (`hosts:add`), so the Publish panel shows it as a switch.
 - **contested** / **refused** — a toast with the reason.
+
+## Opening the domain on a creation
+
+A claimed apex is its host's front door: the card, with the creations
+switched on here. The claimant can instead open the bare domain on one of
+their creations (jwize 2026-10-05, for pointblanksolutions.ca: the domain is
+both the offer and the proof of the hosting). In the Publish panel, on the
+domain's row, Own address → **Make it the front page of `<domain>`**. That
+signs `addresses["<domain>"] = "<lineage>"` in the index; the label is `@`,
+the apex's own name in DNS.
+
+- The apex then serves that creation through the visitor engine, exactly as
+  any door serves its site: its page, its tiles, every view and filter.
+- One origin runs one shell (the card and the visitor engine each bring their
+  own service worker and storage), so the card moves to **`host.<domain>`**.
+  That first-level name is reserved on every front door: never a site, never
+  an own address, and read-only. `/hosts` and `/@hypercomb` on the apex
+  redirect there.
+- The apex stays the zone root, so every write still lands there.
+- **Use the root path** on the same row puts the card back at the apex.
 
 ## Contested and lost claims
 

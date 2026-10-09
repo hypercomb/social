@@ -22,6 +22,7 @@ import { compactBreaks, listBreaks, updateIssue } from './breaks.js'
 import { readPublicBranches } from '../presentation/tiles/tile-public.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
 import { bridgeMaySetRootKey, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+import { zoneDoor } from '../sharing/zone-door.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -1467,7 +1468,8 @@ export class ClaudeBridgeWorker extends Worker {
     if (!bridgeMaySetRootKey(key)) {
       return { id: req.id, ok: false, error: `hive-root-set refuses '${key}' — only an install:<channel> stamp is settable over the bridge; everything else is a participant act` }
     }
-    const host = String(req.host ?? '').trim().toLowerCase() || PUBLIC_CONTENT_HOSTS[0] || ''
+    // A write: the zone root, never its retired `content.` face.
+    const host = zoneDoor(String(req.host ?? '').trim().toLowerCase() || PUBLIC_CONTENT_HOSTS[0] || '')
     if (!host) return { id: req.id, ok: false, error: 'no index host configured' }
     const result = await setHiveRoot(host, key, sig)
     if (!result.ok) return { id: req.id, ok: false, error: result.reason ?? 'hive-root-set failed' }

@@ -43,7 +43,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
-import { hasDecorationKind, defaultViewForSegments } from './decoration-kind-index.js'
+import { hasDecorationKind, defaultViewForSegments, defaultViewWithinSegments } from './decoration-kind-index.js'
 import { visualBeeIconSvg } from './visual-bee-icon-svg.js'
 import { resolveViewEntrance } from './view-entrance.js'
 import { VIEW_SPAWN_EFFECT } from '../presentation/tiles/view-spawn.js'
@@ -130,6 +130,10 @@ type TileIconProvider = {
   hoverTint?: number
   visibleWhen?: (ctx: unknown) => boolean
   tintWhen?: (ctx: unknown) => number | null | undefined
+  /** Ctrl/cmd+click is this icon's own gesture — here, the default-view toggle. */
+  ctrlClick?: boolean
+  /** Per-tile standing selected ring — here, "this view is the tile's default". */
+  selectedWhen?: (ctx: unknown) => boolean
   labelKey?: string
   descriptionKey?: string
 }
@@ -201,6 +205,18 @@ function isPreferredView(ctx: unknown, view: string): boolean {
   const here = (lineage?.explorerSegments?.() ?? [])
     .map(segment => String(segment ?? '').trim()).filter(Boolean)
   return defaultViewForSegments([...here, label]) === view
+}
+
+/** Does the tile OPEN AS this view — its own mark, or an ancestor's default
+ *  covering it? That is what the selected ring shows, and what a ctrl+click
+ *  on the icon turns off (view-default.ts `decideDefaultToggle` reads the same). */
+function opensAsView(ctx: unknown, view: string): boolean {
+  const label = String((ctx as { label?: string })?.label ?? '').trim()
+  if (!label) return false
+  const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+  const here = (lineage?.explorerSegments?.() ?? [])
+    .map(segment => String(segment ?? '').trim()).filter(Boolean)
+  return defaultViewWithinSegments([...here, label]) === view
 }
 
 /** Sync the IconProviderRegistry to the current set of adoptable visual
@@ -281,6 +297,10 @@ function syncIcons(): void {
       // a bookmark. Every other view keeps the family blue, which is what
       // separates a view from an action on the same row.
       tintWhen: (ctx) => isPreferredView(ctx, bee.view) ? VIEW_DEFAULT_TINT : VIEW_TINT,
+      // …and a standing ring, so the default still reads under the pointer
+      // (hover swaps the tint) — the same mark as the header rail's.
+      selectedWhen: (ctx) => opensAsView(ctx, bee.view),
+      ctrlClick: true,
       labelKey: bee.labelKey,
       descriptionKey: bee.descriptionKey,
       // ANY kind the bee answers for — its own, a further-live peer
@@ -441,6 +461,19 @@ type ViewModeLike = { mode?: string; setMode?: (next: string) => void }
  *  page-less cell and website mode came up empty — the home page lives at the
  *  root. `resolveViewEntrance` walks up to that root; a node-scoped behaviour
  *  resolves to the clicked cell unchanged. */
+/** Toggle `view` as the default of the child tile `label` under the current
+ *  layer. Emits the existing `features:default` intent with `toggle`, so the
+ *  write, the on/off/opt-out rule and the history entry all live where the
+ *  panel's and the rail's do. `silent`: the answer is the ring on the icon. */
+function dispatchDefaultToggle(view: string, label: string): void {
+  if (!view || !label) return
+  const bee = window.ioc.get<VisualBeeRegistry>('@diamondcoreprocessor.com/VisualBeeRegistry')?.get(view)
+  if (!bee || bee.behavior === 'navigation') return
+  const lineage = window.ioc.get<LineageLike>('@hypercomb.social/Lineage')
+  const here = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+  EffectBus.emit('features:default', { cell: label, segments: [...here, label], view, toggle: true, silent: true })
+}
+
 function dispatchEnterAction(action: string, label: string | undefined, prefix: string = ENTER_ACTION_PREFIX): void {
   const view = action.slice(prefix.length)
   if (!view || !label) return
@@ -518,8 +551,19 @@ function dispatchAsleepAction(label: string | undefined): void {
 // check runs first — `view-enter:` must never fall through to the adopt path.
 // NOTE: `tile:action` is an EFFECTBUS event (the overlay emits via
 // emitEffect), not a window CustomEvent — a window listener never fires.
-EffectBus.on<{ action?: string; label?: string }>('tile:action', (detail) => {
+EffectBus.on<{ action?: string; label?: string; ctrlKey?: boolean; metaKey?: boolean }>('tile:action', (detail) => {
   if (!detail?.action) return
+  // CTRL/CMD on a tile's view icon: "this tile opens as this view", or not —
+  // the parent sets its child's default without walking in (jwize, 2026-10-04,
+  // an approved exception to "a door names only the tile you stand in"; see
+  // documentation/context-behaviors.md). Written on the CHILD's own layer, so
+  // it is the same record the rail and the panel write, and it rides publish.
+  // Only a CARRIED view (the enter icon): an offered one has no content on the
+  // tile yet, so a default there would never open.
+  if ((detail.ctrlKey || detail.metaKey) && detail.label && detail.action.startsWith(ENTER_ACTION_PREFIX)) {
+    dispatchDefaultToggle(detail.action.slice(ENTER_ACTION_PREFIX.length), detail.label)
+    return
+  }
   if (detail.action.startsWith(ASLEEP_ACTION_PREFIX)) {
     dispatchAsleepAction(detail.label)
     return

@@ -2,8 +2,8 @@
 //
 // HostAiService — talk to your HOST's AI and get an answer NOW.
 //
-// The host (the blossom-worker on the operator's domain, e.g.
-// content.jwize.com) fields `POST /ai/ask`, relays to the Anthropic API
+// The host (the blossom-worker at the operator's zone ROOT, e.g.
+// pluginthematrix.com — never a retired `content.` face) fields `POST /ai/ask`, relays to the Anthropic API
 // (Haiku by default) and streams the reply back as SSE. This service is the
 // client half: it signs the request with the participant's OWN Nostr key
 // (NIP-98 — the same identity envelope host-sync PUTs carry, no secrets on
@@ -26,14 +26,18 @@ import {
   PARTICIPANT_AI_HOST_STORAGE_KEY,
   isParticipantAiHostConfigured,
 } from '@hypercomb/core'
+import { zoneDoor } from '../sharing/zone-door.js'
 
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const NIP98_KIND = 27235
 
 /** localStorage key naming the AI host (domain only, no scheme). Defaults to
- *  the public content endpoint — the worker that actually runs /ai/ask. */
+ *  the public content endpoint's zone root — the worker that actually runs
+ *  /ai/ask, and not a home machine (jwize.com) a hive must never depend on.
+ *  A stored `content.<zone>` (set before the face retired) is read as its
+ *  zone: asks go to the root (zone-door.ts). */
 export const AI_HOST_STORAGE_KEY = PARTICIPANT_AI_HOST_STORAGE_KEY
-export const AI_HOST_DEFAULT = 'content.jwize.com'
+export const AI_HOST_DEFAULT = 'pluginthematrix.com'
 
 export const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
 
@@ -66,7 +70,7 @@ export class HostAiService extends EventTarget {
   /** The configured AI host (bare domain). */
   get host(): string {
     try {
-      const raw = String(localStorage.getItem(AI_HOST_STORAGE_KEY) ?? '').trim()
+      const raw = zoneDoor(localStorage.getItem(AI_HOST_STORAGE_KEY) ?? '')
       return raw || AI_HOST_DEFAULT
     } catch {
       return AI_HOST_DEFAULT
@@ -75,7 +79,7 @@ export class HostAiService extends EventTarget {
 
   /** Set (or clear with '') the AI host. Bare domain, scheme stripped. */
   setHost(domain: string): void {
-    const bare = String(domain ?? '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+    const bare = zoneDoor(domain)
     try {
       if (bare) localStorage.setItem(AI_HOST_STORAGE_KEY, bare)
       else localStorage.removeItem(AI_HOST_STORAGE_KEY)
@@ -182,7 +186,7 @@ export class HostAiService extends EventTarget {
    * read once, whole. The model that answered is reported by the host.
    */
   async askWhole(host: string, question: string, contextSigs: readonly string[] = [], signal?: AbortSignal): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string }> {
-    const bare = String(host ?? '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+    const bare = zoneDoor(host)
     const q = String(question ?? '').trim()
     if (!bare || !q) return { ok: false, error: 'no host or no question' }
     const scheme = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(bare) ? 'http' : 'https'

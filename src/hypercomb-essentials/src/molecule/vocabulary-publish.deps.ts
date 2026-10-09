@@ -15,6 +15,7 @@ import { lineageKey } from '../history/lineage-key.js'
 import { PUBLIC_CONTENT_HOSTS, vocabularyRootOf } from '../sharing/hive-link.js'
 import { fetchHiveIndex, setHiveRoot } from '../sharing/hive-pointer.js'
 import { hostsOfBranch } from '../sharing/community-hosts.js'
+import { zoneDoor } from '../sharing/zone-door.js'
 import { latestByLineageKey } from '../sharing/publish-heads.js'
 import { cachedPubkey, readerPubkey } from '../sharing/head-claim-signer.js'
 import { readPublicBranches } from '../presentation/tiles/tile-public.js'
@@ -84,10 +85,10 @@ const indexHost = async (): Promise<string> => {
       if (segments.length === 0) continue
       const zones = await hostsOfBranch(segments)
       const first = zones?.[0]
-      if (first) return `content.${first}`
+      if (first) return zoneDoor(first)
     }
   } catch { /* fall through to the standing endpoint */ }
-  return PUBLIC_CONTENT_HOSTS[0] ?? ''
+  return zoneDoor(PUBLIC_CONTENT_HOSTS[0] ?? '')
 }
 
 /**

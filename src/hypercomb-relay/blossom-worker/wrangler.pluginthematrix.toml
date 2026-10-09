@@ -3,6 +3,13 @@
 # This deployment owns no jwize.com APEX or content.jwize.com route (that stays
 # on hypercomb-content); it serves *.jwize.com sites only. The relay hostname
 # SITE_BINDINGS and worker.js rejects every non-GET/HEAD request on them.
+#
+# THE ZONE ROOT IS THE WRITE FACE (jwize 2026-10-03). Every write the hive
+# makes — PUT /<sig>, the signed index, /upload, /forget, /grant, /claim,
+# /ai/* — is accepted at a zone root: an apex bound below (front door or not),
+# a claimed apex, or a SITE_OPERATORS zone. Sites UNDER a zone stay read-only.
+# content.<zone> is LEGACY: its route stays forever so installs that have not
+# updated keep writing, but nothing new points at it.
 
 name = "pluginthematrix-core"
 main = "worker.js"
@@ -43,6 +50,12 @@ routes = [
   # The apex is the domain's FRONT DOOR (2026-09-22): the shim host card,
   # served through this worker from HOST_DOOR_ORIGIN.
   { pattern = "realones.online", custom_domain = true },
+  # FOURTH ZONE — cafesociety.buzz, Leanne's host (2026-10-04; was .me). Same shape as
+  # realones.online: a proxied `* A 192.0.2.1` record for the wildcard (added
+  # by hand; zone ACTIVE, NS jack/margaret), the apex as her front door. Her
+  # creations live at <name>.cafesociety.buzz; only her key publishes there.
+  { pattern = "*.cafesociety.buzz/*", zone_name = "cafesociety.buzz" },
+  { pattern = "cafesociety.buzz", custom_domain = true },
   # THIRD ZONE — hypercomb.com. Same script, same bindings: one worker serves
   # every zone, so a new domain is routes + SITE_BINDINGS and nothing else.
   # Zone ACTIVE 2026-08-30 (registrar NS moved to jack/margaret) with a
@@ -66,7 +79,11 @@ routes = [
   # hypercomb-content worker's custom domain (an exact hostname outranks
   # this wildcard). The zone needs a proxied `* CNAME jwize.com` record
   # before any <name>.jwize.com resolves; the route is harmless without it.
-  { pattern = "*.jwize.com/*", zone_name = "jwize.com" }
+  { pattern = "*.jwize.com/*", zone_name = "jwize.com" },
+  # connected 2026-10-05 by scripts/connect-domain.mjs — wildcard only
+  { pattern = "*.pointblanksolutions.ca/*", zone_name = "pointblanksolutions.ca" },
+  # zone root of pointblanksolutions.ca: front door + write face
+  { pattern = "pointblanksolutions.ca", custom_domain = true }
 ]
 
 [assets]
@@ -154,6 +171,12 @@ HOST_DOOR_ORIGIN = "https://hypercomb-host.pages.dev"
 # The participant shell a sandbox door (try-<label>.<zone>) proxies to for
 # everything that is not the package's own files (worker.js serveSandboxShell).
 SANDBOX_SHELL_ORIGIN = "https://hypercomb.io"
+# ROOT PATHS — https://<front-door zone>/<lineage> serves that published place
+# (worker.js rootPlaceAt) and /publications.json lists it there. Off until the
+# visitor engine asks its own files relative to its document base (today it
+# asks /content/… and /hypercomb-core.runtime.js at the origin root, which on a
+# front-door apex is the host card's). Switch on with the visitor deploy:
+# ROOT_PATHS = "1"
 # There is no visitor hold: a door opens only while the publisher's SIGNED
 # index names its lineage (worker.js "open is a signed mark"). Unpublish hides it.
 AUTO_GRANT = "1"
@@ -178,7 +201,10 @@ AI_WRITERS = ""
 CF_ACCOUNT_ID = "5bc6089d4172ca3782a8735fb0d8c261"
 CLAIM_SCRIPT = "hypercomb-hosts"
 
-# The relay hostname is deliberately absent: it must retain signed PUT routes.
+# The legacy relay hostname (content.<zone>) is deliberately absent: it keeps
+# its signed PUT routes for installs that have not updated. The apexes below
+# are zone roots and take the same writes (worker.js isZoneRoot); hypercomb.com
+# and jwize.com are not routed here, so their writes land on pluginthematrix.com.
 #
 # `routed` / `wildcard` (both default true) SAY WHAT IS DEPLOYED — a binding
 # whose route is commented out above resolves in the worker and is never reached
@@ -206,4 +232,4 @@ CLAIM_SCRIPT = "hypercomb-hosts"
 # so no hive location can ever mint a lineage containing a dot. A plausible
 # anchor lineage like "realones" would instead sit in the publications ledger's
 # `named` set and silently deny a real hive of that name its plate.
-SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true},"hypercomb.com":{"title":"Hypercomb","lineage":"hypercomb","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false},"replication.hypercomb.com":{"title":"Replication by Signature","lineage":"hypercomb/architecture/replication-by-signature","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"jwize.com":{"title":"jwize","lineage":"jwize.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false}}'
+SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true},"hypercomb.com":{"title":"Hypercomb","lineage":"hypercomb","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false},"replication.hypercomb.com":{"title":"Replication by Signature","lineage":"hypercomb/architecture/replication-by-signature","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"jwize.com":{"title":"jwize","lineage":"jwize.com","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false},"cafesociety.buzz":{"title":"Café Society","lineage":"cafesociety.buzz","publishers":[{"pubkey":"83814be50701e8cd997e7021f8cb2e3390281ec63b3fdc503bd17bf436686e0d","label":"Leanne","primary":true}],"frontDoor":true},"pointblanksolutions.ca":{"title":"pointblanksolutions.ca","lineage":"pointblanksolutions.ca","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"frontDoor":true,"explicitDoors":true}}'

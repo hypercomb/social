@@ -184,7 +184,7 @@ const visitGarden = () => {
 const wandGarden = () => { EffectBus.emitTransient('swarm:wand', { label: 'garden' }) }
 
 /** Standing in a zone is the wand's first condition. */
-const inZone = () => { localStorage.setItem('hc:mesh-public', 'true') }
+const inZone = () => { EffectBus.emit('mesh:public-changed', { public: true }) }
 
 const settle = async () => {
   for (let i = 0; i < 4; i++) { await Promise.resolve(); await new Promise(r => setTimeout(r, 0)) }
@@ -192,6 +192,7 @@ const settle = async () => {
 
 beforeEach(() => {
   localStorage.clear()
+  EffectBus.emit('mesh:public-changed', { public: false })
   _resetVisitGenomeCache()
 })
 

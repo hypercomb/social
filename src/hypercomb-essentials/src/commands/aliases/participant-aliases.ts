@@ -12,14 +12,14 @@
 // WHERE THEY LIVE. One content-addressed doc in the `sign('commands:aliases')`
 // pool of meaning — colon-scoped per the known-location-pools doctrine, seeded
 // in core's pool-registry so no root walker mistakes it for a lineage bag.
-// A pool and not localStorage for the reason spoken habits next door are:
-// a name that did not follow you to your other machine was not your name for
-// it. localStorage still holds a mirror, but only as a BOOT CACHE — the
-// census reads synchronously and cannot wait on an OPFS round trip.
+// A pool and not localStorage because a name that did not follow you to your
+// other machine was not your name for it. localStorage still holds a mirror,
+// but only as a BOOT CACHE — the census reads synchronously and cannot wait
+// on an OPFS round trip.
 //
-// HOW TWO MACHINES AGREE. Newer entry wins, PER COMMAND. Habits merge by
-// max-count because a habit is a tally; an alias set is a CHOICE, and a
-// union-merge would resurrect every name you deliberately took away. So each
+// HOW TWO MACHINES AGREE. Newer entry wins, PER COMMAND. An alias set is a
+// CHOICE, not a tally, and a union-merge would resurrect every name you
+// deliberately took away. So each
 // command's entry carries the moment it was decided, and the later decision
 // replaces the earlier one whole — removal sticks, and re-reading the same
 // doc changes nothing.
@@ -116,8 +116,8 @@ export class ParticipantAliases {
     // the same late-arrival subscription the slash drone's auto-wrap keeps.
     ioc?.onRegister?.((_key, value) => { this.#applyToOne(value) })
 
-    // BOOT ORDER — same lesson spoken-habits paid for: the Store may not be
-    // in IoC yet, and being in IoC is not the same as being ready.
+    // BOOT ORDER: the Store may not be in IoC yet, and being in IoC is not
+    // the same as being ready.
     if (ioc?.get?.('@hypercomb.social/Store')) void this.#hydrateWhenPossible()
     else ioc?.whenReady?.('@hypercomb.social/Store', () => { void this.#hydrateWhenPossible() })
   }

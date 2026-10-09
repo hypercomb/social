@@ -12,6 +12,11 @@ compatibility_date = "2026-06-01"
 # The public byte address. custom_domain=true has Cloudflare mint the DNS
 # record + cert on the jwize.com zone; removing this line and redeploying
 # detaches it just as cleanly.
+#
+# content.jwize.com is a LEGACY write face (jwize 2026-10-03: writes go to a
+# zone root). Its route stays forever so installs that have not updated keep
+# writing and reading; nothing new is pointed at it. This deployment carries
+# no SITE_BINDINGS, so every host it serves is a relay face that takes writes.
 routes = [
   { pattern = "content.jwize.com", custom_domain = true },
   # pluginthematrix.io remains the legacy byte fallback. The same worker now

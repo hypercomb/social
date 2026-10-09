@@ -351,7 +351,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       const findMs = performance.now() - tFind
       const findMsg = `[script-preloader] find: total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms (${walked.bees.length}b/${walked.dependencies.length}d/${walked.resources.length}r)`
       console.log(findMsg)
-      try { localStorage.setItem('hc:perf-find-last', `${Date.now()}:${findMsg}`) } catch {}
 
       if (!ScriptPreloader.#firstFindMarked) {
         ScriptPreloader.#firstFindMarked = true
@@ -997,7 +996,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       if (status.ready) {
         const fastMsg = `[script-preloader] FAST ${criticalSource} wave (${criticalPending.length}) loaded in ${wave1Ms.toFixed(0)}ms; ${restPending.length} backgrounded`
         console.log(fastMsg)
-        try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${fastMsg}`) } catch {}
 
         const restLoads = restPending.map(sig => this.#loadBeeBySignature(sig))
         return { pending, loads: [...criticalLoads, ...restLoads] }
@@ -1020,7 +1018,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         ? `[script-preloader] FALLBACK critical services ready in ${fallbackMs.toFixed(0)}ms`
         : `[script-preloader] FALLBACK all bees settled in ${fallbackMs.toFixed(0)}ms with critical services missing: ${ScriptPreloader.#formatMissingCritical(fallback.missing)}`
       console.log(fallbackMsg)
-      try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${fallbackMsg}`) } catch {}
       return { pending, loads: [...criticalLoads, ...fallback.loads] }
     }
 
@@ -1033,7 +1030,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       ? `[script-preloader] COLD critical services ready in ${criticalMs.toFixed(0)}ms; populating package-bound cache`
       : `[script-preloader] COLD all bees settled in ${criticalMs.toFixed(0)}ms with critical services missing: ${ScriptPreloader.#formatMissingCritical(cold.missing)}`
     console.log(coldMsg)
-    try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${coldMsg}`) } catch {}
     return { pending, loads: cold.loads }
   }
 

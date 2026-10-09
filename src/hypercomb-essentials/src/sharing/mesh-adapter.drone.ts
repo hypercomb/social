@@ -1,5 +1,6 @@
 // core/communication/mesh-adapter.drone.ts
 import { Drone, type Effect } from '@hypercomb/core'
+import { isJoinedHere } from './membership.js'
 
 type NostrRelay = string
 
@@ -37,12 +38,10 @@ export class MeshAdapterDrone extends Drone {
   // public via the mesh control or `mesh.togglePublic` keymap, we
   // start publishing; otherwise this drone is silent — no
   // WebSockets, no network traffic, no warnings. Initial value is
-  // read from localStorage so a refresh of an already-public mesh
-  // doesn't have a transient idle window before the first
-  // mesh:public-changed event arrives.
-  #meshPublic = (() => {
-    try { return localStorage.getItem('hc:mesh-public') === 'true' } catch { return false }
-  })()
+  // THIS tab's membership (membership.ts — its session survives a
+  // refresh) so an already-joined tab has no transient idle window before
+  // the first mesh:public-changed event arrives.
+  #meshPublic = isJoinedHere()
 
   constructor() {
     super()

@@ -62,7 +62,7 @@ type EnumerablePool = { entries?: () => AsyncIterable<[string, PoolEntry]> }
 type StoreLike = {
   getPool?: (meaning: string) => Promise<PoolHandle | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
 }
 
 const store = (): StoreLike | undefined =>
@@ -173,7 +173,8 @@ export const declareHiveFormat = async (
     const bytes = new TextEncoder().encode(JSON.stringify(next))
     // The pool is colon-scoped, so `putPoolDoc`'s sibling sweep has positive
     // proof of ownership and this stays a true one-current-document pool.
-    const sig = await s.putPoolDoc(pool, bytes.buffer.slice(0, bytes.byteLength) as ArrayBuffer)
+    // Stamped by the software on boot, not a save: only the current one is kept.
+    const sig = await s.putPoolDoc(pool, bytes.buffer.slice(0, bytes.byteLength) as ArrayBuffer, undefined, { keep: 'current' })
     return sig ? next : current
   } catch { return current }
 }

@@ -117,10 +117,59 @@
                 (keydown.space)="$event.stopPropagation()"
               >↗</a>
             }
+            @if (doorOn(current(), zone) && current()?.segments?.length) {
+              <!-- OWN ADDRESS — a small option beside the root path. -->
+              <button
+                class="pdoor-own"
+                type="button"
+                [class.set]="!!ownLabel(current(), zone)"
+                [attr.aria-expanded]="isOwnOpen(current(), zone)"
+                [attr.aria-label]="'publish.own.toggle' | t"
+                [attr.data-tip]="'publish.own.toggle' | t"
+                (click)="toggleOwn(current(), zone); $event.stopPropagation()"
+                (keydown.enter)="$event.stopPropagation()"
+                (keydown.space)="$event.stopPropagation()"
+              ><span class="mat-sym">alt_route</span></button>
+            }
             <span class="pdoor-bulb" [class.on]="doorOn(current(), zone)" aria-hidden="true">
               <span class="mat-sym">lightbulb</span>
             </span>
           </li>
+          @if (current(); as row) {
+            @if (isOwnOpen(row, zone)) {
+              <li class="pdoor-ownedit">
+                <p class="pdoor-ownnote">{{ 'publish.own.note' | t: { zone: zone } }}</p>
+                <div class="pdoor-ownrow">
+                  <input
+                    class="pdoor-owninput"
+                    type="text"
+                    spellcheck="false"
+                    autocomplete="off"
+                    [attr.aria-label]="'publish.own.label' | t"
+                    [value]="ownValue(row, zone)"
+                    (input)="setOwnDraft(row, zone, $any($event.target).value)"
+                    (keydown.enter)="saveOwn(row, zone)"
+                  />
+                  <span class="pdoor-ownzone">.{{ zone }}</span>
+                </div>
+                <div class="pdoor-ownrow">
+                  <button class="pcur-action" type="button" (click)="saveOwn(row, zone)">{{ 'publish.own.save' | t }}</button>
+                  @if (ownLabel(row, zone)) {
+                    <button class="pcur-action" type="button" (click)="clearOwn(row, zone)">{{ 'publish.own.clear' | t }}</button>
+                  }
+                </div>
+                <!-- THE DOMAIN ITSELF — the bare domain opens on this place, and
+                     the host card moves to host.<zone>. -->
+                @if (ownLabel(row, zone) === '@') {
+                  <p class="pdoor-ownnote">{{ 'publish.own.apex-note' | t: { zone: zone } }}</p>
+                } @else {
+                  <div class="pdoor-ownrow">
+                    <button class="pcur-action" type="button" (click)="saveApex(row, zone)">{{ 'publish.own.apex' | t: { zone: zone } }}</button>
+                  </div>
+                }
+              </li>
+            }
+          }
         }
       </ul>
       <button class="pcur-hosts-manage" type="button" (click)="openHosts()">

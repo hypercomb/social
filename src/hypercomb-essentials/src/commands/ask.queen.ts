@@ -34,7 +34,7 @@ export class AskQueenBee extends QueenBee {
   override options = ['<question>', 'host <domain>']
   override examples = [
     { input: '/ask what is this hive about?', result: 'Opens the chat and asks' },
-    { input: '/ask host content.jwize.com', result: 'Point at a different AI host' },
+    { input: '/ask host example.org', result: 'Point at a different AI host' },
   ]
 
   protected execute(args: string): void {

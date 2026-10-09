@@ -76,7 +76,7 @@ describe('attestPackage', () => {
   it('reads EVERY verified copy before saying not-named — a stale host is not the last word', async () => {
     const storage = following()
     const fetchIndex = indexAt({
-      'content.example.com': verified({ 'install:essentials': OLD }),
+      'example.com': verified({ 'install:essentials': OLD }),
       'jwize.com': verified({ 'install:essentials': CURRENT }),
     })
     expect(await attestPackage(CURRENT, ['jwize.com'], { storage, publisher: null, fetchIndex }))
@@ -110,9 +110,9 @@ describe('attestPackage', () => {
 })
 
 describe('indexHostsFor', () => {
-  it('asks the followed hosts first, then each offering zone and its content face', () => {
+  it('asks the followed hosts first, then each offering zone — every root before any retired content face', () => {
     expect(indexHostsFor({ pubkey: PUB, hosts: ['content.example.com'], channel: 'essentials' }, ['jwize.com', 'content.other.example', 'localhost:4270', '']))
-      .toEqual(['content.example.com', 'jwize.com', 'content.jwize.com', 'content.other.example', 'localhost:4270'])
+      .toEqual(['example.com', 'jwize.com', 'other.example', 'localhost:4270', 'content.example.com', 'content.jwize.com', 'content.other.example'])
   })
 })
 

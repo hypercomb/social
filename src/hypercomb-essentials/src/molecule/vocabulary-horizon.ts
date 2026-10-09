@@ -20,9 +20,10 @@
 //
 // ── A ZONE IS NOT A DOOR, AND A SHARED DOOR IS NOT FREE ─────────────────
 //
-// A community host is recorded as a ZONE (`example.com`); the content door is
-// `content.<zone>`, the same shape `defaultVocabularyPublishDeps().host`
-// resolves.
+// A community host is recorded as a ZONE (`example.com`); the door is the
+// zone ROOT, the same shape `defaultVocabularyPublishDeps().host` resolves.
+// The retired `content.<apex>` face is still READ, after the root, for an
+// index only the old face held (zone-door.ts) — never written.
 //
 // Shared doors are NOT handed to every publisher. `hiveIndexUrl` puts the
 // publisher's key in the PATH, so asking a shared host about every publisher
@@ -39,6 +40,7 @@
 // publishers in can never become fewer than N rows out.
 
 import { foldHorizon, type VocabularyHorizon, type VocabularyPublisher } from './vocabulary-search.js'
+import { foldContentLabel } from '../sharing/zone-door.js'
 
 /** A visited branch, as `visit-genome.ts` records it. */
 export interface HorizonVisit {
@@ -57,7 +59,7 @@ export interface HorizonSources {
   readonly visits?: readonly HorizonVisit[]
   /** Roots this participant follows, by root name. */
   readonly follows?: Readonly<Record<string, HorizonFollow | undefined>>
-  /** Community host ZONES. Turned into `content.<zone>` doors. */
+  /** Community host ZONES. Asked at the root, then the retired content face. */
   readonly communityZones?: readonly string[]
   /** The standing public endpoint, as a last door. */
   readonly fallbackHosts?: readonly string[]
@@ -114,7 +116,8 @@ export const apexOf = (zone: unknown): string => {
 }
 
 /**
- * `content.<apex>` — the relay's write/read face for a zone.
+ * `content.<apex>` — the relay's RETIRED face for a zone: a read fallback
+ * only (writes go to the zone root — zone-door.ts).
  *
  * It was `content.<zone>` on whatever it was handed, which minted a DEAD door
  * for every site on a wildcard zone: a visit to `susan.hypercomb.com` asked
@@ -141,7 +144,8 @@ export const contentDoorOf = (zone: unknown): string => {
  * concurrently and ranked, so a door that is down costs nothing but itself.
  */
 export const doorsOfZone = (zone: unknown): string[] => {
-  const bare = bareHost(zone)
+  // A zone recorded as its old `content.` face is asked at its ROOT first.
+  const bare = foldContentLabel(bareHost(zone))
   if (!bare) return []
   const face = contentDoorOf(bare)
   return face && face !== bare ? [bare, face] : [bare]

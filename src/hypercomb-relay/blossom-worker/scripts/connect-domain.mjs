@@ -5,7 +5,7 @@
 // domain answers, or it stops at the first missing piece and says exactly
 // what that piece is. Re-runnable: every step checks before it writes.
 //
-//   npm run connect -- <domain> [--no-deploy]
+//   npm run connect -- <domain> [--no-deploy] [--no-apex]
 //
 // The steps, in order:
 //   1. the zone exists in the account and reads ACTIVE (else: the nameservers
@@ -13,11 +13,15 @@
 //      deploy, every other host with it);
 //   2. a proxied `* CNAME <domain>` wildcard record (proxying is what lets it
 //      work with no apex record: the worker route claims the request first);
-//   3. the `*.<domain>/*` route and the zone-anchor binding in
-//      wrangler.pluginthematrix.toml (anchor lineage = the domain itself, a
-//      key no hive path can ever mint — see the toml's anchor note);
+//   3. the `*.<domain>/*` route, the APEX route, and the zone-anchor binding
+//      in wrangler.pluginthematrix.toml (anchor lineage = the domain itself, a
+//      key no hive path can ever mint — see the toml's anchor note). The apex
+//      is the ZONE ROOT (jwize 2026-10-03): the front door, the write face for
+//      everything the hive publishes, and every published place at its root
+//      path. `--no-apex` keeps the old wildcard-only shape for a domain whose
+//      apex lives elsewhere; its writes then go to another zone's root;
 //   4. tests, then deploy;
-//   5. prove it: the relay face answers the index, and an unpublished name
+//   5. prove it: the zone root answers the index, and an unpublished name
 //      answers the honest "nothing published" 404 FROM THE WORKER.
 //
 // Then the domain is a switch in every layer's Publish panel once it is in
@@ -38,10 +42,11 @@ const API = 'https://api.cloudflare.com/client/v4'
 
 const args = process.argv.slice(2)
 const deploy = !args.includes('--no-deploy')
+const apex = !args.includes('--no-apex')
 const domain = String(args.find(a => !a.startsWith('--')) ?? '')
   .trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^\*\./, '')
 if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(domain)) {
-  console.error('usage: npm run connect -- <domain> [--no-deploy]')
+  console.error('usage: npm run connect -- <domain> [--no-deploy] [--no-apex]')
   process.exit(2)
 }
 
@@ -151,18 +156,42 @@ if (found && !found[1]) {
   ok('route added to the worker config')
 }
 
+// The apex: the zone root. Cloudflare mints its record and certificate, and the
+// worker answers it as the front door and the write face (worker.js isZoneRoot).
+if (apex) {
+  const apexRoute = `{ pattern = "${domain}", custom_domain = true }`
+  const apexLine = new RegExp(`^\\s*(#\\s*)?\\{\\s*pattern\\s*=\\s*"${domain.replace(/\./g, '\\.')}"`, 'm')
+  const apexFound = toml.match(apexLine)
+  if (apexFound && !apexFound[1]) {
+    ok('apex route already in the worker config')
+  } else if (apexFound) {
+    toml = toml.replace(apexLine, (line) => line.replace(/#\s*/, ''))
+    ok('apex route re-enabled in the worker config')
+  } else {
+    const routes = toml.match(/^routes = \[[\s\S]*?^\]/m)
+    if (!routes) stop('could not find the routes list in wrangler.pluginthematrix.toml')
+    const body = routes[0].replace(/\s*\]$/, '')
+    const sep = body.trimEnd().endsWith(',') || body.trimEnd().endsWith('[') ? '' : ','
+    toml = toml.replace(routes[0], `${body.trimEnd()}${sep}\n  # zone root of ${domain}: front door + write face\n  ${apexRoute}\n]`)
+    ok('apex route added to the worker config')
+  }
+}
+
 const bindingsMatch = toml.match(/^SITE_BINDINGS = '(.*)'$/m)
 if (!bindingsMatch) stop('could not find SITE_BINDINGS in wrangler.pluginthematrix.toml')
 const bindings = JSON.parse(bindingsMatch[1])
 const anchor = bindings[domain]
-if (anchor && anchor.wildcard !== false) {
+const shaped = (b) => b && b.wildcard !== false && (apex ? b.frontDoor === true && b.routed !== false : true)
+if (shaped(anchor)) {
   ok('zone anchor already bound')
 } else {
   const publishers = anchor?.publishers ?? Object.values(bindings).find(b => Array.isArray(b.publishers))?.publishers
   if (!publishers?.length) stop('no publisher list to copy into the new zone anchor')
   // The anchor lineage is the domain itself: it contains a dot, and lineageKey
   // folds dots to '-', so no hive path can ever claim it.
-  bindings[domain] = { title: anchor?.title ?? domain, lineage: domain, publishers, routed: false }
+  bindings[domain] = apex
+    ? { title: anchor?.title ?? domain, lineage: domain, publishers, frontDoor: true }
+    : { title: anchor?.title ?? domain, lineage: domain, publishers, routed: false }
   toml = toml.replace(bindingsMatch[0], () => `SITE_BINDINGS = '${JSON.stringify(bindings)}'`)
   ok('zone anchor bound')
 }
@@ -181,12 +210,17 @@ ok('deployed')
 
 // ── 5. prove it ───────────────────────────────────────────────────────────
 const publisher = bindings[domain].publishers[0].pubkey
+// The index answers at the zone root; a wildcard-only domain still has only
+// its legacy relay face, content.<domain>.
+const indexes = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('hive:indexes')))]
+  .map((b) => b.toString(16).padStart(2, '0')).join('')
+const writeFace = apex ? domain : `content.${domain}`
 const probe = `hc-connect-${Date.now().toString(36)}`
 let served = false, routed = false
 for (let i = 0; i < 12 && !(served && routed); i++) {
   if (i) await sleep(5000)
   try {
-    const index = await fetch(`https://content.${domain}/hive/${publisher}`, { cache: 'no-store' })
+    const index = await fetch(`https://${writeFace}/${indexes}/${publisher}`, { cache: 'no-store' })
     served = index.status === 200 || index.status === 404
   } catch { /* not yet */ }
   try {
@@ -194,8 +228,8 @@ for (let i = 0; i < 12 && !(served && routed); i++) {
     routed = door.status === 404 && /nothing published/.test(await door.text())
   } catch { /* not yet */ }
 }
-if (!served) stop(`content.${domain} does not answer the index yet — DNS may still be propagating; run this again in a minute`)
-ok(`content.${domain} answers the index`)
+if (!served) stop(`${writeFace} does not answer the index yet — DNS may still be propagating; run this again in a minute`)
+ok(`${writeFace} answers the index`)
 if (!routed) stop(`${probe}.${domain} is not reaching the worker — check the wildcard record and the route`)
 ok(`${domain} doors reach the worker`)
 console.log(`\n${domain} is connected. Add it in Hosts and it is a switch on every layer's Publish panel.`)

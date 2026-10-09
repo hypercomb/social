@@ -19,7 +19,7 @@ const H = require('./hive-harness.cjs')
 
 const WEB = process.argv[2] || 'http://localhost:4260'
 const HOST = process.argv[3] || 'localhost:4291'
-const WRITE = `content.${HOST}`
+const WRITE = HOST                                     // the zone root is the write face (content.<zone> is legacy)
 const KEY = 'module.jevfollows'                       // English only in the shipped catalogs
 const SHIPPED_KEY = 'editor.save'                      // shipped in ja: must never be replaced
 const JA = `すべての規則に従う ${Date.now().toString(36)}`

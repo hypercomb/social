@@ -16,6 +16,11 @@
 // model: the link itself reveals nothing (it is an opaque hash), and
 // possession of it is the invitation.
 //
+// A bare `invite` (no tile selected) no longer mints a bundle at all: it
+// hands out the MEETING LINK below, which carries the same three inputs in
+// its fragment and needs no host. The bundle stays the shape of a tile-borne
+// junction, whose signature rides the wire.
+//
 // This module holds ONLY pure data + validation so both the receive-side
 // worker and the /invite share queen can import it without pulling in any
 // runtime. It imports nothing.
@@ -88,6 +93,65 @@ export function validateInviteBundle(raw: unknown): MeetingInviteBundle | null {
     ...(alias ? { alias } : {}),
     ...(createdAt ? { createdAt } : {}),
   }
+}
+
+// ── The meeting link ──────────────────────────────────────────────────
+//
+// `https://<origin>/#meet=<room>/<secret>[/<segment>...]`, each part
+// percent-encoded. It carries the SAME three inputs a bundle does, but in the
+// link itself — so it needs no host, no fetch and no upload before anyone can
+// join: the facilitator types `invite`, the room taps the link. The fragment
+// never reaches a server (browsers do not send it), which keeps the secret
+// exactly as private as the bearer bundle's signature kept it.
+//
+// The shell captures it at boot (hypercomb-shared/core/invite-capture.ts,
+// which mirrors MEET_KEY — keep the two literals in sync), stashing the text
+// after `#meet=` VERBATIM; parseMeet below is the one validator.
+
+/** sessionStorage key the shell stashes a `#meet=` fragment under. */
+export const MEET_KEY = 'hc:pending-meet'
+
+/** The fragment prefix a meeting link carries. */
+export const MEET_PREFIX = '#meet='
+
+const MEET_PART_MAX = 512
+const MEET_SEGMENTS_MAX = 64
+
+/** The link's fragment for (room, secret, segments) — the caller prefixes
+ *  its own origin. Every part is percent-encoded, so a slash, a space or a
+ *  non-Latin letter in a room survives the round trip unchanged. */
+export function meetFragment(room: string, secret: string, segments: readonly string[]): string {
+  return MEET_PREFIX + [room, secret, ...segments].map(s => encodeURIComponent(s)).join('/')
+}
+
+/** Read a stashed meeting fragment (with or without its `#meet=` prefix)
+ *  back into a joinable bundle. A malformed fragment — a bad escape, a
+ *  missing room or secret, a part carrying a slash, an absurd length — is
+ *  null, and the caller ignores it. Never throws. */
+export function parseMeet(raw: string): MeetingInviteBundle | null {
+  let body = String(raw ?? '').trim()
+  if (body.startsWith(MEET_PREFIX)) body = body.slice(MEET_PREFIX.length)
+  else if (body.startsWith('meet=')) body = body.slice('meet='.length)
+  // Some other fragment altogether (`#other=…`) is not a meeting link.
+  if (!body || body.startsWith('#')) return null
+  const encoded = body.split('/')
+  if (encoded.length < 2 || encoded.length > MEET_SEGMENTS_MAX + 2) return null
+  const parts: string[] = []
+  for (const e of encoded) {
+    let part: string
+    try { part = decodeURIComponent(e) } catch { return null }
+    if (part.length > MEET_PART_MAX || SLASH_RE.test(part)) return null
+    parts.push(part)
+  }
+  const [room, secret, ...rest] = parts
+  if (!room.trim() || !secret.trim()) return null
+  return validateInviteBundle({
+    kind: MEETING_INVITE_KIND,
+    v: MEETING_INVITE_VERSION,
+    segments: rest.filter(s => s.trim().length > 0),
+    room,
+    secret,
+  })
 }
 
 // ── Tile-borne invites ────────────────────────────────────────────────

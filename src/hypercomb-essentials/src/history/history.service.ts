@@ -1,5 +1,5 @@
 // core/history.service.ts
-import { CHILD_SLOTS, EffectBus, MARKER_CEILING, SignatureService, SignatureStore, USAGE_IOC_KEY, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, homeMoleculeKey, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, rootMoleculeAddress, writeLayerMarker, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, MARKER_CEILING, SignatureService, SignatureStore, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, homeMoleculeKey, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, rootMoleculeAddress, writeLayerMarker, type MetaEnvelope } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -3438,31 +3438,13 @@ export class HistoryService {
       sliceStart = performance.now()
     }
 
-    // Strict breadth-first, usage-ordered within each level. The entered layer
-    // must actually finish warming before any child starts; all immediate
-    // sibling destinations finish before a grandchild can begin.
-    const ranker = get<UsageRanker>(USAGE_IOC_KEY)
-    const weightOf = (sig: string): number => (ranker ? ranker.weight(sig) : 0)
-    // BALANCE, not dominance. Raw usage weight is milliseconds of dwell plus a
-    // visit bias, so it runs to hundreds of thousands: sorting on it directly
-    // let ONE visited tile at depth 5 outrank every unvisited tile in front of
-    // the participant, and the walk dived down a single corridor while the
-    // page they are looking at stayed cold. Two corrections:
-    //   · log1p compresses usage into a small span (an unseen tile is 0, a
-    //     heavily-used one ~13), so "used more" is a nudge, not a veto;
-    //   · every level down costs DEPTH_COST of that span, so a tile must be
-    //     genuinely more used to justify being fetched from further away.
-    // A tile with no history at all scores -depth·DEPTH_COST, which is exactly
-    // the shallow-first walk a cold participant had before.
-    const DEPTH_COST = 2
-    // Interest runs downhill: the children of a tile you use are likelier than
-    // a stranger's, even before you have ever opened them. Passing a share of
-    // the parent's score down means a hot BRANCH warms its insides ahead of an
-    // unrelated cold tile at the same depth — without pretending the child was
-    // itself visited.
-    const INHERIT = 0.4
-    const scoreOf = (sig: string, depth: number, inherited: number): number =>
-      Math.log1p(Math.max(0, weightOf(sig))) + inherited - depth * DEPTH_COST
+    // Strict breadth-first, in the layer's own child order within each level.
+    // The entered layer must actually finish warming before any child starts;
+    // all immediate sibling destinations finish before a grandchild can begin.
+    // The order is STRUCTURAL only: nothing about where the participant has
+    // been or how long they stayed is recorded or consulted (no tracking —
+    // jwize, 2026-10-03), so every node scores 0 and the slice keeps the order
+    // the children were pushed in.
     const store = get<StoreContentWarm>('@hypercomb.social/Store')
     // Superseded-by-navigation check: captured now, compared per node. The
     // moment the user navigates again this walk is warming a STALE
@@ -3478,7 +3460,7 @@ export class HistoryService {
     // preparing a view anywhere prepares it everywhere, permanently.
     type WarmNode = { sig: string; depth: number; score: number; parentSegments: readonly string[] }
     const startSegments = rootSegments.map(s => String(s ?? '').trim()).filter(Boolean)
-    const frontier: WarmNode[] = [{ sig: rootSig, depth: 0, score: scoreOf(rootSig, 0, 0), parentSegments: startSegments }]
+    const frontier: WarmNode[] = [{ sig: rootSig, depth: 0, score: 0, parentSegments: startSegments }]
     const CONCURRENCY = 12
     // The tiles within the code radius, with what the walk already read of
     // them — their faces warm AFTER the pass (#warmFaceTail).
@@ -3588,10 +3570,7 @@ export class HistoryService {
                 frontier.push({
                   sig: childSig,
                   depth: node.depth + 1,
-                  // Its own history, plus the share of its parent's standing
-                  // that interest passes down (see INHERIT), minus the cost of
-                  // being one level further away.
-                  score: scoreOf(childSig, node.depth + 1, Math.max(0, node.score) * INHERIT),
+                  score: 0,
                   parentSegments: ownSegments,
                 })
               }

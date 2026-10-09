@@ -132,10 +132,12 @@ const REEL_KEEPS: 'angular' | 'tangential' = 'angular'
 const SWING_ACCEL = 1500               // horizontal push from left/right while roped
 const ROPE_AIR_DRAG = 0.08             // barely any drag — momentum is the point of a rope
 const ROPE_MAX_SPEED = 1300            // cap on total roped speed (keeps swings controllable)
-// The rope never fires flatter than this above horizontal, however low you aim: a re-rope
-// is always a steep cast. 45 degrees is jwize's call; a forum recollection puts the
-// original Worms 2 limit at 45 degrees too (low confidence, not measured).
-const ROPE_MIN_ELEVATION = Math.PI / 4
+// W/S turn the one aim — the rope and the weapon share it (jwize, 2026-10-04:
+// "you only need one aim") — at this rate while held.
+const AIM_SPEED = 1.6                  // radians per second
+// Letting go of a rope that stuck turns the aim to this elevation on the OTHER
+// side from that rope: the next rope starts there, never straight up (jwize).
+const REROPE_ELEVATION = Math.PI / 4
 
 // Weapons
 const CHARGE_MIN = 260                 // throw speed at a tap
@@ -191,15 +193,12 @@ export class RoperEngine {
   wind = 0                              // signed, |wind| <= WIND_MAX
   winner: number | null = null
 
-  // Aim + charge are owned by the overlay (input) but live here so the renderer
-  // and physics share one source of truth.
+  // The one aim, shared by the rope and the weapon. W/S steer it (#steerAim);
+  // it keeps its elevation and turns with the worm. Charge is owned by the
+  // overlay but lives here so the renderer and physics share one truth.
   aimAngle = -Math.PI / 4              // radians; -PI/2 is straight up
   charging = false
   power = 0                            // 0..1 while charging
-
-  // Horizontal side of the last rope fired this turn (0 none, ±1). The next rope
-  // can't come out the same way — it flips to the opposite side (W2 feel).
-  #lastRopeSign: 0 | 1 | -1 = 0
 
   #rng: () => number
 
@@ -211,7 +210,7 @@ export class RoperEngine {
     this.#spawnWorms(opts.wormsPerTeam ?? 3)
     this.activeIndex = this.worms.findIndex(w => w.team === 0)
     this.wind = this.#rollWind()
-    this.facingFromAim()
+    this.#steerAim(0)
   }
 
   // ── public reads ─────────────────────────────────────────
@@ -250,17 +249,27 @@ export class RoperEngine {
     }
 
     for (const w of this.worms) if (w.alive) this.#stepWorm(w, dt, w === this.active)
+    this.#steerAim(dt)
     this.#stepProjectiles(dt)
     this.#stepCosmetics(dt)
   }
 
-  // ── input-driven actions (called by the overlay) ─────────
-  /** Point the active worm to match the current aim (used after a turn switch). */
-  facingFromAim(): void {
+  /** W/S raise and lower the one aim whenever the active worm is off the rope
+   *  (on it, the same keys reel). The aim keeps its elevation and turns with
+   *  the worm, so walking or swinging the other way mirrors it. */
+  #steerAim(dt: number): void {
     const w = this.active
-    if (w) w.facing = Math.cos(this.aimAngle) >= 0 ? 1 : -1
+    if (!w) return
+    let elevation = Math.atan2(-Math.sin(this.aimAngle), Math.abs(Math.cos(this.aimAngle)))
+    if (!this.attached) {
+      if (this.input.up) elevation += AIM_SPEED * dt
+      else if (this.input.down) elevation -= AIM_SPEED * dt
+      elevation = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, elevation))
+    }
+    this.aimAngle = Math.atan2(-Math.sin(elevation), w.facing * Math.cos(elevation))
   }
 
+  // ── input-driven actions (called by the overlay) ─────────
   selectWeapon(kind: WeaponKind): void {
     if (this.state === 'aim') this.weapon = kind
   }
@@ -269,32 +278,15 @@ export class RoperEngine {
     this.selectWeapon(WEAPON_ORDER[(i + 1) % WEAPON_ORDER.length])
   }
 
-  /** The direction the rope will ACTUALLY launch from the current aim, applying
-   *  the two Team17 rules: (1) it only fires in the upper hemisphere, never flatter
-   *  than ROPE_MIN_ELEVATION (45 degrees) above horizontal; (2) it can't come out the same horizontal side as the
-   *  last rope this turn, so a right cast is followed by a left one (you re-aim
-   *  the steepness in the air, the side flips). Shared by fireRope and the aim
-   *  preview so what you see is what fires. */
-  ropeLaunchDir(): { dx: number; dy: number; sign: 1 | -1 } {
-    const cx = Math.cos(this.aimAngle)
-    // elevation above horizontal, upper hemisphere only, floored at ROPE_MIN_ELEVATION
-    const elev = Math.max(ROPE_MIN_ELEVATION, Math.atan2(Math.abs(Math.sin(this.aimAngle)), Math.abs(cx)))
-    let sign: 1 | -1 = cx >= 0 ? 1 : -1
-    if (this.#lastRopeSign !== 0 && sign === this.#lastRopeSign) sign = sign === 1 ? -1 : 1
-    const dx = sign * Math.cos(elev)
-    const dy = -Math.sin(elev)
-    return { dx, dy, sign }          // already a unit vector
-  }
-
-  /** Fire the rope: the hook shoots OUT along the launch direction. It locks onto
-   *  the first terrain it crosses; if it reaches full length without grabbing it
-   *  pulls back — so the rope always flies out far enough to gauge your aim even
-   *  on a miss. The worm stays in free flight until the hook actually grabs. */
+  /** Fire the rope: the hook shoots OUT along the aim — the same aim a weapon
+   *  is thrown along. It locks onto the first terrain it crosses; if it reaches
+   *  full length without grabbing it pulls back — so the rope always flies out
+   *  far enough to gauge your aim even on a miss. The worm stays in free flight
+   *  until the hook actually grabs. */
   fireRope(): void {
     const w = this.active
     if (!w || !w.alive || this.state === 'over') return
-    const { dx, dy, sign } = this.ropeLaunchDir()
-    this.#lastRopeSign = sign
+    const dx = Math.cos(this.aimAngle), dy = Math.sin(this.aimAngle)
     this.rope = {
       phase: 'extending',
       ox: w.x, oy: w.y, dx, dy,
@@ -305,11 +297,19 @@ export class RoperEngine {
   }
 
   releaseRope(): void { this.rope = null }
-  /** Space / right-click: detach when swinging, otherwise (re)fire — so you can
-   *  pop the rope out again and again to range a swing before committing. */
+  /** J / right-click: detach when swinging, otherwise (re)fire — so you can
+   *  pop the rope out again and again to range a swing before committing.
+   *  Letting go of a rope that stuck turns the aim to REROPE_ELEVATION on the
+   *  other side from it (toward the worm's facing if it went straight up);
+   *  W/S adjust from there. */
   toggleRope(): void {
-    if (this.rope?.phase === 'attached') this.releaseRope()
-    else this.fireRope()
+    const r = this.rope, w = this.active
+    if (r?.phase !== 'attached') { this.fireRope(); return }
+    this.releaseRope()
+    if (!w) return
+    const side: 1 | -1 = Math.abs(r.dx) < 1e-6 ? w.facing : r.dx > 0 ? -1 : 1
+    w.facing = side
+    this.aimAngle = Math.atan2(-Math.sin(REROPE_ELEVATION), side * Math.cos(REROPE_ELEVATION))
   }
 
   /** Throw the selected weapon along the aim at the given power (0..1). One
@@ -733,8 +733,7 @@ export class RoperEngine {
     this.wind = this.#rollWind()
     this.charging = false
     this.power = 0
-    this.#lastRopeSign = 0          // each worm's first rope can go either way
-    this.facingFromAim()
+    this.#steerAim(0)               // the aim turns to face the way the new worm does
   }
 
   /** Round-robin the next living worm of a team, continuing past the last one

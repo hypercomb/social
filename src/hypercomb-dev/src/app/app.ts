@@ -191,7 +191,8 @@ export class App implements AfterViewInit {
     // nostr-mesh.drone.ts), so a join needs zero extra setup.
     queueMicrotask(() => {
       const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
-      mesh?.setNetworkEnabled?.(meshResumed, true)
+      // Not persisted: the value is this TAB's (see web's core-adapter).
+      mesh?.setNetworkEnabled?.(meshResumed, false)
       void this.startRegisteredBees()
     })
   }
@@ -206,13 +207,12 @@ export class App implements AfterViewInit {
     EffectBus.emit('render:set-orientation', { flat: next === 'flat-top' })
   }
 
+  // Announce, don't reach in: the swarm turns the network on for a join and
+  // off after its signed {left} is on the wire (see web's core-adapter).
   public toggleMesh = (): void => {
-    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any;
-
     const next = !this.meshPublic();
     this.meshPublic.set(next);
     localStorage.setItem('hc:mesh-public', String(next))
-    mesh?.setNetworkEnabled?.(next, true);
     EffectBus.emit('mesh:public-changed', { public: next })
   }
 

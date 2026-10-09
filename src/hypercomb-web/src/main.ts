@@ -33,10 +33,10 @@ if (isSandboxDoor()) {
 // ── boot perf trail ──────────────────────────────────────────────────────────
 // Mirror of hypercomb-dev/src/main.ts. T0 = earliest point in the module graph.
 // Any shared/essentials code that calls window.__hcBoot('label') gets a
-// `[boot] +Nms label` console line + a push into window.__hcBootMarks (also
-// persisted to localStorage['hc:perf-boot-marks'] so the trail survives the
-// reload it measures). Web previously never defined __hcBoot, so every mark in
-// shared/essentials was a silent no-op here and production boot was unmeasurable.
+// `[boot] +Nms label` console line + a push into window.__hcBootMarks, in
+// memory only: boot timings are never stored. Web previously never defined
+// __hcBoot, so every mark in shared/essentials was a silent no-op here and
+// production boot was unmeasurable.
 ;(window as any).__hcBootT0 = performance.now()
 ;(window as any).__hcBootMarks = [] as string[]
 ;(window as any).__hcBoot = (label: string, extra?: string) => {
@@ -48,7 +48,6 @@ if (isSandboxDoor()) {
   // The one boot line a quiet origin still says: first paint, and when.
   if (label.startsWith('bootstrapApplication done')) announce(`[hypercomb] ready +${t.toFixed(0)}ms`)
   ;(window as any).__hcBootMarks.push(msg)
-  try { localStorage.setItem('hc:perf-boot-marks', JSON.stringify((window as any).__hcBootMarks)) } catch {}
 }
 ;(window as any).__hcBoot('main.ts module evaluated')
 

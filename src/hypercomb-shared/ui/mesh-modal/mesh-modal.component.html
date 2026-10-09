@@ -51,6 +51,10 @@
           [value]="roomDraft()"
           [class.mesh-modal-input-missing]="missingField() === 'room'"
           (input)="onRoomInput($event)"
+          autocapitalize="off"
+          autocorrect="off"
+          autocomplete="off"
+          spellcheck="false"
         />
         @if (missingField() === 'room') {
           <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.needs-location' | t }}</p>
@@ -86,6 +90,8 @@
             [value]="secretDraft()"
             [class.mesh-modal-input-missing]="missingField() === 'secret'"
             (input)="onSecretInput($event)"
+            autocapitalize="off"
+            autocorrect="off"
             autocomplete="off"
             spellcheck="false"
           />
@@ -105,10 +111,10 @@
         @if (missingField() === 'secret') {
           <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.needs-secret' | t }}</p>
         }
-        <!-- The same two words the breadcrumb shows for this zone, live as
-             the fields change — dressed like the crumb (◆ pair ◆) so the pair
-             up top is recognisably THIS location + secret once the window
-             closes. -->
+        <!-- The room's two words (room + secret only, never the page), live
+             as the fields change — dressed like the crumb (◆ pair ◆) so the
+             pair up top and on the presence line is recognisably THIS room
+             once the window closes, for everyone in it. -->
         @if (zoneWords()) {
           <p class="mesh-modal-words" aria-live="polite"><span class="mesh-modal-words-sep">◆</span><span class="mesh-modal-words-pair">{{ zoneWords() }}</span><span class="mesh-modal-words-sep">◆</span></p>
         }

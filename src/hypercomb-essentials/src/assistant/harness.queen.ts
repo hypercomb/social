@@ -17,6 +17,7 @@ import { listReceipts, summarizeReceipts } from './agent-receipts.js'
 import { openHarnessTile } from './harness-tiles.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
 import { PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+import { zoneDoor } from '../sharing/zone-door.js'
 import { listCommunityHosts } from '../sharing/community-hosts.js'
 
 const short = (sig: string): string => sig.slice(0, 12)
@@ -35,7 +36,8 @@ type HostSyncLike = {
 
 /** A host as a URL: loopback on http, everything else https. */
 const hostUrl = (host: string): string => {
-  const bare = host.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  // The zone root — a `content.` face named here is the zone (zone-door.ts).
+  const bare = zoneDoor(host)
   const loopback = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(bare)
   return `${loopback ? 'http' : 'https'}://${bare}`
 }
@@ -129,7 +131,7 @@ export class HarnessQueenBee extends QueenBee {
       if (!target) { toast(t('harness.usage.offer', 'Say which: harness offer <name> [@<host>]'), 'warning'); return }
       const found = harness.find(target)
       if (!found) { toast(t('harness.unknown', 'No harness called "{name}" in the pool.', { name: target }), 'warning'); return }
-      const host = at || PUBLIC_CONTENT_HOSTS[0] || ''
+      const host = zoneDoor(at || PUBLIC_CONTENT_HOSTS[0] || '')
       const deps = host ? publishDeps() : null
       if (!deps) { toast(t('harness.unoffered', '{name} was not offered: {reason}', { name: found.record.name, reason: host ? 'the store or the host service is not loaded' : 'no host is configured' }), 'warning'); return }
       const done = await publishHarness(host, found.record, deps)
@@ -140,7 +142,7 @@ export class HarnessQueenBee extends QueenBee {
     }
 
     if (word === 'sync') {
-      const hosts = [...new Set([...(at ? [at] : []), ...PUBLIC_CONTENT_HOSTS, ...(await listCommunityHosts().catch(() => []))].filter(Boolean))]
+      const hosts = [...new Set([...(at ? [at] : []), ...PUBLIC_CONTENT_HOSTS, ...(await listCommunityHosts().catch(() => []))].map(zoneDoor).filter(Boolean))]
       const imported: string[] = []
       let answered = 0
       let dropped = 0

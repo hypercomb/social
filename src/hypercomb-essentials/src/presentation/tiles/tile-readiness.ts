@@ -12,8 +12,6 @@
 // for the atlases, and the repair of a proof an atlas eviction broke. It
 // paints nothing: the renderer writes the shade (the host).
 
-import { USAGE_IOC_KEY } from '@hypercomb/core'
-import type { UsageRanker } from '@hypercomb/core'
 import { cellLocationSig, isSignature, readTilePropsIndex, recoverableTileImageSig } from '../../editor/tile-properties.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 
@@ -460,21 +458,12 @@ export class TileReadiness {
         }
       }
 
-      // MOST-USED FIRST: rank the pending branch tiles by the participant's
-      // local usage of each child location, then check them SERIALLY. A tile
+      // IN DISPLAY ORDER: check the pending branch tiles SERIALLY. A tile
       // whose children are all present/concluded is released IMMEDIATELY —
       // its own repaint, not one batch flip at the end — so tiles brighten
-      // one by one, and the ones you actually open brighten first. Misses
-      // enqueue in this same priority order, so the warm queue drains toward
-      // the most-used tile's children before anything else.
-      const ranker = window.ioc?.get?.(USAGE_IOC_KEY) as UsageRanker | undefined
-      const weighted = await Promise.all(branchCells.map(async c => ({
-        c,
-        w: ranker ? ranker.weight(await cellLocationSig(parentSegments, c.label)) : 0,
-      })))
-      weighted.sort((a, b) => b.w - a.w)
-
-      for (const { c } of weighted) {
+      // one by one. Misses enqueue in this same order. Nothing about which
+      // tiles the participant opens is recorded or consulted (no tracking).
+      for (const c of branchCells) {
         // Superseded by navigation — abort but ALWAYS leave a retry behind.
         if (gen !== this.#readinessGen) { this.#queueComputeRetry(); return }
         if (this.#childrenReadyByLabel.get(c.label) === true) continue

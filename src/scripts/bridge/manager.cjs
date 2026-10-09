@@ -9,6 +9,7 @@
 //   node scripts/bridge/manager.cjs tree [/route]            the tiles under a route
 //   node scripts/bridge/manager.cjs read /route              one tile: properties and notes
 //   node scripts/bridge/manager.cjs notes /route             the notes on a tile
+//   node scripts/bridge/manager.cjs dates /route             a tile's versions, oldest first, with create dates (null = unknown)
 //   node scripts/bridge/manager.cjs note /route "<text>"     add a note to a tile
 //   node scripts/bridge/manager.cjs unnote /route <noteId>   take a note off a tile (a list change; history keeps it)
 //   node scripts/bridge/manager.cjs thread <manager|convoId> [n]   the last n turns
@@ -82,7 +83,15 @@ const sendOnce = (req, waitMs) => new Promise(resolve => {
     try { ws.close() } catch { /* gone */ }
     resolve(message)
   })
-  ws.on('error', error => { clearTimeout(timer); resolve({ ok: false, error: String(error.message) }) })
+  // A REFUSED CONNECTION HAS NO MESSAGE: Node reports it as an AggregateError
+  // whose .message is empty, so a dead broker printed nothing and looked like
+  // a failed read (all three managers, 2026-10-04). Say what is down.
+  ws.on('error', error => {
+    clearTimeout(timer)
+    const code = error.code || error.errors?.[0]?.code || ''
+    const refused = code === 'ECONNREFUSED' || code === 'ECONNRESET'
+    resolve({ ok: false, error: refused ? `bridge broker not running at ${BRIDGE} (${code}); start it with: node scripts/bridge/run-bridge.cjs` : (error.message || code || 'bridge connection failed') })
+  })
 })
 
 // GIT BASH REWRITES A LEADING SLASH. Under MSYS an argument that starts with
@@ -161,7 +170,16 @@ const main = async () => {
         send({ op: 'inspect', segments }),
         send({ op: 'note-list', segments }),
       ])
+      // Both failed: that is a failure, not an empty tile.
+      if (!tile.ok && !notes.ok) return fail(tile.error || notes.error)
       return print({ tile: tile.ok ? tile.data : tile.error, notes: notes.ok ? notes.data : notes.error })
+    }
+    case 'dates': {
+      // Markers written since 2026-10-02 carry their create date; older ones
+      // say null, which is unknown, never a date.
+      const reply = await send({ op: 'layers-at', segments: segmentsOf(first) })
+      if (!reply.ok) return fail(reply.error)
+      return print(reply.data.map(entry => ({ index: entry.index, sig: entry.layerSig, at: entry.at ? new Date(entry.at).toISOString() : null })))
     }
     case 'notes': {
       const reply = await send({ op: 'note-list', segments: segmentsOf(first) })
@@ -213,7 +231,9 @@ const main = async () => {
         const reply = await send({ op: 'chat-asked', cell: askId })
         if (!reply.ok) return fail(reply.error)
         if (reply.data?.done) {
-          const { outcome, rounds, reads, tokens, answer, left, error } = reply.data
+          const { outcome, rounds, reads, tokens, answer, left, error, held } = reply.data
+          // Held for jwize: the change waits in Execution; nothing ran yet.
+          if (outcome === 'held') return print({ convoId, outcome, held, note: 'waiting for jwize in Execution — report it; do not try to get around the hold' })
           return print({ convoId, outcome, rounds, reads, ...(reads === 0 ? { warning: 'nothing was read in this turn: check every claim about the hive yourself' } : {}), tokens, ...(left ? { left: 'the work stopped at the end of a leg; ask "Continue." to carry it on' } : {}), ...(error ? { error } : {}), answer })
         }
       }

@@ -7,7 +7,10 @@ import type { HiveIndexResult, PutHiveResult } from './hive-pointer.js'
 const SIG = 'a'.repeat(64)
 const PUBKEY = 'b'.repeat(64)
 const HOST = 'jwize.com'
-const ENDPOINT = 'content.pluginthematrix.com'
+// The setting as an install from before the content face retired stored it;
+// every write goes to the zone ROOT it names.
+const STORED = 'content.pluginthematrix.com'
+const ENDPOINT = 'pluginthematrix.com'
 const bytes = (value: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(value))
 const exact = (value: Uint8Array): ArrayBuffer =>
   value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer
@@ -64,7 +67,7 @@ describe('explicit text-theme offering', () => {
       return { ok: true, pubkey: PUBKEY, createdAt: 1_700_000_001 }
     })
     const sync = {
-      publicHostDomain: () => ENDPOINT,
+      publicHostDomain: () => STORED,
       publishAtoms: async (host: string, sigs: readonly string[], bytesOf: (sig: string) => Promise<Uint8Array | null>) => {
         order.push('stage')
         expect(host).toBe(ENDPOINT)
@@ -104,7 +107,7 @@ describe('explicit text-theme offering', () => {
     const publishAtoms = vi.fn(async () => ({ ok: true as const, sent: 0, held: 0 }))
     const putIndex = vi.fn(async (): Promise<PutHiveResult> => ({ ok: true, pubkey: PUBKEY, createdAt: 1 }))
     const deps: TextThemeOfferDeps = {
-      store: local.store, sync: { publicHostDomain: () => ENDPOINT, publishAtoms },
+      store: local.store, sync: { publicHostDomain: () => STORED, publishAtoms },
       pubkey: async () => PUBKEY,
       readIndex: async (): Promise<HiveIndexResult> => ({ ok: false, reason: 'http', status: 404 }), putIndex,
     }
@@ -118,7 +121,7 @@ describe('explicit text-theme offering', () => {
     const publishAtoms = vi.fn(async () => ({ ok: true as const, sent: 0, held: 0 }))
     const putIndex = vi.fn(async (): Promise<PutHiveResult> => ({ ok: true, pubkey: PUBKEY, createdAt: 1 }))
     const deps: TextThemeOfferDeps = {
-      store: local.store, sync: { publicHostDomain: () => ENDPOINT, publishAtoms },
+      store: local.store, sync: { publicHostDomain: () => STORED, publishAtoms },
       pubkey: async () => PUBKEY,
       readIndex: async (): Promise<HiveIndexResult> => ({ ok: false, reason: 'forged' }), putIndex,
     }
@@ -136,7 +139,7 @@ describe('explicit text-theme offering', () => {
         title: 'Studio', host: HOST },
     } }
     const deps: TextThemeOfferDeps = {
-      sync: { publicHostDomain: () => ENDPOINT, publishAtoms: async () => ({ ok: true, sent: 0, held: 0 }) },
+      sync: { publicHostDomain: () => STORED, publishAtoms: async () => ({ ok: true, sent: 0, held: 0 }) },
       pubkey: async () => PUBKEY,
       readIndex: async (): Promise<HiveIndexResult> => ({ ok: true, manifest: {
         roots: {}, createdAt: 1, pubkey: PUBKEY, offerings: content.offerings, signedContent: content,

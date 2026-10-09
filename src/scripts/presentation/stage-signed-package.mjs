@@ -39,7 +39,10 @@ if (!SIG.test(pubkey)) throw new Error('install-publisher.json names no publishe
 
 // The signed index, from every host that serves it; the first that verifies
 // against the pinned key answers. A forged copy is fatal, never skipped.
-const indexHosts = [...new Set(['content.hypercomb.com', ...(publisher.hosts ?? [])])]
+// The zone root answers the index (hypercomb.com's apex is a static site, so
+// pluginthematrix.com leads); the content.<zone> faces stay as read fallbacks
+// for what older publishes left there.
+const indexHosts = [...new Set(['pluginthematrix.com', ...(publisher.hosts ?? []), 'content.hypercomb.com'])]
 let root = null
 for (const host of indexHosts) {
   let event

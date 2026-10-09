@@ -40,6 +40,7 @@ let draftDocument: ParticipantDocument<unknown> | null = null
 const draftDoc = (): ParticipantDocument<unknown> => draftDocument ??= new ParticipantDocument<unknown>({
   meaning: SOLOMON_LEVELS_MEANING,
   subKey: 'draft',
+  keep: 'current',   // the designer's autosave, not a save
   legacyKey: LEGACY_DRAFT_KEY,
   empty: null,
   parse: raw => raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null,

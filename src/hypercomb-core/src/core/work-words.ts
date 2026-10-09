@@ -224,7 +224,7 @@ export const workInstruction = (powers: WorkPowers): string => {
       'A module\'s first page lists its "sections" — the source files bundled into it, by path. read <signature> <src/path.ts> opens one section alone, which is how to read one file of a large module',
       'code · code <words> — the code running in this hive: every module and dependency whose name holds the words, with the signature that opens it, AND "hits": every line of code that holds the words — a function, a message, a tile\'s name — each with its module signature, its section and "at"',
       'FINDING CODE. Search for what the code does or names: `code useDoor`, `code labyrinth-view`, `code solomon-maze-v1`. A hit opens exactly where it is with `read <signature> <section> <at>`. The code behind a tile is found by its name: `read /path` also lists, under "code", the running code that names the tile. A signature you found earlier stays listed under ALREADY READ, so open it again rather than searching again. Do not try `read code core`, `read /code`, or `read /core`. Reading code never runs it and never grants permission to change it.',
-      'find <word> — tiles under the current page whose name contains the word',
+      'find <word> · find <word> /path — tiles under the current page, or under that path, whose name contains the word',
       powers.readsRunFreely
         ? 'Reads run straight away, as many as the work needs: read whole modules, follow every lead, and do not stop to ask whether to keep reading.'
         : 'The participant approves each read before it runs. A read they skip comes back as skipped.',
@@ -277,7 +277,11 @@ export const HANDOFF_INSTRUCTION = 'HANDING OFF. If the request is beyond what y
 const carry = (request: string): string => {
   const text = String(request ?? '').trim()
   const cut = text.length > REQUEST_ECHO_MAX ? `${text.slice(0, REQUEST_ECHO_MAX)}…` : text
-  return cut ? `\n\nThe participant's request, for reference: «${cut}»` : ''
+  // THE HIVE'S NOTE IS NOT THE PARTICIPANT'S WORDS. Sent back to read first,
+  // a model answered the note — "You're right — I refused rather than
+  // answering… Reading them now." — and that went out in the answer (the
+  // harness manager, 2026-10-04).
+  return cut ? `\n\nThe participant's request, for reference: «${cut}»\n\nThis message is from the hive, not the participant: do not reply to it, thank it or apologise for it. Write only your answer to the participant.` : ''
 }
 
 const bullets = (lines: readonly string[]): string => lines.map(line => `- ${line}`).join('\n')
@@ -294,8 +298,40 @@ export const doRanMessage = (ran: readonly string[], request: string): string =>
 export const doSkippedMessage = (lines: readonly string[], request: string): string =>
   `The participant skipped your ${DO_FENCE_LANG} block; nothing changed:\n${bullets(lines)}\n\nDo not propose it again unless they ask. Continue, or answer.${carry(request)}`
 
-export const doFailedMessage = (ran: readonly string[], stoppedAt: string, reason: string, request: string): string =>
-  `Your ${DO_FENCE_LANG} block stopped at ${stoppedAt}: ${reason}.${ran.length ? `\nIt ran before stopping:\n${bullets(ran)}` : ' Nothing ran.'}\n\nContinue: correct it, or tell the participant what went wrong.${carry(request)}`
+/** What a stopped block's roll back did (hypercomb-plan-transaction.ts):
+ *  pages put back, pages left because something else moved them, pages
+ *  that could not be put back, why nothing was, and the lines that wrote
+ *  outside the pages — which a roll back of pages cannot reach. */
+export type DoRollback = {
+  readonly restored: number
+  readonly kept: number
+  readonly failed: number
+  readonly refused?: string
+  readonly beyond: readonly string[]
+}
+
+const pages = (count: number): string => `${count} page${count === 1 ? '' : 's'}`
+
+/** One paragraph, in the order a model needs it: whether anything of the
+ *  block still stands, then what outside the pages stays. */
+const rollbackText = (rollback: DoRollback): string => {
+  const said: string[] = []
+  if (rollback.refused) said.push(`Nothing was put back: ${rollback.refused}.`)
+  else if (!rollback.restored && !rollback.kept && !rollback.failed) said.push('Those lines changed no page, so there was nothing to put back.')
+  else {
+    said.push(rollback.restored
+      ? `The hive put back the ${pages(rollback.restored)} they changed, as new versions — nothing is lost from history.`
+      : 'No page was put back.')
+    if (rollback.kept) said.push(`${pages(rollback.kept)} changed again by something else meanwhile ${rollback.kept === 1 ? 'was' : 'were'} left as ${rollback.kept === 1 ? 'it is' : 'they are'}.`)
+    if (rollback.failed) said.push(`${pages(rollback.failed)} could not be put back.`)
+  }
+  if (rollback.beyond.length) said.push(`What these lines wrote outside the pages stays: ${rollback.beyond.join(', ')}.`)
+  const whole = !rollback.refused && !rollback.kept && !rollback.failed && !rollback.beyond.length
+  return `\n${said.join(' ')}${whole ? ' Nothing of the block stands.' : ''}`
+}
+
+export const doFailedMessage = (ran: readonly string[], stoppedAt: string, reason: string, request: string, rollback?: DoRollback): string =>
+  `Your ${DO_FENCE_LANG} block stopped at ${stoppedAt}: ${reason}.${ran.length ? `\nIt ran before stopping:\n${bullets(ran)}${rollback ? rollbackText(rollback) : ''}` : ' Nothing ran.'}\n\nContinue: correct it, or tell the participant what went wrong.${carry(request)}`
 
 const fenceLangOf = (kind: WorkKind): string =>
   kind === 'read' ? READ_FENCE_LANG : kind === 'table' ? TABLE_FENCE_LANG : kind === 'write' ? WRITE_FENCE_LANG : DO_FENCE_LANG

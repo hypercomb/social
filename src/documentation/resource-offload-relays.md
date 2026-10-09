@@ -124,6 +124,10 @@ proof surface; the gate is their read side (`host-sync.service.ts` +
   holds a confirmed read-back receipt on at least one enabled host.
   Confirmed closures memoize permanently (bytes immutable, receipts
   accrue); misses re-check only when a new receipt bumps the epoch.
+- *Amended 2026-10-04 by [swarm-host.md](swarm-host.md): the swarm host
+  provides the hosting — "no host, no share" narrows to "no host, no
+  bytes": names go out at once, signatures once the meeting's host serves
+  them, and a tile is never taken back for being new or uploading.*
 - **Sharing requires hosting (jwize, 2026-09-25).** Both announce surfaces
   (the publish walk AND the personal subscribe channel) announce a public
   child only once its closure is available on a host, and hold it back
@@ -156,6 +160,9 @@ proof surface; the gate is their read side (`host-sync.service.ts` +
   only entries the hosts actually lack: `total` is the work list after
   reconciliation and `done` ticks once per entry sent. The presence strip
   paints "uploading N of M" from it; the reconciliation itself is silent.
+- *Amended 2026-10-04 by [swarm-host.md](swarm-host.md): a bare `invite`
+  (nothing selected) hands out a `#meet=` link with no host at all; only an
+  invite stamped on selected tiles keeps the bundle path below.*
 - `/invite` refuses without hosting ("sharing requires hosting") and
   waits for the bundle's receipt (`ensureReceipt`) before declaring the
   link live.

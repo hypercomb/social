@@ -18,16 +18,15 @@
 // instead of producing a hive that looks joined and is deaf and mute. Leaving
 // is never gated — the safe direction always works.
 //
-// Idempotent by reading the flag first, because a toggle answering to two
-// different words would make `join` LEAVE a participant who was already in.
+// Idempotent by asking first, because a toggle answering to two different
+// words would make `join` LEAVE a participant who was already in. The answer
+// is THIS tab's membership (membership.ts), never the origin-wide flag a
+// second tab can rewrite.
 
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { isJoinedHere } from './membership.js'
 
-const MESH_PUBLIC_KEY = 'hc:mesh-public'
-
-const inSwarm = (): boolean => {
-  try { return localStorage.getItem(MESH_PUBLIC_KEY) === 'true' } catch { return false }
-}
+const inSwarm = (): boolean => isJoinedHere()
 
 const say = (key: string, fallback: string): void => {
   const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined

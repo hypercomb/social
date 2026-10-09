@@ -10,6 +10,7 @@ export {
   CODE_HITS,
   HypercombObservationError,
   parseHypercombObservationGrammars,
+  withoutNotesBlock,
   executeHypercombObservationPlan,
   foreignReads,
   formatHypercombObservationReceipt,

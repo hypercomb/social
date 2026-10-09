@@ -12,6 +12,7 @@
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+import { zoneDoor } from './zone-door.js'
 import {
   addParticipantFeature,
   listParticipantFeatures,
@@ -50,7 +51,7 @@ export class FeaturesQueenBee extends QueenBee {
       return
     }
     if (verb === 'publish') {
-      await this.#publish(rest[0] || PUBLIC_CONTENT_HOSTS[0] || '')
+      await this.#publish(zoneDoor(rest[0] || PUBLIC_CONTENT_HOSTS[0] || ''))
       return
     }
     const names = await listParticipantFeatures()

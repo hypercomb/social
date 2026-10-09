@@ -35,6 +35,7 @@
 import { QueenBee, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
 import { PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+import { zoneDoor } from '../sharing/zone-door.js'
 import { listCommunityHosts } from '../sharing/community-hosts.js'
 import {
   catalogOf, cleanLocale, COMMUNITY_SUBKEY, healFrom, mergeCatalogs, publishCatalog, publishMissing,
@@ -65,7 +66,8 @@ type Say = (key: string, fallback: string, params?: Record<string, string | numb
 
 /** A host as a URL: loopback on http, everything else https. */
 const hostUrl = (host: string): string => {
-  const bare = host.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  // The zone root — a `content.` face named here is the zone (zone-door.ts).
+  const bare = zoneDoor(host)
   const loopback = /^((?:[a-z0-9-]+\.)*localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(bare)
   return `${loopback ? 'http' : 'https'}://${bare}`
 }
@@ -179,7 +181,7 @@ export class LanguageQueenBee extends QueenBee {
       return
     }
 
-    const host = parts.find(p => p.startsWith('@'))?.slice(1) || (PUBLIC_CONTENT_HOSTS[0] ?? '')
+    const host = zoneDoor(parts.find(p => p.startsWith('@'))?.slice(1) || (PUBLIC_CONTENT_HOSTS[0] ?? ''))
     const named = parts.slice(1).find(p => !p.startsWith('@'))
     const locale = cleanLocale(named ? (LOCALE_ALIASES[named.toLowerCase()] ?? named) : i18n.locale)
     if (!locale) { toast(t('language.badlocale', 'Say a locale like ja, zh or es.'), 'warning'); return }
@@ -197,7 +199,7 @@ export class LanguageQueenBee extends QueenBee {
     }
 
     if (word === 'sync') {
-      const hosts = [...new Set([...(parts.some(p => p.startsWith('@')) ? [host] : []), ...PUBLIC_CONTENT_HOSTS, ...(await listCommunityHosts().catch(() => []))].filter(Boolean))]
+      const hosts = [...new Set([...(parts.some(p => p.startsWith('@')) ? [host] : []), ...PUBLIC_CONTENT_HOSTS, ...(await listCommunityHosts().catch(() => []))].map(zoneDoor).filter(Boolean))]
       let merged = await placed(locale)
       const filled = new Set<string>()
       const translators = new Set<string>()

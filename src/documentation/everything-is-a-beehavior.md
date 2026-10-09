@@ -435,7 +435,7 @@ last.
   `games-group`, `launch-group*`), `tile-icon-provider-registry`,
   `proximity-registry`
 - [ ] Services: `theme.service`, `view-mode.service`, `trust-service`,
-  `usage-tracker`, `movement.service`, `voice-input.service`,
+  `movement.service`, `voice-input.service`,
   `cell-suggestion.provider` + `completion-utility` +
   `resource-completion.service` + `suggestion-provider`, `icon-edit.service`
 - [ ] `navigation.ts` (275)

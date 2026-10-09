@@ -25,12 +25,11 @@ import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
 import type { RecentPortal, RecentPortalsStore } from '../../core/recent-portals.store'
 import { clearLaneWithUndo } from '../docked-panel/dock-lanes'
 import { isWindowShowing } from '../window-session'
-import { showHiveRoot } from '../../core/home-root'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '@hypercomb/runtime/install-monitor'
 import { VoiceInputService } from '../../core/voice-input.service'
-import { secretTag } from '@hypercomb/core'
+import { roomWords } from '../presence-banner/presence-status'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
@@ -1146,19 +1145,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   })
 
   readonly secretWords = computed(() => {
-    // The word pair is a human-verifiable reflection of the mesh FILTER.
-    // It hashes the EXACT SAME STRING the mesh requests use today —
-    // `lineage \0 room \0 secret` (no domain) — so two peers comparing
-    // their two words confirm they share the same place AND the same
-    // secret, i.e. they're on the same channel. See SwarmDrone
-    // (#syncForCurrentLineage / composeSigForSegments), which signs this
-    // same string into the channel sig. Keep this string byte-identical
-    // to the swarm's: same trim, same NUL separators, same lineage.
-    const secret = this.#secret$().trim()
-    const room = this.#room$().trim()
-    const lineage = this.#lineageKey()
-    if (!lineage && !room && !secret) return ''
-    return secretTag(`${lineage}\0${room}\0${secret}`, this.#locale$())
+    // THE ROOM'S TWO WORDS — a human-verifiable reflection of the room:
+    // they hash the room and the secret only (`roomWords`, the swarm's
+    // lifecycle channel `lifecycle \0 room \0 secret`), never the page. The
+    // page used to be in the preimage, so two people in one room standing
+    // on different pages read different pairs and a room could never check
+    // itself out loud; a split it SHOULD catch (a capital the phone slipped
+    // into the room, a stale secret) hid among those false alarms. Same
+    // pair in the location window and on the presence line.
+    return roomWords(this.#room$(), this.#secret$(), this.#locale$())
   })
 
   readonly hasSecret = computed(() => !!this.#secret$().trim())
@@ -1177,20 +1172,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Active domain for breadcrumb display */
   readonly activeDomain = computed(() => {
     return window.location.hostname || 'hypercomb.io'
-  })
-
-  /**
-   * Lineage path key — the navigation path, derived byte-identically to
-   * the swarm's lineageKey (#syncForCurrentLineage): trim each segment,
-   * drop empties, join with '/'. Two peers at the same lineage derive the
-   * same value regardless of room or secret. Feeds the secret-words crumb.
-   */
-  readonly #lineageKey = computed(() => {
-    this.#moved$()
-    return this.navigation.segmentsRaw()
-      .map(s => String(s ?? '').trim())
-      .filter(s => s.length > 0)
-      .join('/')
   })
 
   readonly canGoBack = computed(() => {
@@ -2146,7 +2127,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // open — closing releases them. (The tour picker is not among them any
     // more: it is a tool window, which tears itself down.)
     this.closeFitMenu()
-    this.closeHomeMenu()
     // Never leave the gate locked behind a torn-down bar — the pin would be
     // unreleasable (the only button that releases it went away with us).
     this.gate?.removeEventListener?.('change', this.#onGateChange)
@@ -2310,7 +2290,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   #portals$ = fromRuntime(
     get('@hypercomb.social/RecentPortalsStore') as EventTarget,
-    () => this.recentPortals?.value ?? [],
+    () => this.recentPortals?.home,
   )
 
   /** The portal Home flies to — the one MARKED as home in the Portals
@@ -2319,9 +2299,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly homePortal = computed<RecentPortal | undefined>(
     () => { this.#portals$(); return this.recentPortals?.home },
   )
-
-  readonly isPinnedPortal = (entry: RecentPortal): boolean =>
-    !!this.recentPortals?.isPinned(entry.segments)
 
   /** What the button says it will do — the portal's own name, so the tooltip
    *  names the thing rather than the mechanism. */
@@ -2339,7 +2316,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     if (event && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
       event.stopPropagation()
-      this.closeHomeMenu()
       const segments = this.navigation.segmentsRaw()
       if (segments.length === 0) {
         // The unmarked state already means the hive root; Ctrl+clicking Home at
@@ -2351,48 +2327,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       return
     }
-    this.closeHomeMenu()
     // Ask for the ROOT, never for the home's address. The root resolves to
     // whatever is marked as home (home-redirect.ts), so this button, the
     // leading breadcrumb crumb and a cold load of `/` are one behaviour rather
     // than three that have to be kept agreeing.
     this.navigateTo([])
-  }
-
-  // ── the recent-portals picker ─────────────────────────
-
-  readonly homeMenuOpen = signal(false)
-  readonly homeMenuPos = signal<{ x: number; y: number; flip: boolean }>({ x: 0, y: 0, flip: false })
-  readonly homeEntries = signal<readonly RecentPortal[]>([])
-
-  #openHomeMenu(event: MouseEvent): void {
-    const entries = this.recentPortals?.value ?? []
-    if (entries.length === 0) {
-      // Nothing walked yet — there is no list to show, so honour the plain
-      // meaning rather than opening an empty menu.
-      this.navigateTo([])
-      return
-    }
-    this.homeEntries.set(entries)
-
-    // Fixed positioning off the button's own rect, for the same reason the tour
-    // picker does it: the rail is a scrolling, overflow-hidden box that would
-    // clip a menu rendered inside it.
-    const rect = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect()
-    const width = 248
-    const x = rect ? rect.right + 10 : 12
-    const flip = x + width > window.innerWidth - 8
-    const maxHeight = Math.min(window.innerHeight * 0.7, 520)
-    const menuX = flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x
-    this.homeMenuPos.set({
-      x: menuX,
-      y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - maxHeight - 8)),
-      flip,
-    })
-    this.#clearLaneForMenu(menuX)
-    this.homeMenuOpen.set(true)
-    window.addEventListener('pointerdown', this.#onHomeMenuOutside, true)
-    window.addEventListener('keydown', this.#onHomeMenuKey, true)
   }
 
   /** An anchored rail interface is about to open at `x` — put away the tool
@@ -2418,62 +2357,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const undo = this.#laneRestore
     this.#laneRestore = null
     undo?.()
-  }
-
-  readonly closeHomeMenu = (): void => {
-    this.#restoreLane()
-    if (!this.homeMenuOpen()) return
-    this.homeMenuOpen.set(false)
-    window.removeEventListener('pointerdown', this.#onHomeMenuOutside, true)
-    window.removeEventListener('keydown', this.#onHomeMenuKey, true)
-  }
-
-  /** Travel to somewhere you were. This does NOT re-home — jumping back to a
-   *  place you passed through is looking around, not deciding, and only the
-   *  Portals toolwindow's mark decides. It does move the row to the front of
-   *  the recent list, because you have just been there again. */
-  readonly pickHomePortal = (entry: RecentPortal): void => {
-    this.closeHomeMenu()
-    this.recentPortals?.record(entry.label, entry.segments)
-    this.navigateTo([...entry.segments])
-  }
-
-  /** Put a portal down. Dropping the current one hands Home to the next most
-   *  recent — this is how a finished piece of work stops being your home. */
-  readonly forgetHomePortal = (entry: RecentPortal, event?: MouseEvent): void => {
-    event?.stopPropagation()
-    this.recentPortals?.remove(entry.segments)
-    const left = this.recentPortals?.value ?? []
-    this.homeEntries.set(left)
-    if (left.length === 0) this.closeHomeMenu()
-  }
-
-  /** The hive root ITSELF, not what stands in for it. Always the last row:
-   *  marking a portal as home makes `/` resolve to that portal, so this is the
-   *  one way back to the bare root — it suspends the substitution for as long
-   *  as you stay there. */
-  readonly goHiveRoot = (): void => {
-    this.closeHomeMenu()
-    showHiveRoot()
-    this.navigateTo([])
-  }
-
-  readonly homePortalPath = (entry: RecentPortal): string =>
-    entry.segments.length ? '/' + entry.segments.join('/') : '/'
-
-  readonly #onHomeMenuOutside = (event: PointerEvent): void => {
-    const target = event.target as HTMLElement | null
-    if (target?.closest?.('.home-menu, .rail-home')) return
-    this.closeHomeMenu()
-  }
-
-  readonly #onHomeMenuKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return
-    // Take Escape before the global cascade — the menu is the innermost thing
-    // open, so it is what Escape must close.
-    event.stopPropagation()
-    event.preventDefault()
-    this.closeHomeMenu()
   }
 
   /** THE BEE OPENS THE ROSTER.

@@ -2,7 +2,10 @@
 
 **Status: DEPLOYED 2026-07-09, smoke-tested live.** Code:
 `hypercomb-relay/blossom-worker/` (worker.js + wrangler.toml + package.json).
-Live at **`https://content.jwize.com`** (canonical) and
+Live at **`https://content.jwize.com`** (legacy since 2026-10-03 — writes and
+index reads now go to a zone root such as `https://pluginthematrix.com`, which
+serves the same bucket; this face keeps answering for installs that have not
+updated) and
 **`https://pluginthematrix.io`** (legacy-client alias — every deployed
 client already probes it as a byte fallback, so old installs get public
 reads with zero updates; zone moved from DreamHost NS 2026-07-09). Both

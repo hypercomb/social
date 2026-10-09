@@ -3,8 +3,8 @@
 // order, mesh, readiness, faces, fill geometry, dive, previews, landing,
 // hover — documentation/tile-renderer-tree.md). A new tile behaviour
 // is a branch of its own, never more lines here.
-import { Drone, EffectBus, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
-import type { I18nProvider, UsageRanker } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
+import type { I18nProvider } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
@@ -19,6 +19,7 @@ import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import { visitRecordAt } from '../../sharing/visit-genome.js'
 import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
+import { isJoinedHere } from '../../sharing/membership.js'
 import { kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel, defaultViewWithinSegments, HEXAGONS_SURFACE } from '../../commands/decoration-kind-index.js'
 import { defaultViewWithinAt } from '../../commands/view-default.js'
 import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
@@ -852,11 +853,9 @@ export class ShowCellDrone extends Drone {
   // Public/swarm mode. When on, EVERY tile is navigable (you can drill
   // into an empty tile to explore / invite others), unlike private mode
   // where only branch tiles — ones that already have children — open on
-  // click. Mirrors the master privacy switch (`hc:mesh-public`) and is
+  // click. Mirrors THIS tab's swarm membership (membership.ts) and is
   // kept live via the `mesh:public-changed` effect.
-  #publicMode = (() => {
-    try { return localStorage.getItem('hc:mesh-public') === 'true' } catch { return false }
-  })()
+  #publicMode = isJoinedHere()
 
   // Per-tile presence glow (0..1), keyed by child name. Reflects how many
   // peers are currently inside (or entering) each child location at the
@@ -6125,6 +6124,7 @@ export class ShowCellDrone extends Drone {
     shadedLabels: string[]
     flatPaths: Record<string, string[]>
     filterBlocked: string[]
+    narrowed: boolean // something narrows the page: empty means "nothing matches", not a leaf
   } {
     // Empty-layer invitation watermark — DISABLED for now. It should be a
     // genuine-swarm cue, but public mode is the default in some shells, so

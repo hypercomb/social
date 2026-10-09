@@ -33,7 +33,6 @@
   const msg = `+${t.toFixed(0)}ms ${label}${extra ? ` ${extra}` : ''}`
   console.log(`[boot] ${msg}`)
   ;(window as any).__hcBootMarks.push(msg)
-  try { localStorage.setItem('hc:perf-boot-marks', JSON.stringify((window as any).__hcBootMarks)) } catch {}
 }
 ;(window as any).__hcBoot('shim main.ts module evaluated')
 

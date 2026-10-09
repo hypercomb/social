@@ -29,7 +29,8 @@ Three legs, all reusing existing primitives:
    per example. The existing one-command publish: re-links the chain, walks the
    closure (layers, decoration records, tile-properties image sigs — the walk
    mines every embedded 64-hex ref), pushes missing sigs to the relay and the
-   public CDN (content.jwize.com = Blossom worker over R2), then resolves and
+   public CDN (the zone root pluginthematrix.com = Blossom worker over R2;
+   content.jwize.com reads the same bucket and is legacy), then resolves and
    verifies the branch **head** (the sig the parent points at — what a consumer
    folds).
 

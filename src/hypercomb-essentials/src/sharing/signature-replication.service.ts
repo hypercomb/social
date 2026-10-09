@@ -2,6 +2,7 @@
 // not subscribed to content writes or any render/navigation effect.
 
 import { SignatureService } from '@hypercomb/core'
+import { foldContentLabel } from './zone-door.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -150,7 +151,9 @@ export class SignatureReplicationService {
   #base(domain: string): string {
     const raw = domain.trim().replace(/\/+$/, '')
     if (/^https?:\/\//i.test(raw)) return raw
-    return `${/^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(raw) ? 'http' : 'https'}://${raw}`
+    // A bare host is a zone: replication is a write, so it goes to the root.
+    const zone = foldContentLabel(raw)
+    return `${/^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(zone) ? 'http' : 'https'}://${zone}`
   }
 
   async #nip98(url: string, method: string, payload?: Uint8Array): Promise<string | null> {

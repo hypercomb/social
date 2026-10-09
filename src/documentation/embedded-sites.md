@@ -97,6 +97,22 @@ the default mark does not reopen the site underneath. While Ctrl/⌘ is held
 over the button it wears the `hexagon` glyph, naming what the click will do.
 One button, two meanings, the same shape as the rail's own icon.
 
+## A published site: the exit is the author's call
+
+On a published door (the read-only visitor shell, `data-hypercomb-mode="visitor"`)
+there is no hive behind the page to go back to — a business card wearing a
+"close website" button reads as broken. So there the exit is **off unless the
+page asks for it**, in its own signed bytes:
+
+```html
+<meta name="hypercomb:exit" content="show">
+```
+
+Without it, a published page shows no exit button, Escape does not leave
+website mode, and the chrome corner below is not reserved (the vars stay
+unset, so pages written against the standard render as they do standalone).
+Inside a participant's hive nothing changes: the exit is always there.
+
 ## The chrome corner
 
 Every site is a different page, and the exit button sits over all of them.

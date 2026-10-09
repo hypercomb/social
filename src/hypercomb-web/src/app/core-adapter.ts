@@ -48,13 +48,18 @@ export class CoreAdapter {
   // mesh toggle
   // -------------------------------------------------
 
+  // ANNOUNCE, DON'T REACH IN — the same rule the keymap toggle follows
+  // (runtime-initializer). The swarm owns the network on both edges: it turns
+  // the mesh on for a join, and on a leave it hands its signed {left} to the
+  // socket FIRST and only then turns the mesh off. Switching the network off
+  // here, before the announcement, closed the socket under the tombstone: it
+  // waited in the mesh's queue, peers kept our tiles for minutes, and it went
+  // out on the next join — perhaps into another room.
   public toggleMesh = (): void => {
-    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
     const current = this.meshPublic()
     const next = !current
     this.meshPublic.set(next)
     localStorage.setItem(MESH_PUBLIC_KEY, String(next))
-    mesh?.setNetworkEnabled?.(next, true)
     EffectBus.emit('mesh:public-changed', { public: next })
   }
 
@@ -72,7 +77,10 @@ export class CoreAdapter {
     // REFRESH KEEPS THE SWARM: the network starts as this tab's session left
     // it (mesh-session's write is the flag's truth) — connected on a reload
     // mid-swarm, disconnected on a new tab.
+    // Not persisted: the value is this TAB's, and the origin-wide flag it
+    // would overwrite is read by every other tab — a private second tab used
+    // to write '0' under a joined one.
     const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
-    mesh?.setNetworkEnabled?.(meshResumed, true)
+    mesh?.setNetworkEnabled?.(meshResumed, false)
   }
 }

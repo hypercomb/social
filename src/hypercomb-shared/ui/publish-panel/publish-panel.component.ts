@@ -75,6 +75,13 @@ interface PublishRow {
   versions: { sig: string; at: number }[]
   /** OPTIMIZE — the published arrival plan (IoC keys); null = whole package. */
   plan: string[] | null
+  /** zone → where this creation is shown there: the zone's root path by
+   *  default, its own address when the signed index gives it one. */
+  urls: Record<string, string>
+  /** zone → the own-address label it holds there (absent = root path). */
+  ownLabels: Record<string, string>
+  /** The tile's name folded to a DNS label — where an own address starts. */
+  defaultLabel: string
 }
 
 interface PublishViewChoice {
@@ -114,8 +121,8 @@ interface PublishCollision {
 interface PublishRenderPayload {
   open: boolean
   host: string
-  /** The ROOT domain of the target — the only choosable part of an address:
-   *  the tile's name is the subdomain, the content endpoint is plumbing. */
+  /** The ROOT domain of the target — writes go there, and a creation lives
+   *  at its root path unless it is given an own address. */
   zone: string
   /** The hosts this participant actually has — the pick-list. */
   hosts: string[]
@@ -316,17 +323,79 @@ export class PublishPanelComponent implements OnDestroy {
     EffectBus.emit('publish:door', { key: row.key, zone, on: !this.doorOn(row, zone) })
   }
 
-  /** The address as a person reads it: name.zone (the zone itself at root). */
+  /** The address as a person reads it — the link without its scheme. */
   address(row: PublishRow | null, zone: string): string {
-    const name = row ? this.label(row) : ''
-    return name ? `${name}.${zone}` : zone
+    return this.addressUrl(row, zone).replace(/^https?:\/\//, '')
   }
 
-  /** Where ONE address lives once published. A branch with no name of its own
-   *  (the hive root) has no subdomain — the zone IS the address. */
+  /** Where ONE creation lives on a domain: the drone's answer (its own
+   *  address when it has one), else the zone's ROOT PATH — the default
+   *  address, `https://<zone>/<path>`. The hive root is the zone itself. */
   addressUrl(row: PublishRow | null, zone: string): string {
-    const name = row ? this.label(row) : ''
-    return `https://${name ? `${name}.` : ''}${zone}`
+    const given = row?.urls?.[zone]
+    if (given) return given
+    const path = (row?.segments ?? []).map(s => encodeURIComponent(s)).join('/')
+    return `https://${zone}${path ? `/${path}` : ''}`
+  }
+
+  // ── OWN ADDRESS ──────────────────────────────────────────────────────
+  // A creation lives at its domain's root path. Given an own address, it is
+  // also `<label>.<zone>` — a signed entry in the hive index, written by the
+  // drone (it checks the label; `content` and `try-*` are the host's).
+
+  /** Which domain's own-address editor is open, keyed by `<row key> <zone>`. */
+  readonly ownOpen = signal('')
+  /** The label being typed, per editor. */
+  readonly ownDraft = signal<Record<string, string>>({})
+
+  #ownSlot(row: PublishRow, zone: string): string { return `${row.key} ${zone}` }
+
+  ownLabel(row: PublishRow | null, zone: string): string {
+    return row?.ownLabels?.[zone] ?? ''
+  }
+
+  isOwnOpen(row: PublishRow | null, zone: string): boolean {
+    return !!row && this.ownOpen() === this.#ownSlot(row, zone)
+  }
+
+  toggleOwn(row: PublishRow | null, zone: string): void {
+    if (!row) return
+    const slot = this.#ownSlot(row, zone)
+    this.ownOpen.set(this.ownOpen() === slot ? '' : slot)
+  }
+
+  ownValue(row: PublishRow, zone: string): string {
+    const held = this.ownDraft()[this.#ownSlot(row, zone)]
+    return held ?? (this.ownLabel(row, zone) || row.defaultLabel || '')
+  }
+
+  setOwnDraft(row: PublishRow, zone: string, text: string): void {
+    const slot = this.#ownSlot(row, zone)
+    this.ownDraft.update(all => ({ ...all, [slot]: text }))
+  }
+
+  /** Save the typed label as this creation's own address on `zone`. */
+  saveOwn(row: PublishRow, zone: string): void {
+    if (row.busyPhase) return
+    const label = this.ownValue(row, zone).trim().toLowerCase()
+    if (!label) return
+    EffectBus.emit('publish:own-address', { key: row.key, zone, label })
+    this.ownOpen.set('')
+  }
+
+  /** The bare domain opens on this place (`@`, the zone apex); the host card
+   *  moves to host.<zone>. */
+  saveApex(row: PublishRow, zone: string): void {
+    if (row.busyPhase) return
+    EffectBus.emit('publish:own-address', { key: row.key, zone, label: '@' })
+    this.ownOpen.set('')
+  }
+
+  /** Back to the root path on `zone` — the own address is dropped. */
+  clearOwn(row: PublishRow, zone: string): void {
+    if (row.busyPhase) return
+    EffectBus.emit('publish:own-address', { key: row.key, zone, label: null })
+    this.ownOpen.set('')
   }
 
   constructor() {
@@ -343,7 +412,7 @@ export class PublishPanelComponent implements OnDestroy {
 
     this.#cleanups.push(EffectBus.on<PublishRenderPayload>('publish:render', (p) => {
       if (!p) return
-      this.zone.set(String(p.zone ?? '') || String(p.host ?? '').replace(/^content\./, ''))
+      this.zone.set(String(p.zone ?? '') || String(p.host ?? ''))
       this.hosts.set(Array.isArray(p.hosts) ? p.hosts.map(String).filter(Boolean) : [])
       this.pubkey.set(String(p.pubkey ?? ''))
       const nextCurrent = String(p.currentKey ?? '')
@@ -377,6 +446,9 @@ export class PublishPanelComponent implements OnDestroy {
             opensAs: String(row.opensAs ?? ''),
             versions: Array.isArray(row.versions) ? row.versions.map(v => ({ ...v })) : [],
             plan: Array.isArray(row.plan) ? row.plan.map(String) : null,
+            urls: { ...(row.urls ?? {}) },
+            ownLabels: { ...(row.ownLabels ?? {}) },
+            defaultLabel: String(row.defaultLabel ?? ''),
           }))
         : [])
       this.participantOnly.set(Array.isArray(p.participantOnly) ? p.participantOnly.map(String) : [])

@@ -9,6 +9,7 @@
 import { Drone, textThemeChanges } from '@hypercomb/core'
 import { NostrSigner } from './nostr-signer.js'
 import { hostSyncService } from './host-sync.service.js'
+import { nameService } from './names.service.js'
 import { setTextThemeOffering, textThemeOfferingStatus, textThemeOfferHost } from './text-theme-offering.js'
 import { reconcileCodeTrust, trustCode, trustedCodeDomains, untrustCode } from './code-trust.js'
 import { reconcilePublicBranches, reconcilePublicTiles } from '../presentation/tiles/tile-public.js'
@@ -22,7 +23,7 @@ export class SharingBootDrone extends Drone {
   readonly lane = 'boot'
 
   public override description =
-    'Sharing at boot: registers the Nostr signer and the host sync (and its runtime contract key).'
+    'Sharing at boot: registers the Nostr signer, the host sync (and its runtime contract key) and the verified names.'
 
   protected override sense = (): boolean => false
 }
@@ -33,6 +34,9 @@ window.ioc.register('@diamondcoreprocessor.com/HostSyncService', hostSyncService
 // resolves this as '@HostSyncService'. The store's read-triggered staging (the
 // author's push half) goes through that key; without it, it is inert.
 window.ioc.register('@HostSyncService', hostSyncService)
+// WHO A KEY IS, AT ITS HOST (names.service.ts) — read-only, so the visitor
+// shell carries it too: the preview banner names its publisher through it.
+window.ioc.register('@diamondcoreprocessor.com/NameService', nameService)
 
 if (!(window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__) {
   window.ioc.register('@diamondcoreprocessor.com/TextThemeOffering', {

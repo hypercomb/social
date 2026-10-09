@@ -255,6 +255,12 @@ class SelectionInputDrone extends Drone {
     const label = this.#labelAtClient(e.clientX, e.clientY)
     if (!label) return
 
+    // Ctrl/cmd on one of the tile's ctrl-capable icons (a view icon) is the
+    // default-view gesture, owned by TileOverlayDrone — not a paint and not a
+    // claim. Stand down before taking the gate.
+    if ((e.ctrlKey || e.metaKey) && window.ioc.get<{ ctrlIconAtClient?: (x: number, y: number) => string | null }>(
+      '@diamondcoreprocessor.com/TileOverlayDrone')?.ctrlIconAtClient?.(e.clientX, e.clientY)) return
+
     const selection = this.#selection()
     if (!selection) return
 

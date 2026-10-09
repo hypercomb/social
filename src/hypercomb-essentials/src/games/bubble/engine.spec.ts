@@ -313,6 +313,24 @@ describe('NovaLogic DOS Bubble Bobble reconstruction', () => {
     expect(enemy).toMatchObject({ x: 56, y: 87, vx: 60, vy: -60, facing: 1 })
   })
 
+  it('still reflects a native flyer off a platform underside — only jumpers rise through', () => {
+    const level: LevelDef = {
+      ...BUILTIN_LEVELS[0],
+      enemies: [{ x: 160, y: 168, kind: 'monsta', headingCode: 0x0c, activationDelayTicks: 1_000 }],
+    }
+    const game = playing(level)
+    const enemy = game.enemies[0]
+    // Under ROUND 01's row-19 platform (y 152..159), heading up and right.
+    Object.assign(enemy, { state: 'walking', x: 160, y: 168, vx: 0, vy: 0, grounded: false })
+    let highest = enemy.y
+    for (let tick = 0; tick < 20; tick++) {
+      game.update(1 / 60, idle)
+      highest = Math.min(highest, enemy.y)
+    }
+    expect(highest).toBeGreaterThanOrEqual(160)
+    expect(enemy.vy).toBeGreaterThan(0)
+  })
+
   it.each(['zenchan', 'mighta', 'hidegons', 'drunk', 'banebou'] as const)(
     'runs all four AA4A facing flips before %s high-jump movement', kind => {
       for (const facing of [-1, 1] as const) {
@@ -402,7 +420,7 @@ describe('NovaLogic DOS Bubble Bobble reconstruction', () => {
     expect(game.player.grounded).toBe(true)
   })
 
-  it('uses the native solid underside, turn tick and delayed first jump step', () => {
+  it('jumps up through a native platform onto its top, with the turn tick and delayed first jump step', () => {
     const game = playing(BUILTIN_LEVELS[0])
     game.enemies.forEach(enemy => { enemy.state = 'trapped' })
     game.player.x = 160; game.player.y = 176; game.player.grounded = true
@@ -424,9 +442,62 @@ describe('NovaLogic DOS Bubble Bobble reconstruction', () => {
       game.update(1 / 60, idle)
       minimum = Math.min(minimum, game.player.y)
     }
-    // ROUND 01's row-19 platform has a solid native underside at y=160.
-    expect(minimum).toBe(160)
-    expect(game.player).toMatchObject({ y: 176, grounded: true })
+    // ROUND 01 spaces its platforms one jump apart: the jump rises through the
+    // row-19 platform (top y=152) and lands on it.
+    expect(minimum).toBe(135.21875)
+    expect(game.player).toMatchObject({ y: 136, grounded: true })
+  })
+
+  it('keeps its sideways line while jumping up through a native ledge', () => {
+    const game = playing(BUILTIN_LEVELS[0])
+    game.enemies.forEach(enemy => { enemy.state = 'trapped' })
+    game.player.x = 100; game.player.y = 176; game.player.grounded = true
+    game.player.vx = 0; game.player.vy = 0; game.player.facing = 1
+    const right = { ...idle, right: true }
+    game.update(1 / 60, { ...right, jump: true })
+    const path: Array<{ x: number; y: number }> = []
+    for (let tick = 0; tick < 70; tick++) {
+      game.update(1 / 60, right)
+      path.push({ x: game.player.x, y: game.player.y })
+    }
+    // While the body overlaps ROUND 01's row-19 ledge (y 152..159) the run
+    // goes on: the ledge never holds it and turns the jump straight up.
+    const inside = path.filter(point => point.y < 160 && point.y + 16 > 152)
+    expect(inside.length).toBeGreaterThan(4)
+    for (let index = 1; index < inside.length; index++) expect(inside[index].x).toBeGreaterThan(inside[index - 1].x)
+    expect(game.player).toMatchObject({ y: 136, grounded: true })
+  })
+
+  it('still stops a native jump at the side wall', () => {
+    const game = playing(BUILTIN_LEVELS[0])
+    game.enemies.forEach(enemy => { enemy.state = 'trapped' })
+    game.player.x = 64; game.player.y = 176; game.player.grounded = true
+    game.player.vx = 0; game.player.vy = 0; game.player.facing = -1
+    const left = { ...idle, left: true }
+    game.update(1 / 60, { ...left, jump: true })
+    let least = game.player.x
+    for (let tick = 0; tick < 70; tick++) {
+      game.update(1 / 60, left)
+      least = Math.min(least, game.player.x)
+    }
+    // Columns 0-1 are the wall: its inner face is x=56.
+    expect(least).toBe(56)
+  })
+
+  it('stops a native jump at the ceiling row and lands back where it took off', () => {
+    const game = playing(BUILTIN_LEVELS[1])
+    game.enemies.forEach(enemy => { enemy.state = 'trapped' })
+    // ROUND 02: standing on the row-4 platform, under a solid row 0.
+    game.player.x = 160; game.player.y = 16; game.player.grounded = true
+    game.player.vx = 0; game.player.vy = 0; game.player.facing = 1
+    game.update(1 / 60, { ...idle, jump: true })
+    let minimum = game.player.y
+    for (let tick = 0; tick < 120; tick++) {
+      game.update(1 / 60, idle)
+      minimum = Math.min(minimum, game.player.y)
+    }
+    expect(minimum).toBe(8)
+    expect(game.player).toMatchObject({ y: 16, grounded: true })
   })
 
   it('keeps takeoff momentum until reverse input gives air control', () => {

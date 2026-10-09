@@ -101,6 +101,7 @@ import {
   PARTICIPANT_AI_HOST_STORAGE_KEY,
   QUESTION_ASKING_INSTRUCTION,
   hostWireText,
+  hypercomb,
   isLocalClaudeBridgeConfigured,
   isParticipantAiHostConfigured,
   reachPhrase,
@@ -133,6 +134,7 @@ import {
   callableBehaviours,
   hypercombActionProviderId,
   hypercombContextKey,
+  hypercombLinesBeyondPages,
   hypercombPlanLeaves,
   hypercombPlanReach,
   hypercombVocabulary,
@@ -145,6 +147,7 @@ import {
   type HypercombFunctionTool,
   type HypercombToolCall,
 } from './hypercomb-grammar'
+import { PlanTransaction, type PlanHistory } from './hypercomb-plan-transaction'
 import {
   executeHypercombObservationPlan,
   foreignReads,
@@ -164,6 +167,7 @@ import {
   blockRefusedMessage,
   blockUnwrittenMessage, claimsUnranChange, unranChangeMessage,
   doFailedMessage,
+  type DoRollback,
   JevGone,
   doRanMessage,
   doSkippedMessage,
@@ -3146,6 +3150,27 @@ export class ChatWindowComponent implements OnDestroy {
         done()
       }))
     })
+    // HELD FOR THE PARTICIPANT: a change Jev marked for review, or one that
+    // leaves the machine or follows someone else's words, waits for a hand
+    // even in a trusted conversation. The asker hears so at once, with the
+    // lines, instead of waiting out its own timeout (the harness manager's
+    // write probe, 2026-10-04: fifteen minutes, then nothing). The turn
+    // itself waits on in Execution.
+    let answered = false
+    offs.push(EffectBus.on<{ at?: number; waiting?: readonly { id: string; convoId: string; lines: readonly string[]; review?: boolean; needsGrant?: boolean; leaves?: boolean; foreign?: boolean }[] }>('agent:held', payload => {
+      if (answered || (payload?.at ?? 0) < since) return
+      const held = (payload?.waiting ?? []).filter(row => row.convoId === ask.convoId && (row.review || row.needsGrant || row.leaves || row.foreign))
+      if (!held.length) return
+      answered = true
+      EffectBus.emit('chat:asked', {
+        askId: ask.askId, convoId: ask.convoId, at: Date.now(), ok: false, outcome: 'held',
+        held: held.map(row => ({
+          id: row.id, lines: row.lines,
+          why: row.review ? 'Jev marked it for review' : row.needsGrant ? 'it needs a grant' : row.leaves ? 'it leaves this machine' : 'it follows someone else’s words',
+        })),
+        rounds: 0, reads: 0, tokens: 0, answer: '',
+      })
+    }))
     if (ask.trust) this.#trustConversation(ask.convoId, true)
     let failure = ''
     await this.#load(ask.convoId)
@@ -3162,6 +3187,8 @@ export class ChatWindowComponent implements OnDestroy {
       const last = [...turns].reverse().find(entry => entry.role === 'assistant' && entry.at >= since)
       if (!failure && receipt?.outcome === 'failed') failure = this.#turnFailures.get(ask.convoId) ?? ''
       this.#turnFailures.delete(ask.convoId)
+      if (answered) return
+      answered = true
       EffectBus.emit('chat:asked', {
         askId: ask.askId, convoId: ask.convoId, at: Date.now(),
         ok: !failure && !!last,
@@ -6703,6 +6730,7 @@ export class ChatWindowComponent implements OnDestroy {
       let unwrittenSaid = false
       let unreadSaid = false
       let unranSaid = false
+      let readsCut = false
       // A READ THE PARTICIPANT WROTE OUT (`find arkanoid` in a read block):
       // until something is read, what the model says is not shown. Asked to
       // paste a read back, a model streamed 3 KB of invented module paths
@@ -6944,6 +6972,10 @@ export class ChatWindowComponent implements OnDestroy {
             maxBytes: perReadBytes,
             signal,
           }), covers)
+          if (receipt.results.some(result => {
+            const read = result.read as { ok?: boolean; truncated?: boolean; notesTruncated?: boolean }
+            return read.ok === true && (read.truncated === true || read.notesTruncated === true)
+          })) readsCut = true
           const content = (contextReceipt ? `${contextReceipt}\n\n` : '') + formatHypercombObservationReceipt(receipt)
           if (content.length > remaining) {
             // A BLOCK LARGER THAN A WHOLE FRESH STRETCH IS NOT HANDED OVER.
@@ -7160,8 +7192,15 @@ export class ChatWindowComponent implements OnDestroy {
         // before the first action, so waiting behind another plan — or behind
         // the participant's hand — cannot stale a read unnoticed.
         let snapshotAdmitted = snapshotIds.length === 0
+        // ONE RUN, ONE UNIT (hypercomb-plan-transaction.ts): every page the
+        // plan moves is recorded from its first line, IN the lane — a plan
+        // waiting behind another records nothing of the other's — so a line
+        // that fails can put the earlier ones back.
+        const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as Partial<PlanHistory> | undefined
+        const transaction = history?.warmHeadSigFor && history.promoteToHead ? new PlanTransaction(history as PlanHistory) : undefined
         const executor: HypercombBehaviourExecutor = {
           execute: async (command, args) => {
+            transaction?.begin(EffectBus)
             stillHere()
             if (!snapshotAdmitted) {
               if (!treeReader || !await treeReader.validateSnapshots(snapshotIds, signal)) {
@@ -7177,6 +7216,7 @@ export class ChatWindowComponent implements OnDestroy {
         }
         try {
           const receipt = await hypercombPlanQueue.run(plan, executor, signal)
+          transaction?.end()
           ran.push(...receipt.grammars)
           needsVerification = true
           evidence.splice(1)
@@ -7186,18 +7226,34 @@ export class ChatWindowComponent implements OnDestroy {
           lastRun = 'ran'
           return doRanMessage(receipt.grammars, message)
         } catch (error) {
+          // Stop is the participant's hand: what ran before it stays.
+          transaction?.end()
           if (signal?.aborted) {
             queue.settle(entry.id, 'skipped')
             throw error
           }
           if (error instanceof HypercombActionExecutionError) {
-            ran.push(...error.completed)
+            // A FAILURE UNDOES THE PREFIX: the participant ran the block as
+            // one thing. Its pages go back as forward commits once the commit
+            // lane has settled; a hive left rewound takes no writes.
+            let rollback: DoRollback | undefined
+            if (error.completed.length && transaction) {
+              const committer = ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as { settled?: () => Promise<void> } | undefined
+              const cursor = ioc()?.get('@diamondcoreprocessor.com/HistoryCursorService') as { state?: { rewound?: boolean } } | undefined
+              await committer?.settled?.().catch(() => undefined)
+              const undone = await transaction.rollback({ rewound: cursor?.state?.rewound === true })
+              rollback = { ...undone, beyond: hypercombLinesBeyondPages(plan, behaviourEntries, error.completed) }
+              if (undone.restored) await new hypercomb().act()
+            }
+            const standing = !rollback || rollback.refused || rollback.kept || rollback.failed || rollback.beyond.length
+            ran.push(...(standing ? error.completed : []))
             if (error.completed.length) needsVerification = true
             if (error.completed.length) evidence.splice(1)
             if (error.completed.length) snapshotIds.length = 0
             const reason = error.cause instanceof Error ? error.cause.message : 'it could not run'
-            queue.settle(entry.id, 'failed', `${error.grammar}: ${reason}`)
-            return doFailedMessage(error.completed, error.grammar, reason, message)
+            const putBack = rollback?.restored ? ` — ${rollback.restored} page${rollback.restored === 1 ? '' : 's'} put back` : ''
+            queue.settle(entry.id, 'failed', `${error.grammar}: ${reason}${putBack}`)
+            return doFailedMessage(error.completed, error.grammar, reason, message, rollback)
           }
           queue.settle(entry.id, 'failed', error instanceof Error ? error.message : undefined)
           throw error
@@ -7487,10 +7543,26 @@ export class ChatWindowComponent implements OnDestroy {
         if (!work.request && !lastRound && !unreadSaid && canRead && readRounds === 0) {
           // A read the participant wrote out themselves names no route
           // (`find arkanoid`): it is asked for all the same.
+          // THE HIVE RUNS IT. Sent back to run the read, a model invented its
+          // result a second time with nothing read (2026-10-04), and a second
+          // unread answer goes out as it stands. The participant wrote the
+          // block; it is theirs to have run, so the hive runs it — through
+          // the same read step, grants and withheld tiles included — and the
+          // model answers from the receipt.
           if (readAsked) {
             unreadSaid = true
-            messages.push({ role: 'assistant', content: roundText }, { role: 'user', content: unreadAskedMessage(askedRead.lines.slice(0, 6), message) })
-            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `asked again: answered ${askedRead.lines[0]} without running it` })
+            messages.push({ role: 'assistant', content: roundText })
+            let reply: string
+            try {
+              reply = await runRead(askedRead.lines.slice(0, readsPerBlock), roundProviderId, roundModel)
+            } catch (error) {
+              if (signal?.aborted) throw error
+              reply = isWorkRefusal(error)
+                ? blockRefusedMessage('read', (error as Error).message, message)
+                : unreadAskedMessage(askedRead.lines.slice(0, 6), message)
+            }
+            messages.push({ role: 'user', content: reply })
+            EffectBus.emit('agent:progress', { id: component.#beeId(convoId), activity: `ran ${askedRead.lines[0]} itself: the model answered without running it` })
             continue
           }
           const named = routesNamedIn(message)
@@ -7515,6 +7587,10 @@ export class ChatWindowComponent implements OnDestroy {
             const note = await verifyAnswer(work.prose, roundText, roundProviderId)
             if (note) yield note
           }
+          // A READ CUT SHORT IS SAID, NOT LEFT TO A SCORE. Over a tree read
+          // to its limit, a model answered "80 leaf tiles" above a list of
+          // 106, and there are 119 (the harness manager, 2026-10-04).
+          if (readsCut) yield '\n\nSome reads in this turn were cut short at their size limit, so this answer may not cover everything — counts especially.'
           if (jevTurn && ran.length) yield needsVerification
             ? '\n\nThe commands ran, but no subsequent readback was completed.'
             : '\n\nReadback was collected after execution; correctness of every affected item has not been independently verified.'

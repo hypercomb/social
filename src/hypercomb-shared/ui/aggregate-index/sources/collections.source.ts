@@ -36,10 +36,8 @@ import {
   CHILD_SLOTS,
   CANONICAL_REFERENCE_SERVICE_KEY,
   EffectBus,
-  USAGE_IOC_KEY,
   hypercomb,
   type CanonicalReferenceService,
-  type UsageRanker,
 } from '@hypercomb/core'
 import {
   registerAggregateSource,
@@ -227,21 +225,16 @@ class CollectionsSource implements AggregateSource {
       return { name: nm, sig, segments: await this.#targetOf(nm) }
     }))
     const entries = resolved.filter((e): e is Entry => e !== null)
-    // The index is a working surface, not an alphabetized catalog. The saved
-    // Home pool stays first; everything else follows the participant's durable
-    // usage weight. Unseen pools have weight zero and remain stable at the
-    // bottom until they are actually used.
-    const usage = ioc()?.get(USAGE_IOC_KEY) as UsageRanker | undefined
+    // The index is a working surface, not an alphabetized catalog. Pinned
+    // entries come first (the participant's own choice); everything else keeps
+    // the pool's order. No usage weight: nothing about where the participant
+    // goes is recorded (no tracking).
     const portals = ioc()?.get('@hypercomb.social/RecentPortalsStore') as RecentPortalsLike | undefined
-    const ranked = await Promise.all(entries.map(async (entry, index) => {
-      const locationSig = await h.sign({ explorerSegments: () => entry.segments }).catch(() => '')
-      return {
-        entry, index,
-        pinned: portals?.isPinned(entry.segments) ? 1 : 0,
-        weight: locationSig ? (usage?.weight(locationSig) ?? 0) : 0,
-      }
+    const ranked = entries.map((entry, index) => ({
+      entry, index,
+      pinned: portals?.isPinned(entry.segments) ? 1 : 0,
     }))
-    ranked.sort((a, b) => (b.pinned - a.pinned) || (b.weight - a.weight) || (a.index - b.index))
+    ranked.sort((a, b) => (b.pinned - a.pinned) || (a.index - b.index))
     const orderedEntries = ranked.map(row => row.entry)
     // Launch-group aggregates are NOT merged in any more. Each aggregate is its
     // own source with its own index now, so listing them here would be a second

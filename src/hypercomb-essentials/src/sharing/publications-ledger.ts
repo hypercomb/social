@@ -60,6 +60,10 @@ export interface PublicationCard {
   readonly title: string
   readonly lineage: string
   readonly publisherLabel: string
+  /** The label the ledger reports for that publisher, as typed — empty when
+   *  it has none. A claim, not a verification: a reader shows it marked
+   *  unverified until the host vouches for a name (names.service.ts). */
+  readonly publisherName?: string
   /** The publisher whose verified head names this plate — what a hive-link
    *  bundle pins, so "bring into my hive" verifies against the same key the
    *  door was verified against. */
@@ -130,6 +134,7 @@ export function shapePublications(
       title: site.title,
       lineage: site.lineage,
       publisherLabel: publisher.label || publisher.pubkey.slice(0, 12) + '…',
+      publisherName: typeof publisher.label === 'string' ? publisher.label : '',
       pubkey: publisher.pubkey,
       head: publisher.head as string,
       publishedAt: publisher.publishedAt,

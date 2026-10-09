@@ -17,6 +17,8 @@
 - [swarm-scale-and-host-delegation.md](swarm-scale-and-host-delegation.md) — Rendezvous stewardship, need matrix, coordination-free delegation
 - [signature-algebra.md](signature-algebra.md) — The algebra collapsed compute memoizes
 - [dna.md](dna.md) — The content-addressed, merkle-versioned artifacts the whole structure is built from
+- [business-card.md](business-card.md) — The founding creation: one card at your own address, hosted by anyone, read live, exchanged by address
+- [using-a-creation.md](using-a-creation.md) — Three places to use any creation, one promise: what you read is live, what you run is yours to change
 
 ---
 

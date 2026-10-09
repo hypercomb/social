@@ -2032,24 +2032,6 @@ function drawAim(ctx: CanvasRenderingContext2D, engine: RoperEngine): void {
   ctx.stroke()
   ctx.restore()
 
-  // Rope launch preview — where the rope will ACTUALLY fire: clamped to the upper
-  // hemisphere and flipped to the side opposite your last rope. Lets you see the
-  // "reverse angle" before you commit (cyan, distinct from the weapon reticle).
-  const rd = engine.ropeLaunchDir()
-  const rl = 60
-  ctx.save()
-  ctx.setLineDash([2, 6])
-  ctx.lineWidth = 1.4
-  ctx.strokeStyle = 'rgba(126,224,255,0.8)'
-  ctx.beginPath()
-  ctx.moveTo(w.x + rd.dx * (WORM_RADIUS + 5), w.y + rd.dy * (WORM_RADIUS + 5))
-  ctx.lineTo(w.x + rd.dx * rl, w.y + rd.dy * rl)
-  ctx.stroke()
-  ctx.setLineDash([])
-  ctx.fillStyle = 'rgba(180,230,255,0.95)'
-  ctx.beginPath(); ctx.arc(w.x + rd.dx * rl, w.y + rd.dy * rl, 2.6, 0, Math.PI * 2); ctx.fill()
-  ctx.restore()
-
   // power meter grows out of the worm while charging the throw
   if (engine.charging) {
     const pw = 52, ph = 6

@@ -9,7 +9,6 @@ import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from
 import { readNamedTarget } from './named-target.js'
 import { readAccentTarget } from './accent-target.js'
 import { UtteranceReader } from './utterance/utterance-reader.js'
-import { SpokenHabits } from './utterance/spoken-habits.js'
 
 /** Participant-local lens: whether the prototypes filter is open. Read live
  *  on every presentation so `/prototypes` takes effect on the next keystroke
@@ -948,9 +947,8 @@ class ObserveProvider implements SlashBehaviourProvider {
 // ── registration ────────────────────────────────────────
 
 // THE BEE WIRES (atomic-modules-plan.md): how a typed or spoken sentence is
-// read, and the spoken habits it learns — the command line reaches both here.
+// read — the command line reaches it here.
 window.ioc.register('@diamondcoreprocessor.com/UtteranceReader', new UtteranceReader())
-window.ioc.register('@diamondcoreprocessor.com/SpokenHabits', new SpokenHabits())
 
 const _slashBehaviours = new SlashBehaviourDrone()
 // THE DOOR TO THE WORKSHOP SHELF. Prototype behaviours are in the global —
@@ -1023,6 +1021,9 @@ _slashBehaviours.retire({ word: 'del', by: 'remove' })
 for (const word of ['flatten', 'compact', 'collapse-history']) {
   _slashBehaviours.retire({ word, note: 'archiving the middle of a history publishes less than you had' })
 }
+// Retired with the habits it emptied (2026-10-04): the line kept a tally of
+// what you ran and how you said it, and we keep no tally of anyone.
+_slashBehaviours.retire({ word: 'forget', note: 'the command line no longer learns your habits, so there is nothing to forget' })
 
 // ── auto-discovery of QueenBees ─────────────────────────
 //

@@ -150,6 +150,19 @@ export interface AdmissionEntry {
   }
 }
 
+/**
+ * A WRITE — a module section or a doctrine section a model writes back. No
+ * census row declares it, because it is not a behaviour: it is the door's own
+ * act. So it is declared once, HERE beside the rule that judges it, rather than
+ * spelled out in a shell file: an edit that reaches the whole hive — running
+ * code, or the rules every model is sent. The gate weighs it against the
+ * participant's ceiling, scope and off switch like any declared verb.
+ */
+export const MACHINE_WRITE: AdmissionEntry = Object.freeze({
+  name: 'write',
+  machine: Object.freeze({ reach: 'editing', scope: 'hive' }),
+})
+
 export type MachineAdmission =
   | { readonly admit: true; readonly name: string }
   | { readonly admit: false; readonly reason: string }

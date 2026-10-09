@@ -16,6 +16,10 @@
 // them sample a joined flag a closed tab left behind.
 
 const MESH_PUBLIC_KEY = 'hc:mesh-public'
+// MIRRORED: hypercomb-essentials/src/sharing/membership.ts reads this same key
+// (a module never imports the shell) — essentials' isJoinedHere() is seeded
+// from it. Rename it in both places or per-tab membership silently breaks
+// after a reload. hypercomb-runtime's keymap toggle writes it too.
 const MESH_SESSION_KEY = 'hc:mesh-session'
 
 export const meshResumed: boolean = (() => {

@@ -37,6 +37,7 @@
 import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { askWhichBranch, type BranchOffer } from './adopt-branch-picker.js'
 import { peerDivergesAt } from './peer-divergence.js'
+import { nameService } from './names.service.js'
 import type { OverlayActionDescriptor, OverlayTileContext } from '../presentation/tiles/tile-overlay.drone.js'
 
 const OWNER = '@diamondcoreprocessor.com/AdoptBranchDrone'
@@ -152,8 +153,10 @@ export class AdoptBranchDrone extends Drone {
   }
 
   /** Who publishes `label` at this location, freshest first, as the names
-   *  the participant knows them by (a label if they announced one, else the
-   *  start of their key). */
+   *  the participant knows them by: a name their host vouches for, else the
+   *  label they announced (marked unverified), else a short npub
+   *  (names.service.ts). Several publishers of one name are told apart here,
+   *  so the verified name is the one that matters most. */
   #publishersOf = (label: string): { pubkey: string; name: string }[] => {
     const swarm = ioc<SwarmLike>(SWARM_KEY)
     const seen = new Set<string>()
@@ -161,8 +164,7 @@ export class AdoptBranchDrone extends Drone {
     for (const t of swarm?.peerTilesAtCurrentSig?.() ?? []) {
       if (t.name !== label || seen.has(t.peerPubkey)) continue
       seen.add(t.peerPubkey)
-      const known = swarm?.labelFor?.(t.peerPubkey)?.trim()
-      out.push({ pubkey: t.peerPubkey, name: known || t.peerPubkey.slice(0, 8) })
+      out.push({ pubkey: t.peerPubkey, name: nameService.label(t.peerPubkey, undefined, swarm?.labelFor?.(t.peerPubkey)) })
     }
     return out
   }
@@ -206,7 +208,7 @@ export class AdoptBranchDrone extends Drone {
         if (!theirs) continue
         offers.push({ ...p, branch: theirs, count: await this.#countUnder(theirs.layerSig) })
       }
-      if (offers.length === 0) offers.push({ pubkey: branch.pubkey ?? '', name: branch.pubkey?.slice(0, 8) ?? '', branch, count: await this.#countUnder(branch.layerSig) })
+      if (offers.length === 0) offers.push({ pubkey: branch.pubkey ?? '', name: nameService.label(branch.pubkey ?? ''), branch, count: await this.#countUnder(branch.layerSig) })
 
       const lead = offers.find(o => o.pubkey === branch.pubkey) ?? offers[0]
       const many = offers.length > 1

@@ -240,7 +240,7 @@ type StoreHandle = {
   /** Open (creating if needed) the sign(meaning) pool for a meaning. */
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
   /** The document-pool contract (Store.putPoolDoc / getPoolDoc). */
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
   getResource: (sig: string) => Promise<Blob | null>
   putResource: (blob: Blob) => Promise<string>
@@ -825,7 +825,7 @@ export class SubstrateService extends EventTarget {
       const pool = await this.#customSetsPool(store)
       if (!pool) return
       const bytes = new TextEncoder().encode(JSON.stringify({ sigs })).buffer as ArrayBuffer
-      await store.putPoolDoc(pool, bytes, setId)
+      await store.putPoolDoc(pool, bytes, setId, { keep: 'current' })   // a sync, not a save
     } catch { /* store not ready */ }
   }
 
@@ -889,7 +889,7 @@ export class SubstrateService extends EventTarget {
       const pool = await this.#poolFor(store, PENDING_MEANING)
       if (!pool) return
       const bytes = new TextEncoder().encode(JSON.stringify({ sigs })).buffer as ArrayBuffer
-      await store.putPoolDoc(pool, bytes, setId)
+      await store.putPoolDoc(pool, bytes, setId, { keep: 'current' })   // a sync, not a save
     } catch { /* store not ready */ }
   }
 

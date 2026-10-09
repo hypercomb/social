@@ -2,6 +2,26 @@
 
 **Status: DESIGN — pinned 2026-07-09. Not built.**
 
+## Swarms: consent is the standing allow plus the join sheet (2026-10-04)
+
+A swarm does not use this handshake. See [swarm-host.md](swarm-host.md).
+
+- The relay you meet at is the swarm's host. Its operator consents once, for
+  every swarm that meets there, with a standing relay flag:
+  `--allow-participants` (or `=<lifecycleSig,...>` for chosen rooms only).
+- A participant consents by joining. The join sheet names the host: "Tiles you
+  add while joined are shared with the room and kept by jwize.com."
+- No kind 20410 request, no kind 30411 grant, no `/@grant`, no consent toast.
+  Fixed caps replace per-key quotas: 8 MB a blob, 256 MB a key and 2 GB an IP
+  per 24 h, 4 GB a day across all participants, and no uploads while the disk
+  has under 10 GB free.
+- The `.public` marker gate is unchanged. Private tiles never reach the host.
+- For the swarm target only, the relay's `201` body `stored <sig>` is the
+  receipt. Every other target keeps the read-back GET below.
+
+What stays here is hosting outside a meeting: a participant asking an
+operator they do not meet at to keep their bytes. That is still a design.
+
 ## Problem
 
 The mesh is deliberately thin: it transports **layer sigs only** (tiny JSON
@@ -93,6 +113,9 @@ like the subscribe-consent decisions so the host isn't re-prompted.
 **No transfer events on the mesh.** Transfer success is proven the host-sync
 way: a fresh `GET /<sig>` returning 200 *is* the receipt (never a bare PUT
 200 — the deploy-pipeline silent-drop lesson, protocol-spec §21.11/§21.12).
+The one exception is the swarm target: the relay answers `stored <sig>` only
+after the bytes hashed and landed, which no fallback page can fake
+([swarm-host.md](swarm-host.md)).
 
 ### Transfer (HTTP — all existing machinery)
 

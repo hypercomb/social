@@ -470,7 +470,7 @@ type StoreLike = {
   /** Opens a pool WITHOUT creating it — every read path. */
   openPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
   /** One current document per sub-key; writing it drops the previous one. */
-  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string, options?: { keep?: 'versions' | 'current' }) => Promise<string | null>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
   listOptimizations?: () => Promise<string[]>
   getOptimization?: (sig: string) => Promise<Blob | null>
@@ -723,6 +723,10 @@ interface FlowCoordination {
   subscribedAt: number
   /** The per-conversation mint guard. */
   readonly organizing: Set<string>
+  /** THE DRAIN'S WORK QUEUE: conversations the participant opened whose flow
+   *  may still be behind, newest last. In memory only, no times, never saved —
+   *  an entry leaves once its flow is current, and a reload empties it. */
+  readonly queued: Set<string>
   /** Explicit selected-text assimilation owns the conversation while its two
    *  calls run, so refresh hints cannot interleave an automatic flow call. */
   readonly assimilating: Set<string>
@@ -735,8 +739,6 @@ interface FlowCoordination {
   readonly plainLocalModels: Set<string>
   /** The model the last passive pass resolved. */
   lastPassModel: string
-  /** convoId → when the participant last opened it here. The drain's queue. */
-  readonly visited: Map<string, number>
   /** Until when the provider is BUSY (rate-limited or overloaded). A passive
    *  call that met a 429 sets it; no passive call starts before it passes. */
   throttledUntil: number
@@ -747,21 +749,6 @@ interface FlowCoordination {
  *  nothing: the pass moved to the next conversation and met the next 429. */
 export const ROUTE_FLOW_THROTTLE_MS = 5 * 60_000
 
-/** Where the visited queue lives between reloads; the newest 200 kept. */
-export const ROUTE_VISITED_KEY = 'hc:chat-route-visited'
-const ROUTE_VISITED_CAP = 200
-
-const readVisited = (): Map<string, number> => {
-  try {
-    const raw = JSON.parse(globalThis.localStorage?.getItem(ROUTE_VISITED_KEY) ?? 'null') as Record<string, unknown> | null
-    const out = new Map<string, number>()
-    if (raw && typeof raw === 'object') {
-      for (const [id, at] of Object.entries(raw)) if (typeof at === 'number' && Number.isFinite(at) && id) out.set(id, at)
-    }
-    return out
-  } catch { return new Map() }
-}
-
 const flowState = (): FlowCoordination => {
   const state = ((globalThis as Record<symbol, unknown>)[FLOW_STATE] ??= {
     tail: Promise.resolve(),
@@ -770,43 +757,21 @@ const flowState = (): FlowCoordination => {
     pausedUntil: 0,
     subscribedAt: 0,
     organizing: new Set<string>(),
+    queued: new Set<string>(),
     assimilating: new Set<string>(),
     organizingNow: new Map<string, RouteOrganizing>(),
     prefer: new Map<string, string>(),
     backoff: new Map<string, number>(),
     plainLocalModels: new Set<string>(),
     lastPassModel: '',
-    visited: readVisited(),
     throttledUntil: 0,
   } satisfies FlowCoordination) as FlowCoordination
   // A live hot-reloaded tab may hold the preceding state shape.
   ;(state as FlowCoordination & { assimilating?: Set<string> }).assimilating ??= new Set<string>()
   ;(state as FlowCoordination & { throttledUntil?: number }).throttledUntil ??= 0
+  ;(state as FlowCoordination & { queued?: Set<string> }).queued ??= new Set<string>()
   return state
 }
-
-/**
- * THE VISITED QUEUE. Jaime: "if we don't touch the conversation let's not
- * organize the workflow sidebar … it gets into a queue if you visit it and
- * then that will be done in the background." Opening a conversation puts it
- * here; the drain reads only from here, most recently opened first, and a
- * conversation nobody opened on this machine is never organized. Persisted,
- * newest 200, so a reload does not forget what you were working in.
- */
-export const markRouteVisited = (convoId: string, at = Date.now()): void => {
-  const id = String(convoId ?? '').trim()
-  if (!id) return
-  const state = flowState()
-  state.visited.set(id, at)
-  if (state.visited.size > ROUTE_VISITED_CAP) {
-    const oldest = [...state.visited.entries()].sort((a, b) => a[1] - b[1]).slice(0, state.visited.size - ROUTE_VISITED_CAP)
-    for (const [key] of oldest) state.visited.delete(key)
-  }
-  try { globalThis.localStorage?.setItem(ROUTE_VISITED_KEY, JSON.stringify(Object.fromEntries(state.visited))) } catch { /* private mode */ }
-}
-
-/** The conversations the drain may organize, most recently opened first. */
-export const routeVisited = (): ReadonlyMap<string, number> => flowState().visited
 
 /**
  * THE PARTICIPANT'S OWN LOCAL CHAT PRE-EMPTS EVERYTHING. Measured on qwen3:8b:
@@ -2400,7 +2365,8 @@ export const writeRouteFlow = async (record: RouteFlowRecord): Promise<boolean> 
     const pool = await flowsPool(store, true)
     if (!pool || !store?.putPoolDoc) return false
     const bytes = new TextEncoder().encode(JSON.stringify(checked))
-    return !!(await store.putPoolDoc(pool, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, checked.convoId))
+    // The organizer's own output, not a save: only the current flow is kept.
+    return !!(await store.putPoolDoc(pool, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, checked.convoId, { keep: 'current' }))
   } catch { return false }
 }
 
@@ -3176,9 +3142,9 @@ export const organizeRoute = async (
   if (!id) return 0
   const state = flowState()
   ensureSubscribed(state)
-  // The shell calls this for the conversation on screen: that is a visit,
-  // whatever the gate says next — the drain picks it up once a model wakes.
-  markRouteVisited(id)
+  // Opening a conversation is what queues it for the drain (newest last).
+  state.queued.delete(id)
+  state.queued.add(id)
   const preferred = String(prefer ?? '').trim()
   if (preferred) state.prefer.set(id, preferred)
   if (waiting || Date.now() < state.pausedUntil) return 0
@@ -3188,10 +3154,11 @@ export const organizeRoute = async (
     if (gate.state !== 'awake') return 0
     const model = await organizerModel(gate, { fallback: state.lastPassModel, convoIds: [id] })
     if (!model) return 0
-    const { wrote } = await organizeOne(id, {
+    const result = await organizeOne(id, {
       attended: true, model, liveRunId, waiting, now: Date.now, pending: once(pendingChatAsks), claim,
     })
-    return wrote ? 1 : 0
+    if (flowDone(result)) state.queued.delete(id)
+    return result.wrote ? 1 : 0
   } catch {
     return 0
   } finally {
@@ -3423,6 +3390,11 @@ const yieldToIdle = (): Promise<void> => new Promise(resolve => {
   else setTimeout(resolve, 0)
 })
 
+/** A conversation leaves the work queue once nothing is left to do for it:
+ *  its flow is current with no exchange still closing, or it cannot be read. */
+const flowDone = (result: { readonly outcome: OrganizeOutcome; readonly dueIn?: number }): boolean =>
+  (result.outcome === 'current' && result.dueIn === undefined) || result.outcome === 'unreadable'
+
 /** Back-off entries older than the retry window go; at most the cap stay, newest kept. */
 const pruneBackoff = (state: FlowCoordination, now: number): void => {
   for (const [key, at] of state.backoff) if (now - at >= ROUTE_FLOW_RETRY_MS) state.backoff.delete(key)
@@ -3438,11 +3410,14 @@ const pruneBackoff = (state: FlowCoordination, now: number): void => {
  * nothing, fetches nothing and logs nothing. The pass model is resolved ONCE,
  * from the participant's stored choice and the live conversations, and pinned
  * as `lastPassModel` — a model swap on the participant's machine measured
- * 10–17 s and evicts the model they chat with. Then every conversation the
- * participant has OPENED here (the visited queue), most recently opened first,
- * one at a time, the gate re-read before each and the main thread given back between
- * them. Before every call: the participant's pause and an attended call end the
- * pass as `yield` with a `resumeAt`; 48 calls or 90 s end it as `budget`.
+ * 10–17 s and evicts the model they chat with. Then ONLY the conversations
+ * the participant opened (the in-memory work queue), most recently opened
+ * first, one at a time, the gate re-read before each and the main thread
+ * given back between them. A conversation nobody opened is never organized
+ * (jwize: "if we don't touch the conversation let's not organize the workflow
+ * sidebar"), and nothing records who opened what. Before every call:
+ * the participant's pause and an attended call end the pass as `yield` with a
+ * `resumeAt`; 48 calls or 90 s end it as `budget`.
  * `elapsedMs` is always returned, so the orchestrator can rest as long as the
  * pass ran. Never a bee, never agent work, silent on every failure.
  */
@@ -3462,11 +3437,13 @@ export const drainRouteFlows = async (options: RouteFlowDrainOptions = {}): Prom
     if (gate.state !== 'awake') return { organized, behind, stopped: 'gate', elapsedMs: elapsed() }
     let conversations: ConversationSummary[]
     try { conversations = await listConversations() } catch { return { organized, behind, stopped: 'fault', elapsedMs: elapsed() } }
-    // ONLY THE VISITED, most recently opened first — live or archived alike;
-    // a conversation nobody opened here is left as it is.
+    // ONLY THE QUEUED, most recently opened first — live or archived alike.
     const worth = (convo: ConversationSummary): boolean => convo.turnCount >= 2 && convo.replied !== false
-    const visitedAt = (convo: ConversationSummary): number => state.visited.get(convo.convoId) ?? 0
-    const ordered = conversations.filter(convo => worth(convo) && visitedAt(convo) > 0).sort((a, b) => visitedAt(b) - visitedAt(a) || b.lastAt - a.lastAt)
+    const byId = new Map(conversations.map(convo => [convo.convoId, convo]))
+    for (const id of state.queued) if (!byId.has(id)) state.queued.delete(id)
+    const ordered = [...state.queued].reverse()
+      .map(id => byId.get(id))
+      .filter((convo): convo is ConversationSummary => !!convo && worth(convo))
     const live = ordered.filter(convo => !convo.archived)
 
     const model = await organizerModel(gate, { convoIds: live.map(convo => convo.convoId) })
@@ -3501,6 +3478,7 @@ export const drainRouteFlows = async (options: RouteFlowDrainOptions = {}): Prom
         attended: false, model, now, pending, summary: convo, beforeCall, afterCall: () => { calls++ },
       })
       if (result.dueIn !== undefined) dueIn = Math.min(dueIn ?? Number.POSITIVE_INFINITY, result.dueIn)
+      if (flowDone(result)) state.queued.delete(convo.convoId)
       if (result.wrote) organized++
       if (result.outcome === 'busy') { behind++; continue }
       if (result.outcome === 'yielded' || result.outcome === 'throttled') return { ...yielded(), ...(dueIn !== undefined ? { dueIn } : {}) }

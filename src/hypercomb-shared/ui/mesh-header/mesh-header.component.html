@@ -5,6 +5,8 @@
     [class.solo-mode]="!meshPublic && stage() === 0"
     [class.shield-mode]="!!meshPublic"
     [class.prep-mode]="!meshPublic && stage() > 0"
+    [class.mesh-pending]="!!meshPublic && link() === 'pending'"
+    [class.mesh-down]="!!meshPublic && link() === 'down'"
     [style.--shield-color]="shieldColor()"
     type="button"
     [title]="modeTitleKey() | t"

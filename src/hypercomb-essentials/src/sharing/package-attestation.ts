@@ -20,7 +20,8 @@
 // another key is no witness.
 //
 // WHERE THE INDEX IS ASKED FOR. The followed hosts first (that is what they
-// are for), then the offering domains and their `content.` faces — a host that
+// are for), then the offering domains — every zone at its root first, the
+// retired `content.` faces only after, for old data — a host that
 // serves the publisher's index vouches for its own head, and one that does not
 // simply costs a 404. EVERY verified copy is read before 'not-named' is
 // answered, because one host may hold a stale-but-authentic index naming the
@@ -32,12 +33,12 @@ import { ATTESTATION_IOC_KEY, type AttestationVerdict, type PackageAttestation }
 import { installRootOf } from './hive-link.js'
 import { fetchHiveIndex, type HiveIndexResult } from './hive-pointer.js'
 import { readInstallFollow, type InstallFollow } from './update-scout.service.js'
+import { readDoorsOf } from './zone-door.js'
 
 /** localStorage key: `{ "<packageSig>": "<pubkey that named it>" }`. */
 export const ATTESTED_PACKAGES_KEY = 'hc:attested-packages'
 
 const SIG_RE = /^[a-f0-9]{64}$/
-const LOOPBACK_RE = /^(localhost|127(?:\.\d+){3})(:\d{1,5})?$/
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>
 
@@ -73,13 +74,11 @@ const witness = (storage: StorageLike, sig: string, pubkey: string): void => {
 }
 
 /** Every host worth asking for the followed publisher's index, in order:
- *  the followed hosts, then each offering zone and its `content.` face. */
-export const indexHostsFor = (follow: InstallFollow, zones: readonly string[]): string[] => {
-  const offered = zones.map(z => String(z ?? '').trim().toLowerCase()).filter(Boolean)
-  const faces = offered.flatMap(z =>
-    z.startsWith('content.') || LOOPBACK_RE.test(z) ? [z] : [z, `content.${z}`])
-  return [...new Set([...follow.hosts, ...faces])]
-}
+ *  the followed hosts and each offering zone at their ROOTS, then — a read
+ *  fallback for an index only the old face held — their retired `content.`
+ *  faces (zone-door.ts). */
+export const indexHostsFor = (follow: InstallFollow, zones: readonly string[]): string[] =>
+  readDoorsOf([...follow.hosts, ...zones])
 
 export const attestPackage = async (
   packageSig: string,

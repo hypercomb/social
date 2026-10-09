@@ -72,7 +72,7 @@
 import { Drone } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
 import { kindsForLabel, countLabelsWithKind, DEFAULT_VIEW_DECORATION_KIND } from '../../commands/decoration-kind-index.js'
-import { defaultViewAt, writeDefaultView, clearDefaultView } from '../../commands/view-default.js'
+import { defaultViewAt, writeDefaultView, clearDefaultView, nextDefaultViewAt } from '../../commands/view-default.js'
 import { viewSourceScopeAt } from '../../commands/view-source-scope.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import {
@@ -500,11 +500,20 @@ export class ShowFeaturesDrone extends Drone {
     // `silent` is the rail's: the panel asks for the refresh because the
     // participant is looking AT the panel, while a rail gesture must not pop
     // a tool window open over the hive — its answer is the icon lighting up.
-    this.onEffect<{ cell?: string; segments?: string[]; view?: string; clear?: boolean; silent?: boolean }>('features:default', (p) => {
+    //
+    // `toggle` is the one-gesture form (ctrl+click on a tile's view icon from
+    // its parent, the rail's ctrl+click): `#toggleDefaultViewAt` decides on,
+    // off, or the explicit `hexagons` opt-out from the layers themselves, so
+    // "off" means the same thing wherever it is asked for.
+    this.onEffect<{ cell?: string; segments?: string[]; view?: string; clear?: boolean; silent?: boolean; toggle?: boolean }>('features:default', (p) => {
       const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
       const view = String(p?.view ?? '').trim()
       const cell = String(p?.cell ?? '').trim()
       if (segments.length === 0 && !cell) return
+      if (p?.toggle === true && view && segments.length > 0) {
+        void this.#toggleDefaultViewAt(segments, view, cell, p?.silent === true)
+        return
+      }
       void this.#defaultViewAt(segments, view, p?.clear === true, cell, p?.silent === true)
     })
 
@@ -915,6 +924,21 @@ export class ShowFeaturesDrone extends Drone {
       console.warn('[show-features] default view failed', { view, segments, clear, err })
       this.emitEffect('features:outcome', { cell: label, kind: DEFAULT_VIEW_DECORATION_KIND, ok: false, message: `couldn't set how "${label}" opens` })
     }
+  }
+
+  /** THE ONE TOGGLE (view-default.ts `decideDefaultToggle`), read cold so a
+   *  default the warm index has not seen — the hive root's, an unvisited
+   *  branch's — still counts. Whether the place has children is read from its
+   *  own layer: a childless page opens as its page for a visitor unless its
+   *  mark says otherwise, so its "off" must be written, not just cleared. */
+  async #toggleDefaultViewAt(segments: readonly string[], view: string, cell: string, silent: boolean): Promise<void> {
+    let leaf = false
+    try {
+      const children = (await this.#layerAt(segments))?.['children']
+      leaf = !(Array.isArray(children) && children.length > 0)
+    } catch { /* unreadable layer — treat as a branch: off clears rather than writes */ }
+    const next = await nextDefaultViewAt(segments, view, leaf)
+    await this.#defaultViewAt(segments, 'write' in next ? next.write : view, 'clear' in next, cell, silent)
   }
 
   /** Wait until `kind` is readable on the layer at `segments` — the commit

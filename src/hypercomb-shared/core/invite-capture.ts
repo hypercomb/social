@@ -1,6 +1,7 @@
 // hypercomb-shared/core/invite-capture.ts
 //
-// Boot-time capture for `/<sig>` meeting-place invite links.
+// Boot-time capture for `/<sig>` meeting-place invite links (and, below, the
+// `#meet=` meeting link and the `?hive=` outside-in door).
 //
 // Runs on import — BEFORE Navigation / bootstrap-history parse the URL. If the
 // boot path is a single 64-hex signature, stash it for the receive-side
@@ -33,6 +34,28 @@ const DOOR_PARAM = 'hive'                      // mirror of HIVE_DOOR_PARAM
 
     // Strip the signature so the URL is a clean root; preserve any query/hash.
     const clean = folderPath('/') + (window.location.search ?? '') + (window.location.hash ?? '')
+    window.history.replaceState(window.history.state, '', clean)
+  } catch { /* ignore — never block boot on capture */ }
+})()
+
+// THE MEETING LINK — `#meet=room/secret/page`, what a bare `invite` copies.
+// The place rides in the FRAGMENT, which no server ever sees, so the shell
+// stashes it for the receive side (MeetingInviteWorker) and strips it before
+// anything can read the hash or show the secret in the address bar. Stashed
+// VERBATIM, like the door below: the one validator is essentials'
+// meeting-invite.ts `parseMeet`. sessionStorage, because a first visit may
+// install and reload before the worker runs — the join must survive that.
+const PENDING_MEET_KEY = 'hc:pending-meet' // mirror of essentials meeting-invite.ts MEET_KEY
+const MEET_PREFIX = '#meet='               // mirror of MEET_PREFIX
+
+;(function captureMeetLink(): void {
+  try {
+    const hash = window.location.hash ?? ''
+    if (!hash.startsWith(MEET_PREFIX)) return
+
+    try { sessionStorage.setItem(PENDING_MEET_KEY, hash.slice(MEET_PREFIX.length)) } catch { /* ignore */ }
+
+    const clean = window.location.pathname + (window.location.search ?? '')
     window.history.replaceState(window.history.state, '', clean)
   } catch { /* ignore — never block boot on capture */ }
 })()

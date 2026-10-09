@@ -13,6 +13,7 @@ export {
 export type { WorkKind, WorkRequest, SplitWork, WorkBudget } from '@hypercomb/core'
 export {
   MAX_WORK_ROUNDS,
+  draftPathRefusal,
   applySectionEdits,
   writeHeaderOf,
   parseWriteBlock,
@@ -50,4 +51,5 @@ export type {
   SectionEdit,
   DoctrineWriteRequest,
   WorkPowers,
+  DoRollback,
 } from '@hypercomb/core'
