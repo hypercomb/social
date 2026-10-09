@@ -2720,5 +2720,10 @@
   "invite.meet.join.message-local": "“{room}” odasına katılmak istiyor musun? Buradaki herkesi göreceksin. Katılıyken eklediğin döşemeler odayla paylaşılır.",
   "invite.meet.join.confirm": "Katıl",
   "invite.meet.join.cancel": "Şimdi değil",
+  "slash.keep-alive": "Sen yokken bu kovanı uyanık ve sürüde tut",
+  "keep-alive.usage": "keep-alive: \"keep-alive\", \"keep-alive on\" ya da \"keep-alive off\" yaz",
+  "keep-alive.on": "Keep-alive açık — kovan ekranda olduğu sürece bu bilgisayar uyanık ve sürüde kalır.",
+  "keep-alive.on-no-lock": "Keep-alive açık ama bu tarayıcı ekranı uyanık tutamıyor — bilgisayarı uykuya geçmeyecek şekilde ayarla.",
+  "keep-alive.off": "Keep-alive kapalı — bu bilgisayar her zamanki gibi uyur.",
   "host.no-host": "Baytları koyacak yer yok ({reason}) — bu dala bir sunucu ekle ya da sunucular panelinden bir tane ayarla, sonra yeniden yayımla. Hiçbir şey yayımlanmadı."
 }

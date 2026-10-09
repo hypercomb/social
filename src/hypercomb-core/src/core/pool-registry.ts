@@ -597,6 +597,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // pure derivation, so it is minted only on an explicit `/summary` miss by
   // essentials/assistant/compaction.ts. Colon meaning: no tile may name it.
   'system:compaction',
+  // KEEP-ALIVE (essentials/sharing/keep-alive.queen.ts): whether this device
+  // keeps its hive awake and in the swarm while nobody is at it. One document,
+  // this machine's own setting; it never travels with content.
+  'swarm:keep-alive',
   // TRANSFER PACKS (atomic-modules-plan.md): one member per package, named by
   // the package's root signature and holding the signature of a pack — one
   // content-addressed file carrying that package's bytes, so a cold install

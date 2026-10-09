@@ -2854,5 +2854,10 @@
   "invite.meet.join.message-local": "ルーム「{room}」に参加しますか？ ここにいる全員が見えます。参加中に追加したタイルはルームと共有されます。",
   "invite.meet.join.confirm": "参加",
   "invite.meet.join.cancel": "今はしない",
+  "slash.keep-alive": "離れている間もこのハイブを起こしたままスウォームに残す",
+  "keep-alive.usage": "keep-alive: 「keep-alive」「keep-alive on」「keep-alive off」のいずれかを入力",
+  "keep-alive.on": "Keep-alive オン — ハイブが表示されている間、このコンピューターはスリープせずスウォームに残ります。",
+  "keep-alive.on-no-lock": "Keep-alive はオンですが、このブラウザーは画面のスリープを止められません — コンピューターをスリープしない設定にしてください。",
+  "keep-alive.off": "Keep-alive オフ — このコンピューターは通常どおりスリープします。",
   "host.no-host": "バイトの置き場所がありません（{reason}）— このブランチにホストを追加するか、ホストパネルで設定してから、もう一度公開してください。何も公開されていません。"
 }

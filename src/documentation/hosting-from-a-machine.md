@@ -206,6 +206,34 @@ upload end to end with a throwaway key.
 The machine itself needs Ethernet, no sleep and no shutdown on meeting days:
 see the runbook in [swarm-host.md](swarm-host.md).
 
+## Leaving the hive in the swarm while you are away: `keep-alive`
+
+An idle participant does not drop: no code watches for input, and the swarm
+beacon refreshes on its own timer (about every 60 s against a 90 s expiry). What
+does take a hive out is the computer sleeping (the relay reaps the socket and the
+others see you leave) and the browser freezing a tab it thinks nobody is using.
+
+`keep-alive` (toggle; `keep-alive on`, `keep-alive off`) covers the hive's half
+(jwize 2026-10-09: "so I can leave it as a host for some data and go away from
+my computer"):
+
+- it holds the browser's **screen wake lock**, so the operating system does not
+  dim, lock or sleep while the hive tab is showing, and asks again whenever the
+  tab shows (the browser releases the lock whenever the tab is hidden);
+- it **pulses the hive every 25 s**, so the beats that only run on a pulse (the
+  meeting's 30 s availability) keep running with nobody touching the page;
+- it is **remembered on this device** (`swarm:keep-alive` pool), so a reload or
+  an update keeps it on. It never travels with content.
+
+The machine's half is a setting, once:
+
+- keep the hive tab **showing** — the active tab of a window that is not
+  minimised (the hive's own screensaver is fine);
+- in Edge, add the hive's address to **Settings → System and performance →
+  Never put these sites to sleep** (sleeping tabs freeze inactive background
+  tabs, after 5 minutes when efficiency mode is on);
+- a closed laptop lid sleeps the machine whatever the page asks.
+
 ## Moving your root off the machine: the machine joins the farm
 
 *jwize, 2026-10-07:* "You can move the hosting role over to

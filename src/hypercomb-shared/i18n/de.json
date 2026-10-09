@@ -2720,5 +2720,10 @@
   "invite.meet.join.message-local": "Dem Raum „{room}“ beitreten? Du siehst alle hier. Kacheln, die du hinzufügst, solange du dabei bist, werden mit dem Raum geteilt.",
   "invite.meet.join.confirm": "Beitreten",
   "invite.meet.join.cancel": "Nicht jetzt",
+  "slash.keep-alive": "Diesen Bienenstock wach und im Schwarm halten, während du weg bist",
+  "keep-alive.usage": "keep-alive: sag „keep-alive“, „keep-alive on“ oder „keep-alive off“",
+  "keep-alive.on": "Keep-alive ist an — dieser Computer bleibt wach und im Schwarm, solange der Bienenstock sichtbar ist.",
+  "keep-alive.on-no-lock": "Keep-alive ist an, aber dieser Browser kann den Bildschirm nicht wach halten — stell den Computer so ein, dass er nicht schläft.",
+  "keep-alive.off": "Keep-alive ist aus — dieser Computer schläft wie gewohnt.",
   "host.no-host": "Kein Ort für die Bytes ({reason}) — füge diesem Zweig einen Host hinzu oder lege einen im Host-Bereich fest und veröffentliche dann erneut. Es wurde nichts veröffentlicht."
 }

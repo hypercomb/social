@@ -2720,5 +2720,10 @@
   "invite.meet.join.message-local": "Entrar na sala “{room}”? Você verá todos que estão aqui. Os blocos que você adicionar enquanto estiver dentro são compartilhados com a sala.",
   "invite.meet.join.confirm": "Entrar",
   "invite.meet.join.cancel": "Agora não",
+  "slash.keep-alive": "Mantenha esta colmeia acordada e no enxame enquanto você está fora",
+  "keep-alive.usage": "keep-alive: diga \"keep-alive\", \"keep-alive on\" ou \"keep-alive off\"",
+  "keep-alive.on": "Keep-alive ligado — este computador fica acordado e no enxame enquanto a colmeia estiver à vista.",
+  "keep-alive.on-no-lock": "Keep-alive ligado, mas este navegador não consegue manter a tela acordada — configure o computador para não dormir.",
+  "keep-alive.off": "Keep-alive desligado — este computador dorme como de costume.",
   "host.no-host": "Não há onde colocar os bytes ({reason}) — adicione um host a esta ramificação, ou defina um no painel de hosts, e publique de novo. Nada foi publicado."
 }

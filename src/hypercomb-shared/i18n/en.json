@@ -3407,5 +3407,10 @@
   "invite.meet.join.message-local": "Join the room “{room}”? You'll see everyone here. Tiles you add while joined are shared with the room.",
   "invite.meet.join.confirm": "Join",
   "invite.meet.join.cancel": "Not now",
+  "slash.keep-alive": "Keep this hive awake and in the swarm while you are away",
+  "keep-alive.usage": "keep-alive: say \"keep-alive\", \"keep-alive on\" or \"keep-alive off\"",
+  "keep-alive.on": "Keep-alive is on — this computer stays awake and in the swarm while the hive is showing.",
+  "keep-alive.on-no-lock": "Keep-alive is on, but this browser cannot hold the screen awake — set the computer not to sleep.",
+  "keep-alive.off": "Keep-alive is off — this computer sleeps as usual.",
   "host.no-host": "Nowhere to put the bytes ({reason}) — add a host to this branch, or set one in the hosts panel, then publish again. Nothing was published."
 }
