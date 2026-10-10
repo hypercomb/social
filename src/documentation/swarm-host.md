@@ -377,6 +377,22 @@ Each walk builds the entry for each public child with one helper:
   to, why that one (`publish`, `pool` or `relay`), and what it last said —
   `no-host` when nothing hosts them. `sync:state` carries the same `source`
   for every swarm host.
+- Once the relay has taken the page this tab stands on, the swarm emits
+  `swarm:page-announced` {location, segments} — the page's address only,
+  never a count or a name. "Taken" is the relay's OK, reported by the mesh's
+  `publish(…, onTaken)`: `publish` itself resolves `true` as soon as the
+  event is sent or queued, and on a fresh join the socket is still connecting
+  then, so the promise is not the room (measured 2026-10-10: the event left
+  ~20-115 ms after `publish` resolved). A walk of the current page that finds
+  its word unchanged (the relay took this meeting's very word for the slot
+  within the refresh window) emits it too, so arriving back on a page counts
+  as arriving.
+  The share ask (`share-ask.worker.ts`) waits for it and then for idle time,
+  so it never adds anything before a join's first announce; it reads the
+  count with `privateToOfferHere()` (the same names `offerPrivateHere()` would
+  flip — never a collection item or a tile the participant hid — read
+  locally, nothing sealed). It takes its line down on the Lineage's `change`,
+  the moment the participant navigates.
 
 Timing on venue wifi:
 
@@ -723,10 +739,21 @@ If it fails:
 - Take a peer's tile with the wand gesture (ctrl/⌘ + press). Its bytes come
   from the author's host (named on their layer events; hypercomb.com on a
   fresh install), so this works after the author has left.
-- Tiles you had before the meeting stay private. "Share" on the status line
-  offers the ones on this page, tile by tile, after one confirmation; their
-  contents stay private. The globe on your own tiles does the same for one
-  tile.
+- Tiles you had before the meeting stay private. Each page you arrive on in
+  the meeting asks once, after the page has been announced: "Share the 12
+  tiles on this page with downtown?" [Share] [Not now] (jwize 2026-10-10,
+  `sharing/share-ask.worker.ts`). Share offers exactly those tiles, tile by
+  tile; their contents stay private. Not now, closing the line or letting it
+  time out changes nothing, and that page is not asked again in this meeting,
+  a reload included (the tab's sessionStorage holds digests of meeting and
+  page, never the secret or a name). Another meeting asks again. A line taken
+  down before it was answered — you walked to another page, left, or the tab
+  went to the background — uses nothing up: the page asks again when you are
+  back, and no line is ever shown to a tab nobody is looking at. Pages with
+  nothing private, the sets page, collection items and tiles you hid are
+  never asked about.
+  "Share" on the status line still offers the page's private tiles after one
+  confirmation, and the globe on your own tiles does the same for one tile.
 - Wifi drop, phone lock, app switch or reload: nothing to press.
 
 ### After

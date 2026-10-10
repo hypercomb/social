@@ -6,6 +6,7 @@
 // never imported for a value (atomic-modules-plan.md).
 
 import { normalizeCell, SignatureService } from '@hypercomb/core'
+import { sessionHideStore } from './session-hide.store.js'
 
 /** Zone-scoped localStorage key for the hide list at this location.
  *  SwarmDrone writes `hc:current-zone` on every room/secret change
@@ -20,6 +21,31 @@ export function hideStorageKey(location: string): string {
   return zone
     ? `hc:hidden-tiles:${location}:z${zone}`
     : `hc:hidden-tiles:${location}`
+}
+
+const namesIn = (raw: string | null): string[] => {
+  try {
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+  } catch { return [] }
+}
+
+/** Is a tile name hidden at the page `segments` names? The participant's own
+ *  hide lists, as show-cell's render pass reads them: the session list under
+ *  hideStorageKey() and the bare key, the path-keyed `hc:hidden-lineages`
+ *  list (`<page>/<name>`, bare `<name>` at the root) and the global
+ *  `hc:hidden-tiles` list. Anything that offers "the tiles on this page" asks
+ *  this first, so a tile the participant hid is never counted or shared. */
+export function hiddenAt(segments: readonly string[]): (name: string) => boolean {
+  const page = segments.join('/')
+  const location = '/' + page
+  const names = new Set<string>([
+    ...namesIn(sessionHideStore.getItem(hideStorageKey(location))),
+    ...namesIn(sessionHideStore.getItem(`hc:hidden-tiles:${location}`)),
+    ...namesIn((() => { try { return localStorage.getItem('hc:hidden-tiles') } catch { return null } })()),
+  ])
+  const paths = new Set(namesIn(sessionHideStore.getItem('hc:hidden-lineages')))
+  return (name: string): boolean => names.has(name) || paths.has(page ? `${page}/${name}` : name)
 }
 
 // ── Per-tile public/private flag ──────────────────────────────────

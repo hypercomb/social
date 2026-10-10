@@ -198,6 +198,33 @@ describe('acks and retries', () => {
     expect(mesh.connectionState().refused).toBeUndefined()
   })
 
+  it('onTaken runs when the relay TAKES the event — not while it is queued or merely sent, never for a refusal, and once', async () => {
+    localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([RELAY]))
+    const mesh = new NostrMeshDrone()
+    meshes.push(mesh)
+    await Promise.resolve()
+    const ws = last()
+    const taken: string[] = []
+    // A fresh join's socket is still connecting: publish says true (queued).
+    expect(await mesh.publish(30200, S, { a: 1 }, [['d', 'L']], () => taken.push('first'))).toBe(true)
+    expect(events(ws)).toHaveLength(0)
+    ws.open()
+    await vi.advanceTimersByTimeAsync(0)
+    const id = events(ws)[0]?.id
+    expect(id).toBeTruthy()
+    expect(taken).toEqual([])
+    ws.receive(['OK', id, true, ''])
+    expect(taken).toEqual(['first'])
+    ws.receive(['OK', id, true, ''])
+    expect(taken).toEqual(['first'])
+
+    await mesh.publish(30201, S, { a: 2 }, [['d', 'R']], () => taken.push('refused'))
+    ws.receive(['OK', events(ws)[1].id, false, 'invalid: bad signature'])
+    await mesh.publish(30200, S, { a: 3 }, [['d', 'L']], () => taken.push('duplicate'))
+    ws.receive(['OK', events(ws)[2].id, false, 'duplicate: already have it'])
+    expect(taken).toEqual(['first', 'duplicate'])
+  })
+
   it('re-sends frames a dead socket swallowed once the relay is back', async () => {
     const { mesh, ws } = await boot()
     ws.alive = false
