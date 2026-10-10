@@ -231,6 +231,10 @@ const FULL_MIN_BACKOFF_MS = 10 * 60_000
 // (the drain is single-flight) or a verify slot (the semaphore is shared).
 const REQUEST_TIMEOUT_MS = 15_000
 const TIMEOUT_PER_100KB_MS = 1_000
+// The largest body a common edge (Cloudflare's 100 MB) lets through to a
+// host. Above it the edge answers 413 with no CORS headers, which a browser
+// shows as a bare network error — one entry too large, never a host refusing.
+const EDGE_BODY_MAX_BYTES = 100 * 1_048_576
 
 type QueueEntry = { sig: string; kind: HostSyncKind; fileName: string; mtime: number; dir: FileSystemDirectoryHandle }
 
@@ -238,9 +242,23 @@ type QueueEntry = { sig: string; kind: HostSyncKind; fileName: string; mtime: nu
  *  `sync:state` as both `status` and `state`, with the reason beside it. */
 type SyncStatus = 'backed-up' | 'syncing' | 'refused' | 'full' | 'too-large' | 'unreachable' | 'not-live'
 
+/** WHY a host is not taking this tab's uploads, as a person can act on it
+ *  (#whyOf): it answers a web PAGE where a heap answers bytes or 404; nothing
+ *  at that name ever answered while this tab was online (`unresolved` — a
+ *  mistyped name, NXDOMAIN, a host that is gone or switched off: check the
+ *  host name, and that it is running); it refuses (a writers list, an upload
+ *  its browser preflight never lets leave); it is full; or it is plainly
+ *  unreachable right now. Emitted on `sync:state` as `why`, beside the
+ *  status. */
+export type HostWhy = 'page' | 'unresolved' | 'refused' | 'full' | 'too-large' | 'not-live' | 'unreachable'
+
 /** A host's refusal or silence, classified once (#refusal). `drop` = about
- *  this entry only (413, 409): that target never owes it again this session. */
-type PushFailure = { status: Exclude<SyncStatus, 'backed-up' | 'syncing'>; reason: string; retryAfterMs?: number; drop?: true }
+ *  this entry only (413, 409): that target never owes it again this session.
+ *  `threw` = an upload that never left the browser, from a host that answers
+ *  (#putThrew): a refusal read from the browser's side, which a path that
+ *  changed under the upload can also cause — so it waits on the ladder, is
+ *  never remembered across a reload, and is given back with the socket. */
+type PushFailure = { status: Exclude<SyncStatus, 'backed-up' | 'syncing'>; reason: string; retryAfterMs?: number; drop?: true; threw?: true }
 
 /** One push: receipted, local bytes that can never satisfy the sig, nothing
  *  attempted for a local reason (no signer, entry gone), or the host's answer. */
@@ -285,7 +303,7 @@ type ScopeAt = { page: readonly string[]; extra: ReadonlySet<string>; targets: r
 type RefEdge = { kind: HostSyncKind; child: boolean; step: string }
 
 /** A host's standing failure (#noteHostFailure). Removed on its next success. */
-type HostBackoff = { until: number; streak: number; notLive: number; status: SyncStatus; reason: string }
+type HostBackoff = { until: number; streak: number; notLive: number; status: SyncStatus; reason: string; threw?: true }
 
 export class HostSyncService extends EventTarget {
 
@@ -426,16 +444,20 @@ export class HostSyncService extends EventTarget {
       // stalled → open is the same socket answering late, not a return.
       const cameBack = p?.state === 'open' && (p.reopened === true || (prev !== 'open' && prev !== 'stalled'))
       if (!cameBack) return
-      // A pool host that went silent while the path itself was down is given
-      // its chance again with the path (one that failed while the relay
-      // answered stays passed over — that was the host).
+      // A pool host that went silent (or answered a page) while the path
+      // itself was down, or whose uploads never left the browser (#putThrew —
+      // a network that changed under them reads the same), is given its
+      // chance again with the path (one that failed while the relay answered
+      // stays passed over — that was the host). Its refusal's evidence starts
+      // over too.
       for (const host of [...this.#downWhileOffline]) this.#resolver.markUp(host)
       this.#downWhileOffline.clear()
+      this.#putsThrew.clear()
       const relay = this.#resolver.relayHost()
       for (const domain of this.#swarmSources().keys()) {
         const backoff = this.#hostBackoff.get(domain)
         if (!backoff || backoff.status === 'full') continue
-        if (domain === relay || backoff.status === 'unreachable' || backoff.status === 'not-live') this.#hostBackoff.delete(domain)
+        if (domain === relay || backoff.status === 'unreachable' || backoff.status === 'not-live' || backoff.threw) this.#hostBackoff.delete(domain)
       }
       if (this.#anyEnabled()) void this.drain()
     })
@@ -481,6 +503,9 @@ export class HostSyncService extends EventTarget {
     this.#hostBackoff.clear()
     this.#assertedAbsent.clear()
     this.#pageHosts.clear()
+    this.#probedHosts.clear()
+    this.#answersPage.clear()
+    this.#putsThrew.clear()
     this.#resolver.clearDown()
     void this.drain()
   }
@@ -506,6 +531,9 @@ export class HostSyncService extends EventTarget {
     this.#hostBackoff.delete(this.publicHostDomain())
     this.#assertedAbsent.clear()
     this.#pageHosts.clear()
+    this.#probedHosts.clear()
+    this.#answersPage.clear()
+    this.#putsThrew.clear()
     void this.drain()
   }
 
@@ -1534,7 +1562,7 @@ export class HostSyncService extends EventTarget {
     // concurrent passes asking the host the same HEAD five times over.
     this.#draining = true
     try {
-      const targets = await this.#targets()
+      let targets = await this.#targets()
       if (targets.length === 0) return // nothing enabled — stay inert
       // PER-HOST BACKOFF: a host that failed is asked nothing and sent
       // nothing until its window ends — and every read-triggered enqueue()
@@ -1553,17 +1581,25 @@ export class HostSyncService extends EventTarget {
       // single-flight guard so it can never race the queue removals below.
       await this.#absorbLegacy()
       for (;;) {
-        const entries = await this.#listQueue()
-        if (entries.length === 0) break
+        const queue = await this.#listQueue()
+        if (queue.length === 0) break
+        // A target that has not answered yet goes first (#canariesFirst):
+        // its first answer, or failure, never waits behind another's backlog.
+        const entries = await this.#canariesFirst(queue, targets.filter(t => t.swarm === true && active(t)))
+        // The target set this pass was planned for (see the batches below), in
+        // the words #noteTargetSet keys it by.
+        const plannedFor = targets.map(t => `${t.domain}${t.hostHash === null ? '!' : ''}`).join(' ')
+        let regather = false
         let progressed = false
-        // THE HOST IS THE TRUTH; the receipt is a memo of it. Before any
-        // byte is sent, every entry is reconciled against every target it
-        // owes: a receipt on file, or — lacking one — the host asked
-        // directly (a HEAD). A host that already serves the sig earns its
-        // receipt on the spot and is never sent the bytes again. This is
-        // what a host is FOR: it is already up to date, and a browser
-        // without the ledger (new profile, lost pool, a node named for the
-        // first time) must discover that rather than re-upload its hive.
+        // THE HOST IS THE TRUTH; the receipt is a memo of it. Before its
+        // bytes are sent, every entry is reconciled against every target it
+        // owes (a batch at a time — below): a receipt on file, or — lacking
+        // one — the host asked directly (a HEAD). A host that already serves
+        // the sig earns its receipt on the spot and is never sent the bytes
+        // again. This is what a host is FOR: it is already up to date, and a
+        // browser without the ledger (new profile, lost pool, a node named
+        // for the first time) must discover that rather than re-upload its
+        // hive.
         // The reconciliation is silent; only real uploads are painted.
         // A paused host is asked nothing and sent nothing this pass — a HEAD
         // per queued entry every tick against a capped Worker is not free.
@@ -1595,102 +1631,146 @@ export class HostSyncService extends EventTarget {
           }
           return { entry, applicable, owed, paused }
         }
-        // Reconciled CONCURRENTLY (the probes share the verify cap), so the
-        // pre-pass costs N/4 round trips, not N×T, ahead of the first byte.
-        const work: Owed[] = []
-        for (const r of await HostSyncService.#mapConcurrently(entries, HostSyncService.#VERIFY_MAX_CONCURRENT, reconcile)) {
-          if (!r) continue
-          if (r.owed.length === 0 && r.paused === 0) {
-            // Every target serves it (or refused it for good) — the entry's
-            // job is done. Retire it exactly as a confirmed push would.
-            await this.#removeEntry(r.entry)
-            progressed = true
-            if (r.applicable.length === 0) continue // refused everywhere — nothing was receipted
-            this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: r.entry.sig } }))
-            EffectBus.emit('host:receipt', { sig: r.entry.sig })
-            continue
-          }
-          if (r.owed.length === 0) continue // owed only to paused hosts — waits, uncounted
-          work.push(r)
-        }
+        // IN BATCHES, so the first byte never waits on the whole queue. A
+        // reload re-stages a big hive's whole public closure for a host that
+        // holds none of it — thousands of entries — and reconciling every one
+        // of them (a receipt read and a HEAD each) before the first PUT held
+        // the first receipt, or the first failure that passes a dead host
+        // over, for minutes: the 2026-10-10 meeting read "uploading" for 40
+        // of them. Each batch is reconciled CONCURRENTLY (the probes share the
+        // verify cap, so a batch costs B/4 round trips, not B×T), then sent,
+        // then the next — the same HEAD-before-PUT dedup, a batch at a time.
+        // A pass that finds every target paused (a failure in this very pass)
+        // stops there: the backoff retries, and the rest wait, unasked.
+        //
         // Live progress for the surfaces that paint an upload (the presence
-        // strip): the denominator is what the hosts actually lack, and
-        // `done` ticks AFTER an entry's sends resolve — so "k of M" means k
-        // landed, and the strip clears only when the last one has.
-        // Reports only — nothing waits on it.
+        // strip): `done` ticks AFTER an entry's sends resolve — so "k of M"
+        // means k landed. M is what the batches reconciled so far found the
+        // hosts lack, plus the entries not reconciled yet — an upper bound
+        // that shrinks to the truth as the pass goes — so a big queue shows
+        // its upload after its first batch, never after its last. Nothing is
+        // painted until some host is found to lack something, and the strip
+        // clears when the pass ends. Reports only — nothing waits on it.
         let done = 0
-        const total = work.length
-        if (total > 0) EffectBus.emit('host-sync:progress', { done, total })
-        // FOUR AT A TIME. Each entry's targets go in order; entries overlap,
-        // so a page of tiles is one or two round trips, not one per tile.
-        // Crash safety is per entry and unchanged: every receipt is written
-        // before its entry is removed, so an interrupted pass re-checks them.
-        await HostSyncService.#mapConcurrently(work, HostSyncService.#PUSH_MAX_CONCURRENT, async ({ entry, applicable, owed, paused }) => {
-          try {
-            // Settled = receipted, or refused for good by that target.
-            let settled = applicable.length - owed.length - paused
-            let served = settled > 0
-            for (const target of owed) {
-              if (!active(target)) continue // paused by a sibling's failure in THIS pass — entry stays
-              const outcome = await this.#pushAndReceipt(target, entry)
-              if (outcome === 'corrupt') {
-                // Local bytes for this sig don't hash to it — the host would
-                // (or did) 422. Retrying identical bytes can never succeed, so
-                // drop the entry and warn ONCE per sig, naming sig + kind so
-                // the upstream source of the bad bytes can be traced. A
-                // per-entry condition, never the host's — keep draining.
-                await this.#removeEntry(entry)
-                if (!this.#warnedCorrupt.has(entry.sig)) {
-                  this.#warnedCorrupt.add(entry.sig)
-                  console.warn(
-                    `[host-sync] dropped ${entry.kind} ${entry.sig.slice(0, 12)}… from backup queue — ` +
-                    `local bytes do not hash to this sig (would 422). The source store holds ` +
-                    `non-canonical bytes for it; that sig is now unreachable for witnessing peers ` +
-                    `until it is re-authored.`
-                  )
-                }
-                return
-              }
-              if (outcome === 'local') continue // nothing was asked of the host — the timer retries
-              if (outcome !== 'ok') {
-                if (outcome.drop) {
-                  // About THIS entry only (too large, a reserved address):
-                  // that target never owes it again; the host stays healthy.
-                  this.#refusedEntries.add(`${target.domain}:${entry.sig}`)
-                  this.#entryRefusal.set(target.domain, { status: outcome.status, reason: outcome.reason, sig: entry.sig })
-                  this.#emitSyncState(target)
-                  settled++
-                  progressed = true
-                } else {
-                  this.#noteHostFailure(target, outcome)
-                }
-                continue
-              }
-              this.#hostBackoff.delete(target.domain) // a success resets the host's ladder
-              settled++
-              served = true
-              progressed = true
-              // Attribution: a PUBLIC-target receipt means that host now
-              // serves this sig — record it in the broker's address graph so
-              // an adopt-click can answer getKnownDomains() without a mesh wait.
-              if (target.publicOnly) this.#noteAttribution(entry.sig, target.domain)
-            }
-            if (settled === applicable.length) {
-              // EVERY currently-enabled applicable target confirmed (or
-              // refused for good) — the entry's job is done (crash-safe:
-              // receipts land before this removal).
-              await this.#removeEntry(entry)
-              progressed = true
-              if (served) {
-                this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: entry.sig } }))
-                EffectBus.emit('host:receipt', { sig: entry.sig })
-              }
-            }
-          } finally {
-            done++
-            EffectBus.emit('host-sync:progress', { done, total })
+        let found = 0
+        let unread = entries.length
+        let shown = false
+        const report = (): void => {
+          if (found === 0 && !shown) return
+          shown = true
+          EffectBus.emit('host-sync:progress', { done, total: found + unread })
+        }
+        for (let at = 0; at < entries.length; at += HostSyncService.#DRAIN_BATCH) {
+          if (!targets.some(active)) break // paused in this pass — the backoff retries
+          // THE TARGETS MOVED since the pass was planned — a branch given its
+          // publish domain, a pool host passed over for the next: the pass
+          // starts over with the new set (its new host's canary first) rather
+          // than finish a backlog the new host waits behind. Synchronous, from
+          // caches; at least one batch goes per pass, so a flapping set still
+          // moves.
+          if (at > 0) {
+            this.#targetSpecs()
+            if (this.#targetSetKey !== plannedFor) { regather = true; break }
           }
-        })
+          const batch = entries.slice(at, at + HostSyncService.#DRAIN_BATCH)
+          const work: Owed[] = []
+          for (const r of await HostSyncService.#mapConcurrently(batch, HostSyncService.#VERIFY_MAX_CONCURRENT, reconcile)) {
+            if (!r) continue
+            if (r.owed.length === 0 && r.paused === 0) {
+              // Every target serves it (or refused it for good) — the entry's
+              // job is done. Retire it exactly as a confirmed push would.
+              await this.#removeEntry(r.entry)
+              progressed = true
+              if (r.applicable.length === 0) continue // refused everywhere — nothing was receipted
+              this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: r.entry.sig } }))
+              EffectBus.emit('host:receipt', { sig: r.entry.sig })
+              continue
+            }
+            if (r.owed.length === 0) continue // owed only to paused hosts — waits, uncounted
+            work.push(r)
+          }
+          unread -= batch.length
+          found += work.length
+          report()
+          // FOUR AT A TIME. Each entry's targets go in order; entries overlap,
+          // so a page of tiles is one or two round trips, not one per tile.
+          // Crash safety is per entry and unchanged: every receipt is written
+          // before its entry is removed, so an interrupted pass re-checks them.
+          await HostSyncService.#mapConcurrently(work, HostSyncService.#PUSH_MAX_CONCURRENT, async ({ entry, applicable, owed, paused }) => {
+            try {
+              // Settled = receipted, or refused for good by that target.
+              let settled = applicable.length - owed.length - paused
+              let served = settled > 0
+              for (const target of owed) {
+                if (!active(target)) continue // paused by a sibling's failure in THIS pass — entry stays
+                const outcome = await this.#pushAndReceipt(target, entry)
+                if (outcome === 'corrupt') {
+                  // Local bytes for this sig don't hash to it — the host would
+                  // (or did) 422. Retrying identical bytes can never succeed, so
+                  // drop the entry and warn ONCE per sig, naming sig + kind so
+                  // the upstream source of the bad bytes can be traced. A
+                  // per-entry condition, never the host's — keep draining.
+                  await this.#removeEntry(entry)
+                  if (!this.#warnedCorrupt.has(entry.sig)) {
+                    this.#warnedCorrupt.add(entry.sig)
+                    console.warn(
+                      `[host-sync] dropped ${entry.kind} ${entry.sig.slice(0, 12)}… from backup queue — ` +
+                      `local bytes do not hash to this sig (would 422). The source store holds ` +
+                      `non-canonical bytes for it; that sig is now unreachable for witnessing peers ` +
+                      `until it is re-authored.`
+                    )
+                  }
+                  return
+                }
+                if (outcome === 'local') continue // nothing was asked of the host — the timer retries
+                if (outcome !== 'ok') {
+                  if (outcome.drop) {
+                    // About THIS entry only (too large, a reserved address):
+                    // that target never owes it again; the host stays healthy.
+                    this.#refusedEntries.add(`${target.domain}:${entry.sig}`)
+                    this.#entryRefusal.set(target.domain, { status: outcome.status, reason: outcome.reason, sig: entry.sig })
+                    this.#emitSyncState(target)
+                    settled++
+                    progressed = true
+                  } else {
+                    this.#noteHostFailure(target, outcome)
+                  }
+                  continue
+                }
+                this.#hostBackoff.delete(target.domain) // a success resets the host's ladder
+                settled++
+                served = true
+                progressed = true
+                // Attribution: a PUBLIC-target receipt means that host now
+                // serves this sig — record it in the broker's address graph so
+                // an adopt-click can answer getKnownDomains() without a mesh wait.
+                if (target.publicOnly) this.#noteAttribution(entry.sig, target.domain)
+              }
+              if (settled === applicable.length) {
+                // EVERY currently-enabled applicable target confirmed (or
+                // refused for good) — the entry's job is done (crash-safe:
+                // receipts land before this removal).
+                await this.#removeEntry(entry)
+                progressed = true
+                if (served) {
+                  this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: entry.sig } }))
+                  EffectBus.emit('host:receipt', { sig: entry.sig })
+                }
+              }
+            } finally {
+              done++
+              report()
+            }
+          })
+        }
+        // A pass that stopped early leaves its unread entries for the next
+        // one: the strip does not go on promising them.
+        if (shown && done < found + unread) EffectBus.emit('host-sync:progress', { done, total: done })
+        if (regather) {
+          targets = await this.#targets()
+          if (!targets.some(active)) break
+          continue
+        }
         if (!progressed) break // nothing advanced (hosts unreachable/paused) — stop; the backoff retries
       }
       // Per-host state: pending = entries THIS host still owes a receipt
@@ -1717,6 +1797,39 @@ export class HostSyncService extends EventTarget {
   }
 
   static readonly #PUSH_MAX_CONCURRENT = 4
+  /** Entries reconciled before their sends go (see drain): eight HEAD round
+   *  trips at the verify cap, whatever the queue holds. */
+  static readonly #DRAIN_BATCH = 32
+
+  /** ONE CANARY PER SWARM HOST THAT HAS NOT ANSWERED YET. The batches walk
+   *  the queue oldest first, so a host whose entries were staged behind
+   *  another's backlog — a branch given its publish domain (or a typo of one)
+   *  while the pool host takes a whole hive — would be asked nothing until
+   *  every earlier batch went, and until its first answer or failure the
+   *  status lines have nothing true to say about it. The first entry each
+   *  such host is owed (and holds no receipt for) is moved into the first
+   *  batch; the rest keep their order. Local reads only, and a host is no
+   *  longer asked about once it has answered or failed. */
+  readonly #canariesFirst = async (entries: QueueEntry[], targets: readonly SyncTarget[]): Promise<QueueEntry[]> => {
+    const lead: QueueEntry[] = []
+    for (const target of targets) {
+      const host = target.domain
+      if (this.#answeredHosts.has(host) || this.#provenHosts.has(host) || this.#hostBackoff.has(host)) continue
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i]!
+        if (!this.#owedBy(target, entry.sig) || this.#refusedEntries.has(`${host}:${entry.sig}`)) continue
+        if (this.#receiptedOnHost.get(entry.sig)?.has(host)) continue
+        if (target.publicOnly && !(await this.#isPublicMarked(entry.sig))) continue
+        if (await this.#receiptExists(entry.sig, target)) { this.#noteReceiptedOn(entry.sig, host); continue }
+        // Already in the first batch, or already a canary: nothing to move.
+        if (i >= HostSyncService.#DRAIN_BATCH && !lead.includes(entry)) lead.push(entry)
+        break
+      }
+    }
+    if (lead.length === 0) return entries
+    const moved = new Set(lead)
+    return [...lead, ...entries.filter(entry => !moved.has(entry))]
+  }
 
   /** A swarm host (as a public-only target) is owed only what a current root
    *  offered on a page it serves needs (#neededBySwarm); every other target —
@@ -1739,45 +1852,64 @@ export class HostSyncService extends EventTarget {
     const streak = sameWave ? prev.streak : (prev?.streak ?? 0) + 1
     const notLive = failure.status !== 'not-live' ? 0 : sameWave ? prev.notLive : (prev?.notLive ?? 0) + 1
     const ladder = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** (streak - 1))
-    const wait = failure.status === 'refused' ? REFUSED_BACKOFF_MS
+    // A refusal read from the browser's side (`threw`, #putThrew) is not the
+    // host's own word: it waits on the ladder, never the refusal's 10 min.
+    const wait = failure.status === 'refused' && !failure.threw ? REFUSED_BACKOFF_MS
       : failure.status === 'full' ? Math.max(FULL_MIN_BACKOFF_MS, failure.retryAfterMs ?? 0)
       : failure.status === 'not-live' && notLive <= NOT_LIVE_RETRIES ? NOT_LIVE_RETRY_MS
       : ladder + Math.floor(Math.random() * ladder * 0.25)
     const until = Math.max(now + wait, sameWave ? prev.until : 0)
-    this.#hostBackoff.set(target.domain, { until, streak, notLive, status: failure.status, reason: failure.reason })
-    this.#notePoolHostFailure(target, failure.status, streak)
+    this.#hostBackoff.set(target.domain, { until, streak, notLive, status: failure.status, reason: failure.reason, ...(failure.threw ? { threw: true as const } : {}) })
+    this.#notePoolHostFailure(target, failure, streak)
     if (!sameWave || prev.status !== failure.status) {
       this.#emitSyncState(target)
+      // Once per episode: the ladder's later waves say nothing new.
+      if (failure.threw) { if (!prev?.threw) console.warn(`[host-sync] ${target.domain} answers, but no upload from this page reaches it (its CORS preflight?) — retried on the ladder`) }
       // An operator fixing a writers list needs the exact key — once per episode.
-      if (failure.status === 'refused') void this.#getOwnPubkey().then(pk => console.warn(
+      else if (failure.status === 'refused') void this.#getOwnPubkey().then(pk => console.warn(
         `[host-sync] ${target.domain} refused uploads (${failure.reason}) — paused ${REFUSED_BACKOFF_MS / 60_000} min; ` +
         `ioc.get('@diamondcoreprocessor.com/HostSyncService').enable() retries now. pubkey: ${pk || '(no signer available)'}`))
     }
     this.#scheduleRetry()
   }
 
-  /** Pool hosts passed over while the PATH was down (the mesh not open) —
-   *  given back when a socket comes back. */
+  /** Pool hosts passed over for what may have been the PATH — silent, or
+   *  answering a page, while the mesh was not open; or uploads that never
+   *  left the browser (#putThrew) — given back when a socket comes back. */
   readonly #downWhileOffline = new Set<string>()
   /** Hosts that held a receipt this session: proven to take uploads, so a
    *  run of silence from one is the path, not the host. */
   readonly #provenHosts = new Set<string>()
 
   /** A POOL HOST THAT CANNOT TAKE UPLOADS MUST NOT STRAND THE ROOM. When one
-   *  refuses (401/403 — the writers list, a closed door), is full, or has
-   *  never answered an upload and stays silent while this tab is connected
-   *  (a page answering where a heap should be, an upload blocked at the CORS
-   *  preflight — both read as no answer), the resolver passes it over: the
-   *  next pool host, else a relay that hosts participants (swarm-hosts.ts).
-   *  Publish domains are the participant's explicit choice for a branch and
-   *  are never passed over; the status line names their refusal instead. */
-  readonly #notePoolHostFailure = (target: SyncTarget, status: SyncStatus, streak: number): void => {
+   *  refuses (401/403 — the writers list, a closed door; or an upload its
+   *  CORS preflight never lets leave while it answers everything else —
+   *  #putThrew), or is full, the resolver passes it over at once; a page
+   *  where a heap should be already was, at the HEAD (#hostHolds). One that
+   *  has never answered an upload and stays silent while this tab is
+   *  connected is passed over on its second wave. Then the next pool host,
+   *  else a relay that hosts participants (swarm-hosts.ts). Publish domains
+   *  are the participant's explicit choice for a branch and are never passed
+   *  over; the status lines name the branch, the host and why instead. */
+  readonly #notePoolHostFailure = (target: SyncTarget, failure: PushFailure, streak: number): void => {
     if (!target.swarm || !this.#resolver.isPoolHost(target.domain)) return
-    const reason = `${status}`
-    if (status === 'refused' || status === 'full') { this.#resolver.markDown(target.domain, reason); return }
+    const { status } = failure
+    const reason = `${status}: ${failure.reason}`
+    if (status === 'refused' || status === 'full') {
+      // Only the host's OWN refusal (a 4xx) is remembered across a reload of
+      // this tab. A full host named its own wait; an upload that never left
+      // the browser may have been the path — this page's only, and given
+      // back with the next socket.
+      if (failure.threw) this.#downWhileOffline.add(target.domain)
+      this.#resolver.markDown(target.domain, reason, status === 'refused' && !failure.threw)
+      return
+    }
     if (status !== 'unreachable' || this.#provenHosts.has(target.domain) || streak < 2) return
+    // Silence is weak evidence — a 5xx while the host deploys, a timeout, or
+    // the path itself down (given back with the next socket): this page's
+    // only, never remembered across a reload.
     if (this.#meshState !== 'open') this.#downWhileOffline.add(target.domain)
-    this.#resolver.markDown(target.domain, reason)
+    this.#resolver.markDown(target.domain, reason, false)
   }
 
   /** One timer for the earliest backoff that ends — the retry is the host's
@@ -1815,13 +1947,80 @@ export class HostSyncService extends EventTarget {
       : refusal ? refusal.status
       : 'backed-up'
     const reason = failure ? failure.reason : pending === 0 && refusal ? refusal.reason : ''
+    const why = this.#whyOf(target.domain, status, reason)
     EffectBus.emit('sync:state', {
       host: target.domain, pending, status, state: status, reason,
+      // Why it is not taking the bytes, as a person acts on it (#whyOf) —
+      // absent while it is.
+      ...(why ? { why } : {}),
       swarm: target.swarm === true, missing: this.#missingLocal.size,
       // Why this host: the page's publish domains, the hosts pool, or the
       // relay that allows participants (absent for every other target).
       ...(target.swarm ? { source: [...(this.#swarmSources().get(target.domain) ?? [])][0] ?? 'none' } : {}),
     })
+  }
+
+  /** WHY, in the words a person acts on (HostWhy). Only a failing status has
+   *  one. A page where a heap answers bytes is `page`, whatever the push then
+   *  said; `unreachable` from a host that never answered anything at all
+   *  while this tab was online and its socket open is `unresolved` — the name
+   *  does not reach a running host (the 2026-10-10 `hyperccomb.com` typo:
+   *  NXDOMAIN read as "uploading" for ever; also a machine host that is
+   *  switched off, whose edge's error page carries no CORS — the browser
+   *  cannot tell them apart, so the line asks for both). A timeout is never
+   *  `unresolved`: something answered the connection. */
+  readonly #whyOf = (domain: string, status: SyncStatus, reason = ''): HostWhy | '' => {
+    if (status === 'backed-up' || status === 'syncing') return ''
+    if (status === 'too-large' || status === 'not-live' || status === 'full') return status
+    if (this.#answersPage.has(domain)) return 'page'
+    if (status === 'refused') return 'refused'
+    const silent = !this.#answeredHosts.has(domain) && !this.#provenHosts.has(domain)
+    return silent && reason !== 'timed out' && this.#meshState === 'open' && !HostSyncService.#offline() ? 'unresolved' : 'unreachable'
+  }
+
+  /** The browser says it has no network at all (navigator.onLine false) —
+   *  then nothing that failed is the host's to answer for. */
+  static #offline(): boolean {
+    try { return globalThis.navigator?.onLine === false } catch { return false }
+  }
+
+  /**
+   * WHAT STOPS A HOST TAKING THIS TAB'S UPLOADS, or null — synchronous, from
+   * memory. Its standing failure, or (a pool host the resolver passed over
+   * without a push — it answered a page) why it was passed over; and WHY, as
+   * `sync:state` says it. A failure about one file, or one the host itself
+   * clears in a moment (`too-large`, `not-live`), is no trouble of the
+   * host's. The publish row asks it of each domain a branch publishes to, so
+   * a branch whose domain can never take a write says so, by name, instead
+   * of reading as uploading.
+   */
+  public readonly hostTrouble = (host: string): { host: string; status: SyncStatus; why: HostWhy; reason: string } | null => {
+    const domain = foldContentLabel(String(host ?? '').trim().toLowerCase()
+      .replace(/^(?:wss?|https?):\/\//, '').replace(/\/+$/, ''))
+    if (!domain) return null
+    const failure = this.#hostBackoff.get(domain)
+    const down = this.#resolver.downReason(domain)
+    if (failure) {
+      const why = this.#whyOf(domain, failure.status, failure.reason)
+      if (!why || why === 'too-large' || why === 'not-live') return null
+      return { host: domain, status: failure.status, why, reason: failure.reason }
+    }
+    if (!down) return null
+    // Passed over with no standing failure here: at its HEAD (a page where a
+    // heap answers bytes), or before a reload of this tab — which remembers
+    // why in the reason it was passed over with, never "check the name".
+    const why: HostWhy = this.#answersPage.has(domain) ? 'page' : HostSyncService.#whyOfDown(down)
+    const status: SyncStatus = why === 'full' ? 'full' : why === 'unreachable' ? 'unreachable' : 'refused'
+    return { host: domain, status, why, reason: down }
+  }
+
+  /** Why a pool host was passed over, read back from the reason it was
+   *  passed over with (#hostHolds, #notePoolHostFailure: the status word
+   *  first) — all a reload of this tab still knows about it. */
+  static #whyOfDown(reason: string): HostWhy {
+    if (/answers a page/.test(reason)) return 'page'
+    const word = (reason.split(':', 1)[0] ?? '').trim()
+    return word === 'refused' || word === 'full' ? word : 'unreachable'
   }
 
   /** Fire-and-forget: after a PUBLIC-target receipt confirms, attribute
@@ -1990,6 +2189,9 @@ export class HostSyncService extends EventTarget {
     this.#verifiedOnHost.clear()
     this.#assertedAbsent.clear()
     this.#pageHosts.clear()
+    this.#probedHosts.clear()
+    this.#answersPage.clear()
+    this.#putsThrew.clear()
     this.#hostBackoff.clear()
     this.#refusedEntries.clear()
     this.#entryRefusal.clear()
@@ -2631,8 +2833,16 @@ export class HostSyncService extends EventTarget {
       return 'local'
     }
 
+    let put: Response
     try {
-      const put = await HostSyncService.#fetchWithin(url, { method: 'PUT', headers: { Authorization: auth }, body: bytes }, bytes.byteLength)
+      put = await HostSyncService.#fetchWithin(url, { method: 'PUT', headers: { Authorization: auth }, body: bytes }, bytes.byteLength)
+    } catch (err) {
+      return await this.#putThrew(target, url, bytes.byteLength, err)
+    }
+    this.#answeredHosts.add(host)
+    this.#putsThrew.delete(host) // an upload reached it: the evidence of a block starts over
+
+    try {
       // 422 = the host's own sha256(body)===sig check failed. The precheck
       // above normally catches this first; this covers the rare case where
       // the host canonicalizes differently than we do. Either way the bytes
@@ -2666,13 +2876,50 @@ export class HostSyncService extends EventTarget {
       try { await back.body?.cancel() } catch { /* already drained/closed */ }
       if (!served) return { status: 'unreachable', reason: `${back.status} not served back` }
     } catch (err) {
-      // Network, CORS, host down, or our own deadline — retry on the ladder.
+      // The read-back: network, host down, or our own deadline — retry on
+      // the ladder (the PUT itself was answered).
       const timedOut = (err as { name?: string } | null)?.name === 'AbortError'
       return { status: 'unreachable', reason: timedOut ? 'timed out' : 'unreachable' }
     }
 
     return (await this.#writeReceipt(entry.sig, target)) ? 'ok' : 'local'
   }
+
+  /** A PUT that never got an answer, classified. Our own deadline, or a
+   *  network error from a host that never answered anything, is the ladder's
+   *  `unreachable`. But an upload its CORS preflight never lets leave the
+   *  browser, from a SWARM host that answers everything else, is the host up
+   *  and refusing (the hypercomb.com apex on 2026-10-10 blocked every upload
+   *  and read as `unreachable` for 40 minutes) — and the browser shows that
+   *  as the same TypeError a dropped network, a captive portal or an edge's
+   *  CORS-less error page gives. So it is called a refusal only on evidence,
+   *  gathered on this failure path and never on connect: the host had
+   *  answered this session and never took an upload from this tab; this tab
+   *  is online with its socket open; a SECOND upload to it never left since
+   *  one last reached it (one error page is not a block); and the host
+   *  answers a HEAD at that very address now (a dropped path does not). Even
+   *  then it is `threw`: on the ladder, a pool host passed over for this page
+   *  only, given back with the next socket (#notePoolHostFailure). A body
+   *  larger than an edge takes is that one entry's fate, never the host's. */
+  readonly #putThrew = async (target: SyncTarget, url: string, sent: number, err: unknown): Promise<PushFailure> => {
+    if ((err as { name?: string } | null)?.name === 'AbortError') return { status: 'unreachable', reason: 'timed out' }
+    const unreachable: PushFailure = { status: 'unreachable', reason: 'unreachable' }
+    const host = target.domain
+    if (!(err instanceof TypeError) || !target.swarm) return unreachable
+    if (sent > EDGE_BODY_MAX_BYTES) return { status: 'too-large', reason: `${Math.ceil(sent / 1_048_576)} MB — more than an edge takes`, drop: true }
+    if (this.#provenHosts.has(host) || !this.#answeredHosts.has(host)) return unreachable
+    if (this.#meshState !== 'open' || HostSyncService.#offline()) return unreachable
+    const threw = (this.#putsThrew.get(host) ?? 0) + 1
+    this.#putsThrew.set(host, threw)
+    if (threw < 2) return unreachable
+    try { await HostSyncService.#fetchWithin(url, { method: 'HEAD', cache: 'no-store' }) } catch { return unreachable }
+    return { status: 'refused', reason: `${host} answers, but lets no upload from this page through`, threw: true }
+  }
+
+  /** Uploads to a host that never left the browser since one last reached
+   *  it — #putThrew's evidence that the host blocks them. Cleared by any
+   *  answered PUT or receipt, a socket that comes back, and the retry. */
+  readonly #putsThrew = new Map<string, number>()
 
   /** A host's non-2xx answer, classified. The reason is the status plus the
    *  first line of the body — the host's own words, never paraphrased. */
@@ -2735,7 +2982,13 @@ export class HostSyncService extends EventTarget {
       // This one is per target (`swarm: true`) — the swarm re-walks on it;
       // counters of settled entries skip it.
       if (target.swarm) {
+        // Proof it takes bytes: whatever page it once answered (it was fixed),
+        // and whatever uploads once never left, no longer describe it — and
+        // it is probed (HEAD-before-PUT) like any heap again.
         this.#provenHosts.add(target.domain)
+        this.#pageHosts.delete(target.domain)
+        this.#answersPage.delete(target.domain)
+        this.#putsThrew.delete(target.domain)
         this.#resolver.markUp(target.domain)
         EffectBus.emit('host:receipt', { sig, host: target.domain, swarm: true })
       }
@@ -2803,6 +3056,19 @@ export class HostSyncService extends EventTarget {
    *  probed again this session (#hostHolds). Cleared with #assertedAbsent. */
   readonly #pageHosts = new Set<string>()
 
+  /** Swarm hosts of any kind (pool hosts and publish domains) that answered
+   *  a page where a sig's bytes should be — the status lines' `page` (#whyOf).
+   *  Cleared with #pageHosts. */
+  readonly #answersPage = new Set<string>()
+
+  /** Hosts that ANSWERED a request this session — a HEAD of any status, or a
+   *  PUT's response. The path to them has worked: later uploads that never
+   *  leave the browser may be the host's CORS refusing them (#putThrew asks
+   *  for more evidence), and a host never in here while this tab is online
+   *  may not resolve at all (#whyOf). Session memory, never cleared: an
+   *  answer stays an answer. */
+  readonly #answeredHosts = new Set<string>()
+
   /** ASK THE HOST before sending: does it already serve this sig? One HEAD
    *  on the flat address, under the verify concurrency cap and this host's
    *  own breaker. A served answer (#servesSig) mints the receipt and returns
@@ -2810,12 +3076,50 @@ export class HostSyncService extends EventTarget {
    *  the host asserting absence → remembered, false, push. Network trouble
    *  or 5xx asserts nothing → false; the push that follows fails the same
    *  way and waits for the retry timer, and a streak pauses this host's
-   *  probes. */
+   *  probes.
+   *
+   *  THE FIRST QUESTION TO A HOST GOES ALONE. Its answer — bytes, a 404, a
+   *  page where bytes should be, nothing — says how to treat every address
+   *  after it, so while this tab's first probe of a host is in flight the
+   *  rest of its batch waits on that one answer instead of asking the same
+   *  question four times over: a page host costs ONE HEAD, and is passed over
+   *  before a second is asked. Settled either way, it is never waited on
+   *  again — a host that does not answer is then asked at the full cap, never
+   *  one entry behind another. */
   readonly #hostHolds = async (sig: string, target: SyncTarget): Promise<boolean> => {
     const host = target.domain
     const key = `${host}:${sig}`
     if (this.#assertedAbsent.has(key)) return false
     if (this.#pageHosts.has(host)) return false // it answers every address with a page
+    if (!this.#probedHosts.has(host)) {
+      const first = this.#firstProbe.get(host)
+      if (first) {
+        await first
+        if (this.#assertedAbsent.has(key) || this.#pageHosts.has(host)) return false
+      } else {
+        let settle!: () => void
+        this.#firstProbe.set(host, new Promise<void>(resolve => { settle = resolve }))
+        try { return await this.#probeHolds(sig, target) } finally {
+          this.#probedHosts.add(host)
+          this.#firstProbe.delete(host)
+          settle()
+        }
+      }
+    }
+    return this.#probeHolds(sig, target)
+  }
+
+  /** This tab's first probe of a host, while it is in flight (#hostHolds). */
+  readonly #firstProbe = new Map<string, Promise<void>>()
+  /** Hosts whose first probe settled — asked at the full cap from then on.
+   *  Cleared with #pageHosts, so a host given back is asked alone again. */
+  readonly #probedHosts = new Set<string>()
+
+  /** One held-probe (#hostHolds): the HEAD, under the verify cap and this
+   *  host's breaker. */
+  readonly #probeHolds = async (sig: string, target: SyncTarget): Promise<boolean> => {
+    const host = target.domain
+    const key = `${host}:${sig}`
     const health = this.#holdsHealth.get(host) ?? { streak: 0, pausedUntil: 0 }
     this.#holdsHealth.set(host, health)
     if (Date.now() < health.pausedUntil) return false // breaker open — no probes; the push will tell
@@ -2824,6 +3128,7 @@ export class HostSyncService extends EventTarget {
       if (Date.now() < health.pausedUntil) return false // re-check after the slot wait (burst)
       const url = `${HostSyncService.#schemeFor(host)}://${host}${this.#pathFor(sig)}`
       const res = await HostSyncService.#fetchWithin(url, { method: 'HEAD', cache: 'no-store' })
+      this.#answeredHosts.add(host) // whatever it said, the path to it works
       if (res.ok || res.status === 404) health.streak = 0 // the host is alive and ASSERTING
       if (await this.#servesSig(res, url, sig)) {
         if (!(await this.#writeReceipt(sig, target))) return false
@@ -2835,13 +3140,32 @@ export class HostSyncService extends EventTarget {
       }
       if (res.ok && (res.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) {
         // A PAGE WHERE BYTES SHOULD BE: a site's fallback for every address
-        // (the hypercomb.com apex is the Azure shell today). For a POOL host —
-        // where a host that cannot take uploads is passed over — its answer to
-        // the next sig would be the same page, so it is not asked again this
-        // session; the push says whether it takes uploads at all
-        // (#notePoolHostFailure). Any other host keeps its per-sig probe: a
-        // static door may hold some sigs as files and fall back for the rest.
-        if (target.swarm && this.#resolver.isPoolHost(host)) this.#pageHosts.add(host)
+        // (the hypercomb.com apex answered the Azure shell until 2026-10-10).
+        // Any host keeps its per-sig probe — a static door may hold some sigs
+        // as files and fall back for the rest — and is pushed to; a publish
+        // domain is the participant's choice and is never passed over, only
+        // named honestly when its push fails (`page`, #whyOf).
+        // A host that already took this tab's uploads and answers a page
+        // once is a hiccup (a route or a deploy), never a page host.
+        if (target.swarm && !this.#provenHosts.has(host)) {
+          this.#answersPage.add(host)
+          if (this.#resolver.isPoolHost(host)) {
+            // A POOL host is different: a host that cannot take uploads is
+            // passed over, and a heap answers bytes or 404 — never a page.
+            // THIS HEAD, the one the drain makes anyway, is the probe: passed
+            // over now, before a single PUT waits on it (the 2026-10-10
+            // meeting sat 40 minutes behind two whole failure waves of it).
+            // Its answer to the next sig would be the same page, so it is not
+            // asked again this session; a receipt from it, or the
+            // participant's retry, gives it back. Remembered across a reload
+            // of this tab — unless the socket was down (then the page may
+            // have been the path's, and the next socket gives it back).
+            const pathDown = this.#meshState !== 'open'
+            this.#pageHosts.add(host)
+            if (pathDown) this.#downWhileOffline.add(host)
+            this.#resolver.markDown(host, `${host} answers a page — takes no uploads`, !pathDown)
+          }
+        }
         this.#assertedAbsent.add(key)
         return false
       }

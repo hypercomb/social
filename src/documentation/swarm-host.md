@@ -29,18 +29,24 @@ is slow.
      added FIRST. A fresh install seeds `hypercomb.com` there, and nothing
      else. Adding a host to follow it never moves where your tiles go;
      removing the hosts ahead of one makes it the primary. A pool host that
-     fails this session — it refuses (401/403), is full (429/507), or has
-     never taken an upload and stays silent while your relay answers (a page
-     where a heap should be, an upload blocked at its CORS preflight) — is
-     passed over for the next one;
+     fails — it refuses (401/403, or uploads its CORS preflight never lets
+     leave while it answers everything else), is full (429/507), answers a
+     web PAGE where a heap answers bytes or 404 (passed over at that very
+     HEAD, before any upload waits on it — unless it already took this tab's
+     uploads), or has never taken an upload and stays silent while your relay
+     answers — is passed over for the next one. THIS TAB remembers it across
+     a reload (an hour at most) only on positive evidence: the page, or the
+     host's own 401/403;
   4. **the relay you meet at** — only when 1–3 have nothing usable, and
      only when its `hc:host` card says participants `all` or `zones`. A
      relay that sends no card hosts nobody.
 
   The relay is never the host merely because it is where you meet: that made
   one person's relay everyone's host. Publish domains are never passed over:
-  they are your choice for that branch, and the status line names their
-  refusal instead.
+  they are your choice for that branch, so the status line and the branch's
+  publish row NAME the branch, the host and why instead — "favorites:
+  hyperccomb.com can't be reached — check the host name, and that the host is
+  running" — rather than the branch reading as uploading for ever.
 - **A tile goes where its page goes; a branch's subtree goes where ITS pages
   go.** A tile offered on a page is uploaded to that page's hosts, and its
   children to the hosts of the page one step down, and so on. So a branch that
@@ -325,24 +331,51 @@ going out whatever happens.
 | 413 | `too-large` | the entry is dropped for this host | that tile stays name-only |
 | 429 or 507 | `full` | Retry-After, at least 10 min | names only |
 | no answer, or 5xx | `unreachable` | 2 s, doubling to 60 s | retried |
+| no answer to a SECOND PUT from a swarm host that answered a HEAD and has taken no upload from this tab, while the tab is online with its socket open and the host answers a HEAD at that address right after (its CORS preflight) | `refused` | 2 s, doubling to 60 s — given back with a reopened socket | a pool host is passed over for this page only |
+| no answer to a PUT over 100 MB from a swarm host (an edge's CORS-less 413) | `too-large` | the entry is dropped for this host | that tile stays name-only |
 
 `sync:state` also reports `backed-up` (everything served) and `syncing`
-(uploads in flight). Back-off resets on success, and on a socket that comes
-back — the first open after a join, or the one `reopened` payload; a stall
+(uploads in flight). Beside a failure it says `why`, as a person acts on it:
+`page` (the host answers a web page where a heap answers bytes — until it
+serves a receipt), `unresolved` (nothing at that name ever answered, fast,
+while the tab was online with its socket open — a typo, a name that resolves
+nowhere, or a machine host switched off behind its edge; the browser cannot
+tell them apart, so the line asks for both; a timeout is never `unresolved`),
+`refused`, `full`, or plain `unreachable`. `hostTrouble(host)` answers the
+same from memory, for the publish rows. The drain reconciles and sends in
+batches of 32 — a HEAD-before-PUT check a batch at a time — so a reload that
+re-stages thousands of entries for a host never holds the first upload, or
+the first failure that passes a dead host over, behind all of them;
+`host-sync:progress` is up after the first batch. A swarm host that has not
+answered yet gets ONE CANARY — the first entry it is owed — in the first
+batch, and a target set that moves mid-pass (a branch given its publish
+domain, a pool host passed over) starts the pass over, so a new host's first
+answer never waits behind another host's backlog. The FIRST question this
+tab asks a host goes alone: while it is in flight the rest of the batch waits
+on that one answer, so a page host costs one HEAD (and the GET that checks
+what a 200 carries), not one per concurrent slot; once it has settled, either
+way, the host is asked at the full cap. Back-off resets on success, and on a
+socket that comes back — the first open after a join, or the one `reopened` payload; a stall
 answered late is not a return. A 409 answers only a PUT at a reserved address,
 which a tile's bytes never are. Each receipt the swarm host earns is announced
 at once as `host:receipt` {sig, host, swarm: true}, so a second, refusing
 public-only target can never hold the room's tiles name-only. A reopened
 socket resets the relay's pause when the relay is a swarm host, and any other
-swarm host's only when it was `unreachable` or `not-live` — the path came
-back; a refusal or a full host keeps its window. A POOL host that refused, is
-full, or never took an upload and stayed silent while the relay answered is
-also passed over for the session (see the rule): the next pool host, then a
-relay that hosts participants, takes the page. A pool host passed over while
-the socket itself was down gets its chance back with the socket; any other
-only when the pool changes, `enable()` or `reDrain()` is called, or it serves
-a receipt. `swarm:share-status` names the pool hosts passed over
-(`passedOver`).
+swarm host's only when it was `unreachable` or `not-live` or a refusal read
+from the browser's side (uploads that never left) — the path came back; the
+host's own refusal or a full host keeps its window. A POOL host that refused,
+is full, answered a page, or never took an upload and stayed silent while the
+relay answered is also passed over (see the rule): the next pool host, then a
+relay that hosts participants, takes the page. A pool host passed over for
+what may have been the path — anything while the socket itself was down, or
+uploads that never left the browser — gets its chance back with the socket.
+Only a page or the host's own 401/403 is remembered in THIS TAB's
+sessionStorage (`hc:swarm-hosts:down`, the newest 8, an hour at most — never
+localStorage) so a reload does not make it primary again; a full host (it
+named its own wait) and plain silence are this page's only. A remembered one
+gets its chance back only when the pool changes, `enable()` or `reDrain()` is
+called, or it serves a receipt. `swarm:share-status` names the pool hosts
+passed over (`passedOver`).
 
 ## Names before bytes: the gate
 

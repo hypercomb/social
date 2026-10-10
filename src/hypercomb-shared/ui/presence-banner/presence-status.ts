@@ -55,6 +55,21 @@ export interface ShareStatus {
   hostSource?: string
   hostState?: string
   reason?: string
+  /** Why `host` is not taking the bytes, as a person acts on it (host-sync's
+   *  HostWhy: page, unresolved, refused, full, unreachable). */
+  why?: string
+  /** Branches a host takes none of the bytes of — named with the host and
+   *  why, never counted as uploading (a publish domain that does not
+   *  resolve, answers a page, refuses or is full). */
+  blocked?: readonly BlockedBranch[]
+}
+
+/** One branch a host holds (SwarmDrone #blockedBranches). */
+export interface BlockedBranch {
+  branch?: string
+  host?: string
+  state?: string
+  why?: string
 }
 
 /** HostSyncService's `sync:state` payload — swarm hosts' only (the component
@@ -69,6 +84,8 @@ export interface SyncState {
   swarm?: boolean
   source?: string
   missing?: number
+  /** Why it is not taking the bytes (host-sync's HostWhy). */
+  why?: string
 }
 
 export type LinkPhase = 'connecting' | 'open' | 'reconnecting' | 'down'
@@ -170,6 +187,20 @@ const HOST_HELD: Readonly<Record<string, string>> = {
   'not-live': 'swarm.share.not-live',
 }
 
+/** A branch a host holds, by why, by catalog key: "<branch>: <host> …". */
+const BRANCH_HELD: Readonly<Record<string, string>> = {
+  'unresolved': 'swarm.share.branch.unresolved',
+  'page': 'swarm.share.branch.page',
+  'refused': 'swarm.share.branch.refused',
+  'full': 'swarm.share.branch.full',
+  'unreachable': 'swarm.share.branch.unreachable',
+}
+
+const branchPart = (b: BlockedBranch): StatusPart => ({
+  key: BRANCH_HELD[String(b.why ?? '')] ?? BRANCH_HELD[String(b.state ?? '')] ?? BRANCH_HELD['unreachable'],
+  params: { branch: String(b.branch ?? ''), host: String(b.host ?? '') },
+})
+
 const count = (n: unknown): number => {
   const v = Number(n)
   return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0
@@ -211,9 +242,16 @@ export function statusLine(i: StatusInput): StatusLine {
     const hostWord = i.sync ? (i.sync.state ?? i.sync.status ?? '') : (share?.hostState ?? '')
     const tooLarge = hostWord === 'too-large'
     const held = tooLarge ? undefined : HOST_HELD[hostWord]
+    // A BRANCH A HOST HOLDS is named — the branch, the host, and why (a name
+    // that does not resolve, a page where a heap belongs, a refusal) —
+    // instead of reading as "uploading" for ever. This page's own host is
+    // named so only while its live word still holds it.
+    const blocked = (share?.blocked ?? []).filter(b => !!b?.branch && !!b.host && (b.host !== upload || !!held))
+    const own = held ? blocked.find(b => b.host === upload) : undefined
     if (held) {
       // Names only — the count would promise more than the room receives.
-      parts.push({ key: held, params: { host: upload } })
+      // The host's live why beats the walk's snapshot of it.
+      parts.push(own ? branchPart({ ...own, why: i.sync?.why || own.why }) : { key: held, params: { host: upload } })
       tone = 'warn'
     } else {
       if (share && count(share.offered) > 0) {
@@ -232,6 +270,11 @@ export function statusLine(i: StatusInput): StatusLine {
         parts.push({ key: HOST_HELD['too-large'], params: { host: upload } })
         tone = 'warn'
       }
+    }
+    for (const b of blocked) {
+      if (b === own) continue
+      parts.push(branchPart(b))
+      tone = 'warn'
     }
     if (share && count(share.private) > 0) {
       parts.push(

@@ -85,6 +85,10 @@ interface PublishRow {
   /** host → the entrance each address this creation is served at runs —
    *  its own addresses, never a domain's root. */
   entrances: Record<string, PublishEntrance>
+  /** A domain this branch publishes to that takes none of its bytes, and why
+   *  (unresolved, page, refused, full, unreachable); null when none. Optional:
+   *  an older drone sends none. */
+  hostTrouble?: { host: string; why: string } | null
 }
 
 /** Mirrors PublishEntrance in sharing/publish-status.drone.ts. */
@@ -870,6 +874,19 @@ export class PublishPanelComponent implements OnDestroy {
       case 'unknown': return row.seenAt ? 'publish.why.as-of' : 'publish.why.offline'
       case 'gone': return row.gaps.length > 0 ? 'publish.why.gaps' : ''
       default: return row.gaps.length > 0 ? 'publish.why.gaps' : ''
+    }
+  }
+
+  /** The row's domain that takes none of its bytes, as its catalog key —
+   *  "<branch>: <host> …" — or '' when every domain it uses takes them. */
+  troubleKey(row: PublishRow): string {
+    return row.hostTrouble ? `publish.host.${row.hostTrouble.why}` : ''
+  }
+
+  troubleParams(row: PublishRow): Record<string, string> {
+    return {
+      branch: row.segments[row.segments.length - 1] ?? row.path,
+      host: row.hostTrouble?.host ?? '',
     }
   }
 

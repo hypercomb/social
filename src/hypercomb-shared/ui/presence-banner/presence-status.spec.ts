@@ -125,6 +125,39 @@ describe('the status line — one state, one sentence', () => {
       .toBe('Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 4')
   })
 
+  // THE 2026-10-10 MEETING: `favorites` published at the typo
+  // `hyperccomb.com` read as "Sharing 27 · 1 uploading" for ever. A branch a
+  // host takes none of the bytes of is named — the branch, the host, why.
+  it('a branch a publish domain holds is named, with the host and why — never "uploading"', () => {
+    const line = statusLine({
+      ...live, uploadHost: 'hypercomb.com',
+      share: {
+        offered: 27, uploading: 0, host: 'hypercomb.com', hostSource: 'pool', hostState: 'backed-up',
+        blocked: [{ branch: 'favorites', host: 'hyperccomb.com', state: 'unreachable', why: 'unresolved' }],
+      },
+      sync: { state: 'backed-up', host: 'hypercomb.com' },
+    })
+    expect(say(line)).toBe("Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 27 · favorites: hyperccomb.com can't be reached — check the host name, and that the host is running")
+    expect(line.tone).toBe('warn')
+    const why = (w: string): string => say(statusLine({ ...live, share: { offered: 1, blocked: [{ branch: 'shop', host: 'shop.example', why: w }] } }))
+    expect(why('page')).toContain('shop: shop.example answers with a web page — it takes no uploads')
+    expect(why('refused')).toContain("shop: shop.example isn't taking uploads from this page")
+    expect(why('full')).toContain('shop: shop.example is full')
+    expect(why('unreachable')).toContain("shop: can't upload to shop.example right now")
+  })
+
+  it('standing on the branch itself: its own host\'s line names the branch and why, while the host\'s live word holds it', () => {
+    const share = {
+      offered: 3, uploading: 3, nameOnly: 3, host: 'hyperccomb.com', hostSource: 'publish', hostState: 'unreachable', why: 'unresolved',
+      blocked: [{ branch: 'favorites', host: 'hyperccomb.com', state: 'unreachable', why: 'unresolved' }],
+    }
+    const held = say(statusLine({ ...live, uploadHost: 'hyperccomb.com', share, sync: { state: 'unreachable', why: 'unresolved', host: 'hyperccomb.com' } }))
+    expect(held).toBe("Live · meetup · amber falcon · 7 in the room (3 here) · favorites: hyperccomb.com can't be reached — check the host name, and that the host is running")
+    // The host answered since: the walk's snapshot of it says nothing.
+    expect(say(statusLine({ ...live, uploadHost: 'hyperccomb.com', share, sync: { state: 'backed-up', host: 'hyperccomb.com' } })))
+      .toBe('Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 3 · 3 uploading')
+  })
+
   it('content this device does not hold', () => {
     expect(say(statusLine({ ...live, share: { offered: 5, uploading: 3, nameOnly: 3 }, sync: { state: 'syncing', missing: 2 } })))
       .toBe("Live · meetup · amber falcon · 7 in the room (3 here) · Sharing 5 · 3 uploading · 3 tiles include content this device doesn't hold")

@@ -1070,12 +1070,13 @@ describe('which host: publish domains, then the hosts pool, then the relay', () 
     expect(service.swarmHostsFor(null)).toMatchObject({ source: 'relay', passedOver: ['hypercomb.com'] })
   })
 
-  it('a pool host that answers a PAGE where bytes should be is probed once, and passed over when its upload fails', async () => {
+  it('a pool host that answers a PAGE where bytes should be is probed once, and passed over at that probe', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
     pool = ['hypercomb.com']
     const relay = makeHost()
-    // The apex today: the Azure shell answers every address with its page,
-    // and a PUT never leaves the browser (its CORS preflight allows no PUT).
+    // The apex until 2026-10-10: the Azure shell answered every address with
+    // its page, and a PUT never left the browser (its CORS preflight allowed
+    // no PUT). The HEAD alone passes it over (host-sync.stuck-uploads.spec).
     const apexFetch = vi.fn(async (_input: string, init?: RequestInit): Promise<Response> => {
       if ((init?.method ?? 'GET') === 'PUT') throw new TypeError('Failed to fetch')
       return new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } })

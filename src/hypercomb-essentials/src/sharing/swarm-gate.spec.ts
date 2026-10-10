@@ -368,6 +368,42 @@ describe('per page: the hosts its tiles went to', () => {
     expect(shareStatus.at(-1)).toMatchObject({ location: '/p4', host: 'hypercomb.com', hostState: 'syncing' })
   })
 
+  // THE 2026-10-10 MEETING: `favorites` published at the typo
+  // `hyperccomb.com` (NXDOMAIN) read as "uploading" for ever. A branch a host
+  // takes none of the bytes of is NAMED — the branch, the host, and why — and
+  // is not counted as uploading: it is not on its way.
+  it('a tile whose subtree waits on a publish domain that cannot take bytes is named, with the host and why — not counted as uploading', async () => {
+    const page = ['p8']
+    seedPage(page, ['favorites', 'omicron'])
+    makePublic(page, 'favorites')
+    makePublic(page, 'omicron')
+    availableOn.set(sealOf(page, 'omicron'), ['hypercomb.com'])
+    current['closureHostsOf'] = (sig: string): string[] =>
+      sig === sealOf(page, 'favorites') ? ['hypercomb.com', 'hyperccomb.com'] : ['hypercomb.com']
+    try {
+      EffectBus.emit('sync:state', { host: 'hyperccomb.com', state: 'unreachable', status: 'unreachable', reason: 'unreachable', why: 'unresolved', swarm: true })
+      EffectBus.emit('sync:state', { host: 'hypercomb.com', state: 'backed-up', status: 'backed-up', reason: '', swarm: true })
+      await goTo(page)
+      expect(shareStatus.at(-1)).toMatchObject({
+        location: '/p8', offered: 2, uploading: 0, host: 'hypercomb.com', hostState: 'backed-up',
+        blocked: [{ branch: 'favorites', host: 'hyperccomb.com', state: 'unreachable', why: 'unresolved' }],
+      })
+    } finally { delete current['closureHostsOf'] }
+  })
+
+  it('standing on a branch whose own publish domain answers a page: the branch is named, with why', async () => {
+    pageHosts.set('p9', { hosts: ['pagesite.example'], source: 'publish', pending: false })
+    pageHosts.set('p9/inner', { hosts: ['pagesite.example'], source: 'publish', pending: false })
+    seedPage(['p9', 'inner'], ['pi'])
+    makePublic(['p9', 'inner'], 'pi')
+    EffectBus.emit('sync:state', { host: 'pagesite.example', state: 'refused', status: 'refused', reason: 'refused', why: 'page', swarm: true })
+    await goTo(['p9', 'inner'])
+    expect(shareStatus.at(-1)).toMatchObject({
+      location: '/p9/inner', host: 'pagesite.example', hostState: 'refused', why: 'page',
+      blocked: [{ branch: 'p9', host: 'pagesite.example', why: 'page' }],
+    })
+  })
+
   it('nothing hosts a page: names only, no domain named, said as no-host', async () => {
     const page = ['p3']
     pageHosts.set('p3', { hosts: [], source: 'none', pending: false })

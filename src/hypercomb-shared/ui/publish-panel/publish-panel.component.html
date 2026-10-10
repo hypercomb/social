@@ -73,6 +73,11 @@
       @if (whyKey(row)) {
         <p class="pcur-why">{{ whyKey(row) | t: whyParams(row) }}</p>
       }
+      <!-- A domain this branch publishes to that takes none of its bytes —
+           named, with why, rather than the branch reading as uploading. -->
+      @if (troubleKey(row)) {
+        <p class="pcur-why" role="status">{{ troubleKey(row) | t: troubleParams(row) }}</p>
+      }
     } @else {
       <!-- No tile to act on (the hive root, still checking, no key yet): the
            domains are listed all the same, switched by nothing until you

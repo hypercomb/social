@@ -170,7 +170,14 @@ interface HostSyncLike {
   probeServed?: (host: string, sig: string) => Promise<'served' | 'absent' | 'unknown'>
   closureGaps?: (sig: string, kind?: string, closure?: boolean, limit?: number) => Promise<string[]>
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
+  /** What stops a host taking this tab's uploads, and why — synchronous,
+   *  null when nothing does. Optional: an older host-sync has none. */
+  hostTrouble?: (host: string) => { host: string; why: string } | null
 }
+
+/** Why a branch's domain takes none of its bytes — the `publish.host.<why>`
+ *  catalog keys. Anything else a host says is not the row's to name. */
+const HOST_TROUBLE_WHYS: ReadonlySet<string> = new Set(['unresolved', 'page', 'refused', 'full', 'unreachable'])
 interface SignerLike { getPublicKeyHex?: () => Promise<string | null> }
 
 export type { PublishRowState } from './publish-verdict.js'
@@ -231,6 +238,12 @@ export interface PublishRow {
    *  signed index gives it there, and `<key>.<zone>` when its key is an
    *  address label no own address took. Never a domain's root. */
   entrances: Record<string, PublishEntrance>
+  /** A domain this branch publishes to that is taking none of its bytes
+   *  right now, and why (host-sync's word: `unresolved` — the name reaches
+   *  no host, `page` — it answers a web page, `refused`, `full`,
+   *  `unreachable`) — so the row names it instead of reading as uploading.
+   *  null when every domain it uses is taking bytes, or nothing was tried. */
+  hostTrouble: { host: string; why: string } | null
 }
 
 /** One address's entrance as the panel shows it (documentation/using-a-creation.md,
@@ -322,7 +335,7 @@ export class PublishStatusDrone extends Drone {
     'The publish differential: one row per publishable branch comparing the head the signed hive index names (what the world sees) against the head sealing would produce now (what is here), with an honest online proof — schnorr-verified index, monotonic freshness against our own publish ledger, and a 404-only absence rule. Publishes, republishes and unpublishes per row.'
 
   protected override listens: string[] = [
-    'publish:view-toggle', 'publish:close', 'publish:refresh',
+    'publish:view-toggle', 'publish:close', 'publish:refresh', 'sync:state',
     'publish:run', 'publish:unpublish', 'publish:inspect', 'publish:copy-link',
     'publish:opens-as', 'publish:set-target', 'publish:door', 'publish:forget',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
@@ -408,6 +421,13 @@ export class PublishStatusDrone extends Drone {
     })
 
     this.onEffect('publish:refresh', () => { if (this.#open) void this.#refresh() })
+
+    // A host started or stopped taking a branch's bytes: the rows that
+    // publish there say so at once — no sweep, no network (#retrouble).
+    this.onEffect('sync:state', () => {
+      if (!this.#open || this.#rows.length === 0) return
+      if (this.#retrouble()) this.#emit()
+    })
 
     // WHERE ONE BRANCH PUBLISHES. Per branch, never global — /susan moving
     // zones must not move /dylan. The intent carries the branch key and its
@@ -541,7 +561,10 @@ export class PublishStatusDrone extends Drone {
     // re-ordered list must not keep probing the door it just left.
     this.#hostByKey.delete(key)
     const row = this.#rows.find(candidate => candidate.key === key)
-    if (row) row.zones = this.#zonesFor(key)
+    if (row) {
+      row.zones = this.#zonesFor(key)
+      row.hostTrouble = this.#troubleFor(row.zones)
+    }
     this.#emit()
   }
 
@@ -841,7 +864,37 @@ export class PublishStatusDrone extends Drone {
       ownLabels: {},
       defaultLabel: foldDnsLabel(segments[segments.length - 1] ?? ''),
       entrances: {},
+      hostTrouble: this.#troubleFor(this.#zonesFor(key)),
     }
+  }
+
+  /** WHICH OF A BRANCH'S DOMAINS TAKES NONE OF ITS BYTES, and why — the
+   *  first of them, primary first (host-sync's own memory, synchronous). A
+   *  publish domain is never passed over — it was chosen — so a domain that
+   *  does not resolve, answers a page, or refuses is NAMED on its row
+   *  instead of the branch reading as uploading for ever. */
+  #troubleFor(zones: readonly string[]): { host: string; why: string } | null {
+    const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+    if (typeof hostSync?.hostTrouble !== 'function') return null
+    for (const zone of zones) {
+      let trouble: { host: string; why: string } | null = null
+      try { trouble = hostSync.hostTrouble(zoneDoor(zone)) } catch { trouble = null }
+      if (trouble && HOST_TROUBLE_WHYS.has(trouble.why)) return { host: trouble.host, why: trouble.why }
+    }
+    return null
+  }
+
+  /** Re-read every row's trouble; true when any row's changed. */
+  #retrouble(): boolean {
+    let moved = false
+    for (const row of this.#rows) {
+      const next = this.#troubleFor(row.zones)
+      const prev = row.hostTrouble
+      if (prev?.host === next?.host && prev?.why === next?.why) continue
+      row.hostTrouble = next
+      moved = true
+    }
+    return moved
   }
 
   /** The entrance of every address this row is served at, from the signed

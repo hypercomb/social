@@ -273,9 +273,10 @@ describe('the drain asks the host before it sends', () => {
     receipt.off()
   })
 
-  it('(c) reconciles every entry before sending any: one served + one lacking is a total of 1 and exactly one PUT', async () => {
+  it('(c) reconciles every entry of a batch before sending any: one served + one lacking is a total of 1 and exactly one PUT', async () => {
     // The lacking entry is queued FIRST, so a drain that sent as it went would
-    // PUT before it ever asked about the second.
+    // PUT before it ever asked about the second. (A batch is 32 entries; a
+    // longer queue sends after each batch — host-sync.stuck-uploads.spec.)
     const lacking = await stage('{"name":"the host lacks me"}')
     const served = await stage('{"name":"the host serves me"}')
     const host = makeHost({ held: new Map([[served.sig, served.bytes]]) })

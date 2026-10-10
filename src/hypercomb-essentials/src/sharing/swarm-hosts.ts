@@ -17,9 +17,14 @@
 //      publish domain it is an explicit choice, never passed over.
 //   3. THE HOSTS POOL — the participant's `community:hosts` pool (HostsDrone
 //      seeds hypercomb.com into an empty one): its PRIMARY, the host added
-//      first. A pool host that failed this session (it refused, is full, or
-//      did not answer while the relay did) is passed over for the next one —
-//      a host that cannot take uploads must never strand every tile as a name.
+//      first. A pool host that failed this session (it refused, is full,
+//      answered a page where a heap answers bytes, or did not answer while
+//      the relay did) is passed over for the next one — a host that cannot
+//      take uploads must never strand every tile as a name. THIS TAB
+//      remembers the pass-over across a reload (sessionStorage, an hour at
+//      most, a handful of hosts): a reload must not make the failed host
+//      primary again and strand the room for another round of failures. A
+//      receipt from it, or the participant's retry, forgets it.
 //   4. THE RELAY YOU MEET AT — only when 1-3 have nothing usable, and only
 //      when that relay's `hc:host` card said participants 'all' or 'zones'.
 //
@@ -71,7 +76,13 @@ export interface SwarmHostDeps {
   /** The meeting host this tab's meeting named ('' when none). A local,
    *  synchronous read. */
   meetingHost?(): string
+  /** THIS TAB's session storage — where a passed-over pool host is
+   *  remembered across a reload. Absent or null: this page only. */
+  session?(): SessionLike | null
 }
+
+/** The part of `Storage` the resolver uses (sessionStorage in a tab). */
+export type SessionLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
 const STORE_KEY = '@hypercomb.social/Store'
 
@@ -102,6 +113,13 @@ const MARKS_CACHE_MAX = 4_096
 /** Branches re-read when the tab becomes visible (another tab may have moved
  *  their marks): the most recently used. */
 const MARKS_REVISIT = 64
+/** A pool host passed over is remembered in THIS TAB's session — never
+ *  localStorage: another tab, or tomorrow, asks the host afresh — so a reload
+ *  does not make it primary again. For at most an hour, and only the most
+ *  recent few. */
+const DOWN_SESSION_KEY = 'hc:swarm-hosts:down'
+const DOWN_REMEMBER_MS = 60 * 60_000
+const DOWN_REMEMBER_MAX = 8
 
 const PENDING: SwarmHostChoice = Object.freeze({ hosts: Object.freeze([]) as readonly string[], source: 'none', pending: true })
 const NONE: SwarmHostChoice = Object.freeze({ hosts: Object.freeze([]) as readonly string[], source: 'none', pending: false })
@@ -144,6 +162,9 @@ export const liveSwarmHostDeps: SwarmHostDeps = {
     try { return isLoopbackHost(globalThis.location?.host ?? '') } catch { return false }
   },
   meetingHost: () => tabMeetingHost(),
+  session: () => {
+    try { return globalThis.sessionStorage ?? null } catch { return null }
+  },
 }
 
 const keyOf = (segments: readonly string[], length: number): string => segments.slice(0, length).join('\u0000')
@@ -181,6 +202,10 @@ export class SwarmHostResolver extends EventTarget {
    *  A pool host here is passed over; publish domains are the participant's
    *  explicit choice for a branch and are never passed over. */
   readonly #down = new Map<string, string>()
+  /** When each REMEMBERED failure was marked — the ones this tab's session
+   *  keeps across a reload (#rememberDown). A failure marked while the path
+   *  itself was down is not among them. */
+  readonly #downAt = new Map<string, number>()
 
   /** The relay card's policy as last seen, so a repeat is no change. */
   #relaySeen = ''
@@ -208,6 +233,10 @@ export class SwarmHostResolver extends EventTarget {
   constructor(deps: SwarmHostDeps = liveSwarmHostDeps) {
     super()
     this.#deps = deps
+    // A reload of this tab keeps the pool hosts it passed over (within the
+    // hour): the first answer after a reload must not hand the room back to
+    // a host that just proved it takes no uploads.
+    this.#restoreDown()
     // THE POOL — HostsDrone emits the list after every read, add and remove,
     // with last-value replay. Its list is alphabetical and its first read can
     // run before the store is open, so it is a SIGNAL, never the answer: the
@@ -355,11 +384,21 @@ export class SwarmHostResolver extends EventTarget {
   /** Is this door one of the pool's hosts (as this page may use them)? */
   readonly isPoolHost = (host: string): boolean => this.#pool !== null && this.#usable(this.#pool, true).includes(host)
 
-  /** A host failed this session (host-sync: it refused, is full, or did not
-   *  answer while the relay did). A pool host is passed over from now on. */
-  readonly markDown = (host: string, reason: string): void => {
-    if (!host || this.#down.has(host)) return
+  /** A host failed this session (host-sync: it refused, is full, answered a
+   *  page where a heap answers bytes, or did not answer while the relay did).
+   *  A pool host is passed over from now on — and, `remember`ed (the
+   *  default), across a reload of this tab too (#rememberDown). A failure
+   *  that may have been the PATH (no socket open) is this page's only. */
+  readonly markDown = (host: string, reason: string, remember = true): void => {
+    if (!host) return
+    if (this.#down.has(host)) {
+      // Already passed over; a later failure the path cannot explain makes a
+      // path-time pass-over one to remember.
+      if (remember && !this.#downAt.has(host)) { this.#downAt.set(host, Date.now()); this.#rememberDown() }
+      return
+    }
     this.#down.set(host, reason)
+    if (remember) { this.#downAt.set(host, Date.now()); this.#rememberDown() }
     this.#version++
     if (this.isPoolHost(host)) this.#changed()
   }
@@ -367,6 +406,7 @@ export class SwarmHostResolver extends EventTarget {
   /** A host answered again (a receipt, or the participant asked to retry). */
   readonly markUp = (host: string): void => {
     if (!this.#down.delete(host)) return
+    if (this.#downAt.delete(host)) this.#rememberDown()
     this.#version++
     if (this.isPoolHost(host)) this.#changed()
   }
@@ -376,6 +416,8 @@ export class SwarmHostResolver extends EventTarget {
     if (this.#down.size === 0) return
     const pooled = [...this.#down.keys()].some(h => this.isPoolHost(h))
     this.#down.clear()
+    this.#downAt.clear()
+    this.#rememberDown()
     this.#version++
     if (pooled) this.#changed()
   }
@@ -418,12 +460,61 @@ export class SwarmHostResolver extends EventTarget {
     return out
   }
 
+  // ── the pass-overs this tab remembers ───────────────────────────────────
+
+  /** The session's own handle, or null (no storage, a worker, a test world
+   *  without one): then a pass-over lasts this page only. */
+  readonly #session = (): SessionLike | null => {
+    try { return this.#deps.session?.() ?? null } catch { return null }
+  }
+
+  /** Take back what this tab's session remembers: pool hosts passed over
+   *  within the last hour, newest first, a handful at most. Anything else in
+   *  the record (older, malformed) is simply not taken back. */
+  readonly #restoreDown = (): void => {
+    let raw: string | null = null
+    try { raw = this.#session()?.getItem(DOWN_SESSION_KEY) ?? null } catch { raw = null }
+    if (!raw) return
+    let rows: unknown
+    try { rows = JSON.parse(raw) } catch { return }
+    if (!Array.isArray(rows)) return
+    const now = Date.now()
+    for (const row of rows.slice(0, DOWN_REMEMBER_MAX)) {
+      if (!Array.isArray(row)) continue
+      const [host, reason, at] = row as unknown[]
+      if (typeof host !== 'string' || !host || typeof at !== 'number' || !Number.isFinite(at)) continue
+      if (at > now || now - at >= DOWN_REMEMBER_MS) continue
+      this.#down.set(host, typeof reason === 'string' ? reason : '')
+      this.#downAt.set(host, at)
+    }
+  }
+
+  /** Write what this tab remembers: the newest few remembered pass-overs
+   *  still inside the hour — or nothing at all once none is left. */
+  readonly #rememberDown = (): void => {
+    const session = this.#session()
+    if (!session) return
+    const now = Date.now()
+    const rows = [...this.#downAt]
+      .filter(([host, at]) => this.#down.has(host) && now - at < DOWN_REMEMBER_MS)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, DOWN_REMEMBER_MAX)
+      .map(([host, at]) => [host, this.#down.get(host) ?? '', at])
+    try {
+      if (rows.length === 0) session.removeItem(DOWN_SESSION_KEY)
+      else session.setItem(DOWN_SESSION_KEY, JSON.stringify(rows))
+    } catch { /* storage refused — this page still passes it over */ }
+  }
+
   readonly #setPool = (zones: readonly string[]): void => {
     const first = this.#pool === null
     if (!first && sameList(this.#pool!, zones)) return
     // A changed pool is the participant acting: every host gets its chance
-    // again.
-    if (!first) this.#down.clear()
+    // again — in this page and after a reload.
+    if (!first) {
+      this.#down.clear()
+      if (this.#downAt.size > 0) { this.#downAt.clear(); this.#rememberDown() }
+    }
     this.#pool = [...zones]
     this.#version++
     const asked = this.#askedPool

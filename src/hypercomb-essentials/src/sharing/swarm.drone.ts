@@ -280,6 +280,12 @@ const WALK_STATS_MAX = 64
 // A host's `sync:state` words that mean it is not taking this page's bytes
 // right now (#hostReport): another of the page's hosts that is, speaks.
 const HOST_HELD_STATES: ReadonlySet<string> = new Set(['refused', 'full', 'unreachable', 'not-live', 'too-large'])
+// Of those, the ones that hold a whole BRANCH (#blockedBranches): the host
+// takes none of its bytes. `not-live` clears itself in a second, and
+// `too-large` is one file's fate, never the branch's.
+const BRANCH_HELD_STATES: ReadonlySet<string> = new Set(['refused', 'full', 'unreachable'])
+// How many held branches a page's status line names — a line, not a list.
+const BLOCKED_SHOWN_MAX = 3
 // WHERE A PAGE'S BYTES GO still being read (a reload's first walk; a page
 // whose branch marks were never read) is UNKNOWN, like a cold history read:
 // the walk says nothing for that page — the relay keeps our last slot — and
@@ -903,8 +909,9 @@ export class SwarmDrone extends Drone {
 
   // Each swarm host's last reported state (`sync:state`) — the reason a
   // name-only tile is name-only, for the sharer's status line. Keyed by host:
-  // a page names the state of the host ITS tiles go to.
-  readonly #hostStates = new Map<string, { state: string; reason: string }>()
+  // a page names the state of the host ITS tiles go to. `why` is the reason
+  // as a person acts on it (host-sync's HostWhy: page, unresolved, …).
+  readonly #hostStates = new Map<string, { state: string; reason: string; why: string }>()
 
   // Pages the walk is holding while their hosts are being read: since when,
   // and the one timer that walks them again when the wait runs out.
@@ -1630,10 +1637,16 @@ export class SwarmDrone extends Drone {
     // (refused, full, too large, unreachable) or that it is uploading. Only a
     // swarm host's report counts — another target's backup is not what this
     // room can fetch from — and a page reads its own host's.
-    this.onEffect<{ host?: string; state?: string; status?: string; reason?: string; swarm?: boolean }>('sync:state', (s) => {
+    this.onEffect<{ host?: string; state?: string; status?: string; reason?: string; why?: string; swarm?: boolean }>('sync:state', (s) => {
       const host = String(s?.host ?? '').trim()
       if (!host || s?.swarm !== true) return
-      this.#hostStates.set(host, { state: String(s?.state ?? s?.status ?? ''), reason: String(s?.reason ?? '') })
+      const before = this.#hostStates.get(host)
+      const next = { state: String(s?.state ?? s?.status ?? ''), reason: String(s?.reason ?? ''), why: String(s?.why ?? '') }
+      this.#hostStates.set(host, next)
+      // A host that just stopped (or started again) taking a branch's bytes
+      // changes what the status line names (#blockedBranches): walk once,
+      // rather than leave "uploading" standing until the heartbeat.
+      if (BRANCH_HELD_STATES.has(next.state) !== BRANCH_HELD_STATES.has(before?.state ?? '')) this.#scheduleReceiptRewalk()
     })
 
     // A page's hosts became known or moved (the pool, a branch's marks, the
@@ -3589,15 +3602,21 @@ export class SwarmDrone extends Drone {
       // many as a name alone), how many stay private, WHICH host this page's
       // tiles go to and why that one (publish domains, the hosts pool, the
       // relay), and what it last said — the reason a name-only tile is
-      // name-only. No host at all is said as 'no-host'.
+      // name-only. No host at all is said as 'no-host'. A branch held by a
+      // host that takes none of its bytes is NAMED, with the host and why
+      // (`blocked`), and is not counted as uploading: it is not on its way.
       this.#privateHere = prunedNames.length
+      const { blocked, heldChildren } = this.#blockedBranches(segments, hostSync, childRefs, announced.map(a => a.form))
+      const stillUploading = heldChildren.size === 0 ? uploading
+        : announced.filter((a, i) => a.form !== 'full' && !heldChildren.has(childRefs[i]!.name)).length
       this.emitEffect('swarm:share-status', {
         location: publicLocation,
         offered: children.length,
-        uploading,
+        uploading: stillUploading,
         nameOnly,
         private: prunedNames.length,
         ...this.#hostReport(segments),
+        ...(blocked.length > 0 ? { blocked } : {}),
       })
     }
     // Stamp our chosen label onto the payload so participants can render
@@ -4187,7 +4206,7 @@ const payload: SwarmLayerPayload = myLabel
    *  second publish domain that refuses says nothing while the first serves
    *  the room — else the primary's refusal. A page with no host at all, once
    *  its hosts have been read, is 'no-host'. */
-  #hostReport = (segments: readonly string[]): { host: string; hosts: string[]; hostSource: string; hostState: string; reason: string; passedOver?: string[] } => {
+  #hostReport = (segments: readonly string[]): { host: string; hosts: string[]; hostSource: string; hostState: string; reason: string; why?: string; passedOver?: string[] } => {
     const choice = this.#pageHosts(segments)
     const hosts = choice ? [...choice.hosts] : [this.#swarmHost()].filter(Boolean)
     const hostSource = choice ? choice.source : (hosts.length ? 'relay' : 'none')
@@ -4197,9 +4216,69 @@ const payload: SwarmLayerPayload = myLabel
     if (hosts.length === 0) {
       return { host: '', hosts, hostSource, hostState: choice && !choice.pending ? 'no-host' : '', reason: '', ...passedOver }
     }
-    const states = hosts.map(host => ({ host, ...(this.#hostStates.get(host) ?? { state: '', reason: '' }) }))
+    const states = hosts.map(host => ({ host, ...(this.#hostStates.get(host) ?? { state: '', reason: '', why: '' }) }))
     const shown = states.find(x => !HOST_HELD_STATES.has(x.state)) ?? states[0]!
-    return { host: shown.host, hosts, hostSource, hostState: shown.state, reason: shown.reason, ...passedOver }
+    return { host: shown.host, hosts, hostSource, hostState: shown.state, reason: shown.reason, ...(shown.why ? { why: shown.why } : {}), ...passedOver }
+  }
+
+  /** WHICH BRANCH A HOST HOLDS, BY NAME (jwize 2026-10-10). A publish domain
+   *  that can never take a write — a name that does not resolve (the
+   *  `hyperccomb.com` typo), a host answering a web page, one that refuses or
+   *  is full — is never passed over: it was the participant's choice. So it
+   *  is NAMED, with the branch that waits on it and why, rather than that
+   *  branch reading as "uploading" for ever: this page itself when it wears
+   *  the host as its publish domain and none of its hosts takes bytes, and
+   *  each tile here still on its way whose subtree's pages go to a held host
+   *  this page's own tiles do not. From host-sync's last word per host
+   *  (`sync:state`) — synchronous, no network. `heldChildren`: the tiles
+   *  here that wait on such a host, which are not counted as uploading. */
+  #blockedBranches = (
+    segments: readonly string[],
+    hostSync: HostSyncLike | undefined,
+    refs: readonly ChildRef[],
+    forms: readonly EntryForm[],
+  ): { blocked: { branch: string; host: string; state: string; why: string }[]; heldChildren: Set<string> } => {
+    const blocked: { branch: string; host: string; state: string; why: string }[] = []
+    const heldChildren = new Set<string>()
+    const heldOf = (host: string): { state: string; why: string } | null => {
+      const s = this.#hostStates.get(host)
+      return s && BRANCH_HELD_STATES.has(s.state) ? s : null
+    }
+    const name = (branch: string, host: string, s: { state: string; why: string }): void => {
+      if (blocked.some(b => b.branch === branch && b.host === host)) return
+      blocked.push({ branch, host, state: s.state, why: s.why || s.state })
+    }
+    const choice = this.#pageHosts(segments)
+    const pageHosts = choice ? [...choice.hosts] : []
+    if (choice?.source === 'publish' && segments.length > 0 && pageHosts.length > 0) {
+      const held = pageHosts.map(heldOf)
+      if (held.every(Boolean)) name(this.#branchWearing(segments, choice), pageHosts[0]!, held[0]!)
+    }
+    if (this.#perPage(hostSync) && typeof hostSync?.closureHostsOf === 'function') {
+      refs.forEach((c, i) => {
+        if (forms[i] === 'full' || !c.layerSig) return
+        let below: string[] = []
+        try { below = hostSync.closureHostsOf!(c.layerSig) } catch { below = [] }
+        for (const host of below) {
+          if (pageHosts.includes(host)) continue
+          const s = heldOf(host)
+          if (!s) continue
+          heldChildren.add(c.name)
+          name(c.name, host, s)
+        }
+      })
+    }
+    return { blocked: blocked.slice(0, BLOCKED_SHOWN_MAX), heldChildren }
+  }
+
+  /** The branch whose publish domains this page wears: up from the page for
+   *  as long as the page above answers the same publish domains. */
+  #branchWearing = (segments: readonly string[], choice: SwarmHostChoiceLike): string => {
+    const same = (c: SwarmHostChoiceLike | null): boolean =>
+      !!c && c.source === 'publish' && c.hosts.length === choice.hosts.length && c.hosts.every((h, i) => h === choice.hosts[i])
+    let n = segments.length
+    while (n > 1 && same(this.#pageHosts(segments.slice(0, n - 1)))) n--
+    return segments[n - 1]!
   }
 
   // Resolve the children to publish at `segments`: the current layer's
