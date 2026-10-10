@@ -58,6 +58,9 @@ vi.mock('./hosts', () => ({
 
 vi.mock('@hypercomb/runtime/host-packages', () => ({ askHostPackages: effects.ask }))
 
+// Tiles ask the host heap for their pictures; no test reaches a network.
+vi.mock('./tile-picture', () => ({ tilePicture: vi.fn(async () => null), pictureOrigins: () => [] }))
+
 vi.mock('./replicate', () => ({
   acquire: effects.acquire,
   installPackage: effects.install,
@@ -397,4 +400,42 @@ it('shows a turned-on offering replicating on its own review tile', async () => 
   expect(bar.getAttribute('aria-label')).toBe('Replicating Garden')
   finish(true)
   await vi.waitFor(() => expect(effects.clearPending).toHaveBeenCalledOnce())
+})
+
+it('lays the gallery out one section per domain, this door first', async () => {
+  const garden = {
+    kind: 'host:offering', title: 'Garden', route: 'https://garden.example.com/',
+    lineage: 'garden', pubkey: 'a'.repeat(64), head: 'b'.repeat(64),
+    location: 'c'.repeat(64), doors: ['example.com'], index: { created_at: 1 },
+  }
+  effects.zones.push('example.com')
+  effects.offers.mockImplementation(async (host: string) => host === 'example.com' ? [garden] : [])
+
+  const { showHostPanel } = await import('./host-panel')
+  showHostPanel()
+  const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
+  await vi.waitFor(() => expect(root.querySelectorAll('.domain-section')).toHaveLength(2))
+  const [own, other] = [...root.querySelectorAll('.domain-section')]
+  expect(own!.classList.contains('own')).toBe(true)
+  expect(own!.querySelector('.domain-empty')?.textContent).toBe('Nothing is published here yet.')
+  expect(other!.querySelector('h2')?.textContent).toBe('example.com')
+  await vi.waitFor(() => expect(other!.isConnected ? other!.querySelector('.offer b')?.textContent
+    : root.querySelectorAll('.domain-section')[1]!.querySelector('.offer b')?.textContent).toBe('Garden'))
+  // Management waits, closed, at the foot of the welcome.
+  expect(root.querySelector<HTMLDetailsElement>('details.manage')?.open).toBe(false)
+  expect(root.querySelector('details.manage .packages')).not.toBeNull()
+})
+
+it('shows a tile chosen on another domain grayed in this door until it is reviewed', async () => {
+  effects.zones.push('example.com')
+  effects.pending.push({ source: 'example.com', route: 'https://studio.example.com/', pubkey: 'e'.repeat(64),
+    lineage: 'studio', head: 'f'.repeat(64) })
+
+  const { showHostPanel } = await import('./host-panel')
+  showHostPanel()
+  const root = document.querySelector('hc-shim-hosts')!.shadowRoot!
+  await vi.waitFor(() => expect(root.querySelector('.domain-section.own .offer-waiting b')?.textContent).toBe('studio'))
+  expect(root.querySelector('.domain-section.own .offer-waiting')?.textContent).toContain('Selected on example.com')
+  root.querySelector<HTMLButtonElement>('.domain-section.own .offer-waiting .offer-main')!.click()
+  await vi.waitFor(() => expect(root.querySelector('.review')?.textContent).toContain('example.com'))
 })

@@ -108,7 +108,56 @@ const assertRatchet = (actual: string[], allowed: string[], rule: string): void 
   expect(drift.concat(paid), msg).toEqual([])
 }
 
+/** How many times `pattern` (global) occurs per file, comments stripped. */
+const countsMatching = (pattern: RegExp): Record<string, number> => {
+  const counts: Record<string, number> = {}
+  for (const dir of SCAN_DIRS) {
+    let files: string[]
+    try { files = walk(join(ROOT, dir)) } catch { continue }
+    for (const file of files) {
+      const n = (stripComments(readFileSync(file, 'utf8')).match(pattern) ?? []).length
+      if (n) counts[relative(ROOT, file).replace(/\\/g, '/')] = n
+    }
+  }
+  return counts
+}
+
+/** The per-SITE ratchet: a file may never gain an occurrence, and a file that
+ *  sheds one must have its allowance lowered so the ratchet clicks. Returns the
+ *  problems (empty when clean), so several rules report in one failure. */
+const countRatchet = (actual: Record<string, number>, allowed: Record<string, number>, rule: string, fix: string): { problems: string[]; msg: string } => {
+  const drift = Object.entries(actual)
+    .filter(([file, n]) => n > (allowed[file] ?? 0))
+    .map(([file, n]) => `${file}: ${n} (allowed ${allowed[file] ?? 0})`)
+  const paid = Object.entries(allowed)
+    .filter(([file, n]) => (actual[file] ?? 0) < n)
+    .map(([file, n]) => `${file}: ${actual[file] ?? 0} (allowed ${n}) — lower it${actual[file] ? '' : ', or remove the entry'}`)
+  const msg =
+    (drift.length ? `\nNEW DRIFT (${rule}) — ${fix}; never raise an allowance:\n  ${drift.join('\n  ')}\n` : '') +
+    (paid.length ? `\nDEBT PAID (${rule}) — update doctrine.storage-writes.json so the ratchet clicks:\n  ${paid.join('\n  ')}\n` : '')
+  return { problems: drift.concat(paid), msg }
+}
+
 describe('doctrine ratchets', () => {
+  it('raw storage writes may only shrink — durable state goes through the store', () => {
+    // documentation/layer-pattern-audit.md, phase 2. State that persists is a
+    // list item with history behind it: a layer commit, or `putPoolDoc` (a
+    // participant's save keeps every version; what the software writes on its
+    // own passes `keep: 'current'`). A raw OPFS delete, a raw OPFS write, or a
+    // localStorage key is how state escapes that pattern — the audit found
+    // dozens. Every site counted on 2026-10-07 is frozen PER FILE in
+    // doctrine.storage-writes.json.
+    const allowed = JSON.parse(readFileSync(join(ROOT, 'doctrine.storage-writes.json'), 'utf8')) as Record<string, Record<string, number>>
+    const results = [
+      countRatchet(countsMatching(/\.removeEntry\(/g), allowed['removeEntry'], 'removeEntry',
+        'hide first (documentation/hide-first-delete-second.md); a document that replaces itself passes keep: \'current\''),
+      countRatchet(countsMatching(/\.createWritable\(/g), allowed['createWritable'], 'createWritable',
+        'write through the store: a layer commit, putResource, or putPoolDoc'),
+      countRatchet(countsMatching(/localStorage\??\.setItem\(/g), allowed['localStorage.setItem'], 'localStorage.setItem',
+        'durable state belongs in a pool of meaning (putPoolDoc / ParticipantDocument), never a browser key'),
+    ]
+    expect(results.flatMap(r => r.problems), results.map(r => r.msg).join('')).toEqual([])
+  })
 
   it('reserved scratch workspaces are ignored without hiding ordinary source', () => {
     // This is a behavior check, not a text check: it proves Git will contain a

@@ -41,7 +41,7 @@ There are distinct trust decisions:
 |---|---|---|
 | View public signed content | Resolve and render immutable public bytes | Allowed in the read-only profile |
 | Run or adopt application code in `hypercomb.io` | Execute that publisher's beehaviors in the personal hive | Explicit adoption and code consent |
-| Use a provider domain for an account or storage | Let that normal web origin hold consumer data and mediate its services | Only after the consumer trusts that domain |
+| Use a provider domain for an account or storage | Let that normal web origin hold consumer data and mediate its services | Only by an allowance: a community standard's, or the consumer's own override after a review (below) |
 | Copy personal hive data to a provider | Send specifically selected signed content out of the personal hive | Explicit, scoped consumer action |
 
 The current `pluginthematrix.com` website profile implements only the first
@@ -52,6 +52,132 @@ as a provider. It never follows merely from the fact that both sides run Core.
 Browser-origin separation keeps that provider relationship tight and natural:
 the consumer's state at one provider does not silently become another
 provider's state or the contents of their personal `hypercomb.io` hive.
+
+### Trust is an allowance, never a tap
+
+*jwize, 2026-10-07*, asked how a card door should let someone without a host
+keep their cards and use the camera: "Trust is only based on some
+predetermined allowances based on community standards and or your overridden
+things. However, overriding should always be preceded by some form of review
+either by humans or AI agents but [more] reviews the better."
+
+And: "you can allow certain fields like text and others but if it is code
+then it needs to be community verified. One breach can be total breach."
+
+**Data and code are allowed differently.**
+- **Data can be allowed by field.** Text and other plain fields, such as what
+  a card holds or a held address, are values that never run. A community
+  standard can allow them, and so can the participant's own choice.
+- **Code needs community verification.** Anything that runs needs it before it
+  is allowed anything more than showing signed content: a page, a bee, a
+  template's script, a slot's filler script. That includes keeping storage in
+  its origin or using the camera, because the code holds those powers.
+  Verification is the same review a module change gets before it is adopted:
+  the reader's own AI audit, Jev's reading, the host AI and public
+  assessments. More reviews are better. One breach can be a total breach, so
+  no single person's say-so is enough for code.
+
+What a door may do comes from one of two places:
+- **A community standard's allowance**, decided in advance for that kind of
+  creation. For example: a card door whose page the community has verified
+  may keep the visitor's cards in its origin and use the camera to scan.
+- **The participant's own override.** An override always comes after a
+  review, by people or AI agents, and for code that review is community
+  verification.
+
+There is no "trust this site" button. A single tap is not a review.
+
+**On your own domain, your review is the one that turns it on.** *Decided
+2026-10-07 (jwize):* powers are off by default, and a domain's participant
+turns them on from their own hive, for one page version, after previewing it
+and signing their own review of it. Other voices' scents are shown beside it,
+to read; they never turn it on, and none is required. Visitors already trust
+whoever runs a domain (below, "A separate address is not trust in its host"),
+so the review that turns a domain's page on is the one by the person who
+answers for that domain. Community verification is what you ask of someone
+else's code before it runs in your own space. How it is built:
+[using-a-creation.md](using-a-creation.md), "Powers are off by default, and the
+participant turns them on".
+
+**Discovered security: scents in community pools.** *jwize, 2026-10-07:* "these
+publications become staging areas where people leave their scents to be
+picked up by the truster. This allows another level of security … discovered
+security by community pools, and that being an explicit playground area for
+everyone. Then we can add flagged domains as well. Pools allow for everything
+and anything."
+
+- **Publications are the playground.** Anything published can be tried where
+  it is published, on its own origin, by anyone. Trying something adopts
+  nothing. It is an explicit staging area for everyone.
+- **People leave scents.** A scent is a pheromone ([pheromones.md](pheromones.md)):
+  a signed claim on a signature, left by a person or by an agent that read the
+  thing. "I reviewed this page", "it is safe to keep its data", "it did
+  something it should not" are all scents. It never labels what something is.
+  It is someone's claim.
+- **Scents gather in community pools on hosts.** Anyone can read them.
+  Pools allow for anything, including a pool of **flagged domains**: scents
+  that warn against a domain.
+- **The truster picks them up.** The truster is whoever decides: your own hive
+  before it adopts code, or a host before it gives a door's page a power. It
+  reads the pools and weighs each scent by whose it is, through the people and
+  agents it chooses to listen to. No scent is authority on its own. Trust is
+  discovered from the community, not declared by a list.
+- **Community verification is scents.** A page or module is verified for a
+  truster when enough scents from the voices that truster listens to say so.
+  A flag from those same voices can take it away. For the card page today, the
+  first scents are jwize's reviews.
+
+**Values a door keeps today.** Each value is named, with the only values it
+may hold, so it can never carry anything else, such as an identity. The visitor
+shell (`hypercomb-web/src/index.visitor.html`, `KEPT`) reads it from the
+browser's own storage and writes it back. Everything else still ends with the
+page.
+
+| Key | Values | What it is | Allowed |
+|---|---|---|---|
+| `bc.howto` | `true` / `false` | The card page's How-to was shown, so it opens by itself only once | jwize, 2026-10-07: "make it remember the how-to on doors too" |
+
+**Values a card door keeps, once its participant turns it on.** A card door
+has no visitor shell: the host serves the one page version its participant
+turned on as the whole document, so the browser's storage at that address is
+the page's own. The page checks every value as it loads, each on its own, and
+drops what breaks its rule, because other code may have run at that address
+before. In your hive the same checks run, but nothing you keep is ever cut.
+
+| Key | Rule | At most |
+|---|---|---|
+| `bc.cards` | Your own cards: `{id, card, mark}`. `id` is `c<n>`; `card` holds only a card's own fields; `mark` is 64 number pairs, or nothing | 16 |
+| `bc.current`, `bc.default` | An id in `bc.cards` (`bc.default` may also be `site`, or empty) | — |
+| `bc.hyperdex` | The people you keep. `id` is `d<n>`; a note of where you met, at most 300 characters; then either a card received as a link, or an address with the versions you took (`sig`, `data`, `at`, `publishedAt`) | 500 people, 16 versions each |
+| `bc.sigs` | A card's text by its SHA-256: a card, at most 65,536 characters, checked against its name on every load | — |
+| `bc.next` | The last id given out in each list, so an id is never given twice | — |
+| `bc.entrance`, `bc.entranceFor`, `bc.shake`, `bc.howto` | The page's own settings: fixed words, or `true` / `false` | — |
+
+Never kept on a card door: `bc.base` (the share address is the domain itself),
+`bc.ring` (an edit in progress ends with the page) and `bc.chooser`. Times are
+kept to the day and ids count up, so nothing kept says more about you than
+what you put on a card. The current version of each card you keep is held
+against its head again on every load; a version its head does not carry is
+dropped.
+
+**A separate address is not trust in its host.** *jwize:* "You can use
+subdomains and hosted friends but you are still at risk if they deploy a
+backdoor." And: "or any domain but the same is true." Any address you
+use but do not run, whether a friend's subdomain, a community host or any
+other domain, keeps your data apart from other sites, but not from its host. Whoever runs the host decides what code the
+address serves, and can change it at any deploy: the shell, the worker, the
+page. Verifying a signed version tells you what that version does. It cannot
+stop a host from serving something else in its place. So data kept at an
+address is only as safe as whoever runs it. Your own domain on your own host
+is the only place where you are that someone.
+
+**More than one entry point segregates the danger.** *jwize:* "It is always
+best to secure by one or even better multiple host entry points that would
+segregate the dangers further." One host entry point you run is good. Several
+are better. Put different things behind different hosts, so a breach at one
+reaches only what that host serves. And the same signed item, read through
+more than one host, lets a reader notice when one of them serves something
+else.
 
 ## The hosting model (settled 2026-08-28)
 

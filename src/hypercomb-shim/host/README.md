@@ -150,7 +150,7 @@ and the card reads it:
 Every field is optional and every field is untrusted: text is clamped, and an
 `href` may only be a path on this origin or a plain `http(s)` address. The
 first link leads; the footer never repeats a door the staged links already
-open. A host with no `welcome.json` renders the default front door, which is
+open. Where a worker fronts the origin, a card signed into the pool `sign('welcome:<zone>')` outranks the file (`hosts welcome <zone> <title> | <tagline>`; see [domain-claim.md](../../documentation/domain-claim.md#what-the-front-door-calls-itself)) — one origin serving several zones can only name them apart that way. A host with no `welcome.json` renders the default front door, which is
 the normal case — the shim itself knows nothing about any particular domain.
 
 On Cloudflare Pages, put the file in `public/` and it ships in `dist/`. The

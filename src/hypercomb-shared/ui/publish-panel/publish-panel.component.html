@@ -123,6 +123,7 @@
                 class="pdoor-own"
                 type="button"
                 [class.set]="!!ownLabel(current(), zone)"
+                [class.update]="entranceOfferedOn(current(), zone)"
                 [attr.aria-expanded]="isOwnOpen(current(), zone)"
                 [attr.aria-label]="'publish.own.toggle' | t"
                 [attr.data-tip]="'publish.own.toggle' | t"
@@ -159,13 +160,90 @@
                   }
                 </div>
                 <!-- THE DOMAIN ITSELF — the bare domain opens on this place, and
-                     the host card moves to host.<zone>. -->
+                     the host card moves to host.<zone>. A root is a plain
+                     front door: it never runs a page with powers. -->
                 @if (ownLabel(row, zone) === '@') {
                   <p class="pdoor-ownnote">{{ 'publish.own.apex-note' | t: { zone: zone } }}</p>
                 } @else {
                   <div class="pdoor-ownrow">
                     <button class="pcur-action" type="button" (click)="saveApex(row, zone)">{{ 'publish.own.apex' | t: { zone: zone } }}</button>
                   </div>
+                }
+                <!-- THE ENTRANCES — one per address this place is served at
+                     under the domain. Powers are off until you turn them on,
+                     for the one page you previewed here, at that address and
+                     nowhere else. Code and data are bound apart: the address
+                     serves this page by signature, and the card it shows
+                     follows this place's head. -->
+                @for (host of entranceHostsOn(row, zone); track host) {
+                  @if (entranceOf(row, host); as e) {
+                    <div class="pentr" [class.powered]="e.powered">
+                      <div class="pentr-head">{{ 'publish.entrance.at' | t: { host: host } }}</div>
+                      <p class="pdoor-ownnote">{{ 'publish.entrance.note' | t }}</p>
+                      <div class="pentr-line">
+                        <span>{{ (e.page ? 'publish.entrance.runs' : 'publish.entrance.runs-none') | t: { page: short(e.page) } }}</span>
+                        @if (e.page) {
+                          <span class="pentr-quiet">{{ (e.powered ? 'publish.entrance.powers-on' : 'publish.entrance.powers-off') | t }}</span>
+                          <button class="pentr-act" type="button" (click)="previewEntrance(row, host, e.page)">{{ 'publish.entrance.preview' | t }}</button>
+                        }
+                      </div>
+                      <div class="pentr-line">
+                        <span>{{ (e.wears ? 'publish.entrance.wears' : 'publish.entrance.wears-none') | t: { page: short(e.wears) } }}</span>
+                        @if (e.wears && e.wears !== e.page) {
+                          <button class="pentr-act" type="button" (click)="previewEntrance(row, host, e.wears)">{{ 'publish.entrance.preview' | t }}</button>
+                        }
+                      </div>
+                      @if (e.offered) {
+                        <div class="pentr-line">
+                          <span class="pentr-badge">{{ 'publish.entrance.offered' | t: { page: short(e.offered) } }}</span>
+                          <button class="pentr-act" type="button" (click)="previewEntrance(row, host, e.offered)">{{ 'publish.entrance.preview' | t }}</button>
+                          <button class="pentr-act" type="button" (click)="skipEntrance(row, host)">{{ 'publish.entrance.skip' | t }}</button>
+                        </div>
+                      }
+                      @for (skip of e.skipped; track skip.sig) {
+                        <div class="pentr-line pentr-quiet">
+                          <span>{{ 'publish.entrance.skipped-version' | t: { page: short(skip.page) } }}</span>
+                          <button class="pentr-act" type="button" (click)="showAgain(skip.sig)">{{ 'publish.entrance.show-again' | t }}</button>
+                        </div>
+                      }
+                      @if (e.page) {
+                        <div class="pentr-line pentr-quiet">
+                          <span>{{ scentsKey(e) | t: scentParams(e) }}</span>
+                          @if (ownVerdictKey(e); as verdict) {
+                            <span>{{ 'publish.entrance.scents-yours' | t: { verdict: (verdict | t) } }}</span>
+                          }
+                        </div>
+                      }
+                      @if (previewFor(host); as pv) {
+                        <div class="pentr-line">
+                          <span>{{ 'publish.entrance.previewing' | t: { page: short(pv.page) } }}</span>
+                          <button class="pentr-act" type="button" (click)="closeEntrancePreview(row, host)">{{ 'publish.entrance.preview-close' | t }}</button>
+                        </div>
+                        <iframe
+                          class="pentr-frame"
+                          sandbox="allow-scripts"
+                          referrerpolicy="no-referrer"
+                          [src]="pv.src"
+                          [attr.title]="'publish.entrance.preview' | t"
+                        ></iframe>
+                      }
+                      <div class="pentr-line">
+                        <button
+                          class="pentr-act"
+                          type="button"
+                          [disabled]="!canTurnOn(row, host)"
+                          [attr.data-tip]="'publish.entrance.turn-on-tip' | t"
+                          (click)="turnOn(row, host)"
+                        >{{ 'publish.entrance.turn-on' | t }}</button>
+                        @if (e.powered) {
+                          <button class="pentr-act" type="button" (click)="turnOff(row, host)">{{ 'publish.entrance.turn-off' | t }}</button>
+                        }
+                        @if (e.page || e.from) {
+                          <button class="pentr-act" type="button" (click)="forgetEntrance(row, host)">{{ 'publish.entrance.forget' | t }}</button>
+                        }
+                      </div>
+                    </div>
+                  }
                 }
               </li>
             }

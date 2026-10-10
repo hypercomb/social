@@ -35,7 +35,7 @@
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, computed, inject, signal, type OnDestroy } from '@angular/core'
-import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
+import { DomSanitizer, type SafeHtml, type SafeResourceUrl } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
@@ -82,6 +82,29 @@ interface PublishRow {
   ownLabels: Record<string, string>
   /** The tile's name folded to a DNS label — where an own address starts. */
   defaultLabel: string
+  /** host → the entrance each address this creation is served at runs —
+   *  its own addresses, never a domain's root. */
+  entrances: Record<string, PublishEntrance>
+}
+
+/** Mirrors PublishEntrance in sharing/publish-status.drone.ts. */
+interface PublishEntrance {
+  /** The domain the address sits under. */
+  zone: string
+  /** The page the address runs (H), or null. */
+  page: string | null
+  /** H runs with its powers on. */
+  powered: boolean
+  from: { pubkey: string; lineage: string } | null
+  /** The card page this tile wears here now. */
+  wears: string | null
+  /** A newer page the followed head wears, not skipped. */
+  offered: string | null
+  /** The community's scents on H — read only. */
+  scents: { pubkey: string; verdict: string; at: number; own: boolean }[]
+  /** Versions put away with Skip, for this address: the page, and the
+   *  signature of its skip record (Show again names it). */
+  skipped: { page: string; sig: string }[]
 }
 
 interface PublishViewChoice {
@@ -141,6 +164,10 @@ interface PublishRenderPayload {
    *  snapshot matches them. */
   participantOnly?: string[]
   participantState?: 'published' | 'changed' | 'none'
+  /** The page being previewed — a blob: URL of its exact bytes. */
+  entrancePreview?: { host: string; page: string; url: string } | null
+  /** Pages previewed this session; Turn on is offered for these only. */
+  previewed?: string[]
 }
 
 const SIG_SHOWN = 12
@@ -203,6 +230,12 @@ export class PublishPanelComponent implements OnDestroy {
   readonly optimizeDraft = signal<Record<string, string>>({})
   /** Where each row's last trial arrival opened, keyed by row. */
   readonly optimizeTried = signal<Record<string, string>>({})
+  /** THE ENTRANCE PREVIEW — the drone's blob: URL with `#<host>` as its
+   *  fragment (the page reads its address from it off https), trusted ONCE
+   *  per URL so a re-render never reloads the frame. */
+  readonly entrancePreview = signal<{ host: string; page: string; url: string; src: SafeResourceUrl } | null>(null)
+  /** Pages previewed this session — the only ones Turn on may name. */
+  readonly previewed = signal<ReadonlySet<string>>(new Set())
   readonly #sanitizer = inject(DomSanitizer)
   /** A deliberately coarse render clock. Template helpers must not call
    *  Date.now() themselves: Angular's development check renders twice and a
@@ -378,7 +411,7 @@ export class PublishPanelComponent implements OnDestroy {
   saveOwn(row: PublishRow, zone: string): void {
     if (row.busyPhase) return
     const label = this.ownValue(row, zone).trim().toLowerCase()
-    if (!label) return
+    if (!label || !this.#mayMoveAddress(row, zone, label)) return
     EffectBus.emit('publish:own-address', { key: row.key, zone, label })
     this.ownOpen.set('')
   }
@@ -386,16 +419,132 @@ export class PublishPanelComponent implements OnDestroy {
   /** The bare domain opens on this place (`@`, the zone apex); the host card
    *  moves to host.<zone>. */
   saveApex(row: PublishRow, zone: string): void {
-    if (row.busyPhase) return
+    if (row.busyPhase || !this.#mayMoveAddress(row, zone, '@')) return
     EffectBus.emit('publish:own-address', { key: row.key, zone, label: '@' })
     this.ownOpen.set('')
   }
 
   /** Back to the root path on `zone` — the own address is dropped. */
   clearOwn(row: PublishRow, zone: string): void {
-    if (row.busyPhase) return
+    if (row.busyPhase || !this.#mayMoveAddress(row, zone, null)) return
     EffectBus.emit('publish:own-address', { key: row.key, zone, label: null })
     this.ownOpen.set('')
+  }
+
+  /** A creation holds ONE own address per domain, and an entrance lives only
+   *  while its address is bound — so moving, clearing or turning the address
+   *  into the domain's front page (`@`) takes the entrance of the address it
+   *  leaves with it: no page runs there with powers until one is turned on
+   *  again. Asked first, as Forget is: true when no page runs there or the
+   *  participant agrees. The implicit `<key>.<zone>` stays bound without an
+   *  own address. */
+  #mayMoveAddress(row: PublishRow, zone: string, label: string | null): boolean {
+    const current = this.ownLabel(row, zone)
+    if (!current) return true
+    const leaving = current === '@' ? zone : `${current}.${zone}`
+    const next = label === '@' ? zone : label ? `${label}.${zone}` : ''
+    if (leaving === next || leaving === `${row.key}.${zone}`) return true
+    if (!this.entranceOf(row, leaving)?.page) return true
+    const i18n = window.ioc?.get<{ t?: (k: string, p?: Record<string, string>) => string }>('@hypercomb.social/I18n')
+    const question = i18n?.t?.('publish.entrance.unbind-confirm', { host: leaving })
+      ?? `${leaving} runs its own page. Moving this address takes that entrance with it, and no page runs at ${leaving} with powers until you turn one on there again. Move it anyway?`
+    return window.confirm(question)
+  }
+
+  // ── THE ENTRANCES (each app address) ────────────────────────────────
+  // Powers are off by default, and the participant turns them on, for the
+  // one page they previewed, at an address of its own — never at a domain's
+  // root, which stays a plain front door (documentation/using-a-creation.md).
+  // The drone writes the signed index; the panel only names the acts. None of
+  // these intents is open to the bridge.
+
+  entranceOf(row: PublishRow | null, host: string): PublishEntrance | null {
+    return row?.entrances?.[host] ?? null
+  }
+
+  /** The addresses under `zone` this row runs an entrance at, in order. */
+  entranceHostsOn(row: PublishRow | null, zone: string): string[] {
+    return Object.entries(row?.entrances ?? {}).filter(([, e]) => e.zone === zone).map(([host]) => host).sort()
+  }
+
+  /** Some address under `zone` has a newer page on offer. */
+  entranceOfferedOn(row: PublishRow | null, zone: string): boolean {
+    return this.entranceHostsOn(row, zone).some(host => !!this.entranceOf(row, host)?.offered)
+  }
+
+  /** The preview open for THIS address, if any. */
+  previewFor(host: string): { page: string; src: SafeResourceUrl } | null {
+    const preview = this.entrancePreview()
+    return preview && preview.host === host ? preview : null
+  }
+
+  /** Show a page in a frame sandboxed to scripts alone. */
+  previewEntrance(row: PublishRow, host: string, page: string | null): void {
+    if (!page) return
+    EffectBus.emit('publish:entrance-preview', { key: row.key, host, page })
+  }
+
+  closeEntrancePreview(row: PublishRow, host: string): void {
+    EffectBus.emit('publish:entrance-preview', { key: row.key, host, page: '' })
+  }
+
+  /** Turn on is offered only for the exact page previewed here, this session,
+   *  and only when it would change what the address runs. */
+  canTurnOn(row: PublishRow, host: string): boolean {
+    const preview = this.previewFor(host)
+    const entrance = this.entranceOf(row, host)
+    if (!preview || !entrance || row.busyPhase || !this.previewed().has(preview.page)) return false
+    return !(entrance.powered && entrance.page === preview.page)
+  }
+
+  turnOn(row: PublishRow, host: string): void {
+    const preview = this.previewFor(host)
+    if (!preview || !this.canTurnOn(row, host)) return
+    EffectBus.emit('publish:entrance', { key: row.key, host, on: true, page: preview.page })
+  }
+
+  turnOff(row: PublishRow, host: string): void {
+    if (row.busyPhase || !this.entranceOf(row, host)?.powered) return
+    EffectBus.emit('publish:entrance', { key: row.key, host, on: false })
+  }
+
+  /** Put the offered version away; the next newer one is still offered. */
+  skipEntrance(row: PublishRow, host: string): void {
+    const offered = this.entranceOf(row, host)?.offered
+    if (!offered) return
+    EffectBus.emit('publish:entrance-skip', { key: row.key, host, page: offered })
+  }
+
+  /** Forget the entrance entirely — asked first, in the participant's words. */
+  forgetEntrance(row: PublishRow, host: string): void {
+    if (row.busyPhase) return
+    const i18n = window.ioc?.get<{ t?: (k: string, p?: Record<string, string>) => string }>('@hypercomb.social/I18n')
+    const question = i18n?.t?.('publish.entrance.forget-confirm', { host })
+      ?? `Forget the entrance of ${host}?`
+    if (!window.confirm(question)) return
+    EffectBus.emit('publish:entrance', { key: row.key, host, forget: true })
+  }
+
+  /** The scents line: none yet, or a tally. */
+  scentsKey(entrance: PublishEntrance): string {
+    return entrance.scents.length === 0 ? 'publish.entrance.scents-none' : 'publish.entrance.scents'
+  }
+
+  scentParams(entrance: PublishEntrance): Record<string, number> {
+    const count = (verdict: string): number => entrance.scents.filter(s => s.verdict === verdict).length
+    return { accept: count('accept'), refuse: count('refuse'), unclear: count('unclear') }
+  }
+
+  /** Your own reading, as its catalog key — '' when you have none. */
+  ownVerdictKey(entrance: PublishEntrance): string {
+    const verdict = entrance.scents.find(s => s.own)?.verdict ?? ''
+    return ['accept', 'refuse', 'unclear'].includes(verdict) ? `publish.entrance.verdict.${verdict}` : ''
+  }
+
+  /** Bring a skipped version back: it leaves the put-away list, and the
+   *  Publish panel may offer it again. */
+  showAgain(sig: string): void {
+    EffectBus.emit('hidden:reveal', { sig })
   }
 
   constructor() {
@@ -449,8 +598,27 @@ export class PublishPanelComponent implements OnDestroy {
             urls: { ...(row.urls ?? {}) },
             ownLabels: { ...(row.ownLabels ?? {}) },
             defaultLabel: String(row.defaultLabel ?? ''),
+            entrances: Object.fromEntries(Object.entries(row.entrances ?? {}).map(([host, e]) => [host, {
+              ...e,
+              zone: String(e.zone ?? ''),
+              from: e.from ? { ...e.from } : null,
+              scents: Array.isArray(e.scents) ? e.scents.map(s => ({ ...s })) : [],
+              skipped: Array.isArray(e.skipped) ? e.skipped.map(k => ({ page: String(k?.page ?? ''), sig: String(k?.sig ?? '') })) : [],
+            }])),
           }))
         : [])
+      this.previewed.set(new Set(Array.isArray(p.previewed) ? p.previewed.map(String) : []))
+      const preview = p.entrancePreview
+      const shown = this.entrancePreview()
+      if (!preview?.url) this.entrancePreview.set(null)
+      else if (!shown || shown.url !== preview.url || shown.host !== preview.host) {
+        // A blob: URL the drone minted from bytes it checked against their
+        // signature; the frame is sandboxed to scripts with no same origin.
+        this.entrancePreview.set({
+          host: preview.host, page: preview.page, url: preview.url,
+          src: this.#sanitizer.bypassSecurityTrustResourceUrl(`${preview.url}#${preview.host}`),
+        })
+      }
       this.participantOnly.set(Array.isArray(p.participantOnly) ? p.participantOnly.map(String) : [])
       this.participantState.set(p.participantState === 'published' || p.participantState === 'changed' ? p.participantState : 'none')
       this.views.set(Array.isArray(p.views)

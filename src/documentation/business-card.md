@@ -272,9 +272,9 @@ hive root with a leading `/`. Both writes are ordinary commits, so they undo
 like any other. Change it in your hive first; visitors see it after the next
 publish.
 
-In the silo (a card kept on your device at someone else's domain) the card
-editor's theme picker does the same, and the card's link carries the theme's
-name.
+In the silo (a card kept on your device at someone else's domain), the
+template's name on the card's editing bar does the same: ‹ and › step through
+the templates. The card's link carries the theme's name.
 
 ### The middle picture by AI
 
@@ -290,6 +290,140 @@ side. A published card serves only the stored image from its own host.
 - **Indexed across public domains** is the `themes:card` meaning, offered from
   a host the way text themes are. It needs hive code and a host deploy, as the
   ledger says.
+
+### Slots on a card
+
+Slots are a Hypercomb primitive, not the card's: [slots.md](slots.md). A
+template leaves blanks as slot marks naming one word each; the hive shows an
+unfilled slot as a hexagon silhouette, fills it from an explicit mark, then
+from `sign(word)` on the hive and the hosts it follows, and asks on a miss.
+Passive discovery, the halo and count, `fill`, and the sticky
+`sign('discovery')` observation are all there.
+
+What the card adds is only its words. The business card's template wears
+`name`, up to four roles, up to three contact lines, `portrait`, and the
+middle picture. A card instance wears `slot → signature` marks for the ones it
+chose. A different card with more blanks is a different template signature
+that may reuse every filler this one had. No subdomain is involved: a filler
+is a tile named the word, published from its author's own domain.
+
+## On a phone: the list is the root
+
+The card page opens on a phone as a directory of people
+([using-a-creation.md](using-a-creation.md), "On a phone, the root is people"):
+the default card at the top, then your own cards and the site's card, then
+everyone in your Hyperdex, then "Create your own card" until you have one.
+Each row is the card made small, its name and title. Pulling up from the
+bottom of a card shrinks it into its row; past halfway it finishes on its own.
+Tapping a row grows it back into the card. The search sits at the top of the
+list and is always there. A row whose card has a phone number starts with a
+call button, and each of your own rows ends with an edit button. A dock along
+the bottom scans, shows your code, shares and edits your own card; its bottom
+right corner holds the manage toggle. Turning the card over is one swipe, never
+a spin past the side you meant.
+
+Someone using another person's card site can make their own card the default
+there, and carry their cards and Hyperdex to another address in a file until
+they have a host of their own.
+
+### Editing a card in place
+
+*jwize, 2026-10-07:* "edit the card elements in place … it has to be mobile
+friendly dragging and selecting things … the edit screen goes away but we make
+everything possible in-line on the card."
+
+There is no edit screen. Editing holds the card flat, face up and still, and
+the card is its own editor:
+
+- **Tap a line** to select its block: the name, the roles, or the ways to reach
+  you. Tap it again to type straight onto the card. The card redraws the line
+  as you type.
+- **Drag** a block to move it. **A−** and **A+** size it, and the align button
+  steps through left, centre and right. The glass behind the type follows the
+  type wherever it goes.
+- **A template's default elements** that the card does not have yet are drawn
+  faint where they belong. Tap one and type it. Left empty, it stays faint and
+  nobody else ever sees it: a card shows only what its owner filled in. The
+  business card's default elements are a title, what you make, a role, a
+  company, a website and an email. A phone number and more links come from the
+  ⋯ menu.
+- **The bar** along the bottom changes the template (‹ name ›), records the
+  card's mark, makes the card the first one on this site (☆), and holds the
+  rest under ⋯: the card's options, a phone, a link, the card's address, saving
+  and bringing cards in a file, and delete. Shake is one of the defaults.
+- **Card options** shrinks the card into its own row in the list, open on its
+  options, while the edit waits in the ring (*jwize:* "make the options for the
+  card somehow available and when you come back you are back to the card
+  editing"). The row says *Editing*. Tapping it, or *Continue editing*, grows it
+  back into the card, still editing. A new card not yet kept has a row of its
+  own to land on.
+- **Back** and **Done** sit in the top corners.
+
+#### The ring: nothing is lost until you accept
+
+*jwize, 2026-10-07:* "remember the current state so the clipboard ring
+remembers your last version as well as each template. That way you don't
+accidentally lose anything until you accept a new template."
+
+While you edit a card, the ring holds:
+- the card as it was;
+- the version you are making;
+- your version under every template you try.
+
+Your words follow you from template to template. Where the type sits and how
+big it is belong to each template, so going back to a template finds it the
+way you left it. The ring is saved as you go: close the page mid-edit and the
+next edit picks up where you stopped. Done keeps the version on screen and
+empties the ring. Back empties it and keeps nothing, and the card returns to
+exactly how it was.
+
+### A row held, and managing
+
+*jwize, 2026-10-07:* "a call icon on the left … more options … by holding down
+on the item … an expanded rectangle with the flag and any other options
+needed", and "don't make them up yet if you don't know".
+
+- **Hold a row** (or tap its ⋯) and it opens in place into a larger rectangle
+  with its options. The options are only what was asked for, or what the page
+  already does for that kind of row:
+  - every row: call, if the card has a phone, and its own entrance flag;
+  - your own card: edit and make first;
+  - a Hyperdex contact: details, save to the phone's contacts, pass it on, and
+    remove.
+
+  A tap anywhere else closes the rectangle and does nothing more.
+- **The manage toggle** turns manage mode on. The defaults open full screen
+  first. Pulling up, or the list icon, collapses them into the list's top rows
+  the way a card collapses into its row. While manage is on, a tap opens any
+  row instead of its card. The toggle and the list take the theme's second
+  accent (red, not gold), so the mode is never mistaken for the ordinary list.
+  It stays on until the toggle is turned off. The toggle is the only way in:
+  the search keeps its own long-press (paste).
+- **The defaults are toggles**: one tap moves a default to its next state, with
+  no second level (*jwize:* "just click to change the state instantly"). There
+  are two defaults, the only settings that exist: the card entrance, and shake
+  to show your card.
+
+### The entrance
+
+*jwize, 2026-10-07:* asked whether a card's entrance should play every time,
+then "at least should be a setting", "with flag as well", and "multi stage
+toggle entrance → Starts | Always | Never".
+
+The entrance plays when a card **starts** in someone's hands: shown with the
+phone gesture, or received by a scan or a link. It does not play while you
+browse: the list, the Hyperdex, or a card read again all open the card at
+rest. This rule follows from the act, not from a record of which cards you
+have seen, so nothing keeps a viewing history.
+
+The entrance is decided by the first of these that applies:
+
+1. **A phone set to reduce motion** never plays it.
+2. **The link's flag** decides for that visit (`?entrance=starts`,
+   `?entrance=always` or `?entrance=never`), over the viewer's own choice. A
+   kiosk's link can say always.
+3. **A card's own flag**: Default, Always or Never, from its row.
+4. **The default**: Starts, Always or Never.
 
 ## Why this is the founding creation
 
@@ -317,17 +451,27 @@ useful on day one, so it is the creation the concept is explained with:
 | QR of the card's address on the back; scanning adds to the Hyperdex; Hyperdex kept on the device | built, in the page |
 | The phone gesture (Quick Tap, shake) opening the card; a scribble choosing between cards | built for the local development build; the published site cannot yet be installed as an app |
 | One shared page plus each tile's own card | built. The page carries no card; it reads the `card:data` record on its tile through the hive's own services (and `card.json` beside it when it runs on its own). The cube is the card's own `logo`, so it appears only on cards that name it. The three.js dependency and the animation are still inside the shared page, owed as separate signed parts. |
-| Themes | built in the page: Honeycomb Edge, Graphite, Graphite Red and Emerald; a theme from the tile (`themeSig`) or named by the card (`h`); the editor's picker; the page chrome follows the card's theme. `jaime-weise` still wears the page from before themes, by choice |
+| Themes | built in the page: Honeycomb Edge, Graphite, Graphite Red and Emerald; a theme from the tile (`themeSig`) or named by the card (`h`); ‹ and › on the editing bar; the page chrome follows the card's theme. `jaime-weise` still wears the page from before themes, by choice |
 | The middle picture | built in the page (`artSig`). Making it is `/comfy` today; the hive's AI cannot start a picture on its own yet (`comfy:generate` is not a bridge intent) |
 | `jaime-weise/business-card/template` and its theme tiles | built in the hive. The template wears the themed page and a card of name slots; each starter theme is a tile under it wearing the same page and naming its theme. `jaime-weise` keeps its own page and card and wears `view:default=website`; `business-card` wears `hexagons` |
 | `templates:<business-card>` facet and `template` membership | membership in `template` is by name, today. The facet needs a writer in the hive (`facet-succession.ts` exists; no word or bridge op writes this facet) |
+| The card's blanks as slot marks ([slots.md](slots.md)) | not built. Today the template's card carries the name slots as fields of its `card:data`, filled by typing; nothing is a slot mark yet |
 | Templates indexed across public domains (`themes:card`) | not built. It needs the meaning reserved in the pool registry, an offering handler, and the host worker to list it (today it lists `themes:text` only) |
+| The list as the root on a phone; pull a card up into its row, tap a row to grow it; the search always at the top; the dock | built in the card page |
+| Editing a card in place: select, type, drag, size, align and change the template on the card; default elements drawn faint; the ring until Done | built in the card page. The ring lives in the browser at that address, not yet in the hive's clipboard pool |
+| Each template naming its own default elements | not built. Every template offers the business card's |
+| A row held: call on the left, the rectangle of options, the card's own entrance flag | built in the card page. The per-card flag lives in the browser, keyed by the card's name and first way to reach it. Editing your own card carries the flag over; a held card that arrives again under a new name starts without one |
+| Manage: the toggle at the dock's corner, the defaults full screen collapsing into the list, toggles that change on one tap, the red accent | built in the card page |
+| Card options from the editor, and coming back to the edit from its row | built in the card page |
+| The entrance rule (starts, always, never; the link's flag; reduce motion) | built in the card page |
+| Making yourself the default on someone's card site; carrying cards and Hyperdex in a file | built in the card page |
+| Staying on the page version you use when the site publishes a newer one | not built ([using-a-creation.md](using-a-creation.md)) |
 | Gestures and choosers as drone modules | design — the page carries a registry; nothing is a bee yet |
 | The Hyperdex as a collection in the hive, synced across the participant's devices | design — a private `/hyperdex` collection of link tiles. The pieces are built: collections, link tiles, and the confirm step (`link:intake`). Nothing yet writes a scanned or pasted card address into it. |
 | Reading a held address at its live head | built — opening a door resolves the signed index |
 | A local card at someone else's domain (the silo) | built, in the page. "New card" keeps it on the device, its QR carries the card in a link at that domain, and opening the link shows it with "Add to my Hyperdex". The hive clears a link's `#` part before a page mounts, so the page reads the link it was opened with from the browser's record of the visit, once per load. The card's extra links list does not travel in the link. |
 | Moving a silo's card and Hyperdex into your own hive | not built |
-| "Updated" mark on a Hyperdex entry | not built — modelled on the update scout's one check per boot. Each host already answers its current heads in the signed `host:offerings` pool. |
+| An update notice on a Hyperdex entry: the head you took stays until you upgrade or skip ([using-a-creation.md](using-a-creation.md), "Holding a published item") | not built. The Hyperdex keeps copies, not addresses and heads. Each host already answers its current heads in the signed `host:offerings` pool, and the update scout's one check per boot is the model. |
 | From a card's door to a hive, a host, a domain and a card, in that order | not built. The door shows nothing onward. Each step exists on its own: a hive by replication (`acquire`), a host (Serve This Hive in the desktop client, `hypercomb-serve`, or a Pages deploy), a domain (`domain claim`), and the card (`/publish`). Nothing leads a newcomer through them. The door's `?home=` button is a hosting step for people who already have a hive. |
 | Becoming a host without a developer | not built. Serve This Hive opens a port on the participant's own machine. Reaching it from the internet needs a server, a forwarded port or a tunnel in front, which is a developer's job today. |
 | No card without a host and a domain | not enforced. Today a guest with no host of their own can publish a branch to the shared hypercomb.com host, and it opens at a path on hypercomb.com. |

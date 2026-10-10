@@ -42,8 +42,10 @@ import { deliverLink } from './deliver-link.js'
 import {
   MEETING_INVITE_KIND,
   MEETING_INVITE_VERSION,
+  INVITE_SECRET_PREFIX,
   SWARM_INVITE_KIND,
   encodeInviteBundle,
+  inviteSecretCheck,
   meetFragment,
   meetingRelayOf,
   type InviteDecorationPayload,
@@ -164,12 +166,17 @@ export class InviteQueenBee {
     const alias = args.trim().slice(0, 120) || undefined
     const baseSegments = nav.segments()
 
+    // THE BUNDLE HOLDS NO SECRET (jwize, 2026-10-07: "the key can never be
+    // stored in a pool or public place"). It goes to the host and its sig
+    // rides the swarm, so it carries only the secret's check; a swarm peer
+    // already holds the secret, and the link carries it in its fragment.
+    const secretCheck = await inviteSecretCheck(roomVal, secretVal)
     const mkBundle = (segments: string[], lbl?: string): MeetingInviteBundle => ({
       kind: MEETING_INVITE_KIND,
       v: MEETING_INVITE_VERSION,
       segments,
       room: roomVal,
-      secret: secretVal,
+      secretCheck,
       ...((alias ?? lbl) ? { alias: alias ?? lbl } : {}),
       createdAt: Date.now(),
     })
@@ -225,7 +232,8 @@ export class InviteQueenBee {
 
     const host = this.#linkHost()
     const scheme = LOOPBACK_RE.test(host) ? 'http' : 'https'
-    const url = `${scheme}://${host}/${linkSig}`
+    // The secret rides in the fragment, which no server is sent.
+    const url = `${scheme}://${host}/${linkSig}${INVITE_SECRET_PREFIX}${encodeURIComponent(secretVal)}`
 
     // Sheet → clipboard → fresh-tap offer: the receipt wait above can leave
     // the tap's activation stale, and on phones the invite is the link most

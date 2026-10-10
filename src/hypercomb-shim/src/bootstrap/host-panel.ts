@@ -19,6 +19,7 @@ import { hostRouteName } from '@hypercomb/runtime/host-activation'
 import { askHostPackages } from '@hypercomb/runtime/host-packages'
 import { acquire, installPackage, installedPackageSig, type HostPackage, type InstallOutcome } from './replicate'
 import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeLink } from './welcome'
+import { pictureOrigins, tilePicture } from './tile-picture'
 import { addOffering, addPublicCreation, clearPendingSelection, listActiveOfferings,
   listActivePublicCreations, listAdoptions, listPendingSelections, stagePendingSelection, stagePendingCreation,
   listRevisionCandidates, publicCreationOrigin, readOfferings, readPublicCreations, rememberRevisionCandidate,
@@ -49,13 +50,13 @@ h1 { margin: 0 0 .35rem; font-size: 1.2rem; font-weight: 600; color: var(--md-on
 p.lede { margin: 0 0 1.25rem; color: var(--md-on-surface-var); }
 
 /* the front door — the mark, the name, and what this is */
-.brand { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); column-gap: 1.1rem; align-items: center; margin-bottom: clamp(3rem, 7vh, 5.5rem); }
-.brand svg { width: 3.1rem; height: 3.1rem; color: var(--md-primary); grid-row: span 2; }
+.brand { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr); column-gap: 1.35rem; align-items: center; margin-bottom: clamp(2.4rem, 6vh, 4.2rem); }
+.brand svg { width: 4rem; height: 4rem; color: var(--md-primary); grid-row: span 2; align-self: start; margin-top: .35rem; }
 .brand h1 {
-  margin: 0; font-size: clamp(1.25rem, 3vw, 1.65rem); font-weight: 650;
-  letter-spacing: -.035em; color: var(--md-on-surface-strong); overflow-wrap: anywhere;
+  margin: 0; color: var(--md-on-surface-strong); overflow-wrap: anywhere;
+  font: 500 clamp(2.3rem, 6vw, 4.4rem)/1.02 'Source Serif 4', Georgia, serif; letter-spacing: -.045em;
 }
-.brand p { max-width: 39rem; margin: -.15rem 0 0; color: var(--md-on-surface-var); font-size: .84rem; line-height: 1.45; }
+.brand p { max-width: 44rem; margin: .6rem 0 0; color: var(--md-on-surface-var); font-size: clamp(.98rem, 1.6vw, 1.14rem); line-height: 1.5; }
 
 /* section headings, and the label above the directory */
 .lbl {
@@ -108,8 +109,6 @@ li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; bo
 .status { min-height: 1.4em; margin: 1rem 0 0; color: var(--md-on-surface-var); }
 .status[data-tone="bad"] { color: var(--hc-status-alert); }
 .status[data-tone="good"] { color: var(--hc-status-ok); }
-.gallery-head { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--md-outline-variant); }
-.gallery-head h2 { margin: 0; color: var(--md-on-surface-strong); font: 500 clamp(2.7rem, 7vw, 4.5rem)/1.05 'Source Serif 4', Georgia, serif; letter-spacing: -.055em; }
 .gallery-search { display: block; width: 100%; margin: 0 0 .75rem; padding: 1rem 1.15rem; font-size: 1.02rem; box-shadow: var(--md-elev-1); }
 .gallery-search::placeholder { color: var(--md-on-surface-faint); }
 .source-filter { margin: 0 0 .25rem; border: 1px solid var(--md-outline-variant); border-radius: .85rem; background: var(--md-surface-c-low); }
@@ -141,7 +140,7 @@ li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; bo
 .offer-main { display: flex; flex: 1; flex-direction: column; width: 100%; padding: 0; color: var(--md-on-surface); text-decoration: none; }
 .offer-main[type='button'] { text-align: left; border: 0; border-radius: 0; background: transparent; }
 .offer-main[type='button']:hover { background: transparent; }
-.offer-art { position: relative; display: grid; place-items: center; width: 100%; min-height: 11rem; overflow: hidden; isolation: isolate;
+.offer-art { position: relative; display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 10; min-height: 11rem; overflow: hidden; isolation: isolate;
   background: radial-gradient(circle at 75% 30%, hsl(var(--art-hue) 48% 38% / .38), transparent 48%),
     linear-gradient(145deg, hsl(var(--art-hue) 28% 23%), hsl(var(--art-hue) 38% 11%));
   color: hsl(var(--art-hue) 58% 82%); }
@@ -193,15 +192,42 @@ li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; bo
 .pending-actions button { margin-top: 0; }
 .source-form { margin: .8rem 1rem 1rem; }
 .status { margin: .2rem 1rem 1rem; }
-.gallery-empty { border-style: dashed; box-shadow: none; }
-.gallery-empty:hover { transform: none; border-color: var(--md-outline-variant); box-shadow: none; }
-.gallery-empty .offer-art { min-height: 11rem; filter: saturate(.55); }
-.gallery-empty .art-monogram { opacity: .65; }
-.gallery-empty .offer-copy { min-height: 6.5rem; }
-.gallery-empty .offer-copy b { color: var(--md-on-surface-strong); font-size: 1.12rem; }
-.gallery-empty .offer-copy span { color: var(--md-on-surface-var); font-size: .78rem; }
-.gallery-empty button { margin: 0 1rem 1rem; }
-.gallery-empty.secondary { opacity: .58; pointer-events: none; }
+/* a creation's own picture, when its tile wears one */
+.offer-art .art-picture { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; animation: art-in .35s ease forwards; }
+.offer-art.has-picture::before { display: none; }
+.offer-art.has-picture::after { display: block; inset: 0; width: auto; height: auto; z-index: 1; border: 0; opacity: 1; clip-path: none; transform: none;
+  background: linear-gradient(180deg, rgb(0 0 0 / .38), transparent 42%); }
+.offer-art.has-picture .art-monogram { display: none; }
+.offer-art.has-picture .art-kind { z-index: 2; color: #fff; text-shadow: 0 1px 3px rgb(0 0 0 / .6); }
+@keyframes art-in { to { opacity: 1; } }
+
+/* one section per domain, this door's own first */
+.gallery-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .6rem; margin: 0 0 1.6rem; }
+.gallery-tools .gallery-search { flex: 1 1 18rem; width: auto; margin: 0; padding: .72rem 1rem; font-size: .95rem; box-shadow: none; }
+.gallery-tools .source-filter { flex: 0 0 auto; margin: 0; }
+.gallery-tools .source-filter[open] { flex: 1 1 100%; }
+.gallery-tools .gallery-count { flex-basis: 100%; margin: .1rem 0 0; }
+.domain-section { margin: 0 0 3rem; }
+.domain-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem .9rem; margin: 0 0 1.1rem; padding-bottom: .7rem; border-bottom: 1px solid var(--md-outline-variant); }
+.domain-head .lbl { margin: 0; }
+.domain-head h2 { margin: 0; color: var(--md-on-surface-strong); font: 500 clamp(1.5rem, 3.2vw, 2.15rem)/1.15 'Source Serif 4', Georgia, serif; letter-spacing: -.035em; overflow-wrap: anywhere; }
+.domain-head a { margin-left: auto; color: var(--md-primary); font-size: .84rem; font-weight: 600; text-decoration: none; }
+.domain-head a:hover { text-decoration: underline; }
+.domain-empty { margin: 0; padding: 1.4rem 1.2rem; border: 1px dashed var(--md-outline-variant); border-radius: 1rem; color: var(--md-on-surface-var); }
+.offer-waiting { opacity: .6; border-style: dashed; box-shadow: none; }
+.offer-waiting:hover { opacity: .92; }
+.offer-waiting .offer-art { filter: grayscale(1); }
+
+/* management: present for whoever keeps this door, out of a visitor's way */
+.manage { margin-top: 3rem; border: 1px solid var(--md-outline-variant); border-radius: 1rem; background: var(--md-surface-c-low); }
+.manage > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem .7rem; padding: .9rem 1.1rem; cursor: pointer; list-style: none; color: var(--md-on-surface-strong); font-weight: 600; }
+.manage > summary::-webkit-details-marker { display: none; }
+.manage > summary small { color: var(--md-on-surface-faint); font-weight: 400; }
+.manage > summary::after { content: '⌄'; margin-left: auto; color: var(--md-on-surface-var); transition: transform .18s; }
+.manage[open] > summary::after { transform: rotate(180deg); }
+.manage > .manage-body { padding: 0 1.1rem 1.1rem; }
+.manage .technical { margin-top: 1rem; }
+
 .technical { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--md-outline-variant); }
 .technical > summary { cursor: pointer; color: var(--md-on-surface-var); }
 .deployments { display: grid; gap: .75rem; margin-top: 1rem; }
@@ -255,10 +281,11 @@ footer a:hover { color: var(--md-primary); border-bottom-color: var(--md-primary
 footer a:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 @media (max-width: 640px) {
   .panel { width: calc(100vw - 1.5rem); margin: 1.4rem 0 3rem; }
-  .brand { grid-template-columns: 2.7rem minmax(0, 1fr); gap: .35rem .7rem; margin-bottom: 2.5rem; }
-  .brand svg { width: 2.5rem; height: 2.5rem; }
+  .brand { grid-template-columns: 2.9rem minmax(0, 1fr); gap: .35rem .8rem; margin-bottom: 2.2rem; }
+  .brand svg { width: 2.7rem; height: 2.7rem; margin-top: .2rem; }
+  .brand h1 { font-size: 2.2rem; }
+  .manage > summary small { flex-basis: 100%; order: 2; }
   .brand p { grid-column: 1 / -1; margin-top: .35rem; }
-  .gallery-head h2 { font-size: 2.8rem; }
   .gallery-search { font-size: .92rem; }
   .domain-row { flex-wrap: wrap; }
   .domain-row .domain-link { min-width: 55%; }
@@ -284,8 +311,10 @@ const mark = (): Element => {
   return holder.firstElementChild ?? holder
 }
 
-/** A quiet, deterministic cover for an offering with no published artwork. */
-const tileArt = (title: string, kind: string, signature: string): HTMLElement => {
+/** A quiet, deterministic cover — and, once it arrives, the picture the
+ *  creation's own tile wears (tile-picture.ts). */
+const tileArt = (title: string, kind: string, signature: string,
+  picture?: { head: string; route: string }): HTMLElement => {
   const art = document.createElement('div')
   art.className = 'offer-art'
   art.style.setProperty('--art-hue', String(170 + (Number.parseInt(signature.slice(0, 2), 16) || 0) % 110))
@@ -296,26 +325,19 @@ const tileArt = (title: string, kind: string, signature: string): HTMLElement =>
   monogram.className = 'art-monogram'
   monogram.textContent = title.trim().slice(0, 1).toLocaleUpperCase() || 'H'
   art.append(type, monogram)
+  if (picture) {
+    void tilePicture(picture.head, pictureOrigins(picture.route)).then(url => {
+      if (!url) return
+      const image = document.createElement('img')
+      image.className = 'art-picture'
+      image.alt = ''
+      image.decoding = 'async'
+      image.src = url
+      art.prepend(image)
+      art.classList.add('has-picture')
+    })
+  }
   return art
-}
-
-/** Empty positions show the tile geometry without inventing an offering. */
-const emptyTile = (number: string, title: string, message: string): HTMLElement => {
-  const tile = document.createElement('article')
-  tile.className = 'offer gallery-empty'
-  tile.setAttribute('aria-label', `Empty creation slot ${number}`)
-  const art = tileArt(number, 'OPEN SLOT', number === '01' ? '30' : '8f')
-  const monogram = art.querySelector('.art-monogram')
-  if (monogram) monogram.textContent = number
-  const copy = document.createElement('div')
-  copy.className = 'offer-copy'
-  const name = document.createElement('b')
-  name.textContent = title
-  const note = document.createElement('span')
-  note.textContent = message
-  copy.append(name, note)
-  tile.append(art, copy)
-  return tile
 }
 
 /** A module is named `<sig>.js` in one record and `<sig>` in another. */
@@ -554,11 +576,21 @@ class HostPanelElement extends HTMLElement {
     panel.className = 'panel'
 
     const [identity, ...doorLinks] = this.#frontDoor(door)
-    panel.append(identity)
+    panel.append(identity, ...doorLinks)
     if (this.#reviews?.length) panel.append(this.#reviewSection(this.#reviews))
     panel.append(this.#gallery(rootZones([this.#self, ...zones])))
-    panel.append(...doorLinks)
-    panel.append(this.#packages(zones))
+    // MANAGEMENT IS HERE, NOT IN THE WAY (jwize 2026-10-07): packages, revisions
+    // and deployments wait behind one line at the foot of the welcome.
+    const manage = document.createElement('details')
+    manage.className = 'manage'
+    const manageSummary = document.createElement('summary')
+    const manageNote = document.createElement('small')
+    manageNote.textContent = 'packages, revisions and deployments'
+    manageSummary.append(document.createTextNode('Manage this hive'), manageNote)
+    const manageBody = document.createElement('div')
+    manageBody.className = 'manage-body'
+    manage.append(manageSummary, manageBody)
+    manageBody.append(this.#packages(zones))
     const technical = document.createElement('details')
     technical.className = 'technical'
     const summary = document.createElement('summary')
@@ -572,7 +604,8 @@ class HostPanelElement extends HTMLElement {
       technical.append(contents)
       void this.#fillDeploymentDetails(contents)
     })
-    panel.append(technical)
+    manageBody.append(technical)
+    panel.append(manage)
     if (door.footer.length > 0) panel.append(this.#footer(door.footer))
 
     card.append(panel)
@@ -900,11 +933,6 @@ class HostPanelElement extends HTMLElement {
       saveChoices()
       paint()
     }
-    const head = document.createElement('div')
-    head.className = 'gallery-head'
-    const title = document.createElement('h2')
-    title.textContent = 'Creations'
-    head.append(title)
     const search = document.createElement('input')
     search.className = 'gallery-search'
     search.type = 'search'
@@ -933,8 +961,8 @@ class HostPanelElement extends HTMLElement {
     sourceNote.className = 'source-note'
     const count = document.createElement('p')
     count.className = 'gallery-count'
-    const grid = document.createElement('div')
-    grid.className = 'offer-grid'
+    const sectionsHost = document.createElement('div')
+    sectionsHost.className = 'domain-sections'
     const more = document.createElement('button')
     more.className = 'gallery-more'
     more.type = 'button'
@@ -1034,58 +1062,58 @@ class HostPanelElement extends HTMLElement {
         ? zones.filter(zone => domainTerms.every(term => zone.includes(term))).slice(0, 12) : [])
       for (const zone of this.#gallerySearchZones) this.#queueGalleryZone(zone)
       const visibleZones = new Set([...pins, ...this.#gallerySearchZones])
-      const groups = new Map<string, { offer: Offering; offers: Offering[]; sources: Set<string> }>()
-      for (const zone of visibleZones) for (const offer of this.#galleryOffers.get(zone) ?? []) {
-        const key = `${offer.pubkey}:${offer.lineage}`
-        const found = groups.get(key)
-        if (!found) { groups.set(key, { offer, offers: [offer], sources: new Set([zone]) }); continue }
-        found.sources.add(zone)
-        if (!found.offers.some(row => row.route === offer.route)) found.offers.push(offer)
-        if (Number(offer.index['created_at']) > Number(found.offer.index['created_at'])) found.offer = offer
-      }
-      const matches = [...groups.values()].filter(({ offer, offers, sources }) =>
-        terms.every(term => [offer.title, offer.lineage, ...sources, ...offers.map(row => new URL(row.route).host)]
-          .some(value => value.toLowerCase().includes(term))))
-      const creationGroups = new Map<string, { creation: PublicCreation; sources: Set<string> }>()
-      for (const zone of visibleZones) for (const creation of this.#galleryCreations.get(zone) ?? []) {
-        const key = `${creation.pubkey}:${creation.location}`
-        const group = creationGroups.get(key)
-        if (group) group.sources.add(zone)
-        else creationGroups.set(key, { creation, sources: new Set([zone]) })
-      }
-      const otherMatches = [...creationGroups.values()].filter(({ creation, sources }) =>
-        terms.every(term => [creation.title, creation.meaning, creation.key, creation.host, ...sources]
-          .some(value => value.toLowerCase().includes(term))))
-      const total = matches.length + otherMatches.length
-      count.textContent = `${total} creation${total === 1 ? '' : 's'} · ${visibleZones.size} source${visibleZones.size === 1 ? '' : 's'} in view`
       const activeByCreation = new Map(activeCreations.map(row =>
         [`${row.pubkey}:${row.meaning}:${row.key}`, row.head]))
-      const siteCards = matches.slice(0, limit).map(group => this.#offeringTile(group, previous, enabled, remembered,
-        selecting ? { choices, toggleChoice } : null))
-      const creationCards = otherMatches.slice(0, Math.max(0, limit - siteCards.length))
-        .map(group => this.#publicCreationTile(group, activeByCreation, remembered,
-          selecting ? { choices, toggleChoice: toggleCreationChoice } : null))
-      grid.replaceChildren(...siteCards, ...creationCards)
-      if (!total) {
-        const reading = [...visibleZones].some(zone => this.#galleryPending.has(zone))
-        const first = emptyTile('01', reading ? 'Reading sources…'
-          : terms.length ? 'No matching creations' : 'Your gallery starts here',
-        reading ? 'Checking current public offerings.'
-          : terms.length ? 'Try another search or choose a source.'
-            : 'Choose a source to see what it offers.')
-        if (!selecting) {
-          const openSources = document.createElement('button')
-          openSources.type = 'button'
-          openSources.textContent = 'Choose sources'
-          openSources.addEventListener('click', () => { sources.open = true; input.focus() })
-          first.append(openSources)
+      // ONE SECTION PER DOMAIN, this door's own first (jwize 2026-10-07: "each
+      // host tile section should be separated by the domain"). A creation two
+      // domains both offer is shown under each: each domain is its own place.
+      const order = [...new Set([this.#self, ...pins, ...this.#gallerySearchZones].filter(Boolean))]
+        .filter(zone => zone === this.#self || visibleZones.has(zone))
+      let shown = 0
+      let total = 0
+      const sectionsOut: HTMLElement[] = []
+      for (const zone of order) {
+        const own = zone === this.#self
+        const groups = new Map<string, { offer: Offering; offers: Offering[]; sources: Set<string> }>()
+        for (const offer of this.#galleryOffers.get(zone) ?? []) {
+          const key = `${offer.pubkey}:${offer.lineage}`
+          const found = groups.get(key)
+          if (!found) { groups.set(key, { offer, offers: [offer], sources: new Set([zone]) }); continue }
+          if (!found.offers.some(row => row.route === offer.route)) found.offers.push(offer)
+          if (Number(offer.index['created_at']) > Number(found.offer.index['created_at'])) found.offer = offer
         }
-        const second = emptyTile('02', 'An open space',
-          'Each published creation gets a tile you can explore.')
-        second.classList.add('secondary')
-        second.setAttribute('aria-hidden', 'true')
-        grid.append(first, second)
+        const sites = [...groups.values()].filter(({ offer, offers }) =>
+          terms.every(term => [offer.title, offer.lineage, zone, ...offers.map(row => new URL(row.route).host)]
+            .some(value => value.toLowerCase().includes(term))))
+        const creations = (this.#galleryCreations.get(zone) ?? [])
+          .filter((creation, index, all) => all.findIndex(row =>
+            row.pubkey === creation.pubkey && row.location === creation.location) === index)
+          .filter(creation => terms.every(term => [creation.title, creation.meaning, creation.key, creation.host, zone]
+            .some(value => value.toLowerCase().includes(term))))
+        // CHOSEN ELSEWHERE, WAITING HERE: a tile picked on another domain shows
+        // grayed in this door's own section until it is turned on here.
+        const waiting = own && !selecting ? this.#pending.filter(row => row.selected !== false
+          && !('kind' in row ? creations.some(item => item.pubkey === row.pubkey && item.key === row.key)
+            : sites.some(({ offer }) => offer.pubkey === row.pubkey && offer.lineage === row.lineage))
+          && terms.every(term => ['kind' in row ? row.key : row.lineage, row.source]
+            .some(value => value.toLowerCase().includes(term)))) : []
+        total += sites.length + creations.length
+        const room = Math.max(0, limit - shown)
+        const siteCards = sites.slice(0, room).map(group => this.#offeringTile(group, previous, enabled, remembered,
+          selecting ? { choices, toggleChoice } : null))
+        const creationCards = creations.slice(0, Math.max(0, room - siteCards.length))
+          .map(creation => this.#publicCreationTile({ creation, sources: new Set([zone]) }, activeByCreation, remembered,
+            selecting ? { choices, toggleChoice: toggleCreationChoice } : null))
+        shown += siteCards.length + creationCards.length
+        sectionsOut.push(this.#domainSection(zone, own, [...siteCards, ...creationCards, ...waiting.map(row => this.#waitingTile(row))], {
+          reading: this.#galleryPending.has(zone) && !this.#galleryOffers.has(zone),
+          searching: terms.length > 0,
+        }))
       }
+      sectionsHost.replaceChildren(...sectionsOut)
+      count.textContent = total
+        ? `${total} creation${total === 1 ? '' : 's'} across ${order.length} domain${order.length === 1 ? '' : 's'}`
+        : ''
       more.hidden = total <= limit
     }
 
@@ -1104,8 +1132,15 @@ class HostPanelElement extends HTMLElement {
     const status = document.createElement('p')
     status.className = 'status'
     sources.append(sourceSearch, pinnedRows, foundRows, sourceNote, form, status)
-    if (selecting) section.append(returnBar, head, search, count, grid, more)
-    else section.append(head, search, sources, count, grid, more)
+    const tools = document.createElement('div')
+    tools.className = 'gallery-tools'
+    if (selecting) {
+      tools.append(search, count)
+      section.append(returnBar, tools, sectionsHost, more)
+    } else {
+      tools.append(search, sources, count)
+      section.append(tools, sectionsHost, more)
+    }
     this.#galleryRefresh = () => { if (section.isConnected) paint() }
     paint()
     queueMicrotask(() => { for (const zone of pins) this.#queueGalleryZone(zone) })
@@ -1113,6 +1148,73 @@ class HostPanelElement extends HTMLElement {
     void listActiveOfferings().then(rows => { active = rows; this.#galleryRefresh?.() }).catch(() => {})
     void listActivePublicCreations().then(rows => { activeCreations = rows; this.#galleryRefresh?.() }).catch(() => {})
     return section
+  }
+
+  /** One domain's creations, under its own name. */
+  #domainSection(zone: string, own: boolean, cards: HTMLElement[],
+    state: { reading: boolean; searching: boolean }): HTMLElement {
+    const section = document.createElement('section')
+    section.className = own ? 'domain-section own' : 'domain-section'
+    const head = document.createElement('header')
+    head.className = 'domain-head'
+    const kicker = document.createElement('span')
+    kicker.className = 'lbl'
+    kicker.textContent = own ? 'On this domain' : 'From'
+    const name = document.createElement('h2')
+    name.textContent = zone
+    head.append(kicker, name)
+    if (!own) {
+      const visit = document.createElement('a')
+      visit.href = domainVisitHref(zone, this.#self)
+      visit.target = '_blank'
+      visit.rel = 'noopener'
+      visit.textContent = 'Visit ↗'
+      visit.setAttribute('aria-label', `Visit ${zone}`)
+      head.append(visit)
+    }
+    section.append(head)
+    if (cards.length) {
+      const grid = document.createElement('div')
+      grid.className = 'offer-grid'
+      grid.append(...cards)
+      section.append(grid)
+    } else {
+      const note = document.createElement('p')
+      note.className = 'domain-empty'
+      note.textContent = state.reading ? 'Reading what this domain offers…'
+        : state.searching ? 'Nothing here matches your search.'
+          : own ? 'Nothing is published here yet.' : 'Nothing is offered here right now.'
+      section.append(note)
+    }
+    return section
+  }
+
+  /** A tile chosen on another domain and not yet turned on here: grayed, and
+   *  one click from its review. */
+  #waitingTile(row: PendingSelection): HTMLElement {
+    const creation = 'kind' in row
+    const title = creation ? row.key : row.lineage
+    const tile = document.createElement('article')
+    tile.className = 'offer offer-waiting'
+    const main = document.createElement('button')
+    main.type = 'button'
+    main.className = 'offer-main'
+    main.setAttribute('aria-label', `Review ${title}, selected on ${row.source}`)
+    main.append(tileArt(title, 'SELECTED', row.head, creation ? undefined : { head: row.head, route: row.route }))
+    const copy = document.createElement('span')
+    copy.className = 'offer-copy'
+    const name = document.createElement('b')
+    name.textContent = title
+    const from = document.createElement('span')
+    from.textContent = `Selected on ${row.source}`
+    const next = document.createElement('span')
+    next.className = 'offer-visit'
+    next.textContent = 'Review to turn on here'
+    copy.append(name, from, next)
+    main.append(copy)
+    main.addEventListener('click', () => { void this.#openPending(row.source) })
+    tile.append(main)
+    return tile
   }
 
   #updateBadge(source: string, title: string, selected: boolean): HTMLElement {
@@ -1156,7 +1258,7 @@ class HostPanelElement extends HTMLElement {
     link.href = visitHref(offer.route, source)
     link.target = '_blank'
     link.rel = 'noopener'
-    link.append(tileArt(offer.title, 'IMPLEMENTATION', offer.head))
+    link.append(tileArt(offer.title, 'CREATION', offer.head, { head: offer.head, route: offer.route }))
     const copy = document.createElement('span')
     copy.className = 'offer-copy'
     const name = document.createElement('b')

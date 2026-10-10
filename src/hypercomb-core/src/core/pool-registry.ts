@@ -559,6 +559,25 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // read-fallback. Per-participant, replaced whole: DOCUMENT.
   'substrate:registry',
   'substrate:sources',
+  // THE PICTURES TAKEN OUT OF THE ROTATION — the participant's own choice, one
+  // current document with every version kept (essentials/substrate). Moved out
+  // of localStorage `hc:substrate-hidden`, read once as a fallback.
+  'substrate:hidden',
+  // THE SIGNATURES THE SUBSTRATE ITSELF ASSIGNED — the ledger that tells a
+  // default picture (ours to replace) from an explicit one (never touched).
+  // Written by the software, so it keeps only the current document. Moved out
+  // of localStorage `hc:substrate-assigned`, read once as a fallback.
+  'substrate:assigned',
+  // THE ARRANGE CYCLE'S WORKING STATE — per location, the active position in
+  // the cycle and the ring of earlier layouts it keeps to cycle back to
+  // (essentials/sequence). Written by the software: only the current document
+  // is kept. Moved out of localStorage `hc:arrange-active` / `hc:arrange-ring`.
+  'arrange:active',
+  'arrange:ring',
+  // THE CIGAR CATALOG INDEX — cigar key -> the signature of its record, the
+  // participant's own (essentials/revolucionstyle.com). Each cigar added is a
+  // save, so every version is kept. Moved out of `hc:cigar-catalog-index`.
+  'cigars:catalog',
   // THE STATIC ANATOMY'S LINEAGE BAG — the protocol + doctrine text every
   // model outside the machine is sent first (documentation/anatomy-context-
   // need.md §2). 8-digit `{ layerSig, at }` markers, the history service's
@@ -578,6 +597,10 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // pure derivation, so it is minted only on an explicit `/summary` miss by
   // essentials/assistant/compaction.ts. Colon meaning: no tile may name it.
   'system:compaction',
+  // KEEP-ALIVE (essentials/sharing/keep-alive.queen.ts): whether this device
+  // keeps its hive awake and in the swarm while nobody is at it. One document,
+  // this machine's own setting; it never travels with content.
+  'swarm:keep-alive',
   // TRANSFER PACKS (atomic-modules-plan.md): one member per package, named by
   // the package's root signature and holding the signature of a pack — one
   // content-addressed file carrying that package's bytes, so a cold install

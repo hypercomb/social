@@ -37,7 +37,7 @@ import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { isSelectOp, BRACKET_CMD_RE, normalizeSelectInput } from './select-ops'
 import { dispatchedCallsOf, viewCommandOf, type FeatureReading, type SpokenCall } from './remote-verbs'
-import { isSensitiveLine } from './command-history'
+import { cutBackToWords, isSensitiveLine } from './command-history'
 import { parseTargetedKeywordsInput } from '../../core/targeted-keywords-input'
 
 const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
@@ -1226,6 +1226,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // Producer-owned indicators are not persisted. Ask their producers to
     // replay current state now that the command-line listener is live.
     EffectBus.emit('indicator:query', {})
+
+    // A word that found a secret on its line asks for it back: the history
+    // keeps only the words it names (command-history.ts). Transient — the
+    // words, never the secret.
+    this.#historyForgetUnsub = EffectBus.on<{ words?: string }>('command-history:forget', (p) => {
+      if (typeof p?.words === 'string') this.#forgetHistoryAfter(p.words)
+    })
   }
 
   /** Flip the open-for-subscribers toggle. Called from the shell's
@@ -2669,6 +2676,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #voiceSubmitUnsub?: () => void
   #commandSubmitUnsub?: () => void
   #remoteSubmitUnsub?: () => void
+  #historyForgetUnsub?: () => void
   // Location segments (bracket stripped) at the last navigate event.
   #lastNavKey = ''
   readonly #onNavigate = (): void => {
@@ -2784,6 +2792,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#voiceSubmitUnsub?.()
     this.#commandSubmitUnsub?.()
     this.#remoteSubmitUnsub?.()
+    this.#historyForgetUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#pushToTalkUnsub?.()
     this.#micPressUnsub?.()
@@ -3531,6 +3540,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#commandHistory = [entry, ...this.#commandHistory].slice(0, COMMAND_HISTORY_MAX)
     this.#historyIndex = -1
     this.#historyDraft = ''
+    this.#persistHistory()
+  }
+
+  /** A word gives back a secret it found on its line (`command-history:forget`,
+   *  command-history.ts): the remembered lines are cut back to its words. */
+  #forgetHistoryAfter(words: string): void {
+    const next = cutBackToWords(this.#commandHistory, words)
+    if (next.length === this.#commandHistory.length && next.every((line, index) => line === this.#commandHistory[index])) return
+    this.#commandHistory = next
+    this.#historyIndex = -1
+    this.#persistHistory()
+  }
+
+  #persistHistory(): void {
     try {
       localStorage.setItem(COMMAND_HISTORY_KEY, JSON.stringify(this.#commandHistory))
     } catch { /* quota / private mode — recall is best-effort */ }

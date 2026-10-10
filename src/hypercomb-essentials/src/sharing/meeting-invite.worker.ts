@@ -35,6 +35,7 @@ import { Worker, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
   MEET_KEY,
   PENDING_INVITE_KEY,
+  PENDING_INVITE_SECRET_KEY,
   SWARM_INVITE_KIND,
   parseMeet,
   validateInviteBundle,
@@ -161,8 +162,15 @@ export class MeetingInviteWorker extends Worker {
   #joinFromLink = async (sig: string): Promise<void> => {
     const raw = await loadBundleJson(sig)
     const invite = validateInviteBundle(raw)
+    // The secret rode in the link's fragment (`#invite-secret=`), never in
+    // the bundle the host serves. Drained once, like the link itself.
+    let linkSecret = ''
+    try {
+      linkSecret = sessionStorage.getItem(PENDING_INVITE_SECRET_KEY) ?? ''
+      sessionStorage.removeItem(PENDING_INVITE_SECRET_KEY)
+    } catch { linkSecret = '' }
     if (invite) {
-      await joinMeetingPlace(invite)
+      await joinMeetingPlace(invite, linkSecret || undefined)
       return
     }
     const hiveLink = validateHiveLinkBundle(raw)

@@ -12,9 +12,18 @@
 // of localhost does not count: try-x.localhost is a door in the local harness.
 // Anything unparsable ('null' from a sandboxed frame, garbage) is refused.
 //
+// THE RENDERER SLOT IS NARROWER STILL. Any localhost page may open a socket,
+// but only the hive's own pages may register as the renderer — the socket
+// every op is forwarded to and every answer comes from. Those are the origins
+// in BRIDGE_RENDERER_ORIGINS (comma- or space-separated), or by default the
+// ports the hive's dev and web shells serve on, on localhost, 127.0.0.1 or
+// [::1]. No Origin (a Node client on this machine) may register too.
+//
 // Twin: hypercomb-cli/src/bridge/server.ts keeps the same lines.
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+// hypercomb-dev (start, start:4251/4253/4254/4450) and hypercomb-web (4200, start:4260, 4264).
+const HIVE_PORTS = [4200, 4250, 4251, 4253, 4254, 4260, 4264, 4450]
 
 function bridgeOriginAllowed(origin) {
   if (origin === undefined || origin === null) return true
@@ -26,4 +35,29 @@ function bridgeOriginAllowed(origin) {
   }
 }
 
-module.exports = { bridgeOriginAllowed }
+// The origins a page may register the renderer from, normalized.
+function rendererOrigins(env) {
+  const listed = String(env ?? '').split(/[\s,]+/).filter(Boolean)
+  const wanted = listed.length
+    ? listed
+    : HIVE_PORTS.flatMap(port => [...LOOPBACK_HOSTS].flatMap(host => [`http://${host}:${port}`, `https://${host}:${port}`]))
+  const origins = new Set()
+  for (const entry of wanted) {
+    try {
+      const { origin } = new URL(entry)
+      if (origin !== 'null') origins.add(origin)
+    } catch { /* not an origin — never matches */ }
+  }
+  return origins
+}
+
+function rendererOriginAllowed(origin, origins) {
+  if (origin === undefined || origin === null) return true
+  try {
+    return origins.has(new URL(String(origin)).origin)
+  } catch {
+    return false
+  }
+}
+
+module.exports = { bridgeOriginAllowed, rendererOrigins, rendererOriginAllowed, HIVE_PORTS }

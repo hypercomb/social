@@ -45,8 +45,17 @@ export interface MeetingInviteBundle {
   segments: string[]
   /** Room id (RoomStore). Folds into the channel sig. Required, non-empty. */
   room: string
-  /** Access secret (SecretStore). Folds into the channel sig. Required, non-empty. */
-  secret: string
+  /** Access secret (SecretStore). Folds into the channel sig. ONLY on a
+   *  bundle that never leaves the device (a `#meet=` link parsed in memory)
+   *  or one minted before 2026-10-07 — read, never written. A secret is
+   *  never stored where it can be fetched (jwize, 2026-10-07: "the key can
+   *  never be stored in a pool or public place"). */
+  secret?: string
+  /** What a stored bundle carries instead: `inviteSecretCheck(room, secret)`.
+   *  It names the secret without holding it — a swarm peer, who already holds
+   *  this room's secret, matches it and joins; a link carries the secret in
+   *  its fragment, which no server sees. */
+  secretCheck?: string
   /** Optional display label, shown in the recipient's join prompt. */
   alias?: string
   /** Epoch ms the invite was minted (informational only). */
@@ -66,9 +75,12 @@ export function validateInviteBundle(raw: unknown): MeetingInviteBundle | null {
   const o = raw as Record<string, unknown>
   if (o['kind'] !== MEETING_INVITE_KIND) return null
   const room = o['room']
-  const secret = o['secret']
+  const secretRaw = o['secret']
+  const checkRaw = o['secretCheck']
   if (typeof room !== 'string' || !room.trim()) return null
-  if (typeof secret !== 'string' || !secret.trim()) return null
+  const secret = typeof secretRaw === 'string' && secretRaw.trim() ? secretRaw.trim() : ''
+  const secretCheck = typeof checkRaw === 'string' && /^[0-9a-f]{64}$/.test(checkRaw) ? checkRaw : ''
+  if (!secret && !secretCheck) return null
 
   const rawSegments = o['segments']
   const segments = Array.isArray(rawSegments)
@@ -89,7 +101,8 @@ export function validateInviteBundle(raw: unknown): MeetingInviteBundle | null {
     v,
     segments,
     room: room.trim(),
-    secret: secret.trim(),
+    ...(secret ? { secret } : {}),
+    ...(secretCheck ? { secretCheck } : {}),
     ...(alias ? { alias } : {}),
     ...(createdAt ? { createdAt } : {}),
   }
@@ -317,9 +330,42 @@ export function encodeInviteBundle(b: MeetingInviteBundle): Blob {
     v: b.v,
     segments: b.segments,
     room: b.room,
-    secret: b.secret,
+    // Never the secret: these bytes go to a host (see `secret` above).
+    ...(b.secretCheck ? { secretCheck: b.secretCheck } : {}),
     ...(b.alias ? { alias: b.alias } : {}),
     ...(b.createdAt ? { createdAt: b.createdAt } : {}),
   }
   return new Blob([JSON.stringify(ordered)], { type: 'application/json' })
 }
+
+/** The check a stored invite carries in place of its secret: SHA-256 of a
+ *  fixed label, the room and the secret. It names the secret without holding
+ *  it. */
+export async function inviteSecretCheck(room: string, secret: string): Promise<string> {
+  const bytes = new TextEncoder().encode(`hypercomb:invite\0${room}\0${secret}`)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** The secret an invite opens with, or null: the bundle's own (a meeting
+ *  link, or a bundle minted before 2026-10-07), else the first candidate —
+ *  the link's fragment, then the secret the participant already holds —
+ *  that matches the bundle's check. */
+export async function resolveInviteSecret(
+  bundle: MeetingInviteBundle,
+  candidates: readonly (string | null | undefined)[],
+): Promise<string | null> {
+  if (bundle.secret) return bundle.secret
+  if (!bundle.secretCheck) return null
+  for (const candidate of candidates) {
+    const secret = String(candidate ?? '').trim()
+    if (secret && await inviteSecretCheck(bundle.room, secret) === bundle.secretCheck) return secret
+  }
+  return null
+}
+
+/** The fragment an invite link carries its secret in — `/<sig>#invite-secret=…`.
+ *  A fragment never reaches a server. Captured at boot (shell
+ *  invite-capture.ts) under PENDING_INVITE_SECRET_KEY. */
+export const INVITE_SECRET_PREFIX = '#invite-secret='
+export const PENDING_INVITE_SECRET_KEY = 'hc:pending-invite-secret'

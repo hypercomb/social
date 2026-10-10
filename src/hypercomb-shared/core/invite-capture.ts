@@ -18,6 +18,8 @@ import { EffectBus } from '@hypercomb/core'
 import { meetingRelayOf } from './mesh-session'
 
 const PENDING_INVITE_KEY = 'hc:pending-invite' // mirror of essentials meeting-invite.ts
+const PENDING_INVITE_SECRET_KEY = 'hc:pending-invite-secret' // mirror of PENDING_INVITE_SECRET_KEY
+const INVITE_SECRET_PREFIX = '#invite-secret='               // mirror of INVITE_SECRET_PREFIX
 const PENDING_DOOR_KEY = 'hc:pending-door'     // mirror of essentials hive-link.ts
 const SIG_RE = /^[0-9a-f]{64}$/
 const DOOR_PARAM = 'hive'                      // mirror of HIVE_DOOR_PARAM
@@ -33,8 +35,19 @@ const DOOR_PARAM = 'hive'                      // mirror of HIVE_DOOR_PARAM
 
     try { sessionStorage.setItem(PENDING_INVITE_KEY, sig) } catch { /* ignore */ }
 
+    // The invite's secret rides in the fragment (`#invite-secret=…`), never
+    // in the bundle the host serves. Stashed for the worker and stripped, so
+    // it never sits in the address bar or the history.
+    let hash = window.location.hash ?? ''
+    if (hash.startsWith(INVITE_SECRET_PREFIX)) {
+      try {
+        sessionStorage.setItem(PENDING_INVITE_SECRET_KEY, decodeURIComponent(hash.slice(INVITE_SECRET_PREFIX.length)))
+      } catch { /* ignore */ }
+      hash = ''
+    }
+
     // Strip the signature so the URL is a clean root; preserve any query/hash.
-    const clean = '/' + (window.location.search ?? '') + (window.location.hash ?? '')
+    const clean = '/' + (window.location.search ?? '') + hash
     window.history.replaceState(window.history.state, '', clean)
   } catch { /* ignore — never block boot on capture */ }
 })()

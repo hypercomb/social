@@ -106,6 +106,15 @@ export const parseWelcome = (raw: unknown): Welcome | null => {
  * the content type is checked before the body is believed.
  */
 export const readWelcome = async (): Promise<Welcome | null> => {
+  // A ZONE'S SIGNED CARD FIRST. Where a worker fronts this origin it reads the
+  // card from the pool sign('welcome:<zone>') — the head the zone's publisher
+  // signs — and writes it into the page as `#hc-welcome`. A file staged next to
+  // the shell names every zone that shares the origin at once; a pool names one.
+  try {
+    const carried = document.getElementById('hc-welcome')?.textContent
+    const card = carried ? parseWelcome(JSON.parse(carried)) : null
+    if (card) return card
+  } catch { /* a malformed card is no card; the staged file still answers */ }
   try {
     const response = await fetch('/welcome.json', { cache: 'no-store' })
     if (!response.ok) return null

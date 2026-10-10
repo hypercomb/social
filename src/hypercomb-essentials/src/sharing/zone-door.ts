@@ -158,6 +158,203 @@ export const readAddresses = (raw: unknown, roots: Record<string, string>): Reco
   return out
 }
 
+/// ── the entrance an app address runs ───────────────────────────────────
+//
+// POWERS ARE OFF BY DEFAULT, AND THE PARTICIPANT TURNS THEM ON
+// (documentation/using-a-creation.md). The Hyperdex app lives at its OWN
+// ADDRESS — `business-card.<zone>` — and its powers are turned on for THAT
+// address, never for a domain's root: a separate address is a separate browser
+// storage, so the cards visitors keep live at the app address, and the root
+// stays a plain front door that can change freely. The signed index may carry
+// `entrances: { "<host>": { page, powers, from } }`, keyed by the host:
+//
+//   page    the one card page (htmlSig) the participant previewed — the bytes
+//           the address serves at `/`, by signature;
+//   powers  what that page may do there; version 1 is all or nothing, so only
+//           exactly `keep`, `camera` and `read` turn anything on;
+//   from    whose page this is followed from, `at`: the followed index's stamp
+//           (whole seconds) when the participant turned it on, and `head`: the
+//           followed lineage's head layer then. Only a later stamp AND a moved
+//           head can offer an update. Read by the hive only; the host ignores
+//           it.
+//
+// An entry counts only while the same index BINDS its host to a lineage
+// (`boundLineage`): its own address, or the implicit `<key>.<zone>` label of a
+// published key, on a domain the key's doors open. Every read and every write
+// drops an entry whose host is no longer bound — so unpublishing, closing a
+// door or moving an address takes the entrance with it. The host remembers the
+// last page it served with powers and serves it sealed; releasing that is an
+// operator act.
+
+/** The powers a card door may be given — keep the visitor's cards, use the
+ *  camera, read other hosts. Version 1 grants all three or none. */
+export const ENTRANCE_POWERS = ['keep', 'camera', 'read'] as const
+export type EntrancePower = (typeof ENTRANCE_POWERS)[number]
+
+export interface ZoneEntranceFrom {
+  pubkey: string
+  lineage: string
+  /** The followed index's `created_at` when this page was turned on. */
+  at?: number
+  /** The followed lineage's head layer signature when it was turned on. */
+  head?: string
+}
+
+export interface ZoneEntrance {
+  page?: string
+  powers?: EntrancePower[]
+  from?: ZoneEntranceFrom
+}
+
+/** What an index says about where its creations live — the three maps that
+ *  decide whether an entrance's host is bound. */
+export interface EntranceBinding {
+  roots: Record<string, string>
+  addresses?: Record<string, string>
+  doors?: Record<string, readonly string[]>
+}
+
+const ENTRANCE_SIG_RE = /^[a-f0-9]{64}$/
+const MAX_FOLLOWED_LINEAGE = 512
+const MAX_HOST = 253
+/** The host refuses a powers list longer than this (worker ENTRANCE_POWERS_MAX). */
+const ENTRANCE_POWERS_MAX = 8
+/** The host refuses an index naming more (worker ENTRANCES_MAX). */
+export const ENTRANCES_MAX = 16
+
+/** An entrance's host: lower case, at most 253 characters, more than one
+ *  label, every label a DNS label — or '' when `raw` is not one. Loopback has
+ *  no DNS labels in front of it, so it is never one. */
+export const entranceHost = (raw: unknown): string => {
+  const h = bareHost(raw)
+  if (!h || h.length > MAX_HOST || LOOPBACK_RE.test(h)) return ''
+  const labels = h.split('.')
+  return labels.length > 1 && labels.every(label => DNS_LABEL_RE.test(label)) ? h : ''
+}
+
+/** THE LINEAGE AN INDEX BINDS `host` TO, or ''. Its own address first (an
+ *  `addresses` entry — a `<label>.<zone>` or an apex claim); otherwise the
+ *  implicit label: `<key>.<rest>` names the published key `key` when `key` is
+ *  an own-address label (never `@`). Either way only while the key's doors
+ *  are unset or open on the host (or a zone it sits under) — the host's own
+ *  reading (worker `opensOn`): an own address on a domain the creation was
+ *  switched off for binds nothing there, so its entrance goes with the door
+ *  and never comes back on by itself when the door reopens. An entrance
+ *  counts only while this is not empty. */
+export const boundLineage = (index: EntranceBinding | null | undefined, host: unknown): string => {
+  const h = bareHost(host)
+  if (!index || !h) return ''
+  const opens = (key: string): boolean => {
+    const zones = index.doors?.[key]
+    if (zones === undefined) return true
+    return zones.some(z => {
+      const zone = String(z ?? '').trim().toLowerCase()
+      return !!zone && (h === zone || h.endsWith(`.${zone}`))
+    })
+  }
+  const own = index.addresses?.[h]
+  if (own && opens(own)) return own
+  const dot = h.indexOf('.')
+  if (dot <= 0) return ''
+  const label = h.slice(0, dot)
+  if (label === APEX_LABEL || !isOwnAddressLabel(label) || !(label in (index.roots ?? {}))) return ''
+  return opens(label) ? label : ''
+}
+
+/** EVERY ADDRESS A CREATION RUNS AN ENTRANCE AT — the hosts the Publish panel
+ *  offers an Entrances block for, each with the domain it sits under. On every
+ *  domain the creation is open on (its doors; with none signed, every domain
+ *  in `zones`), each own address the index gives it under that domain, and
+ *  `<key>.<zone>` when the key is an address label no own address took. Never
+ *  a domain itself — a root is a plain front door — never an address under a
+ *  domain the creation is switched off for, and nothing at all for a creation
+ *  that is not live. A nested key (`a/b`) is no label, so it has only its own
+ *  addresses. */
+export const entranceAddresses = (
+  creation: { key: string; live: boolean; doors: readonly string[] | null },
+  zones: readonly string[],
+  addresses: Record<string, string>,
+): { host: string; zone: string }[] => {
+  if (!creation.live) return []
+  const out: { host: string; zone: string }[] = []
+  const seen = new Set<string>()
+  const open = [...new Set(zones.map(z => bareHost(z)).filter(Boolean))]
+    .filter(zone => creation.doors === null || creation.doors.some(d => bareHost(d) === zone))
+  for (const zone of open) {
+    const hosts = Object.entries(addresses)
+      .filter(([host, key]) => key === creation.key && host !== zone && host.endsWith(`.${zone}`))
+      .map(([host]) => entranceHost(host))
+      .filter(Boolean)
+    const implicit = creation.key !== APEX_LABEL && isOwnAddressLabel(creation.key) ? entranceHost(`${creation.key}.${zone}`) : ''
+    if (implicit && !(implicit in addresses)) hosts.push(implicit)
+    for (const host of hosts.sort()) {
+      if (seen.has(host) || host === zone) continue
+      seen.add(host)
+      out.push({ host, zone })
+    }
+  }
+  return out
+}
+
+/** One entry's SHAPE, leniently: an invalid field is dropped, never the
+ *  entry; an unknown field (a leftover `other` included) is dropped; an entry
+ *  with nothing valid left is null. Powers without a page mean nothing and
+ *  are dropped with it. A powers list that is not a short list of unique
+ *  known powers is dropped whole — a field this hive cannot read never turns
+ *  powers on. */
+export const readEntrance = (raw: unknown): ZoneEntrance | null => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const entry = raw as Record<string, unknown>
+  const out: ZoneEntrance = {}
+  const page = String(entry['page'] ?? '').trim().toLowerCase()
+  if (ENTRANCE_SIG_RE.test(page)) out.page = page
+  const powers = entry['powers']
+  if (out.page && Array.isArray(powers) && powers.length <= ENTRANCE_POWERS_MAX
+    && new Set(powers).size === powers.length
+    && powers.every(p => (ENTRANCE_POWERS as readonly unknown[]).includes(p))) {
+    out.powers = ENTRANCE_POWERS.filter(p => powers.includes(p))
+  }
+  const from = entry['from']
+  if (from && typeof from === 'object' && !Array.isArray(from)) {
+    const f = from as Record<string, unknown>
+    const pubkey = String(f['pubkey'] ?? '').trim().toLowerCase()
+    const lineage = String(f['lineage'] ?? '').trim()
+    const at = f['at']
+    const head = String(f['head'] ?? '').trim().toLowerCase()
+    if (ENTRANCE_SIG_RE.test(pubkey) && lineage && lineage.length <= MAX_FOLLOWED_LINEAGE) {
+      out.from = {
+        pubkey, lineage,
+        ...(Number.isSafeInteger(at) && (at as number) >= 0 ? { at: at as number } : {}),
+        ...(ENTRANCE_SIG_RE.test(head) ? { head } : {}),
+      }
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
+/** The signed `entrances` map, leniently: a key that is not a host, a host
+ *  the index does not bind (`boundLineage`), or an entry with nothing valid in
+ *  it drops that entry — never the whole index; at most sixteen are kept. The
+ *  same rules normalize every write (putHiveManifest), against the roots,
+ *  addresses and doors that write signs. */
+export const readEntrances = (raw: unknown, index: EntranceBinding): Record<string, ZoneEntrance> => {
+  const out: Record<string, ZoneEntrance> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const host = entranceHost(key)
+    if (!host || !boundLineage(index, host)) continue
+    const entry = readEntrance(value)
+    if (entry && (host in out || Object.keys(out).length < ENTRANCES_MAX)) out[host] = entry
+  }
+  return out
+}
+
+/** Are this entrance's powers on? Version 1: a page AND exactly the three. */
+export const isPoweredEntrance = (entrance: ZoneEntrance | null | undefined): boolean => {
+  const powers = entrance?.powers ?? []
+  return !!entrance?.page && powers.length === ENTRANCE_POWERS.length && ENTRANCE_POWERS.every(p => powers.includes(p))
+}
+
 /** The own address a lineage key holds on `zone`, as its label, or ''. */
 export const ownLabelOn = (addresses: Record<string, string> | undefined, zone: unknown, key: string): string => {
   const z = foldContentLabel(zone)

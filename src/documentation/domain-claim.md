@@ -172,6 +172,28 @@ the apex's own name in DNS.
 - The apex stays the zone root, so every write still lands there.
 - **Use the root path** on the same row puts the card back at the apex.
 
+## What the front door calls itself
+
+A link to a claimed domain previews under the domain's own card, not the
+shell's name. The card is a **pool of meaning**, never a file:
+
+```
+hosts welcome pluginthematrix.com Plugin the Matrix | Creations worth carrying
+```
+
+signs an atom `{ kind: 'host:welcome', zone, title, tagline, links }`, sends it
+to your host and names it in your signed index as `welcome:<zone>`. The host
+adds every card ever named to the pool `sign('welcome:<zone>')`, so the
+history only grows and replicates like any pool; the front door wears the card
+the zone's own publishers sign now (primary first). The worker writes it into
+the page itself (`<title>`, the share card, and `#hc-welcome` for the shim),
+because a link preview runs no script.
+
+Why not `welcome.json`: every zone a worker fronts is served from one shim
+origin, so a staged file can only name all of them at once, and only whoever
+deploys the origin can change it. The file is still read where no card is
+signed — a plain static host with no worker in front of it.
+
 ## Contested and lost claims
 
 A contest lapses 7 days after it began. Before that, the operator decides it

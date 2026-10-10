@@ -19,7 +19,7 @@
 // exactly where they were — and never writes a stale pair over another tab's.
 
 import { EffectBus, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { validateInviteBundle, meetingRelayOf, meetingHostOf, isAccessCode, type MeetingInviteBundle, type MeetingPoint } from './meeting-invite.js'
+import { resolveInviteSecret, validateInviteBundle, meetingRelayOf, meetingHostOf, isAccessCode, type MeetingInviteBundle, type MeetingPoint } from './meeting-invite.js'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { readDoorsOf } from './zone-door.js'
 import { isJoinedHere, readTabZone, writeTabZone } from './membership.js'
@@ -206,15 +206,28 @@ export function pointMeshAt(relay: string): void {
 }
 
 /** Confirm + auth-switch into the bundle's meeting place. Returns true iff
- *  the participant joined. Nothing is written unless they do. */
-export async function joinMeetingPlace(bundle: MeetingInviteBundle & MeetingPoint): Promise<boolean> {
+ *  the participant joined. Nothing is written unless they do. The STORED
+ *  bundle holds no secret (only its check); `linkSecret` is the one the link
+ *  carried in its fragment. The meeting point (relay/host/code) rides along
+ *  from the parsed link and is never part of a stored bundle. */
+export async function joinMeetingPlace(stored: MeetingInviteBundle & MeetingPoint, linkSecret?: string): Promise<boolean> {
   const room = get<CredStoreLike>(ROOM_KEY)
   const secret = get<CredStoreLike>(SECRET_KEY)
   const nav = get<NavLike>(NAV_KEY)
   if (!room || !secret || !nav) return false
 
-  const where = bundle.segments.length ? '/' + bundle.segments.join('/') : '/ (hive root)'
-  const label = bundle.alias?.trim() || where
+  // A STORED INVITE HOLDS NO SECRET, only its check (meeting-invite.ts
+  // `secretCheck`): the link carries the secret in its fragment, and a swarm
+  // peer already holds this room's. Neither matching, the invite cannot
+  // open — said so, never guessed.
+  const opened = await resolveInviteSecret(stored, [linkSecret, room.value === stored.room ? secret.value : ''])
+  const where = stored.segments.length ? '/' + stored.segments.join('/') : '/ (hive root)'
+  const label = stored.alias?.trim() || where
+  if (!opened) {
+    toast('tip', tr('invite.join.title', 'Meeting place'), tr('invite.needs-link', `"${label}" opens from its invite link — ask whoever shared it.`, { label }))
+    return false
+  }
+  const bundle = { ...stored, secret: opened }
   const point = pointOf(bundle)
   const tab = readTabZone()
 

@@ -38,13 +38,21 @@ answers, and retires them. Close the laptop mid-question? The ask survives —
 it is answered when a responder next connects.
 
 **Trust model**: the broker binds to loopback only. Registration as a renderer
-is *always* loopback-only. Nothing on your network can touch your hive unless
-you deliberately bind wide **and** set a shared token (covered below). And no
-web page can either: a browser always says which page opened a socket, so the
-broker refuses any `Origin` that is not exactly localhost, 127.0.0.1 or [::1]
-(`scripts/bridge/bridge-origin.cjs`) — a site, or a sandbox door you are
-trying, cannot drive your bridge. Agents (Node) send no Origin and are
-unaffected.
+is *always* loopback-only, and only from the hive's own page — the origins in
+`BRIDGE_RENDERER_ORIGINS`, by default the hive's dev and web ports (4200,
+4250, 4251, 4253, 4254, 4260, 4264, 4450) on localhost — and a renderer that
+holds the slot is never displaced by a stranger. The broker serves **this
+machine's own tools** — a Node client on loopback that sends no `Origin` (your
+scripts, your Claude Code sessions) — and nobody else unless they present a
+**bridge code** you gave them from the hive
+([Who may use the bridge — codes](#who-may-use-the-bridge--codes)). That
+includes every web page: a browser always says which page opened a socket, so
+the broker refuses any `Origin` that is not exactly localhost, 127.0.0.1 or
+[::1] (`scripts/bridge/bridge-origin.cjs`) — a site, or a sandbox door you are
+trying, cannot drive your bridge — and even a localhost page needs a code
+before it may send an op. With no codes, nobody but this machine's own tools
+gets in. Nothing on your network can touch your hive unless you deliberately
+bind wide **and** give someone a code.
 
 ---
 
@@ -215,17 +223,71 @@ The **renderer tab must stay on the broker's machine** — only the answering
 session can be remote:
 
 ```bash
-BRIDGE_HOST=0.0.0.0 HYPERCOMB_BRIDGE_TOKEN=<shared-secret> npm run bridge
+BRIDGE_HOST=0.0.0.0 npm run bridge
 ```
 
-on the hive machine, and on the remote machine:
+on the hive machine, then `bridge give <their name>` in the hive tab, and on
+the remote machine:
 
 ```bash
-BRIDGE_URL=ws://<hive-machine>:2401 HYPERCOMB_BRIDGE_TOKEN=<shared-secret> npm run bridge:watch
+BRIDGE_URL=ws://<hive-machine>:2401 HYPERCOMB_BRIDGE_TOKEN=<their code> npm run bridge:watch
 ```
 
-Without the token, remote senders are refused outright — that is the safe
+Without a code, remote senders are refused outright — that is the safe
 default.
+
+### Who may use the bridge — codes
+
+The broker serves **this machine** without asking: a Node client on loopback
+that sends no `Origin` header — your scripts, `npm run bridge:watch`, a parked
+Claude Code session. **Everyone else needs a code**: a session on another
+machine, and every browser page that sends ops, a localhost page included.
+(Registering as the renderer needs no code, but it is loopback-only and only
+from a hive page: `BRIDGE_RENDERER_ORIGINS`, comma-separated origins such as
+`http://localhost:4267`, replaces the default list of the hive's dev and web
+ports. While a renderer holds the slot, a second one is refused unless it is
+another tab of the same origin, carries the same non-empty code list, or is
+this machine's own tool; and an answer counts only from the socket its op was
+sent to.)
+
+You give codes from the hive, with one word:
+
+| Say | What happens |
+|---|---|
+| `bridge` | Lists the codes by fingerprint (the first 8 characters of the code's hash) and name — or says there are none, and only this machine's tools can connect |
+| `bridge give <name>` | Mints a code (`hcb-` and 32 base32 characters) and copies it to the clipboard. **It is shown once, never again**; if the clipboard is refused, a prompt holds it for you to copy |
+| `bridge add <name>` | Holds a code someone already has — 1 to 256 letters, digits or ASCII symbols, no spaces, because a script sends it in a header. The hive asks for it in a prompt — never type a code on the command line, which keeps a history. A line that carries one (`bridge add susan <code>`) adds nothing and is cut back to `bridge add susan` in the history |
+| `bridge withdraw <fingerprint\|name>` | That code stops working at once — on its holder's very next op, even on a socket that is already open |
+
+Only you say it, at the keyboard: a model, and a bridge `submit`, are refused
+every form.
+
+- **The broker gets hashes, never codes.** The hive keeps each code's SHA-256
+  under its name, on this device only (`hc:bridge:codes` — never a pool, a
+  resource, an event or an export), and the renderer tab hands the broker the
+  whole list of hashes when it registers and again whenever the list changes.
+  The broker hashes what a sender presents and compares. The list belongs to
+  the renderer's socket: when the tab goes, the broker forgets it — and with
+  no renderer there are no ops anyway.
+- **Default deny.** With no codes, nobody but this machine's own tools gets in.
+- **Presenting a code.** A Node client sends `Authorization: Bearer <code>` on
+  the handshake. Setting `HYPERCOMB_BRIDGE_TOKEN=<code>` makes these clients
+  send it: `npm run bridge:watch` (`watch-asks`), `npm run bridge:drain`
+  (`drain-tick`), and `manager`, `breaks`, `orchestrator-sweep`,
+  `bridge-agents`, `_ask-drain`, `_bop`, `_chat-reply` and `_put-file` in
+  `scripts/bridge/`, plus essentials' `stamp-install-channel`. **No other
+  bridge script sends a code** — `npm run bridge:check` (`bridge-cli`), the
+  one-off `scripts/bridge/_*` publish drivers, `scripts/drive-bridge-agents.cjs` — so
+  they serve this machine only and are refused from anywhere else, code or
+  not. A page sends `{"type":"code","code":"<code>"}` before its ops. Never
+  in a URL or a subprotocol.
+- **The env token is a fallback.** `HYPERCOMB_BRIDGE_BROKER_TOKEN` set on the
+  *broker* admits whoever presents it — for a broker with no hive tab to give
+  codes. It cannot be withdrawn without restarting the broker, so prefer
+  codes. It is a different variable from `HYPERCOMB_BRIDGE_TOKEN` on purpose:
+  that one is what *your* scripts present to someone else's broker, and a code
+  you hold for another hive must never open yours. The broker says at start
+  when it sees `HYPERCOMB_BRIDGE_TOKEN` and does not admit it.
 
 ---
 
@@ -240,6 +302,9 @@ default.
 | Chat window says nothing is listening | Live truth from `bridge:status` | Same as above — start a session |
 | Worked, then died after a tab reload | Renderer reconnects only if it had connected once | Reload the tab after the broker is up |
 | Two browsers flapping connect/timeout | Two tabs fighting for one renderer slot | Windows: `Get-NetTCPConnection -RemotePort 2401` to find them; close one |
+| `unauthorized — this bridge serves its own machine…` | A page or a remote sender without a code | `bridge give <name>` in the hive tab; send it as `Authorization: Bearer <code>`, or from a page as `{"type":"code","code":"<code>"}` first |
+| Broker logs `refused a renderer from page … not a hive page` | The hive runs on a port outside the default list | Start the broker with `BRIDGE_RENDERER_ORIGINS=http://localhost:<port>` |
+| Broker logs `refused a second renderer … holds the slot` | Another hive tab, on another origin, is already the renderer | Close one tab; the other takes the slot on its next retry |
 
 ---
 

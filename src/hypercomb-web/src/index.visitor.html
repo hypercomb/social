@@ -19,25 +19,44 @@
          resolves dependencies to blob: URLs that die with the page, so a
          replayed map was a map of dead specifiers — the old reason this
          script existed), and `hc:verbose` is the one key carried in, read
-         from the real storage, so a published site can still be debugged. -->
+         from the real storage, so a published site can still be debugged.
+
+         KEPT VALUES. A few plain values are allowed through to the real
+         storage, each with the only values it may hold, so no allowed key
+         can carry anything else, an identity least of all
+         (read-only-deployment.md, "Trust is an allowance, never a tap": data
+         is allowed by field). `bc.howto` (true | false) is the card page's
+         mark that its How-to was shown, so it opens by itself once on a door
+         as it does in a hive (jwize, 2026-10-07: "make it remember the how-to
+         on doors too"). The page asks `localStorage.keeps(key)`. -->
     <script>
       (function () {
-        var verbose = null;
-        try { verbose = window.localStorage.getItem('hc:verbose'); } catch (error) {}
-        function pageStorage(seed) {
+        var KEPT = { 'bc.howto': /^(true|false)$/ };
+        var real = null, verbose = null, seed = [];
+        try { real = window.localStorage; verbose = real.getItem('hc:verbose'); } catch (error) {}
+        if (verbose) seed.push(['hc:verbose', verbose]);
+        Object.keys(KEPT).forEach(function (key) {
+          try { var v = real && real.getItem(key); if (v !== null && v !== undefined && KEPT[key].test(v)) seed.push([key, v]); } catch (error) {}
+        });
+        function pageStorage(seed, through) {
           var data = new Map(seed);
+          var kept = function (key) { return !!through && Object.prototype.hasOwnProperty.call(KEPT, key); };
           return {
             get length() { return data.size; },
             key: function (index) { var keys = Array.from(data.keys()); return index < keys.length ? keys[index] : null; },
             getItem: function (key) { key = String(key); return data.has(key) ? data.get(key) : null; },
-            setItem: function (key, value) { data.set(String(key), String(value)); },
-            removeItem: function (key) { data.delete(String(key)); },
-            clear: function () { data.clear(); }
+            setItem: function (key, value) {
+              key = String(key); value = String(value); data.set(key, value);
+              if (kept(key) && KEPT[key].test(value)) { try { through.setItem(key, value); } catch (error) {} }
+            },
+            removeItem: function (key) { key = String(key); data.delete(key); if (kept(key)) { try { through.removeItem(key); } catch (error) {} } },
+            clear: function () { data.clear(); },
+            keeps: function (key) { return kept(String(key)); }
           };
         }
         try {
-          Object.defineProperty(window, 'localStorage', { configurable: true, value: pageStorage(verbose ? [['hc:verbose', verbose]] : []) });
-          Object.defineProperty(window, 'sessionStorage', { configurable: true, value: pageStorage([]) });
+          Object.defineProperty(window, 'localStorage', { configurable: true, value: pageStorage(seed, real) });
+          Object.defineProperty(window, 'sessionStorage', { configurable: true, value: pageStorage([], null) });
         } catch (error) {}
       })();
     </script>

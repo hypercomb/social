@@ -2,6 +2,21 @@
   "zone": "hypercomb.com",
   "doors": [
     {
+      "host": "behaviors.hypercomb.com",
+      "label": "behaviors",
+      "title": "behaviors"
+    },
+    {
+      "host": "business-card.hypercomb.com",
+      "label": "business-card",
+      "title": "business-card"
+    },
+    {
+      "host": "camelflage.hypercomb.com",
+      "label": "camelflage",
+      "title": "camelflage"
+    },
+    {
       "host": "dylan.hypercomb.com",
       "label": "dylan",
       "title": "dylan"
@@ -12,9 +27,14 @@
       "title": "favorites"
     },
     {
+      "host": "jaime-weise.hypercomb.com",
+      "label": "jaime-weise",
+      "title": "jaime-weise"
+    },
+    {
       "host": "pluginthematrix.hypercomb.com",
       "label": "pluginthematrix",
-      "title": "Plugin the Matrix"
+      "title": "pluginthematrix"
     },
     {
       "host": "replication.hypercomb.com",
