@@ -187,6 +187,9 @@ const CLOSED_RETRY_CAP_MS = 30_000
 const SEEN_CAP = 1024
 const SLOT_FLOOR_CAP = 4096
 const CLOCK_APPLY_MS = 2_000
+// publish(…, onTaken): callers waiting on a relay's OK, by event id. Bounded —
+// an event no relay ever answers is forgotten with the oldest waiter.
+const TAKEN_WAITERS_MAX = 64
 
 // ── addresses (the relay's address gate) ─────────────────────────────────────
 // THE SIGNATURES ARE THE ONLY THING THAT CAN BE QUERIED (jwize 2026-09-25,
@@ -369,6 +372,9 @@ export class NostrMeshDrone extends Drone {
 
   // delivery
   #inflight = new Map<string, Inflight>()
+  /** publish(…, onTaken) waiters: event id → called once, on the first
+   *  relay's OK (accepted or duplicate). Sent or queued is not taken. */
+  #takenWaiters = new Map<string, () => void>()
   #slotFloor = new Map<string, number>()
   #selfPubkey = ''
 
@@ -980,7 +986,9 @@ export class NostrMeshDrone extends Drone {
   // note: publish a payload
   // - always local fanout immediately (even if signer is missing)
   // - best-effort to sign + send to relays
-  public publish = async (kind: number, sig: string, payload: any, extraTags?: string[][]): Promise<boolean> => {
+  // - `onTaken` runs once a relay has TAKEN the event (its OK, accepted or
+  //   duplicate) — `true` from publish only says sent or queued
+  public publish = async (kind: number, sig: string, payload: any, extraTags?: string[][], onTaken?: () => void): Promise<boolean> => {
     this.ensureStartedNow()
 
     const k = Number(kind ?? 0)
@@ -1056,6 +1064,13 @@ export class NostrMeshDrone extends Drone {
       return false
     }
     if (signed.pubkey && signed.pubkey !== this.#selfPubkey) this.#learnSelf(String(signed.pubkey))
+    if (onTaken && signed.id) {
+      if (this.#takenWaiters.size >= TAKEN_WAITERS_MAX) {
+        const oldest = this.#takenWaiters.keys().next().value
+        if (oldest !== undefined) this.#takenWaiters.delete(oldest)
+      }
+      this.#takenWaiters.set(String(signed.id), onTaken)
+    }
     if (this.#draining.size) {
       for (const relay of askedOn) {
         const ws = this.#draining.get(relay)
@@ -2229,6 +2244,11 @@ export class NostrMeshDrone extends Drone {
     if (accepted || reason.startsWith('duplicate:')) {
       this.#dropInflight(key)
       if (this.#refusal?.reason === 'clock') this.#clearRefusal()
+      const taken = this.#takenWaiters.get(id)
+      if (taken) {
+        this.#takenWaiters.delete(id)
+        try { taken() } catch { /* the caller's own trouble */ }
+      }
       return
     }
 
@@ -2241,6 +2261,7 @@ export class NostrMeshDrone extends Drone {
     }
 
     this.#dropInflight(key)
+    this.#takenWaiters.delete(id)
     if (/too far in the future/i.test(reason)) this.#setRefusal('clock')
     this.stats.rejected++
     console.warn(`[nostr-mesh] relay ${relay} REJECTED event ${id.slice(0, 12)}: "${reason}"`)

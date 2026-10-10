@@ -26,13 +26,13 @@
 // subscription on the same sig auto-triggers that paint when an event
 // arrives, so we don't need to dispatch a render signal ourselves.
 
-import { Drone, EffectBus, poolAddresses, SignatureService } from '@hypercomb/core'
+import { Drone, EffectBus, normalizeCell, poolAddresses, SignatureService } from '@hypercomb/core'
 import { verifyEvent } from 'nostr-tools/pure'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { noteVisualHosts, visualArtifactSigs } from './visual-hosts.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
-import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-public.js'
+import { hiddenAt, isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-public.js'
 import { referenceTargetForLabel, titlesForSegments } from '../commands/decoration-kind-index.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
 import { kindsForLabel } from '../commands/decoration-kind-index.js'
@@ -314,6 +314,10 @@ const REASSERT_SPREAD_MS = 5_000
 // sticky refresh still re-walk it).
 const PENDING_PAGES_MAX = 128
 
+// Page slots whose last word a relay took (#takenBySig). Bounded; the oldest
+// falls off — its next walk says it again and is taken again.
+const TAKEN_PAGES_MAX = 256
+
 // Upper bound on resource subscriptions waiting for bytes at once (see
 // #openResourceSub). The relay caps subscriptions per connection; ~14 are
 // long-lived shell channels, so this keeps the shell well under it.
@@ -423,7 +427,9 @@ interface MeshEvtLike {
 interface MeshSubLike { close: () => void }
 
 interface MeshApi {
-  publish: (kind: number, sig: string, payload: unknown, extraTags?: string[][]) => Promise<boolean>
+  /** `onTaken`: once a relay has TAKEN the event (its OK) — the promise only
+   *  says sent or queued. An older mesh never calls it. */
+  publish: (kind: number, sig: string, payload: unknown, extraTags?: string[][], onTaken?: () => void) => Promise<boolean>
   subscribe: (sig: string, cb: (e: MeshEvtLike) => void) => MeshSubLike
   configureKinds: (kinds: number[] | null, persist?: boolean) => void
   ensureStartedForSig: (sig: string) => void
@@ -801,7 +807,7 @@ export class SwarmDrone extends Drone {
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
   protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt', 'behavior:enablement-changed', 'swarm:visit-folded', 'mesh:connection', 'mesh:rejected', 'sync:state', 'swarm:hosts-changed']
-  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed', 'swarm:zone-incomplete', 'swarm:zone-complete', 'swarm:tile-visited', 'swarm:share-status', 'swarm:roster-changed']
+  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed', 'swarm:withheld-changed', 'swarm:zone-incomplete', 'swarm:zone-complete', 'swarm:tile-visited', 'swarm:share-status', 'swarm:page-announced', 'swarm:roster-changed']
 
   // Per-lineage subscription handle. We open one per visited sig and
   // never close (cheap — mesh dedupes by sig at the bucket layer).
@@ -921,6 +927,11 @@ export class SwarmDrone extends Drone {
   // Private children at the page this tab stands on, from its last walk —
   // privateCountHere() reads it synchronously.
   #privateHere = 0
+
+  // Page slot → the word for it the relay last TOOK (its OK). An unchanged
+  // walk of a page says the page is in the room only when the relay took the
+  // very word the memo holds — sent or queued is not in the room.
+  readonly #takenBySig = new Map<string, string>()
 
   // Sweep pacing — see #sweepStalePeers.
   #lastSweepMs = Date.now()
@@ -2022,25 +2033,73 @@ export class SwarmDrone extends Drone {
   /** Own tiles at this page that stay private — from its last walk. */
   public privateCountHere = (): number => this.#privateHere
 
+  /** A relay took this tab's word for a page (mesh publish's onTaken). The
+   *  page this tab stands on is in the room from now: `swarm:page-announced`
+   *  {location, segments} — its address only. */
+  #pageTaken = (sig: string, word: string, segments: readonly string[], location: string): void => {
+    // Only the word the memo still holds: a late OK for an older word must
+    // not stand in for the newer one the relay has (or has not) taken.
+    if (this.#lastPublishedBySig.get(sig) === word) {
+      this.#takenBySig.delete(sig)
+      this.#takenBySig.set(sig, word)
+    }
+    while (this.#takenBySig.size > TAKEN_PAGES_MAX) {
+      const oldest = this.#takenBySig.keys().next().value
+      if (oldest === undefined) break
+      this.#takenBySig.delete(oldest)
+    }
+    if (lineageKey(segments) === this.#currentPageKey() && isJoinedHere()) {
+      this.emitEffect('swarm:page-announced', { location, segments: [...segments] })
+    }
+  }
+
+  /** What offerPrivateHere offers at the page this tab stands on: its own
+   *  tiles still private here — collection items, the sets page and the tiles
+   *  the participant HID left out (the page shows them no more, so "the tiles
+   *  on this page" never counts or shares them), one per name as setCellPublic
+   *  keys it. Names only, read locally: nothing is sealed and nothing leaves.
+   *  null = the page could not be read (history cold) — never taken for
+   *  "none". */
+  #privateToOffer = async (): Promise<{ location: string; names: string[] } | null> => {
+    if (!isJoinedHere()) return { location: '', names: [] }
+    const segments = this.currentSegments()
+    if (segments[0] === 'sets') return { location: '', names: [] }
+    const location = '/' + segments.join('/')
+    const refs = await this.#resolveChildRefs(await this.#resolveLineageDir(), segments, () => false)
+    if (refs === null) return null
+    const hidden = hiddenAt(segments)
+    const hiddenByRelay = this.hiddenAtCurrentSig()
+    const seen = new Set<string>()
+    const names: string[] = []
+    for (const { name } of refs) {
+      if (isCellPublic(location, name) || referenceTargetForLabel(name) !== null) continue
+      if (hidden(name) || hiddenByRelay.has(name)) continue
+      // Two names one public key would name: the first flip covers both.
+      const key = normalizeCell(name) || name
+      if (seen.has(key)) continue
+      seen.add(key)
+      names.push(name)
+    }
+    return { location, names }
+  }
+
+  /** How many tiles offerPrivateHere would offer here right now — the same
+   *  reading, nothing flipped (share-ask.worker.ts asks with it). null = the
+   *  page could not be read yet. */
+  public privateToOfferHere = async (): Promise<number | null> =>
+    (await this.#privateToOffer())?.names.length ?? null
+
   /** Offer every private tile at the page this tab stands on to the room —
    *  TILE BY TILE (setCellPublic, never a branch: what is inside each stays
    *  private), then one tile:public-changed so the walk announces them.
    *  Collection items keep the same exemption a create in a swarm has.
    *  Returns how many were offered. */
   public offerPrivateHere = async (): Promise<number> => {
-    if (!isJoinedHere()) return 0
-    const segments = this.currentSegments()
-    if (segments[0] === 'sets') return 0
-    const location = '/' + segments.join('/')
-    // Names only — nothing here needs a handle, so nothing is sealed.
-    const refs = await this.#resolveChildRefs(await this.#resolveLineageDir(), segments, () => false)
-    let offered = 0
-    for (const { name } of refs ?? []) {
-      if (isCellPublic(location, name) || referenceTargetForLabel(name) !== null) continue
-      setCellPublic(location, name, true)
-      offered++
-    }
-    if (offered > 0) EffectBus.emit('tile:public-changed', { location, public: true, offered })
+    const found = await this.#privateToOffer()
+    if (!found || found.names.length === 0) return 0
+    for (const name of found.names) setCellPublic(found.location, name, true)
+    const offered = found.names.length
+    EffectBus.emit('tile:public-changed', { location: found.location, public: true, offered })
     return offered
   }
 
@@ -3689,7 +3748,13 @@ const payload: SwarmLayerPayload = myLabel
       // subtrees went (#domainTags).
       tags.push(...this.#domainTags(segments, this.#closureHosts(hostSync, childRefs)))
       this.#publishStats.wireEvents++
-      const delivered = await mesh.publish(SWARM_LAYER_KIND, sig, payload, tags)
+      // The page this tab stands on is in the room once the relay TAKES its
+      // word (not when it is sent or queued, which a fresh join's connecting
+      // socket does first). What waits on that — the ask about tiles from
+      // before the meeting, share-ask.worker.ts — runs after it, never
+      // before: the page's address only, no count, no name of anything on it.
+      const delivered = await mesh.publish(SWARM_LAYER_KIND, sig, payload, tags,
+        () => this.#pageTaken(sig, serialized, segments, publicLocation))
       // Publish honesty: `false` means signing failed — NOTHING reached
       // (or was queued for) a relay. Un-stamp the memo so the next walk
       // retries instead of believing the slot is live for 45s while
@@ -3709,6 +3774,11 @@ const payload: SwarmLayerPayload = myLabel
           }
         }
       }
+    } else if (pageKey === this.#currentPageKey() && isJoinedHere() && this.#takenBySig.get(sig) === serialized) {
+      // Unchanged: this meeting's word for the page went out within
+      // LAYER_REFRESH_MS and the relay took it, so arriving back here is an
+      // arrival all the same — the page is in the room.
+      this.emitEffect('swarm:page-announced', { location: publicLocation, segments: [...segments] })
     }
 
     if (depth >= MAX_PUBLISH_DEPTH) return
