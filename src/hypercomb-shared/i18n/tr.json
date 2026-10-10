@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "Katıl",
   "invite.join.cancel": "Kal",
   "invite.join.success": "Buluşma noktasına katıldınız",
+  "invite.needs-link": "”{label}” davet bağlantısıyla açılır — paylaşan kişiye sorun.",
   "website-archive.save-failed.title": "Kaydetme başarısız",
   "website-archive.save-failed.message": "Çekirdek hizmetler kullanılamıyor",
   "website-archive.pick-branch.title": "Bir dal seçin",

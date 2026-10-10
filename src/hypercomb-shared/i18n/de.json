@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "Beitreten",
   "invite.join.cancel": "Bleiben",
   "invite.join.success": "Treffpunkt beigetreten",
+  "invite.needs-link": "„{label}“ öffnet sich über seinen Einladungslink — fragen Sie die Person, die ihn geteilt hat.",
   "website-archive.save-failed.title": "Speichern fehlgeschlagen",
   "website-archive.save-failed.message": "Kerndienste nicht verfügbar",
   "website-archive.pick-branch.title": "Zweig wählen",

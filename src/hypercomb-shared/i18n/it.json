@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "Unisciti",
   "invite.join.cancel": "Resta",
   "invite.join.success": "Ti sei unito al punto d'incontro",
+  "invite.needs-link": "«{label}» si apre dal suo link di invito — chiedi a chi l’ha condiviso.",
   "website-archive.save-failed.title": "Salvataggio fallito",
   "website-archive.save-failed.message": "Servizi principali non disponibili",
   "website-archive.pick-branch.title": "Scegli un ramo",

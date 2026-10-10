@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "참여",
   "invite.join.cancel": "유지",
   "invite.join.success": "회의 장소에 참여했습니다",
+  "invite.needs-link": "”{label}”은(는) 초대 링크로 열립니다 — 공유한 사람에게 문의하세요.",
   "website-archive.save-failed.title": "저장 실패",
   "website-archive.save-failed.message": "핵심 서비스를 사용할 수 없습니다",
   "website-archive.pick-branch.title": "분기 선택",

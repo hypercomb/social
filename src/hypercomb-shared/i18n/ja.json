@@ -1718,6 +1718,7 @@
   "invite.join.confirm": "参加",
   "invite.join.cancel": "やめる",
   "invite.join.success": "ミーティングプレイスに参加しました",
+  "invite.needs-link": "「{label}」は招待リンクから開きます — 共有した人に尋ねてください。",
   "website-archive.save-failed.title": "保存に失敗しました",
   "website-archive.save-failed.message": "コアサービスが利用できません",
   "website-archive.pick-branch.title": "ブランチを選択",

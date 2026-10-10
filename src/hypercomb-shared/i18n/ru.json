@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "Присоединиться",
   "invite.join.cancel": "Остаться",
   "invite.join.success": "Вы присоединились к месту встречи",
+  "invite.needs-link": "\"{label}\" открывается по своей ссылке-приглашению — спросите у того, кто поделился ею.",
   "website-archive.save-failed.title": "Не удалось сохранить",
   "website-archive.save-failed.message": "Основные службы недоступны",
   "website-archive.pick-branch.title": "Выберите ветку",

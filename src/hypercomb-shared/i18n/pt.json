@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "Entrar",
   "invite.join.cancel": "Ficar",
   "invite.join.success": "Entrou no ponto de encontro",
+  "invite.needs-link": "«{label}» abre pelo link de convite — peça a quem compartilhou.",
   "website-archive.save-failed.title": "Falha ao salvar",
   "website-archive.save-failed.message": "Serviços principais indisponíveis",
   "website-archive.pick-branch.title": "Escolha uma ramificação",

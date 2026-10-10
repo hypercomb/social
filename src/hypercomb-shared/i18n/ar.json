@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "انضمام",
   "invite.join.cancel": "البقاء",
   "invite.join.success": "تمّ الانضمام إلى نقطة اللقاء",
+  "invite.needs-link": "يُفتح \"{label}\" من رابط الدعوة الخاص به — اسأل من شاركه.",
   "website-archive.save-failed.title": "فشل الحفظ",
   "website-archive.save-failed.message": "الخدمات الأساسية غير متاحة",
   "website-archive.pick-branch.title": "اختر فرعاً",

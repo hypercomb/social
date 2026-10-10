@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "शामिल हों",
   "invite.join.cancel": "रुकें",
   "invite.join.success": "मीटिंग प्लेस में शामिल हो गए",
+  "invite.needs-link": "”{label}” अपने आमंत्रण लिंक से खुलता है — जिसने इसे साझा किया उससे पूछें।",
   "website-archive.save-failed.title": "सेव विफल",
   "website-archive.save-failed.message": "कोर सेवाएँ उपलब्ध नहीं हैं",
   "website-archive.pick-branch.title": "शाखा चुनें",

@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "加入",
   "invite.join.cancel": "留下",
   "invite.join.success": "已加入会议场所",
+  "invite.needs-link": "「{label}」需通过其邀请链接打开 — 请询问分享它的人。",
   "website-archive.save-failed.title": "保存失败",
   "website-archive.save-failed.message": "核心服务不可用",
   "website-archive.pick-branch.title": "选择分支",

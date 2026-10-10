@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "Rejoindre",
   "invite.join.cancel": "Rester",
   "invite.join.success": "Point de rencontre rejoint",
+  "invite.needs-link": "« {label} » s’ouvre depuis son lien d’invitation — demandez à la personne qui l’a partagé.",
   "website-archive.save-failed.title": "Échec de la sauvegarde",
   "website-archive.save-failed.message": "Services principaux indisponibles",
   "website-archive.pick-branch.title": "Choisissez une branche",

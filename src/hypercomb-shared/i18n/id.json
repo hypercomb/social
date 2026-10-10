@@ -1504,6 +1504,7 @@
   "invite.join.confirm": "Bergabung",
   "invite.join.cancel": "Tetap di sini",
   "invite.join.success": "Bergabung ke tempat pertemuan berhasil",
+  "invite.needs-link": "”{label}” dibuka lewat tautan undangannya — tanyakan kepada orang yang membagikannya.",
   "website-archive.save-failed.title": "Gagal menyimpan",
   "website-archive.save-failed.message": "Layanan inti tidak tersedia",
   "website-archive.pick-branch.title": "Pilih cabang",

@@ -27,7 +27,7 @@
 //     `swarm:invite` decoration) and joins.
 //
 // Both funnel through joinMeetingPlace (meeting-invite.join.ts): confirm,
-// auth-switch, rollback-on-cancel. It is a Worker (acts once when the core
+// then auth-switch — declining writes nothing. It is a Worker (acts once when the core
 // services have registered) rather than a warmup() hook because the link sig
 // may not be resolvable until Store + the credential stores exist.
 
@@ -64,7 +64,7 @@ export class MeetingInviteWorker extends Worker {
   override genotype = 'meeting-invite'
 
   public override description =
-    'Joins a meeting place from a #meet= meeting link or a /<sig> invite link (on boot), or from a swarm:invite tile junction (on click): confirms, and auth-switches the participant in — restoring prior credentials on cancel.'
+    'Joins a meeting place from a #meet= meeting link or a /<sig> invite link (on boot), or from a swarm:invite tile junction (on click): confirms, and auth-switches the participant in — nothing is written unless they join.'
   public override effects = ['network'] as const
   protected override listens = ['tile:action']
   protected override emits = ['keymap:invoke', 'command-line:stance', 'mesh:room', 'mesh:secret', 'toast:show', 'hive:link']

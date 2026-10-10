@@ -2025,6 +2025,7 @@
   "invite.join.confirm": "Join",
   "invite.join.cancel": "Stay",
   "invite.join.success": "Joined meeting place",
+  "invite.needs-link": "\"{label}\" opens from its invite link — ask whoever shared it.",
   "website-archive.save-failed.title": "Save failed",
   "website-archive.save-failed.message": "Core services unavailable",
   "website-archive.pick-branch.title": "Pick a branch",
